@@ -42,6 +42,13 @@ export class EditService {
         }
 
         const applied = document.applyEdits(file.edits, source);
+        if (applied === 0) {
+          // Разбор прошёл, но текст не изменился: позиции указывают не туда.
+          // «применено 0» без объяснения модель читает как успех и повторяет ошибку.
+          throw new Error(
+            'правки не изменили документ: позиции не совпали с содержимым файла — перечитай файл и повтори',
+          );
+        }
         this.deps.editors.applyEdits(document, file.edits);
         reports.push({ path: file.path, applied, version: document.version });
       } catch (error) {

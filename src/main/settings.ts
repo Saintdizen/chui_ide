@@ -6,6 +6,9 @@ import {
   type AiSettingsPatch,
   type AppearanceSettings,
   type EditorSettings,
+  type ExplorerSettings,
+  type ReasoningEffort,
+  type RunSettings,
   type Settings,
   type SettingsPatch,
   type WorkspaceSettings,
@@ -30,8 +33,11 @@ interface StoredSettings {
     temperature: number;
     maxTokens: number;
     systemPrompt: string;
+    reasoningEffort: ReasoningEffort;
   };
   editor: EditorSettings;
+  explorer: ExplorerSettings;
+  run: RunSettings;
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
 }
@@ -63,6 +69,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     temperature: 0.2,
     maxTokens: 4096,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    // По умолчанию параметр не отправляем: не всякая модель его знает.
+    reasoningEffort: 'off',
   },
   editor: {
     tabSize: 4,
@@ -70,6 +78,42 @@ const DEFAULT_SETTINGS: StoredSettings = {
     wordWrap: false,
     // В PyCharm миникарты нет — по умолчанию она выключена.
     minimap: false,
+    fontLigatures: true,
+    insertSpaces: true,
+    // Python и Makefile требуют разного отступа: пусть язык решает сам.
+    languageIndent: true,
+    renderWhitespace: 'selection',
+    cursorBlinking: 'smooth',
+    smoothScrolling: true,
+    // Как в PyCharm: ниже последней строки остаётся место для чтения.
+    scrollBeyondLastLine: true,
+    lineNumbers: 'on',
+    renderLineHighlight: 'all',
+    bracketPairColorization: true,
+    stickyScroll: false,
+    quickSuggestions: true,
+    showUnused: true,
+  },
+  explorer: {
+    icons: true,
+    // Скрытые файлы видны: в Node-проектах половина настроек — точечные файлы.
+    showHidden: true,
+    foldersFirst: true,
+    sort: 'name',
+    indent: 12,
+    rowDensity: 'normal',
+    gitDecorations: true,
+    folderChangeDot: true,
+    // Привычка из PyCharm: двойной клик открывает, одинарный — выделяет.
+    openOnSingleClick: false,
+    confirmDelete: true,
+    exclude: [],
+  },
+  run: {
+    // Пусто: сначала ищем окружение проекта, потом `python3` из PATH.
+    pythonPath: '',
+    packageManager: 'auto',
+    saveBeforeRun: true,
   },
   appearance: {
     // «Системная» — разумная точка входа: IDE подстраивается под схему рабочего стола.
@@ -85,7 +129,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
 const ENV_KEYS: Record<string, string> = {
   openai: 'OPENAI_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
   groq: 'GROQ_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
   ollama: 'OLLAMA_API_KEY',
 };
 
@@ -114,7 +160,7 @@ export class SettingsStore {
   }
 
   get(): Settings {
-    const { ai, editor } = this.data;
+    const { ai, editor, explorer, run } = this.data;
     return {
       ai: {
         providers: ai.providers.map((provider) => ({
@@ -130,8 +176,11 @@ export class SettingsStore {
         temperature: ai.temperature,
         maxTokens: ai.maxTokens,
         systemPrompt: ai.systemPrompt,
+        reasoningEffort: ai.reasoningEffort ?? 'off',
       },
       editor: { ...editor },
+      explorer: { ...explorer, exclude: [...explorer.exclude] },
+      run: { ...run },
       appearance: { ...this.data.appearance },
       workspace: { recent: [...this.data.workspace.recent] },
     };
@@ -156,6 +205,12 @@ export class SettingsStore {
     }
     if (patch.editor) {
       this.data.editor = { ...this.data.editor, ...patch.editor };
+    }
+    if (patch.explorer) {
+      this.data.explorer = { ...this.data.explorer, ...patch.explorer };
+    }
+    if (patch.run) {
+      this.data.run = { ...this.data.run, ...patch.run };
     }
     if (patch.appearance) {
       this.data.appearance = { ...this.data.appearance, ...patch.appearance };
@@ -211,6 +266,39 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
   if (patch.temperature !== undefined) target.temperature = patch.temperature;
   if (patch.maxTokens !== undefined) target.maxTokens = patch.maxTokens;
   if (patch.systemPrompt !== undefined) target.systemPrompt = patch.systemPrompt;
+  if (patch.reasoningEffort !== undefined) target.reasoningEffort = patch.reasoningEffort;
+
+  // Провайдеров можно добавлять и править из интерфейса: ключ к ним приходит
+  // отдельным вызовом ai.setApiKey, здесь только адрес и список моделей.
+  if (patch.provider) {
+    const incoming = patch.provider;
+    const existing = target.providers.find((item) => item.id === incoming.id);
+    if (existing) {
+      if (incoming.label !== undefined) existing.label = incoming.label;
+      if (incoming.baseUrl !== undefined) existing.baseUrl = incoming.baseUrl;
+      if (incoming.models !== undefined) existing.models = [...incoming.models];
+      if (incoming.defaultModel !== undefined) existing.defaultModel = incoming.defaultModel;
+    } else {
+      const created: StoredProvider = {
+        id: incoming.id,
+        label: incoming.label ?? incoming.id,
+        baseUrl: incoming.baseUrl ?? '',
+        models: [...(incoming.models ?? [])],
+      };
+      const fallback = incoming.defaultModel ?? incoming.models?.[0];
+      if (fallback) created.defaultModel = fallback;
+      target.providers.push(created);
+    }
+    if (!target.activeProviderId) target.activeProviderId = incoming.id;
+  }
+
+  if (patch.removeProviderId) {
+    target.providers = target.providers.filter((item) => item.id !== patch.removeProviderId);
+    if (target.activeProviderId === patch.removeProviderId) {
+      target.activeProviderId = target.providers[0]?.id;
+      delete target.activeModel;
+    }
+  }
 }
 
 function loadSettings(filePath: string): StoredSettings {
@@ -231,6 +319,17 @@ function loadSettings(filePath: string): StoredSettings {
   return {
     ai: { ...DEFAULT_SETTINGS.ai, ...storedAi, providers },
     editor: { ...DEFAULT_SETTINGS.editor, ...(parsed.editor ?? {}) },
+    // Секции появились позже первых версий: старый settings.json их не знает,
+    // поэтому неполный файл догружается значениями по умолчанию, а список
+    // исключений приводим к строкам — его могли править руками.
+    explorer: {
+      ...DEFAULT_SETTINGS.explorer,
+      ...(parsed.explorer ?? {}),
+      exclude: Array.isArray(parsed.explorer?.exclude)
+        ? parsed.explorer.exclude.filter((item): item is string => typeof item === 'string')
+        : [],
+    },
+    run: { ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) },
     appearance: { ...DEFAULT_SETTINGS.appearance, ...(parsed.appearance ?? {}) },
     workspace: {
       ...DEFAULT_SETTINGS.workspace,

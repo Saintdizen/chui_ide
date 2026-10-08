@@ -2,22 +2,37 @@
   "name": "chui-ide",
   "version": "0.0.1",
   "private": true,
-  "description": "Chui IDE — Electron + TypeScript: документная модель, реестр команд, AI-ready архитектура",
+  "author": {
+    "name": "Chui IDE",
+    "email": "chui-ide@users.noreply.github.com"
+  },
+  "description": "Редактор кода: Python и Node.js",
   "main": "dist/main/index.js",
+  "desktopName": "chui-ide.desktop",
   "scripts": {
     "dev": "npm run build:main && node scripts/dev.mjs",
     "build:main": "tsc -p tsconfig.main.json",
     "build:renderer": "vite build",
     "build": "npm run build:main && npm run build:renderer",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json",
-    "start": "npm run build && electron .",
+    "start": "npm run rebuild && npm run build && electron .",
     "rebuild": "electron-rebuild -f -w node-pty",
     "smoke:pty": "ELECTRON_RUN_AS_NODE=1 electron scripts/pty-smoke.cjs",
     "smoke:terminal": "npm run build:main && electron scripts/terminal-smoke.cjs",
     "smoke:window": "npm run build:main && electron scripts/window-smoke.cjs",
     "clean": "rm -rf dist",
     "smoke:git": "npm run build:main && electron scripts/git-smoke.cjs",
-    "smoke:launcher": "npm run build && electron scripts/launcher-smoke.cjs"
+    "smoke:agent": "npm run build:main && electron scripts/agent-smoke.cjs",
+    "smoke:host": "npm run build:main && electron scripts/host-smoke.cjs",
+    "smoke:edits": "tsc scripts/edits-check.ts --ignoreConfig --module commonjs --target es2020 --strict --outDir node_modules/.cache/edits-check && node node_modules/.cache/edits-check/scripts/edits-check.js",
+    "smoke:launcher": "npm run build && electron scripts/launcher-smoke.cjs",
+    "probe:colors": "electron scripts/color-probe.cjs",
+    "probe:menu": "npm run build:main && electron scripts/menu-probe.cjs",
+    "icon": "npm run build:main && node scripts/make-icon.mjs",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
+    "dist:win": "npm run build && electron-builder --win nsis --publish never",
+    "dist:mac": "npm run build && electron-builder --mac dmg --publish never"
   },
   "engines": {
     "node": ">=20"
@@ -26,6 +41,7 @@
     "@electron/rebuild": "^4.2.1",
     "@types/node": "^26.6.4",
     "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.3"
   },

@@ -1,4 +1,4 @@
-import type { PushMessage, RpcCall, RpcEventMessage, RpcResult } from './api';
+import type { HostReply, HostRequest, PushMessage, RpcCall, RpcEventMessage, RpcResult } from './api';
 
 /**
  * Форма моста, который preload кладёт в `window.chui`.
@@ -13,6 +13,10 @@ export interface ChuiBridge {
   cancel(id: string): Promise<boolean>;
   onRpcEvent(listener: (message: RpcEventMessage) => void): number;
   onPush(listener: (message: PushMessage) => void): number;
+  /** Обратный вызов main → renderer: подписаться на запросы хоста. */
+  onHostRequest(listener: (request: HostRequest) => void): number;
+  /** Ответить на хостовый запрос; без ответа вызов в main никогда не завершится. */
+  replyHostRequest(reply: HostReply): Promise<boolean>;
   off(listenerId: number): void;
 }
 

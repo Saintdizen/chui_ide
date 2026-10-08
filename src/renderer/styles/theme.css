@@ -66,6 +66,16 @@
   --motion_base: 0.25s;
   --motion_ease: cubic-bezier(0.32, 0.72, 0, 1);
 
+  /* ── слои всплывающих элементов ────────────────────────────────────────── */
+  --layer_overlay: 150; /* палитра команд — затемняет окно, но не диалоги */
+  --layer_popup: 200; /* контекстное меню, поповеры */
+  --layer_modal: 300; /* модальное окно настроек */
+  --layer_toast: 320; /* уведомления — поверх диалога, иначе их не видно */
+  /* Список селекта живёт в `body`, а не внутри диалога, поэтому его слой выше
+     модального: иначе список открытого в настройках поля уезжает ПОД окно. */
+  --layer_select: 340;
+  --layer_edge: 400; /* края растягивания безрамочного окна — всегда сверху */
+
   --focus_outline: 2px solid var(--focus_ring_color);
   --focus_outline_offset: 2px;
 
@@ -75,6 +85,11 @@
   /* Высота строки интерфейса — общая для текста приложения и пунктов меню Monaco:
      от неё зависит высота строки в меню и списках, а разойтись они не должны. */
   --line_height_ui: 1.45;
+
+  /* Высота строки дерева проекта: настройка проводника, поэтому переменная,
+     а не значение в правиле. Плотность выбирает пользователь (см. настройки),
+     значения — в правилах `.explorer[data-rows=…]`. */
+  --tree_row_height: 24px;
 
   /* ── тёмная схема ───────────────────────────────────────────────────────── */
 
@@ -132,14 +147,17 @@
   --yellow_prime_background: #ffd600;
   --purple_prime_background: #db34f2;
 
-  /* Состояния файлов в git. Это не системные цвета Apple: HIG не описывает
-     статусы файлов, поэтому значения подобраны под читаемость на нашей
-     поверхности — пометка должна читаться как текст, а не светиться. */
-  --git_modified: #d9b26a;
-  --git_added: #7fc08a;
-  --git_deleted: #e08a7a;
-  --git_renamed: #8fb8ff;
-  --git_conflicted: #ff6a61;
+  /* Состояния файлов в git — цвета VS Code (Dark+: added #81b88b, modified
+     #e2c08d, deleted #c74e39, renamed #73c991, conflicted #e4676b), поднятые
+     на одну ступень насыщенности и яркости тем же правилом, что палитра кода
+     в core/theme.ts: пометка должна читаться на нашей поверхности, но
+     оттенки остаются VS Code. Значения продублированы в `core/theme.ts`
+     (`chrome.added/modified/deleted`) — менять в обоих местах. */
+  --git_modified: #edca96;
+  --git_added: #8bc997;
+  --git_deleted: #db5e48;
+  --git_renamed: #7ed99e;
+  --git_conflicted: #f27276;
 
   --focus_ring_color: var(--blue_prime_background);
   --link_color: #4da6ff;
@@ -159,6 +177,40 @@
 
   /* Подсветка найденного: жёлтый, как в системном поиске. */
   --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 24%, transparent);
+
+  /* ── значки файлов и папок ────────────────────────────────────────────────
+     Цвет — свойство ВИДА файла, а не состояния, поэтому у каждого вида своя
+     роль. Тона взяты из палитры Seti (вид файлов в VS Code), но ступень
+     насыщенности выше: на тёмной поверхности Seti выцветает в серый.
+     Тёмная схема светлее, светлая — темнее: значок должен читаться на фоне. */
+  --file_text: #9aa4af;
+  --file_code: #b3a1e6;
+  --file_js: #e5c44f;
+  --file_ts: #4d9ee0;
+  --file_python: #4d9ee0;
+  --file_json: #d7b94a;
+  --file_markdown: #6aa9d8;
+  --file_css: #a678d8;
+  --file_html: #e0724f;
+  --file_shell: #7dc46a;
+  --file_yaml: #d16a6a;
+  --file_config: #b5a684;
+  --file_database: #e0a04a;
+  --file_docker: #4d9ee0;
+  --file_image: #b98ad8;
+  --file_archive: #d8a35c;
+  --file_lock: #8b949e;
+  --file_git: #e0724f;
+  /* Промежутки внутри значка — это фон панели, а не белый: буквы читаются
+     как вырез в цветной фигуре (так устроены значки Material Icon Theme). */
+  --file_badge: var(--element_background_2);
+  --folder_default: #8fa8c8;
+  --folder_special: #c9b48a;
+  --folder_open: #a9c3e0;
+
+  /* Запуск: зелёный из палитры IDE — одна роль на кнопку, значок в жёлобе
+     и подпись инструмента в статусбаре. */
+  --run_accent: #7fd18b;
 }
 
 @media (prefers-color-scheme: light) {
@@ -198,12 +250,15 @@
     --yellow_prime_background: #ffcc00;
     --purple_prime_background: #cb30e0;
 
-    /* Состояния git на светлом фоне затемнены: те же роли, но как текст. */
-    --git_modified: #8a6a1f;
-    --git_added: #1f7a34;
-    --git_deleted: #b03028;
-    --git_renamed: #1f5fd0;
-    --git_conflicted: #a1251e;
+    /* Состояния git — цвета VS Code Light+ (added #587c0c, modified #895503,
+       deleted #ad0707, renamed #007100, conflicted #ad0707) с той же ступенью
+       насыщенности. Переименование и новый файл в VS Code делят зелёный:
+       состояния различает буква пометки (R и U), а не оттенок. */
+    --git_modified: #8c5600;
+    --git_added: #5b8602;
+    --git_deleted: #b40000;
+    --git_renamed: #007100;
+    --git_conflicted: #b40000;
 
     --focus_ring_color: var(--blue_prime_background);
     /* На белом акцентный синий даёт контраст около 3 — для текста он затемнён. */
@@ -218,6 +273,30 @@
 
     --scrollbar_thumb: rgba(0, 0, 0, 0.3);
 
+    /* Значки файлов: те же роли, но темнее — на белом светлый Seti не читается. */
+    --file_text: #6a737d;
+    --file_code: #6b4fc4;
+    --file_js: #9a7d0a;
+    --file_ts: #1a6fb0;
+    --file_python: #1a6fb0;
+    --file_json: #8a7410;
+    --file_markdown: #2b6f9e;
+    --file_css: #7040a8;
+    --file_html: #b4461f;
+    --file_shell: #3f7f2f;
+    --file_yaml: #a83c3c;
+    --file_config: #7a6a44;
+    --file_database: #a86b10;
+    --file_docker: #1a6fb0;
+    --file_image: #7a41a8;
+    --file_archive: #9a6a1a;
+    --file_lock: #6a737d;
+    --file_git: #b4461f;
+    --file_badge: var(--element_background_2);
+    --folder_default: #5b7ba6;
+    --folder_special: #8a7440;
+    --folder_open: #4a6a96;
+    --run_accent: #2f7d32;
     --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 32%, transparent);
   }
 }

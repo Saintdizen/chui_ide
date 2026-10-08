@@ -1,4 +1,4 @@
-import type { DirEntry, GitChange } from '../../shared/api';
+import type { DirEntry, ExplorerSettings, GitChange } from '../../shared/api';
 import type { CommandRegistry } from '../core/commands';
 import type { GitModel } from '../core/git-model';
 import type { OpenEditors } from '../core/open-editors';
@@ -6,6 +6,7 @@ import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { showContextMenu } from './context-menu';
 import { clear, debounce, h, svgIcon } from './dom';
+import { fileIcon, folderIcon } from './file-icons';
 
 type InlineEdit =
   | { kind: 'create'; parent: string; entryKind: 'file' | 'directory' }
@@ -37,7 +38,27 @@ export interface ExplorerView {
   /** Создание с инлайн-вводом имени: цель — выбранная папка или её родитель. */
   startCreate(entryKind: 'file' | 'directory'): void;
   startRename(path: string): void;
+  /** Вид и поведение дерева: значки, сортировка, фильтры, клик. */
+  applySettings(settings: ExplorerSettings): void;
 }
+
+/**
+ * Значения до первого `settings.get`. Дублируют умолчания main-процесса: дерево
+ * строится раньше, чем приходят настройки, и не должно мелькать другим видом.
+ */
+const FALLBACK_SETTINGS: ExplorerSettings = {
+  icons: true,
+  showHidden: true,
+  foldersFirst: true,
+  sort: 'name',
+  indent: 12,
+  rowDensity: 'normal',
+  gitDecorations: true,
+  folderChangeDot: true,
+  openOnSingleClick: false,
+  confirmDelete: true,
+  exclude: [],
+};
 
 export interface ExplorerDeps {
   workspace: WorkspaceModel;
@@ -61,6 +82,37 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let inlineEdit: InlineEdit | null = null;
   let selected: string | null = null;
   let root: string | null = null;
+  let options: ExplorerSettings = FALLBACK_SETTINGS;
+
+  /**
+   * Что показывать из содержимого папки: скрытое и исключённое отсеиваем до
+   * отрисовки. Фильтр — часть вида, поэтому его результат не кешируем: смена
+   * настройки должна применяться сразу.
+   */
+  const visible = (entries: readonly DirEntry[], dir: string): DirEntry[] => {
+    const prefix = root && dir.startsWith(root) ? dir.slice(root.length + 1) : '';
+    return sortEntries(
+      entries.filter((entry) => {
+        if (!options.showHidden && entry.name.startsWith('.')) return false;
+        if (options.exclude.length === 0) return true;
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        return !options.exclude.some((pattern) => matchesGlob(entry.name, relative, pattern));
+      }),
+    );
+  };
+
+  const sortEntries = (entries: readonly DirEntry[]): DirEntry[] => {
+    const kindRank = (entry: DirEntry): number => (options.foldersFirst ? (entry.kind === 'directory' ? 0 : 1) : 0);
+    return [...entries].sort((a, b) => {
+      const byKind = kindRank(a) - kindRank(b);
+      if (byKind !== 0) return byKind;
+      if (options.sort === 'type') {
+        const byType = extensionOf(a.name).localeCompare(extensionOf(b.name));
+        if (byType !== 0) return byType;
+      }
+      return a.name.localeCompare(b.name, 'ru');
+    });
+  };
 
   const readDir = async (dir: string): Promise<void> => {
     try {
@@ -94,7 +146,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const input = h('input', { class: 'tree-input', type: 'text', value: initial, spellcheck: false });
     const row = h(
       'div',
-      { class: 'tree-row is-editing', style: { paddingLeft: `${8 + depth * 12}px` } },
+      { class: 'tree-row is-editing', style: { paddingLeft: `${8 + depth * options.indent}px` } },
       input,
     );
 
@@ -221,7 +273,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   /* ── отрисовка ─────────────────────────────────────────────────────────── */
 
-  const renderRows = (container: HTMLElement, entries: readonly DirEntry[], depth: number): void => {
+  const renderRows = (container: HTMLElement, rawEntries: readonly DirEntry[], depth: number, dir: string): void => {
+    const entries = visible(rawEntries, dir);
     for (const entry of entries) {
       const isDirectory = entry.kind === 'directory';
       const isExpanded = expanded.has(entry.path);
@@ -253,18 +306,32 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           type: 'button',
           title: change ? `${entry.path} — ${CHANGE_TITLE[change.change]}` : (insideTitle ? `${entry.path} — ${insideTitle}` : entry.path),
           dataset: { path: entry.path },
-          style: { paddingLeft: `${8 + depth * 12}px` },
+          style: { paddingLeft: `${8 + depth * options.indent}px` },
         },
         h('span', { class: `tree-twisty${isExpanded ? ' is-open' : ''}` }, isDirectory ? svgIcon('chevron', 12) : null),
-        svgIcon(isDirectory ? 'folder' : 'file', 15),
+        // Значок — по виду файла; с выключенной настройкой остаётся привычный
+        // монохромный лист, чтобы дерево не пёстрило цветом.
+        options.icons
+          ? isDirectory
+            ? folderIcon(entry.name, isExpanded)
+            : fileIcon(entry.name)
+          : svgIcon(isDirectory ? 'folder' : 'file', 15),
         h('span', { class: 'tree-name' }, entry.name),
-        change ? h('span', { class: `tree-badge is-${change.change}`, title: CHANGE_TITLE[change.change] }, CHANGE_LETTER[change.change]) : null,
-        inside ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle }) : null,
+        change && options.gitDecorations
+          ? h('span', { class: `tree-badge is-${change.change}`, title: CHANGE_TITLE[change.change] }, CHANGE_LETTER[change.change])
+          : null,
+        inside && options.folderChangeDot ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle }) : null,
       );
 
       row.addEventListener('click', () => {
         selected = entry.path;
-        void onClick(entry);
+        // Папка раскрывается всегда одним кликом (так работает стрелка),
+        // а файл — по настройке: PyCharm открывает двойным, VS Code — одинарным.
+        if (isDirectory || options.openOnSingleClick) void onClick(entry);
+        else render();
+      });
+      row.addEventListener('dblclick', () => {
+        if (!isDirectory && !options.openOnSingleClick) void onClick(entry);
       });
       row.addEventListener('contextmenu', (event) => openMenu(entry, event));
       container.appendChild(row);
@@ -276,7 +343,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
       if (isDirectory && isExpanded) {
         const nested = children.get(entry.path);
-        if (nested) renderRows(container, nested, depth + 1);
+        if (nested) renderRows(container, nested, depth + 1, entry.path);
         // Неудачное чтение само по себе не повторяем: иначе каждый проход
         // отрисовки заново просит ту же папку и дерево крутится без остановки.
         else if (!failed.has(entry.path)) void load(entry.path).then(render);
@@ -335,7 +402,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       h(
         'div',
         { class: 'panel-header' },
-        h('span', { class: 'panel-title' }, 'Проект'),
+        // Вместо слова «Проект» — имя папки: заголовок говорит, что открыто,
+        // а полный путь лежит в подсказке, чтобы длинное имя не резало кнопки.
+        h('span', { class: 'panel-title', title: `${info.name} · ${info.root}` }, info.name),
         h('div', { class: 'panel-actions' },
           h('button', { class: 'icon-btn', type: 'button', title: 'Новый файл', onClick: () => startCreate('file') }, svgIcon('filePlus', 15)),
           h('button', { class: 'icon-btn', type: 'button', title: 'Новая папка', onClick: () => startCreate('directory') }, svgIcon('folderPlus', 15)),
@@ -365,7 +434,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const edit = inlineEdit;
       tree.appendChild(inlineInput(0, '', (value) => void commitCreate(edit, value)));
     }
-    renderRows(tree, entries, 0);
+    renderRows(tree, entries, 0, info.root);
   };
 
   /**
@@ -425,7 +494,44 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   render();
 
-  return { element, render, scheduleRefresh, reveal, startCreate, startRename };
+  return {
+    element,
+    render,
+    scheduleRefresh,
+    reveal,
+    startCreate,
+    startRename,
+    applySettings(next) {
+      options = next;
+      // Плотность строк — атрибут-переключатель: CSS читает его и берёт свою высоту.
+      element.dataset.rows = next.rowDensity;
+      render();
+    },
+  };
+}
+
+/** Расширение без точки: по нему сортируем дерево «по типу». */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf('.');
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+}
+
+/**
+ * Совпадение имени с шаблоном из настроек: `*.min.js`, `dist`, `**
+ * /generated/*`.
+ * Полноценный glob тут не нужен — шаблоны задаёт человек руками, поэтому
+ * поддерживаем `*`, `?` и `**` и сверяем и имя, и путь от корня проекта.
+ */
+function matchesGlob(name: string, relative: string, pattern: string): boolean {
+  const source = pattern
+    .trim()
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '\u0001')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]')
+    .replace(/\u0001/g, '.*');
+  const regexp = new RegExp(`^(?:${source})$`, 'i');
+  return regexp.test(name) || regexp.test(relative);
 }
 
 function basename(target: string): string {

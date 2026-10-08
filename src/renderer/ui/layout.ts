@@ -15,6 +15,8 @@ export interface Layout {
   tabsHost: HTMLElement;
   breadcrumbsHost: HTMLElement;
   editorHost: HTMLElement;
+  /** Остров редактора: на нём переключаются режимы (например, чат вместо файлов). */
+  editorIsland: HTMLElement;
   dockHost: HTMLElement;
   rightPanel: HTMLElement;
   rightBody: HTMLElement;
@@ -81,9 +83,32 @@ export function createLayout(mount: HTMLElement): Layout {
   mount.appendChild(root);
   apply();
 
-  attachSplitter(root, sidebarSplitter, { cssVar: '--sidebar-width', axis: 'x', min: 170, max: 560, invert: false });
-  attachSplitter(root, rightSplitter, { cssVar: '--right-width', axis: 'x', min: 280, max: 760, invert: true });
-  attachSplitter(root, dockSplitter, { cssVar: '--dock-height', axis: 'y', min: 100, max: 800, invert: true });
+  attachSplitter(root, sidebarSplitter, {
+    cssVar: '--sidebar-size',
+    axis: 'x',
+    min: 170,
+    max: 560,
+    invert: false,
+    reset: 260,
+    oppositeVar: '--right-width',
+  });
+  attachSplitter(root, rightSplitter, {
+    cssVar: '--right-size',
+    axis: 'x',
+    min: 280,
+    max: 760,
+    invert: true,
+    reset: 400,
+    oppositeVar: '--sidebar-width',
+  });
+  attachSplitter(root, dockSplitter, {
+    cssVar: '--dock-size',
+    axis: 'y',
+    min: 100,
+    max: 800,
+    invert: true,
+    reset: 260,
+  });
 
   return {
     root,
@@ -96,6 +121,7 @@ export function createLayout(mount: HTMLElement): Layout {
     tabsHost,
     breadcrumbsHost,
     editorHost,
+    editorIsland,
     dockHost,
     rightPanel,
     rightBody,
@@ -131,17 +157,51 @@ interface SplitterOptions {
   max: number;
   /** true для панелей справа и снизу: тянуть нужно в противоположную сторону. */
   invert: boolean;
+  /** Ширина, к которой возвращает двойной клик. */
+  reset?: number;
+  /** Переменная панели напротив: по ней считаем предел, чтобы не съесть редактор. */
+  oppositeVar?: string;
 }
 
-function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: SplitterOptions): void {
-  splitter.addEventListener('pointerdown', (event) => {
-    event.preventDefault();
-    splitter.classList.add('is-dragging');
+/** Ниже этого редактор уже не читается — дальше панель не пускаем. */
+const MIN_EDITOR = 200;
 
-    const horizontal = options.axis === 'x';
+/**
+ * Перетаскивание разделителя.
+ *
+ * Главное здесь — `setPointerCapture`. Без него события приходят, только пока
+ * курсор физически лежит на полосе в 6 px: стоит дёрнуть мышь чуть быстрее,
+ * и `pointermove` уходит в редактор, а перетаскивание «отваливается».
+ * Захват перенаправляет все события разделителю, где бы курсор ни оказался.
+ */
+function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: SplitterOptions): void {
+  const horizontal = options.axis === 'x';
+
+  const readSize = (name: string): number =>
+    Number.parseFloat(getComputedStyle(root).getPropertyValue(name)) || 0;
+
+  splitter.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+
     const start = horizontal ? event.clientX : event.clientY;
-    const startSize = Number.parseFloat(getComputedStyle(root).getPropertyValue(options.cssVar)) || 0;
-    const limit = horizontal ? window.innerWidth - 320 : window.innerHeight - 160;
+    const startSize = readSize(options.cssVar);
+    const opposite = options.oppositeVar ? readSize(options.oppositeVar) : 0;
+    const limit = horizontal
+      ? window.innerWidth - opposite - MIN_EDITOR
+      : window.innerHeight - MIN_EDITOR;
+
+    // Захват может не сработать (например, указатель уже отпущен) — тогда
+    // перетаскивание продолжит работать, просто без «резинки» за курсором.
+    try {
+      splitter.setPointerCapture(event.pointerId);
+    } catch {
+      /* обойдёмся без захвата */
+    }
+    splitter.classList.add('is-dragging');
+    // Курсор во время перетаскивания держим сами: иначе редактор под курсором
+    // переключает его на текстовый и непонятно, что вообще происходит.
+    root.classList.add(horizontal ? 'is-resizing-x' : 'is-resizing-y');
 
     const onMove = (move: PointerEvent): void => {
       const current = horizontal ? move.clientX : move.clientY;
@@ -152,13 +212,23 @@ function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: Split
 
     const onUp = (): void => {
       splitter.classList.remove('is-dragging');
+      root.classList.remove('is-resizing-x', 'is-resizing-y');
       splitter.removeEventListener('pointermove', onMove);
       splitter.removeEventListener('pointerup', onUp);
       splitter.removeEventListener('pointercancel', onUp);
+      splitter.removeEventListener('lostpointercapture', onUp);
+      if (splitter.hasPointerCapture(event.pointerId)) splitter.releasePointerCapture(event.pointerId);
     };
 
     splitter.addEventListener('pointermove', onMove);
     splitter.addEventListener('pointerup', onUp);
     splitter.addEventListener('pointercancel', onUp);
+    splitter.addEventListener('lostpointercapture', onUp);
   });
+
+  // Двойной клик возвращает размер по умолчанию — привычный жест.
+  if (options.reset !== undefined) {
+    const reset = options.reset;
+    splitter.addEventListener('dblclick', () => root.style.setProperty(options.cssVar, `${reset}px`));
+  }
 }

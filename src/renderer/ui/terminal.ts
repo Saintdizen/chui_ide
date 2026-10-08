@@ -17,6 +17,12 @@ export interface TerminalPanelView {
   /** Открыть панель: создаёт сессию, если её ещё нет. */
   open(): Promise<void>;
   newSession(): Promise<void>;
+  /**
+   * Выполнить готовую команду в новой сессии.
+   * Команда набирается в терминале, а не запускается «в фоне»: человек должен
+   * видеть процесс, уметь его прервать и посмотреть вывод.
+   */
+  run(command: string, title?: string): Promise<void>;
   clearActive(): void;
   killActive(): Promise<void>;
   /** Пересчитать размер: вызывать, когда панель стала видимой. */
@@ -80,7 +86,12 @@ export function createTerminalPanel(deps: {
   /** Вывод, пришедший раньше, чем мы успели зарегистрировать сессию. */
   const orphanData = new Map<string, string[]>();
   let activeId: string | null = null;
-  let creating = false;
+  /**
+   * Незавершённое создание сессии. Промис, а не флаг: запуску нужно ДОЖДАТЬСЯ
+   * той сессии, которую уже создаёт открытие панели, иначе команда уходит
+   * в пустоту или появляется вторая вкладка.
+   */
+  let creating: Promise<string | null> | null = null;
 
   deps.rpc.onPush((message) => {
     if (message.topic === PushTopic.TerminalData) {
@@ -105,10 +116,17 @@ export function createTerminalPanel(deps: {
     }
   });
 
-  async function createSession(): Promise<void> {
-    if (creating) return;
-    creating = true;
+  /** Создать сессию и вернуть её id — он нужен, чтобы сразу отправить команду. */
+  function createSession(): Promise<string | null> {
+    if (creating) return creating;
+    const task = openSession().finally(() => {
+      creating = null;
+    });
+    creating = task;
+    return task;
+  }
 
+  async function openSession(): Promise<string | null> {
     const container = h('div', { class: 'term-instance' });
     body.appendChild(container);
 
@@ -162,12 +180,12 @@ export function createTerminalPanel(deps: {
 
       activate(session.id);
       terminal.focus();
+      return session.id;
     } catch (error) {
       container.remove();
       terminal.dispose();
       showToast(error instanceof Error ? error.message : String(error), 'error');
-    } finally {
-      creating = false;
+      return null;
     }
   }
 
@@ -241,7 +259,29 @@ export function createTerminalPanel(deps: {
         if (view) fitSession(view);
       }
     },
-    newSession: createSession,
+    newSession: async () => {
+      await createSession();
+    },
+    async run(command, title) {
+      // Команда идёт в уже открытую оболочку, а не в новую вкладку: вкладка
+      // создаётся только если терминала ещё нет. Панель показывает вызывающая
+      // сторона — поэтому здесь никакой связи с доком.
+      const current = active();
+      const id = current && !current.exited ? current.session.id : await createSession();
+      if (!id) return;
+
+      const view = sessions.get(id);
+      if (view && title) {
+        // Имя вкладки — по запуску, как в PyCharm: видно, что это запуск, а не
+        // свободная оболочка. Подсказка хранит саму команду, если она отличается
+        // от имени (у задачи из package.json они совпадают).
+        view.tab.textContent = title;
+        view.tab.title = title === command ? title : `${title} · ${command}`;
+        activate(id);
+      }
+      await deps.rpc.request('terminal.write', { id, data: `${command}\r` }).catch(() => undefined);
+      view?.terminal.focus();
+    },
     clearActive,
     killActive,
     fit() {

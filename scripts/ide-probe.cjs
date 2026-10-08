@@ -14,6 +14,7 @@ const path = require('node:path');
 const { AiService } = require('../dist/main/ai/service.js');
 const { GitService } = require('../dist/main/git/git.js');
 const { registerIpc } = require('../dist/main/ipc/register.js');
+const { HostClient } = require('../dist/main/ipc/host.js');
 const { pushToRenderers } = require('../dist/main/ipc/push.js');
 const { registerAppScheme, serveRenderer } = require('../dist/main/protocol.js');
 const { SettingsStore } = require('../dist/main/settings.js');
@@ -64,7 +65,7 @@ app.whenReady().then(async () => {
   const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
-  registerIpc({ settings, workspace, ai, terminals, git });
+  registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient() });
 
   if (process.env.CHUI_PROBE_PROJECT !== 'skip') await workspace.open(project);
   console.log(`[проба] проект: ${process.env.CHUI_PROBE_PROJECT === 'skip' ? 'не открываем' : project}`);
@@ -74,7 +75,7 @@ app.whenReady().then(async () => {
     await wait(seconds === 5 ? 5000 : 5000);
     const answer = await ask(ide, `({
       app: Boolean(document.querySelector('.app')),
-      workspace: document.querySelector('.workspace-name')?.textContent ?? null,
+      workspace: document.querySelector('.panel-title')?.textContent ?? null,
       entries: [...document.querySelectorAll('.tree-name')].map((node) => node.textContent),
       loading: document.querySelector('.tree-loading')?.textContent ?? null,
     })`, 20000);

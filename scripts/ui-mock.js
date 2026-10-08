@@ -15,6 +15,12 @@
 (() => {
   const ROOT = '/mock/project';
   const MOCK_SHELL = '/bin/bash';
+  /**
+   * `?fast=1` убирает задержки потока. Нужно для проверки интерфейса: вкладка
+   * браузера обычно не активна, и Chromium режет таймеры до одного раза в секунду —
+   * с обычными задержками один ответ модели идёт десятки секунд.
+   */
+  const FAST = new URLSearchParams(location.search).has('fast');
 
   /* ── данные: дерево повторяет обычный проект на JavaScript ─────────────── */
 
@@ -82,6 +88,10 @@ module.exports = [
 `,
     ],
     [`${ROOT}/src/queue.js`, `class Queue {\n  #items = [];\n\n  push(item) {\n    this.#items.push(item);\n  }\n}\n`],
+    [
+      `${ROOT}/scripts/train.py`,
+      `"""Обучение небольшой модели."""\n\nimport json\nimport sys\n\n\nclass Trainer:\n    def __init__(self, epochs: int = 3) -> None:\n        self.epochs = epochs\n\n    def fit(self, data: list[float]) -> float:\n        total = 0.0\n        for value in data:\n            total += value * value\n        return total / max(len(data), 1)\n\n\ndef main() -> None:\n    trainer = Trainer(epochs=5)\n    print(json.dumps({"loss": trainer.fit([1.0, 2.0, 3.0])}))\n\n\nif __name__ == "__main__":\n    main()\n`,
+    ],
   ]);
 
   const DIRS = new Map([
@@ -89,7 +99,7 @@ module.exports = [
     [`${ROOT}/.gitverse`, ['config.json', 'logo.svg']],
     [`${ROOT}/app`, ['main.js', 'window.js', 'index.html']],
     [`${ROOT}/docs`, ['architecture.md', 'roadmap.md']],
-    [`${ROOT}/scripts`, ['build.mjs', 'dev.mjs']],
+    [`${ROOT}/scripts`, ['build.mjs', 'dev.mjs', 'train.py']],
     [`${ROOT}/src`, ['queue.js', 'logger.js']],
   ]);
 
@@ -178,13 +188,19 @@ module.exports = [
 
   /* ── стартовое окно: корень, открытый «в main», и история проектов ─────── */
 
-  let currentRoot = null;
+  // Проект открыт сразу: так проверка интерфейса идёт по тому же пути, что
+  // в жизни — дерево, вкладки файлов, чат рядом с ними.
+  let currentRoot = ROOT;
   const recent = [
     { path: ROOT, name: 'project', exists: true },
     { path: '/mock/gone-project', name: 'gone-project', exists: false },
   ];
 
   /* ── настройки: те же ключи, что в `main/settings.ts` ──────────────────── */
+
+  /** Красный пиксель: миниатюра в чипе видна, файл при этом крошечный. */
+  const TINY_PNG =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
 
   const settings = {
     ai: {
@@ -193,7 +209,9 @@ module.exports = [
           id: 'openai',
           label: 'OpenAI',
           baseUrl: 'https://api.openai.com/v1',
-          models: ['gpt-4o-mini', 'gpt-4o'],
+          // o3-mini — из семейства с усилием размышления: на нём видно,
+          // как контрол включённого эффорта отличается от выключенного.
+          models: ['gpt-4o-mini', 'gpt-4o', 'o3-mini'],
           defaultModel: 'gpt-4o-mini',
           hasApiKey: false,
         },
@@ -212,16 +230,66 @@ module.exports = [
       maxTokens: 2048,
       systemPrompt: 'Ты ассистент внутри редактора.',
     },
-    editor: { tabSize: 2, fontSize: 14, wordWrap: false, minimap: false },
+    editor: {
+      tabSize: 2,
+      fontSize: 14,
+      wordWrap: false,
+      minimap: false,
+      fontLigatures: true,
+      insertSpaces: true,
+      languageIndent: true,
+      renderWhitespace: 'selection',
+      cursorBlinking: 'smooth',
+      smoothScrolling: true,
+      scrollBeyondLastLine: true,
+      lineNumbers: 'on',
+      renderLineHighlight: 'all',
+      bracketPairColorization: true,
+      stickyScroll: false,
+      quickSuggestions: true,
+      showUnused: true,
+    },
+    // Проводник и запуск: мок повторяет контракт настроек из shared/api.ts.
+    explorer: {
+      icons: true,
+      showHidden: true,
+      foldersFirst: true,
+      sort: 'name',
+      indent: 12,
+      rowDensity: 'normal',
+      gitDecorations: true,
+      folderChangeDot: true,
+      openOnSingleClick: false,
+      confirmDelete: true,
+      exclude: [],
+    },
+    run: { pythonPath: '', packageManager: 'auto', saveBeforeRun: true },
     // «Системная» — чтобы схему в проверке задавал Playwright (`emulateMedia`).
     appearance: { theme: 'system' },
+    // Усилие размышления: по умолчанию не отправляется (см. shared/providers.ts).
+    reasoningEffort: 'off',
   };
 
   /* ── шина: события вызова и широковещательные push-сообщения ───────────── */
 
   const rpcEventListeners = new Set();
   const pushListeners = new Set();
+  const hostListeners = new Set();
+  const pendingHost = new Map();
   let listenerId = 0;
+  let hostSeq = 0;
+  /** Как main: отмена вызова прерывает выполняющийся стрим. */
+  let cancelRequested = false;
+
+  /** Как main: спросить renderer и дождаться ответа хостовым вызовом. */
+  const askHost = (method, params) => {
+    hostSeq += 1;
+    const id = `mock-h${hostSeq}`;
+    return new Promise((resolve) => {
+      pendingHost.set(id, resolve);
+      for (const listener of [...hostListeners]) listener({ id, method, params });
+    });
+  };
 
   const emit = (id, event, payload) => {
     for (const listener of rpcEventListeners) listener({ id, event, payload });
@@ -229,7 +297,7 @@ module.exports = [
   const push = (topic, payload) => {
     for (const listener of pushListeners) listener({ topic, payload });
   };
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, FAST ? Math.min(ms, 4) : ms));
 
   /* ── методы ───────────────────────────────────────────────────────────── */
 
@@ -316,12 +384,20 @@ module.exports = [
       FILES.set(params.path, params.text ?? '');
       return { mtimeMs: Date.now() };
     },
-    'workspace.stat': (params) => ({
-      path: params.path,
-      kind: kindOf(params.path),
-      size: FILES.get(params.path)?.length ?? 0,
-      mtimeMs: Date.now(),
-    }),
+    // Как настоящая ФС: несуществующий путь — ошибка. Иначе определение
+    // инструментов проекта (`.venv/bin/python`, файлы блокировки) «находит»
+    // что угодно и показывает не тот интерпретатор.
+    'workspace.stat': (params) => {
+      if (!FILES.has(params.path) && !DIRS.has(params.path)) {
+        throw new Error(`Файл не найден: ${params.path}`);
+      }
+      return {
+        path: params.path,
+        kind: kindOf(params.path),
+        size: FILES.get(params.path)?.length ?? 0,
+        mtimeMs: Date.now(),
+      };
+    },
     'workspace.search': (params) => {
       const hits = [];
       for (const [path, text] of FILES) {
@@ -366,6 +442,12 @@ module.exports = [
       dropChild(params.path);
     },
 
+    // Картинку отдаём настоящую (крошечный PNG): по ней видно, что миниатюра
+    // в чипе действительно рисуется, а не только имя файла.
+    'dialog.pickImages': () => [
+      { name: 'screenshot.png', mime: 'image/png', bytes: 68, dataUrl: TINY_PNG },
+    ],
+
     'terminal.create': (params) => {
       const id = `t${sessions.size + 1}`;
       const session = { id, title: 'bash', cwd: params.cwd ?? ROOT, shell: MOCK_SHELL, pid: 1000 + sessions.size };
@@ -400,27 +482,175 @@ module.exports = [
       bounds = { ...bounds, ...params };
       return { ...bounds };
     },
-    'app.showMenu': () => undefined,
+    'menu.role': () => undefined,
 
     'settings.get': () => structuredClone(settings),
     'settings.update': (params) => {
-      Object.assign(settings.ai, params.ai ?? {});
+      const { provider, removeProviderId, ...ai } = params.ai ?? {};
+      Object.assign(settings.ai, ai);
       Object.assign(settings.editor, params.editor ?? {});
+      Object.assign(settings.explorer, params.explorer ?? {});
+      Object.assign(settings.run, params.run ?? {});
       Object.assign(settings.appearance, params.appearance ?? {});
+
+      // Провайдеров добавляем и убираем так же, как это делает SettingsStore.
+      if (provider) {
+        const existing = settings.ai.providers.find((item) => item.id === provider.id);
+        if (existing) Object.assign(existing, provider);
+        else settings.ai.providers.push({ models: [], ...provider });
+      }
+      if (removeProviderId) {
+        settings.ai.providers = settings.ai.providers.filter((item) => item.id !== removeProviderId);
+      }
+
+      // Схему main сообщает push-событием: от неё зависят Monaco, xterm и
+      // подсветка кода в чате, поэтому мок обязан её отдавать так же.
+      if (params.appearance?.theme) {
+        const chosen = settings.appearance.theme;
+        const scheme = chosen === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : chosen;
+        push('theme:changed', { theme: chosen, scheme });
+      }
+
       const snapshot = structuredClone(settings);
       push('settings:changed', snapshot);
       return snapshot;
     },
     'settings.revealFile': () => ({ path: '/mock/config/settings.json' }),
 
-    'ai.setApiKey': () => structuredClone(settings),
-    'ai.clearApiKey': () => structuredClone(settings),
+    'ai.setApiKey': (params) => {
+      const provider = settings.ai.providers.find((item) => item.id === params.providerId);
+      if (provider) provider.hasApiKey = true;
+      return structuredClone(settings);
+    },
+    'ai.clearApiKey': (params) => {
+      const provider = settings.ai.providers.find((item) => item.id === params.providerId);
+      if (provider) provider.hasApiKey = false;
+      return structuredClone(settings);
+    },
     'ai.models': () => settings.ai.providers[0].models,
+    // Проверка подключения: два понятных исхода вместо исключения.
+    'ai.test': (params) => {
+      if (/bad|invalid/i.test(params.baseUrl)) {
+        return { ok: false, models: [], message: 'Адрес не найден — проверьте написание сервера' };
+      }
+      const provider = settings.ai.providers.find((item) => item.id === params.providerId);
+      const needsKey = !provider || /^https:/.test(params.baseUrl);
+      if (needsKey && !params.apiKey) {
+        return { ok: false, models: [], message: 'Нужен API-ключ: без него провайдер отклонит запрос' };
+      }
+      const models = ['gpt-4o', 'gpt-4o-mini', 'gpt-4o-realtime'];
+      return { ok: true, models, message: `Подключение работает · доступно моделей: ${models.length}` };
+    },
     'ai.chat': async (params, id) => {
-      const answer = `Проверка панели: ответ приходит потоком. Файл — ${params.messages.at(-1)?.content ?? ''}.`;
+      cancelRequested = false;
+
+      // Сжатие беседы — отдельный короткий запрос: модель отвечает резюме,
+      // а не обычным ответом с размышлениями и блоками кода.
+      const asked = params.messages.at(-1)?.content ?? '';
+      if (/Сожми нашу беседу/.test(asked)) {
+        await sleep(60);
+        const summary = 'Просили разобрать панель; правили package.json; раскладка ассистента проверена.';
+        emit(id, 'delta', { text: summary });
+        return { text: summary, finishReason: 'stop', usage: { promptTokens: 9, completionTokens: 12 } };
+      }
+
+      // Размышления reasoning-моделей приходят отдельным полем — показываем их блоком.
+      const thoughts = 'Сначала посмотрю на открытый файл. Потом отвечу коротко и по делу.';
+      if (FAST) emit(id, 'reasoning', { text: thoughts });
+      else {
+        for (const word of thoughts.split(' ')) {
+          await sleep(14);
+          if (cancelRequested) break;
+          emit(id, 'reasoning', { text: `${word} ` });
+        }
+      }
+
+      // Как настоящий агент: сначала спрашивает разрешение на команду, потом правит файл.
+      if (params.useTools) {
+        // Пачка чтения проекта: в жизни агент смотрит десяток папок подряд,
+        // такие вызовы должны свернуться в одну строку, а не залить весь чат.
+        const folders = ['src', 'src/main', 'src/renderer', 'scripts'];
+        for (const [index, folder] of folders.entries()) {
+          const dirId = `mock-dir-${index}`;
+          emit(id, 'tool_start', { id: dirId, name: 'list_dir', args: JSON.stringify({ path: `${ROOT}/${folder}` }) });
+          await sleep(50);
+          emit(id, 'tool_result', {
+            id: dirId,
+            name: 'list_dir',
+            ok: true,
+            summary: 'элементов: 6',
+            detail: ['index.ts', 'service.ts', 'tools.ts', 'main.css', 'chat.ts', 'package.json']
+              .map((name) => `- ${name}`)
+              .join('\n'),
+          });
+        }
+
+        const command = 'npm run lint';
+        emit(id, 'tool_start', {
+          id: 'mock-call-0',
+          name: 'run_terminal',
+          args: JSON.stringify({ command }),
+        });
+        const permission = await askHost('ai.confirmCommand', { command });
+        emit(id, 'tool_result', {
+          id: 'mock-call-0',
+          name: 'run_terminal',
+          ok: Boolean(permission?.allowed),
+          summary: permission?.allowed ? 'код выхода 0' : 'Пользователь запретил выполнение команды',
+          detail: permission?.allowed ? `$ ${command}\n(мок: команда не выполняется)` : undefined,
+        });
+
+        const callId = 'mock-call-1';
+        const target = `${ROOT}/package.json`;
+        const edits = [
+          {
+            path: target,
+            edits: [
+              {
+                startLine: 1,
+                startColumn: 1,
+                endLine: 1,
+                endColumn: 1,
+                newText: '// Правка агента\n// вторая строка\n// третья строка\n',
+              },
+            ],
+          },
+        ];
+
+        emit(id, 'tool_start', { id: callId, name: 'apply_edit', args: JSON.stringify({ edits }) });
+        const decision = await askHost('ai.applyEdits', { edits });
+        const ok = !decision?.rejected;
+        emit(id, 'tool_result', {
+          id: callId,
+          name: 'apply_edit',
+          ok,
+          summary: ok ? 'применено файлов: 1' : 'Пользователь отклонил правки',
+        });
+      }
+
+      // Ответ с несколькими блоками: на нём видно, что подсветка включается
+      // для каждого языка по метке в ограде, а не только для `js`.
+      const answer =
+        'Проверка панели: ответ приходит потоком.\n' +
+        '```js\nconst answer = 42;\n```\n' +
+        '```python\ndef greet(name: str) -> str:\n    return f"привет, {name}"\n```\n' +
+        '```bash\nnpm run smoke:agent\n```\n' +
+        `Файл — ${params.messages.at(-1)?.content ?? ''}.`;
+      // В быстром режиме ответ уходит одной порцией: браузер режет таймеры скрытой
+      // вкладки до секунды, и поток по словам длился бы минуты.
+      if (FAST) {
+        emit(id, 'delta', { text: answer });
+        return { text: answer, finishReason: 'stop', usage: { promptTokens: 12, completionTokens: 24 } };
+      }
+
       let text = '';
       for (const word of answer.split(' ')) {
         await sleep(18);
+        if (cancelRequested) {
+          const stopped = new Error('Операция отменена');
+          stopped.code = -32800; // RpcErrorCode.Cancelled
+          throw stopped;
+        }
         text += `${word} `;
         emit(id, 'delta', { text: `${word} ` });
       }
@@ -454,6 +684,7 @@ module.exports = [
       }
     },
     async cancel() {
+      cancelRequested = true;
       return true;
     },
     onRpcEvent(listener) {
@@ -463,6 +694,17 @@ module.exports = [
     onPush(listener) {
       pushListeners.add(listener);
       return (listenerId += 1);
+    },
+    onHostRequest(listener) {
+      hostListeners.add(listener);
+      return (listenerId += 1);
+    },
+    async replyHostRequest(reply) {
+      const resolve = pendingHost.get(reply.id);
+      if (!resolve) return false;
+      pendingHost.delete(reply.id);
+      resolve(reply.ok ? reply.value : { rejected: true });
+      return true;
     },
     off() {
       // В моке подписчики живут до перезагрузки страницы — отписываться не от чего.

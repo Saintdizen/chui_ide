@@ -1,9 +1,13 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
+  HOST_REPLY_CHANNEL,
+  HOST_REQUEST_CHANNEL,
   PUSH_CHANNEL,
   RPC_CALL_CHANNEL,
   RPC_CANCEL_CHANNEL,
   RPC_EVENT_CHANNEL,
+  type HostReply,
+  type HostRequest,
   type PushMessage,
   type RpcCall,
   type RpcEventMessage,
@@ -18,10 +22,12 @@ import { BRIDGE_KEY, type ChuiBridge } from '../shared/bridge';
 
 type RpcEventListener = (message: RpcEventMessage) => void;
 type PushEventListener = (message: PushMessage) => void;
+type HostRequestListener = (request: HostRequest) => void;
 
 let listenerSeq = 0;
 const rpcListeners = new Map<number, RpcEventListener>();
 const pushListeners = new Map<number, PushEventListener>();
+const hostListeners = new Map<number, HostRequestListener>();
 
 ipcRenderer.on(RPC_EVENT_CHANNEL, (_event, message: RpcEventMessage) => {
   for (const listener of [...rpcListeners.values()]) listener(message);
@@ -29,6 +35,10 @@ ipcRenderer.on(RPC_EVENT_CHANNEL, (_event, message: RpcEventMessage) => {
 
 ipcRenderer.on(PUSH_CHANNEL, (_event, message: PushMessage) => {
   for (const listener of [...pushListeners.values()]) listener(message);
+});
+
+ipcRenderer.on(HOST_REQUEST_CHANNEL, (_event, request: HostRequest) => {
+  for (const listener of [...hostListeners.values()]) listener(request);
 });
 
 const bridge: ChuiBridge = {
@@ -54,9 +64,18 @@ const bridge: ChuiBridge = {
     pushListeners.set(listenerSeq, listener);
     return listenerSeq;
   },
+  onHostRequest(listener: HostRequestListener): number {
+    listenerSeq += 1;
+    hostListeners.set(listenerSeq, listener);
+    return listenerSeq;
+  },
+  replyHostRequest(reply: HostReply): Promise<boolean> {
+    return ipcRenderer.invoke(HOST_REPLY_CHANNEL, reply) as Promise<boolean>;
+  },
   off(listenerId: number): void {
     rpcListeners.delete(listenerId);
     pushListeners.delete(listenerId);
+    hostListeners.delete(listenerId);
   },
 };
 

@@ -15,6 +15,7 @@ const path = require('node:path');
 const { AiService } = require('../dist/main/ai/service.js');
 const { GitService } = require('../dist/main/git/git.js');
 const { registerIpc } = require('../dist/main/ipc/register.js');
+const { HostClient } = require('../dist/main/ipc/host.js');
 const { pushToRenderers } = require('../dist/main/ipc/push.js');
 const { registerAppScheme, serveRenderer } = require('../dist/main/protocol.js');
 const { SettingsStore } = require('../dist/main/settings.js');
@@ -77,7 +78,7 @@ app.whenReady().then(async () => {
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
 
-  registerIpc({ settings, workspace, ai, terminals, git });
+  registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient() });
 
   // Проект уже открывался раньше — значит он есть в истории.
   await workspace.open(project);

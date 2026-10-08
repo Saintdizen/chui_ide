@@ -76,13 +76,20 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
   const place = (): void => {
     if (!popup) return;
     const anchor = element.getBoundingClientRect();
-    const rect = popup.getBoundingClientRect();
-    const left = Math.max(8, Math.min(anchor.left, window.innerWidth - rect.width - 8));
+    // Измеряем offset-размерами, а не rect: у появления есть transform,
+    // и по нему позиция уезжала бы на кадр анимации.
+    const width = popup.offsetWidth;
+    const height = popup.offsetHeight;
+    const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(value, max));
+    const left = clamp(anchor.left, 8, Math.max(8, window.innerWidth - width - 8));
     const below = anchor.bottom + 4;
-    const above = anchor.top - rect.height - 4;
-    const flip = below + rect.height > window.innerHeight - 8 && above > 8;
+    const above = anchor.top - height - 4;
+    const flip = below + height > window.innerHeight - 8 && above > 8;
+    // Верхний предел обязателен: кнопка может быть прокручена из виду внутри
+    // модального окна, и без зажима список улетал бы под шапку приложения.
+    const top = clamp(flip ? above : below, 8, Math.max(8, window.innerHeight - height - 8));
     popup.style.left = `${left}px`;
-    popup.style.top = `${flip ? above : below}px`;
+    popup.style.top = `${top}px`;
   };
 
   const setCursor = (next: number): void => {

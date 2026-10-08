@@ -2,6 +2,7 @@ import { app, BrowserWindow, nativeTheme } from 'electron';
 import { PushTopic } from '../shared/api';
 import { AiService } from './ai/service';
 import { GitService } from './git/git';
+import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
 import { registerIpc } from './ipc/register';
 import { createApplicationMenu } from './menu';
@@ -13,6 +14,33 @@ import { createWelcomeWindow } from './window';
 
 // Схему нужно объявить до инициализации приложения, иначе Chromium не даст ей привилегий.
 registerAppScheme();
+
+// Палитра проекта описана в sRGB, а Chromium по умолчанию пересчитывает цвета
+// в профиль монитора. На широкоохватном экране без нормального ICC-профиля
+// sRGB-контент растягивается и выглядит кислотнее задуманного — один и тот же
+// hex даёт разный цвет на разных машинах. Флаг прибивает цветовое пространство
+// рендеринга к sRGB, и цвета совпадают с тем, что задано в CSS и в теме Monaco.
+// Флаг читает Chromium до старта GPU-процесса, поэтому ставить его нужно здесь,
+// а не после `whenReady`.
+app.commandLine.appendSwitch('force-color-profile', 'srgb');
+
+// Это не то же самое, что профиль дисплея: на Wayland Chromium ведёт окно через
+// протокол цветоуправления `wp_color_manager_v1`, и тёмные тона уезжают вверх —
+// токен `#1e1e1e` на экране даёт `#242424` (сдвиг +6), при этом чёрный и белый
+// остаются на месте, то есть чужая кривая, а не прозрачность и не наложение.
+// `force-color-profile` такой сдвиг не лечит: он про профиль монитора, а тут
+// кривая на самом окне. Поэтому протокол отключаем, а значение флага дописываем
+// к уже переданному из командной строки, а не заменяем его.
+if (
+  process.platform === 'linux' &&
+  (process.env.XDG_SESSION_TYPE === 'wayland' || process.env.WAYLAND_DISPLAY !== undefined)
+) {
+  const passed = app.commandLine.getSwitchValue('disable-features');
+  app.commandLine.appendSwitch(
+    'disable-features',
+    passed === '' ? 'WaylandWpColorManagerV1' : `${passed},WaylandWpColorManagerV1`,
+  );
+}
 
 // Второй экземпляр приложения не нужен: он бы писал в тот же settings.json.
 if (!app.requestSingleInstanceLock()) {
@@ -57,7 +85,7 @@ if (!app.requestSingleInstanceLock()) {
     // узнаём после своих же операций и после сохранения файла.
     const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
 
-    registerIpc({ settings, workspace, ai, terminals, git });
+    registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient() });
     serveRenderer();
     createApplicationMenu();
     // Приложение начинается со списка проектов: окно IDE откроется после

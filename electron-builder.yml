@@ -1,0 +1,89 @@
+# Сборка дистрибутивов: electron-builder.
+#
+# Один и тот же файл описывает все три платформы — Windows (NSIS), Linux
+# (AppImage + deb) и macOS (dmg), — потому что различия здесь только в целях
+# и значке. Значки лежат в `build/`: из одного `icon.png` 512×512 сборщик
+# делает `.ico` и `.icns` сам (см. `scripts/make-icon.mjs`).
+appId: io.chui.ide
+productName: Chui IDE
+copyright: Chui IDE
+
+directories:
+  output: release
+  buildResources: build
+
+# В пакет идёт только собранный код: исходники TypeScript и моки проверок
+# в дистрибутиве не нужны.
+files:
+  - dist/**
+  - package.json
+  - '!**/*.map'
+  - '!**/*.ts'
+
+# Нативный модуль (node-pty) нельзя держать внутри asar: он грузится из файла.
+asarUnpack:
+  - '**/*.node'
+  - node_modules/node-pty/**
+
+# node-pty собирается под Electron, поэтому перед упаковкой пересобираем модули.
+npmRebuild: true
+
+artifactName: '${productName}-${version}-${os}-${arch}.${ext}'
+
+win:
+  target:
+    - nsis
+  icon: build/icon.png
+
+nsis:
+  # Не «одним кликом»: пользователь сам выбирает каталог установки.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: Chui IDE
+
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: build/icon.png
+  category: Development
+  # Имя .desktop-файла должно совпадать с именем, которое Electron сообщает
+  # композитору: иначе среда не связывает окно с ярлыком (нет иконки в доке).
+  syncDesktopName: true
+  # deb требует сопровождающего: без него fpm отказывается собирать пакет.
+  # Адрес — служебный (noreply GitHub): подпись пакета — дело самого проекта.
+  maintainer: Chui IDE <chui-ide@users.noreply.github.com>
+  synopsis: IDE с ассистентом
+  description: >-
+    Chui IDE — редактор кода на Electron: дерево проекта, Monaco, терминал,
+    git, ассистент с инструментами агента.
+  desktop:
+    entry:
+      Name: Chui IDE
+      Comment: Редактор кода с ассистентом
+      Categories: Development;IDE;
+
+deb:
+  # Зависимости, без которых Electron не стартует на чистой системе.
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libsecret-1-0
+
+mac:
+  target:
+    - dmg
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  # Подписи нет: без сертификата сборка выходит неподписанной, и это ожидаемо.
+  identity: null
+
+dmg:
+  title: Chui IDE

@@ -3,26 +3,35 @@ import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
 import { EditService } from './core/edits';
+import { HostService } from './core/host';
 import { EditorService } from './core/editor-service';
 import { GitModel } from './core/git-model';
+import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
+import { languageLabel, languageIndent } from './core/languages';
 import { OpenEditors } from './core/open-editors';
+import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
 import { RpcClient } from './core/rpc';
+import { collectRunTargets, entryLine, type RunTarget, type RunnableFile } from './core/run-config';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
-import { createBreadcrumbs } from './ui/breadcrumbs';
-import { createChatPanel } from './ui/chat';
+import { showApplicationMenu } from './ui/app-menu';
+import { createBreadcrumbs } from './ui/breadcrumbs';import { createChatPanel } from './ui/chat';
 import { createDock } from './ui/dock';
 import { createDiffView } from './ui/diff-view';
 import { basename, clear, h, svgIcon, type IconName } from './ui/dom';
 import { createEmptyState } from './ui/empty-state';
 import { createExplorer } from './ui/explorer';
 import { createLayout } from './ui/layout';
+import { logoMark } from './ui/logo';
 import { createPalette } from './ui/palette';
+import { closePopupMenu, isPopupOpen, showPopupMenu } from './ui/popup-menu';
+import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
 import { createSourceControl } from './ui/source-control';
 import { createStatusBar } from './ui/statusbar';
+import { createSettingsModal } from './ui/settings-modal';
 import { createTabs } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
 import { showToast } from './ui/toast';
@@ -54,6 +63,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   const editors = new EditorService(layout.editorHost, documents, settings.editor, theme.monacoThemeId);
   const edits = new EditService({ documents, editors, rpc });
+  // Приёмник обратных вызовов из main: правки агента приходят сюда.
+  const host = new HostService();
+
+  // Настройки — модальное окно поверх всего: и шапка, и панель AI открывают одно и то же.
+  const settingsModal = createSettingsModal({ rpc, commands, theme });
+  document.body.appendChild(settingsModal.element);
 
   /* ── панели ────────────────────────────────────────────────────────────── */
 
@@ -83,13 +98,159 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   layout.dockHost.appendChild(dock.element);
 
-  const chat = createChatPanel({ rpc, documents, editors, commands, settings });
+  /* ── чат ───────────────────────────────────────────────────────────────── */
+
+  /**
+   * Чат можно перенести в область редактора — тогда он становится обычной
+   * вкладкой рядом с файлами, а не отдельным экраном. Панель чата при этом одна:
+   * элемент переезжает между хозяевами, второй копии не существует.
+   */
+  const chatEditor = h('div', { class: 'chat-editor', hidden: true });
+  layout.editorHost.appendChild(chatEditor);
+
+  let chatInEditor = false;
+  /** Вкладка чата показана сейчас: файлы ждут своей очереди. */
+  let chatTabActive = false;
+
+  /** Показать вкладку чата (или перенести чат, если он ещё в панели). */
+  function showChatTab(): void {
+    if (!chatInEditor) {
+      setChatInEditor(true);
+      return;
+    }
+    chatTabActive = true;
+    syncChatTab();
+  }
+
+  /** Активировали файл — вкладка чата остаётся в полосе, но не показывается. */
+  function hideChatTab(): void {
+    if (!chatInEditor || !chatTabActive) return;
+    chatTabActive = false;
+    syncChatTab();
+  }
+
+  function syncChatTab(): void {
+    const shown = chatInEditor && chatTabActive;
+    chatEditor.hidden = !shown;
+    layout.editorIsland.classList.toggle('is-chat', shown);
+    tabs.refresh();
+  }
+
+  function setChatInEditor(next: boolean): void {
+    if (next === chatInEditor) {
+      if (next) showChatTab();
+      return;
+    }
+    chatInEditor = next;
+    chatTabActive = next;
+
+    if (next) {
+      // Панель отдаёт чат редактору: два хозяина у одной области экрана лишние.
+      layout.rightBody.replaceChildren();
+      chatEditor.appendChild(chat.element);
+      layout.setRightVisible(false);
+    } else {
+      chatEditor.hidden = true;
+      layout.rightBody.appendChild(chat.element);
+      layout.setRightVisible(true);
+    }
+
+    syncChatTab();
+  }
+
+  const chat = createChatPanel({
+    rpc,
+    documents,
+    editors,
+    edits,
+    commands,
+    settings,
+    settingsModal,
+    host,
+    toggleEditor: () => setChatInEditor(!chatInEditor),
+    isInEditor: () => chatInEditor,
+  });
   layout.rightBody.appendChild(chat.element);
 
-  layout.tabsHost.appendChild(createTabs({ openEditors, documents, commands }));
-  layout.breadcrumbsHost.appendChild(createBreadcrumbs({ openEditors, documents, workspace, commands }));
+  const tabs = createTabs({
+    openEditors,
+    documents,
+    commands,
+    auxiliary: {
+      title: 'Чат',
+      get visible() {
+        return chatInEditor;
+      },
+      get active() {
+        return chatTabActive;
+      },
+      activate: showChatTab,
+      close: () => setChatInEditor(false),
+    },
+  });
+  layout.tabsHost.appendChild(tabs.element);
 
-  const emptyState = createEmptyState({ commands });
+  const breadcrumbs = createBreadcrumbs({ openEditors, documents, workspace, commands });
+  layout.breadcrumbsHost.appendChild(breadcrumbs);
+
+  // Кнопка запуска живёт в той же полосе, что и крошки: это действие над файлом,
+  // а не настройка, и место у него — рядом с редактором, а не в шапке окна.
+  const runControl = createRunButton((target) => void runTarget(target));
+  layout.breadcrumbsHost.appendChild(runControl.element);
+
+  /* ── запуск ────────────────────────────────────────────────────────────── */
+
+  /** Чем запускать код и какие задачи есть в проекте: спрашиваем один раз на корень. */
+  const tools = new ProjectToolsModel(rpc, () => settings.run, info.platform);
+  /** Подпись последнего нарисованного значка запуска: не трогаем украшения зря. */
+  let runMarkerSignature = '';
+
+  /** Файл как программа: путь от корня нужен для команды в терминале. */
+  const runnableFileOf = (document: TextDocument | null): RunnableFile | null => {
+    const root = workspace.root;
+    if (!document || !root) return null;
+    const relative = workspace.relative(document.path);
+    // Файл вне корня запускать нечем: команда выполняется в каталоге проекта.
+    if (relative === document.path) return null;
+    return { path: document.path, relative, languageId: document.languageId, text: document.value };
+  };
+
+  function targetsFor(document: TextDocument | null): RunTarget[] {
+    return collectRunTargets(runnableFileOf(document), tools.get());
+  }
+
+  /**
+   * Кнопка запуска и значок ▶ в жёлобе говорят одно и то же: что можно запустить
+   * в этом файле. Значок ставим только у настоящей точки входа — иначе жёлоб
+   * пестреет стрелками у каждого файла.
+   */
+  function syncRunControl(): void {
+    const active = openEditors.active;
+    runControl.update(targetsFor(active));
+
+    // Полоса под вкладками нужна ровно тогда, когда в ней есть что показать:
+    // путь из одного сегмента крошек не рисует, и без кнопки запуска
+    // оставалась бы пустая полоска с линией на всю ширину.
+    layout.breadcrumbsHost.hidden = breadcrumbs.hidden && runControl.element.hidden;
+
+    if (!active) return;
+    const line = entryLine(active.languageId, active.value);
+    const signature = `${active.path}:${line ?? 0}`;
+    if (signature === runMarkerSignature) return;
+    runMarkerSignature = signature;
+    editors.setRunLines(active.path, line ? [line] : []);
+  }
+
+  /** Запуск цели: файл сохраняем, панель показываем, команду набираем в терминале. */
+  async function runTarget(target: RunTarget): Promise<void> {
+    if (settings.run.saveBeforeRun) {
+      for (const document of documents.dirty()) await saveDocument(document);
+    }
+    dock.show('terminal');
+    await terminalPanel.run(target.command, target.label);
+  }
+
+  const emptyState = createEmptyState();
   layout.editorHost.appendChild(emptyState.element);
 
   const palette = createPalette({ commands });
@@ -103,11 +264,23 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Переключатели панелей: их подсветку держит `syncViewButtons`. */
   const viewButtons = new Map<string, HTMLButtonElement>();
 
-  const addTopButton = (host: HTMLElement, id: string, icon: IconName, title: string, command: string): void => {
+  /**
+   * Кнопка шапки. Обычно это значок из общего набора, но кнопка ассистента носит
+   * знак приложения — он шире и рисуется отдельно, поэтому его можно передать
+   * готовым узлом.
+   */
+  const addTopButton = (
+    host: HTMLElement,
+    id: string,
+    icon: IconName,
+    title: string,
+    command: string,
+    glyph?: SVGSVGElement,
+  ): void => {
     const button = h(
       'button',
       { class: 'icon-btn', type: 'button', title, onClick: () => void commands.execute(command) },
-      svgIcon(icon, 16),
+      glyph ?? svgIcon(icon, 16),
     );
     viewButtons.set(id, button);
     host.appendChild(button);
@@ -121,33 +294,32 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     viewButtons.get('ai')?.classList.toggle('is-active', layout.rightVisible);
   };
 
-  const workspaceWidget = h(
-    'button',
-    { class: 'workspace-widget', type: 'button', title: 'Открыть папку проекта', onClick: () => void commands.execute('workspace.openFolder') },
-    svgIcon('folder', 15),
-    h('span', { class: 'workspace-name' }, 'нет проекта'),
-  );
-
   // Системной полосы меню у безрамочного окна нет — открываем её кнопкой.
-  layout.topBarLeft.appendChild(
-    h(
-      'button',
-      { class: 'icon-btn', type: 'button', title: 'Меню приложения', onClick: () => void commands.execute('app.showMenu') },
-      svgIcon('menu', 16),
-    ),
+  // Меню рисует renderer, поэтому оно выглядит как остальные выпадашки; системное
+  // меню остаётся внутри main ради горячих клавиш (см. `shared/app-menu.ts`).
+  const menuButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Меню приложения', onClick: () => void commands.execute('app.showMenu') },
+    svgIcon('menu', 16),
   );
-  layout.topBarLeft.appendChild(workspaceWidget);
-  // Переключатель боковой панели стоит рядом с виджетом проекта: он про то же —
-  // что открыто слева. Раньше для него была отдельная полоса иконок у края окна.
+  layout.topBarLeft.appendChild(menuButton);
+  // Отдельного виджета проекта в шапке нет: имя проекта показывает заголовок
+  // панели проекта, а открыть другую папку можно из меню (Ctrl+O).
+  // Переключатель боковой панели стоит рядом с меню: он про то же — что открыто слева.
+  // Раньше для него была отдельная полоса иконок у края окна.
   addTopButton(layout.topBarLeft, 'project', 'panel', 'Боковая панель (Ctrl+B)', 'view.toggleSidebar');
 
-  // Действия шапки: сначала работа с кодом, потом инструменты, потом служебные.
-  addTopButton(layout.topBarRight, 'save', 'save', 'Сохранить всё (Ctrl+Shift+S)', 'file.saveAll');
-  addTopButton(layout.topBarRight, 'search', 'search', 'Найти в проекте (Ctrl+Shift+F)', 'search.project');
-  addTopButton(layout.topBarRight, 'terminal', 'terminal', 'Терминал (Alt+F12)', 'view.showTerminal');
-  addTopButton(layout.topBarRight, 'ai', 'sparkle', 'AI Assistant (Ctrl+Shift+A)', 'view.toggleRight');
+  // Действия шапки. Слева — то, что показывает содержимое: файлы, поиск,
+  // терминал. Справа — служебное: ассистент, палитра, настройки, тема.
+  addTopButton(layout.topBarLeft, 'save', 'save', 'Сохранить всё (Ctrl+Shift+S)', 'file.saveAll');
+  addTopButton(layout.topBarLeft, 'search', 'search', 'Найти в проекте (Ctrl+Shift+F)', 'search.project');
+  addTopButton(layout.topBarLeft, 'terminal', 'terminal', 'Терминал (Alt+F12)', 'view.showTerminal');
+
+  // Ассистент носит знак приложения, а не звезду-искру: тот же знак, что
+  // в пустом состоянии редактора, — кнопка и экран говорят одно и то же.
+  addTopButton(layout.topBarRight, 'ai', 'sparkle', 'AI Assistant (Ctrl+Shift+A)', 'view.toggleRight', logoMark(13));
   addTopButton(layout.topBarRight, 'palette', 'command', 'Палитра команд (Ctrl+Shift+P)', 'palette.open');
-  addTopButton(layout.topBarRight, 'settings', 'settings', 'settings.json', 'settings.open');
+  addTopButton(layout.topBarRight, 'settings', 'settings', 'Настройки', 'settings.open');
 
   const themeButton = h('button', {
     class: 'icon-btn',
@@ -178,6 +350,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     openEditors.open(document);
     editors.open(document);
     explorer.reveal(path);
+    // Открыли файл — на экране он, вкладка чата ждёт в полосе.
+    hideChatTab();
   };
 
   const saveDocument = async (document: TextDocument): Promise<void> => {
@@ -226,6 +400,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     openEditors.activate(path);
     const document = documents.get(path);
     if (document) editors.open(document);
+    // Файл мог быть активным и до этого: клик по его вкладке всё равно должен
+    // показать файл, а не оставить на экране чат.
+    hideChatTab();
   });
 
   define({ id: 'file.close', title: 'Закрыть вкладку', category: 'Файл', keybinding: 'Ctrl+W' }, (path) => {
@@ -294,16 +471,59 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'file.delete', title: 'Удалить в корзину', category: 'Файл' }, async (path) => {
     if (typeof path !== 'string') return;
+
+    // Удаление необратимо, поэтому спрашиваем — но только если так настроено:
+    // в проводнике это рутинное действие, и лишний вопрос раздражает.
+    if (settings.explorer.confirmDelete) {
+      const { confirmed } = await rpc.request('dialog.confirm', {
+        title: 'Удалить в корзину',
+        message: `Переместить ${basename(path)} в корзину?`,
+        detail: `${workspace.relative(path)} — файл можно вернуть из корзины системы.`,
+        confirmLabel: 'Удалить',
+      });
+      if (!confirmed) return;
+    }
+
     if (openEditors.has(path)) openEditors.close(path);
     await rpc.request('workspace.trash', { path });
     explorer.scheduleRefresh();
     showToast(`В корзине: ${basename(path)}`);
   });
 
-  define({ id: 'file.revealAt', title: 'Перейти к позиции', category: 'Навигация' }, async (path, line, column) => {
-    if (typeof path !== 'string') return;
+  define({ id: 'file.revealAt', title: 'Перейти к позиции', category: 'Навигация' }, async (path, line, column) => {    if (typeof path !== 'string') return;
     await openPath(path);
     editors.reveal(path, typeof line === 'number' ? line : 1, typeof column === 'number' ? column : 1);
+  });
+
+  /* ── запуск ────────────────────────────────────────────────────────────── */
+
+  define({ id: 'run.file', title: 'Запустить файл', category: 'Запуск', keybinding: 'Ctrl+F5' }, async () => {
+    const target = targetsFor(openEditors.active)[0];
+    if (!target) {
+      showToast('Запускать нечего: нужен скрипт или задача в package.json', 'error');
+      return;
+    }
+    await runTarget(target);
+  });
+
+  define({ id: 'run.choose', title: 'Запустить…', category: 'Запуск', keybinding: 'Shift+F10' }, () => {
+    const targets = targetsFor(openEditors.active);
+    if (targets.length === 0) {
+      showToast('Запускать нечего: нужен скрипт или задача в package.json', 'error');
+      return;
+    }
+    if (targets.length === 1) {
+      void runTarget(targets[0]!);
+      return;
+    }
+    const anchor = runControl.element;
+    const rect = anchor.getBoundingClientRect();
+    showPopupMenu(
+      targets.map((target) => ({ label: target.label, hint: target.detail, onSelect: () => void runTarget(target) })),
+      rect.right - 260,
+      rect.bottom + 4,
+      { anchor },
+    );
   });
 
   define({ id: 'view.showExplorer', title: 'Показать проводник', category: 'Вид', keybinding: 'Alt+1' }, () => {
@@ -420,17 +640,40 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncViewButtons();
   });
 
-  define({ id: 'app.showMenu', title: 'Меню приложения', category: 'Вид' }, async () => {
-    await rpc.request('app.showMenu');
+  define({ id: 'app.showMenu', title: 'Меню приложения', category: 'Вид', keybinding: 'Alt+F10' }, () => {
+    // Повторное нажатие закрывает: так ведёт себя системное меню, и так ждёт человек.
+    if (isPopupOpen()) {
+      closePopupMenu();
+      return;
+    }
+    menuButton.classList.add('is-menu-open');
+    showApplicationMenu(
+      menuButton,
+      {
+        execute: (command) => void commands.execute(command),
+        runRole: (role) => void rpc.request('menu.role', { role }),
+      },
+      () => menuButton.classList.remove('is-menu-open'),
+    );
   });
 
   define({ id: 'palette.open', title: 'Палитра команд', category: 'Вид', keybinding: 'Ctrl+Shift+P' }, () => {
     palette.open();
   });
 
-  define({ id: 'settings.open', title: 'Открыть settings.json', category: 'Настройки' }, async () => {
+  define({ id: 'settings.open', title: 'Настройки', category: 'Настройки', keybinding: 'Ctrl+,' }, () => settingsModal.open());
+
+  define({ id: 'settings.revealFile', title: 'Открыть settings.json', category: 'Настройки' }, async () => {
     const result = await rpc.request('settings.revealFile');
     showToast(`Настройки: ${result.path}`);
+  });
+
+  // Диагностика нужна, когда приходит «в чате не подсвечивается код»:
+  // отчёт в консоли показывает, какие языки дают токены и с каким цветом.
+  define({ id: 'ai.highlightProbe', title: 'AI: диагностика подсветки кода', category: 'AI' }, async () => {
+    const report = await diagnoseHighlighting();
+    console.info(`[chui] подсветка кода\n${report}`);
+    showToast('Отчёт о подсветке — в консоли (Ctrl+Shift+I)');
   });
 
   define({ id: 'ai.newChat', title: 'Новый диалог', category: 'AI' }, () => {
@@ -440,6 +683,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   define({ id: 'ai.stop', title: 'Остановить генерацию', category: 'AI' }, () => chat.stop());
+
+  define({ id: 'ai.openInEditor', title: 'Перенести чат в окно редактора', category: 'AI', keybinding: 'Ctrl+Alt+E' }, () =>
+    showChatTab(),
+  );
+
+  define({ id: 'ai.backToPanel', title: 'Вернуть чат в боковую панель', category: 'AI' }, () => setChatInEditor(false));
 
   define({ id: 'ai.explainSelection', title: 'Объяснить выделение', category: 'AI' }, async () => {
     layout.setRightVisible(true);
@@ -466,14 +715,21 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   const refreshStatus = (): void => {
     const active = openEditors.active;
+    const projectTools = tools.get();
+    // Отступ и язык — свойства файла: у Python четыре пробела, у Makefile таб,
+    // поэтому в статусбаре видно ФАКТИЧЕСКОЕ значение, а не общее из настроек.
+    const language = active?.languageId ?? null;
+    const indent = settings.editor.languageIndent && language ? languageIndent(language) : null;
     statusBar.update({
       workspace: workspace.current?.name ?? null,
       file: active ? workspace.relative(active.path) : null,
       dirty: active?.dirty ?? false,
-      language: active?.languageId ?? null,
+      language: language ? languageLabel(language) : null,
       version: active?.version ?? 0,
       ai: rpc.isStreaming ? 'генерация…' : 'готов',
-      tabSize: settings.editor.tabSize,
+      tabSize: indent?.tabSize ?? settings.editor.tabSize,
+      useTabs: indent ? !indent.insertSpaces : !settings.editor.insertSpaces,
+      tool: active ? toolLabel(language, projectTools) : null,
       branch: git.branch,
       changes: git.changeCount,
     });
@@ -488,19 +744,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     layout.topBarTitle.title = active?.path ?? 'Chui IDE';
   };
 
-  const syncWorkspaceWidget = (): void => {
-    const info = workspace.current;
-    const name = workspaceWidget.querySelector('.workspace-name');
-    if (name) name.textContent = info?.name ?? 'нет проекта';
-    workspaceWidget.title = info ? `${info.name} · ${info.root}` : 'Открыть папку проекта';
-  };
-
-  const syncEmptyState = (): void => emptyState.update(openEditors.paths.length > 0, workspace.current !== null);
+  const syncEmptyState = (): void => emptyState.update(openEditors.paths.length > 0);
 
   const applySettings = (next: Settings): void => {
     settings = next;
     editors.applyOptions(next.editor);
+    explorer.applySettings(next.explorer);
     chat.applySettings(next);
+    settingsModal.applySettings(next);
+    // Инструменты проекта зависят от настроек запуска: путь к интерпретатору
+    // и менеджеру пакетов могли поменять — перепроверяем проект заново.
+    void tools.refresh(workspace.root, true).then(() => {
+      syncRunControl();
+      refreshStatus();
+    });
     // Схема могла прийти извне — догоняем Monaco и xterm.
     theme.apply();
     refreshStatus();
@@ -533,14 +790,31 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   openEditors.onDidChange(() => {
     refreshStatus();
     syncEmptyState();
+    syncRunControl();
+    // Файл стал активным — показываем его, а вкладка чата просто ждёт в полосе.
+    if (openEditors.active) hideChatTab();
   });
   // Счётчик правок и ветка в статусбаре живут по тому же снимку, что и дерево.
   git.onDidChange(refreshStatus);
-  documents.onDidChange(refreshStatus);
+  documents.onDidChange(() => {
+    refreshStatus();
+    // Правка текста может добавить или убрать точку входа — значок запуска
+    // обязан следовать за файлом, а не жить до перезапуска.
+    syncRunControl();
+  });
+  // Значок ▶ в жёлобе: запускаем тот файл, в котором на него нажали.
+  editors.onRunMarker(({ path }) => {
+    const target = targetsFor(documents.get(path) ?? null).find((item) => item.id === `file:${path}`);
+    if (target) void runTarget(target);
+  });
+  tools.onDidChange(() => {
+    syncRunControl();
+    refreshStatus();
+  });
   workspace.onDidChange(() => {
-    syncWorkspaceWidget();
     refreshStatus();
     syncEmptyState();
+    void tools.refresh(workspace.root).then(() => syncRunControl());
   });
   editors.onCursorChange((state) => statusBar.update({ line: state.line, column: state.column }));
   rpc.onDidChangeStreaming((streaming) => statusBar.update({ ai: streaming ? 'генерация…' : 'готов' }));
@@ -548,6 +822,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   theme.onDidChange((scheme) => {
     editors.setTheme(scheme);
     terminalPanel.setScheme(scheme);
+    setHighlightScheme(scheme);
     syncThemeButton();
   });
   theme.apply();
@@ -556,8 +831,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     { combo: 'Alt+1', command: 'view.showExplorer' },
     { combo: 'Alt+2', command: 'search.project' },
     { combo: 'Ctrl+Shift+P', command: 'palette.open' },
+    { combo: 'Ctrl+,', command: 'settings.open' },
     { combo: 'Ctrl+Shift+G', command: 'view.showChanges' },
     { combo: 'Ctrl+`', command: 'view.showTerminal' },
+    { combo: 'Ctrl+Alt+E', command: 'ai.openInEditor' },
+    // Запуск — как в PyCharm (Shift+F10) и VS Code (Ctrl+F5): обе привычки живут рядом.
+    { combo: 'Ctrl+F5', command: 'run.file' },
+    { combo: 'Shift+F10', command: 'run.choose' },
+    // Меню — как в приложениях KDE: Alt+F10 открывает его с клавиатуры.
+    { combo: 'Alt+F10', command: 'app.showMenu' },
   ]).attach(window);
 
   // Проект мог быть открыт ещё в стартовом окне: main помнит корень, и окно IDE
@@ -566,7 +848,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const current = await rpc.request('workspace.current');
   if (current.root) await workspace.open(current.root);
 
-  syncWorkspaceWidget();
+  await tools.refresh(workspace.root);
+  syncRunControl();
+
   syncViewButtons();
   refreshStatus();
   syncEmptyState();
@@ -592,6 +876,21 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       diffView,
       git,
       theme,
+      tools,
     };
   }
+}
+
+/**
+ * Чем запустится активный файл. В статусбаре важно именно «чем», а не «каким
+ * языком»: системный python3 и интерпретатор окружения проекта выглядят
+ * одинаково, пока не увидишь путь.
+ */
+function toolLabel(language: string | null, project: ProjectTools): string | null {
+  if (!language || !project.root) return null;
+  if (language === 'python') return project.pythonLabel;
+  if (language === 'javascript' || language === 'typescript') {
+    return project.hasPackageJson ? `${project.packageManager}` : 'node';
+  }
+  return null;
 }

@@ -7,9 +7,9 @@
 :root {
   /* Размеры панелей: их двигают сплиттеры во время работы,
      поэтому это не токены палитры, а состояние раскладки. */
-  --sidebar-width: 260px;
-  --right-width: 400px;
-  --dock-height: 260px;
+  --sidebar-size: 260px;
+  --right-size: 400px;
+  --dock-size: 260px;
 }
 
 * {
@@ -88,6 +88,13 @@ textarea {
      схлопывается вместе с ней, иначе сбоку останется двойной отступ. */
   --sidebar-gap: 6px;
   --right-gap: 6px;
+  /* Размер и видимость — разные переменные: сплиттер пишет размер инлайном
+     на этом же элементе, а инлайн перебивает класс. Здесь размер превращается
+     в ширину панели, и уже её отменяет правило скрытия — иначе скрытая панель
+     оставляла бы пустую колонку своего размера после перетаскивания. */
+  --sidebar-width: var(--sidebar-size);
+  --right-width: var(--right-size);
+  --dock-height: var(--dock-size);
   grid-template-columns: 6px var(--sidebar-width) var(--sidebar-gap) minmax(0, 1fr) var(--right-gap) var(--right-width) 6px;
   grid-template-rows: var(--topbar_height) minmax(0, 1fr) 24px;
   height: 100%;
@@ -152,6 +159,20 @@ textarea {
 .topbar .icon-btn {
   width: var(--topbar_control_size);
   height: var(--topbar_control_size);
+}
+
+/* Кнопка со знаком приложения — прямоугольная: знак шире обычного значка, и в квадрате
+   он упирается в края. Ширина по содержимому, отступ по 6 px с боков — ровно шаг
+   между кнопками, поэтому ряд остаётся ровным. */
+.topbar .icon-btn.has-mark {
+  width: auto;
+  padding: 0 6px;
+}
+
+.topbar .icon-btn.has-mark .logo-mark {
+  display: block;
+  height: 13px;
+  width: auto;
 }
 
 /* Всё кликабельное в шапке выключается из области перетаскивания. */
@@ -221,7 +242,7 @@ textarea {
    иначе край накрывает кнопки и клик по их краю тянет окно вместо действия. */
 .resize-edge {
   position: fixed;
-  z-index: 400;
+  z-index: var(--layer_edge);
   app-region: no-drag;
   -webkit-app-region: no-drag;
 }
@@ -290,31 +311,6 @@ textarea {
   cursor: nesw-resize;
 }
 
-.workspace-widget {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  max-width: 420px;
-  height: var(--topbar_control_size);
-  padding: 0 10px;
-  border-radius: var(--radius_sm);
-  color: var(--text_color_tertiary);
-  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease);
-}
-
-.workspace-widget:hover {
-  background: var(--element_background_hover);
-  color: var(--text_color);
-}
-
-.workspace-name {
-  overflow: hidden;
-  font-weight: 600;
-  color: var(--text_color);
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 .sidebar {
   grid-column: 2;
   grid-row: 2;
@@ -324,6 +320,8 @@ textarea {
 
 .splitter {
   background: transparent;
+  /* Ширина полосы — 6 px. Без этого тач-жест уводит прокрутку вместо перетаскивания. */
+  touch-action: none;
   transition: background var(--motion_fast) var(--motion_ease);
 }
 
@@ -346,6 +344,23 @@ textarea {
 .splitter:hover,
 .splitter.is-dragging {
   background: var(--blue_prime_background);
+}
+
+/* Пока тянем — курсор и запрет выделения на весь интерфейс. Иначе редактор под
+   курсором переключает его на текстовый, и непонятно, что вообще происходит. */
+.app.is-resizing-x,
+.app.is-resizing-x * {
+  cursor: col-resize !important;
+}
+
+.app.is-resizing-y,
+.app.is-resizing-y * {
+  cursor: row-resize !important;
+}
+
+.app.is-resizing-x,
+.app.is-resizing-y {
+  user-select: none;
 }
 
 .center {
@@ -375,6 +390,15 @@ textarea {
   flex-direction: column;
 }
 
+/* Тело панели — единственный ребёнок «острова», поэтому тянется на всю высоту.
+   Без растяжения панель чата получает высоту по содержимому и всё липнет к верху. */
+.right-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .statusbar-host {
   grid-column: 1 / -1;
   grid-row: 3;
@@ -394,9 +418,13 @@ textarea {
 }
 
 .panel-title {
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--font_labels_size);
   font-weight: 600;
   color: var(--text_color);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* Умные возможности HIG помечает фиолетовым — тем же акцентом отмечаем ассистента. */
@@ -446,6 +474,9 @@ textarea {
   gap: 2px;
   height: 36px;
   padding: 0 6px;
+  /* Прокрутка доводит вкладку до того же зазора, что и отступ полосы: иначе
+     последняя вкладка встаёт вплотную к краю и он выглядит срезанным. */
+  scroll-padding-inline: 6px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
@@ -453,6 +484,27 @@ textarea {
 
 .tabs::-webkit-scrollbar {
   display: none;
+}
+
+/* Вкладка, обрезанная краем полосы, читается как «дальше есть ещё», если край
+   мягко уходит: без этого она выглядит случайно срезанной. Классы ставит полоса
+   (вкладки есть с той стороны, куда можно прокрутить). */
+.tabs.is-scrolled-start {
+  mask-image: linear-gradient(to right, transparent 0, #000 16px);
+}
+
+.tabs.is-scrolled-end {
+  mask-image: linear-gradient(to left, transparent 0, #000 16px);
+}
+
+.tabs.is-scrolled-start.is-scrolled-end {
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 16px,
+    #000 calc(100% - 16px),
+    transparent 100%
+  );
 }
 
 .tab {
@@ -522,19 +574,25 @@ textarea {
 /* ── хлебные крошки ─────────────────────────────────────────────────────── */
 
 .breadcrumbs-host {
+  display: flex;
+  align-items: center;
   flex: 0 0 auto;
+  height: 26px;
+  padding-right: 6px;
+  /* Линия принадлежит всей полосе: крошки могут быть скрыты (файл в корне),
+     а кнопка запуска в этой же строке — нет, и разрыв линии был бы виден. */
+  border-bottom: 1px solid var(--separator_color);
 }
 
 .breadcrumbs {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
   gap: 1px;
-  height: 26px;
+  height: 100%;
   padding: 0 8px;
   overflow: hidden;
-  /* Линия принадлежит самой полосе, а не её контейнеру: когда крошки скрыты,
-     не должно оставаться висящей разделительной черты. */
-  border-bottom: 1px solid var(--separator_color);
   white-space: nowrap;
 }
 
@@ -555,6 +613,74 @@ textarea {
 
 .crumb.is-file {
   color: var(--text_color_disabled);
+}
+
+/* ── запуск файла ────────────────────────────────────────────────────────
+   Кнопка живёт в полосе крошек, у правого края: это действие над открытым
+   файлом. Видна она только когда запускать есть что. */
+.run-control {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 6px;
+}
+
+.run-button,
+.run-picker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+}
+
+.run-button:hover,
+.run-picker:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.run-button {
+  color: var(--run_accent);
+  font-weight: 500;
+}
+
+.run-button-label {
+  max-width: 190px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.run-picker {
+  padding: 0 4px;
+  margin-left: -2px;
+}
+
+/* Значок ▶ на поле номеров строк: нажимается, как кнопка, но живёт в жёлобе. */
+.run-glyph {
+  position: relative;
+  cursor: pointer;
+}
+
+.run-glyph::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 0;
+  height: 0;
+  border-left: 7px solid var(--run_accent);
+  border-top: 4.5px solid transparent;
+  border-bottom: 4.5px solid transparent;
+}
+
+.status-tool {
+  color: var(--run_accent);
 }
 
 .editor-host {
@@ -581,23 +707,17 @@ textarea {
   color: var(--blue_prime_background);
 }
 
+/* Знак — не тянущийся элемент: во флекс-колонке он иначе сжимается по высоте,
+   когда редактор низкий, и перестаёт быть квадратным. */
+.welcome .logo-mark {
+  flex: 0 0 auto;
+}
+
 .welcome-title {
   margin: 2px 0 0;
   color: var(--text_color);
   font-size: 24px;
   font-weight: 600;
-}
-
-.welcome-subtitle {
-  max-width: 460px;
-  margin: 0;
-  color: var(--text_color_disabled);
-}
-
-.welcome-actions {
-  display: flex;
-  gap: 8px;
-  margin: 12px 0 4px;
 }
 
 .welcome-hints {
@@ -765,7 +885,7 @@ textarea {
 
 .select-popup {
   position: fixed;
-  z-index: 220;
+  z-index: var(--layer_select);
   max-height: 320px;
   padding: 4px;
   overflow: auto;
@@ -858,17 +978,135 @@ textarea {
   padding: 4px 0 12px;
 }
 
+/* Плотность дерева — настройка проводника: строки ниже/выше, значок и отступ
+   остаются те же, поэтому меняется только высота. */
+.explorer[data-rows='compact'] {
+  --tree_row_height: 21px;
+}
+
+.explorer[data-rows='cozy'] {
+  --tree_row_height: 27px;
+}
+
 .tree-row {
   display: flex;
   align-items: center;
   gap: 6px;
   width: calc(100% - 8px);
-  height: calc(24px * var(--density));
+  height: calc(var(--tree_row_height) * var(--density));
   margin: 0 4px;
   padding-right: 8px;
   border-radius: calc(var(--radius_sm) - 3px);
   color: var(--text_color_disabled);
   text-align: left;
+}
+
+/* ── значки файлов и папок ──────────────────────────────────────────────
+   Значок — часть строки, а не украшение поверх неё: он держит свою ширину,
+   не сжимается в узкой панели и не перекрашивается вместе с текстом строки.
+   Цвет приходит из ролей `--file_*`/`--folder_*` в theme.css, вид — из
+   ui/file-icons.ts. */
+.file-icon,
+.folder-icon {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.file-icon {
+  color: var(--file_text);
+}
+
+.folder-icon {
+  color: var(--folder_default);
+}
+
+.file-icon.is-code {
+  color: var(--file_code);
+}
+.file-icon.is-js {
+  color: var(--file_js);
+}
+.file-icon.is-ts {
+  color: var(--file_ts);
+}
+.file-icon.is-python {
+  color: var(--file_python);
+}
+.file-icon.is-json {
+  color: var(--file_json);
+}
+.file-icon.is-markdown {
+  color: var(--file_markdown);
+}
+.file-icon.is-css {
+  color: var(--file_css);
+}
+.file-icon.is-html {
+  color: var(--file_html);
+}
+.file-icon.is-shell {
+  color: var(--file_shell);
+}
+.file-icon.is-yaml {
+  color: var(--file_yaml);
+}
+.file-icon.is-config {
+  color: var(--file_config);
+}
+.file-icon.is-database {
+  color: var(--file_database);
+}
+.file-icon.is-docker {
+  color: var(--file_docker);
+}
+.file-icon.is-image {
+  color: var(--file_image);
+}
+.file-icon.is-archive {
+  color: var(--file_archive);
+}
+.file-icon.is-lock {
+  color: var(--file_lock);
+}
+.file-icon.is-git {
+  color: var(--file_git);
+}
+
+.folder-icon.is-open {
+  color: var(--folder_open);
+}
+.folder-icon.is-git {
+  color: var(--file_git);
+}
+.folder-icon.is-deps {
+  color: var(--file_shell);
+}
+.folder-icon.is-build {
+  color: var(--file_lock);
+}
+.folder-icon.is-test {
+  color: var(--file_shell);
+}
+.folder-icon.is-docs {
+  color: var(--file_markdown);
+}
+.folder-icon.is-assets {
+  color: var(--file_image);
+}
+.folder-icon.is-scripts {
+  color: var(--file_archive);
+}
+.folder-icon.is-ci,
+.folder-icon.is-source {
+  color: var(--file_ts);
+}
+
+/* Внутри значка не нужен обработчик событий и свой слой: SVG — украшение строки. */
+.tree-row .file-icon,
+.tree-row .folder-icon,
+.crumb .file-icon,
+.crumb .folder-icon {
+  pointer-events: none;
 }
 
 .tree-row:hover {
@@ -1167,10 +1405,271 @@ textarea {
 /* ── чат ────────────────────────────────────────────────────────────────── */
 
 .chat {
+  position: relative; /* от него позиционируется окно информации о сессии */
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1 1 auto;
   min-height: 0;
+}
+
+/* ── вкладки бесед: те же классы, что у вкладок редактора ──────────────── */
+
+.chat-tabs {
+  /* Те же отступы, что у полосы вкладок редактора: вкладка беседы и кнопка
+     «новая беседа» стоят на одном зазоре от краёв шапки. */
+  padding: 0 6px;
+}
+
+/* Полоса вкладок редактора рассчитана на свою высоту — здесь она живёт в шапке. */
+.chat-tab-list {
+  height: auto;
+  padding: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Идёт генерация: точка у вкладки — тот же язык, что точка несохранённого файла. */
+.chat-tab.is-busy .tab-label::after {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: var(--radius_circle);
+  background: var(--blue_prime_background);
+  animation: tab-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tab-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* ── окно информации о сессии ──────────────────────────────────────────── */
+
+.session-info {
+  position: absolute;
+  right: 8px;
+  /* Кнопка-кольцо живёт в самом низу композера — окно раскрывается вверх от него. */
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  width: 262px;
+  padding: 10px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_background);
+  box-shadow: var(--box_shadow_drop);
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+.session-info[hidden] {
+  display: none;
+}
+
+.session-info-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--text_color);
+  font-weight: 600;
+  font-size: var(--font_labels_size);
+}
+
+.session-info-sub {
+  margin-bottom: 4px;
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.session-info-gauge {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.session-info-value {
+  font-family: var(--font_mono);
+  font-size: 11px;
+}
+
+.session-info-percent {
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+/* Полоса заполнения: доли частей контекста друг относительно друга. */
+.context-bar {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius_pill);
+  background: var(--sunken_background);
+}
+
+.context-seg-system {
+  background: var(--purple_prime_background);
+}
+
+.context-seg-tools {
+  background: var(--yellow_prime_background);
+}
+
+.context-seg-messages {
+  background: var(--blue_prime_background);
+}
+
+.context-seg-results {
+  background: var(--git_added);
+}
+
+.context-seg-files {
+  background: var(--git_modified);
+}
+
+.session-info-reserved {
+  margin-top: 5px;
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.session-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+}
+
+.session-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+}
+
+.session-info-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.context-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius_circle);
+}
+
+.session-info-share {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
+}
+
+.session-info-note {
+  margin-top: 8px;
+}
+
+.session-info-compact {
+  width: 100%;
+  justify-content: center;
+  margin-top: 10px;
+  gap: 6px;
+}
+
+/* ── кольцо заполнения контекста — кнопка в правом нижнем углу ────────── */
+
+.context-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 1px 4px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+}
+
+.context-ring:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color_disabled);
+}
+
+.ring-track {
+  stroke: var(--separator_color);
+}
+
+/* Дуга кольца: цвет говорит о запасе контекста — синий, жёлтый, красный. */
+.ring-value {
+  stroke: var(--blue_prime_background);
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--motion_base) var(--motion_ease);
+}
+
+.context-ring.is-tight .ring-value {
+  stroke: var(--yellow_prime_background);
+}
+
+.context-ring.is-full .ring-value {
+  stroke: var(--red_prime_background);
+}
+
+.ring-percent {
+  font-family: var(--font_mono);
+  font-size: 10.5px;
+}
+
+/* ── лента беседы и её сводка после сжатия ─────────────────────────────── */
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-thread[hidden] {
+  display: none;
+}
+
+.thread-summary {
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  font-size: var(--font_labels_size);
+}
+
+.thread-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  color: var(--text_color_disabled);
+  cursor: pointer;
+}
+
+.thread-summary-text {
+  max-height: 220px;
+  padding: 0 8px 8px;
+  overflow: auto;
+  color: var(--text_color_tertiary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .chat-config {
@@ -1187,10 +1686,7 @@ textarea {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 12px;
+  padding: 10px;
 }
 
 .chat-intro {
@@ -1204,12 +1700,12 @@ textarea {
 .msg {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   max-width: 100%;
 }
 
 .msg-body {
-  padding: 8px 10px;
+  padding: 7px 9px;
   border-radius: var(--radius_sm);
   font-size: var(--font_labels_size);
   overflow-wrap: anywhere;
@@ -1237,14 +1733,55 @@ textarea {
 
 .code-block {
   margin: 0 0 8px;
-  padding: 8px 10px;
-  overflow: auto;
+  overflow: hidden;
   border: 1px solid var(--separator_color);
   border-radius: var(--radius_sm);
   background: var(--sunken_background);
+}
+
+.code-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.code-lang {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-size: 10.5px;
+}
+
+.code-action {
+  color: var(--text_color_disabled);
+  font-size: 11px;
+}
+
+.code-action:hover {
+  color: var(--link_color);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
   font-family: var(--font_mono);
   font-size: 11.5px;
   line-height: 1.6;
+}
+
+/* Подсвеченный код — тот же предок, но `code` у браузера моноширинный по умолчанию
+   и со своим кеглем: цвета приходят от Monaco, а шрифт должен остаться нашим. */
+.code-block pre code {
+  display: block;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
 }
 
 .msg-error {
@@ -1257,15 +1794,490 @@ textarea {
   font-style: italic;
 }
 
-.chat-footer {
+/* Пустой сегмент (например, между двумя вызовами инструментов) не должен
+   рисовать пустую рамку. */
+.msg-body:empty {
+  display: none;
+}
+
+/* ── текст ответа: компактный markdown ──────────────────────────────────── */
+
+.md-p,
+.text-block {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+
+.md-p:last-child,
+.text-block:last-child {
+  margin-bottom: 0;
+}
+
+.md-heading {
+  margin: 10px 0 5px;
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.md-heading:first-child {
+  margin-top: 0;
+}
+
+.md-h1 {
+  font-size: 14px;
+}
+
+.md-h2 {
+  font-size: 13px;
+}
+
+.md-h3,
+.md-h4 {
+  font-size: 12px;
+}
+
+.md-list {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.md-list:last-child {
+  margin-bottom: 0;
+}
+
+.md-list li {
+  margin-bottom: 2px;
+}
+
+.md-quote {
+  margin: 0 0 6px;
+  padding: 2px 0 2px 9px;
+  border-left: 2px solid var(--separator_color);
+  color: var(--text_color_disabled);
+}
+
+.md-code {
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--element_background);
+  font-family: var(--font_mono);
+  font-size: 11px;
+}
+
+.md-link {
+  color: var(--link_color);
+  text-decoration: underline dotted;
+}
+
+/* ── размышления модели ─────────────────────────────────────────────────── */
+
+.reasoning {
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.reasoning-summary {
+  cursor: pointer;
+  color: var(--text_color_disabled);
+}
+
+.reasoning-text {
+  max-height: 180px;
+  margin-top: 4px;
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── вызовы инструментов ────────────────────────────────────────────────── */
+
+/* Цепочка вызовов — одна строка в ленте. Строки живут внутри, под раскрытием. */
+.tool-group {
+  overflow: hidden;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+  font-size: var(--font_labels_size);
+}
+
+.tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  color: var(--text_color_tertiary);
+  text-align: left;
+}
+
+.tool-group-head:hover {
+  background: var(--element_background_hover);
+}
+
+.tool-group-title {
   flex: 0 0 auto;
-  padding: 10px;
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.tool-group-tools {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
+}
+
+.tool-group-state {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+}
+
+.tool-group-body {
   border-top: 1px solid var(--separator_color);
+}
+
+/* Строка внутри группы — без своей рамки: разделители только между строками. */
+.tool-group-body .tool-card {
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+
+.tool-group-body .tool-card + .tool-card {
+  border-top: 1px solid var(--separator_color);
+}
+
+.tool-card {
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+  font-size: var(--font_labels_size);
+}
+
+/* Строка целиком — кнопка: подробности открываются кликом по любому её месту. */
+.tool-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  color: var(--text_color_tertiary);
+  text-align: left;
+}
+
+.tool-head:hover {
+  background: var(--element_background_hover);
+}
+
+.tool-name {
+  flex: 0 0 auto;
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.tool-args {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
+}
+
+/* Состояние — подпись, а не плашка: плашка только у ошибки, чтобы её было видно. */
+.tool-state {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+}
+
+.tool-state.is-fail {
+  padding: 1px 6px;
+  border-radius: var(--radius_pill);
+  background: color-mix(in srgb, var(--text_color_error) 16%, transparent);
+  color: var(--text_color_error);
+}
+
+.tool-chevron {
+  flex: 0 0 auto;
+  color: var(--text_color_disabled);
+  transition: transform var(--motion_fast) var(--motion_ease);
+}
+
+.tool-card.is-open > .tool-head .tool-chevron,
+.tool-group.is-open > .tool-group-head .tool-chevron {
+  transform: rotate(180deg);
+}
+
+.tool-failed .tool-name {
+  color: var(--text_color_error);
+}
+
+/* Подробности инструмента — только по запросу: в ленте нужна одна строка. */
+.tool-panel {
+  padding: 6px 8px;
+  border-top: 1px solid var(--separator_color);
+  color: var(--text_color_tertiary);
+}
+
+.tool-summary {
+  color: var(--text_color_disabled);
+}
+
+.tool-raw {
+  max-height: 240px;
+  margin: 4px 0 0;
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Подсвеченный код внутри вывода: шрифт и цвет наследуются от `pre`. */
+.tool-raw code {
+  display: block;
+  font: inherit;
+  color: inherit;
+}
+
+/* ── решение принято: от карточки остаётся одна строка ──────────────────── */
+
+.decision-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+}
+
+.decision-status {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+}
+
+/* Карточка уже не требует действия — гасим акцентную рамку. */
+.decision-done {
+  border-color: var(--separator_color);
+  background: none;
+}
+
+/* ── ревью правок агента ────────────────────────────────────────────────── */
+
+.review {
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+  font-size: var(--font_labels_size);
+}
+
+.review-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.review-file {
+  padding-bottom: 6px;
+}
+
+.review-path {
+  padding: 6px 8px 0;
+  overflow-wrap: anywhere;
+  color: var(--text_color_disabled);
+  font-family: var(--font_mono);
+  font-size: 11px;
+}
+
+.review-hunk {
+  padding: 4px 8px;
+  overflow-wrap: anywhere;
+  font-family: var(--font_mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.review-range {
+  color: var(--text_color_tertiary);
+}
+
+.review-del {
+  color: var(--text_color_error);
+}
+
+.review-add {
+  color: var(--link_color);
+}
+
+.review-error {
+  padding: 4px 8px;
+  color: var(--text_color_tertiary);
+}
+
+.review-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--separator_color);
+}
+
+.review-status {
+  color: var(--text_color_tertiary);
+}
+
+/* ── подтверждение команды агента ───────────────────────────────────────── */
+
+.approval {
+  border: 1px solid var(--yellow_prime_background);
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+  font-size: var(--font_labels_size);
+}
+
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.approval .field-hint {
+  padding: 0 8px 8px;
+}
+
+.approval-command {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--separator_color);
+}
+
+.approval-status {
+  color: var(--text_color_tertiary);
+}
+
+.chat-footer {
+  position: relative; /* меню композера позиционируется от него */
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Поле ввода тянется к краям панели: по бокам остаётся только отступ самой рамки
+     поля, а не поля композера. Верхний отступ отделяет стопку от ленты. */
+  padding: 10px 0 8px;
+  border-top: 1px solid var(--separator_color);
+}
+
+/* Всё, кроме поля ввода, держит свои боковые отступы: к краям панели тянется
+   только поле, а кнопки тулбара не липнут к рамке. */
+.chat-footer > .composer-changes,
+.chat-footer > .composer-chips,
+.chat-footer .composer-toolbar,
+.chat-footer .composer-status {
+  padding: 0 10px;
+}
+
+.chat-footer .chat-input {
+  /* Вверх поле растёт само: в стопке ему отдана свободная высота, а не фиксированные
+     строки — под панелью остаётся минимум места для ленты. */
+  flex: 1 1 auto;
+  min-height: 84px;
+  max-height: 40vh;
+}
+
+/* Поле ввода, тулбар и статус — одна стопка: между блоками зазор больше,
+   чем внутри неё, поэтому границей читается именно она. */
+.composer-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* ── меню композера: команды «/» и контекст «#» ─────────────────────────── */
+
+.composer-menu {
+  position: absolute;
+  right: 10px;
+  bottom: calc(100% + 4px);
+  left: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_background);
+  box-shadow: var(--box_shadow_drop);
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+.composer-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+  text-align: left;
+}
+
+.composer-menu-item:hover,
+.composer-menu-item.is-cursor {
+  background: var(--element_background);
+}
+
+.composer-menu-title {
+  font-size: var(--font_labels_size);
+}
+
+.composer-menu-hint {
+  color: var(--text_color_tertiary);
+  font-size: 11px;
 }
 
 .chat-input {
   width: 100%;
-  padding: 6px 8px;
+  padding: 8px 10px;
   resize: vertical;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_sm);
@@ -1273,18 +2285,283 @@ textarea {
   color: var(--text_color);
   font-size: var(--font_labels_size);
 }
+/* ── композер: панель изменений, чипы, тулбар, статус ────────────────────── */
 
-.chat-actions {
+.composer-changes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Шапка панели — кнопка: список файлов скрывается целиком, а не по одному. */
+.changes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 6px 2px 2px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+}
+
+.changes-toggle:hover {
+  background: var(--element_background_hover);
+}
+
+.changes-toggle svg {
+  flex: 0 0 auto;
+  color: var(--text_color_disabled);
+  transition: transform var(--motion_fast) var(--motion_ease);
+}
+
+.composer-changes.is-open .changes-toggle svg {
+  transform: rotate(180deg);
+}
+
+.changes-summary {
+  color: var(--text_color);
+}
+
+/* Счётчик правок: своя типографика, чтобы числа не сливались с подписью. */
+.changes-stat,
+.chip-stat {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--font_mono);
+  font-size: 11px;
+}
+
+/* Добавленное — зелёное, удалённое — красное: те же цвета, что у статусов файлов. */
+.stat-add {
+  color: var(--git_added);
+}
+
+.stat-del {
+  color: var(--git_deleted);
+}
+
+.changes-actions {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
+  margin-left: auto;
 }
 
-.chat-hint {
-  margin-right: auto;
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Список файлов занимает свою строку под шапкой панели. */
+.changes-files {
+  display: flex;
+  flex: 1 0 100%;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px dashed var(--border_color);
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color_disabled);
+  font-family: var(--font_mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--button_border_color_hover);
+  color: var(--text_color);
+}
+
+.chip-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* В чипе числа стоят плотнее: места мало, а разделитель и так виден. */
+.chip-stat {
+  gap: 4px;
+}
+
+/* Приложенный контекст — не кнопка: он не открывает файл, а только снимается. */
+.chip-static {
+  cursor: default;
+}
+
+.chip-static:hover {
+  border-color: var(--border_color);
+  color: var(--text_color_disabled);
+}
+
+.chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
   color: var(--text_color_tertiary);
+}
+
+.chip-remove:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Приложенное изображение: в чипе стоит его миниатюра, а не значок файла —
+   так видно, что именно приложено, не открывая файл. */
+.chip-image {
+  padding: 2px 6px 2px 2px;
+}
+
+.chip-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border: 1px solid var(--border_color);
+  border-radius: 3px;
+  background: var(--sunken_background);
+}
+
+.chip-hint {
+  color: var(--text_color_tertiary);
+  font-size: 10px;
+}
+
+/* Перетаскивание изображения на панель чата: подсвечиваем место приёма, иначе
+   ничего не говорит о том, что панель готова принять файл. */
+.chat.is-dropping {
+  outline: 1px dashed var(--blue_prime_background_tint_strong);
+  outline-offset: -3px;
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.composer-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composer-group:last-child {
+  margin-left: auto;
+}
+
+.composer-select,
+.composer-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color_disabled);
   font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+/* Селект — это `.select` (кнопка), но в тулбаре он должен выглядеть как текст. */
+.composer-select {
+  width: auto;
+  min-height: 24px;
+  padding: 0 4px 0 8px;
+  border-color: transparent;
+  background: none;
+  color: var(--text_color_disabled);
+}
+
+.composer-select svg {
+  margin-left: 0;
+}
+
+.composer-select.is-disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer-select:hover,
+.composer-model:hover {
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+.composer-select-active {
+  color: var(--blue_prime_background);
+}
+
+/* Обёртка контролов тулбара: подсказка должна работать и у выключенного контрола,
+   а сам disabled-элемент событий мыши не получает. */
+.composer-field {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Автопилот — режим с последствиями: он и в тулбаре, и в статусе помечен отдельно. */
+.composer-select-auto {
+  color: var(--yellow_prime_background);
+}
+
+.composer-model {
+  max-width: 190px;
+  min-width: 0;
+}
+
+.composer-model span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.composer-action-send {
+  color: var(--blue_prime_background);
+}
+
+.composer-action-stop {
+  color: var(--text_color);
+}
+
+.composer-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 0;
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.composer-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.composer-status-warn {
+  color: var(--yellow_prime_background);
+}
+
+.composer-status-auto {
+  color: var(--red_prime_background);
 }
 
 /* ── статусбар ──────────────────────────────────────────────────────────── */
@@ -1333,9 +2610,250 @@ textarea {
 
 /* ── всплывающие слои: полупрозрачный материал с блюром и тенью ─────────── */
 
+.popover {
+  position: fixed;
+  z-index: var(--layer_popup);
+  padding: 12px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_background);
+  box-shadow: var(--box_shadow_drop);
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+.popover-title {
+  margin-bottom: 10px;
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+}
+
+/* В попапе блок настроек — уже не самостоятельная секция панели. */
+.popover .chat-config {
+  padding: 0;
+  border-bottom: none;
+  background: none;
+}
+
+/* ── модальное окно настроек ────────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer_modal);
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: rgba(0, 0, 0, 0.42);
+}
+
+/* Явно: у `.modal-backdrop` свой `display`, иначе он перебивает `[hidden]` из UA-стилей. */
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  height: min(560px, 100%);
+  overflow: hidden;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_background);
+  box-shadow: var(--box_shadow_drop);
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 40px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.modal-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.modal-body {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.modal-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  overflow: auto;
+  border-right: 1px solid var(--separator_color);
+}
+
+.modal-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_disabled);
+  text-align: left;
+  font-size: var(--font_labels_size);
+}
+
+.modal-nav-item:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.modal-nav-item.is-active {
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+.modal-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.modal-pane .field {
+  max-width: 420px;
+}
+
+.field-between {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.field-label {
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+}
+
+.settings-divider {
+  height: 1px;
+  margin: 2px 0;
+  background: var(--separator_color);
+}
+
+/* Результат «Проверить подключение» — один из двух понятных исходов. */
+.field-hint.is-ok {
+  color: var(--link_color);
+}
+
+.field-hint.is-error {
+  color: var(--text_color_error);
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  border-top: 1px solid var(--separator_color);
+}
+
+/* Переключатель вместо чекбокса: та же плотность, что у остальных контролов. */
+.switch {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+.switch-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.switch-track {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--element_background);
+  transition: background var(--motion_fast) var(--motion_ease);
+}
+
+.switch-track::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text_color);
+  transition: transform var(--motion_fast) var(--motion_ease);
+}
+
+.switch-input:checked + .switch-track {
+  background: var(--blue_prime_background);
+}
+
+.switch-input:checked + .switch-track::after {
+  transform: translateX(14px);
+}
+
+.switch-input:focus-visible + .switch-track {
+  outline: 2px solid var(--focus_ring_color);
+  outline-offset: 2px;
+}
+
+.recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+}
+
+.recent-item:hover {
+  background: var(--element_background);
+}
+
+.recent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color);
+}
+
 .context-menu {
   position: fixed;
-  z-index: 200;
+  z-index: var(--layer_popup);
   min-width: 210px;
   padding: 4px;
   border: 1px solid var(--border_color);
@@ -1357,7 +2875,9 @@ textarea {
   font-size: var(--font_labels_size);
 }
 
-.context-item:hover {
+.context-item:hover,
+.context-item.is-highlighted,
+.context-item.is-open {
   background: var(--element_background_hover);
 }
 
@@ -1372,9 +2892,27 @@ textarea {
   font-size: 11px;
 }
 
-.context-item:hover .context-hint {
+.context-item:hover .context-hint,
+.context-item.is-highlighted .context-hint {
   color: inherit;
   opacity: 0.7;
+}
+
+/* Пункт с подменю: строка занимает всю ширину, а стрелка уходит вправо. */
+.context-item.has-submenu {
+  justify-content: space-between;
+}
+
+.context-arrow {
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+}
+
+.context-item.is-open .context-arrow,
+.context-item.is-highlighted .context-arrow {
+  color: inherit;
 }
 
 .context-separator {
@@ -1388,7 +2926,7 @@ textarea {
 .overlay {
   position: fixed;
   inset: 0;
-  z-index: 150;
+  z-index: var(--layer_overlay);
   display: flex;
   justify-content: center;
   padding-top: 90px;
@@ -1475,7 +3013,7 @@ textarea {
   position: fixed;
   right: 16px;
   bottom: 36px;
-  z-index: 300;
+  z-index: var(--layer_toast);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -1913,6 +3451,34 @@ textarea {
 .sc-row-action:hover {
   background: var(--element_background_hover);
   color: var(--text_color);
+}
+
+/* ── чат в области редактора ────────────────────────────────────────────── */
+
+/* Чат — обычная вкладка рядом с файлами: пока она активна, файловое полотно
+   и хлебные крошки прячутся, а чат занимает освободившееся место. */
+.chat-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  background: var(--editor_background);
+}
+
+.chat-editor[hidden] {
+  display: none;
+}
+
+.editor-island.is-chat .breadcrumbs-host,
+.editor-island.is-chat .editor-host > :not(.chat-editor) {
+  display: none;
+}
+
+/* На широком экране беседа растягивалась бы в нечитаемые строки. */
+.chat-editor .chat {
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
 }
 
 /* ── сравнение версий файла ─────────────────────────────────────────────── */

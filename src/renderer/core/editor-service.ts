@@ -1,23 +1,28 @@
 import * as monaco from 'monaco-editor';
+import type { DiagnosticItem, EditorSettings } from '../../shared/api';
 import type { TextEdit } from '../../shared/edits';
 import './monaco-env';
 import type { TextDocument } from './document';
 import type { DocumentStore } from './document-store';
 import { Emitter } from './events';
+import { applyTypeScriptDefaults, registerLanguageModes } from './language-modes';
+import { languageIndent } from './languages';
 import { MONACO_THEMES, MONACO_THEME_IDS, type Scheme } from './theme';
 
-export interface EditorOptions {
-  fontSize: number;
-  tabSize: number;
-  wordWrap: boolean;
-  minimap: boolean;
-}
+/** Настройки редактора приходят из общего контракта: окно настроек и редактор — одно целое. */
+export type EditorOptions = EditorSettings;
 
 export interface CursorState {
   path: string | null;
   line: number;
   column: number;
   selections: number;
+}
+
+/** Нажали на значок запуска в жёлобе — этот файл и строку и просят выполнить. */
+export interface RunMarkerHit {
+  path: string;
+  line: number;
 }
 
 /** Управление одним экраном сравнения; модели Monaco живут внутри сервиса. */
@@ -39,8 +44,16 @@ export class EditorService {
   private readonly cursorEmitter = new Emitter<CursorState>();
   readonly onCursorChange = this.cursorEmitter.event;
 
+  /** Просьба запустить файл со значка в жёлобе. */
+  private readonly runMarkerEmitter = new Emitter<RunMarkerHit>();
+  readonly onRunMarker = this.runMarkerEmitter.event;
+
   private readonly models = new Map<string, monaco.editor.ITextModel>();
   private readonly viewStates = new Map<string, monaco.editor.ICodeEditorViewState | null>();
+  /** Значки запуска по файлам: нарисованные украшения нужно убирать перед новой отрисовкой. */
+  private readonly runDecorations = new Map<string, string[]>();
+  private readonly runLines = new Map<string, ReadonlySet<number>>();
+  private options: EditorOptions;
   private applying = false;
   private activePath: string | null = null;
 
@@ -49,21 +62,31 @@ export class EditorService {
     monaco.editor.defineTheme(MONACO_THEME_IDS.dark, MONACO_THEMES.dark);
     monaco.editor.defineTheme(MONACO_THEME_IDS.light, MONACO_THEMES.light);
 
+    // Правила языков и подсказки Node регистрируются один раз на приложение.
+    registerLanguageModes();
+    applyTypeScriptDefaults({ showUnused: options.showUnused });
+    this.options = options;
+
     this.editor = monaco.editor.create(container, {
       theme: themeId,
       automaticLayout: true,
-      fontSize: options.fontSize,
-      tabSize: options.tabSize,
-      wordWrap: options.wordWrap ? 'on' : 'off',
-      minimap: { enabled: options.minimap },
-      scrollBeyondLastLine: false,
-      renderWhitespace: 'selection',
-      fontLigatures: true,
-      cursorBlinking: 'smooth',
-      smoothScrolling: true,
+      ...editorOptions(options),
+      // Жёлоб шире обычного на ширину значка: там живёт кнопка запуска файла.
+      glyphMargin: true,
       padding: { top: 12, bottom: 12 },
       fixedOverflowWidgets: true,
       fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace',
+    });
+
+    // Клик по значку ▶ в жёлобе запускает файл: то же действие, что Shift+F10,
+    // но в том месте, где человек видит точку входа.
+    this.editor.onMouseDown((event) => {
+      if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
+      const line = event.target.position?.lineNumber;
+      const path = this.activePath;
+      if (!line || !path) return;
+      if (!this.runLines.get(path)?.has(line)) return;
+      this.runMarkerEmitter.fire({ path, line });
     });
 
     // Monaco считает ширину символа по фактическому шрифту, а файл шрифта
@@ -117,6 +140,8 @@ export class EditorService {
     const state = this.viewStates.get(document.path);
     if (state) this.editor.restoreViewState(state);
     this.activePath = document.path;
+    // Модель появилась позже, чем узнали о точке входа — дорисовываем значок.
+    this.drawRunMarkers(document.path);
     this.editor.focus();
     this.emitCursor();
   }
@@ -160,12 +185,108 @@ export class EditorService {
     return model.getValueInRange(selection);
   }
 
+  /**
+   * Вставка текста в позицию курсора. Идёт через `executeEdits`, поэтому
+   * изменение подхватывает документ — тот же путь, что и обычный ввод.
+   */
+  insertAtCursor(text: string): boolean {
+    const selection = this.editor.getSelection();
+    if (!this.editor.getModel() || !selection) return false;
+    this.editor.executeEdits('assistant', [{ range: selection, text, forceMoveMarkers: true }]);
+    this.editor.focus();
+    return true;
+  }
+
+  /**
+   * Пометки языка — то, что редактор и так подчёркивает. Агенту они нужны
+   * текстом, поэтому отдаём их тем же списком, что и инструмент get_diagnostics.
+   */
+  markers(path?: string): DiagnosticItem[] {
+    const items: DiagnosticItem[] = [];
+
+    for (const [filePath, model] of this.models) {
+      if (path && filePath !== path) continue;
+      for (const marker of monaco.editor.getModelMarkers({ resource: model.uri })) {
+        items.push({
+          path: filePath,
+          line: marker.startLineNumber,
+          column: marker.startColumn,
+          severity:
+            marker.severity >= monaco.MarkerSeverity.Error
+              ? 'error'
+              : marker.severity >= monaco.MarkerSeverity.Warning
+                ? 'warning'
+                : 'info',
+          message: marker.message,
+          source: marker.source ?? '',
+        });
+      }
+    }
+
+    return items.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
+  }
+
   applyOptions(options: EditorOptions): void {
-    this.editor.updateOptions({
-      fontSize: options.fontSize,
-      tabSize: options.tabSize,
-      wordWrap: options.wordWrap ? 'on' : 'off',
-      minimap: { enabled: options.minimap },
+    const wasShowUnused = this.options.showUnused;
+    this.options = options;
+    this.editor.updateOptions(editorOptions(options));
+
+    if (wasShowUnused !== options.showUnused) applyTypeScriptDefaults({ showUnused: options.showUnused });
+
+    // Отступы задаются модели, а не редактору: у Python и Makefile они свои,
+    // поэтому при смене настройки переписываем их всем открытым файлам.
+    for (const model of this.models.values()) this.applyIndent(model);
+  }
+
+  /**
+   * Значки запуска на поле номеров строк: `lines` — строки, с которых начинается
+   * выполнение файла (`if __name__ == "__main__"` и подобные). Пустой список
+   * убирает значки — файл больше не считаем запускаемым.
+   */
+  setRunLines(path: string, lines: readonly number[]): void {
+    // Запоминаем желаемое состояние независимо от модели: документ открывается
+    // раньше, чем Monaco создаёт модель, и рисовать в этот момент некуда.
+    if (lines.length === 0) this.runLines.delete(path);
+    else this.runLines.set(path, new Set(lines));
+    this.drawRunMarkers(path);
+  }
+
+  /** Нарисовать значки запуска по запомненным строкам. Без модели — нечего рисовать. */
+  private drawRunMarkers(path: string): void {
+    const model = this.models.get(path);
+    if (!model) return;
+
+    const previous = this.runDecorations.get(path) ?? [];
+    const lines = [...(this.runLines.get(path) ?? [])];
+    if (lines.length === 0) {
+      this.runDecorations.delete(path);
+      if (previous.length > 0) model.deltaDecorations(previous, []);
+      return;
+    }
+
+    const next = model.deltaDecorations(
+      previous,
+      lines.map((line) => ({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          glyphMarginClassName: 'run-glyph',
+          glyphMarginHoverMessage: { value: 'Запустить файл' },
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      })),
+    );
+    this.runDecorations.set(path, next);
+  }
+
+  /**
+   * Отступ документа: у языка свои значения (Python — 4 пробела, Makefile — таб),
+   * но только если пользователь оставил это на усмотрение языка.
+   */
+  private applyIndent(model: monaco.editor.ITextModel): void {
+    const perLanguage = this.options.languageIndent ? languageIndent(model.getLanguageId()) : null;
+    model.updateOptions({
+      tabSize: perLanguage?.tabSize ?? this.options.tabSize,
+      insertSpaces: perLanguage?.insertSpaces ?? this.options.insertSpaces,
     });
   }
 
@@ -222,6 +343,7 @@ export class EditorService {
       const current = this.documents.get(document.path);
       if (current) current.setText(created.getValue(), 'user');
     });
+    this.applyIndent(created);
 
     this.models.set(document.path, created);
     model = created;
@@ -236,6 +358,8 @@ export class EditorService {
       this.editor.setModel(null);
     }
     this.viewStates.delete(path);
+    this.runDecorations.delete(path);
+    this.runLines.delete(path);
     model.dispose();
     this.models.delete(path);
   }
@@ -259,4 +383,33 @@ export class EditorService {
       selections: this.editor.getSelections()?.length ?? 0,
     });
   }
+}
+
+/**
+ * Настройки редактора → параметры Monaco.
+ *
+ * Одна функция на создание и на обновление: два списка параметров неизбежно
+ * расходятся, и половина настроек перестаёт применяться без перезапуска.
+ * Отступы здесь не задаются — они свойство модели, а не редактора.
+ */
+function editorOptions(options: EditorOptions): monaco.editor.IEditorOptions & monaco.editor.IGlobalEditorOptions {
+  return {
+    fontSize: options.fontSize,
+    wordWrap: options.wordWrap ? 'on' : 'off',
+    minimap: { enabled: options.minimap },
+    fontLigatures: options.fontLigatures,
+    renderWhitespace: options.renderWhitespace,
+    cursorBlinking: options.cursorBlinking,
+    smoothScrolling: options.smoothScrolling,
+    scrollBeyondLastLine: options.scrollBeyondLastLine,
+    lineNumbers: options.lineNumbers,
+    renderLineHighlight: options.renderLineHighlight,
+    bracketPairColorization: { enabled: options.bracketPairColorization },
+    stickyScroll: { enabled: options.stickyScroll },
+    quickSuggestions: options.quickSuggestions,
+    // Без отступа-сетки Monaco рисует табуляцию своей шириной, и файлы с табом «плывут».
+    detectIndentation: false,
+    tabSize: options.tabSize,
+    insertSpaces: options.insertSpaces,
+  };
 }

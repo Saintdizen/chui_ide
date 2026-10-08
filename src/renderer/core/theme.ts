@@ -11,9 +11,9 @@ export const MONACO_THEME_IDS: Record<Scheme, string> = {
 /**
  * Подсветка кода — цвета VS Code (Dark+ и Light+).
  *
- * Те же значения объявлены в `styles/theme.css` как `--code_token_*`, но Monaco
- * не умеет читать CSS-переменные, поэтому таблица дублируется здесь.
- * При правке палитры правила меняются в обоих местах.
+ * Здесь лежат ИСХОДНЫЕ значения VS Code: перед применением их прогоняет `vivid()`,
+ * который поднимает насыщенность и яркость. Так и Monaco, и чат в одном проекте
+ * получают один и тот же цвет, а таблица остаётся узнаваемой палитрой VS Code.
  */
 interface TokenRules {
   comment: string;
@@ -28,7 +28,7 @@ interface TokenRules {
   attribute: string;
 }
 
-const DARK_TOKENS: TokenRules = {
+const VSCODE_DARK_TOKENS: TokenRules = {
   comment: '6a9955',
   string: 'ce9178',
   number: 'b5cea8',
@@ -41,7 +41,7 @@ const DARK_TOKENS: TokenRules = {
   attribute: '9cdcfe',
 };
 
-const LIGHT_TOKENS: TokenRules = {
+const VSCODE_LIGHT_TOKENS: TokenRules = {
   comment: '008000',
   string: 'a31515',
   number: '098658',
@@ -53,6 +53,147 @@ const LIGHT_TOKENS: TokenRules = {
   tag: '800000',
   attribute: 'e50000',
 };
+
+/* ── насыщенность и яркость ─────────────────────────────────────────────── */
+
+/**
+ * Одна ступень усиления палитры VS Code — не своя палитра: оттенки остаются
+ * теми же, растут только насыщенность и (в тёмной схеме) светлота.
+ *
+ * Зачем: в чате блок кода лежит на более тёмной подложке, чем полотно
+ * редактора, и цвета Dark+ на ней читаются вяло. Усиление применяется к палитре
+ * целиком, поэтому редактор и чат остаются согласованными. Под правило попадают
+ * те роли, которые мы объявляем ниже; редкие области (операторы, шаблонные
+ * строки и прочее) остаются ровно как в VS Code — их берёт базовая тема Monaco.
+ */
+const VIVID_SATURATION = 1.1;
+const VIVID_SATURATION_STEP = 0.06;
+const VIVID_LIGHTNESS = 0.14;
+
+/** `RRGGBB` → каналы в долях. */
+function channels(hex: string): [number, number, number] {
+  return [
+    Number.parseInt(hex.slice(0, 2), 16) / 255,
+    Number.parseInt(hex.slice(2, 4), 16) / 255,
+    Number.parseInt(hex.slice(4, 6), 16) / 255,
+  ];
+}
+
+/** Цвет → тон в градусах, насыщенность и светлота в долях. */
+function toHsl(hex: string): [number, number, number] {
+  const [r, g, b] = channels(hex);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+
+  if (max === min) return [0, 0, lightness];
+
+  const delta = max - min;
+  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+  const hue =
+    max === r ? ((g - b) / delta + (g < b ? 6 : 0)) : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
+
+  return [hue * 60, saturation, lightness];
+}
+
+/** Обратно в `#RRGGBB`. */
+function toHex(hue: number, saturation: number, lightness: number): string {
+  const c = (1 - Math.abs(2 * lightness - 1)) * saturation;
+  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
+  const m = lightness - c / 2;
+
+  let rgb: [number, number, number] = [0, 0, 0];
+  if (hue < 60) rgb = [c, x, 0];
+  else if (hue < 120) rgb = [x, c, 0];
+  else if (hue < 180) rgb = [0, c, x];
+  else if (hue < 240) rgb = [0, x, c];
+  else if (hue < 300) rgb = [x, 0, c];
+  else rgb = [c, 0, x];
+
+  const part = (value: number): string =>
+    Math.round((value + m) * 255)
+      .toString(16)
+      .padStart(2, '0');
+
+  return `#${part(rgb[0])}${part(rgb[1])}${part(rgb[2])}`;
+}
+
+/**
+ * Цвет VS Code одной ступенью ярче и насыщеннее. На белом «ярче» означает
+ * «глубже», поэтому в светлой схеме светлота не меняется — только насыщенность,
+ * иначе светлые тона вымывались бы в пастель.
+ */
+export function vivid(hex: string, scheme: Scheme): string {
+  const [hue, saturation, lightness] = toHsl(hex);
+  const nextSaturation = Math.min(1, saturation * VIVID_SATURATION + VIVID_SATURATION_STEP);
+  const nextLightness = scheme === 'dark' ? lightness + (1 - lightness) * VIVID_LIGHTNESS : lightness;
+  return toHex(hue, nextSaturation, nextLightness);
+}
+
+function vividTokens(source: TokenRules, scheme: Scheme): TokenRules {
+  const out = {} as TokenRules;
+  for (const key of Object.keys(source) as Array<keyof TokenRules>) {
+    out[key] = vivid(source[key], scheme).slice(1);
+  }
+  return out;
+}
+
+/**
+ * Соответствие типов токенов палитре — ОДИН список на две задачи: из него
+ * собираются правила темы Monaco и по нему красится код в чате. Держать две
+ * таблицы рядом с одинаковыми значениями — верный способ их развести.
+ * Порядок важен: частное правило идёт раньше общего (`keyword.control` до `keyword`).
+ */
+interface TokenRule {
+  prefix: string;
+  key: keyof TokenRules;
+  italic?: boolean;
+}
+
+const TOKEN_RULES: readonly TokenRule[] = [
+  { prefix: 'comment', key: 'comment', italic: true },
+  { prefix: 'string.escape', key: 'string' },
+  { prefix: 'string', key: 'string' },
+  { prefix: 'regexp', key: 'string' },
+  { prefix: 'number', key: 'number' },
+  // VS Code красит управляющие конструкции отдельно от const/let/class.
+  { prefix: 'keyword.flow', key: 'keywordControl' },
+  { prefix: 'keyword.control', key: 'keywordControl' },
+  { prefix: 'keyword', key: 'keyword' },
+  { prefix: 'type.identifier', key: 'type' },
+  { prefix: 'type', key: 'type' },
+  { prefix: 'constant', key: 'constant' },
+  { prefix: 'tag', key: 'tag' },
+  { prefix: 'attribute.name', key: 'attribute' },
+  { prefix: 'annotation', key: 'identifier' },
+  { prefix: 'identifier', key: 'identifier' },
+];
+
+/**
+ * Палитра в том виде, в каком её читают Monaco и чат: цвета VS Code, поднятые
+ * `vivid()`. Одно значение на две задачи — держать две таблицы рядом с
+ * одинаковыми числами верный способ их развести.
+ */
+const VIVID_TOKENS: Record<Scheme, TokenRules> = {
+  dark: vividTokens(VSCODE_DARK_TOKENS, 'dark'),
+  light: vividTokens(VSCODE_LIGHT_TOKENS, 'light'),
+};
+
+function tokensFor(scheme: Scheme): TokenRules {
+  return VIVID_TOKENS[scheme];
+}
+
+/**
+ * Цвет токена для подсветки В ЧАТЕ. Тут мы красим сами, а не просим Monaco
+ * отрисовать разметку: цвета его разметки живут в отдельной таблице стилей,
+ * а если та не применилась — весь код в чате остаётся белым, хотя токены
+ * размечены правильно. `null` — цвет по умолчанию (цвет текста).
+ */
+export function tokenColor(scheme: Scheme, tokenType: string): string | null {
+  const type = tokenType.toLowerCase();
+  const rule = TOKEN_RULES.find((item) => type === item.prefix || type.startsWith(`${item.prefix}.`));
+  return rule ? `#${tokensFor(scheme)[rule.key]}` : null;
+}
 
 /** Полупрозрачная ступень цвета: `#RRGGBB` плюс альфа в hex (`'40'` ≈ 25 %). */
 const fade = (color: string, alpha: string): string => `#${color}${alpha}`;
@@ -142,9 +283,11 @@ const DARK_CHROME: Chrome = {
   warning: 'ffd600',
   highlight: 'ffd6003d',
   highlightStrong: 'ffd60073',
-  added: '7fc08a',
-  modified: 'd9b26a',
-  deleted: 'e08a7a',
+  // Цвета изменений — те же, что `--git_*` в styles/theme.css: цвета VS Code из
+  // его таблицы состояний git (#81b88b, #e2c08d, #c74e39), поднятые `vivid()`.
+  added: '8bc997', // --git_added
+  modified: 'edca96', // --git_modified
+  deleted: 'db5e48', // --git_deleted
   scrollbar: '79797966',
   scrollbarHover: '646464b3',
   scrollbarActive: 'bfbfbf66',
@@ -184,9 +327,10 @@ const LIGHT_CHROME: Chrome = {
   warning: 'ffcc00',
   highlight: 'ffcc0052',
   highlightStrong: 'ffcc0080',
-  added: '1f7a34',
-  modified: '8a6a1f',
-  deleted: 'b03028',
+  // Светлая схема: цвета VS Code Light+, там же поднятые `vivid()`.
+  added: '5b8602', // --git_added
+  modified: '8c5600', // --git_modified
+  deleted: 'b40000', // --git_deleted
   scrollbar: '64646466',
   scrollbarHover: '646464b3',
   scrollbarActive: '00000099',
@@ -194,7 +338,7 @@ const LIGHT_CHROME: Chrome = {
 };
 
 function buildTheme(scheme: Scheme): monaco.editor.IStandaloneThemeData {
-  const tokens = scheme === 'dark' ? DARK_TOKENS : LIGHT_TOKENS;
+  const tokens = tokensFor(scheme);
   const chrome = scheme === 'dark' ? DARK_CHROME : LIGHT_CHROME;
 
   return {
@@ -202,22 +346,12 @@ function buildTheme(scheme: Scheme): monaco.editor.IStandaloneThemeData {
     base: scheme === 'dark' ? 'vs-dark' : 'vs',
     inherit: true,
     rules: [
-      { token: 'comment', foreground: tokens.comment, fontStyle: 'italic' },
-      { token: 'string', foreground: tokens.string },
-      { token: 'string.escape', foreground: tokens.string },
-      { token: 'regexp', foreground: tokens.string },
-      { token: 'number', foreground: tokens.number },
-      { token: 'keyword', foreground: tokens.keyword },
-      // VS Code красит управляющие конструкции отдельно от const/let/class.
-      { token: 'keyword.flow', foreground: tokens.keywordControl },
-      { token: 'keyword.control', foreground: tokens.keywordControl },
-      { token: 'identifier', foreground: tokens.identifier },
-      { token: 'type.identifier', foreground: tokens.type },
-      { token: 'type', foreground: tokens.type },
-      { token: 'constant', foreground: tokens.constant },
-      { token: 'tag', foreground: tokens.tag },
-      { token: 'attribute.name', foreground: tokens.attribute },
-      { token: 'annotation', foreground: tokens.identifier },
+      // Правила собираются из той же таблицы, по которой красится чат.
+      ...TOKEN_RULES.map((rule) => ({
+        token: rule.prefix,
+        foreground: tokens[rule.key],
+        fontStyle: rule.italic ? 'italic' : undefined,
+      })),
       { token: 'delimiter', foreground: chrome.foreground },
       { token: 'operator', foreground: chrome.foreground },
     ],

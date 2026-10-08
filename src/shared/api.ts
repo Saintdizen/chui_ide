@@ -5,12 +5,19 @@
  * Файл попадает и в Node, и в браузер, поэтому импортировать сюда electron/node нельзя.
  */
 
+import type { MenuRole } from './app-menu';
+import type { ApplyResult, FileEdit } from './edits';
+
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
 
 export const RPC_CALL_CHANNEL = 'chui:rpc:call';
 export const RPC_EVENT_CHANNEL = 'chui:rpc:event';
 export const RPC_CANCEL_CHANNEL = 'chui:rpc:cancel';
 export const PUSH_CHANNEL = 'chui:push';
+
+/** Обратный вызов: main просит renderer выполнить действие и ждёт ответа. */
+export const HOST_REQUEST_CHANNEL = 'chui:host:request';
+export const HOST_REPLY_CHANNEL = 'chui:host:reply';
 
 /** Темы широковещательных уведомлений main → renderer. */
 export const PushTopic = {
@@ -53,6 +60,20 @@ export interface PushMessage {
   topic: string;
   payload: unknown;
 }
+
+/**
+ * Запрос main → renderer. Нужен там, где действие живёт только в renderer:
+ * правка документа обязана идти через документную модель, undo и ревью.
+ */
+export interface HostRequest {
+  id: string;
+  method: string;
+  params: unknown;
+}
+
+export type HostReply =
+  | { id: string; ok: true; value: unknown }
+  | { id: string; ok: false; error: RpcError };
 
 export const RpcErrorCode = {
   Cancelled: -32800,
@@ -238,6 +259,13 @@ export interface CloneProgressPayload {
 
 /* ── Настройки ──────────────────────────────────────────────────────────── */
 
+/**
+ * Сколько модель думает перед ответом — «thinking effort» из интерфейса.
+ * `off` означает «параметр не отправлять»: у большинства моделей его нет вовсе,
+ * и подставлять туда что-то своё было бы выдумкой.
+ */
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
+
 /** Провайдер в том виде, в каком его видит renderer: без ключа, только факт наличия. */
 export interface AiProviderView {
   id: string;
@@ -255,18 +283,92 @@ export interface AiSettings {
   temperature: number;
   maxTokens: number;
   systemPrompt: string;
+  /** Сколько модели думать перед ответом (`reasoning_effort`). */
+  reasoningEffort: ReasoningEffort;
 }
+
+/** Как показывать невидимые символы. */
+export type RenderWhitespace = 'none' | 'boundary' | 'selection' | 'trailing' | 'all';
+/** Как мигает курсор. */
+export type CursorBlinking = 'blink' | 'smooth' | 'phase' | 'expand' | 'solid';
+/** Номера строк: обычные, относительные, скрытые. */
+export type LineNumbersMode = 'on' | 'off' | 'relative' | 'interval';
+/** Что подсвечивать в строке курсора. */
+export type LineHighlightMode = 'none' | 'gutter' | 'line' | 'all';
 
 export interface EditorSettings {
   tabSize: number;
   fontSize: number;
   wordWrap: boolean;
   minimap: boolean;
+  /** Лигатуры шрифта: `=>`, `!==` и прочие связки JetBrains Mono. */
+  fontLigatures: boolean;
+  insertSpaces: boolean;
+  /** Язык задаёт свои отступы: Python — 4 пробела, Makefile — символ табуляции. */
+  languageIndent: boolean;
+  renderWhitespace: RenderWhitespace;
+  cursorBlinking: CursorBlinking;
+  smoothScrolling: boolean;
+  /** Разрешить прокрутку за последнюю строку (в PyCharm так по умолчанию). */
+  scrollBeyondLastLine: boolean;
+  lineNumbers: LineNumbersMode;
+  renderLineHighlight: LineHighlightMode;
+  /** Разноцветные парные скобки (в VS Code включено по умолчанию). */
+  bracketPairColorization: boolean;
+  /** Заголовок области видимости, прилипающий к верху (липкий скролл). */
+  stickyScroll: boolean;
+  /** Подсказки по мере ввода. */
+  quickSuggestions: boolean;
+  /** Подсвечивать неиспользуемые импорты и переменные в JS/TS. */
+  showUnused: boolean;
+}
+
+/** Плотность строк дерева проекта. */
+export type TreeRowDensity = 'compact' | 'normal' | 'cozy';
+/** Порядок детей в дереве. */
+export type TreeSort = 'name' | 'type';
+
+/**
+ * Настройки проводника. Дерево — главный способ ходить по проекту, поэтому
+ * всё, что меняет его вид и поведение, живёт здесь, а не в коде по вкусу автора.
+ */
+export interface ExplorerSettings {
+  /** Значки по виду файла — вместо одинаковых листов. */
+  icons: boolean;
+  /** Показывать скрытые файлы и папки (`.git`, `.env`, `.venv`). */
+  showHidden: boolean;
+  /** Папки выше файлов. */
+  foldersFirst: boolean;
+  sort: TreeSort;
+  /** Отступ одного уровня вложенности, px. */
+  indent: number;
+  rowDensity: TreeRowDensity;
+  /** Буквы M/A/D у файлов с правками. */
+  gitDecorations: boolean;
+  /** Точка у свёрнутой папки, внутри которой есть правки. */
+  folderChangeDot: boolean;
+  /** Открывать файл одним кликом (иначе — двойным). */
+  openOnSingleClick: boolean;
+  /** Спрашивать подтверждение перед удалением. */
+  confirmDelete: boolean;
+  /** Шаблоны имён, которые не показываем в дереве (`*.min.js`, `coverage`). */
+  exclude: string[];
+}
+
+export type PackageManagerChoice = 'auto' | 'npm' | 'pnpm' | 'yarn' | 'bun';
+
+/** Как запускать файлы и скрипты проекта. */
+export interface RunSettings {
+  /** Интерпретатор Python. Пусто — ищем виртуальное окружение проекта, затем `python3`. */
+  pythonPath: string;
+  /** Менеджер пакетов Node. `auto` — по файлу блокировки в корне проекта. */
+  packageManager: PackageManagerChoice;
+  /** Сохранять документ перед запуском. */
+  saveBeforeRun: boolean;
 }
 
 /** Схема приложения: светлая, тёмная или системная. */
 export type ThemeChoice = 'dark' | 'light' | 'system';
-
 export interface AppearanceSettings {
   theme: ThemeChoice;
 }
@@ -286,8 +388,19 @@ export interface ThemeChangedPayload {
 export interface Settings {
   ai: AiSettings;
   editor: EditorSettings;
+  explorer: ExplorerSettings;
+  run: RunSettings;
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
+}
+
+/** Провайдер, которого добавляют или меняют из интерфейса. Ключ задаётся отдельно. */
+export interface AiProviderPatch {
+  id: string;
+  label?: string;
+  baseUrl?: string;
+  models?: string[];
+  defaultModel?: string;
 }
 
 export interface AiSettingsPatch {
@@ -296,11 +409,25 @@ export interface AiSettingsPatch {
   temperature?: number;
   maxTokens?: number;
   systemPrompt?: string;
+  reasoningEffort?: ReasoningEffort;
+  /** Добавить провайдера или обновить существующего по `id`. */
+  provider?: AiProviderPatch;
+  /** Убрать провайдера из списка. */
+  removeProviderId?: string;
+}
+
+/** Результат «Проверить подключение»: ошибки объясняем текстом, а не кодом. */
+export interface AiConnectionTestResult {
+  ok: boolean;
+  models: string[];
+  message: string;
 }
 
 export interface SettingsPatch {
   ai?: AiSettingsPatch;
   editor?: Partial<EditorSettings>;
+  explorer?: Partial<ExplorerSettings>;
+  run?: Partial<RunSettings>;
   appearance?: Partial<AppearanceSettings>;
 }
 
@@ -308,10 +435,60 @@ export interface SettingsPatch {
 
 export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
 
+/** Вызов инструмента, который запросила модель. Аргументы — сырая JSON-строка. */
+export interface ChatToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
 export interface ChatMessage {
   role: ChatRole;
   content: string;
   name?: string;
+  /**
+   * Картинки сообщения — data-URL (`data:image/png;base64,…`).
+   * Отдельным полем, а не частями `content`: на проводе они становятся
+   * мультимодальным содержимым, но внутри приложения текст остаётся текстом,
+   * и весь код работы с историей его таким и видит.
+   */
+  images?: readonly string[];
+  /** Для role='assistant': инструменты, которые модель попросила вызвать. */
+  toolCalls?: ChatToolCall[];
+  /** Для role='tool': id вызова, на который отвечает это сообщение. */
+  toolCallId?: string;
+}
+
+/**
+ * Контекст, который renderer собрал сам и прикладывает к вопросу.
+ * Так работают `#selection`, `#file` и `#problems` в панели ассистента.
+ */
+export interface ChatAttachment {
+  kind: 'file' | 'selection' | 'problems' | 'note' | 'image';
+  /** Короткая подпись для чипа в композере. */
+  label: string;
+  /** Заголовок блока в промпте: путь файла или описание. */
+  title: string;
+  text: string;
+  /** Для kind='image': сама картинка — data-URL, уходит в модель как изображение. */
+  dataUrl?: string;
+  /** Размер картинки в байтах: показываем в чипе и проверяем предел. */
+  bytes?: number;
+}
+
+/** Больше четырёх картинок в одном вопросе — это уже не вопрос, а альбом. */
+export const MAX_CHAT_IMAGES = 4;
+/** Предел на картинку: больше не примет ни провайдер, ни смысл вложения. */
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/** Картинка, выбранная в системном диалоге или прочитанная из буфера. */
+export interface PickedImage {
+  /** Имя файла без пути: в чипе видно, что приложено. */
+  name: string;
+  /** Тип (`image/png`) — для подсказки и проверки на стороне main. */
+  mime: string;
+  bytes: number;
+  dataUrl: string;
 }
 
 export interface ChatRequest {
@@ -320,7 +497,18 @@ export interface ChatRequest {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  /** Усилие размышления для этой конкретной отправки (иначе — из настроек). */
+  reasoningEffort?: ReasoningEffort;
   systemPrompt?: string;
+  /** Включить агентный цикл: модель сможет вызывать инструменты из shared/tools.ts. */
+  useTools?: boolean;
+  /**
+   * Автопилот: агент сам применяет правки и запускает команды, не спрашивая.
+   * Опасные команды всё равно требуют подтверждения — решает main, не renderer.
+   */
+  autoApprove?: boolean;
+  /** Дополнительный контекст от renderer: выделение, файл, ошибки. */
+  attachments?: ChatAttachment[];
 }
 
 export interface ChatUsage {
@@ -332,16 +520,109 @@ export interface ChatStreamDone {
   text: string;
   finishReason?: string;
   usage?: ChatUsage;
+  /** Размышления reasoning-моделей: ответу не принадлежат, но их полезно видеть. */
+  reasoning?: string;
+  /** Вызовы инструментов из последнего шага модели (если модель их запросила). */
+  toolCalls?: ChatToolCall[];
+  /**
+   * Вся ветка диалога, которую породил этот вызов: assistant(toolCalls) →
+   * tool(результат) → assistant(ответ). Renderer дописывает её в историю,
+   * поэтому в следующем вопросе модель помнит, что успела прочитать.
+   */
+  agentMessages?: ChatMessage[];
 }
 
 /** Имена событий стрима `ai.chat`. */
 export const ChatStreamEvent = {
   Delta: 'delta',
+  Reasoning: 'reasoning',
+  ToolStart: 'tool_start',
+  ToolResult: 'tool_result',
 } as const;
 
 export interface ChatDeltaPayload {
   text: string;
 }
+
+/** Поток размышлений модели: показываем сворачиваемым блоком над ответом. */
+export interface ChatReasoningPayload {
+  text: string;
+}
+
+/** Модель решила вызвать инструмент — в UI появляется карточка «выполняется». */
+export interface ChatToolStartPayload {
+  id: string;
+  name: string;
+  /** Сырые аргументы (JSON-строка), как их прислала модель. */
+  args: string;
+}
+
+/** Инструмент отработал: короткая сводка для карточки и полный вывод. */
+export interface ChatToolResultPayload {
+  id: string;
+  name: string;
+  ok: boolean;
+  summary: string;
+  detail?: string;
+}
+
+/* ── Хост-вызовы main → renderer ────────────────────────────────────────── */
+
+/** Аргументы `ai.applyEdits`: то, что агент просит применить к документам. */
+export interface ApplyEditsHostParams {
+  edits: FileEdit[];
+  /** Автопилот: применить сразу, без экрана ревью. */
+  autoApprove?: boolean;
+}
+
+export interface ApplyEditsHostResult {
+  /** Пользователь отказался — это решение, а не ошибка. */
+  rejected: boolean;
+  result?: ApplyResult;
+}
+
+/** Аргументы `ai.confirmCommand`: команда, которую просит выполнить агент. */
+export interface ConfirmCommandHostParams {
+  command: string;
+}
+
+export interface ConfirmCommandHostResult {
+  allowed: boolean;
+}
+
+/** Одна пометка языка: ошибка, предупреждение, подсказка. */
+export interface DiagnosticItem {
+  path: string;
+  line: number;
+  column: number;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  source: string;
+}
+
+/** Аргументы `ai.getDiagnostics`: без пути — по всем открытым файлам. */
+export interface DiagnosticsHostParams {
+  path?: string;
+}
+
+export interface DiagnosticsHostResult {
+  items: DiagnosticItem[];
+}
+
+/**
+ * Таблица хостовых методов: main обязан знать, что renderer умеет исполнять.
+ * Обратный вызов нужен только там, где действие физически живёт в renderer.
+ */
+export interface HostMethods {
+  'ai.applyEdits': { params: ApplyEditsHostParams; result: ApplyEditsHostResult };
+  'ai.confirmCommand': { params: ConfirmCommandHostParams; result: ConfirmCommandHostResult };
+  /** Пометки языка живут в Monaco, то есть в renderer. */
+  'ai.getDiagnostics': { params: DiagnosticsHostParams; result: DiagnosticsHostResult };
+}
+
+export type HostMethodName = keyof HostMethods;
+export type HostParamsOf<M extends HostMethodName> = HostMethods[M]['params'];
+export type HostResultOf<M extends HostMethodName> = HostMethods[M]['result'];
 
 /* ── Контракт RPC ───────────────────────────────────────────────────────── */
 
@@ -358,6 +639,11 @@ export interface ChuiMethods {
     params: { title: string; message: string; detail?: string; confirmLabel?: string };
     result: { confirmed: boolean };
   };
+  /**
+   * Выбор картинок системным диалогом. Читает файлы и отдаёт data-URL сам main:
+   * renderer не имеет доступа к файловой системе и не должен его получать.
+   */
+  'dialog.pickImages': { params: void; result: PickedImage[] };
 
   'workspace.open': { params: { path: string }; result: WorkspaceInfo };
   'workspace.readDir': { params: { path: string }; result: DirEntry[] };
@@ -393,7 +679,8 @@ export interface ChuiMethods {
   'window.close': { params: void; result: void };
   'window.getBounds': { params: void; result: WindowBounds };
   'window.setBounds': { params: Partial<WindowBounds>; result: WindowBounds };
-  'app.showMenu': { params: void; result: void };
+  /** Действие меню, которое умеет только main: буфер обмена, масштаб, окно. */
+  'menu.role': { params: { role: MenuRole }; result: void };
 
   /* Стартовое окно: список недавних проектов и переход к IDE. */
   'app.recentProjects': { params: void; result: RecentProject[] };
@@ -409,6 +696,11 @@ export interface ChuiMethods {
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };
   'ai.models': { params: { providerId: string }; result: string[] };
+  /** Проверить адрес и ключ до сохранения провайдера. */
+  'ai.test': {
+    params: { baseUrl: string; apiKey?: string; providerId?: string };
+    result: AiConnectionTestResult;
+  };
   'ai.chat': { params: ChatRequest; result: ChatStreamDone };
 }
 

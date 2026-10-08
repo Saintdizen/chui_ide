@@ -11,6 +11,10 @@ export interface StatusState {
   version: number;
   ai: string;
   tabSize: number;
+  /** Отступ символом табуляции — так у языков вроде Makefile. */
+  useTabs: boolean;
+  /** Чем запускается активный файл (`python3`, `.venv/bin/python`, `npm`). */
+  tool: string | null;
   eol: string;
   encoding: string;
   /** Ветка или null, если репозитория нет. */
@@ -40,6 +44,8 @@ export function createStatusBar(commands: CommandRegistry): StatusBarView {
     version: 0,
     ai: 'готов',
     tabSize: 2,
+    useTabs: false,
+    tool: null,
     eol: 'LF',
     encoding: 'UTF-8',
     branch: null,
@@ -65,6 +71,7 @@ export function createStatusBar(commands: CommandRegistry): StatusBarView {
   const encodingItem = h('span', { class: 'status-item' });
   const indentItem = h('span', { class: 'status-item' });
   const languageItem = h('span', { class: 'status-item' });
+  const toolItem = h('span', { class: 'status-item status-tool' });
   const versionItem = h('span', { class: 'status-item status-muted' });
   const aiItem = h('span', { class: 'status-item status-ai' }, svgIcon('sparkle', 12));
 
@@ -81,6 +88,7 @@ export function createStatusBar(commands: CommandRegistry): StatusBarView {
       eolItem,
       encodingItem,
       indentItem,
+      toolItem,
       languageItem,
     ),
   );
@@ -92,8 +100,11 @@ export function createStatusBar(commands: CommandRegistry): StatusBarView {
     positionItem.textContent = `${state.line}:${state.column}`;
     eolItem.textContent = state.eol;
     encodingItem.textContent = state.encoding;
-    indentItem.textContent = `${state.tabSize} пробела`;
+    indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} пробела`;
     languageItem.textContent = state.language ?? '—';
+    toolItem.textContent = state.tool ?? '';
+    toolItem.hidden = !state.tool;
+    toolItem.title = state.tool ? `Запуск: ${state.tool}` : '';
     versionItem.textContent = state.version ? `v${state.version}` : '';
     aiItem.title = `AI: ${state.ai}`;
     aiItem.classList.toggle('is-busy', state.ai !== 'готов');

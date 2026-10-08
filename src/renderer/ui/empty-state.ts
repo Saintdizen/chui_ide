@@ -1,39 +1,25 @@
-import type { CommandRegistry } from '../core/commands';
-import { h, svgIcon } from './dom';
+import { h } from './dom';
+import { logoMark } from './logo';
 
 export interface EmptyStateView {
   element: HTMLElement;
-  update(hasTabs: boolean, hasWorkspace: boolean): void;
+  /** Заглушка нужна, пока не открыто ни одного файла. */
+  update(hasTabs: boolean): void;
 }
 
-export function createEmptyState(deps: { commands: CommandRegistry }): EmptyStateView {
-  const subtitle = h('p', { class: 'welcome-subtitle' });
-
+/**
+ * Пустое состояние редактора: знак, имя и подсказки по горячим клавишам.
+ * Кнопок и пояснений нет намеренно: всё, что они делали, есть в меню («☰»),
+ * в палитре команд и в дереве проекта, а здесь нужен только знак и что делать.
+ */
+export function createEmptyState(): EmptyStateView {
   const element = h(
     'div',
     { class: 'welcome' },
-    svgIcon('sparkle', 40),
+    // Знак крупнее обычных значков интерфейса: он не часть панели, а лицо
+    // приложения, поэтому рисуется отдельно (ui/logo.ts).
+    logoMark(40),
     h('h1', { class: 'welcome-title' }, 'Chui IDE'),
-    subtitle,
-    h(
-      'div',
-      { class: 'welcome-actions' },
-      h(
-        'button',
-        { class: 'btn btn-primary', type: 'button', onClick: () => void deps.commands.execute('workspace.openFolder') },
-        'Открыть папку',
-      ),
-      h(
-        'button',
-        { class: 'btn', type: 'button', onClick: () => void deps.commands.execute('view.showTerminal') },
-        'Терминал',
-      ),
-      h(
-        'button',
-        { class: 'btn', type: 'button', onClick: () => void deps.commands.execute('palette.open') },
-        'Палитра команд',
-      ),
-    ),
     h(
       'ul',
       { class: 'welcome-hints' },
@@ -45,11 +31,8 @@ export function createEmptyState(deps: { commands: CommandRegistry }): EmptyStat
 
   return {
     element,
-    update(hasTabs, hasWorkspace) {
+    update(hasTabs) {
       element.hidden = hasTabs;
-      subtitle.textContent = hasWorkspace
-        ? 'Файлы не открыты. Выберите файл в проводнике слева.'
-        : 'Начните с выбора папки проекта — дальше всё как в привычной IDE.';
     },
   };
 }

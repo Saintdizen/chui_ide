@@ -1,4 +1,4 @@
-import { RpcErrorCode, type ChatMessage, type ChatStreamDone } from '../../shared/api';
+import { RpcErrorCode, type ChatMessage, type ChatStreamDone, type ChatToolCall } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
 import type { AiProvider, StreamChatHandlers, StreamChatParams } from './provider';
 
@@ -9,9 +9,22 @@ export interface OpenAiCompatibleOptions {
   apiKey?: string;
 }
 
+/** Фрагмент вызова инструмента в дельте стрима. Приходит по кускам, ключ — `index`. */
+interface ToolCallDelta {
+  index?: number;
+  id?: string;
+  function?: { name?: string; arguments?: string };
+}
+
 interface ChatCompletionChunk {
   choices?: Array<{
-    delta?: { content?: string | null };
+    delta?: {
+      content?: string | null;
+      /** Размышления: у DeepSeek — `reasoning_content`, у части других — `reasoning`. */
+      reasoning_content?: string | null;
+      reasoning?: string | null;
+      tool_calls?: ToolCallDelta[];
+    };
     finish_reason?: string | null;
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
@@ -63,6 +76,8 @@ export class OpenAiCompatibleProvider implements AiProvider {
     };
     if (params.temperature !== undefined) body.temperature = params.temperature;
     if (params.maxTokens !== undefined) body.max_tokens = params.maxTokens;
+    // Имя поля — из OpenAI-протокола; так же его понимают OpenRouter, Groq и шлюзы.
+    if (params.reasoningEffort) body.reasoning_effort = params.reasoningEffort;
     if (params.tools?.length) body.tools = params.tools;
 
     const response = await fetch(this.url('/chat/completions'), {
@@ -87,8 +102,10 @@ export class OpenAiCompatibleProvider implements AiProvider {
     const decoder = new TextDecoder();
     let buffer = '';
     let text = '';
+    let thoughts = '';
     let finishReason: string | undefined;
     let usage: ChatStreamDone['usage'];
+    const toolSlots = new Map<number, { id: string; name: string; args: string }>();
 
     while (true) {
       const { done, value } = await reader.read();
@@ -113,11 +130,31 @@ export class OpenAiCompatibleProvider implements AiProvider {
         }
 
         const choice = chunk.choices?.[0];
+
+        // Размышления отдельным потоком: в ответ они не входят и в историю не пишутся.
+        const reasoning = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
+        if (typeof reasoning === 'string' && reasoning.length > 0) {
+          thoughts += reasoning;
+          handlers.onReasoning?.(reasoning);
+        }
+
         const delta = choice?.delta?.content;
         if (typeof delta === 'string' && delta.length > 0) {
           text += delta;
           handlers.onDelta(delta);
         }
+
+        // Вызовы инструментов приходят фрагментами: id и имя — обычно целиком
+        // в первом чанке, аргументы — по кускам JSON, которые надо склеить.
+        for (const call of choice?.delta?.tool_calls ?? []) {
+          const index = typeof call.index === 'number' ? call.index : 0;
+          const slot = toolSlots.get(index) ?? { id: '', name: '', args: '' };
+          if (call.id && !slot.id) slot.id = call.id;
+          if (call.function?.name) slot.name += call.function.name;
+          if (call.function?.arguments) slot.args += call.function.arguments;
+          toolSlots.set(index, slot);
+        }
+
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         if (chunk.usage) {
           usage = {
@@ -128,7 +165,22 @@ export class OpenAiCompatibleProvider implements AiProvider {
       }
     }
 
-    return { text, finishReason, usage };
+    const toolCalls: ChatToolCall[] = [...toolSlots.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([index, slot]) => ({
+        id: slot.id || `call_${index}`,
+        name: slot.name,
+        arguments: slot.args,
+      }))
+      .filter((call) => call.name.length > 0);
+
+    return {
+      text,
+      finishReason,
+      usage,
+      ...(thoughts ? { reasoning: thoughts } : {}),
+      ...(toolCalls.length ? { toolCalls } : {}),
+    };
   }
 
   private url(pathname: string): string {
@@ -142,8 +194,44 @@ export class OpenAiCompatibleProvider implements AiProvider {
   }
 }
 
-function toWireMessage(message: ChatMessage): { role: string; content: string } {
-  return { role: message.role, content: message.content };
+function toWireMessage(message: ChatMessage): Record<string, unknown> {
+  if (message.role === 'tool') {
+    const wire: Record<string, unknown> = { role: 'tool', content: message.content };
+    if (message.toolCallId) wire.tool_call_id = message.toolCallId;
+    if (message.name) wire.name = message.name;
+    return wire;
+  }
+
+  if (message.role === 'assistant' && message.toolCalls?.length) {
+    return {
+      role: 'assistant',
+      // content обязан быть null, когда ответ целиком состоит из вызовов
+      content: message.content.length > 0 ? message.content : null,
+      tool_calls: message.toolCalls.map((call) => ({
+        id: call.id,
+        type: 'function',
+        function: { name: call.name, arguments: call.arguments },
+      })),
+    };
+  }
+
+  const wire: Record<string, unknown> = { role: message.role, content: wireContent(message) };
+  if (message.name) wire.name = message.name;
+  return wire;
+}
+
+/**
+ * Содержимое сообщения: строка, а с картинками — части контента
+ * (`text` + `image_url` с data-URL). Так картинки понимает любой
+ * OpenAI-совместимый провайдер, и ничего кодировать по дороге не нужно.
+ */
+function wireContent(message: ChatMessage): unknown {
+  if (!message.images?.length) return message.content;
+
+  const parts: Record<string, unknown>[] = [];
+  if (message.content.trim()) parts.push({ type: 'text', text: message.content });
+  for (const image of message.images) parts.push({ type: 'image_url', image_url: { url: image } });
+  return parts;
 }
 
 async function safeText(response: Response): Promise<string | undefined> {

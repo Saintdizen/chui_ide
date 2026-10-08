@@ -1,16 +1,20 @@
-import type { ChatMessage, ChatStreamDone } from '../../shared/api';
+import type { ChatMessage, ChatStreamDone, ReasoningEffort } from '../../shared/api';
 
 export interface StreamChatParams {
   model: string;
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
-  /** Задел под этап 3: описания инструментов в формате провайдера. */
+  /** Усилие размышления; не выставляется для моделей, которые его не понимают. */
+  reasoningEffort?: ReasoningEffort;
+  /** Описания инструментов в формате провайдера (см. `toOpenAiTools`). */
   tools?: readonly unknown[];
 }
 
 export interface StreamChatHandlers {
   onDelta(text: string): void;
+  /** Размышления модели (`reasoning_content` у DeepSeek и подобных). */
+  onReasoning?(text: string): void;
 }
 
 /**

@@ -1,23 +1,28 @@
-import { app, BrowserWindow, dialog, Menu, shell } from 'electron';
+import { app, BrowserWindow, dialog, shell } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import {
   CloneEvent,
+  MAX_CHAT_IMAGES,
   PushTopic,
   RpcErrorCode,
   type AppInfo,
   type ChatRequest,
   type ParamsOf,
+  type PickedImage,
   type RecentProject,
   type SettingsPatch,
   type WindowBounds,
 } from '../../shared/api';
 import type { AiService } from '../ai/service';
+import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
 import type { GitService } from '../git/git';
+import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
 import type { TerminalService } from '../terminal/terminal';
 import { applyBounds, openIdeWindow, windowState } from '../window';
 import type { WorkspaceService } from '../workspace/workspace';
+import type { HostClient } from './host';
 import { pushToRenderers } from './push';
 import { RpcFailure, RpcRouter, type RpcContext } from './router';
 
@@ -27,6 +32,8 @@ export interface AppDependencies {
   ai: AiService;
   terminals: TerminalService;
   git: GitService;
+  /** Обратные вызовы main → renderer (правки в документной модели). */
+  host: HostClient;
 }
 
 /**
@@ -56,6 +63,25 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
       properties: ['openDirectory', 'createDirectory'],
     });
     return { path: result.canceled ? null : (result.filePaths[0] ?? null) };
+  });
+
+  // Картинки читает main: renderer файловой системы не видит, и получать доступ
+  // к ней ради вложения в чат ему незачем. Файлы отдаём сразу data-URL —
+  // в таком виде их понимает и <img> в интерфейсе, и OpenAI-совместимый API.
+  router.register('dialog.pickImages', async (_params, ctx) => {
+    const result = await dialog.showOpenDialog(senderWindow(ctx), {
+      title: 'Приложить изображение',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Изображения', extensions: IMAGE_EXTENSIONS }],
+    });
+    if (result.canceled) return [];
+
+    const picked: PickedImage[] = [];
+    for (const file of result.filePaths.slice(0, MAX_CHAT_IMAGES)) {
+      const image = await readImageAsDataUrl(file).catch(() => null);
+      if (image) picked.push(image);
+    }
+    return picked;
   });
 
   // Подтверждение спрашиваем системным диалогом: он модальный для окна
@@ -201,8 +227,8 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('window.setBounds', (params: Partial<WindowBounds>, ctx) =>
     applyBounds(senderWindow(ctx), params),
   );
-  router.register('app.showMenu', (_params, ctx) => {
-    Menu.getApplicationMenu()?.popup({ window: senderWindow(ctx) });
+  router.register('menu.role', (params, ctx) => {
+    performMenuRole(senderWindow(ctx).webContents, params.role);
   });
 
   router.register('settings.get', () => deps.settings.get());  router.register('settings.update', (patch: SettingsPatch) => deps.settings.update(patch));
@@ -215,11 +241,27 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('ai.setApiKey', (params) => deps.settings.setApiKey(params.providerId, params.apiKey));
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
   router.register('ai.models', (params, ctx) => deps.ai.models(params.providerId, ctx.signal));
+  router.register('ai.test', (params, ctx) => deps.ai.testConnection(params, ctx.signal));
   router.register('ai.chat', (request: ChatRequest, ctx) =>
-    deps.ai.chat(request, (event, payload) => ctx.emit(event, payload), ctx.signal),
+    deps.ai.chat(
+      request,
+      (event, payload) => ctx.emit(event, payload),
+      ctx.signal,
+      // Правки и подтверждения живут в renderer: там документная модель, undo и интерфейс.
+      {
+        applyEdits: (edits, autoApprove) =>
+          deps.host.request(ctx.sender, 'ai.applyEdits', { edits, autoApprove }, ctx.signal),
+        confirmCommand: (command) =>
+          deps.host
+            .request(ctx.sender, 'ai.confirmCommand', { command }, ctx.signal)
+            .then((decision) => decision.allowed),
+        getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
+      },
+    ),
   );
 
   router.attach();
+  deps.host.attach();
 
   deps.settings.onDidChange((settings) => pushToRenderers(PushTopic.SettingsChanged, settings));
 
