@@ -1,0 +1,447 @@
+import type { DirEntry, GitChange } from '../../shared/api';
+import type { CommandRegistry } from '../core/commands';
+import type { GitModel } from '../core/git-model';
+import type { OpenEditors } from '../core/open-editors';
+import type { RpcClient } from '../core/rpc';
+import type { WorkspaceModel } from '../core/workspace-model';
+import { showContextMenu } from './context-menu';
+import { clear, debounce, h, svgIcon } from './dom';
+
+type InlineEdit =
+  | { kind: 'create'; parent: string; entryKind: 'file' | 'directory' }
+  | { kind: 'rename'; path: string; currentName: string };
+
+const CHANGE_LETTER: Record<GitChange, string> = {
+  modified: 'M',
+  added: 'A',
+  deleted: 'D',
+  renamed: 'R',
+  untracked: 'U',
+  conflicted: '!',
+};
+
+const CHANGE_TITLE: Record<GitChange, string> = {
+  modified: 'изменён',
+  added: 'добавлен в индекс',
+  deleted: 'удалён',
+  renamed: 'переименован',
+  untracked: 'новый файл',
+  conflicted: 'конфликт слияния',
+};
+
+export interface ExplorerView {
+  element: HTMLElement;
+  render(): void;
+  scheduleRefresh(): void;
+  reveal(path: string): void;
+  /** Создание с инлайн-вводом имени: цель — выбранная папка или её родитель. */
+  startCreate(entryKind: 'file' | 'directory'): void;
+  startRename(path: string): void;
+}
+
+export interface ExplorerDeps {
+  workspace: WorkspaceModel;
+  rpc: RpcClient;
+  commands: CommandRegistry;
+  openEditors: OpenEditors;
+  git: GitModel;
+}
+
+/**
+ * Проводник как в PyCharm: скруглённые строки, инлайн-переименование
+ * и контекстное меню. Папки читаются лениво и кэшируются.
+ */
+export function createExplorer(deps: ExplorerDeps): ExplorerView {
+  const element = h('div', { class: 'explorer' });
+  const expanded = new Set<string>();
+  const children = new Map<string, readonly DirEntry[]>();
+  /* Незавершённые чтения папок и те, что прочитать не удалось. */
+  const pending = new Map<string, Promise<void>>();
+  const failed = new Set<string>();
+  let inlineEdit: InlineEdit | null = null;
+  let selected: string | null = null;
+  let root: string | null = null;
+
+  const readDir = async (dir: string): Promise<void> => {
+    try {
+      children.set(dir, await deps.rpc.request('workspace.readDir', { path: dir }));
+    } catch (error) {
+      failed.add(dir);
+      console.error('[chui] не удалось прочитать папку', dir, error);
+    } finally {
+      pending.delete(dir);
+    }
+  };
+
+  /**
+   * Читает папку один раз: повторный запрос той же папки ждёт первый и получает
+   * тот же промис. Просто выйти здесь нельзя: вызвавшая сторона получает
+   * разрешённый промис, сразу рисует дерево снова, снова просит папку — и поток
+   * навсегда остаётся в микротасках. Цикл обещаний не отдаёт управление ни
+   * отрисовке, ни IPC: окно перестаёт отвечать и жжёт ядро процессора.
+   */
+  const load = (dir: string): Promise<void> => {
+    const running = pending.get(dir);
+    if (running) return running;
+    const task = readDir(dir);
+    pending.set(dir, task);
+    return task;
+  };
+
+  /* ── инлайн-ввод имени ─────────────────────────────────────────────────── */
+
+  const inlineInput = (depth: number, initial: string, commit: (value: string) => void): HTMLElement => {
+    const input = h('input', { class: 'tree-input', type: 'text', value: initial, spellcheck: false });
+    const row = h(
+      'div',
+      { class: 'tree-row is-editing', style: { paddingLeft: `${8 + depth * 12}px` } },
+      input,
+    );
+
+    let done = false;
+    const finish = (value: string | null): void => {
+      if (done) return;
+      done = true;
+      inlineEdit = null;
+      if (value) commit(value);
+      else render();
+    };
+
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        finish(input.value.trim());
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(null);
+      }
+    });
+    input.addEventListener('blur', () => finish(null));
+
+    requestAnimationFrame(() => {
+      input.focus();
+      const dot = initial.lastIndexOf('.');
+      input.setSelectionRange(0, dot > 0 ? dot : initial.length);
+    });
+
+    return row;
+  };
+
+  const commitCreate = async (edit: Extract<InlineEdit, { kind: 'create' }>, name: string): Promise<void> => {
+    const target = `${edit.parent}/${name}`;
+    try {
+      if (edit.entryKind === 'directory') {
+        await deps.commands.execute('file.createFolder', target);
+        expanded.add(target);
+      } else {
+        await deps.commands.execute('file.createFile', target);
+      }
+    } catch {
+      // команда уже показала ошибку пользователю
+    }
+    await refresh();
+  };
+
+  const commitRename = async (path: string, name: string): Promise<void> => {
+    const parent = path.slice(0, path.lastIndexOf('/'));
+    if (name && `${parent}/${name}` !== path) {
+      await deps.commands.execute('file.rename', path, `${parent}/${name}`).catch(() => undefined);
+    }
+    await refresh();
+  };
+
+  /* ── контекстное меню ──────────────────────────────────────────────────── */
+
+  const openMenu = (entry: DirEntry | null, event: MouseEvent): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    selected = entry?.path ?? null;
+    render();
+
+    const parent = entry ? (entry.kind === 'directory' ? entry.path : dirname(entry.path)) : (deps.workspace.root ?? '');
+    const items = entry
+      ? [
+          { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },
+          { label: 'Новая папка…', onSelect: () => startCreateIn(parent, 'directory') },
+          { separator: true as const },
+          { label: 'Переименовать…', hint: 'F2', onSelect: () => startRename(entry.path) },
+          { label: 'Удалить', hint: 'Del', danger: true, onSelect: () => void deps.commands.execute('file.delete', entry.path) },
+          { separator: true as const },
+          {
+            label: 'Копировать путь',
+            onSelect: () => {
+              void navigator.clipboard.writeText(entry.path).catch(() => undefined);
+            },
+          },
+        ]
+      : [
+          { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },
+          { label: 'Новая папка…', onSelect: () => startCreateIn(parent, 'directory') },
+          { separator: true as const },
+          { label: 'Обновить', onSelect: () => void deps.commands.execute('workspace.refresh') },
+        ];
+
+    showContextMenu(items, event.clientX, event.clientY);
+  };
+
+  const startCreateIn = (parent: string, entryKind: 'file' | 'directory'): void => {
+    expanded.add(parent);
+    if (!children.has(parent)) void load(parent);
+    inlineEdit = { kind: 'create', parent, entryKind };
+    // Рисуем ровно один раз и уже после перечитывания папок: лишняя перерисовка
+    // заменила бы поле ввода только что созданным, а подмена узла закрывает ввод.
+    void refresh().then(paint);
+  };
+
+  const startCreate = (entryKind: 'file' | 'directory'): void => {
+    const root = deps.workspace.root;
+    if (!root) return;
+    if (selected) {
+      const entry = findEntry(selected);
+      const parent = entry?.kind === 'directory' ? entry.path : dirname(selected);
+      startCreateIn(parent, entryKind);
+      return;
+    }
+    startCreateIn(root, entryKind);
+  };
+
+  const startRename = (path: string): void => {
+    const entry = findEntry(path);
+    inlineEdit = { kind: 'rename', path, currentName: entry?.name ?? basename(path) };
+    paint();
+  };
+
+  const findEntry = (path: string): DirEntry | undefined => {
+    for (const entries of children.values()) {
+      const found = entries.find((entry) => entry.path === path);
+      if (found) return found;
+    }
+    return undefined;
+  };
+
+  /* ── отрисовка ─────────────────────────────────────────────────────────── */
+
+  const renderRows = (container: HTMLElement, entries: readonly DirEntry[], depth: number): void => {
+    for (const entry of entries) {
+      const isDirectory = entry.kind === 'directory';
+      const isExpanded = expanded.has(entry.path);
+      const isActive = deps.openEditors.active?.path === entry.path;
+      const isSelected = selected === entry.path;
+
+      if (inlineEdit?.kind === 'rename' && inlineEdit.path === entry.path) {
+        container.appendChild(inlineInput(depth, inlineEdit.currentName, (value) => void commitRename(entry.path, value)));
+        continue;
+      }
+
+      const classes = ['tree-row'];
+      if (isActive) classes.push('is-active');
+      if (isSelected) classes.push('is-selected');
+
+      // Пометка git из дерева не ходит в репозиторий: модель уже разложила статус по путям.
+      const change = deps.git.statusOf(entry.path);
+      if (change) classes.push(`is-${change.change}`);
+
+      // У папки правок быть не может, но внутри — сколько угодно: без пометки
+      // свёрнутая папка выглядит чистой, хотя это не так.
+      const inside = isDirectory ? deps.git.changeInside(entry.path) : undefined;
+      const insideTitle = inside ? `Правок внутри: ${inside.count}` : undefined;
+
+      const row = h(
+        'button',
+        {
+          class: classes.join(' '),
+          type: 'button',
+          title: change ? `${entry.path} — ${CHANGE_TITLE[change.change]}` : (insideTitle ? `${entry.path} — ${insideTitle}` : entry.path),
+          dataset: { path: entry.path },
+          style: { paddingLeft: `${8 + depth * 12}px` },
+        },
+        h('span', { class: `tree-twisty${isExpanded ? ' is-open' : ''}` }, isDirectory ? svgIcon('chevron', 12) : null),
+        svgIcon(isDirectory ? 'folder' : 'file', 15),
+        h('span', { class: 'tree-name' }, entry.name),
+        change ? h('span', { class: `tree-badge is-${change.change}`, title: CHANGE_TITLE[change.change] }, CHANGE_LETTER[change.change]) : null,
+        inside ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle }) : null,
+      );
+
+      row.addEventListener('click', () => {
+        selected = entry.path;
+        void onClick(entry);
+      });
+      row.addEventListener('contextmenu', (event) => openMenu(entry, event));
+      container.appendChild(row);
+
+      if (isCreateTarget(inlineEdit, entry.path)) {
+        const edit = inlineEdit;
+        container.appendChild(inlineInput(depth + 1, '', (value) => void commitCreate(edit, value)));
+      }
+
+      if (isDirectory && isExpanded) {
+        const nested = children.get(entry.path);
+        if (nested) renderRows(container, nested, depth + 1);
+        // Неудачное чтение само по себе не повторяем: иначе каждый проход
+        // отрисовки заново просит ту же папку и дерево крутится без остановки.
+        else if (!failed.has(entry.path)) void load(entry.path).then(render);
+      }
+    }
+  };
+
+  const onClick = async (entry: DirEntry): Promise<void> => {
+    if (entry.kind !== 'directory') {
+      await deps.commands.execute('file.open', entry.path);
+      return;
+    }
+    if (expanded.has(entry.path)) {
+      expanded.delete(entry.path);
+      render();
+      return;
+    }
+    expanded.add(entry.path);
+    if (!children.has(entry.path)) await load(entry.path);
+    render();
+  };
+
+  /**
+   * Перерисовка дерева. Пока открыто поле ввода имени, её не делаем: `clear`
+   * уносит поле из документа, его `blur` закрывает ввод — со стороны это
+   * выглядело так, будто «Новый файл» ничего не делает. Правки git и открытие
+   * файлов, случившиеся за это время, применяются следующим проходом после
+   * завершения ввода. Сами рисующие вызовы идут через `paint`.
+   */
+  const render = (): void => {
+    if (inlineEdit) return;
+    paint();
+  };
+
+  const paint = (): void => {
+    clear(element);
+    const info = deps.workspace.current;
+
+    if (!info) {
+      element.appendChild(
+        h(
+          'div',
+          { class: 'empty-note' },
+          h('p', {}, 'Проект не открыт'),
+          h(
+            'button',
+            { class: 'btn btn-primary', type: 'button', onClick: () => void deps.commands.execute('workspace.openFolder') },
+            'Открыть папку',
+          ),
+        ),
+      );
+      return;
+    }
+
+    element.appendChild(
+      h(
+        'div',
+        { class: 'panel-header' },
+        h('span', { class: 'panel-title' }, 'Проект'),
+        h('div', { class: 'panel-actions' },
+          h('button', { class: 'icon-btn', type: 'button', title: 'Новый файл', onClick: () => startCreate('file') }, svgIcon('filePlus', 15)),
+          h('button', { class: 'icon-btn', type: 'button', title: 'Новая папка', onClick: () => startCreate('directory') }, svgIcon('folderPlus', 15)),
+          h('button', { class: 'icon-btn', type: 'button', title: 'Свернуть все папки', onClick: () => { expanded.clear(); render(); } }, svgIcon('collapse', 15)),
+          h('button', { class: 'icon-btn', type: 'button', title: 'Обновить', onClick: () => void deps.commands.execute('workspace.refresh') }, svgIcon('refresh', 14)),
+        ),
+      ),
+    );
+
+    const tree = h('div', { class: 'tree' });
+    tree.addEventListener('contextmenu', (event) => openMenu(null, event));
+    element.appendChild(tree);
+
+    const entries = children.get(info.root);
+    if (!entries) {
+      tree.appendChild(
+        h('div', { class: 'tree-loading' }, failed.has(info.root) ? 'Не удалось прочитать папку' : 'Читаю папку…'),
+      );
+      if (!failed.has(info.root)) void load(info.root).then(render);
+      return;
+    }
+
+    // Поле ввода для создания в корне проекта: строка корня в дереве не рисуется
+    // (рисуются только её дети), поэтому создание «в никуда» не показывало поля —
+    // со стороны это выглядело так, будто кнопка ничего не делает.
+    if (inlineEdit?.kind === 'create' && inlineEdit.parent === info.root) {
+      const edit = inlineEdit;
+      tree.appendChild(inlineInput(0, '', (value) => void commitCreate(edit, value)));
+    }
+    renderRows(tree, entries, 0);
+  };
+
+  /**
+   * Перечитывает уже прочитанные папки. Раскрытые папки и выделение остаются
+   * на месте: это и есть отличие обновления от повторного открытия проекта.
+   */
+  const refresh = async (): Promise<void> => {
+    const info = deps.workspace.current;
+    if (!info) return;
+    const dirs = [info.root, ...[...expanded].filter((dir) => children.has(dir))];
+    children.clear();
+    failed.clear();
+    for (const dir of dirs) await load(dir);
+    render();
+  };
+
+  const scheduleRefresh = debounce(() => void refresh(), 250);
+
+  const reveal = (target: string): void => {
+    const info = deps.workspace.current;
+    if (!info || !target.startsWith(info.root)) return;
+
+    const segments = target.slice(info.root.length + 1).split('/');
+    segments.pop();
+    let current = info.root;
+    for (const segment of segments) {
+      current = `${current}/${segment}`;
+      expanded.add(current);
+      if (!children.has(current)) void load(current).then(render);
+    }
+    selected = target;
+    render();
+    element.querySelector<HTMLElement>(`[data-path="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'nearest' });
+  };
+
+  deps.workspace.onDidChange(() => {
+    const next = deps.workspace.root;
+    // Та же папка — это обновление («Обновить», повторное открытие того же
+    // проекта): раскрытые папки, выделение и поле ввода имени остаются.
+    if (next === root) {
+      void refresh();
+      return;
+    }
+    root = next;
+    expanded.clear();
+    children.clear();
+    pending.clear();
+    failed.clear();
+    selected = null;
+    inlineEdit = null;
+    render();
+  });
+
+  deps.openEditors.onDidChange(render);
+  // Пометки git меняются и без правок в дереве — например после коммита.
+  deps.git.onDidChange(render);
+
+  render();
+
+  return { element, render, scheduleRefresh, reveal, startCreate, startRename };
+}
+
+function basename(target: string): string {
+  const index = target.lastIndexOf('/');
+  return index < 0 ? target : target.slice(index + 1);
+}
+
+function dirname(target: string): string {
+  const index = target.lastIndexOf('/');
+  return index <= 0 ? '/' : target.slice(0, index);
+}
+
+/** Есть ли активное создание внутри указанной папки. */
+function isCreateTarget(
+  edit: InlineEdit | null,
+  path: string,
+): edit is Extract<InlineEdit, { kind: 'create' }> {
+  return edit?.kind === 'create' && edit.parent === path;
+}

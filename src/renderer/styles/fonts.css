@@ -1,0 +1,47 @@
+/*
+ * Шрифты приложения. Оба семейства — переменные (variable): один файл закрывает
+ * весь диапазон начертаний, поэтому в сборку попадают четыре файла, а не десятки
+ * начертаний по отдельности.
+ *
+ * - Inter — интерфейс (`--font_ui`): подписи, меню, вкладки, дерево, чат.
+ * - JetBrains Mono — код (`--font_mono`): Monaco, терминал, сниппеты в палитре.
+ *
+ * Имена семейств — ровно те, что уже просит код (`'Inter'`, `'JetBrains Mono'`
+ * в `theme.css`, `editor-service.ts`, `ui/terminal.ts`), поэтому ничего
+ * переименовывать не нужно.
+ *
+ * Лицензия у обоих — SIL Open Font License 1.1: тексты лежат рядом с файлами
+ * (`Inter-OFL.txt`, `JetBrainsMono-OFL.txt`).
+ */
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../assets/fonts/InterVariable.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../assets/fonts/InterVariable-Italic.ttf') format('truetype');
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../assets/fonts/JetBrainsMonoVariable.ttf') format('truetype');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../assets/fonts/JetBrainsMonoVariable-Italic.ttf') format('truetype');
+  font-weight: 100 800;
+  font-style: italic;
+  font-display: swap;
+}

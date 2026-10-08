@@ -1,0 +1,164 @@
+import { clear, h } from './dom';
+
+/**
+ * Каркас в стиле PyCharm New UI: фон приложения темнее панелей, панели —
+ * «острова» со скруглёнными углами, а зазоры между ними служат сплиттерами.
+ */
+export interface Layout {
+  root: HTMLElement;
+  topBar: HTMLElement;
+  topBarLeft: HTMLElement;
+  topBarTitle: HTMLElement;
+  topBarRight: HTMLElement;
+  sidebar: HTMLElement;
+  sidebarBody: HTMLElement;
+  tabsHost: HTMLElement;
+  breadcrumbsHost: HTMLElement;
+  editorHost: HTMLElement;
+  dockHost: HTMLElement;
+  rightPanel: HTMLElement;
+  rightBody: HTMLElement;
+  statusBarHost: HTMLElement;
+  readonly sidebarVisible: boolean;
+  readonly rightVisible: boolean;
+  readonly dockVisible: boolean;
+  setSidebarVisible(visible: boolean): void;
+  setRightVisible(visible: boolean): void;
+  setDockVisible(visible: boolean): void;
+}
+
+export function createLayout(mount: HTMLElement): Layout {
+  const topBarLeft = h('div', { class: 'topbar-left' });
+  const topBarTitle = h('div', { class: 'topbar-title' });
+  const topBarRight = h('div', { class: 'topbar-right' });
+  const topBar = h('header', { class: 'topbar' }, topBarLeft, topBarTitle, topBarRight);
+
+  const sidebarBody = h('div', { class: 'sidebar-body' });
+  const sidebar = h('aside', { class: 'island sidebar' }, sidebarBody);
+  const sidebarSplitter = h('div', { class: 'splitter splitter-left' });
+
+  const tabsHost = h('div', { class: 'tabs-host' });
+  const breadcrumbsHost = h('div', { class: 'breadcrumbs-host' });
+  const editorHost = h('div', { class: 'editor-host' });
+  const editorIsland = h('section', { class: 'island editor-island' }, tabsHost, breadcrumbsHost, editorHost);
+
+  const dockSplitter = h('div', { class: 'splitter splitter-dock' });
+  const dockHost = h('div', { class: 'dock-host' });
+  const dockIsland = h('section', { class: 'island dock' }, dockHost);
+  const dockWrap = h('div', { class: 'dock-wrap' }, dockSplitter, dockIsland);
+
+  const center = h('div', { class: 'center' }, editorIsland, dockWrap);
+  const rightSplitter = h('div', { class: 'splitter splitter-right' });
+
+  const rightBody = h('div', { class: 'right-body' });
+  const rightPanel = h('aside', { class: 'island right-panel' }, rightBody);
+
+  const statusBarHost = h('footer', { class: 'statusbar-host' });
+
+  const root = h(
+    'div',
+    { class: 'app' },
+    topBar,
+    sidebar,
+    sidebarSplitter,
+    center,
+    rightSplitter,
+    rightPanel,
+    statusBarHost,
+  );
+
+  let sidebarVisible = true;
+  let rightVisible = true;
+  let dockVisible = false;
+
+  const apply = (): void => {
+    root.classList.toggle('is-sidebar-hidden', !sidebarVisible);
+    root.classList.toggle('is-right-hidden', !rightVisible);
+    root.classList.toggle('is-dock-hidden', !dockVisible);
+  };
+
+  clear(mount);
+  mount.appendChild(root);
+  apply();
+
+  attachSplitter(root, sidebarSplitter, { cssVar: '--sidebar-width', axis: 'x', min: 170, max: 560, invert: false });
+  attachSplitter(root, rightSplitter, { cssVar: '--right-width', axis: 'x', min: 280, max: 760, invert: true });
+  attachSplitter(root, dockSplitter, { cssVar: '--dock-height', axis: 'y', min: 100, max: 800, invert: true });
+
+  return {
+    root,
+    topBar,
+    topBarLeft,
+    topBarTitle,
+    topBarRight,
+    sidebar,
+    sidebarBody,
+    tabsHost,
+    breadcrumbsHost,
+    editorHost,
+    dockHost,
+    rightPanel,
+    rightBody,
+    statusBarHost,
+    get sidebarVisible() {
+      return sidebarVisible;
+    },
+    get rightVisible() {
+      return rightVisible;
+    },
+    get dockVisible() {
+      return dockVisible;
+    },
+    setSidebarVisible(visible: boolean) {
+      sidebarVisible = visible;
+      apply();
+    },
+    setRightVisible(visible: boolean) {
+      rightVisible = visible;
+      apply();
+    },
+    setDockVisible(visible: boolean) {
+      dockVisible = visible;
+      apply();
+    },
+  };
+}
+
+interface SplitterOptions {
+  cssVar: string;
+  axis: 'x' | 'y';
+  min: number;
+  max: number;
+  /** true для панелей справа и снизу: тянуть нужно в противоположную сторону. */
+  invert: boolean;
+}
+
+function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: SplitterOptions): void {
+  splitter.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    splitter.classList.add('is-dragging');
+
+    const horizontal = options.axis === 'x';
+    const start = horizontal ? event.clientX : event.clientY;
+    const startSize = Number.parseFloat(getComputedStyle(root).getPropertyValue(options.cssVar)) || 0;
+    const limit = horizontal ? window.innerWidth - 320 : window.innerHeight - 160;
+
+    const onMove = (move: PointerEvent): void => {
+      const current = horizontal ? move.clientX : move.clientY;
+      const delta = options.invert ? start - current : current - start;
+      const size = Math.min(Math.max(startSize + delta, options.min), Math.min(options.max, limit));
+      root.style.setProperty(options.cssVar, `${size}px`);
+    };
+
+    const onUp = (): void => {
+      splitter.classList.remove('is-dragging');
+      splitter.removeEventListener('pointermove', onMove);
+      splitter.removeEventListener('pointerup', onUp);
+      splitter.removeEventListener('pointercancel', onUp);
+    };
+
+    splitter.addEventListener('pointermove', onMove);
+    splitter.addEventListener('pointerup', onUp);
+    splitter.addEventListener('pointercancel', onUp);
+  });
+}

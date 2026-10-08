@@ -1,0 +1,162 @@
+/**
+ * Оформление попапов Monaco: меню по правой кнопке, палитра `F1`, поиск,
+ * подсказки и окно параметров.
+ *
+ * Цвета им задаёт тема (`core/theme.ts`). Здесь лежит то, что цветом не
+ * выражается, в двух частях:
+ *
+ * 1. Переменные `--vscode-*` — их Monaco читает в своих стилях (в VS Code их
+ *    объявляет сама оболочка): радиус и тень меню и поиска, толщина рамки меню,
+ *    ступени текста в списках. Объявляем на `:root` нашими токенами: переменные
+ *    наследуются и через границу shadow root, поэтому внутрь лезть не нужно.
+ *
+ * 2. Плотную поверхность попапов, которые Monaco рисует в обычном DOM редактора
+ *    (`.monaco-editor .overflow-guard`): палитра, поиск, подсказки. Фон им задаёт
+ *    тема, а здесь — форма: радиус, тень, отступы списка.
+ *
+ * Меню по правой кнопке и быстрые вводы живут в shadow root, куда извне правила
+ * не доходят: их материал дописывает `core/monaco-chrome.ts`.
+ */
+
+:root {
+  /* Рамку меню красит тема (`menu.border`), но правило Monaco берёт цвет из
+     переменной: без неё подставляется имя цвета (`editorWidget.border`) вместо
+     значения, и вся декларация `border` считается неверной — рамки нет вовсе. */
+  --vscode-menu-border: var(--border_color);
+  /* Фон меню и быстрых вводов. Переменные темы Monaco объявляет на самом
+     редакторе, а эти виджеты рисуются в теневом корне рядом с `body` — вне
+     редактора, куда его переменные не доходят. Без значения `var(--vscode-menu-
+     background)` не разрешается, и меню остаётся полностью прозрачным: видна
+     только рамка на просвечивающем коде. */
+  --vscode-menu-background: var(--popup_background);
+  --vscode-quickInput-background: var(--popup_background);
+  --vscode-strokeThickness: 1px;
+
+  /* Радиусы: у нас три ступени, у Monaco — свои имена. */
+  --vscode-cornerRadius-small: var(--radius_sm);
+  --vscode-cornerRadius-medium: var(--radius_sm);
+  --vscode-cornerRadius-large: var(--radius_md);
+
+  --vscode-shadow-lg: var(--box_shadow_drop);
+  --vscode-widget-shadow: var(--box_shadow_drop);
+
+  /* Текст в списках и подписях попапов — наши ступени, а не палитра VS Code. */
+  --vscode-foreground: var(--text_color);
+  --vscode-descriptionForeground: var(--text_color_tertiary);
+  --vscode-disabledForeground: var(--text_color_disabled);
+  --vscode-widget-border: var(--border_color);
+  --vscode-focusBorder: var(--blue_prime_background);
+  --vscode-toolbar-hoverBackground: var(--element_background_hover);
+}
+
+/* ── попапы в обычном DOM ──────────────────────────────────────────────── */
+
+/* Поиск, подсказки и окно параметров — слои помельче, радиус тише. Радиус поиска
+   приходит из переменной выше, остальным задаём здесь. */
+.monaco-editor .find-widget,
+.monaco-editor .suggest-widget,
+.monaco-editor .monaco-hover,
+.monaco-editor .parameter-hints-widget {
+  border-radius: var(--radius_sm);
+  box-shadow: var(--box_shadow_drop);
+  overflow: hidden;
+}
+
+/* ── палитра команд (F1) и прочие быстрые вводы: как наш .palette ──────── */
+
+/* Контейнер: материал, радиус, модальная тень и появление — как у .palette.
+   Шрифт интерфейса, а не стек редактора: иначе текст мельче и другой. */
+.monaco-editor .quick-input-widget {
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  border-radius: var(--radius_md);
+  box-shadow: var(--box_shadow_modal);
+  overflow: hidden;
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+/* Заголовок с полем: отступы и линия — как у .palette-input. */
+.monaco-editor .quick-input-widget .quick-input-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+/* Поле у нас без рамки и заливки — на всю ширину заголовка. Цвета Monaco задаёт
+   inline-стилями из темы, а фокусную рамку — outline на самом поле, поэтому
+   перекрываем и то, и другое важностью. */
+.monaco-editor .quick-input-widget .monaco-inputbox {
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0;
+}
+
+.monaco-editor .quick-input-widget .monaco-inputbox,
+.monaco-editor .quick-input-widget .monaco-inputbox .input {
+  /* Палитра сама и есть фокус: отдельная рамка у поля лишняя. */
+  outline: none !important;
+}
+
+.monaco-editor .quick-input-widget .monaco-inputbox .input {
+  font-family: var(--font_ui);
+  font-size: var(--font_default_size);
+  color: var(--text_color);
+  /* У нас поле в палитре без своей рамки: палитра сама и есть фокус. */
+  outline: none !important;
+}
+
+.monaco-editor .quick-input-widget .monaco-inputbox .input::placeholder {
+  color: var(--placeholder_text_color);
+}
+
+/* Список: тот же отступ 6px, что у .palette-list, и тот же радиус заливки
+   строки, что у .palette-item. Высоту строк не трогаем: шаг задаёт сам Monaco
+   своим виртуализированным списком, от CSS строки наедут друг на друга. */
+.monaco-editor .quick-input-widget .quick-input-list {
+  padding: 6px 0;
+}
+
+.monaco-editor .quick-input-widget .monaco-list-row {
+  margin: 0 6px;
+  width: calc(100% - 12px);
+  border-radius: var(--radius_sm);
+}
+
+.monaco-editor .quick-input-widget .quick-input-list-entry {
+  padding: 0 10px;
+  gap: 10px;
+}
+
+/* Описание (категория команды) и подпись — как .palette-item-category и название: 
+   размер Monaco задаёт сам и мельче нашего. */
+.monaco-editor .quick-input-widget .label-description,
+.monaco-editor .quick-input-widget .label-name {
+  font-size: var(--font_labels_size) !important;
+}
+
+.monaco-editor .quick-input-widget .label-description {
+  color: var(--text_color_tertiary);
+}
+
+/* Сочетание клавиш — та же «клавиша», что у .palette-item-key: рамка, моно и
+   третья ступень текста вместо плашек Monaco (они тоже нарисованы inline). */
+.monaco-editor .quick-input-widget .monaco-keybinding-key {
+  margin: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--border_color) !important;
+  border-radius: 4px;
+  background: transparent !important;
+  color: var(--text_color_tertiary) !important;
+  font-family: var(--font_mono);
+  font-size: 10.5px;
+}
+
+.monaco-editor .quick-input-widget .monaco-keybinding > .monaco-keybinding-key + .monaco-keybinding-key,
+.monaco-editor .quick-input-widget .monaco-keybinding-separator + .monaco-keybinding-key {
+  margin-left: 2px;
+}
+
+.monaco-editor .quick-input-widget .monaco-keybinding-separator {
+  color: var(--text_color_tertiary);
+  font-size: 10.5px;
+}
+

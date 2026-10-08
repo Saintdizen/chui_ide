@@ -1,0 +1,1978 @@
+/**
+ * Раскладка и компоненты. Цветов здесь нет — только токены из `theme.css`,
+ * которые переключаются вместе со схемой (`prefers-color-scheme`).
+ * Геометрия и движение — тоже токены: `--radius_*`, `--control_height`, `--motion_*`.
+ */
+
+:root {
+  /* Размеры панелей: их двигают сплиттеры во время работы,
+     поэтому это не токены палитры, а состояние раскладки. */
+  --sidebar-width: 260px;
+  --right-width: 400px;
+  --dock-height: 260px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Панели скрываются атрибутом hidden, а классы задают им display: flex. */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--main_background);
+  color: var(--text_color);
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  line-height: var(--line_height_ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: var(--focus_outline);
+  outline-offset: var(--focus_outline_offset);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar_thumb);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--radius_pill);
+}
+
+/* ── каркас ─────────────────────────────────────────────────────────────── */
+
+.app {
+  display: grid;
+  /* Отступы есть только по бокам: шапка и статусбар примыкают к панелям,
+     иначе сверху и снизу читаются лишние пустые полосы.
+     Зазоры между панелями — колонки со сплиттерами; зазор скрытой панели
+     схлопывается вместе с ней, иначе сбоку останется двойной отступ. */
+  --sidebar-gap: 6px;
+  --right-gap: 6px;
+  grid-template-columns: 6px var(--sidebar-width) var(--sidebar-gap) minmax(0, 1fr) var(--right-gap) var(--right-width) 6px;
+  grid-template-rows: var(--topbar_height) minmax(0, 1fr) 24px;
+  height: 100%;
+  background: var(--main_background);
+}
+
+/* У окна нет системной рамки — тонкий внутренний контур очерчивает его на тёмном столе. */
+:root.has-custom-frame .app {
+  box-shadow: inset 0 0 0 1px var(--border_color);
+}
+
+.app.is-sidebar-hidden {
+  --sidebar-width: 0px;
+  --sidebar-gap: 0px;
+}
+
+.app.is-sidebar-hidden .sidebar,
+.app.is-sidebar-hidden .splitter-left {
+  display: none;
+}
+
+.app.is-right-hidden {
+  --right-width: 0px;
+  --right-gap: 0px;
+}
+
+.app.is-right-hidden .right-panel,
+.app.is-right-hidden .splitter-right {
+  display: none;
+}
+
+.app.is-dock-hidden .dock-wrap {
+  display: none;
+}
+
+/* «Остров»: содержимое окна светлее самого окна, поэтому панель читается карточкой. */
+.island {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--element_background_2);
+}
+
+.topbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px;
+  /* Шапка — область перетаскивания окна: без системной рамки двигать окно больше нечем.
+     Жест ведёт Chromium через оконный менеджер, поэтому движение плавное. */
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+/* Кнопки шапки меньше панельных: высота полосы 36 px, зазор по 6 px со всех сторон —
+   сверху и снизу от края окна, поэтому размер кнопки 24 px. */
+.topbar .icon-btn {
+  width: var(--topbar_control_size);
+  height: var(--topbar_control_size);
+}
+
+/* Всё кликабельное в шапке выключается из области перетаскивания. */
+.topbar button,
+.topbar input,
+.topbar select {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.topbar-title {
+  overflow: hidden;
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.topbar-left,
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* На macOS свои кнопки не нужны: там остаются системные «светофоры»,
+   и под них надо освободить место слева. */
+:root.is-mac .topbar-left {
+  padding-left: 68px;
+}
+
+:root.is-mac .window-controls {
+  display: none;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 6px;
+}
+
+.window-btn {
+  display: grid;
+  place-items: center;
+  width: var(--topbar_control_size);
+  height: var(--topbar_control_size);
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease);
+}
+
+.window-btn:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.window-btn.is-close:hover {
+  background: var(--red_prime_background);
+  color: var(--text_color_hover);
+}
+
+/* Края растягивания: у безрамочного окна на Linux системных краёв нет.
+   Полоса сверху и снизу — 4 px, то есть меньше зазора кнопки в шапке (6 px),
+   иначе край накрывает кнопки и клик по их краю тянет окно вместо действия. */
+.resize-edge {
+  position: fixed;
+  z-index: 400;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.resize-edge-n,
+.resize-edge-s {
+  right: 8px;
+  left: 8px;
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.resize-edge-n {
+  top: 0;
+}
+
+.resize-edge-s {
+  bottom: 0;
+}
+
+.resize-edge-e,
+.resize-edge-w {
+  top: 8px;
+  bottom: 8px;
+  width: 5px;
+  cursor: ew-resize;
+}
+
+.resize-edge-e {
+  right: 0;
+}
+
+.resize-edge-w {
+  left: 0;
+}
+
+.resize-edge-ne,
+.resize-edge-nw,
+.resize-edge-se,
+.resize-edge-sw {
+  width: 10px;
+  height: 10px;
+}
+
+.resize-edge-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.resize-edge-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.resize-edge-se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.resize-edge-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.workspace-widget {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 420px;
+  height: var(--topbar_control_size);
+  padding: 0 10px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease);
+}
+
+.workspace-widget:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.workspace-name {
+  overflow: hidden;
+  font-weight: 600;
+  color: var(--text_color);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sidebar {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+}
+
+.splitter {
+  background: transparent;
+  transition: background var(--motion_fast) var(--motion_ease);
+}
+
+.splitter-left {
+  grid-column: 3;
+  grid-row: 2;
+  cursor: col-resize;
+}
+
+.splitter-right {
+  grid-column: 5;
+  grid-row: 2;
+  cursor: col-resize;
+}
+
+.splitter-dock {
+  cursor: row-resize;
+}
+
+.splitter:hover,
+.splitter.is-dragging {
+  background: var(--blue_prime_background);
+}
+
+.center {
+  grid-column: 4;
+  grid-row: 2;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dock-wrap {
+  display: grid;
+  grid-template-rows: 6px var(--dock-height);
+  min-height: 0;
+}
+
+.editor-island {
+  display: flex;
+  flex-direction: column;
+}
+
+.right-panel {
+  grid-column: 6;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+}
+
+.statusbar-host {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
+/* ── заголовки панелей ──────────────────────────────────────────────────── */
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 6px 0 10px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_tertiary);
+}
+
+.panel-title {
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  color: var(--text_color);
+}
+
+/* Умные возможности HIG помечает фиолетовым — тем же акцентом отмечаем ассистента. */
+.panel-header-ai svg {
+  color: var(--purple_prime_background);
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: var(--toolbar_control_size);
+  height: var(--toolbar_control_size);
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease);
+}
+
+.icon-btn:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Кнопка-переключатель панели: синий значок значит «панель открыта». */
+.icon-btn.is-active {
+  color: var(--blue_prime_background);
+}
+
+/* ── вкладки редактора ──────────────────────────────────────────────────── */
+
+/* Полоса вкладок — того же цвета, что полотно: вкладки читаются обводкой,
+   а не заливками, поэтому полоса не выглядит отдельной панелью. */
+.tabs-host {
+  flex: 0 0 auto;
+  background: var(--editor_background);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 6px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  max-width: 200px;
+  padding: 0 6px 0 9px;
+  border-radius: var(--radius_sm);
+  background: transparent;
+  color: var(--text_color_disabled);
+  white-space: nowrap;
+  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease);
+}
+
+.tab:hover {
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+/* Активная вкладка залита тем же выделением, что выбранная строка дерева:
+   одно состояние читается одинаково в любом списке интерфейса. */
+.tab.is-active {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Крестик показывается на наведении, у активной и у изменённой вкладки:
+   так полоса не забита одинаковыми значками закрытия. */
+.tab-close {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  color: var(--text_color_tertiary);
+  opacity: 0;
+  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease),
+    opacity var(--motion_fast) var(--motion_ease);
+}
+
+.tab:hover .tab-close,
+.tab.is-active .tab-close,
+.tab.is-dirty .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.tab-dirty {
+  width: 7px;
+  height: 7px;
+  margin-right: -2px;
+  border-radius: var(--radius_circle);
+  background: var(--blue_prime_background);
+}
+
+/* ── хлебные крошки ─────────────────────────────────────────────────────── */
+
+.breadcrumbs-host {
+  flex: 0 0 auto;
+}
+
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  height: 26px;
+  padding: 0 8px;
+  overflow: hidden;
+  /* Линия принадлежит самой полосе, а не её контейнеру: когда крошки скрыты,
+     не должно оставаться висящей разделительной черты. */
+  border-bottom: 1px solid var(--separator_color);
+  white-space: nowrap;
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.crumb:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.crumb.is-file {
+  color: var(--text_color_disabled);
+}
+
+.editor-host {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--editor_background);
+}
+
+/* ── приветствие ────────────────────────────────────────────────────────── */
+
+.welcome {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  background: var(--editor_background);
+  color: var(--blue_prime_background);
+}
+
+.welcome-title {
+  margin: 2px 0 0;
+  color: var(--text_color);
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.welcome-subtitle {
+  max-width: 460px;
+  margin: 0;
+  color: var(--text_color_disabled);
+}
+
+.welcome-actions {
+  display: flex;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+
+.welcome-hints {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.welcome-hints li {
+  margin: 2px 0;
+}
+
+/* ── кнопки и поля ──────────────────────────────────────────────────────── */
+
+/* Одно поведение у всего кликабельного: короткий переход цвета и лёгкое сжатие
+   при нажатии. Так кнопки, значки и пункты списков ощущаются одинаково. */
+.btn,
+.icon-btn,
+.select,
+.window-btn,
+.context-item,
+.select-item,
+.palette-item,
+.dock-tab,
+.term-tab {
+  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease),
+    border-color var(--motion_fast) var(--motion_ease), transform var(--motion_fast) var(--motion_ease);
+}
+
+.btn:active:not(:disabled),
+.icon-btn:active,
+.window-btn:active,
+.context-item:active,
+.select-item:active,
+.palette-item:active,
+.launcher-item:active {
+  transform: scale(0.97);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control_height);
+  padding: var(--control_padding_sm) 12px;
+  border: 1px solid var(--button_border_color);
+  border-radius: var(--radius_sm);
+  background: var(--button_background);
+  color: var(--text_color);
+  transition: background var(--motion_fast) var(--motion_ease), border-color var(--motion_fast) var(--motion_ease);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--button_border_color_hover);
+  background: var(--element_background_hover);
+}
+
+.btn:disabled {
+  background: var(--button_background_disabled);
+  color: var(--text_color_disabled);
+  cursor: default;
+}
+
+.btn-primary {
+  border-color: transparent;
+  background: var(--blue_prime_background);
+  color: var(--text_color_hover);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--blue_prime_background);
+  filter: brightness(1.08);
+}
+
+.btn-primary:disabled {
+  background: var(--blue_prime_background_tint_strong);
+  color: var(--text_color_hover);
+}
+
+.btn-small {
+  min-height: calc(var(--control_height) - 4px);
+  padding: 3px 9px;
+}
+
+.link-btn {
+  align-self: flex-start;
+  padding: 0;
+  color: var(--link_color);
+  font-size: var(--font_labels_size);
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-row .field-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Поле — углубление на своей панели, поэтому заливка относительная, а не готовый цвет.
+   Та же геометрия у выпадающего списка: снаружи он кнопка, но выглядеть должен полем. */
+.field-input,
+.select {
+  width: 100%;
+  min-height: var(--control_height);
+  padding: var(--control_padding_sm) 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  transition: background var(--motion_fast) var(--motion_ease), border-color var(--motion_fast) var(--motion_ease);
+}
+
+.select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+}
+
+.select:hover:not(.is-disabled) {
+  background: var(--element_background_hover);
+}
+
+.select svg {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+}
+
+.select-value {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Пустое значение — подсказка, а не текст: та же роль, что placeholder. */
+.select-value.is-empty {
+  color: var(--placeholder_text_color);
+}
+
+.select[aria-expanded='true'] {
+  border-color: var(--focus_ring_color);
+}
+
+.select-popup {
+  position: fixed;
+  z-index: 220;
+  max-height: 320px;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_background);
+  box-shadow: var(--box_shadow_drop);
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+.select-popup:focus {
+  outline: none;
+}
+
+.select-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: var(--control_padding_sm) 9px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+  text-align: left;
+  font-size: var(--font_labels_size);
+}
+
+.select-item:hover,
+.select-item.is-cursor {
+  background: var(--element_background_hover);
+}
+
+/* Текущее значение — та же заливка выделения, что у строки дерева и вкладки. */
+.select-item.is-selected {
+  background: var(--selection_background);
+}
+
+.select-item-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.select-item-hint {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.select-item:hover .select-item-hint,
+.select-item.is-cursor .select-item-hint,
+.select-item.is-selected .select-item-hint {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.field-input::placeholder,
+.chat-input::placeholder,
+.palette-input::placeholder {
+  color: var(--placeholder_text_color);
+}
+
+.field-input:focus,
+.search-input:focus,
+.chat-input:focus,
+.sc-message:focus {
+  outline: none;
+  border-color: var(--focus_ring_color);
+}
+
+.field-hint {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* ── проводник ──────────────────────────────────────────────────────────── */
+
+.explorer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.tree {
+  padding: 4px 0 12px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 8px);
+  height: calc(24px * var(--density));
+  margin: 0 4px;
+  padding-right: 8px;
+  border-radius: calc(var(--radius_sm) - 3px);
+  color: var(--text_color_disabled);
+  text-align: left;
+}
+
+.tree-row:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Выбранная строка — тонировка акцента: текст остаётся основным и читается в обеих схемах. */
+.tree-row.is-active,
+.tree-row.is-selected {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+.tree-row.is-editing {
+  background: var(--element_background_hover);
+}
+
+.tree-twisty {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  color: var(--text_color_tertiary);
+  transition: transform var(--motion_fast) var(--motion_ease);
+}
+
+.tree-twisty.is-open {
+  transform: rotate(90deg);
+}
+
+.tree-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tree-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--focus_ring_color);
+  border-radius: calc(var(--radius_sm) - 3px);
+  background: var(--sunken_background);
+  font-size: var(--font_labels_size);
+}
+
+.tree-loading,
+.empty-note {
+  padding: 10px 12px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.empty-note p {
+  margin: 0 0 8px;
+}
+
+/* ── нижняя панель ──────────────────────────────────────────────────────── */
+
+.dock {
+  display: flex;
+  flex-direction: column;
+}
+
+.dock-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 6px 0 8px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.dock-header-spacer,
+.toolbar-spacer {
+  flex: 1;
+}
+
+.dock-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.dock-tab {
+  padding: 4px 10px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.dock-tab:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Активная вкладка дока — та же заливка выделения, что у вкладки редактора,
+   выбранной строки дерева и пункта списков. */
+.dock-tab.is-active {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+.dock-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dock-body > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── терминал ───────────────────────────────────────────────────────────── */
+
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.term-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 3px 6px;
+}
+
+.term-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.term-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.term-tab {
+  padding: 3px 9px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+}
+
+.term-tab:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.term-tab.is-active {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+.term-tab.is-exited {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+/* Полотно консоли — углубление в доке: фон совпадает с полотном редактора. */
+.term-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 2px 0 0 6px;
+  background: var(--editor_terminal_background);
+}
+
+.term-instance {
+  height: 100%;
+}
+
+.xterm .xterm-viewport {
+  background: transparent !important;
+}
+
+/* ── поиск ──────────────────────────────────────────────────────────────── */
+
+.search-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.search-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 8px 10px 6px;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  color: var(--text_color_tertiary);
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-scope {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.search-status {
+  flex: 0 0 auto;
+  padding: 0 12px 6px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.search-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 10px;
+}
+
+.search-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 2px;
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+}
+
+.search-file-path {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.search-count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--radius_pill);
+  background: var(--element_background);
+  color: var(--text_color_tertiary);
+  font-size: 10px;
+}
+
+.search-hit {
+  display: flex;
+  gap: 10px;
+  width: calc(100% - 16px);
+  margin: 0 8px;
+  padding: 2px 8px 2px 14px;
+  border-radius: 4px;
+  color: var(--text_color_disabled);
+  text-align: left;
+  font-size: var(--font_labels_size);
+}
+
+.search-hit:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.search-line {
+  min-width: 28px;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
+  text-align: right;
+}
+
+.search-text {
+  overflow: hidden;
+  font-family: var(--font_mono);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.search-text mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--highlight_background);
+  color: var(--text_color);
+}
+
+/* ── чат ────────────────────────────────────────────────────────────────── */
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.chat-config {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 12px;
+  border-bottom: 1px solid var(--separator_color);
+  background: var(--sunken_background);
+}
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.chat-intro {
+  color: var(--text_color_disabled);
+}
+
+.chat-intro p {
+  margin: 0 0 6px;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.msg-body {
+  padding: 8px 10px;
+  border-radius: var(--radius_sm);
+  font-size: var(--font_labels_size);
+  overflow-wrap: anywhere;
+}
+
+.msg-user .msg-body {
+  align-self: flex-end;
+  background: var(--blue_prime_background_tint_strong);
+  color: var(--text_color_hover);
+}
+
+.msg-assistant .msg-body {
+  border: 1px solid var(--separator_color);
+  background: var(--sunken_background);
+}
+
+.text-block {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+}
+
+.text-block:last-child {
+  margin-bottom: 0;
+}
+
+.code-block {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  font-family: var(--font_mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.msg-error {
+  margin: 0;
+  color: var(--text_color_error);
+}
+
+.typing {
+  color: var(--text_color_tertiary);
+  font-style: italic;
+}
+
+.chat-footer {
+  flex: 0 0 auto;
+  padding: 10px;
+  border-top: 1px solid var(--separator_color);
+}
+
+.chat-input {
+  width: 100%;
+  padding: 6px 8px;
+  resize: vertical;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+}
+
+.chat-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chat-hint {
+  margin-right: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* ── статусбар ──────────────────────────────────────────────────────────── */
+
+.statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 100%;
+  padding: 0 10px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.status-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.status-item {
+  white-space: nowrap;
+}
+
+.status-file {
+  overflow: hidden;
+  color: var(--text_color);
+  text-overflow: ellipsis;
+}
+
+.status-muted {
+  color: var(--text_color_tertiary);
+}
+
+.status-ai {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text_color_tertiary);
+}
+
+.status-ai.is-busy {
+  color: var(--blue_prime_background);
+}
+
+/* ── всплывающие слои: полупрозрачный материал с блюром и тенью ─────────── */
+
+.context-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 210px;
+  padding: 4px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_background);
+  box-shadow: var(--box_shadow_drop);
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+.context-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: var(--control_padding_sm) 9px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+  text-align: left;
+  font-size: var(--font_labels_size);
+}
+
+.context-item:hover {
+  background: var(--element_background_hover);
+}
+
+.context-item.is-danger:hover {
+  background: var(--red_prime_background);
+  color: var(--text_color_hover);
+}
+
+.context-hint {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.context-item:hover .context-hint {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.context-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--separator_color);
+}
+
+/* ── палитра команд ─────────────────────────────────────────────────────── */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  justify-content: center;
+  padding-top: 90px;
+  background: var(--modal_scrim);
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  width: min(620px, 90vw);
+  max-height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_background);
+  box-shadow: var(--box_shadow_modal);
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+.palette-input {
+  flex: 0 0 auto;
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--separator_color);
+  background: transparent;
+  font-size: var(--font_default_size);
+}
+
+.palette-input:focus {
+  outline: none;
+}
+
+.palette-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: var(--control_padding_sm) 10px;
+  border-radius: var(--radius_sm);
+  text-align: left;
+}
+
+.palette-item.is-active {
+  background: var(--selection_background);
+}
+
+.palette-item-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.palette-item-category {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.palette-item-key {
+  padding: 1px 6px;
+  border: 1px solid var(--border_color);
+  border-radius: 4px;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 10.5px;
+}
+
+.palette-empty {
+  padding: 16px;
+  color: var(--text_color_tertiary);
+  text-align: center;
+}
+
+/* ── уведомления ────────────────────────────────────────────────────────── */
+
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 36px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 420px;
+  padding: 8px 12px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_background);
+  box-shadow: var(--box_shadow_drop);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+.toast.is-leaving {
+  opacity: 0;
+  transition: opacity var(--motion_base) var(--motion_ease);
+}
+
+.toast-error svg {
+  color: var(--text_color_error);
+}
+
+.toast-info svg {
+  color: var(--blue_prime_background);
+}
+
+.toast-text {
+  overflow-wrap: anywhere;
+}
+
+/* Одно появление у всех всплывающих слоёв: список, меню, палитра, тост.
+   Ощущение «слой выехал поверх» вместо «элемент возник». */
+@keyframes popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── стартовое окно ─────────────────────────────────────────────────────── */
+
+.launcher {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--main_background);
+}
+
+/* В стартовом окне шапка одна и без сетки: размер задаём явно. */
+.launcher .topbar {
+  flex: 0 0 auto;
+  height: var(--topbar_height);
+}
+
+.launcher-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 10px 28px 28px;
+  overflow: auto;
+}
+
+.launcher-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.launcher-subtitle {
+  max-width: 560px;
+  margin: 4px 0 0;
+  color: var(--text_color_disabled);
+}
+
+.launcher-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.launcher-action {
+  padding-inline: 14px;
+}
+
+.launcher-clone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--element_background_2);
+  animation: popup-in var(--motion_base) var(--motion_ease);
+}
+
+.launcher-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.launcher-path {
+  flex: 1;
+  min-width: 0;
+  padding: var(--control_padding_sm) 8px;
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.launcher-path.is-empty {
+  color: var(--placeholder_text_color);
+}
+
+.launcher-progress {
+  min-height: 15px;
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.launcher-error {
+  margin: 0;
+  color: var(--text_color_error);
+}
+
+.launcher-section-title {
+  margin-top: 4px;
+  color: var(--text_color_tertiary);
+}
+
+.launcher-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.launcher-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_disabled);
+  text-align: left;
+}
+
+.launcher-item:hover {
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+.launcher-item.is-missing {
+  opacity: 0.6;
+}
+
+.launcher-item-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.launcher-item-name {
+  overflow: hidden;
+  color: var(--text_color);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.launcher-item-path {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.launcher-item-hint {
+  flex: 0 0 auto;
+  color: var(--git_modified);
+  font-size: 11px;
+}
+
+/* Крестик появляется на наведении, как у вкладок и строк изменений. */
+.launcher-item-remove {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--text_color_tertiary);
+  opacity: 0;
+  transition: opacity var(--motion_fast) var(--motion_ease);
+}
+
+.launcher-item:hover .launcher-item-remove {
+  opacity: 1;
+}
+
+.launcher-item-remove:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.launcher-empty {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--border_color);
+  border-radius: var(--radius_md);
+  color: var(--text_color_tertiary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── git ────────────────────────────────────────────────────────────────── */
+
+/* Состояние файла — один язык для дерева и панели изменений: класс строки
+   задаёт цвет, а буква и имя берут его из переменной. */
+.is-modified {
+  --change_color: var(--git_modified);
+}
+
+.is-added {
+  --change_color: var(--git_added);
+}
+
+.is-untracked {
+  --change_color: var(--git_added);
+}
+
+.is-deleted {
+  --change_color: var(--git_deleted);
+}
+
+.is-renamed {
+  --change_color: var(--git_renamed);
+}
+
+.is-conflicted {
+  --change_color: var(--git_conflicted);
+}
+
+.tree-badge,
+.sc-badge {
+  min-width: 14px;
+  color: var(--change_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  text-align: center;
+}
+
+.tree-badge {
+  margin-left: auto;
+  padding-right: 2px;
+}
+
+/* Папка с правками внутри: точка в цвете самой заметной из них. Именно точка,
+   а не буква: сама папка не изменена, и «M» на ней читалась бы неправдой. */
+.tree-dot {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius_circle);
+  background: var(--change_color);
+}
+
+.sc-badge {
+  margin-left: auto;
+}
+
+/* Имя файла красим, только пока строка не выделена: на заливке выделения
+   статусный цвет теряет контраст с фоном. */
+.tree-row:not(.is-active):not(.is-selected) .tree-name,
+.sc-row .sc-row-name {
+  color: var(--change_color, inherit);
+}
+
+.source-control {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.sc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--text_color_tertiary);
+}
+
+.sc-branch-name {
+  overflow: hidden;
+  color: var(--text_color);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sc-branch-select {
+  width: auto;
+  max-width: 240px;
+  min-height: 22px;
+  margin-left: auto;
+}
+
+.sc-commit-box {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.sc-message {
+  width: 100%;
+  min-height: 54px;
+  padding: 6px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  resize: vertical;
+}
+
+.sc-commit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sc-hint {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+.sc-commit {
+  margin-left: auto;
+}
+
+.sc-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 0 10px;
+}
+
+.sc-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px 2px;
+  color: var(--text_color_tertiary);
+}
+
+.sc-group-count {
+  margin-left: auto;
+  font-family: var(--font_mono);
+}
+
+.sc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 8px);
+  height: calc(24px * var(--density));
+  margin: 0 4px;
+  padding: 0 6px 0 10px;
+  border-radius: calc(var(--radius_sm) - 3px);
+  color: var(--text_color_disabled);
+  text-align: left;
+}
+
+.sc-row:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.sc-row-name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sc-row-action {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--text_color_tertiary);
+  opacity: 0;
+  transition: opacity var(--motion_fast) var(--motion_ease);
+}
+
+.sc-row:hover .sc-row-action,
+.sc-row-action:focus-visible {
+  opacity: 1;
+}
+
+.sc-row-action:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* ── сравнение версий файла ─────────────────────────────────────────────── */
+
+.diff-view {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--editor_background);
+}
+
+.diff-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_tertiary);
+}
+
+.diff-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.diff-subtitle {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.diff-header .icon-btn {
+  margin-left: auto;
+}
+
+.diff-body {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── ветка в статусбаре ─────────────────────────────────────────────────── */
+
+.status-git {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.status-git:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.status-git-label {
+  font-family: var(--font_mono);
+}

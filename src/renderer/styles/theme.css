@@ -1,0 +1,255 @@
+/**
+ * Палитра приложения: цвета живут только здесь — в обеих схемах один и тот же
+ * набор ключей, компоненты берут их ключом через `var(--…)`.
+ *
+ * Ключи названы по смыслу, а не по цвету: роль (текст, заливка, разделитель,
+ * поверхность) важнее оттенка, а оттенок меняется вместе со схемой.
+ *
+ * Цвета взяты из таблиц системных цветов HIG. Ниже у каждого ключа назван его
+ * системный цвет, а в скобках — значения для светлой и тёмной схемы.
+ *
+ *   • поверхности: windowBackgroundColor (#ECECEC / #1E1E1E),
+ *     controlBackgroundColor (#FFFFFF / #1E1E1E) и systemGray5 (#E5E5EA / #2C2C2E)
+ *     для приподнятой карточки в тёмной схеме — HIG показывает подъём светлой
+ *     поверхностью, а не тенью;
+ *   • текст — ступени label: label (#000000D9 / #FFFFFFD9), secondaryLabel,
+ *     tertiaryLabel и placeholderTextColor. Цветной текст берёт затемнённые
+ *     ступени акцентов, иначе на светлом фоне он не проходит по контрасту;
+ *   • заливки контролов — ступени fill (#78788029 / #78788052): они
+ *     полупрозрачные, поэтому читаются на любой поверхности и в обеих схемах;
+ *   • линии: separatorColor (#3C3C4349 / #545458A6) и opaqueSeparatorColor;
+ *   • акценты — системные цвета из таблицы (blue, red, yellow, purple), у них
+ *     есть отдельная колонка значений для повышенного контраста — она
+ *     включается в `prefers-contrast: more`;
+ *   • всплывающие слои — обычная поверхность карточки: прозрачности и блюра нет,
+ *     слой держат рамка и тень;
+ *
+ * Сознательные отступления от HIG (и причина каждого):
+ *   • выделение — тонировка акцента, а не его сплошная заливка: сплошной акцент
+ *     спорит с подсветкой кода и требует белого текста;
+ *   • ссылка и цветной текст на светлом фоне взяты темнее акцента — ради контраста;
+ *   • цвета подсветки кода живут не здесь, а в `core/theme.ts`: Monaco не умеет
+ *     читать CSS-переменные, и второй копии этих значений быть не должно.
+ *
+ * Тёмная схема — в `:root`, светлая — переопределением в `@media`. Схему выбирает
+ * `nativeTheme.themeSource` в main-процессе, поэтому Chromium всегда отдаёт
+ * `prefers-color-scheme`, и CSS переключается сам, без правок в DOM.
+ */
+
+:root {
+  /* ── геометрия, плотность, движение ─────────────────────────────────────── */
+
+  --density: 1;
+  --font_scale: 1;
+
+  --radius_sm: 8px;
+  --radius_md: 12px;
+  --radius_pill: 999px;
+  --radius_circle: 50%;
+
+  --control_height: calc(29px * var(--density));
+  --toolbar_control_size: calc(28px * var(--density));
+  --control_padding_sm: calc(5px * var(--density));
+
+  /* Шапка — самая узкая полоса интерфейса, поэтому у её кнопок свой размер:
+     36 px минус зазор 6 px сверху и снизу = 24 px. Тот же зазор у панелей по бокам
+     и у кнопок от края окна, поэтому отступы ровные со всех сторон.
+     24 px — минимальный размер цели нажатия (WCAG 2.2). Кнопки в заголовках панелей
+     остаются крупнее: там высота 34 px и места больше. */
+  --topbar_height: calc(36px * var(--density));
+  --topbar_control_size: calc(24px * var(--density));
+
+  --font_default_size: calc(14px * var(--font_scale));
+  --font_labels_size: calc(12px * var(--font_scale));
+
+  --motion_fast: 0.15s;
+  --motion_base: 0.25s;
+  --motion_ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --focus_outline: 2px solid var(--focus_ring_color);
+  --focus_outline_offset: 2px;
+
+  --font_ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, 'Helvetica Neue', sans-serif;
+  --font_mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Consolas, monospace;
+
+  /* Высота строки интерфейса — общая для текста приложения и пунктов меню Monaco:
+     от неё зависит высота строки в меню и списках, а разойтись они не должны. */
+  --line_height_ui: 1.45;
+
+  /* ── тёмная схема ───────────────────────────────────────────────────────── */
+
+  /* Ступени текста: чем меньше вес в иерархии, тем тише ступень.
+     Подсказка поля — отдельная роль, она не равна выключенному тексту.
+     В тёмной схеме ступени выше светлых: полупрозрачный белый на тёмном фоне
+     теряет контраст быстрее, чем полупрозрачный чёрный на светлом —
+     шаг 0.25 давал серый по серому и читался как «грязь», а не как иерархия. */
+  --text_color: rgba(255, 255, 255, 0.92);
+  --text_color_disabled: rgba(255, 255, 255, 0.7);
+  --text_color_tertiary: rgba(255, 255, 255, 0.45);
+  --placeholder_text_color: rgba(255, 255, 255, 0.4);
+  --text_color_hover: #ffffff;
+  --text_color_error: #ff6a61;
+
+  /* Поверхности: окно — самый тёмный слой, содержимое лежит на нём карточкой.
+     В светлой схеме карточка белая на сером окне, в тёмной — светлее окна: подъём
+     в тёмных интерфейсах показывают светлой поверхностью, а не тенью.
+     Карточка совпадает по цвету с полотном редактора (как в VS Code Dark Modern),
+     поэтому активная вкладка сливается с кодом, а «остров» читается одной поверхностью. */
+  --main_background: #161618;
+  --element_background_2: #1e1e1e;
+
+  /* Полотно редактора и консоли. Эти два значения продублированы в `core/theme.ts`
+     (Monaco и xterm красят себя сами) — менять нужно в обоих местах. */
+  --editor_background: #1e1e1e;
+  --editor_terminal_background: #1e1e1e;
+
+  /* Заливки контролов: полупрозрачные, ступень — плотность состояния. */
+  --element_background: rgba(120, 120, 128, 0.32);
+  --element_background_hover: rgba(120, 120, 128, 0.36);
+  --button_background: rgba(120, 120, 128, 0.32);
+  --button_background_disabled: rgba(120, 120, 128, 0.18);
+  --sunken_background: rgba(0, 0, 0, 0.2);
+
+  /* Линии: рамку носит каждый блок, поэтому она плотнее разделителя. Контур блока
+     на тёмной поверхности светлее фона, но тише контура контрола: иначе карточки
+     превращаются в сетку из светлых рамок. */
+  --border_color: #3a3a3c;
+  --button_border_color: #48484a;
+  --button_border_color_hover: #0091ff;
+  --separator_color: rgba(84, 84, 88, 0.65);
+  --opaque_separator_color: #38383a;
+
+  /* Всплывающий слой — та же карточка, что у панелей: блюра и прозрачности нет,
+     слой держат рамка и тень. */
+  --popup_background: var(--element_background_2);
+  --popup_border: var(--border_color);
+  --modal_scrim: rgba(0, 0, 0, 0.5);
+
+  /* Акценты — значения HIG для тёмной схемы. Объявлены только те, которые
+     кто-то читает: остальные цвета таблицы появятся вместе со своими ролями. */
+  --blue_prime_background: #0091ff;
+  --red_prime_background: #ff4245;
+  --yellow_prime_background: #ffd600;
+  --purple_prime_background: #db34f2;
+
+  /* Состояния файлов в git. Это не системные цвета Apple: HIG не описывает
+     статусы файлов, поэтому значения подобраны под читаемость на нашей
+     поверхности — пометка должна читаться как текст, а не светиться. */
+  --git_modified: #d9b26a;
+  --git_added: #7fc08a;
+  --git_deleted: #e08a7a;
+  --git_renamed: #8fb8ff;
+  --git_conflicted: #ff6a61;
+
+  --focus_ring_color: var(--blue_prime_background);
+  --link_color: #4da6ff;
+
+  /* Выделение (строка дерева, вкладка терминала, пункт палитры) — непрозрачная смесь
+     акцента с поверхностью: полупрозрачная тонировка на тёмном фоне выцветала в серо-синий
+     и на разных панелях давала разный оттенок. В светлой схеме доля акцента меньше —
+     на белом тот же процент выглядит заметно ярче. */
+  --selection_background: color-mix(in srgb, var(--blue_prime_background) 30%, var(--element_background_2));
+
+  --blue_prime_background_tint_strong: rgba(0, 145, 255, 0.6);
+
+  --box_shadow_drop: 0 2px 6px rgb(0 0 0 / 26%), 0 14px 36px rgb(0 0 0 / 38%);
+  --box_shadow_modal: 0 4px 12px rgb(0 0 0 / 30%), 0 28px 72px rgb(0 0 0 / 46%);
+
+  --scrollbar_thumb: rgba(255, 255, 255, 0.35);
+
+  /* Подсветка найденного: жёлтый, как в системном поиске. */
+  --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 24%, transparent);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    /* ── светлая схема ───────────────────────────────────────────────────── */
+
+    --text_color: rgba(0, 0, 0, 0.85);
+    --text_color_disabled: rgba(0, 0, 0, 0.5);
+    --text_color_tertiary: rgba(0, 0, 0, 0.26);
+    --placeholder_text_color: rgba(0, 0, 0, 0.25);
+    --text_color_hover: #ffffff;
+    --text_color_error: #a1251e;
+
+    --main_background: #ececec;
+    --element_background_2: #ffffff;
+
+    --editor_background: #ffffff;
+    --editor_terminal_background: #ffffff;
+
+    --element_background: rgba(120, 120, 128, 0.16);
+    --element_background_hover: rgba(120, 120, 128, 0.24);
+    --button_background: rgba(120, 120, 128, 0.16);
+    --button_background_disabled: rgba(120, 120, 128, 0.08);
+    --sunken_background: rgba(0, 0, 0, 0.05);
+
+    --border_color: #c7c7cc;
+    --button_border_color: #c7c7cc;
+    --button_border_color_hover: #0088ff;
+    --separator_color: rgba(60, 60, 67, 0.29);
+    --opaque_separator_color: #c6c6c8;
+
+    --popup_background: var(--element_background_2);
+    --modal_scrim: rgba(0, 0, 0, 0.18);
+
+    --blue_prime_background: #0088ff;
+    --red_prime_background: #ff383c;
+    --yellow_prime_background: #ffcc00;
+    --purple_prime_background: #cb30e0;
+
+    /* Состояния git на светлом фоне затемнены: те же роли, но как текст. */
+    --git_modified: #8a6a1f;
+    --git_added: #1f7a34;
+    --git_deleted: #b03028;
+    --git_renamed: #1f5fd0;
+    --git_conflicted: #a1251e;
+
+    --focus_ring_color: var(--blue_prime_background);
+    /* На белом акцентный синий даёт контраст около 3 — для текста он затемнён. */
+    --link_color: #0066cc;
+
+    --selection_background: color-mix(in srgb, var(--blue_prime_background) 14%, var(--element_background_2));
+
+    --blue_prime_background_tint_strong: rgba(0, 136, 255, 0.6);
+
+    --box_shadow_drop: 0 2px 6px rgb(0 0 0 / 5%), 0 14px 36px rgb(0 0 0 / 9%);
+    --box_shadow_modal: 0 4px 12px rgb(0 0 0 / 6%), 0 28px 72px rgb(0 0 0 / 14%);
+
+    --scrollbar_thumb: rgba(0, 0, 0, 0.3);
+
+    --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 32%, transparent);
+  }
+}
+
+/**
+ * Повышенный контраст: у акцентов HIG есть отдельная колонка значений,
+ * а текст переходит на непрозрачные ступени и плотный разделитель.
+ */
+@media (prefers-contrast: more) {
+  :root {
+    --text_color: #ffffff;
+    --text_color_disabled: rgba(255, 255, 255, 0.85);
+    --text_color_tertiary: rgba(255, 255, 255, 0.65);
+    --placeholder_text_color: rgba(255, 255, 255, 0.6);
+    --separator_color: var(--opaque_separator_color);
+
+    --blue_prime_background: #5cb8ff;
+    --red_prime_background: #ff6165;
+    --yellow_prime_background: #fedf43;
+    --purple_prime_background: #ea8dff;
+  }
+}
+
+@media (prefers-color-scheme: light) and (prefers-contrast: more) {
+  :root {
+    --text_color: #000000;
+    --text_color_disabled: rgba(0, 0, 0, 0.7);
+    --text_color_tertiary: rgba(0, 0, 0, 0.45);
+
+    --blue_prime_background: #1e6ef4;
+    --red_prime_background: #e9152d;
+    --yellow_prime_background: #a16a00;
+    --purple_prime_background: #b02fc2;
+  }
+}

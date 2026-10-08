@@ -1,0 +1,38 @@
+{
+  "name": "chui-ide",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Chui IDE — Electron + TypeScript: документная модель, реестр команд, AI-ready архитектура",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "npm run build:main && node scripts/dev.mjs",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "vite build",
+    "build": "npm run build:main && npm run build:renderer",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json",
+    "start": "npm run build && electron .",
+    "rebuild": "electron-rebuild -f -w node-pty",
+    "smoke:pty": "ELECTRON_RUN_AS_NODE=1 electron scripts/pty-smoke.cjs",
+    "smoke:terminal": "npm run build:main && electron scripts/terminal-smoke.cjs",
+    "smoke:window": "npm run build:main && electron scripts/window-smoke.cjs",
+    "clean": "rm -rf dist",
+    "smoke:git": "npm run build:main && electron scripts/git-smoke.cjs",
+    "smoke:launcher": "npm run build && electron scripts/launcher-smoke.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.1",
+    "@types/node": "^26.6.4",
+    "electron": "^44.7.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.3"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "monaco-editor": "^0.57.0",
+    "node-pty": "^1.1.0"
+  }
+}
