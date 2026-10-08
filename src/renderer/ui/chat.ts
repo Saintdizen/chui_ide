@@ -5,13 +5,18 @@ import {
   type ApplyEditsHostParams,
   type ApplyEditsHostResult,
   type ChatAttachment,
+  type ChatConversation,
   type ChatDeltaPayload,
+  type ChatHistory,
   type ChatMessage,
+  type ChatPlanPayload,
   type ChatReasoningPayload,
   type ChatToolResultPayload,
   type ChatToolStartPayload,
   type ChatUsage,
+  type DirEntry,
   type PickedImage,
+  type PlanStep,
   type ReasoningEffort,
   type Settings,
 } from '../../shared/api';
@@ -23,11 +28,14 @@ import type { DocumentStore } from '../core/document-store';
 import type { EditService } from '../core/edits';
 import type { EditorService } from '../core/editor-service';
 import type { HostService } from '../core/host';
-import { RpcError, type RpcClient } from '../core/rpc';
-import { highlightInto } from '../core/highlight';
-import { type Child, type IconName, basename, clear, h, svgIcon } from './dom';
+import type { WorkspaceModel } from '../core/workspace-model';
+import { relativePath } from '../core/workspace-model';
+import { type RpcClient, RpcError } from '../core/rpc';
+import { basename, clear, h, svgIcon } from './dom';
 import { createSelect } from './select';
 import { createSessionInfo, createUsageRing, contextUsage, type SessionInfoData } from './session-info';
+import { createToolFeed, type ToolCardView } from './chat-tools';
+import { createMarkdownRenderer } from './chat-markdown';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
 
@@ -50,6 +58,8 @@ export interface ChatDeps {
   editors: EditorService;
   edits: EditService;
   commands: CommandRegistry;
+  /** Рабочая папка: её корень — ключ, по которому main находит историю бесед. */
+  workspace: WorkspaceModel;
   settings: Settings;
   /** Модальное окно со всеми настройками приложения. */
   settingsModal: SettingsOpener;
@@ -77,6 +87,9 @@ const COMPACT_PROMPT = [
 /** Сколько символов беседы уезжает на сжатие: хвост важнее начала. */
 const MAX_COMPACT_CHARS = 40_000;
 
+/** Размышления показываются целиком, но без предела один блок съест всю ленту. */
+const MAX_REASONING_CHARS = 20_000;
+
 /**
  * Панель ассистента — правый «остров» в стиле tool window.
  *
@@ -92,6 +105,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   let autoApprove = false;
   let streamBuffer = '';
   let frame = 0;
+  /**
+   * Тянем ли ленту вниз автоматически. Пользователь прокрутил вверх —
+   * стрим не дёргает ленту; вернулся к низу (или нажал кнопку) — снова тянем.
+   */
+  let autoScroll = true;
   /** Ожидания решений пользователя (ревью правок, подтверждение команды). */
   const pendingApprovals = new Set<() => void>();
 
@@ -102,6 +120,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   interface ChatSession {
     id: number;
+    /** Стабильный идентификатор для сохранения: номер вкладки перезапуск не переживёт. */
+    uid: string;
     title: string;
     /** Лента сообщений: своя у каждой беседы, при переключении не перерисовывается. */
     thread: HTMLElement;
@@ -113,6 +133,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     draft: string;
     /** Последний ответ: реальный размер контекста, каким его увидел провайдер. */
     usage?: ChatUsage;
+    /** Скорость последнего ответа в токенах в секунду (для «Информации о сессии»). */
+    speed?: number;
   }
 
   const sessions: ChatSession[] = [];
@@ -120,14 +142,44 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   let nextId = 1;
   /** Беседа, которая сейчас генерирует: хостовые вызовы приходят именно от неё. */
   let streamingSession: ChatSession | null = null;
+  /** Корень папки, к которой привязана текущая история: ключ сохранения. */
+  let chatRoot: string | null = null;
+  let saveTimer = 0;
+  let uidSeq = 0;
+  /** Идентификатор беседы: переживает перезапуск, поэтому не равен номеру вкладки. */
+  const newUid = (): string => `chat_${Date.now().toString(36)}_${(uidSeq += 1).toString(36)}`;
 
   const active = (): ChatSession => sessions.find((session) => session.id === activeId) ?? sessions[0]!;
 
   const body = h('div', { class: 'chat-body' });
+
+  /** Кнопка возврата к низу: появляется, когда лента прокручена вверх. */
+  const jumpButton = h(
+    'button',
+    {
+      class: 'chat-jump',
+      type: 'button',
+      title: 'К последнему сообщению',
+      onClick: () => {
+        autoScroll = true;
+        jumpButton.hidden = true;
+        body.scrollTop = body.scrollHeight;
+      },
+    },
+    svgIcon('chevronDown', 16),
+  );
+  jumpButton.hidden = true;
+
+  // Низ ленты — это «следить за ответом»; верх — «читать и не мешать».
+  body.addEventListener('scroll', () => {
+    const distance = body.scrollHeight - body.scrollTop - body.clientHeight;
+    autoScroll = distance < 40;
+    jumpButton.hidden = autoScroll;
+  });
   const input = h('textarea', {
     class: 'chat-input',
     rows: 3,
-    placeholder: 'Спросите о коде. «/» — команды, «#» — приложить контекст (Enter — отправить)',
+    placeholder: 'Спросите о коде. «/» — команды, «#» — контекст, «@» — файл проекта (Enter — отправить)',
     spellcheck: false,
   });
 
@@ -370,6 +422,82 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     else addAttachment(attachmentFrom('file'));
   }
 
+  /** Собрать вложение по произвольному пути: файл целиком или список папки. */
+  async function attachmentFromPath(target: string, kind: 'file' | 'dir'): Promise<ChatAttachment | null> {
+    try {
+      if (kind === 'dir') {
+        const entries = await deps.workspace.readDir(target);
+        const list = entries.map((entry) => `${entry.name}${entry.kind === 'directory' ? '/' : ''}`).join('\n');
+        return {
+          kind: 'note',
+          label: `${basename(target)}/`,
+          title: `Папка ${target}`,
+          text: `Содержимое папки ${target}:\n\n${list}`,
+        };
+      }
+      const file = await deps.rpc.request('workspace.readFile', { path: target });
+      const text = file.text.length > MAX_ATTACHMENT_CHARS ? `${file.text.slice(0, MAX_ATTACHMENT_CHARS)}\n… (файл обрезан)` : file.text;
+      return {
+        kind: 'file',
+        label: basename(target),
+        title: `Файл ${target}`,
+        text: `\`\`\`${languageFromPath(target)}\n${text}\n\`\`\``,
+      };
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+      return null;
+    }
+  }
+
+  /** Вложение из пути: тип определяем через stat, чтобы папка и файл шли разными путями. */
+  async function attachPath(target: string): Promise<void> {
+    try {
+      const stat = await deps.rpc.request('workspace.stat', { path: target });
+      addAttachment(await attachmentFromPath(target, stat.kind === 'directory' ? 'dir' : 'file'));
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  }
+
+  /* ── @-упоминания: список путей проекта ─────────────────────────────────── */
+
+  /** Плоский список путей для подсказки `@`: пересобирается при смене папки. */
+  let mentionCache: string[] | null = null;
+  const MENTION_SKIP = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
+  const MAX_MENTIONS = 4000;
+
+  async function collectMentions(): Promise<void> {
+    const root = deps.workspace.root;
+    if (!root) {
+      mentionCache = [];
+      return;
+    }
+
+    const result: string[] = [];
+    const walk = async (dir: string, depth: number): Promise<void> => {
+      if (depth > 6 || result.length >= MAX_MENTIONS) return;
+      let entries: DirEntry[];
+      try {
+        entries = await deps.workspace.readDir(dir);
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (result.length >= MAX_MENTIONS) return;
+        const rel = relativePath(root, entry.path);
+        if (entry.kind === 'directory') {
+          if (MENTION_SKIP.has(entry.name)) continue;
+          result.push(`${rel}/`);
+          await walk(entry.path, depth + 1);
+        } else {
+          result.push(rel);
+        }
+      }
+    };
+    await walk(root, 0);
+    mentionCache = result;
+  }
+
   /* ── меню композера: слэш-команды и контекст ───────────────────────────── */
 
   interface ComposerItem {
@@ -551,6 +679,31 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       return;
     }
 
+    // `@` — файл или папка проекта: так контекст прикладывается точнее всего.
+    const at = value.lastIndexOf('@');
+    if (at >= 0 && /(^|\s)@[\w./-]*$/.test(value)) {
+      const query = value.slice(at + 1).toLowerCase();
+      const candidates = (mentionCache ?? []).filter((path) => path.toLowerCase().includes(query)).slice(0, 30);
+      if (candidates.length === 0 && mentionCache === null) void collectMentions();
+      showMenu(
+        candidates.map((path) => {
+          const isDir = path.endsWith('/');
+          return {
+            title: path,
+            hint: isDir ? 'папка — список файлов' : 'файл — содержимое',
+            run: () => {
+              input.value = `${value.slice(0, at).trimEnd()} `.trimStart();
+              const root = deps.workspace.root ?? '';
+              const full = root ? `${root}/${path.replace(/\/$/, '')}` : path;
+              void attachPath(full);
+              input.focus();
+            },
+          };
+        }),
+      );
+      return;
+    }
+
     hideMenu();
   }
 
@@ -631,6 +784,96 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     { class: 'icon-btn', type: 'button', title: 'Новая беседа', onClick: () => newChat() },
     svgIcon('plus', 15),
   );
+
+  /* ── поиск по беседам ──────────────────────────────────────────────────── */
+
+  const searchInput = h('input', {
+    class: 'chat-search-input',
+    type: 'text',
+    spellcheck: false,
+    placeholder: 'Поиск по всем беседам',
+  });
+  const searchResults = h('div', { class: 'chat-search-results', hidden: true });
+  const searchBar = h('div', { class: 'chat-search', hidden: true }, searchInput, searchResults);
+  const searchButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Поиск по беседам', onClick: () => toggleSearch() },
+    svgIcon('search', 14),
+  );
+
+  function toggleSearch(): void {
+    searchBar.hidden = !searchBar.hidden;
+    if (searchBar.hidden) {
+      searchInput.value = '';
+      searchResults.hidden = true;
+      clear(searchResults);
+      input.focus();
+    } else {
+      searchInput.focus();
+    }
+  }
+
+  function runSearch(): void {
+    const query = searchInput.value.trim().toLowerCase();
+    clear(searchResults);
+    if (!query) {
+      searchResults.hidden = true;
+      return;
+    }
+
+    const matches: Array<{ session: ChatSession; snippet: string }> = [];
+    for (const session of sessions) {
+      for (const message of session.history) {
+        const text = message.content ?? '';
+        const at = text.toLowerCase().indexOf(query);
+        if (at < 0) continue;
+        const start = Math.max(0, at - 24);
+        const snippet = text.slice(start, at + query.length + 48).replace(/\s+/g, ' ').trim();
+        matches.push({ session, snippet });
+        break; // одна строка на беседу — список читается легче
+      }
+      if (matches.length >= 30) break;
+    }
+
+    searchResults.hidden = false;
+    if (matches.length === 0) {
+      searchResults.appendChild(h('div', { class: 'chat-search-empty' }, 'Ничего не найдено'));
+      return;
+    }
+
+    for (const match of matches) {
+      searchResults.appendChild(
+        h(
+          'button',
+          {
+            class: 'chat-search-item',
+            type: 'button',
+            onClick: () => {
+              const target = match.session;
+              activate(target.id);
+              requestAnimationFrame(() => {
+                const node = [...target.thread.querySelectorAll('.msg')].find((el) =>
+                  (el.textContent ?? '').toLowerCase().includes(query),
+                );
+                node?.scrollIntoView({ block: 'center' });
+                node?.classList.add('is-search-hit');
+              });
+            },
+          },
+          h('span', { class: 'chat-search-title' }, match.session.title),
+          h('span', { class: 'chat-search-snippet' }, match.snippet),
+        ),
+      );
+    }
+  }
+
+  searchInput.addEventListener('input', runSearch);
+  searchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      toggleSearch();
+    }
+  });
 
   /** Заголовок вкладки — по первому вопросу: в списке видно, о чём беседа. */
   function titleFrom(text: string): string {
@@ -731,9 +974,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
   }
 
-  function createSession(): ChatSession {
+  function createSession(uid = newUid()): ChatSession {
     const session: ChatSession = {
       id: nextId,
+      uid,
       title: `Беседа ${nextId}`,
       thread: h('div', { class: 'chat-thread' }),
       history: [],
@@ -797,11 +1041,181 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     renderTabs();
     syncSessionInfo();
+    scheduleSave();
   }
 
   function syncTabTitle(session: ChatSession, text: string): void {
     session.title = titleFrom(text);
     renderTabs();
+    scheduleSave();
+  }
+
+  /* ── сохранение бесед ─────────────────────────────────────────────────────
+   * Источник истины — renderer: он собирает ленту и историю. main пишет файл
+   * по корню проекта, поэтому при смене папки сначала сохраняется старая, а
+   * затем восстанавливается новая. Пишем с задержкой: история меняется пачкой
+   * (вопрос → ответ → инструменты), а файл нужен один на всю пачку.
+   */
+
+  /** Сериализация беседы: лента DOM и незаписанные правки на диск не уходят. */
+  function serializeSession(session: ChatSession): ChatConversation {
+    return {
+      uid: session.uid,
+      title: session.title,
+      updatedAt: Date.now(),
+      messages: session.history.map((message) => {
+        const copy: ChatMessage = { role: message.role, content: message.content };
+        if (message.name) copy.name = message.name;
+        if (message.toolCallId) copy.toolCallId = message.toolCallId;
+        if (message.rating) copy.rating = message.rating;
+        if (message.toolCalls?.length) copy.toolCalls = message.toolCalls.map((call) => ({ ...call }));
+        return copy;
+      }),
+      ...(session.usage ? { usage: { ...session.usage } } : {}),
+    };
+  }
+
+  /** Записать беседы этой папки немедленно: снимок берём синхронно, до отправки. */
+  function persistTo(root: string): void {
+    const conversations = sessions.map(serializeSession);
+    const activeUid = active()?.uid;
+    void deps.rpc
+      .request('ai.chats.save', { root, conversations, ...(activeUid ? { activeUid } : {}) })
+      .catch(() => undefined); // не сохранилось — не повод показывать ошибку в чате
+  }
+
+  function scheduleSave(): void {
+    if (!chatRoot) return;
+    if (saveTimer) window.clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(() => {
+      saveTimer = 0;
+      if (chatRoot) persistTo(chatRoot);
+    }, 400);
+  }
+
+  /** Обновить вид активной беседы после восстановления вкладок. */
+  function syncActiveView(): void {
+    const next = active();
+    for (const session of sessions) session.thread.hidden = session.id !== next.id;
+    input.value = next.draft;
+    renderAttachments();
+    renderChanges();
+    renderTabs();
+    syncSessionInfo();
+  }
+
+  /**
+   * Восстановление ленты по истории. Вызовы инструментов рисуем теми же
+   * карточками, что и при живом ответе: беседа после перезапуска должна
+   * читаться так же, как читалась до него.
+   */
+  function renderHistory(session: ChatSession): void {
+    clear(session.thread);
+    if (session.history.length === 0) {
+      renderIntro(session);
+      return;
+    }
+
+    const cards = new Map<string, ToolCardView>();
+    const lastIndex = session.history.length - 1;
+    session.history.forEach((message, index) => {
+      if (message.role === 'user') {
+        appendMessage(session, 'user', message.content, () => editUserMessage(session, index, message.content));
+        return;
+      }
+
+      if (message.role === 'assistant') {
+        const el = h('div', { class: 'msg msg-assistant' });
+        if (message.content) {
+          const content = h('div', { class: 'msg-body' });
+          markdown.renderInto(content, message.content);
+          el.appendChild(content);
+        }
+        if (message.toolCalls?.length) {
+          const feed = createToolFeed(el);
+          for (const call of message.toolCalls) {
+            cards.set(call.id, feed.add({ id: call.id, name: call.name, args: call.arguments }));
+          }
+          feed.seal();
+        }
+        // «Повторить» — только у последнего ответа: повторять середину беседы нечем.
+        if (message.content) {
+          const text = message.content;
+          attachAssistantActions(
+            el,
+            () => text,
+            index === lastIndex ? () => void regenerate(session) : undefined,
+            feedbackFor(session, index),
+          );
+        }
+        if (el.childElementCount > 0) session.thread.appendChild(el);
+        return;
+      }
+
+      // Результат инструмента: карточке из прошлого шага дописываем итог.
+      if (message.role === 'tool') {
+        const card = message.toolCallId ? cards.get(message.toolCallId) : undefined;
+        const failed = message.content.startsWith('Ошибка:');
+        card?.finish({
+          id: message.toolCallId ?? '',
+          name: message.name ?? '',
+          ok: !failed,
+          summary: failed ? message.content.slice(0, 120) : 'готово',
+          detail: message.content,
+        });
+      }
+    });
+    scrollToEnd(session);
+  }
+
+  async function loadChats(root: string): Promise<void> {
+    let history: ChatHistory;
+    try {
+      history = await deps.rpc.request('ai.chats.load', { root });
+    } catch {
+      return; // история — не то, ради чего стоит ломать открытие проекта
+    }
+    if (chatRoot !== root) return; // проект сменился, пока грузили
+
+    for (const session of sessions) session.thread.remove();
+    sessions.length = 0;
+    nextId = 1;
+
+    for (const conversation of history.conversations) {
+      const session = createSession(conversation.uid);
+      session.title = conversation.title;
+      session.history = [...conversation.messages];
+      session.usage = conversation.usage;
+      renderHistory(session);
+    }
+    if (sessions.length === 0) createSession();
+
+    const restored = history.activeUid ? sessions.find((item) => item.uid === history.activeUid) : undefined;
+    activeId = (restored ?? sessions[0]!).id;
+    syncActiveView();
+  }
+
+  function initPersistence(): void {
+    const applyRoot = (root: string | null): void => {
+      if (root === chatRoot) return;
+      // Прежняя папка сохраняется до смены chatRoot: сессии ещё её.
+      if (chatRoot) persistTo(chatRoot);
+      chatRoot = root;
+      if (root) void loadChats(root);
+    };
+
+    applyRoot(deps.workspace.root);
+    if (!chatRoot) {
+      // Проект открывается позже (окно IDE стартует после лаунчера): пустая беседа.
+      createSession();
+      renderTabs();
+    }
+    // Список путей для `@` собираем заранее: подсказка должна открыться мгновенно.
+    void collectMentions();
+    deps.workspace.onDidChange((info) => {
+      applyRoot(info?.root ?? null);
+      void collectMentions();
+    });
   }
 
   /* ── информация о сессии ───────────────────────────────────────────────── */
@@ -821,6 +1235,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       tools: useTools,
       reservedTokens: settings.ai.maxTokens,
       usage: session.usage,
+      speed: session.speed,
+      contextWindow: settings.ai.contextWindow,
     };
   }
 
@@ -912,6 +1328,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       setBusy(false, session);
       renderTabs();
       syncSessionInfo();
+      scheduleSave();
     }
   }
 
@@ -1094,9 +1511,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       'div',
       { class: 'panel-header chat-tabs' },
       tabList,
-      h('div', { class: 'panel-actions' }, newChatButton),
+      h('div', { class: 'panel-actions' }, searchButton, newChatButton),
     ),
+    searchBar,
     body,
+    jumpButton,
     h(
       'div',
       { class: 'chat-footer' },
@@ -1131,8 +1550,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // Перетаскивание изображения на панель чата — тот же путь, что вставка из буфера.
   // Слушатели на корне: файл можно бросить в любое место панели, не только в поле.
   element.addEventListener('dragover', (event) => {
-    const items = [...(event.dataTransfer?.items ?? [])];
-    if (!items.some((item) => item.kind === 'file' && item.type.startsWith('image/'))) return;
+    const hasImage = [...(event.dataTransfer?.items ?? [])].some(
+      (item) => item.kind === 'file' && item.type.startsWith('image/'),
+    );
+    const hasPath = [...(event.dataTransfer?.types ?? [])].includes('application/x-chui-path');
+    if (!hasImage && !hasPath) return;
     event.preventDefault();
     element.classList.add('is-dropping');
   });
@@ -1142,11 +1564,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (event.target === element) element.classList.remove('is-dropping');
   });
   element.addEventListener('drop', (event) => {
+    const path = event.dataTransfer?.getData('application/x-chui-path') ?? '';
     const files = [...(event.dataTransfer?.files ?? [])];
-    if (!files.some((file) => file.type.startsWith('image/'))) return;
+    const hasImage = files.some((file) => file.type.startsWith('image/'));
+    if (!path && !hasImage) return;
     event.preventDefault();
     element.classList.remove('is-dropping');
-    void attachFiles(files);
+    // Путь из дерева и картинки из буфера идут разными путями.
+    if (path) void attachPath(path);
+    else void attachFiles(files);
   });
 
   /* ── провайдер и модель ────────────────────────────────────────────────── */
@@ -1170,17 +1596,28 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /* ── рендер сообщений ──────────────────────────────────────────────────── */
 
-  function scrollToEnd(session: ChatSession = active()): void {
+  function scrollToEnd(session: ChatSession = active(), force = false): void {
     // Фоновая беседа может генерировать, но прокручивать чужую ленту нельзя:
     // полоса прокрутки у панели одна, и она принадлежит активной вкладке.
     if (session.id !== activeId) return;
+    // Пользователь читает выше — не дёргаем ленту под ним.
+    if (!autoScroll && !force) return;
     body.scrollTop = body.scrollHeight;
   }
 
-  function appendMessage(session: ChatSession, role: 'user' | 'assistant', text: string): HTMLElement {
+  function appendMessage(
+    session: ChatSession,
+    role: 'user' | 'assistant',
+    text: string,
+    onEdit?: () => void,
+  ): HTMLElement {
     const content = h('div', { class: 'msg-body' });
-    if (text) renderInto(content, text);
-    session.thread.appendChild(h('div', { class: `msg msg-${role}` }, content));
+    if (text) markdown.renderInto(content, text);
+    const messageEl = h('div', { class: `msg msg-${role}` }, content);
+    // Действия есть только у вопросов пользователя — у ответов они рисуются
+    // отдельно, когда ответ завершён (см. streamReply / renderHistory).
+    if (role === 'user' && onEdit) attachUserActions(messageEl, text, onEdit);
+    session.thread.appendChild(messageEl);
     scrollToEnd(session);
     return content;
   }
@@ -1189,7 +1626,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (frame) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
-      renderInto(target, streamBuffer);
+      markdown.renderInto(target, streamBuffer);
       scrollToEnd(session);
     });
   }
@@ -1216,6 +1653,145 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /* ── отправка ──────────────────────────────────────────────────────────── */
+
+  /** Текст ответа из всех его сегментов — для «Копировать». */
+  function assistantText(messageEl: HTMLElement): string {
+    return [...messageEl.querySelectorAll('.msg-body')]
+      .map((node) => node.textContent ?? '')
+      .join('\n')
+      .trim();
+  }
+
+  /** Копирование с сообщением об успехе: буфер обмена доступен не всегда. */
+  function copyText(text: string): void {
+    if (!text.trim()) {
+      showToast('Нечего копировать');
+      return;
+    }
+    void navigator.clipboard.writeText(text).then(
+      () => showToast('Скопировано'),
+      () => showToast('Не удалось скопировать', 'error'),
+    );
+  }
+
+  /** Кнопки под сообщением пользователя: править текст вопроса и скопировать. */
+  function attachUserActions(messageEl: HTMLElement, text: string, onEdit: () => void): void {
+    messageEl.appendChild(
+      h(
+        'div',
+        { class: 'msg-actions' },
+        h('button', { class: 'link-btn', type: 'button', onClick: onEdit }, 'Править'),
+        h('button', { class: 'link-btn', type: 'button', onClick: () => copyText(text) }, 'Копировать'),
+      ),
+    );
+  }
+
+  /** Оценка ответа: хранится в истории и переживает перезапуск. */
+  interface MessageFeedback {
+    get(): 'up' | 'down' | undefined;
+    set(value: 'up' | 'down' | undefined): void;
+  }
+
+  function feedbackFor(session: ChatSession, index: number): MessageFeedback {
+    return {
+      get: () => session.history[index]?.rating,
+      set: (value) => {
+        const message = session.history[index];
+        if (!message) return;
+        if (value) message.rating = value;
+        else delete message.rating;
+        scheduleSave();
+      },
+    };
+  }
+
+  /** Кнопки под ответом: скопировать, повторить и оценить (👍/👎). */
+  function attachAssistantActions(
+    messageEl: HTMLElement,
+    getText: () => string,
+    onRegenerate?: () => void,
+    feedback?: MessageFeedback,
+  ): void {
+    const actions = h(
+      'div',
+      { class: 'msg-actions' },
+      h('button', { class: 'link-btn', type: 'button', onClick: () => copyText(getText()) }, 'Копировать'),
+    );
+    if (onRegenerate) {
+      actions.appendChild(h('button', { class: 'link-btn', type: 'button', onClick: onRegenerate }, 'Повторить'));
+    }
+    if (feedback) {
+      const up = h('button', { class: 'link-btn msg-rate', type: 'button', title: 'Полезный ответ' }, '👍');
+      const down = h('button', { class: 'link-btn msg-rate', type: 'button', title: 'Неудачный ответ' }, '👎');
+      const sync = (): void => {
+        up.classList.toggle('is-active', feedback.get() === 'up');
+        down.classList.toggle('is-active', feedback.get() === 'down');
+      };
+      up.addEventListener('click', () => {
+        feedback.set(feedback.get() === 'up' ? undefined : 'up');
+        sync();
+      });
+      down.addEventListener('click', () => {
+        feedback.set(feedback.get() === 'down' ? undefined : 'down');
+        sync();
+      });
+      sync();
+      actions.append(up, down);
+    }
+    messageEl.appendChild(actions);
+  }
+
+  /** «Править»: отрезать этот вопрос и всё после него, вернуть текст в поле ввода. */
+  function editUserMessage(session: ChatSession, index: number, text: string): void {
+    if (busy) {
+      showToast('Дождитесь ответа или остановите генерацию');
+      return;
+    }
+    if (index < 0 || index >= session.history.length) return;
+
+    session.history = session.history.slice(0, index);
+    session.usage = undefined;
+    session.speed = undefined;
+    renderHistory(session);
+    syncSessionInfo();
+    scheduleSave();
+    input.value = text;
+    session.draft = text;
+    input.focus();
+  }
+
+  /** «Повторить»: выбросить ответы после последнего вопроса и спросить снова. */
+  async function regenerate(session: ChatSession = active()): Promise<void> {
+    if (busy) {
+      showToast('Дождитесь ответа или остановите генерацию');
+      return;
+    }
+
+    let lastUser = -1;
+    for (let i = session.history.length - 1; i >= 0; i -= 1) {
+      if (session.history[i]!.role === 'user') {
+        lastUser = i;
+        break;
+      }
+    }
+    if (lastUser < 0) {
+      showToast('Нет вопроса для повтора');
+      return;
+    }
+
+    const provider = currentProvider();
+    const model = currentModel();
+    if (!provider || !model) {
+      showToast('Провайдер не настроен', 'error');
+      return;
+    }
+
+    session.history = session.history.slice(0, lastUser + 1);
+    session.usage = undefined;
+    session.speed = undefined;
+    renderHistory(session);
+    await streamReply(session, provider.id, model, []);
+  }
 
   async function send(raw: string): Promise<void> {
     const text = raw.trim();
@@ -1248,8 +1824,26 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       clear(session.thread);
       syncTabTitle(session, text);
     }
-    appendMessage(session, 'user', text);
+    const index = session.history.length - 1;
+    appendMessage(session, 'user', text, () => editUserMessage(session, index, text));
 
+    // Новый вопрос — снова следим за низом ленты.
+    autoScroll = true;
+    jumpButton.hidden = true;
+
+    await streamReply(session, provider.id, model, sent);
+  }
+
+  /**
+   * Стриминг ответа в ленту беседы. Отделено от `send`, потому что «Повторить»
+   * и «Продолжить» переиспользуют тот же путь, не добавляя новый вопрос.
+   */
+  async function streamReply(
+    session: ChatSession,
+    providerId: string,
+    model: string,
+    attachments: ChatAttachment[],
+  ): Promise<void> {
     // Ответ ассистента — это последовательность «текст → карточка инструмента →
     // текст», поэтому внутри одного сообщения живёт несколько текстовых сегментов.
     const messageEl = h('div', { class: 'msg msg-assistant' });
@@ -1262,6 +1856,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     let reasoningBuffer = '';
     let reasoningBox: HTMLElement | null = null;
     let reasoningFrame = 0;
+    /** Чек-лист плана: один на ответ, обновляется на каждом событии плана. */
+    let planCard: HTMLElement | null = null;
+    /** Замер скорости ответа: от первого текстового фрагмента до конца потока. */
+    let firstDeltaAt = 0;
+    let lastDeltaAt = 0;
 
     streamBuffer = '';
     scrollToEnd(session);
@@ -1269,12 +1868,35 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     const flushSegment = (): void => {
       cancelFrame();
-      renderInto(segment, streamBuffer);
+      markdown.renderInto(segment, streamBuffer);
+    };
+
+    /** Чек-лист шагов: агент шлёт свой план, мы рисуем прогресс. */
+    const pushPlan = (steps: PlanStep[]): void => {
+      if (!planCard) {
+        planCard = h('div', { class: 'plan-card' });
+        messageEl.insertBefore(planCard, segment);
+      }
+      clear(planCard);
+      planCard.appendChild(h('div', { class: 'plan-head' }, svgIcon('command', 12), h('span', {}, 'План')));
+      const list = h('div', { class: 'plan-list' });
+      for (const step of steps) {
+        list.appendChild(
+          h(
+            'div',
+            { class: `plan-step is-${step.status}` },
+            h('span', { class: 'plan-mark' }, step.status === 'done' ? svgIcon('sparkle', 11) : null),
+            h('span', { class: 'plan-text' }, step.text),
+          ),
+        );
+      }
+      planCard.appendChild(list);
+      scrollToEnd(session);
     };
 
     /** Размышления — сворачиваемый блок перед ответом, как у reasoning-моделей. */
     const pushReasoning = (chunk: string): void => {
-      reasoningBuffer += chunk;
+      if (reasoningBuffer.length < MAX_REASONING_CHARS) reasoningBuffer += chunk;
 
       if (!reasoningBox) {
         reasoningBox = h(
@@ -1311,16 +1933,20 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const done = await deps.rpc.stream(
         'ai.chat',
         {
-          providerId: provider.id,
+          providerId,
           model,
           messages: session.history.map((message) => ({ ...message })),
           useTools,
           autoApprove,
-          attachments: sent,
+          attachments,
         },
         (event, payload) => {
           if (event === ChatStreamEvent.Reasoning) {
             pushReasoning((payload as ChatReasoningPayload).text);
+            return;
+          }
+          if (event === ChatStreamEvent.Plan) {
+            pushPlan((payload as ChatPlanPayload).steps);
             return;
           }
           if (event === ChatStreamEvent.Delta) {
@@ -1328,6 +1954,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
             collapseReasoning();
             // Пошёл текст ответа — цепочка вызовов закончилась.
             tools.seal();
+            const now = performance.now();
+            if (firstDeltaAt === 0) firstDeltaAt = now;
+            lastDeltaAt = now;
             streamBuffer += (payload as ChatDeltaPayload).text;
             scheduleRender(segment, session);
             return;
@@ -1335,6 +1964,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           if (event === ChatStreamEvent.ToolStart) {
             const call = payload as ChatToolStartPayload;
             flushSegment();
+            // Новый вызов — новый текстовый сегмент. Буфер держит текст ТОЛЬКО
+            // текущего шага: иначе в следующий сегмент выльется весь предыдущий
+            // текст и ответ будет повторяться в каждом пузыре.
+            streamBuffer = '';
+            // Размышления тоже пошаговые: блок предыдущего шага закрываем, следующий
+            // шаг заведёт свой — иначе всё копится в одном блоке перед первым сегментом.
+            if (reasoningFrame) cancelAnimationFrame(reasoningFrame);
+            reasoningFrame = 0;
+            reasoningBuffer = '';
+            reasoningBox = null;
             toolCards.set(call.id, tools.add(call));
             segment = h('div', { class: 'msg-body' });
             messageEl.appendChild(segment);
@@ -1353,6 +1992,36 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       tools.seal();
       session.history.push(...(done.agentMessages ?? [{ role: 'assistant', content: done.text }]));
       session.usage = done.usage;
+
+      // Скорость ответа: токены / время потока. Без обоих чисел не показываем.
+      const completion = done.usage?.completionTokens;
+      session.speed =
+        completion !== undefined && firstDeltaAt > 0 && lastDeltaAt > firstDeltaAt
+          ? completion / ((lastDeltaAt - firstDeltaAt) / 1000)
+          : undefined;
+
+      // Обрыв по лимиту токенов: без пометки ответ выглядит просто коротким.
+      if (done.finishReason === 'length') {
+        messageEl.appendChild(
+          h(
+            'div',
+            { class: 'finish-note' },
+            svgIcon('warning', 12),
+            h('span', {}, 'Ответ обрезан по лимиту токенов'),
+            h(
+              'button',
+              {
+                class: 'link-btn',
+                type: 'button',
+                onClick: () => void send('Продолжи ответ с того места, где остановился.'),
+              },
+              'Продолжить',
+            ),
+          ),
+        );
+      }
+
+      attachAssistantActions(messageEl, () => assistantText(messageEl), () => void regenerate(session), feedbackFor(session, session.history.length - 1));
       scrollToEnd(session);
     } catch (error) {
       flushSegment();
@@ -1371,8 +2040,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       setBusy(false, session);
       renderTabs();
       syncSessionInfo();
+      scheduleSave();
       void deps.rpc
-        .request('settings.update', { ai: { activeProviderId: provider.id, activeModel: model } })
+        .request('settings.update', { ai: { activeProviderId: providerId, activeModel: model } })
         .catch(() => undefined);
     }
   }
@@ -1401,6 +2071,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     renderChanges();
     renderTabs();
     sessionInfo.hide();
+    scheduleSave();
     requestAnimationFrame(() => {
       body.scrollTop = 0;
       input.focus();
@@ -1611,6 +2282,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // Пометки языка живут в Monaco, поэтому их отдаёт renderer.
   deps.host.handle('ai.getDiagnostics', async (params) => ({ items: deps.editors.markers(params.path) }));
 
+  // Показать файл в редакторе: открытие вкладки и позиция курсора — дело renderer.
+  deps.host.handle('ai.openFile', async (params) => {
+    deps.editors.reveal(params.path, params.line ?? 1, params.column ?? 1);
+    return { ok: true };
+  });
+
   /**
    * Правки агента: в автопилоте применяем сразу, иначе сперва показываем ревью.
    * Запись в историю и панель изменений — в обоих случаях: пользователь должен
@@ -1649,160 +2326,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return { rejected: false, result };
   }
 
-  /**
-   * Компактный markdown: заголовки, списки, цитаты, блоки кода и инлайн-разметка.
-   * Никакого innerHTML — узлы создаются напрямую, поэтому ответ модели
-   * не может вставить разметку в интерфейс.
-   */
-  function renderInto(container: HTMLElement, text: string): void {
-    clear(container);
-    if (!text) return;
-    for (const node of markdownBlocks(text)) container.appendChild(node);
-  }
-
-  function markdownBlocks(text: string): HTMLElement[] {
-    const nodes: HTMLElement[] = [];
-    const lines = text.split('\n');
-    let index = 0;
-
-    while (index < lines.length) {
-      const line = lines[index] ?? '';
-
-      // Блок кода: ``` с необязательным языком.
-      if (line.trimStart().startsWith('```')) {
-        const language = line.trim().slice(3).trim();
-        const body: string[] = [];
-        index += 1;
-        while (index < lines.length && !(lines[index] ?? '').trimStart().startsWith('```')) {
-          body.push(lines[index] ?? '');
-          index += 1;
-        }
-        index += 1;
-        nodes.push(codeBlock(body.join('\n'), language));
-        continue;
-      }
-
-      if (!line.trim()) {
-        index += 1;
-        continue;
-      }
-
-      const heading = /^(#{1,4})\s+(.*)$/.exec(line);
-      if (heading) {
-        nodes.push(h('div', { class: `md-heading md-h${heading[1]!.length}` }, ...inlineMarkdown(heading[2] ?? '')));
-        index += 1;
-        continue;
-      }
-
-      if (/^>\s?/.test(line)) {
-        const body: string[] = [];
-        while (index < lines.length && /^>\s?/.test(lines[index] ?? '')) {
-          body.push((lines[index] ?? '').replace(/^>\s?/, ''));
-          index += 1;
-        }
-        nodes.push(h('blockquote', { class: 'md-quote' }, ...inlineMarkdown(body.join(' '))));
-        continue;
-      }
-
-      const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
-      const ordered = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-      if (bullet || ordered) {
-        const list = h(bullet ? 'ul' : 'ol', { class: 'md-list' });
-        while (index < lines.length) {
-          const match = (bullet ? /^\s*[-*+]\s+(.*)$/ : /^\s*\d+[.)]\s+(.*)$/).exec(lines[index] ?? '');
-          if (!match) break;
-          list.appendChild(h('li', {}, ...inlineMarkdown(match[1] ?? '')));
-          index += 1;
-        }
-        nodes.push(list);
-        continue;
-      }
-
-      // Абзац: строки до пустой. Перенос внутри абзаца — мягкий, как в markdown.
-      const paragraph: string[] = [];
-      while (index < lines.length) {
-        const next = lines[index] ?? '';
-        if (!next.trim() || /^(#{1,4}\s|>|\s*[-*+]\s|\s*\d+[.)]\s)/.test(next) || next.trimStart().startsWith('```')) break;
-        paragraph.push(next.trim());
-        index += 1;
-      }
-      if (paragraph.length > 0) nodes.push(h('p', { class: 'md-p' }, ...inlineMarkdown(paragraph.join(' '))));
-      else index += 1;
-    }
-
-    return nodes;
-  }
-
-  /** Инлайн-разметка: `код`, **жирный** и ссылки в виде текста с подсказкой. */
-  function inlineMarkdown(text: string): Child[] {
-    const nodes: Child[] = [];
-    const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g;
-    let last = 0;
-
-    for (const match of text.matchAll(pattern)) {
-      const start = match.index ?? 0;
-      if (start > last) nodes.push(text.slice(last, start));
-
-      const token = match[0];
-      if (token.startsWith('`')) {
-        nodes.push(h('code', { class: 'md-code' }, token.slice(1, -1)));
-      } else if (token.startsWith('**')) {
-        nodes.push(h('strong', {}, token.slice(2, -2)));
-      } else {
-        const link = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
-        if (link) nodes.push(h('span', { class: 'md-link', title: link[2] ?? '' }, link[1] ?? ''));
-      }
-
-      last = start + token.length;
-    }
-
-    if (last < text.length) nodes.push(text.slice(last));
-    return nodes;
-  }
-
-  /** Блок кода с действиями: без них ответ переносят руками. */
-  function codeBlock(code: string, language: string): HTMLElement {
-    const bar = h(
-      'div',
-      { class: 'code-bar' },
-      h('span', { class: 'code-lang' }, language || 'text'),
-      h(
-        'button',
-        {
-          class: 'link-btn code-action',
-          type: 'button',
-          onClick: () => {
-            void navigator.clipboard.writeText(code).then(
-              () => showToast('Скопировано'),
-              () => showToast('Не удалось скопировать', 'error'),
-            );
-          },
-        },
-        'Копировать',
-      ),
-      h(
-        'button',
-        {
-          class: 'link-btn code-action',
-          type: 'button',
-          onClick: () => {
-            if (deps.editors.insertAtCursor(code)) showToast('Вставлено в позицию курсора');
-            else showToast('Нет открытого редактора', 'error');
-          },
-        },
-        'Вставить',
-      ),
-    );
-
-    return h('div', { class: 'code-block' }, bar, h('pre', {}, codeNode(code, language)));
-  }
-
-  /** Блок кода: текст сразу, цвета — как отдаст Monaco. */
-  function codeNode(code: string, language: string): HTMLElement {
-    const node = h('code', {});
-    highlightInto(node, code, language);
-    return node;
-  }
+  /** Разбор ответа в узлы: движок markdown живёт в отдельном модуле. */
+  const markdown = createMarkdownRenderer({ insertCode: (code) => deps.editors.insertAtCursor(code) });
 
   input.addEventListener('input', syncMenu);
 
@@ -1833,10 +2358,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     void send(input.value);
   });
 
-  // Первая беседа создаётся до отрисовки композера: чипы и панель изменений
-  // читают состояние активной беседы, и без неё им нечего показывать.
-  createSession();
-  renderTabs();
+  // Первая беседа и восстановление истории — до отрисовки композера: чипы и
+  // панель изменений читают состояние активной беседы, без неё им нечего показывать.
+  initPersistence();
   syncProviderFields();
   syncMode();
   syncEffort();
@@ -1853,30 +2377,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       settings = next;
       syncProviderFields();
       syncEffort();
+      // Размер контекстного окна тоже в настройках: кольцо должно пересчитаться
+      // сразу, а не после следующего ответа модели.
+      syncSessionInfo();
     },
   };
 }
 
-/* ── карточки вызовов инструментов ──────────────────────────────────────── */
-
-const TOOL_LABELS: Record<string, string> = {
-  list_dir: 'Просмотр папки',
-  read_file: 'Чтение файла',
-  search: 'Поиск по проекту',
-  get_diagnostics: 'Диагностика',
-  apply_edit: 'Правка файлов',
-  run_terminal: 'Команда в терминале',
-};
-
-/** У инструмента свой значок: строка читается без чтения подписи. */
-const TOOL_ICONS: Record<string, IconName> = {
-  list_dir: 'folder',
-  read_file: 'file',
-  search: 'search',
-  get_diagnostics: 'warning',
-  apply_edit: 'wrench',
-  run_terminal: 'terminal',
-};
+/* ── ревью правок: ограничения показа и сводка ──────────────────────────── */
 
 /** Ограничения показа: ревью — не редактор, длинные пачки правок ему не нужны. */
 const MAX_REVIEW_HUNKS = 20;
@@ -1919,244 +2427,4 @@ function countLines(edits: readonly FileEdit[], target: string): { added: number
   return { added, removed };
 }
 
-function toolLabel(name: string): string {
-  return TOOL_LABELS[name] ?? name;
-}
-
-function toolIcon(name: string): IconName {
-  return TOOL_ICONS[name] ?? 'wrench';
-}
-
-/** Аргументы вызова в одну строку: путь, запрос, маска. */
-function summarizeArgs(raw: string): string {
-  try {
-    const value = JSON.parse(raw) as Record<string, unknown>;
-    const parts: string[] = [];
-    if (typeof value.path === 'string') parts.push(value.path);
-    if (typeof value.query === 'string') parts.push(`«${value.query}»`);
-    if (typeof value.glob === 'string') parts.push(value.glob);
-    if (typeof value.command === 'string') parts.push(value.command);
-    // apply_edit: в карточке нужны имена файлов, а не сырой JSON на 80 символов.
-    if (Array.isArray(value.edits)) {
-      for (const file of value.edits) {
-        if (file && typeof file === 'object' && typeof (file as { path?: unknown }).path === 'string') {
-          parts.push(basename((file as { path: string }).path));
-        }
-      }
-    }
-    if (parts.length === 0) parts.push(raw.trim().slice(0, 80));
-    return parts.join(' · ');
-  } catch {
-    return raw.trim().slice(0, 80);
-  }
-}
-
-/** Строка вызова инструмента и её обновление — в одном месте. */
-interface ToolCardView {
-  card: HTMLElement;
-  finish(result: ChatToolResultPayload): void;
-}
-
-/**
- * Язык для подсветки вывода инструмента. Вывод — это код: содержимое файла
- * или команда, и он заслуживает той же подсветки, что блоки в ответе.
- */
-function toolDetailLanguage(call: ChatToolStartPayload): string {
-  if (call.name === 'run_terminal') return 'shell';
-  if (call.name !== 'read_file' && call.name !== 'list_dir') return '';
-  try {
-    const args = JSON.parse(call.args) as { path?: unknown };
-    return typeof args.path === 'string' ? languageFromPath(args.path) : '';
-  } catch {
-    return ''; // аргументы не разобрались — покажем текстом, это не ошибка
-  }
-}
-
-/** Состояние строки вызова: пока идёт — «выполняется…», потом итог. */
-function toolStateElement(): HTMLElement {
-  return h('span', { class: 'tool-state' }, 'выполняется…');
-}
-
-function setToolState(element: HTMLElement, ok: boolean): void {
-  element.textContent = ok ? 'готово' : 'ошибка';
-  element.classList.toggle('is-fail', !ok);
-}
-
-/** Одна группа вызовов: шапка со сводкой и строки под раскрытием. */
-interface ToolGroupView {
-  add(call: ChatToolStartPayload): ToolCardView;
-  seal(): void;
-}
-
-function createToolGroup(container: HTMLElement): ToolGroupView {
-  let count = 0;
-  let pending = 0;
-  let failed = 0;
-  /** Раскрыта ли группа руками: тогда автоматика её не сворачивает. */
-  let pinned = false;
-  let expanded = true;
-  const names: string[] = [];
-
-  const title = h('span', { class: 'tool-group-title' }, 'Действия');
-  const tools = h('span', { class: 'tool-group-tools' });
-  const state = h('span', { class: 'tool-group-state' }, 'выполняется…');
-  const body = h('div', { class: 'tool-group-body' });
-  const chevron = svgIcon('chevronDown', 12);
-  chevron.classList.add('tool-chevron');
-
-  const applyExpanded = (): void => {
-    body.hidden = !expanded;
-    root.classList.toggle('is-open', expanded);
-  };
-
-  const head = h(
-    'button',
-    {
-      class: 'tool-group-head',
-      type: 'button',
-      'aria-expanded': 'true',
-      onClick: () => {
-        expanded = !expanded;
-        pinned = true;
-        head.setAttribute('aria-expanded', String(expanded));
-        applyExpanded();
-      },
-    },
-    svgIcon('wrench', 13),
-    title,
-    tools,
-    state,
-    chevron,
-  );
-
-  const root = h('div', { class: 'tool-group is-open' }, head, body);
-  container.appendChild(root);
-
-  const sync = (): void => {
-    title.textContent = `Действия · ${count}`;
-    const brief = names.slice(0, 2).join(', ');
-    tools.textContent = names.length > 2 ? `${brief} и ещё ${names.length - 2}` : brief;
-
-    if (pending > 0) {
-      state.textContent = 'выполняется…';
-      state.className = 'tool-group-state';
-      return;
-    }
-
-    state.textContent = failed > 0 ? `ошибок: ${failed}` : 'готово';
-    state.className = `tool-group-state${failed > 0 ? ' is-fail' : ' is-ok'}`;
-    // Работа закончилась — держать список перед глазами больше незачем.
-    if (!pinned) {
-      expanded = false;
-      applyExpanded();
-    }
-  };
-
-  const add = (call: ChatToolStartPayload): ToolCardView => {
-    count += 1;
-    pending += 1;
-    const label = toolLabel(call.name);
-    if (!names.includes(label)) names.push(label);
-
-    const cardState = toolStateElement();
-    const panel = h('div', { class: 'tool-panel', hidden: true });
-    const card = h('div', { class: 'tool-card' });
-    const rowChevron = svgIcon('chevronDown', 12);
-    rowChevron.classList.add('tool-chevron');
-
-    let outcome: ChatToolResultPayload | null = null;
-    const detailLanguage = toolDetailLanguage(call);
-
-    /** Подробности собираем по первому запросу: до ответа инструмента их нет. */
-    const togglePanel = (): void => {
-      if (!outcome) return;
-      if (panel.childElementCount === 0) {
-        panel.appendChild(h('div', { class: 'tool-summary' }, outcome.summary));
-        if (outcome.detail) {
-          const raw = h('code', {});
-          highlightInto(raw, outcome.detail, detailLanguage);
-          panel.appendChild(h('pre', { class: 'tool-raw' }, raw));
-        }
-      }
-      panel.hidden = !panel.hidden;
-      card.classList.toggle('is-open', !panel.hidden);
-    };
-
-    card.append(
-      h(
-        'button',
-        {
-          class: 'tool-head',
-          type: 'button',
-          title: `${label} — показать вывод`,
-          onClick: togglePanel,
-        },
-        svgIcon(toolIcon(call.name), 13),
-        h('span', { class: 'tool-name' }, label),
-        h('span', { class: 'tool-args' }, summarizeArgs(call.args)),
-        cardState,
-        rowChevron,
-      ),
-      panel,
-    );
-    body.appendChild(card);
-    sync();
-
-    return {
-      card,
-      finish: (result) => {
-        outcome = result;
-        setToolState(cardState, result.ok);
-        card.classList.toggle('tool-failed', !result.ok);
-        pending -= 1;
-        if (!result.ok) failed += 1;
-        sync();
-      },
-    };
-  };
-
-  /**
-   * Закрываем группу: дальше идёт текст ответа или новый вопрос.
-   * Одиночный вызов группы не требует — он остаётся обычной строкой.
-   * Сама группа при этом жива: её шапка по-прежнему раскрывает строки.
-   */
-  const seal = (): void => {
-    if (count === 1) {
-      const solo = body.firstElementChild as HTMLElement | null;
-      if (solo) root.replaceWith(solo);
-      return;
-    }
-    if (pending === 0 && !pinned) {
-      expanded = false;
-      applyExpanded();
-    }
-  };
-
-  return { add, seal };
-}
-
-/**
- * Лента вызовов инструментов.
- *
- * Агент за один шаг читает десяток файлов, и строка на каждый вызов
- * превращает чат в свалку. Поэтому подряд идущие вызовы собираются в одну
- * группу: в ленте остаётся её шапка («Действия · 6 · Просмотр папки,
- * Чтение файла · готово»), а сами строки — под раскрытием.
- */
-function createToolFeed(container: HTMLElement): {
-  add(call: ChatToolStartPayload): ToolCardView;
-  seal(): void;
-} {
-  let current: ToolGroupView | null = null;
-
-  return {
-    add: (call) => {
-      current ??= createToolGroup(container);
-      return current.add(call);
-    },
-    seal: () => {
-      current?.seal();
-      current = null;
-    },
-  };
-}
+/* Карточки вызовов инструментов и лента действий живут в `chat-tools.ts`. */

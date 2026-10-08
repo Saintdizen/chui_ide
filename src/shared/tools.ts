@@ -19,7 +19,19 @@ export type AgentToolName =
   | 'search'
   | 'get_diagnostics'
   | 'apply_edit'
-  | 'run_terminal';
+  | 'run_terminal'
+  | 'create_file'
+  | 'delete_file'
+  | 'move_file'
+  | 'update_plan'
+  | 'git_status'
+  | 'git_diff'
+  | 'open_file'
+  | 'terminal_list'
+  | 'terminal_start'
+  | 'terminal_read'
+  | 'terminal_write'
+  | 'terminal_stop';
 
 export interface JsonSchemaProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -57,11 +69,22 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'read_file',
     side: 'main',
-    description: 'Прочитать файл целиком. Для больших файлов сначала читай только нужный диапазон строк.',
+    description:
+      'Прочитать файл. Большие файлы читай диапазоном строк — так в контекст попадёт нужное, ' +
+      'а не первые 20 000 символов. Строки в выводе нумеруются с 1: по этим номерам удобно ' +
+      'готовить правки apply_edit.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Абсолютный путь к файлу.' },
+        startLine: {
+          type: 'number',
+          description: 'Первая строка диапазона (1-based, включительно). Без него — с начала файла.',
+        },
+        endLine: {
+          type: 'number',
+          description: 'Последняя строка диапазона (включительно). Без него — до конца (с лимитом строк).',
+        },
       },
       required: ['path'],
     },
@@ -126,6 +149,166 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         command: { type: 'string', description: 'Команда для запуска.' },
       },
       required: ['command'],
+    },
+  },
+  {
+    name: 'create_file',
+    side: 'main',
+    description:
+      'Создать новый файл с содержимым. Существующий файл НЕ перетирается — вернётся ошибка; ' +
+      'для правки существующего файла используй apply_edit.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Абсолютный путь к новому файлу.' },
+        contents: { type: 'string', description: 'Содержимое нового файла.' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'delete_file',
+    side: 'main',
+    description:
+      'Удалить файл или папку (в корзину). Вызывай только когда уверен: отмена — из корзины вручную.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Абсолютный путь к файлу или папке.' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'move_file',
+    side: 'main',
+    description: 'Переместить или переименовать файл либо папку внутри рабочей директории.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Текущий абсолютный путь.' },
+        to: { type: 'string', description: 'Новый абсолютный путь.' },
+      },
+      required: ['from', 'to'],
+    },
+  },
+  {
+    name: 'update_plan',
+    side: 'main',
+    description:
+      'Обновить план работы: список шагов со статусами. Вызывай в начале задачи, а затем после ' +
+      'каждого выполненного шага — пользователь видит прогресс, а ты не теряешь нить.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        steps: {
+          type: 'array',
+          description: 'Шаги плана: { text, status }, где status — pending | in_progress | done.',
+          items: { type: 'object', description: 'PlanStep' },
+        },
+      },
+      required: ['steps'],
+    },
+  },
+  {
+    name: 'git_status',
+    side: 'main',
+    description:
+      'Состояние git: текущая ветка и список изменённых файлов (индекс и рабочее дерево). ' +
+      'Смотри перед тем, как коммитить или откатывать.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'git_diff',
+    side: 'main',
+    description:
+      'Diff файла по git: рабочее дерево против индекса, а с staged=true — индекс против HEAD.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Абсолютный путь файла.' },
+        staged: { type: 'boolean', description: 'true — сравнить индекс с HEAD.' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'open_file',
+    side: 'renderer',
+    description:
+      'Открыть файл в редакторе на нужной строке — чтобы пользователь сразу увидел место, ' +
+      'о котором идёт речь. Вызывай, когда ссылаешься на конкретный код.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Абсолютный путь файла.' },
+        line: { type: 'number', description: 'Строка (1-based).' },
+        column: { type: 'number', description: 'Столбец (1-based).' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'terminal_list',
+    side: 'main',
+    description: 'Список открытых терминальных сессий (id, cwd, pid) — для long-running процессов.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'terminal_start',
+    side: 'main',
+    description:
+      'Открыть НАСТОЯЩИЙ терминал (pty) и вернуть его id. В отличие от run_terminal, сессия ' +
+      'живёт между шагами: можно запустить долгий процесс (сервер, watch) и позже читать его вывод. ' +
+      'Команду можно не передавать и набирать потом через terminal_write.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Необязательная команда, которую наберём сразу после старта.' },
+        cwd: { type: 'string', description: 'Рабочая папка (по умолчанию — корень проекта).' },
+      },
+    },
+  },
+  {
+    name: 'terminal_read',
+    side: 'main',
+    description:
+      'Прочитать НОВЫЙ вывод сессии. Передай from — смещение, полученное в прошлом ответе; ' +
+      'без него прочитаешь весь буфер (до 60 000 символов).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'id сессии из terminal_start или terminal_list.' },
+        from: { type: 'number', description: 'С какого смещения читать (из поля offset прошлого чтения).' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'terminal_write',
+    side: 'main',
+    description:
+      'Отправить ввод в сессию (как будто пользователь набрал в терминале). Завершай строку \\n, ' +
+      'если хочешь нажать Enter.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'id сессии.' },
+        data: { type: 'string', description: 'Что написать в терминал.' },
+      },
+      required: ['id', 'data'],
+    },
+  },
+  {
+    name: 'terminal_stop',
+    side: 'main',
+    description: 'Остановить сессию терминала (kill процесса).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'id сессии.' },
+      },
+      required: ['id'],
     },
   },
 ];

@@ -1,6 +1,6 @@
 import type { ChatAttachment, ChatMessage, ChatUsage } from '../../shared/api';
 import { AGENT_TOOLS } from '../../shared/tools';
-import { contextWindow } from '../../shared/providers';
+import { contextWindow, modelPricing } from '../../shared/providers';
 import { clear, h, svgIcon } from './dom';
 
 /**
@@ -24,6 +24,10 @@ export interface SessionInfoData {
   /** Сколько токенов отдано под ответ. */
   reservedTokens: number;
   usage?: ChatUsage;
+  /** Скорость последнего ответа в токенах в секунду: считается в чате. */
+  speed?: number;
+  /** Явный размер окна из настроек; не задан — считается по имени модели. */
+  contextWindow?: number;
 }
 
 export interface SessionInfoView {
@@ -66,6 +70,12 @@ function formatTokens(value: number): string {
   return String(Math.round(value));
 }
 
+/** Стоимость в долларах: мелкие суммы показываем с большей точностью. */
+function formatCost(value: number): string {
+  if (value > 0 && value < 0.01) return value.toFixed(4);
+  return value.toFixed(2);
+}
+
 /** Что занимает место в контексте: считаем по символам, показываем после калибровки. */
 function split(data: SessionInfoData): Part[] {  let messages = 0;
   let results = 0;
@@ -95,7 +105,7 @@ function split(data: SessionInfoData): Part[] {  let messages = 0;
 export function contextUsage(data: SessionInfoData): ContextUsage {
   const estimated = split(data).reduce((sum, part) => sum + part.tokens, 0);
   const used = data.usage?.promptTokens ?? estimated;
-  const limit = contextWindow(data.model);
+  const limit = contextWindow(data.model, data.contextWindow);
   return {
     used,
     limit,
@@ -169,6 +179,7 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
   const gaugePercent = h('span', { class: 'session-info-percent' });
   const gaugeBar = h('div', { class: 'context-bar' });
   const reservedNote = h('div', { class: 'session-info-reserved' });
+  const usageNote = h('div', { class: 'field-hint session-info-usage' });
   const list = h('div', { class: 'session-info-list' });
   const note = h('div', { class: 'field-hint session-info-note' });
 
@@ -187,6 +198,7 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
     h('div', { class: 'session-info-gauge' }, gaugeValue, gaugePercent),
     gaugeBar,
     reservedNote,
+    usageNote,
     list,
     note,
     compactButton,
@@ -225,6 +237,25 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
 
     reservedNote.textContent = `Зарезервировано для ответа: ${formatTokens(data.reservedTokens)}`;
     reservedNote.hidden = data.reservedTokens <= 0;
+
+    // Реальные токены последнего обмена: у провайдера их два числа — запрос и ответ.
+    const completion = data.usage?.completionTokens;
+    if (real !== undefined || completion !== undefined || data.speed !== undefined) {
+      const parts: string[] = [];
+      if (real !== undefined) parts.push(`запрос ${formatTokens(real)}`);
+      if (completion !== undefined) parts.push(`ответ ${formatTokens(completion)}`);
+      // Стоимость — только когда модель есть в таблице цен: иначе это гадание.
+      const pricing = modelPricing(data.model);
+      if (pricing && (real !== undefined || completion !== undefined)) {
+        const cost = ((real ?? 0) / 1_000_000) * pricing.input + ((completion ?? 0) / 1_000_000) * pricing.output;
+        parts.push(`стоимость ≈ $${formatCost(cost)}`);
+      }
+      if (data.speed !== undefined && data.speed > 0) parts.push(`${data.speed.toFixed(1)} tok/s`);
+      usageNote.textContent = `Последний обмен: ${parts.join(' · ')}`;
+      usageNote.hidden = false;
+    } else {
+      usageNote.hidden = true;
+    }
 
     clear(list);
     for (const part of parts) {

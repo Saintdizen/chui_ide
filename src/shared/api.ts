@@ -29,6 +29,7 @@ export const PushTopic = {
   TerminalExit: 'terminal:exit',
   ThemeChanged: 'theme:changed',
   WindowStateChanged: 'window:state',
+  LspDiagnostics: 'lsp:diagnostics',
 } as const;
 
 /* ── Транспорт ──────────────────────────────────────────────────────────── */
@@ -274,6 +275,8 @@ export interface AiProviderView {
   models: string[];
   defaultModel?: string;
   hasApiKey: boolean;
+  /** Протокол общения: OpenAI-совместимый (по умолчанию) или нативный Anthropic. */
+  protocol?: 'openai' | 'anthropic';
 }
 
 export interface AiSettings {
@@ -282,6 +285,11 @@ export interface AiSettings {
   activeModel?: string;
   temperature: number;
   maxTokens: number;
+  /**
+   * Размер контекстного окна модели в токенах. Не задан — определяем по имени
+   * модели (`contextWindow` в shared/providers.ts); задан — берём как есть.
+   */
+  contextWindow?: number;
   systemPrompt: string;
   /** Сколько модели думать перед ответом (`reasoning_effort`). */
   reasoningEffort: ReasoningEffort;
@@ -379,6 +387,40 @@ export interface WorkspaceSettings {
   recent: string[];
 }
 
+/* ── LSP ───────────────────────────────────────────────────────────────── */
+
+/** Один языковой сервер: язык, команда запуска и включён ли он. */
+export interface LspServerConfig {
+  /** Идентификатор языка (как в shared/languages.ts): python, typescript, … */
+  language: string;
+  command: string;
+  args: string[];
+  enabled: boolean;
+}
+
+export interface LspSettings {
+  /** Общий выключатель: без него серверы не запускаются. */
+  enabled: boolean;
+  servers: LspServerConfig[];
+}
+
+/** Пометка от языкового сервера, уже привязанная к файлу. */
+export interface LspDiagnostic {
+  severity: 'error' | 'warning' | 'info';
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+  message: string;
+  source?: string;
+}
+
+/** Полезная нагрузка события `PushTopic.LspDiagnostics`. */
+export interface LspDiagnosticsPayload {
+  path: string;
+  diagnostics: LspDiagnostic[];
+}
+
 /** Полезная нагрузка события `PushTopic.ThemeChanged`: выбор и фактическая схема. */
 export interface ThemeChangedPayload {
   theme: ThemeChoice;
@@ -392,6 +434,7 @@ export interface Settings {
   run: RunSettings;
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
+  lsp: LspSettings;
 }
 
 /** Провайдер, которого добавляют или меняют из интерфейса. Ключ задаётся отдельно. */
@@ -401,6 +444,7 @@ export interface AiProviderPatch {
   baseUrl?: string;
   models?: string[];
   defaultModel?: string;
+  protocol?: 'openai' | 'anthropic';
 }
 
 export interface AiSettingsPatch {
@@ -408,6 +452,8 @@ export interface AiSettingsPatch {
   activeModel?: string;
   temperature?: number;
   maxTokens?: number;
+  /** Размер контекстного окна в токенах; 0 — вернуть автоопределение по модели. */
+  contextWindow?: number;
   systemPrompt?: string;
   reasoningEffort?: ReasoningEffort;
   /** Добавить провайдера или обновить существующего по `id`. */
@@ -429,6 +475,7 @@ export interface SettingsPatch {
   explorer?: Partial<ExplorerSettings>;
   run?: Partial<RunSettings>;
   appearance?: Partial<AppearanceSettings>;
+  lsp?: Partial<LspSettings>;
 }
 
 /* ── AI ─────────────────────────────────────────────────────────────────── */
@@ -457,6 +504,8 @@ export interface ChatMessage {
   toolCalls?: ChatToolCall[];
   /** Для role='tool': id вызова, на который отвечает это сообщение. */
   toolCallId?: string;
+  /** Оценка ответа пользователем: помогает понять, какие ответы были полезны. */
+  rating?: 'up' | 'down';
 }
 
 /**
@@ -532,12 +581,35 @@ export interface ChatStreamDone {
   agentMessages?: ChatMessage[];
 }
 
+/**
+ * Беседа в том виде, в каком она переживает перезапуск. От сессии в renderer
+ * отличается тем, что здесь нет ни ленты DOM, ни незаписанных правок — только
+ * то, что имеет смысл показать после старта: история, заголовок и расход контекста.
+ */
+export interface ChatConversation {
+  /** Идентификатор беседы: в отличие от номера вкладки, стабилен между запусками. */
+  uid: string;
+  title: string;
+  /** Время последнего изменения: по нему беседы можно упорядочивать в списке. */
+  updatedAt: number;
+  messages: ChatMessage[];
+  usage?: ChatUsage;
+}
+
+/** Всё, что main хранит по одной рабочей папке. */
+export interface ChatHistory {
+  conversations: ChatConversation[];
+  /** Беседа, которая была активной: её показываем после восстановления. */
+  activeUid?: string;
+}
+
 /** Имена событий стрима `ai.chat`. */
 export const ChatStreamEvent = {
   Delta: 'delta',
   Reasoning: 'reasoning',
   ToolStart: 'tool_start',
   ToolResult: 'tool_result',
+  Plan: 'plan',
 } as const;
 
 export interface ChatDeltaPayload {
@@ -564,6 +636,19 @@ export interface ChatToolResultPayload {
   ok: boolean;
   summary: string;
   detail?: string;
+}
+
+/** Статус шага плана: как в todo-инструментах агентов. */
+export type PlanStepStatus = 'pending' | 'in_progress' | 'done';
+
+export interface PlanStep {
+  text: string;
+  status: PlanStepStatus;
+}
+
+/** Модель обновила план работы — в ленте появляется чек-лист. */
+export interface ChatPlanPayload {
+  steps: PlanStep[];
 }
 
 /* ── Хост-вызовы main → renderer ────────────────────────────────────────── */
@@ -609,6 +694,19 @@ export interface DiagnosticsHostResult {
   items: DiagnosticItem[];
 }
 
+/** Аргументы `ai.openFile`: файл и место, которое нужно показать в редакторе. */
+export interface OpenFileHostParams {
+  path: string;
+  /** Строка (1-based). Без неё — начало файла. */
+  line?: number;
+  /** Столбец (1-based). */
+  column?: number;
+}
+
+export interface OpenFileHostResult {
+  ok: boolean;
+}
+
 /**
  * Таблица хостовых методов: main обязан знать, что renderer умеет исполнять.
  * Обратный вызов нужен только там, где действие физически живёт в renderer.
@@ -618,6 +716,8 @@ export interface HostMethods {
   'ai.confirmCommand': { params: ConfirmCommandHostParams; result: ConfirmCommandHostResult };
   /** Пометки языка живут в Monaco, то есть в renderer. */
   'ai.getDiagnostics': { params: DiagnosticsHostParams; result: DiagnosticsHostResult };
+  /** Показать файл в редакторе: открытие вкладки — тоже дело renderer. */
+  'ai.openFile': { params: OpenFileHostParams; result: OpenFileHostResult };
 }
 
 export type HostMethodName = keyof HostMethods;
@@ -693,6 +793,13 @@ export interface ChuiMethods {
   'settings.update': { params: SettingsPatch; result: Settings };
   'settings.revealFile': { params: void; result: { path: string } };
 
+  /* Языковые серверы: синхронизация документа и перезапуск. */
+  'lsp.open': { params: { path: string; languageId: string; text: string }; result: void };
+  'lsp.change': { params: { path: string; text: string }; result: void };
+  'lsp.close': { params: { path: string }; result: void };
+  'lsp.restart': { params: void; result: { running: string[] } };
+  'lsp.status': { params: void; result: { running: string[] } };
+
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };
   'ai.models': { params: { providerId: string }; result: string[] };
@@ -702,6 +809,10 @@ export interface ChuiMethods {
     result: AiConnectionTestResult;
   };
   'ai.chat': { params: ChatRequest; result: ChatStreamDone };
+  /** История бесед рабочей папки: renderer восстанавливает вкладки после запуска. */
+  'ai.chats.load': { params: { root: string }; result: ChatHistory };
+  /** Сохранение бесед: renderer — источник истины, main только пишет на диск. */
+  'ai.chats.save': { params: { root: string; conversations: ChatConversation[]; activeUid?: string }; result: void };
 }
 
 export type MethodName = keyof ChuiMethods;

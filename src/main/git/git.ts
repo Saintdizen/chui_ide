@@ -154,6 +154,24 @@ export class GitService {
     return { original, modified };
   }
 
+  /**
+   * Унифицированный diff файла от самого git — так его видит человек в
+   * терминале (`+`/`-`). Нужен инструментам агента: `diff()` отдаёт обе версии
+   * целиком, а модели полезнее готовые строки изменений.
+   */
+  async diffText(filePath: string, staged = false): Promise<string> {
+    const status = await this.status();
+    const repoRoot = status.repository?.root;
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    const known = status.files.find((file) => file.path === path.resolve(filePath));
+    if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
+
+    const args = staged ? ['diff', '--cached', '--', known.relative] : ['diff', '--', known.relative];
+    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    return result.stdout;
+  }
+
   async branches(): Promise<GitBranch[]> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return [];

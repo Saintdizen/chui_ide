@@ -17,6 +17,10 @@ import { RpcFailure } from '../ipc/router';
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_SEARCH_RESULTS = 2000;
+/** Сколько файлов читаем параллельно: больше — уже перегрузка диска, меньше — простой. */
+const SEARCH_CONCURRENCY = 8;
+/** Предохранитель от обхода гигантских деревьев без совпадений. */
+const MAX_SCAN_FILES = 20_000;
 
 /**
  * Работа с рабочей директорией. Renderer никогда не трогает ФС напрямую:
@@ -163,7 +167,7 @@ export class WorkspaceService {
     }
   }
 
-  async search(options: SearchOptions): Promise<SearchResult> {
+  async search(options: SearchOptions, signal?: AbortSignal): Promise<SearchResult> {
     const root = this.requireRoot();
     const limit = Math.min(options.maxResults ?? 200, MAX_SEARCH_RESULTS);
     const flags = options.caseSensitive ? 'g' : 'gi';
@@ -171,26 +175,41 @@ export class WorkspaceService {
     const matcher = new RegExp(pattern, flags);
     const globMatcher = options.glob ? globToRegExp(options.glob) : null;
 
-    const hits: SearchHit[] = [];
-    let truncated = false;
-    let scanned = 0;
-
-    const walk = async (dir: string): Promise<void> => {
-      if (truncated) return;
+    // Сначала дешёвый обход: собрать список файлов. Чтение — тяжёлое, поэтому
+    // его распараллеливаем с ограничением, а не идём по дереву последовательно.
+    const files: string[] = [];
+    const collect = async (dir: string): Promise<void> => {
+      if (signal?.aborted || files.length >= MAX_SCAN_FILES) return;
       const dirents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
       for (const dirent of dirents) {
-        if (truncated) return;
+        if (signal?.aborted || files.length >= MAX_SCAN_FILES) return;
         const full = path.join(dir, dirent.name);
         if (dirent.isDirectory()) {
-          if (!IGNORED_DIRS.has(dirent.name)) await walk(full);
+          if (!IGNORED_DIRS.has(dirent.name)) await collect(full);
           continue;
         }
         if (!dirent.isFile()) continue;
+        if (globMatcher && !globMatcher.test(path.relative(root, full))) continue;
+        files.push(full);
+      }
+    };
+    await collect(root);
 
-        const relative = path.relative(root, full);
-        if (globMatcher && !globMatcher.test(relative)) continue;
+    const hits: SearchHit[] = [];
+    let scanned = 0;
+    let stop = false;
+    let next = 0;
 
+    // Пул воркеров: каждый берёт следующий файл, пока список не кончится
+    // или не упрёмся в лимит совпадений/отмену.
+    const worker = async (): Promise<void> => {
+      while (!stop && !signal?.aborted) {
+        const index = next;
+        next += 1;
+        if (index >= files.length) return;
+        const full = files[index]!;
         scanned += 1;
+
         let text: string;
         try {
           const stat = await fs.stat(full);
@@ -202,28 +221,31 @@ export class WorkspaceService {
         if (text.includes('\u0000')) continue; // бинарный файл
 
         const lines = text.split('\n');
-        for (let index = 0; index < lines.length; index += 1) {
-          const line = lines[index]!;
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+          const line = lines[lineIndex]!;
           matcher.lastIndex = 0;
           const match = matcher.exec(line);
           if (!match) continue;
 
           hits.push({
             path: full,
-            line: index + 1,
+            line: lineIndex + 1,
             column: match.index + 1,
             text: line.trim().slice(0, 400),
           });
           if (hits.length >= limit) {
-            truncated = true;
+            stop = true;
             return;
           }
         }
       }
     };
 
-    await walk(root);
-    return { hits, truncated, scanned };
+    await Promise.all(Array.from({ length: SEARCH_CONCURRENCY }, () => worker()));
+
+    // Пул завершает файлы в произвольном порядке — для стабильного вывода сортируем.
+    hits.sort((a, b) => (a.path === b.path ? a.line - b.line : a.path < b.path ? -1 : 1));
+    return { hits: hits.slice(0, limit), truncated: stop || files.length >= MAX_SCAN_FILES, scanned };
   }
 
   dispose(): void {

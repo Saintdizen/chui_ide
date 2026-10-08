@@ -19,6 +19,8 @@ export interface ProviderPreset {
   defaultModel: string;
   /** Короткая подсказка, где взять ключ или как поднять сервер. */
   hint: string;
+  /** Протокол: по умолчанию OpenAI-совместимый, у Anthropic — нативный. */
+  protocol?: 'openai' | 'anthropic';
 }
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
@@ -43,11 +45,12 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   {
     id: 'anthropic',
     label: 'Anthropic',
-    baseUrl: 'https://api.anthropic.com/v1',
+    baseUrl: 'https://api.anthropic.com',
     needsKey: true,
-    models: ['claude-sonnet-4-5'],
+    models: ['claude-sonnet-4-5', 'claude-opus-4-1', 'claude-haiku-4-5'],
     defaultModel: 'claude-sonnet-4-5',
-    hint: 'Нужен OpenAI-совместимый шлюз или прокси',
+    hint: 'Ключ — на console.anthropic.com. Работает нативный протокол Messages API',
+    protocol: 'anthropic',
   },
   {
     id: 'groq',
@@ -168,7 +171,11 @@ export function reasoningEffortFor(
  * Значения — из документации вендоров; для незнакомых моделей берём 128K:
  * это частое значение, и лучше показать приблизительное число, чем никакого.
  */
-export function contextWindow(model: string): number {
+export function contextWindow(model: string, override?: number): number {
+  // Явное значение из настроек важнее эвристики: шлюзы отдают модели со своими
+  // именами, и угадать окно по имени не всегда можно.
+  if (override !== undefined && Number.isFinite(override) && override > 0) return Math.round(override);
+
   const name = model.trim().toLowerCase();
   if (name.includes('gemini')) return 1_000_000;
   if (/^(o1|o3|o4|gpt-5)/.test(name)) return 200_000;
@@ -176,4 +183,47 @@ export function contextWindow(model: string): number {
   if (name.startsWith('deepseek')) return 64_000;
   if (name.includes('grok')) return 131_072;
   return 128_000;
+}
+
+/**
+ * Цена модели за 1 млн токенов (USD): `input` — запрос, `output` — ответ.
+ *
+ * Значения приблизительные (прайс провайдеров меняется), но для оценки
+ * стоимости обмена этого достаточно: точную цену знает только выставленный
+ * счёт. Незнакомая модель → `null`, стоимость просто не показываем.
+ */
+export interface ModelPricing {
+  input: number;
+  output: number;
+}
+
+export function modelPricing(model: string): ModelPricing | null {
+  const name = model.trim().toLowerCase();
+  if (!name) return null;
+
+  // OpenAI
+  if (name.startsWith('gpt-4o-mini')) return { input: 0.15, output: 0.6 };
+  if (name.startsWith('gpt-4o')) return { input: 2.5, output: 10 };
+  if (name.startsWith('gpt-4.1-mini')) return { input: 0.4, output: 1.6 };
+  if (name.startsWith('gpt-4.1')) return { input: 2, output: 8 };
+  if (name.startsWith('o4-mini')) return { input: 1.1, output: 4.4 };
+  if (name.startsWith('o3')) return { input: 10, output: 40 };
+  if (name.startsWith('o1-mini')) return { input: 1.1, output: 4.4 };
+  if (name.startsWith('o1')) return { input: 15, output: 60 };
+  if (name.startsWith('gpt-5')) return { input: 1.25, output: 10 };
+
+  // DeepSeek
+  if (name.startsWith('deepseek-reasoner')) return { input: 0.55, output: 2.19 };
+  if (name.startsWith('deepseek')) return { input: 0.27, output: 1.1 };
+
+  // Anthropic (через шлюз)
+  if (name.includes('claude-opus')) return { input: 15, output: 75 };
+  if (name.includes('claude-haiku')) return { input: 1, output: 5 };
+  if (name.includes('claude')) return { input: 3, output: 15 };
+
+  // Прочее из пресетов
+  if (name.startsWith('llama-3.3-70b')) return { input: 0.59, output: 0.79 };
+  if (name.includes('qwen') && name.includes('coder')) return null; // локальные/дешёвые — цену не гадаем
+
+  return null;
 }

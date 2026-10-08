@@ -304,6 +304,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         {
           class: classes.join(' '),
           type: 'button',
+          draggable: 'true',
           title: change ? `${entry.path} — ${CHANGE_TITLE[change.change]}` : (insideTitle ? `${entry.path} — ${insideTitle}` : entry.path),
           dataset: { path: entry.path },
           style: { paddingLeft: `${8 + depth * options.indent}px` },
@@ -334,6 +335,12 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         if (!isDirectory && !options.openOnSingleClick) void onClick(entry);
       });
       row.addEventListener('contextmenu', (event) => openMenu(entry, event));
+      // Перетаскивание в чат: путь кладём в dataTransfer — панель ассистента его приложит.
+      row.addEventListener('dragstart', (event) => {
+        event.dataTransfer?.setData('text/plain', entry.path);
+        event.dataTransfer?.setData('application/x-chui-path', entry.path);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+      });
       container.appendChild(row);
 
       if (isCreateTarget(inlineEdit, entry.path)) {

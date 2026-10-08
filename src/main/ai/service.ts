@@ -11,14 +11,17 @@ import {
   type ChatStreamDone,
   type ChatUsage,
   type DiagnosticsHostResult,
+  type PlanStep,
+  type PlanStepStatus,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
-import { modelCapabilities, reasoningEffortFor } from '../../shared/providers';
+import { modelCapabilities, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec } from '../../shared/tools';
 import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
-import { runTool, type ToolContext } from './agent-tools';
+import { runTool, type GitTools, type TerminalAgent, type ToolContext, type ToolOutcome } from './agent-tools';
+import { AnthropicProvider } from './anthropic';
 import { assertChatImages } from './images';
 import { OpenAiCompatibleProvider } from './openai-compatible';
 import type { AiProvider } from './provider';
@@ -32,12 +35,21 @@ const MAX_AGENT_STEPS = 8;
 /** В автопилоте задача длиннее: шагов нужно больше. */
 const MAX_AUTOPILOT_STEPS = 24;
 
+/**
+ * Инструменты, которые только читают состояние. Их повтор без нового
+ * результата — признак зацикливания, и повторный вызов можно не исполнять.
+ * Правки и команды сюда не входят: они меняют мир, и повторить их бывает нужно.
+ */
+const READ_ONLY_TOOLS = new Set(['list_dir', 'read_file', 'search', 'get_diagnostics']);
+
 /** Дописывается в системный промпт, когда агентный режим включён. */
 const AGENT_PROMPT = [
-  'У тебя есть инструменты: list_dir, read_file, search, get_diagnostics — изучать проект; apply_edit — предлагать правки; run_terminal — выполнять команды.',
+  'У тебя есть инструменты: list_dir, read_file, search, get_diagnostics — изучать проект; apply_edit — предлагать правки; create_file, delete_file, move_file — создавать, удалять и перемещать файлы; run_terminal — выполнить одну команду; terminal_start, terminal_read, terminal_write, terminal_stop — долгие процессы в настоящем терминале (сервер, watch); update_plan — вести план работы; git_status и git_diff — смотреть состояние git; open_file — открыть файл в редакторе на нужной строке.',
   'Пути передавай абсолютные; позиции в apply_edit — 1-based, как в LSP.',
   'В каждой правке передавай oldText — точный текст, который она заменяет: инструмент сверяет его с файлом.',
+  'Большие файлы читай диапазоном: у read_file есть startLine и endLine, а строки в выводе пронумерованы — по ним готовь правки. Не читай файл целиком много раз.',
   'Не выдумывай содержимое файлов: то, чего не знаешь, читай инструментами.',
+  'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу — так видно прогресс.',
   'Перед тем как чинить код, посмотри get_diagnostics — так видно настоящую ошибку, а не догадку.',
   'Если apply_edit ответил «не совпало с текстом документа» — перечитай файл и повтори правку, а не меняй формулировку наугад.',
   'Правки и команды пользователь подтверждает — не считай их сделанными, пока не получил ответ инструмента.',
@@ -61,14 +73,8 @@ export interface ChatHostBridge {
   confirmCommand(command: string): Promise<boolean>;
   /** Пометки языка: они живут в Monaco, то есть в renderer. */
   getDiagnostics(path?: string): Promise<DiagnosticsHostResult>;
-}
-
-/** Может ли эта сборка исполнить инструмент. */
-function canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined): boolean {
-  if (tool.name === 'apply_edit') return host?.applyEdits !== undefined;
-  if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
-  if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
-  return tool.side === 'main';
+  /** Показать файл в редакторе на нужной позиции. */
+  openFile(path: string, line?: number, column?: number): Promise<boolean>;
 }
 
 /**
@@ -78,10 +84,25 @@ function canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined): boolean 
  * возвращается в диалог, пока модель не ответит текстом.
  */
 export class AiService {
+  /** Git подключается снаружи (registerIpc): без него git-инструменты не предлагаем. */
+  private git?: GitTools;
+  /** Терминальные сессии тоже приходят снаружи: без них terminal_* не предлагаем. */
+  private terminals?: TerminalAgent;
+
   constructor(
     private readonly settings: SettingsStore,
     private readonly workspace: WorkspaceService,
   ) {}
+
+  /** Подключить git рабочей папки: включает инструменты git_status и git_diff. */
+  attachGit(git: GitTools): void {
+    this.git = git;
+  }
+
+  /** Подключить терминалы: включает инструменты terminal_start/read/write/stop. */
+  attachTerminals(terminals: TerminalAgent): void {
+    this.terminals = terminals;
+  }
 
   async models(providerId: string, signal?: AbortSignal): Promise<string[]> {
     return this.createProvider(providerId).listModels(signal);
@@ -100,7 +121,12 @@ export class AiService {
       return { ok: false, models: [], message: 'Нужен API-ключ: без него провайдер отклонит запрос' };
     }
 
-    const provider = new OpenAiCompatibleProvider({ id: 'test', label: 'Проверка', baseUrl, apiKey });
+    // Проверка идёт тем же протоколом, что и рабочий запрос: у Anthropic он свой.
+    const preset = params.providerId ? findProviderPreset(params.providerId) : undefined;
+    const provider: AiProvider =
+      preset?.protocol === 'anthropic'
+        ? new AnthropicProvider({ id: 'test', label: 'Проверка', baseUrl, apiKey })
+        : new OpenAiCompatibleProvider({ id: 'test', label: 'Проверка', baseUrl, apiKey });
     try {
       const models = await provider.listModels(signal);
       return {
@@ -149,13 +175,16 @@ export class AiService {
     if (images.length > 0) attachImages(messages, images.map((item) => item.dataUrl!));
 
     // Предлагаем модели только то, что реально может исполнить эта сборка.
-    const available = useTools ? AGENT_TOOLS.filter((tool) => canRun(tool, host)) : [];
+    const available = useTools ? AGENT_TOOLS.filter((tool) => this.canRun(tool, host)) : [];
     const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
     const toolContext: ToolContext = { workspace: this.workspace, signal, autoApprove };
+    if (this.git) toolContext.git = this.git;
+    if (this.terminals) toolContext.terminals = this.terminals;
     if (host) {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
       toolContext.diagnostics = (path) => host.getDiagnostics(path);
+      toolContext.openFile = (path, line, column) => host.openFile(path, line, column);
     }
 
     const steps = autoApprove ? MAX_AUTOPILOT_STEPS : MAX_AGENT_STEPS;
@@ -175,6 +204,12 @@ export class AiService {
     let reasoning = '';
     let usage: ChatUsage | undefined;
     let finishReason: string | undefined;
+
+    // Дедупликация вызовов в рамках одной ветки: одинаковый read-only вызов
+    // не исполняется дважды, а если шаг целиком состоит из повторов — цикл
+    // останавливается. Правка/команда сбрасывает кэш: состояние могло измениться.
+    const executed = new Map<string, ToolOutcome>();
+    let stallSteps = 0;
 
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
@@ -209,9 +244,43 @@ export class AiService {
       messages.push(assistant);
       produced.push(assistant);
 
+      let didNewWork = false;
       for (const call of calls) {
+        // План — не вызов инструмента в привычном смысле, а обновление чек-листа:
+        // рисуем его отдельным событием, но модели всё равно отвечаем role:'tool'.
+        if (call.name === 'update_plan') {
+          const steps = parsePlanSteps(call.arguments);
+          if (steps.length > 0) emit(ChatStreamEvent.Plan, { steps });
+          const toolMessage: ChatMessage = {
+            role: 'tool',
+            toolCallId: call.id,
+            name: call.name,
+            content: steps.length > 0 ? `План обновлён: шагов — ${steps.length}` : 'План не изменён',
+          };
+          messages.push(toolMessage);
+          produced.push(toolMessage);
+          didNewWork = true;
+          continue;
+        }
+
+        const key = `${call.name}:${call.arguments}`;
+        const repeated = READ_ONLY_TOOLS.has(call.name) ? executed.get(key) : undefined;
+
         emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
-        const outcome = await runTool(toolContext, call.name, call.arguments);
+        let outcome: ToolOutcome;
+        if (repeated) {
+          outcome = {
+            ok: false,
+            summary: `повтор вызова «${call.name}» — пропущен`,
+            detail:
+              'Точно такой вызов уже был в этой ветке. Повтор не нужен: используй уже полученный результат или смени подход.',
+          };
+        } else {
+          outcome = await runTool(toolContext, call.name, call.arguments);
+          if (READ_ONLY_TOOLS.has(call.name)) executed.set(key, outcome);
+          else executed.clear(); // правка/команда изменили состояние — прежние чтения устарели
+          didNewWork = true;
+        }
         emit(ChatStreamEvent.ToolResult, {
           id: call.id,
           name: call.name,
@@ -229,6 +298,17 @@ export class AiService {
         messages.push(toolMessage);
         produced.push(toolMessage);
       }
+
+      // Целый шаг из повторов — модель ходит по кругу. После двух таких шагов
+      // останавливаемся: дальше это только сожжёт токены без прогресса.
+      stallSteps = didNewWork ? 0 : stallSteps + 1;
+      if (stallSteps >= 2) {
+        const note = '\n\n[агент остановлен: повторяющиеся вызовы не дают нового результата]';
+        text += note;
+        emit(ChatStreamEvent.Delta, { text: note });
+        produced.push({ role: 'assistant', content: note.trim() });
+        return { text, finishReason, usage, agentMessages: produced, ...(reasoning ? { reasoning } : {}) };
+      }
     }
 
     // Отмена (например, пока пользователь решал судьбу правок) — это не
@@ -245,6 +325,22 @@ export class AiService {
     return { text, finishReason, usage, agentMessages: produced, ...(reasoning ? { reasoning } : {}) };
   }
 
+  /**
+   * Может ли эта сборка исполнить инструмент. Файловые операции и git живут в
+   * main; правки, диагностика и открытие вкладки — в renderer, поэтому зависят
+   * от того, подключён ли мост. Лишний инструмент хуже отсутствующего: модель
+   * потратит шаг на вызов, который заведомо не сработает.
+   */
+  private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined): boolean {
+    if (tool.name === 'apply_edit') return host?.applyEdits !== undefined;
+    if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
+    if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
+    if (tool.name === 'open_file') return host?.openFile !== undefined;
+    if (tool.name === 'git_status' || tool.name === 'git_diff') return this.git !== undefined;
+    if (tool.name.startsWith('terminal_')) return this.terminals !== undefined;
+    return tool.side === 'main';
+  }
+
   private createProvider(providerId: string): AiProvider {
     const provider = this.settings.get().ai.providers.find((item) => item.id === providerId);
     if (!provider) {
@@ -257,6 +353,10 @@ export class AiService {
         RpcErrorCode.InvalidParams,
         `Не задан API-ключ для «${provider.label}». Укажите его в панели AI или в settings.json`,
       );
+    }
+
+    if (provider.protocol === 'anthropic') {
+      return new AnthropicProvider({ id: provider.id, label: provider.label, baseUrl: provider.baseUrl, apiKey });
     }
 
     return new OpenAiCompatibleProvider({
@@ -324,6 +424,36 @@ function attachImages(messages: ChatMessage[], images: readonly string[]): void 
   // Сообщения пользователя нет (например, вопрос пришёл только вложениями):
   // тогда картинкам нужен свой контейнер.
   messages.push({ role: 'user', content: 'Изображения к вопросу', images });
+}
+
+/**
+ * Разбор аргументов `update_plan`. Модель — недоверенный источник, поэтому
+ * шаги проверяем: пустые гасим, статус приводим к известному, длину ограничиваем.
+ */
+function parsePlanSteps(raw: string): PlanStep[] {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw) as unknown;
+  } catch {
+    return [];
+  }
+  const list = (value as { steps?: unknown } | null)?.steps;
+  if (!Array.isArray(list)) return [];
+
+  const allowed: PlanStepStatus[] = ['pending', 'in_progress', 'done'];
+  return list
+    .slice(0, 40)
+    .map((item): PlanStep | null => {
+      if (typeof item !== 'object' || item === null) return null;
+      const text = (item as { text?: unknown }).text;
+      if (typeof text !== 'string' || text.trim().length === 0) return null;
+      const status = (item as { status?: unknown }).status;
+      return {
+        text: text.trim().slice(0, 300),
+        status: allowed.includes(status as PlanStepStatus) ? (status as PlanStepStatus) : 'pending',
+      };
+    })
+    .filter((step): step is PlanStep => step !== null);
 }
 
 function isLocalEndpoint(baseUrl: string): boolean {

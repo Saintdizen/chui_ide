@@ -7,6 +7,7 @@ import {
   type AppearanceSettings,
   type EditorSettings,
   type ExplorerSettings,
+  type LspSettings,
   type ReasoningEffort,
   type RunSettings,
   type Settings,
@@ -21,6 +22,8 @@ interface StoredProvider {
   baseUrl: string;
   models: string[];
   defaultModel?: string;
+  /** Как говорить с провайдером: OpenAI-совместимо или нативно (Anthropic). */
+  protocol?: 'openai' | 'anthropic';
   /** Ключ лежит только в main-процессе и никогда не уходит в renderer. */
   apiKey?: string;
 }
@@ -32,6 +35,8 @@ interface StoredSettings {
     activeModel?: string;
     temperature: number;
     maxTokens: number;
+    /** Не задано — окно определяется по имени модели. */
+    contextWindow?: number;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
   };
@@ -40,6 +45,7 @@ interface StoredSettings {
   run: RunSettings;
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
+  lsp: LspSettings;
 }
 
 const DEFAULT_SYSTEM_PROMPT = [
@@ -124,6 +130,12 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // стартовое окно, а оно — отдельный процесс со своим хранилищем.
     recent: [],
   },
+  lsp: {
+    // По умолчанию выключено: языковой сервер — внешний процесс, который нужно
+    // установить и указать вручную. Никаких догадок про пути к бинарникам.
+    enabled: false,
+    servers: [],
+  },
 };
 
 const ENV_KEYS: Record<string, string> = {
@@ -169,12 +181,14 @@ export class SettingsStore {
           baseUrl: provider.baseUrl,
           models: [...provider.models],
           defaultModel: provider.defaultModel,
+          protocol: provider.protocol,
           hasApiKey: Boolean(this.resolveApiKey(provider.id)),
         })),
         activeProviderId: ai.activeProviderId ?? ai.providers[0]?.id,
         activeModel: ai.activeModel,
         temperature: ai.temperature,
         maxTokens: ai.maxTokens,
+        contextWindow: ai.contextWindow,
         systemPrompt: ai.systemPrompt,
         reasoningEffort: ai.reasoningEffort ?? 'off',
       },
@@ -183,6 +197,10 @@ export class SettingsStore {
       run: { ...run },
       appearance: { ...this.data.appearance },
       workspace: { recent: [...this.data.workspace.recent] },
+      lsp: {
+        enabled: this.data.lsp.enabled,
+        servers: this.data.lsp.servers.map((server) => ({ ...server, args: [...server.args] })),
+      },
     };
   }
 
@@ -214,6 +232,9 @@ export class SettingsStore {
     }
     if (patch.appearance) {
       this.data.appearance = { ...this.data.appearance, ...patch.appearance };
+    }
+    if (patch.lsp) {
+      this.data.lsp = sanitizeLsp({ ...this.data.lsp, ...patch.lsp });
     }
     this.persist();
     return this.get();
@@ -265,6 +286,12 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
   if (patch.activeModel !== undefined) target.activeModel = patch.activeModel;
   if (patch.temperature !== undefined) target.temperature = patch.temperature;
   if (patch.maxTokens !== undefined) target.maxTokens = patch.maxTokens;
+  // Окно контекста: 0 или отрицательное — снова доверяем имени модели.
+  if (patch.contextWindow !== undefined) {
+    const value = Math.round(patch.contextWindow);
+    if (Number.isFinite(value) && value > 0) target.contextWindow = value;
+    else delete target.contextWindow;
+  }
   if (patch.systemPrompt !== undefined) target.systemPrompt = patch.systemPrompt;
   if (patch.reasoningEffort !== undefined) target.reasoningEffort = patch.reasoningEffort;
 
@@ -278,6 +305,7 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
       if (incoming.baseUrl !== undefined) existing.baseUrl = incoming.baseUrl;
       if (incoming.models !== undefined) existing.models = [...incoming.models];
       if (incoming.defaultModel !== undefined) existing.defaultModel = incoming.defaultModel;
+      if (incoming.protocol !== undefined) existing.protocol = incoming.protocol;
     } else {
       const created: StoredProvider = {
         id: incoming.id,
@@ -285,6 +313,7 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
         baseUrl: incoming.baseUrl ?? '',
         models: [...(incoming.models ?? [])],
       };
+      if (incoming.protocol) created.protocol = incoming.protocol;
       const fallback = incoming.defaultModel ?? incoming.models?.[0];
       if (fallback) created.defaultModel = fallback;
       target.providers.push(created);
@@ -316,8 +345,14 @@ function loadSettings(filePath: string): StoredSettings {
       ? storedAi.providers.map((provider) => ({ ...provider }))
       : DEFAULT_SETTINGS.ai.providers.map((provider) => ({ ...provider }));
 
+  // Окно контекста мог задать человек в settings.json: держим только разумное число.
+  const ai: StoredSettings['ai'] = { ...DEFAULT_SETTINGS.ai, ...storedAi, providers };
+  const storedWindow = Math.round(Number(storedAi.contextWindow));
+  if (Number.isFinite(storedWindow) && storedWindow > 0) ai.contextWindow = storedWindow;
+  else delete ai.contextWindow;
+
   return {
-    ai: { ...DEFAULT_SETTINGS.ai, ...storedAi, providers },
+    ai,
     editor: { ...DEFAULT_SETTINGS.editor, ...(parsed.editor ?? {}) },
     // Секции появились позже первых версий: старый settings.json их не знает,
     // поэтому неполный файл догружается значениями по умолчанию, а список
@@ -339,5 +374,21 @@ function loadSettings(filePath: string): StoredSettings {
         ? parsed.workspace!.recent.filter((item): item is string => typeof item === 'string')
         : [],
     },
+    lsp: sanitizeLsp({ ...DEFAULT_SETTINGS.lsp, ...(parsed.lsp ?? {}) }),
   };
+}
+
+/** Языковые серверы правит человек в settings.json: приводим к безопасному виду. */
+function sanitizeLsp(value: LspSettings): LspSettings {
+  const servers = Array.isArray(value.servers)
+    ? value.servers
+        .filter((server) => server && typeof server.language === 'string' && typeof server.command === 'string')
+        .map((server) => ({
+          language: server.language,
+          command: server.command,
+          args: Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === 'string') : [],
+          enabled: server.enabled !== false,
+        }))
+    : [];
+  return { enabled: value.enabled === true, servers };
 }

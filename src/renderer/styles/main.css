@@ -1897,6 +1897,289 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+/* ── действия над сообщением, обрыв ответа, план ─────────────────────────── */
+
+/* Кнопки под сообщением появляются при наведении: в спокойном виде лента чище. */
+.msg-actions {
+  display: flex;
+  gap: 10px;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.msg:hover .msg-actions,
+.msg:focus-within .msg-actions {
+  opacity: 1;
+}
+
+.msg-user .msg-actions {
+  justify-content: flex-end;
+}
+
+.msg-actions .link-btn {
+  color: var(--text_color_disabled);
+  font-size: 11px;
+}
+
+.msg-actions .link-btn:hover {
+  color: var(--link_color);
+}
+
+/* Оценка ответа: неактивная — приглушена, выбранная — полная яркость. */
+.msg-actions .msg-rate {
+  font-size: 12px;
+  line-height: 1;
+  opacity: 0.5;
+}
+
+.msg-actions .msg-rate.is-active {
+  opacity: 1;
+}
+
+/* Поиск по беседам: поле и список совпадений над лентой. */
+.chat-search {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--separator_color);
+  background: var(--sunken_background);
+}
+
+.chat-search[hidden] {
+  display: none;
+}
+
+.chat-search-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+  color: var(--text_color);
+  font: inherit;
+  font-size: var(--font_labels_size);
+}
+
+.chat-search-input:focus {
+  border-color: var(--focus_ring_color);
+  outline: none;
+}
+
+.chat-search-results {
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.chat-search-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 6px;
+  border-radius: var(--radius_sm);
+  text-align: left;
+}
+
+.chat-search-item:hover {
+  background: var(--element_background_hover);
+}
+
+.chat-search-title {
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+}
+
+.chat-search-snippet {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-search-empty {
+  padding: 6px;
+  color: var(--text_color_disabled);
+  font-size: 11px;
+}
+
+.msg.is-search-hit .msg-body {
+  outline: 1px solid var(--focus_ring_color);
+}
+
+/* Ответ оборван по лимиту токенов: строка-предупреждение с продолжением. */
+.finish-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.finish-note .icon {
+  flex: 0 0 auto;
+  color: var(--git_modified, var(--text_color_tertiary));
+}
+
+/* Чек-лист плана агента. */
+.plan-card {
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  font-size: var(--font_labels_size);
+}
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: var(--text_color_tertiary);
+}
+
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plan-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text_color_tertiary);
+}
+
+.plan-mark {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--blue_prime_background);
+  text-align: center;
+}
+
+.plan-step.is-in_progress {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.plan-step.is-done .plan-text {
+  color: var(--text_color_disabled);
+  text-decoration: line-through;
+}
+
+.plan-step.is-done .plan-mark {
+  color: var(--git_added);
+}
+
+/* Кнопка «к последнему сообщению» в правом нижнем углу ленты. */
+.chat-jump {
+  position: absolute;
+  right: 14px;
+  bottom: 118px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--separator_color);
+  border-radius: 50%;
+  background: var(--element_background);
+  color: var(--text_color_tertiary);
+  box-shadow: var(--box_shadow_drop);
+}
+
+.chat-jump:hover {
+  color: var(--text_color_hover);
+  background: var(--element_background_hover);
+}
+
+.chat-jump[hidden] {
+  display: none;
+}
+
+/* ── markdown: таблицы, линии, чек-листы и diff ─────────────────────────── */
+
+.md-table {
+  width: 100%;
+  margin: 0 0 6px;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+
+.md-table th,
+.md-table td {
+  padding: 4px 7px;
+  border: 1px solid var(--separator_color);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table th {
+  background: var(--sunken_background);
+  font-weight: 600;
+}
+
+.md-hr {
+  margin: 8px 0;
+  border: none;
+  border-top: 1px solid var(--separator_color);
+}
+
+.md-task {
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.md-list .md-task {
+  margin-left: -16px;
+}
+
+.md-check {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--blue_prime_background);
+}
+
+.md-task.is-done {
+  color: var(--text_color_disabled);
+}
+
+/* Diff-блок: строки с плюсом - зелёные, с минусом - красные. */
+.diff-code {
+  display: block;
+}
+
+.diff-line {
+  display: block;
+  white-space: pre;
+}
+
+.diff-line.diff-add {
+  color: var(--git_added);
+  background: var(--git_added_tint, transparent);
+}
+
+.diff-line.diff-del {
+  color: var(--git_deleted);
+  background: var(--git_deleted_tint, transparent);
+}
+
+.diff-line.diff-hunk {
+  color: var(--text_color_disabled);
+}
+
 /* ── вызовы инструментов ────────────────────────────────────────────────── */
 
 /* Цепочка вызовов — одна строка в ленте. Строки живут внутри, под раскрытием. */

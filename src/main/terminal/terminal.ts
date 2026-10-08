@@ -13,6 +13,10 @@ import { RpcFailure } from '../ipc/router';
 /** Вывод pty приходит мелкими порциями: склеиваем их, чтобы не топить IPC. */
 const FLUSH_INTERVAL_MS = 8;
 const MAX_SESSIONS = 8;
+/** Сколько держим вывод сессии: агент читает его с офсетом, буфер не растёт безлимитно. */
+const SCROLLBACK_CHARS = 60_000;
+/** Завершённую сессию держим ещё немного: агент должен успеть вычитать последний вывод. */
+const EXIT_KEEP_MS = 60_000;
 
 interface Session {
   readonly id: string;
@@ -22,6 +26,12 @@ interface Session {
   readonly process: pty.IPty;
   pending: string;
   flushTimer: NodeJS.Timeout | null;
+  /** Накопленный вывод сессии: буфер, из которого читает агент. */
+  log: string;
+  /** Сколько символов выброшено из начала `log`: смещение остаётся абсолютным. */
+  dropped: number;
+  exited: boolean;
+  exitCode?: number;
 }
 
 /**
@@ -38,7 +48,22 @@ export class TerminalService {
   constructor(private readonly emit: (topic: string, payload: unknown) => void) {}
 
   list(): TerminalSession[] {
-    return [...this.sessions.values()].map((session) => describe(session));
+    return [...this.sessions.values()]
+      .filter((session) => !session.exited)
+      .map((session) => describe(session));
+  }
+
+  /**
+   * Прочитать вывод сессии, начиная с абсолютного смещения `from`.
+   * Смещение возвращается вместе с данными: следующий вызов передаёт его как `from`,
+   * поэтому агент видит только НОВЫЙ вывод, а не всё заново.
+   */
+  read(id: string, from = 0): { data: string; offset: number; alive: boolean; exitCode?: number } {
+    const session = this.require(id);
+    const total = session.dropped + session.log.length;
+    const start = Math.max(from, session.dropped);
+    const data = start >= total ? '' : session.log.slice(start - session.dropped);
+    return { data, offset: total, alive: !session.exited, exitCode: session.exitCode };
   }
 
   create(options: TerminalCreateOptions): TerminalSession {
@@ -78,14 +103,20 @@ export class TerminalService {
       process: child,
       pending: '',
       flushTimer: null,
+      log: '',
+      dropped: 0,
+      exited: false,
     };
     this.sessions.set(id, session);
 
     child.onData((data) => this.buffer(session, data));
     child.onExit(({ exitCode, signal }) => {
       this.flush(session);
-      this.sessions.delete(id);
+      // Сессию не удаляем сразу: агенту нужно успеть вычитать финальный вывод.
+      session.exited = true;
+      session.exitCode = exitCode;
       this.emit(PushTopic.TerminalExit, { id, exitCode, signal });
+      setTimeout(() => this.sessions.delete(id), EXIT_KEEP_MS).unref?.();
     });
 
     return describe(session);
@@ -107,13 +138,16 @@ export class TerminalService {
   kill(id: string): void {
     const session = this.sessions.get(id);
     if (!session) return;
-    this.sessions.delete(id);
+    if (session.exited) {
+      this.sessions.delete(id);
+      return;
+    }
     try {
       session.process.kill();
     } catch {
       // уже не живой
     }
-    this.emit(PushTopic.TerminalExit, { id, exitCode: 0 });
+    // Удаление сделает `onExit` — там же сохранится код выхода.
   }
 
   /** Вызывается при выходе из приложения: не оставляем висящие shell-процессы. */
@@ -148,7 +182,17 @@ export class TerminalService {
     if (!session.pending) return;
     const data = session.pending;
     session.pending = '';
+    this.appendLog(session, data);
     this.emit(PushTopic.TerminalData, { id: session.id, data });
+  }
+
+  /** Вывод копится в буфер сессии: его читает агент, и он же переживёт завершение процесса. */
+  private appendLog(session: Session, data: string): void {
+    session.log += data;
+    if (session.log.length <= SCROLLBACK_CHARS) return;
+    const cut = session.log.length - SCROLLBACK_CHARS;
+    session.dropped += cut;
+    session.log = session.log.slice(cut);
   }
 
   private uniqueTitle(base: string): string {

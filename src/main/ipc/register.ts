@@ -15,8 +15,10 @@ import {
   type WindowBounds,
 } from '../../shared/api';
 import type { AiService } from '../ai/service';
+import { ChatStore } from '../ai/chat-store';
 import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
 import type { GitService } from '../git/git';
+import type { LspService } from '../lsp/lsp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
 import type { TerminalService } from '../terminal/terminal';
@@ -34,6 +36,10 @@ export interface AppDependencies {
   git: GitService;
   /** Обратные вызовы main → renderer (правки в документной модели). */
   host: HostClient;
+  /** Хранилище бесед. Необязательно: пробникам история чата не нужна. */
+  chatStore?: ChatStore;
+  /** Языковые серверы. Необязательно: пробникам LSP не нужен. */
+  lsp?: LspService;
 }
 
 /**
@@ -48,6 +54,11 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   const refreshGit = (): void => {
     void deps.git.refresh().catch(() => undefined);
   };
+
+  // Git нужен и агенту (инструменты git_status/git_diff) — отдаём ему тот же сервис.
+  deps.ai.attachGit(deps.git);
+  // Терминалы — тоже: агент работает с pty-сессиями, а не только разовыми командами.
+  deps.ai.attachTerminals(deps.terminals);
 
   router.register('app.info', (): AppInfo => ({
     appVersion: app.getVersion(),
@@ -238,6 +249,19 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     return { path: file };
   });
 
+  // Языковые серверы: renderer синхронизирует документ и просит перезапуск.
+  router.register('lsp.open', async (params) => {
+    await deps.lsp?.open(params.path, params.languageId, params.text);
+  });
+  router.register('lsp.change', (params) => {
+    deps.lsp?.change(params.path, params.text);
+  });
+  router.register('lsp.close', (params) => {
+    deps.lsp?.close(params.path);
+  });
+  router.register('lsp.restart', () => deps.lsp?.restart() ?? { running: [] });
+  router.register('lsp.status', () => deps.lsp?.status() ?? { running: [] });
+
   router.register('ai.setApiKey', (params) => deps.settings.setApiKey(params.providerId, params.apiKey));
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
   router.register('ai.models', (params, ctx) => deps.ai.models(params.providerId, ctx.signal));
@@ -256,9 +280,21 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
             .request(ctx.sender, 'ai.confirmCommand', { command }, ctx.signal)
             .then((decision) => decision.allowed),
         getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
+        openFile: (path, line, column) =>
+          deps.host
+            .request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal)
+            .then((result) => result.ok),
       },
     ),
   );
+
+  // История бесед: renderer её собирает, main только хранит. Каталог — рядом
+  // с настройками, по одному файлу на рабочую папку.
+  const chatStore = deps.chatStore ?? new ChatStore();
+  router.register('ai.chats.load', (params) => chatStore.load(params.root));
+  router.register('ai.chats.save', (params) => {
+    chatStore.save(params.root, { conversations: params.conversations, activeUid: params.activeUid });
+  });
 
   router.attach();
   deps.host.attach();

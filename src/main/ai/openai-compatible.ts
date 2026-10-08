@@ -47,7 +47,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
   }
 
   async listModels(signal?: AbortSignal): Promise<string[]> {
-    const response = await fetch(this.url('/models'), { headers: this.headers(), signal });
+    const response = await fetchWithRetry(this.url('/models'), { headers: this.headers() }, signal);
     if (!response.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -68,31 +68,46 @@ export class OpenAiCompatibleProvider implements AiProvider {
     handlers: StreamChatHandlers,
     signal: AbortSignal,
   ): Promise<ChatStreamDone> {
-    const body: Record<string, unknown> = {
-      model: params.model,
-      messages: params.messages.map((message) => toWireMessage(message)),
-      stream: true,
-      stream_options: { include_usage: true },
+    // `stream_options` понимают не все: строгий OpenAI-совместимый сервер
+    // (часть сборок llama.cpp, vLLM) отвечает ошибкой «unknown field». Поэтому
+    // собираем тело сборщиком и при отказе повторяем запрос без него.
+    const buildBody = (includeStreamOptions: boolean): Record<string, unknown> => {
+      const body: Record<string, unknown> = {
+        model: params.model,
+        messages: params.messages.map((message) => toWireMessage(message)),
+        stream: true,
+      };
+      if (includeStreamOptions) body.stream_options = { include_usage: true };
+      if (params.temperature !== undefined) body.temperature = params.temperature;
+      if (params.maxTokens !== undefined) body.max_tokens = params.maxTokens;
+      // Имя поля — из OpenAI-протокола; так же его понимают OpenRouter, Groq и шлюзы.
+      if (params.reasoningEffort) body.reasoning_effort = params.reasoningEffort;
+      if (params.tools?.length) body.tools = params.tools;
+      return body;
     };
-    if (params.temperature !== undefined) body.temperature = params.temperature;
-    if (params.maxTokens !== undefined) body.max_tokens = params.maxTokens;
-    // Имя поля — из OpenAI-протокола; так же его понимают OpenRouter, Groq и шлюзы.
-    if (params.reasoningEffort) body.reasoning_effort = params.reasoningEffort;
-    if (params.tools?.length) body.tools = params.tools;
 
-    const response = await fetch(this.url('/chat/completions'), {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify(body),
-      signal,
-    });
-
-    if (!response.ok) {
-      throw new RpcFailure(
-        RpcErrorCode.Internal,
-        `Провайдер ответил ошибкой (HTTP ${response.status})`,
-        await safeText(response),
+    const post = (body: Record<string, unknown>): Promise<Response> =>
+      fetchWithRetry(
+        this.url('/chat/completions'),
+        { method: 'POST', headers: this.headers(), body: JSON.stringify(body) },
+        signal,
       );
+
+    let response = await post(buildBody(true));
+    if (!response.ok && (response.status === 400 || response.status === 422)) {
+      const detail = await safeText(response);
+      if (/stream_options|stream options|unknown field|unrecognized|extra field|additional propert/i.test(detail ?? '')) {
+        response = await post(buildBody(false));
+        if (!response.ok) {
+          const retryDetail = await safeText(response);
+          throw new RpcFailure(RpcErrorCode.Internal, describeHttpError(response.status, retryDetail), retryDetail);
+        }
+      } else {
+        throw new RpcFailure(RpcErrorCode.Internal, describeHttpError(response.status, detail), detail);
+      }
+    } else if (!response.ok) {
+      const detail = await safeText(response);
+      throw new RpcFailure(RpcErrorCode.Internal, describeHttpError(response.status, detail), detail);
     }
     if (!response.body) {
       throw new RpcFailure(RpcErrorCode.Internal, 'Провайдер не вернул поток данных');
@@ -234,10 +249,85 @@ function wireContent(message: ChatMessage): unknown {
   return parts;
 }
 
-async function safeText(response: Response): Promise<string | undefined> {
+export async function safeText(response: Response): Promise<string | undefined> {
   try {
     return (await response.text()).slice(0, 2000);
   } catch {
     return undefined;
   }
+}
+
+/** Коды, на которых повтор осмыслен: временная перегрузка или сеть. */
+const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 4;
+
+/** Задержка перед повтором: экспонента с джиттером, но не дольше 8 с. */
+function backoffDelay(attempt: number): number {
+  const base = Math.min(8_000, 500 * 2 ** (attempt - 1));
+  return base + Math.floor(Math.random() * 250);
+}
+
+/** `Retry-After` — секунды или HTTP-дата. Отдаём миллисекунды, если разобрали. */
+function retryAfterMs(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.min(30_000, Math.max(0, seconds * 1000));
+  const date = Date.parse(header);
+  if (!Number.isNaN(date)) return Math.min(30_000, Math.max(0, date - Date.now()));
+  return undefined;
+}
+
+/** Пауза, прерываемая сигналом: отмена не должна ждать сна. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Повтор запроса на временных сбоях сети и состояниях 429/5xx. Повторяется
+ * только сам fetch — до чтения тела потока, поэтому стрим не дублируется.
+ */
+export async function fetchWithRetry(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(url, { ...init, signal });
+      if (response.ok || !RETRYABLE_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) {
+        return response;
+      }
+      const wait = retryAfterMs(response.headers.get('retry-after')) ?? backoffDelay(attempt);
+      await sleep(wait, signal);
+    } catch (error) {
+      lastError = error;
+      if (signal?.aborted || attempt === MAX_ATTEMPTS) throw error;
+      await sleep(backoffDelay(attempt), signal);
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('Запрос к провайдеру не удался');
+}
+
+/** Текст ошибки по коду HTTP: переполнение контекста — самая частая причина 400. */
+export function describeHttpError(status: number, detail?: string): string {
+  const body = (detail ?? '').toLowerCase();
+  if (/context[_ ]length|maximum context|too many tokens|exceeds the (model'?s )?maximum|reduce the length/.test(body)) {
+    return 'Превышен размер контекста модели — сожмите беседу или снимите вложения (HTTP 400)';
+  }
+  if (status === 401 || status === 403) return `Ключ отклонён провайдером (HTTP ${status})`;
+  if (status === 404) return 'По этому адресу нет API — возможно, забыт суффикс /v1 (HTTP 404)';
+  if (status === 429) return 'Провайдер ограничил частоту запросов (HTTP 429)';
+  if (status >= 500) return `Провайдер недоступен (HTTP ${status})`;
+  return `Провайдер ответил ошибкой (HTTP ${status})`;
 }

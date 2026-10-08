@@ -302,6 +302,9 @@ module.exports = [
   /* ── методы ───────────────────────────────────────────────────────────── */
 
   const sessions = new Map();
+  // Беседы чата: мок держит их в памяти по корню проекта — смена папки и
+  // обратная загрузка работают, а перезагрузка страницы их, как и в жизни, теряет.
+  const savedChats = new Map();
   let bounds = { x: 40, y: 40, width: 1280, height: 820 };
 
   const methods = {
@@ -528,6 +531,12 @@ module.exports = [
       return structuredClone(settings);
     },
     'ai.models': () => settings.ai.providers[0].models,
+    // Языковые серверы в моке не запускаются: методы принимают вызовы и молчат.
+    'lsp.open': () => undefined,
+    'lsp.change': () => undefined,
+    'lsp.close': () => undefined,
+    'lsp.restart': () => ({ running: [] }),
+    'lsp.status': () => ({ running: [] }),
     // Проверка подключения: два понятных исхода вместо исключения.
     'ai.test': (params) => {
       if (/bad|invalid/i.test(params.baseUrl)) {
@@ -540,6 +549,13 @@ module.exports = [
       }
       const models = ['gpt-4o', 'gpt-4o-mini', 'gpt-4o-realtime'];
       return { ok: true, models, message: `Подключение работает · доступно моделей: ${models.length}` };
+    },
+    'ai.chats.load': (params) => savedChats.get(params.root) ?? { conversations: [] },
+    'ai.chats.save': (params) => {
+      savedChats.set(params.root, {
+        conversations: params.conversations ?? [],
+        ...(params.activeUid ? { activeUid: params.activeUid } : {}),
+      });
     },
     'ai.chat': async (params, id) => {
       cancelRequested = false;
@@ -565,8 +581,16 @@ module.exports = [
         }
       }
 
-      // Как настоящий агент: сначала спрашивает разрешение на команду, потом правит файл.
+      // Как настоящий агент: сначала план, потом разрешение на команду, потом правка файла.
       if (params.useTools) {
+        emit(id, 'plan', {
+          steps: [
+            { text: 'Изучить панель ассистента', status: 'done' },
+            { text: 'Проверить команду линтера', status: 'in_progress' },
+            { text: 'Применить правку package.json', status: 'pending' },
+          ],
+        });
+
         // Пачка чтения проекта: в жизни агент смотрит десяток папок подряд,
         // такие вызовы должны свернуться в одну строку, а не залить весь чат.
         const folders = ['src', 'src/main', 'src/renderer', 'scripts'];
@@ -633,6 +657,9 @@ module.exports = [
       const answer =
         'Проверка панели: ответ приходит потоком.\n' +
         '```js\nconst answer = 42;\n```\n' +
+        '```diff\n- старый вызов модели\n+ новый вызов с планом\n```\n' +
+        '| Часть | Состояние |\n| --- | --- |\n| Лента | обновлена |\n| Композер | без изменений |\n' +
+        '- [x] собрал проект\n- [ ] проверил в браузере\n' +
         '```python\ndef greet(name: str) -> str:\n    return f"привет, {name}"\n```\n' +
         '```bash\nnpm run smoke:agent\n```\n' +
         `Файл — ${params.messages.at(-1)?.content ?? ''}.`;

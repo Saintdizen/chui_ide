@@ -1,5 +1,5 @@
 import * as monaco from 'monaco-editor';
-import type { DiagnosticItem, EditorSettings } from '../../shared/api';
+import type { DiagnosticItem, EditorSettings, LspDiagnostic } from '../../shared/api';
 import type { TextEdit } from '../../shared/edits';
 import './monaco-env';
 import type { TextDocument } from './document';
@@ -224,6 +224,36 @@ export class EditorService {
     }
 
     return items.sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
+  }
+
+  /**
+   * Пометки из внешнего источника (LSP). Кладём их в Monaco под своим `owner`,
+   * поэтому они живут рядом с собственными пометками и не затирают друг друга:
+   * `getModelMarkers` (а значит и агент) видит и те, и другие.
+   */
+  setExternalMarkers(path: string, owner: string, diagnostics: readonly LspDiagnostic[]): void {
+    const model = this.models.get(path);
+    if (!model) return;
+
+    const severity = (value: LspDiagnostic['severity']): monaco.MarkerSeverity =>
+      value === 'error'
+        ? monaco.MarkerSeverity.Error
+        : value === 'warning'
+          ? monaco.MarkerSeverity.Warning
+          : monaco.MarkerSeverity.Info;
+
+    monaco.editor.setModelMarkers(
+      model,
+      owner,
+      diagnostics.map((item) => ({
+        severity: severity(item.severity),
+        message: item.source ? `${item.message} (${item.source})` : item.message,
+        startLineNumber: item.line,
+        startColumn: item.column,
+        endLineNumber: Math.max(item.endLine, item.line),
+        endColumn: item.endLine === item.line ? Math.max(item.endColumn, item.column) : item.endColumn,
+      })),
+    );
   }
 
   applyOptions(options: EditorOptions): void {

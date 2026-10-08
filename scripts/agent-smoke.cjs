@@ -64,6 +64,8 @@ function readBody(req) {
 
 /** Что сервер «попросит» на первом шаге текущего сценария. */
 let requested = { name: 'read_file', args: {} };
+/** Если true — тот же вызов приходит и вторым шагом (проверка дедупликации). */
+let requestTwice = false;
 let turn = 0;
 /** Тела запросов к провайдеру: по ним видно, какие инструменты ему предложили. */
 const bodies = [];
@@ -103,7 +105,7 @@ function reasoningSse(thoughts) {
 app.whenReady().then(async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-agent-'));
   const file = path.join(dir, 'notes.txt');
-  await fs.writeFile(file, `первая строка\n${MARKER}\n`, 'utf8');
+  await fs.writeFile(file, `строка один\n${MARKER}\nстрока три\n`, 'utf8');
 
   const server = http.createServer(async (req, res) => {
     // «Проверить подключение» — обычный GET /models.
@@ -117,7 +119,8 @@ app.whenReady().then(async () => {
     bodies.push(body);
 
     // Первый шаг — вызов инструмента; второй — текст (результат уже в диалоге).
-    if (turn === 0) {
+    // requestTwice заставляет сервер повторить тот же вызов и на втором шаге.
+    if (turn === 0 || (requestTwice && turn === 1)) {
       turn += 1;
       sendSse(res, toolCallSse(requested.name, requested.args));
       return;
@@ -196,6 +199,27 @@ app.whenReady().then(async () => {
       'размышления пришли отдельным потоком',
       run.reasoning.includes('Сначала прочитаю файл') && run.done.reasoning === run.reasoning,
       run.reasoning,
+    );
+
+    /* 1a. read_file диапазоном: только запрошенные строки, с номерами */
+    requested = { name: 'read_file', args: { path: file, startLine: 3, endLine: 3 } };
+    run = await chat(undefined);
+    const ranged = String(run.results[0]?.detail ?? '');
+    check(
+      'read_file отдал только запрошенный диапазон с номерами',
+      ranged.includes('3 | строка три') && !ranged.includes('строка один'),
+      ranged,
+    );
+
+    /* 1b. повторный одинаковый вызов не исполняется второй раз */
+    requestTwice = true;
+    requested = { name: 'read_file', args: { path: file } };
+    run = await chat(undefined);
+    requestTwice = false;
+    check(
+      'повторный одинаковый вызов помечен как повтор',
+      run.results.length === 2 && run.results[0]?.ok === true && run.results[1]?.ok === false && /повтор/i.test(String(run.results[1]?.summary)),
+      run.results.map((item) => item.summary),
     );
     check('без моста apply_edit не предлагается', !run.toolNames.includes('apply_edit'), run.toolNames);
 

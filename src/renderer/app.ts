@@ -9,6 +9,7 @@ import { GitModel } from './core/git-model';
 import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
 import { languageLabel, languageIndent } from './core/languages';
+import { LspClient } from './core/lsp';
 import { OpenEditors } from './core/open-editors';
 import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
 import { RpcClient } from './core/rpc';
@@ -65,6 +66,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const edits = new EditService({ documents, editors, rpc });
   // Приёмник обратных вызовов из main: правки агента приходят сюда.
   const host = new HostService();
+  // Языковые серверы: держим документы синхронными и кладём их пометки в Monaco.
+  new LspClient(rpc, documents, editors).attach();
 
   // Настройки — модальное окно поверх всего: и шапка, и панель AI открывают одно и то же.
   const settingsModal = createSettingsModal({ rpc, commands, theme });
@@ -164,6 +167,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     editors,
     edits,
     commands,
+    workspace,
     settings,
     settingsModal,
     host,
@@ -666,6 +670,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   define({ id: 'settings.revealFile', title: 'Открыть settings.json', category: 'Настройки' }, async () => {
     const result = await rpc.request('settings.revealFile');
     showToast(`Настройки: ${result.path}`);
+  });
+
+  define({ id: 'lsp.restart', title: 'Языковые серверы: перезапустить', category: 'Языки' }, async () => {
+    const result = await rpc.request('lsp.restart');
+    showToast(result.running.length > 0 ? `Серверы: ${result.running.join(', ')}` : 'Языковые серверы остановлены');
   });
 
   // Диагностика нужна, когда приходит «в чате не подсвечивается код»:

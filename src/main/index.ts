@@ -5,6 +5,7 @@ import { GitService } from './git/git';
 import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
 import { registerIpc } from './ipc/register';
+import { LspService } from './lsp/lsp';
 import { createApplicationMenu } from './menu';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { SettingsStore } from './settings';
@@ -84,8 +85,10 @@ if (!app.requestSingleInstanceLock()) {
     // Git ничего не хранит сам: корень берётся у рабочей папки, а об изменениях
     // узнаём после своих же операций и после сохранения файла.
     const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
+    // Языковые серверы — внешние процессы: настройка задаёт команду, main держит их жизненный цикл.
+    const lsp = new LspService(() => workspace.rootPath(), () => settings.get().lsp, (topic, payload) => pushToRenderers(topic, payload));
 
-    registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient() });
+    registerIpc({ settings, workspace, ai, terminals, git, lsp, host: new HostClient() });
     serveRenderer();
     createApplicationMenu();
     // Приложение начинается со списка проектов: окно IDE откроется после
@@ -94,6 +97,7 @@ if (!app.requestSingleInstanceLock()) {
 
     app.on('will-quit', () => {
       terminals.dispose();
+      lsp.dispose();
       workspace.dispose();
     });
 

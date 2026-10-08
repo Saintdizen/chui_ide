@@ -1,6 +1,7 @@
 import type {
   EditorSettings,
   ExplorerSettings,
+  LspServerConfig,
   ReasoningEffort,
   RecentProject,
   RunSettings,
@@ -33,14 +34,15 @@ export interface SettingsModalView {
   applySettings(settings: Settings): void;
 }
 
-type SectionId = 'ai' | 'editor' | 'explorer' | 'run' | 'appearance' | 'project';
+type SectionId = 'ai' | 'editor' | 'explorer' | 'run' | 'appearance' | 'project' | 'lsp';
 
-const SECTIONS: ReadonlyArray<{ id: SectionId; title: string; icon: 'sparkle' | 'file' | 'sun' | 'panel' | 'folder' | 'play' }> = [
+const SECTIONS: ReadonlyArray<{ id: SectionId; title: string; icon: 'sparkle' | 'file' | 'sun' | 'panel' | 'folder' | 'play' | 'command' }> = [
   { id: 'ai', title: 'AI', icon: 'sparkle' },
   { id: 'editor', title: 'Редактор', icon: 'file' },
   { id: 'explorer', title: 'Проводник', icon: 'folder' },
   { id: 'run', title: 'Запуск', icon: 'play' },
   { id: 'appearance', title: 'Внешний вид', icon: 'sun' },
+  { id: 'lsp', title: 'Языки (LSP)', icon: 'command' },
   { id: 'project', title: 'Проект', icon: 'panel' },
 ];
 
@@ -368,7 +370,23 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
       field(
         'Максимум токенов ответа',
-        numberInput(ai.maxTokens, 256, 200_000, 256, (value) => void patch({ ai: { maxTokens: value } })),
+        numberInput(ai.maxTokens, 256, 1_000_000, 256, (value) => void patch({ ai: { maxTokens: value } })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Сколько токенов модель может написать в ответе. Большие значения (вплоть до 1 000 000) ' +
+          'уместны для моделей с широким лимитом; если модель ответит ошибкой про лимит — уменьшите число.',
+      ),
+      field(
+        'Контекстное окно (токенов)',
+        numberInput(ai.contextWindow ?? 0, 0, 2_000_000, 1000, (value) => void patch({ ai: { contextWindow: value } })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Размер входного окна модели — по нему считается заполнение контекста и кнопка «Сжать беседу». ' +
+          '0 — определять автоматически по имени модели (например, Gemini ≈ 1 000 000, GPT-4o ≈ 128 000).',
       ),
       field('Системный промпт', prompt),
     ];
@@ -390,6 +408,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         models: [...preset.models],
       };
       if (preset.defaultModel) provider.defaultModel = preset.defaultModel;
+      if (preset.protocol) provider.protocol = preset.protocol;
       await patch({ ai: { provider } });
     }
 
@@ -626,6 +645,39 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     ];
   }
 
+  function renderLsp(): Child[] {
+    const lsp = settings!.lsp;
+
+    const servers = h('textarea', { class: 'field-input', rows: 8, spellcheck: false });
+    servers.value = JSON.stringify(lsp.servers, null, 2);
+    servers.addEventListener('change', () => {
+      try {
+        const parsed = JSON.parse(servers.value) as unknown;
+        if (!Array.isArray(parsed)) throw new Error('ожидался массив');
+        void patch({ lsp: { servers: parsed as LspServerConfig[] } }, true);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Некорректный JSON', 'error');
+      }
+    });
+
+    return [
+      switchRow('Запускать языковые серверы', lsp.enabled, (value) => void patch({ lsp: { enabled: value } }, true)),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Сервер поднимается при первом открытии файла его языка и живёт до выхода из приложения. ' +
+          'Его пометки показываются в редакторе рядом с собственными.',
+      ),
+      field('Серверы (JSON)', servers),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Например: python → pylsp; typescript → typescript-language-server --stdio; rust → rust-analyzer. ' +
+          'Формат: [{"language":"python","command":"pylsp","args":[],"enabled":true}] — команда должна быть в PATH.',
+      ),
+    ];
+  }
+
   function renderProject(): Child[] {
     const list = h('div', { class: 'recent-list' });
 
@@ -722,7 +774,9 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
               ? renderRun()
               : section === 'appearance'
                 ? renderAppearance()
-                : renderProject();
+                : section === 'lsp'
+                  ? renderLsp()
+                  : renderProject();
     append(pane, content);
     pane.scrollTop = 0;
     title.textContent = `Настройки · ${SECTIONS.find((item) => item.id === section)?.title ?? ''}`;
