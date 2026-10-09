@@ -42,6 +42,8 @@ interface StoredSettings {
     contextWindow?: number;
     /** Абсолютный предел истории для автосжатия; 0 — по окну модели. */
     compactAtTokens: number;
+    /** Модель для сжатия беседы; не задана — активная. */
+    compactModel?: string;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
     /** Страховка от зацикливания: шагов «модель → инструмент → модель» в обычном режиме. */
@@ -216,6 +218,7 @@ export class SettingsStore {
         maxTokens: ai.maxTokens,
         contextWindow: ai.contextWindow,
         compactAtTokens: ai.compactAtTokens,
+        compactModel: ai.compactModel,
         systemPrompt: ai.systemPrompt,
         reasoningEffort: ai.reasoningEffort ?? 'off',
         maxSteps: ai.maxSteps,
@@ -329,6 +332,12 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     const value = Math.round(patch.compactAtTokens);
     if (Number.isFinite(value) && value >= 0) target.compactAtTokens = value;
   }
+  // Модель сжатия: пусто — снова сжимаем активной моделью.
+  if (patch.compactModel !== undefined) {
+    const value = patch.compactModel.trim();
+    if (value) target.compactModel = value;
+    else delete target.compactModel;
+  }
   if (patch.systemPrompt !== undefined) target.systemPrompt = patch.systemPrompt;
   if (patch.reasoningEffort !== undefined) target.reasoningEffort = patch.reasoningEffort;
   if (patch.maxSteps !== undefined) target.maxSteps = clampSteps(patch.maxSteps, target.maxSteps);
@@ -397,6 +406,10 @@ function loadSettings(filePath: string): StoredSettings {
   const storedCompact = Math.round(Number(storedAi.compactAtTokens));
   ai.compactAtTokens =
     Number.isFinite(storedCompact) && storedCompact >= 0 ? storedCompact : DEFAULT_SETTINGS.ai.compactAtTokens;
+
+  // Модель сжатия: строка без пробелов или ничего (тогда сжимаем активной моделью).
+  ai.compactModel =
+    typeof storedAi.compactModel === 'string' && storedAi.compactModel.trim() ? storedAi.compactModel.trim() : undefined;
 
   // Лимиты шагов могли прийти из старого файла или быть правлены руками.
   ai.maxSteps = clampSteps(storedAi.maxSteps, DEFAULT_SETTINGS.ai.maxSteps);

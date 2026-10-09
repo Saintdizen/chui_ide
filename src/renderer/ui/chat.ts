@@ -81,8 +81,8 @@ export interface ChatDeps {
 type ChatMode = 'ask' | 'agent' | 'plan';
 
 /**
- * Сжатие беседы: старая история заменяется резюме. Пересказ просим у той же модели —
- * пересказывать код она умеет, а своего суммаризатора у нас нет.
+ * Сжатие беседы: старая история заменяется резюме. Пересказ просим у модели сжатия —
+ * по умолчанию той же, что и беседа, но её можно задать в настройках (`ai.compactModel`).
  */
 const COMPACT_PROMPT = [
   'Сожми нашу беседу в краткое резюме, чтобы продолжить работу с ним вместо истории.',
@@ -1096,10 +1096,18 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (event.key === 'Escape' && sessionInfo.visible) sessionInfo.hide();
   });
 
-  /** Бюджет одного прохода сжатия, в символах — от окна модели (см. `shared/context-fit`). */
+  /** Модель сжатия: своя из настроек (`ai.compactModel`), иначе — активная. */
+  function compactionModel(): string {
+    return settings.ai.compactModel?.trim() || currentModel();
+  }
+
+  /** Бюджет одного прохода сжатия, в символах — от окна модели сжатия (см. `shared/context-fit`). */
   function compactBudget(): number {
-    const limit = contextWindow(currentModel(), settings.ai.contextWindow);
-    return compactionBudgetChars(limit, settings.ai.maxTokens + 2_000);
+    const model = compactionModel();
+    // Явный размер окна задан для активной модели; для отдельной модели сжатия
+    // берём автоопределение по имени.
+    const override = model === currentModel() ? settings.ai.contextWindow : undefined;
+    return compactionBudgetChars(contextWindow(model, override), settings.ai.maxTokens + 2_000);
   }
 
   /**
@@ -1112,7 +1120,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   async function compactSession(session: ChatSession): Promise<boolean> {
     const provider = currentProvider();
-    const model = currentModel();
+    const model = compactionModel();
     if (!provider || !model) {
       showToast('Провайдер не настроен', 'error');
       return false;
@@ -1688,7 +1696,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     const provider = currentProvider();
-    const model = currentModel();
+    const model = compactionModel();
     if (!provider || !model) {
       showToast('Провайдер не настроен', 'error');
       return;

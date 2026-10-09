@@ -381,6 +381,12 @@ export interface AiSettings {
    * даже если до конца окна ещё далеко. 0 — сжимать только при подходе к окну.
    */
   compactAtTokens: number;
+  /**
+   * Модель для сжатия беседы. Не задана — сжимаем той же моделью, что и беседа.
+   * Пересказ — задача простая: небольшая модель справится дешевле и не займёт
+   * окно основной.
+   */
+  compactModel?: string;
   systemPrompt: string;
   /** Сколько модели думать перед ответом (`reasoning_effort`). */
   reasoningEffort: ReasoningEffort;
@@ -752,6 +758,8 @@ export interface AiSettingsPatch {
   contextWindow?: number;
   /** Абсолютный предел истории для автосжатия в токенах; 0 — только по окну модели. */
   compactAtTokens?: number;
+  /** Модель для сжатия беседы; пусто — активная модель. */
+  compactModel?: string;
   systemPrompt?: string;
   reasoningEffort?: ReasoningEffort;
   /** Сколько шагов делает агент в обычном режиме (страховка от зацикливания). */
