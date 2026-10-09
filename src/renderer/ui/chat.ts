@@ -9,13 +9,6 @@ import {
   type ChatDeltaPayload,
   type ChatHistory,
   type ChatMessage,
-  type ChatPlanPayload,
-  type ChatReasoningPayload,
-  type ChatStreamDone,
-  type ChatToolResultPayload,
-  type ToolFileChange,
-  type ChatToolStartPayload,
-  type ChatUsage,
   type DirEntry,
   type PickedImage,
   type ReasoningEffort,
@@ -35,11 +28,13 @@ import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, svgIcon } from './dom';
 import { createSelect } from './select';
 import { createSessionInfo, createUsageRing, contextUsage, type SessionInfoData } from './session-info';
-import { createToolFeed, toolLabel, type ReasoningRowView, type ToolCardView } from './chat-tools';
+import { createToolFeed, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
 import { createComposerMenu } from './chat-composer-menu';
 import { createChangesPanel } from './chat-changes';
 import { createPlanPanel } from './chat-plan';
+import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
+import type { ChatSession } from './chat-session';
 import {
   createCommandApproval,
   createEditReview,
@@ -98,14 +93,6 @@ const COMPACT_PROMPT = [
 const MAX_COMPACT_CHARS = 40_000;
 
 /**
- * Обрыв по лимиту токенов достраиваем сами, но с пределом: иначе зацикленная
- * модель жгла бы токены без конца. Дальше — ручная кнопка «Продолжить».
- */
-const MAX_AUTO_CONTINUE = 2;
-const CONTINUE_PROMPT = 'Ответ оборвался по лимиту токенов. Продолжи ровно с того места, где остановился, без повторов.';
-
-
-/**
  * Панель ассистента — правый «остров» в стиле tool window.
  *
  * Сама панель только ведёт беседу: отправляет запрос потоком (`rpc.stream`),
@@ -123,8 +110,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   let planMode = false;
   // Права доступа: кнопка в композере. Включено — команды и правки без вопросов.
   let autoApprove = false;
-  let streamBuffer = '';
-  let frame = 0;
   /**
    * Тянем ли ленту вниз автоматически. Пользователь прокрутил вверх —
    * стрим не дёргает ленту; вернулся к низу (или нажал кнопку) — снова тянем.
@@ -132,32 +117,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   let autoScroll = true;
   /** Ожидания решений пользователя (ревью правок, подтверждение команды). */
   const pendingApprovals = new Set<() => void>();
-
-  /**
-   * Беседа. Вкладок может быть много, поэтому всё, что относится к диалогу —
-   * история, ленты сообщений, правки и приложенный контекст, — живёт здесь,
-   * а не в переменных панели: иначе вторая вкладка затирала бы первую.
-   */
-  interface ChatSession {
-    id: number;
-    /** Стабильный идентификатор для сохранения: номер вкладки перезапуск не переживёт. */
-    uid: string;
-    title: string;
-    /** Лента сообщений: своя у каждой беседы, при переключении не перерисовывается. */
-    thread: HTMLElement;
-    history: ChatMessage[];
-    /** Файлы, которые агент изменил именно в этой беседе (правки документов). */
-    touched: Map<string, { original: string; added: number; removed: number }>;
-    /** Файлы, которых агент коснулся без правки документа: создал, удалил, перенёс. */
-    files: ToolFileChange[];
-    attachments: ChatAttachment[];
-    /** Недописанный вопрос: вернулся на вкладку — текст на месте. */
-    draft: string;
-    /** Последний ответ: реальный размер контекста, каким его увидел провайдер. */
-    usage?: ChatUsage;
-    /** Скорость последнего ответа в токенах в секунду (для «Информации о сессии»). */
-    speed?: number;
-  }
 
   const sessions: ChatSession[] = [];
   let activeId = 0;
@@ -1513,26 +1472,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (text) markdown.renderInto(content, text);
     const messageEl = h('div', { class: `msg msg-${role}` }, content);
     // Действия есть только у вопросов пользователя — у ответов они рисуются
-    // отдельно, когда ответ завершён (см. streamReply / renderHistory).
+    // отдельно, когда ответ завершён (см. chat-stream.ts / renderHistory).
     if (role === 'user' && onEdit) attachUserActions(messageEl, text, onEdit);
     // Вопрос открывает новый ход, ответ дописывается в текущий.
     (role === 'user' ? beginTurn(session) : currentTurn(session)).appendChild(messageEl);
     scrollToEnd(session);
     return content;
-  }
-
-  function scheduleRender(target: HTMLElement, session: ChatSession): void {
-    if (frame) return;
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      markdown.renderInto(target, streamBuffer);
-      scrollToEnd(session);
-    });
-  }
-
-  function cancelFrame(): void {
-    if (frame) cancelAnimationFrame(frame);
-    frame = 0;
   }
 
   function renderIntro(session: ChatSession): void {
@@ -1694,36 +1639,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     session.usage = undefined;
     session.speed = undefined;
     renderHistory(session);
-    await streamReply(session, provider.id, model, []);
-  }
-
-  /**
-   * Индикатор работы ассистента. Живёт внизу сообщения всю генерацию: пока модель
-   * думает или выполняется инструмент, в ленте видно движение — иначе ответ «висит»
-   * без единого признака жизни и кажется, что приложение зависло.
-   */
-  function createActivity(): {
-    element: HTMLElement;
-    state(label: string): void;
-    hide(): void;
-    dispose(): void;
-  } {
-    const label = h('span', { class: 'msg-activity-label' });
-    const dots = h('span', { class: 'msg-activity-dots' }, h('i', {}), h('i', {}), h('i', {}));
-    const element = h('div', { class: 'msg-activity', hidden: true }, dots, label);
-    return {
-      element,
-      state(text: string) {
-        label.textContent = text;
-        element.hidden = false;
-      },
-      hide() {
-        element.hidden = true;
-      },
-      dispose() {
-        element.remove();
-      },
-    };
+    await stream.run(session, provider.id, model, []);
   }
 
   async function send(raw: string): Promise<void> {
@@ -1767,222 +1683,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     autoScroll = true;
     jumpButton.hidden = true;
 
-    await streamReply(session, provider.id, model, sent);
-  }
-
-  /**
-   * Стриминг ответа в ленту беседы. Отделено от `send`, потому что «Повторить»
-   * и «Продолжить» переиспользуют тот же путь, не добавляя новый вопрос.
-   */
-  async function streamReply(
-    session: ChatSession,
-    providerId: string,
-    model: string,
-    attachments: ChatAttachment[],
-  ): Promise<void> {
-    // Ответ ассистента — это последовательность «текст → карточка инструмента →
-    // текст», поэтому внутри одного сообщения живёт несколько текстовых сегментов.
-    const messageEl = h('div', { class: 'msg msg-assistant' });
-    currentTurn(session).appendChild(messageEl);
-    let segment = h('div', { class: 'msg-body' });
-    messageEl.appendChild(segment);
-    // Индикатор работы держим внизу сообщения: новые сегменты вставляем перед ним.
-    const activity = createActivity();
-    messageEl.appendChild(activity.element);
-    activity.state('думает…');
-    // Подряд идущие вызовы инструментов живут одной группой — см. createToolFeed.
-    const tools = createToolFeed(messageEl, activity.element, () => scrollToEnd(session));
-    /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
-    let reasoningView: ReasoningRowView | null = null;
-    const toolCards = new Map<string, ToolCardView>();
-    /** Размышления: строка живёт в ленте действий — заводим её лениво. */
-    const pushReasoning = (text: string): void => {
-      (reasoningView ??= tools.reasoning()).push(text);
-    };
-    /** Ответ начался или закончился — сворачиваем строку размышлений. */
-    const collapseReasoning = (): void => {
-      reasoningView?.collapse();
-      reasoningView = null;
-    };
-    /** Замер скорости ответа: от первого текстового фрагмента до конца потока. */
-    let firstDeltaAt = 0;
-    let lastDeltaAt = 0;
-
-    streamBuffer = '';
-    planPanel.hide();
-    scrollToEnd(session);
-    streamingSession = session;
-
-    const flushSegment = (): void => {
-      cancelFrame();
-      markdown.renderInto(segment, streamBuffer);
-    };
-
-    setBusy(true, session);
-
-    let continues = 0;
-    let done: ChatStreamDone;
-
-    try {
-      for (;;) {
-        done = await deps.rpc.stream(
-          'ai.chat',
-          {
-            providerId,
-            model,
-            messages: session.history.map((message) => ({ ...message })),
-            useTools,
-            autoApprove,
-            planMode,
-            attachments,
-          },
-          (event, payload) => {
-            if (event === ChatStreamEvent.Reasoning) {
-              pushReasoning((payload as ChatReasoningPayload).text);
-              activity.state('размышляет…');
-              return;
-            }
-            if (event === ChatStreamEvent.Plan) {
-              planPanel.render((payload as ChatPlanPayload).steps);
-              activity.state('строит план…');
-              return;
-            }
-            if (event === ChatStreamEvent.Delta) {
-              cancelFrame();
-              collapseReasoning();
-              activity.hide();
-              // Пошёл текст ответа — цепочка вызовов закончилась.
-              tools.seal();
-              const now = performance.now();
-              if (firstDeltaAt === 0) firstDeltaAt = now;
-              lastDeltaAt = now;
-              streamBuffer += (payload as ChatDeltaPayload).text;
-              scheduleRender(segment, session);
-              return;
-            }
-            if (event === ChatStreamEvent.ToolStart) {
-              const call = payload as ChatToolStartPayload;
-              flushSegment();
-              // Текст, после которого пошёл вызов инструмента, — промежуточный:
-              // показываем пузырём, чтобы он не сливался со строками действий.
-              segment.classList.add('msg-note');
-              // Новый вызов — новый текстовый сегмент. Буфер держит текст ТОЛЬКО
-              // текущего шага: иначе в следующий сегмент выльется весь предыдущий
-              // текст и ответ будет повторяться в каждом пузыре.
-              streamBuffer = '';
-              // Размышления пошаговые: закрываем текущую часть, следующая врезка
-              // ляжет отдельным абзацем в ту же строку ленты.
-              reasoningView?.part();
-              toolCards.set(call.id, tools.add(call));
-              activity.state(`выполняю: ${toolLabel(call.name)}`);
-              segment = h('div', { class: 'msg-body' });
-              messageEl.insertBefore(segment, activity.element);
-              scrollToEnd(session);
-              return;
-            }
-            if (event === ChatStreamEvent.ToolResult) {
-              const result = payload as ChatToolResultPayload;
-              toolCards.get(result.id)?.finish(result);
-              activity.state('думает…');
-              // Создание, удаление и перенос не идут через документы: панель
-              // изменений узнаёт о них из результата инструмента.
-              if (result.ok && result.changes?.length) {
-                for (const change of result.changes) {
-                  const at = session.files.findIndex((item) => item.path === change.path);
-                  if (at >= 0) session.files[at] = change;
-                  else session.files.push(change);
-                }
-                renderChanges();
-              }
-            }
-          },
-        );
-
-        flushSegment();
-        collapseReasoning();
-        tools.seal();
-        session.history.push(...(done.agentMessages ?? [{ role: 'assistant', content: done.text }]));
-        session.usage = done.usage;
-
-        // Скорость ответа: токены / время потока. Без обоих чисел не показываем.
-        const completion = done.usage?.completionTokens;
-        session.speed =
-          completion !== undefined && firstDeltaAt > 0 && lastDeltaAt > firstDeltaAt
-            ? completion / ((lastDeltaAt - firstDeltaAt) / 1000)
-            : undefined;
-
-        // Обрезано по лимиту — достраиваем сами, пока есть бюджет продолжений.
-        if (done.finishReason !== 'length' || continues >= MAX_AUTO_CONTINUE) break;
-
-        continues += 1;
-        messageEl.insertBefore(
-          h(
-            'div',
-            { class: 'finish-note is-continue' },
-            svgIcon('refresh', 12),
-            h('span', {}, `Продолжаю ответ · ${continues}/${MAX_AUTO_CONTINUE}`),
-          ),
-          activity.element,
-        );
-        session.history.push({ role: 'user', content: CONTINUE_PROMPT });
-        // Продолжение — часть ТОГО ЖЕ ответа: новый сегмент в том же пузыре.
-        segment = h('div', { class: 'msg-body' });
-        messageEl.insertBefore(segment, activity.element);
-        streamBuffer = '';
-        scrollToEnd(session);
-      }
-
-      // Дошли до предела продолжений, а ответ всё обрезан — оставляем ручную кнопку.
-      if (done.finishReason === 'length') {
-        messageEl.insertBefore(
-          h(
-            'div',
-            { class: 'finish-note' },
-            svgIcon('warning', 12),
-            h('span', {}, 'Ответ обрезан по лимиту токенов'),
-            h(
-              'button',
-              {
-                class: 'link-btn',
-                type: 'button',
-                onClick: () => void send('Продолжи ответ с того места, где остановился.'),
-              },
-              'Продолжить',
-            ),
-          ),
-          activity.element,
-        );
-      }
-
-      attachAssistantActions(messageEl, () => assistantText(messageEl), () => void regenerate(session), feedbackFor(session, session.history.length - 1));
-      scrollToEnd(session);
-    } catch (error) {
-      flushSegment();
-      tools.seal();
-      closeApprovals();
-      if (error instanceof RpcError && error.cancelled) {
-        segment.appendChild(h('div', { class: 'field-hint' }, 'генерация остановлена'));
-        session.history.push({ role: 'assistant', content: streamBuffer });
-      } else {
-        clear(segment);
-        segment.appendChild(h('p', { class: 'msg-error' }, error instanceof Error ? error.message : String(error)));
-        showToast('Не удалось получить ответ модели', 'error');
-      }
-    } finally {
-      planPanel.hide();
-      activity.dispose();
-      streamingSession = null;
-      setBusy(false, session);
-      // Правки уже на диске: их записал applyAgentEdits сразу после применения.
-      // Здесь остаётся только подстраховка — добить то, что не записалось.
-      if (session.touched.size > 0) await persistPaths(session.touched.keys());
-      renderTabs();
-      syncSessionInfo();
-      scheduleSave();
-      void deps.rpc
-        .request('settings.update', { ai: { activeProviderId: providerId, activeModel: model } })
-        .catch(() => undefined);
-    }
+    await stream.run(session, provider.id, model, sent);
   }
 
   function setBusy(value: boolean, session: ChatSession = active()): void {
@@ -2128,6 +1829,40 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /** Разбор ответа в узлы: движок markdown живёт в отдельном модуле. */
   const markdown = createMarkdownRenderer({ insertCode: (code) => deps.editors.insertAtCursor(code) });
+
+  /**
+   * Стриминг ответа вынесен в отдельный модуль: он умеет всё сам и лишь просит
+   * панель про прокрутку, занятость и панели — эти действия передаём сюда.
+   */
+  const stream = createStreamRunner({
+    rpc: deps.rpc,
+    markdown,
+    messageHost: (session) => currentTurn(session),
+    scrollToEnd: (session) => scrollToEnd(session),
+    renderPlan: (steps) => planPanel.render(steps),
+    hidePlan: () => planPanel.hide(),
+    renderChanges,
+    setBusy,
+    closeApprovals,
+    persist: (paths) => persistPaths(paths),
+    setStreaming: (session) => {
+      streamingSession = session;
+    },
+    attachActions: (messageEl, session) =>
+      attachAssistantActions(
+        messageEl,
+        () => assistantText(messageEl),
+        () => void regenerate(session),
+        feedbackFor(session, session.history.length - 1),
+      ),
+    continueAnswer: () => void send('Продолжи ответ с того места, где остановился.'),
+    afterStream: () => {
+      renderTabs();
+      syncSessionInfo();
+      scheduleSave();
+    },
+    modes: () => ({ useTools, autoApprove, planMode }),
+  });
 
   input.addEventListener('input', () => menu.sync());
 
