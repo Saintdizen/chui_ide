@@ -12,6 +12,7 @@ import { projectEnv } from './project-env';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { activateCommand, findEnvironments, pythonInterpreterFor } from './python/environments';
 import { SessionStore } from './session-store';
+import { ProjectConfigStore } from './project-config';
 import { SettingsStore } from './settings';
 import { TerminalService } from './terminal/terminal';
 import { WorkspaceService } from './workspace/workspace';
@@ -127,8 +128,9 @@ if (!app.requestSingleInstanceLock()) {
     );
     // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
     const sessions = new SessionStore();
+    const projectConfig = new ProjectConfigStore();
 
-    registerIpc({ settings, workspace, ai, terminals, git, lsp, debug, sessions, host: new HostClient() });
+    registerIpc({ settings, workspace, ai, terminals, git, lsp, debug, sessions, projectConfig, host: new HostClient() });
     serveRenderer();
     createApplicationMenu();
     // Приложение начинается со списка проектов: окно IDE откроется после

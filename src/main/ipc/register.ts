@@ -37,6 +37,7 @@ import { collectTests } from '../python/tests';
 import { formatPython } from '../python/format';
 import { checkEnvironments } from '../python/health';
 import type { SessionStore } from '../session-store';
+import type { ProjectConfigStore } from '../project-config';
 import { matchPresets } from '../../shared/lsp-presets';
 import type { TerminalService } from '../terminal/terminal';
 import { applyBounds, openIdeWindow, windowState } from '../window';
@@ -61,6 +62,8 @@ export interface AppDependencies {
   debug?: DebugService;
   /** Сессия проекта (вкладки, папки, панели). Необязательно для пробников. */
   sessions?: SessionStore;
+  /** Настройки и макет уровня проекта: `<root>/.chui_ide/` (см. ProjectConfigStore). */
+  projectConfig?: ProjectConfigStore;
 }
 
 /**
@@ -305,7 +308,17 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('session.save', (params) => {
     deps.sessions?.save(params.root, params.state);
   });
-
+  // Настройки и макет уровня проекта — в `<root>/.chui_ide/`. Свои для каждого
+  // проекта, поэтому корень берём из параметров, а не из глобальных настроек.
+  router.register('project.config', (params) =>
+    deps.projectConfig?.load(params.root) ?? { settings: {}, layout: {} },
+  );
+  router.register('project.updateSettings', (params) =>
+    deps.projectConfig?.updateSettings(params.root, params.patch) ?? { settings: {}, layout: {} },
+  );
+  router.register('project.saveLayout', (params) =>
+    deps.projectConfig?.saveLayout(params.root, params.layout) ?? params.layout,
+  );
   /* ── стартовое окно ────────────────────────────────────────────────────── */
 
   /** Недавние проекты с проверкой, что папка ещё на месте. */

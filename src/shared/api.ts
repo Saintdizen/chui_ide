@@ -8,6 +8,7 @@
 import type { MenuRole } from './app-menu';
 import type { ApplyResult, FileEdit } from './edits';
 import type { ProjectScan } from './project-scan';
+import type { ProjectConfig, ProjectLayout, ProjectSettings } from './project-config';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { NodeTestSuite } from './node-tests';
 import type { PythonEnvironment, PythonInterpreter } from './python-env';
@@ -1106,6 +1107,15 @@ export interface ChuiMethods {
    * имён без чтения содержимого — дёшево и без последствий для больших проектов.
    */
   'project.scan': { params: void; result: ProjectScan };
+  /**
+   * Конфигурация уровня проекта из `<root>/.chui_ide/`: настройки редактора,
+   * дерева, запуска и LSP вместе с макетом панелей. Лежит в самом проекте,
+   * чтобы её можно было версионировать вместе с кодом, в отличие от userData.
+   */
+  'project.config': { params: { root: string }; result: ProjectConfig };
+  'project.updateSettings': { params: { root: string; patch: ProjectSettings }; result: ProjectConfig };
+  'project.saveLayout': { params: { root: string; layout: ProjectLayout }; result: ProjectLayout };
+
 
   /** Виртуальные окружения Python в проекте: главное — первым. */
   'python.environments': { params: void; result: PythonEnvironment[] };
