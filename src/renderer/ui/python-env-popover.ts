@@ -6,6 +6,7 @@ import { envList, envShortLabel, envSource, envSourceLabel } from '../core/pytho
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
 import { createSelect, type SelectOption } from './select';
+import { showToast } from './toast';
 
 /**
  * Попап Python-окружения в статусбаре.
@@ -93,7 +94,7 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
     const kind = deps.projectKind?.();
     if (kind) body.appendChild(row('Проект', kind, false));
 
-    const [environments, interpreters, packages, requirementsText, health] = await Promise.all([
+    const [environments, interpreters, packages, requirementsText, health, activation] = await Promise.all([
       deps.rpc.request('python.environments').catch(() => [] as PythonEnvironment[]),
       deps.rpc.request('python.interpreters').catch(() => [] as PythonInterpreter[]),
       deps.rpc.request('python.packages').catch(() => [] as InstalledPackage[]),
@@ -104,6 +105,8 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
         .then((file) => file.text)
         .catch(() => null),
       deps.rpc.request('python.envHealth').catch(() => [] as EnvironmentHealth[]),
+      // Команду активации собирает main: renderer не знает ни платформы, ни путей.
+      deps.rpc.request('python.activateCommand').catch(() => ({ command: null })),
     ]);
     // Поломки окружения показываем сразу под интерпретатором: это важнее списка пакетов.
     if (health.length > 0) {
@@ -157,7 +160,21 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
         );
       }
     }
-    body.appendChild(section('Окружения', list, button('Создать окружение…', () => deps.onCreate())));
+    // Команда активации — рядом с окружениями: её копируют в сторонний терминал,
+    // чтобы работать в том же venv, когда IDE его не активирует (внешняя оболочка).
+    const envActions: HTMLElement[] = [];
+    if (activation.command) {
+      const command = activation.command;
+      envActions.push(
+        button('Скопировать команду активации', () => {
+          void navigator.clipboard.writeText(command).then(
+            () => showToast('Команда активации скопирована'),
+            () => showToast('Не удалось скопировать', 'error'),
+          );
+        }),
+      );
+    }
+    body.appendChild(section('Окружения', list, ...envActions, button('Создать окружение…', () => deps.onCreate())));
 
     // Интерпретатор для этого проекта: выбор важнее общего, когда проектов несколько.
     const options: SelectOption[] = [{ value: '', label: 'Автоматически (окружение проекта)' }];

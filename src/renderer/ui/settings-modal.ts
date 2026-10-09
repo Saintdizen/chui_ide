@@ -67,6 +67,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   let testResult: { ok: boolean; message: string } | null = null;
   /** Модели, которые отдал провайдер при проверке. */
   let testedModels: string[] = [];
+  /**
+   * Языки, у которых сервер поднят сейчас. `null` — ещё не спрашивали: показываем
+   * это состояние, чтобы не обещать «ничего не запущено» до ответа main.
+   */
+  let lspRunning: string[] | null = null;
 
   const nav = h('nav', { class: 'modal-nav' });
   const pane = h('div', { class: 'modal-pane' });
@@ -135,6 +140,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error');
     }
+    // Статус серверов спрашиваем заново при каждом открытии окна: он меняется.
+    lspRunning = null;
+    render();
+  }
+
+  /** Спросить у main, какие языковые серверы подняты, и перерисовать панель. */
+  async function refreshLspStatus(): Promise<void> {
+    lspRunning = await deps.rpc
+      .request('lsp.status')
+      .then((status) => status.running)
+      .catch(() => []);
     render();
   }
 
@@ -731,6 +747,30 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         });
     });
 
+    // Живой статус: какие серверы подняты прямо сейчас, и кнопка их перезапуска.
+    // Перезапуск нужен, когда сервер завис или подхватил не то окружение.
+    const restartButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Перезапустить');
+    restartButton.addEventListener('click', () => {
+      restartButton.disabled = true;
+      void deps.rpc
+        .request('lsp.restart')
+        .then((result) => {
+          lspRunning = result.running;
+          render();
+          showToast('Серверы остановлены — поднимутся при следующем открытии файла');
+        })
+        .catch((error) => {
+          showToast(error instanceof Error ? error.message : String(error), 'error');
+          restartButton.disabled = false;
+        });
+    });
+    const statusText =
+      lspRunning === null
+        ? 'Смотрю запущенные серверы…'
+        : lspRunning.length > 0
+          ? `Сейчас запущены: ${lspRunning.join(', ')}`
+          : 'Сейчас ничего не запущено';
+
     return [
       switchRow('Запускать языковые серверы', lsp.enabled, (value) => void patch({ lsp: { enabled: value } }, true)),
       h(
@@ -739,6 +779,8 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Сервер поднимается при первом открытии файла его языка и живёт до выхода из приложения. ' +
           'Его пометки показываются в редакторе рядом с собственными.',
       ),
+      h('div', { class: 'field-hint' }, statusText),
+      field('Перезапустить', restartButton),
       field('Серверы (JSON)', servers),
       field('Найти серверы', detectButton),
       h(
@@ -838,6 +880,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       );
       nav.appendChild(button);
     }
+
+    // Открыли раздел LSP, а статуса ещё нет — спросим. Один раз: ответ перерисует
+    // панель, и повторно дёргать main на каждую отрисовку незачем.
+    if (section === 'lsp' && lspRunning === null) void refreshLspStatus();
 
     clear(pane);
     const content =
