@@ -647,6 +647,22 @@ export interface ChatToolResultPayload {
   ok: boolean;
   summary: string;
   detail?: string;
+  /** Файлы, которых коснулся инструмент без правки документа (создание, удаление, перенос). */
+  changes?: ToolFileChange[];
+}
+
+/**
+ * Файловая операция агента, которую видно в панели «Изменён N файл».
+ * Правки документов едут отдельным путём (apply_edit → ревью), а это —
+ * создание, удаление и перенос: они меняют диск, но не буфер редактора.
+ */
+export interface ToolFileChange {
+  path: string;
+  kind: 'created' | 'deleted' | 'moved';
+  /** Для `moved` — исходный путь. */
+  from?: string;
+  /** Строк в созданном файле (для счётчика). */
+  lines?: number;
 }
 
 /** Статус шага плана: как в todo-инструментах агентов. */

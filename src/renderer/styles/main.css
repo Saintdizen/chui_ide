@@ -1903,8 +1903,19 @@ textarea {
 }
 
 .reasoning-summary {
+  display: list-item;
   cursor: pointer;
   color: var(--text_color_disabled);
+}
+
+/* Счётчик шагов: по нему видно, что размышления собраны из нескольких врезок. */
+.reasoning-count:not(:empty) {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius_pill);
+  background: var(--element_background);
+  font-size: 10px;
+  color: var(--text_color_tertiary);
 }
 
 .reasoning-text {
@@ -2048,6 +2059,14 @@ textarea {
 .finish-note .icon {
   flex: 0 0 auto;
   color: var(--git_modified, var(--text_color_tertiary));
+}
+
+/* Ответ достраивается сам: это не предупреждение, а ход работы — тише и без рамки. */
+.finish-note.is-continue {
+  border-color: transparent;
+  background: none;
+  padding-left: 0;
+  font-style: italic;
 }
 
 /* Чек-лист плана агента. */
@@ -2375,8 +2394,12 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
-/* Карточка уже не требует действия — гасим акцентную рамку. */
-.decision-done {
+/* Карточка уже не требует действия — гасим акцентную рамку.
+   Селектор с классом карточки: без него жёлтая рамка `.approval` (она ниже
+   по файлу и с той же специфичностью) перебивает это правило. */
+.decision-done,
+.approval.decision-done,
+.review.decision-done {
   border-color: var(--separator_color);
   background: none;
 }
@@ -2404,12 +2427,40 @@ textarea {
   padding-bottom: 6px;
 }
 
-.review-path {
+/* Шапка файла кликабельна целиком: щелчок по имени тоже ставит/снимает галочку. */
+.review-file-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 8px 0;
+  cursor: pointer;
+}
+
+.review-path {
   overflow-wrap: anywhere;
   color: var(--text_color_disabled);
   font-family: var(--font_mono);
   font-size: 11px;
+}
+
+.review-check {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--blue_prime_background);
+}
+
+/* Снятая галочка приглушает файл: видно, что он не попадёт в применение. */
+.review-file:has(.review-check:not(:checked)) .review-hunk,
+.review-file:has(.review-check:not(:checked)) .review-error {
+  opacity: 0.45;
+}
+
+.review-all {
+  color: var(--text_color_disabled);
+}
+
+.review-all:hover {
+  color: var(--link_color);
 }
 
 .review-hunk {
@@ -2634,6 +2685,23 @@ textarea {
   gap: 6px;
   font-family: var(--font_mono);
   font-size: 11px;
+}
+
+/* Операция агента с файлом: создан, удалён или перенесён. */
+.chip-kind {
+  padding: 0 5px;
+  border-radius: var(--radius_pill);
+  background: var(--element_background);
+  color: var(--text_color_tertiary);
+  font-size: 10px;
+}
+
+.chip-kind-created {
+  color: var(--git_added, #5c9e5c);
+}
+
+.chip-kind-deleted {
+  color: var(--text_color_error);
 }
 
 /* Добавленное — зелёное, удалённое — красное: те же цвета, что у статусов файлов. */

@@ -59,7 +59,7 @@ const AGENT_PROMPT = [
 const AUTOPILOT_PROMPT = [
   'Режим автопилота: правки применяются сразу, рядовые команды выполняются без подтверждения.',
   'Работай до результата: прочитай нужное, сделай правки, проверь себя и только потом отвечай.',
-  'Необратимые команды всё равно уйдят на подтверждение — не рассчитывай на них.',
+  'Доступ полный: команды и правки выполняются сразу, подтверждений не будет. Будь аккуратен с необратимыми действиями.',
 ].join('\n');
 
 /**
@@ -177,7 +177,8 @@ export class AiService {
     // Предлагаем модели только то, что реально может исполнить эта сборка.
     const available = useTools ? AGENT_TOOLS.filter((tool) => this.canRun(tool, host)) : [];
     const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
-    const toolContext: ToolContext = { workspace: this.workspace, signal, autoApprove };
+    // Автопилот — это полный доступ: и правки, и команды без подтверждений.
+    const toolContext: ToolContext = { workspace: this.workspace, signal, autoApprove, allowAll: autoApprove };
     if (this.git) toolContext.git = this.git;
     if (this.terminals) toolContext.terminals = this.terminals;
     if (host) {
@@ -287,6 +288,7 @@ export class AiService {
           ok: outcome.ok,
           summary: outcome.summary,
           detail: outcome.detail,
+          changes: outcome.changes,
         });
 
         const toolMessage: ChatMessage = {

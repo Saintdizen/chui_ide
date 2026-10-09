@@ -7,6 +7,7 @@ import {
   type GitStatus,
   type TerminalCreateOptions,
   type TerminalSession,
+  type ToolFileChange,
 } from '../../shared/api';
 import type { FileEdit, TextEdit } from '../../shared/edits';
 import { parseToolArguments } from '../../shared/tools';
@@ -28,6 +29,8 @@ export interface ToolOutcome {
   summary: string;
   /** То, что уходит модели. Может быть длинным — усекается до `MAX_OUTPUT_CHARS`. */
   detail?: string;
+  /** Файловые операции (создание/удаление/перенос): их показывает панель изменений чата. */
+  changes?: ToolFileChange[];
 }
 
 /**
@@ -55,8 +58,10 @@ export interface TerminalAgent {
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
-  /** Автопилот: не спрашивать разрешения на правки и рядовые команды. */
+  /** Автопилот: не спрашивать разрешения на правки. */
   autoApprove?: boolean;
+  /** Полный доступ: не спрашивать разрешения ни на что — включая команды. */
+  allowAll?: boolean;
   /** Правки в документах; нет обработчика — правки недоступны. */
   applyEdits?(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Спросить у пользователя разрешение на запуск команды. */
@@ -84,33 +89,6 @@ const MAX_EDITS_PER_FILE = 500;
 
 /** Команда длиннее — это уже не команда, а попытка спрятать скрипт. */
 const MAX_COMMAND_CHARS = 2000;
-
-/**
- * Команды, которые в автопилоте всё равно спрашивают подтверждение.
- * Список не защита от злого умысла, а страховка от необратимой ошибки:
- * цена промаха у них выше, чем выигрыш от автоматизации. Ловим опасные
- * глаголы в ЛЮБОМ месте строки (после `;`, `&&`, `|`), а не только в начале.
- */
-const DANGEROUS_COMMAND = new RegExp(
-  [
-    String.raw`(^|[\s;&|])(sudo|doas|su)\s`,
-    String.raw`(^|[\s;&|])(rm|rmdir|shred|wipefs|mkfs\S*|fdisk|sfdisk|parted|shutdown|reboot|poweroff|halt|killall|pkill)\s`,
-    String.raw`(^|[\s;&|])dd\s+[^\n]*\bif=`,
-    String.raw`>\s*\/dev\/(sd|nvme|hd|disk)`,
-    String.raw`>\s*(\/etc\/|\/boot\/|\/usr\/|~?\/?\.ssh\/|~?\/?\.bashrc|~?\/?\.zshrc)`,
-    String.raw`:\s*\(\s*\)\s*\{`,
-    String.raw`chmod\s+-R\s+(777|666)\s+\/(\s|$)`,
-    String.raw`chown\s+-R\s+\S+\s+\/(\s|$)`,
-    String.raw`git\s+(push\s+[^\n]*(--force|-f)\b|reset\s+--hard|clean\s+-[a-z]*f[a-z]*d)`,
-    String.raw`(curl|wget)\b[^\n|]*\|\s*(ba|z|fi|da)?sh\b`,
-    String.raw`--no-preserve-root`,
-  ].join('|'),
-  'i',
-);
-
-export function isDangerousCommand(command: string): boolean {
-  return DANGEROUS_COMMAND.test(command);
-}
 
 export async function runTool(ctx: ToolContext, name: string, rawArguments: string): Promise<ToolOutcome> {
   const parsed = parseToolArguments(rawArguments);
@@ -419,9 +397,8 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   const root = ctx.workspace.rootPath();
   if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
 
-  // В автопилоте рядовые команды идут без вопросов, но необратимые — всегда через диалог.
-  const needsPermission = !ctx.autoApprove || isDangerousCommand(command);
-  if (needsPermission) {
+  // Полный доступ (автопилот) — без вопросов; обычный агент спрашивает всегда.
+  if (!ctx.allowAll) {
     const allowed = await ctx.confirmCommand(command);
     if (!allowed) {
       return {
@@ -457,6 +434,7 @@ async function createFile(workspace: WorkspaceService, args: Record<string, unkn
     ok: true,
     summary: `создан ${relative(created, workspace.rootPath())} (${lines} строк)`,
     detail: `Создан файл ${created}.`,
+    changes: [{ path: created, kind: 'created', lines }],
   };
 }
 
@@ -468,6 +446,7 @@ async function deleteFile(workspace: WorkspaceService, args: Record<string, unkn
     ok: true,
     summary: `в корзину: ${relative(target, workspace.rootPath())}`,
     detail: `Удалено (в корзину): ${target}.`,
+    changes: [{ path: target, kind: 'deleted' }],
   };
 }
 
@@ -481,6 +460,7 @@ async function moveFile(workspace: WorkspaceService, args: Record<string, unknow
     ok: true,
     summary: `${relative(from, root)} → ${relative(moved, root)}`,
     detail: `Перемещено: ${from} → ${moved}.`,
+    changes: [{ path: moved, kind: 'moved', from }],
   };
 }
 
@@ -626,8 +606,8 @@ async function terminalStart(ctx: ToolContext, args: Record<string, unknown>): P
     throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
   }
 
-  // Рядовая команда в автопилоте — без вопросов; необратимая — всегда через диалог.
-  if (command && (!ctx.autoApprove || isDangerousCommand(command))) {
+  // Полный доступ (автопилот) — без вопросов; обычный агент спрашивает всегда.
+  if (command && !ctx.allowAll) {
     if (!ctx.confirmCommand) return { ok: false, summary: 'Запуск команд недоступен' };
     const allowed = await ctx.confirmCommand(command);
     if (!allowed) {
@@ -686,8 +666,8 @@ async function terminalWrite(ctx: ToolContext, args: Record<string, unknown>): P
   const id = requireString(args, 'id');
   const data = requireString(args, 'data');
 
-  // Ввод в терминал может быть чем угодно — спрашиваем, если это не автопилот.
-  if (!ctx.autoApprove) {
+  // Ввод в терминал может быть чем угодно — спрашиваем, если нет полного доступа.
+  if (!ctx.allowAll) {
     if (!ctx.confirmCommand) return { ok: false, summary: 'Ввод в терминал недоступен' };
     const allowed = await ctx.confirmCommand(`[${id}] ${data.replace(/\n/g, '⏎')}`);
     if (!allowed) return { ok: false, summary: 'Пользователь запретил ввод', detail: 'Ввод отклонён.' };

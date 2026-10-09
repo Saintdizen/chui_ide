@@ -11,7 +11,9 @@ import {
   type ChatMessage,
   type ChatPlanPayload,
   type ChatReasoningPayload,
+  type ChatStreamDone,
   type ChatToolResultPayload,
+  type ToolFileChange,
   type ChatToolStartPayload,
   type ChatUsage,
   type DirEntry,
@@ -91,6 +93,14 @@ const MAX_COMPACT_CHARS = 40_000;
 const MAX_REASONING_CHARS = 20_000;
 
 /**
+ * Обрыв по лимиту токенов достраиваем сами, но с пределом: иначе зацикленная
+ * модель жгла бы токены без конца. Дальше — ручная кнопка «Продолжить».
+ */
+const MAX_AUTO_CONTINUE = 2;
+const CONTINUE_PROMPT = 'Ответ оборвался по лимиту токенов. Продолжи ровно с того места, где остановился, без повторов.';
+
+
+/**
  * Панель ассистента — правый «остров» в стиле tool window.
  *
  * Агентного цикла здесь пока нет: канал для него готов (`rpc.stream` +
@@ -126,8 +136,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     /** Лента сообщений: своя у каждой беседы, при переключении не перерисовывается. */
     thread: HTMLElement;
     history: ChatMessage[];
-    /** Файлы, которые агент изменил именно в этой беседе. */
+    /** Файлы, которые агент изменил именно в этой беседе (правки документов). */
     touched: Map<string, { original: string; added: number; removed: number }>;
+    /** Файлы, которых агент коснулся без правки документа: создал, удалил, перенёс. */
+    files: ToolFileChange[];
     attachments: ChatAttachment[];
     /** Недописанный вопрос: вернулся на вкладку — текст на месте. */
     draft: string;
@@ -732,7 +744,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     class: 'composer-select',
     title:
       'Вопрос — просто ответ. Агент — сам читает проект, правит файлы и запускает команды, но каждое действие подтверждаете вы. ' +
-      'Автопилот — делает то же без вопросов (необратимые команды всё равно спросит).',
+      'Автопилот — полный доступ: делает то же и без единого вопроса, включая необратимые команды.',
   });
   modeSelect.setOptions([
     { value: 'ask', label: 'Вопрос' },
@@ -982,6 +994,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       thread: h('div', { class: 'chat-thread' }),
       history: [],
       touched: new Map(),
+      files: [],
       attachments: [],
       draft: '',
     };
@@ -1120,6 +1133,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const lastIndex = session.history.length - 1;
     session.history.forEach((message, index) => {
       if (message.role === 'user') {
+        // Служебный дострой обрезанного ответа — не вопрос человека: в ленте не показываем.
+        if (message.content === CONTINUE_PROMPT) return;
         appendMessage(session, 'user', message.content, () => editUserMessage(session, index, message.content));
         return;
       }
@@ -1224,8 +1239,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   /** Кольцо в углу композера показывает то же число, что и окно информации. */
   const contextRing = createUsageRing(() => toggleSessionInfo());
 
-  function sessionInfoData(): SessionInfoData {
-    const session = active();
+  function sessionInfoData(session: ChatSession = active()): SessionInfoData {
     return {
       provider: currentProvider()?.label ?? 'провайдер не задан',
       model: currentModel(),
@@ -1264,23 +1278,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (event.key === 'Escape' && sessionInfo.visible) sessionInfo.hide();
   });
 
-  /** Резюме заменяет историю: беседа продолжается с освобождённым контекстом. */
-  async function compactActive(): Promise<void> {
-    const session = active();
-    if (busy) {
-      showToast('Дождитесь ответа или остановите генерацию');
-      return;
-    }
-    if (session.history.length === 0) {
-      showToast('Беседа пуста — сжимать нечего');
-      return;
-    }
-
+  /** Сжать указанную беседу: вернуть true, если резюме получено и история заменена. */
+  async function compactSession(session: ChatSession): Promise<boolean> {
     const provider = currentProvider();
     const model = currentModel();
     if (!provider || !model) {
       showToast('Провайдер не настроен', 'error');
-      return;
+      return false;
     }
 
     const transcript = session.history
@@ -1308,7 +1312,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const summary = (done.text || streamed).trim();
       if (!summary) {
         showToast('Модель не вернула резюме', 'error');
-        return;
+        return false;
       }
 
       const before = session.history.length;
@@ -1321,15 +1325,48 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       showToast(
         `Беседа сжата: ${before} ${plural(before, 'сообщение', 'сообщения', 'сообщений')} → краткое резюме`,
       );
+      return true;
     } catch (error) {
       if (error instanceof RpcError && error.cancelled) showToast('Сжатие отменено');
       else showToast(error instanceof Error ? error.message : String(error), 'error');
+      return false;
     } finally {
       setBusy(false, session);
       renderTabs();
       syncSessionInfo();
       scheduleSave();
     }
+  }
+
+  /** Сжатие по кнопке: с проверками «идёт генерация» и «есть что сжимать». */
+  async function compactActive(): Promise<void> {
+    const session = active();
+    if (busy) {
+      showToast('Дождитесь ответа или остановите генерацию');
+      return;
+    }
+    if (session.history.length === 0) {
+      showToast('Беседа пуста — сжимать нечего');
+      return;
+    }
+    await compactSession(session);
+  }
+
+  /**
+   * Перед отправкой сверяемся с окном модели: если запрос плюс зарезервированный
+   * ответ не помещаются, сначала сжимаем беседу — иначе провайдер обрежет запрос
+   * или вернёт ошибку лимита. Сжимать нечего (короткая история) — просто предупреждаем.
+   */
+  async function ensureContextFits(session: ChatSession): Promise<void> {
+    const usage = contextUsage(sessionInfoData(session));
+    if (usage.used + settings.ai.maxTokens <= usage.limit) return;
+
+    if (session.history.length < 2) {
+      showToast('Контекст переполнен, но сжимать почти нечего — ответ может обрезаться', 'error');
+      return;
+    }
+    showToast('Контекст переполнен — сжимаю беседу перед отправкой');
+    await compactSession(session);
   }
 
   /** После сжатия в ленте остаётся отметка и само резюме — его стоит видеть. */
@@ -1357,7 +1394,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     modeBadge.classList.toggle('composer-status-auto', mode === 'autopilot');
     modeName.textContent =
       mode === 'autopilot'
-        ? 'Автопилот: правки без подтверждения'
+        ? 'Автопилот: полный доступ, без подтверждений'
         : mode === 'agent'
           ? 'Инструменты разрешены'
           : 'Инструменты выключены';
@@ -1400,8 +1437,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   function renderChanges(): void {
-    const touched = active().touched;
-    if (touched.size === 0) {
+    const session = active();
+    const touched = session.touched;
+    const files = session.files;
+    const total = touched.size + files.length;
+    if (total === 0) {
       changesBar.hidden = true;
       changesFiles.hidden = true;
       clear(changesFiles);
@@ -1414,9 +1454,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       added += entry.added;
       removed += entry.removed;
     }
+    for (const file of files) added += file.kind === 'created' ? (file.lines ?? 0) : 0;
 
     changesBar.hidden = false;
-    changesSummary.textContent = `Изменён ${touched.size} ${fileWord(touched.size)}`;
+    changesSummary.textContent = `Изменён ${total} ${fileWord(total)}`;
     // Знак и число красятся по смыслу: плюсы — зелёные, минусы — красные.
     changesStat.replaceChildren(
       h('span', { class: 'stat-add' }, `+${added}`),
@@ -1441,18 +1482,50 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       );
     }
 
+    // Файловые операции: они уже на диске, но человеку важно видеть и их.
+    for (const file of files) {
+      const label = file.kind === 'created' ? 'создан' : file.kind === 'deleted' ? 'удалён' : 'перенос';
+      const title = file.from ? `${file.from} → ${file.path}` : file.path;
+      changesFiles.appendChild(
+        h(
+          'button',
+          { class: 'chip', type: 'button', title, onClick: () => deps.editors.reveal(file.path, 1, 1) },
+          svgIcon(file.kind === 'deleted' ? 'trash' : file.kind === 'moved' ? 'file' : 'filePlus', 12),
+          h('span', { class: 'chip-name' }, basename(file.path)),
+          h('span', { class: `chip-kind chip-kind-${file.kind}` }, label),
+        ),
+      );
+    }
+
     syncChangesPanel();
   }
 
-  /** «Сохранить» завершает сессию правок: файлы уходят на диск. */
-  async function saveTouched(): Promise<void> {
-    const touched = active().touched;
-    let saved = 0;
-    for (const target of touched.keys()) {
-      const document = deps.documents.get(target);
+  /**
+   * Записать правки агента на диск, оставив список изменений на месте: файловый
+   * менеджер и внешние инструменты должны видеть файл, но человек — что изменилось.
+   */
+  async function persistDocuments(target: ChatSession): Promise<void> {
+    for (const path of target.touched.keys()) {
+      const document = deps.documents.get(path);
       if (!document?.dirty) continue;
       try {
-        await deps.rpc.request('workspace.writeFile', { path: target, text: document.value });
+        await deps.rpc.request('workspace.writeFile', { path, text: document.value });
+        document.markSaved();
+      } catch {
+        // не записалось — файл останется «грязным», следующий «Сохранить» повторит
+      }
+    }
+  }
+
+  /** «Сохранить» завершает сессию правок: файлы уходят на диск, список очищается. */
+  async function saveTouched(target: ChatSession = active()): Promise<void> {
+    const touched = target.touched;
+    let saved = 0;
+    for (const path of touched.keys()) {
+      const document = deps.documents.get(path);
+      if (!document?.dirty) continue;
+      try {
+        await deps.rpc.request('workspace.writeFile', { path, text: document.value });
         document.markSaved();
         saved += 1;
       } catch (error) {
@@ -1460,13 +1533,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       }
     }
     touched.clear();
+    target.files = [];
     renderChanges();
     showToast(saved > 0 ? `Сохранено файлов: ${saved}` : 'Нечего сохранять');
   }
 
   /** «Отменить» возвращает документы к тому, какими они были до правок агента. */
   async function revertTouched(): Promise<void> {
-    const touched = active().touched;
+    const session = active();
+    const touched = session.touched;
     const fileEdits: FileEdit[] = [];
 
     for (const [target, entry] of touched) {
@@ -1490,17 +1565,47 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     touched.clear();
+    const files = session.files;
+    session.files = [];
     renderChanges();
 
+    // Файловые операции откатываем тоже: созданное — в корзину, перенос — назад.
+    // Удалённое вернуть нечем: файл уже в корзине системы, это отметим отдельно.
+    let undone = 0;
+    let skipped = 0;
+    for (const file of files) {
+      try {
+        if (file.kind === 'created') {
+          await deps.rpc.request('workspace.trash', { path: file.path });
+          undone += 1;
+        } else if (file.kind === 'moved' && file.from) {
+          await deps.rpc.request('workspace.rename', { from: file.path, to: file.from });
+          undone += 1;
+        } else if (file.kind === 'deleted') {
+          skipped += 1;
+        }
+      } catch {
+        skipped += 1;
+      }
+    }
+
     if (fileEdits.length === 0) {
-      showToast('Нечего отменять');
+      showToast(
+        undone > 0 ? `Отменено файловых операций: ${undone}` : skipped > 0 ? 'Удалённые файлы в корзине — верните их вручную' : 'Нечего отменять',
+        skipped > 0 && undone === 0 ? 'error' : 'info',
+      );
       return;
     }
 
     const result = await deps.edits.applyFileEdits(fileEdits, 'programmatic');
+    const failed = result.failed.length;
     showToast(
-      result.failed.length > 0 ? `Не удалось отменить файлов: ${result.failed.length}` : 'Правки агента отменены',
-      result.failed.length > 0 ? 'error' : 'info',
+      failed > 0
+        ? `Не удалось отменить файлов: ${failed}`
+        : skipped > 0
+          ? `Правки отменены; удалённые файлы — в корзине`
+          : 'Правки агента отменены',
+      failed > 0 ? 'error' : 'info',
     );
   }
 
@@ -1810,6 +1915,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       return;
     }
 
+    // Не влезает в окно — сначала освобождаем контекст, потом спрашиваем.
+    await ensureContextFits(session);
+
     input.value = '';
     session.draft = '';
     hideMenu();
@@ -1853,7 +1961,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Подряд идущие вызовы инструментов живут одной группой — см. createToolFeed.
     const tools = createToolFeed(messageEl);
     const toolCards = new Map<string, ToolCardView>();
-    let reasoningBuffer = '';
+    /**
+     * Размышления собираются в ОДИН блок на весь ответ. Шагов у агента много,
+     * и на каждый приходит своя врезка размышлений, но для человека это одно
+     * «думание»: части копим в списке и разделяем пустой строкой, а не заводим
+     * новый спойлер на каждый шаг.
+     */
+    const reasoningParts: string[] = [];
+    /** Открыта ли текущая часть: следующий шаг размышлений начнёт новую. */
+    let reasoningOpen = false;
     let reasoningBox: HTMLElement | null = null;
     let reasoningFrame = 0;
     /** Чек-лист плана: один на ответ, обновляется на каждом событии плана. */
@@ -1894,115 +2010,174 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       scrollToEnd(session);
     };
 
-    /** Размышления — сворачиваемый блок перед ответом.
-     * Создаётся свёрнутым: во время стрима он не разворачивается сам и не съедает ленту,
-     * но по клику на «Размышления» раскрывается. */
+    /** Текст размышлений целиком: части-шаги разделены пустой строкой. */
+    const reasoningText = (): string => reasoningParts.join('\n\n');
+
+    /** Счётчик шагов в шапке: видно, из скольких «подходов» собраны размышления. */
+    const syncReasoningCount = (): void => {
+      const count = reasoningBox?.querySelector('.reasoning-count');
+      if (count) count.textContent = reasoningParts.length > 1 ? String(reasoningParts.length) : '';
+    };
+
+    /**
+     * Размышления — один сворачиваемый блок на весь ответ, общий для всех шагов.
+     * Создаётся свёрнутым: во время стрима он не разворачивается сам и не съедает
+     * ленту, но по клику на «Размышления» раскрывается. Блок держим первым
+     * в сообщении — думание идёт до действий и ответа.
+     */
     const pushReasoning = (chunk: string): void => {
-      if (reasoningBuffer.length < MAX_REASONING_CHARS) reasoningBuffer += chunk;
+      if (!reasoningOpen) {
+        reasoningParts.push('');
+        reasoningOpen = true;
+      }
+      const index = reasoningParts.length - 1;
+      const current = reasoningParts[index] ?? '';
+      if (current.length + chunk.length <= MAX_REASONING_CHARS) {
+        reasoningParts[index] = current + chunk;
+      }
 
       if (!reasoningBox) {
         reasoningBox = h(
           'details',
           { class: 'reasoning' },
-          h('summary', { class: 'reasoning-summary' }, 'Размышления'),
+          h(
+            'summary',
+            { class: 'reasoning-summary' },
+            h('span', { class: 'reasoning-label' }, 'Размышления'),
+            h('span', { class: 'reasoning-count' }),
+          ),
           h('div', { class: 'reasoning-text' }),
         );
-        messageEl.insertBefore(reasoningBox, segment);
+        messageEl.prepend(reasoningBox);
       }
 
       if (reasoningFrame) return;
       reasoningFrame = requestAnimationFrame(() => {
         reasoningFrame = 0;
         const target = reasoningBox?.querySelector('.reasoning-text');
-        if (target) target.textContent = reasoningBuffer;
+        if (target) target.textContent = reasoningText();
+        syncReasoningCount();
         scrollToEnd(session);
       });
     };
 
-    /** Ответ начался или закончился — размышления убираем под спойлер. */
+    /** Ответ начался или закончился — размышления остаются под спойлером. */
     const collapseReasoning = (): void => {
       if (reasoningFrame) cancelAnimationFrame(reasoningFrame);
       reasoningFrame = 0;
       if (!reasoningBox) return;
       const target = reasoningBox.querySelector('.reasoning-text');
-      if (target) target.textContent = reasoningBuffer;
+      if (target) target.textContent = reasoningText();
+      syncReasoningCount();
       reasoningBox.removeAttribute('open');
     };
 
     setBusy(true, session);
 
+    let continues = 0;
+    let done: ChatStreamDone;
+
     try {
-      const done = await deps.rpc.stream(
-        'ai.chat',
-        {
-          providerId,
-          model,
-          messages: session.history.map((message) => ({ ...message })),
-          useTools,
-          autoApprove,
-          attachments,
-        },
-        (event, payload) => {
-          if (event === ChatStreamEvent.Reasoning) {
-            pushReasoning((payload as ChatReasoningPayload).text);
-            return;
-          }
-          if (event === ChatStreamEvent.Plan) {
-            pushPlan((payload as ChatPlanPayload).steps);
-            return;
-          }
-          if (event === ChatStreamEvent.Delta) {
-            cancelFrame();
-            collapseReasoning();
-            // Пошёл текст ответа — цепочка вызовов закончилась.
-            tools.seal();
-            const now = performance.now();
-            if (firstDeltaAt === 0) firstDeltaAt = now;
-            lastDeltaAt = now;
-            streamBuffer += (payload as ChatDeltaPayload).text;
-            scheduleRender(segment, session);
-            return;
-          }
-          if (event === ChatStreamEvent.ToolStart) {
-            const call = payload as ChatToolStartPayload;
-            flushSegment();
-            // Новый вызов — новый текстовый сегмент. Буфер держит текст ТОЛЬКО
-            // текущего шага: иначе в следующий сегмент выльется весь предыдущий
-            // текст и ответ будет повторяться в каждом пузыре.
-            streamBuffer = '';
-            // Размышления тоже пошаговые: блок предыдущего шага закрываем, следующий
-            // шаг заведёт свой — иначе всё копится в одном блоке перед первым сегментом.
-            if (reasoningFrame) cancelAnimationFrame(reasoningFrame);
-            reasoningFrame = 0;
-            reasoningBuffer = '';
-            reasoningBox = null;
-            toolCards.set(call.id, tools.add(call));
-            segment = h('div', { class: 'msg-body' });
-            messageEl.appendChild(segment);
-            scrollToEnd(session);
-            return;
-          }
-          if (event === ChatStreamEvent.ToolResult) {
-            const result = payload as ChatToolResultPayload;
-            toolCards.get(result.id)?.finish(result);
-          }
-        },
-      );
+      for (;;) {
+        done = await deps.rpc.stream(
+          'ai.chat',
+          {
+            providerId,
+            model,
+            messages: session.history.map((message) => ({ ...message })),
+            useTools,
+            autoApprove,
+            attachments,
+          },
+          (event, payload) => {
+            if (event === ChatStreamEvent.Reasoning) {
+              pushReasoning((payload as ChatReasoningPayload).text);
+              return;
+            }
+            if (event === ChatStreamEvent.Plan) {
+              pushPlan((payload as ChatPlanPayload).steps);
+              return;
+            }
+            if (event === ChatStreamEvent.Delta) {
+              cancelFrame();
+              collapseReasoning();
+              // Пошёл текст ответа — цепочка вызовов закончилась.
+              tools.seal();
+              const now = performance.now();
+              if (firstDeltaAt === 0) firstDeltaAt = now;
+              lastDeltaAt = now;
+              streamBuffer += (payload as ChatDeltaPayload).text;
+              scheduleRender(segment, session);
+              return;
+            }
+            if (event === ChatStreamEvent.ToolStart) {
+              const call = payload as ChatToolStartPayload;
+              flushSegment();
+              // Новый вызов — новый текстовый сегмент. Буфер держит текст ТОЛЬКО
+              // текущего шага: иначе в следующий сегмент выльется весь предыдущий
+              // текст и ответ будет повторяться в каждом пузыре.
+              streamBuffer = '';
+              // Размышления пошаговые, но блок общий: закрываем текущую часть,
+              // следующая врезка продолжится в том же спойлере (см. pushReasoning).
+              reasoningOpen = false;
+              toolCards.set(call.id, tools.add(call));
+              segment = h('div', { class: 'msg-body' });
+              messageEl.appendChild(segment);
+              scrollToEnd(session);
+              return;
+            }
+            if (event === ChatStreamEvent.ToolResult) {
+              const result = payload as ChatToolResultPayload;
+              toolCards.get(result.id)?.finish(result);
+              // Создание, удаление и перенос не идут через документы: панель
+              // изменений узнаёт о них из результата инструмента.
+              if (result.ok && result.changes?.length) {
+                for (const change of result.changes) {
+                  const at = session.files.findIndex((item) => item.path === change.path);
+                  if (at >= 0) session.files[at] = change;
+                  else session.files.push(change);
+                }
+                renderChanges();
+              }
+            }
+          },
+        );
 
-      flushSegment();
-      collapseReasoning();
-      tools.seal();
-      session.history.push(...(done.agentMessages ?? [{ role: 'assistant', content: done.text }]));
-      session.usage = done.usage;
+        flushSegment();
+        collapseReasoning();
+        tools.seal();
+        session.history.push(...(done.agentMessages ?? [{ role: 'assistant', content: done.text }]));
+        session.usage = done.usage;
 
-      // Скорость ответа: токены / время потока. Без обоих чисел не показываем.
-      const completion = done.usage?.completionTokens;
-      session.speed =
-        completion !== undefined && firstDeltaAt > 0 && lastDeltaAt > firstDeltaAt
-          ? completion / ((lastDeltaAt - firstDeltaAt) / 1000)
-          : undefined;
+        // Скорость ответа: токены / время потока. Без обоих чисел не показываем.
+        const completion = done.usage?.completionTokens;
+        session.speed =
+          completion !== undefined && firstDeltaAt > 0 && lastDeltaAt > firstDeltaAt
+            ? completion / ((lastDeltaAt - firstDeltaAt) / 1000)
+            : undefined;
 
-      // Обрыв по лимиту токенов: без пометки ответ выглядит просто коротким.
+        // Обрезано по лимиту — достраиваем сами, пока есть бюджет продолжений.
+        if (done.finishReason !== 'length' || continues >= MAX_AUTO_CONTINUE) break;
+
+        continues += 1;
+        messageEl.appendChild(
+          h(
+            'div',
+            { class: 'finish-note is-continue' },
+            svgIcon('refresh', 12),
+            h('span', {}, `Продолжаю ответ · ${continues}/${MAX_AUTO_CONTINUE}`),
+          ),
+        );
+        session.history.push({ role: 'user', content: CONTINUE_PROMPT });
+        // Продолжение — часть ТОГО ЖЕ ответа: новый сегмент в том же пузыре.
+        segment = h('div', { class: 'msg-body' });
+        messageEl.appendChild(segment);
+        streamBuffer = '';
+        reasoningOpen = false;
+        scrollToEnd(session);
+      }
+
+      // Дошли до предела продолжений, а ответ всё обрезан — оставляем ручную кнопку.
       if (done.finishReason === 'length') {
         messageEl.appendChild(
           h(
@@ -2040,6 +2215,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     } finally {
       streamingSession = null;
       setBusy(false, session);
+      // Автопилот — полный доступ: правки уходят на диск сами, иначе дерево
+      // файлов и внешние инструменты их не увидят до ручного «Сохранить».
+      if (autoApprove && session.touched.size > 0) await persistDocuments(session);
       renderTabs();
       syncSessionInfo();
       scheduleSave();
@@ -2138,24 +2316,32 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   /**
    * Показывает предложенные правки и ждёт решения пользователя.
    * Ничего не применяет — это делает вызывающий уже после согласия.
+   *
+   * Возвращает выбранные файлы (можно применить лишь часть правок) или `null`,
+   * если пользователь отклонил всё.
    */
-  async function reviewEdits(fileEdits: readonly FileEdit[]): Promise<boolean> {
+  async function reviewEdits(fileEdits: readonly FileEdit[]): Promise<FileEdit[] | null> {
     const files = await Promise.all(
       fileEdits.map(async (file) => previewFile(file, await currentText(file.path))),
     );
 
     const block = h('div', { class: 'review' });
-    block.appendChild(
-      h(
-        'div',
-        { class: 'review-head' },
-        svgIcon('wrench', 13),
-        h('span', { class: 'review-title' }, `Ассистент предлагает правки · ${files.length} ${fileWord(files.length)}`),
-      ),
-    );
+    const checks: HTMLInputElement[] = [];
 
-    for (const file of files) {
-      const section = h('div', { class: 'review-file' }, h('div', { class: 'review-path' }, file.path));
+    /** Сводка в шапке и подпись кнопки — по числу отмеченных файлов. */
+    const head = h('div', { class: 'review-head' }, svgIcon('wrench', 13), h('span', { class: 'review-title' }));
+    block.appendChild(head);
+
+    files.forEach((file) => {
+      const box = h('input', { class: 'review-check', type: 'checkbox' }) as HTMLInputElement;
+      box.checked = true;
+      checks.push(box);
+
+      const section = h(
+        'div',
+        { class: 'review-file' },
+        h('label', { class: 'review-file-head' }, box, h('span', { class: 'review-path' }, file.path)),
+      );
       if (file.error) section.appendChild(h('div', { class: 'review-error' }, file.error));
       for (const hunk of file.hunks) {
         const group = h('div', { class: 'review-hunk' }, h('div', { class: 'review-range' }, hunk.label));
@@ -2165,19 +2351,24 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       }
       if (file.extra) section.appendChild(h('div', { class: 'review-error' }, `… и ещё правок: ${file.extra}`));
       block.appendChild(section);
-    }
+    });
 
     const status = h('span', { class: 'review-status' });
-    let settle: (approved: boolean) => void = () => undefined;
-    const decision = new Promise<boolean>((resolve) => {
+    let settle: (result: FileEdit[] | null) => void = () => undefined;
+    const decision = new Promise<FileEdit[] | null>((resolve) => {
       settle = resolve;
     });
+
+    const checkedIndexes = (): number[] =>
+      checks.flatMap((box, index) => (box.checked ? [index] : []));
 
     /** Решение принято — разбор правок больше не нужен: остаётся строка итога. */
     function finish(approved: boolean, note: string): void {
       pendingApprovals.delete(abort);
-      block.classList.toggle('review-rejected', !approved);
+      const chosen = approved ? checkedIndexes() : [];
+      block.classList.toggle('review-rejected', !approved || chosen.length === 0);
       block.classList.add('decision-done');
+      const applied = files.filter((_, index) => chosen.includes(index));
       block.replaceChildren(
         h(
           'div',
@@ -2186,12 +2377,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           h(
             'span',
             {},
-            approved ? `Правки применены · ${files.length} ${fileWord(files.length)}` : 'Правки отклонены',
+            approved && applied.length > 0
+              ? `Правки применены · ${applied.length} ${fileWord(applied.length)}`
+              : approved
+                ? 'Ничего не выбрано'
+                : 'Правки отклонены',
           ),
           note ? h('span', { class: 'decision-status' }, note) : null,
         ),
       );
-      settle(approved);
+      settle(approved && chosen.length > 0 ? fileEdits.filter((_, index) => chosen.includes(index)) : null);
     }
 
     const applyButton = h(
@@ -2204,10 +2399,34 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       { class: 'btn btn-small', type: 'button', onClick: () => finish(false, '') },
       'Отклонить',
     );
+    const allButton = h(
+      'button',
+      {
+        class: 'link-btn review-all',
+        type: 'button',
+        onClick: () => {
+          const all = checks.every((box) => box.checked);
+          for (const box of checks) box.checked = !all;
+          syncCount();
+        },
+      },
+      'Все / ничего',
+    );
     // Вызов агента прервали — ревью больше некому ответить, закрываем его.
     const abort = (): void => finish(false, 'отменено');
 
-    block.appendChild(h('div', { class: 'review-actions' }, applyButton, rejectButton, status));
+    /** Сколько файлов отмечено: это видно в шапке и на кнопке. */
+    function syncCount(): void {
+      const count = checkedIndexes().length;
+      head.querySelector('.review-title')!.textContent =
+        `Ассистент предлагает правки · ${files.length} ${fileWord(files.length)} · отмечено ${count}`;
+      applyButton.textContent = count > 0 ? `Применить (${count})` : 'Применить';
+      applyButton.disabled = count === 0;
+    }
+    for (const box of checks) box.addEventListener('change', syncCount);
+    syncCount();
+
+    block.appendChild(h('div', { class: 'review-actions' }, applyButton, rejectButton, allButton, status));
     (streamingSession ?? active()).thread.appendChild(block);
     scrollToEnd();
 
@@ -2296,8 +2515,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * видеть, что агент сделал, даже когда не спрашивал.
    */
   async function applyAgentEdits(params: ApplyEditsHostParams): Promise<ApplyEditsHostResult> {
-    const approved = params.autoApprove === true || (await reviewEdits(params.edits));
-    if (!approved) return { rejected: true };
+    // В автопилоте применяем всё сразу, иначе спрашиваем: какие файлы применить.
+    const selected = params.autoApprove === true ? [...params.edits] : await reviewEdits(params.edits);
+    if (!selected || selected.length === 0) return { rejected: true };
 
     // Вызов пришёл из конкретной беседы: правки принадлежат ей, даже если
     // пользователь успел переключить вкладку.
@@ -2305,15 +2525,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     // Текст до правок нужен панели «Изменён N файл»: по нему работает «Отменить».
     const before = new Map<string, string>();
-    for (const file of params.edits) {
+    for (const file of selected) {
       const text = await currentText(file.path);
       if (text !== null) before.set(file.path, text);
     }
 
-    const result = await deps.edits.applyFileEdits(params.edits, 'programmatic');
+    const result = await deps.edits.applyFileEdits(selected, 'programmatic');
 
     for (const report of result.reports) {
-      const { added, removed } = countLines(params.edits, report.path);
+      const { added, removed } = countLines(selected, report.path);
       const seen = session.touched.get(report.path);
       if (seen) {
         seen.added += added;
