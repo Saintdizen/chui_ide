@@ -232,16 +232,22 @@ export async function runCommand(
 }
 
 /**
- * Понятная причина сбоя: последняя содержательная строка вывода и подсказка,
- * если у интерпретатора нет модуля `venv` — это самая частая осечка на
- * Debian/Ubuntu, где venv вынесен в отдельный пакет `python3.X-venv`.
+ * Понятная причина сбоя: последняя содержательная строка вывода и подсказка для
+ * двух самых частых осечек на Debian/Ubuntu, где venv и pip вынесены в отдельный
+ * пакет `python3.X-venv`: `venv` без ensurepip не может создать окружение, а уже
+ * созданное окружение без pip не может ставить пакеты.
  */
-function failureMessage(command: string, args: string[], code: number | null, output: readonly string[]): string {
+export function failureMessage(command: string, args: string[], code: number | null, output: readonly string[]): string {
+  const text = output.join('\n');
   const last = [...output].reverse().find((line) => line.trim()) ?? '';
-  const hint = /ensurepip is not available/i.test(output.join('\n'))
-    ? ' У этого интерпретатора нет модуля venv: на Debian/Ubuntu поставьте пакет python3.X-venv или выберите другой интерпретатор в списке.'
-    : '';
-  return `${command} ${args.join(' ')} — код выхода ${code}${last ? `: ${last}` : ''}.${hint}`;
+  const base = `${command} ${args.join(' ')} — код выхода ${code}${last ? `: ${last}` : ''}.`;
+  if (/ensurepip is not available/i.test(text)) {
+    return `${base} У этого интерпретатора нет модуля venv: на Debian/Ubuntu поставьте пакет python3.X-venv или выберите другой интерпретатор в списке.`;
+  }
+  if (/No module named pip/i.test(text)) {
+    return `${base} В этом окружении нет pip: оно создано без него (на Debian/Ubuntu нужен пакет python3.X-venv) — поставьте pip или выберите интерпретатор с ним.`;
+  }
+  return base;
 }
 
 /** Первый подходящий интерпретатор: `python3`, затем `python`, затем `py`. */

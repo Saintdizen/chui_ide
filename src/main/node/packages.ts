@@ -50,6 +50,15 @@ export async function availablePackages(root: string): Promise<ReadonlySet<strin
   return packages;
 }
 
+/**
+ * Встроенный модуль — в любой записи: `fs` и `node:fs` это одно и то же.
+ * Парсер импортов ссылки с протоколом отсекает, но имя может прийти и извне,
+ * и тогда `node:fs` выглядел бы как неустановленный пакет.
+ */
+function isBuiltin(name: string): boolean {
+  return BUILTINS.has(name) || BUILTINS.has(name.replace(/^node:/, ''));
+}
+
 /** Пакеты, которых нет ни в `node_modules`, ни среди встроенных модулей. */
 export async function missingPackages(root: string | null, modules: readonly string[]): Promise<string[]> {
   const unique = [...new Set(modules)].filter((name) => name);
@@ -64,7 +73,7 @@ export async function missingPackages(root: string | null, modules: readonly str
     }
   }
 
-  return unique.filter((name) => !available.has(name) && !BUILTINS.has(name));
+  return unique.filter((name) => !available.has(name) && !isBuiltin(name));
 }
 
 /* ── обход каталогов ────────────────────────────────────────────────────── */
