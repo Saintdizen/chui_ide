@@ -485,8 +485,17 @@ export class EditorService {
       this.editor.setModel(null);
     }
     this.viewStates.delete(path);
+    // Всё, что нарисовано по модели, живёт вместе с ней: карты украшений нужно
+    // чистить здесь, иначе при повторном открытии файла в deltaDecorations
+    // уходили бы id уже удалённой модели.
     this.runDecorations.delete(path);
     this.runLines.delete(path);
+    // Карты украшений точек останова и подсветки отладки тоже живут с моделью:
+    // без очистки в них остаются id удалённых моделей — Monaco их молча
+    // игнорирует, но карты копят ссылки на модели, которых уже нет.
+    this.breakpointDecorations.delete(path);
+    this.debugDecorations.delete(path);
+    if (this.debugLine?.path === path) this.debugLine = null;
     model.dispose();
     this.models.delete(path);
   }
