@@ -15,7 +15,7 @@ import {
   type Settings,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
-import { compactionBudgetChars, splitTranscript } from '../../shared/context-fit';
+import { compactionBudgetChars, contextUsage, splitTranscript } from '../../shared/context-fit';
 import { contextWindow, modelCapabilities } from '../../shared/providers';
 import { languageFromPath } from '../core/languages';
 import type { CommandRegistry } from '../core/commands';
@@ -28,7 +28,7 @@ import { relativePath } from '../core/workspace-model';
 import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, svgIcon } from './dom';
 import { createSelect } from './select';
-import { createSessionInfo, createUsageRing, contextUsage, type SessionInfoData } from './session-info';
+import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createToolFeed, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
 import { createComposerMenu } from './chat-composer-menu';
@@ -111,15 +111,6 @@ const COMPACT_CONTINUE_PROMPT = [
  * когда до предела остаётся 20%.
  */
 const COMPACT_AT_RATIO = 0.8;
-
-/**
- * Абсолютный предел истории в токенах — второй триггер сжатия.
- *
- * Доля окна плохо работает на больших окнах: 80% от миллиона токенов недостижимо
- * за одну беседу, и автосжатие там не срабатывает никогда. Поэтому сжимаем ещё и
- * тогда, когда история переросла это число, — так поведение не зависит от модели.
- */
-const COMPACT_AT_TOKENS = 100_000;
 
 /**
  * Панель ассистента — правый «остров» в стиле tool window.
@@ -1209,14 +1200,17 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   /**
    * Перед отправкой решаем, не пора ли освободить контекст. Триггеров два:
    * заполнение подошло к пределу окна (`COMPACT_AT_RATIO`, с запасом, а не «в упор»)
-   * либо история переросла абсолютный предел (`COMPACT_AT_TOKENS` — он выручает на
-   * моделях с огромным окном, где доля недостижима). Иначе провайдер обрежет запрос
-   * или вернёт ошибку лимита. Сжимать нечего — просто предупреждаем.
+   * либо история переросла абсолютный предел — он выручает на моделях с огромным
+   * окном, где доля недостижима. Предел равен `COMPACT_AT_TOKENS` по умолчанию, но
+   * его можно поднять в настройках (`ai.compactAtTokens`); 0 — только по окну.
+   * Иначе провайдер обрежет запрос или вернёт ошибку лимита. Сжимать нечего —
+   * просто предупреждаем.
    */
   async function ensureContextFits(session: ChatSession, pending: string): Promise<void> {
     const usage = contextUsage(sessionInfoData(session, pending));
     const nearWindow = usage.used + settings.ai.maxTokens > usage.limit * COMPACT_AT_RATIO;
-    const tooLong = usage.used > COMPACT_AT_TOKENS;
+    const absolute = settings.ai.compactAtTokens;
+    const tooLong = absolute > 0 && usage.used > absolute;
     if (!nearWindow && !tooLong) return;
 
     if (session.history.length < 2) {

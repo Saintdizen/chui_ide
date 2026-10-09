@@ -228,6 +228,7 @@ module.exports = [
       activeModel: 'gpt-4o-mini',
       temperature: 0.2,
       maxTokens: 2048,
+      compactAtTokens: 100_000,
       systemPrompt: 'Ты ассистент внутри редактора.',
       maxSteps: 8,
       maxAutopilotSteps: 24,

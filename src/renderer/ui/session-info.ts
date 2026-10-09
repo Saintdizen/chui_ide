@@ -1,7 +1,6 @@
 import type { ChatAttachment, ChatMessage, ChatUsage } from '../../shared/api';
-import { AGENT_TOOLS } from '../../shared/tools';
-import { contextWindow, modelPricing } from '../../shared/providers';
-import { estimateTokens } from '../../shared/context-fit';
+import { modelPricing } from '../../shared/providers';
+import { contextUsage, estimateContextParts, type ContextUsage } from '../../shared/context-fit';
 import { clear, h, svgIcon } from './dom';
 
 /**
@@ -43,15 +42,6 @@ export interface SessionInfoView {
   hide(): void;
 }
 
-/** Сколько контекста занято: итог — реальный, если провайдер его сообщил. */
-export interface ContextUsage {
-  used: number;
-  limit: number;
-  percent: number;
-  /** Итог известен точно или пока оценён по символам. */
-  exact: boolean;
-}
-
 interface Part {
   key: string;
   label: string;
@@ -71,45 +61,16 @@ function formatCost(value: number): string {
   return value.toFixed(2);
 }
 
-/** Что занимает место в контексте: считаем по символам, показываем после калибровки. */
-function split(data: SessionInfoData): Part[] {  let messages = 0;
-  let results = 0;
-
-  for (const message of data.history) {
-    const size = (message.content ?? '').length + (message.name?.length ?? 0);
-    if (message.role === 'tool') results += size;
-    else messages += size;
-  }
-
-  // Вопрос, который ещё не в истории, но уже уезжает в модель.
-  if (data.pending) messages += data.pending.length;
-
-  const files = data.attachments.reduce((sum, item) => sum + item.text.length, 0);
-  const toolDefs = data.tools ? JSON.stringify(AGENT_TOOLS).length : 0;
-
+/** Что занимает место в контексте: разбивка по частям запроса (см. `context-fit`). */
+function split(data: SessionInfoData): Part[] {
+  const parts = estimateContextParts(data);
   return [
-    { key: 'system', label: 'Системные инструкции', tokens: estimateTokens(data.systemPrompt.length) },
-    { key: 'tools', label: 'Описания инструментов', tokens: estimateTokens(toolDefs) },
-    { key: 'messages', label: 'Сообщения', tokens: estimateTokens(messages) },
-    { key: 'results', label: 'Результаты инструментов', tokens: estimateTokens(results) },
-    { key: 'files', label: 'Файлы', tokens: estimateTokens(files) },
+    { key: 'system', label: 'Системные инструкции', tokens: parts.system },
+    { key: 'tools', label: 'Описания инструментов', tokens: parts.tools },
+    { key: 'messages', label: 'Сообщения', tokens: parts.messages },
+    { key: 'results', label: 'Результаты инструментов', tokens: parts.results },
+    { key: 'files', label: 'Файлы', tokens: parts.files },
   ];
-}
-
-/**
- * Заполнение контекстного окна. Итог берём у провайдера (`prompt_tokens`),
- * а пока его нет — считаем по символам: без знаменателя заполнение не показать.
- */
-export function contextUsage(data: SessionInfoData): ContextUsage {
-  const estimated = split(data).reduce((sum, part) => sum + part.tokens, 0);
-  const used = data.usage?.promptTokens ?? estimated;
-  const limit = contextWindow(data.model, data.contextWindow);
-  return {
-    used,
-    limit,
-    percent: limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0,
-    exact: data.usage?.promptTokens !== undefined,
-  };
 }
 
 /** Кольцо с процентом заполнения — кнопка «Информация о сессии» в углу композера. */

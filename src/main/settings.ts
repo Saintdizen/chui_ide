@@ -14,6 +14,7 @@ import {
   type SettingsPatch,
   type WorkspaceSettings,
 } from '../shared/api';
+import { COMPACT_AT_TOKENS } from '../shared/context-fit';
 import { RpcFailure } from './ipc/router';
 
 interface StoredProvider {
@@ -39,6 +40,8 @@ interface StoredSettings {
     maxTokens: number;
     /** Не задано — окно определяется по имени модели. */
     contextWindow?: number;
+    /** Абсолютный предел истории для автосжатия; 0 — по окну модели. */
+    compactAtTokens: number;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
     /** Страховка от зацикливания: шагов «модель → инструмент → модель» в обычном режиме. */
@@ -84,6 +87,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     ],
     temperature: 0.2,
     maxTokens: 4096,
+    // Предел автосжатия: история сверх этого числа сжимается, даже если окно ещё далеко.
+    compactAtTokens: COMPACT_AT_TOKENS,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     // По умолчанию параметр не отправляем: не всякая модель его знает.
     reasoningEffort: 'off',
@@ -210,6 +215,7 @@ export class SettingsStore {
         temperature: ai.temperature,
         maxTokens: ai.maxTokens,
         contextWindow: ai.contextWindow,
+        compactAtTokens: ai.compactAtTokens,
         systemPrompt: ai.systemPrompt,
         reasoningEffort: ai.reasoningEffort ?? 'off',
         maxSteps: ai.maxSteps,
@@ -318,6 +324,11 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     if (Number.isFinite(value) && value > 0) target.contextWindow = value;
     else delete target.contextWindow;
   }
+  // Предел автосжатия: 0 — сжимать только по заполнению окна.
+  if (patch.compactAtTokens !== undefined) {
+    const value = Math.round(patch.compactAtTokens);
+    if (Number.isFinite(value) && value >= 0) target.compactAtTokens = value;
+  }
   if (patch.systemPrompt !== undefined) target.systemPrompt = patch.systemPrompt;
   if (patch.reasoningEffort !== undefined) target.reasoningEffort = patch.reasoningEffort;
   if (patch.maxSteps !== undefined) target.maxSteps = clampSteps(patch.maxSteps, target.maxSteps);
@@ -381,6 +392,11 @@ function loadSettings(filePath: string): StoredSettings {
   const storedWindow = Math.round(Number(storedAi.contextWindow));
   if (Number.isFinite(storedWindow) && storedWindow > 0) ai.contextWindow = storedWindow;
   else delete ai.contextWindow;
+
+  // Предел автосжатия: 0 — по окну модели; побитое или отсутствующее — по умолчанию.
+  const storedCompact = Math.round(Number(storedAi.compactAtTokens));
+  ai.compactAtTokens =
+    Number.isFinite(storedCompact) && storedCompact >= 0 ? storedCompact : DEFAULT_SETTINGS.ai.compactAtTokens;
 
   // Лимиты шагов могли прийти из старого файла или быть правлены руками.
   ai.maxSteps = clampSteps(storedAi.maxSteps, DEFAULT_SETTINGS.ai.maxSteps);

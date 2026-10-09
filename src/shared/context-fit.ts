@@ -1,4 +1,6 @@
-import type { ChatMessage } from './api';
+import type { ChatAttachment, ChatMessage, ChatUsage } from './api';
+import { contextWindow } from './providers';
+import { AGENT_TOOLS } from './tools';
 
 /**
  * Предохранитель от переполнения контекста в многошаговом агентном цикле.
@@ -53,22 +55,120 @@ export function estimateTextTokens(text: string): number {
   return Math.ceil(narrow / CHARS_PER_TOKEN + wide / CHARS_PER_TOKEN_WIDE);
 }
 
+/** Оценка одного сообщения: текст, служебные поля, вызовы инструментов и картинки. */
+function messageTokens(message: ChatMessage): number {
+  let tokens = estimateTextTokens(message.content ?? '');
+  if (message.name) tokens += estimateTextTokens(message.name);
+  if (message.toolCallId) tokens += estimateTextTokens(message.toolCallId);
+  for (const call of message.toolCalls ?? []) {
+    tokens += estimateTextTokens(call.id) + estimateTextTokens(call.name) + estimateTextTokens(call.arguments);
+  }
+  return tokens + (message.images?.length ?? 0) * IMAGE_TOKENS;
+}
+
 /** Оценка размера истории в токенах: текст по составу, картинки — фиксированно. */
 export function estimateMessagesTokens(messages: readonly ChatMessage[]): number {
   let tokens = 0;
-  let images = 0;
+  for (const message of messages) tokens += messageTokens(message);
+  return tokens;
+}
 
-  for (const message of messages) {
-    tokens += estimateTextTokens(message.content ?? '');
-    if (message.name) tokens += estimateTextTokens(message.name);
-    if (message.toolCallId) tokens += estimateTextTokens(message.toolCallId);
-    for (const call of message.toolCalls ?? []) {
-      tokens += estimateTextTokens(call.id) + estimateTextTokens(call.name) + estimateTextTokens(call.arguments);
-    }
-    images += message.images?.length ?? 0;
+/* ── состав контекста и заполнение окна ─────────────────────────────────────
+ * Провайдер сообщает только общий размер запроса (`usage.promptTokens`), разбивку
+ * по частям он не отдаёт. Считаем её сами — по тем же ставкам, что и обрезка
+ * (`estimateTextTokens`): тогда оценка в renderer и в main не разъезжается, и
+ * кириллица не занижается ровно вдвое — иначе автосжатие запаздывает.
+ */
+
+/** Из чего состоит контекст: токены по частям запроса. */
+export interface ContextParts {
+  /** Системный промпт и контекст проекта. */
+  system: number;
+  /** Описания инструментов, которые уезжают модели. */
+  tools: number;
+  /** Обычные сообщения беседы (включая ещё не отправленный вопрос). */
+  messages: number;
+  /** Результаты вызовов инструментов — они растут быстрее всего. */
+  results: number;
+  /** Приложенные пользователем файлы и выделение. */
+  files: number;
+}
+
+/** Всё, из чего складывается контекст сессии. */
+export interface ContextPartsInput {
+  history: readonly ChatMessage[];
+  attachments: readonly ChatAttachment[];
+  systemPrompt: string;
+  /** Предлагаются ли модели описания инструментов. */
+  tools: boolean;
+  /**
+   * Вопрос, который вот-вот уйдёт в модель, но ещё не попал в историю. Без него
+   * оценка перед отправкой занижена ровно на вес отправляемого сообщения.
+   */
+  pending?: string;
+}
+
+/**
+ * Разбивка контекста по частям. Сообщения и результаты инструментов считаем
+ * раздельно: у агента результаты растут очень неровно, и по разбивке сразу видно,
+ * что именно съело окно.
+ */
+export function estimateContextParts(input: ContextPartsInput): ContextParts {
+  let messages = 0;
+  let results = 0;
+  for (const message of input.history) {
+    const tokens = messageTokens(message);
+    if (message.role === 'tool') results += tokens;
+    else messages += tokens;
   }
+  // Вопрос, который ещё не в истории, но уже уезжает в модель.
+  if (input.pending) messages += estimateTextTokens(input.pending);
 
-  return tokens + images * IMAGE_TOKENS;
+  return {
+    system: estimateTextTokens(input.systemPrompt),
+    tools: input.tools ? estimateTextTokens(JSON.stringify(AGENT_TOOLS)) : 0,
+    messages,
+    results,
+    files: input.attachments.reduce((sum, item) => sum + estimateTextTokens(item.text), 0),
+  };
+}
+
+/** Сколько контекста занято: итог — реальный, если провайдер его сообщил. */
+export interface ContextUsage {
+  used: number;
+  limit: number;
+  percent: number;
+  /** Итог известен точно или пока оценён по символам. */
+  exact: boolean;
+}
+
+/** Данные для расчёта заполнения контекстного окна. */
+export interface ContextUsageInput extends ContextPartsInput {
+  model: string;
+  /** Явный размер окна из настроек; не задан — считается по имени модели. */
+  contextWindow?: number;
+  usage?: ChatUsage;
+}
+
+/**
+ * Заполнение контекстного окна. Итог берём у провайдера (`promptTokens`), а пока
+ * его нет — считаем по символам: без знаменателя заполнение не показать. Новый
+ * вопрос добавляем и к точному итогу: иначе перед отправкой его вес не виден, и
+ * сжатие срабатывает позже, чем нужно.
+ */
+export function contextUsage(input: ContextUsageInput): ContextUsage {
+  const parts = estimateContextParts(input);
+  const estimated = parts.system + parts.tools + parts.messages + parts.results + parts.files;
+  const pendingTokens = input.pending ? estimateTextTokens(input.pending) : 0;
+  const actual = input.usage?.promptTokens;
+  const used = actual !== undefined ? actual + pendingTokens : estimated;
+  const limit = contextWindow(input.model, input.contextWindow);
+  return {
+    used,
+    limit,
+    percent: limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0,
+    exact: actual !== undefined,
+  };
 }
 
 export interface TrimOptions {
@@ -166,6 +266,16 @@ export function trimMessagesToFit(
  */
 export const COMPACT_MIN_CHARS = 20_000;
 export const COMPACT_MAX_CHARS = 400_000;
+
+/**
+ * Абсолютный предел истории в токенах по умолчанию — значение настройки
+ * `ai.compactAtTokens` и второй триггер автосжатия (0 — только по окну модели).
+ *
+ * Доля окна плохо работает на больших окнах: 80% от миллиона токенов недостижимо
+ * за одну беседу. Поэтому сжимаем ещё и когда история переросла этот предел, — так
+ * размер одного запроса не зависит от модели. Человек может поднять его в настройках.
+ */
+export const COMPACT_AT_TOKENS = 100_000;
 
 /**
  * Бюджет одного прохода сжатия: сколько символов истории можно отдать модели за

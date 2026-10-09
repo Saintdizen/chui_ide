@@ -142,6 +142,7 @@ app.whenReady().then(async () => {
       providers: [{ id: 'local', label: 'Локальный', baseUrl, models: ['test'], hasApiKey: false }],
       temperature: 0,
       maxTokens: 256,
+      compactAtTokens: 100_000,
       systemPrompt: '',
       reasoningEffort: 'off',
       maxSteps: 8,

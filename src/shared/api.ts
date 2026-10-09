@@ -376,6 +376,11 @@ export interface AiSettings {
    * модели (`contextWindow` в shared/providers.ts); задан — берём как есть.
    */
   contextWindow?: number;
+  /**
+   * Абсолютный предел истории в токенах: выше него беседа сжимается автоматически,
+   * даже если до конца окна ещё далеко. 0 — сжимать только при подходе к окну.
+   */
+  compactAtTokens: number;
   systemPrompt: string;
   /** Сколько модели думать перед ответом (`reasoning_effort`). */
   reasoningEffort: ReasoningEffort;
@@ -745,6 +750,8 @@ export interface AiSettingsPatch {
   maxTokens?: number;
   /** Размер контекстного окна в токенах; 0 — вернуть автоопределение по модели. */
   contextWindow?: number;
+  /** Абсолютный предел истории для автосжатия в токенах; 0 — только по окну модели. */
+  compactAtTokens?: number;
   systemPrompt?: string;
   reasoningEffort?: ReasoningEffort;
   /** Сколько шагов делает агент в обычном режиме (страховка от зацикливания). */

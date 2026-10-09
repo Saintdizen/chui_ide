@@ -6,6 +6,8 @@ import {
   COMPACT_MAX_CHARS,
   COMPACT_MIN_CHARS,
   compactionBudgetChars,
+  contextUsage,
+  estimateContextParts,
   estimateMessagesTokens,
   isContextOverflow,
   TokenCalibration,
@@ -42,6 +44,72 @@ describe('estimateMessagesTokens', () => {
     const withImage: ChatMessage = { role: 'user', content: 'a', images: [`data:image/png;base64,${'A'.repeat(50_000)}`] };
     // Огромная base64-строка не должна раздувать оценку: провайдер берёт за картинку не по символам.
     expect(estimateMessagesTokens([withImage])).toBeLessThan(5_000);
+  });
+});
+
+describe('estimateContextParts', () => {
+  const base = {
+    history: [] as ChatMessage[],
+    attachments: [] as const,
+    systemPrompt: '',
+    tools: false,
+  };
+
+  it('делит сообщения беседы и результаты инструментов', () => {
+    const parts = estimateContextParts({
+      ...base,
+      history: [user('привет'), { role: 'tool', toolCallId: 'c1', name: 'read_file', content: 'данные' }],
+    });
+    expect(parts.messages).toBeGreaterThan(0);
+    expect(parts.results).toBeGreaterThan(0);
+  });
+
+  it('кириллицу считает дороже латиницы — как и предохранитель в main', () => {
+    const latin = estimateContextParts({ ...base, systemPrompt: 'a'.repeat(300) }).system;
+    const cyrillic = estimateContextParts({ ...base, systemPrompt: 'я'.repeat(300) }).system;
+    // Раньше renderer считал по длине — оценка расходилась с main, и русская
+    // беседа переполняла окно незаметно для автосжатия.
+    expect(cyrillic).toBeGreaterThan(latin);
+  });
+
+  it('ещё не отправленный вопрос входит в сообщения', () => {
+    const withPending = estimateContextParts({ ...base, history: [user('привет')], pending: 'а теперь вот это' });
+    const without = estimateContextParts({ ...base, history: [user('привет')] });
+    expect(withPending.messages).toBeGreaterThan(without.messages);
+  });
+
+  it('приложенные вложения уходят в отдельную часть «файлы»', () => {
+    const parts = estimateContextParts({
+      ...base,
+      attachments: [{ kind: 'file', label: 'a.py', title: 'a.py', text: 'x'.repeat(200) }],
+    });
+    expect(parts.files).toBeGreaterThan(0);
+  });
+});
+
+describe('contextUsage', () => {
+  const base = {
+    model: 'gpt-4o',
+    contextWindow: 100_000,
+    history: [user('привет')],
+    attachments: [] as const,
+    systemPrompt: 'инструкции',
+    tools: false,
+  };
+
+  it('без ответа провайдера считает по символам и помечает итог оценкой', () => {
+    const usage = contextUsage(base);
+    expect(usage.exact).toBe(false);
+    expect(usage.used).toBeGreaterThan(0);
+    expect(usage.limit).toBe(100_000);
+  });
+
+  it('к известному итогу добавляет вес ещё не отправленного вопроса', () => {
+    const known = contextUsage({ ...base, usage: { promptTokens: 1_000 } });
+    const withPending = contextUsage({ ...base, usage: { promptTokens: 1_000 }, pending: 'новый вопрос' });
+    // Иначе перед отправкой вес вопроса не виден и сжатие запаздывает.
+    expect(known.exact).toBe(true);
+    expect(withPending.used).toBeGreaterThan(known.used);
   });
 });
 
