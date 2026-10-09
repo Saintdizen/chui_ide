@@ -3,6 +3,7 @@ import { buildScan } from '../src/shared/project-scan';
 import type { ProjectTools } from '../src/renderer/core/project-tools';
 import {
   collectRunTargets,
+  fileRunTarget,
   nodeInstallTarget,
   nodeTestsRunTargets,
   nodeTestsTarget,
@@ -20,12 +21,33 @@ const tools: ProjectTools = {
   scripts: [],
   hasPackageJson: false,
   tsRunner: null,
+  tsRunnerFrom: null,
   testRunner: null,
 };
 
 function scanOf(files: readonly string[]) {
   return buildScan({ root: '/p', name: 'p', files, dirCount: 1 });
 }
+
+describe('fileRunTarget: TypeScript', () => {
+  const file = { path: '/p/src/index.ts', relative: 'src/index.ts', languageId: 'typescript', text: 'const x = 1;' };
+
+  it('раннер проекта запускает .ts и это видно в подсказке', () => {
+    const target = fileRunTarget(file, { ...tools, tsRunner: 'npx tsx', tsRunnerFrom: 'project' });
+    expect(target?.command).toBe('npx tsx src/index.ts');
+    expect(target?.detail).toContain('раннером проекта');
+  });
+
+  it('без раннера проекта .ts запускает встроенный Node', () => {
+    const target = fileRunTarget(file, { ...tools, tsRunner: 'node', tsRunnerFrom: 'node' });
+    expect(target?.command).toBe('node src/index.ts');
+    expect(target?.detail).toContain('встроенными средствами Node');
+  });
+
+  it('запускать нечем — цели нет', () => {
+    expect(fileRunTarget(file, tools)).toBeNull();
+  });
+});
 
 describe('pytestRunTargets', () => {
   it('Python-проект с тестами даёт цель «все тесты» и цели по файлам', () => {

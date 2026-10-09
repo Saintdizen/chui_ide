@@ -12,6 +12,7 @@ const tools: ProjectTools = {
   scripts: [],
   hasPackageJson: false,
   tsRunner: null,
+  tsRunnerFrom: null,
 };
 
 const SYSTEM: ProjectTools = {

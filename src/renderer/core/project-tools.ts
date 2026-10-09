@@ -1,4 +1,5 @@
 import type { RunSettings } from '../../shared/api';
+import { nodeTypeStripCommand } from '../../shared/node-env';
 import { nodeTestRunnerFrom, type DeclaredNodeRunner } from '../../shared/node-tests';
 import type { RpcClient } from './rpc';
 import { Emitter } from './events';
@@ -33,8 +34,13 @@ export interface ProjectTools {
   scripts: readonly ProjectScript[];
   /** Найден ли package.json: без него задач Node нет. */
   hasPackageJson: boolean;
-  /** Чем запускать TypeScript, если он есть в зависимостях проекта (`tsx`, `ts-node`). */
+  /**
+   * Чем запускать TypeScript: раннер из зависимостей проекта (`tsx`, `ts-node`)
+   * или встроенное стирание типов Node — без зависимостей и сборки. null — нечем.
+   */
   tsRunner: string | null;
+  /** Откуда взялся `tsRunner`: раннер проекта или встроенный Node. null — нечем. */
+  tsRunnerFrom: 'project' | 'node' | null;
   /**
    * Чем запускаются тесты проекта: `vitest` или `jest` из зависимостей. null —
    * объявленного раннера нет; годится ли встроенный `node --test`, решает тот,
@@ -52,6 +58,7 @@ const EMPTY: ProjectTools = {
   scripts: [],
   hasPackageJson: false,
   tsRunner: null,
+  tsRunnerFrom: null,
   testRunner: null,
 };
 
@@ -108,11 +115,17 @@ export class ProjectToolsModel {
   }
 
   private async detect(root: string): Promise<void> {
-    const [manifest, hasPackageJson, python] = await Promise.all([
+    const [manifest, hasPackageJson, python, nodeVersion] = await Promise.all([
       this.readManifest(root),
       this.exists(`${root}/package.json`),
       this.detectPython(root),
+      this.detectNodeVersion(),
     ]);
+
+    // Раннер проекта важнее встроенного: он выбран осознанно и умеет больше
+    // (tsx понимает и .tsx, и пути-алиасы из tsconfig). Встроенное стирание типов
+    // — запасной путь для проекта без зависимостей.
+    const builtinTs = manifest.tsRunner ? null : nodeTypeStripCommand(nodeVersion);
 
     const chosen = this.settings().packageManager;
     const packageManager: NodePackageManager =
@@ -124,10 +137,24 @@ export class ProjectToolsModel {
       packageManager,
       hasPackageJson,
       scripts: manifest.scripts,
-      tsRunner: manifest.tsRunner,
+      tsRunner: manifest.tsRunner ?? builtinTs,
+      tsRunnerFrom: manifest.tsRunner ? 'project' : builtinTs ? 'node' : null,
       testRunner: manifest.testRunner,
       ...python,
     });
+  }
+
+  /**
+   * Версия Node из PATH: нужна, чтобы решить, умеет ли он выполнять TypeScript
+   * без сборки. Нет Node — null, и запуск `.ts` просто не предлагается.
+   */
+  private async detectNodeVersion(): Promise<string | null> {
+    try {
+      const info = await this.rpc.request('node.info');
+      return info.runtime.version;
+    } catch {
+      return null;
+    }
   }
 
   private apply(next: ProjectTools): void {

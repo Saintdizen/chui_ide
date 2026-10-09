@@ -81,7 +81,10 @@ export function fileRunTarget(file: RunnableFile, tools: ProjectTools): RunTarge
     return {
       id: `file:${file.path}`,
       label: `Запустить ${name}`,
-      detail: `${tools.tsRunner} · TypeScript выполняется раннером проекта`,
+      detail:
+        tools.tsRunnerFrom === 'node'
+          ? `${tools.tsRunner} · TypeScript без сборки, встроенными средствами Node`
+          : `${tools.tsRunner} · TypeScript выполняется раннером проекта`,
       command: `${tools.tsRunner} ${path}`,
       ...(line ? { line } : {}),
       source: 'file',

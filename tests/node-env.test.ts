@@ -3,6 +3,7 @@ import {
   describeNodeEnvIssues,
   diffNodeDependencies,
   installCommand,
+  nodeTypeStripCommand,
   nodeVersionLabel,
   parseNodeManifest,
   parseNodeVersion,
@@ -41,6 +42,28 @@ describe('разбор версий', () => {
   it('подпись версии — major.minor, а не найденный Node объясняем словами', () => {
     expect(nodeVersionLabel('22.12.5')).toBe('Node 22.12');
     expect(nodeVersionLabel(null)).toBe('Node не найден');
+  });
+});
+
+describe('nodeTypeStripCommand', () => {
+  it('старый Node TypeScript не выполняет — запуска нет', () => {
+    expect(nodeTypeStripCommand('20.11.0')).toBeNull();
+    expect(nodeTypeStripCommand('22.5.0')).toBeNull();
+  });
+
+  it('22.6+ умеет, но пока за флагом', () => {
+    expect(nodeTypeStripCommand('22.6.0')).toBe('node --experimental-strip-types');
+    expect(nodeTypeStripCommand('22.12.0')).toBe('node --experimental-strip-types');
+  });
+
+  it('23.6+ выполняет без флага: стирание типов по умолчанию', () => {
+    expect(nodeTypeStripCommand('23.6.0')).toBe('node');
+    expect(nodeTypeStripCommand('24.1.0')).toBe('node');
+  });
+
+  it('версия неизвестна — обещать нечего', () => {
+    expect(nodeTypeStripCommand(null)).toBeNull();
+    expect(nodeTypeStripCommand('мусор')).toBeNull();
   });
 });
 

@@ -54,6 +54,29 @@ export function nodeVersionLabel(version: string | null): string {
   return minor ? `Node ${major}.${minor}` : `Node ${version}`;
 }
 
+/**
+ * Чем Node запускает TypeScript встроенными средствами — без сборки, `tsx` и
+ * каких-либо зависимостей проекта.
+ *
+ * Умение появилось не сразу: стирание типов (`--experimental-strip-types`) Node
+ * получил в 22.6, а с 23.6 оно включено по умолчанию и флаг не нужен. Более
+ * старый Node TypeScript не выполняет вовсе — тогда возвращаем null, и запуск
+ * честно не предлагается. Версию спрашивают один раз на проект, поэтому решение
+ * здесь чистое и проверяется в тестах.
+ */
+export function nodeTypeStripCommand(version: string | null): string | null {
+  const parsed = version ? parsePartial(version) : null;
+  if (!parsed || parsed.major === null) return null;
+  const major = parsed.major;
+  const minor = parsed.minor ?? 0;
+
+  // 23.6+ — стирание типов по умолчанию: обычный `node file.ts` уже работает.
+  if (major > 23 || (major === 23 && minor >= 6)) return 'node';
+  // 22.6+ — умение есть, но пока за флагом.
+  if (major === 22 && minor >= 6) return 'node --experimental-strip-types';
+  return null;
+}
+
 /* ── версии и диапазоны ─────────────────────────────────────────────────────
  * `engines.node` задаётся диапазоном semver (`>=18`, `^20.10`, `20 || 22`), и
  * проверить его нужно без сторонних библиотек — это единственное место, где
