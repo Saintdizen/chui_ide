@@ -2,7 +2,7 @@ import { diffRequirements, parseRequirements, requirementsNote, type InstalledPa
 import type { PythonEnvironment, PythonInterpreter } from '../../shared/python-env';
 import type { EnvironmentHealth } from '../../shared/python-health';
 import type { ProjectTools } from '../core/project-tools';
-import { envShortLabel, envSource, envSourceLabel } from '../core/python-view';
+import { envList, envShortLabel, envSource, envSourceLabel } from '../core/python-view';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
 import { createSelect, type SelectOption } from './select';
@@ -138,12 +138,13 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
       ),
     );
 
-    // Окружения проекта: главное — первым (порядок уже такой от main).
+    // Окружения проекта: главное — первым. Порядок от main уже такой, но полагаться
+    // на это не стоит — envList расставляет приоритет сам.
     const list = h('div', { class: 'python-env-list' });
     if (environments.length === 0) {
       list.appendChild(h('div', { class: 'python-env-empty' }, 'Виртуальных окружений нет.'));
     } else {
-      for (const environment of environments) {
+      for (const environment of envList(environments)) {
         list.appendChild(
           h(
             'div',

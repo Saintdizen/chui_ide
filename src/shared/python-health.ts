@@ -86,8 +86,3 @@ export function describeEnvIssues(facts: EnvFacts): EnvIssue[] {
 
   return issues;
 }
-
-/** Есть ли среди проблем хоть одна ошибка (а не предупреждение). */
-export function hasBlockingIssue(issues: readonly EnvIssue[]): boolean {
-  return issues.some((issue) => issue.severity === 'error');
-}

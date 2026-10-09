@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeEnvIssues, hasBlockingIssue, type EnvFacts } from '../src/shared/python-health';
+import { describeEnvIssues, type EnvFacts } from '../src/shared/python-health';
 
 const HEALTHY: EnvFacts = {
   label: '.venv',
@@ -45,13 +45,5 @@ describe('describeEnvIssues', () => {
   it('в сообщении есть имя окружения', () => {
     const issues = describeEnvIssues({ ...HEALTHY, label: 'backend/.venv', hasPip: false });
     expect(issues[0].message).toContain('backend/.venv');
-  });
-});
-
-describe('hasBlockingIssue', () => {
-  it('ошибка блокирует, предупреждение — нет', () => {
-    expect(hasBlockingIssue(describeEnvIssues({ ...HEALTHY, baseExists: false }))).toBe(true);
-    expect(hasBlockingIssue(describeEnvIssues({ ...HEALTHY, hasPip: false }))).toBe(false);
-    expect(hasBlockingIssue([])).toBe(false);
   });
 });

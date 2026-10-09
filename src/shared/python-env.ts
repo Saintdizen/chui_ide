@@ -60,11 +60,11 @@ export function venvActivatePath(venvDir: string, platform: string): string {
  */
 export function venvActivateCommand(venvRelative: string, platform: string): string {
   const quoted = /[\s'"]/.test(venvRelative) ? `"${venvRelative}"` : venvRelative;
-  if (platform === 'win32') {
-    // PowerShell: политика выполнения у поставляемого скрипта — ByPass.
-    return `. ${quoted}/Scripts/Activate.ps1`;
-  }
-  return `source ${quoted}/bin/activate`;
+  // Путь к скрипту строит venvActivatePath — чтобы правило «bin/activate или
+  // Scripts/Activate.ps1» жило в одном месте.
+  const script = venvActivatePath(quoted, platform);
+  // PowerShell: политика выполнения у поставляемого скрипта — ByPass.
+  return platform === 'win32' ? `. ${script}` : `source ${script}`;
 }
 
 /**

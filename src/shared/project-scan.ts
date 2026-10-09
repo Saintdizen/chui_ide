@@ -82,11 +82,6 @@ function fileName(target: string): string {
   return index < 0 ? target : target.slice(index + 1);
 }
 
-/** Последний сегмент каталога. */
-export function dirName(target: string): string {
-  return fileName(target.replace(/[/\\]+$/, ''));
-}
-
 /* ── тесты ──────────────────────────────────────────────────────────────── */
 
 /** `test_foo.py`, `foo_test.py`, `tests/*.py` — соглашения pytest и unittest. */

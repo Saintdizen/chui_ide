@@ -6,6 +6,7 @@ import {
   type PythonInterpreter,
   type VenvInstallPreset,
 } from '../../shared/python-env';
+import { envList } from '../core/python-view';
 import type { RpcClient } from '../core/rpc';
 import { clear, h, svgIcon } from './dom';
 import { createSelect, type SelectOption } from './select';
@@ -191,7 +192,7 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
       list.appendChild(h('div', { class: 'venv-empty' }, 'Окружений нет. Создайте первое — оно станет основным.'));
       return;
     }
-    for (const environment of environments) {
+    for (const environment of envList(environments)) {
       list.appendChild(
         h(
           'div',
