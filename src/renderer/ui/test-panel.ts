@@ -1,4 +1,5 @@
 import { buildTestTree, parseCoverage, parseResultMarker, type CollectedSuite, type TestFolder } from '../../shared/python-tests';
+import { isTestFile } from '../../shared/project-scan';
 import { PushTopic, type TerminalDataPayload } from '../../shared/api';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
@@ -11,8 +12,9 @@ import { clear, h } from './dom';
  * отдельный тест, класс целиком или файл. Сбор идёт через main (`python.tests`),
  * а запуск — обычной командой в терминале: тесты должны быть видны и прерываемы.
  *
- * Пересобираем при открытии и по кнопке: список меняется, когда правят код,
- * и держать его актуальным в фоне дороже, чем спросить заново.
+ * Пересобираем при открытии, по кнопке и по правке тестового файла — но не на
+ * каждое нажатие и не в фоне: с задержкой и только когда панель на виду (см.
+ * `notifyChange`). Иначе pytest дёргался бы на каждый символ.
  *
  * Исход прогона берём из вывода терминала (см. `resultMarkerCommand`): оболочка
  * после pytest не завершается, поэтому кода выхода из события процесса не
@@ -31,17 +33,23 @@ export interface TestPanelDeps {
   onRun: (selector: string | null, options?: { report?: boolean }) => void;
   /** Запустить с покрытием (`pytest --cov`). */
   onCoverage: (selector: string | null) => void;
+  /** Панель на виду: пересобирать список по правке имеет смысл только тогда. */
+  isVisible: () => boolean;
 }
 
 /** Исход последнего прогона узла. */
 type TestOutcome = 'running' | 'passed' | 'failed';
 /** Ключ для узла «все тесты»: у него нет собственного id в дереве. */
 const ALL_KEY = 'pytest:all';
+/** Пауза перед авто-перечитыванием: пока человек печатает, pytest не зовём. */
+const AUTO_REFRESH_DELAY = 1500;
 
 export interface TestPanelView {
   element: HTMLElement;
   /** Пересобрать список тестов; вызывается при открытии панели. */
   refresh(): Promise<void>;
+  /** Сообщить о правке файла: панель сама решит, надо ли пересобирать. */
+  notifyChange(path: string): void;
   focus(): void;
 }
 
@@ -243,6 +251,23 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
     render();
   }
 
+  /** Таймер отложенного перечитывания: новое изменение сбрасывает старое. */
+  let autoTimer: number | null = null;
+
+  /**
+   * Файл изменился. Пересобираем дерево только если это тестовый файл и панель
+   * на виду, да ещё и с паузой: правка кода идёт посимвольно, а pytest на каждый
+   * символ запускать нельзя.
+   */
+  function notifyChange(path: string): void {
+    if (!deps.isVisible() || !isTestFile(path)) return;
+    if (autoTimer !== null) window.clearTimeout(autoTimer);
+    autoTimer = window.setTimeout(() => {
+      autoTimer = null;
+      void refresh();
+    }, AUTO_REFRESH_DELAY);
+  }
+
   render();
-  return { element, refresh, focus: () => refreshButton.focus() };
+  return { element, refresh, notifyChange, focus: () => refreshButton.focus() };
 }

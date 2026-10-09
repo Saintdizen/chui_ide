@@ -195,6 +195,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // по ней панель и красит узлы. Покрытие — отдельная цель.
     onRun: (selector, options) => void runTarget(pytestTarget(tools.get(), selector, { ...options, platform: info.platform })),
     onCoverage: (selector) => void runTarget(pytestCoverageTarget(tools.get(), selector, { report: true, platform: info.platform })),
+    // Пересобирать список по правке стоит только когда панель тестов на виду.
+    isVisible: () => dock.visible && dock.activeId === 'tests',
   });
 
   const dock = createDock();
@@ -1362,11 +1364,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   // Счётчик правок и ветка в статусбаре живут по тому же снимку, что и дерево.
   git.onDidChange(refreshStatus);
-  documents.onDidChange(() => {
+  documents.onDidChange(({ document }) => {
     refreshStatus();
     // Правка текста может добавить или убрать точку входа — значок запуска
     // обязан следовать за файлом, а не жить до перезапуска.
     syncRunControl();
+    // Тестовый файл изменился — панель тестов сама решит, пересобирать ли дерево.
+    testPanel.notifyChange(document.path);
   });
   // Значок ▶ в жёлобе: запускаем тот файл, в котором на него нажали.
   editors.onRunMarker(({ path }) => {
