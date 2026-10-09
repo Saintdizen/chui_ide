@@ -365,10 +365,8 @@ export class EditorService {
       breakpoints.map((item) => ({
         range: new monaco.Range(item.line, 1, item.line, 1),
         options: {
-          glyphMarginClassName: item.condition ? 'breakpoint-glyph is-conditional' : 'breakpoint-glyph',
-          glyphMarginHoverMessage: {
-            value: item.condition ? `Точка останова с условием: ${item.condition}` : 'Точка останова',
-          },
+          glyphMarginClassName: breakpointGlyphClass(item),
+          glyphMarginHoverMessage: { value: breakpointTooltip(item) },
           stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
         },
       })),
@@ -541,6 +539,25 @@ export class EditorService {
       selections: this.editor.getSelections()?.length ?? 0,
     });
   }
+}
+
+/**
+ * Класс значка точки: обычная — кружок, условная — ромб, точка в журнал —
+ * ромб с «журнальным» цветом. Видно с одного взгляда, без наведения.
+ */
+function breakpointGlyphClass(item: BreakpointInput): string {
+  if (item.logMessage) return 'breakpoint-glyph is-log';
+  if (item.condition || item.hitCondition) return 'breakpoint-glyph is-conditional';
+  return 'breakpoint-glyph';
+}
+
+/** Подсказка точки: все её настройки в одном месте. */
+function breakpointTooltip(item: BreakpointInput): string {
+  if (item.logMessage) return `Точка в журнал: ${item.logMessage}`;
+  const parts: string[] = [];
+  if (item.condition) parts.push(`условие: ${item.condition}`);
+  if (item.hitCondition) parts.push(`попаданий: ${item.hitCondition}`);
+  return parts.length > 0 ? `Точка останова (${parts.join(', ')})` : 'Точка останова';
 }
 
 /**

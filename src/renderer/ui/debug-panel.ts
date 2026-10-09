@@ -36,6 +36,9 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
 
   /** Кадр, для которого показаны переменные; по умолчанию — верхний. */
   let selectedFrameId: number | null = null;
+  /** Наблюдаемые выражения и их последние значения. Живут, пока открыта панель. */
+  let watchExpressions: string[] = [];
+  const watchValues = new Map<string, DebugVariable>();
   /** Раскрытые узлы переменных и их загруженные дети: ссылка → значения. */
   const loadedVariables = new Map<number, DebugVariable[]>();
   const expanded = new Set<number>();
@@ -167,6 +170,71 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
     body.appendChild(h('section', { class: 'debug-section' }, h('h3', { class: 'debug-heading' }, 'Переменные'), box));
   }
 
+  /**
+   * Наблюдение: выражения, которые человек вводит сам (`n * 2`, `len(items)`).
+   * Значения пересчитываются на каждом останове в контексте верхнего кадра,
+   * а сами выражения живут в панели, пока её не закрыли.
+   */
+  function renderWatch(): void {
+    const list = h('div', { class: 'debug-list' });
+
+    for (const expression of watchExpressions) {
+      const result = watchValues.get(expression);
+      const row = h(
+        'div',
+        { class: 'debug-row', title: 'Убрать из наблюдения' },
+        h('span', { class: 'debug-var-name' }, expression),
+        h('span', { class: 'debug-var-value' }, result ? result.value : '…'),
+        result?.type ? h('span', { class: 'debug-var-type' }, result.type) : null,
+      );
+      row.addEventListener('click', () => {
+        watchExpressions = watchExpressions.filter((item) => item !== expression);
+        watchValues.delete(expression);
+        render(stateSnapshot);
+      });
+      list.appendChild(row);
+    }
+
+    if (watchExpressions.length === 0) {
+      const hint = stateSnapshot.phase === 'stopped' ? 'Выражений нет.' : 'Выражения посчитаются на останове.';
+      list.appendChild(h('div', { class: 'debug-empty' }, hint));
+    }
+
+    // Поле ввода: Enter добавляет выражение и сразу считает его.
+    const input = h('input', {
+      class: 'field-input debug-watch-input',
+      type: 'text',
+      placeholder: 'выражение, например len(items)',
+      spellcheck: 'false',
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      const expression = input.value.trim();
+      if (!expression || watchExpressions.includes(expression)) return;
+      input.value = '';
+      watchExpressions.push(expression);
+      void evaluateWatch().then(() => render(stateSnapshot));
+    });
+
+    body.appendChild(
+      h('section', { class: 'debug-section' }, h('h3', { class: 'debug-heading' }, 'Наблюдение'), list, input),
+    );
+  }
+
+  /** Пересчитать все наблюдаемые выражения в контексте выбранного кадра. */
+  async function evaluateWatch(): Promise<void> {
+    // В контексте кадра считать можно только на останове: пока программа идёт,
+    // вычислять нечего, и «нет остановленной программы» вместо значения было бы
+    // шумом — оставляем заглушку до первого останова.
+    const frameId = selectedFrameId ?? stateSnapshot.topFrame?.id;
+    if (stateSnapshot.phase !== 'stopped' || frameId === undefined || frameId === null) return;
+
+    for (const expression of watchExpressions) {
+      watchValues.set(expression, await deps.debug.evaluate(expression, frameId));
+    }
+  }
+
   /** Последнее отрисованное состояние: обработчики кликов перерисовывают по нему. */
   let stateSnapshot: DebugState = { phase: 'idle', reason: null, frames: [], topFrame: null };
 
@@ -184,12 +252,22 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
     const topId = state.topFrame?.id ?? null;
     if (state.phase === 'stopped' && topId !== selectedFrameId) {
       selectedFrameId = topId;
-      if (topId !== null) void loadScopes(topId).then(() => render(stateSnapshot));
+      if (topId !== null) {
+        void loadScopes(topId)
+          // Наблюдаемые выражения считаем в том же кадре: иначе они смотрели бы
+          // на другой фрейм, чем переменные, и значения расходились бы.
+          .then(() => evaluateWatch())
+          .then(() => render(stateSnapshot));
+      }
     }
 
     renderStack(state);
     if (state.phase === 'stopped') renderVariables();
     else body.appendChild(h('div', { class: 'debug-empty' }, 'Программа выполняется…'));
+
+    // Наблюдение показываем и пока программа идёт: выражения удобно заготовить
+    // заранее — они посчитаются на ближайшем останове. Без сессии раздел не нужен.
+    renderWatch();
   }
 
   deps.debug.onDidChange(render);

@@ -418,6 +418,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   });
   router.register('debug.scopes', (params) => requireDebug().scopes(params.frameId));
   router.register('debug.variables', (params) => requireDebug().variables(params.reference));
+  router.register('debug.evaluate', (params) => requireDebug().evaluate(params.expression, params.frameId));
 
   // Кроме PATH смотрим окружение проекта: pylsp, ruff и прочие, поставленные в
   // venv, видит только оно — системный питон чужие пакеты не видит. Окружение

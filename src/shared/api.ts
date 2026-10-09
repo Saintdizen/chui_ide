@@ -569,13 +569,21 @@ export type DebugPhase = 'idle' | 'starting' | 'running' | 'stopped';
 /**
  * Точка останова.
  *
- * `condition` — выражение на языке отлаживаемой программы: останов происходит,
- * только если оно истинно. Пустая строка — обычная точка, останавливается всегда.
+ * Поля-настройки необязательны и работают вместе так же, как в DAP:
+ * `condition` и `hitCondition` решают, останавливаться ли, а `logMessage` —
+ * останавливаться ли вообще: точка с сообщением только пишет строку в вывод.
  */
 export interface DebugBreakpoint {
   line: number;
-  /** Условие останова; нет — точка безусловная. */
+  /** Останавливаться, только если выражение истинно. */
   condition?: string;
+  /** Останавливаться после стольких попаданий (`>5`, `10`). Счёт ведёт отладчик. */
+  hitCondition?: string;
+  /**
+   * Точка в журнал: вместо останова печатает сообщение. `{выражение}` внутри
+   * текста подставляет значение — как в VS Code и как понимает отладчик.
+   */
+  logMessage?: string;
   /** Подтвердил ли точку отладчик (проверена ли исполнимость строки). */
   verified: boolean;
 }
@@ -1095,8 +1103,13 @@ export interface ChuiMethods {
   'debug.stop': { params: void; result: void };
   /** Области видимости кадра: локальные, глобальные. */
   'debug.scopes': { params: { frameId: number }; result: DebugScope[] };
-  /** Значения области или раскрытого узла. */
+    /** Значения области или раскрытого узла. */
   'debug.variables': { params: { reference: number }; result: DebugVariable[] };
+  /**
+   * Вычислить выражение в контексте кадра: панель «наблюдение».
+   * Ошибка выражения — это результат, а не сбой: текст ошибки возвращается как значение.
+   */
+  'debug.evaluate': { params: { expression: string; frameId?: number }; result: DebugVariable };
 
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };

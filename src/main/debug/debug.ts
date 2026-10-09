@@ -147,10 +147,7 @@ export class DebugService {
         // уже мёртв
       }
     }, 300);
-    this.rejectAll(new Error('Сессия отладки остановлена'));
-    this.frames = [];
-    this.topFrameId = null;
-    this.setPhase('idle');
+    this.clearSession('Сессия отладки остановлена');
   }
 
   dispose(): void {
@@ -175,17 +172,23 @@ export class DebugService {
 
     const response = await this.call('setBreakpoints', {
       source: { path },
-      // Условные точки прокидываем как есть: `condition` — стандартное поле DAP,
-      // и debugpy его понимает. Пустое условие не шлём, чтобы не менять поведение.
-      breakpoints: wanted.map((item) => (item.condition ? { line: item.line, condition: item.condition } : { line: item.line })),
+      // Настройки точки (`condition`, `hitCondition`, `logMessage`) — стандартные
+      // поля DAP, debugpy их понимает. Не заданные не шлём: пустое поле может
+      // значить не то же самое, что отсутствие поля.
+      breakpoints: wanted.map((item) => ({
+        line: item.line,
+        ...(item.condition ? { condition: item.condition } : {}),
+        ...(item.hitCondition ? { hitCondition: item.hitCondition } : {}),
+        ...(item.logMessage ? { logMessage: item.logMessage } : {}),
+      })),
     }).catch(() => null);
     const verified =
       (response?.body as { breakpoints?: Array<{ line?: number; verified?: boolean }> } | undefined)?.breakpoints ?? [];
-    // Отладчик может сдвинуть строку (пустая строка, закрывающая скобка) — берём его ответ,
-    // но условие остаётся нашим: адаптер его не возвращает.
+    // Отладчик может сдвинуть строку (пустая строка, закрывающая скобка) — берём его
+    // ответ. Наши настройки он не возвращает, поэтому переносим их сами.
     return verified.map((item, index) => ({
+      ...(wanted[index] ?? { line: 0 }),
       line: item.line ?? wanted[index]?.line ?? 0,
-      ...(wanted[index]?.condition ? { condition: wanted[index]!.condition } : {}),
       verified: item.verified === true,
     }));
   }
@@ -230,6 +233,45 @@ export class DebugService {
       type: variable.type ?? null,
       variablesReference: variable.variablesReference ?? 0,
     }));
+  }
+
+  /**
+   * Вычислить выражение в контексте кадра — панель «наблюдение».
+   *
+   * Ошибку выражения отдаём как значение, а не как сбой запроса: неверное имя
+   * переменной при остановке — обычное дело, и человеку нужен текст ошибки там
+   * же, где он ждал значение, а не тост.
+   */
+  async evaluate(expression: string, frameId?: number): Promise<DebugVariable> {
+    const text = expression.trim();
+    if (!text) return { name: text, value: '', type: null, variablesReference: 0 };
+
+    const threadId = this.thread;
+    const frame = frameId ?? this.topFrameId ?? this.frames[0]?.id ?? null;
+    if (threadId === null || frame === null) {
+      return { name: text, value: 'нет остановленной программы', type: null, variablesReference: 0 };
+    }
+
+    // Сообщение ошибки берём из ответа адаптера как есть: «name 'x' is not defined»
+    // объясняет причину, а «отладчик не ответил» — нет. Поэтому ошибку запроса не
+    // глотаем, а превращаем в значение.
+    try {
+      const response = await this.call('evaluate', { expression: text, frameId: frame, context: 'watch' });
+      const body = response.body as { result?: unknown; type?: unknown; variablesReference?: unknown } | undefined;
+      return {
+        name: text,
+        value: typeof body?.result === 'string' ? body.result : '',
+        type: typeof body?.type === 'string' ? body.type : null,
+        variablesReference: typeof body?.variablesReference === 'number' ? body.variablesReference : 0,
+      };
+    } catch (error) {
+      return {
+        name: text,
+        value: error instanceof Error ? error.message : 'ошибка выражения',
+        type: null,
+        variablesReference: 0,
+      };
+    }
   }
 
   /** Кадры текущего останова: панель берёт их отсюда, не запрашивая заново. */
@@ -399,7 +441,17 @@ export class DebugService {
   private ended(): void {
     if (this.phase === 'idle' && !this.child) return;
     this.child = null;
-    this.rejectAll(new Error('Отладка завершена'));
+    this.clearSession('Отладка завершена');
+  }
+
+  /**
+   * Общий сброс состояния сессии — один на оба выхода (явный стоп и завершение
+   * процесса отладчика). Забытый здесь `thread` — не мелочь: с ним «Пауза» и
+   * вычисление выражений уходят к мёртвому соединению, а новый поток из
+   * следующей сессии не запоминается, потому что поле занято старым.
+   */
+  private clearSession(reason: string): void {
+    this.rejectAll(new Error(reason));
     this.frames = [];
     this.topFrameId = null;
     this.thread = null;
@@ -426,19 +478,29 @@ export class DebugService {
 export interface DebugBreakpointInput {
   line: number;
   condition?: string;
+  hitCondition?: string;
+  logMessage?: string;
 }
 
 /**
  * Привести точки к виду для DAP: только целые положительные строки, по одной на
- * строку, по возрастанию. Условие обрезаем — модель или человек могли оставить
- * хвостовые пробелы, а пустое условие означает обычную точку.
+ * строку, по возрастанию. Строковые настройки обрезаем — человек мог оставить
+ * хвостовые пробелы, а пустое значение означает «настройки нет», а не «пустая».
  */
 function normalizeBreakpoints(breakpoints: readonly DebugBreakpointInput[]): DebugBreakpointInput[] {
   const byLine = new Map<number, DebugBreakpointInput>();
   for (const item of breakpoints) {
     if (!Number.isInteger(item.line) || item.line < 1) continue;
     const condition = item.condition?.trim();
-    byLine.set(item.line, condition ? { line: item.line, condition } : { line: item.line });
+    const hitCondition = item.hitCondition?.trim();
+    // Сообщение не обрезаем по краям: пробелы в нём — часть форматирования.
+    const logMessage = item.logMessage?.length ? item.logMessage : undefined;
+    byLine.set(item.line, {
+      line: item.line,
+      ...(condition ? { condition } : {}),
+      ...(hitCondition ? { hitCondition } : {}),
+      ...(logMessage ? { logMessage } : {}),
+    });
   }
   return [...byLine.values()].sort((a, b) => a.line - b.line);
 }

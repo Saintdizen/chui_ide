@@ -40,10 +40,22 @@ function handle(message) {
       break;
     case 'setBreakpoints':
       breakpoints = (args.breakpoints || []).length;
+      // Отладчик возвращает только строку и подтверждение: настройки точки
+      // (условие, сообщение, счётчик) он не повторяет — клиент должен помнить их сам.
       response(message.seq, 'setBreakpoints', {
         breakpoints: (args.breakpoints || []).map((b) => ({ verified: true, line: b.line })),
       });
       break;
+    case 'evaluate': {
+      // Как debugpy: плохое выражение — это ответ с ошибкой, а не молчание.
+      const expression = String(args.expression || '');
+      if (expression.includes('bad')) {
+        send({ type: 'response', request_seq: message.seq, success: false, command: 'evaluate', message: 'NameError: name bad is not defined' });
+        break;
+      }
+      response(message.seq, 'evaluate', { result: '42', type: 'int', variablesReference: 0 });
+      break;
+    }
     case 'configurationDone':
       response(message.seq, 'configurationDone');
       if (launchSeq !== null) {
@@ -275,5 +287,69 @@ describe('DebugService', () => {
     expect(confirmed.find((item) => item.line === 1)?.condition).toBeUndefined();
     expect(confirmed.find((item) => item.line === 2)?.condition).toBe('x > 1');
     service.dispose();
+  });
+
+  it('точка в журнал и счётчик попаданий сохраняются вместе с условием', async () => {
+    const { service } = fakeService();
+    const confirmed = await service.setBreakpoints('/proj/app.py', [
+      { line: 1, logMessage: 'n = {n}' },
+      { line: 2, hitCondition: '5' },
+      { line: 3, condition: 'n > 1', logMessage: 'нашли {n}' },
+    ]);
+
+    // Сообщение не обрезаем по краям: пробелы могут быть частью формата.
+    expect(confirmed.find((item) => item.line === 1)?.logMessage).toBe('n = {n}');
+    expect(confirmed.find((item) => item.line === 2)?.hitCondition).toBe('5');
+    const both = confirmed.find((item) => item.line === 3);
+    expect(both?.condition).toBe('n > 1');
+    expect(both?.logMessage).toBe('нашли {n}');
+    service.dispose();
+  });
+
+  it('точка без настроек не несёт пустых полей', async () => {
+    const { service } = fakeService();
+    const [first] = await service.setBreakpoints('/proj/app.py', [{ line: 1, condition: '', logMessage: '', hitCondition: '  ' }]);
+    // Пустое — это «настройки нет», а не «пустая настройка»: поле не должно появиться.
+    expect(first).toEqual({ line: 1, verified: false });
+    service.dispose();
+  });
+
+  describe('evaluate', () => {
+    it('считает выражение в контексте кадра', async () => {
+      const { service } = fakeService();
+      await service.setBreakpoints('/proj/app.py', [{ line: 4 }]);
+      await service.start('/proj/app.py');
+      await waitPhase(service, 'stopped');
+
+      const result = await service.evaluate('total * 2', service.stack()[0]!.id);
+      expect(result).toMatchObject({ name: 'total * 2', value: '42', type: 'int' });
+      service.dispose();
+    });
+
+    it('ошибку выражения отдаёт текстом, а не сбоем', async () => {
+      const { service } = fakeService();
+      await service.setBreakpoints('/proj/app.py', [{ line: 4 }]);
+      await service.start('/proj/app.py');
+      await waitPhase(service, 'stopped');
+
+      // Причина важна целиком: по ней человек понимает, что опечатался.
+      const result = await service.evaluate('bad_name');
+      expect(result.value).toContain('NameError');
+      service.dispose();
+    });
+
+    it('пустое выражение не уходит отладчику', async () => {
+      const { service } = fakeService();
+      const result = await service.evaluate('   ');
+      expect(result.value).toBe('');
+      service.dispose();
+    });
+
+    it('без останова объясняет, что программы нет', async () => {
+      const { service } = fakeService();
+      const result = await service.evaluate('total');
+      expect(result.value).toContain('нет остановленной программы');
+      service.dispose();
+    });
   });
 });

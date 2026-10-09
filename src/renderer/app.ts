@@ -1452,31 +1452,57 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /** Меню точки останова по правому клику на поле номеров строк. */
   const openBreakpointMenu = ({ path, line }: { path: string; line: number }): void => {
-    const condition = debug.conditionOf(path, line);
-    const hasBreakpoint = debug.linesOf(path).includes(line);
+    const breakpoint = debug.breakpointsOf(path).find((item) => item.line === line);
+    const at = breakpoint ?? { line };
+
+    /** Задать настройку точки и перерисовать значки. */
+    const apply = (options: { condition?: string; hitCondition?: string; logMessage?: string }): void => {
+      void debug.setBreakpointOptions(path, line, options).then((list) => editors.setBreakpoints(path, list));
+    };
+
     showPopupMenu(
       [
         {
-          label: condition ? 'Изменить условие…' : 'Условие останова…',
+          label: at.condition ? 'Изменить условие…' : 'Условие останова…',
           onSelect: () => {
             conditionInput.open({
               title: 'Условие останова',
               label: `Строка ${line}`,
-              value: condition ?? '',
+              value: at.condition ?? '',
               placeholder: 'например n > 100',
               confirmLabel: 'Задать',
-              onAccept: (value) => {
-                void debug.setCondition(path, line, value).then((breakpoints) => editors.setBreakpoints(path, breakpoints));
-              },
+              onAccept: (value) => apply({ ...at, condition: value }),
             });
           },
         },
         {
-          label: hasBreakpoint ? 'Убрать точку останова' : 'Поставить точку останова',
+          label: at.hitCondition ? 'Изменить счётчик попаданий…' : 'Счётчик попаданий…',
           onSelect: () => {
-            void debug.toggleBreakpoint(path, line).then((breakpoints) => editors.setBreakpoints(path, breakpoints));
+            conditionInput.open({
+              title: 'Счётчик попаданий',
+              label: 'Сколько раз пройти мимо, прежде чем остановиться',
+              value: at.hitCondition ?? '',
+              placeholder: 'например 5 или >3',
+              confirmLabel: 'Задать',
+              onAccept: (value) => apply({ ...at, hitCondition: value }),
+            });
           },
         },
+        {
+          label: at.logMessage ? 'Изменить сообщение журнала…' : 'Точка в журнал…',
+          onSelect: () => {
+            conditionInput.open({
+              title: 'Точка в журнал',
+              label: 'Сообщение; {выражение} подставит значение',
+              value: at.logMessage ?? '',
+              placeholder: 'например n = {n}',
+              confirmLabel: 'Задать',
+              onAccept: (value) => apply({ ...at, logMessage: value }),
+            });
+          },
+        },
+        { label: breakpoint ? 'Убрать точку останова' : 'Поставить точку останова', onSelect: () =>
+          void debug.toggleBreakpoint(path, line).then((list) => editors.setBreakpoints(path, list)) },
       ],
       lastPointer.x,
       lastPointer.y,

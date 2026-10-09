@@ -30,8 +30,12 @@ export interface DebugState {
 /** Точка останова в том виде, в каком её держит renderer. */
 export interface BreakpointInput {
   line: number;
-  /** Условие останова; нет — точка безусловная. */
+  /** Останавливаться, только если выражение истинно. */
   condition?: string;
+  /** Останавливаться после стольких попаданий. */
+  hitCondition?: string;
+  /** Точка в журнал: печатает сообщение вместо останова. */
+  logMessage?: string;
 }
 
 const IDLE: DebugState = { phase: 'idle', reason: null, frames: [], topFrame: null };
@@ -45,7 +49,15 @@ function normalize(breakpoints: readonly BreakpointInput[]): BreakpointInput[] {
   for (const item of breakpoints) {
     if (!Number.isInteger(item.line) || item.line < 1) continue;
     const condition = item.condition?.trim();
-    byLine.set(item.line, condition ? { line: item.line, condition } : { line: item.line });
+    const hitCondition = item.hitCondition?.trim();
+    // Сообщение не обрезаем: пробелы в нём могут быть частью формата.
+    const logMessage = item.logMessage?.length ? item.logMessage : undefined;
+    byLine.set(item.line, {
+      line: item.line,
+      ...(condition ? { condition } : {}),
+      ...(hitCondition ? { hitCondition } : {}),
+      ...(logMessage ? { logMessage } : {}),
+    });
   }
   return [...byLine.values()].sort((a, b) => a.line - b.line);
 }
@@ -111,15 +123,15 @@ export class DebugController {
     return this.setBreakpoints(path, current);
   }
 
-  /**
-   * Задать условие точки на строке. Пустое условие убирает его, но оставляет
-   * точку: так «убрать условие» не значит «убрать точку».
-   */
-  async setCondition(path: string, line: number, condition: string): Promise<BreakpointInput[]> {
-    const trimmed = condition.trim();
+  /** Настройка точки на строке: обновляем её и оставляем точку на месте. */
+  async setBreakpointOptions(
+    path: string,
+    line: number,
+    options: { condition?: string; hitCondition?: string; logMessage?: string },
+  ): Promise<BreakpointInput[]> {
     const next = this.breakpointsOf(path)
       .filter((item) => item.line !== line)
-      .concat(trimmed ? [{ line, condition: trimmed }] : [{ line }])
+      .concat([{ line, ...options }])
       .sort((a, b) => a.line - b.line);
     return this.setBreakpoints(path, next);
   }
@@ -173,6 +185,13 @@ export class DebugController {
 
   variables(reference: number): Promise<DebugVariable[]> {
     return this.rpc.request('debug.variables', { reference }).catch(() => []);
+  }
+
+  /** Вычислить выражение в кадре — для панели «наблюдение». */
+  evaluate(expression: string, frameId?: number): Promise<DebugVariable> {
+    return this.rpc
+      .request('debug.evaluate', { expression, ...(frameId !== undefined ? { frameId } : {}) })
+      .catch(() => ({ name: expression, value: 'отладчик недоступен', type: null, variablesReference: 0 }));
   }
 
   private apply(next: DebugState): void {

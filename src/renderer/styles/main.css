@@ -738,6 +738,15 @@ textarea {
   transform: rotate(45deg);
 }
 
+/* Точка в журнал — ромб другого цвета: она не останавливает программу. */
+.breakpoint-glyph.is-log::after {
+  width: 9px;
+  height: 9px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: var(--run_accent);
+}
+
 /* Строка, где стоит отладчик: подсвечиваем всю строку, а не только жёлоб. */
 .debug-line {
   background: var(--debug_line_background);
@@ -4718,6 +4727,12 @@ textarea {
   margin: 4px 8px 2px;
   color: var(--text_color_tertiary);
   font-weight: 600;
+}
+
+/* Поле наблюдения: внутри прокручиваемого тела панели, поэтому отступы свои. */
+.debug-watch-input {
+  margin: 6px 8px 0;
+  width: calc(100% - 16px);
 }
 
 .debug-empty {
