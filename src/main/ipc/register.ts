@@ -27,6 +27,7 @@ import { detectAvailableCommands, detectVenvCommands } from '../lsp/detect';
 import { scanProject } from '../project/scan';
 import { activateCommand, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
 import { missingPackages } from '../node/packages';
+import { checkEnvironment as checkNodeEnvironment, nodeInfo, installedPackages as installedNodePackages } from '../node/environment';
 import { missingModules } from '../python/packages';
 import { findInterpreters } from '../python/interpreters';
 import { installPackages, installedPackages } from '../python/pip';
@@ -268,6 +269,18 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     const root = requireRoot();
     return formatPython(root, resolvePython(root), params.path, params.text);
   });
+
+  /* ── Node: окружение проекта ───────────────────────────────────────────── */
+
+  // Версия Node и менеджер пакетов: чем запускается код и чем ставить зависимости.
+  router.register('node.info', () => nodeInfo(deps.workspace.rootPath()));
+
+  // Установленные пакеты: то, что лежит в `node_modules` проекта.
+  router.register('node.packages', () => installedNodePackages(requireRoot()));
+
+  // Здоровье окружения: нет `node_modules`, не хватает зависимостей, версия Node
+  // не под `engines.node`, нет файла блокировки.
+  router.register('node.envHealth', () => checkNodeEnvironment(requireRoot()));
 
   // Сессия проекта: renderer собирает состояние и кладёт сюда, а при следующем
   // открытии забирает обратно. Без хранилища (пробники) отвечаем пустой сессией.

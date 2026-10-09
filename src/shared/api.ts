@@ -8,6 +8,7 @@
 import type { MenuRole } from './app-menu';
 import type { ApplyResult, FileEdit } from './edits';
 import type { ProjectScan } from './project-scan';
+import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { PythonEnvironment, PythonInterpreter } from './python-env';
 import type { InstalledPackage } from './python-packages';
 import type { CollectedSuite } from './python-tests';
@@ -1067,6 +1068,13 @@ export interface ChuiMethods {
   'python.envHealth': { params: void; result: EnvironmentHealth[] };
   /** Отформатировать текст файла инструментом окружения (ruff или black). */
   'python.format': { params: { path: string; text: string }; result: PythonFormatResult };
+
+  /** Окружение Node: версия Node и менеджер пакетов проекта. */
+  'node.info': { params: void; result: NodeInfo };
+  /** Установленные пакеты проекта: то, что лежит в `node_modules`. */
+  'node.packages': { params: void; result: NodePackage[] };
+  /** Что не так с окружением проекта: нет `node_modules`, версия Node не под `engines.node`. */
+  'node.envHealth': { params: void; result: NodeEnvironmentHealth[] };
   /**
    * Какие из импортированных модулей проект не видит: для Python — интерпретатор,
    * для JS/TS — `node_modules`. Пустой ответ — либо всё на месте, либо судить
