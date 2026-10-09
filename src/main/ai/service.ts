@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   ChatStreamEvent,
@@ -17,7 +17,7 @@ import {
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
-import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec } from '../../shared/tools';
+import { AGENT_TOOLS, parseToolArguments, toOpenAiTools, type AgentToolSpec } from '../../shared/tools';
 import { estimateMessagesTokens, estimateTokens, isContextOverflow, TokenCalibration, trimMessagesToFit } from '../../shared/context-fit';
 import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
@@ -41,6 +41,51 @@ const OVERFLOW_RETRIES = 2;
 
 /** Во сколько раз ужимаем бюджет окна на каждом повторе после переполнения. */
 const OVERFLOW_SHRINK = 0.7;
+
+/** Пометка на свёрнутом результате инструмента; её наличие — признак уже свёрнутого. */
+const AGED_MARK = ' (детали свёрнуты — перечитай инструмент, если нужно)';
+
+/** Результаты короче этого порога не сворачиваем: объём не стоит потери контекста. */
+const AGED_MIN_CHARS = 400;
+
+/** Покрыт ли запрошенный диапазон одним из уже прочитанных. */
+function isCovered(ranges: ReadonlyArray<{ from: number; to: number }>, from: number, to: number): boolean {
+  return ranges.some((range) => range.from <= from && range.to >= to);
+}
+
+/**
+ * Запрос read_file, целиком лежащий в уже прочитанном диапазоне: такой повтор не
+ * исполняем — текст уже есть выше в ветке. Ловим только запросы с явным endLine:
+ * без него верхняя граница (конец файла) нам неизвестна.
+ */
+function coveredRequest(
+  name: string,
+  rawArguments: string,
+  reads: ReadonlyMap<string, Array<{ from: number; to: number }>>,
+): { path: string; from: number; to: number } | undefined {
+  if (name !== 'read_file') return undefined;
+  const parsed = parseToolArguments(rawArguments);
+  if (!parsed.ok) return undefined;
+  const target = parsed.value.path;
+  const endLine = parsed.value.endLine;
+  if (typeof target !== 'string' || typeof endLine !== 'number' || !Number.isInteger(endLine)) return undefined;
+  const startLine = parsed.value.startLine;
+  const from = typeof startLine === 'number' && Number.isInteger(startLine) ? Math.max(1, startLine) : 1;
+  const to = Math.max(from, endLine);
+  const ranges = reads.get(target);
+  if (!ranges || !isCovered(ranges, from, to)) return undefined;
+  return { path: target, from, to };
+}
+
+/** Запомнить прочитанный диапазон файла. */
+function rememberRead(
+  reads: Map<string, Array<{ from: number; to: number }>>,
+  read: { path: string; from: number; to: number },
+): void {
+  const ranges = reads.get(read.path) ?? [];
+  ranges.push({ from: read.from, to: read.to });
+  reads.set(read.path, ranges);
+}
 
 /**
  * Заметка на месте обрезанной истории. Агент должен знать, что начало беседы
@@ -89,12 +134,10 @@ const READ_ONLY_TOOLS = new Set([
 
 /** Дописывается в системный промпт, когда агентный режим включён. */
 const AGENT_PROMPT = [
-  'У тебя есть инструменты: list_dir, read_file, read_files, search, find_files, get_diagnostics — изучать проект; apply_edit — предлагать правки; replace_in_files — массовая замена по проекту; create_file, delete_file, move_file — создавать, удалять и перемещать файлы; run_terminal — выполнить одну команду; terminal_start, terminal_read, terminal_write, terminal_stop — долгие процессы в настоящем терминале (сервер, watch); update_plan — вести план работы; git_status, git_diff и git_log — смотреть состояние и историю git; open_file — открыть файл в редакторе на нужной строке.',
-  'Пути передавай абсолютные; позиции в apply_edit — 1-based, как в LSP.',
-  'В каждой правке передавай oldText — точный текст, который она заменяет: инструмент сверяет его с файлом.',
-  'Большие файлы читай диапазоном: у read_file есть startLine и endLine, а строки в выводе пронумерованы — по ним готовь правки. Не читай файл целиком много раз.',
+  'Работай с проектом инструментами, а не по догадке: назначение и аргументы у каждого инструмента описаны отдельно — читай их.',
   'Не выдумывай содержимое файлов: то, чего не знаешь, читай инструментами.',
-  'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу — так видно прогресс.',
+  'Большие файлы читай диапазоном строк и не перечитывай одно и то же много раз.',
+  'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу.',
   'Перед тем как чинить код, посмотри get_diagnostics — так видно настоящую ошибку, а не догадку.',
   'Если apply_edit ответил «не совпало с текстом документа» — перечитай файл и повтори правку, а не меняй формулировку наугад.',
   'Правки и команды пользователь подтверждает — не считай их сделанными, пока не получил ответ инструмента.',
@@ -170,7 +213,11 @@ export class AiService {
   constructor(
     private readonly settings: SettingsStore,
     private readonly workspace: WorkspaceService,
-  ) {}
+  ) {
+    // Поправки оценки токенов переживают перезапуск: без них первые шаги снова
+    // промахиваются мимо окна, пока калибровка не наберёт замеры заново.
+    this.calibration.load(readCalibration(this.settings.file()));
+  }
 
   /** Подключить git рабочей папки: включает инструменты git_status и git_diff. */
   attachGit(git: GitTools): void {
@@ -315,9 +362,27 @@ export class AiService {
     // останавливается. Правка/команда сбрасывает кэш: состояние могло измениться.
     const executed = new Map<string, ToolOutcome>();
     let stallSteps = 0;
+    // Сводки результатов по id: ими заменяем детали, когда результат «стареет».
+    const toolSummaries = new Map<string, string>();
+    // id вызовов последнего хода — их результаты модель ещё не «отработала».
+    let freshToolIds = new Set<string>();
+    // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
+    const coveredReads = new Map<string, Array<{ from: number; to: number }>>();
 
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
+
+      // Свернуть детали результатов прошлых ходов: они уже отработали, а полный
+      // текст (прочитанный файл, вывод команды) снова грузит окно на каждом шаге.
+      for (let i = 0; i < messages.length; i += 1) {
+        const aged = messages[i]!;
+        if (aged.role !== 'tool' || !aged.toolCallId) continue;
+        if (freshToolIds.has(aged.toolCallId)) continue;
+        const content = aged.content ?? '';
+        if (content.length < AGED_MIN_CHARS || content.endsWith(AGED_MARK)) continue;
+        const summary = toolSummaries.get(aged.toolCallId) ?? 'результат инструмента';
+        messages[i] = { ...aged, content: summary + AGED_MARK };
+      }
 
       // Каждый шаг сверяемся с окном: результаты инструментов копятся, и
       // длинный прогон легко переполняет контекст. Режем старые ходы целиком,
@@ -401,6 +466,8 @@ export class AiService {
 
         const key = `${call.name}:${call.arguments}`;
         const repeated = READ_ONLY_TOOLS.has(call.name) ? executed.get(key) : undefined;
+        // Повтор чтения уже прочитанного диапазона: текст есть выше, не дублируем.
+        const covered = repeated ? undefined : coveredRequest(call.name, call.arguments, coveredReads);
 
         emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
         let outcome: ToolOutcome;
@@ -411,10 +478,21 @@ export class AiService {
             detail:
               'Точно такой вызов уже был в этой ветке. Повтор не нужен: используй уже полученный результат или смени подход.',
           };
+        } else if (covered) {
+          outcome = {
+            ok: true,
+            summary: `${covered.path}: строки ${covered.from}–${covered.to} уже прочитаны`,
+            detail: 'Этот диапазон уже есть выше в текущей ветке. Возьми текст оттуда, не читай повторно.',
+          };
         } else {
           outcome = await runTool(toolContext, call.name, call.arguments);
+          toolSummaries.set(call.id, outcome.summary);
+          if (outcome.read) rememberRead(coveredReads, outcome.read);
           if (READ_ONLY_TOOLS.has(call.name)) executed.set(key, outcome);
-          else executed.clear(); // правка/команда изменили состояние — прежние чтения устарели
+          else {
+            executed.clear(); // правка/команда изменили состояние — прежние чтения устарели
+            coveredReads.clear();
+          }
           didNewWork = true;
         }
         emit(ChatStreamEvent.ToolResult, {
@@ -438,6 +516,9 @@ export class AiService {
 
       // Целый шаг из повторов — модель ходит по кругу. После двух таких шагов
       // останавливаемся: дальше это только сожжёт токены без прогресса.
+
+      // id вызовов этого хода: их результаты считаем свежими на следующем шаге.
+      freshToolIds = new Set(calls.map((call) => call.id));
       stallSteps = didNewWork ? 0 : stallSteps + 1;
       if (stallSteps >= 2) {
         const note = '\n\n[агент остановлен: повторяющиеся вызовы не дают нового результата]';
@@ -530,6 +611,7 @@ export class AiService {
         if (done.usage?.promptTokens !== undefined) {
           const estimated = estimateMessagesTokens(wire.messages) + params.toolsTokens;
           this.calibration.observe(params.calibrationKey, estimated, done.usage.promptTokens);
+          this.saveCalibration();
         }
         return done;
       } catch (error) {
@@ -540,6 +622,21 @@ export class AiService {
         if (tighter.dropped === 0) throw error;
         wire = tighter;
       }
+    }
+  }
+
+  /**
+   * Сохранить поправки оценки на диск. Поправка — необязательное удобство:
+   * сбой записи не должен ломать чат, поэтому ошибки глушим.
+   */
+  private saveCalibration(): void {
+    try {
+      const file = calibrationPath(this.settings.file());
+      const temporary = file + '.tmp';
+      writeFileSync(temporary, JSON.stringify(this.calibration.snapshot()), 'utf8');
+      renameSync(temporary, file);
+    } catch {
+      // Калибровка — удобство, а не данные: терять из-за неё ответ нельзя.
     }
   }
 
@@ -709,4 +806,18 @@ function describeConnectionError(error: unknown): string {
   // Всё остальное с «fetch failed» — тоже проблема связи, а не конфигурации.
   if (/fetch failed/i.test(raw)) return 'Сервер не отвечает — он запущен и слушает этот порт?';
   return raw || 'Не удалось подключиться';
+}
+
+/** Файл с поправками оценки токенов — рядом с settings.json. */
+function calibrationPath(settingsFile: string): string {
+  return path.join(path.dirname(settingsFile), 'token-calibration.json');
+}
+
+/** Прочитать сохранённые поправки; нет файла или мусор — начинаем с чистого листа. */
+function readCalibration(settingsFile: string): unknown {
+  try {
+    return JSON.parse(readFileSync(calibrationPath(settingsFile), 'utf8'));
+  } catch {
+    return undefined;
+  }
 }

@@ -371,9 +371,9 @@ const CALIBRATION_SMOOTHING = 0.3;
  * оценки вниз перестаёт доходить до отказа провайдера.
  *
  * Работает поверх чистых `estimate*` и не меняет их: поправка нужна одному месту —
- * агентному циклу в main (см. `AiService.streamStep`). Живёт в памяти процесса:
- * после перезапуска калибровка начинается заново. Предохранителю этого достаточно
- * — он и не ждёт точности, а реактивный повтор подстрахует.
+ * агентному циклу в main (см. `AiService.streamStep`). Поправки держим на диске
+ * (`snapshot`/`load`), чтобы после перезапуска оценка не занижалась снова. Даже без
+ * них предохранитель не пропадёт: реактивный повтор после отказа подстрахует.
  */
 export class TokenCalibration {
   private readonly scales = new Map<string, number>();
@@ -393,5 +393,18 @@ export class TokenCalibration {
     const ratio = Math.min(CALIBRATION_MAX, Math.max(CALIBRATION_MIN, actual / estimated));
     const previous = this.scales.get(key);
     this.scales.set(key, previous === undefined ? ratio : previous + CALIBRATION_SMOOTHING * (ratio - previous));
+  }
+
+  /** Снимок поправок для сохранения между запусками (см. `AiService`). */
+  snapshot(): Record<string, number> {
+    return Object.fromEntries(this.scales);
+  }
+
+  /** Загрузить ранее сохранённые поправки. Мусор пропускаем: берём только числа. */
+  load(data: unknown): void {
+    if (typeof data !== 'object' || data === null) return;
+    for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+      if (typeof value === 'number' && Number.isFinite(value)) this.scales.set(key, value);
+    }
   }
 }

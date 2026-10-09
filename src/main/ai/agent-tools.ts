@@ -29,6 +29,8 @@ export interface ToolOutcome {
   summary: string;
   /** То, что уходит модели. Может быть длинным — усекается до `MAX_OUTPUT_CHARS`. */
   detail?: string;
+  /** Фактически прочитанный диапазон строк (1-based, включительно): повтор не нужен. */
+  read?: { path: string; from: number; to: number };
   /** Файловые операции (создание/удаление/перенос): их показывает панель изменений чата. */
   changes?: ToolFileChange[];
 }
@@ -232,6 +234,7 @@ async function readFile(workspace: WorkspaceService, args: Record<string, unknow
       ok: true,
       summary: `${rel}: ${total} строк${truncated ? ' (обрезано)' : ''}`,
       detail: text.length ? text : '(пустой файл)',
+      ...(truncated || total === 0 ? {} : { read: { path: target, from: 1, to: total } }),
     };
   }
 
@@ -257,10 +260,18 @@ async function readFile(workspace: WorkspaceService, args: Record<string, unknow
   const clipped =
     last < to ? `\n… (показаны строки ${from}–${last} из ${to}; продолжай с ${last + 1})` : '';
 
+  // Диапазон тоже режем по символам: 2000 строк по ~40 символов — это ~80 КБ,
+  // вчетверо больше общего потолка вывода. Без этого одно чтение диапазона
+  // съедало окно модели сильнее, чем чтение целого файла без диапазона.
+  const { text: trimmed } = truncate(body);
+  // Весь запрошенный кусок ушёл целиком — только тогда его можно считать прочитанным.
+  const whole = trimmed === body;
+
   return {
     ok: true,
     summary: `${rel}: строки ${from}–${last} из ${total}`,
-    detail: `${body}${clipped}`,
+    detail: `${trimmed}${clipped}`,
+    ...(whole ? { read: { path: target, from, to: last } } : {}),
   };
 }
 
@@ -385,7 +396,7 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     return {
       ok: true,
       summary: `совпадения в файлах: ${files.length}${result.truncated ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
-      detail: files.length ? files.join('\n') : 'Ничего не найдено',
+      detail: files.length ? truncate(files.join('\n')).text : 'Ничего не найдено',
     };
   }
 
@@ -394,7 +405,7 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
   return {
     ok: true,
     summary: `${result.hits.length} совпадений${result.truncated ? ', список обрезан' : ''} · просканировано файлов: ${result.scanned}`,
-    detail: lines.length ? lines.join('\n') : 'Ничего не найдено',
+    detail: lines.length ? truncate(lines.join('\n')).text : 'Ничего не найдено',
   };
 }
 
@@ -410,7 +421,7 @@ async function findFiles(workspace: WorkspaceService, args: Record<string, unkno
   return {
     ok: true,
     summary: `${glob ? `«${glob}»: ` : ''}файлов: ${files.length}${files.length >= limit ? ' (обрезано)' : ''}`,
-    detail: files.length ? files.join('\n') : 'Ничего не найдено',
+    detail: files.length ? truncate(files.join('\n')).text : 'Ничего не найдено',
   };
 }
 
@@ -600,7 +611,8 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   }
 
   const result = await runShellCommand(command, root, ctx.signal);
-  const output = result.output.trim();
+  // Причёсываем и держим хвост: один `npm install` иначе завалит контекст логом.
+  const output = truncateTail(condenseOutput(result.output));
   const notes: string[] = [];
   if (result.timedOut) notes.push('превышено время выполнения');
   if (result.truncated) notes.push('вывод обрезан');
@@ -834,7 +846,9 @@ async function terminalStart(ctx: ToolContext, args: Record<string, unknown>): P
 
   await delay(TERMINAL_SETTLE_MS, ctx.signal);
   const { data, offset, alive } = ctx.terminals.read(session.id, 0);
-  const output = stripAnsi(data).trim();
+  // Причёсывание снимает пустые простыни, обрезка держит хвост: у сборки и логов
+  // важен последний вывод, а один большой cat иначе съедает всё окно модели.
+  const output = truncateTail(condenseOutput(stripAnsi(data)));
 
   return {
     ok: true,
@@ -856,7 +870,8 @@ function terminalRead(ctx: ToolContext, args: Record<string, unknown>): ToolOutc
   const id = requireString(args, 'id');
   const from = optionalInteger(args, 'from') ?? 0;
   const { data, offset, alive, exitCode } = ctx.terminals.read(id, from);
-  const output = stripAnsi(data).trim();
+  // Как в terminal_start: хвост важнее начала, пустые простыни сжимаем.
+  const output = truncateTail(condenseOutput(stripAnsi(data)));
 
   return {
     ok: true,
@@ -915,6 +930,30 @@ function relativePath(target: string, root: string | null): string {
   if (!root) return target;
   const rel = path.relative(root, target);
   return rel.length === 0 ? '.' : rel;
+}
+
+/**
+ * Причесать вывод процесса перед отправкой модели: снять хвостовые пробелы и
+ * сжать простыни пустых строк. В логах сборки и тестов их много, а смысла они не
+ * несут — только жгут токены. Оформление по краям тоже убираем: это не содержание.
+ */
+function condenseOutput(text: string): string {
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/**
+ * Обрезка с конца: у вывода терминала и команд важнее последние строки — начало
+ * (приветствие, старая сборка) модели уже не нужно. Оставляем хвост и говорим,
+ * сколько символов отброшено, чтобы она знала, что видит не весь вывод.
+ */
+function truncateTail(text: string, limit = MAX_OUTPUT_CHARS): string {
+  if (text.length <= limit) return text;
+  const dropped = text.length - limit;
+  return `… (отброшено символов в начале: ${dropped})\n${text.slice(dropped)}`;
 }
 
 function truncate(text: string): { text: string; truncated: boolean } {

@@ -304,4 +304,22 @@ describe('TokenCalibration', () => {
     calibration.observe('m', Number.NaN, 100);
     expect(calibration.scaleFor('m')).toBe(1);
   });
+
+  it('переживает перезапуск: снимок восстанавливается в новую калибровку', () => {
+    const source = new TokenCalibration();
+    source.observe('openai::gpt-4o', 1_000, 2_000);
+    const restored = new TokenCalibration();
+    restored.load(source.snapshot());
+    expect(restored.scaleFor('openai::gpt-4o')).toBeCloseTo(source.scaleFor('openai::gpt-4o'), 5);
+  });
+
+  it('load терпим к мусору: берёт числа и пропускает остальное', () => {
+    const calibration = new TokenCalibration();
+    calibration.load({ good: 2, bad: 'x', missing: null, nan: Number.NaN });
+    expect(calibration.scaleFor('good')).toBe(2);
+    expect(calibration.scaleFor('bad')).toBe(1);
+    expect(calibration.scaleFor('nan')).toBe(1);
+    calibration.load(null);
+    expect(calibration.scaleFor('good')).toBe(2);
+  });
 });

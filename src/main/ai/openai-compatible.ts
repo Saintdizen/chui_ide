@@ -89,6 +89,11 @@ export class OpenAiCompatibleProvider implements AiProvider {
       // Имя поля — из OpenAI-протокола; так же его понимают OpenRouter, Groq и шлюзы.
       if (params.reasoningEffort) body.reasoning_effort = params.reasoningEffort;
       if (params.tools?.length) body.tools = params.tools;
+      // Кеш промпта: только на официальном OpenAI — сторонние совместимые серверы
+      // могут отвергнуть незнакомое поле. Ключ стабилен для одного префикса, поэтому
+      // повторные запросы попадают в тот же кеш и префикс считается дешевле.
+      const cacheKey = promptCacheKey(this.options.baseUrl, params);
+      if (cacheKey) body.prompt_cache_key = cacheKey;
       return body;
     };
 
@@ -255,6 +260,35 @@ function wireContent(message: ChatMessage): unknown {
   if (message.content.trim()) parts.push({ type: 'text', text: message.content });
   for (const image of message.images) parts.push({ type: 'image_url', image_url: { url: image } });
   return parts;
+}
+
+/**
+ * Ключ кеша промпта для OpenAI. Поле понимает только официальный сервер, поэтому
+ * шлём его лишь на `api.openai.com`: у сторонних OpenAI-совместимых серверов
+ * незнакомое поле — это 400. Ключ должен быть стабилен для одного префикса
+ * (модель + system + инструменты) — тогда повторы бьют в тот же кеш.
+ */
+function promptCacheKey(baseUrl: string, params: StreamChatParams): string | undefined {
+  let host = '';
+  try {
+    host = new URL(baseUrl).host;
+  } catch {
+    return undefined;
+  }
+  if (host !== 'api.openai.com') return undefined;
+  const system = params.messages.find((message) => message.role === 'system')?.content ?? '';
+  if (!system && !params.tools?.length) return undefined;
+  return hashKey(`${params.model}\n${system}\n${params.tools?.length ?? 0}`);
+}
+
+/** FNV-1a: нужен короткий стабильный ключ из префикса, не криптография. */
+function hashKey(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16);
 }
 
 export async function safeText(response: Response): Promise<string | undefined> {
