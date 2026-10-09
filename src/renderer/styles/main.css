@@ -4774,6 +4774,51 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+/* Покрытие по файлам: сначала самые проблемные — с нулевым покрытием. */
+.tests-coverage-box {
+  margin: 6px 0 12px;
+  border-top: 1px solid var(--separator_color);
+  padding-top: 6px;
+}
+
+.tests-cov-title {
+  padding: 0 8px 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tests-cov-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  font-size: var(--font_labels_size);
+}
+
+.tests-cov-path {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_secondary, var(--text_color));
+}
+
+.tests-cov-percent {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tests-cov-row.is-bad .tests-cov-percent {
+  color: var(--red_prime_background);
+}
+
+.tests-cov-row.is-more {
+  color: var(--text_color_disabled);
+}
+
 /* ── попап Python-окружения в статусбаре ──────────────────────────────── */
 
 /* Отступ даёт сам попап (`.popover`): своё поле здесь сложилось бы с ним

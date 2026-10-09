@@ -4,6 +4,7 @@ import {
   collectFailure,
   describeTest,
   parseCoverage,
+  parseCoverageReport,
   parsePytestCollect,
   parseResultMarker,
   resultMarkerCommand,
@@ -115,6 +116,67 @@ describe('маркер результата прогона', () => {
 
   it('stripAnsi убирает цвет, но не текст', () => {
     expect(stripAnsi('\u001b[31mпровал\u001b[0m')).toBe('провал');
+  });
+});
+
+describe('parseCoverageReport', () => {
+  // Настоящий вывод pytest-cov: шапка, разделители, файлы и итог.
+  const output = [
+    '============================= test session starts ==============================',
+    'plugins: cov-7.1.0',
+    'collected 2 items',
+    'tests/test_bad.py F                                                      [ 50%]',
+    'tests/test_ok.py .                                                       [100%]',
+    '================================ tests coverage ================================',
+    '_______________ coverage: platform linux, python 3.14.4-final-0 ________________',
+    '',
+    'Name                      Stmts   Miss  Cover',
+    '---------------------------------------------',
+    'src/app.py                   20     10    50%',
+    'src/util.py                   5      0   100%',
+    'src/empty.py                  0      0   100%',
+    '---------------------------------------------',
+    'TOTAL                        25     10    60%',
+    '============================== 1 failed, 1 passed in 0.03s ======================',
+    '',
+    'chui-pytest-result 1',
+  ].join('\n');
+
+  it('берёт итог и разбивку по файлам', () => {
+    const report = parseCoverageReport(output);
+    expect(report.total).toBe(60);
+    // Первым — app.py (10 непокрытых), затем два полностью покрытых по алфавиту.
+    expect(report.files.map((file) => file.path)).toEqual(['src/app.py', 'src/empty.py', 'src/util.py']);
+    expect(report.files[0]).toEqual({ path: 'src/app.py', percent: 50, statements: 20, missing: 10 });
+  });
+
+  it('сначала самое проблемное: по непокрытым строкам', () => {
+    const report = parseCoverageReport(output);
+    // У app.py 10 непокрытых, у остальных 0 — он и должен быть первым.
+    expect(report.files[0]?.path).toBe('src/app.py');
+  });
+
+  it('шапку, разделители и строки прогона в файлы не тащит', () => {
+    const report = parseCoverageReport(output);
+    expect(report.files.some((file) => file.path.includes('Name'))).toBe(false);
+    expect(report.files.some((file) => file.path.includes('test session'))).toBe(false);
+  });
+
+  it('путь с пробелом берётся целиком', () => {
+    const report = parseCoverageReport('my folder/app.py   4   1   75%\nTOTAL   4   1   75%');
+    expect(report.files[0]?.path).toBe('my folder/app.py');
+    expect(report.files[0]?.percent).toBe(75);
+  });
+
+  it('без coverage-отчёта — пусто и без итога', () => {
+    const report = parseCoverageReport('2 passed in 0.01s\nchui-pytest-result 0');
+    expect(report.total).toBeNull();
+    expect(report.files).toEqual([]);
+  });
+
+  it('ANSI-цвета не мешают', () => {
+    const report = parseCoverageReport('\u001b[31mTOTAL   10   4   60%\u001b[0m');
+    expect(report.total).toBe(60);
   });
 });
 

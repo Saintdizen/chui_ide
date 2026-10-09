@@ -128,13 +128,67 @@ export function parseResultMarker(text: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** Покрытие одного файла из отчёта `pytest --cov`. */
+export interface CoverageRow {
+  /** Путь файла, как его назвал отчёт (обычно относительный). */
+  path: string;
+  /** Процент покрытых строк. */
+  percent: number;
+  /** Всего исполняемых строк. */
+  statements: number;
+  /** Непокрытых строк. */
+  missing: number;
+}
+
+/** Итог покрытия: процент по проекту и разбивка по файлам. */
+export interface CoverageReport {
+  /** Процент по всему прогону; null — строки `TOTAL` в выводе не было. */
+  total: number | null;
+  /** Файлы по убыванию числа непокрытых строк: сначала то, что стоит смотреть. */
+  files: CoverageRow[];
+}
+
+/** Строка отчёта: `путь  стmts  miss  cover%`. Имя — всё, что до чисел. */
+const COVERAGE_ROW = /^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)%$/;
+
+/**
+ * Разбор полного отчёта покрытия `pytest --cov`.
+ *
+ * Берём и итог, и построчные данные: по ним видно, какие файлы провалились, а не
+ * только общий процент. Строки-разделители, шапка и служебные пометки пропускаются —
+ * их разбирать нечего.
+ */
+export function parseCoverageReport(text: string): CoverageReport {
+  const files: CoverageRow[] = [];
+  let total: number | null = null;
+
+  for (const raw of stripAnsi(text).split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const match = COVERAGE_ROW.exec(line);
+    if (!match) continue;
+
+    const name = match[1]!.trim();
+    if (name === 'TOTAL') {
+      total = Number(match[4]);
+      continue;
+    }
+    // Шапка и разделители под шаблон не подходят, а имя с пробелами шаблон берёт
+    // целиком (группа нежадная): отдельной проверки на служебные строки не нужно.
+    files.push({ path: name, percent: Number(match[4]), statements: Number(match[2]), missing: Number(match[3]) });
+  }
+
+  // Сначала самое проблемное: по числу непокрытых строк, затем по проценту.
+  files.sort((a, b) => b.missing - a.missing || a.percent - b.percent || a.path.localeCompare(b.path));
+  return { total, files };
+}
+
 /**
  * Итог покрытия из вывода `pytest --cov`: строка `TOTAL   N   M   P%`.
  * null — строки нет: прогон был без покрытия или отчёт ещё не напечатан.
  */
 export function parseCoverage(text: string): number | null {
-  const match = /^TOTAL\s+\d+\s+\d+\s+(\d+)%/m.exec(stripAnsi(text));
-  return match ? Number(match[1]) : null;
+  return parseCoverageReport(text).total;
 }
 
 /** Разбор одной строки-идентификатора: `file.py::Class::name` или `file.py::name`. */

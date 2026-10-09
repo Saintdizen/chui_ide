@@ -1,4 +1,4 @@
-import { buildTestTree, parseCoverage, parseResultMarker, type CollectedSuite, type TestFolder } from '../../shared/python-tests';
+import { buildTestTree, parseCoverageReport, parseResultMarker, type CollectedSuite, type CoverageReport, type TestFolder } from '../../shared/python-tests';
 import { isTestFile } from '../../shared/project-scan';
 import { PushTopic, type TerminalDataPayload } from '../../shared/api';
 import type { RpcClient } from '../core/rpc';
@@ -43,6 +43,8 @@ type TestOutcome = 'running' | 'passed' | 'failed';
 const ALL_KEY = 'pytest:all';
 /** Пауза перед авто-перечитыванием: пока человек печатает, pytest не зовём. */
 const AUTO_REFRESH_DELAY = 1500;
+/** Сколько файлов покрытия показываем: список должен оставаться обозримым. */
+const MAX_COVERAGE_ROWS = 12;
 
 export interface TestPanelView {
   element: HTMLElement;
@@ -94,7 +96,8 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   /** Ждём ли от текущего прогона покрытие (кнопка «С покрытием»). */
   let pendingCoverage = false;
   /** Итог покрытия последнего прогона с покрытием, в процентах. */
-  let coverage: number | null = null;
+  /** Отчёт покрытия последнего прогона с `--cov`: итог и разбивка по файлам. */
+  let coverage: CoverageReport | null = null;
 
   // Исход приходит из общего потока вывода терминала: своего канала у прогона нет.
   deps.rpc.onPush((message) => {
@@ -105,7 +108,7 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
     if (code === null) return;
     outcomes.set(pendingKey, code === 0 ? 'passed' : 'failed');
     // Строку покрытия печатает pytest-cov перед нашим маркером — берём её отсюда же.
-    if (pendingCoverage) coverage = parseCoverage(outputTail);
+    if (pendingCoverage) coverage = parseCoverageReport(outputTail);
     pendingKey = null;
     pendingCoverage = false;
     outputTail = '';
@@ -228,11 +231,39 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
           : outcome === 'running'
             ? ' · идёт прогон'
             : '';
-    const cover = coverage === null ? '' : ` · покрытие ${coverage}%`;
+    const total = coverage?.total ?? null;
+    const cover = total === null ? '' : ` · покрытие ${total}%`;
     summary.textContent = `Тестов: ${suite.total}${suffix}${cover}`;
     if (suite.errors.length > 0) renderErrors(suite.errors);
 
     for (const node of buildTestTree(suite.tests)) body.appendChild(branch(node, 0));
+
+    // Разбивку по файлам показываем отдельным списком: в дереве видны только
+    // тестовые файлы, а покрытие часто считают по исходникам (`--cov=src`), и
+    // искать их по дереву тестов было бы негде.
+    renderCoverageFiles();
+  }
+
+  /** Покрытие по файлам: сначала те, где больше непокрытых строк. */
+  function renderCoverageFiles(): void {
+    const files = coverage?.files;
+    if (!files || files.length === 0) return;
+
+    const list = h('div', { class: 'tests-coverage' });
+    for (const file of files.slice(0, MAX_COVERAGE_ROWS)) {
+      list.appendChild(
+        h(
+          'div',
+          { class: `tests-cov-row${file.percent === 0 ? ' is-bad' : ''}`, title: `Непокрытых строк: ${file.missing}` },
+          h('span', { class: 'tests-cov-path' }, file.path),
+          h('span', { class: 'tests-cov-percent' }, `${file.percent}%`),
+        ),
+      );
+    }
+    if (files.length > MAX_COVERAGE_ROWS) {
+      list.appendChild(h('div', { class: 'tests-cov-row is-more' }, `… ещё файлов: ${files.length - MAX_COVERAGE_ROWS}`));
+    }
+    body.appendChild(h('section', { class: 'tests-coverage-box' }, h('div', { class: 'tests-cov-title' }, 'Покрытие по файлам'), list));
   }
 
   async function refresh(): Promise<void> {
