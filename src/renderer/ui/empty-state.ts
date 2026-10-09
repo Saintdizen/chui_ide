@@ -19,7 +19,7 @@ export function createEmptyState(): EmptyStateView {
     // Знак крупнее обычных значков интерфейса: он не часть панели, а лицо
     // приложения, поэтому рисуется отдельно (ui/logo.ts).
     logoMark(40),
-    h('h1', { class: 'welcome-title' }, 'Chui IDE'),
+    h('h1', { class: 'welcome-title' }, 'chui_iDE'),
     h(
       'ul',
       { class: 'welcome-hints' },

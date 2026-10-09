@@ -14,7 +14,7 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
   const rpc = new RpcClient();
 
   const topBarLeft = h('div', { class: 'topbar-left' });
-  const topBarTitle = h('div', { class: 'topbar-title' }, 'Chui IDE');
+  const topBarTitle = h('div', { class: 'topbar-title is-brand' }, 'chui_iDE');
   const topBarRight = h('div', { class: 'topbar-right' });
   const topBar = h('header', { class: 'topbar' }, topBarLeft, topBarTitle, topBarRight);
 
@@ -83,7 +83,7 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
     h(
       'div',
       { class: 'launcher-intro' },
-      h('h1', { class: 'launcher-title' }, 'Chui IDE'),
+      h('h1', { class: 'launcher-title' }, 'chui_iDE'),
       h('p', { class: 'launcher-subtitle' }, 'Откройте папку проекта или склонируйте репозиторий — дальше начнётся обычная работа в редакторе.'),
     ),
     h('div', { class: 'launcher-actions' }, openButton, cloneToggle),

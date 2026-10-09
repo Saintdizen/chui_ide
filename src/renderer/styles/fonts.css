@@ -4,7 +4,8 @@
  * начертаний по отдельности.
  *
  * - Inter — интерфейс (`--font_ui`): подписи, меню, вкладки, дерево, чат.
- * - JetBrains Mono — код (`--font_mono`): Monaco, терминал, сниппеты в палитре.
+ * - JetBrains Mono — код (`--font_mono`): Monaco, терминал, сниппеты в палитре,
+ *   а также название приложения (`chui_iDE`).
  *
  * Имена семейств — ровно те, что уже просит код (`'Inter'`, `'JetBrains Mono'`
  * в `theme.css`, `editor-service.ts`, `ui/terminal.ts`), поэтому ничего

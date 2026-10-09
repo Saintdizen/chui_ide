@@ -5,8 +5,8 @@
 # и значке. Значки лежат в `build/`: из одного `icon.png` 512×512 сборщик
 # делает `.ico` и `.icns` сам (см. `scripts/make-icon.mjs`).
 appId: io.chui.ide
-productName: Chui IDE
-copyright: Chui IDE
+productName: chui_iDE
+copyright: chui_iDE
 
 directories:
   output: release
@@ -41,7 +41,7 @@ nsis:
   perMachine: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
-  shortcutName: Chui IDE
+  shortcutName: chui_iDE
 
 linux:
   target:
@@ -54,14 +54,14 @@ linux:
   syncDesktopName: true
   # deb требует сопровождающего: без него fpm отказывается собирать пакет.
   # Адрес — служебный (noreply GitHub): подпись пакета — дело самого проекта.
-  maintainer: Chui IDE <chui-ide@users.noreply.github.com>
+  maintainer: chui_iDE <chui-ide@users.noreply.github.com>
   synopsis: IDE с ассистентом
   description: >-
-    Chui IDE — редактор кода на Electron: дерево проекта, Monaco, терминал,
+    chui_iDE — редактор кода на Electron: дерево проекта, Monaco, терминал,
     git, ассистент с инструментами агента.
   desktop:
     entry:
-      Name: Chui IDE
+      Name: chui_iDE
       Comment: Редактор кода с ассистентом
       Categories: Development;IDE;
 
@@ -86,4 +86,4 @@ mac:
   identity: null
 
 dmg:
-  title: Chui IDE
+  title: chui_iDE

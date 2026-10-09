@@ -1735,8 +1735,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       ? project
         ? `${basename(active.path)} — ${project}`
         : basename(active.path)
-      : 'Chui IDE';
-    layout.topBarTitle.title = active?.path ?? 'Chui IDE';
+      : 'chui_iDE';
+    // Название приложения показываем моношрифтом (JetBrains Mono), а путь файла —
+    // интерфейсным: это не название, а данные.
+    layout.topBarTitle.classList.toggle('is-brand', !active);
+    layout.topBarTitle.title = active?.path ?? 'chui_iDE';
   };
 
   const syncEmptyState = (): void => emptyState.update(openEditors.paths.length > 0);

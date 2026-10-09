@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "author": {
-    "name": "Chui IDE",
+    "name": "chui_iDE",
     "email": "chui-ide@users.noreply.github.com"
   },
   "description": "Редактор кода: Python и Node.js",

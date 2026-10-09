@@ -323,7 +323,7 @@ export class LspService {
     const result = (await runtime.connection.request('initialize', {
       processId: process.pid,
       rootUri: pathToFileURL(cwd).toString(),
-      clientInfo: { name: 'Chui IDE' },
+      clientInfo: { name: 'chui_iDE' },
       capabilities: {
         textDocument: {
           synchronization: {},

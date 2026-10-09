@@ -72,7 +72,7 @@ function createAppWindow(options: WindowOptions): BrowserWindow {
     minHeight: options.minHeight,
     show: false,
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#ececec',
-    title: 'Chui IDE',
+    title: 'chui_iDE',
     // Своя рамка. На macOS оставляем системные «светофоры» — без них окно
     // теряет привычные кнопки, — а на Linux и Windows рамку рисует renderer.
     ...(isMac

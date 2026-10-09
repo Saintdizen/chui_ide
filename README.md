@@ -1,4 +1,4 @@
-# Chui IDE
+# chui_iDE
 
 IDE на Electron и чистом TypeScript: раскладка в духе PyCharm New UI («острова» со скруглёнными
 панелями), собственная светлая и тёмная палитра, подсветка кода цветами VS Code,
@@ -427,9 +427,9 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
 
 ## Шрифты
 
-Оба семейства лежат в проекте, а не берутся из системы: интерфейс — Inter,
-код и терминал — JetBrains Mono. Файлы — переменные (variable), поэтому на всё
-приложение их четыре: `InterVariable.ttf`, `InterVariable-Italic.ttf`,
+Оба семейства лежат в проекте, а не берутся из системы: интерфейс — Inter;
+код, терминал и название приложения — JetBrains Mono. Файлы — переменные (variable),
+поэтому на всё приложение их четыре: `InterVariable.ttf`, `InterVariable-Italic.ttf`,
 `JetBrainsMonoVariable.ttf`, `JetBrainsMonoVariable-Italic.ttf`
 (`src/renderer/assets/fonts/`). Один файл закрывает весь диапазон начертаний
 (Inter 100–900, JetBrains Mono 100–800), поэтому вместо десятков начертаний — четыре файла,

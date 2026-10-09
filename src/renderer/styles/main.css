@@ -192,6 +192,12 @@ textarea {
   text-overflow: ellipsis;
 }
 
+/* Название приложения — тем же шрифтом, что код и терминал (JetBrains Mono).
+   Путь открытого файла остаётся интерфейсным: это не название, а данные. */
+.topbar-title.is-brand {
+  font-family: var(--font_mono);
+}
+
 .topbar-left,
 .topbar-right {
   display: flex;
@@ -790,6 +796,8 @@ textarea {
 .welcome-title {
   margin: 2px 0 0;
   color: var(--text_color);
+  /* Название приложения: тот же шрифт, что у кода и терминала. */
+  font-family: var(--font_mono);
   font-size: 24px;
   font-weight: 600;
 }
@@ -4068,6 +4076,8 @@ textarea {
 
 .launcher-title {
   margin: 0;
+  /* Название приложения: тот же шрифт, что у кода и терминала. */
+  font-family: var(--font_mono);
   font-size: 26px;
   font-weight: 600;
 }
