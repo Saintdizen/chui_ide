@@ -1,3 +1,4 @@
+import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,13 +18,16 @@ import { frameForHover } from '../src/renderer/core/debug';
 
 /** Мини-адаптер: повторяет поведение debugpy настолько, насколько нужно клиенту. */
 const FAKE_ADAPTER = `
+const net = require('node:net');
 let buffer = Buffer.alloc(0);
 let launchSeq = null;
 let breakpoints = 0;
+// Куда писать DAP-кадры: по stdio это stdout, в режиме TCP — принятый сокет.
+let out = process.stdout;
 function send(message) {
   const body = Buffer.from(JSON.stringify(message), 'utf8');
-  process.stdout.write('Content-Length: ' + body.length + '\\r\\n\\r\\n');
-  process.stdout.write(body);
+  out.write('Content-Length: ' + body.length + '\\r\\n\\r\\n');
+  out.write(body);
 }
 function response(seq, command, body) {
   send({ type: 'response', request_seq: seq, success: true, command, body: body || {} });
@@ -48,6 +52,9 @@ function handle(message) {
       // что форма запроса собрана по отлаживаемой стороне.
       send({ type: 'event', event: 'output', body: { category: 'stdout', output: 'attach-args:' + JSON.stringify(args) } });
       response(message.seq, 'attach');
+      // Подключение подтверждаем событием initialized: клиент считает attach
+      // состоявшимся только по нему (как настоящий debugpy и Node-адаптер).
+      send({ type: 'event', event: 'initialized' });
       setTimeout(() => send({ type: 'event', event: 'process', body: { name: 'app.js', startMethod: 'attach' } }), 10);
       setTimeout(() => send({ type: 'event', event: 'thread', body: { reason: 'started', threadId: 1 } }), 15);
       break;
@@ -141,7 +148,8 @@ function handle(message) {
       response(message.seq, message.command);
   }
 }
-process.stdin.on('data', (chunk) => {
+function serve(stream) {
+  stream.on('data', (chunk) => {
   buffer = Buffer.concat([buffer, chunk]);
   for (;;) {
     const headerEnd = buffer.indexOf('\\r\\n\\r\\n');
@@ -163,10 +171,26 @@ process.stdin.on('data', (chunk) => {
       continue;
     }
   }
-});
+  });
+}
+
+// Режим TCP: адаптер слушает порт и печатает его — так же поднимается
+// debugpy --listen, к которому клиент подключается сокетом, а не по stdio.
+if ('FAKE_DAP_PORT' in process.env) {
+  const server = net.createServer((socket) => {
+    out = socket;
+    serve(socket);
+  });
+  server.listen(Number(process.env.FAKE_DAP_PORT || 0), '127.0.0.1', () => {
+    process.stdout.write('PORT ' + server.address().port + '\\n');
+  });
+} else {
+  serve(process.stdin);
+}
 `;
 
 const dirs: string[] = [];
+const children: ChildProcess[] = [];
 
 /** Уведомление main → renderer: тема и произвольная нагрузка (её разбирает сам тест). */
 interface Push {
@@ -174,11 +198,17 @@ interface Push {
   payload: Record<string, unknown>;
 }
 
-function fakeService(adapterID: 'node' | 'python' = 'python'): { service: DebugService; events: Push[] } {
+/** Написать фейковый адаптер во временную папку и вернуть путь к скрипту. */
+function fakeAdapterFile(): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'chui-dap-'));
   dirs.push(dir);
   const fake = path.join(dir, 'fake-dap.cjs');
   writeFileSync(fake, FAKE_ADAPTER, 'utf8');
+  return fake;
+}
+
+function fakeService(adapterID: 'node' | 'python' = 'python'): { service: DebugService; events: Push[] } {
+  const fake = fakeAdapterFile();
 
   const events: Push[] = [];
   const service = new DebugService(
@@ -192,6 +222,38 @@ function fakeService(adapterID: 'node' | 'python' = 'python'): { service: DebugS
   return { service, events };
 }
 
+/**
+ * Поднять фейковый адаптер в режиме TCP и вернуть сервис, который к нему
+ * подключится. Так проверяется путь Python-подключения: разговора по stdio тут
+ * нет — клиент идёт сокетом к уже слушающему адаптеру (`debugpy --listen`).
+ */
+async function tcpPythonService(): Promise<{ service: DebugService; events: Push[]; port: number }> {
+  const fake = fakeAdapterFile();
+  const server = spawn(process.execPath, [fake], { env: { ...process.env, FAKE_DAP_PORT: '0' } });
+  children.push(server);
+  const port = await new Promise<number>((resolve, reject) => {
+    let seen = '';
+    const timer = setTimeout(() => reject(new Error('фейковый адаптер не сообщил порт')), 5000);
+    server.stdout.on('data', (chunk) => {
+      seen += chunk.toString('utf8');
+      const match = /PORT (\d+)/.exec(seen);
+      if (match) {
+        clearTimeout(timer);
+        resolve(Number(match[1]));
+      }
+    });
+  });
+
+  const events: Push[] = [];
+  const service = new DebugService(
+    (topic, payload) => events.push({ topic, payload }),
+    () => null,
+    () => 'python3',
+    async () => ({}),
+  );
+  return { service, events, port };
+}
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Дождаться фазы: события приходят из процесса, поэтому ждём, а не спим фиксированно. */
@@ -203,6 +265,7 @@ async function waitPhase(service: DebugService, phase: string, timeout = 5000): 
 
 describe('DebugService', () => {
   afterEach(() => {
+    for (const child of children.splice(0)) child.kill();
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
@@ -347,17 +410,34 @@ describe('DebugService', () => {
     service.dispose();
   });
 
-  it('подключение к Python-процессу шлёт адрес так, как ждёт debugpy', async () => {
-    const { service, events } = fakeService();
-    // debugpy принимает адрес полем `connect`, а не `port`/`host` сверху.
-    const attached = await service.attach({ port: 5678, target: 'python' });
+  it('подключение к Python-процессу идёт по TCP и шлёт адрес так, как ждёт debugpy', async () => {
+    // Python-цель запущена `debugpy --listen`: адаптер уже слушает порт, поэтому
+    // подключаемся к нему сокетом (своего адаптера не поднимаем). Форма запроса —
+    // поле `connect`, а не `port`/`host` сверху.
+    const { service, events, port } = await tcpPythonService();
+    const attached = await service.attach({ port, target: 'python' });
     expect(attached.ok).toBe(true);
     expect(await waitPhase(service, 'running')).toBe('running');
 
     const echo = events.find(
       (event) => event.topic === 'debug:output' && String(event.payload.text).startsWith('attach-args:'),
     );
-    expect(echo?.payload.text).toBe('attach-args:{"connect":{"host":"127.0.0.1","port":5678}}');
+    expect(echo?.payload.text).toBe(`attach-args:{"connect":{"host":"127.0.0.1","port":${port}}}`);
+    service.dispose();
+  });
+
+  it('подключение к Python-процессу честно падает, если порт не слушают', async () => {
+    // Раньше «Отладка подключена» выдавалась до handshake, и панель висела в
+    // пустоте. Теперь неудача видна сразу.
+    const service = new DebugService(
+      () => undefined,
+      () => null,
+      () => 'python3',
+      async () => ({}),
+    );
+    const attached = await service.attach({ port: 1, target: 'python' });
+    expect(attached.ok).toBe(false);
+    expect(attached.message).toContain('Не удалось подключиться');
     service.dispose();
   });
 

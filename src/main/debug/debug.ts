@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import net from 'node:net';
 import path from 'node:path';
 import {
   PushTopic,
@@ -61,9 +62,22 @@ interface AdapterSpec {
 
 export class DebugService {
   private child: ChildProcessWithoutNullStreams | null = null;
+  /**
+   * Второй транспорт: TCP-сокет. Нужен там, где адаптер слушает порт сам, — это
+   * подключение к Python-процессу, запущенному `debugpy --listen`: адаптер уже
+   * поднят и говорит по DAP, поэтому подключаемся к нему клиентом, а не поднимаем
+   * свой адаптер (тот ждал бы, пока цель подключится к нему). Живым бывает ровно
+   * один из двух транспортов, `child` или `socket`.
+   */
+  private socket: net.Socket | null = null;
   private buffer = Buffer.alloc(0);
   private nextSeq = 1;
   private readonly pending = new Map<number, Pending>();
+
+  /** Пришло ли `initialized` в текущей сессии: подключение рапортует успех не раньше него. */
+  private initializedSeen = false;
+  /** Кто ждёт `initialized`; получают `true`, когда событие придёт, иначе `false`. */
+  private readonly initializedWaiters = new Set<(ok: boolean) => void>();
 
   private phase: DebugPhase = 'idle';
   /** Точки останова по файлам: путь → строки. Набор шлём целиком, как велит DAP. */
@@ -160,11 +174,16 @@ export class DebugService {
   async attach(options: DebugAttachOptions): Promise<{ ok: boolean; message: string }> {
     const target = options.target ?? 'node';
     const host = options.host?.trim() || '127.0.0.1';
-    const args =
-      target === 'node'
-        ? { port: options.port, host }
-        : { connect: { host, port: options.port } };
-    return this.openAdapter(this.adapterFor(target), this.root() ?? undefined, 'attach', args, 'Отладка подключена');
+    // Python: цель запущена `debugpy --listen`, и адаптер уже слушает её порт —
+    // значит, подключаемся к нему сокетом (см. `openSocket`). Форма запроса на
+    // подключение у него своя — поле `connect`; поле `port`/`host` сверху он
+    // принимает не для этого и молча игнорирует, из-за чего раньше подключение
+    // «проходило», но отладка не начиналась.
+    if (target === 'python') return this.openSocket(host, options.port, { connect: { host, port: options.port } });
+    // Node: инспектор адресуется портом, а адаптер наш — поднимаем его по stdio и
+    // отдаём ему адрес инспектора. Успех подтверждает сам адаптер: событием
+    // `initialized` (см. `waitInitialized`).
+    return this.openAdapter(this.adapterFor('node'), this.root() ?? undefined, 'attach', { port: options.port, host }, 'Отладка подключена', true);
   }
 
   /**
@@ -174,6 +193,9 @@ export class DebugService {
    *
    * Ответ на `launch`/`attach` не ждём: DAP отвечает на него лишь после
    * `configurationDone`, и ожидание здесь сорвало бы отправку точек останова.
+   *
+   * `waitInitialized` включаем для подключения: там исход неочевиден (цель могла
+   * не слушать), и рапортовать успех, пока адаптер не прислал `initialized`, нельзя.
    */
   private async openAdapter(
     spec: AdapterSpec,
@@ -181,9 +203,11 @@ export class DebugService {
     command: 'launch' | 'attach',
     args: Record<string, unknown>,
     ready: string,
+    waitInitialized = false,
   ): Promise<{ ok: boolean; message: string }> {
     this.stop();
     this.target = spec.adapterID === 'node' ? 'node' : 'python';
+    this.initializedSeen = false;
     const env = mergeEnv(process.env, await this.env());
 
     this.setPhase('starting');
@@ -221,26 +245,151 @@ export class DebugService {
       return { ok: false, message: `Не удалось запустить отладчик: ${error instanceof Error ? error.message : String(error)}` };
     }
 
-    void this
-      .call(command, args)
-      .catch((error) => this.publish(PushTopic.DebugOutput, { category: 'stderr', text: `${command}: ${error.message}` }));
+    const request = this.call(command, args);
+    if (!waitInitialized) {
+      void request.catch((error) => this.publish(PushTopic.DebugOutput, { category: 'stderr', text: `${command}: ${error.message}` }));
+      return { ok: true, message: ready };
+    }
 
+    // Подключение состоялось только когда пришло `initialized`: до него адаптер
+    // ещё не готов, и «Отладка подключена» была бы неправдой — панель показала бы
+    // успех при мёртвом соединении (см. `waitInitialized`).
+    const trouble = await this.waitInitialized(request);
+    if (trouble) {
+      this.stop();
+      return { ok: false, message: `Не удалось подключиться: ${trouble.message}` };
+    }
     return { ok: true, message: ready };
   }
 
+  /** Дождаться `initialized` или отказа запроса о подключении — что случится раньше. */
+  private async waitInitialized(request: Promise<unknown>): Promise<Error | null> {
+    const failure = request.then(() => null, (error: Error) => error);
+    return Promise.race([
+      this.awaitInitialized(REQUEST_TIMEOUT_MS).then((ok) => (ok ? null : new Error('отладчик не подтвердил подключение'))),
+      failure,
+    ]);
+  }
+
+  /**
+   * Ждать событие `initialized`. Это единственный честный признак, что адаптер
+   * подключился и готов принимать точки останова: ответ на `attach` приходит
+   * раньше и сам по себе ничего не значит.
+   */
+  private awaitInitialized(timeoutMs: number): Promise<boolean> {
+    if (this.initializedSeen) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let timer: NodeJS.Timeout;
+      const waiter = (ok: boolean): void => {
+        clearTimeout(timer);
+        resolve(ok);
+      };
+      timer = setTimeout(() => {
+        this.initializedWaiters.delete(waiter);
+        resolve(false);
+      }, timeoutMs);
+      this.initializedWaiters.add(waiter);
+    });
+  }
+
+  /**
+   * Подключиться к уже слушающему адаптеру по TCP.
+   *
+   * Так выглядит подключение к Python-процессу: `debugpy --listen` (как и вызов
+   * `debugpy.listen` в самом скрипте) поднимает отдельный процесс-адаптер, который
+   * слушает порт и говорит по DAP. Своего адаптера здесь поднимать нечего — он бы
+   * ждал, пока цель подключится к нему, тогда как цель уже слушает сама. Отсюда
+   * транспорт сокетом: тот же протокол, только не по stdio, а по сети.
+   */
+  private async openSocket(host: string, port: number, args: Record<string, unknown>): Promise<{ ok: boolean; message: string }> {
+    this.stop();
+    this.target = 'python';
+    this.initializedSeen = false;
+    this.setPhase('starting');
+
+    const socket = net.connect({ host, port });
+    this.socket = socket;
+    socket.on('data', (chunk: Buffer) => this.feed(chunk));
+    socket.on('error', (error: Error) => {
+      // До handshake об ошибке сокета сообщит сам `attach` понятным текстом; писать
+      // ещё и в вывод отладчика — только путать. После — это единственная весточка.
+      if (this.socket !== socket || !this.initializedSeen) return;
+      this.publish(PushTopic.DebugOutput, { category: 'stderr', text: `debugpy: ${error.message}` });
+    });
+    socket.on('close', () => {
+      if (this.socket === socket) this.ended();
+    });
+
+    try {
+      await this.waitConnected(socket);
+    } catch (error) {
+      this.socket = null;
+      socket.destroy();
+      this.clearSession('Подключение не состоялось');
+      const why = error instanceof Error ? error.message : String(error);
+      return { ok: false, message: `Не удалось подключиться к ${host}:${port}: ${why}` };
+    }
+
+    try {
+      await this.call('initialize', {
+        adapterID: 'python',
+        clientID: 'chui',
+        linesStartAt1: true,
+        columnsStartAt1: true,
+        pathFormat: 'path',
+      });
+    } catch (error) {
+      this.stop();
+      return { ok: false, message: `Не удалось запустить отладчик: ${error instanceof Error ? error.message : String(error)}` };
+    }
+
+    const trouble = await this.waitInitialized(this.call('attach', args));
+    if (trouble) {
+      this.stop();
+      return { ok: false, message: `Не удалось подключиться: ${trouble.message}` };
+    }
+    return { ok: true, message: 'Отладка подключена' };
+  }
+
+  /** Дождаться установления TCP-соединения: до него слать DAP некуда. */
+  private waitConnected(socket: net.Socket): Promise<void> {
+    return new Promise((resolve, reject) => {
+      let timer: NodeJS.Timeout;
+      const finish = (error?: Error): void => {
+        clearTimeout(timer);
+        socket.off('connect', onConnect);
+        socket.off('error', onError);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onConnect = (): void => finish();
+      const onError = (error: Error): void => finish(error);
+      timer = setTimeout(() => finish(new Error('истекло время ожидания')), REQUEST_TIMEOUT_MS);
+      socket.once('connect', onConnect);
+      socket.once('error', onError);
+    });
+  }
+
   stop(): void {
-    if (!this.child) return;
-    const child = this.child;
-    this.child = null;
-    // Мягко просим отключиться; если не успел — процесс всё равно снимем ниже.
+    if (!this.child && !this.socket) return;
+    // Мягко просим отключиться, пока транспорт ещё жив: после обнуления слать
+    // уже некуда. Раньше процесс снимался до отправки, и `disconnect` не уходил
+    // вовсе — адаптер не успевал закрыть цель сам.
     this.call('disconnect', { terminateDebuggee: true }, 1500).catch(() => undefined);
-    setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-        // уже мёртв
-      }
-    }, 300);
+    const child = this.child;
+    const socket = this.socket;
+    this.child = null;
+    this.socket = null;
+    if (socket) socket.destroy();
+    if (child) {
+      setTimeout(() => {
+        try {
+          child.kill();
+        } catch {
+          // уже мёртв
+        }
+      }, 300);
+    }
     this.clearSession('Сессия отладки остановлена');
   }
 
@@ -490,8 +639,7 @@ export class DebugService {
 
   /** Запрос к адаптеру; ошибка или тайм-аут — исключение. */
   private call(command: string, args: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<DapMessage> {
-    const child = this.child;
-    if (!child) return Promise.reject(new Error('Сессия отладки не запущена'));
+    if (!this.child && !this.socket) return Promise.reject(new Error('Сессия отладки не запущена'));
 
     const seq = this.nextSeq;
     this.nextSeq += 1;
@@ -502,16 +650,22 @@ export class DebugService {
       }, timeoutMs);
       this.pending.set(seq, { resolve, reject, timer });
       this.send({ seq, type: 'request', command, arguments: args });
-      void child;
     });
   }
 
+  /** Запрос адаптеру: транспорт у сессии один — либо процесс по stdio, либо сокет. */
   private send(message: DapMessage): void {
-    const child = this.child;
-    if (!child) return;
     const body = Buffer.from(JSON.stringify(message), 'utf8');
-    child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
-    child.stdin.write(body);
+    const frame = `Content-Length: ${body.length}\r\n\r\n`;
+    if (this.child) {
+      this.child.stdin.write(frame);
+      this.child.stdin.write(body);
+      return;
+    }
+    if (this.socket && !this.socket.destroyed) {
+      this.socket.write(frame);
+      this.socket.write(body);
+    }
   }
 
   /** Разбор потока: заголовок `Content-Length: N` и тело из N байт. */
@@ -560,8 +714,12 @@ export class DebugService {
     const body = (message.body ?? {}) as Record<string, unknown>;
     switch (message.event) {
       case 'initialized':
-        // Разрешено слать точки останова; после них — configurationDone, иначе
+        // Подключение подтверждено: адаптер готов принять точки останова (см.
+        // `waitInitialized`), а после них ждёт `configurationDone`, иначе
         // программа не начнёт выполняться.
+        this.initializedSeen = true;
+        for (const waiter of this.initializedWaiters) waiter(true);
+        this.initializedWaiters.clear();
         void this.pushAllBreakpoints();
         break;
       case 'process':
@@ -646,8 +804,9 @@ export class DebugService {
 
   /** Сессия завершилась: чистим и говорим интерфейсу, что отладка кончилась. */
   private ended(): void {
-    if (this.phase === 'idle' && !this.child) return;
+    if (this.phase === 'idle' && !this.child && !this.socket) return;
     this.child = null;
+    this.socket = null;
     this.clearSession('Отладка завершена');
   }
 
@@ -662,6 +821,10 @@ export class DebugService {
     this.frames = [];
     this.topFrameId = null;
     this.thread = null;
+    // Ждущих `initialized` не оставляем без ответа: иначе подключение зависнет.
+    for (const waiter of this.initializedWaiters) waiter(false);
+    this.initializedWaiters.clear();
+    this.initializedSeen = false;
     this.setPhase('idle');
   }
 
