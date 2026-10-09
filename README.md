@@ -619,10 +619,11 @@ Renderer не трогает `node:fs`. Всё идёт через `WorkspaceSer
 biome.json           линт и формат (Biome)
 vitest.config.mts    юнит-тесты (Vitest)
 .github/workflows/   ci.yml (проверки на push/PR), release.yml (дистрибутивы по тегу)
-tests/               юнит-тесты чистой логики (28 файлов): edits, replace, session, glob,
+tests/               юнит-тесты чистой логики (29 файлов): edits, replace, session, glob,
 │                    tools, providers, languages, theme, chat-text, quick-open-rank,
 │                    imports/import-install, env-file/project-env, project-scan,
-│                    python-env/-health/-packages/-tests, node-packages, uri-path, lsp-*
+│                    python-env/-health/-packages/-tests, node-packages, uri-path,
+│                    git-model, lsp-*
 
 src/
 ├── shared/            контракт: api.ts (типы + методы), bridge.ts, tools.ts, app-menu.ts,
