@@ -17,7 +17,10 @@ export interface PopoverView {
  * выпадающего списка: Esc, клик вне, повторный клик по якорю. Позиция —
  * `fixed`, поэтому попап не обрезается панелями с `overflow: hidden`.
  */
-export function createPopover(content: HTMLElement, options: { width?: number; gap?: number } = {}): PopoverView {
+export function createPopover(
+  content: HTMLElement,
+  options: { width?: number; gap?: number; align?: 'start' | 'end' } = {},
+): PopoverView {
   const gap = options.gap ?? 6;
   const element = h('div', { class: 'popover', role: 'dialog', hidden: true }, content);
   if (options.width !== undefined) element.style.width = `${options.width}px`;
@@ -34,12 +37,17 @@ export function createPopover(content: HTMLElement, options: { width?: number; g
       size: { width: element.offsetWidth, height: element.offsetHeight },
       viewport: { width: window.innerWidth, height: window.innerHeight },
       gap,
+      align: options.align,
     });
     element.style.left = `${left}px`;
     element.style.top = `${top}px`;
   };
 
   const open = (target: HTMLElement): void => {
+    // Повторное открытие у другого якоря: снимаем прошлые слушатели и observer,
+    // иначе они копятся и попап начинает закрываться не один раз.
+    detach?.();
+    detach = null;
     anchor = target;
     element.hidden = false;
     place(target);

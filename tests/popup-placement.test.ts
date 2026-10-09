@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { placePopup } from '../src/renderer/core/popup-placement';
 
 /** Статусбар внизу окна 800×600: якорь — кнопка окружения. */
-const anchor = { top: 576, right: 500, bottom: 596 };
+const anchor = { top: 576, left: 160, right: 500, bottom: 596 };
 const viewport = { width: 800, height: 600 };
 
 describe('placePopup', () => {
@@ -13,7 +13,7 @@ describe('placePopup', () => {
   });
 
   it('попап выше якоря не влезает — кладём под ним', () => {
-    const placement = placePopup({ anchor: { top: 40, right: 300, bottom: 60 }, size: { width: 200, height: 100 }, viewport, gap: 6 });
+    const placement = placePopup({ anchor: { top: 40, left: 100, right: 300, bottom: 60 }, size: { width: 200, height: 100 }, viewport, gap: 6 });
     expect(placement.top).toBe(66);
   });
 
@@ -31,12 +31,30 @@ describe('placePopup', () => {
 
   it('длинный попап шире места справа — прижимаем к левому краю окна', () => {
     const placement = placePopup({
-      anchor: { top: 300, right: 100, bottom: 320 },
+      anchor: { top: 300, left: 40, right: 100, bottom: 320 },
       size: { width: 900, height: 100 },
       viewport,
       gap: 6,
     });
     expect(placement.left).toBe(8);
+  });
+
+  it('прижатие start: попап растёт вправо от левого края якоря', () => {
+    // Так открывается список изменений из композера: попап должен остаться
+    // внутри панели чата, а не уехать за левый край окна.
+    const placement = placePopup({ anchor, size: { width: 340, height: 200 }, viewport, gap: 6, align: 'start' });
+    expect(placement.left).toBe(anchor.left);
+  });
+
+  it('прижатие start не даёт уехать и за правый край окна', () => {
+    const placement = placePopup({
+      anchor: { top: 300, left: 700, right: 760, bottom: 320 },
+      size: { width: 340, height: 100 },
+      viewport,
+      gap: 6,
+      align: 'start',
+    });
+    expect(placement.left).toBe(800 - 340 - 8);
   });
 
   it('зазор и отступ от края настраиваются', () => {

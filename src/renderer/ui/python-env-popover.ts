@@ -76,7 +76,12 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
     return h('button', { class: 'python-env-manage', type: 'button', onClick: () => onClick() }, label);
   }
 
+  // Данные спрашиваются асинхронно, а тело общее: без стража два наложившихся
+  // refresh (открыли, закрыли, открыли) дописали бы контент дважды.
+  let generation = 0;
+
   async function refresh(): Promise<void> {
+    const mine = ++generation;
     const root = deps.root();
     const tools = deps.tools();
     clear(body);
@@ -108,6 +113,8 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
       // Команду активации собирает main: renderer не знает ни платформы, ни путей.
       deps.rpc.request('python.activateCommand').catch(() => ({ command: null })),
     ]);
+    // Кто-то отрисовался после нас — наш результат уже неактуален.
+    if (mine !== generation) return;
     // Поломки окружения показываем сразу под интерпретатором: это важнее списка пакетов.
     if (health.length > 0) {
       const box = h('div', { class: 'python-env-health' });

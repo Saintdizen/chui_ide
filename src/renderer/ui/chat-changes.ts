@@ -2,6 +2,7 @@ import type { ToolFileChange } from '../../shared/api';
 import { fileWord } from './chat-text';
 import { basename, clear, h, svgIcon } from './dom';
 import { fileIcon } from './file-icons';
+import { createPopover } from './popover';
 
 /**
  * Панель изменений композера: что агент поменял в этой беседе.
@@ -42,43 +43,93 @@ export interface ChangesPanelView {
 export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
   const summary = h('span', { class: 'changes-summary' });
   const stat = h('span', { class: 'changes-stat' });
-  const files = h('div', { class: 'changes-files', hidden: true });
-  /** Список файлов раскрыт по умолчанию: он и есть содержимое панели. */
-  let expanded = true;
+  // Файлы показываем списком в попапе: чипы в строке ломались переносом и при
+  // десятке правок занимали пол-композера.
+  const list = h('div', { class: 'changes-list' });
+  // «Отменить» — в попапе: это действие над его содержимым, а в шапке кнопка
+  // спорила со счётчиком и отнимала место в узкой панели.
+  // Правки уходят на диск сразу (см. applyAgentEdits в chat.ts), поэтому
+  // сохранять вручную нечего — остаётся только откат к состоянию до правок.
+  const content = h(
+    'div',
+    { class: 'changes-popover' },
+    list,
+    h(
+      'div',
+      { class: 'changes-popover-actions' },
+      h(
+        'button',
+        {
+          class: 'btn btn-small',
+          type: 'button',
+          onClick: () => {
+            popover.close();
+            deps.onRevert();
+          },
+        },
+        'Отменить',
+      ),
+    ),
+  );
+  // Прижимаем к левому краю якоря: попап должен остаться внутри панели чата,
+  // а не уехать за левый край окна — якорь стоит в её левом нижнем углу.
+  const popover = createPopover(content, { width: 340, align: 'start' });
+  popover.element.classList.add('popover-changes');
 
   const toggle = h(
     'button',
-    { class: 'changes-toggle', type: 'button', 'aria-expanded': 'true' },
+    { class: 'changes-toggle', type: 'button', 'aria-expanded': 'false' },
     svgIcon('chevronDown', 12),
     summary,
     stat,
   );
 
-  const element = h(
-    'div',
-    { class: 'composer-changes is-open', hidden: true },
-    toggle,
-    h(
-      'div',
-      { class: 'changes-actions' },
-      // Правки уходят на диск сразу (см. applyAgentEdits в chat.ts), поэтому
-      // сохранять вручную нечего — остаётся только откат к состоянию до правок.
-      h('button', { class: 'btn btn-small', type: 'button', onClick: () => deps.onRevert() }, 'Отменить'),
-    ),
-    files,
-  );
+  const element = h('div', { class: 'composer-changes', hidden: true }, toggle);
 
+  /** Состояние шапки повторяет попап: он закрывается и кликом вне, и по Esc. */
   function syncPanel(): void {
-    files.hidden = !expanded;
-    element.classList.toggle('is-open', expanded);
-    toggle.setAttribute('aria-expanded', String(expanded));
-    toggle.title = expanded ? 'Скрыть список файлов' : 'Показать список файлов';
+    const open = popover.isOpen;
+    element.classList.toggle('is-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.title = open ? 'Скрыть список файлов' : 'Показать список файлов';
   }
 
+  // Следим за атрибутом `hidden` попапа: иначе шапка разъедется с содержимым.
+  new MutationObserver(syncPanel).observe(popover.element, { attributes: true, attributeFilter: ['hidden'] });
+
   toggle.addEventListener('click', () => {
-    expanded = !expanded;
-    syncPanel();
+    if (element.hidden) return;
+    popover.toggle(toggle);
   });
+
+  /** Имя файла и его папка: полный путь в строке списка не помещается. */
+  function shortPath(target: string): { name: string; dir: string } {
+    const name = basename(target);
+    const parts = target.split(/[/\\]/).filter(Boolean);
+    const dir = parts.length >= 2 ? (parts[parts.length - 2] ?? '') : '';
+    return { name, dir };
+  }
+
+  /** Строка списка: значок, имя, папка и хвост — счётчик правок или вид операции. */
+  function row(target: string, tail: Node, title = target): HTMLElement {
+    const { name, dir } = shortPath(target);
+    return h(
+      'button',
+      {
+        class: 'changes-row',
+        type: 'button',
+        title,
+        onClick: () => {
+          popover.close();
+          deps.reveal(target, 1, 1);
+        },
+      },
+      fileIcon(target, 14),
+      h('span', { class: 'changes-row-name' }, name),
+      dir ? h('span', { class: 'changes-row-dir' }, dir) : null,
+      tail,
+    );
+  }
 
   /** Подпись файловой операции. */
   function fileLabel(change: ToolFileChange): string {
@@ -92,8 +143,8 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
     const total = source.touched.size + source.files.length;
     if (total === 0) {
       element.hidden = true;
-      files.hidden = true;
-      clear(files);
+      popover.close();
+      clear(list);
       return;
     }
 
@@ -113,14 +164,11 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
       h('span', { class: 'stat-del' }, `−${removed}`),
     );
 
-    clear(files);
+    clear(list);
     for (const [target, entry] of source.touched) {
-      files.appendChild(
-        h(
-          'button',
-          { class: 'chip', type: 'button', title: target, onClick: () => deps.reveal(target, 1, 1) },
-          fileIcon(target, 12),
-          h('span', { class: 'chip-name' }, basename(target)),
+      list.appendChild(
+        row(
+          target,
           h(
             'span',
             { class: 'chip-stat' },
@@ -133,17 +181,8 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
 
     // Файловые операции: они уже на диске, но человеку важно видеть и их.
     for (const file of source.files) {
-      const label = fileLabel(file);
       const title = file.from ? `${file.from} → ${file.path}` : file.path;
-      files.appendChild(
-        h(
-          'button',
-          { class: 'chip', type: 'button', title, onClick: () => deps.reveal(file.path, 1, 1) },
-          fileIcon(file.path, 12),
-          h('span', { class: 'chip-name' }, basename(file.path)),
-          h('span', { class: `chip-kind chip-kind-${file.kind}` }, label),
-        ),
-      );
+      list.appendChild(row(file.path, h('span', { class: `chip-kind chip-kind-${file.kind}` }, fileLabel(file)), title));
     }
 
     syncPanel();

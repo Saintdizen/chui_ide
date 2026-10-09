@@ -68,7 +68,12 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
     return h('button', { class: 'python-env-manage', type: 'button', onClick: () => onClick() }, label);
   }
 
+  // Данные спрашиваются асинхронно, а тело общее: без стража два наложившихся
+  // refresh (открыли, закрыли, открыли) дописали бы контент дважды.
+  let generation = 0;
+
   async function refresh(): Promise<void> {
+    const mine = ++generation;
     const root = deps.root();
     const manager = deps.tools().packageManager;
     clear(body);
@@ -88,6 +93,8 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
         .then((file) => file.text)
         .catch(() => null),
     ]);
+    // Кто-то отрисовался после нас — наш результат уже неактуален.
+    if (mine !== generation) return;
 
     // Чем запускается код и чем ставятся зависимости — это первое, что нужно.
     body.appendChild(row('Node', info?.runtime.label ?? 'не найден'));

@@ -8,6 +8,8 @@
 
 export interface Rect {
   top: number;
+  // Левый край якоря: нужен попапам с прижатием к началу (start).
+  left: number;
   right: number;
   bottom: number;
 }
@@ -40,12 +42,20 @@ export function placePopup(options: {
   gap: number;
   /** Отступ от краёв окна. */
   margin?: number;
+  /**
+   * К чему прижимать по горизонтали. `end` — попап растёт влево от правого края
+   * якоря (панели у правого края окна). `start` — вправо от левого края якоря:
+   * так попап остаётся внутри своей панели, а не уезжает за левый край окна.
+   */
+  align?: 'start' | 'end';
 }): Placement {
   const { anchor, size, viewport, gap } = options;
   const margin = options.margin ?? 8;
+  const align = options.align ?? 'end';
 
-  // По горизонтали прижимаем к правому краю якоря, но не даём вылезти за окно.
-  const left = Math.max(margin, Math.min(anchor.right - size.width, viewport.width - size.width - margin));
+  // По горизонтали прижимаем к нужному краю якоря, но не даём вылезти за окно.
+  const preferredLeft = align === 'start' ? anchor.left : anchor.right - size.width;
+  const left = Math.max(margin, Math.min(preferredLeft, viewport.width - size.width - margin));
 
   const above = anchor.top - size.height - gap;
   const below = anchor.bottom + gap;
