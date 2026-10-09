@@ -89,6 +89,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'number',
           description: 'Последняя строка диапазона (включительно). Без него — до конца (с лимитом строк).',
         },
+        force: {
+          type: 'boolean',
+          description:
+            'Перечитать даже ранее прочитанное в этом ходе — на случай, если содержимое выпало из контекста.',
+        },
       },
       required: ['path'],
     },

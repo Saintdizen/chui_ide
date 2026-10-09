@@ -6,6 +6,7 @@ import {
   COMPACT_MAX_CHARS,
   COMPACT_MIN_CHARS,
   compactionBudgetChars,
+  condenseCallArguments,
   contextUsage,
   estimateContextParts,
   estimateMessagesTokens,
@@ -321,5 +322,53 @@ describe('TokenCalibration', () => {
     expect(calibration.scaleFor('nan')).toBe(1);
     calibration.load(null);
     expect(calibration.scaleFor('good')).toBe(2);
+  });
+});
+
+describe('condenseCallArguments', () => {
+  const long = 'строка\n'.repeat(120);
+  const minChars = 400;
+
+  it('сжимает длинные тела правок, сохраняя путь и версию', () => {
+    const args = JSON.stringify({
+      edits: [
+        {
+          path: 'src/a.ts',
+          expectedVersion: 3,
+          edits: [{ startLine: 1, endLine: 2, oldText: long, newText: long }],
+        },
+      ],
+    });
+    const condensed = condenseCallArguments(args, minChars);
+    const parsed = JSON.parse(condensed) as {
+      edits: Array<{
+        path: string;
+        expectedVersion: number;
+        edits: Array<{ oldText: string; newText: string }>;
+      }>;
+    };
+    expect(parsed.edits[0]?.path).toBe('src/a.ts');
+    expect(parsed.edits[0]?.expectedVersion).toBe(3);
+    expect(parsed.edits[0]?.edits[0]?.newText).toContain('применено');
+    expect(condensed.length).toBeLessThan(args.length);
+  });
+
+  it('сжимает длинное содержимое create_file', () => {
+    const args = JSON.stringify({ path: 'src/b.ts', contents: long });
+    const parsed = JSON.parse(condenseCallArguments(args, minChars)) as {
+      path: string;
+      contents: string;
+    };
+    expect(parsed.path).toBe('src/b.ts');
+    expect(parsed.contents).not.toContain('строка');
+  });
+
+  it('не трогает короткие тела и мелкие поля', () => {
+    const args = JSON.stringify({ path: 'src/a.ts', contents: 'коротко' });
+    expect(condenseCallArguments(args, minChars)).toBe(args);
+  });
+
+  it('возвращает исходную строку для не-JSON', () => {
+    expect(condenseCallArguments('не json', minChars)).toBe('не json');
   });
 });

@@ -1,6 +1,6 @@
 import type { ChatAttachment, ChatMessage, ChatUsage } from './api';
 import { contextWindow } from './providers';
-import { AGENT_TOOLS } from './tools';
+import { AGENT_TOOLS, parseToolArguments } from './tools';
 
 /**
  * Предохранитель от переполнения контекста в многошаговом агентном цикле.
@@ -407,4 +407,35 @@ export class TokenCalibration {
       if (typeof value === 'number' && Number.isFinite(value)) this.scales.set(key, value);
     }
   }
+}
+
+/** Тела правок в аргументах изменяющих инструментов: полный текст истории не нужен. */
+const CONDENSE_FIELDS = new Set(['newText', 'oldText', 'content', 'contents']);
+
+/**
+ * Сжать аргументы уже применённого изменения: длинные тела правок заменяем
+ * пометкой, путь и прочие поля оставляем. Возвращает исходную строку, если это
+ * не JSON или сжимать нечего. `minChars` отсекает мелочь — короткая правка и так
+ * ничего не весит.
+ */
+export function condenseCallArguments(args: string, minChars: number): string {
+  const parsed = parseToolArguments(args);
+  if (!parsed.ok) return args;
+  let changed = false;
+  const walk = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(walk);
+    if (value === null || typeof value !== 'object') return value;
+    const record = value as Record<string, unknown>;
+    for (const [key, inner] of Object.entries(record)) {
+      if (typeof inner === 'string' && CONDENSE_FIELDS.has(key) && inner.length >= minChars) {
+        record[key] = `[применено: ${inner.split('\n').length} стр. — текст в файле]`;
+        changed = true;
+      } else {
+        record[key] = walk(inner);
+      }
+    }
+    return record;
+  };
+  const result = walk(parsed.value);
+  return changed ? JSON.stringify(result) : args;
 }

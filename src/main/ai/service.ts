@@ -18,7 +18,7 @@ import {
 import type { FileEdit } from '../../shared/edits';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, parseToolArguments, toOpenAiTools, type AgentToolSpec } from '../../shared/tools';
-import { estimateMessagesTokens, estimateTokens, isContextOverflow, TokenCalibration, trimMessagesToFit } from '../../shared/context-fit';
+import { condenseCallArguments, estimateMessagesTokens, estimateTokens, isContextOverflow, TokenCalibration, trimMessagesToFit } from '../../shared/context-fit';
 import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -66,6 +66,8 @@ function coveredRequest(
   if (name !== 'read_file') return undefined;
   const parsed = parseToolArguments(rawArguments);
   if (!parsed.ok) return undefined;
+  // force: явный запрос перечитать — контент мог выпасть из контекста.
+  if (parsed.value.force === true) return undefined;
   const target = parsed.value.path;
   const endLine = parsed.value.endLine;
   if (typeof target !== 'string' || typeof endLine !== 'number' || !Number.isInteger(endLine)) return undefined;
@@ -384,6 +386,23 @@ export class AiService {
         messages[i] = { ...aged, content: summary + AGED_MARK };
       }
 
+      // Аргументы уже применённых правок копятся ещё хуже: полный newText/oldText
+      // остаётся в истории навсегда, хотя файл давно изменён. Держим путь и
+      // размеры, а длинные тела правок заменяем пометкой.
+      for (let i = 0; i < messages.length; i += 1) {
+        const aged = messages[i]!;
+        if (aged.role !== 'assistant' || !aged.toolCalls?.length) continue;
+        let changed = false;
+        const toolCalls = aged.toolCalls.map((call) => {
+          if (freshToolIds.has(call.id)) return call;
+          const condensed = condenseCallArguments(call.arguments, AGED_MIN_CHARS);
+          if (condensed === call.arguments) return call;
+          changed = true;
+          return { ...call, arguments: condensed };
+        });
+        if (changed) messages[i] = { ...aged, toolCalls };
+      }
+
       // Каждый шаг сверяемся с окном: результаты инструментов копятся, и
       // длинный прогон легко переполняет контекст. Режем старые ходы целиком,
       // не трогая ни рамку запроса, ни пару «вызов → результат». Промах оценки
@@ -612,6 +631,20 @@ export class AiService {
           const estimated = estimateMessagesTokens(wire.messages) + params.toolsTokens;
           this.calibration.observe(params.calibrationKey, estimated, done.usage.promptTokens);
           this.saveCalibration();
+        }
+        // Диагностика: разбивка оценки по секциям — видно, что реально занимает окно
+        // (чат, результаты инструментов, фиксированные схемы). Включается переменной
+        // окружения, в обычном режиме молчит.
+        if (process.env.CHUI_TRACE_CONTEXT) {
+          const results = estimateMessagesTokens(wire.messages.filter((m) => m.role === 'tool'));
+          const chat = estimateMessagesTokens(wire.messages.filter((m) => m.role !== 'tool'));
+          console.debug('[context]', {
+            key: params.calibrationKey,
+            chat,
+            tools: params.toolsTokens,
+            results,
+            dropped: wire.dropped,
+          });
         }
         return done;
       } catch (error) {
