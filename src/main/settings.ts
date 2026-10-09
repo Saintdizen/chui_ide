@@ -39,6 +39,10 @@ interface StoredSettings {
     contextWindow?: number;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
+    /** Страховка от зацикливания: шагов «модель → инструмент → модель» без автопилота. */
+    maxSteps: number;
+    /** То же в автопилоте. */
+    maxAutopilotSteps: number;
   };
   editor: EditorSettings;
   explorer: ExplorerSettings;
@@ -77,6 +81,10 @@ const DEFAULT_SETTINGS: StoredSettings = {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     // По умолчанию параметр не отправляем: не всякая модель его знает.
     reasoningEffort: 'off',
+    // Страховка от бесконечного цикла «модель → инструмент → модель».
+    maxSteps: 8,
+    // В автопилоте задача длиннее: шагов нужно больше.
+    maxAutopilotSteps: 24,
   },
   editor: {
     tabSize: 4,
@@ -191,6 +199,8 @@ export class SettingsStore {
         contextWindow: ai.contextWindow,
         systemPrompt: ai.systemPrompt,
         reasoningEffort: ai.reasoningEffort ?? 'off',
+        maxSteps: ai.maxSteps,
+        maxAutopilotSteps: ai.maxAutopilotSteps,
       },
       editor: { ...editor },
       explorer: { ...explorer, exclude: [...explorer.exclude] },
@@ -294,6 +304,10 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
   }
   if (patch.systemPrompt !== undefined) target.systemPrompt = patch.systemPrompt;
   if (patch.reasoningEffort !== undefined) target.reasoningEffort = patch.reasoningEffort;
+  if (patch.maxSteps !== undefined) target.maxSteps = clampSteps(patch.maxSteps, target.maxSteps);
+  if (patch.maxAutopilotSteps !== undefined) {
+    target.maxAutopilotSteps = clampSteps(patch.maxAutopilotSteps, target.maxAutopilotSteps);
+  }
 
   // Провайдеров можно добавлять и править из интерфейса: ключ к ним приходит
   // отдельным вызовом ai.setApiKey, здесь только адрес и список моделей.
@@ -351,6 +365,10 @@ function loadSettings(filePath: string): StoredSettings {
   if (Number.isFinite(storedWindow) && storedWindow > 0) ai.contextWindow = storedWindow;
   else delete ai.contextWindow;
 
+  // Лимиты шагов могли прийти из старого файла или быть правлены руками.
+  ai.maxSteps = clampSteps(storedAi.maxSteps, DEFAULT_SETTINGS.ai.maxSteps);
+  ai.maxAutopilotSteps = clampSteps(storedAi.maxAutopilotSteps, DEFAULT_SETTINGS.ai.maxAutopilotSteps);
+
   return {
     ai,
     editor: { ...DEFAULT_SETTINGS.editor, ...(parsed.editor ?? {}) },
@@ -376,6 +394,13 @@ function loadSettings(filePath: string): StoredSettings {
     },
     lsp: sanitizeLsp({ ...DEFAULT_SETTINGS.lsp, ...(parsed.lsp ?? {}) }),
   };
+}
+
+/** Лимиты шагов агента: целое в разумном диапазоне, иначе — значение по умолчанию. */
+function clampSteps(value: unknown, fallback: number): number {
+  const rounded = Math.round(Number(value));
+  if (!Number.isFinite(rounded) || rounded < 1 || rounded > 500) return fallback;
+  return rounded;
 }
 
 /** Языковые серверы правит человек в settings.json: приводим к безопасному виду. */

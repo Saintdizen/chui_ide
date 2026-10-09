@@ -378,6 +378,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Сколько токенов модель может написать в ответе. Большие значения (вплоть до 1 000 000) ' +
           'уместны для моделей с широким лимитом; если модель ответит ошибкой про лимит — уменьшите число.',
       ),
+      field('Шагов агента', numberInput(ai.maxSteps, 1, 500, 1, (value) => void patch({ ai: { maxSteps: value } }))),
+      field(
+        'Шагов агента в автопилоте',
+        numberInput(ai.maxAutopilotSteps, 1, 500, 1, (value) => void patch({ ai: { maxAutopilotSteps: value } })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Страховка от зацикливания: сколько раз агент может сходить «инструмент → модель» до остановки. ' +
+          'В автопилоте задач больше, поэтому лимит свой.',
+      ),
       field(
         'Контекстное окно (токенов)',
         numberInput(ai.contextWindow ?? 0, 0, 2_000_000, 1000, (value) => void patch({ ai: { contextWindow: value } })),

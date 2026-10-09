@@ -229,6 +229,8 @@ module.exports = [
       temperature: 0.2,
       maxTokens: 2048,
       systemPrompt: 'Ты ассистент внутри редактора.',
+      maxSteps: 8,
+      maxAutopilotSteps: 24,
     },
     editor: {
       tabSize: 2,
@@ -662,6 +664,7 @@ module.exports = [
         '- [x] собрал проект\n- [ ] проверил в браузере\n' +
         '```python\ndef greet(name: str) -> str:\n    return f"привет, {name}"\n```\n' +
         '```bash\nnpm run smoke:agent\n```\n' +
+        'Инлайн-код: `view.toggleRight` и `layout.setRightVisible(...)`.\n' +
         `Файл — ${params.messages.at(-1)?.content ?? ''}.`;
       // В быстром режиме ответ уходит одной порцией: браузер режет таймеры скрытой
       // вкладки до секунды, и поток по словам длился бы минуты.

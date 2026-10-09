@@ -1171,6 +1171,21 @@ textarea {
   flex-direction: column;
 }
 
+/* Обёртка дока — точка монтирования панелей (поиск, терминал, изменения).
+   Без растяжения цепочка высот рвётся: панель берёт высоту по содержимому,
+   терминал — размер по умолчанию (24 строки), и низ вылезает за док. */
+.dock-host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.dock-host > .dock {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .dock-header {
   display: flex;
   align-items: center;
@@ -1287,6 +1302,12 @@ textarea {
 
 .xterm .xterm-viewport {
   background: transparent !important;
+  overflow-y: hidden !important;
+  /* xterm 6 рисует СВОЙ скроллбар (`.xterm-scrollable-element > .scrollbar`),
+     а на вьюпорте остаётся нативный (overflow-y: scroll из xterm.css). Он
+     пустой (scrollHeight == clientHeight), но крадёт 10px ширины и спорит
+     с настоящим скроллбаром — из-за этого прокрутка выглядит сломанной. */
+  overflow-y: hidden !important;
 }
 
 /* ── поиск ──────────────────────────────────────────────────────────────── */

@@ -31,9 +31,9 @@ const INSTRUCTION_FILES = ['AGENTS.md', 'CHUI.md', 'CLAUDE.md'];
 const MAX_INSTRUCTIONS_BYTES = 8000;
 
 /** Страховка от бесконечного цикла «модель → инструмент → модель». */
-const MAX_AGENT_STEPS = 8;
+const MAX_AGENT_STEPS = 20;
 /** В автопилоте задача длиннее: шагов нужно больше. */
-const MAX_AUTOPILOT_STEPS = 24;
+const MAX_AUTOPILOT_STEPS = 64;
 
 /**
  * Инструменты, которые только читают состояние. Их повтор без нового

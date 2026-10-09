@@ -139,7 +139,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
       const token = match[0];
       if (token.startsWith('`')) {
-        nodes.push(h('code', { class: 'md-code' }, token.slice(1, -1)));
+        nodes.push(inlineCode(token.slice(1, -1)));
       } else if (token.startsWith('**')) {
         nodes.push(h('strong', {}, token.slice(2, -2)));
       } else {
@@ -152,6 +152,33 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
     if (last < text.length) nodes.push(text.slice(last));
     return nodes;
+  }
+
+  /**
+   * Инлайн-код красим теми же токенами, что и блоки кода. Язык у фрагмента не
+   * указан, поэтому угадываем по виду: команда оболочки, Python или (по умолчанию)
+   * JavaScript — он же покрывает TS: имена, свойства и вызовы читаются как надо.
+   */
+  function inlineCode(code: string): HTMLElement {
+    const node = h('code', { class: 'md-code' });
+    highlightInto(node, code, guessInlineLanguage(code));
+    return node;
+  }
+
+  function guessInlineLanguage(code: string): string {
+    const text = code.trim();
+    if (
+      /^(\$|npm|npx|yarn|pnpm|git|cd|ls|rm|mkdir|touch|echo|cat|grep|sed|awk|curl|wget|pip|pip3|make|node|sudo|chmod)\b/.test(
+        text,
+      ) ||
+      text.includes(' && ')
+    ) {
+      return 'shell';
+    }
+    if (/^(def |class |import |from |return|await |async def |self\b|print\()/.test(text) || /\bself\./.test(text)) {
+      return 'python';
+    }
+    return 'javascript';
   }
 
   /** Ячейки строки таблицы: внешние разделители и пустые края отбрасываем. */

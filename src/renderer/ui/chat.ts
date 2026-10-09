@@ -1894,14 +1894,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       scrollToEnd(session);
     };
 
-    /** Размышления — сворачиваемый блок перед ответом, как у reasoning-моделей. */
+    /** Размышления — сворачиваемый блок перед ответом.
+     * Создаётся свёрнутым: во время стрима он не разворачивается сам и не съедает ленту,
+     * но по клику на «Размышления» раскрывается. */
     const pushReasoning = (chunk: string): void => {
       if (reasoningBuffer.length < MAX_REASONING_CHARS) reasoningBuffer += chunk;
 
       if (!reasoningBox) {
         reasoningBox = h(
           'details',
-          { class: 'reasoning', open: true },
+          { class: 'reasoning' },
           h('summary', { class: 'reasoning-summary' }, 'Размышления'),
           h('div', { class: 'reasoning-text' }),
         );

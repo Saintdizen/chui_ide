@@ -115,6 +115,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Вкладка чата показана сейчас: файлы ждут своей очереди. */
   let chatTabActive = false;
 
+  /** Чат виден человеку: панелью справа либо вкладкой в редакторе. */
+  function chatVisible(): boolean {
+    return chatInEditor ? chatTabActive : layout.rightVisible;
+  }
+
   /** Показать вкладку чата (или перенести чат, если он ещё в панели). */
   function showChatTab(): void {
     if (!chatInEditor) {
@@ -137,6 +142,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     chatEditor.hidden = !shown;
     layout.editorIsland.classList.toggle('is-chat', shown);
     tabs.refresh();
+    // Вкладка чата — это тоже «показан ли чат»: кнопка AI должна это отражать.
+    syncViewButtons();
   }
 
   function setChatInEditor(next: boolean): void {
@@ -159,6 +166,27 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     }
 
     syncChatTab();
+  }
+
+  /** Показать чат там, где он сейчас живёт: панелью справа или вкладкой в редакторе. */
+  function revealChat(): void {
+    if (chatInEditor) showChatTab();
+    else layout.setRightVisible(true);
+    syncViewButtons();
+  }
+
+  /**
+   * Кнопка AI: свернуть/развернуть чат — где бы он ни жил. Когда чат перенесён
+   * в редактор, правая панель пуста, поэтому переключать нужно вкладку, а не её.
+   */
+  function toggleChat(): void {
+    if (chatInEditor) {
+      if (chatTabActive) hideChatTab();
+      else showChatTab();
+      return;
+    }
+    layout.setRightVisible(!layout.rightVisible);
+    syncViewButtons();
   }
 
   const chat = createChatPanel({
@@ -295,7 +323,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     viewButtons.get('project')?.classList.toggle('is-active', layout.sidebarVisible);
     viewButtons.get('search')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'search');
     viewButtons.get('terminal')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'terminal');
-    viewButtons.get('ai')?.classList.toggle('is-active', layout.rightVisible);
+    viewButtons.get('ai')?.classList.toggle('is-active', chatVisible());
   };
 
   // Системной полосы меню у безрамочного окна нет — открываем её кнопкой.
@@ -640,8 +668,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   define({ id: 'view.toggleRight', title: 'Панель AI', category: 'Вид', keybinding: 'Ctrl+Shift+A' }, () => {
-    layout.setRightVisible(!layout.rightVisible);
-    syncViewButtons();
+    toggleChat();
   });
 
   define({ id: 'app.showMenu', title: 'Меню приложения', category: 'Вид', keybinding: 'Alt+F10' }, () => {
@@ -686,8 +713,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   define({ id: 'ai.newChat', title: 'Новый диалог', category: 'AI' }, () => {
-    layout.setRightVisible(true);
-    syncViewButtons();
+    revealChat();
     chat.newChat();
   });
 
@@ -700,14 +726,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   define({ id: 'ai.backToPanel', title: 'Вернуть чат в боковую панель', category: 'AI' }, () => setChatInEditor(false));
 
   define({ id: 'ai.explainSelection', title: 'Объяснить выделение', category: 'AI' }, async () => {
-    layout.setRightVisible(true);
-    syncViewButtons();
+    revealChat();
     await chat.askAboutSelection('explain');
   });
 
   define({ id: 'ai.fixSelection', title: 'Исправить выделение', category: 'AI' }, async () => {
-    layout.setRightVisible(true);
-    syncViewButtons();
+    revealChat();
     await chat.askAboutSelection('fix');
   });
 

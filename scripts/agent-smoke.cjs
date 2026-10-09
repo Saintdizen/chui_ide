@@ -138,6 +138,8 @@ app.whenReady().then(async () => {
       maxTokens: 256,
       systemPrompt: '',
       reasoningEffort: 'off',
+      maxSteps: 8,
+      maxAutopilotSteps: 24,
     },
     get() {
       return this;

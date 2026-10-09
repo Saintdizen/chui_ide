@@ -293,6 +293,13 @@ export interface AiSettings {
   systemPrompt: string;
   /** Сколько модели думать перед ответом (`reasoning_effort`). */
   reasoningEffort: ReasoningEffort;
+  /**
+   * Страховка от зацикливания: сколько шагов «модель → инструмент → модель»
+   * агент делает в обычном режиме, прежде чем остановиться.
+   */
+  maxSteps: number;
+  /** То же для автопилота: задача длиннее, шагов нужно больше. */
+  maxAutopilotSteps: number;
 }
 
 /** Как показывать невидимые символы. */
@@ -456,6 +463,10 @@ export interface AiSettingsPatch {
   contextWindow?: number;
   systemPrompt?: string;
   reasoningEffort?: ReasoningEffort;
+  /** Сколько шагов делает агент в обычном режиме (страховка от зацикливания). */
+  maxSteps?: number;
+  /** Сколько шагов делает агент в автопилоте. */
+  maxAutopilotSteps?: number;
   /** Добавить провайдера или обновить существующего по `id`. */
   provider?: AiProviderPatch;
   /** Убрать провайдера из списка. */
