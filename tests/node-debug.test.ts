@@ -433,4 +433,38 @@ describe('NodeAdapter', () => {
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
   }, 20_000);
+
+  it('останавливается на необработанном исключении', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
+    dirs.push(dir);
+    // Программа бросает исключение из функции: останов должен встать там, где его бросили.
+    const program = path.join(dir, 'boom.js');
+    writeFileSync(
+      program,
+      ['function fail() {', "  throw new Error('kaboom');", '}', 'fail();', ''].join('\n'),
+      'utf8',
+    );
+    const { input, client } = startAdapter();
+
+    await client.request('initialize', { adapterID: 'node' });
+    const launch = client.request('launch', { program, cwd: dir });
+    await client.waitEvent('initialized');
+    expect((await launch).success).toBe(true);
+
+    // Точки останова нет: останавливаемся именно из-за исключения.
+    await client.request('setExceptionBreakpoints', { filters: ['uncaught'] });
+    await client.request('configurationDone', {});
+
+    const stopped = await client.waitEvent('stopped');
+    expect((stopped.body as { reason?: string }).reason).toBe('exception');
+
+    // Стек ведёт в бросившую функцию, а не во внутренности процесса.
+    const stack = await client.request('stackTrace', { threadId: 1 });
+    const frames = stack.body?.stackFrames as Array<{ name: string; line: number }>;
+    expect(frames[0]?.name).toBe('fail');
+    expect(frames[0]?.line).toBe(2);
+
+    await client.request('disconnect', { terminateDebuggee: true });
+    input.end();
+  }, 20_000);
 });

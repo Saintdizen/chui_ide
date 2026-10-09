@@ -72,6 +72,12 @@ export class DebugService {
   private frames: DebugFrame[] = [];
   /** Кадр, где стоит курсор: у него берём переменные по умолчанию. */
   private topFrameId: number | null = null;
+  /** Останов по исключению: какие исключения останавливают программу. */
+  private exceptions = { uncaught: false, caught: false };
+  /** Фильтры задавал пользователь: без этого адаптер не трогаем — у него свой набор. */
+  private exceptionsSet = false;
+  /** Сторона отладки: от неё зависит имя фильтра у адаптера (`caught` против `raised`). */
+  private target: 'node' | 'python' = 'node';
 
   constructor(
     private readonly publish: (topic: string, payload: unknown) => void,
@@ -177,6 +183,7 @@ export class DebugService {
     ready: string,
   ): Promise<{ ok: boolean; message: string }> {
     this.stop();
+    this.target = spec.adapterID === 'node' ? 'node' : 'python';
     const env = mergeEnv(process.env, await this.env());
 
     this.setPhase('starting');
@@ -278,6 +285,32 @@ export class DebugService {
       line: item.line ?? wanted[index]?.line ?? 0,
       verified: item.verified === true,
     }));
+  }
+
+  /**
+   * Останов по исключению: какие исключения останавливают программу.
+   *
+   * Запрос можно слать и до старта: значение запомним и отдадим адаптеру при
+   * инициализации (как и точки останова). Имена фильтров у адаптеров разные,
+   * поэтому клиент даёт пару понятных флагов, а перевод — здесь.
+   */
+  async setExceptionBreakpoints(filters: { uncaught: boolean; caught: boolean }): Promise<void> {
+    this.exceptions = { uncaught: filters.uncaught === true, caught: filters.caught === true };
+    this.exceptionsSet = true;
+    if (!this.child) return;
+    await this.call('setExceptionBreakpoints', { filters: this.dapExceptionFilters() }).catch(() => undefined);
+  }
+
+  /**
+   * Пара флагов → набор фильтров адаптера. У Node это `uncaught`/`caught` (их
+   * понимает наш адаптер и сам переводит в `Debugger.setPauseOnExceptions`), а у
+   * debugpy пойманные и необработанные называются `raised` и `uncaught`.
+   */
+  private dapExceptionFilters(): string[] {
+    const filters: string[] = [];
+    if (this.exceptions.uncaught) filters.push('uncaught');
+    if (this.exceptions.caught) filters.push(this.target === 'python' ? 'raised' : 'caught');
+    return filters;
   }
 
   async resume(): Promise<void> {
@@ -575,10 +608,16 @@ export class DebugService {
     }
   }
 
-  /** Отправить все известные точки останова и разрешить старт программы. */
+  /** Отправить все известные точки останова и настройки останова по исключению. */
   private async pushAllBreakpoints(): Promise<void> {
     for (const [path, lines] of this.breakpoints) {
       await this.setBreakpoints(path, lines).catch(() => undefined);
+    }
+    // Фильтры исключений — тоже до `configurationDone`. Шлём, только если их
+    // задавал человек: у debugpy без этого свой набор по умолчанию, и трогать его
+    // без просьбы не стоит.
+    if (this.exceptionsSet) {
+      await this.call('setExceptionBreakpoints', { filters: this.dapExceptionFilters() }).catch(() => undefined);
     }
     await this.call('configurationDone', {}).catch(() => undefined);
   }

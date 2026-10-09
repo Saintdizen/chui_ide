@@ -1,4 +1,4 @@
-import type { BreakpointRecord, DebugLaunchOptions, SessionState } from './api';
+import type { BreakpointRecord, DebugExceptionFilters, DebugLaunchOptions, SessionState } from './api';
 
 /**
  * Проверка и границы сессии — в `shared`, а не в main: это чистая логика без
@@ -66,6 +66,8 @@ export function sanitizeSession(raw: unknown): SessionState {
   if (launch) state.debugLaunch = launch;
   const watch = stringList(value.debugWatch, MAX_WATCH);
   if (watch.length > 0) state.debugWatch = watch;
+  const exceptions = exceptionFilters(value.debugExceptions);
+  if (exceptions) state.debugExceptions = exceptions;
   const breakpoints = breakpointRecords(value.breakpoints);
   if (breakpoints.length > 0) state.breakpoints = breakpoints;
 
@@ -117,6 +119,19 @@ function launchOptions(raw: unknown): DebugLaunchOptions | undefined {
   if (typeof value.cwd === 'string' && value.cwd) options.cwd = value.cwd.slice(0, MAX_PATH_CHARS);
 
   return Object.keys(options).length > 0 ? options : undefined;
+}
+
+/**
+ * Останов по исключению из сессии. Возвращаем `undefined`, если оба фильтра
+ * выключены: так в файле не оседает `{uncaught:false,caught:false}` — это значит
+ * «настройки нет», и адаптер не трогают раньше времени.
+ */
+function exceptionFilters(raw: unknown): DebugExceptionFilters | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  const uncaught = value.uncaught === true;
+  const caught = value.caught === true;
+  return uncaught || caught ? { uncaught, caught } : undefined;
 }
 
 /** Именованные строки (переменные окружения): ключ и значение — строки. */

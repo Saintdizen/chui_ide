@@ -1,4 +1,4 @@
-import type { DebugFrame, DebugScope, DebugVariable } from '../../shared/api';
+import type { DebugExceptionFilters, DebugFrame, DebugScope, DebugVariable } from '../../shared/api';
 import type { DebugController, DebugState } from '../core/debug';
 import { clear, h } from './dom';
 import { showToast } from './toast';
@@ -20,6 +20,8 @@ export interface DebugPanelDeps {
   onRevealFrame: (frame: DebugFrame) => void;
   /** Наблюдение изменилось — рабочее место стоит сохранить. */
   onWatchChange?: () => void;
+  /** Останов по исключению изменился — тоже часть рабочего места. */
+  onExceptionChange?: () => void;
   /** Спросить у человека новое значение; `null` — отменили ввод. */
   promptValue?: (input: { title: string; label: string; value: string }) => Promise<string | null>;
 }
@@ -367,6 +369,50 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
     }
   }
 
+  /**
+   * Останов по исключению: две галочки — необработанные и пойманные (любые).
+   * Второй фильтр включает останов и на пойманных, поэтому он перекрывает первый.
+   */
+  function renderExceptions(): void {
+    const current = deps.debug.exceptionFilters();
+    const box = (
+      label: string,
+      title: string,
+      on: boolean,
+      next: (value: boolean) => DebugExceptionFilters,
+    ): HTMLElement => {
+      const input = h('input', { class: 'debug-exc-box', type: 'checkbox', ...(on ? { checked: true } : {}) });
+      input.addEventListener('change', () => {
+        void deps.debug.setExceptionFilters(next(input.checked)).then(() => {
+          deps.onExceptionChange?.();
+          render(stateSnapshot);
+        });
+      });
+      return h('label', { class: 'debug-exc-item', title }, input, label);
+    };
+    body.appendChild(
+      h(
+        'section',
+        { class: 'debug-section' },
+        h('h3', { class: 'debug-heading' }, 'Останов по исключению'),
+        h(
+          'div',
+          { class: 'debug-exc' },
+          box('Необработанные', 'Останавливаться на необработанных исключениях', current.uncaught, (value) => ({
+            ...current,
+            uncaught: value,
+          })),
+          box(
+            'Любые (в том числе пойманные)',
+            'Останавливаться на всех исключениях: и пойманных, и прочих',
+            current.caught,
+            (value) => ({ ...current, caught: value }),
+          ),
+        ),
+      ),
+    );
+  }
+
   /** Последнее отрисованное состояние: обработчики кликов перерисовывают по нему. */
   let stateSnapshot: DebugState = { phase: 'idle', reason: null, frames: [], topFrame: null };
 
@@ -406,6 +452,7 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
 
     // Наблюдение показываем и пока программа идёт: выражения удобно заготовить
     // заранее — они посчитаются на ближайшем останове. Без сессии раздел не нужен.
+    renderExceptions();
     renderWatch();
   }
 

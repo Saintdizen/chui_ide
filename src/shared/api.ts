@@ -227,6 +227,8 @@ export interface SessionState {
   debugLaunch?: DebugLaunchOptions;
   /** Наблюдаемые в панели отладки выражения. */
   debugWatch?: string[];
+  /** Останов по исключению: какие исключения останавливали программу. */
+  debugExceptions?: DebugExceptionFilters;
   /** Точки останова отладки по файлам — их рабочее место помнит для проекта. */
   breakpoints?: BreakpointRecord[];
 }
@@ -698,6 +700,20 @@ export interface DebugAttachOptions {
    * `node --inspect`, а Python-процесс слушает `debugpy`, и это видно по файлу.
    */
   target?: 'node' | 'python';
+}
+
+/**
+ * Останов по исключению: какие исключения останавливают программу.
+ *
+ * `caught` включает и пойманные — это «все исключения»; он перекрывает
+ * `uncaught`. Адаптеры зовут эти фильтры по-разному, поэтому наружу даём пару
+ * понятных флагов, а перевод делает main.
+ */
+export interface DebugExceptionFilters {
+  /** Необработанные исключения. */
+  uncaught: boolean;
+  /** Пойманные исключения (любые). */
+  caught: boolean;
 }
 
 export interface Settings {
@@ -1177,6 +1193,11 @@ export interface ChuiMethods {
     params: { path: string; breakpoints: Array<{ line: number; condition?: string; hitCondition?: string; logMessage?: string }> };
     result: DebugBreakpoint[];
   };
+  /**
+   * Останов по исключению: какие исключения останавливают программу. Набор
+   * заменяется целиком, как и точки останова.
+   */
+  'debug.setExceptionBreakpoints': { params: DebugExceptionFilters; result: void };
   'debug.continue': { params: void; result: void };
   'debug.step': { params: { kind: 'over' | 'into' | 'out' }; result: void };
   'debug.pause': { params: void; result: void };

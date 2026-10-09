@@ -89,6 +89,19 @@ describe('sanitizeSession', () => {
     expect(sanitizeSession({ debugWatch: ['ok', '', 5] }).debugWatch).toEqual(['ok']);
   });
 
+  it('останов по исключению читается и валиден', () => {
+    expect(sanitizeSession({ debugExceptions: { uncaught: true, caught: false } }).debugExceptions).toEqual({
+      uncaught: true,
+      caught: false,
+    });
+  });
+
+  it('выключенный останов по исключению в сессию не пишется', () => {
+    expect(sanitizeSession({ debugExceptions: { uncaught: false, caught: false } }).debugExceptions).toBeUndefined();
+    expect(sanitizeSession({ debugExceptions: null }).debugExceptions).toBeUndefined();
+    expect(sanitizeSession({ debugExceptions: [true] }).debugExceptions).toBeUndefined();
+  });
+
   it('точки останова читаются с настройками', () => {
     const state = sanitizeSession({
       breakpoints: [

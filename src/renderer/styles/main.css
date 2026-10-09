@@ -4745,6 +4745,26 @@ textarea {
   flex-direction: column;
 }
 
+.debug-exc {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 8px;
+}
+
+.debug-exc-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.debug-exc-box {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--blue_prime_background);
+}
+
 .debug-row,
 .debug-frame {
   display: flex;

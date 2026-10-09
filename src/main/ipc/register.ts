@@ -436,6 +436,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Подключение к чужому процессу: ни файла, ни окружения — только адрес инспектора.
   router.register('debug.attach', (params) => requireDebug().attach(params));
   router.register('debug.setBreakpoints', (params) => requireDebug().setBreakpoints(params.path, params.breakpoints));
+  router.register('debug.setExceptionBreakpoints', (params) => requireDebug().setExceptionBreakpoints(params));
   router.register('debug.continue', () => requireDebug().resume());
   router.register('debug.step', (params) => requireDebug().step(params.kind));
   router.register('debug.pause', () => requireDebug().pause());

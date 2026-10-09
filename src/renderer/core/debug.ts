@@ -3,6 +3,7 @@ import {
   type DebugAttachOptions,
   type DebugFrame,
   type DebugLaunchOptions,
+  type DebugExceptionFilters,
   type DebugOutputPayload,
   type DebugPhase,
   type DebugScope,
@@ -80,6 +81,8 @@ export class DebugController {
   private state: DebugState = IDLE;
   /** Точки останова по файлам. Держим копию, чтобы отправить их при старте. */
   private readonly breakpoints = new Map<string, BreakpointInput[]>();
+  /** Останов по исключению: тоже копия — уйдёт в main и вернётся в сессию проекта. */
+  private exceptions: DebugExceptionFilters = { uncaught: false, caught: false };
 
   private readonly emitter = new Emitter<DebugState>();
   readonly onDidChange = this.emitter.event;
@@ -189,6 +192,21 @@ export class DebugController {
     await this.rpc.request('debug.setBreakpoints', { path, breakpoints: next }).catch(() => undefined);
     this.breakpointEmitter.fire();
     return next;
+  }
+
+  /** Какие исключения останавливают программу: панель рисует по этому переключатели. */
+  exceptionFilters(): DebugExceptionFilters {
+    return { ...this.exceptions };
+  }
+
+  /**
+   * Задать останов по исключению. Набор шлём в main целиком (как точки останова):
+   * он запомнит его и отдаст адаптеру при старте. Без сессии вызов тоже осмыслен —
+   * значение вступит в силу на ближайшем запуске.
+   */
+  async setExceptionFilters(filters: DebugExceptionFilters): Promise<void> {
+    this.exceptions = { uncaught: filters.uncaught === true, caught: filters.caught === true };
+    await this.rpc.request('debug.setExceptionBreakpoints', this.exceptions).catch(() => undefined);
   }
 
   /** Запустить отладку файла. Все известные точки main получит по событию `initialized`. */

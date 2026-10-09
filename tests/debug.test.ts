@@ -129,6 +129,11 @@ function handle(message) {
       }
       break;
     }
+    case 'setExceptionBreakpoints':
+      // Эхо фильтров: тест видит, что клиент собрал их по отлаживаемой стороне.
+      send({ type: 'event', event: 'output', body: { category: 'stdout', output: 'exception-filters:' + JSON.stringify(args.filters || []) } });
+      response(message.seq, 'setExceptionBreakpoints');
+      break;
     case 'output':
       response(message.seq, 'output');
       break;
@@ -169,7 +174,7 @@ interface Push {
   payload: Record<string, unknown>;
 }
 
-function fakeService(): { service: DebugService; events: Push[] } {
+function fakeService(adapterID: 'node' | 'python' = 'python'): { service: DebugService; events: Push[] } {
   const dir = mkdtempSync(path.join(tmpdir(), 'chui-dap-'));
   dirs.push(dir);
   const fake = path.join(dir, 'fake-dap.cjs');
@@ -182,7 +187,7 @@ function fakeService(): { service: DebugService; events: Push[] } {
     () => 'python3',
     async () => ({}),
     // Подмена адаптера: тот же протокол, но скрипт на Node.
-    () => ({ command: process.execPath, args: [fake] }),
+    () => ({ command: process.execPath, args: [fake], adapterID }),
   );
   return { service, events };
 }
@@ -563,6 +568,45 @@ describe('DebugService', () => {
 
     it('пустой стек — подсказки не будет', () => {
       expect(frameForHover([], { path: '/p/app.js', line: 1 })).toBeNull();
+    });
+  });
+
+  describe('setExceptionBreakpoints', () => {
+    /** Дождаться строки-эха с фильтрами, которые клиент отправил адаптеру. */
+    const filtersSent = async (events: Push[]): Promise<string | undefined> => {
+      const started = Date.now();
+      while (Date.now() - started < 3000) {
+        await wait(25);
+        const line = events
+          .map((event) => String(event.payload.text ?? ''))
+          .find((text) => text.startsWith('exception-filters:'));
+        if (line) return line;
+      }
+      return undefined;
+    };
+
+    it('для Python переводит флаги в фильтры debugpy (пойманные → raised)', async () => {
+      const { service, events } = fakeService('python');
+      await service.start('/proj/app.py');
+      await service.setExceptionBreakpoints({ uncaught: true, caught: true });
+      expect(await filtersSent(events)).toBe('exception-filters:["uncaught","raised"]');
+      service.dispose();
+    });
+
+    it('для Node шлёт фильтры, понятные своему адаптеру', async () => {
+      const { service, events } = fakeService('node');
+      await service.start('/proj/app.js');
+      await service.setExceptionBreakpoints({ uncaught: true, caught: true });
+      expect(await filtersSent(events)).toBe('exception-filters:["uncaught","caught"]');
+      service.dispose();
+    });
+
+    it('снятие всех фильтров шлёт пустой набор', async () => {
+      const { service, events } = fakeService('node');
+      await service.start('/proj/app.js');
+      await service.setExceptionBreakpoints({ uncaught: false, caught: false });
+      expect(await filtersSent(events)).toBe('exception-filters:[]');
+      service.dispose();
     });
   });
 });

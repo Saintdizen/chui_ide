@@ -764,6 +764,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     // Наблюдение изменилось — рабочее место стоит сохранить (см. сессию ниже).
     onWatchChange: () => scheduleSessionSave(),
+    // Останов по исключению изменили — тоже часть рабочего места.
+    onExceptionChange: () => scheduleSessionSave(),
     // Правка значения переменной: панель просит строку, ввод показывает app.
     promptValue,
   });
@@ -817,6 +819,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const captureSession = (): SessionState => {
     const breakpoints = captureBreakpoints();
     const watch = debugPanel.getWatch();
+    const exceptions = debug.exceptionFilters();
     return {
       tabs: [...openEditors.paths],
       ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
@@ -829,6 +832,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       // пустые не пишем, чтобы файл не разрастался полями-пустышками.
       ...(Object.keys(debugOptions).length > 0 ? { debugLaunch: debugOptions } : {}),
       ...(watch.length > 0 ? { debugWatch: watch } : {}),
+      ...(exceptions.uncaught || exceptions.caught ? { debugExceptions: exceptions } : {}),
       ...(breakpoints.length > 0 ? { breakpoints } : {}),
     };
   };
@@ -875,6 +879,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       // Параметры запуска, наблюдение и точки останова — из прошлой сессии проекта.
       debugOptions = state.debugLaunch ?? {};
       debugPanel.setWatch(state.debugWatch ?? []);
+      if (state.debugExceptions) void debug.setExceptionFilters(state.debugExceptions);
       restoreBreakpoints(state.breakpoints ?? []);
       layout.setSidebarVisible(state.sidebarVisible);
       // Панель ассистента не восстанавливаем, если AI выключен: её место свободно.

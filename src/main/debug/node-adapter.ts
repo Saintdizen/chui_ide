@@ -208,6 +208,11 @@ export class NodeAdapter {
           supportsSetVariable: true,
           supportsSetExpression: true,
           supportsTerminateRequest: true,
+          // Фильтры останова по исключению: их понимает `setExceptionBreakpoints`.
+          exceptionBreakpointFilters: [
+            { filter: 'uncaught', label: 'Необработанные исключения', default: false },
+            { filter: 'caught', label: 'Исключения (в том числе пойманные)', default: false },
+          ],
         });
         break;
 
@@ -233,6 +238,10 @@ export class NodeAdapter {
         break;
 
       case 'setExceptionBreakpoints':
+        await this.setExceptionBreakpoints(args);
+        this.respond(request, { breakpoints: [] });
+        break;
+
       case 'setFunctionBreakpoints':
         this.respond(request, { breakpoints: [] });
         break;
@@ -445,6 +454,23 @@ export class NodeAdapter {
     // Через очередь: скрипты загружаются пачкой, и постановка из разных поводов
     // правила бы одно и то же состояние — набор мог бы остаться наполовину снятым.
     return this.queueBreakpoints(() => this.applyBreakpoints(file, wanted));
+  }
+
+  /**
+   * Останавливаться ли на исключениях — и на каких.
+   *
+   * DAP описывает это набором фильтров, а CDP — одним состоянием
+   * `Debugger.setPauseOnExceptions`: `none` — не останавливаться, `uncaught` —
+   * только необработанные, `all` — любые. Фильтра «пойманные» у CDP нет: это и
+   * есть «все», поэтому `caught` включает `all` и перекрывает `uncaught`.
+   *
+   * Фильтры не запоминаем: клиент шлёт их при каждой настройке сессии, а снятие
+   * всех — такой же обычный случай, как их постановка.
+   */
+  private async setExceptionBreakpoints(args: Record<string, unknown>): Promise<void> {
+    const filters = Array.isArray(args.filters) ? args.filters.map(String) : [];
+    const state = filters.includes('caught') ? 'all' : filters.includes('uncaught') ? 'uncaught' : 'none';
+    await this.requireCdp().send('Debugger.setPauseOnExceptions', { state });
   }
 
   /**
