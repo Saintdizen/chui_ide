@@ -172,6 +172,25 @@ export class GitService {
     return result.stdout;
   }
 
+  /**
+   * История коммитов текстом: hash, дата, автор, заголовок. Read-only — нужна
+   * агенту, чтобы понять контекст, не вычитывая файл целиком. Поле `path`
+   * ограничивает историю одним файлом.
+   */
+  async logText(limit = 20, filePath?: string): Promise<string> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    const count = Math.min(Math.max(Math.round(limit) || 20, 1), 100);
+    const args = ['log', `-n${count}`, '--date=short', '--format=%h %ad %an: %s'];
+    if (filePath) args.push('--', path.relative(repoRoot, path.resolve(filePath)));
+
+    // allowFailure: в репозитории без коммитов `git log` завершается ошибкой,
+    // а это не сбой — просто истории ещё нет.
+    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    return result.ok ? result.stdout : '';
+  }
+
   async branches(): Promise<GitBranch[]> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return [];

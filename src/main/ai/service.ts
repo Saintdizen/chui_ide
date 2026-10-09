@@ -30,21 +30,28 @@ import type { AiProvider } from './provider';
 const INSTRUCTION_FILES = ['AGENTS.md', 'CHUI.md', 'CLAUDE.md'];
 const MAX_INSTRUCTIONS_BYTES = 8000;
 
-/** Страховка от бесконечного цикла «модель → инструмент → модель». */
-const MAX_AGENT_STEPS = 20;
-/** В автопилоте задача длиннее: шагов нужно больше. */
-const MAX_AUTOPILOT_STEPS = 64;
+// Лимиты шагов «модель → инструмент → модель» живут в настройках
+// (`ai.maxSteps` и `ai.maxAutopilotSteps`): значения по умолчанию — там же.
 
 /**
  * Инструменты, которые только читают состояние. Их повтор без нового
  * результата — признак зацикливания, и повторный вызов можно не исполнять.
  * Правки и команды сюда не входят: они меняют мир, и повторить их бывает нужно.
  */
-const READ_ONLY_TOOLS = new Set(['list_dir', 'read_file', 'search', 'get_diagnostics']);
+const READ_ONLY_TOOLS = new Set([
+  'list_dir',
+  'read_file',
+  'read_files',
+  'search',
+  'find_files',
+  'get_diagnostics',
+  'git_status',
+  'git_log',
+]);
 
 /** Дописывается в системный промпт, когда агентный режим включён. */
 const AGENT_PROMPT = [
-  'У тебя есть инструменты: list_dir, read_file, search, get_diagnostics — изучать проект; apply_edit — предлагать правки; create_file, delete_file, move_file — создавать, удалять и перемещать файлы; run_terminal — выполнить одну команду; terminal_start, terminal_read, terminal_write, terminal_stop — долгие процессы в настоящем терминале (сервер, watch); update_plan — вести план работы; git_status и git_diff — смотреть состояние git; open_file — открыть файл в редакторе на нужной строке.',
+  'У тебя есть инструменты: list_dir, read_file, read_files, search, find_files, get_diagnostics — изучать проект; apply_edit — предлагать правки; replace_in_files — массовая замена по проекту; create_file, delete_file, move_file — создавать, удалять и перемещать файлы; run_terminal — выполнить одну команду; terminal_start, terminal_read, terminal_write, terminal_stop — долгие процессы в настоящем терминале (сервер, watch); update_plan — вести план работы; git_status, git_diff и git_log — смотреть состояние и историю git; open_file — открыть файл в редакторе на нужной строке.',
   'Пути передавай абсолютные; позиции в apply_edit — 1-based, как в LSP.',
   'В каждой правке передавай oldText — точный текст, который она заменяет: инструмент сверяет его с файлом.',
   'Большие файлы читай диапазоном: у read_file есть startLine и endLine, а строки в выводе пронумерованы — по ним готовь правки. Не читай файл целиком много раз.',
@@ -188,7 +195,8 @@ export class AiService {
       toolContext.openFile = (path, line, column) => host.openFile(path, line, column);
     }
 
-    const steps = autoApprove ? MAX_AUTOPILOT_STEPS : MAX_AGENT_STEPS;
+    // Лимит шагов задаётся в настройках: человек может поднять его под длинную задачу.
+    const steps = autoApprove ? settings.ai.maxAutopilotSteps : settings.ai.maxSteps;
 
     // Что из параметров генерации модель вообще принимает: o-серия отвергает
     // temperature, обычные модели не знают reasoning_effort. Лишнее поле в теле
@@ -338,7 +346,9 @@ export class AiService {
     if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
     if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
     if (tool.name === 'open_file') return host?.openFile !== undefined;
-    if (tool.name === 'git_status' || tool.name === 'git_diff') return this.git !== undefined;
+    if (tool.name === 'git_status' || tool.name === 'git_diff' || tool.name === 'git_log') {
+      return this.git !== undefined;
+    }
     if (tool.name.startsWith('terminal_')) return this.terminals !== undefined;
     return tool.side === 'main';
   }

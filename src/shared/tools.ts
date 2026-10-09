@@ -16,9 +16,12 @@ export type AgentToolSide = 'main' | 'renderer';
 export type AgentToolName =
   | 'list_dir'
   | 'read_file'
+  | 'read_files'
   | 'search'
+  | 'find_files'
   | 'get_diagnostics'
   | 'apply_edit'
+  | 'replace_in_files'
   | 'run_terminal'
   | 'create_file'
   | 'delete_file'
@@ -26,6 +29,7 @@ export type AgentToolName =
   | 'update_plan'
   | 'git_status'
   | 'git_diff'
+  | 'git_log'
   | 'open_file'
   | 'terminal_list'
   | 'terminal_start'
@@ -92,15 +96,78 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'search',
     side: 'main',
-    description: 'Поиск подстроки или регулярного выражения по файлам рабочей директории.',
+    description:
+      'Поиск подстроки или регулярного выражения по содержимому файлов рабочей директории. ' +
+      'Для обзора «где это вообще встречается» ставь filesOnly=true — вернутся только имена файлов.',
     inputSchema: {
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Образец поиска.' },
         isRegex: { type: 'boolean', description: 'Считать query регулярным выражением.' },
+        caseSensitive: { type: 'boolean', description: 'Учитывать регистр (по умолчанию — нет).' },
+        filesOnly: { type: 'boolean', description: 'Вернуть только пути файлов с совпадением, без строк.' },
         glob: { type: 'string', description: 'Маска файлов, например **/*.ts' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'find_files',
+    side: 'main',
+    description:
+      'Найти файлы по glob-маске пути — например **/*.test.ts или src/**/*.py. ' +
+      'Служебные папки (node_modules, .git, dist и прочие) пропускаются. ' +
+      'Вызывай, когда нужно узнать, какие файлы вообще есть в проекте, а не их содержимое.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        glob: {
+          type: 'string',
+          description:
+            'Маска пути: `**` — любая глубина, `*` — в пределах сегмента. ' +
+            'Например **/*.py или src/renderer/**. Без маски вернутся все файлы проекта.',
+        },
+        limit: { type: 'number', description: 'Максимум путей (по умолчанию 200, максимум 2000).' },
+      },
+    },
+  },
+  {
+    name: 'read_files',
+    side: 'main',
+    description:
+      'Прочитать несколько файлов одним вызовом — когда нужно свериться с 2–5 файлами сразу. ' +
+      'Экономит шаги: вместо пяти read_file хватает одного. Каждый файл возвращается с номерами ' +
+      'строк, как у read_file, но общий размер вывода ограничен.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          description: 'Абсолютные пути файлов.',
+          items: { type: 'string', description: 'Путь к файлу.' },
+        },
+      },
+      required: ['paths'],
+    },
+  },
+  {
+    name: 'replace_in_files',
+    side: 'main',
+    description:
+      'Заменить все вхождения строки или регулярного выражения по файлам проекта — массовое ' +
+      'переименование, а не точечная правка. Для изменения одной пары строк используй apply_edit. ' +
+      'Маска glob ограничивает, в каких файлах искать. Все изменения сразу пишутся на диск ' +
+      'и видны в панели изменений.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Что заменить.' },
+        replacement: { type: 'string', description: 'Чем заменить (пустая строка — удалить).' },
+        isRegex: { type: 'boolean', description: 'Считать query регулярным выражением (тогда в замене работают группы $1).' },
+        caseSensitive: { type: 'boolean', description: 'Учитывать регистр (по умолчанию — нет).' },
+        glob: { type: 'string', description: 'Маска файлов, например **/*.ts' },
+      },
+      required: ['query', 'replacement'],
     },
   },
   {
@@ -230,6 +297,20 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         staged: { type: 'boolean', description: 'true — сравнить индекс с HEAD.' },
       },
       required: ['path'],
+    },
+  },
+  {
+    name: 'git_log',
+    side: 'main',
+    description:
+      'История коммитов: последние изменения репозитория или одного файла. Read-only — ' +
+      'ничего не меняет. Возвращает hash, дату, автора и заголовок каждого коммита.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Сколько последних коммитов (по умолчанию 20, максимум 100).' },
+        path: { type: 'string', description: 'Ограничить историю одним файлом (абсолютный путь).' },
+      },
     },
   },
   {

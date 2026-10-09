@@ -12,11 +12,14 @@ export interface AnthropicOptions {
 
 /* ── типы Messages API (только нужное нам) ──────────────────────────────── */
 
+/** Точка кеша промпта: провайдер переиспользует префикс до неё. */
+type CacheControl = { cache_control?: { type: 'ephemeral' } };
+
 type ContentBlock =
-  | { type: 'text'; text: string }
-  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
-  | { type: 'tool_use'; id: string; name: string; input: unknown }
-  | { type: 'tool_result'; tool_use_id: string; content: string };
+  | ({ type: 'text'; text: string } & CacheControl)
+  | ({ type: 'image'; source: { type: 'base64'; media_type: string; data: string } } & CacheControl)
+  | ({ type: 'tool_use'; id: string; name: string; input: unknown } & CacheControl)
+  | ({ type: 'tool_result'; tool_use_id: string; content: string } & CacheControl);
 
 interface AnthropicMessage {
   role: 'user' | 'assistant';
@@ -75,24 +78,51 @@ export class AnthropicProvider implements AiProvider {
     // У Anthropic max_tokens обязателен, а при включённом мышлении ещё и больше бюджета.
     const maxTokens = Math.max(params.maxTokens ?? 4096, budget + 1024);
 
-    const body: Record<string, unknown> = {
-      model: params.model,
-      max_tokens: maxTokens,
-      messages,
-      stream: true,
-    };
-    if (system) body.system = system;
-    if (params.tools?.length) body.tools = toAnthropicTools(params.tools);
-    // Температуру не отправляем при включённом мышлении: Anthropic требует ровно 1.
-    if (params.temperature !== undefined && !effort) body.temperature = params.temperature;
-    if (effort) body.thinking = { type: 'enabled', budget_tokens: budget };
+    // Кеш промпта: в агентском режиме на каждом шаге уходит один и тот же префикс
+    // (инструменты + system + история). Помечаем точки кеширования — провайдер
+    // переиспользует оплаченный префикс и берёт за него около 10% цены. Включаем
+    // только когда есть инструменты: там многошаговость и экономия окупает запись кеша.
+    const useCache = (params.tools?.length ?? 0) > 0;
 
-    const response = await fetchWithRetry(
-      `${this.url()}/v1/messages`,
-      { method: 'POST', headers: this.headers(), body: JSON.stringify(body) },
-      signal,
-    );
-    if (!response.ok) {
+    const buildBody = (withCache: boolean): Record<string, unknown> => {
+      const body: Record<string, unknown> = {
+        model: params.model,
+        max_tokens: maxTokens,
+        messages: withCache ? withCacheBreakpoints(messages) : messages,
+        stream: true,
+      };
+      // system — блоком: cache_control на нём кеширует инструменты вместе с system.
+      if (system) {
+        body.system = withCache ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system;
+      }
+      if (params.tools?.length) body.tools = toAnthropicTools(params.tools);
+      // Температуру не отправляем при включённом мышлении: Anthropic требует ровно 1.
+      if (params.temperature !== undefined && !effort) body.temperature = params.temperature;
+      if (effort) body.thinking = { type: 'enabled', budget_tokens: budget };
+      return body;
+    };
+
+    const post = (withCache: boolean): Promise<Response> =>
+      fetchWithRetry(
+        `${this.url()}/v1/messages`,
+        { method: 'POST', headers: this.headers(), body: JSON.stringify(buildBody(withCache)) },
+        signal,
+      );
+
+    let response = await post(useCache);
+    if (!response.ok && useCache && (response.status === 400 || response.status === 422)) {
+      const detail = await safeText(response);
+      // Прокси и шлюзы могут не знать cache_control: повторяем без него.
+      if (/cache_control|cache control|unexpected|extra field|additional propert|unknown field/i.test(detail ?? '')) {
+        response = await post(false);
+        if (!response.ok) {
+          const retryDetail = await safeText(response);
+          throw new RpcFailure(RpcErrorCode.Internal, describeHttpError(response.status, retryDetail), retryDetail);
+        }
+      } else {
+        throw new RpcFailure(RpcErrorCode.Internal, describeHttpError(response.status, detail), detail);
+      }
+    } else if (!response.ok) {
       const detail = await safeText(response);
       throw new RpcFailure(RpcErrorCode.Internal, describeHttpError(response.status, detail), detail);
     }
@@ -106,6 +136,7 @@ export class AnthropicProvider implements AiProvider {
     let finishReason: string | undefined;
     let promptTokens: number | undefined;
     let completionTokens: number | undefined;
+    let cachedTokens: number | undefined;
     const toolSlots = new Map<number, { id: string; name: string; args: string }>();
 
     while (true) {
@@ -133,6 +164,8 @@ export class AnthropicProvider implements AiProvider {
         if (chunk.type === 'message_start' && chunk.message?.usage) {
           promptTokens = chunk.message.usage.input_tokens;
           completionTokens = chunk.message.usage.output_tokens ?? completionTokens;
+          const fromCache = chunk.message.usage.cache_read_input_tokens ?? 0;
+          if (fromCache > 0) cachedTokens = fromCache;
           continue;
         }
 
@@ -177,7 +210,7 @@ export class AnthropicProvider implements AiProvider {
     return {
       text,
       finishReason,
-      usage: { promptTokens, completionTokens },
+      usage: { promptTokens, completionTokens, ...(cachedTokens !== undefined ? { cachedTokens } : {}) },
       ...(thoughts ? { reasoning: thoughts } : {}),
       ...(toolCalls.length ? { toolCalls } : {}),
     };
@@ -202,10 +235,34 @@ export class AnthropicProvider implements AiProvider {
 interface AnthropicStreamEvent {
   type: string;
   index?: number;
-  message?: { usage?: { input_tokens?: number; output_tokens?: number } };
+  message?: {
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
+    };
+  };
   content_block?: { type?: string; id?: string; name?: string };
   delta?: { type?: string; text?: string; thinking?: string; partial_json?: string; stop_reason?: string };
   usage?: { output_tokens?: number };
+}
+
+/**
+ * Точка кеша в конце беседы: следующий шаг переиспользует префикс до неё.
+ * Копируем последнее сообщение с блоками, чтобы не портить исходный массив.
+ */
+function withCacheBreakpoints(messages: AnthropicMessage[]): AnthropicMessage[] {
+  const out = [...messages];
+  for (let index = out.length - 1; index >= 0; index -= 1) {
+    const message = out[index]!;
+    const blocks = message.content;
+    if (!Array.isArray(blocks) || blocks.length === 0) continue;
+    const last = blocks[blocks.length - 1]!;
+    out[index] = { ...message, content: [...blocks.slice(0, -1), { ...last, cache_control: { type: 'ephemeral' } }] };
+    break;
+  }
+  return out;
 }
 
 /** `max_tokens` у Anthropic — это наш `length`: ответ оборван по лимиту. */

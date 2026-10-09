@@ -54,6 +54,7 @@ const FILE: MenuNode = {
     { label: 'Закрыть вкладку', accelerator: 'Ctrl+W', command: 'file.close' },
     { separator: true },
     { label: 'Обновить дерево', accelerator: 'Ctrl+R', command: 'workspace.refresh' },
+    { label: 'Быстрое открытие файла…', accelerator: 'Ctrl+Shift+O', command: 'file.quickOpen' },
     { separator: true },
     { label: 'Выход', role: 'quit' },
   ],

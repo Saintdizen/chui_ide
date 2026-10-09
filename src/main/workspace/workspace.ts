@@ -7,12 +7,16 @@ import {
   type DirEntry,
   type FileContent,
   type FileStat,
+  type ReplaceFilesOptions,
   type SearchHit,
   type SearchOptions,
   type SearchResult,
+  type WorkspaceChangedPayload,
   type WorkspaceInfo,
 } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
+import { globToRegExp } from '../../shared/glob';
+import { replaceAll } from '../../shared/replace';
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -237,6 +241,8 @@ export class WorkspaceService {
             stop = true;
             return;
           }
+          // filesOnly — сводка «где встречается»: хватит одного совпадения на файл.
+          if (options.filesOnly) break;
         }
       }
     };
@@ -246,6 +252,106 @@ export class WorkspaceService {
     // Пул завершает файлы в произвольном порядке — для стабильного вывода сортируем.
     hits.sort((a, b) => (a.path === b.path ? a.line - b.line : a.path < b.path ? -1 : 1));
     return { hits: hits.slice(0, limit), truncated: stop || files.length >= MAX_SCAN_FILES, scanned };
+  }
+
+  /**
+   * Все файлы проекта абсолютными путями. Служебные папки пропускаем, глубину
+   * ограничиваем потолком, чтобы огромный репозиторий не вешал main. Общий обход
+   * для быстрого открывателя и замены по проекту.
+   */
+  private async collectFiles(): Promise<string[]> {
+    const root = this.requireRoot();
+    const files: string[] = [];
+
+    const collect = async (dir: string): Promise<void> => {
+      if (files.length >= MAX_SCAN_FILES) return;
+      const dirents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+      for (const dirent of dirents) {
+        if (files.length >= MAX_SCAN_FILES) return;
+        const full = path.join(dir, dirent.name);
+        if (dirent.isDirectory()) {
+          if (!IGNORED_DIRS.has(dirent.name)) await collect(full);
+          continue;
+        }
+        if (dirent.isFile()) files.push(full);
+      }
+    };
+
+    await collect(root);
+    return files;
+  }
+
+  /**
+   * Все файлы проекта — относительными путями (POSIX): из них собирается
+   * быстрый открыватель (`Ctrl+Shift+O`). Пути сортируем: список показывается
+   * человеку, порядок должен быть стабильным.
+   */
+  async listFiles(): Promise<string[]> {
+    const root = this.requireRoot();
+    const files = await this.collectFiles();
+    return files
+      .map((full) => path.relative(root, full).split(path.sep).join('/'))
+      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  }
+
+  /**
+   * Файлы по glob-маске пути. Обход общий с `listFiles` и `search`, поэтому
+   * служебные папки и потолок глубины те же. Возвращаем относительные POSIX-пути:
+   * агенту они короче и читаемее абсолютных.
+   */
+  async findFiles(glob?: string, limit = 200): Promise<string[]> {
+    const root = this.requireRoot();
+    const matcher = glob && glob.trim() ? globToRegExp(glob.trim()) : null;
+    const cap = Math.min(Math.max(limit, 1), 2000);
+
+    const files = await this.collectFiles();
+    const out: string[] = [];
+    for (const full of files) {
+      const relative = path.relative(root, full).split(path.sep).join('/');
+      if (matcher && !matcher.test(relative)) continue;
+      out.push(relative);
+      if (out.length >= cap) break;
+    }
+    out.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    return out;
+  }
+
+  /**
+   * Поиск с заменой по всему проекту. Идём по тем же файлам, что и поиск,
+   * и пишем только те, где что-то реально изменилось. Возвращаем изменённые
+   * пути: renderer обновляет по ним открытые вкладки.
+   *
+   * Большие файлы пропускаем: держать их целиком в памяти ради замены не стоит.
+   */
+  async replace(options: ReplaceFilesOptions): Promise<{ files: string[]; replaced: number }> {
+    const root = this.requireRoot();
+    const targets = await this.collectFiles();
+    const matcher = options.glob && options.glob.trim() ? globToRegExp(options.glob.trim()) : null;
+    const changed: string[] = [];
+    let replaced = 0;
+
+    for (const file of targets) {
+      // Маска проверяется по относительному пути: агенту он ближе, чем абсолютный.
+      if (matcher && !matcher.test(path.relative(root, file).split(path.sep).join('/'))) continue;
+      const stat = await fs.stat(file).catch(() => null);
+      if (!stat || stat.size > MAX_FILE_BYTES) continue;
+
+      const buffer = await fs.readFile(file).catch(() => null);
+      if (!buffer) continue;
+      const text = buffer.toString('utf8').replace(/\r\n/g, '\n');
+
+      const result = replaceAll(text, options.query, options.replacement, {
+        isRegex: options.isRegex,
+        caseSensitive: options.caseSensitive,
+      });
+      if (result.count === 0) continue;
+
+      await fs.writeFile(file, result.text, 'utf8');
+      changed.push(file);
+      replaced += result.count;
+    }
+
+    return { files: changed, replaced };
   }
 
   dispose(): void {
@@ -285,8 +391,9 @@ export class WorkspaceService {
         if (this.watchTimer) return;
         this.watchTimer = setTimeout(() => {
           this.watchTimer = null;
-          const payload = { root, path: this.pendingChange };
+          const changedPath = this.pendingChange ?? root;
           this.pendingChange = null;
+          const payload: WorkspaceChangedPayload = { root, path: changedPath };
           this.onChange(PushTopic.WorkspaceChanged, payload);
         }, 120);
       });
@@ -310,12 +417,3 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Минимальная поддержка глоб: `**` — любая глубина, `*` — в пределах сегмента. */
-function globToRegExp(glob: string): RegExp {
-  const escaped = glob
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*\/?/g, '\u0000')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\u0000/g, '(?:.*/)?');
-  return new RegExp(`^${escaped}$`);
-}

@@ -40,6 +40,8 @@ export interface ToolOutcome {
 export interface GitTools {
   status(): Promise<GitStatus>;
   diffText(path: string, staged?: boolean): Promise<string>;
+  /** История коммитов текстом: hash, дата, автор, заголовок. */
+  logText(limit?: number, path?: string): Promise<string>;
 }
 
 /**
@@ -79,6 +81,8 @@ export interface ToolContext {
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
 const MAX_OUTPUT_CHARS = 20_000;
 const MAX_SEARCH_HITS = 200;
+/** Потолок для режима «только файлы»: там на файл одна строка, поэтому можно больше. */
+const MAX_FIND_FILES = 2000;
 const MAX_DIR_ENTRIES = 500;
 /** Сколько строк отдаёт read_file за один диапазонный вызов. */
 const MAX_READ_LINES = 2000;
@@ -100,12 +104,18 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await listDir(ctx.workspace, parsed.value);
       case 'read_file':
         return await readFile(ctx.workspace, parsed.value);
+      case 'read_files':
+        return await readFiles(ctx.workspace, parsed.value);
       case 'search':
         return await search(ctx, parsed.value);
+      case 'find_files':
+        return await findFiles(ctx.workspace, parsed.value);
       case 'get_diagnostics':
         return await diagnostics(ctx, parsed.value);
       case 'apply_edit':
         return await applyEdit(ctx, parsed.value);
+      case 'replace_in_files':
+        return await replaceInFiles(ctx.workspace, parsed.value);
       case 'run_terminal':
         return await runTerminal(ctx, parsed.value);
       case 'create_file':
@@ -121,6 +131,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await gitStatus(ctx);
       case 'git_diff':
         return await gitDiff(ctx, parsed.value);
+      case 'git_log':
+        return await gitLog(ctx, parsed.value);
       case 'open_file':
         return await openFile(ctx, parsed.value);
       case 'terminal_list':
@@ -207,20 +219,153 @@ async function readFile(workspace: WorkspaceService, args: Record<string, unknow
   };
 }
 
+/** Сколько файлов и сколько символов отдаёт `read_files` за один вызов. */
+const MAX_READ_FILES = 10;
+const MAX_READ_FILES_TOTAL_CHARS = 60_000;
+
+/**
+ * Пакетное чтение: 2–5 файлов за один шаг. Каждый файл получает те же номера
+ * строк, что и `read_file`, но общий вывод ограничен — иначе пятёрка больших
+ * файлов вытеснит из контекста всё остальное.
+ */
+async function readFiles(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const raw = args.paths;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error('Не задан аргумент «paths»: нужен непустой массив путей');
+  }
+  const paths = raw.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  if (paths.length === 0) throw new Error('В «paths» нет ни одного корректного пути');
+  if (paths.length > MAX_READ_FILES) {
+    throw new Error(`Слишком много файлов за один вызов: ${paths.length} (максимум ${MAX_READ_FILES})`);
+  }
+
+  const root = workspace.rootPath();
+  const parts: string[] = [];
+  const failed: string[] = [];
+  let total = 0;
+  let read = 0;
+
+  for (const target of paths) {
+    const rel = relative(target, root);
+    if (total >= MAX_READ_FILES_TOTAL_CHARS) {
+      parts.push(`### ${rel}\n… (пропущен: общий лимит вывода исчерпан)`);
+      continue;
+    }
+    try {
+      const content = await workspace.readFile(target);
+      const lines = content.text.length === 0 ? [] : content.text.split('\n');
+      const width = String(lines.length).length;
+      const body = lines.map((line, index) => `${String(index + 1).padStart(width, ' ')} | ${line}`).join('\n');
+      const { text, truncated } = truncate(body);
+      const chunk = `### ${rel} (${lines.length} строк${truncated ? ', обрезано' : ''})\n${text || '(пустой файл)'}`;
+      parts.push(chunk);
+      total += chunk.length;
+      read += 1;
+    } catch (error) {
+      failed.push(`${rel}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  for (const failure of failed) parts.push(`### ошибка\n${failure}`);
+
+  const summaryParts = [`прочитано файлов: ${read}`];
+  if (failed.length > 0) summaryParts.push(`ошибок: ${failed.length}`);
+  if (total >= MAX_READ_FILES_TOTAL_CHARS) summaryParts.push('вывод обрезан');
+
+  return {
+    ok: failed.length < paths.length,
+    summary: summaryParts.join(', '),
+    detail: parts.join('\n\n'),
+  };
+}
+
+/* ── замена по проекту ──────────────────────────────────────────────────── */
+/** Сколько файлов показывает сводка замены: остальные — числом. */
+const MAX_REPLACE_SUMMARY_FILES = 20;
+
+/**
+ * Массовая замена по файлам проекта. Идёт в main, как и остальные файловые
+ * операции: логика замены чистая (`shared/replace.ts`) и уже проверена.
+ * Изменённые файлы возвращаются в `changes` — панель изменений чата их покажет.
+ */
+async function replaceInFiles(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const query = requireString(args, 'query');
+  const replacement = typeof args.replacement === 'string' ? args.replacement : '';
+  const result = await workspace.replace({
+    query,
+    replacement,
+    isRegex: optionalBoolean(args, 'isRegex') ?? false,
+    caseSensitive: optionalBoolean(args, 'caseSensitive') ?? false,
+    glob: optionalString(args, 'glob'),
+  });
+
+  if (result.replaced === 0) {
+    return {
+      ok: true,
+      summary: 'ничего не заменено',
+      detail: `Вхождений «${query}» не найдено${args.glob ? ` по маске ${args.glob}` : ''}.`,
+    };
+  }
+
+  const root = workspace.rootPath();
+  const shown = result.files.slice(0, MAX_REPLACE_SUMMARY_FILES);
+  const lines = shown.map((file) => relative(file, root));
+  if (result.files.length > shown.length) lines.push(`… ещё файлов: ${result.files.length - shown.length}`);
+
+  return {
+    ok: true,
+    summary: `заменено вхождений: ${result.replaced} · файлов: ${result.files.length}`,
+    detail: lines.join('\n'),
+    changes: result.files.map((file) => ({ path: file, kind: 'modified' as const, replaced: result.replaced })),
+  };
+}
+
 async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const workspace = ctx.workspace;
   const query = requireString(args, 'query');
   const isRegex = optionalBoolean(args, 'isRegex') ?? false;
+  const caseSensitive = optionalBoolean(args, 'caseSensitive') ?? false;
+  const filesOnly = optionalBoolean(args, 'filesOnly') ?? false;
   const glob = optionalString(args, 'glob');
 
-  const result = await workspace.search({ query, isRegex, glob, maxResults: MAX_SEARCH_HITS }, ctx.signal);
+  const result = await workspace.search(
+    { query, isRegex, caseSensitive, filesOnly, glob, maxResults: filesOnly ? MAX_FIND_FILES : MAX_SEARCH_HITS },
+    ctx.signal,
+  );
   const root = workspace.rootPath();
+
+  // Режим «только файлы»: одна строка на файл, без номера строки и текста.
+  if (filesOnly) {
+    const files = [...new Set(result.hits.map((hit) => relativePath(hit.path, root)))];
+    return {
+      ok: true,
+      summary: `совпадения в файлах: ${files.length}${result.truncated ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
+      detail: files.length ? files.join('\n') : 'Ничего не найдено',
+    };
+  }
+
   const lines = result.hits.map((hit) => `${relativePath(hit.path, root)}:${hit.line}:${hit.column}: ${hit.text}`);
 
   return {
     ok: true,
     summary: `${result.hits.length} совпадений${result.truncated ? ', список обрезан' : ''} · просканировано файлов: ${result.scanned}`,
     detail: lines.length ? lines.join('\n') : 'Ничего не найдено',
+  };
+}
+
+/**
+ * Файлы по glob-маске. Отдельно от `search`: тут не читается содержимое,
+ * поэтому обход дешёвый и результат — список путей.
+ */
+async function findFiles(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const glob = optionalString(args, 'glob');
+  const limit = optionalInteger(args, 'limit') ?? 200;
+
+  const files = await workspace.findFiles(glob, limit);
+  return {
+    ok: true,
+    summary: `${glob ? `«${glob}»: ` : ''}файлов: ${files.length}${files.length >= limit ? ' (обрезано)' : ''}`,
+    detail: files.length ? files.join('\n') : 'Ничего не найдено',
   };
 }
 
@@ -419,6 +564,26 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
     ok: result.code === 0 && !result.timedOut,
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
     detail: `$ ${command}\n${output.length ? output : '(пустой вывод)'}`,
+  };
+}
+
+/** История коммитов: read-only контекст «что тут менялось». */
+async function gitLog(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
+
+  const limit = optionalInteger(args, 'limit') ?? 20;
+  const target = optionalString(args, 'path');
+  const text = (await ctx.git.logText(limit, target)).trim();
+
+  if (!text) {
+    return { ok: true, summary: 'история пуста', detail: 'У репозитория нет коммитов.' };
+  }
+
+  const lines = text.split('\n').filter(Boolean);
+  return {
+    ok: true,
+    summary: `коммитов: ${lines.length}${target ? ` по ${path.basename(target)}` : ''}`,
+    detail: text,
   };
 }
 

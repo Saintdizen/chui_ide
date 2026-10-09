@@ -129,6 +129,8 @@ export interface SearchOptions {
   caseSensitive?: boolean;
   maxResults?: number;
   glob?: string;
+  /** Только имена файлов с совпадением, без строк — обзор «где это встречается». */
+  filesOnly?: boolean;
 }
 
 export interface SearchHit {
@@ -142,6 +144,22 @@ export interface SearchResult {
   hits: SearchHit[];
   truncated: boolean;
   scanned: number;
+}
+
+export interface ReplaceFilesOptions {
+  query: string;
+  replacement: string;
+  isRegex?: boolean;
+  caseSensitive?: boolean;
+  /** Маска пути: замена только в подходящих файлах (`**` — любая глубина). */
+  glob?: string;
+}
+
+export interface ReplaceFilesResult {
+  /** Абсолютные пути файлов, в которых что-то заменилось. */
+  files: string[];
+  /** Сколько вхождений заменено всего. */
+  replaced: number;
 }
 /* ── Окно ─────────────────────────────────────────────────────────────── */
 
@@ -174,6 +192,32 @@ export interface TerminalCreateOptions {
   cols: number;
   rows: number;
   cwd?: string;
+}
+
+/**
+ * Сессия рабочей папки: что было открыто в прошлый раз. Восстанавливается
+ * при открытии проекта, чтобы не собирать рабочее место заново.
+ */
+export interface SessionState {
+  /** Абсолютные пути открытых вкладок в порядке слева направо. */
+  tabs: string[];
+  /** Активная вкладка — если она ещё входит в `tabs`. */
+  activeTab?: string;
+  /** Абсолютные пути раскрытых папок дерева. */
+  expanded: string[];
+  dockVisible: boolean;
+  /** Какая вкладка нижней панели открыта: `terminal`, `search`, `git`. */
+  dockActive?: string;
+  sidebarVisible: boolean;
+  rightVisible: boolean;
+}
+
+/** Полезная нагрузка события `PushTopic.WorkspaceChanged`. */
+export interface WorkspaceChangedPayload {
+  /** Корень рабочей папки — он же ключ, по которому событие адресуется. */
+  root: string;
+  /** Что именно изменилось: путь файла или папки. */
+  path: string;
 }
 
 /** Полезная нагрузка события `PushTopic.TerminalData`. */
@@ -574,6 +618,11 @@ export interface ChatRequest {
 export interface ChatUsage {
   promptTokens?: number;
   completionTokens?: number;
+  /**
+   * Сколько входных токенов пришло из кеша промпта. Они дешевле обычных,
+   * поэтому это число — прямой признак экономии на многошаговой задаче.
+   */
+  cachedTokens?: number;
 }
 
 export interface ChatStreamDone {
@@ -658,9 +707,11 @@ export interface ChatToolResultPayload {
  */
 export interface ToolFileChange {
   path: string;
-  kind: 'created' | 'deleted' | 'moved';
+  kind: 'created' | 'deleted' | 'moved' | 'modified';
   /** Для `moved` — исходный путь. */
   from?: string;
+  /** Для `modified` — сколько вхождений заменено (массовая замена). */
+  replaced?: number;
   /** Строк в созданном файле (для счётчика). */
   lines?: number;
 }
@@ -778,6 +829,12 @@ export interface ChuiMethods {
   'workspace.writeFile': { params: { path: string; text: string }; result: { mtimeMs: number } };
   'workspace.stat': { params: { path: string }; result: FileStat };
   'workspace.search': { params: SearchOptions; result: SearchResult };
+  /** Относительные (POSIX) пути всех файлов проекта — для быстрого открывателя. */
+  'workspace.listFiles': { params: void; result: string[] };
+  /** Сессия проекта: восстановление при открытии и сохранение изменений. */
+  'session.load': { params: { root: string }; result: SessionState };
+  'session.save': { params: { root: string; state: SessionState }; result: void };
+  'workspace.replace': { params: ReplaceFilesOptions; result: ReplaceFilesResult };
   'workspace.createFile': { params: { path: string }; result: { path: string } };
   'workspace.createDir': { params: { path: string }; result: { path: string } };
   'workspace.rename': { params: { from: string; to: string }; result: { path: string } };
@@ -826,6 +883,8 @@ export interface ChuiMethods {
   'lsp.close': { params: { path: string }; result: void };
   'lsp.restart': { params: void; result: { running: string[] } };
   'lsp.status': { params: void; result: { running: string[] } };
+  /** Найти в PATH известные языковые серверы и вернуть готовые конфигурации. */
+  'lsp.detect': { params: void; result: LspServerConfig[] };
 
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };

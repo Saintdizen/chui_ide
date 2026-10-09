@@ -1,4 +1,3 @@
-import type { CommandRegistry } from '../core/commands';
 import { h, svgIcon } from './dom';
 
 export interface StatusState {
@@ -28,12 +27,17 @@ export interface StatusBarView {
   update(patch: Partial<StatusState>): void;
 }
 
+export interface StatusBarDeps {
+  /** Открыть менеджер git у указанной кнопки — так работает кнопка ветки. */
+  openGitManager(anchor: HTMLElement): void;
+}
+
 /**
  * Статусбар как в PyCharm: слева путь к активному файлу и ветка git,
  * справа «строка:столбец», перевод строки, кодировка, отступ, язык.
  * Полоса плоская, без «острова» — на фоне приложения.
  */
-export function createStatusBar(commands: CommandRegistry): StatusBarView {
+export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const state: StatusState = {
     workspace: null,
     file: null,
@@ -59,8 +63,8 @@ export function createStatusBar(commands: CommandRegistry): StatusBarView {
     {
       class: 'status-item status-git',
       type: 'button',
-      title: 'Изменения в репозитории',
-      onClick: () => void commands.execute('view.showChanges'),
+      title: 'Менеджер git',
+      onClick: (event: Event) => deps.openGitManager(event.currentTarget as HTMLElement),
     },
     svgIcon('branch', 12),
   );

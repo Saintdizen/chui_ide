@@ -319,10 +319,40 @@ textarea {
 }
 
 .splitter {
+  position: relative;
   background: transparent;
   /* Ширина полосы — 6 px. Без этого тач-жест уводит прокрутку вместо перетаскивания. */
   touch-action: none;
-  transition: background var(--motion_fast) var(--motion_ease);
+}
+
+/* Метка-хендл: три точки по центру полосы. До наведения её не видно, а сама
+   полоса остаётся тонкой — прежний «толстый» фокус на всю ширину убран. */
+.splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion_fast) var(--motion_ease);
+  background-image: radial-gradient(circle, var(--text_color_tertiary) 1.4px, transparent 1.5px);
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+}
+
+/* Вертикальные разделители — точки столбиком. */
+.splitter-left::after,
+.splitter-right::after {
+  width: 4px;
+  height: 16px;
+  background-position: center top, center center, center bottom;
+}
+
+/* Горизонтальный разделитель дока — точки в ряд. */
+.splitter-dock::after {
+  width: 16px;
+  height: 4px;
+  background-position: left center, center center, right center;
 }
 
 .splitter-left {
@@ -341,9 +371,9 @@ textarea {
   cursor: row-resize;
 }
 
-.splitter:hover,
-.splitter.is-dragging {
-  background: var(--blue_prime_background);
+.splitter:hover::after,
+.splitter.is-dragging::after {
+  opacity: 1;
 }
 
 /* Пока тянем — курсор и запрет выделения на весь интерфейс. Иначе редактор под
@@ -803,7 +833,9 @@ textarea {
 
 .btn-small {
   min-height: calc(var(--control_height) - 4px);
-  padding: 3px 9px;
+  /* Вертикаль — от токена плотности, как у .btn: иначе при смене плотности
+     крупная и малая кнопки расходятся по высоте. Горизонталь меньше на 3px. */
+  padding: calc(var(--control_padding_sm) - 2px) 9px;
 }
 
 .link-btn {
@@ -1265,7 +1297,8 @@ textarea {
 }
 
 .term-tab {
-  padding: 3px 9px;
+  /* Геометрия та же, что у вкладок дока: это вкладки одного док-острова. */
+  padding: 4px 10px;
   border-radius: var(--radius_sm);
   color: var(--text_color_disabled);
   font-size: var(--font_labels_size);
@@ -1302,7 +1335,6 @@ textarea {
 
 .xterm .xterm-viewport {
   background: transparent !important;
-  overflow-y: hidden !important;
   /* xterm 6 рисует СВОЙ скроллбар (`.xterm-scrollable-element > .scrollbar`),
      а на вьюпорте остаётся нативный (overflow-y: scroll из xterm.css). Он
      пустой (scrollHeight == clientHeight), но крадёт 10px ширины и спорит
@@ -1336,6 +1368,17 @@ textarea {
 }
 
 .search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Строка замены: поле тянется, кнопка держится справа. */
+.search-replace {
+  gap: 6px;
+  padding-top: 0;
+}
+
+.search-replace-input {
   flex: 1;
   min-width: 0;
 }
@@ -1738,9 +1781,12 @@ textarea {
   color: var(--text_color_hover);
 }
 
+/* Ответ ассистента — без «пузыря»: текст идёт прямо по полотну ленты.
+   Обводка и подложка мешали читать длинный ответ, а под размышлениями
+   выглядели лишней коробкой. Пользовательское сообщение плашку сохраняет. */
 .msg-assistant .msg-body {
-  border: 1px solid var(--separator_color);
-  background: var(--sunken_background);
+  padding: 0 2px;
+  color: var(--text_color);
 }
 
 .text-block {
@@ -1780,7 +1826,6 @@ textarea {
 
 .code-action {
   color: var(--text_color_disabled);
-  font-size: 11px;
 }
 
 .code-action:hover {
@@ -1813,6 +1858,70 @@ textarea {
 .typing {
   color: var(--text_color_tertiary);
   font-style: italic;
+}
+
+/* Индикатор работы ассистента: три пульсирующие точки и подпись состояния.
+   Пока генерация идёт, он виден внизу сообщения — иначе ответ «висит» без
+   признаков жизни, особенно когда модель думает или вызывает инструмент. */
+.msg-activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 2px;
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.msg-activity-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.msg-activity-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius_circle);
+  background: currentColor;
+  animation: activity-dot 1.1s ease-in-out infinite;
+}
+
+.msg-activity-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.msg-activity-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes activity-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+
+  35% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+/* Подпись инструмента в работе мягко пульсирует, пока не придёт итог. */
+.tool-state.is-running,
+.tool-group-state.is-running {
+  animation: activity-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes activity-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 /* Пустой сегмент (например, между двумя вызовами инструментов) не должен
@@ -1892,13 +2001,10 @@ textarea {
 
 /* ── размышления модели ─────────────────────────────────────────────────── */
 
+/* Размышления — без плашки: сворачиваемый блок на фоне ленты, не «пузырь».
+   Раньше был фон и левая обводка, из-за них текст тонул в подложке. */
 .reasoning {
-  margin-bottom: 6px;
-  padding: 4px 8px;
-  border-left: 2px solid var(--separator_color);
-  border-radius: var(--radius_sm);
-  background: var(--sunken_background);
-  color: var(--text_color_tertiary);
+  margin-bottom: 4px;
   font-size: 11px;
 }
 
@@ -1906,6 +2012,10 @@ textarea {
   display: list-item;
   cursor: pointer;
   color: var(--text_color_disabled);
+}
+
+.reasoning-summary:hover {
+  color: var(--text_color);
 }
 
 /* Счётчик шагов: по нему видно, что размышления собраны из нескольких врезок. */
@@ -1918,13 +2028,17 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
+/* Читаемый тон в обеих схемах: `--text_color_tertiary` в светлой теме
+   (26 % чёрного) почти не виден, поэтому берём `--text_color_disabled`
+   (70 % белого / 50 % чёрного) — это вторичный, но различимый текст. */
 .reasoning-text {
   max-height: 180px;
-  margin-top: 4px;
+  margin-top: 3px;
   overflow: auto;
   font-family: var(--font_mono);
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.5;
+  color: var(--text_color_disabled);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1951,7 +2065,6 @@ textarea {
 
 .msg-actions .link-btn {
   color: var(--text_color_disabled);
-  font-size: 11px;
 }
 
 .msg-actions .link-btn:hover {
@@ -2121,12 +2234,14 @@ textarea {
   color: var(--git_added);
 }
 
-/* Кнопка «к последнему сообщению» в правом нижнем углу ленты. */
+/* Кнопка «к последнему сообщению» в правом нижнем углу ленты. Крепится к футеру
+   и висит НАД композером: фиксированный отступ от низа панели не знал о высоте
+   поля ввода и при нескольких строках кнопка ложилась прямо на него. */
 .chat-jump {
   position: absolute;
   right: 14px;
-  bottom: 118px;
-  z-index: 1;
+  bottom: calc(100% + 8px);
+  z-index: 3;
   display: grid;
   place-items: center;
   width: 28px;
@@ -2223,20 +2338,22 @@ textarea {
 /* ── вызовы инструментов ────────────────────────────────────────────────── */
 
 /* Цепочка вызовов — одна строка в ленте. Строки живут внутри, под раскрытием. */
+/* Действия агента — лента (timeline): вертикальная линия слева, на ней узел
+   с иконкой вызова. Рамку и плашки убрали: строку держит узел, а не коробка,
+   поэтому лента шагов читается как ход работы, а не как стопка карточек.
+   Отступы сжаты — шаг агента занимает минимум места. */
 .tool-group {
-  overflow: hidden;
-  border: 1px solid var(--separator_color);
-  border-radius: var(--radius_sm);
-  background: var(--editor_background);
   font-size: var(--font_labels_size);
+  color: var(--text_color_tertiary);
 }
 
 .tool-group-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 2px 4px;
+  border-radius: var(--radius_sm);
   color: var(--text_color_tertiary);
   text-align: left;
 }
@@ -2267,41 +2384,68 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
+/* Тело ленты: слева идёт линия, строки сдвинуты под неё. */
 .tool-group-body {
-  border-top: 1px solid var(--separator_color);
+  position: relative;
+  margin-top: 1px;
+  padding-left: 20px;
 }
 
-/* Строка внутри группы — без своей рамки: разделители только между строками. */
-.tool-group-body .tool-card {
+.tool-group-body::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 2px;
+  bottom: 2px;
+  width: 1px;
+  background: var(--separator_color);
+}
+
+/* Строка ленты — без рамки и фона; разделители между строками тоже убраны. */
+.tool-group-body .tool-card,
+.tool-card {
   border: 0;
   border-radius: 0;
   background: none;
-}
-
-.tool-group-body .tool-card + .tool-card {
-  border-top: 1px solid var(--separator_color);
-}
-
-.tool-card {
-  border: 1px solid var(--separator_color);
-  border-radius: var(--radius_sm);
-  background: var(--editor_background);
   font-size: var(--font_labels_size);
 }
 
 /* Строка целиком — кнопка: подробности открываются кликом по любому её месту. */
 .tool-head {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
-  padding: 6px 8px;
+  padding: 3px 6px;
+  border-radius: var(--radius_sm);
   color: var(--text_color_tertiary);
   text-align: left;
 }
 
 .tool-head:hover {
   background: var(--element_background_hover);
+}
+
+/* Узел ленты: иконка вызова садится на линию. Фон панели перекрывает линию
+   под значком, поэтому узел читается точкой на рельсе. Берём `:first-child` —
+   последний значок строки это шеврон, его трогать нельзя. */
+.tool-group-body .tool-head > .icon:first-child {
+  position: absolute;
+  top: 50%;
+  left: -20px;
+  box-sizing: border-box;
+  width: 17px;
+  height: 17px;
+  padding: 3px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: var(--element_background_2);
+  color: var(--text_color_disabled);
+}
+
+.tool-failed .tool-head > .icon:first-child {
+  color: var(--text_color_error);
 }
 
 .tool-name {
@@ -2351,8 +2495,7 @@ textarea {
 
 /* Подробности инструмента — только по запросу: в ленте нужна одна строка. */
 .tool-panel {
-  padding: 6px 8px;
-  border-top: 1px solid var(--separator_color);
+  padding: 2px 6px 6px;
   color: var(--text_color_tertiary);
 }
 
@@ -2366,7 +2509,7 @@ textarea {
   overflow: auto;
   font-family: var(--font_mono);
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -3770,13 +3913,52 @@ textarea {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px 2px;
+  padding: 6px 8px 2px;
   color: var(--text_color_tertiary);
 }
 
 .sc-group-count {
-  margin-left: auto;
   font-family: var(--font_mono);
+}
+
+/* Массовые действия группы: у того же правого края, что и строки файлов. */
+.sc-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.sc-group-action {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--text_color_tertiary);
+}
+
+.sc-group-action:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Поле имени новой ветки: та же левая линия 8px, что и у остальных блоков. */
+.sc-branch-create {
+  flex: 0 0 auto;
+  padding: 0 8px 6px;
+}
+
+.sc-branch-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--focus_ring_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+}
+
+.sc-branch-input:focus {
+  outline: none;
 }
 
 .sc-row {
@@ -3786,7 +3968,7 @@ textarea {
   width: calc(100% - 8px);
   height: calc(24px * var(--density));
   margin: 0 4px;
-  padding: 0 6px 0 10px;
+  padding: 0 4px;
   border-radius: calc(var(--radius_sm) - 3px);
   color: var(--text_color_disabled);
   text-align: left;
@@ -3823,6 +4005,27 @@ textarea {
 .sc-row-action:hover {
   background: var(--element_background_hover);
   color: var(--text_color);
+}
+
+/* ── git-менеджер в поповере статусбара ─────────────────────────────────── */
+
+/* Тот же менеджер, что и панель изменений, но во всплывающей рамке у кнопки
+   ветки: ограничиваем ширину и высоту списка, чтобы попап не разрастался. */
+.popover-git {
+  padding: 6px 0;
+}
+
+.popover-git .source-control {
+  width: 340px;
+  height: auto;
+}
+
+.popover-git .sc-list {
+  max-height: 320px;
+}
+
+.popover-git .sc-message {
+  min-height: 48px;
 }
 
 /* ── чат в области редактора ────────────────────────────────────────────── */

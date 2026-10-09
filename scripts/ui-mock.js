@@ -266,6 +266,8 @@ module.exports = [
       exclude: [],
     },
     run: { pythonPath: '', packageManager: 'auto', saveBeforeRun: true },
+    // Языковые серверы: как main — секция есть всегда, по умолчанию выключена.
+    lsp: { enabled: false, servers: [] },
     // «Системная» — чтобы схему в проверке задавал Playwright (`emulateMedia`).
     appearance: { theme: 'system' },
     // Усилие размышления: по умолчанию не отправляется (см. shared/providers.ts).
@@ -304,6 +306,8 @@ module.exports = [
   /* ── методы ───────────────────────────────────────────────────────────── */
 
   const sessions = new Map();
+  // Сессии проектов: как main, по корню рабочей папки.
+  const workspaceSessions = new Map();
   // Беседы чата: мок держит их в памяти по корню проекта — смена папки и
   // обратная загрузка работают, а перезагрузка страницы их, как и в жизни, теряет.
   const savedChats = new Map();
@@ -354,6 +358,18 @@ module.exports = [
 
     'workspace.current': () => ({ root: currentRoot }),
 
+    'session.load': (params) =>
+      workspaceSessions.get(params.root) ?? {
+        tabs: [],
+        expanded: [],
+        dockVisible: false,
+        sidebarVisible: true,
+        rightVisible: true,
+      },
+    'session.save': (params) => {
+      workspaceSessions.set(params.root, params.state);
+    },
+
     'app.recentProjects': () => recent.map((item) => ({ ...item })),
     'app.forgetProject': (params) => {
       const index = recent.findIndex((item) => item.path === params.path);
@@ -381,12 +397,45 @@ module.exports = [
       };
     },
     'workspace.readDir': (params) => entriesOf(params.path),
+    // Как main: замена по всем файлам проекта, возвращает изменённые пути.
+    'workspace.replace': (params) => {
+      const escaped = params.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const source = params.isRegex ? params.query : escaped;
+      const flags = params.caseSensitive ? 'g' : 'gi';
+      let pattern;
+      try {
+        pattern = new RegExp(source, flags);
+      } catch {
+        return { files: [], replaced: 0 };
+      }
+      const files = [];
+      let replaced = 0;
+      for (const [full, text] of FILES) {
+        if (!full.startsWith(`${ROOT}/`)) continue;
+        const hits = (text.match(pattern) ?? []).length;
+        if (hits === 0) continue;
+        FILES.set(full, text.replace(pattern, params.replacement));
+        files.push(full);
+        replaced += hits;
+        push('workspace:changed', { root: currentRoot, path: full });
+      }
+      return { files, replaced };
+    },
+    // Как main: относительные (POSIX) пути всех файлов — для быстрого открывателя.
+    'workspace.listFiles': () =>
+      [...FILES.keys()]
+        .filter((full) => full.startsWith(`${ROOT}/`))
+        .map((full) => full.slice(ROOT.length + 1))
+        .sort(),
     'workspace.readFile': (params) => ({
       text: FILES.get(params.path) ?? '',
       mtimeMs: Date.now(),
     }),
     'workspace.writeFile': (params) => {
       FILES.set(params.path, params.text ?? '');
+      // Как main: сохранение файла — это изменение в рабочей папке, о нём
+      // узнаёт и дерево, и открытый документ (перечитывает renderer).
+      push('workspace:changed', { root: currentRoot, path: params.path });
       return { mtimeMs: Date.now() };
     },
     // Как настоящая ФС: несуществующий путь — ошибка. Иначе определение
@@ -497,6 +546,7 @@ module.exports = [
       Object.assign(settings.explorer, params.explorer ?? {});
       Object.assign(settings.run, params.run ?? {});
       Object.assign(settings.appearance, params.appearance ?? {});
+      Object.assign(settings.lsp, params.lsp ?? {});
 
       // Провайдеров добавляем и убираем так же, как это делает SettingsStore.
       if (provider) {
@@ -539,6 +589,11 @@ module.exports = [
     'lsp.close': () => undefined,
     'lsp.restart': () => ({ running: [] }),
     'lsp.status': () => ({ running: [] }),
+    // Как main: «нашлись» только pylsp и typescript-language-server.
+    'lsp.detect': () => [
+      { language: 'python', command: 'pylsp', args: [], enabled: true },
+      { language: 'typescript', command: 'typescript-language-server', args: ['--stdio'], enabled: true },
+    ],
     // Проверка подключения: два понятных исхода вместо исключения.
     'ai.test': (params) => {
       if (/bad|invalid/i.test(params.baseUrl)) {

@@ -27,7 +27,12 @@ interface ChatCompletionChunk {
     };
     finish_reason?: string | null;
   }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    /** OpenAI кладёт сюда попадание в кеш промпта — это оплаченные дешевле токены. */
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
 }
 
 /**
@@ -172,9 +177,11 @@ export class OpenAiCompatibleProvider implements AiProvider {
 
         if (choice?.finish_reason) finishReason = choice.finish_reason;
         if (chunk.usage) {
+          const cached = chunk.usage.prompt_tokens_details?.cached_tokens;
           usage = {
             promptTokens: chunk.usage.prompt_tokens,
             completionTokens: chunk.usage.completion_tokens,
+            ...(cached !== undefined && cached > 0 ? { cachedTokens: cached } : {}),
           };
         }
       }

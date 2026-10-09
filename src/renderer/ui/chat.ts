@@ -36,8 +36,9 @@ import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, svgIcon } from './dom';
 import { createSelect } from './select';
 import { createSessionInfo, createUsageRing, contextUsage, type SessionInfoData } from './session-info';
-import { createToolFeed, type ToolCardView } from './chat-tools';
+import { createToolFeed, toolLabel, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
+import { countLines, fileWord, formatBytes, plural, snippetFor, titleFrom } from './chat-text';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
 
@@ -219,7 +220,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     h(
       'div',
       { class: 'changes-actions' },
-      h('button', { class: 'btn btn-small btn-primary', type: 'button', onClick: () => void saveTouched() }, 'Сохранить'),
+      // Правки уходят на диск сразу (см. applyAgentEdits), поэтому сохранять
+      // вручную нечего — остаётся только откат к состоянию до правок.
       h('button', { class: 'btn btn-small', type: 'button', onClick: () => void revertTouched() }, 'Отменить'),
     ),
     changesFiles,
@@ -297,13 +299,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /* ── изображения ───────────────────────────────────────────────────────── */
-
-  /** Размер по-человечески: «2.4 МБ» вместо «2516582». */
-  function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} Б`;
-    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
-    return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
-  }
 
   /** Файл из буфера или перетаскивания — в data-URL средствами браузера. */
   function readAsDataUrl(file: File): Promise<string | null> {
@@ -836,11 +831,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const matches: Array<{ session: ChatSession; snippet: string }> = [];
     for (const session of sessions) {
       for (const message of session.history) {
-        const text = message.content ?? '';
-        const at = text.toLowerCase().indexOf(query);
-        if (at < 0) continue;
-        const start = Math.max(0, at - 24);
-        const snippet = text.slice(start, at + query.length + 48).replace(/\s+/g, ' ').trim();
+        const snippet = snippetFor(message.content ?? '', query);
+        if (snippet === null) continue;
         matches.push({ session, snippet });
         break; // одна строка на беседу — список читается легче
       }
@@ -886,13 +878,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       toggleSearch();
     }
   });
-
-  /** Заголовок вкладки — по первому вопросу: в списке видно, о чём беседа. */
-  function titleFrom(text: string): string {
-    const flat = text.replace(/\s+/g, ' ').trim();
-    if (!flat) return 'Новая беседа';
-    return flat.length > 24 ? `${flat.slice(0, 23)}…` : flat;
-  }
 
   /**
    * Контекстное меню вкладки беседы: перенос в окно редактора и закрытие.
@@ -1484,13 +1469,20 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     // Файловые операции: они уже на диске, но человеку важно видеть и их.
     for (const file of files) {
-      const label = file.kind === 'created' ? 'создан' : file.kind === 'deleted' ? 'удалён' : 'перенос';
+      const label =
+        file.kind === 'created'
+          ? 'создан'
+          : file.kind === 'deleted'
+            ? 'удалён'
+            : file.kind === 'modified'
+              ? 'заменено'
+              : 'перенос';
       const title = file.from ? `${file.from} → ${file.path}` : file.path;
       changesFiles.appendChild(
         h(
           'button',
           { class: 'chip', type: 'button', title, onClick: () => deps.editors.reveal(file.path, 1, 1) },
-          svgIcon(file.kind === 'deleted' ? 'trash' : file.kind === 'moved' ? 'file' : 'filePlus', 12),
+          svgIcon(file.kind === 'deleted' ? 'trash' : file.kind === 'created' ? 'filePlus' : 'file', 12),
           h('span', { class: 'chip-name' }, basename(file.path)),
           h('span', { class: `chip-kind chip-kind-${file.kind}` }, label),
         ),
@@ -1501,41 +1493,21 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /**
-   * Записать правки агента на диск, оставив список изменений на месте: файловый
-   * менеджер и внешние инструменты должны видеть файл, но человек — что изменилось.
+   * Записать документы на диск. Правки агента ложатся в файл сразу: дерево
+   * файлов, git и внешние инструменты работают с диском и без этого не видят
+   * изменений. Список правок при этом остаётся — по нему можно откатиться.
    */
-  async function persistDocuments(target: ChatSession): Promise<void> {
-    for (const path of target.touched.keys()) {
+  async function persistPaths(paths: Iterable<string>): Promise<void> {
+    for (const path of paths) {
       const document = deps.documents.get(path);
       if (!document?.dirty) continue;
       try {
         await deps.rpc.request('workspace.writeFile', { path, text: document.value });
         document.markSaved();
       } catch {
-        // не записалось — файл останется «грязным», следующий «Сохранить» повторит
+        // не записалось — файл останется «грязным», следующая правка повторит
       }
     }
-  }
-
-  /** «Сохранить» завершает сессию правок: файлы уходят на диск, список очищается. */
-  async function saveTouched(target: ChatSession = active()): Promise<void> {
-    const touched = target.touched;
-    let saved = 0;
-    for (const path of touched.keys()) {
-      const document = deps.documents.get(path);
-      if (!document?.dirty) continue;
-      try {
-        await deps.rpc.request('workspace.writeFile', { path, text: document.value });
-        document.markSaved();
-        saved += 1;
-      } catch (error) {
-        showToast(error instanceof Error ? error.message : String(error), 'error');
-      }
-    }
-    touched.clear();
-    target.files = [];
-    renderChanges();
-    showToast(saved > 0 ? `Сохранено файлов: ${saved}` : 'Нечего сохранять');
   }
 
   /** «Отменить» возвращает документы к тому, какими они были до правок агента. */
@@ -1598,6 +1570,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     const result = await deps.edits.applyFileEdits(fileEdits, 'programmatic');
+    // Правки лежат на диске, поэтому и откат должен до него дойти: иначе файл
+    // останется версией агента, а редактор покажет прежний текст.
+    await persistPaths(fileEdits.map((file) => file.path));
     const failed = result.failed.length;
     showToast(
       failed > 0
@@ -1608,6 +1583,40 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       failed > 0 ? 'error' : 'info',
     );
   }
+
+  // Композер и всё, что под лентой. Кнопка «к последнему сообщению» живёт здесь
+  // же и позиционируется от футера: иначе фиксированный отступ при высоком
+  // поле ввода оставлял бы кнопку поверх него.
+  const footer = h(
+    'div',
+    { class: 'chat-footer' },
+    changesBar,
+    attachmentChips,
+    h(
+      'div',
+      { class: 'composer-box' },
+      input,
+      h(
+        'div',
+        { class: 'composer-toolbar' },
+        h(
+          'div',
+          { class: 'composer-group' },
+          contextButton,
+          modeSelect.element,
+          modelButton,
+          effortField,
+        ),
+        h('div', { class: 'composer-group' }, actionButton),
+      ),
+      // Информация о сессии — индикатор заполнения контекста в правом нижнем углу:
+      // он всегда перед глазами и не занимает места в шапке.
+      h('div', { class: 'composer-status' }, modeBadge, contextRing.element),
+    ),
+    sessionInfo.element,
+    menu,
+  );
+  footer.appendChild(jumpButton);
 
   const element = h(
     'div',
@@ -1620,36 +1629,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     ),
     searchBar,
     body,
-    jumpButton,
-    h(
-      'div',
-      { class: 'chat-footer' },
-      changesBar,
-      attachmentChips,
-      h(
-        'div',
-        { class: 'composer-box' },
-        input,
-        h(
-          'div',
-          { class: 'composer-toolbar' },
-          h(
-            'div',
-            { class: 'composer-group' },
-            contextButton,
-            modeSelect.element,
-            modelButton,
-            effortField,
-          ),
-          h('div', { class: 'composer-group' }, actionButton),
-        ),
-        // Информация о сессии — индикатор заполнения контекста в правом нижнем углу:
-        // он всегда перед глазами и не занимает места в шапке.
-        h('div', { class: 'composer-status' }, modeBadge, contextRing.element),
-      ),
-      sessionInfo.element,
-      menu,
-    ),
+    footer,
   );
 
   // Перетаскивание изображения на панель чата — тот же путь, что вставка из буфера.
@@ -1898,6 +1878,35 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     await streamReply(session, provider.id, model, []);
   }
 
+  /**
+   * Индикатор работы ассистента. Живёт внизу сообщения всю генерацию: пока модель
+   * думает или выполняется инструмент, в ленте видно движение — иначе ответ «висит»
+   * без единого признака жизни и кажется, что приложение зависло.
+   */
+  function createActivity(): {
+    element: HTMLElement;
+    state(label: string): void;
+    hide(): void;
+    dispose(): void;
+  } {
+    const label = h('span', { class: 'msg-activity-label' });
+    const dots = h('span', { class: 'msg-activity-dots' }, h('i', {}), h('i', {}), h('i', {}));
+    const element = h('div', { class: 'msg-activity', hidden: true }, dots, label);
+    return {
+      element,
+      state(text: string) {
+        label.textContent = text;
+        element.hidden = false;
+      },
+      hide() {
+        element.hidden = true;
+      },
+      dispose() {
+        element.remove();
+      },
+    };
+  }
+
   async function send(raw: string): Promise<void> {
     const text = raw.trim();
     if (!text || busy) return;
@@ -1956,8 +1965,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // текст», поэтому внутри одного сообщения живёт несколько текстовых сегментов.
     const messageEl = h('div', { class: 'msg msg-assistant' });
     session.thread.appendChild(messageEl);
-    let segment = h('div', { class: 'msg-body' }, h('span', { class: 'typing' }, 'думает…'));
+    let segment = h('div', { class: 'msg-body' });
     messageEl.appendChild(segment);
+    // Индикатор работы держим внизу сообщения: новые сегменты вставляем перед ним.
+    const activity = createActivity();
+    messageEl.appendChild(activity.element);
+    activity.state('думает…');
     // Подряд идущие вызовы инструментов живут одной группой — см. createToolFeed.
     const tools = createToolFeed(messageEl);
     const toolCards = new Map<string, ToolCardView>();
@@ -2092,15 +2105,18 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           (event, payload) => {
             if (event === ChatStreamEvent.Reasoning) {
               pushReasoning((payload as ChatReasoningPayload).text);
+              activity.state('размышляет…');
               return;
             }
             if (event === ChatStreamEvent.Plan) {
               pushPlan((payload as ChatPlanPayload).steps);
+              activity.state('строит план…');
               return;
             }
             if (event === ChatStreamEvent.Delta) {
               cancelFrame();
               collapseReasoning();
+              activity.hide();
               // Пошёл текст ответа — цепочка вызовов закончилась.
               tools.seal();
               const now = performance.now();
@@ -2121,14 +2137,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
               // следующая врезка продолжится в том же спойлере (см. pushReasoning).
               reasoningOpen = false;
               toolCards.set(call.id, tools.add(call));
+              activity.state(`выполняю: ${toolLabel(call.name)}`);
               segment = h('div', { class: 'msg-body' });
-              messageEl.appendChild(segment);
+              messageEl.insertBefore(segment, activity.element);
               scrollToEnd(session);
               return;
             }
             if (event === ChatStreamEvent.ToolResult) {
               const result = payload as ChatToolResultPayload;
               toolCards.get(result.id)?.finish(result);
+              activity.state('думает…');
               // Создание, удаление и перенос не идут через документы: панель
               // изменений узнаёт о них из результата инструмента.
               if (result.ok && result.changes?.length) {
@@ -2171,7 +2189,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         session.history.push({ role: 'user', content: CONTINUE_PROMPT });
         // Продолжение — часть ТОГО ЖЕ ответа: новый сегмент в том же пузыре.
         segment = h('div', { class: 'msg-body' });
-        messageEl.appendChild(segment);
+        messageEl.insertBefore(segment, activity.element);
         streamBuffer = '';
         reasoningOpen = false;
         scrollToEnd(session);
@@ -2213,11 +2231,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         showToast('Не удалось получить ответ модели', 'error');
       }
     } finally {
+      activity.dispose();
       streamingSession = null;
       setBusy(false, session);
-      // Автопилот — полный доступ: правки уходят на диск сами, иначе дерево
-      // файлов и внешние инструменты их не увидят до ручного «Сохранить».
-      if (autoApprove && session.touched.size > 0) await persistDocuments(session);
+      // Правки уже на диске: их записал applyAgentEdits сразу после применения.
+      // Здесь остаётся только подстраховка — добить то, что не записалось.
+      if (session.touched.size > 0) await persistPaths(session.touched.keys());
       renderTabs();
       syncSessionInfo();
       scheduleSave();
@@ -2531,6 +2550,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     const result = await deps.edits.applyFileEdits(selected, 'programmatic');
+    // Сразу на диск, в любом режиме: правки должны быть видны дереву файлов, git
+    // и внешним инструментам, а не ждать ручного «Сохранить».
+    await persistPaths(result.reports.map((report) => report.path));
 
     for (const report of result.reports) {
       const { added, removed } = countLines(selected, report.path);
@@ -2618,35 +2640,6 @@ interface EditPreviewFile {
   hunks: Array<{ label: string; removed: string[]; added: string[] }>;
   /** Сколько правок не поместилось в предпросмотр. */
   extra?: number;
-}
-
-/** Русская форма слова для числа: `plural(2, 'файл', 'файла', 'файлов')`. */
-function plural(count: number, one: string, few: string, many: string): string {
-  const mod100 = count % 100;
-  const mod10 = count % 10;
-  if (mod100 >= 11 && mod100 <= 14) return many;
-  if (mod10 === 1) return one;
-  if (mod10 >= 2 && mod10 <= 4) return few;
-  return many;
-}
-
-/** Русская форма слова «файл» для числа. */
-function fileWord(count: number): string {
-  return plural(count, 'файл', 'файла', 'файлов');
-}
-
-/** Сколько строк добавила и убрала пачка правок — для сводки «+53 −4». */
-function countLines(edits: readonly FileEdit[], target: string): { added: number; removed: number } {
-  const file = edits.find((item) => item.path === target);
-  if (!file) return { added: 0, removed: 0 };
-
-  let added = 0;
-  let removed = 0;
-  for (const edit of file.edits) {
-    removed += Math.max(edit.endLine - edit.startLine + 1, 0);
-    added += edit.newText.length === 0 ? 0 : edit.newText.replace(/\n$/, '').split('\n').length;
-  }
-  return { added, removed };
 }
 
 /* Карточки вызовов инструментов и лента действий живут в `chat-tools.ts`. */

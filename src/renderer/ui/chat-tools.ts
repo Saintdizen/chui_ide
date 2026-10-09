@@ -14,9 +14,12 @@ import { basename, h, svgIcon, type IconName } from './dom';
 const TOOL_LABELS: Record<string, string> = {
   list_dir: 'Просмотр папки',
   read_file: 'Чтение файла',
+  read_files: 'Чтение файлов',
   search: 'Поиск по проекту',
+  find_files: 'Поиск файлов',
   get_diagnostics: 'Диагностика',
   apply_edit: 'Правка файлов',
+  replace_in_files: 'Замена по проекту',
   run_terminal: 'Команда в терминале',
   create_file: 'Создание файла',
   delete_file: 'Удаление',
@@ -24,6 +27,7 @@ const TOOL_LABELS: Record<string, string> = {
   update_plan: 'План',
   git_status: 'Состояние git',
   git_diff: 'Diff git',
+  git_log: 'История git',
   open_file: 'Открытие файла',
   terminal_list: 'Список терминалов',
   terminal_start: 'Запуск в терминале',
@@ -36,9 +40,12 @@ const TOOL_LABELS: Record<string, string> = {
 const TOOL_ICONS: Record<string, IconName> = {
   list_dir: 'folder',
   read_file: 'file',
+  read_files: 'file',
   search: 'search',
+  find_files: 'folder',
   get_diagnostics: 'warning',
   apply_edit: 'wrench',
+  replace_in_files: 'refresh',
   run_terminal: 'terminal',
   create_file: 'filePlus',
   delete_file: 'trash',
@@ -46,6 +53,7 @@ const TOOL_ICONS: Record<string, IconName> = {
   update_plan: 'command',
   git_status: 'branch',
   git_diff: 'branch',
+  git_log: 'command',
   open_file: 'file',
   terminal_list: 'terminal',
   terminal_start: 'terminal',
@@ -54,7 +62,7 @@ const TOOL_ICONS: Record<string, IconName> = {
   terminal_stop: 'terminal',
 };
 
-function toolLabel(name: string): string {
+export function toolLabel(name: string): string {
   return TOOL_LABELS[name] ?? name;
 }
 
@@ -111,14 +119,15 @@ function toolDetailLanguage(call: ChatToolStartPayload): string {
   }
 }
 
-/** Состояние строки вызова: пока идёт — «выполняется…», потом итог. */
+/** Состояние строки вызова: пока идёт — «выполняется» (класс даёт пульсацию), потом итог. */
 function toolStateElement(): HTMLElement {
-  return h('span', { class: 'tool-state' }, 'выполняется…');
+  return h('span', { class: 'tool-state is-running' }, 'выполняется');
 }
 
 function setToolState(element: HTMLElement, ok: boolean): void {
   element.textContent = ok ? 'готово' : 'ошибка';
   element.classList.toggle('is-fail', !ok);
+  element.classList.remove('is-running');
 }
 
 /** Одна группа вызовов: шапка со сводкой и строки под раскрытием. */
@@ -138,7 +147,7 @@ function createToolGroup(container: HTMLElement): ToolGroupView {
 
   const title = h('span', { class: 'tool-group-title' }, 'Действия');
   const tools = h('span', { class: 'tool-group-tools' });
-  const state = h('span', { class: 'tool-group-state' }, 'выполняется…');
+  const state = h('span', { class: 'tool-group-state is-running' }, 'выполняется');
   const body = h('div', { class: 'tool-group-body' });
   const chevron = svgIcon('chevronDown', 12);
   chevron.classList.add('tool-chevron');
@@ -177,8 +186,8 @@ function createToolGroup(container: HTMLElement): ToolGroupView {
     tools.textContent = names.length > 2 ? `${brief} и ещё ${names.length - 2}` : brief;
 
     if (pending > 0) {
-      state.textContent = 'выполняется…';
-      state.className = 'tool-group-state';
+      state.textContent = 'выполняется';
+      state.className = 'tool-group-state is-running';
       return;
     }
 

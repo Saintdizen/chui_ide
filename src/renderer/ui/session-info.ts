@@ -242,7 +242,10 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
     const completion = data.usage?.completionTokens;
     if (real !== undefined || completion !== undefined || data.speed !== undefined) {
       const parts: string[] = [];
-      if (real !== undefined) parts.push(`запрос ${formatTokens(real)}`);
+      const cached = data.usage?.cachedTokens;
+      if (real !== undefined) {
+        parts.push(`запрос ${formatTokens(real)}${cached ? ` (кеш ${formatTokens(cached)})` : ''}`);
+      }
       if (completion !== undefined) parts.push(`ответ ${formatTokens(completion)}`);
       // Стоимость — только когда модель есть в таблице цен: иначе это гадание.
       const pricing = modelPricing(data.model);

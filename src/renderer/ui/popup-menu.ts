@@ -154,7 +154,9 @@ function closeLevelsAbove(index: number): void {
 function highlight(levelIndex: number, itemIndex: number): void {
   const level = levels[levelIndex];
   if (!level) return;
-  level.entries.forEach((entry, index) => entry.classList.toggle('is-highlighted', index === itemIndex));
+  level.entries.forEach((entry, index) => {
+    entry.classList.toggle('is-highlighted', index === itemIndex);
+  });
 }
 
 function highlighted(levelIndex: number): number {

@@ -671,6 +671,28 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       }
     });
 
+    // Поиск установленных серверов: команды ищутся в PATH в main, здесь только
+    // показываем найденное и подставляем в список — автозапуска без ведома нет.
+    const detectButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Найти установленные');
+    detectButton.addEventListener('click', () => {
+      detectButton.disabled = true;
+      void deps.rpc
+        .request('lsp.detect')
+        .then((found) => {
+          if (found.length === 0) {
+            showToast('Языковые серверы в PATH не найдены', 'error');
+            return;
+          }
+          servers.value = JSON.stringify(found, null, 2);
+          void patch({ lsp: { servers: found, enabled: true } }, true);
+          showToast(`Найдено серверов: ${found.length}`);
+        })
+        .catch((error) => showToast(error instanceof Error ? error.message : String(error), 'error'))
+        .finally(() => {
+          detectButton.disabled = false;
+        });
+    });
+
     return [
       switchRow('Запускать языковые серверы', lsp.enabled, (value) => void patch({ lsp: { enabled: value } }, true)),
       h(
@@ -680,11 +702,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'Его пометки показываются в редакторе рядом с собственными.',
       ),
       field('Серверы (JSON)', servers),
+      field('Найти серверы', detectButton),
       h(
         'div',
         { class: 'field-hint' },
-        'Например: python → pylsp; typescript → typescript-language-server --stdio; rust → rust-analyzer. ' +
-          'Формат: [{"language":"python","command":"pylsp","args":[],"enabled":true}] — команда должна быть в PATH.',
+        'Кнопка проверяет PATH и подставляет найденное (pylsp/pyright, typescript-language-server, ' +
+          'rust-analyzer, gopls и другие). Запускать сервер без вашего ведома IDE не станет.',
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Вручную: [{"language":"python","command":"pylsp","args":[],"enabled":true}] — команда должна быть в PATH.',
       ),
     ];
   }

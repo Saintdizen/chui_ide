@@ -96,7 +96,9 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
     if (!popup || items.length === 0) return;
     cursor = (next + items.length) % items.length;
     const nodes = [...popup.querySelectorAll<HTMLElement>('.select-item')];
-    nodes.forEach((node, index) => node.classList.toggle('is-cursor', index === cursor));
+    nodes.forEach((node, index) => {
+      node.classList.toggle('is-cursor', index === cursor);
+    });
     nodes[cursor]?.scrollIntoView({ block: 'nearest' });
   };
 

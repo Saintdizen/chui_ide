@@ -45,8 +45,8 @@ jobs:
       - name: Установить зависимости
         run: npm ci
 
-      - name: Проверить типы
-        run: npm run typecheck
+      - name: Проверить код (типы, линт, тесты)
+        run: npm run check
 
       - name: Собрать main и renderer
         run: npm run build

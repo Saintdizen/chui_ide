@@ -8,6 +8,7 @@ import { registerIpc } from './ipc/register';
 import { LspService } from './lsp/lsp';
 import { createApplicationMenu } from './menu';
 import { registerAppScheme, serveRenderer } from './protocol';
+import { SessionStore } from './session-store';
 import { SettingsStore } from './settings';
 import { TerminalService } from './terminal/terminal';
 import { WorkspaceService } from './workspace/workspace';
@@ -87,8 +88,10 @@ if (!app.requestSingleInstanceLock()) {
     const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
     // Языковые серверы — внешние процессы: настройка задаёт команду, main держит их жизненный цикл.
     const lsp = new LspService(() => workspace.rootPath(), () => settings.get().lsp, (topic, payload) => pushToRenderers(topic, payload));
+    // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
+    const sessions = new SessionStore();
 
-    registerIpc({ settings, workspace, ai, terminals, git, lsp, host: new HostClient() });
+    registerIpc({ settings, workspace, ai, terminals, git, lsp, sessions, host: new HostClient() });
     serveRenderer();
     createApplicationMenu();
     // Приложение начинается со списка проектов: окно IDE откроется после

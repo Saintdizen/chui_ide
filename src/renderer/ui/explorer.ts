@@ -1,6 +1,7 @@
 import type { DirEntry, ExplorerSettings, GitChange } from '../../shared/api';
 import type { CommandRegistry } from '../core/commands';
-import type { GitModel } from '../core/git-model';
+import type { DocumentStore } from '../core/document-store';
+import type { GitInsideChange, GitModel } from '../core/git-model';
 import type { OpenEditors } from '../core/open-editors';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
@@ -38,6 +39,10 @@ export interface ExplorerView {
   /** Создание с инлайн-вводом имени: цель — выбранная папка или её родитель. */
   startCreate(entryKind: 'file' | 'directory'): void;
   startRename(path: string): void;
+  /** Раскрытые папки — сохраняются в сессии проекта. */
+  expandedPaths(): string[];
+  /** Вернуть раскрытые папки прошлой сессии: чужие пути игнорируются. */
+  restoreExpanded(paths: readonly string[]): void;
   /** Вид и поведение дерева: значки, сортировка, фильтры, клик. */
   applySettings(settings: ExplorerSettings): void;
 }
@@ -66,6 +71,8 @@ export interface ExplorerDeps {
   commands: CommandRegistry;
   openEditors: OpenEditors;
   git: GitModel;
+  /** Документы: по ним видно несохранённые правки — git их ещё не знает. */
+  documents: DocumentStore;
 }
 
 /**
@@ -273,6 +280,43 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   /* ── отрисовка ─────────────────────────────────────────────────────────── */
 
+  /**
+   * Несохранённые документы git ещё не видит: на диске файл прежний. Но агент и
+   * пользователь правят именно их, и в дереве такие файлы должны читаться как
+   * изменённые — иначе работа агента исчезает из проводника до сохранения.
+   */
+  function isDirty(path: string): boolean {
+    return deps.documents.get(path)?.dirty === true;
+  }
+
+  /** Правки внутри папки: git плюс несохранённые файлы ниже по пути. */
+  function folderInside(path: string): GitInsideChange | null {
+    const git = deps.git.changeInside(path);
+    let count = git?.count ?? 0;
+    let change: GitChange | null = git?.change ?? null;
+    const prefix = `${path}/`;
+    for (const document of deps.documents.dirty()) {
+      if (!document.path.startsWith(prefix)) continue;
+      count += 1;
+      if (change === null) change = 'modified';
+    }
+    return count > 0 && change !== null ? { count, change } : null;
+  }
+
+  /** Подпись набора несохранённых файлов: по ней решаем, нужна ли перерисовка. */
+  let dirtySignature = '';
+
+  function syncDirty(): void {
+    const next = deps.documents
+      .dirty()
+      .map((document) => document.path)
+      .sort()
+      .join('\n');
+    if (next === dirtySignature) return;
+    dirtySignature = next;
+    render();
+  }
+
   const renderRows = (container: HTMLElement, rawEntries: readonly DirEntry[], depth: number, dir: string): void => {
     const entries = visible(rawEntries, dir);
     for (const entry of entries) {
@@ -291,12 +335,17 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       if (isSelected) classes.push('is-selected');
 
       // Пометка git из дерева не ходит в репозиторий: модель уже разложила статус по путям.
-      const change = deps.git.statusOf(entry.path);
-      if (change) classes.push(`is-${change.change}`);
+      const gitChange = deps.git.statusOf(entry.path)?.change;
+      // Несохранённый документ git ещё не видит, но правка уже есть.
+      const unsaved = !isDirectory && gitChange === undefined && isDirty(entry.path);
+      const change = gitChange ?? (unsaved ? 'modified' : undefined);
+      if (change) classes.push(`is-${change}`);
 
       // У папки правок быть не может, но внутри — сколько угодно: без пометки
-      // свёрнутая папка выглядит чистой, хотя это не так.
-      const inside = isDirectory ? deps.git.changeInside(entry.path) : undefined;
+      // свёрнутая папка выглядит чистой, хотя это не так. Класс на строке красит
+      // и имя папки — весь путь к правке выделяется, а не только сам файл.
+      const inside = isDirectory ? folderInside(entry.path) : null;
+      if (inside) classes.push(`is-${inside.change}`);
       const insideTitle = inside ? `Правок внутри: ${inside.count}` : undefined;
 
       const row = h(
@@ -305,7 +354,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           class: classes.join(' '),
           type: 'button',
           draggable: 'true',
-          title: change ? `${entry.path} — ${CHANGE_TITLE[change.change]}` : (insideTitle ? `${entry.path} — ${insideTitle}` : entry.path),
+          title: change
+            ? `${entry.path} — ${unsaved ? 'не сохранён' : CHANGE_TITLE[change]}`
+            : insideTitle
+              ? `${entry.path} — ${insideTitle}`
+              : entry.path,
           dataset: { path: entry.path },
           style: { paddingLeft: `${8 + depth * options.indent}px` },
         },
@@ -318,8 +371,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             : fileIcon(entry.name)
           : svgIcon(isDirectory ? 'folder' : 'file', 15),
         h('span', { class: 'tree-name' }, entry.name),
-        change && options.gitDecorations
-          ? h('span', { class: `tree-badge is-${change.change}`, title: CHANGE_TITLE[change.change] }, CHANGE_LETTER[change.change])
+        gitChange && options.gitDecorations
+          ? h('span', { class: `tree-badge is-${gitChange}`, title: CHANGE_TITLE[gitChange] }, CHANGE_LETTER[gitChange])
+          : null,
+        unsaved && options.gitDecorations
+          ? h('span', { class: 'tree-dot is-modified', title: 'не сохранён' })
           : null,
         inside && options.folderChangeDot ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle }) : null,
       );
@@ -497,7 +553,19 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   deps.openEditors.onDidChange(render);
   // Пометки git меняются и без правок в дереве — например после коммита.
-  deps.git.onDidChange(render);
+  // Сохранение меняет и набор несохранённых, поэтому подпись обновляем тихо.
+  deps.git.onDidChange(() => {
+    dirtySignature = deps.documents
+      .dirty()
+      .map((document) => document.path)
+      .sort()
+      .join('\n');
+    render();
+  });
+  // Первая правка делает файл «грязным», откат и сохранение — снова чистым:
+  // дерево должно показывать это без ручного обновления.
+  deps.documents.onDidChange(syncDirty);
+  deps.documents.onDidClose(syncDirty);
 
   render();
 
@@ -508,6 +576,19 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     reveal,
     startCreate,
     startRename,
+    expandedPaths: () => [...expanded],
+    restoreExpanded(paths) {
+      expanded.clear();
+      const root = deps.workspace.root;
+      // Раскрываем только то, что лежит в текущем проекте: сессия другого
+      // проекта или переименованная папка не должна ломать дерево.
+      for (const item of paths) {
+        if (!root) break;
+        if (item === root || item.startsWith(`${root}/`)) expanded.add(item);
+      }
+      // Отрисовка сама подтянет корень и раскрытые уровни (см. `paint`).
+      render();
+    },
     applySettings(next) {
       options = next;
       // Плотность строк — атрибут-переключатель: CSS читает его и берёт свою высоту.

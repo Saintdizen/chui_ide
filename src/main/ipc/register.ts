@@ -21,6 +21,9 @@ import type { GitService } from '../git/git';
 import type { LspService } from '../lsp/lsp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
+import { detectAvailableCommands } from '../lsp/detect';
+import type { SessionStore } from '../session-store';
+import { matchPresets } from '../../shared/lsp-presets';
 import type { TerminalService } from '../terminal/terminal';
 import { applyBounds, openIdeWindow, windowState } from '../window';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -40,6 +43,8 @@ export interface AppDependencies {
   chatStore?: ChatStore;
   /** Языковые серверы. Необязательно: пробникам LSP не нужен. */
   lsp?: LspService;
+  /** Сессия проекта (вкладки, папки, панели). Необязательно для пробников. */
+  sessions?: SessionStore;
 }
 
 /**
@@ -120,6 +125,13 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   });
   router.register('workspace.stat', (params) => deps.workspace.stat(params.path));
   router.register('workspace.search', (params) => deps.workspace.search(params));
+  router.register('workspace.listFiles', () => deps.workspace.listFiles());
+  router.register('workspace.replace', async (params) => {
+    const result = await deps.workspace.replace(params);
+    // Замена дописала файлы на диске — обновляем и git-статус.
+    refreshGit();
+    return result;
+  });
   router.register('workspace.createFile', async (params) => {
     const path = await deps.workspace.createFile(params.path);
     refreshGit();
@@ -151,6 +163,21 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   });
 
   router.register('workspace.current', () => ({ root: deps.workspace.rootPath() }));
+
+  // Сессия проекта: renderer собирает состояние и кладёт сюда, а при следующем
+  // открытии забирает обратно. Без хранилища (пробники) отвечаем пустой сессией.
+  router.register('session.load', (params) =>
+    deps.sessions?.load(params.root) ?? {
+      tabs: [],
+      expanded: [],
+      dockVisible: false,
+      sidebarVisible: true,
+      rightVisible: true,
+    },
+  );
+  router.register('session.save', (params) => {
+    deps.sessions?.save(params.root, params.state);
+  });
 
   /* ── стартовое окно ────────────────────────────────────────────────────── */
 
@@ -261,6 +288,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   });
   router.register('lsp.restart', () => deps.lsp?.restart() ?? { running: [] });
   router.register('lsp.status', () => deps.lsp?.status() ?? { running: [] });
+  router.register('lsp.detect', async () => matchPresets(await detectAvailableCommands()));
 
   router.register('ai.setApiKey', (params) => deps.settings.setApiKey(params.providerId, params.apiKey));
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));

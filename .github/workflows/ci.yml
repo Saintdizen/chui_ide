@@ -1,0 +1,38 @@
+name: Проверки
+
+# Постоянные проверки на каждый push и pull request. Сборку дистрибутивов
+# здесь не делаем: она долгая и нужна только к релизу (см. release.yml).
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Типы, линт, тесты, сборка
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Установить зависимости
+        run: npm ci
+
+      # check = typecheck + lint + test. Одна команда — чтобы локально и в CI
+      # проверялось ровно одно и то же.
+      - name: Проверить код
+        run: npm run check
+
+      - name: Собрать main и renderer
+        run: npm run build
+
+      # Проверка правок с не-ASCII: чистый Node, без Electron и дисплея.
+      - name: Smoke — правки текста
+        run: npm run smoke:edits

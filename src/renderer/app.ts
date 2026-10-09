@@ -1,4 +1,4 @@
-import { PushTopic, type Settings } from '../shared/api';
+import { PushTopic, type SessionState, type Settings, type WorkspaceChangedPayload } from '../shared/api';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -27,6 +27,8 @@ import { createExplorer } from './ui/explorer';
 import { createLayout } from './ui/layout';
 import { logoMark } from './ui/logo';
 import { createPalette } from './ui/palette';
+import { createPopover, type PopoverView } from './ui/popover';
+import { createQuickOpen } from './ui/quick-open';
 import { closePopupMenu, isPopupOpen, showPopupMenu } from './ui/popup-menu';
 import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
@@ -52,7 +54,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const git = new GitModel(rpc, workspace);
 
   const layout = createLayout(mount);
-  const statusBar = createStatusBar(commands);
+  const statusBar = createStatusBar({ openGitManager: (anchor) => openGitManager(anchor) });
   layout.statusBarHost.appendChild(statusBar.element);
 
   let settings = await rpc.request('settings.get');
@@ -75,14 +77,38 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── панели ────────────────────────────────────────────────────────────── */
 
-  const explorer = createExplorer({ workspace, rpc, commands, openEditors, git });
+  const explorer = createExplorer({ workspace, rpc, commands, openEditors, git, documents });
   layout.sidebarBody.appendChild(explorer.element);
 
   const sourceControl = createSourceControl({ git, workspace, commands });
+
+  /**
+   * Менеджер git в поповере: тот же самописный менеджер, что и панель изменений,
+   * только всплывает у кнопки ветки в статусбаре. Создаём при первом клике —
+   * чтобы не держать вторую подписку на модель, пока попап ни разу не открывали.
+   */
+  let gitManagerPopover: PopoverView | null = null;
+
+  function openGitManager(anchor: HTMLElement): void {
+    if (!gitManagerPopover) {
+      const manager = createSourceControl({ git, workspace, commands });
+      gitManagerPopover = createPopover(manager.element, { width: 360 });
+      gitManagerPopover.element.classList.add('popover-git');
+    }
+    // Свежее состояние: репозиторий мог измениться вне приложения.
+    void git.refresh();
+    gitManagerPopover.toggle(anchor);
+  }
   const diffView = createDiffView({ createDiff: (container) => editors.createDiff(container), git });
   layout.editorHost.appendChild(diffView.element);
 
-  const searchView = createSearchView({ rpc, commands, workspace });
+  const searchView = createSearchView({
+    rpc,
+    commands,
+    workspace,
+    // Замена пишет файлы на диске: открытые вкладки перечитываем сразу.
+    reloadFile: (path) => reloadIfOpen(path),
+  });
   const terminalPanel = createTerminalPanel({ rpc, cwd: () => workspace.root, scheme: theme.resolved });
 
   const dock = createDock();
@@ -386,6 +412,94 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     hideChatTab();
   };
 
+  // Быстрый открыватель файлов (Ctrl+Shift+O): отдельный вход, тот же `openPath`,
+  // что у дерева и вкладок, поэтому открытие ведёт себя одинаково.
+  const quickOpen = createQuickOpen({ rpc, workspace, openFile: (path) => openPath(path) });
+  document.body.appendChild(quickOpen.element);
+
+  /* ── сессия рабочей папки ──────────────────────────────────────────────── */
+
+  /** Какой проект сейчас восстановлен: ключ, по которому кладётся сессия. */
+  let sessionRoot: string | null = null;
+  /** Пока идёт восстановление, сохранять нельзя — иначе затрём файл пустотой. */
+  let restoringSession = false;
+  let sessionSaveTimer = 0;
+
+  /** Текущее рабочее место: что открыто, что раскрыто, какие панели видны. */
+  const captureSession = (): SessionState => ({
+    tabs: [...openEditors.paths],
+    ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
+    expanded: explorer.expandedPaths(),
+    dockVisible: layout.dockVisible,
+    ...(dock.activeId ? { dockActive: dock.activeId } : {}),
+    sidebarVisible: layout.sidebarVisible,
+    rightVisible: layout.rightVisible,
+  });
+
+  const scheduleSessionSave = (): void => {
+    if (!sessionRoot || restoringSession) return;
+    if (sessionSaveTimer) window.clearTimeout(sessionSaveTimer);
+    sessionSaveTimer = window.setTimeout(() => {
+      sessionSaveTimer = 0;
+      if (!sessionRoot || restoringSession) return;
+      void rpc
+        .request('session.save', { root: sessionRoot, state: captureSession() })
+        .catch(() => undefined); // не сохранилось — не повод мешать работе
+    }, 400);
+  };
+
+  /**
+   * Восстановление рабочего места при открытии проекта: вкладки, раскрытые
+   * папки, видимость панелей. Файлы могли исчезнуть — открытие каждого в `try`,
+   * чтобы один пропавший не сорвал восстановление остальных.
+   */
+  const restoreSession = async (root: string): Promise<void> => {
+    if (sessionRoot === root) return;
+    sessionRoot = root;
+    restoringSession = true;
+    try {
+      openEditors.closeAll();
+      const state = await rpc.request('session.load', { root });
+
+      for (const path of state.tabs) {
+        try {
+          await openPath(path);
+        } catch {
+          // файла больше нет — просто пропускаем
+        }
+      }
+      if (state.activeTab && openEditors.has(state.activeTab)) {
+        openEditors.activate(state.activeTab);
+        const document = documents.get(state.activeTab);
+        if (document) editors.open(document);
+      }
+
+      explorer.restoreExpanded(state.expanded);
+      layout.setSidebarVisible(state.sidebarVisible);
+      layout.setRightVisible(state.rightVisible);
+      if (state.dockVisible) {
+        if (state.dockActive) dock.show(state.dockActive);
+      } else {
+        dock.hide();
+      }
+    } catch {
+      // повреждённый файл сессии не должен мешать — начинаем с чистого места
+    } finally {
+      restoringSession = false;
+    }
+    syncViewButtons();
+    scheduleSessionSave();
+  };
+
+  openEditors.onDidChange(scheduleSessionSave);
+  dock.onVisibilityChange(scheduleSessionSave);
+  // Закрытие окна: последний шанс сохранить рабочее место (без ожидания ответа).
+  window.addEventListener('beforeunload', () => {
+    if (sessionRoot && !restoringSession) {
+      void rpc.request('session.save', { root: sessionRoot, state: captureSession() }).catch(() => undefined);
+    }
+  });
+
   const saveDocument = async (document: TextDocument): Promise<void> => {
     await rpc.request('workspace.writeFile', { path: document.path, text: document.value });
     document.markSaved();
@@ -643,6 +757,51 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast(`Ветка: ${name}`);
   });
 
+  define({ id: 'git.createBranch', title: 'Создать ветку', category: 'Git' }, async (name) => {
+    const branch = typeof name === 'string' ? name.trim() : '';
+    if (!branch) return;
+    await git.checkout(branch, true);
+    showToast(`Ветка создана: ${branch}`);
+  });
+
+  define({ id: 'git.stageAll', title: 'Проиндексировать все изменения', category: 'Git' }, async () => {
+    const paths = git.unstaged.map((file) => file.path);
+    if (paths.length === 0) {
+      showToast('Нет изменений для индексации', 'error');
+      return;
+    }
+    await git.stage(paths);
+  });
+
+  define({ id: 'git.unstageAll', title: 'Убрать всё из индекса', category: 'Git' }, async () => {
+    const paths = git.staged.map((file) => file.path);
+    if (paths.length === 0) {
+      showToast('Индекс уже пуст', 'error');
+      return;
+    }
+    await git.unstage(paths);
+  });
+
+  define({ id: 'git.discardAll', title: 'Откатить все правки', category: 'Git' }, async () => {
+    const paths = git.unstaged.map((file) => file.path);
+    if (paths.length === 0) {
+      showToast('Нет правок для отката', 'error');
+      return;
+    }
+
+    // Откат необратим: спрашиваем системным диалогом, как и для одного файла.
+    const { confirmed } = await rpc.request('dialog.confirm', {
+      title: 'Откатить все правки',
+      message: 'Отменить все правки в рабочем дереве?',
+      detail: `Файлов: ${paths.length}. Изменённые вернутся к последнему коммиту, новые будут удалены. Вернуть правки будет нельзя.`,
+      confirmLabel: 'Откатить все',
+    });
+    if (!confirmed) return;
+
+    await git.discard(paths);
+    showToast('Правки откатаны');
+  });
+
   define({ id: 'view.showChanges', title: 'Показать изменения', category: 'Вид', keybinding: 'Ctrl+Shift+G' }, () => {
     dock.show('git');
   });
@@ -690,6 +849,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'palette.open', title: 'Палитра команд', category: 'Вид', keybinding: 'Ctrl+Shift+P' }, () => {
     palette.open();
+  });
+
+  define({ id: 'file.quickOpen', title: 'Быстрое открытие файла', category: 'Навигация', keybinding: 'Ctrl+Shift+O' }, () => {
+    void quickOpen.open();
   });
 
   define({ id: 'settings.open', title: 'Настройки', category: 'Настройки', keybinding: 'Ctrl+,' }, () => settingsModal.open());
@@ -802,6 +965,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncViewButtons();
   });
 
+  /**
+   * Файл изменился на диске. Открытый и не «грязный» документ перечитываем:
+   * иначе в редакторе останется старая версия — например, после правки во
+   * внешнем инструменте или в терминале. Несохранённые правки не трогаем.
+   */
+  const reloadIfOpen = async (path: string): Promise<void> => {
+    const document = documents.get(path);
+    if (!document || document.dirty) return;
+    await edits.reloadFromDisk(path).catch(() => undefined);
+  };
+
   rpc.onPush((message) => {
     switch (message.topic) {
       case PushTopic.MenuCommand: {
@@ -809,9 +983,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         if (payload?.command) void commands.execute(payload.command);
         break;
       }
-      case PushTopic.WorkspaceChanged:
+      case PushTopic.WorkspaceChanged: {
         explorer.scheduleRefresh();
+        // Открытый файл мог измениться снаружи — обновляем и его содержимое.
+        const payload = message.payload as WorkspaceChangedPayload;
+        if (payload?.path) void reloadIfOpen(payload.path);
         break;
+      }
       case PushTopic.SettingsChanged:
         applySettings(message.payload as Settings);
         break;
@@ -844,10 +1022,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncRunControl();
     refreshStatus();
   });
-  workspace.onDidChange(() => {
+  workspace.onDidChange((info) => {
     refreshStatus();
     syncEmptyState();
     void tools.refresh(workspace.root).then(() => syncRunControl());
+    // Другой проект — другое рабочее место: восстанавливаем его из сессии.
+    if (info) void restoreSession(info.root);
+    else sessionRoot = null;
   });
   editors.onCursorChange((state) => statusBar.update({ line: state.line, column: state.column }));
   rpc.onDidChangeStreaming((streaming) => statusBar.update({ ai: streaming ? 'генерация…' : 'готов' }));
@@ -864,6 +1045,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     { combo: 'Alt+1', command: 'view.showExplorer' },
     { combo: 'Alt+2', command: 'search.project' },
     { combo: 'Ctrl+Shift+P', command: 'palette.open' },
+    { combo: 'Ctrl+Shift+O', command: 'file.quickOpen' },
     { combo: 'Ctrl+,', command: 'settings.open' },
     { combo: 'Ctrl+Shift+G', command: 'view.showChanges' },
     { combo: 'Ctrl+`', command: 'view.showTerminal' },
