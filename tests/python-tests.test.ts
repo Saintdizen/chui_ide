@@ -70,8 +70,12 @@ describe('buildTestTree', () => {
     // Сначала одиночный тест, затем группа класса.
     expect(math.children.map((node) => node.label)).toEqual(['test_add', 'TestSum']);
     expect(math.children[1].children.map((node) => node.label)).toEqual(['test_sum', 'test_mul']);
-    // У класса нет своего id — запускается по своим тестам.
+
+    // У каждого узла есть селектор для запуска: ▶ у файла и класса должен запускать
+    // именно их, а не все тесты проекта (панель шлёт `id ?? null`).
+    expect(math.id).toBe('tests/test_math.py');
     expect(math.children[0].id).toBe('tests/test_math.py::test_add');
+    expect(math.children[1].id).toBe('tests/test_math.py::TestSum');
   });
 });
 

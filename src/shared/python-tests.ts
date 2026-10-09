@@ -109,7 +109,10 @@ export interface TestFolder {
   kind: 'file' | 'class' | 'test';
   /** Подпись: `test_math.py`, `TestSum`, `test_adds`. */
   label: string;
-  /** Идентификатор для запуска — только у теста и класса (у класса — его тесты). */
+  /**
+   * Селектор для запуска этого узла: у теста — его id, у класса — `файл::Класс`,
+   * у файла — его путь. Пустым id бывает только у служебных узлов.
+   */
   id?: string;
   children: TestFolder[];
 }
@@ -127,7 +130,8 @@ export function buildTestTree(tests: readonly CollectedTest[]): TestFolder[] {
   for (const test of tests) {
     let file = files.get(test.file);
     if (!file) {
-      file = { kind: 'file', label: test.file, children: [] };
+      // У файла свой id: ▶ у него запускает тесты этого файла, а не всего проекта.
+      file = { kind: 'file', label: test.file, id: test.file, children: [] };
       files.set(test.file, file);
       classes.set(test.file, new Map());
     }
@@ -140,7 +144,8 @@ export function buildTestTree(tests: readonly CollectedTest[]): TestFolder[] {
     const inFile = classes.get(test.file)!;
     let group = inFile.get(test.className);
     if (!group) {
-      group = { kind: 'class', label: test.className, children: [] };
+      // Селектор класса для pytest — файл и имя через `::`: ▶ запускает только его.
+      group = { kind: 'class', label: test.className, id: `${test.file}::${test.className}`, children: [] };
       inFile.set(test.className, group);
       file.children.push(group);
     }
