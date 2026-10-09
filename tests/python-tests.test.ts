@@ -98,8 +98,8 @@ describe('маркер результата прогона', () => {
   });
 
   it('код выхода читается из вывода', () => {
-    expect(parseResultMarker('шум\nchui-pytest-result 0\n')).toBe(0);
-    expect(parseResultMarker('chui-pytest-result 1')).toBe(1);
+    expect(parseResultMarker('шум\nchui-test-result 0\n')).toBe(0);
+    expect(parseResultMarker('chui-test-result 1')).toBe(1);
   });
 
   it('без маркера — null', () => {
@@ -107,12 +107,12 @@ describe('маркер результата прогона', () => {
   });
 
   it('ANSI-последовательности не мешают', () => {
-    expect(parseResultMarker('\u001b[32mchui-pytest-result 2\u001b[0m')).toBe(2);
+    expect(parseResultMarker('\u001b[32mchui-test-result 2\u001b[0m')).toBe(2);
   });
 
   it('эхо самой команды не принимается за результат', () => {
     // Терминал печатает и набранную команду, где после маркера стоит `$?`, а не число.
-    expect(parseResultMarker('$ python -m pytest; echo "chui-pytest-result $?"')).toBeNull();
+    expect(parseResultMarker('$ python -m pytest; echo "chui-test-result $?"')).toBeNull();
   });
 
   it('stripAnsi убирает цвет, но не текст', () => {
@@ -140,7 +140,7 @@ describe('parseCoverageReport', () => {
     'TOTAL                        25     10    60%',
     '============================== 1 failed, 1 passed in 0.03s ======================',
     '',
-    'chui-pytest-result 1',
+    'chui-test-result 1',
   ].join('\n');
 
   it('берёт итог и разбивку по файлам', () => {
@@ -195,7 +195,7 @@ describe('parseCoverageReport', () => {
   });
 
   it('без coverage-отчёта — пусто и без итога', () => {
-    const report = parseCoverageReport('2 passed in 0.01s\nchui-pytest-result 0');
+    const report = parseCoverageReport('2 passed in 0.01s\nchui-test-result 0');
     expect(report.total).toBeNull();
     expect(report.files).toEqual([]);
   });
@@ -254,7 +254,7 @@ describe('parseCoverage', () => {
     '---------------------------------------',
     'TOTAL                  10      4    60%',
     '',
-    'chui-pytest-result 0',
+    'chui-test-result 0',
   ].join('\n');
 
   it('берёт процент из строки TOTAL', () => {
@@ -262,7 +262,7 @@ describe('parseCoverage', () => {
   });
 
   it('без строки TOTAL — null (прогон без покрытия)', () => {
-    expect(parseCoverage('5 passed in 0.1s\nchui-pytest-result 0')).toBeNull();
+    expect(parseCoverage('5 passed in 0.1s\nchui-test-result 0')).toBeNull();
   });
 
   it('ANSI не мешает', () => {

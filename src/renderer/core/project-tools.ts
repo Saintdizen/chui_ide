@@ -1,4 +1,5 @@
 import type { RunSettings } from '../../shared/api';
+import { nodeTestRunnerFrom, type DeclaredNodeRunner } from '../../shared/node-tests';
 import type { RpcClient } from './rpc';
 import { Emitter } from './events';
 
@@ -34,6 +35,12 @@ export interface ProjectTools {
   hasPackageJson: boolean;
   /** Чем запускать TypeScript, если он есть в зависимостях проекта (`tsx`, `ts-node`). */
   tsRunner: string | null;
+  /**
+   * Чем запускаются тесты проекта: `vitest` или `jest` из зависимостей. null —
+   * объявленного раннера нет; годится ли встроенный `node --test`, решает тот,
+   * у кого есть карта проекта (там видно, есть ли вообще тестовые файлы).
+   */
+  testRunner: DeclaredNodeRunner | null;
 }
 
 const EMPTY: ProjectTools = {
@@ -45,6 +52,7 @@ const EMPTY: ProjectTools = {
   scripts: [],
   hasPackageJson: false,
   tsRunner: null,
+  testRunner: null,
 };
 
 /** Порядок проверки блокировок: два рядом лежащих файла — редкость, но пусть решает этот список. */
@@ -117,6 +125,7 @@ export class ProjectToolsModel {
       hasPackageJson,
       scripts: manifest.scripts,
       tsRunner: manifest.tsRunner,
+      testRunner: manifest.testRunner,
       ...python,
     });
   }
@@ -143,6 +152,7 @@ export class ProjectToolsModel {
     scripts: ProjectScript[];
     packageManager: NodePackageManager | null;
     tsRunner: string | null;
+    testRunner: DeclaredNodeRunner | null;
   }> {
     const raw = await this.readJson(`${root}/package.json`);
     const scripts: ProjectScript[] = [];
@@ -164,7 +174,7 @@ export class ProjectToolsModel {
     };
     const tsRunner = 'tsx' in dependencies ? 'npx tsx' : 'ts-node' in dependencies ? 'npx ts-node' : null;
 
-    return { scripts, packageManager, tsRunner };
+    return { scripts, packageManager, tsRunner, testRunner: nodeTestRunnerFrom(Object.keys(dependencies)) };
   }
 
   private async readJson(target: string): Promise<Record<string, unknown> | null> {

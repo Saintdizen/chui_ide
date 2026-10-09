@@ -1,6 +1,8 @@
-import { buildTestTree, parseCoverageReport, parseResultMarker, type CollectedSuite, type CoverageReport, type CoverageRow, type TestFolder } from '../../shared/python-tests';
-import { isTestFile } from '../../shared/project-scan';
 import { PushTopic, type TerminalDataPayload } from '../../shared/api';
+import { isTestFile } from '../../shared/project-scan';
+// Покрытие пока умеет только pytest: отчёт `pytest --cov` разбирается в его модуле.
+import { parseCoverageReport, type CoverageReport, type CoverageRow } from '../../shared/python-tests';
+import { buildTestTree, parseResultMarker, type TestFolder, type TestSuite } from '../../shared/test-model';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
 
@@ -8,31 +10,47 @@ import { clear, h } from './dom';
  * Панель тестов: дерево собранных тестов и запуск любого узла.
  *
  * Тестов может быть сотни, и плоский список из них бесполезен — человек ищет по
- * файлу и классу. Поэтому дерево файл → класс → тест, а запуск — по любому узлу:
- * отдельный тест, класс целиком или файл. Сбор идёт через main (`python.tests`),
- * а запуск — обычной командой в терминале: тесты должны быть видны и прерываемы.
+ * файлу и группе. Поэтому дерево файл → группа → тест, а запуск — по любому узлу:
+ * отдельный тест, группа целиком или файл. Сбор идёт через main (у Python —
+ * `python.tests`, у Node — `node.tests`), а запуск — обычной командой в терминале:
+ * тесты должны быть видны и прерываемы.
+ *
+ * Про раннер панель не знает ничего: сбор и запуск приходят снаружи (`collect` и
+ * `onRun`), поэтому и pytest, и vitest, и jest, и `node --test` ведут себя здесь
+ * одинаково. Отличается только то, умеет ли раннер покрытие — у Node его пока нет,
+ * и кнопка тогда не показывается.
  *
  * Пересобираем при открытии, по кнопке и по правке тестового файла — но не на
  * каждое нажатие и не в фоне: с задержкой и только когда панель на виду (см.
- * `notifyChange`). Иначе pytest дёргался бы на каждый символ.
+ * `notifyChange`). Иначе раннер дёргался бы на каждый символ.
  *
  * Исход прогона берём из вывода терминала (см. `resultMarkerCommand`): оболочка
- * после pytest не завершается, поэтому кода выхода из события процесса не
+ * после раннера не завершается, поэтому кода выхода из события процесса не
  * получить. Запуская узел, панель помнит, чей это прогон, и по маркеру красит
  * узел зелёным или красным.
  */
 
 export interface TestPanelDeps {
   rpc: RpcClient;
-  /** Проект не открыт — собирать нечего. */
-  root: () => string | null;
   /**
-   * Запустить тесты: селектор pytest или null — все. `report` просит дописать в
+   * Собрать тесты проекта. Раннер выбирает тот, кто создаёт панель: у Python это
+   * pytest, у Node — то, что нашлось в проекте. Ошибка сбора приходит списком
+   * `errors`, а не исключением; `null` — проект не открыт.
+   */
+  collect: () => Promise<TestSuite | null>;
+  /**
+   * Запустить тесты: селектор узла или null — все. `report` просит дописать в
    * команду печать кода выхода — панель использует его, чтобы узнать исход.
    */
   onRun: (selector: string | null, options?: { report?: boolean }) => void;
-  /** Запустить с покрытием (`pytest --cov`). */
-  onCoverage: (selector: string | null) => void;
+  /** Запустить с покрытием. Нет — кнопки покрытия в панели не будет. */
+  onCoverage?: (selector: string | null) => void;
+  /**
+   * Умеет ли текущий раннер покрытие. Спрашиваем при отрисовке, а не при создании
+   * панели: проект открывается уже после того, как панель собрана, и вид проекта
+   * на тот момент ещё неизвестен.
+   */
+  canCoverage?: () => boolean;
   /** Панель на виду: пересобирать список по правке имеет смысл только тогда. */
   isVisible: () => boolean;
   /** Пришёл отчёт покрытия — по нему редактор подсвечивает непокрытые строки. */
@@ -42,7 +60,7 @@ export interface TestPanelDeps {
 /** Исход последнего прогона узла. */
 type TestOutcome = 'running' | 'passed' | 'failed';
 /** Ключ для узла «все тесты»: у него нет собственного id в дереве. */
-const ALL_KEY = 'pytest:all';
+const ALL_KEY = '__all__';
 /** Пауза перед авто-перечитыванием: пока человек печатает, pytest не зовём. */
 const AUTO_REFRESH_DELAY = 1500;
 /** Сколько файлов покрытия показываем: список должен оставаться обозримым. */
@@ -84,7 +102,7 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   );
 
   let loading = false;
-  let suite: CollectedSuite | null = null;
+  let suite: TestSuite | null = null;
   /** Исход последнего прогона по ключу узла (id теста/класса/файла или ALL_KEY). */
   const outcomes = new Map<string, TestOutcome>();
   /** Ключ узла, прогон которого сейчас ждём по маркеру. null — ничего не ждём. */
@@ -123,15 +141,15 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
 
   /**
    * Начать прогон узла: запомнить, чей исход ждём, и попросить отчёт. Покрытие —
-   * отдельный путь: там нужен `pytest --cov`, а отчёт печатает сам pytest-cov.
+   * отдельный путь: там другая команда раннера, а отчёт печатает он же.
    */
   function run(key: string, selector: string | null, withCoverage = false): void {
     pendingKey = key;
-    pendingCoverage = withCoverage;
+    pendingCoverage = withCoverage && deps.onCoverage !== undefined;
     outcomes.set(key, 'running');
     outputTail = '';
     render();
-    if (withCoverage) deps.onCoverage(selector);
+    if (withCoverage) deps.onCoverage?.(selector);
     else deps.onRun(selector, { report: true });
   }
 
@@ -208,6 +226,10 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   function render(): void {
     clear(body);
 
+    // Покрытие умеет не каждый раннер: у Node своего отчёта пока нет, и кнопка
+    // «С покрытием» там только обещала бы работу, которой не будет.
+    coverageButton.hidden = !deps.onCoverage || deps.canCoverage?.() === false;
+
     if (loading) {
       summary.textContent = 'Собираю…';
       body.appendChild(h('div', { class: 'tests-empty' }, 'Ищу тесты…'));
@@ -223,7 +245,7 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
     if (suite.tests.length === 0) {
       summary.textContent = 'Тестов не найдено';
       if (suite.errors.length > 0) renderErrors(suite.errors);
-      else body.appendChild(h('div', { class: 'tests-empty' }, 'pytest не нашёл тестов в этом проекте.'));
+      else body.appendChild(h('div', { class: 'tests-empty' }, 'Тестов в этом проекте не нашлось.'));
       return;
     }
 
@@ -239,7 +261,11 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
             : '';
     const total = coverage?.total ?? null;
     const cover = total === null ? '' : ` · покрытие ${total}%`;
-    summary.textContent = `Тестов: ${suite.total}${suffix}${cover}`;
+    // У jest и `node --test` список — файловый: называть файлы тестами значило бы
+    // обещать имена, которых раннер не даёт.
+    const named = suite.tests.some((test) => test.name);
+    const runner = suite.runner ? ` · ${suite.runner}` : '';
+    summary.textContent = `${named ? 'Тестов' : 'Файлов'}: ${suite.total}${runner}${suffix}${cover}`;
     if (suite.errors.length > 0) renderErrors(suite.errors);
 
     for (const node of buildTestTree(suite.tests)) body.appendChild(branch(node, 0));
@@ -285,17 +311,10 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   }
 
   async function refresh(): Promise<void> {
-    const root = deps.root();
-    if (!root) {
-      suite = null;
-      render();
-      return;
-    }
-
     loading = true;
     render();
     // Ошибку сбора отдаёт сам метод (список `errors`), поэтому сбой запроса — отдельный случай.
-    suite = await deps.rpc.request('python.tests').catch(() => ({ tests: [], total: 0, errors: [] }));
+    suite = await deps.collect().catch(() => null);
     loading = false;
     render();
   }

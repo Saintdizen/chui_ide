@@ -1,6 +1,7 @@
 import { basename } from '../../shared/languages';
-import type { ProjectScan } from '../../shared/project-scan';
-import { resultMarkerCommand } from '../../shared/python-tests';
+import { nodeTestNamePattern, nodeTestRunnerLabel, parseNodeTestSelector, type NodeTestRunner } from '../../shared/node-tests';
+import { isNodeTestFile, type ProjectScan } from '../../shared/project-scan';
+import { resultMarkerCommand } from '../../shared/test-model';
 import type { ProjectTools } from './project-tools';
 import { shellQuote } from './project-tools';
 
@@ -222,6 +223,89 @@ export function pytestCoverageTarget(
   };
 }
 
+/* ── тесты Node ─────────────────────────────────────────────────────────── */
+
+/**
+ * Чем позвать бинарник проекта: у каждого менеджера свой способ, и в терминале
+ * привычнее увидеть команду своего менеджера, а не `npx` в pnpm-проекте.
+ */
+const EXEC: Record<ProjectTools['packageManager'], string> = {
+  npm: 'npx',
+  pnpm: 'pnpm exec',
+  yarn: 'yarn exec',
+  bun: 'bunx',
+};
+
+/**
+ * Как позвать раннер тестов. У vitest без `run` включается слежение: прогон из
+ * панели должен завершаться сам, иначе терминал останется занят навсегда.
+ */
+function nodeTestBase(tools: ProjectTools, runner: NodeTestRunner): string {
+  if (runner === 'node') return 'node --test';
+  return runner === 'vitest' ? `${EXEC[tools.packageManager]} vitest run` : `${EXEC[tools.packageManager]} jest`;
+}
+
+/**
+ * Одна цель Node-тестов по селектору: файл, отдельный тест или группа, а `null` —
+ * все тесты проекта. Зеркало `pytestTarget`: панель тестов и меню запуска собирают
+ * команду одним и тем же кодом, иначе две кнопки разойдутся по поведению.
+ *
+ * Имя теста уходит раннеру шаблоном: у vitest и jest это `-t`, у `node --test` —
+ * `--test-name-pattern`, и шаблон экранируется (см. `nodeTestNamePattern`).
+ */
+export function nodeTestsTarget(
+  tools: ProjectTools,
+  runner: NodeTestRunner,
+  selector: string | null,
+  options: { report?: boolean; platform?: string } = {},
+): RunTarget {
+  const { file, name } = selector ? parseNodeTestSelector(selector) : { file: null, name: null };
+  const args = [nodeTestBase(tools, runner)];
+  const pattern = name ? shellQuote(nodeTestNamePattern(name)) : null;
+  // У `node --test` шаблон имени — свой флаг, и он идёт до файла: так его понимает
+  // сам Node, и так команда читается человеком.
+  if (pattern && runner === 'node') args.push(`--test-name-pattern=${pattern}`);
+  if (file) args.push(shellQuote(file));
+  if (pattern && runner !== 'node') args.push('-t', pattern);
+
+  const base = args.join(' ');
+  const command = options.report && options.platform ? `${base}${resultMarkerCommand(options.platform)}` : base;
+  return {
+    id: selector ? `node-tests:${selector}` : 'node-tests:all',
+    label: selector ? `Тесты: ${basename(file ?? selector)}` : `Запустить тесты (${nodeTestRunnerLabel(runner)})`,
+    detail: `${nodeTestRunnerLabel(runner)} · тесты проекта`,
+    command,
+    source: 'test',
+  };
+}
+
+/**
+ * Цели тестов Node по карте проекта. «Запустить все тесты» есть всегда, когда
+ * раннер нашёлся; отдельной целью становится ещё и активный файл, если это тест —
+ * тогда не нужно искать его руками.
+ */
+export function nodeTestsRunTargets(
+  tools: ProjectTools,
+  scan: ProjectScan | null,
+  runner: NodeTestRunner | null,
+  activeRelative: string | null,
+): RunTarget[] {
+  if (!scan || !runner) return [];
+  const tests = scan.testFiles.filter(isNodeTestFile);
+  if (tests.length === 0) return [];
+
+  const targets: RunTarget[] = [nodeTestsTarget(tools, runner, null)];
+  const ordered =
+    activeRelative && tests.includes(activeRelative)
+      ? [activeRelative, ...tests.filter((file) => file !== activeRelative)]
+      : tests;
+
+  for (const file of ordered.slice(0, MAX_TEST_TARGETS)) {
+    targets.push(nodeTestsTarget(tools, runner, file));
+  }
+  return targets;
+}
+
 /**
  * Установка пакетов Node менеджером проекта: `npm install zod`.
  *
@@ -249,6 +333,7 @@ export function collectRunTargets(
   file: RunnableFile | null,
   tools: ProjectTools,
   scan: ProjectScan | null = null,
+  nodeRunner: NodeTestRunner | null = null,
 ): RunTarget[] {
   const targets: RunTarget[] = [];
   if (file) {
@@ -256,6 +341,7 @@ export function collectRunTargets(
     if (target) targets.push(target);
   }
   targets.push(...pytestRunTargets(tools, scan, file?.relative ?? null));
+  targets.push(...nodeTestsRunTargets(tools, scan, nodeRunner, file?.relative ?? null));
   targets.push(...scriptRunTargets(tools));
   return targets;
 }

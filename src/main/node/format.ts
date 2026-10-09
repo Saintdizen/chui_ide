@@ -1,10 +1,8 @@
 import { spawn } from 'node:child_process';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import type { NodeFormatResult } from '../../shared/api';
 import { nodeFormatOrder, nodeFormatPackage, type NodeFormatTool } from '../../shared/format';
-import { parseNodeManifest } from '../../shared/node-env';
-import { nodeRuntime } from './environment';
+import { resolvePackageBin } from './bin';
+import { declaredDependencyNames, nodeRuntime } from './environment';
 
 /**
  * Форматирование файла инструментом проекта: prettier или biome.
@@ -35,11 +33,11 @@ const TOOLS: Record<NodeFormatTool, FormatTool> = {
 export async function formatNode(root: string, path: string, text: string): Promise<NodeFormatResult> {
   const node = (await nodeRuntime()).command;
   const env = { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' };
-  const order = nodeFormatOrder(await declaredDependencies(root));
+  const order = nodeFormatOrder(await declaredDependencyNames(root));
 
   for (const name of order) {
     const tool = TOOLS[name];
-    const script = await toolScript(root, name);
+    const script = await resolvePackageBin(root, nodeFormatPackage(name), name);
     if (!script) continue;
     const attempt = await run(node, [script, ...tool.args(path)], root, text, env);
     // Пустой вывод при успешном коде — тоже неудача: форматировать нечего/не получилось.
@@ -47,48 +45,6 @@ export async function formatNode(root: string, path: string, text: string): Prom
   }
 
   return { text, tool: null };
-}
-
-/** Имена зависимостей из `package.json`: по ним видно, чем проект форматируется. */
-async function declaredDependencies(root: string): Promise<string[]> {
-  const text = await fs.readFile(path.join(root, 'package.json'), 'utf8').catch(() => null);
-  if (text === null) return [];
-  return parseNodeManifest(text).dependencies.map((item) => item.name);
-}
-
-/**
- * Путь к скрипту инструмента из его `package.json`.
- *
- * Так не нужно знать ни версию пакета, ни имя файла внутри: у prettier оно менялось
- * (`bin-prettier.js` → `bin/prettier.cjs`), у biome скрипт зовётся `bin/biome`. Поле
- * `bin` — единственное, что стабильно. Запускаем именно скрипт, а не шим из `.bin`:
- * на Windows это `.cmd`, и полагаться на их разрешение в оболочке незачем.
- */
-async function toolScript(root: string, tool: NodeFormatTool): Promise<string | null> {
-  const dir = path.join(root, 'node_modules', nodeFormatPackage(tool));
-  const text = await fs.readFile(path.join(dir, 'package.json'), 'utf8').catch(() => null);
-  if (text === null) return null;
-
-  let bin: unknown;
-  try {
-    bin = (JSON.parse(text) as { bin?: unknown }).bin;
-  } catch {
-    return null;
-  }
-
-  const relative =
-    typeof bin === 'string'
-      ? bin
-      : bin && typeof bin === 'object' && typeof (bin as Record<string, unknown>)[tool] === 'string'
-        ? (bin as Record<string, string>)[tool]
-        : null;
-  if (!relative) return null;
-
-  const script = path.resolve(dir, relative);
-  return fs
-    .stat(script)
-    .then((stat) => (stat.isFile() ? script : null))
-    .catch(() => null);
 }
 
 /** Результат одного запуска: получилось ли и что инструмент вернул. */

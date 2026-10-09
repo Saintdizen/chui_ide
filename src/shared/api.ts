@@ -9,6 +9,7 @@ import type { MenuRole } from './app-menu';
 import type { ApplyResult, FileEdit } from './edits';
 import type { ProjectScan } from './project-scan';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
+import type { NodeTestSuite } from './node-tests';
 import type { PythonEnvironment, PythonInterpreter } from './python-env';
 import type { InstalledPackage } from './python-packages';
 import type { CollectedSuite } from './python-tests';
@@ -1083,6 +1084,8 @@ export interface ChuiMethods {
   'node.envHealth': { params: void; result: NodeEnvironmentHealth[] };
   /** Отформатировать текст файла инструментом проекта (prettier или biome). */
   'node.format': { params: { path: string; text: string }; result: NodeFormatResult };
+  /** Список тестов проекта: `vitest list`, `jest --listTests` или файлы для `node --test`. */
+  'node.tests': { params: void; result: NodeTestSuite };
   /**
    * Какие из импортированных модулей проект не видит: для Python — интерпретатор,
    * для JS/TS — `node_modules`. Пустой ответ — либо всё на месте, либо судить

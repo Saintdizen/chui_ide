@@ -627,6 +627,8 @@ module.exports = [
     'node.packages': () => [],
     'node.envHealth': () => [],
     'node.format': (params) => ({ text: params.text ?? '', tool: null }),
+    // Тестов Node в моке нет: список пуст и раннер не найден — панель скажет об этом.
+    'node.tests': () => ({ runner: null, tests: [], total: 0, errors: [] }),
     // Проверка подключения: два понятных исхода вместо исключения.
     'ai.test': (params) => {
       if (/bad|invalid/i.test(params.baseUrl)) {

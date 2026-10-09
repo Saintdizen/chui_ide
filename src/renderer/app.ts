@@ -29,13 +29,15 @@ import {
   collectRunTargets,
   entryLine,
   nodeInstallTarget,
+  nodeTestsTarget,
   pytestCoverageTarget,
   pytestTarget,
   type RunTarget,
   type RunnableFile,
 } from './core/run-config';
-import { isTestFile, type ProjectScan } from '../shared/project-scan';
+import { isNodeTestFile, isPythonTestFile, type ProjectScan } from '../shared/project-scan';
 import { findRunnableTests } from '../shared/python-tests';
+import { detectNodeTestRunner, findRunnableNodeTests, type NodeTestRunner } from '../shared/node-tests';
 import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
 import { joinPath, separatorOf, splitPath } from '../shared/paths';
 import { ThemeService } from './core/theme-service';
@@ -242,14 +244,49 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   const terminalPanel = createTerminalPanel({ rpc, cwd: () => workspace.root, scheme: theme.resolved });
 
+  /** Карта проекта: из неё берём тесты и точку входа. Пусто, пока проект не открыт. */
+  let projectScan: ProjectScan | null = null;
+
+  /** Вид проекта: от него зависит, чем собирать и запускать тесты (pytest или Node). */
+  const isPythonProject = (): boolean => projectScan?.kind.id === 'python';
+
+  /** Язык, который исполняется Node: у него свои тесты и свои инструменты. */
+  const isNodeLanguage = (languageId: string): boolean => languageId === 'javascript' || languageId === 'typescript';
+
+  /** Раннер тестов Node: объявленный в проекте, иначе встроенный `node --test`. */
+  const nodeRunner = (): NodeTestRunner | null =>
+    detectNodeTestRunner(tools.get().testRunner, projectScan?.testFiles ?? []);
+
+  /**
+   * Цель прогона тестов панели: селектор узла, а `null` — все тесты проекта. Раннер
+   * выбираем по карте проекта: у Python это pytest, у Node — раннер проекта.
+   */
+  const testTargetFor = (selector: string | null, options: { report?: boolean } = {}): RunTarget => {
+    const node = nodeRunner();
+    if (node) return nodeTestsTarget(tools.get(), node, selector, { ...options, platform: info.platform });
+    return pytestTarget(tools.get(), selector, { ...options, platform: info.platform });
+  };
+
   // Панель тестов: список собирается при показе — правки в коде меняют его.
+  // Про раннер панель не знает: сбор и запуск выбираются здесь по виду проекта.
   const testPanel = createTestPanel({
     rpc,
-    root: () => workspace.root,
+    collect: async () => {
+      if (!workspace.root) return null;
+      // Python-проект собирает pytest, Node — свой раннер (vitest, jest или `node --test`).
+      if (isPythonProject()) {
+        const suite = await rpc.request('python.tests');
+        return { runner: 'pytest', ...suite };
+      }
+      return rpc.request('node.tests');
+    },
     // Панель просит отчёт — команда уносит в терминал и печать кода выхода,
-    // по ней панель и красит узлы. Покрытие — отдельная цель.
-    onRun: (selector, options) => void runTarget(pytestTarget(tools.get(), selector, { ...options, platform: info.platform })),
+    // по ней панель и красит узлы.
+    onRun: (selector, options) => void runTarget(testTargetFor(selector, options)),
+    // Покрытие пока умеет только pytest: у Node своего отчёта нет, и кнопка
+    // «С покрытием» в его проектах не показывается вовсе.
     onCoverage: (selector) => void runTarget(pytestCoverageTarget(tools.get(), selector, { report: true, platform: info.platform })),
+    canCoverage: () => isPythonProject(),
     // Отчёт покрытия → подсветка непокрытых строк в редакторе. Отчёт даёт пути от
     // корня проекта; редактор ключует файлы абсолютными — собираем их здесь.
     onCoverageReport: (report) => {
@@ -433,8 +470,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const tools = new ProjectToolsModel(rpc, () => settings.run, info.platform);
   /** Подпись последнего нарисованного значка запуска: не трогаем украшения зря. */
   let runMarkerSignature = '';
-  /** Карта проекта: из неё берём тесты и точку входа. Пусто, пока проект не открыт. */
-  let projectScan: ProjectScan | null = null;
 
   /** Перечитать карту проекта: дёшево — обход имён без чтения содержимого. */
   async function refreshScan(): Promise<void> {
@@ -507,7 +542,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   };
 
   function targetsFor(document: TextDocument | null): RunTarget[] {
-    return collectRunTargets(runnableFileOf(document), tools.get(), projectScan);
+    return collectRunTargets(runnableFileOf(document), tools.get(), projectScan, nodeRunner());
   }
 
   /**
@@ -544,8 +579,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    */
   function syncTestMarkers(document: TextDocument): void {
     const relative = workspace.relative(document.path);
-    const isTest = document.languageId === 'python' && relative !== document.path && isTestFile(relative);
-    if (!isTest) {
+    const inProject = relative !== document.path;
+    const python = inProject && document.languageId === 'python' && isPythonTestFile(relative);
+    // JS/TS разбираем своим разбором: `test('…')` и `describe` вместо `def test_…`.
+    const node = inProject && isNodeLanguage(document.languageId) && isNodeTestFile(relative);
+    if (!python && !node) {
       editors.setTestMarkers(document.path, []);
       return;
     }
@@ -553,7 +591,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const signature = `${document.path}:${document.version}`;
     if (signature === testMarkerSignature) return;
     testMarkerSignature = signature;
-    editors.setTestMarkers(document.path, findRunnableTests(relative, document.value));
+    editors.setTestMarkers(
+      document.path,
+      python ? findRunnableTests(relative, document.value) : findRunnableNodeTests(relative, document.value),
+    );
   }
 
   /** Запуск цели: файл сохраняем, панель показываем, команду набираем в терминале. */
@@ -1101,16 +1142,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     await runTarget(target);
   });
 
-  define({ id: 'run.tests', title: 'Запустить тесты (pytest)', category: 'Запуск' }, async () => {
+  define({ id: 'run.tests', title: 'Запустить тесты', category: 'Запуск' }, async () => {
     const active = openEditors.active;
     const relative = active ? workspace.relative(active.path) : null;
-    const targets = collectRunTargets(runnableFileOf(active), tools.get(), projectScan);
+    const targets = collectRunTargets(runnableFileOf(active), tools.get(), projectScan, nodeRunner());
     const runnable = relative && relative !== active?.path ? relative : null;
+    // Цели тестов у языков называются по-разному: у Python — `pytest:…`, у Node —
+    // `node-tests:…`. Сначала пробуем файл, в котором стоит человек, потом — все тесты.
     const target =
-      targets.find((item) => item.source === 'test' && item.id === `pytest:${runnable}`) ??
-      targets.find((item) => item.id === 'pytest:all');
+      targets.find(
+        (item) => item.source === 'test' && (item.id === `pytest:${runnable}` || item.id === `node-tests:${runnable}`),
+      ) ?? targets.find((item) => item.id === 'pytest:all' || item.id === 'node-tests:all');
     if (!target) {
-      showToast('Тесты не найдены: нужен проект на Python с файлами тестов', 'error');
+      showToast('Тесты не найдены: нужен pytest, vitest, jest или файлы для `node --test`', 'error');
       return;
     }
     await runTarget(target);
@@ -1650,9 +1694,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (target) void runTarget(target);
   });
 
-  // Значок у `def test_…`: запускаем ровно этот тест — селектор уже собран разбором.
-  editors.onTestMarker(({ selector, name }) => {
-    void runTarget(pytestTarget(tools.get(), selector));
+  // Значок у объявления теста: запускаем ровно этот — селектор уже собран разбором.
+  // Чем запускать, решает язык файла: у Python это pytest, у JS/TS — раннер проекта.
+  editors.onTestMarker(({ path, selector, name }) => {
+    const node = isNodeLanguage(documents.get(path)?.languageId ?? '') ? nodeRunner() : null;
+    void runTarget(
+      node
+        ? nodeTestsTarget(tools.get(), node, selector, { platform: info.platform })
+        : pytestTarget(tools.get(), selector),
+    );
     showToast(`Запускаю тест ${name}`);
   });
 

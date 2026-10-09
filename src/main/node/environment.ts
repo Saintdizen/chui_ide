@@ -55,6 +55,16 @@ export async function packageManagerVersion(manager: NodePackageManager): Promis
   return parsePackageManagerVersion(output);
 }
 
+/**
+ * Имена зависимостей проекта — объявленные и dev. По ним видно, чем проект
+ * форматируется (`prettier`, `biome`) и чем запускает тесты (`vitest`, `jest`):
+ * спрашивать надо проект, а не установленный `node_modules`.
+ */
+export async function declaredDependencyNames(root: string): Promise<string[]> {
+  const manifest = await readManifest(root);
+  return manifest.dependencies.map((item) => item.name);
+}
+
 /** Сводка окружения для интерфейса: версия Node и менеджер пакетов. */
 export async function nodeInfo(root: string | null): Promise<NodeInfo> {
   const manifest = root ? await readManifest(root) : null;

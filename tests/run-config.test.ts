@@ -4,6 +4,8 @@ import type { ProjectTools } from '../src/renderer/core/project-tools';
 import {
   collectRunTargets,
   nodeInstallTarget,
+  nodeTestsRunTargets,
+  nodeTestsTarget,
   pytestCoverageTarget,
   pytestRunTargets,
   pytestTarget,
@@ -18,6 +20,7 @@ const tools: ProjectTools = {
   scripts: [],
   hasPackageJson: false,
   tsRunner: null,
+  testRunner: null,
 };
 
 function scanOf(files: readonly string[]) {
@@ -108,7 +111,7 @@ describe('pytestTarget', () => {
 
   it('с report дописывает печать кода выхода — панель по ней узнаёт исход', () => {
     const target = pytestTarget(tools, null, { report: true, platform: 'linux' });
-    expect(target.command).toBe('./.venv/bin/python -m pytest; echo "chui-pytest-result $?"');
+    expect(target.command).toBe('./.venv/bin/python -m pytest; echo "chui-test-result $?"');
   });
 
   it('без платформы отчёт не добавляется — неизвестно, какой у оболочки синтаксис', () => {
@@ -135,7 +138,7 @@ describe('pytestCoverageTarget', () => {
 
   it('с report дописывает маркер — панель читает и исход, и покрытие', () => {
     expect(pytestCoverageTarget(tools, null, { report: true, platform: 'linux' }).command).toBe(
-      './.venv/bin/python -m pytest --cov --cov-branch --cov-report=term-missing; echo "chui-pytest-result $?"',
+      './.venv/bin/python -m pytest --cov --cov-branch --cov-report=term-missing; echo "chui-test-result $?"',
     );
   });
 });
@@ -156,5 +159,71 @@ describe('nodeInstallTarget', () => {
 
   it('scoped-пакет не ломает команду', () => {
     expect(nodeInstallTarget(tools, ['@scope/pkg']).command).toBe('npm install @scope/pkg');
+  });
+});
+
+describe('nodeTestsTarget', () => {
+  it('vitest зовётся с `run`: без него включается слежение и терминал не освободится', () => {
+    expect(nodeTestsTarget(tools, 'vitest', null)).toMatchObject({
+      id: 'node-tests:all',
+      label: 'Запустить тесты (vitest)',
+      detail: 'vitest · тесты проекта',
+      command: 'npx vitest run',
+      source: 'test',
+    });
+  });
+
+  it('менеджер пакетов проекта решает, чем звать раннер', () => {
+    expect(nodeTestsTarget({ ...tools, packageManager: 'pnpm' }, 'vitest', null).command).toBe('pnpm exec vitest run');
+    expect(nodeTestsTarget({ ...tools, packageManager: 'bun' }, 'jest', null).command).toBe('bunx jest');
+  });
+
+  it('файл и имя теста: `-t` у vitest и jest', () => {
+    expect(nodeTestsTarget(tools, 'vitest', 'tests/a.test.ts::сумма > складывает').command).toBe(
+      "npx vitest run tests/a.test.ts -t 'сумма > складывает'",
+    );
+    expect(nodeTestsTarget(tools, 'jest', 'tests/a.test.js::складывает').command).toBe(
+      "npx jest tests/a.test.js -t 'складывает'",
+    );
+  });
+
+  it('имя теста уходит шаблоном, а не регулярным выражением: метасимволы экранируются', () => {
+    expect(nodeTestsTarget(tools, 'vitest', 'tests/a.test.ts::test_adds[1-2]').command).toBe(
+      "npx vitest run tests/a.test.ts -t 'test_adds\\[1-2\\]'",
+    );
+  });
+
+  it('у `node --test` шаблон имени — свой флаг и идёт до файла', () => {
+    expect(nodeTestsTarget(tools, 'node', 'tests/a.test.mjs::складывает').command).toBe(
+      "node --test --test-name-pattern='складывает' tests/a.test.mjs",
+    );
+    expect(nodeTestsTarget(tools, 'node', null).command).toBe('node --test');
+  });
+
+  it('отчёт дописывает печать кода выхода — по ней панель узнаёт исход', () => {
+    expect(nodeTestsTarget(tools, 'vitest', null, { report: true, platform: 'linux' }).command).toBe(
+      'npx vitest run; echo "chui-test-result $?"',
+    );
+  });
+});
+
+describe('nodeTestsRunTargets', () => {
+  it('цели по файлам, активный тест — первым', () => {
+    const scan = scanOf(['package.json', 'tests/a.test.ts', 'tests/b.test.ts']);
+    const targets = nodeTestsRunTargets(tools, scan, 'vitest', 'tests/b.test.ts');
+    expect(targets[0]?.id).toBe('node-tests:all');
+    expect(targets[1]?.id).toBe('node-tests:tests/b.test.ts');
+    expect(targets.map((item) => item.id)).toContain('node-tests:tests/a.test.ts');
+  });
+
+  it('без раннера или без тестов целей нет', () => {
+    const scan = scanOf(['package.json', 'tests/a.test.ts']);
+    expect(nodeTestsRunTargets(tools, scan, null, null)).toEqual([]);
+    expect(nodeTestsRunTargets(tools, scanOf(['package.json', 'src/index.ts']), 'vitest', null)).toEqual([]);
+  });
+
+  it('коллекция целей запуска включает тесты Node', () => {
+    const scan = scanOf(['package.json', 'tests/a.test.ts']);
+    expect(collectRunTargets(null, tools, scan, 'vitest').map((item) => item.id)).toContain('node-tests:all');
   });
 });

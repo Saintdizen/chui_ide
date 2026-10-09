@@ -181,6 +181,9 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   в Python, `require.main` — в Node. Клик по значку запускает файл так же, как `Ctrl+F5`.
 - В тестовом файле Python значок ▶ стоит у каждого `def test_…` (и у тестов внутри класса):
   клик запускает ровно этот тест — командой `pytest файл::Класс::тест`, а не весь файл.
+  В тестовом файле JS/TS такой же значок ставят `test('…')` и `it('…')` (с учётом `describe`):
+  тест запускается раннером проекта — `vitest <файл> -t '<имя>'`, у jest так же, у `node --test`
+  через `--test-name-pattern`.
 - Команда набирается в терминале в каталоге проекта: процесс видно, его можно прервать
   и посмотреть вывод. Вкладка терминала называется по запуску (`Запустить train.py`).
 - Перед запуском несохранённые файлы сохраняются (отключается в настройках).
@@ -215,10 +218,16 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   файлам (первыми самые непокрытые) со счётчиком частично покрытых ветвей, а в самих исходниках
   строки, которые тесты не исполнили, подсвечиваются приглушённым фоном.
   Исход прогона виден на узле (галочка/крестик): команда уносит в терминал
-  печать кода выхода, панель читает её из вывода — оболочка после pytest не завершается, и кода
+  печать кода выхода, панель читает её из вывода — оболочка после раннера не завершается, и кода
   выхода из события процесса не взять. Правка тестового файла пересобирает дерево сама — но не
   на каждое нажатие и не в фоне: с паузой в 1.5 с и только когда панель на виду. Сбор не удался —
   панель объясняет причину, а не молчит.
+- Та же панель работает и для Node-проекта — раннер выбирается по `package.json`: `vitest`
+  (`vitest list --json` — дерево с именами тестов), `jest` (`--listTests` — дерево из файлов, имён
+  он не отдаёт) или встроенный `node --test`, если раннера нет, а тестовые файлы есть. Запуск идёт
+  про раннер проекта и менеджер пакетов (`npx vitest run`, `pnpm exec vitest run`, `bunx jest`), а у
+  `node --test` — самим Node. Покрытие пока умеет только pytest: у Node кнопки «С покрытием» нет,
+  чтобы не обещать отчёт, которого не будет.
 - Попап окружения замечает молчаливые поломки: `pyvenv.cfg` не читается, базовый интерпретатор
   из конфига пропал (обновили систему), в окружении нет pip. Это видно до первой неудачной команды.
 
@@ -674,11 +683,12 @@ Renderer не трогает `node:fs`. Всё идёт через `WorkspaceSer
 biome.json           линт и формат (Biome)
 vitest.config.mts    юнит-тесты (Vitest)
 .github/workflows/   ci.yml (проверки на push/PR), release.yml (дистрибутивы по тегу)
-tests/               юнит-тесты чистой логики (40 файлов): edits, replace, session, glob,
+tests/               юнит-тесты чистой логики (42 файла): edits, replace, session, glob,
 │                    tools, providers, languages, theme, chat-text, quick-open-rank,
 │                    imports/import-install, env-file/project-env, project-scan,
 │                    python-env/-health/-packages/-tests, node-env/-packages,
-│                    format/node-format (заглушки prettier и biome в temp-проекте),
+│                    format/node-format и node-collect (заглушки prettier, biome,
+│                    vitest и jest в temp-проекте), node-tests/test-model,
 │                    context-fit (сжатие беседы), uri-path, git-model, path-guard,
 │                    debug (DAP против фейкового адаптера), lsp-*
 
@@ -689,7 +699,9 @@ src/
 │                      glob.ts (маски файлов), providers.ts,
 │                      imports.ts (разбор импортов), import-install.ts (что предложить поставить),
 │                      python-env/-health/-packages/-tests, node-env.ts (окружение Node),
-│                      format.ts (какой движок форматирует язык), env-file.ts (разбор .env),
+│                      format.ts (какой движок форматирует язык),
+│                      test-model.ts (дерево тестов и исход прогона) и node-tests.ts
+│                      (раннеры Node, их разбор), env-file.ts (разбор .env),
 │                      project-scan.ts (карта проекта),
 │                      lsp-presets.ts, lsp-symbols.ts
 ├── main/
@@ -712,7 +724,8 @@ src/
 │   │                  tests (сбор тестов), format (ruff/black), health (поломки venv)
 │   ├── node/          environment (версия Node, менеджер пакетов, health),
 │   │                  packages (что видит проект: каталоги node_modules),
-│   │                  format (prettier/biome проекта)
+│   │                  format (prettier/biome проекта), bin (скрипт пакета из `bin`),
+│   │                  tests (сбор: vitest list, jest --listTests, `node --test`)
 │   ├── project/       scan.ts (обход проекта без чтения содержимого)
 │   └── project-env.ts переменные из .env — для запуска, терминала и языкового сервера
 ├── preload/index.ts   мост window.chui

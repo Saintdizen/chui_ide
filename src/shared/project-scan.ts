@@ -88,6 +88,8 @@ function fileName(target: string): string {
 const PY_TEST = /^(?:test_.*|.*_test)\.py$/;
 /** `foo.test.ts`, `foo.spec.tsx` — соглашения jest и vitest. */
 const JS_TEST = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+/** Файл, который исполняется Node: `.js`, `.mjs`, `.cjs`, `.ts`, `.tsx` и родственные. */
+const JS_FILE = /\.[cm]?[jt]sx?$/;
 /** Каталог с тестами: сам факт того, что файл лежит в `tests/`, уже признак. */
 const TEST_DIR = /(?:^|\/)(?:tests?|__tests__|spec)(?:\/|$)/;
 
@@ -97,9 +99,28 @@ const TEST_DIR = /(?:^|\/)(?:tests?|__tests__|spec)(?:\/|$)/;
  * без разбора конфига безопаснее узнавать по имени и по папке тестов.
  */
 export function isTestFile(relativePath: string): boolean {
+  return isPythonTestFile(relativePath) || isNodeTestFile(relativePath);
+}
+
+/** Тестовый файл Python: по имени (`test_foo.py`) или по каталогу тестов. */
+export function isPythonTestFile(relativePath: string): boolean {
   const name = fileName(relativePath);
-  if (PY_TEST.test(name) || JS_TEST.test(name)) return true;
-  return TEST_DIR.test(relativePath);
+  if (!name.endsWith('.py')) return false;
+  return PY_TEST.test(name) || TEST_DIR.test(relativePath);
+}
+
+/**
+ * Тестовый файл Node: по имени (`foo.test.ts`) или по каталогу тестов.
+ *
+ * Каталог считается признаком и здесь: `node --test` находит тесты и в `test/`
+ * с любыми именами, а vitest с jest — по маске из своего конфига. Расширение при
+ * этом проверяем тоже: иначе тест pytest из `tests/` считался бы и тестом Node,
+ * и проект на Python получил бы предложение запустить его через `node --test`.
+ */
+export function isNodeTestFile(relativePath: string): boolean {
+  const name = fileName(relativePath);
+  if (!JS_FILE.test(name)) return false;
+  return JS_TEST.test(name) || TEST_DIR.test(relativePath);
 }
 
 /** Каталог, в котором лежит файл (для группировки тестов). Пусто — файл в корне. */

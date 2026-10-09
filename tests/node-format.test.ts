@@ -24,7 +24,9 @@ const ECHO_TOOL = [
   'const chunks = [];',
   "process.stdin.on('data', (chunk) => chunks.push(chunk));",
   "process.stdin.on('end', () => {",
-  "  process.stdout.write(`${JSON.stringify(process.argv.slice(2))}\\n${Buffer.concat(chunks).toString('utf8').toUpperCase()}`);",
+  '  const args = JSON.stringify(process.argv.slice(2));',
+  "  const text = Buffer.concat(chunks).toString('utf8').toUpperCase();",
+  '  process.stdout.write(args + "\\n" + text);',
   '});',
 ].join('\n');
 
