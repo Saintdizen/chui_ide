@@ -1450,10 +1450,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Останов: подсвечиваем строку и показываем панель. Пока программа идёт или
   // отладка не запущена — подсветки нет.
   let revealedFrameId: number | null = null;
+  let debugWasStopped = false;
   debug.onDidChange((state) => {
     const frame = state.phase === 'stopped' ? state.topFrame : null;
     editors.setDebugLine(frame?.path ?? null, frame?.line ?? null);
-    if (state.phase !== 'idle') dock.show('debug');
+
+    // Панель отладки показываем только на НОВОМ останове: иначе каждое событие
+    // (в том числе «программа идёт») уводило бы фокус из той вкладки дока, куда
+    // человек ушёл сам, — например, в терминал.
+    const stopped = state.phase === 'stopped';
+    if (stopped && !debugWasStopped) dock.show('debug');
+    debugWasStopped = stopped;
 
     // Остановились в файле, которого нет на экране, — открываем его и встаём на
     // строку: иначе видно панель, но не место, где программа стоит. Делаем это
