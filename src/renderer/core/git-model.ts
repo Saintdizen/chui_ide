@@ -32,6 +32,33 @@ const CHANGE_WEIGHT: Record<GitFileStatus['change'], number> = {
 };
 
 /**
+ * Правки, разложенные по папкам-родителям: для каждой — сколько внутри файлов
+ * с правками и какая из них самая заметная. Чистая функция: считается по списку
+ * файлов, без состояния модели, поэтому проверяется в тестах.
+ *
+ * Пути приходят от main в родных разделителях (`path.join`), и дерево ключует
+ * папки тем же путём. Режем по обоим разделителям, а собираем обратно тем, что
+ * был в пути: резать только по «/» значило бы на Windows не найти ни одной папки.
+ */
+export function changeInsideFolders(files: readonly GitFileStatus[]): Map<string, GitInsideChange> {
+  const inside = new Map<string, GitInsideChange>();
+  for (const file of files) {
+    const separator = file.path.includes('\\') ? '\\' : '/';
+    const parts = file.path.split(/[/\\]/);
+    // Первый сегмент — корень («») или диск («C:»): папкой он не считается.
+    for (let depth = 2; depth < parts.length; depth += 1) {
+      const folder = parts.slice(0, depth).join(separator);
+      const known = inside.get(folder);
+      inside.set(folder, {
+        count: (known?.count ?? 0) + 1,
+        change: known && CHANGE_WEIGHT[known.change] > CHANGE_WEIGHT[file.change] ? known.change : file.change,
+      });
+    }
+  }
+  return inside;
+}
+
+/**
  * Снимок состояния репозитория для renderer.
  *
  * Источник истины — main: он присылает статус push-событием после каждой
@@ -147,19 +174,9 @@ export class GitModel {
     this.snapshot = status;
     this.byPath.clear();
     this.insideByFolder.clear();
-    for (const file of status.files) {
-      this.byPath.set(file.path, file);
-      // Папки-родители получают счётчик и самую заметную правку из своих файлов.
-      const parts = file.path.split('/');
-      for (let depth = 1; depth < parts.length; depth += 1) {
-        const folder = parts.slice(0, depth).join('/');
-        const known = this.insideByFolder.get(folder);
-        this.insideByFolder.set(folder, {
-          count: (known?.count ?? 0) + 1,
-          change: known && CHANGE_WEIGHT[known.change] > CHANGE_WEIGHT[file.change] ? known.change : file.change,
-        });
-      }
-    }
+    for (const file of status.files) this.byPath.set(file.path, file);
+    // Папки-родители получают счётчик и самую заметную правку из своих файлов.
+    for (const [folder, change] of changeInsideFolders(status.files)) this.insideByFolder.set(folder, change);
     this.emitter.fire(status);
     return status;
   }
