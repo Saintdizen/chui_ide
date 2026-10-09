@@ -33,6 +33,12 @@ import { mergeEnv } from '../project-env';
 /** Запросы DAP без ответа внятной ошибки не дадут: не ждём дольше этого. */
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * Сколько ждать объявления потока для «Паузы». Поток приходит событием `thread`
+ * сразу после `process`, так что ждём только тогда, когда его нет вовсе.
+ */
+const THREAD_WAIT_MS = 5_000;
+
 interface DapMessage {
   seq?: number;
   type: 'request' | 'response' | 'event';
@@ -78,6 +84,8 @@ export class DebugService {
   private initializedSeen = false;
   /** Кто ждёт `initialized`; получают `true`, когда событие придёт, иначе `false`. */
   private readonly initializedWaiters = new Set<(ok: boolean) => void>();
+  /** Кто ждёт объявления потока: без `threadId` пауза ушла бы впустую (см. `pause`). */
+  private readonly threadWaiters = new Set<(id: number | null) => void>();
 
   private phase: DebugPhase = 'idle';
   /** Точки останова по файлам: путь → строки. Набор шлём целиком, как велит DAP. */
@@ -293,6 +301,33 @@ export class DebugService {
   }
 
   /**
+   * Ждать, пока адаптер объявит поток. Он нужен «Паузе»: без `threadId` запрос
+   * уходит впустую. Поток приходит событием `thread` сразу после `process`, так
+   * что ожидание здесь — только про медленную машину, где между ними щель.
+   */
+  private awaitThread(timeoutMs: number): Promise<number | null> {
+    if (this.thread !== null) return Promise.resolve(this.thread);
+    return new Promise((resolve) => {
+      let timer: NodeJS.Timeout;
+      const waiter = (id: number | null): void => {
+        clearTimeout(timer);
+        resolve(id);
+      };
+      timer = setTimeout(() => {
+        this.threadWaiters.delete(waiter);
+        resolve(null);
+      }, timeoutMs);
+      this.threadWaiters.add(waiter);
+    });
+  }
+
+  /** Разбудить тех, кто ждёт поток: `null` — сессия кончилась, потока не будет. */
+  private releaseThreadWaiters(id: number | null): void {
+    for (const waiter of this.threadWaiters) waiter(id);
+    this.threadWaiters.clear();
+  }
+
+  /**
    * Подключиться к уже слушающему адаптеру по TCP.
    *
    * Так выглядит подключение к Python-процессу: `debugpy --listen` (как и вызов
@@ -477,8 +512,16 @@ export class DebugService {
     await this.call(command, { threadId }).catch(() => undefined);
   }
 
+  /**
+   * Остановить идущую программу.
+   *
+   * Поток адаптер объявляет событием `thread`, и оно приходит после `process`:
+   * на медленной машине между ними заметная щель, и «Пауза», нажатая в неё,
+   * уходила бы без `threadId` — такую паузу адаптер игнорирует, и нажатие
+   * пропадало молча. Поэтому сначала дожидаемся объявления потока.
+   */
   async pause(): Promise<void> {
-    const threadId = this.threadId;
+    const threadId = this.thread ?? (await this.awaitThread(THREAD_WAIT_MS));
     if (threadId === null) return;
     await this.call('pause', { threadId }).catch(() => undefined);
   }
@@ -734,6 +777,8 @@ export class DebugService {
         const threadId = typeof body.threadId === 'number' ? body.threadId : null;
         if (body.reason === 'started') {
           if (this.thread === null) this.thread = threadId;
+          // Кто ждал поток («Пауза»), узнаёт о нём сразу: ждать дольше нечего.
+          if (threadId !== null) this.releaseThreadWaiters(threadId);
         } else if (threadId !== null && threadId === this.thread) {
           this.thread = null; // поток, который мы запомнили, завершился
         }
@@ -824,6 +869,8 @@ export class DebugService {
     // Ждущих `initialized` не оставляем без ответа: иначе подключение зависнет.
     for (const waiter of this.initializedWaiters) waiter(false);
     this.initializedWaiters.clear();
+    // И ждущих поток: сессия кончилась, объявлять его уже некому.
+    this.releaseThreadWaiters(null);
     this.initializedSeen = false;
     this.setPhase('idle');
   }

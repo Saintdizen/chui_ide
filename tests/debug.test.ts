@@ -22,6 +22,9 @@ const net = require('node:net');
 let buffer = Buffer.alloc(0);
 let launchSeq = null;
 let breakpoints = 0;
+// Задержка объявления потока: на медленной машине событие thread приходит позже
+// process, и тест проверяет, что «Пауза» в эту щель не теряется.
+const THREAD_DELAY = Number(process.argv[2] || 15);
 // Куда писать DAP-кадры: по stdio это stdout, в режиме TCP — принятый сокет.
 let out = process.stdout;
 function send(message) {
@@ -56,7 +59,7 @@ function handle(message) {
       // состоявшимся только по нему (как настоящий debugpy и Node-адаптер).
       send({ type: 'event', event: 'initialized' });
       setTimeout(() => send({ type: 'event', event: 'process', body: { name: 'app.js', startMethod: 'attach' } }), 10);
-      setTimeout(() => send({ type: 'event', event: 'thread', body: { reason: 'started', threadId: 1 } }), 15);
+      setTimeout(() => send({ type: 'event', event: 'thread', body: { reason: 'started', threadId: 1 } }), THREAD_DELAY);
       break;
     case 'setBreakpoints':
       breakpoints = (args.breakpoints || []).length;
@@ -102,7 +105,7 @@ function handle(message) {
       // Как debugpy: сначала программа пошла (process + thread). Останов придёт
       // только если есть точка останова — иначе программа просто выполняется.
       setTimeout(() => send({ type: 'event', event: 'process', body: { name: 'app.py', startMethod: 'launch' } }), 10);
-      setTimeout(() => send({ type: 'event', event: 'thread', body: { reason: 'started', threadId: 1 } }), 15);
+      setTimeout(() => send({ type: 'event', event: 'thread', body: { reason: 'started', threadId: 1 } }), THREAD_DELAY);
       if (breakpoints > 0) {
         setTimeout(() => send({ type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1 } }), 30);
       }
@@ -207,7 +210,7 @@ function fakeAdapterFile(): string {
   return fake;
 }
 
-function fakeService(adapterID: 'node' | 'python' = 'python'): { service: DebugService; events: Push[] } {
+function fakeService(adapterID: 'node' | 'python' = 'python', threadDelayMs = 15): { service: DebugService; events: Push[] } {
   const fake = fakeAdapterFile();
 
   const events: Push[] = [];
@@ -216,8 +219,9 @@ function fakeService(adapterID: 'node' | 'python' = 'python'): { service: DebugS
     () => null,
     () => 'python3',
     async () => ({}),
-    // Подмена адаптера: тот же протокол, но скрипт на Node.
-    () => ({ command: process.execPath, args: [fake], adapterID }),
+    // Подмена адаптера: тот же протокол, но скрипт на Node. Второй аргумент —
+    // задержка объявления потока: ею воспроизводится медленная машина.
+    () => ({ command: process.execPath, args: [fake, String(threadDelayMs)], adapterID }),
   );
   return { service, events };
 }
@@ -328,6 +332,20 @@ describe('DebugService', () => {
     // Пауза останавливает идущую программу: threadId клиент берёт из события thread.
     // Раньше его неоткуда было взять (останова ещё не было), и пауза молча ничего
     // не делала.
+    await service.pause();
+    expect(await waitPhase(service, 'stopped')).toBe('stopped');
+
+    service.dispose();
+  });
+
+  it('пауза не теряется, если поток объявлен позже старта программы', async () => {
+    // Поток приходит событием `thread` после `process`. На нагруженной машине
+    // между ними заметная щель: пауза, нажатая в неё, уходила без threadId и
+    // терялась молча — именно так падал этот тест на Windows (по тайм-ауту).
+    const { service } = fakeService('python', 250);
+    await service.start('/proj/app.py');
+    expect(await waitPhase(service, 'running')).toBe('running');
+
     await service.pause();
     expect(await waitPhase(service, 'stopped')).toBe('stopped');
 
