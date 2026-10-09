@@ -1,5 +1,6 @@
 import { basename } from '../../shared/languages';
 import type { ProjectScan } from '../../shared/project-scan';
+import { resultMarkerCommand } from '../../shared/python-tests';
 import type { ProjectTools } from './project-tools';
 import { shellQuote } from './project-tools';
 
@@ -140,6 +141,9 @@ export function pytestRunTargets(
       command: `${tools.pythonCommand} -m pytest`,
       source: 'test',
     },
+    // Покрытие — отдельной целью: видно, что прогон отличается, и его не спутать
+    // с обычным (нужен pytest-cov в окружении).
+    pytestCoverageTarget(tools, null),
   ];
 
   // Активный тест — первой отдельной целью: чаще всего нужен именно он.
@@ -166,15 +170,43 @@ export function pytestRunTargets(
  * а не «всё подряд», и команду собирать должен тот же модуль, что и меню запуска,
  * иначе две кнопки разойдутся по поведению.
  */
-export function pytestTarget(tools: ProjectTools, selector: string | null): RunTarget {
-  const command = selector
+export function pytestTarget(
+  tools: ProjectTools,
+  selector: string | null,
+  options: { report?: boolean; platform?: string } = {},
+): RunTarget {
+  const base = selector
     ? `${tools.pythonCommand} -m pytest ${shellQuote(selector)}`
     : `${tools.pythonCommand} -m pytest`;
+  // Отчёт: панель тестов дописывает печать кода выхода, чтобы узнать исход прогона.
+  const command = options.report && options.platform ? `${base}${resultMarkerCommand(options.platform)}` : base;
   return {
     id: selector ? `pytest:${selector}` : 'pytest:all',
     label: selector ? `Тесты: ${basename(selector)}` : 'Запустить тесты (pytest)',
     detail: `${tools.pythonLabel} · pytest`,
     command,
+    source: 'test',
+  };
+}
+
+/**
+ * Цель с покрытием: `pytest --cov`. Отдельная от обычного прогона, потому что
+ * требует `pytest-cov` в окружении и пишет отчёт после тестов — смешивать их в
+ * одной кнопке значило бы гадать, чего ждёт человек.
+ *
+ * `--cov` идёт ПЕРЕД селектором и отделён `--`: у `--cov` аргумент необязательный,
+ * и `--cov tests/test_x.py` pytest-cov понимает как источник покрытия — тесты
+ * тогда запускаются все, а покрытие выходит пустым. Проверено вживую.
+ */
+export function pytestCoverageTarget(tools: ProjectTools, selector: string | null): RunTarget {
+  const base = selector
+    ? `${tools.pythonCommand} -m pytest --cov -- ${shellQuote(selector)}`
+    : `${tools.pythonCommand} -m pytest --cov`;
+  return {
+    id: selector ? `pytest-cov:${selector}` : 'pytest-cov:all',
+    label: selector ? `Покрытие: ${basename(selector)}` : 'Тесты с покрытием (pytest --cov)',
+    detail: `${tools.pythonLabel} · pytest --cov`,
+    command: base,
     source: 'test',
   };
 }

@@ -95,6 +95,39 @@ export function collectFailure(output: string, limit = 3): string[] {
   return lines.slice(start, index + 1);
 }
 
+/**
+ * Маркер результата прогона в выводе терминала.
+ *
+ * Тесты запускаются в терминале (их видно и можно прервать), но терминал — это
+ * оболочка, которая после pytest не завершается: кода выхода из события процесса
+ * не получить. Поэтому к команде добавляется печать кода выхода предсказуемой
+ * строкой, и панель тестов узнаёт исход, читая вывод.
+ */
+export const TEST_RESULT_MARKER = 'chui-pytest-result';
+
+/**
+ * Хвост команды тестов, печатающий код выхода. Оболочка на Windows — PowerShell,
+ * на остальных — POSIX: переменная с кодом у них разная.
+ */
+export function resultMarkerCommand(platform: string): string {
+  const code = platform === 'win32' ? '$LASTEXITCODE' : '$?';
+  return `; echo "${TEST_RESULT_MARKER} ${code}"`;
+}
+
+/** Убрать управляющие последовательности ANSI: цвет и перерисовка строк вывод не портят. */
+export function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '');
+}
+
+/**
+ * Код выхода из вывода терминала, если маркер в нём нашёлся. null — не нашли:
+ * команда ещё идёт, это не тестовый прогон, или оболочка не поняла хвост.
+ */
+export function parseResultMarker(text: string): number | null {
+  const match = new RegExp(`${TEST_RESULT_MARKER} (\\d+)`).exec(stripAnsi(text));
+  return match ? Number(match[1]) : null;
+}
+
 /** Разбор одной строки-идентификатора: `file.py::Class::name` или `file.py::name`. */
 export function describeTest(file: string, node: string): CollectedTest {
   const parts = node.split('::');

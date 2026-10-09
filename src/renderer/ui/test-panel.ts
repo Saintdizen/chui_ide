@@ -1,4 +1,5 @@
-import { buildTestTree, type CollectedSuite, type TestFolder } from '../../shared/python-tests';
+import { buildTestTree, parseResultMarker, type CollectedSuite, type TestFolder } from '../../shared/python-tests';
+import { PushTopic, type TerminalDataPayload } from '../../shared/api';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
 
@@ -12,15 +13,30 @@ import { clear, h } from './dom';
  *
  * Пересобираем при открытии и по кнопке: список меняется, когда правят код,
  * и держать его актуальным в фоне дороже, чем спросить заново.
+ *
+ * Исход прогона берём из вывода терминала (см. `resultMarkerCommand`): оболочка
+ * после pytest не завершается, поэтому кода выхода из события процесса не
+ * получить. Запуская узел, панель помнит, чей это прогон, и по маркеру красит
+ * узел зелёным или красным.
  */
 
 export interface TestPanelDeps {
   rpc: RpcClient;
   /** Проект не открыт — собирать нечего. */
   root: () => string | null;
-  /** Запустить тесты: селектор pytest или null — все. */
-  onRun: (selector: string | null) => void;
+  /**
+   * Запустить тесты: селектор pytest или null — все. `report` просит дописать в
+   * команду печать кода выхода — панель использует его, чтобы узнать исход.
+   */
+  onRun: (selector: string | null, options?: { report?: boolean }) => void;
+  /** Запустить с покрытием (`pytest --cov`). */
+  onCoverage: (selector: string | null) => void;
 }
+
+/** Исход последнего прогона узла. */
+type TestOutcome = 'running' | 'passed' | 'failed';
+/** Ключ для узла «все тесты»: у него нет собственного id в дереве. */
+const ALL_KEY = 'pytest:all';
 
 export interface TestPanelView {
   element: HTMLElement;
@@ -38,20 +54,65 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   );
   const runAllButton = h(
     'button',
-    { class: 'btn btn-small', type: 'button', title: 'Запустить все тесты', onClick: () => deps.onRun(null) },
+    { class: 'btn btn-small', type: 'button', title: 'Запустить все тесты', onClick: () => run(ALL_KEY, null) },
     'Запустить все',
+  );
+  const coverageButton = h(
+    'button',
+    { class: 'btn btn-small', type: 'button', title: 'Запустить все тесты с покрытием', onClick: () => deps.onCoverage(null) },
+    'С покрытием',
   );
 
   const body = h('div', { class: 'tests-body' });
   const element = h(
     'div',
     { class: 'tests-panel' },
-    h('div', { class: 'tests-toolbar' }, summary, h('div', { class: 'toolbar-spacer' }), runAllButton, refreshButton),
+    h('div', { class: 'tests-toolbar' }, summary, h('div', { class: 'toolbar-spacer' }), runAllButton, coverageButton, refreshButton),
     body,
   );
 
   let loading = false;
   let suite: CollectedSuite | null = null;
+  /** Исход последнего прогона по ключу узла (id теста/класса/файла или ALL_KEY). */
+  const outcomes = new Map<string, TestOutcome>();
+  /** Ключ узла, прогон которого сейчас ждём по маркеру. null — ничего не ждём. */
+  let pendingKey: string | null = null;
+  /**
+   * Хвост вывода терминала. Копим его, а не смотрим каждый кусок отдельно:
+   * маркер может прийти разорванным между двумя порциями вывода.
+   */
+  let outputTail = '';
+
+  // Исход приходит из общего потока вывода терминала: своего канала у прогона нет.
+  deps.rpc.onPush((message) => {
+    if (message.topic !== PushTopic.TerminalData || pendingKey === null) return;
+    const payload = message.payload as TerminalDataPayload;
+    outputTail = (outputTail + payload.data).slice(-500);
+    const code = parseResultMarker(outputTail);
+    if (code === null) return;
+    outcomes.set(pendingKey, code === 0 ? 'passed' : 'failed');
+    pendingKey = null;
+    outputTail = '';
+    render();
+  });
+
+  /** Начать прогон узла: запомнить, чей исход ждём, и попросить отчёт. */
+  function run(key: string, selector: string | null): void {
+    pendingKey = key;
+    outcomes.set(key, 'running');
+    outputTail = '';
+    render();
+    deps.onRun(selector, { report: true });
+  }
+
+  /** Значок исхода узла: точка, галочка или крестик. */
+  function statusBadge(key: string | undefined): HTMLElement | null {
+    const outcome = key ? outcomes.get(key) : undefined;
+    if (!outcome) return null;
+    const label = outcome === 'running' ? '…' : outcome === 'passed' ? '✓' : '✗';
+    const title = outcome === 'running' ? 'Идёт прогон' : outcome === 'passed' ? 'Прошёл' : 'Упал';
+    return h('span', { class: `tests-status is-${outcome}`, title }, label);
+  }
 
   /** Кнопка запуска узла: клик по ней не должен сворачивать ветку. */
   function runButton(node: TestFolder): HTMLElement {
@@ -63,21 +124,23 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
         title: 'Запустить это',
         onClick: (event: Event) => {
           event.stopPropagation();
-          deps.onRun(node.id ?? null);
+          run(node.id ?? ALL_KEY, node.id ?? null);
         },
       },
       '▶',
     );
   }
 
-  /** Строка узла: отступ по глубине, стрелка, подпись и кнопка запуска. */
+  /** Строка узла: отступ по глубине, стрелка, подпись, исход и кнопка запуска. */
   function row(node: TestFolder, depth: number, arrow: string): { head: HTMLElement; marker: HTMLElement } {
     const marker = h('span', { class: `tests-arrow${arrow ? ' is-toggle' : ''}` }, arrow);
+    const outcome = node.id ? outcomes.get(node.id) : undefined;
     const head = h(
       'div',
-      { class: `tests-row tests-${node.kind}`, style: { paddingLeft: `${depth * 14 + 8}px` } },
+      { class: `tests-row tests-${node.kind}${outcome ? ` is-${outcome}` : ''}`, style: { paddingLeft: `${depth * 14 + 8}px` } },
       marker,
       h('span', { class: 'tests-label' }, node.label),
+      statusBadge(node.id),
       runButton(node),
     );
     return { head, marker };
@@ -134,7 +197,17 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
       return;
     }
 
-    summary.textContent = `Тестов: ${suite.total}`;
+    // Сводка несёт исход прогона всех тестов, если он был.
+    const outcome = outcomes.get(ALL_KEY);
+    const suffix =
+      outcome === 'passed'
+        ? ' · прогон прошёл'
+        : outcome === 'failed'
+          ? ' · прогон упал'
+          : outcome === 'running'
+            ? ' · идёт прогон'
+            : '';
+    summary.textContent = `Тестов: ${suite.total}${suffix}`;
     if (suite.errors.length > 0) renderErrors(suite.errors);
 
     for (const node of buildTestTree(suite.tests)) body.appendChild(branch(node, 0));

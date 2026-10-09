@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { buildTestTree, collectFailure, describeTest, parsePytestCollect } from '../src/shared/python-tests';
+import {
+  buildTestTree,
+  collectFailure,
+  describeTest,
+  parsePytestCollect,
+  parseResultMarker,
+  resultMarkerCommand,
+  stripAnsi,
+} from '../src/shared/python-tests';
 
 describe('parsePytestCollect', () => {
   it('разбирает строки-идентификаторы и итог', () => {
@@ -76,6 +84,36 @@ describe('buildTestTree', () => {
     expect(math.id).toBe('tests/test_math.py');
     expect(math.children[0].id).toBe('tests/test_math.py::test_add');
     expect(math.children[1].id).toBe('tests/test_math.py::TestSum');
+  });
+});
+
+describe('маркер результата прогона', () => {
+  it('хвост команды печатает код выхода нужной переменной', () => {
+    // Оболочка на Windows — PowerShell, на остальных — POSIX.
+    expect(resultMarkerCommand('linux')).toContain('$?');
+    expect(resultMarkerCommand('win32')).toContain('$LASTEXITCODE');
+  });
+
+  it('код выхода читается из вывода', () => {
+    expect(parseResultMarker('шум\nchui-pytest-result 0\n')).toBe(0);
+    expect(parseResultMarker('chui-pytest-result 1')).toBe(1);
+  });
+
+  it('без маркера — null', () => {
+    expect(parseResultMarker('5 passed in 0.1s')).toBeNull();
+  });
+
+  it('ANSI-последовательности не мешают', () => {
+    expect(parseResultMarker('\u001b[32mchui-pytest-result 2\u001b[0m')).toBe(2);
+  });
+
+  it('эхо самой команды не принимается за результат', () => {
+    // Терминал печатает и набранную команду, где после маркера стоит `$?`, а не число.
+    expect(parseResultMarker('$ python -m pytest; echo "chui-pytest-result $?"')).toBeNull();
+  });
+
+  it('stripAnsi убирает цвет, но не текст', () => {
+    expect(stripAnsi('\u001b[31mпровал\u001b[0m')).toBe('провал');
   });
 });
 

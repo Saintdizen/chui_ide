@@ -21,6 +21,7 @@ import {
   collectRunTargets,
   entryLine,
   nodeInstallTarget,
+  pytestCoverageTarget,
   pytestTarget,
   type RunTarget,
   type RunnableFile,
@@ -190,7 +191,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const testPanel = createTestPanel({
     rpc,
     root: () => workspace.root,
-    onRun: (selector) => void runTarget(pytestTarget(tools.get(), selector)),
+    // Панель просит отчёт — команда уносит в терминал и печать кода выхода,
+    // по ней панель и красит узлы. Покрытие — отдельная цель.
+    onRun: (selector, options) => void runTarget(pytestTarget(tools.get(), selector, { ...options, platform: info.platform })),
+    onCoverage: (selector) => void runTarget(pytestCoverageTarget(tools.get(), selector)),
   });
 
   const dock = createDock();

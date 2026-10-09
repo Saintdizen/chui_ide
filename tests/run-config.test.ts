@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buildScan } from '../src/shared/project-scan';
 import type { ProjectTools } from '../src/renderer/core/project-tools';
-import { collectRunTargets, nodeInstallTarget, pytestRunTargets, pytestTarget } from '../src/renderer/core/run-config';
+import {
+  collectRunTargets,
+  nodeInstallTarget,
+  pytestCoverageTarget,
+  pytestRunTargets,
+  pytestTarget,
+} from '../src/renderer/core/run-config';
 
 const tools: ProjectTools = {
   root: '/p',
@@ -35,11 +41,17 @@ describe('pytestRunTargets', () => {
     );
   });
 
-  it('активный тест идёт первой отдельной целью', () => {
+  it('активный тест идёт первой отдельной целью (после общих)', () => {
     const scan = scanOf(['pyproject.toml', 'tests/test_a.py', 'tests/test_b.py']);
     const targets = pytestRunTargets(tools, scan, 'tests/test_b.py');
-    // [0] — все тесты, [1] — активный файл.
-    expect(targets[1]?.id).toBe('pytest:tests/test_b.py');
+    // Сначала общие цели («все тесты», покрытие), затем файлы, активный — первым.
+    const firstFile = targets.findIndex((item) => item.id.startsWith('pytest:tests/'));
+    expect(targets[firstFile]?.id).toBe('pytest:tests/test_b.py');
+  });
+
+  it('среди общих целей есть прогон с покрытием', () => {
+    const scan = scanOf(['pyproject.toml', 'tests/test_a.py']);
+    expect(pytestRunTargets(tools, scan, null).map((item) => item.id)).toContain('pytest-cov:all');
   });
 
   it('проект без Python-маркера тестов не предлагает', () => {
@@ -92,6 +104,29 @@ describe('pytestTarget', () => {
     const target = pytestTarget(tools, 'tests/test_x.py::TestY::test_z[1-2]');
     expect(target.command).toBe("./.venv/bin/python -m pytest 'tests/test_x.py::TestY::test_z[1-2]'");
     expect(target.id).toBe('pytest:tests/test_x.py::TestY::test_z[1-2]');
+  });
+
+  it('с report дописывает печать кода выхода — панель по ней узнаёт исход', () => {
+    const target = pytestTarget(tools, null, { report: true, platform: 'linux' });
+    expect(target.command).toBe('./.venv/bin/python -m pytest; echo "chui-pytest-result $?"');
+  });
+
+  it('без платформы отчёт не добавляется — неизвестно, какой у оболочки синтаксис', () => {
+    expect(pytestTarget(tools, null, { report: true }).command).toBe('./.venv/bin/python -m pytest');
+  });
+});
+
+describe('pytestCoverageTarget', () => {
+  it('добавляет --cov и помечается отдельным id', () => {
+    expect(pytestCoverageTarget(tools, null)).toMatchObject({
+      id: 'pytest-cov:all',
+      command: './.venv/bin/python -m pytest --cov',
+      source: 'test',
+    });
+  });
+
+  it('селектор идёт после `--`: иначе --cov съест его как источник покрытия', () => {
+    expect(pytestCoverageTarget(tools, 'tests/test_x.py').command).toBe('./.venv/bin/python -m pytest --cov -- tests/test_x.py');
   });
 });
 

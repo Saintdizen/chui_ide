@@ -4555,6 +4555,25 @@ textarea {
   background: var(--element_background_hover);
 }
 
+/* Исход последнего прогона узла: галочка прошёл, крестик упал, многоточие идёт. */
+.tests-status {
+  flex: 0 0 auto;
+  color: var(--text_color_disabled);
+}
+
+.tests-status.is-passed {
+  color: var(--git_added);
+}
+
+.tests-status.is-failed {
+  color: var(--red_prime_background);
+}
+
+/* Упавший прогон виден и на самой строке, а не только по значку. */
+.tests-row.is-failed .tests-label {
+  color: var(--red_prime_background);
+}
+
 .tests-empty {
   padding: 12px;
   color: var(--text_color_disabled);
