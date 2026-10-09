@@ -18,7 +18,6 @@ import {
   type ChatUsage,
   type DirEntry,
   type PickedImage,
-  type PlanStep,
   type ReasoningEffort,
   type Settings,
 } from '../../shared/api';
@@ -38,12 +37,15 @@ import { createSelect } from './select';
 import { createSessionInfo, createUsageRing, contextUsage, type SessionInfoData } from './session-info';
 import { createToolFeed, toolLabel, type ReasoningRowView, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
+import { createComposerMenu } from './chat-composer-menu';
+import { createChangesPanel } from './chat-changes';
+import { createPlanPanel } from './chat-plan';
 import {
   createCommandApproval,
   createEditReview,
   type ApprovalHost,
 } from './chat-approvals';
-import { countLines, fileWord, formatBytes, plural, snippetFor, titleFrom } from './chat-text';
+import { countLines, formatBytes, plural, snippetFor, titleFrom } from './chat-text';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
 
@@ -205,55 +207,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /* ── композер: панель изменений, чипы, тулбар, статус ──────────────────── */
 
-  const changesSummary = h('span', { class: 'changes-summary' });
-  const changesStat = h('span', { class: 'changes-stat' });
-  const changesFiles = h('div', { class: 'changes-files', hidden: true });
-  /** Список файлов раскрыт по умолчанию: он и есть содержимое панели. */
-  let changesExpanded = true;
-
-  const changesToggle = h(
-    'button',
-    { class: 'changes-toggle', type: 'button', 'aria-expanded': 'true' },
-    svgIcon('chevronDown', 12),
-    changesSummary,
-    changesStat,
-  );
-
-  /** Панель изменений целиком: шапка-переключатель, действия и список файлов. */
-  const changesBar = h(
-    'div',
-    { class: 'composer-changes is-open', hidden: true },
-    changesToggle,
-    h(
-      'div',
-      { class: 'changes-actions' },
-      // Правки уходят на диск сразу (см. applyAgentEdits), поэтому сохранять
-      // вручную нечего — остаётся только откат к состоянию до правок.
-      h('button', { class: 'btn btn-small', type: 'button', onClick: () => void revertTouched() }, 'Отменить'),
-    ),
-    changesFiles,
-  );
-
-  /**
-   * План агента — фиксированная панель над полем ввода, выше панели изменений.
-   * Раньше чек-лист рисовался внутри сообщения и участвовал в порядке ленты;
-   * теперь он закреплён внизу, перед глазами, пока агент работает.
-   */
-  const planBar = h('div', { class: 'composer-plan', hidden: true });
-  /** Свёрнут ли чек-лист плана. Состояние переживает перерисовку: план обновляется часто. */
-  let planExpanded = true;
-
-  function syncChangesPanel(): void {
-    changesFiles.hidden = !changesExpanded;
-    changesBar.classList.toggle('is-open', changesExpanded);
-    changesToggle.setAttribute('aria-expanded', String(changesExpanded));
-    changesToggle.title = changesExpanded ? 'Скрыть список файлов' : 'Показать список файлов';
-  }
-
-  changesToggle.addEventListener('click', () => {
-    changesExpanded = !changesExpanded;
-    syncChangesPanel();
+  // Панель изменений и план агента — отдельные модули: они только рисуют по
+  // состоянию беседы, а работа с документами и редактором остаётся здесь.
+  const changesPanel = createChangesPanel({
+    reveal: (path, line, column) => deps.editors.reveal(path, line, column),
+    onRevert: () => void revertTouched(),
   });
+  const planPanel = createPlanPanel();
 
   /* ── контекст, который прикладывает пользователь ───────────────────────── */
 
@@ -523,78 +483,28 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /* ── меню композера: слэш-команды и контекст ───────────────────────────── */
 
-  interface ComposerItem {
-    title: string;
-    hint: string;
-    run(): void;
-  }
-
-  /** Слэш-команды: подставляют готовый запрос и сами прикладывают контекст. */
-  const SLASH_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string; prompt: string }> = [
-    {
-      id: '/explain',
-      title: 'Объяснить код',
-      hint: 'Разобрать выделение или текущий файл',
-      prompt: 'Объясни этот код: что он делает, как устроен и на что обратить внимание.',
+  // Меню (слэш-команды, `#`-контекст и `@`-файлы) живёт в отдельном модуле:
+  // сама панель только строит его и слушает поле ввода. Работа с редактором и
+  // проектом остаётся здесь — модуль просит её через колбэки.
+  const menu = createComposerMenu({
+    input,
+    onContext: (kind) => addAttachment(attachmentFrom(kind)),
+    onAttachBest: () => attachBest(),
+    onPickImage: () => void attachImagesFromDialog(),
+    onMention: (path) => {
+      const root = deps.workspace.root ?? '';
+      void attachPath(root ? `${root}/${path.replace(/\/$/, '')}` : path);
     },
-    {
-      id: '/fix',
-      title: 'Исправить ошибку',
-      hint: 'Найти причину и предложить правку',
-      prompt: 'Найди причину ошибок в этом коде и предложи минимальную правку.',
-    },
-    {
-      id: '/tests',
-      title: 'Написать тесты',
-      hint: 'Покрыть выделение или файл тестами',
-      prompt: 'Напиши тесты для этого кода. Покрой граничные случаи и объясни, что проверяешь.',
-    },
-    {
-      id: '/doc',
-      title: 'Добавить документацию',
-      hint: 'Комментарии и docstring',
-      prompt: 'Добавь документацию к этому коду: назначение, параметры, возвращаемое значение.',
-    },
-  ];
-
-  const CONTEXT_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string; kind: 'selection' | 'file' | 'problems' }> = [
-    { id: '#selection', title: 'Выделение', hint: 'Фрагмент из редактора', kind: 'selection' },
-    { id: '#file', title: 'Открытый файл', hint: 'Содержимое целиком', kind: 'file' },
-    { id: '#problems', title: 'Ошибки и предупреждения', hint: 'То, что подчёркивает редактор', kind: 'problems' },
-  ];
-
-  const menu = h('div', { class: 'composer-menu', hidden: true });
-  let menuItems: ComposerItem[] = [];
-  let menuIndex = 0;
+    mentionPaths: () => mentionCache,
+    requestMentions: () => void collectMentions(),
+  });
 
   /** Кнопка «+» открывает тот же список контекста: так его видно и без `#`. */
   const contextButton = h(
     'button',
-    { class: 'icon-btn', type: 'button', title: 'Приложить контекст', onClick: () => toggleContextMenu() },
+    { class: 'icon-btn', type: 'button', title: 'Приложить контекст', onClick: () => menu.toggleContext() },
     svgIcon('plus', 14),
   );
-
-  function toggleContextMenu(): void {
-    if (!menu.hidden) {
-      hideMenu();
-      return;
-    }
-    showMenu([
-      ...CONTEXT_COMMANDS.map((item) => ({
-        title: item.title,
-        hint: item.hint,
-        run: () => {
-          addAttachment(attachmentFrom(item.kind));
-          input.focus();
-        },
-      })),
-      {
-        title: 'Изображение из файла…',
-        hint: 'PNG, JPEG, WebP, GIF — или Ctrl+V из буфера',
-        run: () => void attachImagesFromDialog(),
-      },
-    ]);
-  }
 
   // Вставка из буфера: screenshot в буфере — самое частое, что прикладывают к
   // вопросу. Текст с картинкой вместе вставляется как текст: картинку берём только
@@ -616,119 +526,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   // Меню живёт поверх панели: закрываем его кликом мимо, как всплывающие слои.
   document.addEventListener('pointerdown', (event) => {
-    if (menu.hidden) return;
+    if (!menu.isOpen()) return;
     const node = event.target as Node;
-    if (menu.contains(node) || input.contains(node) || contextButton.contains(node)) return;
-    hideMenu();
+    if (menu.element.contains(node) || input.contains(node) || contextButton.contains(node)) return;
+    menu.hide();
   });
-
-  function renderMenu(): void {
-    clear(menu);
-    menuItems.forEach((item, index) => {
-      menu.appendChild(
-        h(
-          'button',
-          {
-            class: `composer-menu-item${index === menuIndex ? ' is-cursor' : ''}`,
-            type: 'button',
-            onClick: () => pickMenuItem(index),
-          },
-          h('span', { class: 'composer-menu-title' }, item.title),
-          h('span', { class: 'composer-menu-hint' }, item.hint),
-        ),
-      );
-    });
-  }
-
-  function showMenu(items: ComposerItem[]): void {
-    menuItems = items;
-    menuIndex = 0;
-    if (items.length === 0) {
-      hideMenu();
-      return;
-    }
-    renderMenu();
-    menu.hidden = false;
-  }
-
-  function hideMenu(): void {
-    menu.hidden = true;
-    menuItems = [];
-    menuIndex = 0;
-  }
-
-  function pickMenuItem(index: number): void {
-    const item = menuItems[index];
-    hideMenu();
-    item?.run();
-  }
-
-  /** `#` в конце слова открывает список контекста, `/` в начале — список команд. */
-  function syncMenu(): void {
-    const value = input.value;
-
-    if (value.startsWith('/')) {
-      const query = value.slice(1).toLowerCase();
-      showMenu(
-        SLASH_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map((item) => ({
-          title: `${item.id} — ${item.title}`,
-          hint: item.hint,
-          run: () => {
-            input.value = item.prompt;
-            attachBest();
-            syncMenu();
-            input.focus();
-          },
-        })),
-      );
-      return;
-    }
-
-    const hash = value.lastIndexOf('#');
-    if (hash >= 0 && /(^|\s)#[\w-]*$/.test(value)) {
-      const query = value.slice(hash + 1).toLowerCase();
-      showMenu(
-        CONTEXT_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map((item) => ({
-          title: `${item.id} — ${item.title}`,
-          hint: item.hint,
-          run: () => {
-            // Убираем набранный `#…`, он был только способом открыть список.
-            input.value = `${value.slice(0, hash).trimEnd()} `.trimStart();
-            addAttachment(attachmentFrom(item.kind));
-            input.focus();
-          },
-        })),
-      );
-      return;
-    }
-
-    // `@` — файл или папка проекта: так контекст прикладывается точнее всего.
-    const at = value.lastIndexOf('@');
-    if (at >= 0 && /(^|\s)@[\w./-]*$/.test(value)) {
-      const query = value.slice(at + 1).toLowerCase();
-      const candidates = (mentionCache ?? []).filter((path) => path.toLowerCase().includes(query)).slice(0, 30);
-      if (candidates.length === 0 && mentionCache === null) void collectMentions();
-      showMenu(
-        candidates.map((path) => {
-          const isDir = path.endsWith('/');
-          return {
-            title: path,
-            hint: isDir ? 'папка — список файлов' : 'файл — содержимое',
-            run: () => {
-              input.value = `${value.slice(0, at).trimEnd()} `.trimStart();
-              const root = deps.workspace.root ?? '';
-              const full = root ? `${root}/${path.replace(/\/$/, '')}` : path;
-              void attachPath(full);
-              input.focus();
-            },
-          };
-        }),
-      );
-      return;
-    }
-
-    hideMenu();
-  }
 
   const actionButton = h('button', {
     class: 'icon-btn composer-action',
@@ -1046,7 +848,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     current.draft = input.value;
     closeApprovals();
-    hideMenu();
+    menu.hide();
     activeId = id;
 
     for (const session of sessions) session.thread.hidden = session.id !== id;
@@ -1479,127 +1281,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
   }
 
+  /** Отрисовать панель изменений по активной беседе. */
   function renderChanges(): void {
-    const session = active();
-    const touched = session.touched;
-    const files = session.files;
-    const total = touched.size + files.length;
-    if (total === 0) {
-      changesBar.hidden = true;
-      changesFiles.hidden = true;
-      clear(changesFiles);
-      return;
-    }
-
-    let added = 0;
-    let removed = 0;
-    for (const entry of touched.values()) {
-      added += entry.added;
-      removed += entry.removed;
-    }
-    for (const file of files) added += file.kind === 'created' ? (file.lines ?? 0) : 0;
-
-    changesBar.hidden = false;
-    changesSummary.textContent = `Изменён ${total} ${fileWord(total)}`;
-    // Знак и число красятся по смыслу: плюсы — зелёные, минусы — красные.
-    changesStat.replaceChildren(
-      h('span', { class: 'stat-add' }, `+${added}`),
-      h('span', { class: 'stat-del' }, `−${removed}`),
-    );
-
-    clear(changesFiles);
-    for (const [target, entry] of touched) {
-      changesFiles.appendChild(
-        h(
-          'button',
-          { class: 'chip', type: 'button', title: target, onClick: () => deps.editors.reveal(target, 1, 1) },
-          svgIcon('file', 12),
-          h('span', { class: 'chip-name' }, basename(target)),
-          h(
-            'span',
-            { class: 'chip-stat' },
-            h('span', { class: 'stat-add' }, `+${entry.added}`),
-            h('span', { class: 'stat-del' }, `−${entry.removed}`),
-          ),
-        ),
-      );
-    }
-
-    // Файловые операции: они уже на диске, но человеку важно видеть и их.
-    for (const file of files) {
-      const label =
-        file.kind === 'created'
-          ? 'создан'
-          : file.kind === 'deleted'
-            ? 'удалён'
-            : file.kind === 'modified'
-              ? 'заменено'
-              : 'перенос';
-      const title = file.from ? `${file.from} → ${file.path}` : file.path;
-      changesFiles.appendChild(
-        h(
-          'button',
-          { class: 'chip', type: 'button', title, onClick: () => deps.editors.reveal(file.path, 1, 1) },
-          svgIcon(file.kind === 'deleted' ? 'trash' : file.kind === 'created' ? 'filePlus' : 'file', 12),
-          h('span', { class: 'chip-name' }, basename(file.path)),
-          h('span', { class: `chip-kind chip-kind-${file.kind}` }, label),
-        ),
-      );
-    }
-
-    syncChangesPanel();
-  }
-
-  /** Показать план агента в фиксированной панели над композером. */
-  function renderPlan(steps: PlanStep[]): void {
-    if (steps.length === 0) {
-      hidePlan();
-      return;
-    }
-    planBar.hidden = false;
-    clear(planBar);
-
-    const done = steps.filter((step) => step.status === 'done').length;
-    // Список шагов прячется целиком: шапка остаётся и говорит, что план свёрнут.
-    const list = h(
-      'div',
-      { class: 'plan-list', hidden: !planExpanded },
-      ...steps.map((step) =>
-        h(
-          'div',
-          { class: `plan-step is-${step.status}` },
-          h('span', { class: 'plan-mark' }, step.status === 'done' ? svgIcon('sparkle', 11) : null),
-          h('span', { class: 'plan-text' }, step.text),
-        ),
-      ),
-    );
-
-    const head = h(
-      'button',
-      { class: 'plan-head', type: 'button', 'aria-expanded': String(planExpanded) },
-      svgIcon('chevronDown', 12),
-      svgIcon('checklist', 12),
-      h('span', { class: 'plan-title' }, 'План'),
-      h('span', { class: 'plan-count' }, `${done}/${steps.length}`),
-    );
-    const syncHead = (): void => {
-      head.classList.toggle('is-collapsed', !planExpanded);
-      head.setAttribute('aria-expanded', String(planExpanded));
-      list.hidden = !planExpanded;
-      head.title = planExpanded ? 'Свернуть план' : 'Развернуть план';
-    };
-    head.addEventListener('click', () => {
-      planExpanded = !planExpanded;
-      syncHead();
-    });
-    syncHead();
-
-    planBar.appendChild(h('div', { class: 'plan-card' }, head, list));
-  }
-
-  function hidePlan(): void {
-    planBar.hidden = true;
-    clear(planBar);
+    changesPanel.render(active());
   }
 
   /**
@@ -1700,8 +1384,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const footer = h(
     'div',
     { class: 'chat-footer' },
-    planBar,
-    changesBar,
+    planPanel.element,
+    changesPanel.element,
     attachmentChips,
     h(
       'div',
@@ -1725,7 +1409,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       // он всегда перед глазами и не занимает места в шапке.
       h('div', { class: 'composer-status' }, modeBadge, contextRing.element, sessionInfo.element),
     ),
-    menu,
+    menu.element,
   );
   footer.appendChild(jumpButton);
 
@@ -2064,7 +1748,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     input.value = '';
     session.draft = '';
-    hideMenu();
+    menu.hide();
     // Контекст приложен к конкретному вопросу: дальше он только мешает.
     const sent = [...session.attachments];
     session.attachments = [];
@@ -2125,7 +1809,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     let lastDeltaAt = 0;
 
     streamBuffer = '';
-    hidePlan();
+    planPanel.hide();
     scrollToEnd(session);
     streamingSession = session;
 
@@ -2159,7 +1843,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
               return;
             }
             if (event === ChatStreamEvent.Plan) {
-              renderPlan((payload as ChatPlanPayload).steps);
+              planPanel.render((payload as ChatPlanPayload).steps);
               activity.state('строит план…');
               return;
             }
@@ -2285,7 +1969,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         showToast('Не удалось получить ответ модели', 'error');
       }
     } finally {
-      hidePlan();
+      planPanel.hide();
       activity.dispose();
       streamingSession = null;
       setBusy(false, session);
@@ -2445,26 +2129,24 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   /** Разбор ответа в узлы: движок markdown живёт в отдельном модуле. */
   const markdown = createMarkdownRenderer({ insertCode: (code) => deps.editors.insertAtCursor(code) });
 
-  input.addEventListener('input', syncMenu);
+  input.addEventListener('input', () => menu.sync());
 
   input.addEventListener('keydown', (event) => {
     // Пока открыт список — стрелки, Enter и Esc принадлежат ему, а не отправке.
-    if (!menu.hidden) {
+    if (menu.isOpen()) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        const step = event.key === 'ArrowDown' ? 1 : -1;
-        menuIndex = (menuIndex + step + menuItems.length) % menuItems.length;
-        renderMenu();
+        menu.moveCursor(event.key === 'ArrowDown' ? 1 : -1);
         return;
       }
       if (event.key === 'Escape') {
         event.preventDefault();
-        hideMenu();
+        menu.hide();
         return;
       }
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
-        pickMenuItem(menuIndex);
+        menu.pickCurrent();
         return;
       }
     }
