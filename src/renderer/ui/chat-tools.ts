@@ -2,6 +2,7 @@ import type { ChatToolResultPayload, ChatToolStartPayload } from '../../shared/a
 import { highlightInto } from '../core/highlight';
 import { languageFromPath } from '../core/languages';
 import { basename, h, svgIcon, type IconName } from './dom';
+import { fileIcon } from './file-icons';
 
 /**
  * Карточки вызовов инструментов в ленте чата.
@@ -71,6 +72,30 @@ export function toolLabel(name: string): string {
 
 function toolIcon(name: string): IconName {
   return TOOL_ICONS[name] ?? 'wrench';
+}
+
+/** Путь файла, если инструмент работает явно с одним файлом; иначе null. */
+function toolFilePath(name: string, raw: string): string | null {
+  if (name === 'list_dir') return null; // каталог, а не файл
+  try {
+    const value = JSON.parse(raw) as { path?: unknown; edits?: unknown };
+    if (typeof value.path === 'string' && value.path) return value.path;
+    if (Array.isArray(value.edits)) {
+      const paths = value.edits
+        .map((file) => (file && typeof file === 'object' ? (file as { path?: unknown }).path : undefined))
+        .filter((path): path is string => typeof path === 'string' && !!path);
+      if (new Set(paths).size === 1) return paths[0] ?? null;
+    }
+  } catch {
+    // не JSON — остаётся общая иконка инструмента
+  }
+  return null;
+}
+
+/** Иконка карточки инструмента: у файловых операций — цветной значок типа файла. */
+function toolIconNode(name: string, raw: string): SVGSVGElement {
+  const path = toolFilePath(name, raw);
+  return path ? fileIcon(path, 13) : svgIcon(toolIcon(name), 13);
 }
 
 /** Аргументы вызова в одну строку: путь, запрос, маска. */
@@ -343,7 +368,7 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
           title: `${label} — показать вывод`,
           onClick: togglePanel,
         },
-        svgIcon(toolIcon(call.name), 13),
+        toolIconNode(call.name, call.args),
         h('span', { class: 'tool-name' }, label),
         h('span', { class: 'tool-args' }, summarizeArgs(call.args)),
         cardState,
