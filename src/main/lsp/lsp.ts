@@ -149,6 +149,10 @@ interface LspCapabilities {
 
 export class LspService {
   private readonly runtimes = new Map<string, ServerRuntime>();
+  /** Подъёмы, которые ещё не завершились: ключ — язык. */
+  private readonly starting = new Map<string, Promise<ServerRuntime | null>>();
+  /** Номер поколения серверов: растёт при перезапуске, отсекает устаревшие подъёмы. */
+  private generation = 0;
   private readonly languageOfPath = new Map<string, string>();
 
   constructor(
@@ -173,6 +177,8 @@ export class LspService {
   }
 
   restart(): { running: string[] } {
+    // Подъёмы, начатые до перезапуска, станут ненужными: счётчик версий их отсечёт.
+    this.generation += 1;
     for (const language of [...this.runtimes.keys()]) this.stop(language);
     return { running: [] };
   }
@@ -214,6 +220,7 @@ export class LspService {
   }
 
   dispose(): void {
+    this.generation += 1;
     for (const language of [...this.runtimes.keys()]) this.stop(language);
   }
 
@@ -222,22 +229,54 @@ export class LspService {
     return language ? (this.runtimes.get(language) ?? null) : null;
   }
 
-  /** Сервер поднимается лениво, при первом открытии файла этого языка. */
+  /**
+   * Сервер поднимается лениво, при первом открытии файла этого языка.
+   *
+   * Подъём асинхронный (читаем `.env`), поэтому одного `runtimes.get` мало: два
+   * файла одного языка, открытые разом, оба успели бы пройти проверку и запустить
+   * по серверу — лишний остался бы висеть процессом. Поэтому второй ждёт тот же
+   * незавершённый подъём.
+   */
   private async runtimeFor(language: string): Promise<ServerRuntime | null> {
     const existing = this.runtimes.get(language);
     if (existing) return existing;
 
+    const inFlight = this.starting.get(language);
+    if (inFlight) return inFlight;
+
+    const pending = this.startLanguage(language).finally(() => this.starting.delete(language));
+    this.starting.set(language, pending);
+    return pending;
+  }
+
+  private async startLanguage(language: string): Promise<ServerRuntime | null> {
     const settings = this.settings();
     if (!settings.enabled) return null;
     const config = settings.servers.find((server) => server.language === language && server.enabled && server.command.trim());
     if (!config) return null;
 
+    // Пока поднимались, могли перезапустить серверы: тогда этот уже не нужен, и
+    // его процесс надо убить — иначе он остался бы жить вне учёта.
+    const generation = this.generation;
     try {
       const runtime = await this.start(config);
+      if (generation !== this.generation) {
+        this.kill(runtime);
+        return null;
+      }
       this.runtimes.set(language, runtime);
       return runtime;
     } catch {
       return null; // сервера нет в PATH — это не повод падать IDE
+    }
+  }
+
+  private kill(runtime: ServerRuntime): void {
+    runtime.connection.dispose();
+    try {
+      runtime.child.kill();
+    } catch {
+      // уже мёртв
     }
   }
 
@@ -372,12 +411,7 @@ export class LspService {
     const runtime = this.runtimes.get(language);
     if (!runtime) return;
     this.runtimes.delete(language);
-    runtime.connection.dispose();
-    try {
-      runtime.child.kill();
-    } catch {
-      // уже мёртв
-    }
+    this.kill(runtime);
   }
 }
 
