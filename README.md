@@ -619,15 +619,20 @@ Renderer не трогает `node:fs`. Всё идёт через `WorkspaceSer
 biome.json           линт и формат (Biome)
 vitest.config.mts    юнит-тесты (Vitest)
 .github/workflows/   ci.yml (проверки на push/PR), release.yml (дистрибутивы по тегу)
-tests/               юнит-тесты чистой логики: edits, replace, session, glob, tools,
-│                    providers, languages, theme, chat-text, quick-open-rank, lsp-presets
+tests/               юнит-тесты чистой логики (28 файлов): edits, replace, session, glob,
+│                    tools, providers, languages, theme, chat-text, quick-open-rank,
+│                    imports/import-install, env-file/project-env, project-scan,
+│                    python-env/-health/-packages/-tests, node-packages, uri-path, lsp-*
 
 src/
-├── shared/            контракт: api.ts (типы + методы), languages.ts (реестр языков),
-│                      edits.ts (правки TextEdit), replace.ts (поиск с заменой),
-│                      session.ts (проверка сессии), glob.ts (маски файлов),
-│                      tools.ts, bridge.ts, app-menu.ts, providers.ts,
-│                      lsp-presets.ts (известные языковые серверы)
+├── shared/            контракт: api.ts (типы + методы), bridge.ts, tools.ts, app-menu.ts,
+│                      languages.ts (реестр языков), edits.ts (правки TextEdit),
+│                      replace.ts (поиск с заменой), session.ts (проверка сессии),
+│                      glob.ts (маски файлов), providers.ts,
+│                      imports.ts (разбор импортов), import-install.ts (что предложить поставить),
+│                      python-env/-health/-packages/-tests, env-file.ts (разбор .env),
+│                      project-scan.ts (карта проекта),
+│                      lsp-presets.ts, lsp-symbols.ts
 ├── main/
 │   ├── index.ts       сборка сервисов, single-instance, выключение терминалов
 │   ├── window.ts      безрамочное окно, его состояние и арифметика размеров
@@ -640,25 +645,39 @@ src/
 │   ├── terminal/      node-pty: сессии, склейка вывода, буферы
 │   ├── ai/            provider.ts, openai-compatible.ts (SSE), anthropic.ts, service.ts,
 │   │                  chat-store.ts (беседы), agent-tools.ts (инструменты агента)
-│   └── lsp/           языковые серверы: жизненный цикл, диагностики,
-│                      detect.ts (поиск команд в PATH)
+│   ├── lsp/           языковые серверы: жизненный цикл, диагностики,
+│   │                  detect.ts (поиск команд в PATH)
+│   ├── python/        environments (окружения), interpreters (поиск в системе),
+│   │                  pip (установка), packages (что видит интерпретатор),
+│   │                  tests (сбор тестов), format (ruff/black), health (поломки venv)
+│   ├── node/          packages.ts (что видит проект: каталоги node_modules)
+│   ├── project/       scan.ts (обход проекта без чтения содержимого)
+│   └── project-env.ts переменные из .env — для запуска, терминала и языкового сервера
 ├── preload/index.ts   мост window.chui
 └── renderer/
     ├── app.ts         композиционный корень: сервисы + команды + подписки
     ├── styles/        theme.css (палитра, две схемы), main.css (раскладка и компоненты)
     ├── core/          document, document-store, editor-service, edits, commands,
-    │                  keybindings, open-editors, workspace-model, rpc,
+    │                  keybindings, open-editors, workspace-model, rpc, host,
     │                  languages (реестр из shared), language-modes (правила Monaco),
     │                  project-tools (интерпретатор и менеджер пакетов),
-    │                  run-config (что можно запустить), highlight (код в чате),
+    │                  run-config (что можно запустить), python-view (подписи окружения),
+    │                  import-check (подчёркивание «модуль не установлен»),
+    │                  import-actions (быстрая правка «установить пакет»),
+    │                  lsp (синхронизация с сервером), lsp-providers (подсказки Monaco),
+    │                  git-model (пометки git по путям), highlight (код в чате),
     │                  quick-open-rank (отбор файлов для Ctrl+Shift+O),
+    │                  popup-placement (где рисовать попап), monaco-chrome, monaco-env,
     │                  theme (темы Monaco и xterm), theme-service (смена схемы),
     │                  window-frame (своя рамка: кнопки и края)
     └── ui/            layout (острова), dock, terminal, explorer, file-icons,
                        tabs, breadcrumbs, run-button, search, chat, chat-text,
                        chat-markdown, chat-tools, quick-open, palette,
-                       popup-menu (контекстные меню и меню приложения),
-                       statusbar, settings-modal, session-info, toast, dom
+                       symbol-picker (Ctrl+T: символ по проекту),
+                       python-env-popover, venv-modal (окружения Python),
+                       test-panel (дерево тестов), source-control (git), diff-view,
+                       popup-menu, context-menu, popover, select,
+                       statusbar, settings-modal, session-info, launcher, toast, dom
 ```
 
 ## Подключение модели
@@ -697,19 +716,29 @@ src/
 **Мелочи, которые заметны каждый день.** Хлебные крошки и путь в статусбаре — по клику
 открывать палитру быстрого перехода. Поиск по открытым вкладкам, а не только по проекту.
 
+**Отладчик.** Самый крупный недостающий кусок: запуск файла — это команда в терминале,
+точек останова и пошагового выполнения нет. Дальше — клиент DAP в `main` и запуск отладчика
+по модели и интерпретатору проекта (для Python — `debugpy`), пометки в жёлобе и панель стека,
+как у запуска и тестов сейчас.
+
+**Панель тестов.** Показывать у узлов статус последнего прогона (прошёл/упал) и покрытие
+(`pytest-cov` уже ставится набором «Окружение для тестов»). Запускать конкретный узел
+выходом из терминала нельзя — оболочка после `pytest` не завершается, поэтому статус нужно
+брать из разбора вывода или отдельным вызовом с кодом возврата.
+
 **Упаковка.** Подпись дистрибутивов (macOS не нотаризуется). Языковые грамматики Monaco Vite
 уже выносит в отдельные чанки и грузит по требованию — тяжёлым остаётся только ядро редактора,
 и его дробление смысла имеет мало.
 
-**Качество.** Расширять `tests/` (парсер markdown, модель git-пометок, отбор совпадений)
-и разбирать `renderer/ui/chat.ts` — он разросся до ~2 600 строк, его стоит поделить
+**Качество.** Разбирать `renderer/ui/chat.ts` — он разросся до ~2 600 строк, его стоит поделить
 на стриминг, композер и панель изменений (чистые помощники уже вынесены в `chat-text.ts`).
 
 **LSP.** Языковые серверы поднимаются по настройке; в разделе «Языки (LSP)» кнопка
 «Найти установленные» проверяет PATH и главное окружение проекта. Если LSP включён,
 а список серверов пуст, IDE подставит найденные сама — при открытии проекта.
-Дальше можно расширять
-список пресетов (`shared/lsp-presets.ts`) и добавлять языки по мере надобности.
+Дальше можно расширять список пресетов (`shared/lsp-presets.ts`) и добавлять языки по мере надобности.
+Стоит помнить: базовый `python-lsp-server` код не проверяет — диагностику дают его плагины
+(`pyflakes`, `pycodestyle`); набор «Полное окружение» ставит их вместе с сервером.
 
 ## Ограничения текущей версии
 
