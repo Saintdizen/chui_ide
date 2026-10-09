@@ -3346,7 +3346,23 @@ textarea {
 
 /* Вид проекта: «Python», «Node.js» — рядом с именем проекта, тише его. */
 .status-kind {
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--text_color_tertiary);
+  font: inherit;
+}
+
+/* У Node чип кликабелен и открывает попап окружения — подсвечиваем при наведении. */
+.status-kind.is-actionable {
+  padding: 0 4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.status-kind.is-actionable:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color_hover);
 }
 
 /* Окружение Python — кнопка: клик открывает попап с подробностями. */
@@ -4882,7 +4898,8 @@ textarea {
 }
 
 /* Окружений бывает много: длинный список прокручиваем, а не вылезаем за окно. */
-.popover-python-env {
+.popover-python-env,
+.popover-node-env {
   max-height: calc(100vh - 16px);
   overflow: auto;
 }

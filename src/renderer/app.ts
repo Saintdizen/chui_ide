@@ -50,6 +50,7 @@ import { createExplorer } from './ui/explorer';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
 import { logoMark } from './ui/logo';
+import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-popover';
 import { createPalette } from './ui/palette';
 import { createPopover, type PopoverView } from './ui/popover';
 import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-env-popover';
@@ -87,6 +88,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const statusBar = createStatusBar({
     openGitManager: (anchor) => openGitManager(anchor),
     openPythonEnv: (anchor) => openPythonEnv(anchor),
+    openNodeEnv: (anchor) => openNodeEnv(anchor),
     // Через команду, а не напрямую: палитра создаётся ниже, а команда уже есть.
     openFilePicker: () => void commands.execute('file.quickOpen'),
   });
@@ -197,6 +199,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     }
     void pythonEnvView.refresh();
     pythonEnvPopover.toggle(anchor);
+  }
+
+  /**
+   * Попап Node-окружения по клику на чип «Node.js»: чем запускается код, чем
+   * ставятся зависимости и всё ли из `package.json` на месте.
+   */
+  let nodeEnvPopover: PopoverView | null = null;
+  let nodeEnvView: NodeEnvPopoverView | null = null;
+
+  function openNodeEnv(anchor: HTMLElement): void {
+    if (!nodeEnvPopover || !nodeEnvView) {
+      nodeEnvView = createNodeEnvPopover({
+        rpc,
+        root: () => workspace.root,
+        tools: () => tools.get(),
+        projectKind: () => projectScan?.kind.label ?? null,
+        onInstall: () => {
+          nodeEnvPopover?.close();
+          // Ставим все объявленные зависимости: `npm install` без аргументов.
+          void installNodePackages([]);
+        },
+      });
+      nodeEnvPopover = createPopover(nodeEnvView.element, { width: 340 });
+      nodeEnvPopover.element.classList.add('popover-node-env');
+    }
+    void nodeEnvView.refresh();
+    nodeEnvPopover.toggle(anchor);
   }
 
   const diffView = createDiffView({ createDiff: (container) => editors.createDiff(container), git });
@@ -1491,6 +1520,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         projectScan && projectScan.kind.source !== 'none' && projectScan.kind.id !== 'python'
           ? projectScan.kind.label
           : null,
+      projectKindId: projectScan && projectScan.kind.source !== 'none' ? projectScan.kind.id : null,
       // Виджет окружения — только там, где он осмыслен: Python-проект или уже
       // выбранный интерпретатор. У Node-проекта его не показываем.
       env:
