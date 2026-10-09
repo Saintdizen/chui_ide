@@ -18,6 +18,7 @@ import { DebugService } from '../src/main/debug/debug';
 const FAKE_ADAPTER = `
 let buffer = Buffer.alloc(0);
 let launchSeq = null;
+let breakpoints = 0;
 function send(message) {
   const body = Buffer.from(JSON.stringify(message), 'utf8');
   process.stdout.write('Content-Length: ' + body.length + '\\r\\n\\r\\n');
@@ -38,6 +39,7 @@ function handle(message) {
       send({ type: 'event', event: 'initialized' });
       break;
     case 'setBreakpoints':
+      breakpoints = (args.breakpoints || []).length;
       response(message.seq, 'setBreakpoints', {
         breakpoints: (args.breakpoints || []).map((b) => ({ verified: true, line: b.line })),
       });
@@ -48,7 +50,13 @@ function handle(message) {
         response(launchSeq, 'launch');
         launchSeq = null;
       }
-      setTimeout(() => send({ type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1 } }), 30);
+      // Как debugpy: сначала программа пошла (process + thread). Останов придёт
+      // только если есть точка останова — иначе программа просто выполняется.
+      setTimeout(() => send({ type: 'event', event: 'process', body: { name: 'app.py', startMethod: 'launch' } }), 10);
+      setTimeout(() => send({ type: 'event', event: 'thread', body: { reason: 'started', threadId: 1 } }), 15);
+      if (breakpoints > 0) {
+        setTimeout(() => send({ type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1 } }), 30);
+      }
       break;
     case 'stackTrace':
       response(message.seq, 'stackTrace', {
@@ -70,6 +78,15 @@ function handle(message) {
       response(message.seq, 'continue');
       setTimeout(() => send({ type: 'event', event: 'terminated' }), 30);
       break;
+    case 'pause': {
+      // Пауза возможна только с известным threadId: клиент берёт его из события
+      // thread. Не знает — молчим, и останов не придёт (прежнее поведение).
+      response(message.seq, 'pause', { threadId: args.threadId });
+      if (typeof args.threadId === 'number') {
+        setTimeout(() => send({ type: 'event', event: 'stopped', body: { reason: 'pause', threadId: args.threadId } }), 20);
+      }
+      break;
+    }
     case 'output':
       response(message.seq, 'output');
       break;
@@ -173,6 +190,7 @@ describe('DebugService', () => {
 
   it('сообщает об останове событием и рассылает фазы', async () => {
     const { service, events } = fakeService();
+    await service.setBreakpoints('/proj/app.py', [4]);
     await service.start('/proj/app.py');
     await waitPhase(service, 'stopped');
 
@@ -188,8 +206,27 @@ describe('DebugService', () => {
     service.dispose();
   });
 
+  it('без точек останова программа идёт, а пауза её останавливает', async () => {
+    const { service } = fakeService();
+    // Точек останова не ставим: останов прийти не должен, программа просто идёт.
+    await service.start('/proj/app.py');
+
+    // Фаза не должна застревать в «starting»: иначе в панели недоступны «Пауза» и
+    // «Стоп» — кнопки включаются по фазе, а не по «программа запущена».
+    expect(await waitPhase(service, 'running')).toBe('running');
+
+    // Пауза останавливает идущую программу: threadId клиент берёт из события thread.
+    // Раньше его неоткуда было взять (останова ещё не было), и пауза молча ничего
+    // не делала.
+    await service.pause();
+    expect(await waitPhase(service, 'stopped')).toBe('stopped');
+
+    service.dispose();
+  });
+
   it('stop() возвращает сервис в покой', async () => {
     const { service } = fakeService();
+    await service.setBreakpoints('/proj/app.py', [4]);
     await service.start('/proj/app.py');
     await waitPhase(service, 'stopped');
 

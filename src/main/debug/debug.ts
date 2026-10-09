@@ -310,11 +310,31 @@ export class DebugService {
         // программа не начнёт выполняться.
         void this.pushAllBreakpoints();
         break;
+      case 'process':
+        // Программа пошла. Без этого фаза оставалась «starting» до первого
+        // останова, а значит в панели были недоступны «Пауза» и «Стоп».
+        if (body.startMethod !== 'attach' || this.phase === 'starting') this.setPhase('running');
+        break;
+      case 'thread': {
+        // Отладчик объявляет потоки заранее, ещё до первого останова. Без этого
+        // «Пауза» на идущей программе не работала бы: она шлёт threadId, а взять
+        // его было негде — останов ещё не случался.
+        const threadId = typeof body.threadId === 'number' ? body.threadId : null;
+        if (body.reason === 'started') {
+          if (this.thread === null) this.thread = threadId;
+        } else if (threadId !== null && threadId === this.thread) {
+          this.thread = null; // поток, который мы запомнили, завершился
+        }
+        break;
+      }
       case 'stopped':
-        this.thread = typeof body.threadId === 'number' ? body.threadId : null;
+        this.thread = typeof body.threadId === 'number' ? body.threadId : this.thread;
         void this.onStopped(typeof body.reason === 'string' ? body.reason : 'stopped');
         break;
       case 'continued':
+        // Поток запоминаем: одиночный Python-поток тот же, поэтому «Пауза»
+        // и шаги после продолжения должны знать его threadId.
+        this.thread = typeof body.threadId === 'number' ? body.threadId : this.thread;
         this.frames = [];
         this.topFrameId = null;
         this.setPhase('running');
