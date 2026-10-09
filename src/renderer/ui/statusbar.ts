@@ -1,7 +1,6 @@
 import { h, svgIcon } from './dom';
 
 export interface StatusState {
-  workspace: string | null;
   file: string | null;
   dirty: boolean;
   line: number;
@@ -20,8 +19,6 @@ export interface StatusState {
   branch: string | null;
   /** Сколько файлов с правками: показывает виджет ветки. */
   changes: number;
-  /** Вид проекта — «Python», «Node.js». Слева, рядом с именем проекта. */
-  projectKind: string | null;
   /** Ключ вида проекта (`python`, `node`, …): выбирает, какой попап открыть. */
   projectKindId: string | null;
   /** Выбранное Python-окружение (`.venv`, `python3`); null — виджет скрыт. */
@@ -51,7 +48,6 @@ export interface StatusBarDeps {
  */
 export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const state: StatusState = {
-    workspace: null,
     file: null,
     dirty: false,
     line: 1,
@@ -66,15 +62,10 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     encoding: 'UTF-8',
     branch: null,
     changes: 0,
-    projectKind: null,
     projectKindId: null,
     env: null,
   };
 
-  const workspaceItem = h('span', { class: 'status-item' });
-  // Чип вида проекта — просто подпись: попап окружения открывает виджет окружения
-  // справа, а второй вход из чипа показывал тот же попап дважды.
-  const kindItem = h('span', { class: 'status-item status-kind' });
   // Виджет окружения один, а попапов два: у Node открываем Node, иначе Python.
   const envItem = h(
     'button',
@@ -118,7 +109,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const element = h(
     'div',
     { class: 'statusbar' },
-    h('div', { class: 'status-group' }, workspaceItem, kindItem, gitItem, fileItem),
+    h('div', { class: 'status-group' }, gitItem, fileItem),
     h(
       'div',
       { class: 'status-group' },
@@ -135,10 +126,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   );
 
   const render = (): void => {
-    workspaceItem.textContent = state.workspace ?? 'нет проекта';
-    kindItem.textContent = state.projectKind ?? '';
-    kindItem.hidden = !state.projectKind;
-    kindItem.title = state.projectKind ? `Проект: ${state.projectKind}` : '';
     fileItem.textContent = state.file ? `${state.dirty ? '● ' : ''}${state.file}` : '';
     fileItem.hidden = !state.file;
     positionItem.textContent = `${state.line}:${state.column}`;

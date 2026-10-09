@@ -3402,15 +3402,6 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
-/* Вид проекта: «Python», «Node.js» — рядом с именем проекта, тише его. */
-.status-kind {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--text_color_tertiary);
-  font: inherit;
-}
-
 /* Окружение Python — кнопка: клик открывает попап с подробностями. */
 .status-env {
   padding: 0 4px;

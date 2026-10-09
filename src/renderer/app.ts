@@ -1713,7 +1713,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const language = active?.languageId ?? null;
     const indent = settings.editor.languageIndent && language ? languageIndent(language) : null;
     statusBar.update({
-      workspace: workspace.current?.name ?? null,
       file: active ? workspace.relative(active.path) : null,
       dirty: active?.dirty ?? false,
       language: language ? languageLabel(language) : null,
@@ -1724,13 +1723,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       tool: active ? toolLabel(language, projectTools) : null,
       branch: git.branch,
       changes: git.changeCount,
-      // У Python всё про окружение — в одном попапе; в статусбаре отдельная надпись
-      // «Python» дублировала бы его. У остальных проектов вид виден чипом, и только
-      // когда он вообще опознан: «Неизвестно» в полосе — лишний шум.
-      projectKind:
-        projectScan && projectScan.kind.source !== 'none' && projectScan.kind.id !== 'python'
-          ? projectScan.kind.label
-          : null,
       projectKindId: projectScan && projectScan.kind.source !== 'none' ? projectScan.kind.id : null,
       // Виджет окружения говорит на языке проекта: у Node — версия и менеджер,
       // у Python — интерпретатор. Раньше в Node-проекте тут висел Python.
