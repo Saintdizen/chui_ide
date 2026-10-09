@@ -38,6 +38,11 @@ import { createSelect } from './select';
 import { createSessionInfo, createUsageRing, contextUsage, type SessionInfoData } from './session-info';
 import { createToolFeed, toolLabel, type ReasoningRowView, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
+import {
+  createCommandApproval,
+  createEditReview,
+  type ApprovalHost,
+} from './chat-approvals';
 import { countLines, fileWord, formatBytes, plural, snippetFor, titleFrom } from './chat-text';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
@@ -2363,208 +2368,25 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
   }
 
-  function previewFile(file: FileEdit, text: string | null): EditPreviewFile {
-    if (text === null) return { path: file.path, error: 'не удалось прочитать файл', hunks: [] };
+  // Решения (ревью правок, подтверждение команды) живут в `chat-approvals.ts`:
+  // там разметка карточек, а панель только подключает их к ленте и к отмене.
+  // Карточка ложится в ту ленту, откуда пришёл вызов, даже если человек успел
+  // переключить вкладку: беседу берёт замыкание `mount`.
+  const approvals: ApprovalHost = {
+    readText: currentText,
+    mount: (block) => currentTurn(streamingSession ?? active()).appendChild(block),
+    scrollToEnd: () => scrollToEnd(),
+    register: (cancel) => {
+      pendingApprovals.add(cancel);
+      return () => pendingApprovals.delete(cancel);
+    },
+  };
+  const editReview = createEditReview(approvals);
+  const commandApproval = createCommandApproval(approvals);
 
-    const lines = text.split('\n');
-    const hunks = file.edits.slice(0, MAX_REVIEW_HUNKS).map((edit) => ({
-      label:
-        edit.startLine === edit.endLine
-          ? `строка ${edit.startLine}`
-          : `строки ${edit.startLine}–${edit.endLine}`,
-      removed: lines.slice(edit.startLine - 1, edit.endLine).slice(0, MAX_REVIEW_LINES),
-      added:
-        edit.newText.length === 0
-          ? []
-          : edit.newText.replace(/\n$/, '').split('\n').slice(0, MAX_REVIEW_LINES),
-    }));
-
-    return { path: file.path, hunks, extra: file.edits.length - hunks.length };
-  }
-
-  /**
-   * Показывает предложенные правки и ждёт решения пользователя.
-   * Ничего не применяет — это делает вызывающий уже после согласия.
-   *
-   * Возвращает выбранные файлы (можно применить лишь часть правок) или `null`,
-   * если пользователь отклонил всё.
-   */
-  async function reviewEdits(fileEdits: readonly FileEdit[]): Promise<FileEdit[] | null> {
-    const files = await Promise.all(
-      fileEdits.map(async (file) => previewFile(file, await currentText(file.path))),
-    );
-
-    const block = h('div', { class: 'review' });
-    const checks: HTMLInputElement[] = [];
-
-    /** Сводка в шапке и подпись кнопки — по числу отмеченных файлов. */
-    const head = h('div', { class: 'review-head' }, svgIcon('wrench', 13), h('span', { class: 'review-title' }));
-    block.appendChild(head);
-
-    files.forEach((file) => {
-      const box = h('input', { class: 'review-check', type: 'checkbox' }) as HTMLInputElement;
-      box.checked = true;
-      checks.push(box);
-
-      const section = h(
-        'div',
-        { class: 'review-file' },
-        h('label', { class: 'review-file-head' }, box, h('span', { class: 'review-path' }, file.path)),
-      );
-      if (file.error) section.appendChild(h('div', { class: 'review-error' }, file.error));
-      for (const hunk of file.hunks) {
-        const group = h('div', { class: 'review-hunk' }, h('div', { class: 'review-range' }, hunk.label));
-        for (const line of hunk.removed) group.appendChild(h('div', { class: 'review-del' }, `- ${line}`));
-        for (const line of hunk.added) group.appendChild(h('div', { class: 'review-add' }, `+ ${line}`));
-        section.appendChild(group);
-      }
-      if (file.extra) section.appendChild(h('div', { class: 'review-error' }, `… и ещё правок: ${file.extra}`));
-      block.appendChild(section);
-    });
-
-    const status = h('span', { class: 'review-status' });
-    let settle: (result: FileEdit[] | null) => void = () => undefined;
-    const decision = new Promise<FileEdit[] | null>((resolve) => {
-      settle = resolve;
-    });
-
-    const checkedIndexes = (): number[] =>
-      checks.flatMap((box, index) => (box.checked ? [index] : []));
-
-    /** Решение принято — разбор правок больше не нужен: остаётся строка итога. */
-    function finish(approved: boolean, note: string): void {
-      pendingApprovals.delete(abort);
-      const chosen = approved ? checkedIndexes() : [];
-      block.classList.toggle('review-rejected', !approved || chosen.length === 0);
-      block.classList.add('decision-done');
-      const applied = files.filter((_, index) => chosen.includes(index));
-      block.replaceChildren(
-        h(
-          'div',
-          { class: 'decision-line' },
-          svgIcon('wrench', 12),
-          h(
-            'span',
-            {},
-            approved && applied.length > 0
-              ? `Правки применены · ${applied.length} ${fileWord(applied.length)}`
-              : approved
-                ? 'Ничего не выбрано'
-                : 'Правки отклонены',
-          ),
-          note ? h('span', { class: 'decision-status' }, note) : null,
-        ),
-      );
-      settle(approved && chosen.length > 0 ? fileEdits.filter((_, index) => chosen.includes(index)) : null);
-    }
-
-    const applyButton = h(
-      'button',
-      { class: 'btn btn-small btn-primary', type: 'button', onClick: () => finish(true, '') },
-      'Применить',
-    );
-    const rejectButton = h(
-      'button',
-      { class: 'btn btn-small', type: 'button', onClick: () => finish(false, '') },
-      'Отклонить',
-    );
-    const allButton = h(
-      'button',
-      {
-        class: 'link-btn review-all',
-        type: 'button',
-        onClick: () => {
-          const all = checks.every((box) => box.checked);
-          for (const box of checks) box.checked = !all;
-          syncCount();
-        },
-      },
-      'Все / ничего',
-    );
-    // Вызов агента прервали — ревью больше некому ответить, закрываем его.
-    const abort = (): void => finish(false, 'отменено');
-
-    /** Сколько файлов отмечено: это видно в шапке и на кнопке. */
-    function syncCount(): void {
-      const count = checkedIndexes().length;
-      head.querySelector('.review-title')!.textContent =
-        `Ассистент предлагает правки · ${files.length} ${fileWord(files.length)} · отмечено ${count}`;
-      applyButton.textContent = count > 0 ? `Применить (${count})` : 'Применить';
-      applyButton.disabled = count === 0;
-    }
-    for (const box of checks) box.addEventListener('change', syncCount);
-    syncCount();
-
-    block.appendChild(h('div', { class: 'review-actions' }, applyButton, rejectButton, allButton, status));
-    currentTurn(streamingSession ?? active()).appendChild(block);
-    scrollToEnd();
-
-    pendingApprovals.add(abort);
-    return decision;
-  }
-
-  /**
-   * Подтверждение запуска команды. Опасное действие показываем в самой ленте:
-   * пользователь видит команду ровно там, где о ней попросил агент.
-   */
-  async function confirmCommand(command: string): Promise<boolean> {
-    const block = h('div', { class: 'approval' });
-    block.appendChild(
-      h(
-        'div',
-        { class: 'approval-head' },
-        svgIcon('warning', 13),
-        h('span', {}, 'Ассистент просит выполнить команду'),
-      ),
-    );
-    block.appendChild(h('pre', { class: 'approval-command' }, command));
-    block.appendChild(h('div', { class: 'field-hint' }, 'Команда выполнится в папке проекта от вашего имени.'));
-
-    const status = h('span', { class: 'approval-status' });
-    let settle: (allowed: boolean) => void = () => undefined;
-    const decision = new Promise<boolean>((resolve) => {
-      settle = resolve;
-    });
-
-    /** Решение принято — команда и подсказка больше не нужны: остаётся строка статуса. */
-    function finish(allowed: boolean, note: string): void {
-      pendingApprovals.delete(abort);
-      block.classList.add('decision-done');
-      block.replaceChildren(
-        h(
-          'div',
-          { class: 'decision-line' },
-          svgIcon('terminal', 12),
-          h('span', {}, 'Выполняется скрипт'),
-          h('span', { class: 'decision-status' }, note),
-        ),
-      );
-      block.scrollIntoView({ block: 'nearest' });
-      settle(allowed);
-    }
-
-    const runButton = h(
-      'button',
-      { class: 'btn btn-small btn-primary', type: 'button', onClick: () => finish(true, 'разрешено') },
-      'Выполнить',
-    );
-    const skipButton = h(
-      'button',
-      { class: 'btn btn-small', type: 'button', onClick: () => finish(false, 'отменено') },
-      'Отменить',
-    );
-    const abort = (): void => finish(false, 'отменено');
-
-    block.appendChild(h('div', { class: 'approval-actions' }, runButton, skipButton, status));
-    currentTurn(streamingSession ?? active()).appendChild(block);
-    scrollToEnd();
-
-    pendingApprovals.add(abort);
-    return decision;
-  }
 
   deps.host.handle('ai.confirmCommand', async (params) => ({
-    allowed: await confirmCommand(params.command),
+    allowed: await commandApproval.confirm(params.command),
   }));
 
   deps.host.handle('ai.applyEdits', async (params) => applyAgentEdits(params));
@@ -2585,7 +2407,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   async function applyAgentEdits(params: ApplyEditsHostParams): Promise<ApplyEditsHostResult> {
     // При полном доступе применяем всё сразу, иначе спрашиваем: какие файлы применить.
-    const selected = params.autoApprove === true ? [...params.edits] : await reviewEdits(params.edits);
+    const selected = params.autoApprove === true ? [...params.edits] : await editReview.review(params.edits);
     if (!selected || selected.length === 0) return { rejected: true };
 
     // Вызов пришёл из конкретной беседы: правки принадлежат ей, даже если
@@ -2691,20 +2513,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       syncAiAvailability();
     },
   };
-}
-
-/* ── ревью правок: ограничения показа и сводка ──────────────────────────── */
-
-/** Ограничения показа: ревью — не редактор, длинные пачки правок ему не нужны. */
-const MAX_REVIEW_HUNKS = 20;
-const MAX_REVIEW_LINES = 20;
-
-interface EditPreviewFile {
-  path: string;
-  error?: string;
-  hunks: Array<{ label: string; removed: string[]; added: string[] }>;
-  /** Сколько правок не поместилось в предпросмотр. */
-  extra?: number;
 }
 
 /* Карточки вызовов инструментов и лента действий живут в `chat-tools.ts`. */
