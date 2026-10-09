@@ -145,7 +145,6 @@ const MODULE_TO_PACKAGE: Readonly<Record<string, string>> = {
   Crypto: 'pycryptodome',
   fitz: 'PyMuPDF',
   win32: 'pywin32',
-  gspread: 'gspread',
   attr: 'attrs',
   skimage: 'scikit-image',
   mpl_toolkits: 'matplotlib',

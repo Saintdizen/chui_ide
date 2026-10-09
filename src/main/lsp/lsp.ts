@@ -322,11 +322,6 @@ export class LspService {
     }
   }
 
-  /** Что сервер умеет по этому файлу — renderer решает по этому, какой провайдер включать. */
-  capabilitiesFor(path: string): LspCapabilities | null {
-    return this.runtimeForPath(path)?.capabilities ?? null;
-  }
-
   /**
    * Символы проекта по запросу: классы, функции, переменные — по всем запущенным
    * серверам. Поиск не привязан к файлу, поэтому спрашиваем каждый сервер, у

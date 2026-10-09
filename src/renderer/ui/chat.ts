@@ -101,8 +101,11 @@ const CONTINUE_PROMPT = 'Ответ оборвался по лимиту ток�
 /**
  * Панель ассистента — правый «остров» в стиле tool window.
  *
- * Агентного цикла здесь пока нет: канал для него готов (`rpc.stream` +
- * `RpcClient.cancelActive`), а описания инструментов лежат в shared/tools.ts.
+ * Сама панель только ведёт беседу: отправляет запрос потоком (`rpc.stream`),
+ * рисует ответ, правки и чек-лист плана по событиям. Агентный цикл — вызовы
+ * инструментов шаг за шагом — живёт в main (`ai/service.ts`), а их описания
+ * лежат в shared/tools.ts. Режим (ask/agent/plan) решает, какие инструменты
+ * доступны и что подтверждается у пользователя.
  */
 export function createChatPanel(deps: ChatDeps): ChatView {
   let settings = deps.settings;
