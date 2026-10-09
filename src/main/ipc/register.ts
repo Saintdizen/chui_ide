@@ -340,7 +340,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('terminal.kill', (params) => {
     deps.terminals.kill(params.id);
   });
-  router.register('terminal.list', () => deps.terminals.list());
+
 
   // Окно ищем по отправителю запроса, а не по «текущему»: у приложения может
   // быть несколько окон, и управлять должно то, из которого пришёл вызов.
@@ -427,10 +427,6 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     deps.ai.setAutoApprove(params.autoApprove);
   });
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
-  router.register('ai.models', (params, ctx) => {
-    requireAiEnabled();
-    return deps.ai.models(params.providerId, ctx.signal);
-  });
   router.register('ai.test', (params, ctx) => {
     requireAiEnabled();
     return deps.ai.testConnection(params, ctx.signal);

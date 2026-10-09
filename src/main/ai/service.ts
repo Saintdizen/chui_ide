@@ -164,10 +164,6 @@ export class AiService {
     this.liveAutoApprove = value;
   }
 
-  async models(providerId: string, signal?: AbortSignal): Promise<string[]> {
-    return this.createProvider(providerId).listModels(signal);
-  }
-
   /**
    * «Проверить подключение»: пробуем получить список моделей по указанному
    * адресу. Ошибки возвращаем текстом — это часть интерфейса, а не сбой.

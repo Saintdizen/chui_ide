@@ -521,8 +521,6 @@ module.exports = [
       sessions.delete(params.id);
       push('terminal:exit', { id: params.id, exitCode: 0 });
     },
-    'terminal.list': () => [...sessions.values()],
-
     'window.getState': () => ({ maximized: false, fullScreen: false, platform: 'linux', customControls: true }),
     'window.minimize': () => undefined,
     'window.toggleMaximize': () => {
@@ -583,7 +581,6 @@ module.exports = [
       if (provider) provider.hasApiKey = false;
       return structuredClone(settings);
     },
-    'ai.models': () => settings.ai.providers[0].models,
     // Языковые серверы в моке не запускаются: методы принимают вызовы и молчат.
     'lsp.open': () => undefined,
     'lsp.change': () => undefined,

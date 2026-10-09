@@ -974,7 +974,6 @@ export interface ChuiMethods {
   'terminal.write': { params: { id: string; data: string }; result: void };
   'terminal.resize': { params: { id: string; cols: number; rows: number }; result: void };
   'terminal.kill': { params: { id: string }; result: void };
-  'terminal.list': { params: void; result: TerminalSession[] };
 
   'window.getState': { params: void; result: WindowState };
   'window.minimize': { params: void; result: void };
@@ -1014,7 +1013,6 @@ export interface ChuiMethods {
 
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };
-  'ai.models': { params: { providerId: string }; result: string[] };
   /** Проверить адрес и ключ до сохранения провайдера. */
   'ai.test': {
     params: { baseUrl: string; apiKey?: string; providerId?: string };
