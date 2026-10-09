@@ -294,7 +294,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const git = deps.git.changeInside(path);
     let count = git?.count ?? 0;
     let change: GitChange | null = git?.change ?? null;
-    const prefix = `${path}/`;
+    // Разделитель — как в самом пути: main отдаёт родные (на Windows обратные),
+    // и с жёстким «/» несохранённые файлы внутри папок не считались бы.
+    const separator = path.includes('\\') ? '\\' : '/';
+    const prefix = path.endsWith(separator) ? path : `${path}${separator}`;
     for (const document of deps.documents.dirty()) {
       if (!document.path.startsWith(prefix)) continue;
       count += 1;

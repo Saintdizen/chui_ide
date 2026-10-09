@@ -61,11 +61,16 @@ export class WorkspaceModel {
 
 /**
  * `node:path` в renderer нет и быть не должно (изоляция контекста),
- * поэтому путь считается строками. Работает для POSIX-путей; на Windows
- * сюда придёт нормализованный main-процессом путь.
+ * поэтому путь считается строками.
+ *
+ * Разделитель берём из самого пути, а не считаем его всегда прямым: main отдаёт
+ * пути как есть (`path.join`), и на Windows это обратные слэши. С прежним
+ * «всегда /» относительный путь на Windows не находился, и файл выглядел как
+ * лежащий вне проекта — ломались хлебные крошки и запуск (он требует путь от корня).
  */
 export function relativePath(root: string, target: string): string {
   if (target === root) return '';
-  const prefix = root.endsWith('/') ? root : `${root}/`;
+  const separator = root.includes('\\') ? '\\' : '/';
+  const prefix = root.endsWith(separator) ? root : `${root}${separator}`;
   return target.startsWith(prefix) ? target.slice(prefix.length) : target;
 }
