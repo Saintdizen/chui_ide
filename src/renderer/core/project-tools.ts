@@ -30,6 +30,8 @@ export interface ProjectTools {
   pythonLabel: string;
   /** Запускается ли Python через окружение проекта (а не системный). */
   pythonFromProject: boolean;
+  /** Версия Node из PATH (`20.11.0`); null — Node не найден. */
+  nodeVersion: string | null;
   /** Задачи из `scripts` в package.json. */
   scripts: readonly ProjectScript[];
   /** Найден ли package.json: без него задач Node нет. */
@@ -55,6 +57,7 @@ const EMPTY: ProjectTools = {
   pythonCommand: 'python3',
   pythonLabel: 'python3',
   pythonFromProject: false,
+  nodeVersion: null,
   scripts: [],
   hasPackageJson: false,
   tsRunner: null,
@@ -140,6 +143,7 @@ export class ProjectToolsModel {
       tsRunner: manifest.tsRunner ?? builtinTs,
       tsRunnerFrom: manifest.tsRunner ? 'project' : builtinTs ? 'node' : null,
       testRunner: manifest.testRunner,
+      nodeVersion,
       ...python,
     });
   }

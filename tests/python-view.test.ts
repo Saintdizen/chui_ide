@@ -9,6 +9,7 @@ const tools: ProjectTools = {
   pythonCommand: './.venv/bin/python',
   pythonLabel: '.venv · ./.venv/bin/python',
   pythonFromProject: true,
+  nodeVersion: null,
   scripts: [],
   hasPackageJson: false,
   tsRunner: null,

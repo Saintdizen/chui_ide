@@ -81,13 +81,17 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       if (state.projectKindId === 'node') deps.openNodeEnv(event.currentTarget as HTMLElement);
     },
   });
+  // Виджет окружения один, а попапов два: у Node открываем Node, иначе Python.
   const envItem = h(
     'button',
     {
       class: 'status-item status-env',
       type: 'button',
-      title: 'Python-окружение проекта',
-      onClick: (event: Event) => deps.openPythonEnv(event.currentTarget as HTMLElement),
+      onClick: (event: Event) => {
+        const anchor = event.currentTarget as HTMLElement;
+        if (state.projectKindId === 'node') deps.openNodeEnv(anchor);
+        else deps.openPythonEnv(anchor);
+      },
     },
   );
   const fileItem = h('button', {
@@ -156,7 +160,11 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     languageItem.textContent = state.language ?? '—';
     envItem.textContent = state.env ?? '';
     envItem.hidden = !state.env;
-    envItem.title = state.env ? `Python-окружение: ${state.env}` : '';
+    envItem.title = state.env
+      ? state.projectKindId === 'node'
+        ? `Node-окружение: ${state.env}`
+        : `Python-окружение: ${state.env}`
+      : '';
     toolItem.textContent = state.tool ?? '';
     toolItem.hidden = !state.tool;
     toolItem.title = state.tool ? `Запуск: ${state.tool}` : '';

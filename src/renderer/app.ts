@@ -25,7 +25,7 @@ import { LspClient } from './core/lsp';
 import { registerLspProviders } from './core/lsp-providers';
 import { OpenEditors } from './core/open-editors';
 import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
-import { envShortLabel, envVisible } from './core/python-view';
+import { envWidgetLabel } from './core/env-widget';
 import { DebugController, frameForHover } from './core/debug';
 import { RpcClient } from './core/rpc';
 import {
@@ -1732,12 +1732,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           ? projectScan.kind.label
           : null,
       projectKindId: projectScan && projectScan.kind.source !== 'none' ? projectScan.kind.id : null,
-      // Виджет окружения — только там, где он осмыслен: Python-проект или уже
-      // выбранный интерпретатор. У Node-проекта его не показываем.
-      env:
-        workspace.root && envVisible(projectScan?.kind.id ?? null, projectTools, settings.run.pythonPath)
-          ? envShortLabel(projectTools)
-          : null,
+      // Виджет окружения говорит на языке проекта: у Node — версия и менеджер,
+      // у Python — интерпретатор. Раньше в Node-проекте тут висел Python.
+      env: envWidgetLabel(projectScan?.kind.id ?? null, projectTools, settings.run.pythonPath),
     });
 
     // Заголовок окна: как в VS Code — открытый файл и проект.
