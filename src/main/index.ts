@@ -7,6 +7,7 @@ import { pushToRenderers } from './ipc/push';
 import { registerIpc } from './ipc/register';
 import { LspService } from './lsp/lsp';
 import { createApplicationMenu } from './menu';
+import { projectEnv } from './project-env';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { activateCommand, findEnvironments, pythonInterpreterFor } from './python/environments';
 import { SessionStore } from './session-store';
@@ -94,6 +95,9 @@ if (!app.requestSingleInstanceLock()) {
         const primary = environments.find((environment) => environment.primary);
         return primary ? activateCommand(root, primary.path, process.platform) : null;
       },
+      // `.env` проекта читаем на каждую сессию: файл правят во время работы, и
+      // перезапуск IDE ради новой переменной — лишний.
+      () => projectEnv(workspace.rootPath()),
     );
     // Git ничего не хранит сам: корень берётся у рабочей папки, а об изменениях
     // узнаём после своих же операций и после сохранения файла.
@@ -109,6 +113,8 @@ if (!app.requestSingleInstanceLock()) {
       // Тот же выбор, что у запуска: настройка важнее окружения проекта. Иначе
       // подсказки шли бы с одного питона, а код запускался другим.
       () => pythonInterpreterFor(workspace.rootPath(), settings.get().run.pythonPath),
+      // Тот же `.env`, что у терминала и запуска: сервер видит то же окружение.
+      () => projectEnv(workspace.rootPath()),
     );
     // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
     const sessions = new SessionStore();

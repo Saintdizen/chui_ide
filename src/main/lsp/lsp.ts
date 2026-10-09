@@ -7,6 +7,7 @@ import {
   type LspSettings,
 } from '../../shared/api';
 import { toProjectSymbols, type ProjectSymbol } from '../../shared/lsp-symbols';
+import { mergeEnv } from '../project-env';
 
 /**
  * Языковые серверы (LSP) в main-процессе.
@@ -159,6 +160,12 @@ export class LspService {
      * без него подсказки по импортам не поднимутся. Возвращает null — окружения нет.
      */
     private readonly pythonPath: () => string | null = () => null,
+    /**
+     * Переменные окружения проекта из `.env`. Языковой сервер запускается с ними:
+     * плагины читают оттуда токены и пути, и тогда его картина мира совпадает с тем,
+     * что видит код при запуске.
+     */
+    private readonly env: () => Promise<Record<string, string>> = async () => ({}),
   ) {}
 
   status(): { running: string[] } {
@@ -172,7 +179,7 @@ export class LspService {
 
   /** Открыть документ в подходящем сервере. Нет сервера для языка — тихо ничего не делаем. */
   async open(path: string, languageId: string, text: string): Promise<void> {
-    const runtime = this.runtimeFor(languageId);
+    const runtime = await this.runtimeFor(languageId);
     if (!runtime) return;
 
     this.languageOfPath.set(path, languageId);
@@ -216,7 +223,7 @@ export class LspService {
   }
 
   /** Сервер поднимается лениво, при первом открытии файла этого языка. */
-  private runtimeFor(language: string): ServerRuntime | null {
+  private async runtimeFor(language: string): Promise<ServerRuntime | null> {
     const existing = this.runtimes.get(language);
     if (existing) return existing;
 
@@ -226,7 +233,7 @@ export class LspService {
     if (!config) return null;
 
     try {
-      const runtime = this.start(config);
+      const runtime = await this.start(config);
       this.runtimes.set(language, runtime);
       return runtime;
     } catch {
@@ -234,12 +241,15 @@ export class LspService {
     }
   }
 
-  private start(config: LspServerConfig): ServerRuntime {
+  private async start(config: LspServerConfig): Promise<ServerRuntime> {
     const cwd = this.root() ?? process.cwd();
+    // Языковой сервер видит `.env` проекта — тем же путём, что терминал и запуск.
+    const env = mergeEnv(process.env, await this.env());
     const child = spawn(config.command, config.args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      env,
     }) as ChildProcessWithoutNullStreams;
 
     const connection = new JsonRpcConnection(

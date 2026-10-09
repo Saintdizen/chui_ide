@@ -330,7 +330,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     deps.git.clone(params.url, params.directory, (line) => ctx.emit(CloneEvent.Progress, { line })),
   );
 
-  router.register('terminal.create', (params) => deps.terminals.create(params));
+  router.register('terminal.create', async (params) => deps.terminals.create(params));
   router.register('terminal.write', (params) => {
     deps.terminals.write(params.id, params.data);
   });

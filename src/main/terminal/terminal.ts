@@ -9,6 +9,7 @@ import {
   type TerminalSession,
 } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
+import { mergeEnv } from '../project-env';
 
 /** Вывод pty приходит мелкими порциями: склеиваем их, чтобы не топить IPC. */
 const FLUSH_INTERVAL_MS = 8;
@@ -53,6 +54,12 @@ export class TerminalService {
      * Возвращает null — активировать нечего, сессия остаётся системной.
      */
     private readonly activateFor?: (cwd: string) => Promise<string | null>,
+    /**
+     * Переменные окружения проекта из `.env`. Терминал запускается с ними: серверы
+     * разработки читают оттуда строки подключения и токены, и заставлять человека
+     * повторять `export` в каждой сессии незачем.
+     */
+    private readonly env: () => Promise<Record<string, string>> = async () => ({}),
   ) {}
 
   list(): TerminalSession[] {
@@ -74,7 +81,7 @@ export class TerminalService {
     return { data, offset: total, alive: !session.exited, exitCode: session.exitCode };
   }
 
-  create(options: TerminalCreateOptions): TerminalSession {
+  async create(options: TerminalCreateOptions): Promise<TerminalSession> {
     if (this.sessions.size >= MAX_SESSIONS) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, `Больше ${MAX_SESSIONS} терминалов открывать не нужно`);
     }
@@ -86,6 +93,9 @@ export class TerminalService {
     this.sequence += 1;
     const id = `term-${this.sequence}`;
     const title = this.uniqueTitle(path.basename(shell));
+    // `.env` проекта — поверх системного окружения: сессия видит те же значения,
+    // что установка пакетов, тесты и языковой сервер.
+    const env = mergeEnv(terminalEnv(), await this.env());
 
     let child: pty.IPty;
     try {
@@ -94,7 +104,7 @@ export class TerminalService {
         cols: Math.max(options.cols, 2),
         rows: Math.max(options.rows, 2),
         cwd,
-        env: terminalEnv(),
+        env,
       });
     } catch (error) {
       throw new RpcFailure(

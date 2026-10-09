@@ -16,3 +16,18 @@ export async function projectEnv(root: string | null): Promise<Record<string, st
   const text = await fs.readFile(path.join(root, '.env'), 'utf8').catch(() => null);
   return text ? parseEnvFile(text) : {};
 }
+
+/**
+ * Слияние окружения процесса с переменными проекта.
+ *
+ * Значения из `.env` важнее системных: проект задаёт своё, не полагаясь на то, что
+ * человек успел выставить в оболочке. Ключи со значением `undefined` (в `process.env`
+ * такие бывают) отбрасываем — `spawn` их не примет.
+ */
+export function mergeEnv(base: NodeJS.ProcessEnv, project: Record<string, string>): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value !== undefined) merged[key] = value;
+  }
+  return { ...merged, ...project };
+}

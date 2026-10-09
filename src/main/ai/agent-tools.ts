@@ -51,7 +51,7 @@ export interface GitTools {
  */
 export interface TerminalAgent {
   list(): TerminalSession[];
-  create(options: TerminalCreateOptions): TerminalSession;
+  create(options: TerminalCreateOptions): Promise<TerminalSession>;
   write(id: string, data: string): void;
   read(id: string, from?: number): { data: string; offset: number; alive: boolean; exitCode?: number };
   kill(id: string): void;
@@ -829,7 +829,7 @@ async function terminalStart(ctx: ToolContext, args: Record<string, unknown>): P
     }
   }
 
-  const session = ctx.terminals.create({ cols: TERMINAL_COLS, rows: TERMINAL_ROWS, cwd });
+  const session = await ctx.terminals.create({ cols: TERMINAL_COLS, rows: TERMINAL_ROWS, cwd });
   if (command) ctx.terminals.write(session.id, `${command}\r`);
 
   await delay(TERMINAL_SETTLE_MS, ctx.signal);

@@ -11,7 +11,7 @@ const { TerminalService } = require('../dist/main/terminal/terminal.js');
 
 const MARKER = 'chui-terminal-ok';
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const chunks = [];
   const terminals = new TerminalService((topic, payload) => {
     if (topic === 'terminal:data') chunks.push(payload.data);
@@ -19,7 +19,7 @@ app.whenReady().then(() => {
 
   let session;
   try {
-    session = terminals.create({ cols: 80, rows: 24, cwd: process.cwd() });
+    session = await terminals.create({ cols: 80, rows: 24, cwd: process.cwd() });
   } catch (error) {
     console.error('[chui] не удалось создать сессию:', error.message);
     app.exit(1);
