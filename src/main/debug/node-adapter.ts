@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { CdpConnection } from './cdp';
@@ -161,6 +161,14 @@ export class NodeAdapter {
 
   /** Загруженные скрипты: идентификатор CDP → сведения о нём. */
   private readonly scripts = new Map<string, ScriptInfo>();
+  /**
+   * Настоящее имя файла (как его видит файловая система) → имя, которым файл
+   * назвал клиент. Node отдаёт скрипты уже развёрнутыми: на macOS это
+   * `/var` → `/private/var` (там живёт временный каталог), на Windows — короткие
+   * имена и другой регистр. Без этой таблицы точка, заданная в открытом файле,
+   * не совпала бы со скриптом, и остановки бы не было.
+   */
+  private readonly aliases = new Map<string, string>();
   /** Пути файлов, ставших скриптами: по ним точка ставится напрямую. */
   private readonly scriptPaths = new Set<string>();
   /** Source-карты по пути сгенерированного файла — для перевода кадров стека. */
@@ -531,10 +539,14 @@ export class NodeAdapter {
     }
 
     this.breakpointIds.set(file, ids);
+    // Настоящее имя файла запоминаем: Node зовёт его иначе (развёрнутый симлинк), а
+    // клиенту в стеке отдаём то имя, которым он сам назвал файл.
+    const real = canonicalPath(file);
+    if (real && real !== file) this.aliases.set(real, file);
     // Файл, которого нет среди скриптов и которого не знает ни одна карта, ещё
     // может оказаться исходником сборки, чей скрипт не загрузился: подержим в
     // отложенных, чтобы добавить перевод, когда карта появится.
-    if (this.scriptPaths.has(file) || this.hasMapFor(file)) this.pendingSources.delete(file);
+    if (this.isKnownFile(file)) this.pendingSources.delete(file);
     else this.pendingSources.add(file);
     return result;
   }
@@ -558,15 +570,39 @@ export class NodeAdapter {
    * не попадал (например, `.ts`).
    */
   private targetsFor(file: string, line: number): BreakpointTarget[] {
-    const targets: BreakpointTarget[] = [{ url: pathToFileURL(file).toString(), line, column: 0, map: null }];
+    // Прямое адресование пробуем во всех написаниях пути: скрипт приходит от Node
+    // уже развёрнутым, а клиент называет файл так, как его открыл.
+    const variants = this.pathVariants(file);
+    const targets: BreakpointTarget[] = variants.map((variant) => ({
+      url: pathToFileURL(variant).toString(),
+      line,
+      column: 0,
+      map: null,
+    }));
 
     for (const script of this.scripts.values()) {
       const map = script.map;
-      if (!map || !map.hasSource(file)) continue;
-      const generated = map.generatedPositionFor(file, line - 1, 0);
-      if (generated) targets.push({ url: script.url, line: generated.line + 1, column: generated.column, map });
+      if (!map) continue;
+      for (const variant of variants) {
+        if (!map.hasSource(variant)) continue;
+        const generated = map.generatedPositionFor(variant, line - 1, 0);
+        if (generated) targets.push({ url: script.url, line: generated.line + 1, column: generated.column, map });
+      }
     }
     return targets;
+  }
+
+  /** Написания пути: как назвал файл клиент и как его видит файловая система. */
+  private pathVariants(file: string): string[] {
+    const real = canonicalPath(file);
+    return real && real !== file ? [file, real] : [file];
+  }
+
+  /** Файл уже знаком: он стал скриптом или его знает source-карта (в любом написании). */
+  private isKnownFile(file: string): boolean {
+    return this.pathVariants(file).some(
+      (variant) => this.scriptPaths.has(variant) || this.hasMapFor(variant),
+    );
   }
 
   /**
@@ -605,14 +641,14 @@ export class NodeAdapter {
     const file = urlToPath(url);
     const info: ScriptInfo = { url, path: file, map: null };
     this.scripts.set(scriptId, info);
-    if (file) this.scriptPaths.add(file);
+    if (file) for (const variant of this.pathVariants(file)) this.scriptPaths.add(variant);
 
     const mapUrl = typeof params.sourceMapURL === 'string' ? params.sourceMapURL : '';
     if (mapUrl) this.loadSourceMap(info, mapUrl);
     if (!file) return;
     // Файл стал скриптом — точка в нём ставится напрямую, отложенной её держать
     // больше незачем. Чтение карты синхронное, поэтому чтение и повтор идут следом.
-    this.pendingSources.delete(file);
+    for (const variant of this.pathVariants(file)) this.pendingSources.delete(variant);
     this.retryPending();
   }
 
@@ -672,8 +708,9 @@ export class NodeAdapter {
 
   /** Есть ли карта, которая знает этот файл исходником. */
   private hasMapFor(file: string): boolean {
+    const variants = this.pathVariants(file);
     for (const script of this.scripts.values()) {
-      if (script.map?.hasSource(file)) return true;
+      if (variants.some((variant) => script.map?.hasSource(variant))) return true;
     }
     return false;
   }
@@ -707,7 +744,10 @@ export class NodeAdapter {
       // `.js`, и стек должен вести туда, где он поставил точку.
       const map = file ? this.mapsByPath.get(file) : null;
       const original = map?.originalPositionFor(frame.location.lineNumber, frame.location.columnNumber);
-      const source = original?.source ?? file;
+      // Путь кадра показываем так же, как файл называет клиент: он открывал его
+      // по своему имени, и по этому же имени кликается кадр в стеке.
+      const raw = original?.source ?? file;
+      const source = raw ? (this.aliases.get(raw) ?? raw) : null;
       return {
         id: this.frameIds[index],
         name: frame.functionName || '(анонимная функция)',
@@ -1082,6 +1122,19 @@ function debuggeeEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   // Адаптер сам запущен как Node (ELECTRON_RUN_AS_NODE): цели это не нужно.
   delete env.ELECTRON_RUN_AS_NODE;
   return extra ? { ...env, ...extra } : env;
+}
+
+/**
+ * Настоящий путь файла: разворачивает симлинки (на macOS `/var` — это
+ * `/private/var`, на Windows мешает регистр и короткие имена). Файла нет —
+ * `null`: путь может быть задан заранее и ещё не существовать.
+ */
+function canonicalPath(file: string): string | null {
+  try {
+    return realpathSync(file);
+  } catch {
+    return null;
+  }
 }
 
 /** Путь из `url` кадра CDP (`file://…`); не файл — `null`. */

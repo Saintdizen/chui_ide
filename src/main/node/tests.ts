@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { realpath } from 'node:fs/promises';
 import {
   detectNodeTestRunner,
   nodeTestFilesSuite,
@@ -49,8 +50,21 @@ export async function collectNodeTests(root: string): Promise<NodeTestSuite> {
 
   const args = runner === 'vitest' ? ['list', '--json'] : ['--listTests', '--json'];
   const output = await runScript(root, script, args);
-  const suite = runner === 'vitest' ? parseVitestList(output, root) : parseJestList(output, root);
+  // Раннер печатает пути, начиная с `process.cwd()`, а тот у процесса развёрнут:
+  // симлинки раскрыты, регистр приведён (macOS, Windows). Сравнивать с исходным
+  // написанием корня нельзя — путь вышел бы абсолютным вместо относительного.
+  const base = await realRoot(root);
+  const suite = runner === 'vitest' ? parseVitestList(output, base) : parseJestList(output, base);
   return { runner, ...suite };
+}
+
+/** Настоящее имя каталога — им же называют корень запущенные раннеры. */
+async function realRoot(root: string): Promise<string> {
+  try {
+    return await realpath(root);
+  } catch {
+    return root;
+  }
 }
 
 /**

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { inlineSourceMap, SourceMap, sourceMappingUrlFromSource } from '../src/main/debug/source-map';
 
@@ -24,14 +25,17 @@ import { inlineSourceMap, SourceMap, sourceMappingUrlFromSource } from '../src/m
 /** Строка `mappings` карты выше: `;` — конец строки сгенерированного файла. */
 const MAPPINGS = ';AAAA;EACE;EACA;AACF;AACA';
 const MAP = { version: 3, file: 'app.js', sources: ['app.ts'], names: [], mappings: MAPPINGS };
-const BASE = '/proj/build';
-const SOURCE = '/proj/build/app.ts';
+// Каталоги берём через `path`: модуль собирает пути системным разделителем, и на
+// Windows с macOS ожидания из POSIX-литералов не совпали бы с результатом.
+const BASE = path.resolve('/proj/build');
+const SOURCE = path.join(BASE, 'app.ts');
+const OTHER = path.join(BASE, 'other.ts');
 
 describe('SourceMap', () => {
   it('переводит исходник в сгенерированную позицию', () => {
     const map = SourceMap.fromJson(MAP, BASE);
     expect(map?.hasSource(SOURCE)).toBe(true);
-    expect(map?.hasSource('/proj/build/other.ts')).toBe(false);
+    expect(map?.hasSource(OTHER)).toBe(false);
 
     // Строки исходника: 1 — заголовок функции, 2 — тело, 3 — возврат и так далее.
     expect(map?.generatedPositionFor(SOURCE, 0, 0)).toEqual({ line: 1, column: 0 });
@@ -40,7 +44,7 @@ describe('SourceMap', () => {
     expect(map?.generatedPositionFor(SOURCE, 4, 0)).toEqual({ line: 5, column: 0 });
 
     // Незнакомый исходник и строка без кода — позиции нет, а не «первая попавшаяся».
-    expect(map?.generatedPositionFor('/proj/build/other.ts', 0, 0)).toBeNull();
+    expect(map?.generatedPositionFor(OTHER, 0, 0)).toBeNull();
     expect(map?.generatedPositionFor(SOURCE, 20, 0)).toBeNull();
   });
 
@@ -57,15 +61,17 @@ describe('SourceMap', () => {
 
   it('собирает путь исходника из sourceRoot', () => {
     const map = SourceMap.fromJson({ version: 3, sources: ['app.ts'], sourceRoot: '../src', mappings: 'AAAA' }, BASE);
-    expect(map?.sources).toEqual(['/proj/src/app.ts']);
-    expect(map?.hasSource('/proj/src/app.ts')).toBe(true);
+    const source = path.resolve(BASE, '../src/app.ts');
+    expect(map?.sources).toEqual([source]);
+    expect(map?.hasSource(source)).toBe(true);
   });
 
   it('разбирает многобайтовый VLQ', () => {
     // Сгенерированная колонка 100 кодируется двумя символами (`oG`).
     const map = SourceMap.fromJson({ version: 3, sources: ['a.ts'], mappings: 'oGAAA' }, BASE);
-    expect(map?.generatedPositionFor(`${BASE}/a.ts`, 0, 0)).toEqual({ line: 0, column: 100 });
-    expect(map?.originalPositionFor(0, 100)).toEqual({ source: `${BASE}/a.ts`, line: 0, column: 0, name: null });
+    const file = path.join(BASE, 'a.ts');
+    expect(map?.generatedPositionFor(file, 0, 0)).toEqual({ line: 0, column: 100 });
+    expect(map?.originalPositionFor(0, 100)).toEqual({ source: file, line: 0, column: 0, name: null });
   });
 
   it('на мусоре возвращает null, а не исключение', () => {

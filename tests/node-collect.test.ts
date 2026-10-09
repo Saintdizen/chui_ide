@@ -51,6 +51,21 @@ async function makeProject(
   return root;
 }
 
+/**
+ * Второе имя каталога: так называют путь macOS и Windows, где временный каталог
+ * лежит за симлинком, а `process.cwd()` у раннера уже развёрнут. Корень в этом
+ * тесте назван коротко, а раннер печатает настоящее имя — пути всё равно должны
+ * остаться относительными.
+ */
+async function linkDir(target: string): Promise<string> {
+  const parent = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-node-link-'));
+  roots.push(parent);
+  const link = path.join(parent, 'alias');
+  // junction — единственная ссылка на каталог в Windows, не требующая прав.
+  await fs.symlink(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+  return link;
+}
+
 /** Заглушка vitest: печатает предупреждение, а затем JSON — как настоящий list. */
 const VITEST_STUB = [
   "console.log('stderr-like noise');",
@@ -84,6 +99,15 @@ describe('collectNodeTests', () => {
     const root = await makeProject(['jest'], ['tests/a.test.js'], [{ pkg: 'jest', bin: 'jest', body: JEST_STUB }]);
 
     const suite = await collectNodeTests(root);
+    expect(suite.runner).toBe('jest');
+    expect(suite.tests).toEqual([{ id: 'tests/a.test.js', file: 'tests/a.test.js', className: null, name: '' }]);
+  });
+
+  it('корень назван через симлинк — пути всё равно относительные', async () => {
+    const real = await makeProject(['jest'], ['tests/a.test.js'], [{ pkg: 'jest', bin: 'jest', body: JEST_STUB }]);
+    const alias = await linkDir(real);
+
+    const suite = await collectNodeTests(alias);
     expect(suite.runner).toBe('jest');
     expect(suite.tests).toEqual([{ id: 'tests/a.test.js', file: 'tests/a.test.js', className: null, name: '' }]);
   });

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -106,6 +106,23 @@ function startAdapter(): { input: PassThrough; client: DapClient } {
   const output = new PassThrough();
   new NodeAdapter(input, output).run();
   return { input, client: new DapClient(input, output) };
+}
+
+/**
+ * Ссылка на каталог — второе имя того же места.
+ *
+ * Так устроены macOS и Windows: временный каталог `/var/folders/…` на самом деле
+ * лежит в `/private/var/folders/…`, а `process.cwd()` и Node называют скрипты уже
+ * развёрнутым путём. Клиент при этом зовёт файл своим именем — через симлинк, — и
+ * без сопоставления имён точка останова не совпала бы со скриптом.
+ */
+function linkDir(target: string): string {
+  const parent = mkdtempSync(path.join(tmpdir(), 'chui-node-link-'));
+  dirs.push(parent);
+  const link = path.join(parent, 'alias');
+  // junction — единственная ссылка на каталог в Windows, не требующая прав.
+  symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+  return link;
 }
 
 /** Маленькая программа для отладки: сумма в функции и вывод результата. */
@@ -265,6 +282,32 @@ describe('NodeAdapter', () => {
       String((message.body as { output?: string }).output ?? '').includes('result 5'),
     );
     expect(output.body).toBeTruthy();
+
+    await client.request('disconnect', { terminateDebuggee: true });
+    input.end();
+  }, 20_000);
+
+  it('точка в файле, названном через симлинк, попадает в развёрнутый путь скрипта', async () => {
+    const real = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
+    dirs.push(real);
+    const alias = linkDir(real);
+    const viaAlias = path.join(alias, path.basename(writeProgram(real)));
+    const { input, client } = startAdapter();
+
+    await client.request('initialize', { adapterID: 'node' });
+    const launch = client.request('launch', { program: viaAlias, cwd: alias });
+    await client.waitEvent('initialized');
+    expect((await launch).success).toBe(true);
+
+    await client.request('setBreakpoints', { source: { path: viaAlias }, breakpoints: [{ line: 2 }] });
+    await client.request('configurationDone', {});
+    await client.waitEvent('stopped');
+
+    const stack = await client.request('stackTrace', { threadId: 1 });
+    const frames = stack.body?.stackFrames as Array<{ line: number; source?: { path?: string } }>;
+    expect(frames[0]?.line).toBe(2);
+    // Стек называет файл так, как его назвал клиент: по этому имени кадр кликается.
+    expect(frames[0]?.source?.path).toBe(viaAlias);
 
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
