@@ -176,6 +176,8 @@ export class NodeAdapter {
 
   /** Показали ли останов клиенту: только тогда «продолжено» имеет смысл сообщать. */
   private reportedStopped = false;
+  /** Останов, пришедший до `configurationDone`: его отдаём, как только клиент настроен. */
+  private pendingPause: Record<string, unknown> | null = null;
   /** Останов на входе (`--inspect-brk`) уже снят: второй раз его снимать нечего. */
   private entryResumed = false;
 
@@ -393,10 +395,20 @@ export class NodeAdapter {
   /** Разрешить программе идти: до этого она ждёт отладчик на `--inspect-brk`. */
   private async onConfigured(): Promise<void> {
     this.configured = true;
+    // Придержанный останов забираем до всего остального: отдать его — обязанность
+    // именно настройки, больше его отдать некому.
+    const pending = this.pendingPause;
+    this.pendingPause = null;
     // Подключённый процесс никто не держал: будить его не нужно и вредно — он бы
     // пошёл дальше по нажатию «продолжить», а не по нашему молчаливому вызову.
-    if (!this.waitingForDebugger) return;
-    await this.cdp?.send('Runtime.runIfWaitingForDebugger').catch(() => undefined);
+    if (this.waitingForDebugger) {
+      await this.cdp?.send('Runtime.runIfWaitingForDebugger').catch(() => undefined);
+      return;
+    }
+    // Останов, случившийся до настройки: клиент о нём ещё не знает, а программа уже
+    // стоит. Отдаём сейчас — иначе сработавшая точка останова выглядела бы как
+    // пропущенная, и клиент ждал бы останова, который уже произошёл.
+    if (pending) await this.handleStop(pending);
   }
 
   private onDebuggeeStderr(chunk: Buffer): void {
@@ -866,9 +878,16 @@ export class NodeAdapter {
     // Ссылки переменных живут в пределах останова: у нового кадра свои objectId.
     this.refs.clear();
 
-    // Останов до конца настройки — это `--inspect-brk` на входе: программу снимет
-    // `Runtime.runIfWaitingForDebugger`, и показывать клиенту тут нечего.
-    if (!this.configured) return;
+    if (!this.configured) {
+      // При запуске останов до конца настройки — это останов на входе (`--inspect-brk`):
+      // его снимает `Runtime.runIfWaitingForDebugger`, показывать клиенту нечего.
+      // А у подключения к работающему процессу входа нет вовсе: до настройки там
+      // приходит настоящая точка. Выбросить её нельзя — программа осталась бы стоять,
+      // а клиент ждал бы события, которого уже не будет. Поэтому придержим останов и
+      // отдадим его сразу после настройки.
+      if (!this.waitingForDebugger) this.pendingPause = params;
+      return;
+    }
     void this.handleStop(params);
   }
 
@@ -970,6 +989,8 @@ export class NodeAdapter {
     this.callFrames = [];
     this.frameIds = [];
     this.refs.clear();
+    // Программа снова идёт: придержанный останов устарел — отдавать его поздно.
+    this.pendingPause = null;
     // «Продолжено» говорим только после показанного останова: точка-журнал и вход
     // по `--inspect-brk` продолжают программу, но клиент об останове не знал.
     if (!this.reportedStopped) return;

@@ -209,6 +209,21 @@ function writeLoop(dir: string): string {
 }
 
 /**
+ * Программа, которая живёт сама: у неё нет ни входа, ни выхода — её нельзя
+ * «запустить», но можно поднять с `--inspect` и подключиться к ней.
+ * Точка в её теле срабатывает на каждом тике таймера.
+ */
+function writeServer(dir: string): string {
+  const program = path.join(dir, 'serve.js');
+  writeFileSync(
+    program,
+    ['let count = 0;', 'function tick() {', '  count += 1;', '}', 'setInterval(tick, 25);', ''].join('\n'),
+    'utf8',
+  );
+  return program;
+}
+
+/**
  * Программа «TypeScript, собранный в JavaScript»: рядом лежат исходник, сборка и
  * карта между ними. Строки сдвинуты (`"use strict"` и развёрнутая шапка функции),
  * поэтому перевод позиций виден: точка в `.ts` не совпала бы со строкой в `.js`.
@@ -454,13 +469,7 @@ describe('NodeAdapter', () => {
   it('подключается к уже запущенному процессу и останавливает его на точке', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
     dirs.push(dir);
-    // Программа, которая живёт сама: у неё нет входа и выхода, её нельзя «запустить».
-    const program = path.join(dir, 'serve.js');
-    writeFileSync(
-      program,
-      ['let count = 0;', 'function tick() {', '  count += 1;', '}', 'setInterval(tick, 25);', ''].join('\n'),
-      'utf8',
-    );
+    const program = writeServer(dir);
 
     const port = await startInspectable(program, dir);
     const { input, client } = startAdapter();
@@ -477,16 +486,49 @@ describe('NodeAdapter', () => {
     const breakpoints = bp.body?.breakpoints as Array<{ verified: boolean }>;
     expect(breakpoints[0]?.verified).toBe(true);
 
-    // Программа уже работала: после настройки она остановится сама, на точке.
+    // Программа уже работала: она остановится сама — либо сразу после настройки
+    // (останов случился до неё и был придержан), либо на ближайшем тике таймера.
     await client.request('configurationDone', {});
-    // Ждём дольше обычного: под нагрузкой (весь прогон идёт в параллель) таймер
-    // до следующего попадания может сработать не сразу.
     await client.waitEvent('stopped', undefined, 15_000);
 
     const stack = await client.request('stackTrace', { threadId: 1 });
     const frames = stack.body?.stackFrames as Array<{ name: string; line: number; source?: { path?: string } }>;
     expect(frames[0]?.name).toBe('tick');
     expect(frames[0]?.source?.path).toBe(program);
+    expect(frames[0]?.line).toBe(3);
+
+    await client.request('disconnect', { terminateDebuggee: true });
+    input.end();
+  }, 20_000);
+
+  it('не теряет останов, случившийся до настройки сессии', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
+    dirs.push(dir);
+    const program = writeServer(dir);
+
+    const port = await startInspectable(program, dir);
+    const { input, client } = startAdapter();
+
+    await client.request('initialize', { adapterID: 'node' });
+    await client.request('attach', { port });
+    await client.waitEvent('initialized');
+
+    await client.request('setBreakpoints', { source: { path: program }, breakpoints: [{ line: 3 }] });
+
+    // Программа уже работает и точку видит: до `configurationDone` она в неё попадёт
+    // и встанет. Ждём заведомо дольше тика (25 мс) — тогда останов случился до настройки
+    // наверняка, а не по случайному совпадению таймингов.
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+
+    await client.request('configurationDone', {});
+    // Останов уже случился: событие теперь приходит сразу, без ожидания тика.
+    const stopped = await client.waitEvent('stopped', undefined, 3000);
+    expect((stopped.body as { reason?: string }).reason).toBe('breakpoint');
+
+    // Не просто событие: за остановом должен стоять настоящий кадр на точке.
+    const stack = await client.request('stackTrace', { threadId: 1 });
+    const frames = stack.body?.stackFrames as Array<{ name: string; line: number }>;
+    expect(frames[0]?.name).toBe('tick');
     expect(frames[0]?.line).toBe(3);
 
     await client.request('disconnect', { terminateDebuggee: true });
