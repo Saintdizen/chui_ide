@@ -4789,6 +4789,12 @@ textarea {
   font-size: var(--font_labels_size);
 }
 
+/* Сверка с requirements.txt: чуть заметнее прочей подписи — по ней решают, что доставить. */
+.python-env-requirements {
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+}
+
 /* Подпись без моно-шрифта: путь — код, а «источник» — просто слово. */
 .python-env-plain {
   font-family: inherit;

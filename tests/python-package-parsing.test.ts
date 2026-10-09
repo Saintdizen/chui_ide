@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalName, diffRequirements, packageForModule, parsePipList, parseRequirements } from '../src/shared/python-packages';
+import {
+  canonicalName,
+  diffRequirements,
+  packageForModule,
+  parsePipList,
+  parseRequirements,
+  requirementsNote,
+} from '../src/shared/python-packages';
 
 describe('parsePipList', () => {
   it('разбирает JSON-массив pip', () => {
@@ -66,6 +73,25 @@ describe('diffRequirements', () => {
     const requirements = parseRequirements('PyYAML');
     const installed = [{ name: 'pyyaml', version: '6.0' }];
     expect(diffRequirements(requirements, installed).missing).toEqual([]);
+  });
+});
+
+describe('requirementsNote', () => {
+  const installed = (names: string[]) => names.map((name) => ({ name, version: '1.0' }));
+
+  it('всё установлено — так и говорим, с числом', () => {
+    const diff = diffRequirements(parseRequirements('pytest\nfuncy'), installed(['pytest', 'funcy']));
+    expect(requirementsNote(diff)).toBe('Установлено всё из requirements.txt (2)');
+  });
+
+  it('перечисляет недостающие имена', () => {
+    const diff = diffRequirements(parseRequirements('pytest\nfuncy\nrequests'), installed(['pytest']));
+    expect(requirementsNote(diff)).toBe('Не хватает 2 из 3: funcy, requests');
+  });
+
+  it('длинный список обрезается по limit с остатком', () => {
+    const diff = diffRequirements(parseRequirements('a\nb\nc\nd'), installed([]));
+    expect(requirementsNote(diff, 2)).toBe('Не хватает 4 из 4: a, b и ещё 2');
   });
 });
 

@@ -1,4 +1,4 @@
-import type { InstalledPackage } from '../../shared/python-packages';
+import { diffRequirements, parseRequirements, requirementsNote, type InstalledPackage } from '../../shared/python-packages';
 import type { PythonEnvironment, PythonInterpreter } from '../../shared/python-env';
 import type { EnvironmentHealth } from '../../shared/python-health';
 import type { ProjectTools } from '../core/project-tools';
@@ -93,17 +93,18 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
     const kind = deps.projectKind?.();
     if (kind) body.appendChild(row('Проект', kind, false));
 
-    const [environments, interpreters, packages, hasRequirements, health] = await Promise.all([
+    const [environments, interpreters, packages, requirementsText, health] = await Promise.all([
       deps.rpc.request('python.environments').catch(() => [] as PythonEnvironment[]),
       deps.rpc.request('python.interpreters').catch(() => [] as PythonInterpreter[]),
       deps.rpc.request('python.packages').catch(() => [] as InstalledPackage[]),
+      // Читаем файл, а не проверяем его наличие: текст нужен для сравнения с
+      // установленным. Нет файла — null, и никаких обещаний про зависимости.
       deps.rpc
-        .request('workspace.stat', { path: `${root}/requirements.txt` })
-        .then(() => true)
-        .catch(() => false),
+        .request('workspace.readFile', { path: `${root}/requirements.txt` })
+        .then((file) => file.text)
+        .catch(() => null),
       deps.rpc.request('python.envHealth').catch(() => [] as EnvironmentHealth[]),
     ]);
-
     // Поломки окружения показываем сразу под интерпретатором: это важнее списка пакетов.
     if (health.length > 0) {
       const box = h('div', { class: 'python-env-health' });
@@ -117,9 +118,12 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
       body.appendChild(box);
     }
 
-    // Пакеты: сколько стоит и быстрый путь поставить зависимости проекта.
+    // Пакеты: сколько стоит, всё ли на месте из requirements.txt и быстрый путь поставить.
     const packageExtras: HTMLElement[] = [];
-    if (hasRequirements) {
+    if (requirementsText !== null) {
+      // Сверяем установленное с файлом: так видно, чего не хватает, не запуская pip.
+      const diff = diffRequirements(parseRequirements(requirementsText), packages);
+      packageExtras.push(h('div', { class: 'python-env-requirements' }, requirementsNote(diff)));
       packageExtras.push(button('Установить из requirements.txt', () => deps.onInstallRequirements()));
     }
     body.appendChild(

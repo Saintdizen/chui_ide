@@ -38,9 +38,11 @@ app.whenReady().then(async () => {
   const project = process.argv[2] ?? path.join(dir, 'demo-project');
 
   // Без аргумента делаем проект с тестом: панель должна увидеть хотя бы файл.
+  // requirements.txt кладём специально: попап должен сказать, чего из него не хватает.
   if (!process.argv[2]) {
     await fs.mkdir(path.join(project, 'tests'), { recursive: true });
     await fs.writeFile(path.join(project, 'tests', 'test_demo.py'), 'def test_ok():\n    assert True\n', 'utf8');
+    await fs.writeFile(path.join(project, 'requirements.txt'), 'pytest==7\nrequests>=2.31\n', 'utf8');
   }
 
   serveRenderer();
@@ -106,6 +108,7 @@ app.whenReady().then(async () => {
       rows: [...document.querySelectorAll('.python-env-row')].map((node) => node.textContent),
       sections: [...document.querySelectorAll('.python-env-heading')].map((node) => node.textContent),
       note: document.querySelector('.python-env-note')?.textContent ?? null,
+      requirements: document.querySelector('.python-env-requirements')?.textContent ?? null,
       issues: [...document.querySelectorAll('.python-env-issue')].map((node) => node.textContent),
       environments: [...document.querySelectorAll('.python-env-item .python-env-name')].map((node) => node.textContent),
     })`,

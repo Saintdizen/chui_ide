@@ -157,6 +157,19 @@ const MODULE_TO_PACKAGE: Readonly<Record<string, string>> = {
   playwright: 'playwright',
 };
 
+/**
+ * Короткая строка для попапа: всё ли из `requirements.txt` стоит в окружении.
+ * Показываем имена недостающих — по ним человек сразу видит, что доустановить,
+ * а не только «чего-то не хватает». `limit` держит строку читаемой при длинном файле.
+ */
+export function requirementsNote(diff: RequirementsDiff, limit = 5): string {
+  const total = diff.present.length + diff.missing.length;
+  if (diff.missing.length === 0) return `Установлено всё из requirements.txt (${total})`;
+  const names = diff.missing.slice(0, limit).map((item) => item.name);
+  const rest = diff.missing.length - names.length;
+  return `Не хватает ${diff.missing.length} из ${total}: ${names.join(', ')}${rest > 0 ? ` и ещё ${rest}` : ''}`;
+}
+
 /** Имя пакета для модуля, который не нашёлся в окружении. */
 export function packageForModule(module: string): string {
   const known = MODULE_TO_PACKAGE[module];
