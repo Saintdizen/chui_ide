@@ -11,11 +11,20 @@ import type { ChatMessage } from './api';
  */
 
 /**
- * Символов на токен. То же значение, что и в окне «Информация о сессии»: смесь
- * русского текста, кода и латиницы. Точное число знает только токенизатор, но для
- * предохранителя важна не точность, а порядок величины.
+ * Символов на токен для узких символов — латиницы, кода, разметки. Значение чуть
+ * ниже реального (там около четырёх): предохранителю важнее переоценить объём, чем
+ * недооценить. Тем же числом оцениваются строки, состав которых мы не разбираем, —
+ * см. `estimateTokens`.
  */
 export const CHARS_PER_TOKEN = 3.5;
+
+/**
+ * Символов на токен для широких символов — кириллицы, иероглифов и прочего
+ * не-ASCII. Их токенизатор дробит мельче (нередко в отдельные токены), поэтому цена
+ * выше. Раньше весь текст считался по узкой ставке — из-за этого русская беседа
+ * незаметно переполняла окно: оценка была вдвое ниже правды.
+ */
+export const CHARS_PER_TOKEN_WIDE = 2;
 
 /**
  * Сколько «стоит» одна картинка. Считать по длине data-URL нельзя: base64-строка
@@ -24,26 +33,42 @@ export const CHARS_PER_TOKEN = 3.5;
  */
 const IMAGE_TOKENS = 1_000;
 
+/** Оценка по одной лишь длине строки: состав не разбирает, см. `estimateTextTokens`. */
 export function estimateTokens(chars: number): number {
   return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
-/** Оценка размера истории в токенах: текст по символам, картинки — фиксированно. */
+/**
+ * Оценка токенов по самому тексту: широкие символы (кириллица) считаем дороже.
+ *
+ * `estimateTokens` знает только длину и слепа к составу строки. На русском тексте
+ * это заметная недооценка: кириллица в токенах дороже латиницы, и запрос, который
+ * по расчёту помещался, у провайдера не влезает. Точное число знает лишь
+ * токенизатор, но нам важнее не занизить — округляем вверх.
+ */
+export function estimateTextTokens(text: string): number {
+  let wide = 0;
+  for (let i = 0; i < text.length; i += 1) if (text.charCodeAt(i) > 127) wide += 1;
+  const narrow = text.length - wide;
+  return Math.ceil(narrow / CHARS_PER_TOKEN + wide / CHARS_PER_TOKEN_WIDE);
+}
+
+/** Оценка размера истории в токенах: текст по составу, картинки — фиксированно. */
 export function estimateMessagesTokens(messages: readonly ChatMessage[]): number {
-  let chars = 0;
+  let tokens = 0;
   let images = 0;
 
   for (const message of messages) {
-    chars += (message.content ?? '').length;
-    if (message.name) chars += message.name.length;
-    if (message.toolCallId) chars += message.toolCallId.length;
+    tokens += estimateTextTokens(message.content ?? '');
+    if (message.name) tokens += estimateTextTokens(message.name);
+    if (message.toolCallId) tokens += estimateTextTokens(message.toolCallId);
     for (const call of message.toolCalls ?? []) {
-      chars += call.id.length + call.name.length + call.arguments.length;
+      tokens += estimateTextTokens(call.id) + estimateTextTokens(call.name) + estimateTextTokens(call.arguments);
     }
     images += message.images?.length ?? 0;
   }
 
-  return estimateTokens(chars) + images * IMAGE_TOKENS;
+  return tokens + images * IMAGE_TOKENS;
 }
 
 export interface TrimOptions {
@@ -182,4 +207,81 @@ export function splitTranscript(history: readonly ChatMessage[], budgetChars: nu
   }
   flush();
   return blocks;
+}
+
+/* ── переполнение окна у провайдера ────────────────────────────────────── */
+
+/**
+ * Признак переполнения контекста в теле ошибки провайдера. Формулировки у вендоров
+ * разные (OpenAI, Anthropic, шлюзы), но говорят они одно: запрос не поместился в окно.
+ */
+const CONTEXT_OVERFLOW =
+  /context[_ ]length|maximum context|too many tokens|exceeds the (model'?s )?maximum|reduce the length|prompt is too long|input (is )?too long/i;
+
+/**
+ * Отказал ли провайдер именно из-за переполнения контекста.
+ *
+ * Отличить это от прочих 400 важно: переполнение лечится обрезкой истории и
+ * повтором, все прочие ошибки — нет. Текст ошибки (`message`) у нас уже переведён,
+ * поэтому надёжный признак — сырое тело ответа в `details`.
+ *
+ * Работаем со структурой ошибки, а не с классом: так предикат остаётся чистым и
+ * проверяется без Electron (см. `tests/context-fit.test.ts`).
+ */
+export function isContextOverflow(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { message, details } = error as { message?: unknown; details?: unknown };
+  return (
+    CONTEXT_OVERFLOW.test(typeof details === 'string' ? details : '') ||
+    CONTEXT_OVERFLOW.test(typeof message === 'string' ? message : '')
+  );
+}
+
+/* ── само-калибровка оценки по факту ───────────────────────────────────── */
+
+/**
+ * Границы поправки: оценка может врать, но не в разы. Если модель вернёт
+ * `promptTokens` с учётом кеша или иной метрикой, отношение легко вылетит за
+ * разумное — зажимаем, чтобы одна странная выборка не схлопнула окно.
+ */
+export const CALIBRATION_MIN = 0.5;
+export const CALIBRATION_MAX = 3;
+
+/** Вес новой точки в скользящем среднем: одна выборка не должна ломать поправку. */
+const CALIBRATION_SMOOTHING = 0.3;
+
+/**
+ * Поправка к оценке токенов, выученная по фактическому `usage` провайдера.
+ *
+ * `estimateMessagesTokens` считает символы по ставке `CHARS_PER_TOKEN`, но это
+ * лишь догадка: токенов на строку у разных моделей и языков разное число. Точное
+ * значение провайдер отдаёт сам — в `usage.promptTokens` после ответа. Сравнив
+ * факт с оценкой того же запроса, получаем поправку `факт / оценка` и храним её
+ * (скользящим средним). Дальше окно для обрезки делим на эту поправку, и промах
+ * оценки вниз перестаёт доходить до отказа провайдера.
+ *
+ * Работает поверх чистых `estimate*` и не меняет их: поправка нужна одному месту —
+ * агентному циклу в main (см. `AiService.streamStep`). Живёт в памяти процесса:
+ * после перезапуска калибровка начинается заново. Предохранителю этого достаточно
+ * — он и не ждёт точности, а реактивный повтор подстрахует.
+ */
+export class TokenCalibration {
+  private readonly scales = new Map<string, number>();
+
+  /** Во сколько раз оценка занижает факт (`actual / estimated`) для этого ключа. */
+  scaleFor(key: string): number {
+    return this.scales.get(key) ?? 1;
+  }
+
+  /**
+   * Учесть один замер: `estimated` — наша оценка отправленного запроса,
+   * `actual` — его настоящий размер из `usage.promptTokens`. Вырожденные значения
+   * (ноль, не число) игнорируем: по ним поправку не построить.
+   */
+  observe(key: string, estimated: number, actual: number): void {
+    if (!Number.isFinite(estimated) || !Number.isFinite(actual) || estimated <= 0 || actual <= 0) return;
+    const ratio = Math.min(CALIBRATION_MAX, Math.max(CALIBRATION_MIN, actual / estimated));
+    const previous = this.scales.get(key);
+    this.scales.set(key, previous === undefined ? ratio : previous + CALIBRATION_SMOOTHING * (ratio - previous));
+  }
 }

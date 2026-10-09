@@ -13,11 +13,12 @@ import {
   type DiagnosticsHostResult,
   type PlanStep,
   type PlanStepStatus,
+  type ReasoningEffort,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec } from '../../shared/tools';
-import { estimateTokens, trimMessagesToFit } from '../../shared/context-fit';
+import { estimateMessagesTokens, estimateTokens, isContextOverflow, TokenCalibration, trimMessagesToFit } from '../../shared/context-fit';
 import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -30,6 +31,16 @@ import type { AiProvider } from './provider';
 /** Файлы с инструкциями проекта — подмешиваются в системный промпт. */
 const INSTRUCTION_FILES = ['AGENTS.md', 'CHUI.md', 'CLAUDE.md'];
 const MAX_INSTRUCTIONS_BYTES = 8000;
+
+/**
+ * Сколько раз пробуем спасти шаг, если провайдер ответил «запрос не влез».
+ * Оценка контекста дешёвая, но неточная (символов на токен мы не знаем точно),
+ * поэтому истине верим не расчёту, а самому отказу. Двух попыток хватает.
+ */
+const OVERFLOW_RETRIES = 2;
+
+/** Во сколько раз ужимаем бюджет окна на каждом повторе после переполнения. */
+const OVERFLOW_SHRINK = 0.7;
 
 /**
  * Заметка на месте обрезанной истории. Агент должен знать, что начало беседы
@@ -148,6 +159,13 @@ export class AiService {
    * Сервис один на окно, а активный агентский прогон в окне один — этого хватает.
    */
   private liveAutoApprove = false;
+
+  /**
+   * Поправка к оценке токенов, выученная по `usage` провайдера: сколько наши
+   * символы на токен врут для конкретной модели. Ключ — провайдер и модель.
+   * См. `TokenCalibration` и `streamStep`.
+   */
+  private readonly calibration = new TokenCalibration();
 
   constructor(
     private readonly settings: SettingsStore,
@@ -303,29 +321,28 @@ export class AiService {
 
       // Каждый шаг сверяемся с окном: результаты инструментов копятся, и
       // длинный прогон легко переполняет контекст. Режем старые ходы целиком,
-      // не трогая ни рамку запроса, ни пару «вызов → результат».
-      const wire = trimMessagesToFit(messages, {
-        limitTokens: windowTokens,
-        overheadTokens: toolsTokens,
-        reserveTokens: maxTokens,
-        keepRecent: 2,
-        marker: TRIM_MARKER,
-      });
-
-      const done = await provider.streamChat(
-        { model: request.model, messages: wire.messages, temperature, maxTokens, reasoningEffort, tools },
-        {
-          onDelta: (delta) => {
-            text += delta;
-            emit(ChatStreamEvent.Delta, { text: delta });
-          },
-          onReasoning: (delta) => {
-            reasoning += delta;
-            emit(ChatStreamEvent.Reasoning, { text: delta });
-          },
-        },
+      // не трогая ни рамку запроса, ни пару «вызов → результат». Промах оценки
+      // ловит сам `streamStep` — по настоящему отказу провайдера.
+      const done = await this.streamStep(provider, {
+        model: request.model,
+        messages,
+        tools,
+        temperature,
+        maxTokens,
+        reasoningEffort,
         signal,
-      );
+        windowTokens,
+        toolsTokens,
+        calibrationKey: `${request.providerId}::${request.model}`,
+        onDelta: (delta) => {
+          text += delta;
+          emit(ChatStreamEvent.Delta, { text: delta });
+        },
+        onReasoning: (delta) => {
+          reasoning += delta;
+          emit(ChatStreamEvent.Reasoning, { text: delta });
+        },
+      });
 
       if (done.usage) usage = done.usage;
       if (done.finishReason) finishReason = done.finishReason;
@@ -443,6 +460,87 @@ export class AiService {
     emit(ChatStreamEvent.Delta, { text: note });
     produced.push({ role: 'assistant', content: note.trim() });
     return { text, finishReason, usage, agentMessages: produced, ...(reasoning ? { reasoning } : {}) };
+  }
+
+  /**
+   * Один шаг обращения к провайдеру с реакцией на переполнение контекста.
+   *
+   * Бюджет окна считаем сами, но оценка грубая: символов на токен мы не знаем
+   * точно, и на русском тексте или незнакомой модели она легко занижает. Поэтому
+   * истине верим не расчёту, а самому провайдеру: если он отказал «запрос не влез»,
+   * ужимаем бюджет и повторяем тот же шаг. Предсказание может врать — восстановление
+   * остаётся, и человек не видит ошибку там, где хватало просто обрезать историю.
+   *
+   * Оценку подтягиваем к правде: после каждого ответа сверяем наш расчёт с
+   * настоящим `usage.promptTokens` и запоминаем поправку (см. `TokenCalibration`).
+   * Повторяем, пока есть что резать: если обрезка больше ничего не убирает,
+   * крутиться бессмысленно — тогда ошибку отдаём наверх как есть.
+   */
+  private async streamStep(
+    provider: AiProvider,
+    params: {
+      model: string;
+      messages: ChatMessage[];
+      tools: readonly unknown[] | undefined;
+      temperature: number | undefined;
+      maxTokens: number;
+      reasoningEffort: ReasoningEffort | undefined;
+      signal: AbortSignal;
+      windowTokens: number;
+      toolsTokens: number;
+      /** Ключ калибровки оценки (провайдер + модель), см. `TokenCalibration`. */
+      calibrationKey: string;
+      onDelta: (delta: string) => void;
+      onReasoning: (delta: string) => void;
+    },
+  ): Promise<ChatStreamDone> {
+    // Поправка оценки (см. `TokenCalibration`): если провайдер обычно показывает
+    // больше токенов, чем мы насчитали, окно для обрезки берём во столько же раз
+    // меньше — тогда расчёт не пропустит запрос, который у провайдера не влезет.
+    const scale = this.calibration.scaleFor(params.calibrationKey);
+    const windowTokens = Math.max(1, Math.floor(params.windowTokens / scale));
+
+    const budget = (factor: number, keepRecent: number): { messages: ChatMessage[]; dropped: number } =>
+      trimMessagesToFit(params.messages, {
+        limitTokens: Math.floor(windowTokens * factor),
+        overheadTokens: params.toolsTokens,
+        reserveTokens: params.maxTokens,
+        keepRecent,
+        marker: TRIM_MARKER,
+      });
+
+    let wire = budget(1, 2);
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const done = await provider.streamChat(
+          {
+            model: params.model,
+            messages: wire.messages,
+            temperature: params.temperature,
+            maxTokens: params.maxTokens,
+            reasoningEffort: params.reasoningEffort,
+            tools: params.tools,
+          },
+          { onDelta: params.onDelta, onReasoning: params.onReasoning },
+          params.signal,
+        );
+        // Факт против оценки: провайдер сам сказал, сколько входных токенов взял.
+        // Сравниваем с оценкой того же запроса и запоминаем поправку на будущее —
+        // следующим шагам она уже не даст промахнуться мимо окна.
+        if (done.usage?.promptTokens !== undefined) {
+          const estimated = estimateMessagesTokens(wire.messages) + params.toolsTokens;
+          this.calibration.observe(params.calibrationKey, estimated, done.usage.promptTokens);
+        }
+        return done;
+      } catch (error) {
+        // Промах оценки: провайдер сам сказал, что не влезло. Режем жёстче — но
+        // лишь пока есть что резать, иначе повтор бессмыслен.
+        if (!isContextOverflow(error) || attempt >= OVERFLOW_RETRIES) throw error;
+        const tighter = budget(OVERFLOW_SHRINK ** (attempt + 1), 1);
+        if (tighter.dropped === 0) throw error;
+        wire = tighter;
+      }
+    }
   }
 
   /**

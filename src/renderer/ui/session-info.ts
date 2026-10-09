@@ -1,6 +1,7 @@
 import type { ChatAttachment, ChatMessage, ChatUsage } from '../../shared/api';
 import { AGENT_TOOLS } from '../../shared/tools';
 import { contextWindow, modelPricing } from '../../shared/providers';
+import { estimateTokens } from '../../shared/context-fit';
 import { clear, h, svgIcon } from './dom';
 
 /**
@@ -55,17 +56,6 @@ interface Part {
   key: string;
   label: string;
   tokens: number;
-}
-
-/**
- * Символов на токен. 3.5 — середина для смеси русского текста, кода и латиницы:
- * латиница и код дают ~4, кириллица в моделях дороже. Точное число знает только
- * токенизатор провайдера, поэтому итог калибруется по `usage`.
- */
-const CHARS_PER_TOKEN = 3.5;
-
-function estimateTokens(chars: number): number {
-  return Math.ceil(chars / CHARS_PER_TOKEN);
 }
 
 /** Короткая запись числа: 1 200 → «1.2K». */

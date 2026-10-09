@@ -1,6 +1,7 @@
 import { RpcErrorCode, type ChatMessage, type ChatStreamDone, type ChatToolCall } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
 import type { AiProvider, StreamChatHandlers, StreamChatParams } from './provider';
+import { isContextOverflow } from '../../shared/context-fit';
 
 export interface OpenAiCompatibleOptions {
   id: string;
@@ -328,8 +329,7 @@ export async function fetchWithRetry(url: string, init: RequestInit, signal?: Ab
 
 /** Текст ошибки по коду HTTP: переполнение контекста — самая частая причина 400. */
 export function describeHttpError(status: number, detail?: string): string {
-  const body = (detail ?? '').toLowerCase();
-  if (/context[_ ]length|maximum context|too many tokens|exceeds the (model'?s )?maximum|reduce the length/.test(body)) {
+  if (isContextOverflow({ details: detail })) {
     return 'Превышен размер контекста модели — сожмите беседу или снимите вложения (HTTP 400)';
   }
   if (status === 401 || status === 403) return `Ключ отклонён провайдером (HTTP ${status})`;

@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../src/shared/api';
 import {
+  CALIBRATION_MAX,
+  CALIBRATION_MIN,
   COMPACT_MAX_CHARS,
   COMPACT_MIN_CHARS,
   compactionBudgetChars,
   estimateMessagesTokens,
+  isContextOverflow,
+  TokenCalibration,
   splitTranscript,
   trimMessagesToFit,
 } from '../src/shared/context-fit';
@@ -24,6 +28,14 @@ const assistant = (content: string): ChatMessage => ({ role: 'assistant', conten
 describe('estimateMessagesTokens', () => {
   it('растёт с объёмом текста', () => {
     expect(estimateMessagesTokens([user('привет')])).toBeLessThan(estimateMessagesTokens([user('привет'.repeat(100))]));
+  });
+
+  it('кириллицу считает дороже латиницы', () => {
+    // Одна и та же длина — разная цена: русский текст в токенах дороже. Занижать
+    // его опаснее всего: предохранитель пропустит запрос, который не влезет.
+    const latin = estimateMessagesTokens([user('a'.repeat(100))]);
+    const cyrillic = estimateMessagesTokens([user('я'.repeat(100))]);
+    expect(cyrillic).toBeGreaterThan(latin);
   });
 
   it('картинку считает фиксированно, а не по длине data-URL', () => {
@@ -144,5 +156,84 @@ describe('splitTranscript', () => {
   it('вырожденный бюджет не зацикливает: текст остаётся целым по сумме', () => {
     const blocks = splitTranscript([user('текст')], 0);
     expect(blocks.join('')).toContain('текст');
+  });
+});
+
+/**
+ * Переполнение контекста у провайдера — сигнал к тому, чтобы обрезать историю и
+ * повторить шаг, а не показывать ошибку. Поэтому важно не спутать его с прочими
+ * отказами: ложное срабатывание заставит резать беседу на ровном месте, а пропуск
+ * оставит человека с невнятным «HTTP 400».
+ */
+describe('isContextOverflow', () => {
+  it('узнаёт переполнение по исходному телу ответа в `details`', () => {
+    // `message` у нас уже переведён, поэтому признак ищем в сыром теле провайдера.
+    const openai = { message: 'Превышен размер контекста модели', details: "This model's maximum context length is 128000 tokens" };
+    const anthropic = { message: 'Превышен размер контекста модели', details: 'prompt is too long: 210000 tokens > 200000 maximum' };
+    expect(isContextOverflow(openai)).toBe(true);
+    expect(isContextOverflow(anthropic)).toBe(true);
+  });
+
+  it('ловит признак и в самом сообщении — на случай ошибки без тела', () => {
+    expect(isContextOverflow({ message: 'maximum context length exceeded' })).toBe(true);
+  });
+
+  it('прочие ошибки переполнением не считает', () => {
+    expect(isContextOverflow({ message: 'Ключ отклонён провайдером (HTTP 401)', details: 'invalid api key' })).toBe(false);
+    expect(isContextOverflow(new Error('сеть недоступна'))).toBe(false);
+    expect(isContextOverflow(undefined)).toBe(false);
+    expect(isContextOverflow(null)).toBe(false);
+    expect(isContextOverflow('maximum context')).toBe(false);
+  });
+});
+
+/**
+ * Само-калибровка оценки токенов: сами считаем символы по ставке, а провайдер
+ * отдаёт настоящий `usage`. Сверяя факт с оценкой того же запроса, учим поправку —
+ * иначе русский текст и незнакомая модель стабильно промахиваются мимо окна.
+ */
+describe('TokenCalibration', () => {
+  it('без замеров поправка нейтральна', () => {
+    const calibration = new TokenCalibration();
+    expect(calibration.scaleFor('openai::gpt-4o')).toBe(1);
+  });
+
+  it('учится по факту: факт вдвое больше оценки — поправка растёт к 2', () => {
+    const calibration = new TokenCalibration();
+    calibration.observe('m', 1_000, 2_000);
+    // Первый замер берём как есть: сравнивать ещё не с чем.
+    expect(calibration.scaleFor('m')).toBeCloseTo(2, 5);
+  });
+
+  it('сглаживает: одиночный выброс не бросает поправку к границе', () => {
+    const calibration = new TokenCalibration();
+    calibration.observe('m', 1_000, 1_000); // поправка 1
+    calibration.observe('m', 100, 1_000); // выброс: отношение 10, но весит 0.3
+    // 1 + 0.3 * (10 - 1) = 1.6 — далеко от границы 3.
+    expect(calibration.scaleFor('m')).toBeGreaterThan(1);
+    expect(calibration.scaleFor('m')).toBeLessThan(CALIBRATION_MAX);
+  });
+
+  it('зажимает поправку в разумные границы', () => {
+    const calibration = new TokenCalibration();
+    calibration.observe('huge', 1, 10_000);
+    expect(calibration.scaleFor('huge')).toBe(CALIBRATION_MAX);
+    calibration.observe('tiny', 10_000, 1);
+    expect(calibration.scaleFor('tiny')).toBe(CALIBRATION_MIN);
+  });
+
+  it('ведёт поправку на каждый ключ отдельно', () => {
+    const calibration = new TokenCalibration();
+    calibration.observe('gpt-4o', 1_000, 2_000);
+    expect(calibration.scaleFor('gpt-4o')).toBeGreaterThan(1);
+    expect(calibration.scaleFor('claude')).toBe(1);
+  });
+
+  it('игнорирует вырожденные замеры', () => {
+    const calibration = new TokenCalibration();
+    calibration.observe('m', 0, 100);
+    calibration.observe('m', 100, 0);
+    calibration.observe('m', Number.NaN, 100);
+    expect(calibration.scaleFor('m')).toBe(1);
   });
 });
