@@ -1,5 +1,6 @@
 import {
   PushTopic,
+  type DebugAttachOptions,
   type DebugFrame,
   type DebugLaunchOptions,
   type DebugOutputPayload,
@@ -190,6 +191,19 @@ export class DebugController {
       ...(options.args && options.args.length > 0 ? { args: options.args } : {}),
       ...(options.env && Object.keys(options.env).length > 0 ? { env: options.env } : {}),
     });
+  }
+
+  /**
+   * Подключиться к уже запущенному процессу.
+   *
+   * Точки отправляем заранее по той же причине, что и при запуске: адаптер
+   * запросит их по событию `initialized`, а это случится сразу после `attach`.
+   */
+  async attach(options: DebugAttachOptions): Promise<{ ok: boolean; message: string }> {
+    for (const [path, breakpoints] of this.breakpoints) {
+      await this.rpc.request('debug.setBreakpoints', { path, breakpoints }).catch(() => undefined);
+    }
+    return this.rpc.request('debug.attach', options);
   }
 
   async resume(): Promise<void> {

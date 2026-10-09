@@ -1165,19 +1165,30 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Запомненные параметры запуска: помнятся в сессии проекта, подставляются в F5. */
   let debugOptions: DebugLaunchOptions = {};
 
-  /** Активный файл, если он на Python: иначе тост и `null`. Отладчик — только Python. */
-  const activePythonFile = (): TextDocument | null => {
+  /**
+   * Активный файл, если его язык умеет отладчик: Python (debugpy) или JavaScript (Node).
+   *
+   * TypeScript запускать нечем: Node его не выполняет, а раннер проекта (`tsx`,
+   * `ts-node`) может быть не установлен — обещать запуск, который не состоится,
+   * хуже отказа. Точки в `.ts` при этом работают: их переводит source-карта, когда
+   * отлаживается собранный `.js`, — об этом и говорит подсказка.
+   */
+  const activeDebuggableFile = (): TextDocument | null => {
     const active = openEditors.active;
-    if (active?.languageId !== 'python') {
-      showToast('Отладчик работает с файлами Python', 'error');
+    if (active?.languageId === 'typescript') {
+      showToast('TypeScript отлаживается через собранный .js: точки в .ts встанут по source-карте', 'error');
+      return null;
+    }
+    if (!active || (active.languageId !== 'python' && active.languageId !== 'javascript')) {
+      showToast('Отладчик работает с файлами Python и JavaScript', 'error');
       return null;
     }
     return active;
   };
 
-  /** Начать отладку активного файла: как запуск, но под debugpy. */
+  /** Начать отладку активного файла: адаптер подберётся по языку (debugpy или Node). */
   const startDebug = async (options: DebugLaunchOptions = debugOptions): Promise<void> => {
-    const active = activePythonFile();
+    const active = activeDebuggableFile();
     if (!active) return;
     if (settings.run.saveBeforeRun) {
       for (const document of documents.dirty()) await saveDocument(document);
@@ -1192,7 +1203,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Параметры запуска одним окном: аргументы, переменные окружения и рабочий каталог.
   // Заданные один раз, они держатся в памяти и подставляются в обычный F5.
   define({ id: 'debug.startWithOptions', title: 'Отладка: параметры запуска…', category: 'Отладка' }, () => {
-    if (!activePythonFile()) return;
+    if (!activeDebuggableFile()) return;
     launchOptions.open({
       options: debugOptions,
       onAccept: (options) => {
@@ -1206,6 +1217,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         showToast('Параметры запуска сброшены');
       },
     });
+  });
+
+  /**
+   * Подключение к уже запущенному процессу.
+   *
+   * Спрашиваем только порт: хост и так локальный, а чем запущен процесс — видно по
+   * открытому файлу (Python или Node). Раннер и файл тут ни при чём: отлаживать
+   * будем то, что уже работает, а не запускать заново.
+   */
+  define({ id: 'debug.attach', title: 'Отладка: подключиться к процессу…', category: 'Отладка' }, async () => {
+    const answer = await promptValue({
+      title: 'Подключиться к процессу',
+      label: 'Порт инспектора (node --inspect=127.0.0.1:9229)',
+      value: '9229',
+    });
+    if (answer === null) return;
+
+    const port = Number(answer.trim());
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      showToast('Порт — это число от 1 до 65535', 'error');
+      return;
+    }
+
+    const target = openEditors.active?.languageId === 'python' ? 'python' : 'node';
+    const result = await debug.attach({ port, target });
+    if (!result.ok) showToast(result.message, 'error');
+    else dock.show('debug');
   });
 
   // F5 как в VS Code: не идёт отладка — начать, стоит на паузе — продолжить.

@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import path from 'node:path';
 import {
   PushTopic,
+  type DebugAttachOptions,
   type DebugBreakpoint,
   type DebugFrame,
   type DebugLaunchOptions,
@@ -12,16 +14,19 @@ import {
 import { mergeEnv } from '../project-env';
 
 /**
- * Отладчик Python: сессия `debugpy` по протоколу DAP.
+ * Отладчик: сессия по протоколу DAP.
  *
  * Живёт в main, потому что отладчик — внешний процесс, а renderer к процессам
- * доступа не имеет. Здесь только транспорт и состояние: запускаем адаптер
- * (`python -m debugpy.adapter`), шлём ему запросы DAP и превращаем события в
- * push-уведомления, которые рисует интерфейс (точки останова, стек, переменные).
+ * доступа не имеет. Здесь только транспорт и состояние: поднимаем адаптер
+ * (`python -m debugpy.adapter` или наш `node-adapter-main.js`), шлём ему запросы
+ * DAP и превращаем события в push-уведомления, которые рисует интерфейс (точки
+ * останова, стек, переменные). Какой адаптер поднимать, решает отлаживаемая
+ * сторона: `.js`/`.ts` — Node, всё остальное — Python.
  *
- * Почему адаптер, а не `debugpy --listen`: адаптер говорит по stdio, и его не
+ * Почему адаптер, а не подключение к порту: адаптер говорит по stdio, и его не
  * нужно связывать по порту — соединение не оборвётся и порт не займётся. Тот же
- * путь использует расширение Python для VS Code.
+ * путь использует расширение Python для VS Code. Исключение — `attach`: там
+ * отлаживаемый процесс уже слушает свой порт, и адаптер подключается к нему.
  */
 
 /** Запросы DAP без ответа внятной ошибки не дадут: не ждём дольше этого. */
@@ -46,6 +51,14 @@ interface Pending {
   timer: NodeJS.Timeout;
 }
 
+/** Чем запускать отладочный адаптер: команда, аргументы, `adapterID` и довесок к окружению. */
+interface AdapterSpec {
+  command: string;
+  args: string[];
+  adapterID: string;
+  env: Record<string, string>;
+}
+
 export class DebugService {
   private child: ChildProcessWithoutNullStreams | null = null;
   private buffer = Buffer.alloc(0);
@@ -67,10 +80,10 @@ export class DebugService {
     private readonly pythonPath: () => string | null,
     private readonly env: () => Promise<Record<string, string>> = async () => ({}),
     /**
-     * Чем запускать адаптер. По умолчанию — `python -m debugpy.adapter`; шов нужен,
-     * чтобы подменить адаптер в тестах (фейковый DAP-сервер) и не тащить debugpy.
+     * Подмена адаптера — шов для тестов: там настоящий debugpy или Node-адаптер не
+     * поднимают, а играют фейковый DAP-сервер. В бою адаптер выбирается по программе.
      */
-    private readonly adapter?: () => { command: string; args: string[] },
+    private readonly adapter?: () => Partial<AdapterSpec> & { command: string; args: string[] },
   ) {}
 
   /** Текущая фаза: интерфейс спрашивает её при открытии панели. */
@@ -78,22 +91,100 @@ export class DebugService {
     return { phase: this.phase };
   }
 
+  /**
+   * Чем поднимать адаптер под эту программу.
+   *
+   * Python идёт через `debugpy.adapter`, JS — через наш адаптер
+   * (`node-adapter-main.js`), который говорит с Node по CDP. Файл лежит рядом с
+   * собранным `debug.js`, поэтому путь берём от `__dirname`. Шов `adapter`
+   * (тесты) перекрывает выбор целиком.
+   */
+  private resolveAdapter(program: string): AdapterSpec {
+    return this.adapterFor(isNodeProgram(program) ? 'node' : 'python');
+  }
+
+  /** Адаптер по отлаживаемой стороне: одна и та же и для запуска, и для подключения. */
+  private adapterFor(target: 'node' | 'python'): AdapterSpec {
+    const override = this.adapter?.();
+    if (override) return { adapterID: 'python', env: {}, ...override };
+
+    if (target === 'node') {
+      return {
+        // Тот же исполняемый файл, что у приложения: под `ELECTRON_RUN_AS_NODE` он
+        // работает как обычный Node — так встроенный `WebSocket` гарантированно есть.
+        command: process.execPath,
+        args: [path.join(__dirname, 'node-adapter-main.js')],
+        adapterID: 'node',
+        env: { ELECTRON_RUN_AS_NODE: '1' },
+      };
+    }
+
+    const python = this.pythonPath() ?? (process.platform === 'win32' ? 'python' : 'python3');
+    return { command: python, args: ['-m', 'debugpy.adapter'], adapterID: 'python', env: {} };
+  }
+
   /* ── сессия ────────────────────────────────────────────────────────────── */
 
   /** Начать отладку файла. Прошлую сессию закрываем: двух быть не должно. */
   async start(program: string, options: DebugLaunchOptions = {}): Promise<{ ok: boolean; message: string }> {
-    const python = this.pythonPath() ?? (process.platform === 'win32' ? 'python' : 'python3');
-    this.stop();
+    return this.openAdapter(this.resolveAdapter(program), options.cwd ?? this.root() ?? undefined, 'launch', {
+      program,
+      // Рабочий каталог нужен и программе: в нём она запускается.
+      cwd: options.cwd ?? this.root() ?? undefined,
+      // Аргументы программы — стандартное поле DAP `args`. Пустой список не шлём:
+      // отсутствие поля и пустой массив отладчик понимает одинаково, но лишний
+      // параметр в запросе — шум в логе.
+      ...(options.args && options.args.length > 0 ? { args: options.args } : {}),
+      // Переменные окружения программы (`env` в DAP) — только для отлаживаемого
+      // процесса: адаптер и так наследует окружение проекта, а эти значения поверх.
+      ...(options.env && Object.keys(options.env).length > 0 ? { env: options.env } : {}),
+      console: 'internalConsole',
+      redirectOutput: true,
+    }, 'Отладка запущена');
+  }
 
-    const workingDir = options.cwd ?? this.root() ?? undefined;
+  /**
+   * Подключиться к уже запущенному процессу.
+   *
+   * Программу здесь не запускают: она уже работает, и перезапуск был бы не
+   * отладкой, а подменой. Адаптеру сообщаем только, где искать её инспектор.
+   * Форма запроса у Node и Python разная (`port` против `connect`), поэтому
+   * собираем её по отлаживаемой стороне, а не отдаём клиенту.
+   */
+  async attach(options: DebugAttachOptions): Promise<{ ok: boolean; message: string }> {
+    const target = options.target ?? 'node';
+    const host = options.host?.trim() || '127.0.0.1';
+    const args =
+      target === 'node'
+        ? { port: options.port, host }
+        : { connect: { host, port: options.port } };
+    return this.openAdapter(this.adapterFor(target), this.root() ?? undefined, 'attach', args, 'Отладка подключена');
+  }
+
+  /**
+   * Поднять адаптер и провести общую часть сессии: спавн, `initialize`, запрос
+   * (`launch` или `attach`). Различие двух запросов — только в их полях, а всё
+   * остальное (транспорт, фазы, точки останова) одинаково, поэтому и код общий.
+   *
+   * Ответ на `launch`/`attach` не ждём: DAP отвечает на него лишь после
+   * `configurationDone`, и ожидание здесь сорвало бы отправку точек останова.
+   */
+  private async openAdapter(
+    spec: AdapterSpec,
+    workingDir: string | undefined,
+    command: 'launch' | 'attach',
+    args: Record<string, unknown>,
+    ready: string,
+  ): Promise<{ ok: boolean; message: string }> {
+    this.stop();
     const env = mergeEnv(process.env, await this.env());
 
-    const spec = this.adapter ? this.adapter() : { command: python, args: ['-m', 'debugpy.adapter'] };
     this.setPhase('starting');
     try {
       this.child = spawn(spec.command, spec.args, {
         cwd: workingDir,
-        env,
+        // Довесок адаптера поверх окружения проекта (у Node — `ELECTRON_RUN_AS_NODE`).
+        env: { ...env, ...spec.env },
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
       }) as ChildProcessWithoutNullStreams;
@@ -112,7 +203,7 @@ export class DebugService {
 
     try {
       await this.call('initialize', {
-        adapterID: 'python',
+        adapterID: spec.adapterID,
         clientID: 'chui',
         linesStartAt1: true,
         columnsStartAt1: true,
@@ -120,26 +211,14 @@ export class DebugService {
       });
     } catch (error) {
       this.stop();
-      return { ok: false, message: `Не удалось запустить debugpy: ${error instanceof Error ? error.message : String(error)}` };
+      return { ok: false, message: `Не удалось запустить отладчик: ${error instanceof Error ? error.message : String(error)}` };
     }
 
-    // `launch` отвечает только после configurationDone — ждать его здесь нельзя,
-    // иначе отправка точек останова не случится. Шлём и идём дальше.
-    void this.call('launch', {
-      program,
-      cwd: workingDir,
-      // Аргументы программы — стандартное поле DAP `args`. Пустой список не шлём:
-      // отсутствие поля и пустой массив отладчик понимает одинаково, но лишний
-      // параметр в запросе — шум в логе.
-      ...(options.args && options.args.length > 0 ? { args: options.args } : {}),
-      // Переменные окружения программы (`env` в DAP) — только для отлаживаемого
-      // процесса: адаптер и так наследует окружение проекта, а эти значения поверх.
-      ...(options.env && Object.keys(options.env).length > 0 ? { env: options.env } : {}),
-      console: 'internalConsole',
-      redirectOutput: true,
-    }).catch((error) => this.publish(PushTopic.DebugOutput, { category: 'stderr', text: `launch: ${error.message}` }));
+    void this
+      .call(command, args)
+      .catch((error) => this.publish(PushTopic.DebugOutput, { category: 'stderr', text: `${command}: ${error.message}` }));
 
-    return { ok: true, message: 'Отладка запущена' };
+    return { ok: true, message: ready };
   }
 
   stop(): void {
@@ -569,6 +648,17 @@ export interface DebugBreakpointInput {
   condition?: string;
   hitCondition?: string;
   logMessage?: string;
+}
+
+/**
+ * Программа на JavaScript или TypeScript: её отлаживает Node-адаптер, а не debugpy.
+ *
+ * Расширения TypeScript в списке нарочно: точку в `.ts` человек ставит сам, и
+ * adapterID здесь не важен, а вот `debugpy` на таком файле — заведомо не тот
+ * отладчик. Собранный `.ts` (Source-карта в `.js`) отлаживается через свой `.js`.
+ */
+function isNodeProgram(program: string): boolean {
+  return /\.(c|m)?(js|ts)x?$/i.test(program);
 }
 
 /**

@@ -681,6 +681,25 @@ export interface DebugLaunchOptions {
   cwd?: string;
 }
 
+/**
+ * Как подключиться к уже запущенному процессу.
+ *
+ * Отличие от запуска принципиальное: процесс поднял не отладчик, а сам человек
+ * (или другая программа), и перезапускать его нельзя. Поэтому вместо программы
+ * известно только, где слушает его инспектор — порт.
+ */
+export interface DebugAttachOptions {
+  /** Порт инспектора: у Node это `--inspect=127.0.0.1:9229`, у Python — `debugpy --listen`. */
+  port: number;
+  /** Хост инспектора; не задан — локальный адрес. */
+  host?: string;
+  /**
+   * Какой адаптер поднимать. По умолчанию Node: чаще всего подключаются к
+   * `node --inspect`, а Python-процесс слушает `debugpy`, и это видно по файлу.
+   */
+  target?: 'node' | 'python';
+}
+
 export interface Settings {
   ai: AiSettings;
   editor: EditorSettings;
@@ -1148,6 +1167,11 @@ export interface ChuiMethods {
   /* Отладчик: сессия debugpy по протоколу DAP. */
   /** Начать отладку файла интерпретатором окружения. */
   'debug.start': { params: { program: string; args?: string[]; env?: Record<string, string>; cwd?: string }; result: { ok: boolean; message: string } };
+  /**
+   * Подключиться к уже запущенному процессу: он стартовал сам, и запускать его
+   * заново нельзя — отлаживаем то, что работает.
+   */
+  'debug.attach': { params: DebugAttachOptions; result: { ok: boolean; message: string } };
   /** Точки останова файла: набор заменяется целиком, как в DAP. */
   'debug.setBreakpoints': {
     params: { path: string; breakpoints: Array<{ line: number; condition?: string; hitCondition?: string; logMessage?: string }> };

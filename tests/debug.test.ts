@@ -42,6 +42,14 @@ function handle(message) {
       send({ type: 'event', event: 'output', body: { category: 'stdout', output: 'launch-env:' + JSON.stringify(args.env || null) } });
       send({ type: 'event', event: 'initialized' });
       break;
+    case 'attach':
+      // Эхо адреса: у Node это поле port, у debugpy — connect. Тест по нему видит,
+      // что форма запроса собрана по отлаживаемой стороне.
+      send({ type: 'event', event: 'output', body: { category: 'stdout', output: 'attach-args:' + JSON.stringify(args) } });
+      response(message.seq, 'attach');
+      setTimeout(() => send({ type: 'event', event: 'process', body: { name: 'app.js', startMethod: 'attach' } }), 10);
+      setTimeout(() => send({ type: 'event', event: 'thread', body: { reason: 'started', threadId: 1 } }), 15);
+      break;
     case 'setBreakpoints':
       breakpoints = (args.breakpoints || []).length;
       // Отладчик возвращает только строку и подтверждение: настройки точки
@@ -316,6 +324,34 @@ describe('DebugService', () => {
     );
     expect(argsEcho?.payload.text).toBe('launch-args:null');
     expect(envEcho?.payload.text).toBe('launch-env:null');
+    service.dispose();
+  });
+
+  it('подключение к процессу шлёт адаптеру адрес инспектора', async () => {
+    const { service, events } = fakeService();
+    const attached = await service.attach({ port: 9229 });
+    expect(attached.ok).toBe(true);
+    expect(await waitPhase(service, 'running')).toBe('running');
+
+    // У Node инспектор адресуется портом: `node --inspect=127.0.0.1:9229`.
+    const echo = events.find(
+      (event) => event.topic === 'debug:output' && String(event.payload.text).startsWith('attach-args:'),
+    );
+    expect(echo?.payload.text).toBe('attach-args:{"port":9229,"host":"127.0.0.1"}');
+    service.dispose();
+  });
+
+  it('подключение к Python-процессу шлёт адрес так, как ждёт debugpy', async () => {
+    const { service, events } = fakeService();
+    // debugpy принимает адрес полем `connect`, а не `port`/`host` сверху.
+    const attached = await service.attach({ port: 5678, target: 'python' });
+    expect(attached.ok).toBe(true);
+    expect(await waitPhase(service, 'running')).toBe('running');
+
+    const echo = events.find(
+      (event) => event.topic === 'debug:output' && String(event.payload.text).startsWith('attach-args:'),
+    );
+    expect(echo?.payload.text).toBe('attach-args:{"connect":{"host":"127.0.0.1","port":5678}}');
     service.dispose();
   });
 

@@ -41,7 +41,12 @@ const IDLE_HINT = 'Отладка не запущена. Точка остано
 export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
   const toolbar = h('div', { class: 'debug-toolbar' });
   const body = h('div', { class: 'debug-body' });
-  const element = h('div', { class: 'debug-panel' }, toolbar, body);
+  // Вывод программы и строки точек-журналов: отдельным блоком под телом панели.
+  // Вывод программы живёт вне состояния (его шлют событием), поэтому элемент свой
+  // и не перерисовывается вместе с телом — иначе прокрутка терялась бы на каждом
+  // останове, а строки копились бы в разметке без предела.
+  const output = h('pre', { class: 'debug-output' });
+  const element = h('div', { class: 'debug-panel' }, toolbar, body, output);
 
   /** Кадр, для которого показаны переменные; по умолчанию — верхний. */
   let selectedFrameId: number | null = null;
@@ -54,6 +59,34 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
   /** Загруженные области выбранного кадра. */
   let scopes: DebugScope[] = [];
   let scopesForFrame: number | null = null;
+
+  /** Полные строки вывода, уже показанные; ограничены, чтобы панель не «толстела». */
+  let outputLines: string[] = [];
+  /** Хвост без перевода строки: вывод приходит кусками, строка — по её концу. */
+  let outputRest = '';
+  /** Фаза на прошлой отрисовке: по ней видно начало новой сессии. */
+  let lastPhase = 'idle';
+
+  /** Сколько строк вывода держим: старые не нужны, а память и разметка конечны. */
+  const MAX_OUTPUT_LINES = 500;
+
+  function paintOutput(): void {
+    output.textContent = outputLines.join('\n');
+    output.scrollTop = output.scrollHeight;
+  }
+
+  /** Добавить кусок вывода: печатаем только целые строки, хвост копим до перевода. */
+  function pushOutput(text: string): void {
+    if (!text) return;
+    outputRest += text;
+    const parts = outputRest.split('\n');
+    outputRest = parts.pop() ?? '';
+    if (parts.length === 0) return;
+    outputLines = [...outputLines, ...parts].slice(-MAX_OUTPUT_LINES);
+    paintOutput();
+  }
+
+  deps.debug.onOutput((payload) => pushOutput(payload.text));
 
   function control(label: string, title: string, enabled: boolean, onClick: () => void): HTMLElement {
     return h(
@@ -339,6 +372,13 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
 
   function render(state: DebugState): void {
     stateSnapshot = state;
+    // Новая сессия — прошлый вывод к ней не относится: начинаем лог с чистого листа.
+    if (state.phase === 'starting' && lastPhase !== 'starting') {
+      outputLines = [];
+      outputRest = '';
+      paintOutput();
+    }
+    lastPhase = state.phase;
     clear(body);
     renderToolbar(state);
 
@@ -380,6 +420,7 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
       scopes = [];
       loadedVariables.clear();
       expanded.clear();
+      paintOutput();
       render(deps.debug.get());
     },
     focus: () => void 0,

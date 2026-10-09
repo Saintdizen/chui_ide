@@ -433,6 +433,8 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('debug.start', (params) =>
     requireDebug().start(params.program, { cwd: params.cwd, args: params.args, env: params.env }),
   );
+  // Подключение к чужому процессу: ни файла, ни окружения — только адрес инспектора.
+  router.register('debug.attach', (params) => requireDebug().attach(params));
   router.register('debug.setBreakpoints', (params) => requireDebug().setBreakpoints(params.path, params.breakpoints));
   router.register('debug.continue', () => requireDebug().resume());
   router.register('debug.step', (params) => requireDebug().step(params.kind));

@@ -4704,6 +4704,29 @@ textarea {
   overflow: auto;
 }
 
+/*
+ * Вывод программы и строки точек-журналов. Своя прокрутка и ограниченная высота:
+ * иначе вывод в сотни строк выдавил бы стек и переменные из панели. Пустой блок
+ * не занимает места — пока программа молчит, панель выглядит как раньше.
+ */
+.debug-output {
+  flex: 0 0 auto;
+  max-height: 40%;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 8px;
+  border-top: 1px solid var(--separator_color);
+  overflow: auto;
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.debug-output:empty {
+  display: none;
+}
+
 .debug-section {
   padding: 4px 0 8px;
 }
