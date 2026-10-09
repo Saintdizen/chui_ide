@@ -74,6 +74,14 @@ describe('installPackages', () => {
     expect(installPackages('full')).toContain('python-lsp-server');
   });
 
+  it('полное окружение включает линтеры для pylsp', () => {
+    // Базовая установка python-lsp-server не проверяет код: без плагинов сервер
+    // молчит. Линтеры должны стоять в наборе, иначе «подсказки» не работают.
+    const full = installPackages('full');
+    expect(full).toContain('pyflakes');
+    expect(full).toContain('pycodestyle');
+  });
+
   it('неизвестный уровень — пусто, без догадок', () => {
     expect(installPackages('что-то')).toEqual([]);
   });

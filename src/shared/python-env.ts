@@ -151,8 +151,12 @@ export const VENV_INSTALL_OPTIONS: readonly VenvInstallOption[] = [
   {
     id: 'full',
     label: 'Полное окружение',
-    hint: 'Тесты и подсказки: pytest, pylsp, ruff',
-    packages: ['pytest', 'pytest-cov', 'python-lsp-server', 'ruff'],
+    hint: 'Тесты, линтер и подсказки: pytest, pylsp с линтерами, ruff',
+    // Базовый `python-lsp-server` сам код не проверяет: диагностику дают его
+    // плагины, а их установка пакета не тянет — без pyflakes и pycodestyle сервер
+    // молчит, и «подсказки» из описания остаются пустым обещанием. Проверено на
+    // живом pylsp: с ними появляются «undefined name» и «imported but unused».
+    packages: ['pytest', 'pytest-cov', 'python-lsp-server', 'pyflakes', 'pycodestyle', 'ruff'],
   },
 ];
 
