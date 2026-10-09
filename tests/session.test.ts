@@ -13,19 +13,13 @@ describe('sanitizeSession', () => {
       tabs: ['/p/a.ts', '/p/b.ts'],
       activeTab: '/p/b.ts',
       expanded: ['/p/src'],
-      dockVisible: true,
       dockActive: 'terminal',
-      sidebarVisible: false,
-      rightVisible: true,
     });
     expect(state).toEqual({
       tabs: ['/p/a.ts', '/p/b.ts'],
       activeTab: '/p/b.ts',
       expanded: ['/p/src'],
-      dockVisible: true,
       dockActive: 'terminal',
-      sidebarVisible: false,
-      rightVisible: true,
     });
   });
 
@@ -48,11 +42,11 @@ describe('sanitizeSession', () => {
     expect(state.expanded).toHaveLength(MAX_EXPANDED);
   });
 
-  it('видимость панелей по умолчанию — правая и боковая видны', () => {
-    const state = sanitizeSession({});
-    expect(state.sidebarVisible).toBe(true);
-    expect(state.rightVisible).toBe(true);
-    expect(state.dockVisible).toBe(false);
+  it('видимость панелей в сессию не попадает (это часть общего макета)', () => {
+    const state = sanitizeSession({ sidebarVisible: false, rightVisible: false, dockVisible: true });
+    expect('sidebarVisible' in state).toBe(false);
+    expect('rightVisible' in state).toBe(false);
+    expect('dockVisible' in state).toBe(false);
   });
 
   it('dockActive без содержимого не сохраняется', () => {

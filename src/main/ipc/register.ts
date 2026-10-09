@@ -62,7 +62,7 @@ export interface AppDependencies {
   debug?: DebugService;
   /** Сессия проекта (вкладки, папки, панели). Необязательно для пробников. */
   sessions?: SessionStore;
-  /** Настройки и макет уровня проекта: `<root>/.chui_ide/` (см. ProjectConfigStore). */
+  /** Настройки уровня проекта: `<root>/.chui_ide/` (см. ProjectConfigStore). */
   projectConfig?: ProjectConfigStore;
 }
 
@@ -297,27 +297,19 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Сессия проекта: renderer собирает состояние и кладёт сюда, а при следующем
   // открытии забирает обратно. Без хранилища (пробники) отвечаем пустой сессией.
   router.register('session.load', (params) =>
-    deps.sessions?.load(params.root) ?? {
-      tabs: [],
-      expanded: [],
-      dockVisible: false,
-      sidebarVisible: true,
-      rightVisible: true,
-    },
+    deps.sessions?.load(params.root) ?? { tabs: [], expanded: [] },
   );
   router.register('session.save', (params) => {
     deps.sessions?.save(params.root, params.state);
   });
-  // Настройки и макет уровня проекта — в `<root>/.chui_ide/`. Свои для каждого
-  // проекта, поэтому корень берём из параметров, а не из глобальных настроек.
+  // Настройки уровня проекта — в `<root>/.chui_ide/`. Свои для каждого проекта,
+  // поэтому корень берём из параметров, а не из глобальных настроек. Макет
+  // рабочей области сюда не входит: он общий и живёт в settings.json (userData).
   router.register('project.config', (params) =>
-    deps.projectConfig?.load(params.root) ?? { settings: {}, layout: {} },
+    deps.projectConfig?.load(params.root) ?? {},
   );
   router.register('project.updateSettings', (params) =>
-    deps.projectConfig?.updateSettings(params.root, params.patch) ?? { settings: {}, layout: {} },
-  );
-  router.register('project.saveLayout', (params) =>
-    deps.projectConfig?.saveLayout(params.root, params.layout) ?? params.layout,
+    deps.projectConfig?.updateSettings(params.root, params.patch) ?? {},
   );
   /* ── стартовое окно ────────────────────────────────────────────────────── */
 

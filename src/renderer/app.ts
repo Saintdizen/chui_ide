@@ -2,18 +2,13 @@ import {
   PushTopic,
   type BreakpointRecord,
   type DebugLaunchOptions,
+  type LayoutSettings,
   type SessionState,
   type Settings,
   type SettingsPatch,
   type WorkspaceChangedPayload,
 } from '../shared/api';
-import {
-  PROJECT_SETTINGS_SECTIONS,
-  mergeDeep,
-  type ProjectConfig,
-  type ProjectLayout,
-  type ProjectSettings,
-} from '../shared/project-config';
+import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -126,11 +121,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       else globalPatch[key] = entry;
     }
     if (root && Object.keys(projectPatch).length > 0) {
-      const config = await rpc.request('project.updateSettings', {
+      projectSettings = await rpc.request('project.updateSettings', {
         root,
         patch: projectPatch as ProjectSettings,
       });
-      projectSettings = config.settings;
     }
     if (Object.keys(globalPatch).length > 0) {
       baseSettings = await rpc.request('settings.update', globalPatch as SettingsPatch);
@@ -140,14 +134,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     return next;
   }
 
-  // Макет проекта: размеры и видимость панелей пишем в .chui_ide/layout.json.
+  // Макет рабочей области общий для всех проектов, поэтому живёт в userData
+  // (settings.json), а не в `.chui_ide` конкретного проекта.
   async function persistLayout(): Promise<void> {
     if (layoutGuard.applying) return;
-    const root = workspace.root;
-    if (!root) return;
-    await rpc
-      .request('project.saveLayout', {
-        root,
+    baseSettings = await rpc
+      .request('settings.update', {
         layout: {
           sidebarSize: layout.sidebarSize,
           rightSize: layout.rightSize,
@@ -157,28 +149,36 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           dockVisible: layout.dockVisible,
         },
       })
-      .catch(() => undefined);
+      .catch(() => baseSettings);
   }
 
-  function applyProjectLayout(saved: ProjectLayout | null | undefined): void {
-    if (!saved) return;
+  /** Программное изменение макета не должно сохранять само себя. */
+  function withoutPersist(run: () => void): void {
     layoutGuard.applying = true;
-    if (typeof saved.sidebarSize === 'number') layout.setSidebarSize(saved.sidebarSize);
-    if (typeof saved.rightSize === 'number') layout.setRightSize(saved.rightSize);
-    if (typeof saved.dockSize === 'number') layout.setDockSize(saved.dockSize);
-    if (typeof saved.sidebarVisible === 'boolean') layout.setSidebarVisible(saved.sidebarVisible);
-    if (typeof saved.rightVisible === 'boolean') layout.setRightVisible(saved.rightVisible);
-    if (typeof saved.dockVisible === 'boolean') layout.setDockVisible(saved.dockVisible);
-    layoutGuard.applying = false;
+    try {
+      run();
+    } finally {
+      layoutGuard.applying = false;
+    }
   }
 
-  // При открытии проекта подтягиваем .chui_ide: настройки и макет.
+  /** Применить макет из настроек: размеры и видимость панелей. */
+  function applyLayoutSettings(saved: LayoutSettings | undefined): void {
+    if (!saved) return;
+    withoutPersist(() => {
+      layout.setSidebarSize(saved.sidebarSize);
+      layout.setRightSize(saved.rightSize);
+      layout.setDockSize(saved.dockSize);
+      layout.setSidebarVisible(saved.sidebarVisible);
+      layout.setRightVisible(saved.rightVisible);
+      layout.setDockVisible(saved.dockVisible);
+    });
+  }
+
+  // При открытии проекта накладываем настройки из его `.chui_ide` поверх общих.
   async function loadProjectConfig(root: string): Promise<void> {
-    const config: ProjectConfig | null = await rpc
-      .request('project.config', { root })
-      .catch(() => null);
-    projectSettings = config?.settings ?? {};
-    applyProjectLayout(config?.layout);
+    const config = await rpc.request('project.config', { root }).catch(() => null);
+    projectSettings = config ?? {};
     applySettings(rebuildSettings());
   }
 
@@ -186,6 +186,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     projectSettings = {};
     applySettings(rebuildSettings());
   }
+
+  // Макет восстановлен из userData ещё до открытия проекта: панели сразу на месте.
+  applyLayoutSettings(baseSettings.layout);
   const info = await rpc.request('app.info');
   console.info(`[chui] Electron ${info.electron} · Chromium ${info.chrome} · Node ${info.node} · ${info.platform}`);
 
@@ -920,10 +923,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       tabs: [...openEditors.paths],
       ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
       expanded: explorer.expandedPaths(),
-      dockVisible: layout.dockVisible,
       ...(dock.activeId ? { dockActive: dock.activeId } : {}),
-      sidebarVisible: layout.sidebarVisible,
-      rightVisible: layout.rightVisible,
+      // Видимость панелей сюда не входит: это общий макет (settings), а не
+      // свойство проекта. Рабочее место конкретной папки — вкладки и папки.
       // Параметры запуска, наблюдение и точки останова отладки — часть рабочего места:
       // пустые не пишем, чтобы файл не разрастался полями-пустышками.
       ...(Object.keys(debugOptions).length > 0 ? { debugLaunch: debugOptions } : {}),
@@ -977,14 +979,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       debugPanel.setWatch(state.debugWatch ?? []);
       if (state.debugExceptions) void debug.setExceptionFilters(state.debugExceptions);
       restoreBreakpoints(state.breakpoints ?? []);
-      layout.setSidebarVisible(state.sidebarVisible);
-      // Панель ассистента не восстанавливаем, если AI выключен: её место свободно.
-      layout.setRightVisible(state.rightVisible && aiEnabled());
-      if (state.dockVisible) {
-        if (state.dockActive) dock.show(state.dockActive);
-      } else {
-        dock.hide();
-      }
+      // Видимость панелей — из общего макета (settings), а не из сессии проекта.
+      // Из сессии берём только то, какая вкладка нижней панели была открыта.
+      withoutPersist(() => {
+        // Панель ассистента не показываем, если AI выключен: её место свободно.
+        layout.setRightVisible(layout.rightVisible && aiEnabled());
+        // Нижняя панель: видимость — из макета, а какая вкладка открыта — из сессии.
+        const dockTab = state.dockActive ?? dock.activeId;
+        if (layout.dockVisible && dockTab) dock.show(dockTab);
+        else if (!layout.dockVisible) dock.hide();
+      });
     } catch {
       // повреждённый файл сессии не должен мешать — начинаем с чистого места
     } finally {
@@ -1754,11 +1758,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     explorer.applySettings(next.explorer);
     chat.applySettings(next);
     settingsModal.applySettings(next);
+    // Макет мог измениться (например, размеры панелей) — применяем без повторной записи.
+    applyLayoutSettings(next.layout);
     // Ассистент выключили мастер-тумблером — закрываем его панель и обновляем шапку,
     // чтобы она не занимала место и не звала в выключенный чат.
     if (!next.ai.enabled) {
       if (chatInEditor) setChatInEditor(false);
-      if (layout.rightVisible) layout.setRightVisible(false);
+      withoutPersist(() => {
+        if (layout.rightVisible) layout.setRightVisible(false);
+      });
     }
     syncViewButtons();
     // Инструменты проекта зависят от настроек запуска: путь к интерпретатору

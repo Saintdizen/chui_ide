@@ -202,6 +202,9 @@ module.exports = [
   const TINY_PNG =
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
 
+  /** Настройки проекта из `.chui_ide` — в моке отдельное хранилище, как в main. */
+  const projectSettings = {};
+
   const settings = {
     ai: {
       providers: [
@@ -272,6 +275,17 @@ module.exports = [
     lsp: { enabled: false, servers: [] },
     // «Системная» — чтобы схему в проверке задавал Playwright (`emulateMedia`).
     appearance: { theme: 'system' },
+    // Макет рабочей области: размеры и видимость панелей (общий для всех проектов).
+    layout: {
+      sidebarSize: 260,
+      rightSize: 400,
+      dockSize: 260,
+      sidebarVisible: true,
+      rightVisible: true,
+      dockVisible: false,
+    },
+    // История открытых папок — для стартового окна; в моке пусто.
+    workspace: { recent: [] },
     // Усилие размышления: по умолчанию не отправляется (см. shared/providers.ts).
     reasoningEffort: 'off',
   };
@@ -546,6 +560,7 @@ module.exports = [
       Object.assign(settings.explorer, params.explorer ?? {});
       Object.assign(settings.run, params.run ?? {});
       Object.assign(settings.appearance, params.appearance ?? {});
+      Object.assign(settings.layout, params.layout ?? {});
       Object.assign(settings.lsp, params.lsp ?? {});
 
       // Провайдеров добавляем и убираем так же, как это делает SettingsStore.
@@ -596,6 +611,12 @@ module.exports = [
       { language: 'python', command: 'pylsp', args: [], enabled: true },
       { language: 'typescript', command: 'typescript-language-server', args: ['--stdio'], enabled: true },
     ],
+    // Настройки проекта из `.chui_ide`: в моке держим в памяти, как это делает main.
+    'project.config': () => structuredClone(projectSettings),
+    'project.updateSettings': (params) => {
+      Object.assign(projectSettings, params.patch ?? {});
+      return structuredClone(projectSettings);
+    },
     // Карта проекта и окружения — заглушки: главное, чтобы методы отвечали.
     'project.scan': () => ({
       root: currentRoot ?? '',

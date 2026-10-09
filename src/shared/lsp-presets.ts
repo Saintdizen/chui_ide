@@ -63,6 +63,18 @@ export function presetCommands(): string[] {
 }
 
 /**
+ * Языки, которые обслуживает проект этого вида. Нужно, чтобы в настройках
+ * показывать только связанные с проектом серверы: у Python-проекта нет смысла
+ * в clangd или gopls. `null` — вид неизвестен или не тот, о котором мы знаем:
+ * тогда фильтровать нечем, показываем всё и не угадываем.
+ */
+export function lspLanguagesForKind(kind: string | null): readonly string[] | null {
+  if (kind === 'python') return ['python'];
+  if (kind === 'node' || kind === 'deno') return ['typescript', 'javascript'];
+  return null;
+}
+
+/**
  * Подобрать конфигурацию по найденным в PATH командам. На каждый язык — один
  * сервер: два сервера одного языка конфликтовали бы (в рантайме ключ — язык).
  */

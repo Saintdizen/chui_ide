@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { LANGUAGES } from '../src/shared/languages';
-import { LSP_PRESETS, matchPresets, presetCommands } from '../src/shared/lsp-presets';
+import { LSP_PRESETS, lspLanguagesForKind, matchPresets, presetCommands } from '../src/shared/lsp-presets';
 
 describe('presetCommands', () => {
   it('без повторов', () => {
@@ -91,6 +91,29 @@ describe('matchPresets', () => {
     const languages = new Set(LSP_PRESETS.map((preset) => preset.language));
     for (const id of ['python', 'typescript', 'rust', 'go', 'java', 'ruby', 'php', 'csharp', 'xml', 'sql']) {
       expect(languages.has(id)).toBe(true);
+    }
+  });
+});
+
+describe('lspLanguagesForKind', () => {
+  it('Python-проекту — только python', () => {
+    expect(lspLanguagesForKind('python')).toEqual(['python']);
+  });
+
+  it('Node и Deno — js/ts', () => {
+    expect(lspLanguagesForKind('node')).toEqual(['typescript', 'javascript']);
+    expect(lspLanguagesForKind('deno')).toEqual(['typescript', 'javascript']);
+  });
+
+  it('неизвестный вид не фильтруется', () => {
+    expect(lspLanguagesForKind(null)).toBeNull();
+    expect(lspLanguagesForKind('rust')).toBeNull();
+  });
+
+  it('каждый язык фильтра есть в пресетах — иначе сервер не подобрать', () => {
+    const known = new Set(LSP_PRESETS.map((preset) => preset.language));
+    for (const kind of ['python', 'node', 'deno']) {
+      for (const id of lspLanguagesForKind(kind) ?? []) expect(known.has(id)).toBe(true);
     }
   });
 });

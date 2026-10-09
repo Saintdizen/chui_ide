@@ -11,6 +11,7 @@ import type {
 } from '../../shared/api';
 import type { AiProviderPatch } from '../../shared/api';
 import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
+import { lspLanguagesForKind } from '../../shared/lsp-presets';
 import type { CommandRegistry } from '../core/commands';
 import type { RpcClient } from '../core/rpc';
 import type { ThemeService } from '../core/theme-service';
@@ -537,6 +538,9 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   function renderEditor(): Child[] {
     const editor: EditorSettings = settings!.editor;
     const editable = (values: Partial<EditorSettings>): void => void patch({ editor: values });
+    // Подсветка неиспользуемого кода — проверка JS/TS в редакторе; в Python-проекте
+    // её показывать нечего, там этим занимается языковой сервер.
+    const showUnused = (deps.project?.kind() ?? null) !== 'python';
     return [
       h('div', { class: 'field-label' }, 'Шрифт'),
       field('Размер шрифта', numberInput(editor.fontSize, 8, 32, 1, (value) => editable({ fontSize: value }))),
@@ -605,13 +609,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Подсказки и проверки'),
       switchRow('Подсказки по мере ввода', editor.quickSuggestions, (value) => editable({ quickSuggestions: value })),
-      switchRow('Подсвечивать неиспользуемый код', editor.showUnused, (value) => editable({ showUnused: value })),
+      ...(showUnused
+        ? [
+            switchRow('Подсвечивать неиспользуемый код', editor.showUnused, (value) => editable({ showUnused: value })),
+            h(
+              'div',
+              { class: 'field-hint' },
+              'Проверка JavaScript и TypeScript работает в самом редакторе: неиспользуемые импорты и переменные подчёркиваются сразу.',
+            ),
+          ]
+        : []),
       switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
-      h(
-        'div',
-        { class: 'field-hint' },
-        'Проверка JavaScript и TypeScript работает в самом редакторе: неиспользуемые импорты и переменные подчёркиваются сразу.',
-      ),
       field(
         'Мигание курсора',
         selectInput(
@@ -731,15 +739,20 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       );
     }
 
+    // Подсказка про запуск — про то, что есть в этом проекте: у Python нет
+    // задач из package.json, у Node — интерпретатора из venv.
+    const runHint =
+      kind === 'python'
+        ? 'Кнопка запуска появляется сама для запускаемых Python-файлов и тестов. Горячие клавиши: Ctrl+F5 — запустить, Shift+F10 — выбрать.'
+        : kind === 'node'
+          ? 'Кнопка запуска появляется сама: файл, если он запускаемый, и задачи из `scripts` в package.json. Горячие клавиши: Ctrl+F5 — запустить, Shift+F10 — выбрать.'
+          : 'Кнопка запуска появляется сама: Python и Node — файлом, если он запускаемый, и всегда — задачами из `scripts` в package.json. Горячие клавиши: Ctrl+F5 — запустить, Shift+F10 — выбрать.';
+
     items.push(
       switchRow('Сохранять файлы перед запуском', run.saveBeforeRun, (value) => apply({ saveBeforeRun: value })),
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Что можно запустить'),
-      h(
-        'div',
-        { class: 'field-hint' },
-        'Кнопка запуска появляется сама: Python и Node — файлом, если он запускаемый, и всегда — задачами из `scripts` в package.json. Горячие клавиши: Ctrl+F5 — запустить, Shift+F10 — выбрать.',
-      ),
+      h('div', { class: 'field-hint' }, runHint),
     );
 
     return items;
@@ -759,14 +772,20 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
 
   function renderLsp(): Child[] {
     const lsp = settings!.lsp;
+    // Показываем серверы только языков этого проекта; остальные не теряем —
+    // держим в стороне и возвращаем назад при сохранении.
+    const languages = lspLanguagesForKind(deps.project?.kind() ?? null);
+    const isOwn = (server: LspServerConfig): boolean => !languages || languages.includes(server.language);
+    const foreign = languages ? lsp.servers.filter((server) => !isOwn(server)) : [];
+    const visible = lsp.servers.filter(isOwn);
 
     const servers = h('textarea', { class: 'field-input', rows: 8, spellcheck: false });
-    servers.value = JSON.stringify(lsp.servers, null, 2);
+    servers.value = JSON.stringify(visible, null, 2);
     servers.addEventListener('change', () => {
       try {
         const parsed = JSON.parse(servers.value) as unknown;
         if (!Array.isArray(parsed)) throw new Error('ожидался массив');
-        void patch({ lsp: { servers: parsed as LspServerConfig[] } }, true);
+        void patch({ lsp: { servers: [...foreign, ...(parsed as LspServerConfig[])] } }, true);
       } catch (error) {
         showToast(error instanceof Error ? error.message : 'Некорректный JSON', 'error');
       }
@@ -780,13 +799,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       void deps.rpc
         .request('lsp.detect')
         .then((found) => {
-          if (found.length === 0) {
+          const relevant = found.filter(isOwn);
+          if (relevant.length === 0) {
             showToast('Языковые серверы в PATH не найдены', 'error');
             return;
           }
-          servers.value = JSON.stringify(found, null, 2);
-          void patch({ lsp: { servers: found, enabled: true } }, true);
-          showToast(`Найдено серверов: ${found.length}`);
+          servers.value = JSON.stringify(relevant, null, 2);
+          void patch({ lsp: { servers: [...foreign, ...relevant], enabled: true } }, true);
+          showToast(`Найдено серверов: ${relevant.length}`);
         })
         .catch((error) => showToast(error instanceof Error ? error.message : String(error), 'error'))
         .finally(() => {
@@ -829,6 +849,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'field-hint' }, statusText),
       field('Перезапустить', restartButton),
       field('Серверы (JSON)', servers),
+      languages
+        ? h(
+            'div',
+            { class: 'field-hint' },
+            `Показаны только серверы языков этого проекта: ${languages.join(', ')}. ` +
+              'Прочие сохранены и вернутся, когда откроется проект другого вида.',
+          )
+        : null,
       field('Найти серверы', detectButton),
       h(
         'div',

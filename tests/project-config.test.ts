@@ -3,11 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ProjectConfigStore } from '../src/main/project-config';
-import {
-  applyProjectSettingsPatch,
-  sanitizeProjectLayout,
-  sanitizeProjectSettings,
-} from '../src/shared/project-config';
+import { applyProjectSettingsPatch, sanitizeProjectSettings } from '../src/shared/project-config';
 
 describe('sanitizeProjectSettings', () => {
   it('оставляет только известные секции-объекты', () => {
@@ -26,22 +22,6 @@ describe('sanitizeProjectSettings', () => {
     expect(sanitizeProjectSettings(null)).toEqual({});
     expect(sanitizeProjectSettings('x')).toEqual({});
     expect(sanitizeProjectSettings([1, 2])).toEqual({});
-  });
-});
-
-describe('sanitizeProjectLayout', () => {
-  it('размеры — положительные числа, видимость — boolean', () => {
-    expect(
-      sanitizeProjectLayout({
-        sidebarSize: 260.6,
-        rightSize: 0,
-        dockSize: -5,
-        sidebarVisible: true,
-        rightVisible: 'yes',
-        dockVisible: false,
-        junk: 3,
-      }),
-    ).toEqual({ sidebarSize: 261, sidebarVisible: true, dockVisible: false });
   });
 });
 
@@ -68,9 +48,9 @@ describe('ProjectConfigStore', () => {
     return dir;
   }
 
-  it('пустой проект даёт пустую конфигурацию', async () => {
+  it('пустой проект даёт пустые настройки', async () => {
     const store = new ProjectConfigStore();
-    expect(await store.load(await makeRoot())).toEqual({ settings: {}, layout: {} });
+    expect(await store.load(await makeRoot())).toEqual({});
   });
 
   it('пишет настройки в .chui_ide/settings.json', async () => {
@@ -86,18 +66,7 @@ describe('ProjectConfigStore', () => {
     const base = await makeRoot();
     await store.updateSettings(base, { editor: { tabSize: 4 } });
     const next = await store.updateSettings(base, { editor: { wordWrap: true } });
-    expect(next.settings.editor).toEqual({ tabSize: 4, wordWrap: true });
-  });
-
-  it('сохраняет макет и объединяет его', async () => {
-    const store = new ProjectConfigStore();
-    const base = await makeRoot();
-    await store.saveLayout(base, { sidebarSize: 280, dockVisible: true });
-    expect(await store.saveLayout(base, { rightSize: 300 })).toEqual({
-      sidebarSize: 280,
-      dockVisible: true,
-      rightSize: 300,
-    });
+    expect(next.editor).toEqual({ tabSize: 4, wordWrap: true });
   });
 
   it('битый JSON не роняет загрузку', async () => {
@@ -105,12 +74,6 @@ describe('ProjectConfigStore', () => {
     const base = await makeRoot();
     await mkdir(path.join(base, '.chui_ide'), { recursive: true });
     await writeFile(path.join(base, '.chui_ide', 'settings.json'), '{ broken', 'utf8');
-    expect((await store.load(base)).settings).toEqual({});
-  });
-
-  it('макет игнорирует мусорные значения', async () => {
-    const store = new ProjectConfigStore();
-    const base = await makeRoot();
-    expect(await store.saveLayout(base, { sidebarSize: -1 } as never)).toEqual({});
+    expect(await store.load(base)).toEqual({});
   });
 });

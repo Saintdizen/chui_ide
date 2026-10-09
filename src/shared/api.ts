@@ -8,7 +8,7 @@
 import type { MenuRole } from './app-menu';
 import type { ApplyResult, FileEdit } from './edits';
 import type { ProjectScan } from './project-scan';
-import type { ProjectConfig, ProjectLayout, ProjectSettings } from './project-config';
+import type { ProjectSettings } from './project-config';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { NodeTestSuite } from './node-tests';
 import type { PythonEnvironment, PythonInterpreter } from './python-env';
@@ -219,11 +219,8 @@ export interface SessionState {
   activeTab?: string;
   /** Абсолютные пути раскрытых папок дерева. */
   expanded: string[];
-  dockVisible: boolean;
   /** Какая вкладка нижней панели открыта: `terminal`, `search`, `git`. */
   dockActive?: string;
-  sidebarVisible: boolean;
-  rightVisible: boolean;
   /** Параметры запуска отладки: аргументы, окружение и рабочий каталог. */
   debugLaunch?: DebugLaunchOptions;
   /** Наблюдаемые в панели отладки выражения. */
@@ -505,6 +502,22 @@ export interface WorkspaceSettings {
   recent: string[];
 }
 
+/**
+ * Макет рабочей области: размеры и видимость панелей. Общий для всех проектов —
+ * это рабочее место человека, а не свойство кода.
+ */
+export interface LayoutSettings {
+  /** Ширина боковой панели, px. */
+  sidebarSize: number;
+  /** Ширина правой панели, px. */
+  rightSize: number;
+  /** Высота нижней панели, px. */
+  dockSize: number;
+  sidebarVisible: boolean;
+  rightVisible: boolean;
+  dockVisible: boolean;
+}
+
 /* ── Python: окружения и создание venv ─────────────────────────────────── */
 
 /** Уровень установки пакетов при создании окружения. */
@@ -735,6 +748,7 @@ export interface Settings {
   run: RunSettings;
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
+  layout: LayoutSettings;
   lsp: LspSettings;
 }
 
@@ -788,6 +802,7 @@ export interface SettingsPatch {
   explorer?: Partial<ExplorerSettings>;
   run?: Partial<RunSettings>;
   appearance?: Partial<AppearanceSettings>;
+  layout?: Partial<LayoutSettings>;
   lsp?: Partial<LspSettings>;
 }
 
@@ -1108,13 +1123,12 @@ export interface ChuiMethods {
    */
   'project.scan': { params: void; result: ProjectScan };
   /**
-   * Конфигурация уровня проекта из `<root>/.chui_ide/`: настройки редактора,
-   * дерева, запуска и LSP вместе с макетом панелей. Лежит в самом проекте,
-   * чтобы её можно было версионировать вместе с кодом, в отличие от userData.
+   * Настройки уровня проекта из `<root>/.chui_ide/`: редактор, дерево, запуск и
+   * LSP. Лежат в самом проекте, чтобы их можно было версионировать вместе с кодом,
+   * в отличие от userData. Макет панелей сюда не входит: он общий для всех проектов.
    */
-  'project.config': { params: { root: string }; result: ProjectConfig };
-  'project.updateSettings': { params: { root: string; patch: ProjectSettings }; result: ProjectConfig };
-  'project.saveLayout': { params: { root: string; layout: ProjectLayout }; result: ProjectLayout };
+  'project.config': { params: { root: string }; result: ProjectSettings };
+  'project.updateSettings': { params: { root: string; patch: ProjectSettings }; result: ProjectSettings };
 
 
   /** Виртуальные окружения Python в проекте: главное — первым. */

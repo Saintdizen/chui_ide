@@ -7,6 +7,7 @@ import {
   type AppearanceSettings,
   type EditorSettings,
   type ExplorerSettings,
+  type LayoutSettings,
   type LspSettings,
   type ReasoningEffort,
   type RunSettings,
@@ -58,6 +59,7 @@ interface StoredSettings {
   run: RunSettings;
   appearance: AppearanceSettings;
   workspace: WorkspaceSettings;
+  layout: LayoutSettings;
   lsp: LspSettings;
 }
 
@@ -157,6 +159,16 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // стартовое окно, а оно — отдельный процесс со своим хранилищем.
     recent: [],
   },
+  // Размеры и видимость панелей — рабочее место человека, общее для всех проектов.
+  // Значения совпадают с CSS-переменными по умолчанию и сбросом сплиттеров.
+  layout: {
+    sidebarSize: 260,
+    rightSize: 400,
+    dockSize: 260,
+    sidebarVisible: true,
+    rightVisible: true,
+    dockVisible: false,
+  },
   lsp: {
     // По умолчанию выключено: языковой сервер — внешний процесс, который нужно
     // установить и указать вручную. Никаких догадок про пути к бинарникам.
@@ -230,6 +242,7 @@ export class SettingsStore {
       run: { ...run },
       appearance: { ...this.data.appearance },
       workspace: { recent: [...this.data.workspace.recent] },
+      layout: { ...this.data.layout },
       lsp: {
         enabled: this.data.lsp.enabled,
         servers: this.data.lsp.servers.map((server) => ({ ...server, args: [...server.args] })),
@@ -265,6 +278,9 @@ export class SettingsStore {
     }
     if (patch.appearance) {
       this.data.appearance = { ...this.data.appearance, ...patch.appearance };
+    }
+    if (patch.layout) {
+      this.data.layout = sanitizeLayout({ ...this.data.layout, ...patch.layout });
     }
     if (patch.lsp) {
       this.data.lsp = sanitizeLsp({ ...this.data.lsp, ...patch.lsp });
@@ -434,6 +450,7 @@ function loadSettings(filePath: string): StoredSettings {
     },
     run: sanitizeRun({ ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) }),
     appearance: { ...DEFAULT_SETTINGS.appearance, ...(parsed.appearance ?? {}) },
+    layout: sanitizeLayout({ ...DEFAULT_SETTINGS.layout, ...(parsed.layout ?? {}) }),
     workspace: {
       ...DEFAULT_SETTINGS.workspace,
       ...(parsed.workspace ?? {}),
@@ -451,6 +468,23 @@ function clampSteps(value: unknown, fallback: number): number {
   const rounded = Math.round(Number(value));
   if (!Number.isFinite(rounded) || rounded < 1 || rounded > 500) return fallback;
   return rounded;
+}
+
+/** Макет рабочей области: размеры — положительные числа, видимость — строгие boolean. */
+function sanitizeLayout(value: LayoutSettings): LayoutSettings {
+  const size = (raw: unknown, fallback: number): number => {
+    const rounded = Math.round(Number(raw));
+    return Number.isFinite(rounded) && rounded > 0 ? rounded : fallback;
+  };
+  const flag = (raw: unknown, fallback: boolean): boolean => (typeof raw === 'boolean' ? raw : fallback);
+  return {
+    sidebarSize: size(value.sidebarSize, DEFAULT_SETTINGS.layout.sidebarSize),
+    rightSize: size(value.rightSize, DEFAULT_SETTINGS.layout.rightSize),
+    dockSize: size(value.dockSize, DEFAULT_SETTINGS.layout.dockSize),
+    sidebarVisible: flag(value.sidebarVisible, DEFAULT_SETTINGS.layout.sidebarVisible),
+    rightVisible: flag(value.rightVisible, DEFAULT_SETTINGS.layout.rightVisible),
+    dockVisible: flag(value.dockVisible, DEFAULT_SETTINGS.layout.dockVisible),
+  };
 }
 
 /** Настройки запуска: путь к интерпретатору и карта «проект → интерпретатор». */

@@ -23,9 +23,6 @@ const MAX_ENV_VALUE_CHARS = 8192;
 export const EMPTY_SESSION: SessionState = {
   tabs: [],
   expanded: [],
-  dockVisible: false,
-  sidebarVisible: true,
-  rightVisible: true,
 };
 
 /**
@@ -47,12 +44,11 @@ export function sanitizeSession(raw: unknown): SessionState {
 
   const tabs = stringList(value.tabs, MAX_TABS);
   const expanded = stringList(value.expanded, MAX_EXPANDED);
+  // Видимость панелей в сессию не входит: это часть общего макета (userData),
+  // одного на все проекты, а не рабочего места конкретной папки.
   const state: SessionState = {
     tabs,
     expanded,
-    dockVisible: value.dockVisible === true,
-    sidebarVisible: value.sidebarVisible !== false,
-    rightVisible: value.rightVisible !== false,
   };
 
   if (typeof value.activeTab === 'string' && tabs.includes(value.activeTab)) {

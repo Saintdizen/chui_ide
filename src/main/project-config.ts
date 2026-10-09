@@ -2,10 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   applyProjectSettingsPatch,
-  sanitizeProjectLayout,
   sanitizeProjectSettings,
-  type ProjectConfig,
-  type ProjectLayout,
   type ProjectSettings,
 } from '../shared/project-config';
 
@@ -27,10 +24,11 @@ async function writeJson(file: string, value: unknown): Promise<void> {
 }
 
 /**
- * Настройки и макет на уровне проекта — в `<root>/.chui_ide/` рядом с кодом,
+ * Настройки уровня проекта — в `<root>/.chui_ide/settings.json` рядом с кодом,
  * а не в userData: их видно в репозитории, можно версионировать и переносить
  * вместе с проектом. Пути задаются от корня рабочей папки, поэтому один и тот
- * же стор обслуживает любой открытый проект.
+ * же стор обслуживает любой открытый проект. Макет рабочей области сюда не
+ * входит: он общий для всех проектов и живёт в settings.json (userData).
  */
 export class ProjectConfigStore {
   private dir(root: string): string {
@@ -41,35 +39,16 @@ export class ProjectConfigStore {
     return path.join(this.dir(root), 'settings.json');
   }
 
-  private layoutFile(root: string): string {
-    return path.join(this.dir(root), 'layout.json');
-  }
-
-  /** Читает настройки и макет проекта; нет папки — пустая конфигурация. */
-  async load(root: string): Promise<ProjectConfig> {
-    const [settings, layout] = await Promise.all([
-      readJson(this.settingsFile(root)),
-      readJson(this.layoutFile(root)),
-    ]);
-    return {
-      settings: sanitizeProjectSettings(settings),
-      layout: sanitizeProjectLayout(layout),
-    };
+  /** Читает настройки проекта; нет папки — пустые настройки. */
+  async load(root: string): Promise<ProjectSettings> {
+    return sanitizeProjectSettings(await readJson(this.settingsFile(root)));
   }
 
   /** Дополняет проектные настройки патчем и возвращает новое состояние. */
-  async updateSettings(root: string, patch: ProjectSettings): Promise<ProjectConfig> {
+  async updateSettings(root: string, patch: ProjectSettings): Promise<ProjectSettings> {
     const current = sanitizeProjectSettings(await readJson(this.settingsFile(root)));
     const next = applyProjectSettingsPatch(current, sanitizeProjectSettings(patch));
     await writeJson(this.settingsFile(root), next);
-    return this.load(root);
-  }
-
-  /** Дополняет макет и возвращает новое состояние. */
-  async saveLayout(root: string, layout: ProjectLayout): Promise<ProjectLayout> {
-    const current = sanitizeProjectLayout(await readJson(this.layoutFile(root)));
-    const next = { ...current, ...sanitizeProjectLayout(layout) };
-    await writeJson(this.layoutFile(root), next);
     return next;
   }
 }
