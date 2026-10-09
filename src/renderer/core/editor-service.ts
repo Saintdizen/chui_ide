@@ -2,6 +2,7 @@ import * as monaco from 'monaco-editor';
 import type { DiagnosticItem, EditorSettings, LspDiagnostic } from '../../shared/api';
 import type { TextEdit } from '../../shared/edits';
 import './monaco-env';
+import type { RunnableTest } from '../../shared/python-tests';
 import type { BreakpointInput } from './debug';
 import type { TextDocument } from './document';
 import type { DocumentStore } from './document-store';
@@ -24,6 +25,15 @@ export interface CursorState {
 export interface RunMarkerHit {
   path: string;
   line: number;
+}
+
+/** Нажали на значок у теста — просят запустить именно его. */
+export interface TestMarkerHit {
+  path: string;
+  line: number;
+  /** Селектор pytest из разбора файла: `файл::Класс::тест`. */
+  selector: string;
+  name: string;
 }
 
 /** Управление одним экраном сравнения; модели Monaco живут внутри сервиса. */
@@ -57,6 +67,10 @@ export class EditorService {
   private readonly breakpointMenuEmitter = new Emitter<RunMarkerHit>();
   readonly onBreakpointMenu = this.breakpointMenuEmitter.event;
 
+  /** Клик по значку ▶ у объявления теста — запустить именно этот тест. */
+  private readonly testMarkerEmitter = new Emitter<TestMarkerHit>();
+  readonly onTestMarker = this.testMarkerEmitter.event;
+
   private readonly models = new Map<string, monaco.editor.ITextModel>();
   private readonly viewStates = new Map<string, monaco.editor.ICodeEditorViewState | null>();
   /** Значки запуска по файлам: нарисованные украшения нужно убирать перед новой отрисовкой. */
@@ -65,6 +79,9 @@ export class EditorService {
   /** Точки останова по файлам и их украшения — по тому же правилу, что значки запуска. */
   private readonly breakpointDecorations = new Map<string, string[]>();
   private readonly breakpointLines = new Map<string, readonly BreakpointInput[]>();
+  /** Значки запуска отдельных тестов: строка → селектор pytest. */
+  private readonly testDecorations = new Map<string, string[]>();
+  private readonly testMarkers = new Map<string, readonly RunnableTest[]>();
   /** Подсветка строки, на которой стоит отладчик; null — отладка не стоит. */
   private debugLine: { path: string; line: number } | null = null;
   /** Украшения подсветки по файлам: перед новой отрисовкой их нужно снять. */
@@ -109,10 +126,19 @@ export class EditorService {
         return;
       }
 
-      // Значок ▶ и точка останова делят одно поле номеров строк. Значок важнее:
-      // он есть только у строки-точки входа, а точку ставят где угодно.
-      if (this.runLines.get(path)?.has(line)) this.runMarkerEmitter.fire({ path, line });
-      else this.breakpointEmitter.fire({ path, line });
+      // Значки запуска и точка останова делят одно поле номеров строк. Порядок
+      // важнее, чем кажется: у точки входа и у теста значки видны, а точку ставят
+      // где угодно — поэтому она последняя.
+      if (this.runLines.get(path)?.has(line)) {
+        this.runMarkerEmitter.fire({ path, line });
+        return;
+      }
+      const test = this.testMarkers.get(path)?.find((item) => item.line === line);
+      if (test) {
+        this.testMarkerEmitter.fire({ path, line, selector: test.selector, name: test.name });
+        return;
+      }
+      this.breakpointEmitter.fire({ path, line });
     });
 
     // Monaco считает ширину символа по фактическому шрифту, а файл шрифта
@@ -170,6 +196,8 @@ export class EditorService {
     this.drawRunMarkers(document.path);
     // Модель появилась позже, чем узнали о точках останова, — дорисовываем и их.
     this.drawBreakpoints(document.path);
+    // И значки тестов: их считает панель по тексту файла.
+    this.drawTestMarkers(document.path);
     this.drawDebugLine();
     this.editor.focus();
     this.emitCursor();
@@ -308,6 +336,42 @@ export class EditorService {
     if (lines.length === 0) this.runLines.delete(path);
     else this.runLines.set(path, new Set(lines));
     this.drawRunMarkers(path);
+  }
+
+  /**
+   * Значки запуска отдельных тестов: у каждой строки `def test_…` — свой ▶.
+   * Клик запускает именно этот тест, а не весь файл.
+   */
+  setTestMarkers(path: string, tests: readonly RunnableTest[]): void {
+    if (tests.length === 0) this.testMarkers.delete(path);
+    else this.testMarkers.set(path, tests);
+    this.drawTestMarkers(path);
+  }
+
+  private drawTestMarkers(path: string): void {
+    const model = this.models.get(path);
+    if (!model) return;
+
+    const previous = this.testDecorations.get(path) ?? [];
+    const tests = this.testMarkers.get(path) ?? [];
+    if (tests.length === 0) {
+      this.testDecorations.delete(path);
+      if (previous.length > 0) model.deltaDecorations(previous, []);
+      return;
+    }
+
+    const next = model.deltaDecorations(
+      previous,
+      tests.map((test) => ({
+        range: new monaco.Range(test.line, 1, test.line, 1),
+        options: {
+          glyphMarginClassName: 'run-glyph test-glyph',
+          glyphMarginHoverMessage: { value: `Запустить тест ${test.name}` },
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      })),
+    );
+    this.testDecorations.set(path, next);
   }
 
   /** Нарисовать значки запуска по запомненным строкам. Без модели — нечего рисовать. */
@@ -508,6 +572,8 @@ export class EditorService {
     // без очистки в них остаются id удалённых моделей — Monaco их молча
     // игнорирует, но карты копят ссылки на модели, которых уже нет.
     this.breakpointDecorations.delete(path);
+    this.testDecorations.delete(path);
+    this.testMarkers.delete(path);
     this.debugDecorations.delete(path);
     if (this.debugLine?.path === path) this.debugLine = null;
     model.dispose();

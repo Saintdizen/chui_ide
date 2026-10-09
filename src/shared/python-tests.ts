@@ -199,6 +199,71 @@ export function describeTest(file: string, node: string): CollectedTest {
   return { id: `${file}::${node}`, file: file.split('\\').join('/'), className, name };
 }
 
+/* ── запуск отдельного теста из редактора ───────────────────────────────── */
+
+/** Тест, который можно запустить прямо из файла: строка и селектор для pytest. */
+export interface RunnableTest {
+  /** Строка объявления `def test_…` (1-based) — по ней ставится значок ▶. */
+  line: number;
+  /** Селектор pytest: `файл::имя` или `файл::Класс::имя`. */
+  selector: string;
+  /** Имя теста без класса — для подписи. */
+  name: string;
+}
+
+/** Объявление теста: `def test_…` или `async def test_…`, с любым отступом. */
+const TEST_DEF = /^\s*(?:async\s+)?def\s+(test_[A-Za-z0-9_]*)\s*\(/;
+/** Объявление класса: `class TestX:` или `class TestX(Base):`. */
+const TEST_CLASS = /^(\s*)class\s+([A-Za-z0-9_]+)\s*[:(]/;
+
+/**
+ * Тесты, объявленные в файле, — чтобы поставить у них значок запуска.
+ *
+ * Разбор нарочно простой, по строкам: нужен не полный синтаксис Python, а строки
+ * объявлений. Класс учитываем, чтобы селектор совпал с тем, что ждёт pytest
+ * (`файл::Класс::test`), и закрываем его по отступу — так же, как это делает сам
+ * интерпретатор. Строки и комментарии не разбираем: файл уже отобран по имени
+ * как тестовый, и `def test_` внутри строки там встретится разве что случайно.
+ */
+export function findRunnableTests(relativePath: string, text: string): RunnableTest[] {
+  const file = relativePath.split('\\').join('/');
+  const tests: RunnableTest[] = [];
+  let className: string | null = null;
+  let classIndent = -1;
+
+  const lines = text.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+
+    const declaration = TEST_CLASS.exec(line);
+    if (declaration) {
+      className = declaration[2]!;
+      classIndent = declaration[1]!.length;
+      continue;
+    }
+
+    // Класс кончился: строка без отступа на уровне класса или выше.
+    if (className !== null) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith('#') && line.length - line.trimStart().length <= classIndent) {
+        className = null;
+        classIndent = -1;
+      }
+    }
+
+    const test = TEST_DEF.exec(line);
+    if (!test) continue;
+    const name = test[1]!;
+    tests.push({
+      line: index + 1,
+      selector: className ? `${file}::${className}::${name}` : `${file}::${name}`,
+      name,
+    });
+  }
+
+  return tests;
+}
+
 /** Узел дерева тестов: файл, класс или сам тест. */
 export interface TestFolder {
   /** Что это за узел. */

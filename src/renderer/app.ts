@@ -27,7 +27,8 @@ import {
   type RunTarget,
   type RunnableFile,
 } from './core/run-config';
-import type { ProjectScan } from '../shared/project-scan';
+import { isTestFile, type ProjectScan } from '../shared/project-scan';
+import { findRunnableTests } from '../shared/python-tests';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
@@ -466,9 +467,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (!active) return;
     const line = entryLine(active.languageId, active.value);
     const signature = `${active.path}:${line ?? 0}`;
-    if (signature === runMarkerSignature) return;
-    runMarkerSignature = signature;
-    editors.setRunLines(active.path, line ? [line] : []);
+    if (signature !== runMarkerSignature) {
+      runMarkerSignature = signature;
+      editors.setRunLines(active.path, line ? [line] : []);
+    }
+    syncTestMarkers(active);
+  }
+
+  /** Подпись для значков тестов: версия документа в ней — правка может добавить тест. */
+  let testMarkerSignature = '';
+
+  /**
+   * Значки запуска отдельных тестов: по объявлениям `def test_…` в файле. Ставим
+   * их только тестовым файлам — иначе жёлоб пестрел бы стрелками у каждого
+   * `def test_` в чужом модуле.
+   */
+  function syncTestMarkers(document: TextDocument): void {
+    const relative = workspace.relative(document.path);
+    const isTest = document.languageId === 'python' && relative !== document.path && isTestFile(relative);
+    if (!isTest) {
+      editors.setTestMarkers(document.path, []);
+      return;
+    }
+
+    const signature = `${document.path}:${document.version}`;
+    if (signature === testMarkerSignature) return;
+    testMarkerSignature = signature;
+    editors.setTestMarkers(document.path, findRunnableTests(relative, document.value));
   }
 
   /** Запуск цели: файл сохраняем, панель показываем, команду набираем в терминале. */
@@ -1442,6 +1467,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   editors.onRunMarker(({ path }) => {
     const target = targetsFor(documents.get(path) ?? null).find((item) => item.id === `file:${path}`);
     if (target) void runTarget(target);
+  });
+
+  // Значок у `def test_…`: запускаем ровно этот тест — селектор уже собран разбором.
+  editors.onTestMarker(({ selector, name }) => {
+    void runTarget(pytestTarget(tools.get(), selector));
+    showToast(`Запускаю тест ${name}`);
   });
 
   // Клик по полю номеров строк — точка останова: контроллер держит набор, а
