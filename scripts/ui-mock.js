@@ -618,6 +618,15 @@ module.exports = [
     'python.format': (params) => ({ text: params.text ?? '', tool: null }),
     // Интерпретаторов в моке нет: список пуст — как на системе без питона.
     'python.interpreters': () => [],
+    // Окружение Node в моке не настоящее: Node «не найден», пакетов нет. Этого
+    // хватает, чтобы попап окружения и форматирование рисовались, а не падали.
+    'node.info': () => ({
+      runtime: { version: null, command: 'node', label: 'Node не найден' },
+      packageManager: { name: 'npm', version: null },
+    }),
+    'node.packages': () => [],
+    'node.envHealth': () => [],
+    'node.format': (params) => ({ text: params.text ?? '', tool: null }),
     // Проверка подключения: два понятных исхода вместо исключения.
     'ai.test': (params) => {
       if (/bad|invalid/i.test(params.baseUrl)) {

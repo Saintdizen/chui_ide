@@ -36,6 +36,7 @@ import {
 } from './core/run-config';
 import { isTestFile, type ProjectScan } from '../shared/project-scan';
 import { findRunnableTests } from '../shared/python-tests';
+import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
 import { joinPath, separatorOf, splitPath } from '../shared/paths';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
@@ -867,23 +868,36 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast(`Сохранено: ${basename(document.path)}`);
   };
 
-  /* ── Python-инструменты: формат и установка ────────────────────────────── */
+  /* ── Инструменты проекта: формат и установка ───────────────────────────── */
 
-  /** Форматирование — про Python: инструменты (ruff, black) питоновские. */
-  const isFormattable = (languageId: string): boolean => languageId === 'python';
+  /** Что вышло из попытки форматирования. */
+  type FormatOutcome = 'changed' | 'unchanged' | 'unavailable';
 
   /**
-   * Отформатировать документ инструментом окружения. true — текст изменился.
-   * Правку проводим через документ: так она попадает в undo и в сохранение.
+   * Отформатировать документ инструментом проекта. Правку проводим через документ:
+   * так она попадает в undo и в сохранение.
+   *
+   * `unavailable` — это не «менять нечего»: инструмента в проекте может просто не
+   * быть, и сказать об этом надо честно, а не молчанием.
    */
-  const formatDocument = async (document: TextDocument): Promise<boolean> => {
-    if (!isFormattable(document.languageId)) return false;
-    const result = await rpc
-      .request('python.format', { path: document.path, text: document.value })
-      .catch(() => null);
-    if (!result?.tool || result.text === document.value) return false;
+  const formatDocument = async (document: TextDocument): Promise<FormatOutcome> => {
+    const engine = formatEngine(document.languageId);
+    if (!engine) return 'unavailable';
+    const result =
+      engine === 'python'
+        ? await rpc.request('python.format', { path: document.path, text: document.value }).catch(() => null)
+        : await rpc.request('node.format', { path: document.path, text: document.value }).catch(() => null);
+    if (!result?.tool) return 'unavailable';
+    if (result.text === document.value) return 'unchanged';
     document.setText(result.text, 'programmatic');
-    return true;
+    return 'changed';
+  };
+
+  /** Человеческий итог форматирования — одним сообщением. */
+  const formatOutcomeMessage = (engine: FormatEngine, outcome: FormatOutcome): string => {
+    if (outcome === 'changed') return 'Файл отформатирован';
+    if (outcome === 'unchanged') return 'Менять нечего';
+    return `Нечем форматировать: ${formatToolNames(engine).join(' и ')} в проекте нет`;
   };
 
   /**
@@ -1416,19 +1430,23 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define(
     {
-      id: 'python.format',
-      title: 'Python: форматировать файл',
-      category: 'Python',
-      keywords: ['ruff', 'black', 'формат'],
+      id: 'format.document',
+      title: 'Форматировать файл',
+      category: 'Файл',
+      keywords: ['ruff', 'black', 'prettier', 'biome', 'формат'],
     },
     async () => {
       const document = openEditors.active;
-      if (!document || !isFormattable(document.languageId)) {
-        showToast('Форматировать можно только файл Python');
+      if (!document) {
+        showToast('Нет открытого файла');
         return;
       }
-      const changed = await formatDocument(document);
-      showToast(changed ? 'Файл отформатирован' : 'Менять нечего');
+      const engine = formatEngine(document.languageId);
+      if (!engine) {
+        showToast(`Не форматирую ${languageLabel(document.languageId)}: для него инструмента нет`);
+        return;
+      }
+      showToast(formatOutcomeMessage(engine, await formatDocument(document)));
     },
   );
 
@@ -1778,8 +1796,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     { combo: 'Shift+F10', command: 'run.choose' },
     // Тесты — рядом с запуском: Ctrl+Shift+F5, как принято в IDE.
     { combo: 'Ctrl+Shift+F5', command: 'run.tests' },
-    // Форматирование — как в VS Code и PyCharm: Shift+Alt+F.
-    { combo: 'Shift+Alt+F', command: 'python.format' },
+    // Форматирование — как в VS Code и PyCharm: Shift+Alt+F. Инструмент выбирается
+    // по языку: у Python это ruff/black окружения, у JS/TS — prettier/biome проекта.
+    { combo: 'Shift+Alt+F', command: 'format.document' },
     // Отладка — привычные из VS Code: F5 пуск/продолжить, Shift+F5 стоп,
     // F9 точка останова, F10/F11 шаги.
     { combo: 'F5', command: 'debug.continue' },

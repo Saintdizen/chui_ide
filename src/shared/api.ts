@@ -542,6 +542,12 @@ export interface PythonFormatResult {
   tool: string | null;
 }
 
+/**
+ * Результат форматирования файла инструментом Node-проекта. Форма та же, что у
+ * питоновского: renderer обрабатывает оба ответа одинаково.
+ */
+export type NodeFormatResult = PythonFormatResult;
+
 /* ── LSP ───────────────────────────────────────────────────────────────── */
 
 /** Один языковой сервер: язык, команда запуска и включён ли он. */
@@ -1075,6 +1081,8 @@ export interface ChuiMethods {
   'node.packages': { params: void; result: NodePackage[] };
   /** Что не так с окружением проекта: нет `node_modules`, версия Node не под `engines.node`. */
   'node.envHealth': { params: void; result: NodeEnvironmentHealth[] };
+  /** Отформатировать текст файла инструментом проекта (prettier или biome). */
+  'node.format': { params: { path: string; text: string }; result: NodeFormatResult };
   /**
    * Какие из импортированных модулей проект не видит: для Python — интерпретатор,
    * для JS/TS — `node_modules`. Пустой ответ — либо всё на месте, либо судить

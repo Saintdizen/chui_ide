@@ -28,6 +28,7 @@ import { scanProject } from '../project/scan';
 import { activateCommand, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
 import { missingPackages } from '../node/packages';
 import { checkEnvironment as checkNodeEnvironment, nodeInfo, installedPackages as installedNodePackages } from '../node/environment';
+import { formatNode } from '../node/format';
 import { missingModules } from '../python/packages';
 import { findInterpreters } from '../python/interpreters';
 import { installPackages, installedPackages } from '../python/pip';
@@ -281,6 +282,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Здоровье окружения: нет `node_modules`, не хватает зависимостей, версия Node
   // не под `engines.node`, нет файла блокировки.
   router.register('node.envHealth', () => checkNodeEnvironment(requireRoot()));
+
+  // Форматирование файла инструментом проекта. Уговор тот же, что у `python.format`:
+  // текст приходит из renderer и туда же уходит результат, правку проводит документ.
+  router.register('node.format', (params) => formatNode(requireRoot(), params.path, params.text));
 
   // Сессия проекта: renderer собирает состояние и кладёт сюда, а при следующем
   // открытии забирает обратно. Без хранилища (пробники) отвечаем пустой сессией.

@@ -190,8 +190,13 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
 - Пакеты окружения: попап показывает, сколько их стоит, сверяет установленное с `requirements.txt`
   (сколько зависимостей не хватает и какие именно) и ставит их одной кнопкой; то же доступно командой
   «Python: установить зависимости». Вывод `pip` идёт событиями — видно, что происходит.
-- Форматирование: `Shift+Alt+F` или «Python: форматировать файл» — `ruff`, а без него `black` из окружения
-  проекта. Правку проводит документ, поэтому работает undo; в настройках есть «Форматировать при сохранении».
+- Окружение Node видно в попапе по клику на чип «Node.js» в статусбаре: версия Node, менеджер пакетов,
+  `engines.node`, поломки (нет `node_modules`, не хватает объявленных зависимостей, нет файла блокировки,
+  версия не под `engines.node`) и кнопка «Установить зависимости» — установка идёт в терминал, как и задачи проекта.
+- Форматирование: `Shift+Alt+F` или «Форматировать файл» — инструментом проекта. У Python это `ruff`, а без
+  него `black` из окружения; у JS/TS и соседних языков (`json`, `css`, `html`, `markdown`, `yaml`) — `prettier`,
+  а без него `biome` из `node_modules`; объявленный в `package.json` идёт первым. Правку проводит документ,
+  поэтому работает undo; в настройках есть «Форматировать при сохранении».
 - У подчёркнутого импорта есть быстрая правка (`Ctrl+.`): «Установить пакет». У Python его ставит
   `pip` в окружение проекта (имя пакета берётся из таблицы: `yaml` → `PyYAML`), у JS/TS —
   менеджер пакетов проекта (`npm`/`pnpm`/`yarn`/`bun`) в терминале.
@@ -669,11 +674,13 @@ Renderer не трогает `node:fs`. Всё идёт через `WorkspaceSer
 biome.json           линт и формат (Biome)
 vitest.config.mts    юнит-тесты (Vitest)
 .github/workflows/   ci.yml (проверки на push/PR), release.yml (дистрибутивы по тегу)
-tests/               юнит-тесты чистой логики (31 файл): edits, replace, session, glob,
+tests/               юнит-тесты чистой логики (40 файлов): edits, replace, session, glob,
 │                    tools, providers, languages, theme, chat-text, quick-open-rank,
 │                    imports/import-install, env-file/project-env, project-scan,
-│                    python-env/-health/-packages/-tests, node-packages, uri-path,
-│                    git-model, path-guard, debug (DAP против фейкового адаптера), lsp-*
+│                    python-env/-health/-packages/-tests, node-env/-packages,
+│                    format/node-format (заглушки prettier и biome в temp-проекте),
+│                    context-fit (сжатие беседы), uri-path, git-model, path-guard,
+│                    debug (DAP против фейкового адаптера), lsp-*
 
 src/
 ├── shared/            контракт: api.ts (типы + методы), bridge.ts, tools.ts, app-menu.ts,
@@ -681,7 +688,8 @@ src/
 │                      replace.ts (поиск с заменой), session.ts (проверка сессии),
 │                      glob.ts (маски файлов), providers.ts,
 │                      imports.ts (разбор импортов), import-install.ts (что предложить поставить),
-│                      python-env/-health/-packages/-tests, env-file.ts (разбор .env),
+│                      python-env/-health/-packages/-tests, node-env.ts (окружение Node),
+│                      format.ts (какой движок форматирует язык), env-file.ts (разбор .env),
 │                      project-scan.ts (карта проекта),
 │                      lsp-presets.ts, lsp-symbols.ts
 ├── main/
@@ -702,7 +710,9 @@ src/
 │   ├── python/        environments (окружения), interpreters (поиск в системе),
 │   │                  pip (установка), packages (что видит интерпретатор),
 │   │                  tests (сбор тестов), format (ruff/black), health (поломки venv)
-│   ├── node/          packages.ts (что видит проект: каталоги node_modules)
+│   ├── node/          environment (версия Node, менеджер пакетов, health),
+│   │                  packages (что видит проект: каталоги node_modules),
+│   │                  format (prettier/biome проекта)
 │   ├── project/       scan.ts (обход проекта без чтения содержимого)
 │   └── project-env.ts переменные из .env — для запуска, терминала и языкового сервера
 ├── preload/index.ts   мост window.chui
