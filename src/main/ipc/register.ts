@@ -19,6 +19,7 @@ import type { AiService } from '../ai/service';
 import { ChatStore } from '../ai/chat-store';
 import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
 import type { GitService } from '../git/git';
+import type { DebugService } from '../debug/debug';
 import type { LspService } from '../lsp/lsp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
@@ -53,6 +54,8 @@ export interface AppDependencies {
   chatStore?: ChatStore;
   /** Языковые серверы. Необязательно: пробникам LSP не нужен. */
   lsp?: LspService;
+  /** Отладчик (DAP). Необязательно: пробникам он не нужен. */
+  debug?: DebugService;
   /** Сессия проекта (вкладки, папки, панели). Необязательно для пробников. */
   sessions?: SessionStore;
 }
@@ -397,6 +400,24 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   );
   // Символы проекта: сервер ищет по всему проекту, а не по открытому файлу.
   router.register('lsp.symbols', (params) => deps.lsp?.projectSymbols(params.query) ?? []);
+
+  /* ── Отладчик (DAP) ────────────────────────────────────────────────────── */
+
+  const requireDebug = (): DebugService => {
+    if (!deps.debug) throw new RpcFailure(RpcErrorCode.Internal, 'Отладчик недоступен');
+    return deps.debug;
+  };
+
+  router.register('debug.start', (params) => requireDebug().start(params.program, params.cwd));
+  router.register('debug.setBreakpoints', (params) => requireDebug().setBreakpoints(params.path, params.lines));
+  router.register('debug.continue', () => requireDebug().resume());
+  router.register('debug.step', (params) => requireDebug().step(params.kind));
+  router.register('debug.pause', () => requireDebug().pause());
+  router.register('debug.stop', () => {
+    requireDebug().stop();
+  });
+  router.register('debug.scopes', (params) => requireDebug().scopes(params.frameId));
+  router.register('debug.variables', (params) => requireDebug().variables(params.reference));
 
   // Кроме PATH смотрим окружение проекта: pylsp, ruff и прочие, поставленные в
   // venv, видит только оно — системный питон чужие пакеты не видит. Окружение

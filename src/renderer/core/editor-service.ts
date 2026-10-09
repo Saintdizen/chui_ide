@@ -48,11 +48,22 @@ export class EditorService {
   private readonly runMarkerEmitter = new Emitter<RunMarkerHit>();
   readonly onRunMarker = this.runMarkerEmitter.event;
 
+  /** Клик по полю номеров строк: включить или выключить точку останова на строке. */
+  private readonly breakpointEmitter = new Emitter<RunMarkerHit>();
+  readonly onBreakpointToggle = this.breakpointEmitter.event;
+
   private readonly models = new Map<string, monaco.editor.ITextModel>();
   private readonly viewStates = new Map<string, monaco.editor.ICodeEditorViewState | null>();
   /** Значки запуска по файлам: нарисованные украшения нужно убирать перед новой отрисовкой. */
   private readonly runDecorations = new Map<string, string[]>();
   private readonly runLines = new Map<string, ReadonlySet<number>>();
+  /** Точки останова по файлам и их украшения — по тому же правилу, что значки запуска. */
+  private readonly breakpointDecorations = new Map<string, string[]>();
+  private readonly breakpointLines = new Map<string, ReadonlySet<number>>();
+  /** Подсветка строки, на которой стоит отладчик; null — отладка не стоит. */
+  private debugLine: { path: string; line: number } | null = null;
+  /** Украшения подсветки по файлам: перед новой отрисовкой их нужно снять. */
+  private readonly debugDecorations = new Map<string, string[]>();
   private options: EditorOptions;
   private applying = false;
   private activePath: string | null = null;
@@ -85,8 +96,10 @@ export class EditorService {
       const line = event.target.position?.lineNumber;
       const path = this.activePath;
       if (!line || !path) return;
-      if (!this.runLines.get(path)?.has(line)) return;
-      this.runMarkerEmitter.fire({ path, line });
+      // Значок ▶ и точка останова делят одно поле номеров строк. Значок важнее:
+      // он есть только у строки-точки входа, а точку ставят где угодно.
+      if (this.runLines.get(path)?.has(line)) this.runMarkerEmitter.fire({ path, line });
+      else this.breakpointEmitter.fire({ path, line });
     });
 
     // Monaco считает ширину символа по фактическому шрифту, а файл шрифта
@@ -142,6 +155,9 @@ export class EditorService {
     this.activePath = document.path;
     // Модель появилась позже, чем узнали о точке входа — дорисовываем значок.
     this.drawRunMarkers(document.path);
+    // Модель появилась позже, чем узнали о точках останова, — дорисовываем и их.
+    this.drawBreakpoints(document.path);
+    this.drawDebugLine();
     this.editor.focus();
     this.emitCursor();
   }
@@ -309,6 +325,87 @@ export class EditorService {
   }
 
   /**
+   * Точки останова файла: `lines` — строки, где отладчик должен остановиться.
+   * Рисуем красную точку на поле номеров строк — так же, как значки запуска.
+   */
+  setBreakpoints(path: string, lines: readonly number[]): void {
+    if (lines.length === 0) this.breakpointLines.delete(path);
+    else this.breakpointLines.set(path, new Set(lines));
+    this.drawBreakpoints(path);
+  }
+
+  private drawBreakpoints(path: string): void {
+    const model = this.models.get(path);
+    if (!model) return;
+
+    const previous = this.breakpointDecorations.get(path) ?? [];
+    const lines = [...(this.breakpointLines.get(path) ?? [])];
+    if (lines.length === 0) {
+      this.breakpointDecorations.delete(path);
+      if (previous.length > 0) model.deltaDecorations(previous, []);
+      return;
+    }
+
+    const next = model.deltaDecorations(
+      previous,
+      lines.map((line) => ({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          glyphMarginClassName: 'breakpoint-glyph',
+          glyphMarginHoverMessage: { value: 'Точка останова' },
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      })),
+    );
+    this.breakpointDecorations.set(path, next);
+  }
+
+  /** Красная линия на строке, где стоит отладчик. `null` — подсветку убрать. */
+  setDebugLine(path: string | null, line: number | null): void {
+    this.debugLine = path && line ? { path, line } : null;
+    this.drawDebugLine();
+  }
+
+  private drawDebugLine(): void {
+    // Снимаем прежнюю подсветку с той модели, где она была.
+    for (const [path, ids] of this.debugDecorations) {
+      const model = this.models.get(path);
+      if (ids.length > 0) model?.deltaDecorations(ids, []);
+    }
+    this.debugDecorations.clear();
+
+    const current = this.debugLine;
+    if (!current) return;
+    const model = this.models.get(current.path);
+    if (!model) return;
+    this.debugDecorations.set(
+      current.path,
+      model.deltaDecorations(
+        [],
+        [
+          {
+            range: new monaco.Range(current.line, 1, current.line, 1),
+            options: {
+              isWholeLine: true,
+              className: 'debug-line',
+              stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+            },
+          },
+        ],
+      ),
+    );
+  }
+
+  /** Прокрутить к кадру останова и поставить курсор: панель кликает по стеку. */
+  revealDebugFrame(path: string, line: number, column = 1): void {
+    const model = this.models.get(path);
+    if (!model) return;
+    const position = new monaco.Position(line, column);
+    this.editor.setPosition(position);
+    this.editor.revealPositionInCenterIfOutsideViewport(position);
+  }
+
+  /**
    * Отступ документа: у языка свои значения (Python — 4 пробела, Makefile — таб),
    * но только если пользователь оставил это на усмотрение языка.
    */
@@ -402,6 +499,12 @@ export class EditorService {
     } finally {
       this.applying = previous;
     }
+  }
+
+  /** Позиция курсора прямо сейчас: нужна команде «точка останова на строке». */
+  cursor(): { line: number; column: number } {
+    const position = this.editor.getPosition() ?? { lineNumber: 1, column: 1 };
+    return { line: position.lineNumber, column: position.column };
   }
 
   private emitCursor(): void {

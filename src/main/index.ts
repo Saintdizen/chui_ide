@@ -1,6 +1,7 @@
 import { app, BrowserWindow, nativeTheme } from 'electron';
 import { PushTopic } from '../shared/api';
 import { AiService } from './ai/service';
+import { DebugService } from './debug/debug';
 import { GitService } from './git/git';
 import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
@@ -116,10 +117,18 @@ if (!app.requestSingleInstanceLock()) {
       // Тот же `.env`, что у терминала и запуска: сервер видит то же окружение.
       () => projectEnv(workspace.rootPath()),
     );
+    // Отладчик: сессия debugpy по DAP. Интерпретатор тот же, что у запуска и тестов,
+    // а `.env` проекта — тот же, что у терминала и языкового сервера.
+    const debug = new DebugService(
+      (topic, payload) => pushToRenderers(topic, payload),
+      () => workspace.rootPath(),
+      () => pythonInterpreterFor(workspace.rootPath(), settings.get().run.pythonPath),
+      () => projectEnv(workspace.rootPath()),
+    );
     // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
     const sessions = new SessionStore();
 
-    registerIpc({ settings, workspace, ai, terminals, git, lsp, sessions, host: new HostClient() });
+    registerIpc({ settings, workspace, ai, terminals, git, lsp, debug, sessions, host: new HostClient() });
     serveRenderer();
     createApplicationMenu();
     // Приложение начинается со списка проектов: окно IDE откроется после
@@ -129,6 +138,7 @@ if (!app.requestSingleInstanceLock()) {
     app.on('will-quit', () => {
       terminals.dispose();
       lsp.dispose();
+      debug.dispose();
       workspace.dispose();
     });
 

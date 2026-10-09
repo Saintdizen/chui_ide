@@ -36,6 +36,9 @@ export const PushTopic = {
   ThemeChanged: 'theme:changed',
   WindowStateChanged: 'window:state',
   LspDiagnostics: 'lsp:diagnostics',
+  DebugState: 'debug:state',
+  DebugStopped: 'debug:stopped',
+  DebugOutput: 'debug:output',
 } as const;
 
 /* ── Транспорт ──────────────────────────────────────────────────────────── */
@@ -558,6 +561,65 @@ export interface ThemeChangedPayload {
   scheme: 'dark' | 'light';
 }
 
+/* ── Отладчик (DAP) ─────────────────────────────────────────────────────── */
+
+/** Что делает сессия отладки прямо сейчас. */
+export type DebugPhase = 'idle' | 'starting' | 'running' | 'stopped';
+
+/** Точка останова: строка и подтвердил ли её отладчик (проверена ли исполнимость). */
+export interface DebugBreakpoint {
+  line: number;
+  verified: boolean;
+}
+
+/** Кадр стека в момент останова. */
+export interface DebugFrame {
+  id: number;
+  name: string;
+  /** Файл кадра; null — кадр без исходника (например, во внутренностях). */
+  path: string | null;
+  line: number;
+  column: number;
+}
+
+/** Область видимости кадра (локальные, глобальные). */
+export interface DebugScope {
+  name: string;
+  variablesReference: number;
+  /** Дорогое раскрытие (большие коллекции) — отладчик сам об этом сообщает. */
+  expensive: boolean;
+}
+
+/** Переменная или поле раскрытой структуры. */
+export interface DebugVariable {
+  name: string;
+  value: string;
+  type: string | null;
+  /** Ненулевое — у значения есть дети, его можно раскрыть. */
+  variablesReference: number;
+}
+
+/** Состояние сессии: его рассылает main, чтобы панель и статусбар шли в ногу. */
+export interface DebugStatePayload {
+  phase: DebugPhase;
+  /** Причина останова (`breakpoint`, `step`, `pause`) — для подписи. */
+  reason: string | null;
+  /** Кадр, на котором остановились (курсор редактора). */
+  topFrame: DebugFrame | null;
+}
+
+/** Полезная нагрузка `PushTopic.DebugStopped`: останов и стек целиком. */
+export interface DebugStoppedPayload {
+  reason: string;
+  frames: DebugFrame[];
+}
+
+/** Полезная нагрузка `PushTopic.DebugOutput`: вывод отлаживаемой программы. */
+export interface DebugOutputPayload {
+  category: string;
+  text: string;
+}
+
 export interface Settings {
   ai: AiSettings;
   editor: EditorSettings;
@@ -1010,6 +1072,20 @@ export interface ChuiMethods {
    * переход к определению. Форму params/result задаёт LSP, детали — в renderer.
    */
   'lsp.request': { params: { path: string; method: string; params: unknown }; result: unknown };
+
+  /* Отладчик: сессия debugpy по протоколу DAP. */
+  /** Начать отладку файла интерпретатором окружения. */
+  'debug.start': { params: { program: string; cwd?: string }; result: { ok: boolean; message: string } };
+  /** Точки останова файла: набор заменяется целиком, как в DAP. */
+  'debug.setBreakpoints': { params: { path: string; lines: number[] }; result: DebugBreakpoint[] };
+  'debug.continue': { params: void; result: void };
+  'debug.step': { params: { kind: 'over' | 'into' | 'out' }; result: void };
+  'debug.pause': { params: void; result: void };
+  'debug.stop': { params: void; result: void };
+  /** Области видимости кадра: локальные, глобальные. */
+  'debug.scopes': { params: { frameId: number }; result: DebugScope[] };
+  /** Значения области или раскрытого узла. */
+  'debug.variables': { params: { reference: number }; result: DebugVariable[] };
 
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };

@@ -211,6 +211,10 @@
   /* Запуск: зелёный из палитры IDE — одна роль на кнопку, значок в жёлобе
      и подпись инструмента в статусбаре. */
   --run_accent: #7fd18b;
+
+  /* Отладка: подсветка строки, где стоит отладчик. Полупрозрачная, чтобы код
+     на ней читался, а не тонул в цвете. */
+  --debug_line_background: rgba(90, 140, 220, 0.18);
 }
 
 @media (prefers-color-scheme: light) {
@@ -297,6 +301,7 @@
     --folder_special: #8a7440;
     --folder_open: #4a6a96;
     --run_accent: #2f7d32;
+    --debug_line_background: rgba(60, 110, 200, 0.16);
     --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 32%, transparent);
   }
 }

@@ -16,6 +16,7 @@ import { registerLspProviders } from './core/lsp-providers';
 import { OpenEditors } from './core/open-editors';
 import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
 import { envShortLabel, envVisible } from './core/python-view';
+import { DebugController } from './core/debug';
 import { RpcClient } from './core/rpc';
 import {
   collectRunTargets,
@@ -52,6 +53,7 @@ import { createStatusBar } from './ui/statusbar';
 import { createSettingsModal } from './ui/settings-modal';
 import { createTabs } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
+import { createDebugPanel } from './ui/debug-panel';
 import { createTestPanel } from './ui/test-panel';
 import { showToast } from './ui/toast';
 import { createVenvModal } from './ui/venv-modal';
@@ -86,6 +88,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   const editors = new EditorService(layout.editorHost, documents, settings.editor, theme.monacoThemeId);
   const edits = new EditService({ documents, editors, rpc });
+  // Отладчик: состояние сессии держит контроллер, события идут из main push-ом.
+  const debug = new DebugController(rpc);
   // Приёмник обратных вызовов из main: правки агента приходят сюда.
   const host = new HostService();
   // Языковые серверы: держим документы синхронными и кладём их пометки в Monaco.
@@ -599,6 +603,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   document.body.appendChild(symbolPicker.element);
 
+  // Панель отладки в нижнем доке: управление сессией, стек и переменные.
+  const debugPanel = createDebugPanel({
+    debug,
+    onRevealFrame: (frame) => {
+      if (!frame.path) return;
+      void openPath(frame.path).then(() => editors.revealDebugFrame(frame.path!, frame.line, frame.column));
+    },
+  });
+  dock.register({ id: 'debug', title: 'Отладка', element: debugPanel.element, onShow: () => debugPanel.refresh() });
+
   /* ── сессия рабочей папки ──────────────────────────────────────────────── */
 
   /** Какой проект сейчас восстановлен: ключ, по которому кладётся сессия. */
@@ -925,6 +939,52 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       return;
     }
     await runTarget(target);
+  });
+
+  /* ── отладка ───────────────────────────────────────────────────────────── */
+
+  /** Начать отладку активного файла: как запуск, но под debugpy. */
+  const startDebug = async (): Promise<void> => {
+    const active = openEditors.active;
+    if (!active || active.languageId !== 'python') {
+      showToast('Отладчик работает с файлами Python', 'error');
+      return;
+    }
+    if (settings.run.saveBeforeRun) {
+      for (const document of documents.dirty()) await saveDocument(document);
+    }
+    const result = await debug.start(active.path);
+    if (!result.ok) showToast(result.message, 'error');
+    else dock.show('debug');
+  };
+
+  define({ id: 'debug.start', title: 'Отладка: запустить файл', category: 'Отладка' }, startDebug);
+
+  // F5 как в VS Code: не идёт отладка — начать, стоит на паузе — продолжить.
+  define({ id: 'debug.continue', title: 'Отладка: продолжить / запустить', category: 'Отладка', keybinding: 'F5' }, async () => {
+    if (debug.get().phase === 'idle') await startDebug();
+    else await debug.resume();
+  });
+  define({ id: 'debug.stop', title: 'Отладка: остановить', category: 'Отладка', keybinding: 'Shift+F5' }, async () => {
+    await debug.stop();
+  });
+  define({ id: 'debug.stepOver', title: 'Отладка: шаг с обходом', category: 'Отладка', keybinding: 'F10' }, async () => {
+    await debug.step('over');
+  });
+  define({ id: 'debug.stepInto', title: 'Отладка: шаг с заходом', category: 'Отладка', keybinding: 'F11' }, async () => {
+    await debug.step('into');
+  });
+  define({ id: 'debug.stepOut', title: 'Отладка: шаг из функции', category: 'Отладка', keybinding: 'Shift+F11' }, async () => {
+    await debug.step('out');
+  });
+
+  // F9 — точка останова на строке курсора: привычное место, не уводя руки с клавиатуры.
+  define({ id: 'debug.toggleBreakpoint', title: 'Отладка: переключить точку останова', category: 'Отладка', keybinding: 'F9' }, async () => {
+    const active = openEditors.active;
+    if (!active) return;
+    const line = editors.cursor().line;
+    const lines = await debug.toggleBreakpoint(active.path, line);
+    editors.setBreakpoints(active.path, lines);
   });
 
   define({ id: 'run.choose', title: 'Запустить…', category: 'Запуск', keybinding: 'Shift+F10' }, () => {
@@ -1361,6 +1421,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncRunControl();
     // Файл стал активным — показываем его, а вкладка чата просто ждёт в полосе.
     if (openEditors.active) hideChatTab();
+    // Точки останова контроллер помнит по файлам, а редактор о них не знает:
+    // при открытии вкладки отдаём ему набор — значки появятся сразу.
+    for (const path of openEditors.paths) editors.setBreakpoints(path, debug.linesOf(path));
   });
   // Счётчик правок и ветка в статусбаре живут по тому же снимку, что и дерево.
   git.onDidChange(refreshStatus);
@@ -1376,6 +1439,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   editors.onRunMarker(({ path }) => {
     const target = targetsFor(documents.get(path) ?? null).find((item) => item.id === `file:${path}`);
     if (target) void runTarget(target);
+  });
+
+  // Клик по полю номеров строк — точка останова: контроллер держит набор, а
+  // редактор рисует по нему значки. Один источник истины — контроллер.
+  editors.onBreakpointToggle(({ path, line }) => {
+    void debug.toggleBreakpoint(path, line).then((lines) => editors.setBreakpoints(path, lines));
+  });
+
+  // Останов: подсвечиваем строку и показываем панель. Пока программа идёт или
+  // отладка не запущена — подсветки нет.
+  debug.onDidChange((state) => {
+    const frame = state.phase === 'stopped' ? state.topFrame : null;
+    editors.setDebugLine(frame?.path ?? null, frame?.line ?? null);
+    if (state.phase !== 'idle') dock.show('debug');
   });
   tools.onDidChange(() => {
     syncRunControl();
@@ -1421,6 +1498,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     { combo: 'Ctrl+Shift+F5', command: 'run.tests' },
     // Форматирование — как в VS Code и PyCharm: Shift+Alt+F.
     { combo: 'Shift+Alt+F', command: 'python.format' },
+    // Отладка — привычные из VS Code: F5 пуск/продолжить, Shift+F5 стоп,
+    // F9 точка останова, F10/F11 шаги.
+    { combo: 'F5', command: 'debug.continue' },
+    { combo: 'Shift+F5', command: 'debug.stop' },
+    { combo: 'F9', command: 'debug.toggleBreakpoint' },
+    { combo: 'F10', command: 'debug.stepOver' },
+    { combo: 'F11', command: 'debug.stepInto' },
+    { combo: 'Shift+F11', command: 'debug.stepOut' },
     // Меню — как в приложениях KDE: Alt+F10 открывает его с клавиатуры.
     { combo: 'Alt+F10', command: 'app.showMenu' },
   ]).attach(window);

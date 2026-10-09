@@ -713,6 +713,28 @@ textarea {
   color: var(--run_accent);
 }
 
+/* Точка останова на поле номеров строк: красный кружок вместо значка запуска. */
+.breakpoint-glyph {
+  position: relative;
+  cursor: pointer;
+}
+
+.breakpoint-glyph::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--red_prime_background);
+}
+
+/* Строка, где стоит отладчик: подсвечиваем всю строку, а не только жёлоб. */
+.debug-line {
+  background: var(--debug_line_background);
+}
+
 .editor-host {
   position: relative;
   flex: 1;
@@ -4572,6 +4594,115 @@ textarea {
 /* Упавший прогон виден и на самой строке, а не только по значку. */
 .tests-row.is-failed .tests-label {
   color: var(--red_prime_background);
+}
+
+/* ── панель отладки ─────────────────────────────────────────────────────── */
+
+.debug-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: var(--font_labels_size);
+}
+
+.debug-toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.debug-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.debug-section {
+  padding: 4px 0 8px;
+}
+
+.debug-heading {
+  margin: 6px 8px 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.debug-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.debug-row,
+.debug-frame {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.debug-frame:hover,
+.debug-row:hover {
+  background: var(--element_background_hover);
+}
+
+.debug-frame.is-active {
+  background: var(--element_background);
+}
+
+.debug-frame-name {
+  color: var(--text_color);
+}
+
+.debug-frame-line {
+  margin-left: auto;
+  color: var(--text_color_disabled);
+}
+
+.debug-toggle {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--text_color_disabled);
+}
+
+.debug-toggle.is-active {
+  cursor: pointer;
+  color: var(--text_color);
+}
+
+.debug-var-name {
+  color: var(--text_color);
+}
+
+.debug-var-value {
+  color: var(--link_color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.debug-var-type {
+  color: var(--text_color_disabled);
+}
+
+.debug-scope {
+  margin: 4px 8px 2px;
+  color: var(--text_color_tertiary);
+  font-weight: 600;
+}
+
+.debug-empty {
+  padding: 8px 10px;
+  color: var(--text_color_disabled);
+}
+
+.debug-idle {
+  padding: 12px;
+  white-space: normal;
 }
 
 .tests-empty {
