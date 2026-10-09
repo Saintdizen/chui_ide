@@ -86,7 +86,7 @@ export interface ToolContext {
 }
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
-const MAX_OUTPUT_CHARS = 20_000;
+const MAX_OUTPUT_CHARS = 60_000;
 const MAX_SEARCH_HITS = 200;
 /** Потолок для режима «только файлы»: там на файл одна строка, поэтому можно больше. */
 const MAX_FIND_FILES = 2000;

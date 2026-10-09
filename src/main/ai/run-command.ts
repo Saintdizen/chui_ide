@@ -23,7 +23,7 @@ export interface CommandResult {
 /** Дольше держать агента в ожидании бессмысленно: пользователь уже ушёл. */
 const TIMEOUT_MS = 120_000;
 /** Один `npm install` выдаёт мегабайты — в контекст модели всё не влезет. */
-const MAX_OUTPUT_CHARS = 20_000;
+const MAX_OUTPUT_CHARS = 60_000;
 
 export function runShellCommand(
   command: string,
