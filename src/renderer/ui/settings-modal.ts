@@ -331,6 +331,15 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     prompt.addEventListener('change', () => void patch({ ai: { systemPrompt: prompt.value } }));
 
     return [
+      switchRow('Ассистент включён', ai.enabled, (value) => void patch({ ai: { enabled: value } }, true)),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Мастер-выключатель: снятая галочка глушит AI целиком — панель чата, команды «Объяснить/Исправить ' +
+          'выделение» и любые запросы к провайдеру. Редактор, файлы и терминал работают как обычно, ' +
+          'а провайдеры, модели и ключи остаются на месте.',
+      ),
+      h('div', { class: 'settings-divider' }),
       field('Провайдер', h('div', { class: 'field-row' }, providerSelect.element, removeButton)),
       field('Добавить провайдера', h('div', { class: 'field-row' }, presetSelect.element, addButton)),
       h('div', { class: 'settings-divider' }),
@@ -380,14 +389,26 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
       field('Шагов агента', numberInput(ai.maxSteps, 1, 500, 1, (value) => void patch({ ai: { maxSteps: value } }))),
       field(
-        'Шагов агента в автопилоте',
+        'Шагов агента при полном доступе',
         numberInput(ai.maxAutopilotSteps, 1, 500, 1, (value) => void patch({ ai: { maxAutopilotSteps: value } })),
       ),
       h(
         'div',
         { class: 'field-hint' },
         'Страховка от зацикливания: сколько раз агент может сходить «инструмент → модель» до остановки. ' +
-          'В автопилоте задач больше, поэтому лимит свой.',
+          'При полном доступе задача длиннее, поэтому лимит свой.',
+      ),
+      switchRow(
+        'Спрашивать перед опасными командами при полном доступе',
+        ai.confirmDangerous,
+        (value) => void patch({ ai: { confirmDangerous: value } }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'По умолчанию выключено: полный доступ — без вопросов. Включите, чтобы даже с ним ' +
+          'спрашивать перед необратимыми командами (удаление, запись на диск, sudo, git push --force). ' +
+          'На отдельные безобидные команды подсказка может сработать зря — страховка склонна спросить лишний раз.',
       ),
       field(
         'Контекстное окно (токенов)',

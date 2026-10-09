@@ -10,9 +10,12 @@
  *  5. без моста apply_edit и run_terminal модели не предлагаются;
  *  6. run_terminal: подтверждение, код выхода и отказ;
  *  7. ai.test объясняет удачу и неудачу словами;
- *  8. автопилот: без подтверждений, но необратимые команды всё равно спрашивает;
+ *  8. полный доступ: без подтверждений, но необратимые команды всё равно спрашивает;
  *  9. get_diagnostics — ошибки редактора доезжают до модели текстом;
- * 10. вложения контекста уходят в промпт отдельным сообщением.
+ * 10. вложения контекста уходят в промпт отдельным сообщением;
+ * 11. режим «Вопрос»: инструменты не предлагаются, моделе сказано об этом;
+ * 12. режим «План»: только чтение, изменения не предлагаются и не исполняются;
+ * 13. права доступа меняются на лету — агент подхватывает их во время ответа.
  *
  *   npm run smoke:agent
  *
@@ -66,6 +69,8 @@ function readBody(req) {
 let requested = { name: 'read_file', args: {} };
 /** Если true — тот же вызов приходит и вторым шагом (проверка дедупликации). */
 let requestTwice = false;
+/** Если true — инструмент вызывается два шага подряд (проверка смены прав на лету). */
+let requestTwoCalls = false;
 let turn = 0;
 /** Тела запросов к провайдеру: по ним видно, какие инструменты ему предложили. */
 const bodies = [];
@@ -120,7 +125,7 @@ app.whenReady().then(async () => {
 
     // Первый шаг — вызов инструмента; второй — текст (результат уже в диалоге).
     // requestTwice заставляет сервер повторить тот же вызов и на втором шаге.
-    if (turn === 0 || (requestTwice && turn === 1)) {
+    if (turn === 0 || ((requestTwice || requestTwoCalls) && turn === 1)) {
       turn += 1;
       sendSse(res, toolCallSse(requested.name, requested.args));
       return;
@@ -133,6 +138,7 @@ app.whenReady().then(async () => {
 
   const settings = {
     ai: {
+      enabled: true,
       providers: [{ id: 'local', label: 'Локальный', baseUrl, models: ['test'], hasApiKey: false }],
       temperature: 0,
       maxTokens: 256,
@@ -140,6 +146,7 @@ app.whenReady().then(async () => {
       reasoningEffort: 'off',
       maxSteps: 8,
       maxAutopilotSteps: 24,
+      confirmDangerous: true,
     },
     get() {
       return this;
@@ -362,7 +369,7 @@ app.whenReady().then(async () => {
     const refused = await ai.testConnection({ baseUrl: 'http://127.0.0.1:59999/v1' });
     check('ai.test объясняет недоступный сервер', !refused.ok && refused.message.includes('не отвечает'), refused.message);
 
-    /* 10. автопилот */
+    /* 10. полный доступ */
     const autoCalls = [];
     const autoHost = {
       applyEdits(edits, autoApprove) {
@@ -378,22 +385,67 @@ app.whenReady().then(async () => {
       },
     };
 
-    requested = { name: 'run_terminal', args: { command: 'echo автопилот' } };
+    requested = { name: 'run_terminal', args: { command: 'echo полный-доступ' } };
     run = await chat(autoHost, true, true);
-    check('автопилот выполняет рядовую команду', run.results[0]?.ok === true, run.results[0]?.summary);
-    check('автопилот не спрашивает про рядовую команду', autoCalls.filter((c) => c.kind === 'confirm').length === 0, autoCalls);
+    check('полный доступ выполняет рядовую команду', run.results[0]?.ok === true, run.results[0]?.summary);
+    check('полный доступ не спрашивает про рядовую команду', autoCalls.filter((c) => c.kind === 'confirm').length === 0, autoCalls);
 
     requested = { name: 'run_terminal', args: { command: 'rm -rf /' } };
     run = await chat(autoHost, true, true);
-    check('автопилот всё равно спрашивает про необратимую команду', autoCalls.some((c) => c.kind === 'confirm'), autoCalls);
+    check('полный доступ всё равно спрашивает про необратимую команду', autoCalls.some((c) => c.kind === 'confirm'), autoCalls);
 
     requested = {
       name: 'apply_edit',
       args: { edits: [{ path: file, edits: [oneEdit({})] }] },
     };
     run = await chat(autoHost, true, true);
-    check('автопилот применяет правки без ревью', autoCalls.some((c) => c.kind === 'edits' && c.autoApprove === true), autoCalls);
-    check('результат правок вернулся модели и в автопилоте', run.results[0]?.ok === true, run.results[0]?.summary);
+    check('полный доступ применяет правки без ревью', autoCalls.some((c) => c.kind === 'edits' && c.autoApprove === true), autoCalls);
+    check('результат правок вернулся модели при полном доступе', run.results[0]?.ok === true, run.results[0]?.summary);
+
+    /* 11. режим «План»: только чтение, изменения не исполняются */
+    requested = { name: 'apply_edit', args: { edits: [{ path: file, edits: [oneEdit({})] }] } };
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) }, true, false, undefined, { planMode: true });
+    check(
+      'в режиме «План» инструменты изменения не предлагаются',
+      !run.toolNames.includes('apply_edit') && !run.toolNames.includes('run_terminal'),
+      run.toolNames,
+    );
+    check(
+      'в режиме «План» чтение предлагается',
+      run.toolNames.includes('read_file') && run.toolNames.includes('update_plan'),
+      run.toolNames,
+    );
+    check(
+      'в режиме «План» изменение не исполняется',
+      run.results[0]?.ok === false && /план/i.test(String(run.results[0]?.summary)),
+      run.results[0]?.summary,
+    );
+
+    /* 12. права доступа можно менять на лету: кнопка в композере */
+    requestTwoCalls = true;
+    requested = { name: 'run_terminal', args: { command: 'echo раз' } };
+    const permLog = [];
+    run = await chat(
+      {
+        applyEdits: () => Promise.resolve({ rejected: true }),
+        confirmCommand(command) {
+          permLog.push(command);
+          // Пользователь включает полный доступ, пока агент ещё работает.
+          ai.setAutoApprove(true);
+          return Promise.resolve(true);
+        },
+      },
+      true,
+      false,
+    );
+    requestTwoCalls = false;
+    check('первое действие спросило разрешение', permLog.length === 1, permLog);
+    check('после включения прав второе действие не спрашивает', permLog.length === 1, permLog);
+    check(
+      'оба действия выполнились',
+      run.results.length === 2 && run.results.every((item) => item.ok === true),
+      run.results.map((item) => item.summary),
+    );
 
     /* 11. диагностика */
     const diagHost = {
@@ -461,6 +513,12 @@ app.whenReady().then(async () => {
 
     run = await chat(undefined, false, false, undefined, { model: 'o3-mini', reasoningEffort: 'off' });
     check('«без размышлений» ничего не отправляет', run.bodies[0]?.reasoning_effort === undefined, run.bodies[0]?.reasoning_effort);
+
+    check('в режиме «Вопрос» инструменты не предлагаются', run.bodies[0]?.tools === undefined);
+    check(
+      'в режиме «Вопрос» модели сказано, что инструменты выключены',
+      (run.bodies[0]?.messages ?? []).some((m) => m.role === 'system' && /выключены/i.test(String(m.content))),
+    );
 
     /* 6. изображения: уходят частями последнего сообщения пользователя */
     const shot = 'data:image/png;base64,iVBORw0KGgo=';

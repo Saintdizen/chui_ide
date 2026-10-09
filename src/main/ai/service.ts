@@ -38,6 +38,25 @@ const MAX_INSTRUCTIONS_BYTES = 8000;
  * результата — признак зацикливания, и повторный вызов можно не исполнять.
  * Правки и команды сюда не входят: они меняют мир, и повторить их бывает нужно.
  */
+/**
+ * Инструменты режима «План»: только чтение проекта и ведение плана. Всё, что
+ * меняет мир (правки, файловые операции, команды), здесь и не предлагается,
+ * и не исполняется — даже если модель вызовет такой инструмент по имени.
+ */
+const PLAN_MODE_TOOLS = new Set<string>([
+  'list_dir',
+  'read_file',
+  'read_files',
+  'search',
+  'find_files',
+  'get_diagnostics',
+  'git_status',
+  'git_log',
+  'git_diff',
+  'open_file',
+  'update_plan',
+]);
+
 const READ_ONLY_TOOLS = new Set([
   'list_dir',
   'read_file',
@@ -62,11 +81,31 @@ const AGENT_PROMPT = [
   'Правки и команды пользователь подтверждает — не считай их сделанными, пока не получил ответ инструмента.',
 ].join('\n');
 
-/** Дописывается к промпту в автопилоте: агент работает сам, до результата. */
-const AUTOPILOT_PROMPT = [
-  'Режим автопилота: правки применяются сразу, рядовые команды выполняются без подтверждения.',
+/** Дописывается, когда включён полный доступ: подтверждения не нужны. */
+const AUTO_APPROVE_PROMPT = [
+  'Полный доступ: правки применяются сразу, команды выполняются без подтверждения.',
   'Работай до результата: прочитай нужное, сделай правки, проверь себя и только потом отвечай.',
-  'Доступ полный: команды и правки выполняются сразу, подтверждений не будет. Будь аккуратен с необратимыми действиями.',
+  'Опасные команды могут требовать подтверждения — учитывай это, но не жди вопросов там, где их не будет.',
+].join('\n');
+
+/**
+ * Дописывается в режиме «План»: агент изучает проект и составляет план, ничего
+ * не меняя. Правки и команды ему недоступны — не предлагай их и не вызывай.
+ */
+const PLAN_PROMPT = [
+  'Режим плана: сначала изучи проект доступными инструментами чтения, затем составь план через update_plan.',
+  'Ничего не меняй: правки файлов и запуск команд в этом режиме недоступны и не выполнятся.',
+  'В конце объясни план словами: что предлагаешь сделать, в каком порядке и почему. Жди решения пользователя.',
+].join('\n');
+
+/**
+ * Дописывается, когда инструменты выключены (режим «Вопрос»). Без этого модель
+ * может попытаться вызвать инструмент, а разметка вызова выльется в ответ
+ * обычным текстом — пользователь увидит служебные токены вместо ответа.
+ */
+const ASK_PROMPT = [
+  'Инструменты в этом режиме выключены: они тебе недоступны.',
+  'Отвечай обычным текстом и не вызывай инструменты — их вызов не выполнится.',
 ].join('\n');
 
 /**
@@ -95,6 +134,12 @@ export class AiService {
   private git?: GitTools;
   /** Терминальные сессии тоже приходят снаружи: без них terminal_* не предлагаем. */
   private terminals?: TerminalAgent;
+  /**
+   * Права доступа текущего прогона (кнопка в композере). Храним на сервисе, а не
+   * снимком в запросе: renderer может переключить их прямо во время ответа агента.
+   * Сервис один на окно, а активный агентский прогон в окне один — этого хватает.
+   */
+  private liveAutoApprove = false;
 
   constructor(
     private readonly settings: SettingsStore,
@@ -109,6 +154,14 @@ export class AiService {
   /** Подключить терминалы: включает инструменты terminal_start/read/write/stop. */
   attachTerminals(terminals: TerminalAgent): void {
     this.terminals = terminals;
+  }
+
+  /**
+   * Обновить права доступа агента. Вызывается кнопкой в композере — в том числе
+   * пока агент работает: следующее действие возьмёт уже новое значение.
+   */
+  setAutoApprove(value: boolean): void {
+    this.liveAutoApprove = value;
   }
 
   async models(providerId: string, signal?: AbortSignal): Promise<string[]> {
@@ -155,7 +208,11 @@ export class AiService {
     const settings = this.settings.get();
     const provider = this.createProvider(request.providerId);
     const useTools = request.useTools ?? false;
-    const autoApprove = request.autoApprove ?? false;
+    const planMode = request.planMode ?? false;
+    // В режиме плана менять ничего нельзя, поэтому полный доступ выключаем.
+    const autoApprove = !planMode && (request.autoApprove ?? false);
+    // Текущие права запоминаем на сервисе: дальше их можно менять на лету.
+    this.liveAutoApprove = autoApprove;
 
     const messages: ChatMessage[] = [];
     const systemPrompt = request.systemPrompt ?? settings.ai.systemPrompt;
@@ -172,7 +229,9 @@ export class AiService {
     if (images.length > 0) {
       messages.push({ role: 'system', content: renderImageNote(images) });
     }
-    if (useTools) messages.push({ role: 'system', content: autoApprove ? `${AGENT_PROMPT}\n${AUTOPILOT_PROMPT}` : AGENT_PROMPT });
+    if (planMode) messages.push({ role: 'system', content: `${AGENT_PROMPT}\n${PLAN_PROMPT}` });
+    else if (useTools) messages.push({ role: 'system', content: autoApprove ? `${AGENT_PROMPT}\n${AUTO_APPROVE_PROMPT}` : AGENT_PROMPT });
+    else messages.push({ role: 'system', content: ASK_PROMPT });
 
     messages.push(...request.messages);
 
@@ -182,10 +241,19 @@ export class AiService {
     if (images.length > 0) attachImages(messages, images.map((item) => item.dataUrl!));
 
     // Предлагаем модели только то, что реально может исполнить эта сборка.
-    const available = useTools ? AGENT_TOOLS.filter((tool) => this.canRun(tool, host)) : [];
+    const available = useTools
+      ? AGENT_TOOLS.filter((tool) => this.canRun(tool, host) && (!planMode || PLAN_MODE_TOOLS.has(tool.name)))
+      : [];
     const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
-    // Автопилот — это полный доступ: и правки, и команды без подтверждений.
-    const toolContext: ToolContext = { workspace: this.workspace, signal, autoApprove, allowAll: autoApprove };
+    // Полный доступ: и правки, и команды без подтверждений.
+    // Страховка — из настроек: по умолчанию выключена, включает пользователь.
+    const toolContext: ToolContext = {
+      workspace: this.workspace,
+      signal,
+      autoApprove,
+      allowAll: autoApprove,
+      confirmDangerous: settings.ai.confirmDangerous === true,
+    };
     if (this.git) toolContext.git = this.git;
     if (this.terminals) toolContext.terminals = this.terminals;
     if (host) {
@@ -271,6 +339,27 @@ export class AiService {
           didNewWork = true;
           continue;
         }
+
+        // Режим плана: исполняем только чтение. Если модель всё же позовёт
+        // изменяющий инструмент — он не выполнится, отвечаем ей отказом.
+        if (planMode && !PLAN_MODE_TOOLS.has(call.name)) {
+          emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
+          const refused: ChatMessage = {
+            role: 'tool',
+            toolCallId: call.id,
+            name: call.name,
+            content: `Режим плана: инструмент «${call.name}» недоступен. Ничего не меняй — составь план доступными средствами чтения.`,
+          };
+          messages.push(refused);
+          produced.push(refused);
+          emit(ChatStreamEvent.ToolResult, { id: call.id, name: call.name, ok: false, summary: 'режим плана: изменение недоступно' });
+          continue;
+        }
+
+        // Права перечитываем перед каждым действием: пользователь мог переключить
+        // их кнопкой, пока агент отвечал. В «Плане» менять нечего — всегда выключены.
+        toolContext.autoApprove = planMode ? false : this.liveAutoApprove;
+        toolContext.allowAll = planMode ? false : this.liveAutoApprove;
 
         const key = `${call.name}:${call.arguments}`;
         const repeated = READ_ONLY_TOOLS.has(call.name) ? executed.get(key) : undefined;

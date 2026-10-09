@@ -33,10 +33,10 @@ import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { relativePath } from '../core/workspace-model';
 import { type RpcClient, RpcError } from '../core/rpc';
-import { basename, clear, h, svgIcon } from './dom';
+import { basename, clear, h, type IconName, svgIcon } from './dom';
 import { createSelect } from './select';
 import { createSessionInfo, createUsageRing, contextUsage, type SessionInfoData } from './session-info';
-import { createToolFeed, toolLabel, type ToolCardView } from './chat-tools';
+import { createToolFeed, toolLabel, type ReasoningRowView, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
 import { countLines, fileWord, formatBytes, plural, snippetFor, titleFrom } from './chat-text';
 import { showContextMenu } from './context-menu';
@@ -74,8 +74,8 @@ export interface ChatDeps {
   isInEditor?: () => boolean;
 }
 
-/** Режим работы панели: спросить, поработать с подтверждениями или на автопилоте. */
-type ChatMode = 'ask' | 'agent' | 'autopilot';
+/** Режим работы панели: спросить, поработать с подтверждениями или наметить план. */
+type ChatMode = 'ask' | 'agent' | 'plan';
 
 /**
  * Сжатие беседы: старая история заменяется резюме. Пересказ просим у той же модели —
@@ -89,9 +89,6 @@ const COMPACT_PROMPT = [
 
 /** Сколько символов беседы уезжает на сжатие: хвост важнее начала. */
 const MAX_COMPACT_CHARS = 40_000;
-
-/** Размышления показываются целиком, но без предела один блок съест всю ленту. */
-const MAX_REASONING_CHARS = 20_000;
 
 /**
  * Обрыв по лимиту токенов достраиваем сами, но с пределом: иначе зацикленная
@@ -110,9 +107,11 @@ const CONTINUE_PROMPT = 'Ответ оборвался по лимиту ток�
 export function createChatPanel(deps: ChatDeps): ChatView {
   let settings = deps.settings;
   let busy = false;
-  /** Режим панели: ответ на вопрос, агент с подтверждениями или автопилот. */
+  /** Режим панели: ответ на вопрос, агент с подтверждениями или план без изменений. */
   let mode: ChatMode = 'ask';
   let useTools = false;
+  let planMode = false;
+  // Права доступа: кнопка в композере. Включено — команды и правки без вопросов.
   let autoApprove = false;
   let streamBuffer = '';
   let frame = 0;
@@ -226,6 +225,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     ),
     changesFiles,
   );
+
+  /**
+   * План агента — фиксированная панель над полем ввода, выше панели изменений.
+   * Раньше чек-лист рисовался внутри сообщения и участвовал в порядке ленты;
+   * теперь он закреплён внизу, перед глазами, пока агент работает.
+   */
+  const planBar = h('div', { class: 'composer-plan', hidden: true });
+  /** Свёрнут ли чек-лист плана. Состояние переживает перерисовку: план обновляется часто. */
+  let planExpanded = true;
 
   function syncChangesPanel(): void {
     changesFiles.hidden = !changesExpanded;
@@ -738,13 +746,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const modeSelect = createSelect({
     class: 'composer-select',
     title:
-      'Вопрос — просто ответ. Агент — сам читает проект, правит файлы и запускает команды, но каждое действие подтверждаете вы. ' +
-      'Автопилот — полный доступ: делает то же и без единого вопроса, включая необратимые команды.',
+      'Вопрос — просто ответ без инструментов. Агент — сам читает проект, правит файлы и запускает команды, ' +
+      'но действия подтверждаете вы (права — кнопкой рядом). План — только читает проект и составляет план, ничего не меняя.',
   });
   modeSelect.setOptions([
-    { value: 'ask', label: 'Вопрос' },
-    { value: 'agent', label: 'Агент' },
-    { value: 'autopilot', label: 'Автопилот' },
+    { value: 'ask', label: 'Вопрос', icon: 'bubble' },
+    { value: 'agent', label: 'Агент', icon: 'wrench' },
+    { value: 'plan', label: 'План', icon: 'checklist' },
   ]);
   modeSelect.onChange((value) => {
     mode = value as ChatMode;
@@ -780,8 +788,41 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   const effortField = h('span', { class: 'composer-field' }, effortSelect.element);
 
+  /** Значок статуса — тот же, что у режима в селекте: картинка и подпись совпадают. */
+  const modeIcon = h('span', { class: 'composer-status-icon' }, svgIcon('bubble', 12));
   const modeName = h('span', {}, '');
-  const modeBadge = h('span', { class: 'composer-status-item' }, svgIcon('warning', 12), modeName);
+  const modeBadge = h('span', { class: 'composer-status-item' }, modeIcon, modeName);
+
+  /**
+   * Права доступа — отдельный тумблер, а не часть режима: включён — команды и правки
+   * выполняются без вопросов, выключен — на каждое действие спрашиваем. В «Вопросе»
+   * и «Плане» смысла не имеет: там менять нечего, поэтому кнопка недоступна.
+   */
+  const permButton = h('button', {
+    class: 'icon-btn composer-perm',
+    type: 'button',
+    onClick: () => {
+      autoApprove = !autoApprove;
+      syncPermButton();
+      // Сообщаем main: если агент уже работает, следующее действие возьмёт новые права.
+      void deps.rpc.request('ai.setPermission', { autoApprove }).catch(() => undefined);
+    },
+  });
+
+  /** Состояние кнопки прав: значок, подпись и активный вид — по текущему режиму. */
+  function syncPermButton(): void {
+    // Только в «Агенте» есть что разрешать: в «Вопросе» и «Плане» изменений нет.
+    const canToggle = mode === 'agent';
+    permButton.disabled = !canToggle;
+    clear(permButton);
+    permButton.appendChild(svgIcon(canToggle && autoApprove ? 'unlock' : 'lock', 14));
+    permButton.classList.toggle('is-active', canToggle && autoApprove);
+    permButton.title = !canToggle
+      ? 'Права доступа: доступно в режиме «Агент»'
+      : autoApprove
+        ? 'Полный доступ: команды и правки выполняются без подтверждений'
+        : 'Спрашивать разрешение на каждое действие';
+  }
 
   /* ── беседы: вкладки в стиле вкладок редактора ───────────────────── */
 
@@ -1127,7 +1168,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       if (message.role === 'assistant') {
         const el = h('div', { class: 'msg msg-assistant' });
         if (message.content) {
-          const content = h('div', { class: 'msg-body' });
+          // Текст, за которым последовал вызов инструмента, — промежуточный:
+          // показываем пузырём, чтобы он не сливался со строками действий.
+          const content = h('div', { class: message.toolCalls?.length ? 'msg-body msg-note' : 'msg-body' });
           markdown.renderInto(content, message.content);
           el.appendChild(content);
         }
@@ -1148,7 +1191,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
             feedbackFor(session, index),
           );
         }
-        if (el.childElementCount > 0) session.thread.appendChild(el);
+        if (el.childElementCount > 0) currentTurn(session).appendChild(el);
         return;
       }
 
@@ -1368,21 +1411,28 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (session.id === activeId) body.scrollTop = 0;
   }
 
-  /** Режим — это и есть тумблер инструментов и подтверждений. */
+  /** Режим задаёт доступ к инструментам; права на изменения — отдельный тумблер. */
   function syncMode(): void {
     useTools = mode !== 'ask';
-    autoApprove = mode === 'autopilot';
+    planMode = mode === 'plan';
     modeSelect.setValue(mode);
-    modeSelect.element.classList.toggle('composer-select-active', mode !== 'ask');
-    modeSelect.element.classList.toggle('composer-select-auto', mode === 'autopilot');
-    modeBadge.classList.toggle('composer-status-warn', mode !== 'ask');
-    modeBadge.classList.toggle('composer-status-auto', mode === 'autopilot');
+    // Класс режима красит и селект, и статус одним цветом — см. main.css.
+    for (const name of ['ask', 'agent', 'plan'] as const) {
+      modeSelect.element.classList.toggle(`is-mode-${name}`, mode === name);
+      modeBadge.classList.toggle(`is-mode-${name}`, mode === name);
+    }
+    // Значок статуса повторяет значок режима: «Вопрос» — реплика, «Агент» — ключ,
+    // «План» — чек-лист. Раньше здесь всегда висел предупреждающий треугольник.
+    const badgeIcon = mode === 'plan' ? 'checklist' : mode === 'agent' ? 'wrench' : 'bubble';
+    clear(modeIcon);
+    modeIcon.appendChild(svgIcon(badgeIcon, 12));
     modeName.textContent =
-      mode === 'autopilot'
-        ? 'Автопилот: полный доступ, без подтверждений'
+      mode === 'plan'
+        ? 'План: только чтение, без изменений'
         : mode === 'agent'
           ? 'Инструменты разрешены'
           : 'Инструменты выключены';
+    syncPermButton();
   }
 
   /** Подпись кнопки модели — «Провайдер - Модель»: где и чем спрашиваем, видно сразу. */
@@ -1492,6 +1542,58 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     syncChangesPanel();
   }
 
+  /** Показать план агента в фиксированной панели над композером. */
+  function renderPlan(steps: PlanStep[]): void {
+    if (steps.length === 0) {
+      hidePlan();
+      return;
+    }
+    planBar.hidden = false;
+    clear(planBar);
+
+    const done = steps.filter((step) => step.status === 'done').length;
+    // Список шагов прячется целиком: шапка остаётся и говорит, что план свёрнут.
+    const list = h(
+      'div',
+      { class: 'plan-list', hidden: !planExpanded },
+      ...steps.map((step) =>
+        h(
+          'div',
+          { class: `plan-step is-${step.status}` },
+          h('span', { class: 'plan-mark' }, step.status === 'done' ? svgIcon('sparkle', 11) : null),
+          h('span', { class: 'plan-text' }, step.text),
+        ),
+      ),
+    );
+
+    const head = h(
+      'button',
+      { class: 'plan-head', type: 'button', 'aria-expanded': String(planExpanded) },
+      svgIcon('chevronDown', 12),
+      svgIcon('checklist', 12),
+      h('span', { class: 'plan-title' }, 'План'),
+      h('span', { class: 'plan-count' }, `${done}/${steps.length}`),
+    );
+    const syncHead = (): void => {
+      head.classList.toggle('is-collapsed', !planExpanded);
+      head.setAttribute('aria-expanded', String(planExpanded));
+      list.hidden = !planExpanded;
+      head.title = planExpanded ? 'Свернуть план' : 'Развернуть план';
+    };
+    head.addEventListener('click', () => {
+      planExpanded = !planExpanded;
+      syncHead();
+    });
+    syncHead();
+
+    planBar.appendChild(h('div', { class: 'plan-card' }, head, list));
+  }
+
+  function hidePlan(): void {
+    planBar.hidden = true;
+    clear(planBar);
+  }
+
   /**
    * Записать документы на диск. Правки агента ложатся в файл сразу: дерево
    * файлов, git и внешние инструменты работают с диском и без этого не видят
@@ -1590,6 +1692,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const footer = h(
     'div',
     { class: 'chat-footer' },
+    planBar,
     changesBar,
     attachmentChips,
     h(
@@ -1604,6 +1707,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           { class: 'composer-group' },
           contextButton,
           modeSelect.element,
+          permButton,
           modelButton,
           effortField,
         ),
@@ -1611,9 +1715,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       ),
       // Информация о сессии — индикатор заполнения контекста в правом нижнем углу:
       // он всегда перед глазами и не занимает места в шапке.
-      h('div', { class: 'composer-status' }, modeBadge, contextRing.element),
+      h('div', { class: 'composer-status' }, modeBadge, contextRing.element, sessionInfo.element),
     ),
-    sessionInfo.element,
     menu,
   );
   footer.appendChild(jumpButton);
@@ -1690,6 +1793,24 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     body.scrollTop = body.scrollHeight;
   }
 
+  /**
+   * Ход беседы: вопрос и все ответы на него. Вопрос внутри хода липнет к верху,
+   * пока ход виден, — при прокрутке длинного ответа ясно, на какой запрос он дан.
+   * Без обёртки все вопросы прилипали бы к верху разом и наслаивались друг на друга.
+   */
+  function beginTurn(session: ChatSession): HTMLElement {
+    const node = h('div', { class: 'chat-turn' });
+    session.thread.appendChild(node);
+    return node;
+  }
+
+  /** Текущий ход — последний в ленте; нет его (приветствие, сводка) — заводим новый. */
+  function currentTurn(session: ChatSession): HTMLElement {
+    const last = session.thread.lastElementChild;
+    if (last instanceof HTMLElement && last.classList.contains('chat-turn')) return last;
+    return beginTurn(session);
+  }
+
   function appendMessage(
     session: ChatSession,
     role: 'user' | 'assistant',
@@ -1702,7 +1823,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Действия есть только у вопросов пользователя — у ответов они рисуются
     // отдельно, когда ответ завершён (см. streamReply / renderHistory).
     if (role === 'user' && onEdit) attachUserActions(messageEl, text, onEdit);
-    session.thread.appendChild(messageEl);
+    // Вопрос открывает новый ход, ответ дописывается в текущий.
+    (role === 'user' ? beginTurn(session) : currentTurn(session)).appendChild(messageEl);
     scrollToEnd(session);
     return content;
   }
@@ -1759,14 +1881,23 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     );
   }
 
+  /** Действие над сообщением — иконка-кнопка: подпись заменяет подсказка, ряд не шумит. */
+  function messageAction(icon: IconName, label: string, onClick: () => void): HTMLButtonElement {
+    return h(
+      'button',
+      { class: 'icon-btn', type: 'button', title: label, 'aria-label': label, onClick },
+      svgIcon(icon, 14),
+    );
+  }
+
   /** Кнопки под сообщением пользователя: править текст вопроса и скопировать. */
   function attachUserActions(messageEl: HTMLElement, text: string, onEdit: () => void): void {
     messageEl.appendChild(
       h(
         'div',
         { class: 'msg-actions' },
-        h('button', { class: 'link-btn', type: 'button', onClick: onEdit }, 'Править'),
-        h('button', { class: 'link-btn', type: 'button', onClick: () => copyText(text) }, 'Копировать'),
+        messageAction('pencil', 'Править', onEdit),
+        messageAction('copy', 'Копировать', () => copyText(text)),
       ),
     );
   }
@@ -1797,29 +1928,25 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     onRegenerate?: () => void,
     feedback?: MessageFeedback,
   ): void {
-    const actions = h(
-      'div',
-      { class: 'msg-actions' },
-      h('button', { class: 'link-btn', type: 'button', onClick: () => copyText(getText()) }, 'Копировать'),
-    );
+    const actions = h('div', { class: 'msg-actions' }, messageAction('copy', 'Копировать', () => copyText(getText())));
     if (onRegenerate) {
-      actions.appendChild(h('button', { class: 'link-btn', type: 'button', onClick: onRegenerate }, 'Повторить'));
+      actions.appendChild(messageAction('refresh', 'Повторить', onRegenerate));
     }
     if (feedback) {
-      const up = h('button', { class: 'link-btn msg-rate', type: 'button', title: 'Полезный ответ' }, '👍');
-      const down = h('button', { class: 'link-btn msg-rate', type: 'button', title: 'Неудачный ответ' }, '👎');
-      const sync = (): void => {
-        up.classList.toggle('is-active', feedback.get() === 'up');
-        down.classList.toggle('is-active', feedback.get() === 'down');
+      const rate = feedback;
+      let sync = (): void => {};
+      const up = messageAction('thumbUp', 'Полезный ответ', () => {
+        rate.set(rate.get() === 'up' ? undefined : 'up');
+        sync();
+      });
+      const down = messageAction('thumbDown', 'Неудачный ответ', () => {
+        rate.set(rate.get() === 'down' ? undefined : 'down');
+        sync();
+      });
+      sync = (): void => {
+        up.classList.toggle('is-active', rate.get() === 'up');
+        down.classList.toggle('is-active', rate.get() === 'down');
       };
-      up.addEventListener('click', () => {
-        feedback.set(feedback.get() === 'up' ? undefined : 'up');
-        sync();
-      });
-      down.addEventListener('click', () => {
-        feedback.set(feedback.get() === 'down' ? undefined : 'down');
-        sync();
-      });
       sync();
       actions.append(up, down);
     }
@@ -1964,7 +2091,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Ответ ассистента — это последовательность «текст → карточка инструмента →
     // текст», поэтому внутри одного сообщения живёт несколько текстовых сегментов.
     const messageEl = h('div', { class: 'msg msg-assistant' });
-    session.thread.appendChild(messageEl);
+    currentTurn(session).appendChild(messageEl);
     let segment = h('div', { class: 'msg-body' });
     messageEl.appendChild(segment);
     // Индикатор работы держим внизу сообщения: новые сегменты вставляем перед ним.
@@ -1972,117 +2099,31 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     messageEl.appendChild(activity.element);
     activity.state('думает…');
     // Подряд идущие вызовы инструментов живут одной группой — см. createToolFeed.
-    const tools = createToolFeed(messageEl);
+    const tools = createToolFeed(messageEl, activity.element, () => scrollToEnd(session));
+    /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
+    let reasoningView: ReasoningRowView | null = null;
     const toolCards = new Map<string, ToolCardView>();
-    /**
-     * Размышления собираются в ОДИН блок на весь ответ. Шагов у агента много,
-     * и на каждый приходит своя врезка размышлений, но для человека это одно
-     * «думание»: части копим в списке и разделяем пустой строкой, а не заводим
-     * новый спойлер на каждый шаг.
-     */
-    const reasoningParts: string[] = [];
-    /** Открыта ли текущая часть: следующий шаг размышлений начнёт новую. */
-    let reasoningOpen = false;
-    let reasoningBox: HTMLElement | null = null;
-    let reasoningFrame = 0;
-    /** Чек-лист плана: один на ответ, обновляется на каждом событии плана. */
-    let planCard: HTMLElement | null = null;
+    /** Размышления: строка живёт в ленте действий — заводим её лениво. */
+    const pushReasoning = (text: string): void => {
+      (reasoningView ??= tools.reasoning()).push(text);
+    };
+    /** Ответ начался или закончился — сворачиваем строку размышлений. */
+    const collapseReasoning = (): void => {
+      reasoningView?.collapse();
+      reasoningView = null;
+    };
     /** Замер скорости ответа: от первого текстового фрагмента до конца потока. */
     let firstDeltaAt = 0;
     let lastDeltaAt = 0;
 
     streamBuffer = '';
+    hidePlan();
     scrollToEnd(session);
     streamingSession = session;
 
     const flushSegment = (): void => {
       cancelFrame();
       markdown.renderInto(segment, streamBuffer);
-    };
-
-    /** Чек-лист шагов: агент шлёт свой план, мы рисуем прогресс. */
-    const pushPlan = (steps: PlanStep[]): void => {
-      if (!planCard) {
-        planCard = h('div', { class: 'plan-card' });
-        messageEl.insertBefore(planCard, segment);
-      }
-      clear(planCard);
-      planCard.appendChild(h('div', { class: 'plan-head' }, svgIcon('command', 12), h('span', {}, 'План')));
-      const list = h('div', { class: 'plan-list' });
-      for (const step of steps) {
-        list.appendChild(
-          h(
-            'div',
-            { class: `plan-step is-${step.status}` },
-            h('span', { class: 'plan-mark' }, step.status === 'done' ? svgIcon('sparkle', 11) : null),
-            h('span', { class: 'plan-text' }, step.text),
-          ),
-        );
-      }
-      planCard.appendChild(list);
-      scrollToEnd(session);
-    };
-
-    /** Текст размышлений целиком: части-шаги разделены пустой строкой. */
-    const reasoningText = (): string => reasoningParts.join('\n\n');
-
-    /** Счётчик шагов в шапке: видно, из скольких «подходов» собраны размышления. */
-    const syncReasoningCount = (): void => {
-      const count = reasoningBox?.querySelector('.reasoning-count');
-      if (count) count.textContent = reasoningParts.length > 1 ? String(reasoningParts.length) : '';
-    };
-
-    /**
-     * Размышления — один сворачиваемый блок на весь ответ, общий для всех шагов.
-     * Создаётся свёрнутым: во время стрима он не разворачивается сам и не съедает
-     * ленту, но по клику на «Размышления» раскрывается. Блок держим первым
-     * в сообщении — думание идёт до действий и ответа.
-     */
-    const pushReasoning = (chunk: string): void => {
-      if (!reasoningOpen) {
-        reasoningParts.push('');
-        reasoningOpen = true;
-      }
-      const index = reasoningParts.length - 1;
-      const current = reasoningParts[index] ?? '';
-      if (current.length + chunk.length <= MAX_REASONING_CHARS) {
-        reasoningParts[index] = current + chunk;
-      }
-
-      if (!reasoningBox) {
-        reasoningBox = h(
-          'details',
-          { class: 'reasoning' },
-          h(
-            'summary',
-            { class: 'reasoning-summary' },
-            h('span', { class: 'reasoning-label' }, 'Размышления'),
-            h('span', { class: 'reasoning-count' }),
-          ),
-          h('div', { class: 'reasoning-text' }),
-        );
-        messageEl.prepend(reasoningBox);
-      }
-
-      if (reasoningFrame) return;
-      reasoningFrame = requestAnimationFrame(() => {
-        reasoningFrame = 0;
-        const target = reasoningBox?.querySelector('.reasoning-text');
-        if (target) target.textContent = reasoningText();
-        syncReasoningCount();
-        scrollToEnd(session);
-      });
-    };
-
-    /** Ответ начался или закончился — размышления остаются под спойлером. */
-    const collapseReasoning = (): void => {
-      if (reasoningFrame) cancelAnimationFrame(reasoningFrame);
-      reasoningFrame = 0;
-      if (!reasoningBox) return;
-      const target = reasoningBox.querySelector('.reasoning-text');
-      if (target) target.textContent = reasoningText();
-      syncReasoningCount();
-      reasoningBox.removeAttribute('open');
     };
 
     setBusy(true, session);
@@ -2100,6 +2141,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
             messages: session.history.map((message) => ({ ...message })),
             useTools,
             autoApprove,
+            planMode,
             attachments,
           },
           (event, payload) => {
@@ -2109,7 +2151,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
               return;
             }
             if (event === ChatStreamEvent.Plan) {
-              pushPlan((payload as ChatPlanPayload).steps);
+              renderPlan((payload as ChatPlanPayload).steps);
               activity.state('строит план…');
               return;
             }
@@ -2129,13 +2171,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
             if (event === ChatStreamEvent.ToolStart) {
               const call = payload as ChatToolStartPayload;
               flushSegment();
+              // Текст, после которого пошёл вызов инструмента, — промежуточный:
+              // показываем пузырём, чтобы он не сливался со строками действий.
+              segment.classList.add('msg-note');
               // Новый вызов — новый текстовый сегмент. Буфер держит текст ТОЛЬКО
               // текущего шага: иначе в следующий сегмент выльется весь предыдущий
               // текст и ответ будет повторяться в каждом пузыре.
               streamBuffer = '';
-              // Размышления пошаговые, но блок общий: закрываем текущую часть,
-              // следующая врезка продолжится в том же спойлере (см. pushReasoning).
-              reasoningOpen = false;
+              // Размышления пошаговые: закрываем текущую часть, следующая врезка
+              // ляжет отдельным абзацем в ту же строку ленты.
+              reasoningView?.part();
               toolCards.set(call.id, tools.add(call));
               activity.state(`выполняю: ${toolLabel(call.name)}`);
               segment = h('div', { class: 'msg-body' });
@@ -2178,26 +2223,26 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         if (done.finishReason !== 'length' || continues >= MAX_AUTO_CONTINUE) break;
 
         continues += 1;
-        messageEl.appendChild(
+        messageEl.insertBefore(
           h(
             'div',
             { class: 'finish-note is-continue' },
             svgIcon('refresh', 12),
             h('span', {}, `Продолжаю ответ · ${continues}/${MAX_AUTO_CONTINUE}`),
           ),
+          activity.element,
         );
         session.history.push({ role: 'user', content: CONTINUE_PROMPT });
         // Продолжение — часть ТОГО ЖЕ ответа: новый сегмент в том же пузыре.
         segment = h('div', { class: 'msg-body' });
         messageEl.insertBefore(segment, activity.element);
         streamBuffer = '';
-        reasoningOpen = false;
         scrollToEnd(session);
       }
 
       // Дошли до предела продолжений, а ответ всё обрезан — оставляем ручную кнопку.
       if (done.finishReason === 'length') {
-        messageEl.appendChild(
+        messageEl.insertBefore(
           h(
             'div',
             { class: 'finish-note' },
@@ -2213,6 +2258,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
               'Продолжить',
             ),
           ),
+          activity.element,
         );
       }
 
@@ -2231,6 +2277,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         showToast('Не удалось получить ответ модели', 'error');
       }
     } finally {
+      hidePlan();
       activity.dispose();
       streamingSession = null;
       setBusy(false, session);
@@ -2446,7 +2493,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     syncCount();
 
     block.appendChild(h('div', { class: 'review-actions' }, applyButton, rejectButton, allButton, status));
-    (streamingSession ?? active()).thread.appendChild(block);
+    currentTurn(streamingSession ?? active()).appendChild(block);
     scrollToEnd();
 
     pendingApprovals.add(abort);
@@ -2506,7 +2553,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const abort = (): void => finish(false, 'отменено');
 
     block.appendChild(h('div', { class: 'approval-actions' }, runButton, skipButton, status));
-    (streamingSession ?? active()).thread.appendChild(block);
+    currentTurn(streamingSession ?? active()).appendChild(block);
     scrollToEnd();
 
     pendingApprovals.add(abort);
@@ -2529,12 +2576,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   });
 
   /**
-   * Правки агента: в автопилоте применяем сразу, иначе сперва показываем ревью.
+   * Правки агента: при полном доступе применяем сразу, иначе сперва показываем ревью.
    * Запись в историю и панель изменений — в обоих случаях: пользователь должен
    * видеть, что агент сделал, даже когда не спрашивал.
    */
   async function applyAgentEdits(params: ApplyEditsHostParams): Promise<ApplyEditsHostResult> {
-    // В автопилоте применяем всё сразу, иначе спрашиваем: какие файлы применить.
+    // При полном доступе применяем всё сразу, иначе спрашиваем: какие файлы применить.
     const selected = params.autoApprove === true ? [...params.edits] : await reviewEdits(params.edits);
     if (!selected || selected.length === 0) return { rejected: true };
 
@@ -2612,6 +2659,20 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   renderAttachments();
   renderChanges();
 
+  /**
+   * Мастер-выключатель из настроек: AI выключен — панель не работает. Гасим и
+   * заодно останавливаем текущую генерацию, чтобы запрос не продолжал жечь токены
+   * после того, как пользователь снял галочку.
+   */
+  function syncAiAvailability(): void {
+    const enabled = settings.ai.enabled;
+    element.classList.toggle('is-ai-disabled', !enabled);
+    // Останавливаем только идущую генерацию: иначе stop() сообщит «ничего не генерируется».
+    if (!enabled && busy) stop();
+  }
+
+  syncAiAvailability();
+
   return {
     element,
     newChat,
@@ -2624,6 +2685,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       // Размер контекстного окна тоже в настройках: кольцо должно пересчитаться
       // сразу, а не после следующего ответа модели.
       syncSessionInfo();
+      syncAiAvailability();
     },
   };
 }

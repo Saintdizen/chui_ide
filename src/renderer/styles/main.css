@@ -503,10 +503,10 @@ textarea {
   align-items: center;
   gap: 2px;
   height: 36px;
-  padding: 0 6px;
+  padding: 0 3px;
   /* Прокрутка доводит вкладку до того же зазора, что и отступ полосы: иначе
      последняя вкладка встаёт вплотную к краю и он выглядит срезанным. */
-  scroll-padding-inline: 6px;
+  scroll-padding-inline: 3px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
@@ -894,10 +894,21 @@ textarea {
   background: var(--element_background_hover);
 }
 
-.select svg {
+.select > svg {
   flex: 0 0 auto;
   margin-left: auto;
   color: var(--text_color_tertiary);
+}
+
+/* Значок значения (иконка опции): цвет берёт от режима/контрола, не свой. */
+.select-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.select-icon svg {
+  color: inherit;
 }
 
 .select-value {
@@ -1476,12 +1487,34 @@ textarea {
   min-height: 0;
 }
 
+/* Ассистент выключен мастер-тумблером в настройках: панель видна, но не работает —
+   поле ввода и лента не принимают ввод, а поверх висит подсказка, как включить обратно. */
+.chat.is-ai-disabled .chat-body,
+.chat.is-ai-disabled .chat-footer,
+.chat.is-ai-disabled .chat-search {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.chat.is-ai-disabled .chat-body::after {
+  content: 'AI выключен в настройках. Включить: Настройки → AI.';
+  display: block;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  pointer-events: auto;
+}
+
 /* ── вкладки бесед: те же классы, что у вкладок редактора ──────────────── */
 
 .chat-tabs {
-  /* Те же отступы, что у полосы вкладок редактора: вкладка беседы и кнопка
-     «новая беседа» стоят на одном зазоре от краёв шапки. */
-  padding: 0 6px;
+  /* Плотный отступ со всех сторон: шапка вкладок бесед ниже панельной и не
+     должна отжимать содержимое к краям. */
+  padding: 3px;
 }
 
 /* Полоса вкладок редактора рассчитана на свою высоту — здесь она живёт в шапке. */
@@ -1514,8 +1547,9 @@ textarea {
 
 .session-info {
   position: absolute;
-  right: 8px;
-  /* Кнопка-кольцо живёт в самом низу композера — окно раскрывается вверх от него. */
+  /* Якорь — строка статуса (.composer-status): отсчёт этого bottom идёт от неё,
+     а не от всего футера, поэтому окно встаёт прямо над кольцом «4%». */
+  right: 5px;
   bottom: calc(100% + 6px);
   z-index: 30;
   width: 262px;
@@ -1711,6 +1745,14 @@ textarea {
   display: none;
 }
 
+/* Ход беседы: вопрос и ответы на него. Вопрос внутри хода липнет к верху ленты
+   и уходит вместе с ходом — при прокрутке видно, на какой запрос идёт ответ. */
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .thread-summary {
   border: 1px solid var(--separator_color);
   border-radius: var(--radius_sm);
@@ -1773,6 +1815,31 @@ textarea {
   border-radius: var(--radius_sm);
   font-size: var(--font_labels_size);
   overflow-wrap: anywhere;
+}
+
+/* Вопрос липнет к верху ленты, пока виден его ход: при прокрутке длинного ответа
+   видно, на какой запрос он дан. Своей плашки у строки нет — ответ
+   прокручивается под ней, а не сквозь неё. Отрицательные поля перекрывают паддинг
+   .chat-body: без них в полосах по краям просвечивал бы прокручиваемый текст. */
+.msg-user {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  max-width: none;
+  margin: 0 -10px;
+  padding: 4px 10px;
+}
+
+/* Промежуточный текст агента (за ним идёт вызов инструмента) — пузырь с плашкой:
+   иначе он сливается со строками действий. Итоговый ответ остаётся без плашки. */
+.msg-assistant .msg-body.msg-note {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
 }
 
 .msg-user .msg-body {
@@ -2001,22 +2068,6 @@ textarea {
 
 /* ── размышления модели ─────────────────────────────────────────────────── */
 
-/* Размышления — без плашки: сворачиваемый блок на фоне ленты, не «пузырь».
-   Раньше был фон и левая обводка, из-за них текст тонул в подложке. */
-.reasoning {
-  margin-bottom: 4px;
-  font-size: 11px;
-}
-
-.reasoning-summary {
-  display: list-item;
-  cursor: pointer;
-  color: var(--text_color_disabled);
-}
-
-.reasoning-summary:hover {
-  color: var(--text_color);
-}
 
 /* Счётчик шагов: по нему видно, что размышления собраны из нескольких врезок. */
 .reasoning-count:not(:empty) {
@@ -2048,8 +2099,9 @@ textarea {
 /* Кнопки под сообщением появляются при наведении: в спокойном виде лента чище. */
 .msg-actions {
   display: flex;
-  gap: 10px;
-  padding: 0 2px;
+  align-items: center;
+  gap: 2px;
+  padding: 0 1px;
   opacity: 0;
   transition: opacity 120ms ease;
 }
@@ -2063,32 +2115,28 @@ textarea {
   justify-content: flex-end;
 }
 
-.msg-actions .link-btn {
+/* Действие над сообщением — иконка-кнопка из общего набора: фон проявляется
+   при наведении, подпись живёт в подсказке. Размер меньше панельного — под
+   высоту строки, тон приглушённый: ряд не спорит с текстом сообщения. */
+.msg-actions .icon-btn {
+  width: 24px;
+  height: 24px;
   color: var(--text_color_disabled);
 }
 
-.msg-actions .link-btn:hover {
-  color: var(--link_color);
-}
-
-/* Оценка ответа: неактивная — приглушена, выбранная — полная яркость. */
-.msg-actions .msg-rate {
-  font-size: 12px;
-  line-height: 1;
-  opacity: 0.5;
-}
-
-.msg-actions .msg-rate.is-active {
-  opacity: 1;
+/* Выбранная оценка (👍/👎) красится акцентом — видно, что отмечено. */
+.msg-actions .icon-btn.is-active {
+  color: var(--blue_prime_background);
+  background: var(--element_background_hover);
 }
 
 /* Поиск по беседам: поле и список совпадений над лентой. */
 .chat-search {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   flex: 0 0 auto;
-  padding: 6px 8px;
+  padding: 5px;
   border-bottom: 1px solid var(--separator_color);
   background: var(--sunken_background);
 }
@@ -2182,6 +2230,11 @@ textarea {
   font-style: italic;
 }
 
+/* Панель плана: чек-лист без собственного нижнего отступа — зазор даёт футер. */
+.composer-plan .plan-card {
+  margin-bottom: 0;
+}
+
 /* Чек-лист плана агента. */
 .plan-card {
   margin-bottom: 6px;
@@ -2192,18 +2245,52 @@ textarea {
   font-size: var(--font_labels_size);
 }
 
+/* Шапка плана — кнопка-переключатель: клик по ней сворачивает и разворачивает шаги. */
 .plan-head {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 4px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
   color: var(--text_color_tertiary);
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-head:hover {
+  color: var(--text_color);
+}
+
+/* Шеврон — первый значок в шапке: в свёрнутом виде указывает вправо. */
+.plan-head > svg:first-child {
+  transition: transform var(--motion_fast) var(--motion_ease);
+}
+
+.plan-head.is-collapsed > svg:first-child {
+  transform: rotate(-90deg);
+}
+
+.plan-title {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+/* Счётчик готовых шагов — справа: видно прогресс, даже когда список свёрнут. */
+.plan-count {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
 }
 
 .plan-list {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  margin-top: 4px;
 }
 
 .plan-step {
@@ -2362,18 +2449,23 @@ textarea {
   background: var(--element_background_hover);
 }
 
+/* Заголовок группы — сами действия, а не слово «Действия»: имя вызова читается
+   сразу, без раскрытия. Кегль меньше строки ленты: список имён длинный, и жирный
+   в полный размер перевешивал бы строки под ним. */
 .tool-group-title {
-  flex: 0 0 auto;
-  color: var(--text_color);
-  font-weight: 600;
-}
-
-.tool-group-tools {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  color: var(--text_color);
+  font-weight: 600;
+  font-size: 11px;
+}
+
+/* Сколько вызовов в группе — серым и моноширинно, тем же кеглем, что заголовок. */
+.tool-group-tools {
+  flex: 0 0 auto;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
   font-size: 11px;
@@ -2382,6 +2474,15 @@ textarea {
 .tool-group-state {
   flex: 0 0 auto;
   color: var(--text_color_tertiary);
+}
+
+/* Итог группы красим так же, как строки: зелёный — готово, красный — ошибки. */
+.tool-group-state.is-ok {
+  color: var(--git_added);
+}
+
+.tool-group-state.is-fail {
+  color: var(--text_color_error);
 }
 
 /* Тело ленты: слева идёт линия, строки сдвинуты под неё. */
@@ -2448,10 +2549,13 @@ textarea {
   color: var(--text_color_error);
 }
 
+/* Имя вызова в строке ленты: жирным, но меньшим кеглем — строка читается как
+   подпись, а не спорит размером с текстом ответа. */
 .tool-name {
   flex: 0 0 auto;
   color: var(--text_color);
   font-weight: 600;
+  font-size: 11px;
 }
 
 .tool-args {
@@ -2469,6 +2573,11 @@ textarea {
 .tool-state {
   flex: 0 0 auto;
   color: var(--text_color_tertiary);
+}
+
+/* Готово — зелёным, ошибка — красным: итог видно, не раскрывая строку. */
+.tool-state.is-ok {
+  color: var(--git_added);
 }
 
 .tool-state.is-fail {
@@ -2695,20 +2804,23 @@ textarea {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  /* Поле ввода тянется к краям панели: по бокам остаётся только отступ самой рамки
-     поля, а не поля композера. Верхний отступ отделяет стопку от ленты. */
-  padding: 10px 0 8px;
+  gap: 5px;
+  /* Небольшой зазор со всех сторон: стопка не липнет к рамке панели,
+     а верхний отступ отделяет её от ленты. */
+  padding: 5px;
   border-top: 1px solid var(--separator_color);
 }
 
-/* Всё, кроме поля ввода, держит свои боковые отступы: к краям панели тянется
-   только поле, а кнопки тулбара не липнут к рамке. */
-.chat-footer > .composer-changes,
-.chat-footer > .composer-chips,
-.chat-footer .composer-toolbar,
-.chat-footer .composer-status {
+/* Чипы контекста держат свой боковой отступ — шире общего зазора футера:
+   вложенные строки не липнут к рамке панели. */
+.chat-footer > .composer-chips {
   padding: 0 10px;
+}
+
+/* Панели изменений и плана прижаты к зазору футера: у обеих своя рамка/подложка. */
+.chat-footer > .composer-changes,
+.chat-footer > .composer-plan {
+  padding: 0;
 }
 
 .chat-footer .chat-input {
@@ -2790,6 +2902,11 @@ textarea {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/* Раскрытый список файлов: строки-чипы идут плотнее, чем в свёрнутом виде. */
+.composer-changes.is-open {
+  gap: 5px;
 }
 
 /* Шапка панели — кнопка: список файлов скрывается целиком, а не по одному. */
@@ -2966,6 +3083,7 @@ textarea {
   gap: 4px;
   min-width: 0;
   margin-top: 0;
+  padding: 0;
 }
 
 .composer-group {
@@ -3019,8 +3137,32 @@ textarea {
   color: var(--text_color);
 }
 
-.composer-select-active {
+/* Режим композера: цвет значка и подписи подсказывает, что режим делает.
+   Вопрос — не спрашивает инструменты (нейтральный), агент — работает (синий),
+   план — только читает (фиолетовый): цвета не спорят с акцентом ссылок. */
+.composer-select.is-mode-ask {
+  color: var(--text_color_tertiary);
+}
+
+.composer-select.is-mode-agent {
   color: var(--blue_prime_background);
+}
+
+.composer-select.is-mode-plan {
+  color: var(--purple_prime_background);
+}
+
+/* Подпись режима в статусе — тем же цветом, что и селект. */
+.composer-status-item.is-mode-ask {
+  color: var(--text_color_tertiary);
+}
+
+.composer-status-item.is-mode-agent {
+  color: var(--blue_prime_background);
+}
+
+.composer-status-item.is-mode-plan {
+  color: var(--purple_prime_background);
 }
 
 /* Обёртка контролов тулбара: подсказка должна работать и у выключенного контрола,
@@ -3031,9 +3173,25 @@ textarea {
   min-width: 0;
 }
 
-/* Автопилот — режим с последствиями: он и в тулбаре, и в статусе помечен отдельно. */
-.composer-select-auto {
+/* Кнопки-иконки тулбара композера держат высоту строки (24px), а не панельную
+   (28px): иначе «+», замок и «отправить» выше селектов, и ряд выглядит рвано. */
+.chat-footer .composer-toolbar .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+/* Кнопка прав доступа: цвет меняется по состоянию — размер задаёт правило выше. */
+.composer-perm {
+  color: var(--text_color_disabled);
+}
+
+.composer-perm.is-active {
   color: var(--yellow_prime_background);
+}
+
+.composer-perm:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .composer-model {
@@ -3056,10 +3214,14 @@ textarea {
 }
 
 .composer-status {
+  /* Строка статуса — containing block для окна «Информация о сессии»: оно
+     раскрывается вверх от кольца, а не от всего композера. */
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   margin-top: 0;
+  padding: 0 5px;
   color: var(--text_color_tertiary);
   font-size: 11px;
 }
@@ -3071,12 +3233,13 @@ textarea {
   min-width: 0;
 }
 
-.composer-status-warn {
-  color: var(--yellow_prime_background);
-}
-
-.composer-status-auto {
-  color: var(--red_prime_background);
+/* Значок режима: обёртка центрирует иконку по вертикали. У инлайнового svg
+   снизу остаётся место под выносную линию, и значок уезжает вверх относительно
+   подписи. Тот же приём, что у значка селекта (.select-icon). */
+.composer-status-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
 }
 
 /* ── статусбар ──────────────────────────────────────────────────────────── */
@@ -4051,9 +4214,9 @@ textarea {
 
 /* На широком экране беседа растягивалась бы в нечитаемые строки. */
 .chat-editor .chat {
-  width: 100%;
-  max-width: 860px;
-  margin: 0 auto;
+  width: -webkit-fill-available;
+  max-width: -webkit-fill-available;
+  /* margin: 0 auto; */
 }
 
 /* ── сравнение версий файла ─────────────────────────────────────────────── */

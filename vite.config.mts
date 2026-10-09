@@ -1,10 +1,20 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
+
+// Политика безопасности в проде не должна разрешать соединения с localhost:
+// они нужны только HMR-сокету dev-сервера. Тег <meta> в HTML один на оба
+// режима, поэтому лишние разрешения снимаем на сборке, а не держим в исходнике.
+const dropDevCsp: Plugin = {
+  name: 'chui-drop-dev-csp',
+  apply: 'build',
+  transformIndexHtml: (html) => html.replace(/\s*ws:\/\/localhost:\* http:\/\/localhost:\*/g, ''),
+};
 
 /**
  * Собираем только renderer. Main и preload компилирует tsc (tsconfig.main.json),
  * поэтому здесь нет никаких плагинов Electron — процессы полностью развязаны.
  */
 export default defineConfig({
+  plugins: [dropDevCsp],
   root: 'src/renderer',
   base: './',
   build: {

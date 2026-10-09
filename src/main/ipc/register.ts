@@ -290,12 +290,34 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('lsp.status', () => deps.lsp?.status() ?? { running: [] });
   router.register('lsp.detect', async () => matchPresets(await detectAvailableCommands()));
 
+  /**
+   * Ассистент выключается мастер-тумблером в настройках. Проверяем на входе:
+   * выключенный AI не должен ни ходить в сеть, ни тратить токены — ни через
+   * панель, ни через команду. Сохранённые ключи и провайдеры при этом целы.
+   */
+  const requireAiEnabled = (): void => {
+    if (!deps.settings.get().ai.enabled) {
+      throw new RpcFailure(RpcErrorCode.Disabled, 'AI выключен в настройках');
+    }
+  };
+
   router.register('ai.setApiKey', (params) => deps.settings.setApiKey(params.providerId, params.apiKey));
+  // Права агента меняются и во время ответа: main хранит их и перечитывает перед действием.
+  router.register('ai.setPermission', (params) => {
+    deps.ai.setAutoApprove(params.autoApprove);
+  });
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
-  router.register('ai.models', (params, ctx) => deps.ai.models(params.providerId, ctx.signal));
-  router.register('ai.test', (params, ctx) => deps.ai.testConnection(params, ctx.signal));
-  router.register('ai.chat', (request: ChatRequest, ctx) =>
-    deps.ai.chat(
+  router.register('ai.models', (params, ctx) => {
+    requireAiEnabled();
+    return deps.ai.models(params.providerId, ctx.signal);
+  });
+  router.register('ai.test', (params, ctx) => {
+    requireAiEnabled();
+    return deps.ai.testConnection(params, ctx.signal);
+  });
+  router.register('ai.chat', (request: ChatRequest, ctx) => {
+    requireAiEnabled();
+    return deps.ai.chat(
       request,
       (event, payload) => ctx.emit(event, payload),
       ctx.signal,
@@ -313,8 +335,8 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
             .request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal)
             .then((result) => result.ok),
       },
-    ),
-  );
+    );
+  });
 
   // История бесед: renderer её собирает, main только хранит. Каталог — рядом
   // с настройками, по одному файлу на рабочую папку.

@@ -60,10 +60,15 @@ export interface TerminalAgent {
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
-  /** Автопилот: не спрашивать разрешения на правки. */
+  /** Полный доступ: не спрашивать разрешения на правки. */
   autoApprove?: boolean;
   /** Полный доступ: не спрашивать разрешения ни на что — включая команды. */
   allowAll?: boolean;
+  /**
+   * Страховка полного доступа: даже при нём спрашивать перед необратимыми
+   * командами. Идёт из `settings.ai.confirmDangerous`, по умолчанию выключена.
+   */
+  confirmDangerous?: boolean;
   /** Правки в документах; нет обработчика — правки недоступны. */
   applyEdits?(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Спросить у пользователя разрешение на запуск команды. */
@@ -93,6 +98,46 @@ const MAX_EDITS_PER_FILE = 500;
 
 /** Команда длиннее — это уже не команда, а попытка спрятать скрипт. */
 const MAX_COMMAND_CHARS = 2000;
+
+/**
+ * Необратимые команды — на них и срабатывает страховка полного доступа
+ * (`settings.ai.confirmDangerous`). Список не защита от злого умысла, а страховка
+ * от ошибки: цена промаха выше выигрыша от автоматизации. Ловим опасные глаголы
+ * в любом месте строки (после `;`, `&&`, `|`), а не только в начале, и намеренно
+ * склонны спросить лишний раз: страховка включается вручную, и промах в сторону
+ * вопроса дешевле пропущенного `rm -rf`.
+ */
+const DANGEROUS_COMMAND = new RegExp(
+  [
+    String.raw`(^|[\s;&|])(sudo|doas|su)\s`,
+    String.raw`(^|[\s;&|])(rm|rmdir|shred|wipefs|mkfs\S*|fdisk|sfdisk|parted|shutdown|reboot|poweroff|halt|killall|pkill)\s`,
+    String.raw`(^|[\s;&|])dd\s+[^\n]*\bif=`,
+    String.raw`>\s*\/dev\/(sd|nvme|hd|disk)`,
+    String.raw`>\s*(\/etc\/|\/boot\/|\/usr\/|~?\/?\.ssh\/|~?\/?\.bashrc|~?\/?\.zshrc)`,
+    String.raw`:\s*\(\s*\)\s*\{`,
+    String.raw`chmod\s+-R\s+(777|666)\s+\/(\s|$)`,
+    String.raw`chown\s+-R\s+\S+\s+\/(\s|$)`,
+    String.raw`git\s+(push\s+[^\n]*(--force|-f)\b|reset\s+--hard|clean\s+-[a-z]*f[a-z]*d)`,
+    String.raw`(curl|wget)\b[^\n|]*\|\s*(ba|z|fi|da)?sh\b`,
+    `--no-preserve-root`,
+  ].join('|'),
+  'i',
+);
+
+export function isDangerousCommand(command: string): boolean {
+  return DANGEROUS_COMMAND.test(command);
+}
+
+/**
+ * Спрашивать ли разрешение на команду. Обычный агент спрашивает всегда; при
+ * полном доступе — только если включена страховка `confirmDangerous`
+ * и команда необратима. По умолчанию страховка выключена, и полный доступ
+ * исполняет всё без вопросов.
+ */
+function needsConfirmation(ctx: ToolContext, command: string): boolean {
+  if (!ctx.allowAll) return true;
+  return ctx.confirmDangerous === true && isDangerousCommand(command);
+}
 
 export async function runTool(ctx: ToolContext, name: string, rawArguments: string): Promise<ToolOutcome> {
   const parsed = parseToolArguments(rawArguments);
@@ -542,8 +587,8 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   const root = ctx.workspace.rootPath();
   if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
 
-  // Полный доступ (автопилот) — без вопросов; обычный агент спрашивает всегда.
-  if (!ctx.allowAll) {
+  // Обычный агент спрашивает всегда; полный доступ — только если включена страховка.
+  if (needsConfirmation(ctx, command)) {
     const allowed = await ctx.confirmCommand(command);
     if (!allowed) {
       return {
@@ -771,8 +816,8 @@ async function terminalStart(ctx: ToolContext, args: Record<string, unknown>): P
     throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
   }
 
-  // Полный доступ (автопилот) — без вопросов; обычный агент спрашивает всегда.
-  if (command && !ctx.allowAll) {
+  // Обычный агент спрашивает всегда; полный доступ — только если включена страховка.
+  if (command && needsConfirmation(ctx, command)) {
     if (!ctx.confirmCommand) return { ok: false, summary: 'Запуск команд недоступен' };
     const allowed = await ctx.confirmCommand(command);
     if (!allowed) {
@@ -831,8 +876,8 @@ async function terminalWrite(ctx: ToolContext, args: Record<string, unknown>): P
   const id = requireString(args, 'id');
   const data = requireString(args, 'data');
 
-  // Ввод в терминал может быть чем угодно — спрашиваем, если нет полного доступа.
-  if (!ctx.allowAll) {
+  // Ввод в терминал может быть чем угодно — страховка ловит необратимое и здесь.
+  if (needsConfirmation(ctx, data)) {
     if (!ctx.confirmCommand) return { ok: false, summary: 'Ввод в терминал недоступен' };
     const allowed = await ctx.confirmCommand(`[${id}] ${data.replace(/\n/g, '⏎')}`);
     if (!allowed) return { ok: false, summary: 'Пользователь запретил ввод', detail: 'Ввод отклонён.' };

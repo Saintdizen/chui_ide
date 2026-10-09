@@ -1,8 +1,10 @@
-import { h, svgIcon } from './dom';
+import { clear, h, svgIcon, type IconName } from './dom';
 
 export interface SelectOption {
   value: string;
   label: string;
+  /** Значок перед подписью: и в кнопке, и в списке. */
+  icon?: IconName;
   /** Пометка справа в списке: «удалённая», описание и прочее. */
   hint?: string;
 }
@@ -32,6 +34,8 @@ let closeOpen: (() => void) | null = null;
  * и поиск по первой букве.
  */
 export function createSelect(options: { title?: string; placeholder?: string; class?: string } = {}): SelectView {
+  /** Значок текущего значения: свой у каждой опции, поэтому живёт отдельным слотом. */
+  const valueIcon = h('span', { class: 'select-icon', hidden: true });
   const valueLabel = h('span', { class: 'select-value is-empty' }, options.placeholder ?? '');
   const element = h(
     'button',
@@ -44,6 +48,7 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
       'aria-expanded': 'false',
       onClick: () => (popup ? close() : open()),
     },
+    valueIcon,
     valueLabel,
     svgIcon('chevronDown', 12),
   );
@@ -68,6 +73,14 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
     const found = labelFor(current);
     valueLabel.textContent = found?.label ?? options.placeholder ?? '';
     valueLabel.classList.toggle('is-empty', !found);
+    // Значок меняется вместе со значением; нет иконки — слот пуст.
+    clear(valueIcon);
+    if (found?.icon) {
+      valueIcon.appendChild(svgIcon(found.icon, 14));
+      valueIcon.hidden = false;
+    } else {
+      valueIcon.hidden = true;
+    }
     element.disabled = disabled;
     element.classList.toggle('is-disabled', disabled);
   };
@@ -160,6 +173,7 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
             onClick: () => pick(item),
             onPointerEnter: () => setCursor(index),
           },
+          item.icon ? h('span', { class: 'select-icon' }, svgIcon(item.icon, 14)) : null,
           h('span', { class: 'select-item-label' }, item.label),
           item.hint ? h('span', { class: 'select-item-hint' }, item.hint) : null,
         ),

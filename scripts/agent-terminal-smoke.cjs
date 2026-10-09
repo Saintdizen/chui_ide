@@ -5,7 +5,7 @@
  */
 const assert = require('node:assert/strict');
 
-const { runTool } = require('../dist/main/ai/agent-tools.js');
+const { runTool, isDangerousCommand } = require('../dist/main/ai/agent-tools.js');
 
 let failures = 0;
 function ok(name, condition, extra) {
@@ -82,10 +82,29 @@ async function main() {
   const afterWrite = await runTool(ctx, 'terminal_read', JSON.stringify({ id: 't1', from: offset }));
   ok('новый вывод виден', /hello world/.test(afterWrite.detail));
 
-  // 4. Автопилот: рядовой ввод без подтверждения.
-  const autoCtx = { ...ctx, autoApprove: true, confirmCommand: undefined };
+  // 4. Полный доступ: рядовой ввод без подтверждения.
+  const autoCtx = { ...ctx, autoApprove: true, allowAll: true, confirmCommand: undefined };
   const autoWrite = await runTool(autoCtx, 'terminal_write', JSON.stringify({ id: 't1', data: 'pwd\n' }));
-  ok('автопилот не спрашивает', autoWrite.ok, autoWrite.summary);
+  ok('полный доступ не спрашивает', autoWrite.ok, autoWrite.summary);
+
+  // 4а. Страховка (confirmDangerous): при полном доступе опасное всё равно спрашивает.
+  ok('опасная команда распознана', isDangerousCommand('sudo rm -rf /'));
+  ok('рядовая команда не помечена', !isDangerousCommand('npm test'));
+  const guardedLog = [];
+  const guardedCtx = {
+    ...ctx,
+    autoApprove: true,
+    allowAll: true,
+    confirmDangerous: true,
+    confirmCommand: async (command) => {
+      guardedLog.push(command);
+      return true;
+    },
+  };
+  const guarded = await runTool(guardedCtx, 'terminal_write', JSON.stringify({ id: 't1', data: 'sudo rm -rf /\n' }));
+  ok('страховка спросила при полном доступе', guarded.ok && guardedLog.some((c) => c.includes('sudo rm -rf /')), guardedLog.join('; '));
+  const guardedPlain = await runTool(guardedCtx, 'terminal_write', JSON.stringify({ id: 't1', data: 'pwd\n' }));
+  ok('рядовая команда прошла без вопроса', guardedPlain.ok && guardedLog.length === 1, `вопросов: ${guardedLog.length}`);
 
   // 5. Список и остановка.
   const list = await runTool(ctx, 'terminal_list', '{}');

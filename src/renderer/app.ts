@@ -146,6 +146,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     return chatInEditor ? chatTabActive : layout.rightVisible;
   }
 
+  /** Ассистент выключен мастер-тумблером в настройках: все входы в него должны молчать. */
+  const aiEnabled = (): boolean => settings.ai.enabled;
+
+  /** Куда зовём, если AI выключен: подсказка вместо тихого «ничего не произошло». */
+  const warnAiDisabled = (): void => {
+    showToast('AI выключен в настройках. Включить: Настройки → AI.', 'error');
+  };
+
   /** Показать вкладку чата (или перенести чат, если он ещё в панели). */
   function showChatTab(): void {
     if (!chatInEditor) {
@@ -196,6 +204,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /** Показать чат там, где он сейчас живёт: панелью справа или вкладкой в редакторе. */
   function revealChat(): void {
+    if (!aiEnabled()) {
+      warnAiDisabled();
+      return;
+    }
     if (chatInEditor) showChatTab();
     else layout.setRightVisible(true);
     syncViewButtons();
@@ -206,6 +218,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * в редактор, правая панель пуста, поэтому переключать нужно вкладку, а не её.
    */
   function toggleChat(): void {
+    if (!aiEnabled()) {
+      warnAiDisabled();
+      return;
+    }
     if (chatInEditor) {
       if (chatTabActive) hideChatTab();
       else showChatTab();
@@ -349,7 +365,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     viewButtons.get('project')?.classList.toggle('is-active', layout.sidebarVisible);
     viewButtons.get('search')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'search');
     viewButtons.get('terminal')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'terminal');
-    viewButtons.get('ai')?.classList.toggle('is-active', chatVisible());
+    // Выключенный AI прячем из шапки: неактивная кнопка всё равно звала бы в чат.
+    const aiButton = viewButtons.get('ai');
+    if (aiButton) {
+      aiButton.hidden = !aiEnabled();
+      aiButton.classList.toggle('is-active', aiEnabled() && chatVisible());
+    }
   };
 
   // Системной полосы меню у безрамочного окна нет — открываем её кнопкой.
@@ -476,7 +497,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
       explorer.restoreExpanded(state.expanded);
       layout.setSidebarVisible(state.sidebarVisible);
-      layout.setRightVisible(state.rightVisible);
+      // Панель ассистента не восстанавливаем, если AI выключен: её место свободно.
+      layout.setRightVisible(state.rightVisible && aiEnabled());
       if (state.dockVisible) {
         if (state.dockActive) dock.show(state.dockActive);
       } else {
@@ -948,6 +970,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     explorer.applySettings(next.explorer);
     chat.applySettings(next);
     settingsModal.applySettings(next);
+    // Ассистент выключили мастер-тумблером — закрываем его панель и обновляем шапку,
+    // чтобы она не занимала место и не звала в выключенный чат.
+    if (!next.ai.enabled) {
+      if (chatInEditor) setChatInEditor(false);
+      if (layout.rightVisible) layout.setRightVisible(false);
+    }
+    syncViewButtons();
     // Инструменты проекта зависят от настроек запуска: путь к интерпретатору
     // и менеджеру пакетов могли поменять — перепроверяем проект заново.
     void tools.refresh(workspace.root, true).then(() => {

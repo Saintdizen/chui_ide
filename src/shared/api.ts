@@ -82,6 +82,8 @@ export const RpcErrorCode = {
   MethodNotFound: -32601,
   Internal: -32603,
   NotFound: -32001,
+  /** Возможность выключена в настройках (например, ассистент целиком). */
+  Disabled: -32002,
 } as const;
 
 /* ── Приложение ─────────────────────────────────────────────────────────── */
@@ -324,6 +326,8 @@ export interface AiProviderView {
 }
 
 export interface AiSettings {
+  /** Общий выключатель ассистента: `false` глушит AI целиком. */
+  enabled: boolean;
   providers: AiProviderView[];
   activeProviderId?: string;
   activeModel?: string;
@@ -342,8 +346,14 @@ export interface AiSettings {
    * агент делает в обычном режиме, прежде чем остановиться.
    */
   maxSteps: number;
-  /** То же для автопилота: задача длиннее, шагов нужно больше. */
+  /** То же при полном доступе: задача длиннее, шагов нужно больше. */
   maxAutopilotSteps: number;
+  /**
+   * Даже при полном доступе спрашивать перед необратимыми командами (удаление,
+   * запись на диск, sudo, `git push --force`). По умолчанию выключено: «полный
+   * доступ» остаётся полным. Включается галочкой в настройках.
+   */
+  confirmDangerous: boolean;
 }
 
 /** Как показывать невидимые символы. */
@@ -499,6 +509,8 @@ export interface AiProviderPatch {
 }
 
 export interface AiSettingsPatch {
+  /** Общий выключатель ассистента: `false` глушит AI целиком. */
+  enabled?: boolean;
   activeProviderId?: string;
   activeModel?: string;
   temperature?: number;
@@ -509,8 +521,10 @@ export interface AiSettingsPatch {
   reasoningEffort?: ReasoningEffort;
   /** Сколько шагов делает агент в обычном режиме (страховка от зацикливания). */
   maxSteps?: number;
-  /** Сколько шагов делает агент в автопилоте. */
+  /** Сколько шагов делает агент при полном доступе (когда подтверждения не нужны). */
   maxAutopilotSteps?: number;
+  /** Спрашивать ли при полном доступе перед необратимыми командами. */
+  confirmDangerous?: boolean;
   /** Добавить провайдера или обновить существующего по `id`. */
   provider?: AiProviderPatch;
   /** Убрать провайдера из списка. */
@@ -607,10 +621,15 @@ export interface ChatRequest {
   /** Включить агентный цикл: модель сможет вызывать инструменты из shared/tools.ts. */
   useTools?: boolean;
   /**
-   * Автопилот: агент сам применяет правки и запускает команды, не спрашивая.
-   * Опасные команды всё равно требуют подтверждения — решает main, не renderer.
+   * Полный доступ: агент сам применяет правки и запускает команды, не спрашивая.
+   * Опасные команды всё равно могут требовать подтверждения — решает main, не renderer.
    */
   autoApprove?: boolean;
+  /**
+   * Режим плана: агент только читает проект и составляет план, ничего не меняя.
+   * Правки и команды в этом режиме не предлагаются и не исполняются.
+   */
+  planMode?: boolean;
   /** Дополнительный контекст от renderer: выделение, файл, ошибки. */
   attachments?: ChatAttachment[];
 }
@@ -734,7 +753,7 @@ export interface ChatPlanPayload {
 /** Аргументы `ai.applyEdits`: то, что агент просит применить к документам. */
 export interface ApplyEditsHostParams {
   edits: FileEdit[];
-  /** Автопилот: применить сразу, без экрана ревью. */
+  /** Полный доступ: применить сразу, без экрана ревью. */
   autoApprove?: boolean;
 }
 
@@ -895,6 +914,11 @@ export interface ChuiMethods {
     result: AiConnectionTestResult;
   };
   'ai.chat': { params: ChatRequest; result: ChatStreamDone };
+  /**
+   * Права доступа агента (кнопка в композере). Меняются и во время ответа:
+   * main перечитывает их перед каждым действием, а не только в начале прогона.
+   */
+  'ai.setPermission': { params: { autoApprove: boolean }; result: void };
   /** История бесед рабочей папки: renderer восстанавливает вкладки после запуска. */
   'ai.chats.load': { params: { root: string }; result: ChatHistory };
   /** Сохранение бесед: renderer — источник истины, main только пишет на диск. */

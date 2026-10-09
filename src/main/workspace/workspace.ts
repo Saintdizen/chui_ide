@@ -111,6 +111,7 @@ export class WorkspaceService {
     await fs.mkdir(path.dirname(file), { recursive: true });
     await fs.writeFile(file, text, 'utf8');
     const stat = await fs.stat(file);
+    this.notifyChanged(file);
     return { mtimeMs: stat.mtimeMs };
   }
 
@@ -135,12 +136,14 @@ export class WorkspaceService {
       }
       throw error;
     }
+    this.notifyChanged(file);
     return file;
   }
 
   async createDir(dirPath: string): Promise<string> {
     const dir = await this.safePath(dirPath);
     await fs.mkdir(dir, { recursive: true });
+    this.notifyChanged(dir);
     return dir;
   }
 
@@ -152,6 +155,9 @@ export class WorkspaceService {
       throw new RpcFailure(RpcErrorCode.InvalidParams, `Уже существует: ${path.basename(target)}`);
     }
     await fs.rename(source, target);
+    // Старое имя тоже исчезло с диска — дерево должно убрать и его.
+    this.notifyChanged(source);
+    this.notifyChanged(target);
     return target;
   }
 
@@ -169,6 +175,7 @@ export class WorkspaceService {
         `Не удалось переместить в корзину: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    this.notifyChanged(resolved);
   }
 
   async search(options: SearchOptions, signal?: AbortSignal): Promise<SearchResult> {
@@ -347,6 +354,7 @@ export class WorkspaceService {
       if (result.count === 0) continue;
 
       await fs.writeFile(file, result.text, 'utf8');
+      this.notifyChanged(file);
       changed.push(file);
       replaced += result.count;
     }
@@ -383,22 +391,48 @@ export class WorkspaceService {
     return resolved;
   }
 
+  /**
+   * Сообщить об изменении дерева. Один путь с задержкой: поток событий схлопывается
+   * в одно уведомление, а дерево перечитывается один раз, как бы часто ни писали.
+   */
+  private scheduleChange(changedPath: string): void {
+    this.pendingChange = changedPath;
+    if (this.watchTimer) return;
+    this.watchTimer = setTimeout(() => {
+      this.watchTimer = null;
+      const path = this.pendingChange ?? this.root;
+      this.pendingChange = null;
+      if (!this.root) return;
+      const payload: WorkspaceChangedPayload = { root: this.root, path: path ?? this.root };
+      this.onChange(PushTopic.WorkspaceChanged, payload);
+    }, 120);
+  }
+
+  /**
+   * Уведомление о нашей собственной правке диска. Полагаться только на `fs.watch`
+   * нельзя: на части платформ и ФС рекурсивное наблюдение молчит (сетевые диски,
+   * лимиты inotify), а тогда агент пишет файл, editor его показывает, а проводник
+   * остаётся старым. Поэтому о своих изменениях сообщаем явно, наблюдатель же
+   * отвечает за чужие — правки внешним инструментом или в терминале.
+   */
+  private notifyChanged(target: string): void {
+    if (!this.root) return;
+    this.scheduleChange(target);
+  }
+
   private startWatcher(root: string): void {
     try {
       this.watcher = watch(root, { recursive: true }, (_eventType, filename) => {
-        const changed = filename ? path.join(root, filename.toString()) : root;
-        this.pendingChange = changed;
-        if (this.watchTimer) return;
-        this.watchTimer = setTimeout(() => {
-          this.watchTimer = null;
-          const changedPath = this.pendingChange ?? root;
-          this.pendingChange = null;
-          const payload: WorkspaceChangedPayload = { root, path: changedPath };
-          this.onChange(PushTopic.WorkspaceChanged, payload);
-        }, 120);
+        this.scheduleChange(filename ? path.join(root, filename.toString()) : root);
+      });
+      // Ошибку наблюдения (например, переполнение буфера inotify) не роняем в консоль:
+      // без него чужую правку не увидим, но свои изменения продолжаем сообщать сами.
+      this.watcher.on('error', () => {
+        this.watcher?.close();
+        this.watcher = null;
       });
     } catch {
-      // не на всех платформах есть рекурсивный watch — живём без автообновления
+      // не на всех платформах есть рекурсивный watch — живём без автонаблюдения
       this.watcher = null;
     }
   }
@@ -408,6 +442,7 @@ export class WorkspaceService {
       clearTimeout(this.watchTimer);
       this.watchTimer = null;
     }
+    this.pendingChange = null;
     this.watcher?.close();
     this.watcher = null;
   }

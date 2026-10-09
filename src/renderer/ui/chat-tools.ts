@@ -11,6 +11,9 @@ import { basename, h, svgIcon, type IconName } from './dom';
  * иначе агент за шаг заливает ленту десятком строк.
  */
 
+/** Размышления показываются целиком, но без предела одна строка съест ленту. */
+const MAX_REASONING_CHARS = 20_000;
+
 const TOOL_LABELS: Record<string, string> = {
   list_dir: 'Просмотр папки',
   read_file: 'Чтение файла',
@@ -126,17 +129,29 @@ function toolStateElement(): HTMLElement {
 
 function setToolState(element: HTMLElement, ok: boolean): void {
   element.textContent = ok ? 'готово' : 'ошибка';
+  element.classList.toggle('is-ok', ok);
   element.classList.toggle('is-fail', !ok);
   element.classList.remove('is-running');
+}
+
+/** Размышления — сворачиваемая строка внутри группы действий. */
+export interface ReasoningRowView {
+  /** Добавить фрагмент текущей части размышлений. */
+  push(chunk: string): void;
+  /** Начать новую часть: следующая врезка станет отдельным абзацем. */
+  part(): void;
+  /** Свернуть строку — ответ начался или закончился. */
+  collapse(): void;
 }
 
 /** Одна группа вызовов: шапка со сводкой и строки под раскрытием. */
 interface ToolGroupView {
   add(call: ChatToolStartPayload): ToolCardView;
+  reasoning(): ReasoningRowView;
   seal(): void;
 }
 
-function createToolGroup(container: HTMLElement): ToolGroupView {
+function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?: () => void): ToolGroupView {
   let count = 0;
   let pending = 0;
   let failed = 0;
@@ -151,6 +166,89 @@ function createToolGroup(container: HTMLElement): ToolGroupView {
   const body = h('div', { class: 'tool-group-body' });
   const chevron = svgIcon('chevronDown', 12);
   chevron.classList.add('tool-chevron');
+
+  // ── размышления модели ───────────────────────────────────────
+  // Размышления — такая же строка ленты, как и вызов инструмента: узел со
+  // значком на рельсе, подпись и раскрываемый текст. Держим их ОДНОЙ строкой
+  // на группу: шагов у агента много, но для человека это одно «думание» —
+  // части копим в списке, разделяем пустой строкой и считаем счётчиком.
+  let reasoningCard: HTMLElement | null = null;
+  let reasoningPanel: HTMLElement | null = null;
+  let reasoningText: HTMLElement | null = null;
+  let reasoningCount: HTMLElement | null = null;
+  const reasoningParts: string[] = [];
+  /** Открыта ли текущая часть: следующая врезка начнёт новую (см. part). */
+  let reasoningOpen = false;
+  let reasoningFrame = 0;
+
+  const flushReasoning = (): void => {
+    if (reasoningText) reasoningText.textContent = reasoningParts.join('\n\n');
+    if (reasoningCount) reasoningCount.textContent = reasoningParts.length > 1 ? String(reasoningParts.length) : '';
+  };
+
+  /** Строка заводится по первому фрагменту и садится первой в ленте: думание — до действий. */
+  const ensureReasoning = (): void => {
+    if (reasoningCard) return;
+    reasoningText = h('div', { class: 'reasoning-text' });
+    reasoningCount = h('span', { class: 'reasoning-count' });
+    reasoningPanel = h('div', { class: 'tool-panel', hidden: true }, reasoningText);
+    const rowChevron = svgIcon('chevronDown', 12);
+    rowChevron.classList.add('tool-chevron');
+    const card = h(
+      'div',
+      { class: 'tool-card' },
+      h(
+        'button',
+        {
+          class: 'tool-head',
+          type: 'button',
+          title: 'Размышления — показать',
+          onClick: () => {
+            if (!reasoningPanel) return;
+            reasoningPanel.hidden = !reasoningPanel.hidden;
+            card.classList.toggle('is-open', !reasoningPanel.hidden);
+          },
+        },
+        svgIcon('bulb', 13),
+        h('span', { class: 'tool-name' }, 'Размышления'),
+        reasoningCount,
+        h('span', { class: 'tool-args' }),
+        rowChevron,
+      ),
+      reasoningPanel,
+    );
+    reasoningCard = card;
+    body.prepend(card);
+  };
+
+  const reasoning: ReasoningRowView = {
+    push: (chunk) => {
+      ensureReasoning();
+      if (!reasoningOpen) {
+        reasoningParts.push('');
+        reasoningOpen = true;
+      }
+      const index = reasoningParts.length - 1;
+      const current = reasoningParts[index] ?? '';
+      if (current.length + chunk.length <= MAX_REASONING_CHARS) reasoningParts[index] = current + chunk;
+      if (reasoningFrame) return;
+      reasoningFrame = requestAnimationFrame(() => {
+        reasoningFrame = 0;
+        flushReasoning();
+        onUpdate?.();
+      });
+    },
+    part: () => {
+      reasoningOpen = false;
+    },
+    collapse: () => {
+      if (reasoningFrame) cancelAnimationFrame(reasoningFrame);
+      reasoningFrame = 0;
+      flushReasoning();
+      if (reasoningPanel) reasoningPanel.hidden = true;
+      reasoningCard?.classList.remove('is-open');
+    },
+  };
 
   const applyExpanded = (): void => {
     body.hidden = !expanded;
@@ -178,12 +276,18 @@ function createToolGroup(container: HTMLElement): ToolGroupView {
   );
 
   const root = h('div', { class: 'tool-group is-open' }, head, body);
-  container.appendChild(root);
+  // Вставляем перед «якорем» низа (индикатор работы), а не в конец сообщения:
+  // иначе карточки действий встают после всего текста, и ответ, написанный
+  // ПОСЛЕ вызовов, оказывается выше них. С якорем порядок — порядок прихода.
+  container.insertBefore(root, anchor);
 
   const sync = (): void => {
-    title.textContent = `Действия · ${count}`;
+    // Заголовок — имена действий, а счётчик — серым рядом: в шапке видно, ЧТО
+    // делал агент, а не сколько раз он это делал. Слово «Действия» больше не
+    // нужно: список имён говорит то же самое, но конкретнее.
     const brief = names.slice(0, 2).join(', ');
-    tools.textContent = names.length > 2 ? `${brief} и ещё ${names.length - 2}` : brief;
+    title.textContent = names.length > 2 ? `${brief} и ещё ${names.length - 2}` : brief || 'Действия';
+    tools.textContent = count > 1 ? `· ${count}` : '';
 
     if (pending > 0) {
       state.textContent = 'выполняется';
@@ -265,13 +369,21 @@ function createToolGroup(container: HTMLElement): ToolGroupView {
 
   /**
    * Закрываем группу: дальше идёт текст ответа или новый вопрос.
-   * Одиночный вызов группы не требует — он остаётся обычной строкой.
-   * Сама группа при этом жива: её шапка по-прежнему раскрывает строки.
+   * Строка-одиночка группы не требует — она читается и без шапки, поэтому
+   * распускаем её наружу. Сама группа при этом жива: шапка раскрывает строки.
    */
   const seal = (): void => {
-    if (count === 1) {
-      const solo = body.firstElementChild as HTMLElement | null;
-      if (solo) root.replaceWith(solo);
+    const items = count + (reasoningCard ? 1 : 0);
+    if (items === 0) {
+      root.remove();
+      return;
+    }
+    if (items === 1) {
+      const solo = reasoningCard ?? (body.querySelector('.tool-card') as HTMLElement | null);
+      if (solo) {
+        solo.remove();
+        root.replaceWith(solo);
+      }
       return;
     }
     if (pending === 0 && !pinned) {
@@ -280,7 +392,7 @@ function createToolGroup(container: HTMLElement): ToolGroupView {
     }
   };
 
-  return { add, seal };
+  return { add, reasoning: () => reasoning, seal };
 }
 
 /**
@@ -288,20 +400,26 @@ function createToolGroup(container: HTMLElement): ToolGroupView {
  *
  * Агент за один шаг читает десяток файлов, и строка на каждый вызов
  * превращает чат в свалку. Поэтому подряд идущие вызовы собираются в одну
- * группу: в ленте остаётся её шапка («Действия · 6 · Просмотр папки,
- * Чтение файла · готово»), а сами строки — под раскрытием.
+ * группу: в ленте остаётся её шапка («Просмотр папки, Чтение файла и ещё 2
+ * · 6 · готово»), а сами строки — под раскрытием.
  */
-export function createToolFeed(container: HTMLElement): {
+export function createToolFeed(
+  container: HTMLElement,
+  anchor: Node | null = null,
+  onUpdate?: () => void,
+): {
   add(call: ChatToolStartPayload): ToolCardView;
+  reasoning(): ReasoningRowView;
   seal(): void;
 } {
   let current: ToolGroupView | null = null;
+  const ensure = (): ToolGroupView => (current ??= createToolGroup(container, anchor, onUpdate));
 
   return {
-    add: (call) => {
-      current ??= createToolGroup(container);
-      return current.add(call);
-    },
+    add: (call) => ensure().add(call),
+    // Размышления открывают ту же группу, что и вызовы: в ленте это соседние
+    // строки одного шага работы, а не отдельный блок над сообщением.
+    reasoning: () => ensure().reasoning(),
     seal: () => {
       current?.seal();
       current = null;

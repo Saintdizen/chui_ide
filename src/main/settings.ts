@@ -30,6 +30,8 @@ interface StoredProvider {
 
 interface StoredSettings {
   ai: {
+    /** Общий выключатель ассистента: `false` — AI выключен целиком. */
+    enabled: boolean;
     providers: StoredProvider[];
     activeProviderId?: string;
     activeModel?: string;
@@ -39,10 +41,12 @@ interface StoredSettings {
     contextWindow?: number;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
-    /** Страховка от зацикливания: шагов «модель → инструмент → модель» без автопилота. */
+    /** Страховка от зацикливания: шагов «модель → инструмент → модель» в обычном режиме. */
     maxSteps: number;
-    /** То же в автопилоте. */
+    /** То же при полном доступе. */
     maxAutopilotSteps: number;
+    /** Страховка полного доступа: спрашивать перед необратимыми командами. */
+    confirmDangerous: boolean;
   };
   editor: EditorSettings;
   explorer: ExplorerSettings;
@@ -60,6 +64,8 @@ const DEFAULT_SYSTEM_PROMPT = [
 
 const DEFAULT_SETTINGS: StoredSettings = {
   ai: {
+    // Ассистент включён по умолчанию: это часть IDE, выключается осознанно.
+    enabled: true,
     providers: [
       {
         id: 'openai',
@@ -83,8 +89,10 @@ const DEFAULT_SETTINGS: StoredSettings = {
     reasoningEffort: 'off',
     // Страховка от бесконечного цикла «модель → инструмент → модель».
     maxSteps: 8,
-    // В автопилоте задача длиннее: шагов нужно больше.
+    // При полном доступе задача длиннее: шагов нужно больше.
     maxAutopilotSteps: 24,
+    // По умолчанию полный доступ полон: страховка — опт-ин.
+    confirmDangerous: false,
   },
   editor: {
     tabSize: 4,
@@ -183,6 +191,7 @@ export class SettingsStore {
     const { ai, editor, explorer, run } = this.data;
     return {
       ai: {
+        enabled: ai.enabled !== false,
         providers: ai.providers.map((provider) => ({
           id: provider.id,
           label: provider.label,
@@ -201,6 +210,7 @@ export class SettingsStore {
         reasoningEffort: ai.reasoningEffort ?? 'off',
         maxSteps: ai.maxSteps,
         maxAutopilotSteps: ai.maxAutopilotSteps,
+        confirmDangerous: ai.confirmDangerous,
       },
       editor: { ...editor },
       explorer: { ...explorer, exclude: [...explorer.exclude] },
@@ -292,6 +302,8 @@ export class SettingsStore {
 }
 
 function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void {
+  // Мастер-тумблер: выключает ассистент целиком, поэтому идёт первым.
+  if (patch.enabled !== undefined) target.enabled = patch.enabled === true;
   if (patch.activeProviderId !== undefined) target.activeProviderId = patch.activeProviderId;
   if (patch.activeModel !== undefined) target.activeModel = patch.activeModel;
   if (patch.temperature !== undefined) target.temperature = patch.temperature;
@@ -308,6 +320,7 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
   if (patch.maxAutopilotSteps !== undefined) {
     target.maxAutopilotSteps = clampSteps(patch.maxAutopilotSteps, target.maxAutopilotSteps);
   }
+  if (patch.confirmDangerous !== undefined) target.confirmDangerous = patch.confirmDangerous === true;
 
   // Провайдеров можно добавлять и править из интерфейса: ключ к ним приходит
   // отдельным вызовом ai.setApiKey, здесь только адрес и список моделей.
@@ -368,6 +381,10 @@ function loadSettings(filePath: string): StoredSettings {
   // Лимиты шагов могли прийти из старого файла или быть правлены руками.
   ai.maxSteps = clampSteps(storedAi.maxSteps, DEFAULT_SETTINGS.ai.maxSteps);
   ai.maxAutopilotSteps = clampSteps(storedAi.maxAutopilotSteps, DEFAULT_SETTINGS.ai.maxAutopilotSteps);
+  // Флаг могли записать чем угодно: оставляем строго булево значение.
+  ai.confirmDangerous = ai.confirmDangerous === true;
+  // Ассистент выключен только явным `false`: отсутствие поля читаем как «включён».
+  ai.enabled = ai.enabled !== false;
 
   return {
     ai,
