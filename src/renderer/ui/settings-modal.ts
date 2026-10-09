@@ -22,6 +22,14 @@ export interface SettingsModalDeps {
   rpc: RpcClient;
   commands: CommandRegistry;
   theme: ThemeService;
+  /**
+   * Проектные настройки из `.chui_ide`: `kind` — вид проекта для фильтрации
+   * секций, `patch` — сохранить правку проектных секций (editor/explorer/run/lsp).
+   */
+  project?: {
+    kind: () => string | null;
+    patch: (value: SettingsPatch) => Promise<Settings>;
+  };
 }
 
 export interface SettingsModalView {
@@ -163,7 +171,9 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   /** Отправить патч и запомнить нормализованный ответ main. */
   async function patch(value: SettingsPatch, rerender = false): Promise<void> {
     try {
-      settings = await deps.rpc.request('settings.update', value);
+      settings = deps.project
+        ? await deps.project.patch(value)
+        : await deps.rpc.request('settings.update', value);
       if (rerender) render();
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -682,32 +692,46 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   function renderRun(): Child[] {
     const run: RunSettings = settings!.run;
     const apply = (values: Partial<RunSettings>): void => void patch({ run: values });
+    const kind = deps.project?.kind() ?? null;
+    const showNode = kind !== 'python';
+    const showPython = kind !== 'node';
 
-    const pythonPath = textInput(run.pythonPath, (value) => apply({ pythonPath: value }));
-    pythonPath.placeholder = 'например, /usr/bin/python3 или .venv/bin/python';
+    const items: Child[] = [];
 
-    return [
-      field(
-        'Менеджер пакетов Node',
-        selectInput(
-          [
-            { value: 'auto', label: 'Автоматически' },
-            { value: 'npm', label: 'npm' },
-            { value: 'pnpm', label: 'pnpm' },
-            { value: 'yarn', label: 'yarn' },
-            { value: 'bun', label: 'bun' },
-          ],
-          run.packageManager,
-          (value) => apply({ packageManager: value as RunSettings['packageManager'] }),
+    if (showNode) {
+      items.push(
+        field(
+          'Менеджер пакетов Node',
+          selectInput(
+            [
+              { value: 'auto', label: 'Автоматически' },
+              { value: 'npm', label: 'npm' },
+              { value: 'pnpm', label: 'pnpm' },
+              { value: 'yarn', label: 'yarn' },
+              { value: 'bun', label: 'bun' },
+            ],
+            run.packageManager,
+            (value) => apply({ packageManager: value as RunSettings['packageManager'] }),
+          ),
         ),
-      ),
-      h('div', { class: 'field-hint' }, '«Автоматически» — по файлу блокировки в корне проекта: pnpm-lock.yaml, yarn.lock, bun.lockb, package-lock.json.'),
-      field('Интерпретатор Python', pythonPath),
-      h(
-        'div',
-        { class: 'field-hint' },
-        'Пусто — берём окружение проекта (`.venv/bin/python`), а без него системный `python3`. Путь с пробелами подставляется в команду в кавычках.',
-      ),
+        h('div', { class: 'field-hint' }, '«Автоматически» — по файлу блокировки в корне проекта: pnpm-lock.yaml, yarn.lock, bun.lockb, package-lock.json.'),
+      );
+    }
+
+    if (showPython) {
+      const pythonPath = textInput(run.pythonPath, (value) => apply({ pythonPath: value }));
+      pythonPath.placeholder = 'например, /usr/bin/python3 или .venv/bin/python';
+      items.push(
+        field('Интерпретатор Python', pythonPath),
+        h(
+          'div',
+          { class: 'field-hint' },
+          'Пусто — берём окружение проекта (`.venv/bin/python`), а без него системный `python3`. Путь с пробелами подставляется в команду в кавычках.',
+        ),
+      );
+    }
+
+    items.push(
       switchRow('Сохранять файлы перед запуском', run.saveBeforeRun, (value) => apply({ saveBeforeRun: value })),
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Что можно запустить'),
@@ -716,7 +740,9 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         { class: 'field-hint' },
         'Кнопка запуска появляется сама: Python и Node — файлом, если он запускаемый, и всегда — задачами из `scripts` в package.json. Горячие клавиши: Ctrl+F5 — запустить, Shift+F10 — выбрать.',
       ),
-    ];
+    );
+
+    return items;
   }
 
   function renderAppearance(): Child[] {

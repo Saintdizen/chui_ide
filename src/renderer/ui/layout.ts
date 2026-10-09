@@ -27,9 +27,18 @@ export interface Layout {
   setSidebarVisible(visible: boolean): void;
   setRightVisible(visible: boolean): void;
   setDockVisible(visible: boolean): void;
+  readonly sidebarSize: number;
+  readonly rightSize: number;
+  readonly dockSize: number;
+  setSidebarSize(size: number): void;
+  setRightSize(size: number): void;
+  setDockSize(size: number): void;
 }
 
-export function createLayout(mount: HTMLElement): Layout {
+export function createLayout(
+  mount: HTMLElement,
+  options: { onChange?: () => void } = {},
+): Layout {
   const topBarLeft = h('div', { class: 'topbar-left' });
   const topBarTitle = h('div', { class: 'topbar-title' });
   const topBarRight = h('div', { class: 'topbar-right' });
@@ -91,6 +100,7 @@ export function createLayout(mount: HTMLElement): Layout {
     invert: false,
     reset: 260,
     oppositeVar: '--right-width',
+    onCommit: options.onChange,
   });
   attachSplitter(root, rightSplitter, {
     cssVar: '--right-size',
@@ -100,9 +110,11 @@ export function createLayout(mount: HTMLElement): Layout {
     invert: true,
     reset: 400,
     oppositeVar: '--sidebar-width',
+    onCommit: options.onChange,
   });
   attachSplitter(root, dockSplitter, {
     cssVar: '--dock-size',
+    onCommit: options.onChange,
     axis: 'y',
     min: 100,
     max: 800,
@@ -138,14 +150,35 @@ export function createLayout(mount: HTMLElement): Layout {
     setSidebarVisible(visible: boolean) {
       sidebarVisible = visible;
       apply();
+      options.onChange?.();
     },
     setRightVisible(visible: boolean) {
       rightVisible = visible;
       apply();
+      options.onChange?.();
     },
     setDockVisible(visible: boolean) {
       dockVisible = visible;
       apply();
+      options.onChange?.();
+    },
+    get sidebarSize() {
+      return readLayoutSize(root, '--sidebar-size');
+    },
+    get rightSize() {
+      return readLayoutSize(root, '--right-size');
+    },
+    get dockSize() {
+      return readLayoutSize(root, '--dock-size');
+    },
+    setSidebarSize(size: number) {
+      root.style.setProperty('--sidebar-size', String(Math.round(size)) + 'px');
+    },
+    setRightSize(size: number) {
+      root.style.setProperty('--right-size', String(Math.round(size)) + 'px');
+    },
+    setDockSize(size: number) {
+      root.style.setProperty('--dock-size', String(Math.round(size)) + 'px');
     },
   };
 }
@@ -161,6 +194,8 @@ interface SplitterOptions {
   reset?: number;
   /** Переменная панели напротив: по ней считаем предел, чтобы не съесть редактор. */
   oppositeVar?: string;
+  /** Вызывается после изменения размера — для сохранения макета. */
+  onCommit?: () => void;
 }
 
 /** Ниже этого редактор уже не читается — дальше панель не пускаем. */
@@ -174,6 +209,12 @@ const MIN_EDITOR = 200;
  * и `pointermove` уходит в редактор, а перетаскивание «отваливается».
  * Захват перенаправляет все события разделителю, где бы курсор ни оказался.
  */
+function readLayoutSize(root: HTMLElement, cssVar: string): number {
+  const raw = getComputedStyle(root).getPropertyValue(cssVar).trim();
+  const value = Number.parseFloat(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
 function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: SplitterOptions): void {
   const horizontal = options.axis === 'x';
 
@@ -218,6 +259,7 @@ function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: Split
       splitter.removeEventListener('pointercancel', onUp);
       splitter.removeEventListener('lostpointercapture', onUp);
       if (splitter.hasPointerCapture(event.pointerId)) splitter.releasePointerCapture(event.pointerId);
+      options.onCommit?.();
     };
 
     splitter.addEventListener('pointermove', onMove);
@@ -229,6 +271,9 @@ function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: Split
   // Двойной клик возвращает размер по умолчанию — привычный жест.
   if (options.reset !== undefined) {
     const reset = options.reset;
-    splitter.addEventListener('dblclick', () => root.style.setProperty(options.cssVar, `${reset}px`));
+    splitter.addEventListener('dblclick', () => {
+      root.style.setProperty(options.cssVar, `${reset}px`);
+      options.onCommit?.();
+    });
   }
 }

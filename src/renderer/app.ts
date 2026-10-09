@@ -4,8 +4,16 @@ import {
   type DebugLaunchOptions,
   type SessionState,
   type Settings,
+  type SettingsPatch,
   type WorkspaceChangedPayload,
 } from '../shared/api';
+import {
+  PROJECT_SETTINGS_SECTIONS,
+  mergeDeep,
+  type ProjectConfig,
+  type ProjectLayout,
+  type ProjectSettings,
+} from '../shared/project-config';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -87,7 +95,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // поэтому UI не переспрашивает статус после каждой своей операции.
   const git = new GitModel(rpc, workspace);
 
-  const layout = createLayout(mount);
+  const layout = createLayout(mount, { onChange: () => void persistLayout() });
   const statusBar = createStatusBar({
     openGitManager: (anchor) => openGitManager(anchor),
     openPythonEnv: (anchor) => openPythonEnv(anchor),
@@ -97,7 +105,87 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   layout.statusBarHost.appendChild(statusBar.element);
 
-  let settings = await rpc.request('settings.get');
+  // ОбщеIDE-настройки хранятся в userData; настройки проекта (.chui_ide) ложатся поверх.
+  let baseSettings = await rpc.request('settings.get');
+  let projectSettings: ProjectSettings = {};
+  let settings = baseSettings;
+  const layoutGuard = { applying: false };
+  const rebuildSettings = (): Settings => {
+    const merged = mergeDeep(baseSettings, projectSettings);
+    settings = (merged ?? baseSettings) as Settings;
+    return settings;
+  };
+
+  // Правка настроек: IDE-секции уходят в userData, проектные (editor/explorer/run/lsp) — в .chui_ide.
+  async function saveSettingsPatch(value: SettingsPatch): Promise<Settings> {
+    const root = workspace.root;
+    const projectPatch: Record<string, unknown> = {};
+    const globalPatch: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if ((PROJECT_SETTINGS_SECTIONS as readonly string[]).includes(key)) projectPatch[key] = entry;
+      else globalPatch[key] = entry;
+    }
+    if (root && Object.keys(projectPatch).length > 0) {
+      const config = await rpc.request('project.updateSettings', {
+        root,
+        patch: projectPatch as ProjectSettings,
+      });
+      projectSettings = config.settings;
+    }
+    if (Object.keys(globalPatch).length > 0) {
+      baseSettings = await rpc.request('settings.update', globalPatch as SettingsPatch);
+    }
+    const next = rebuildSettings();
+    applySettings(next);
+    return next;
+  }
+
+  // Макет проекта: размеры и видимость панелей пишем в .chui_ide/layout.json.
+  async function persistLayout(): Promise<void> {
+    if (layoutGuard.applying) return;
+    const root = workspace.root;
+    if (!root) return;
+    await rpc
+      .request('project.saveLayout', {
+        root,
+        layout: {
+          sidebarSize: layout.sidebarSize,
+          rightSize: layout.rightSize,
+          dockSize: layout.dockSize,
+          sidebarVisible: layout.sidebarVisible,
+          rightVisible: layout.rightVisible,
+          dockVisible: layout.dockVisible,
+        },
+      })
+      .catch(() => undefined);
+  }
+
+  function applyProjectLayout(saved: ProjectLayout | null | undefined): void {
+    if (!saved) return;
+    layoutGuard.applying = true;
+    if (typeof saved.sidebarSize === 'number') layout.setSidebarSize(saved.sidebarSize);
+    if (typeof saved.rightSize === 'number') layout.setRightSize(saved.rightSize);
+    if (typeof saved.dockSize === 'number') layout.setDockSize(saved.dockSize);
+    if (typeof saved.sidebarVisible === 'boolean') layout.setSidebarVisible(saved.sidebarVisible);
+    if (typeof saved.rightVisible === 'boolean') layout.setRightVisible(saved.rightVisible);
+    if (typeof saved.dockVisible === 'boolean') layout.setDockVisible(saved.dockVisible);
+    layoutGuard.applying = false;
+  }
+
+  // При открытии проекта подтягиваем .chui_ide: настройки и макет.
+  async function loadProjectConfig(root: string): Promise<void> {
+    const config: ProjectConfig | null = await rpc
+      .request('project.config', { root })
+      .catch(() => null);
+    projectSettings = config?.settings ?? {};
+    applyProjectLayout(config?.layout);
+    applySettings(rebuildSettings());
+  }
+
+  function resetProjectConfig(): void {
+    projectSettings = {};
+    applySettings(rebuildSettings());
+  }
   const info = await rpc.request('app.info');
   console.info(`[chui] Electron ${info.electron} · Chromium ${info.chrome} · Node ${info.node} · ${info.platform}`);
 
@@ -130,7 +218,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   importChecker.attach();
 
   // Настройки — модальное окно поверх всего: и шапка, и панель AI открывают одно и то же.
-  const settingsModal = createSettingsModal({ rpc, commands, theme });
+  const settingsModal = createSettingsModal({
+    rpc,
+    commands,
+    theme,
+    project: {
+      kind: () => projectScan?.kind.id ?? null,
+      patch: (value) => saveSettingsPatch(value),
+    },
+  });
   document.body.appendChild(settingsModal.element);
 
   // Окно Python-окружений: создание venv рядом с настройками, поверх всего.
@@ -1710,7 +1806,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         break;
       }
       case PushTopic.SettingsChanged:
-        applySettings(message.payload as Settings);
+        baseSettings = message.payload as Settings;
+        applySettings(rebuildSettings());
         break;
       default:
         break;
@@ -1864,9 +1961,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void refreshScan();
     // Новый проект — могли появиться свои серверы в окружении (pylsp в venv).
     void ensureLspServers();
-    // Другой проект — другое рабочее место: восстанавливаем его из сессии.
-    if (info) void restoreSession(info.root);
-    else sessionRoot = null;
+    // Другой проект — другое рабочее место: восстанавливаем его из сессии,
+    // затем накладываем настройки и макет проекта из .chui_ide.
+    if (info) {
+      void restoreSession(info.root).then(() => loadProjectConfig(info.root));
+    } else {
+      sessionRoot = null;
+      resetProjectConfig();
+    }
   });
   editors.onCursorChange((state) => statusBar.update({ line: state.line, column: state.column }));
   rpc.onDidChangeStreaming((streaming) => statusBar.update({ ai: streaming ? 'генерация…' : 'готов' }));
