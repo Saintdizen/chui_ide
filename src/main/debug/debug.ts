@@ -53,7 +53,7 @@ export class DebugService {
 
   private phase: DebugPhase = 'idle';
   /** Точки останова по файлам: путь → строки. Набор шлём целиком, как велит DAP. */
-  private readonly breakpoints = new Map<string, number[]>();
+  private readonly breakpoints = new Map<string, DebugBreakpointInput[]>();
   /** Кадры текущего останова — по ним строится стек и запрашиваются переменные. */
   private frames: DebugFrame[] = [];
   /** Кадр, где стоит курсор: у него берём переменные по умолчанию. */
@@ -162,21 +162,32 @@ export class DebugService {
   /**
    * Задать точки останова файла. Отладчик ещё не запущен — просто запоминаем и
    * отдадим их при старте. Запущен — шлём сразу и возвращаем, что он подтвердил.
+   *
+   * Набор заменяется целиком, как велит DAP: отладчик не умеет «добавь одну» —
+   * он сверяет присланное со своим состоянием и гасит лишнее.
    */
-  async setBreakpoints(path: string, lines: readonly number[]): Promise<DebugBreakpoint[]> {
-    const sorted = [...new Set(lines.filter((line) => Number.isInteger(line) && line > 0))].sort((a, b) => a - b);
-    if (sorted.length === 0) this.breakpoints.delete(path);
-    else this.breakpoints.set(path, sorted);
+  async setBreakpoints(path: string, breakpoints: readonly DebugBreakpointInput[]): Promise<DebugBreakpoint[]> {
+    const wanted = normalizeBreakpoints(breakpoints);
+    if (wanted.length === 0) this.breakpoints.delete(path);
+    else this.breakpoints.set(path, wanted);
 
-    if (!this.child) return sorted.map((line) => ({ line, verified: false }));
+    if (!this.child) return wanted.map((item) => ({ ...item, verified: false }));
 
     const response = await this.call('setBreakpoints', {
       source: { path },
-      breakpoints: sorted.map((line) => ({ line })),
+      // Условные точки прокидываем как есть: `condition` — стандартное поле DAP,
+      // и debugpy его понимает. Пустое условие не шлём, чтобы не менять поведение.
+      breakpoints: wanted.map((item) => (item.condition ? { line: item.line, condition: item.condition } : { line: item.line })),
     }).catch(() => null);
-    const verified = (response?.body as { breakpoints?: Array<{ line?: number; verified?: boolean }> } | undefined)?.breakpoints ?? [];
-    // Отладчик может сдвинуть строку (пустая строка, закрывающая скобка) — берём его ответ.
-    return verified.map((item, index) => ({ line: item.line ?? sorted[index] ?? 0, verified: item.verified === true }));
+    const verified =
+      (response?.body as { breakpoints?: Array<{ line?: number; verified?: boolean }> } | undefined)?.breakpoints ?? [];
+    // Отладчик может сдвинуть строку (пустая строка, закрывающая скобка) — берём его ответ,
+    // но условие остаётся нашим: адаптер его не возвращает.
+    return verified.map((item, index) => ({
+      line: item.line ?? wanted[index]?.line ?? 0,
+      ...(wanted[index]?.condition ? { condition: wanted[index]!.condition } : {}),
+      verified: item.verified === true,
+    }));
   }
 
   async resume(): Promise<void> {
@@ -409,4 +420,25 @@ export class DebugService {
     const payload: DebugStatePayload = { phase, reason, topFrame: phase === 'stopped' ? topFrame : null };
     this.publish(PushTopic.DebugState, payload);
   }
+}
+
+/** Точка останова в том виде, в каком её присылает renderer. */
+export interface DebugBreakpointInput {
+  line: number;
+  condition?: string;
+}
+
+/**
+ * Привести точки к виду для DAP: только целые положительные строки, по одной на
+ * строку, по возрастанию. Условие обрезаем — модель или человек могли оставить
+ * хвостовые пробелы, а пустое условие означает обычную точку.
+ */
+function normalizeBreakpoints(breakpoints: readonly DebugBreakpointInput[]): DebugBreakpointInput[] {
+  const byLine = new Map<number, DebugBreakpointInput>();
+  for (const item of breakpoints) {
+    if (!Number.isInteger(item.line) || item.line < 1) continue;
+    const condition = item.condition?.trim();
+    byLine.set(item.line, condition ? { line: item.line, condition } : { line: item.line });
+  }
+  return [...byLine.values()].sort((a, b) => a.line - b.line);
 }

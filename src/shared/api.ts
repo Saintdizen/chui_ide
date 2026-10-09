@@ -566,9 +566,17 @@ export interface ThemeChangedPayload {
 /** Что делает сессия отладки прямо сейчас. */
 export type DebugPhase = 'idle' | 'starting' | 'running' | 'stopped';
 
-/** Точка останова: строка и подтвердил ли её отладчик (проверена ли исполнимость). */
+/**
+ * Точка останова.
+ *
+ * `condition` — выражение на языке отлаживаемой программы: останов происходит,
+ * только если оно истинно. Пустая строка — обычная точка, останавливается всегда.
+ */
 export interface DebugBreakpoint {
   line: number;
+  /** Условие останова; нет — точка безусловная. */
+  condition?: string;
+  /** Подтвердил ли точку отладчик (проверена ли исполнимость строки). */
   verified: boolean;
 }
 
@@ -1077,7 +1085,10 @@ export interface ChuiMethods {
   /** Начать отладку файла интерпретатором окружения. */
   'debug.start': { params: { program: string; cwd?: string }; result: { ok: boolean; message: string } };
   /** Точки останова файла: набор заменяется целиком, как в DAP. */
-  'debug.setBreakpoints': { params: { path: string; lines: number[] }; result: DebugBreakpoint[] };
+  'debug.setBreakpoints': {
+    params: { path: string; breakpoints: Array<{ line: number; condition?: string }> };
+    result: DebugBreakpoint[];
+  };
   'debug.continue': { params: void; result: void };
   'debug.step': { params: { kind: 'over' | 'into' | 'out' }; result: void };
   'debug.pause': { params: void; result: void };

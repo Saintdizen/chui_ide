@@ -162,7 +162,7 @@ describe('DebugService', () => {
   it('проходит цикл: точки останова, останов, стек, переменные, продолжение', async () => {
     const { service } = fakeService();
 
-    await service.setBreakpoints('/proj/app.py', [4]);
+    await service.setBreakpoints('/proj/app.py', [{ line: 4 }]);
     expect(service.status().phase).toBe('idle');
 
     const started = await service.start('/proj/app.py');
@@ -190,7 +190,7 @@ describe('DebugService', () => {
 
   it('сообщает об останове событием и рассылает фазы', async () => {
     const { service, events } = fakeService();
-    await service.setBreakpoints('/proj/app.py', [4]);
+    await service.setBreakpoints('/proj/app.py', [{ line: 4 }]);
     await service.start('/proj/app.py');
     await waitPhase(service, 'stopped');
 
@@ -226,7 +226,7 @@ describe('DebugService', () => {
 
   it('stop() возвращает сервис в покой', async () => {
     const { service } = fakeService();
-    await service.setBreakpoints('/proj/app.py', [4]);
+    await service.setBreakpoints('/proj/app.py', [{ line: 4 }]);
     await service.start('/proj/app.py');
     await waitPhase(service, 'stopped');
 
@@ -238,8 +238,42 @@ describe('DebugService', () => {
   it('точки останова запоминаются и подтверждаются молча, пока сессия не запущена', async () => {
     const { service } = fakeService();
     // До старта отладчика подтвердить некому: возвращаем тот же набор.
-    const confirmed = await service.setBreakpoints('/proj/app.py', [3, 1, 3]);
+    const confirmed = await service.setBreakpoints('/proj/app.py', [{ line: 3 }, { line: 1 }, { line: 3 }]);
     expect(confirmed.map((item) => item.line)).toEqual([1, 3]);
+    service.dispose();
+  });
+
+  it('условие точки сохраняется и переживает ответ отладчика', async () => {
+    const { service } = fakeService();
+    // Условие задаём до старта: подтвердить некому, но и потерять его нельзя.
+    const confirmed = await service.setBreakpoints('/proj/app.py', [
+      { line: 2 },
+      { line: 4, condition: 'n > 100' },
+    ]);
+    const conditional = confirmed.find((item) => item.line === 4);
+    expect(conditional?.condition).toBe('n > 100');
+    // У безусловной точки поля нет: пустая строка не должна выглядеть условием.
+    expect(confirmed.find((item) => item.line === 2)?.condition).toBeUndefined();
+
+    // Запускаем: адаптер отвечает по своим точкам, а условие остаётся нашим —
+    // в ответе DAP его нет, и без восстановления оно бы потерялось.
+    await service.start('/proj/app.py');
+    await waitPhase(service, 'stopped');
+    const runtime = await service.setBreakpoints('/proj/app.py', [{ line: 4, condition: 'n > 100' }]);
+    expect(runtime[0]?.condition).toBe('n > 100');
+    expect(runtime[0]?.verified).toBe(true);
+
+    service.dispose();
+  });
+
+  it('пустое условие и лишние пробелы не создают условие', async () => {
+    const { service } = fakeService();
+    const confirmed = await service.setBreakpoints('/proj/app.py', [
+      { line: 1, condition: '   ' },
+      { line: 2, condition: '  x > 1  ' },
+    ]);
+    expect(confirmed.find((item) => item.line === 1)?.condition).toBeUndefined();
+    expect(confirmed.find((item) => item.line === 2)?.condition).toBe('x > 1');
     service.dispose();
   });
 });

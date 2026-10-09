@@ -2,6 +2,7 @@ import * as monaco from 'monaco-editor';
 import type { DiagnosticItem, EditorSettings, LspDiagnostic } from '../../shared/api';
 import type { TextEdit } from '../../shared/edits';
 import './monaco-env';
+import type { BreakpointInput } from './debug';
 import type { TextDocument } from './document';
 import type { DocumentStore } from './document-store';
 import { Emitter } from './events';
@@ -52,6 +53,10 @@ export class EditorService {
   private readonly breakpointEmitter = new Emitter<RunMarkerHit>();
   readonly onBreakpointToggle = this.breakpointEmitter.event;
 
+  /** Правый клик по полю номеров строк: меню точки останова (условие, удаление). */
+  private readonly breakpointMenuEmitter = new Emitter<RunMarkerHit>();
+  readonly onBreakpointMenu = this.breakpointMenuEmitter.event;
+
   private readonly models = new Map<string, monaco.editor.ITextModel>();
   private readonly viewStates = new Map<string, monaco.editor.ICodeEditorViewState | null>();
   /** Значки запуска по файлам: нарисованные украшения нужно убирать перед новой отрисовкой. */
@@ -59,7 +64,7 @@ export class EditorService {
   private readonly runLines = new Map<string, ReadonlySet<number>>();
   /** Точки останова по файлам и их украшения — по тому же правилу, что значки запуска. */
   private readonly breakpointDecorations = new Map<string, string[]>();
-  private readonly breakpointLines = new Map<string, ReadonlySet<number>>();
+  private readonly breakpointLines = new Map<string, readonly BreakpointInput[]>();
   /** Подсветка строки, на которой стоит отладчик; null — отладка не стоит. */
   private debugLine: { path: string; line: number } | null = null;
   /** Украшения подсветки по файлам: перед новой отрисовкой их нужно снять. */
@@ -96,6 +101,14 @@ export class EditorService {
       const line = event.target.position?.lineNumber;
       const path = this.activePath;
       if (!line || !path) return;
+
+      // Правый клик — меню точки останова: условие и удаление. Оно доступно и там,
+      // где точки ещё нет: «поставить условную» начинается так же, как обычная.
+      if (event.event.rightButton) {
+        this.breakpointMenuEmitter.fire({ path, line });
+        return;
+      }
+
       // Значок ▶ и точка останова делят одно поле номеров строк. Значок важнее:
       // он есть только у строки-точки входа, а точку ставят где угодно.
       if (this.runLines.get(path)?.has(line)) this.runMarkerEmitter.fire({ path, line });
@@ -325,12 +338,13 @@ export class EditorService {
   }
 
   /**
-   * Точки останова файла: `lines` — строки, где отладчик должен остановиться.
-   * Рисуем красную точку на поле номеров строк — так же, как значки запуска.
+   * Точки останова файла: строка и, если задано, условие останова. Точка рисуется
+   * красным кружком на поле номеров строк; условная — ромбом и с условием в подсказке,
+   * чтобы её не путали с безусловной.
    */
-  setBreakpoints(path: string, lines: readonly number[]): void {
-    if (lines.length === 0) this.breakpointLines.delete(path);
-    else this.breakpointLines.set(path, new Set(lines));
+  setBreakpoints(path: string, breakpoints: readonly BreakpointInput[]): void {
+    if (breakpoints.length === 0) this.breakpointLines.delete(path);
+    else this.breakpointLines.set(path, breakpoints);
     this.drawBreakpoints(path);
   }
 
@@ -339,8 +353,8 @@ export class EditorService {
     if (!model) return;
 
     const previous = this.breakpointDecorations.get(path) ?? [];
-    const lines = [...(this.breakpointLines.get(path) ?? [])];
-    if (lines.length === 0) {
+    const breakpoints = this.breakpointLines.get(path) ?? [];
+    if (breakpoints.length === 0) {
       this.breakpointDecorations.delete(path);
       if (previous.length > 0) model.deltaDecorations(previous, []);
       return;
@@ -348,11 +362,13 @@ export class EditorService {
 
     const next = model.deltaDecorations(
       previous,
-      lines.map((line) => ({
-        range: new monaco.Range(line, 1, line, 1),
+      breakpoints.map((item) => ({
+        range: new monaco.Range(item.line, 1, item.line, 1),
         options: {
-          glyphMarginClassName: 'breakpoint-glyph',
-          glyphMarginHoverMessage: { value: 'Точка останова' },
+          glyphMarginClassName: item.condition ? 'breakpoint-glyph is-conditional' : 'breakpoint-glyph',
+          glyphMarginHoverMessage: {
+            value: item.condition ? `Точка останова с условием: ${item.condition}` : 'Точка останова',
+          },
           stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
         },
       })),

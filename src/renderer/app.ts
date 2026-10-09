@@ -46,6 +46,7 @@ import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-e
 import { createQuickOpen } from './ui/quick-open';
 import { createSymbolPicker } from './ui/symbol-picker';
 import { closePopupMenu, isPopupOpen, showPopupMenu } from './ui/popup-menu';
+import { createPromptModal } from './ui/prompt-modal';
 import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
 import { createSourceControl } from './ui/source-control';
@@ -593,6 +594,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const quickOpen = createQuickOpen({ rpc, workspace, openFile: (path) => openPath(path) });
   document.body.appendChild(quickOpen.element);
 
+  // Диалог ввода: условие точки останова. Один на приложение — открывается по месту.
+  const conditionInput = createPromptModal();
+  document.body.appendChild(conditionInput.element);
+
   // Поиск символа по проекту (Ctrl+T): файл открываем тем же путём, что и дерево,
   // а затем встаём на строку объявления.
   const symbolPicker = createSymbolPicker({
@@ -982,9 +987,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   define({ id: 'debug.toggleBreakpoint', title: 'Отладка: переключить точку останова', category: 'Отладка', keybinding: 'F9' }, async () => {
     const active = openEditors.active;
     if (!active) return;
-    const line = editors.cursor().line;
-    const lines = await debug.toggleBreakpoint(active.path, line);
-    editors.setBreakpoints(active.path, lines);
+    editors.setBreakpoints(active.path, await debug.toggleBreakpoint(active.path, editors.cursor().line));
   });
 
   define({ id: 'run.choose', title: 'Запустить…', category: 'Запуск', keybinding: 'Shift+F10' }, () => {
@@ -1422,8 +1425,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Файл стал активным — показываем его, а вкладка чата просто ждёт в полосе.
     if (openEditors.active) hideChatTab();
     // Точки останова контроллер помнит по файлам, а редактор о них не знает:
-    // при открытии вкладки отдаём ему набор — значки появятся сразу.
-    for (const path of openEditors.paths) editors.setBreakpoints(path, debug.linesOf(path));
+    // при открытии вкладки отдаём ему набор — значки (с условиями) появятся сразу.
+    for (const path of openEditors.paths) editors.setBreakpoints(path, debug.breakpointsOf(path));
   });
   // Счётчик правок и ветка в статусбаре живут по тому же снимку, что и дерево.
   git.onDidChange(refreshStatus);
@@ -1444,8 +1447,50 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Клик по полю номеров строк — точка останова: контроллер держит набор, а
   // редактор рисует по нему значки. Один источник истины — контроллер.
   editors.onBreakpointToggle(({ path, line }) => {
-    void debug.toggleBreakpoint(path, line).then((lines) => editors.setBreakpoints(path, lines));
+    void debug.toggleBreakpoint(path, line).then((breakpoints) => editors.setBreakpoints(path, breakpoints));
   });
+
+  /** Меню точки останова по правому клику на поле номеров строк. */
+  const openBreakpointMenu = ({ path, line }: { path: string; line: number }): void => {
+    const condition = debug.conditionOf(path, line);
+    const hasBreakpoint = debug.linesOf(path).includes(line);
+    showPopupMenu(
+      [
+        {
+          label: condition ? 'Изменить условие…' : 'Условие останова…',
+          onSelect: () => {
+            conditionInput.open({
+              title: 'Условие останова',
+              label: `Строка ${line}`,
+              value: condition ?? '',
+              placeholder: 'например n > 100',
+              confirmLabel: 'Задать',
+              onAccept: (value) => {
+                void debug.setCondition(path, line, value).then((breakpoints) => editors.setBreakpoints(path, breakpoints));
+              },
+            });
+          },
+        },
+        {
+          label: hasBreakpoint ? 'Убрать точку останова' : 'Поставить точку останова',
+          onSelect: () => {
+            void debug.toggleBreakpoint(path, line).then((breakpoints) => editors.setBreakpoints(path, breakpoints));
+          },
+        },
+      ],
+      lastPointer.x,
+      lastPointer.y,
+    );
+  };
+
+  // Правый клик на жёлобе: координаты берём из последнего события мыши — у самого
+  // события Monaco нет координат окна, а меню ставится по месту нажатия.
+  const lastPointer = { x: 0, y: 0 };
+  document.addEventListener('mousedown', (event) => {
+    lastPointer.x = event.clientX;
+    lastPointer.y = event.clientY;
+  }, true);
+  editors.onBreakpointMenu(openBreakpointMenu);
 
   // Останов: подсвечиваем строку и показываем панель. Пока программа идёт или
   // отладка не запущена — подсветки нет.

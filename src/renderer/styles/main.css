@@ -730,6 +730,14 @@ textarea {
   background: var(--red_prime_background);
 }
 
+/* Условная точка — ромб: её видно и без подсказки, и не спутать с безусловной. */
+.breakpoint-glyph.is-conditional::after {
+  width: 9px;
+  height: 9px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+
 /* Строка, где стоит отладчик: подсвечиваем всю строку, а не только жёлоб. */
 .debug-line {
   background: var(--debug_line_background);
@@ -3417,6 +3425,17 @@ textarea {
   grid-template-columns: 190px minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* Диалог одного поля: узкий и по высоте содержимого, а не 560 px, как настройки. */
+.prompt-modal {
+  width: min(420px, 100%);
+  height: auto;
+}
+
+.prompt-modal .modal-body {
+  display: block;
+  padding: 12px;
 }
 
 .modal-nav {
