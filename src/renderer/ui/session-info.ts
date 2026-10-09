@@ -28,6 +28,11 @@ export interface SessionInfoData {
   speed?: number;
   /** Явный размер окна из настроек; не задан — считается по имени модели. */
   contextWindow?: number;
+  /**
+   * Вопрос, который вот-вот уйдёт в модель, но ещё не попал в историю. Без него
+   * оценка перед отправкой занижена ровно на вес отправляемого сообщения.
+   */
+  pending?: string;
 }
 
 export interface SessionInfoView {
@@ -85,6 +90,9 @@ function split(data: SessionInfoData): Part[] {  let messages = 0;
     if (message.role === 'tool') results += size;
     else messages += size;
   }
+
+  // Вопрос, который ещё не в истории, но уже уезжает в модель.
+  if (data.pending) messages += data.pending.length;
 
   const files = data.attachments.reduce((sum, item) => sum + item.text.length, 0);
   const toolDefs = data.tools ? JSON.stringify(AGENT_TOOLS).length : 0;

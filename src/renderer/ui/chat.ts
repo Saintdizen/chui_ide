@@ -15,7 +15,8 @@ import {
   type Settings,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
-import { modelCapabilities } from '../../shared/providers';
+import { compactionBudgetChars, splitTranscript } from '../../shared/context-fit';
+import { contextWindow, modelCapabilities } from '../../shared/providers';
 import { languageFromPath } from '../core/languages';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
@@ -89,8 +90,36 @@ const COMPACT_PROMPT = [
   'и что осталось сделать. Пиши по пунктам, без вступлений и без кода целиком.',
 ].join('\n');
 
-/** Сколько символов беседы уезжает на сжатие: хвост важнее начала. */
-const MAX_COMPACT_CHARS = 40_000;
+/**
+ * Второй проход и дальше: продолжаем уже начатое резюме, а не начинаем заново —
+ * иначе каждый блок вытеснял бы из резюме предыдущий, и середина беседы терялась
+ * ровно так же, как при старом «сжимаем только хвост».
+ */
+const COMPACT_CONTINUE_PROMPT = [
+  'Дополни существующее резюме с учётом новой части беседы. Не пересказывай заново,',
+  'добавь только то, что в резюме ещё нет: запросы пользователя, изменённые файлы,',
+  'принятые решения, найденные ошибки, что осталось сделать. Пиши по пунктам, без кода целиком.',
+].join('\n');
+
+
+
+/**
+ * Доля окна, после которой освобождаем контекст заранее.
+ *
+ * Проверять «в упор» (used + ответ = всё окно) бесполезно: пока считаешь, история
+ * успевает дорасти, а провайдер отклонить запрос. Поэтому сжимаем с запасом —
+ * когда до предела остаётся 20%.
+ */
+const COMPACT_AT_RATIO = 0.8;
+
+/**
+ * Абсолютный предел истории в токенах — второй триггер сжатия.
+ *
+ * Доля окна плохо работает на больших окнах: 80% от миллиона токенов недостижимо
+ * за одну беседу, и автосжатие там не срабатывает никогда. Поэтому сжимаем ещё и
+ * тогда, когда история переросла это число, — так поведение не зависит от модели.
+ */
+const COMPACT_AT_TOKENS = 100_000;
 
 /**
  * Панель ассистента — правый «остров» в стиле tool window.
@@ -1036,7 +1065,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   /** Кольцо в углу композера показывает то же число, что и окно информации. */
   const contextRing = createUsageRing(() => toggleSessionInfo());
 
-  function sessionInfoData(session: ChatSession = active()): SessionInfoData {
+  function sessionInfoData(session: ChatSession = active(), pending = ''): SessionInfoData {
     return {
       provider: currentProvider()?.label ?? 'провайдер не задан',
       model: currentModel(),
@@ -1048,6 +1077,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       usage: session.usage,
       speed: session.speed,
       contextWindow: settings.ai.contextWindow,
+      ...(pending ? { pending } : {}),
     };
   }
 
@@ -1075,7 +1105,20 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (event.key === 'Escape' && sessionInfo.visible) sessionInfo.hide();
   });
 
-  /** Сжать указанную беседу: вернуть true, если резюме получено и история заменена. */
+  /** Бюджет одного прохода сжатия, в символах — от окна модели (см. `shared/context-fit`). */
+  function compactBudget(): number {
+    const limit = contextWindow(currentModel(), settings.ai.contextWindow);
+    return compactionBudgetChars(limit, settings.ai.maxTokens + 2_000);
+  }
+
+  /**
+   * Сжать указанную беседу: вернуть true, если резюме получено и история заменена.
+   *
+   * Длинную историю сжимаем каскадом: режем на части (см. `splitTranscript`) и ведём
+   * одно резюме, достраивая его на каждой части. Так в резюме попадает вся беседа, а
+   * не только хвост, — раньше на сжатие уезжал лишь последний кусок, и всё, что было
+   * до него, пропадало бесследно.
+   */
   async function compactSession(session: ChatSession): Promise<boolean> {
     const provider = currentProvider();
     const model = currentModel();
@@ -1084,32 +1127,46 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       return false;
     }
 
-    const transcript = session.history
-      .map((message) => `${message.role}: ${message.content ?? ''}`)
-      .join('\n\n')
-      .slice(-MAX_COMPACT_CHARS);
+    const blocks = splitTranscript(session.history, compactBudget());
+    if (blocks.length === 0) {
+      showToast('Беседа пуста — сжимать нечего');
+      return false;
+    }
 
     sessionInfo.hide();
     setBusy(true, session);
+    if (blocks.length > 1) {
+      showToast(`Сжимаю беседу: ${blocks.length} ${plural(blocks.length, 'этап', 'этапа', 'этапов')}`);
+    }
     try {
-      let streamed = '';
-      const done = await deps.rpc.stream(
-        'ai.chat',
-        {
-          providerId: provider.id,
-          model,
-          messages: [{ role: 'user', content: `${COMPACT_PROMPT}\n\n---\n${transcript}` }],
-          useTools: false,
-        },
-        (event, payload) => {
-          if (event === ChatStreamEvent.Delta) streamed += (payload as ChatDeltaPayload).text;
-        },
-      );
+      let summary = '';
+      for (let index = 0; index < blocks.length; index += 1) {
+        // Первый проход — резюме с нуля; дальше достраиваем накопленное, чтобы
+        // каждая новая часть не вытесняла предыдущие.
+        const prompt =
+          index === 0
+            ? `${COMPACT_PROMPT}\n\n---\n${blocks[index]}`
+            : `${COMPACT_CONTINUE_PROMPT}\n\n---\nТекущее резюме:\n${summary}\n\n---\nНовая часть беседы:\n${blocks[index]}`;
 
-      const summary = (done.text || streamed).trim();
-      if (!summary) {
-        showToast('Модель не вернула резюме', 'error');
-        return false;
+        let streamed = '';
+        const done = await deps.rpc.stream(
+          'ai.chat',
+          {
+            providerId: provider.id,
+            model,
+            messages: [{ role: 'user', content: prompt }],
+            useTools: false,
+          },
+          (event, payload) => {
+            if (event === ChatStreamEvent.Delta) streamed += (payload as ChatDeltaPayload).text;
+          },
+        );
+
+        summary = (done.text || streamed).trim();
+        if (!summary) {
+          showToast('Модель не вернула резюме', 'error');
+          return false;
+        }
       }
 
       const before = session.history.length;
@@ -1150,19 +1207,27 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /**
-   * Перед отправкой сверяемся с окном модели: если запрос плюс зарезервированный
-   * ответ не помещаются, сначала сжимаем беседу — иначе провайдер обрежет запрос
-   * или вернёт ошибку лимита. Сжимать нечего (короткая история) — просто предупреждаем.
+   * Перед отправкой решаем, не пора ли освободить контекст. Триггеров два:
+   * заполнение подошло к пределу окна (`COMPACT_AT_RATIO`, с запасом, а не «в упор»)
+   * либо история переросла абсолютный предел (`COMPACT_AT_TOKENS` — он выручает на
+   * моделях с огромным окном, где доля недостижима). Иначе провайдер обрежет запрос
+   * или вернёт ошибку лимита. Сжимать нечего — просто предупреждаем.
    */
-  async function ensureContextFits(session: ChatSession): Promise<void> {
-    const usage = contextUsage(sessionInfoData(session));
-    if (usage.used + settings.ai.maxTokens <= usage.limit) return;
+  async function ensureContextFits(session: ChatSession, pending: string): Promise<void> {
+    const usage = contextUsage(sessionInfoData(session, pending));
+    const nearWindow = usage.used + settings.ai.maxTokens > usage.limit * COMPACT_AT_RATIO;
+    const tooLong = usage.used > COMPACT_AT_TOKENS;
+    if (!nearWindow && !tooLong) return;
 
     if (session.history.length < 2) {
       showToast('Контекст переполнен, но сжимать почти нечего — ответ может обрезаться', 'error');
       return;
     }
-    showToast('Контекст переполнен — сжимаю беседу перед отправкой');
+    showToast(
+      nearWindow
+        ? 'Контекст переполнен — сжимаю беседу перед отправкой'
+        : 'Беседа слишком длинная — сжимаю перед отправкой',
+    );
     await compactSession(session);
   }
 
@@ -1660,7 +1725,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     // Не влезает в окно — сначала освобождаем контекст, потом спрашиваем.
-    await ensureContextFits(session);
+    // Вес самого вопроса тоже учитываем: в историю он попадёт лишь ниже.
+    await ensureContextFits(session, text);
 
     input.value = '';
     session.draft = '';

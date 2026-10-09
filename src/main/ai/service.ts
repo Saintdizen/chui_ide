@@ -15,8 +15,9 @@ import {
   type PlanStepStatus,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
-import { modelCapabilities, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
+import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec } from '../../shared/tools';
+import { estimateTokens, trimMessagesToFit } from '../../shared/context-fit';
 import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -29,6 +30,13 @@ import type { AiProvider } from './provider';
 /** Файлы с инструкциями проекта — подмешиваются в системный промпт. */
 const INSTRUCTION_FILES = ['AGENTS.md', 'CHUI.md', 'CLAUDE.md'];
 const MAX_INSTRUCTIONS_BYTES = 8000;
+
+/**
+ * Заметка на месте обрезанной истории. Агент должен знать, что начало беседы
+ * убрано, иначе будет ссылаться на то, чего в запросе уже нет.
+ */
+const TRIM_MARKER =
+  'Часть ранней истории беседы опущена: она не помещалась в окно модели. Если нужны детали — перечитай их инструментами.';
 
 // Лимиты шагов «модель → инструмент → модель» живут в настройках
 // (`ai.maxSteps` и `ai.maxAutopilotSteps`): значения по умолчанию — там же.
@@ -270,6 +278,12 @@ export class AiService {
     const maxTokens = request.maxTokens ?? settings.ai.maxTokens;
     const reasoningEffort = reasoningEffortFor(request.model, request.reasoningEffort ?? settings.ai.reasoningEffort);
 
+    // Предохранитель от переполнения окна посреди цикла: renderer проверил
+    // контекст перед отправкой, но шаги агента копят историю уже здесь, и
+    // сжатие, которое живёт в renderer, до этого места не достаёт.
+    const windowTokens = contextWindow(request.model, settings.ai.contextWindow);
+    const toolsTokens = tools ? estimateTokens(JSON.stringify(tools).length) : 0;
+
     // Вся ветка, порождённая этим вызовом. Renderer дописывает её в историю —
     // поэтому в следующем вопросе модель помнит, что успела прочитать.
     const produced: ChatMessage[] = [];
@@ -287,8 +301,19 @@ export class AiService {
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
 
+      // Каждый шаг сверяемся с окном: результаты инструментов копятся, и
+      // длинный прогон легко переполняет контекст. Режем старые ходы целиком,
+      // не трогая ни рамку запроса, ни пару «вызов → результат».
+      const wire = trimMessagesToFit(messages, {
+        limitTokens: windowTokens,
+        overheadTokens: toolsTokens,
+        reserveTokens: maxTokens,
+        keepRecent: 2,
+        marker: TRIM_MARKER,
+      });
+
       const done = await provider.streamChat(
-        { model: request.model, messages, temperature, maxTokens, reasoningEffort, tools },
+        { model: request.model, messages: wire.messages, temperature, maxTokens, reasoningEffort, tools },
         {
           onDelta: (delta) => {
             text += delta;
