@@ -1449,10 +1449,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   // Останов: подсвечиваем строку и показываем панель. Пока программа идёт или
   // отладка не запущена — подсветки нет.
+  let revealedFrameId: number | null = null;
   debug.onDidChange((state) => {
     const frame = state.phase === 'stopped' ? state.topFrame : null;
     editors.setDebugLine(frame?.path ?? null, frame?.line ?? null);
     if (state.phase !== 'idle') dock.show('debug');
+
+    // Остановились в файле, которого нет на экране, — открываем его и встаём на
+    // строку: иначе видно панель, но не место, где программа стоит. Делаем это
+    // только на НОВОМ останове: пока отладчик стоит, человек мог уйти в другой файл.
+    if (frame?.path && frame.id !== revealedFrameId) {
+      revealedFrameId = frame.id;
+      void openPath(frame.path).then(() => editors.revealDebugFrame(frame.path!, frame.line, frame.column));
+    }
+    if (state.phase === 'idle') revealedFrameId = null;
   });
   tools.onDidChange(() => {
     syncRunControl();
