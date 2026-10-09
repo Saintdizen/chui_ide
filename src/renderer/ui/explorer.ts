@@ -1,4 +1,5 @@
 import type { DirEntry, ExplorerSettings, GitChange } from '../../shared/api';
+import { isInsidePath, joinPath, nameOf, parentOf, pathAfter, splitPath } from '../../shared/paths';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
 import type { GitInsideChange, GitModel } from '../core/git-model';
@@ -87,6 +88,30 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const pending = new Map<string, Promise<void>>();
   const failed = new Set<string>();
   let inlineEdit: InlineEdit | null = null;
+  /** Просьба вернуть фокус дереву на ближайшей отрисовке (см. обработчик клика). */
+  let refocusTreeOnce = false;
+
+  /**
+   * Клавиши дерева. Слушаем на самом дереве, а не глобально: `Delete` в общей
+   * привязке удалял бы выбранный файл, пока человек набирает текст в редакторе —
+   * там событие приходит от скрытой textarea Monaco, и отличить его сложно.
+   */
+  const onTreeKey = (event: KeyboardEvent): void => {
+    const target = event.target as HTMLElement | null;
+    // Поле ввода живёт внутри дерева (создание, переименование) — там клавиши чужие.
+    if (target?.closest('input, textarea, select') || target?.isContentEditable) return;
+    if (!selected) return;
+
+    if (event.key === 'F2') {
+      event.preventDefault();
+      startRename(selected);
+      return;
+    }
+    if (event.key === 'Delete') {
+      event.preventDefault();
+      void deps.commands.execute('file.delete', selected);
+    }
+  };
   let selected: string | null = null;
   let root: string | null = null;
   let options: ExplorerSettings = FALLBACK_SETTINGS;
@@ -187,7 +212,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   };
 
   const commitCreate = async (edit: Extract<InlineEdit, { kind: 'create' }>, name: string): Promise<void> => {
-    const target = `${edit.parent}/${name}`;
+    const target = joinPath(edit.parent, name);
     try {
       if (edit.entryKind === 'directory') {
         await deps.commands.execute('file.createFolder', target);
@@ -202,9 +227,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   };
 
   const commitRename = async (path: string, name: string): Promise<void> => {
-    const parent = path.slice(0, path.lastIndexOf('/'));
-    if (name && `${parent}/${name}` !== path) {
-      await deps.commands.execute('file.rename', path, `${parent}/${name}`).catch(() => undefined);
+    // Новый путь — тот же каталог с новым именем. Родителя и соединение считает
+    // shared/paths: с жёстким «/» переименование на Windows дало бы «/имя».
+    const next = joinPath(parentOf(path), name);
+    if (name && next !== path) {
+      await deps.commands.execute('file.rename', path, next).catch(() => undefined);
     }
     await refresh();
   };
@@ -217,7 +244,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     selected = entry?.path ?? null;
     render();
 
-    const parent = entry ? (entry.kind === 'directory' ? entry.path : dirname(entry.path)) : (deps.workspace.root ?? '');
+    const parent = entry ? (entry.kind === 'directory' ? entry.path : parentOf(entry.path)) : (deps.workspace.root ?? '');
     const items = entry
       ? [
           { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },
@@ -257,7 +284,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     if (!root) return;
     if (selected) {
       const entry = findEntry(selected);
-      const parent = entry?.kind === 'directory' ? entry.path : dirname(selected);
+      const parent = entry?.kind === 'directory' ? entry.path : parentOf(selected);
       startCreateIn(parent, entryKind);
       return;
     }
@@ -266,7 +293,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   const startRename = (path: string): void => {
     const entry = findEntry(path);
-    inlineEdit = { kind: 'rename', path, currentName: entry?.name ?? basename(path) };
+    inlineEdit = { kind: 'rename', path, currentName: entry?.name ?? nameOf(path) };
     paint();
   };
 
@@ -294,12 +321,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const git = deps.git.changeInside(path);
     let count = git?.count ?? 0;
     let change: GitChange | null = git?.change ?? null;
-    // Разделитель — как в самом пути: main отдаёт родные (на Windows обратные),
-    // и с жёстким «/» несохранённые файлы внутри папок не считались бы.
-    const separator = path.includes('\\') ? '\\' : '/';
-    const prefix = path.endsWith(separator) ? path : `${path}${separator}`;
+    // С жёстким «/» несохранённые файлы внутри папок не считались бы на Windows.
     for (const document of deps.documents.dirty()) {
-      if (!document.path.startsWith(prefix)) continue;
+      if (!isInsidePath(path, document.path)) continue;
       count += 1;
       if (change === null) change = 'modified';
     }
@@ -385,6 +409,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
       row.addEventListener('click', () => {
         selected = entry.path;
+        // Перерисовка ниже уничтожит строку вместе с фокусом, а он нужен, чтобы
+        // работали F2 и Del. Просим вернуть фокус дереву ровно один раз — на
+        // ближайшей отрисовке, а не на каждой (иначе фокус выдёргивался бы из
+        // редактора при любом обновлении дерева).
+        refocusTreeOnce = true;
         // Папка раскрывается всегда одним кликом (так работает стрелка),
         // а файл — по настройке: PyCharm открывает двойным, VS Code — одинарным.
         if (isDirectory || options.openOnSingleClick) void onClick(entry);
@@ -480,8 +509,12 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       ),
     );
 
-    const tree = h('div', { class: 'tree' });
+    // tabindex -1: дерево можно сфокусировать программно (в мышь и клавиатуру
+    // табом оно не попадает). Фокус нужен, чтобы F2 и Del относились к дереву,
+    // а не к редактору: глобальная привязка Delete удаляла бы файл при наборе.
+    const tree = h('div', { class: 'tree', tabindex: '-1' });
     tree.addEventListener('contextmenu', (event) => openMenu(null, event));
+    tree.addEventListener('keydown', (event) => onTreeKey(event));
     element.appendChild(tree);
 
     const entries = children.get(info.root);
@@ -501,6 +534,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       tree.appendChild(inlineInput(0, '', (value) => void commitCreate(edit, value)));
     }
     renderRows(tree, entries, 0, info.root);
+
+    // Строку перерисовали — возвращаем фокус дереву, если его туда просили
+    // (клик по строке). Один раз: иначе фокус выдёргивался бы из редактора при
+    // каждом обновлении дерева.
+    if (refocusTreeOnce) {
+      refocusTreeOnce = false;
+      tree.focus();
+    }
   };
 
   /**
@@ -521,13 +562,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   const reveal = (target: string): void => {
     const info = deps.workspace.current;
-    if (!info || !target.startsWith(info.root)) return;
+    if (!info || !isInsidePath(info.root, target)) return;
 
-    const segments = target.slice(info.root.length + 1).split('/');
+    // Раскрываем папки пути по очереди: сегменты режем по обоим разделителям,
+    // а собираем обратно тем, что у корня (путь уходит дальше в main).
+    const segments = splitPath(pathAfter(info.root, target));
     segments.pop();
     let current = info.root;
     for (const segment of segments) {
-      current = `${current}/${segment}`;
+      current = joinPath(current, segment);
       expanded.add(current);
       if (!children.has(current)) void load(current).then(render);
     }
@@ -587,7 +630,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       // проекта или переименованная папка не должна ломать дерево.
       for (const item of paths) {
         if (!root) break;
-        if (item === root || item.startsWith(`${root}/`)) expanded.add(item);
+        // Разделитель берётся из пути: с шаблоном `${root}/` на Windows папки
+        // прошлой сессии не восстанавливались.
+        if (isInsidePath(root, item)) expanded.add(item);
       }
       // Отрисовка сама подтянет корень и раскрытые уровни (см. `paint`).
       render();
@@ -625,15 +670,7 @@ function matchesGlob(name: string, relative: string, pattern: string): boolean {
   return regexp.test(name) || regexp.test(relative);
 }
 
-function basename(target: string): string {
-  const index = target.lastIndexOf('/');
-  return index < 0 ? target : target.slice(index + 1);
-}
-
-function dirname(target: string): string {
-  const index = target.lastIndexOf('/');
-  return index <= 0 ? '/' : target.slice(0, index);
-}
+/* Имя и родителя пути считает shared/paths: разделитель там берётся из пути. */
 
 /** Есть ли активное создание внутри указанной папки. */
 function isCreateTarget(

@@ -1,3 +1,4 @@
+import { joinPath, splitPath } from '../../shared/paths';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
 import type { OpenEditors } from '../core/open-editors';
@@ -27,7 +28,7 @@ export function createBreadcrumbs(deps: BreadcrumbsDeps): HTMLElement {
     const relative = document && root ? deps.workspace.relative(document.path) : null;
     const local = relative && relative !== document?.path ? relative : null;
     // Пути приходят в родных разделителях (на Windows — обратные), поэтому режем по обоим.
-    const segments = local ? local.split(/[/\\]/) : [];
+    const segments = local ? splitPath(local) : [];
 
     // Крошки нужны, только когда есть куда идти: для файла в корне проекта путь — одно имя,
     // и оно уже есть во вкладке и в статусбаре.
@@ -35,12 +36,11 @@ export function createBreadcrumbs(deps: BreadcrumbsDeps): HTMLElement {
     if (element.hidden) return;
 
     let walking = root ?? '';
-    // Собираем обратно тем же разделителем, что и корень: путь уходит в revealPath.
-    const separator = (root ?? '').includes('\\') ? '\\' : '/';
     for (let index = 0; index < segments.length; index += 1) {
       const segment = segments[index]!;
       const isFile = index === segments.length - 1;
-      walking = walking ? `${walking}${separator}${segment}` : segment;
+      // Собираем обратно тем же разделителем, что у корня: путь уходит в revealPath.
+      walking = joinPath(walking, segment);
       const target = walking;
 
       const crumb = h(

@@ -7,6 +7,7 @@ import {
   type GitStatus,
 } from '../../shared/api';
 import { Emitter } from './events';
+import { separatorOf } from '../../shared/paths';
 import type { RpcClient } from './rpc';
 import type { WorkspaceModel } from './workspace-model';
 
@@ -43,9 +44,12 @@ const CHANGE_WEIGHT: Record<GitFileStatus['change'], number> = {
 export function changeInsideFolders(files: readonly GitFileStatus[]): Map<string, GitInsideChange> {
   const inside = new Map<string, GitInsideChange>();
   for (const file of files) {
-    const separator = file.path.includes('\\') ? '\\' : '/';
+    // Режем по обоим разделителям, собираем обратно родным для пути: с жёстким «/»
+    // на Windows папок не находилось вовсе.
+    const separator = separatorOf(file.path);
     const parts = file.path.split(/[/\\]/);
-    // Первый сегмент — корень («») или диск («C:»): папкой он не считается.
+    // depth начинается с 2: нулевой сегмент — корень («») или диск («C:»),
+    // папкой он не считается, а `parts.slice(0, 2)` — уже первая настоящая папка.
     for (let depth = 2; depth < parts.length; depth += 1) {
       const folder = parts.slice(0, depth).join(separator);
       const known = inside.get(folder);

@@ -1,4 +1,5 @@
 import type { DirEntry, WorkspaceInfo } from '../../shared/api';
+import { pathAfter } from '../../shared/paths';
 import { Emitter } from './events';
 import type { RpcClient } from './rpc';
 
@@ -60,17 +61,13 @@ export class WorkspaceModel {
 }
 
 /**
- * `node:path` в renderer нет и быть не должно (изоляция контекста),
- * поэтому путь считается строками.
+ * Путь относительно корня — им пользуются крошки, статусбар и запуск.
  *
- * Разделитель берём из самого пути, а не считаем его всегда прямым: main отдаёт
- * пути как есть (`path.join`), и на Windows это обратные слэши. С прежним
- * «всегда /» относительный путь на Windows не находился, и файл выглядел как
- * лежащий вне проекта — ломались хлебные крошки и запуск (он требует путь от корня).
+ * Считаем строками (`node:path` в renderer нет), но разделитель берём из пути:
+ * main отдаёт родные, и на Windows это обратные слэши. Со «всегда /» путь внутри
+ * проекта не находился, файл выглядел лежащим вне корня, и у него не было кнопки
+ * запуска. Общее правило — в `shared/paths`.
  */
 export function relativePath(root: string, target: string): string {
-  if (target === root) return '';
-  const separator = root.includes('\\') ? '\\' : '/';
-  const prefix = root.endsWith(separator) ? root : `${root}${separator}`;
-  return target.startsWith(prefix) ? target.slice(prefix.length) : target;
+  return pathAfter(root, target);
 }
