@@ -77,6 +77,53 @@ const dirs: string[] = [];
 const children: ChildProcess[] = [];
 
 /**
+ * Дождаться гибели процесса, запущенного тестом.
+ *
+ * Windows не отдаёт каталог, пока в нём живёт процесс: временный каталог — это
+ * рабочий каталог цели (`cwd`), и `rmdir` до её смерти падает с `EBUSY`. Поэтому
+ * уборку начинаем не с удаления, а с ожидания выхода.
+ */
+function stopChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    // Сигнал может не подействовать: ждать процесс бесконечно нельзя.
+    const timer = setTimeout(resolve, 2000);
+    child.once('exit', () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    child.kill();
+  });
+}
+
+/**
+ * Убрать временные каталоги, подождав их освобождения.
+ *
+ * `fs.rmSync` попытки не повторяет, даже когда задан `maxRetries`: повторы есть
+ * только у асинхронного `fs.rm`, а в синхронном они молча не работают (проверено
+ * на Node 22: подменённый `rmdir` вызывается ровно один раз при любом значении).
+ * Освобождение каталога после гибели процесса на Windows при этом отстаёт —
+ * поэтому повторяем сами. Молча сдаться нельзя: застрявший каталог означает, что
+ * процесс всё ещё жив, и об этом надо сказать вслух.
+ */
+async function removeDirs(directories: string[]): Promise<void> {
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    let lastError: unknown = null;
+    for (const dir of directories) {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError === null) return;
+    if (Date.now() > deadline) throw lastError;
+    await new Promise<void>((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+/**
  * Поднять процесс с открытым инспектором — так его поднял бы человек, а отладчик
  * к нему только подключается. Порт Node печатает сам (`--inspect=…:0`), поэтому
  * вычитываем его из stderr, а не назначаем заранее: занятый порт ломал бы прогон.
@@ -208,11 +255,11 @@ function writeCompiled(dir: string): { original: string; generated: string } {
 }
 
 describe('NodeAdapter', () => {
-  afterEach(() => {
-    for (const child of children.splice(0)) child.kill();
-    // Windows не отпускает каталог сразу после убийства процесса: без повторов
-    // `rmSync` падает с EBUSY — и это падение засчитывается тесту.
-    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  afterEach(async () => {
+    // Сначала процессы, потом каталоги: пока жив хотя бы один, Windows не отдаёт
+    // каталог, в котором он работал (а это и есть `cwd` наших целей).
+    await Promise.all(children.splice(0).map(stopChild));
+    await removeDirs(dirs.splice(0));
   });
 
   it('отлаживает JS: точки останова, стек, переменные, вычисление, шаг, продолжение', async () => {
