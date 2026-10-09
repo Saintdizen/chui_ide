@@ -655,7 +655,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    */
   function syncRunControl(): void {
     const active = openEditors.active;
-    runControl.update(targetsFor(active));
+    // Без открытого файла кнопки запуска нет: она говорит о том, что запустится
+    // в файле, а в пустом редакторе остаётся только заглушка с подсказками.
+    // Запуск без файла никуда не девается — он есть в палитре (Shift+F10).
+    runControl.update(active ? targetsFor(active) : []);
 
     // Полоса под вкладками нужна ровно тогда, когда в ней есть что показать:
     // путь из одного сегмента крошек не рисует, и без кнопки запуска
