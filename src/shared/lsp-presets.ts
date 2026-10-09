@@ -51,19 +51,32 @@ export function presetCommands(): string[] {
  * сервер: два сервера одного языка конфликтовали бы (в рантайме ключ — язык).
  */
 export function matchPresets(available: Iterable<string>): LspServerConfig[] {
-  const found = new Set(available);
-  const byLanguage = new Map<string, LspServerConfig>();
+  // Сопоставляем по имени файла: команда может прийти и именем из PATH, и полным
+  // путём к бинарнику в venv — в обоих случаях запускать нужно то, что нашли.
+  const found = new Map<string, string>();
+  for (const item of available) {
+    const name = baseName(item).replace(/\.(exe|cmd|bat)$/i, '');
+    if (!found.has(name)) found.set(name, item);
+  }
 
+  const byLanguage = new Map<string, LspServerConfig>();
   for (const preset of LSP_PRESETS) {
     if (byLanguage.has(preset.language)) continue;
-    if (!found.has(preset.command)) continue;
+    const command = found.get(preset.command);
+    if (!command) continue;
     byLanguage.set(preset.language, {
       language: preset.language,
-      command: preset.command,
+      command,
       args: [...preset.args],
       enabled: true,
     });
   }
 
   return [...byLanguage.values()];
+}
+
+/** Имя файла без каталога: пути на Windows и POSIX режутся одним правилом. */
+function baseName(target: string): string {
+  const index = Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\'));
+  return index < 0 ? target : target.slice(index + 1);
 }

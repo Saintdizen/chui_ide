@@ -115,6 +115,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     stickyScroll: false,
     quickSuggestions: true,
     showUnused: true,
+    // Форматирование при сохранении по умолчанию выключено: правка пробелов
+    // на каждое сохранение — заметное вмешательство, включается осознанно.
+    formatOnSave: false,
   },
   explorer: {
     icons: true,
@@ -136,6 +139,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     pythonPath: '',
     packageManager: 'auto',
     saveBeforeRun: true,
+    pythonByRoot: {},
   },
   appearance: {
     // «Системная» — разумная точка входа: IDE подстраивается под схему рабочего стола.
@@ -399,7 +403,7 @@ function loadSettings(filePath: string): StoredSettings {
         ? parsed.explorer.exclude.filter((item): item is string => typeof item === 'string')
         : [],
     },
-    run: { ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) },
+    run: sanitizeRun({ ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) }),
     appearance: { ...DEFAULT_SETTINGS.appearance, ...(parsed.appearance ?? {}) },
     workspace: {
       ...DEFAULT_SETTINGS.workspace,
@@ -418,6 +422,23 @@ function clampSteps(value: unknown, fallback: number): number {
   const rounded = Math.round(Number(value));
   if (!Number.isFinite(rounded) || rounded < 1 || rounded > 500) return fallback;
   return rounded;
+}
+
+/** Настройки запуска: путь к интерпретатору и карта «проект → интерпретатор». */
+function sanitizeRun(value: RunSettings): RunSettings {
+  const byRoot: Record<string, string> = {};
+  const raw = value.pythonByRoot;
+  if (raw && typeof raw === 'object') {
+    for (const [root, interpreter] of Object.entries(raw)) {
+      if (typeof interpreter === 'string' && interpreter.trim()) byRoot[root] = interpreter;
+    }
+  }
+  return {
+    pythonPath: typeof value.pythonPath === 'string' ? value.pythonPath : '',
+    packageManager: value.packageManager ?? 'auto',
+    saveBeforeRun: value.saveBeforeRun !== false,
+    pythonByRoot: byRoot,
+  };
 }
 
 /** Языковые серверы правит человек в settings.json: приводим к безопасному виду. */

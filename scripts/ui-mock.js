@@ -250,6 +250,7 @@ module.exports = [
       stickyScroll: false,
       quickSuggestions: true,
       showUnused: true,
+      formatOnSave: false,
     },
     // Проводник и запуск: мок повторяет контракт настроек из shared/api.ts.
     explorer: {
@@ -265,7 +266,7 @@ module.exports = [
       confirmDelete: true,
       exclude: [],
     },
-    run: { pythonPath: '', packageManager: 'auto', saveBeforeRun: true },
+    run: { pythonPath: '', packageManager: 'auto', saveBeforeRun: true, pythonByRoot: {} },
     // Языковые серверы: как main — секция есть всегда, по умолчанию выключена.
     lsp: { enabled: false, servers: [] },
     // «Системная» — чтобы схему в проверке задавал Playwright (`emulateMedia`).
@@ -589,11 +590,37 @@ module.exports = [
     'lsp.close': () => undefined,
     'lsp.restart': () => ({ running: [] }),
     'lsp.status': () => ({ running: [] }),
+    // Подсказок в моке нет: пустой ответ — как у сервера без таких возможностей.
+    'lsp.request': () => null,
+    'lsp.symbols': () => [],
     // Как main: «нашлись» только pylsp и typescript-language-server.
     'lsp.detect': () => [
       { language: 'python', command: 'pylsp', args: [], enabled: true },
       { language: 'typescript', command: 'typescript-language-server', args: ['--stdio'], enabled: true },
     ],
+    // Карта проекта и окружения — заглушки: главное, чтобы методы отвечали.
+    'project.scan': () => ({
+      root: currentRoot ?? '',
+      name: currentRoot ? currentRoot.split('/').pop() : '',
+      fileCount: 0,
+      dirCount: 0,
+      languages: [],
+      markers: [],
+      kind: { id: 'unknown', label: 'Неизвестно', source: 'none' },
+      testFiles: [],
+      testDirs: [],
+      entryPoints: [],
+    }),
+    'python.environments': () => [],
+    // Проверка импортов в моке ничего не находит: окружение не настоящее.
+    'imports.missing': () => ({ missing: [] }),
+    'python.packages': () => [],
+    'python.install': () => ({ installed: [] }),
+    'python.tests': () => ({ tests: [], total: 0, errors: [] }),
+    'python.envHealth': () => [],
+    'python.format': (params) => ({ text: params.text ?? '', tool: null }),
+    // Интерпретаторов в моке нет: список пуст — как на системе без питона.
+    'python.interpreters': () => [],
     // Проверка подключения: два понятных исхода вместо исключения.
     'ai.test': (params) => {
       if (/bad|invalid/i.test(params.baseUrl)) {

@@ -6,6 +6,7 @@ import {
   MAX_CHAT_IMAGES,
   PushTopic,
   RpcErrorCode,
+  VenvEvent,
   type AppInfo,
   type ChatRequest,
   type ParamsOf,
@@ -21,7 +22,16 @@ import type { GitService } from '../git/git';
 import type { LspService } from '../lsp/lsp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
-import { detectAvailableCommands } from '../lsp/detect';
+import { detectAvailableCommands, detectVenvCommands } from '../lsp/detect';
+import { scanProject } from '../project/scan';
+import { activateCommand, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
+import { missingPackages } from '../node/packages';
+import { missingModules } from '../python/packages';
+import { findInterpreters } from '../python/interpreters';
+import { installPackages, installedPackages } from '../python/pip';
+import { collectTests } from '../python/tests';
+import { formatPython } from '../python/format';
+import { checkEnvironments } from '../python/health';
 import type { SessionStore } from '../session-store';
 import { matchPresets } from '../../shared/lsp-presets';
 import type { TerminalService } from '../terminal/terminal';
@@ -164,6 +174,98 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
 
   router.register('workspace.current', () => ({ root: deps.workspace.rootPath() }));
 
+  /** Корень проекта нужен методам, читающим файлы: без него им нечего сканировать. */
+  const requireRoot = (): string => {
+    const root = deps.workspace.rootPath();
+    if (!root) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Рабочая папка не открыта');
+    return root;
+  };
+
+  /**
+   * Интерпретатор для проверок: путь из настроек, иначе окружение проекта,
+   * а в крайнем случае — системный. Тем же путём его выбирает и запуск кода:
+   * проверять импорты чужим питоном значило бы врать про окружение.
+   */
+  const resolvePython = (root: string | null): string => {
+    const run = deps.settings.get().run;
+    // Интерпретатор, выбранный для конкретного проекта, важнее общего: два
+    // Python-проекта не должны подменять друг другу окружение.
+    const perProject = (root ? run.pythonByRoot[root] : undefined)?.trim() ?? '';
+    const configured = perProject || run.pythonPath;
+    const byPath = pythonInterpreterFor(root, configured);
+    if (byPath) return byPath;
+    const bare = configured.trim();
+    if (bare) return bare;
+    return process.platform === 'win32' ? 'python' : 'python3';
+  };
+
+  // Карта проекта: обход имён без чтения содержимого, поэтому можно звать часто.
+  router.register('project.scan', async () => scanProject(requireRoot()));
+
+  /* ── Python: виртуальные окружения проекта ─────────────────────────────── */
+
+  // Главное окружение идёт первым — на него ориентируются запуск, тесты и подсказки.
+  router.register('python.environments', () => findEnvironments(requireRoot(), process.platform));
+
+  // Установленные в системе интерпретаторы: их выбор нужен при создании окружения.
+  router.register('python.interpreters', () => findInterpreters(process.platform));
+
+  // Создание долгое: шаги и вывод команд уезжают событиями, как у `git.clone`.
+  router.register('python.createVenv', (params, ctx) =>
+    createVenv(requireRoot(), params, (payload) => ctx.emit(VenvEvent.Progress, payload), ctx.signal),
+  );
+
+  router.register('python.activateCommand', async () => {
+    const root = requireRoot();
+    const environments = await findEnvironments(root, process.platform);
+    const primary = environments.find((environment) => environment.primary);
+    return { command: primary ? activateCommand(root, primary.path, process.platform) : null };
+  });
+
+  // Проверка импортов: какие модули файл подключает, а проект их не видит.
+  // У Python окружение — интерпретатор, у JS/TS — каталоги `node_modules`.
+  router.register('imports.missing', async (params) => {
+    const root = deps.workspace.rootPath();
+    const missing =
+      params.language === 'python'
+        ? await missingModules(root, resolvePython(root), params.modules)
+        : await missingPackages(root, params.modules);
+    return { missing };
+  });
+
+  // Установленные пакеты главного окружения: имя и версия.
+  router.register('python.packages', () =>
+    installedPackages(resolvePython(deps.workspace.rootPath()), deps.workspace.rootPath() ?? undefined),
+  );
+
+  // Установка долгая: шаги и вывод pip уезжают событиями, как при создании окружения.
+  router.register('python.install', (params, ctx) => {
+    const root = requireRoot();
+    return installPackages(
+      root,
+      resolvePython(root),
+      params,
+      (payload) => ctx.emit(VenvEvent.Progress, payload),
+      ctx.signal,
+    );
+  });
+
+  // Список тестов проекта: сбор без выполнения самих тестов.
+  router.register('python.tests', () => {
+    const root = requireRoot();
+    return collectTests(root, resolvePython(root));
+  });
+
+  // Здоровье окружений: читаем `pyvenv.cfg` и смотрим, на месте ли базовый питон и pip.
+  router.register('python.envHealth', () => checkEnvironments(requireRoot(), process.platform));
+
+  // Форматирование: текст приходит из renderer и туда же уходит результат —
+  // правку проводит документ, чтобы работали undo и сохранение.
+  router.register('python.format', (params) => {
+    const root = requireRoot();
+    return formatPython(root, resolvePython(root), params.path, params.text);
+  });
+
   // Сессия проекта: renderer собирает состояние и кладёт сюда, а при следующем
   // открытии забирает обратно. Без хранилища (пробники) отвечаем пустой сессией.
   router.register('session.load', (params) =>
@@ -288,7 +390,25 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   });
   router.register('lsp.restart', () => deps.lsp?.restart() ?? { running: [] });
   router.register('lsp.status', () => deps.lsp?.status() ?? { running: [] });
-  router.register('lsp.detect', async () => matchPresets(await detectAvailableCommands()));
+  // Прокси к серверу: подсказки, наведение, переход к определению. Сервера нет —
+  // возвращаем null, и редактор просто не покажет подсказку.
+  router.register('lsp.request', (params) =>
+    deps.lsp?.request(params.path, params.method, params.params) ?? null,
+  );
+  // Символы проекта: сервер ищет по всему проекту, а не по открытому файлу.
+  router.register('lsp.symbols', (params) => deps.lsp?.projectSymbols(params.query) ?? []);
+
+  // Кроме PATH смотрим окружение проекта: pylsp, ruff и прочие, поставленные в
+  // venv, видит только оно — системный питон чужие пакеты не видит. Окружение
+  // идёт первым: сервер из него и запускать предпочтительнее.
+  router.register('lsp.detect', async () => {
+    const commands = await detectAvailableCommands();
+    const root = deps.workspace.rootPath();
+    const environments = root ? await findEnvironments(root, process.platform) : [];
+    const primary = environments.find((environment) => environment.primary);
+    const venvCommands = primary ? await detectVenvCommands(primary.path, process.platform) : [];
+    return matchPresets([...venvCommands, ...commands]);
+  });
 
   /**
    * Ассистент выключается мастер-тумблером в настройках. Проверяем на входе:

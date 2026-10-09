@@ -36,7 +36,7 @@ export function createPalette(deps: { commands: CommandRegistry }): PaletteView 
       .list()
       .filter((descriptor) => {
         if (!query) return true;
-        const haystack = `${descriptor.title} ${descriptor.category} ${descriptor.id}`.toLowerCase();
+        const haystack = `${descriptor.title} ${descriptor.category} ${descriptor.id} ${(descriptor.keywords ?? []).join(' ')}`.toLowerCase();
         return haystack.includes(query);
       })
       .slice(0, 40);

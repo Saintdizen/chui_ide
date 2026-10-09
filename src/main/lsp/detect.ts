@@ -43,3 +43,26 @@ export async function detectAvailableCommands(): Promise<string[]> {
   const checks = await Promise.all(presetCommands().map(async (command) => ((await isOnPath(command)) ? command : null)));
   return checks.filter((command): command is string => command !== null);
 }
+
+/**
+ * Команды LSP из каталога окружения Python: там живут pylsp, ruff и прочие,
+ * поставленные в venv. Отдельно от PATH, потому что сервер в окружении проекта
+ * видит его пакеты, а системный — нет.
+ */
+export async function detectVenvCommands(venvDir: string, platform: string): Promise<string[]> {
+  const binDir = platform === 'win32' ? `${venvDir}/Scripts` : `${venvDir}/bin`;
+  const checks = await Promise.all(
+    presetCommands().map(async (command) => {
+      for (const name of executableNames(command)) {
+        try {
+          await access(path.join(binDir, name), constants.X_OK);
+          return path.join(binDir, name);
+        } catch {
+          // нет здесь — пробуем следующее имя
+        }
+      }
+      return null;
+    }),
+  );
+  return checks.filter((command): command is string => command !== null);
+}

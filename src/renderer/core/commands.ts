@@ -4,6 +4,8 @@ export interface CommandDescriptor {
   id: string;
   title: string;
   category: string;
+  /** Дополнительные слова для поиска в палитре: синонимы и аббревиатуры. */
+  keywords?: readonly string[];
   /** Подсказка для UI; реальные акселераторы дублируются в меню приложения. */
   keybinding?: string;
 }

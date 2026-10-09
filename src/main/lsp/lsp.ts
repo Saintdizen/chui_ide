@@ -6,6 +6,7 @@ import {
   type LspServerConfig,
   type LspSettings,
 } from '../../shared/api';
+import { toProjectSymbols, type ProjectSymbol } from '../../shared/lsp-symbols';
 
 /**
  * Языковые серверы (LSP) в main-процессе.
@@ -131,6 +132,18 @@ interface ServerRuntime {
   readonly connection: JsonRpcConnection;
   readonly initialized: Promise<void>;
   readonly versions: Map<string, number>;
+  /** Что сервер умеет: спрашивать то, чего нет, бессмысленно и вредно. */
+  capabilities: LspCapabilities;
+}
+
+/** Подмножество возможностей сервера, по которым решаем, что у него просить. */
+interface LspCapabilities {
+  completionProvider?: { triggerCharacters?: string[] };
+  hoverProvider?: boolean;
+  definitionProvider?: boolean;
+  signatureHelpProvider?: { triggerCharacters?: string[] };
+  /** Поиск символов по всему проекту — «перейти к символу». */
+  workspaceSymbolProvider?: boolean;
 }
 
 export class LspService {
@@ -141,6 +154,11 @@ export class LspService {
     private readonly root: () => string | null,
     private readonly settings: () => LspSettings,
     private readonly publish: (topic: string, payload: unknown) => void,
+    /**
+     * Интерпретатор Python проекта. Нужен, чтобы сервер видел пакеты окружения:
+     * без него подсказки по импортам не поднимутся. Возвращает null — окружения нет.
+     */
+    private readonly pythonPath: () => string | null = () => null,
   ) {}
 
   status(): { running: string[] } {
@@ -243,6 +261,7 @@ export class LspService {
       child,
       connection,
       versions: new Map(),
+      capabilities: {},
       initialized: Promise.resolve(),
     };
     // Инициализацию не ждём синхронно: didOpen уедет после неё (см. open()).
@@ -251,13 +270,73 @@ export class LspService {
   }
 
   private async initialize(runtime: ServerRuntime, cwd: string): Promise<void> {
-    await runtime.connection.request('initialize', {
+    const python = this.pythonPath();
+    const result = (await runtime.connection.request('initialize', {
       processId: process.pid,
       rootUri: pathToFileURL(cwd).toString(),
       clientInfo: { name: 'Chui IDE' },
-      capabilities: { textDocument: { synchronization: {} }, workspace: {} },
-    });
+      capabilities: {
+        textDocument: {
+          synchronization: {},
+          completion: { completionItem: { snippetSupport: false } },
+          hover: { contentFormat: ['markdown', 'plaintext'] },
+          definition: {},
+          signatureHelp: {},
+        },
+        // Серверы (pylsp, pyright) спрашивают настройки этим запросом.
+        workspace: { configuration: true },
+      },
+      // Путь к питону передаём сразу: pyright берёт его отсюда, иначе не видит
+      // пакеты окружения и подсказки по импортам не поднимаются.
+      initializationOptions: python ? { pythonPath: python, settings: { python: { pythonPath: python } } } : undefined,
+    })) as { capabilities?: LspCapabilities } | null;
+
+    // Возможности решают, что можно спрашивать: их отсутствие — не ошибка.
+    runtime.capabilities = result?.capabilities ?? {};
     runtime.connection.notify('initialized', {});
+  }
+
+  /**
+   * Запрос к серверу по уже открытому документу: подсказки, наведение, переход.
+   * Ошибка или отсутствие сервера — это `null`, а не сбой: без подсказок
+   * редактор обязан работать дальше.
+   */
+  async request(path: string, method: string, params: unknown): Promise<unknown> {
+    const runtime = this.runtimeForPath(path);
+    if (!runtime) return null;
+    await runtime.initialized.catch(() => undefined);
+    try {
+      return await runtime.connection.request(method, params);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Что сервер умеет по этому файлу — renderer решает по этому, какой провайдер включать. */
+  capabilitiesFor(path: string): LspCapabilities | null {
+    return this.runtimeForPath(path)?.capabilities ?? null;
+  }
+
+  /**
+   * Символы проекта по запросу: классы, функции, переменные — по всем запущенным
+   * серверам. Поиск не привязан к файлу, поэтому спрашиваем каждый сервер, у
+   * которого это умеется: ответит тот, чей язык есть в проекте.
+   */
+  async projectSymbols(query: string): Promise<ProjectSymbol[]> {
+    const results: ProjectSymbol[] = [];
+
+    for (const runtime of [...this.runtimes.values()]) {
+      if (!runtime.capabilities.workspaceSymbolProvider) continue;
+      await runtime.initialized.catch(() => undefined);
+      try {
+        const raw = await runtime.connection.request('workspace/symbol', { query });
+        results.push(...toProjectSymbols(raw, fileURLToPath));
+      } catch {
+        // Сервер не ответил — это не повод терять результаты остальных.
+      }
+    }
+
+    return results;
   }
 
   private onNotification(method: string, params: unknown): void {
@@ -277,8 +356,9 @@ export class LspService {
   /** Запросы сервера к клиенту: отвечаем мягко, лишь бы не подвешивать его. */
   private onRequest(method: string, params: unknown): unknown {
     if (method === 'workspace/configuration') {
-      const items = (params as { items?: unknown[] }).items ?? [];
-      return items.map(() => null);
+      const items = (params as { items?: Array<{ section?: string }> }).items ?? [];
+      const python = this.pythonPath();
+      return items.map((item) => (item.section === 'python' && python ? { pythonPath: python } : null));
     }
     return null;
   }

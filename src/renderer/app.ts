@@ -9,11 +9,23 @@ import { GitModel } from './core/git-model';
 import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
 import { languageLabel, languageIndent } from './core/languages';
+import { ImportChecker } from './core/import-check';
+import { registerImportActions } from './core/import-actions';
 import { LspClient } from './core/lsp';
+import { registerLspProviders } from './core/lsp-providers';
 import { OpenEditors } from './core/open-editors';
 import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
+import { envShortLabel, envVisible } from './core/python-view';
 import { RpcClient } from './core/rpc';
-import { collectRunTargets, entryLine, type RunTarget, type RunnableFile } from './core/run-config';
+import {
+  collectRunTargets,
+  entryLine,
+  nodeInstallTarget,
+  pytestTarget,
+  type RunTarget,
+  type RunnableFile,
+} from './core/run-config';
+import type { ProjectScan } from '../shared/project-scan';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
@@ -28,7 +40,9 @@ import { createLayout } from './ui/layout';
 import { logoMark } from './ui/logo';
 import { createPalette } from './ui/palette';
 import { createPopover, type PopoverView } from './ui/popover';
+import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-env-popover';
 import { createQuickOpen } from './ui/quick-open';
+import { createSymbolPicker } from './ui/symbol-picker';
 import { closePopupMenu, isPopupOpen, showPopupMenu } from './ui/popup-menu';
 import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
@@ -37,7 +51,9 @@ import { createStatusBar } from './ui/statusbar';
 import { createSettingsModal } from './ui/settings-modal';
 import { createTabs } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
+import { createTestPanel } from './ui/test-panel';
 import { showToast } from './ui/toast';
+import { createVenvModal } from './ui/venv-modal';
 
 /**
  * Точка сборки приложения: сервисы, команды, подписки.
@@ -54,7 +70,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const git = new GitModel(rpc, workspace);
 
   const layout = createLayout(mount);
-  const statusBar = createStatusBar({ openGitManager: (anchor) => openGitManager(anchor) });
+  const statusBar = createStatusBar({
+    openGitManager: (anchor) => openGitManager(anchor),
+    openPythonEnv: (anchor) => openPythonEnv(anchor),
+  });
   layout.statusBarHost.appendChild(statusBar.element);
 
   let settings = await rpc.request('settings.get');
@@ -70,10 +89,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const host = new HostService();
   // Языковые серверы: держим документы синхронными и кладём их пометки в Monaco.
   new LspClient(rpc, documents, editors).attach();
+  // Подсказки от языковых серверов: импорты, наведения и переход к определению.
+  registerLspProviders(rpc);
+  // Импорты с неустановленными библиотеками: своя проверка, не зависящая от LSP.
+  const importChecker = new ImportChecker(rpc, documents, editors);
+  importChecker.attach();
 
   // Настройки — модальное окно поверх всего: и шапка, и панель AI открывают одно и то же.
   const settingsModal = createSettingsModal({ rpc, commands, theme });
   document.body.appendChild(settingsModal.element);
+
+  // Окно Python-окружений: создание venv рядом с настройками, поверх всего.
+  const venvModal = createVenvModal({
+    rpc,
+    root: () => workspace.root,
+    // Окружение появилось — запуск, подсказки и статусбар должны увидеть его сразу.
+    onCreated: () => reloadPythonEnvironment(),
+  });
+  document.body.appendChild(venvModal.element);
 
   /* ── панели ────────────────────────────────────────────────────────────── */
 
@@ -99,6 +132,48 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void git.refresh();
     gitManagerPopover.toggle(anchor);
   }
+
+  /**
+   * Попап Python-окружения у кнопки в статусбаре: что выбрано и откуда.
+   * Список окружений обновляем при открытии — попап мог провисеть долго.
+   */
+  let pythonEnvPopover: PopoverView | null = null;
+  let pythonEnvView: PythonEnvPopoverView | null = null;
+
+  function openPythonEnv(anchor: HTMLElement): void {
+    if (!pythonEnvPopover || !pythonEnvView) {
+      pythonEnvView = createPythonEnvPopover({
+        rpc,
+        root: () => workspace.root,
+        tools: () => tools.get(),
+        configured: () => settings.run.pythonPath,
+        platform: () => info.platform,
+        projectKind: () => projectScan?.kind.label ?? null,
+        projectPython: () => (workspace.root ? (settings.run.pythonByRoot[workspace.root] ?? '') : ''),
+        onSelect: (command) => {
+          // Интерпретатор выбирается для ЭТОГО проекта: два Python-проекта не
+          // должны подменять друг другу окружение. Пусто — вернуться к общему.
+          void setProjectInterpreter(command);
+          pythonEnvPopover?.close();
+          // Сервер подсказок поднят со старым интерпретатором — перезапускаем.
+          reopenLsp();
+        },
+        onCreate: () => {
+          pythonEnvPopover?.close();
+          void venvModal.open();
+        },
+        onInstallRequirements: () => {
+          pythonEnvPopover?.close();
+          void installRequirements();
+        },
+      });
+      pythonEnvPopover = createPopover(pythonEnvView.element, { width: 340 });
+      pythonEnvPopover.element.classList.add('popover-python-env');
+    }
+    void pythonEnvView.refresh();
+    pythonEnvPopover.toggle(anchor);
+  }
+
   const diffView = createDiffView({ createDiff: (container) => editors.createDiff(container), git });
   layout.editorHost.appendChild(diffView.element);
 
@@ -111,8 +186,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   const terminalPanel = createTerminalPanel({ rpc, cwd: () => workspace.root, scheme: theme.resolved });
 
+  // Панель тестов: список собирается при показе — правки в коде меняют его.
+  const testPanel = createTestPanel({
+    rpc,
+    root: () => workspace.root,
+    onRun: (selector) => void runTarget(pytestTarget(tools.get(), selector)),
+  });
+
   const dock = createDock();
   dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });
+  dock.register({ id: 'tests', title: 'Тесты', element: testPanel.element, onShow: () => void testPanel.refresh() });
   dock.register({
     id: 'terminal',
     title: 'Терминал',
@@ -278,6 +361,68 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const tools = new ProjectToolsModel(rpc, () => settings.run, info.platform);
   /** Подпись последнего нарисованного значка запуска: не трогаем украшения зря. */
   let runMarkerSignature = '';
+  /** Карта проекта: из неё берём тесты и точку входа. Пусто, пока проект не открыт. */
+  let projectScan: ProjectScan | null = null;
+
+  /** Перечитать карту проекта: дёшево — обход имён без чтения содержимого. */
+  async function refreshScan(): Promise<void> {
+    // Карта от прошлого проекта не должна мелькать на новом: чистим сразу.
+    projectScan = null;
+    refreshStatus();
+    projectScan = await rpc.request('project.scan').catch(() => null);
+    syncRunControl();
+    refreshStatus();
+  }
+
+  /**
+   * Языковые серверы: если LSP включён, а список серверов пуст — подставляем
+   * найденные. Без этого типичные грабли: «включил LSP, а подсказок нет» — просто
+   * потому, что ни один сервер не выбран. Ничего не запускаем: только проверяем,
+   * что команда есть (PATH и главное окружение проекта).
+   */
+  async function ensureLspServers(): Promise<void> {
+    if (!settings.lsp.enabled || settings.lsp.servers.length > 0) return;
+    const found = await rpc.request('lsp.detect').catch(() => []);
+    if (found.length === 0) return;
+    await rpc.request('settings.update', { lsp: { servers: found } }).catch(() => undefined);
+    showToast(`Языковые серверы подключены: ${found.map((server) => server.language).join(', ')}`);
+  }
+
+  /**
+   * Перезапустить серверы подсказок и заново открыть в них документы.
+   *
+   * Сервер поднимается с интерпретатором проекта один раз — при первом открытии
+   * файла этого языка. Сменившееся или появившееся окружение он сам не заметит, а
+   * после перезапуска документы в нём уже не значатся: без повторного `lsp.open`
+   * подсказки пропали бы до переоткрытия файла.
+   */
+  function reopenLsp(): void {
+    if (!settings.lsp.enabled) return;
+    void rpc
+      .request('lsp.restart')
+      .then(() => {
+        for (const document of documents.all()) {
+          void rpc.request('lsp.open', {
+            path: document.path,
+            languageId: document.languageId,
+            text: document.value,
+          });
+        }
+      })
+      .catch(() => undefined);
+  }
+
+  /** Окружение изменилось: перечитать инструменты, карту проекта, подсказки и импорты. */
+  function reloadPythonEnvironment(): void {
+    void tools.refresh(workspace.root, true).then(() => {
+      syncRunControl();
+      refreshStatus();
+    });
+    void refreshScan();
+    reopenLsp();
+    // Импорты, которых не хватало, могли появиться вместе с окружением.
+    importChecker.refresh();
+  }
 
   /** Файл как программа: путь от корня нужен для команды в терминале. */
   const runnableFileOf = (document: TextDocument | null): RunnableFile | null => {
@@ -290,7 +435,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   };
 
   function targetsFor(document: TextDocument | null): RunTarget[] {
-    return collectRunTargets(runnableFileOf(document), tools.get());
+    return collectRunTargets(runnableFileOf(document), tools.get(), projectScan);
   }
 
   /**
@@ -438,6 +583,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const quickOpen = createQuickOpen({ rpc, workspace, openFile: (path) => openPath(path) });
   document.body.appendChild(quickOpen.element);
 
+  // Поиск символа по проекту (Ctrl+T): файл открываем тем же путём, что и дерево,
+  // а затем встаём на строку объявления.
+  const symbolPicker = createSymbolPicker({
+    rpc,
+    openSymbol: (symbol) => {
+      void openPath(symbol.path).then(() => editors.reveal(symbol.path, symbol.line, symbol.column));
+    },
+  });
+  document.body.appendChild(symbolPicker.element);
+
   /* ── сессия рабочей папки ──────────────────────────────────────────────── */
 
   /** Какой проект сейчас восстановлен: ключ, по которому кладётся сессия. */
@@ -523,9 +678,84 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   const saveDocument = async (document: TextDocument): Promise<void> => {
+    // Форматирование при сохранении: правку проводит документ, поэтому на экране
+    // и на диске оказывается одно и то же.
+    if (settings.editor.formatOnSave) await formatDocument(document);
     await rpc.request('workspace.writeFile', { path: document.path, text: document.value });
     document.markSaved();
     showToast(`Сохранено: ${basename(document.path)}`);
+  };
+
+  /* ── Python-инструменты: формат и установка ────────────────────────────── */
+
+  /** Форматирование — про Python: инструменты (ruff, black) питоновские. */
+  const isFormattable = (languageId: string): boolean => languageId === 'python';
+
+  /**
+   * Отформатировать документ инструментом окружения. true — текст изменился.
+   * Правку проводим через документ: так она попадает в undo и в сохранение.
+   */
+  const formatDocument = async (document: TextDocument): Promise<boolean> => {
+    if (!isFormattable(document.languageId)) return false;
+    const result = await rpc
+      .request('python.format', { path: document.path, text: document.value })
+      .catch(() => null);
+    if (!result?.tool || result.text === document.value) return false;
+    document.setText(result.text, 'programmatic');
+    return true;
+  };
+
+  /**
+   * Поставить пакеты в окружение проекта и перепроверить импорты.
+   * Один путь для трёх входов: команда, кнопка в попапе и быстрая правка.
+   */
+  const installPythonPackages = async (packages: string[], requirements = false): Promise<void> => {
+    if (!workspace.root) {
+      showToast('Проект не открыт', 'error');
+      return;
+    }
+    showToast(packages.length > 0 ? `Ставлю: ${packages.join(', ')}…` : 'Устанавливаю зависимости…');
+    try {
+      const result = await rpc.stream('python.install', { packages, requirements }, () => undefined);
+      showToast(result.installed.length > 0 ? `Готово: ${result.installed.join(', ')}` : 'Нечего ставить');
+      // Пакеты появились — подчёркнутые импорты должны это увидеть.
+      importChecker.refresh();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  };
+
+  const installRequirements = (): Promise<void> => installPythonPackages([], true);
+
+  /**
+   * Поставить пакеты Node. Идёт в терминал, как и задачи проекта: вывод
+   * `npm install` длинный, его читают и прерывают руками, а не в тосте.
+   */
+  const installNodePackages = async (packages: string[]): Promise<void> => {
+    if (!tools.get().root) {
+      showToast('Проект не открыт', 'error');
+      return;
+    }
+    await runTarget(nodeInstallTarget(tools.get(), packages));
+    // Пакеты появились — подчёркнутые импорты должны это увидеть.
+    importChecker.refresh();
+  };
+
+  // Быстрая правка у подчёркнутого импорта: «Установить пакет» — прямо из редактора.
+  registerImportActions({
+    checker: importChecker,
+    installPython: (packages) => installPythonPackages(packages),
+    installNode: (packages) => installNodePackages(packages),
+  });
+
+  /** Запомнить интерпретатор для этого проекта (пусто — вернуться к общему). */
+  const setProjectInterpreter = async (command: string): Promise<void> => {
+    const root = workspace.root;
+    if (!root) return;
+    const pythonByRoot = { ...settings.run.pythonByRoot };
+    if (command) pythonByRoot[root] = command;
+    else delete pythonByRoot[root];
+    await rpc.request('settings.update', { run: { pythonByRoot } });
   };
 
   /* ── реестр команд ─────────────────────────────────────────────────────── */
@@ -666,9 +896,26 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /* ── запуск ────────────────────────────────────────────────────────────── */
 
   define({ id: 'run.file', title: 'Запустить файл', category: 'Запуск', keybinding: 'Ctrl+F5' }, async () => {
-    const target = targetsFor(openEditors.active)[0];
+    // Именно файл, а не первая цель из набора: у Python первыми могли оказаться
+    // тесты, и Ctrl+F5 запускал бы их вместо самого файла.
+    const target = targetsFor(openEditors.active).find((item) => item.source === 'file');
     if (!target) {
       showToast('Запускать нечего: нужен скрипт или задача в package.json', 'error');
+      return;
+    }
+    await runTarget(target);
+  });
+
+  define({ id: 'run.tests', title: 'Запустить тесты (pytest)', category: 'Запуск' }, async () => {
+    const active = openEditors.active;
+    const relative = active ? workspace.relative(active.path) : null;
+    const targets = collectRunTargets(runnableFileOf(active), tools.get(), projectScan);
+    const runnable = relative && relative !== active?.path ? relative : null;
+    const target =
+      targets.find((item) => item.source === 'test' && item.id === `pytest:${runnable}`) ??
+      targets.find((item) => item.id === 'pytest:all');
+    if (!target) {
+      showToast('Тесты не найдены: нужен проект на Python с файлами тестов', 'error');
       return;
     }
     await runTarget(target);
@@ -877,7 +1124,67 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void quickOpen.open();
   });
 
+  define(
+    {
+      id: 'navigate.symbol',
+      title: 'Перейти к символу в проекте',
+      category: 'Навигация',
+      keybinding: 'Ctrl+T',
+      keywords: ['symbol', 'символ', 'класс', 'функция'],
+    },
+    () => symbolPicker.open(),
+  );
+
   define({ id: 'settings.open', title: 'Настройки', category: 'Настройки', keybinding: 'Ctrl+,' }, () => settingsModal.open());
+
+  define(
+    {
+      id: 'python.environments',
+      title: 'Python: виртуальные окружения',
+      category: 'Python',
+      // «venv» — как это называют на деле: без слова поиск в палитре не находит.
+      keywords: ['venv', 'virtualenv', 'окружение', 'интерпретатор'],
+    },
+    () => void venvModal.open(),
+  );
+
+  define(
+    {
+      id: 'tests.open',
+      title: 'Тесты: панель',
+      category: 'Запуск',
+      keywords: ['pytest', 'тесты', 'test'],
+    },
+    () => dock.show('tests'),
+  );
+
+  define(
+    {
+      id: 'python.format',
+      title: 'Python: форматировать файл',
+      category: 'Python',
+      keywords: ['ruff', 'black', 'формат'],
+    },
+    async () => {
+      const document = openEditors.active;
+      if (!document || !isFormattable(document.languageId)) {
+        showToast('Форматировать можно только файл Python');
+        return;
+      }
+      const changed = await formatDocument(document);
+      showToast(changed ? 'Файл отформатирован' : 'Менять нечего');
+    },
+  );
+
+  define(
+    {
+      id: 'python.installRequirements',
+      title: 'Python: установить зависимости',
+      category: 'Python',
+      keywords: ['pip', 'install', 'requirements', 'пакеты'],
+    },
+    () => installRequirements(),
+  );
 
   define({ id: 'settings.revealFile', title: 'Открыть settings.json', category: 'Настройки' }, async () => {
     const result = await rpc.request('settings.revealFile');
@@ -950,6 +1257,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       tool: active ? toolLabel(language, projectTools) : null,
       branch: git.branch,
       changes: git.changeCount,
+      // У Python всё про окружение — в одном попапе; в статусбаре отдельная надпись
+      // «Python» дублировала бы его. У остальных проектов вид виден чипом, и только
+      // когда он вообще опознан: «Неизвестно» в полосе — лишний шум.
+      projectKind:
+        projectScan && projectScan.kind.source !== 'none' && projectScan.kind.id !== 'python'
+          ? projectScan.kind.label
+          : null,
+      // Виджет окружения — только там, где он осмыслен: Python-проект или уже
+      // выбранный интерпретатор. У Node-проекта его не показываем.
+      env:
+        workspace.root && envVisible(projectScan?.kind.id ?? null, projectTools, settings.run.pythonPath)
+          ? envShortLabel(projectTools)
+          : null,
     });
 
     // Заголовок окна: как в VS Code — открытый файл и проект.
@@ -983,6 +1303,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       syncRunControl();
       refreshStatus();
     });
+    // Сменили интерпретатор — перепроверяем импорты в открытых файлах.
+    importChecker.refresh();
     // Схема могла прийти извне — догоняем Monaco и xterm.
     theme.apply();
     refreshStatus();
@@ -1055,6 +1377,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     refreshStatus();
     syncEmptyState();
     void tools.refresh(workspace.root).then(() => syncRunControl());
+    void refreshScan();
+    // Новый проект — могли появиться свои серверы в окружении (pylsp в venv).
+    void ensureLspServers();
     // Другой проект — другое рабочее место: восстанавливаем его из сессии.
     if (info) void restoreSession(info.root);
     else sessionRoot = null;
@@ -1075,6 +1400,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     { combo: 'Alt+2', command: 'search.project' },
     { combo: 'Ctrl+Shift+P', command: 'palette.open' },
     { combo: 'Ctrl+Shift+O', command: 'file.quickOpen' },
+    // Символ по проекту — привычка из VS Code и PyCharm.
+    { combo: 'Ctrl+T', command: 'navigate.symbol' },
     { combo: 'Ctrl+,', command: 'settings.open' },
     { combo: 'Ctrl+Shift+G', command: 'view.showChanges' },
     { combo: 'Ctrl+`', command: 'view.showTerminal' },
@@ -1082,6 +1409,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Запуск — как в PyCharm (Shift+F10) и VS Code (Ctrl+F5): обе привычки живут рядом.
     { combo: 'Ctrl+F5', command: 'run.file' },
     { combo: 'Shift+F10', command: 'run.choose' },
+    // Тесты — рядом с запуском: Ctrl+Shift+F5, как принято в IDE.
+    { combo: 'Ctrl+Shift+F5', command: 'run.tests' },
+    // Форматирование — как в VS Code и PyCharm: Shift+Alt+F.
+    { combo: 'Shift+Alt+F', command: 'python.format' },
     // Меню — как в приложениях KDE: Alt+F10 открывает его с клавиатуры.
     { combo: 'Alt+F10', command: 'app.showMenu' },
   ]).attach(window);
@@ -1093,6 +1424,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   if (current.root) await workspace.open(current.root);
 
   await tools.refresh(workspace.root);
+  await refreshScan();
+  await ensureLspServers();
   syncRunControl();
 
   syncViewButtons();
@@ -1116,6 +1449,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       layout,
       explorer,
       terminalPanel,
+      testPanel,
       sourceControl,
       diffView,
       git,
@@ -1129,10 +1463,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
  * Чем запустится активный файл. В статусбаре важно именно «чем», а не «каким
  * языком»: системный python3 и интерпретатор окружения проекта выглядят
  * одинаково, пока не увидишь путь.
+ *
+ * Python сюда не попадает: у него отдельный виджет окружения с попапом — вторая
+ * строчка про интерпретатор только повторяла бы его теми же словами.
  */
 function toolLabel(language: string | null, project: ProjectTools): string | null {
   if (!language || !project.root) return null;
-  if (language === 'python') return project.pythonLabel;
+  if (language === 'python') return null;
   if (language === 'javascript' || language === 'typescript') {
     return project.hasPackageJson ? `${project.packageManager}` : 'node';
   }

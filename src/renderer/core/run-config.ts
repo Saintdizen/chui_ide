@@ -1,4 +1,5 @@
 import { basename } from '../../shared/languages';
+import type { ProjectScan } from '../../shared/project-scan';
 import type { ProjectTools } from './project-tools';
 import { shellQuote } from './project-tools';
 
@@ -21,7 +22,7 @@ export interface RunTarget {
   command: string;
   /** Строка файла, с которой связано «запускаемое» место (для значка ▶ в жёлобе). */
   line?: number;
-  source: 'file' | 'script';
+  source: 'file' | 'script' | 'test';
 }
 
 export interface RunnableFile {
@@ -110,16 +111,108 @@ export function scriptRunTargets(tools: ProjectTools): RunTarget[] {
   }));
 }
 
+/** Сколько тестовых файлов показываем отдельными целями: список не должен расти безмерно. */
+const MAX_TEST_TARGETS = 15;
+
 /**
- * Набор для меню запуска: сначала сам файл, затем задачи проекта.
+ * Цели pytest по карте проекта. «Запустить все тесты» есть всегда у Python-проекта
+ * с тестами; отдельной целью становится ещё и активный файл, если это тест —
+ * тогда не нужно искать его руками.
+ */
+export function pytestRunTargets(
+  tools: ProjectTools,
+  scan: ProjectScan | null,
+  activeRelative: string | null,
+): RunTarget[] {
+  if (!scan) return [];
+  // Тесты pytest есть только у Python-проекта: вид проекта — один вердикт,
+  // а не разбор маркеров на месте.
+  if (scan.kind.id !== 'python') return [];
+
+  const tests = scan.testFiles.filter((file) => file.endsWith('.py'));
+  if (tests.length === 0) return [];
+
+  const targets: RunTarget[] = [
+    {
+      id: 'pytest:all',
+      label: 'Запустить тесты (pytest)',
+      detail: `${tools.pythonLabel} · pytest`,
+      command: `${tools.pythonCommand} -m pytest`,
+      source: 'test',
+    },
+  ];
+
+  // Активный тест — первой отдельной целью: чаще всего нужен именно он.
+  const ordered = activeRelative && tests.includes(activeRelative)
+    ? [activeRelative, ...tests.filter((file) => file !== activeRelative)]
+    : tests;
+
+  for (const file of ordered.slice(0, MAX_TEST_TARGETS)) {
+    targets.push({
+      id: `pytest:${file}`,
+      label: `Тесты: ${basename(file)}`,
+      detail: file,
+      command: `${tools.pythonCommand} -m pytest ${shellQuote(file)}`,
+      source: 'test',
+    });
+  }
+
+  return targets;
+}
+
+/**
+ * Одна цель pytest по селектору: идентификатор теста, класс или файл, а `null` —
+ * все тесты проекта. Нужна панели тестов: там запускают конкретный узел дерева,
+ * а не «всё подряд», и команду собирать должен тот же модуль, что и меню запуска,
+ * иначе две кнопки разойдутся по поведению.
+ */
+export function pytestTarget(tools: ProjectTools, selector: string | null): RunTarget {
+  const command = selector
+    ? `${tools.pythonCommand} -m pytest ${shellQuote(selector)}`
+    : `${tools.pythonCommand} -m pytest`;
+  return {
+    id: selector ? `pytest:${selector}` : 'pytest:all',
+    label: selector ? `Тесты: ${basename(selector)}` : 'Запустить тесты (pytest)',
+    detail: `${tools.pythonLabel} · pytest`,
+    command,
+    source: 'test',
+  };
+}
+
+/**
+ * Установка пакетов Node менеджером проекта: `npm install zod`.
+ *
+ * Установка идёт в терминале, а не отдельным потоком, и это осознанно: вывод
+ * `npm install` длинный и шумный, его принято читать и можно прервать — ровно
+ * как задачи проекта. Менеджер берём из инструментов проекта (по блокировке или
+ * настройке), чтобы не поставить пакеты «не тем» менеджером.
+ */
+export function nodeInstallTarget(tools: ProjectTools, packages: readonly string[]): RunTarget {
+  const list = packages.map((name) => shellQuote(name)).join(' ');
+  return {
+    id: `install:${packages.join(',')}`,
+    label: packages.length === 1 ? `Установить ${packages[0]}` : `Установить пакеты: ${packages.join(', ')}`,
+    detail: `${tools.packageManager} install`,
+    command: `${tools.packageManager} install ${list}`,
+    source: 'script',
+  };
+}
+
+/**
+ * Набор для меню запуска: сначала сам файл, затем тесты, затем задачи проекта.
  * Задачи нужны почти всегда: обычный проект Node запускается не файлом, а скриптом.
  */
-export function collectRunTargets(file: RunnableFile | null, tools: ProjectTools): RunTarget[] {
+export function collectRunTargets(
+  file: RunnableFile | null,
+  tools: ProjectTools,
+  scan: ProjectScan | null = null,
+): RunTarget[] {
   const targets: RunTarget[] = [];
   if (file) {
     const target = fileRunTarget(file, tools);
     if (target) targets.push(target);
   }
+  targets.push(...pytestRunTargets(tools, scan, file?.relative ?? null));
   targets.push(...scriptRunTargets(tools));
   return targets;
 }

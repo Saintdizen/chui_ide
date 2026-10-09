@@ -45,7 +45,15 @@ export class TerminalService {
   private readonly sessions = new Map<string, Session>();
   private sequence = 0;
 
-  constructor(private readonly emit: (topic: string, payload: unknown) => void) {}
+  constructor(
+    private readonly emit: (topic: string, payload: unknown) => void,
+    /**
+     * Команда активации окружения проекта. Терминал набирает её сам, чтобы venv
+     * был активен с первой строки: тогда pip, запуск и тесты видят одни пакеты.
+     * Возвращает null — активировать нечего, сессия остаётся системной.
+     */
+    private readonly activateFor?: (cwd: string) => Promise<string | null>,
+  ) {}
 
   list(): TerminalSession[] {
     return [...this.sessions.values()]
@@ -109,6 +117,10 @@ export class TerminalService {
     };
     this.sessions.set(id, session);
 
+    // Окружение активируем не сразу: shell должен напечатать приглашение,
+    // иначе команда попадёт в ещё не готовый pty и потеряется.
+    void this.activateVenv(session);
+
     child.onData((data) => this.buffer(session, data));
     child.onExit(({ exitCode, signal }) => {
       this.flush(session);
@@ -124,6 +136,22 @@ export class TerminalService {
 
   write(id: string, data: string): void {
     this.require(id).process.write(data);
+  }
+
+  /**
+   * Набрать в сессии команду активации окружения. Пишем сразу: pty буферизует
+   * ввод до готовности shell, поэтому команда не потеряется и уйдёт раньше
+   * любой команды запуска — venv окажется активен к её приходу.
+   */
+  private async activateVenv(session: Session): Promise<void> {
+    if (!this.activateFor) return;
+    try {
+      const command = await this.activateFor(session.cwd);
+      if (!command || session.exited) return;
+      session.process.write(`${command}\r`);
+    } catch {
+      // окружения нет или не нашли — терминал просто остаётся системным
+    }
   }
 
   resize(id: string, cols: number, rows: number): void {

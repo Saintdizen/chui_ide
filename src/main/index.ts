@@ -8,6 +8,7 @@ import { registerIpc } from './ipc/register';
 import { LspService } from './lsp/lsp';
 import { createApplicationMenu } from './menu';
 import { registerAppScheme, serveRenderer } from './protocol';
+import { activateCommand, findEnvironments, pythonInterpreterFor } from './python/environments';
 import { SessionStore } from './session-store';
 import { SettingsStore } from './settings';
 import { TerminalService } from './terminal/terminal';
@@ -82,12 +83,33 @@ if (!app.requestSingleInstanceLock()) {
 
     const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
     const ai = new AiService(settings, workspace);
-    const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
+    // Терминал сам активирует venv проекта: иначе pip, запуск и тесты работают
+    // системным питоном, и человеку приходится вспоминать про `source`.
+    const terminals = new TerminalService(
+      (topic, payload) => pushToRenderers(topic, payload),
+      async () => {
+        const root = workspace.rootPath();
+        if (!root) return null;
+        const environments = await findEnvironments(root, process.platform);
+        const primary = environments.find((environment) => environment.primary);
+        return primary ? activateCommand(root, primary.path, process.platform) : null;
+      },
+    );
     // Git ничего не хранит сам: корень берётся у рабочей папки, а об изменениях
     // узнаём после своих же операций и после сохранения файла.
     const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
     // Языковые серверы — внешние процессы: настройка задаёт команду, main держит их жизненный цикл.
-    const lsp = new LspService(() => workspace.rootPath(), () => settings.get().lsp, (topic, payload) => pushToRenderers(topic, payload));
+    // Сервер подсказок запускаем с интерпретатором окружения: иначе он не видит
+    // установленные пакеты и не подсказывает импорты. Проверка путей — синхронная:
+    // спрашивать диск на каждый запрос сервера дёшево, а кешировать нечего.
+    const lsp = new LspService(
+      () => workspace.rootPath(),
+      () => settings.get().lsp,
+      (topic, payload) => pushToRenderers(topic, payload),
+      // Тот же выбор, что у запуска: настройка важнее окружения проекта. Иначе
+      // подсказки шли бы с одного питона, а код запускался другим.
+      () => pythonInterpreterFor(workspace.rootPath(), settings.get().run.pythonPath),
+    );
     // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
     const sessions = new SessionStore();
 

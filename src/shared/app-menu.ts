@@ -112,5 +112,15 @@ const AI: MenuNode = {
   ],
 };
 
-/** Верхний уровень: те же четыре группы, что в системном меню. */
-export const APP_MENU: readonly MenuNode[] = [FILE, EDIT, VIEW, AI];
+/** Языковые инструменты — отдельной группой: у Python их больше всего. */
+const PYTHON: MenuNode = {
+  label: 'Python',
+  children: [
+    { label: 'Виртуальные окружения…', command: 'python.environments' },
+    { separator: true },
+    { label: 'Перезапустить языковые серверы', command: 'lsp.restart' },
+  ],
+};
+
+/** Верхний уровень: те же группы, что в системном меню. */
+export const APP_MENU: readonly MenuNode[] = [FILE, EDIT, VIEW, AI, PYTHON];

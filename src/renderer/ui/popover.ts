@@ -1,3 +1,4 @@
+import { placePopup } from '../core/popup-placement';
 import { h } from './dom';
 
 export interface PopoverView {
@@ -26,17 +27,14 @@ export function createPopover(content: HTMLElement, options: { width?: number; g
   let anchor: HTMLElement | null = null;
 
   const place = (target: HTMLElement): void => {
-    const rect = target.getBoundingClientRect();
-    const box = element.getBoundingClientRect();
-    const width = box.width;
-    const height = box.height;
-
-    const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
-    const above = rect.top - height - gap;
-    const below = rect.bottom + gap;
-    // Над якорем — обычный случай для нижних панелей; если не влезает, кладём под ним.
-    const top = above >= 8 ? above : Math.min(below, Math.max(window.innerHeight - height - 8, 8));
-
+    const { left, top } = placePopup({
+      anchor: target.getBoundingClientRect(),
+      // Размер берём из макета (`offset*`), а не из `getBoundingClientRect`:
+      // появление идёт анимацией со `scale`, и сжатый размер смещал бы попап.
+      size: { width: element.offsetWidth, height: element.offsetHeight },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      gap,
+    });
     element.style.left = `${left}px`;
     element.style.top = `${top}px`;
   };
@@ -45,6 +43,14 @@ export function createPopover(content: HTMLElement, options: { width?: number; g
     anchor = target;
     element.hidden = false;
     place(target);
+
+    // Содержимое приходит не сразу (список окружений спрашивается у main):
+    // пересчитываем позицию, когда попап меняет размер, иначе он вырастет за
+    // край — при открытии высота ещё пустая.
+    const observer = new ResizeObserver(() => {
+      if (anchor) place(anchor);
+    });
+    observer.observe(element);
 
     const onPointerDown = (event: PointerEvent): void => {
       const node = event.target as Node;
@@ -70,6 +76,7 @@ export function createPopover(content: HTMLElement, options: { width?: number; g
 
     detach = () => {
       window.clearTimeout(timer);
+      observer.disconnect();
       window.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('resize', onResize);

@@ -7,6 +7,12 @@
 
 import type { MenuRole } from './app-menu';
 import type { ApplyResult, FileEdit } from './edits';
+import type { ProjectScan } from './project-scan';
+import type { PythonEnvironment, PythonInterpreter } from './python-env';
+import type { InstalledPackage } from './python-packages';
+import type { CollectedSuite } from './python-tests';
+import type { EnvironmentHealth } from './python-health';
+import type { ProjectSymbol } from './lsp-symbols';
 
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
 
@@ -299,6 +305,11 @@ export const CloneEvent = {
   Progress: 'progress',
 } as const;
 
+/** Событие прогресса `python.createVenv`: шаги и вывод команд. */
+export const VenvEvent = {
+  Progress: 'venv:progress',
+} as const;
+
 /** Полезная нагрузка события `CloneEvent.Progress`. */
 export interface CloneProgressPayload {
   line: string;
@@ -390,6 +401,8 @@ export interface EditorSettings {
   quickSuggestions: boolean;
   /** Подсвечивать неиспользуемые импорты и переменные в JS/TS. */
   showUnused: boolean;
+  /** Форматировать документ при сохранении (ruff или black из окружения). */
+  formatOnSave: boolean;
 }
 
 /** Плотность строк дерева проекта. */
@@ -434,6 +447,11 @@ export interface RunSettings {
   packageManager: PackageManagerChoice;
   /** Сохранять документ перед запуском. */
   saveBeforeRun: boolean;
+  /**
+   * Интерпретатор для конкретного проекта: ключ — корень проекта. Пусто —
+   * берётся общий `pythonPath`. Так два Python-проекта не мешают друг другу.
+   */
+  pythonByRoot: Record<string, string>;
 }
 
 /** Схема приложения: светлая, тёмная или системная. */
@@ -446,6 +464,58 @@ export interface AppearanceSettings {
 export interface WorkspaceSettings {
   /** Недавние проекты, новые в начале списка. */
   recent: string[];
+}
+
+/* ── Python: окружения и создание venv ─────────────────────────────────── */
+
+/** Уровень установки пакетов при создании окружения. */
+export type VenvInstallPreset = 'empty' | 'pytest' | 'full';
+
+export interface CreateVenvOptions {
+  /** Имя каталога окружения от корня проекта. По умолчанию `.venv`. */
+  name?: string;
+  /** Базовый интерпретатор для создания окружения, если задан явно. */
+  base?: string;
+  /** Доустановить pytest, pylsp, ruff — одним из готовых профилей. */
+  preset?: VenvInstallPreset;
+  /** Поставить зависимости из requirements.txt, если он есть. */
+  installRequirements?: boolean;
+}
+
+/** Событие прогресса создания окружения: шаг и вывод команд. */
+export interface VenvProgressPayload {
+  type: 'step' | 'output' | 'done' | 'error';
+  message: string;
+}
+
+export interface CreateVenvResult {
+  environment: PythonEnvironment;
+  /** Что реально поставили: `requirements.txt` и/или имена пакетов. */
+  installed: string[];
+}
+
+/** Что поставить в главное окружение проекта. */
+export interface PythonInstallOptions {
+  /** Явные пакеты: то, что человек выбрал, и то, что подсказали подчёркнутые импорты. */
+  packages?: string[];
+  /** Доустановить то, что просит `requirements.txt` (если файл есть). */
+  requirements?: boolean;
+}
+
+/** Событие прогресса установки: тот же поток, что и у создания окружения. */
+export type PythonInstallProgress = VenvProgressPayload;
+
+/** Результат установки: что реально поставили. */
+export interface PythonInstallResult {
+  installed: string[];
+}
+
+/** Результат форматирования файла. */
+export interface PythonFormatResult {
+  /** Отформатированный текст; совпадает с исходным, если менять нечего. */
+  text: string;
+  /** Инструмент, который отформатировал; null — ни ruff, ни black не нашлись. */
+  tool: string | null;
 }
 
 /* ── LSP ───────────────────────────────────────────────────────────────── */
@@ -858,6 +928,36 @@ export interface ChuiMethods {
   'workspace.createDir': { params: { path: string }; result: { path: string } };
   'workspace.rename': { params: { from: string; to: string }; result: { path: string } };
   'workspace.trash': { params: { path: string }; result: void };
+  /**
+   * Карта проекта: языки, манифесты, тесты и точки входа. Собирается обходом
+   * имён без чтения содержимого — дёшево и без последствий для больших проектов.
+   */
+  'project.scan': { params: void; result: ProjectScan };
+
+  /** Виртуальные окружения Python в проекте: главное — первым. */
+  'python.environments': { params: void; result: PythonEnvironment[] };
+  /** Интерпретаторы Python, найденные в системе: выбор версии при создании окружения. */
+  'python.interpreters': { params: void; result: PythonInterpreter[] };
+  /** Создать окружение, при желании поставив в него пакеты. Долгий вызов со событиями. */
+  'python.createVenv': { params: CreateVenvOptions; result: CreateVenvResult };
+  /** Команда активации главного окружения для терминала; null — окружения нет. */
+  'python.activateCommand': { params: void; result: { command: string | null } };
+  /** Установленные пакеты главного окружения: имя и версия. */
+  'python.packages': { params: void; result: InstalledPackage[] };
+  /** Поставить пакеты или зависимости из requirements.txt. Долгий вызов со событиями. */
+  'python.install': { params: PythonInstallOptions; result: PythonInstallResult };
+  /** Список тестов проекта: `pytest --collect-only`. */
+  'python.tests': { params: void; result: CollectedSuite };
+  /** Что не так с окружениями проекта: битый `pyvenv.cfg`, нет pip, пропал базовый питон. */
+  'python.envHealth': { params: void; result: EnvironmentHealth[] };
+  /** Отформатировать текст файла инструментом окружения (ruff или black). */
+  'python.format': { params: { path: string; text: string }; result: PythonFormatResult };
+  /**
+   * Какие из импортированных модулей проект не видит: для Python — интерпретатор,
+   * для JS/TS — `node_modules`. Пустой ответ — либо всё на месте, либо судить
+   * не по чему (нет интерпретатора, не найден каталог пакетов).
+   */
+  'imports.missing': { params: { language: string; modules: string[] }; result: { missing: string[] } };
 
   'git.status': { params: void; result: GitStatus };
   'git.init': { params: void; result: GitStatus };
@@ -902,8 +1002,15 @@ export interface ChuiMethods {
   'lsp.close': { params: { path: string }; result: void };
   'lsp.restart': { params: void; result: { running: string[] } };
   'lsp.status': { params: void; result: { running: string[] } };
+  /** Символы проекта по запросу: классы, функции, переменные — «перейти к символу». */
+  'lsp.symbols': { params: { query: string }; result: ProjectSymbol[] };
   /** Найти в PATH известные языковые серверы и вернуть готовые конфигурации. */
   'lsp.detect': { params: void; result: LspServerConfig[] };
+  /**
+   * Прокси-запрос к языковому серверу открытого файла: подсказки, наведение,
+   * переход к определению. Форму params/result задаёт LSP, детали — в renderer.
+   */
+  'lsp.request': { params: { path: string; method: string; params: unknown }; result: unknown };
 
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };

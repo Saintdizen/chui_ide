@@ -20,6 +20,10 @@ export interface StatusState {
   branch: string | null;
   /** Сколько файлов с правками: показывает виджет ветки. */
   changes: number;
+  /** Вид проекта — «Python», «Node.js». Слева, рядом с именем проекта. */
+  projectKind: string | null;
+  /** Выбранное Python-окружение (`.venv`, `python3`); null — виджет скрыт. */
+  env: string | null;
 }
 
 export interface StatusBarView {
@@ -30,11 +34,13 @@ export interface StatusBarView {
 export interface StatusBarDeps {
   /** Открыть менеджер git у указанной кнопки — так работает кнопка ветки. */
   openGitManager(anchor: HTMLElement): void;
+  /** Открыть попап Python-окружения у кнопки окружения. */
+  openPythonEnv(anchor: HTMLElement): void;
 }
 
 /**
  * Статусбар как в PyCharm: слева путь к активному файлу и ветка git,
- * справа «строка:столбец», перевод строки, кодировка, отступ, язык.
+ * справа «строка:столбец», перевод строки, кодировка, отступ, окружение и язык.
  * Полоса плоская, без «острова» — на фоне приложения.
  */
 export function createStatusBar(deps: StatusBarDeps): StatusBarView {
@@ -54,9 +60,21 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     encoding: 'UTF-8',
     branch: null,
     changes: 0,
+    projectKind: null,
+    env: null,
   };
 
   const workspaceItem = h('span', { class: 'status-item' });
+  const kindItem = h('span', { class: 'status-item status-kind' });
+  const envItem = h(
+    'button',
+    {
+      class: 'status-item status-env',
+      type: 'button',
+      title: 'Python-окружение проекта',
+      onClick: (event: Event) => deps.openPythonEnv(event.currentTarget as HTMLElement),
+    },
+  );
   const fileItem = h('span', { class: 'status-item status-file' });
   const gitItem = h(
     'button',
@@ -82,7 +100,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const element = h(
     'div',
     { class: 'statusbar' },
-    h('div', { class: 'status-group' }, workspaceItem, gitItem, fileItem),
+    h('div', { class: 'status-group' }, workspaceItem, kindItem, gitItem, fileItem),
     h(
       'div',
       { class: 'status-group' },
@@ -92,6 +110,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       eolItem,
       encodingItem,
       indentItem,
+      envItem,
       toolItem,
       languageItem,
     ),
@@ -99,6 +118,9 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
 
   const render = (): void => {
     workspaceItem.textContent = state.workspace ?? 'нет проекта';
+    kindItem.textContent = state.projectKind ?? '';
+    kindItem.hidden = !state.projectKind;
+    kindItem.title = state.projectKind ? `Проект: ${state.projectKind}` : '';
     fileItem.textContent = state.file ? `${state.dirty ? '● ' : ''}${state.file}` : '';
     fileItem.hidden = !state.file;
     positionItem.textContent = `${state.line}:${state.column}`;
@@ -106,6 +128,9 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     encodingItem.textContent = state.encoding;
     indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} пробела`;
     languageItem.textContent = state.language ?? '—';
+    envItem.textContent = state.env ?? '';
+    envItem.hidden = !state.env;
+    envItem.title = state.env ? `Python-окружение: ${state.env}` : '';
     toolItem.textContent = state.tool ?? '';
     toolItem.hidden = !state.tool;
     toolItem.title = state.tool ? `Запуск: ${state.tool}` : '';

@@ -3276,6 +3276,27 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
+/* Вид проекта: «Python», «Node.js» — рядом с именем проекта, тише его. */
+.status-kind {
+  color: var(--text_color_tertiary);
+}
+
+/* Окружение Python — кнопка: клик открывает попап с подробностями. */
+.status-env {
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  cursor: pointer;
+}
+
+.status-env:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
 .status-ai {
   display: inline-flex;
   align-items: center;
@@ -3291,7 +3312,7 @@ textarea {
 .popover {
   position: fixed;
   z-index: var(--layer_popup);
-  padding: 12px;
+  padding: 5px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--popup_background);
@@ -3448,6 +3469,140 @@ textarea {
   flex: 0 0 auto;
   padding: 10px 12px;
   border-top: 1px solid var(--separator_color);
+}
+
+/* ── окно Python-окружений ──────────────────────────────────────────────── */
+
+.venv-modal {
+  width: 560px;
+}
+
+/* Одно полотно вместо двух колонок настроек: список окружений и форма создания. */
+.modal-body.venv-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.venv-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.venv-heading {
+  margin: 0;
+  color: var(--text_color_disabled);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.venv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.venv-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  font-size: var(--font_labels_size);
+}
+
+/* Основное окружение — рамка акцентом: видно, что возьмут запуск и подсказки. */
+.venv-item.is-primary {
+  border-color: var(--blue_prime_background);
+}
+
+.venv-name {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.venv-version {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
+}
+
+.venv-badge {
+  padding: 1px 6px;
+  border-radius: var(--radius_pill);
+  background: var(--blue_prime_background_tint_strong);
+  color: var(--text_color_hover);
+  font-size: 10px;
+}
+
+.venv-path {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text_color_disabled);
+  font-family: var(--font_mono);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.venv-empty {
+  padding: 12px;
+  border: 1px dashed var(--separator_color);
+  border-radius: var(--radius_sm);
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+  text-align: center;
+}
+
+.venv-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.venv-label {
+  flex: 0 0 auto;
+  width: 80px;
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+}
+
+.venv-hint {
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.venv-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+/* Журнал создания: вывод `venv` и `pip` построчно, с прокруткой у последней строки. */
+.venv-log {
+  max-height: 180px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Переключатель вместо чекбокса: та же плотность, что у остальных контролов. */
@@ -3662,6 +3817,16 @@ textarea {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* Вид символа («класс», «функция») — короткая подпись перед путём. */
+.palette-item-kind {
+  padding: 0 6px;
+  border-radius: var(--radius_pill);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-size: 10px;
+  white-space: nowrap;
 }
 
 .palette-item-category {
@@ -4175,12 +4340,23 @@ textarea {
 /* Тот же менеджер, что и панель изменений, но во всплывающей рамке у кнопки
    ветки: ограничиваем ширину и высоту списка, чтобы попап не разрастался. */
 .popover-git {
-  padding: 6px 0;
+  padding: 5px;
 }
 
+/* Ширину панели задаёт попап: внутри она просто заполняет его. */
 .popover-git .source-control {
-  width: 340px;
+  width: -webkit-fill-available;
   height: auto;
+}
+
+/* Заголовок и поле коммита держатся на отступах попапа, а не на своих:
+   в боковой панели отступы остаются прежними. */
+.popover-git .sc-head {
+  padding: 0;
+}
+
+.popover-git .sc-commit-box {
+  padding: 5px 0;
 }
 
 .popover-git .sc-list {
@@ -4279,4 +4455,342 @@ textarea {
 
 .status-git-label {
   font-family: var(--font_mono);
+}
+
+/* ── панель тестов ─────────────────────────────────────────────────────── */
+
+.tests-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.tests-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.tests-summary {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.tests-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0;
+}
+
+.tests-node {
+  display: flex;
+  flex-direction: column;
+}
+
+.tests-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: 8px;
+  cursor: default;
+  font-size: var(--font_labels_size);
+}
+
+.tests-row:hover {
+  background: var(--element_background_hover);
+}
+
+.tests-file .tests-label {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.tests-class .tests-label {
+  color: var(--text_color_hover);
+}
+
+.tests-test .tests-label {
+  color: var(--text_color_tertiary);
+}
+
+.tests-arrow {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--text_color_disabled);
+}
+
+.tests-arrow.is-toggle {
+  cursor: pointer;
+}
+
+.tests-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Кнопка запуска появляется при наведении: список не должен пестреть стрелками. */
+.tests-run {
+  margin-left: auto;
+  padding: 0 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--blue_prime_background);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.tests-row:hover .tests-run {
+  opacity: 1;
+}
+
+.tests-run:hover {
+  background: var(--element_background_hover);
+}
+
+.tests-empty {
+  padding: 12px;
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+  text-align: center;
+}
+
+.tests-errors {
+  margin: 6px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--red_prime_background);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+}
+
+.tests-error-title {
+  margin-bottom: 4px;
+  color: var(--text_color);
+  font-weight: 600;
+  font-size: var(--font_labels_size);
+}
+
+.tests-error-line {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+/* ── попап Python-окружения в статусбаре ──────────────────────────────── */
+
+/* Отступ даёт сам попап (`.popover`): своё поле здесь сложилось бы с ним
+   в двойную рамку. */
+.python-env {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Окружений бывает много: длинный список прокручиваем, а не вылезаем за окно. */
+.popover-python-env {
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+
+.python-env-title {
+  color: var(--text_color_disabled);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.python-env-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.python-env-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--font_labels_size);
+}
+
+.python-env-key {
+  flex: 0 0 auto;
+  width: 92px;
+  color: var(--text_color_disabled);
+}
+
+/* Путь может быть длинным: переносим по любому месту, а не растягиваем попап. */
+.python-env-value {
+  min-width: 0;
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.python-env-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.python-env-badge {
+  padding: 1px 6px;
+  border-radius: var(--radius_pill);
+  background: var(--blue_prime_background_tint_strong);
+  color: var(--text_color_hover);
+  font-size: 10px;
+}
+
+
+/* Раздел выбора: подпись над списком, как у секций в других окнах. */
+.python-env-heading {
+  margin-top: 2px;
+  color: var(--text_color_disabled);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Строка выбора интерпретатора: клик выбирает, рамка показывает текущий. */
+.python-env-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.python-env-option:hover {
+  border-color: var(--blue_prime_background);
+}
+
+.python-env-option.is-selected {
+  border-color: var(--blue_prime_background);
+  background: var(--blue_prime_background_tint_strong);
+}
+
+.python-env-option-name {
+  flex: 0 0 auto;
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+/* Подробность строки может быть длинной: усекаем, а не растягиваем попап. */
+.python-env-option-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.python-env-empty {
+  padding: 10px;
+  border: 1px dashed var(--separator_color);
+  border-radius: var(--radius_sm);
+  color: var(--text_color_disabled);
+  font-size: var(--font_labels_size);
+  text-align: center;
+}
+
+.python-env-manage {
+  padding: 6px 10px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+.python-env-manage:hover {
+  border-color: var(--blue_prime_background);
+  color: var(--text_color_hover);
+}
+
+/* Поломки окружения: точка цветом важности и объяснение словами. */
+.python-env-health {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+}
+
+.python-env-issue {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--font_labels_size);
+  line-height: 1.4;
+}
+
+.python-env-issue-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text_color_disabled);
+}
+
+.python-env-issue.is-error .python-env-issue-dot {
+  background: var(--red_prime_background);
+}
+
+.python-env-issue.is-warning .python-env-issue-dot {
+  background: var(--yellow_prime_background);
+}
+
+.python-env-issue.is-error {
+  color: var(--text_color);
+}
+
+.python-env-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.python-env-heading {
+  margin: 0;
+  color: var(--text_color_disabled);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.python-env-note {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Подпись без моно-шрифта: путь — код, а «источник» — просто слово. */
+.python-env-plain {
+  font-family: inherit;
+  font-size: var(--font_labels_size);
 }

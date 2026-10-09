@@ -112,7 +112,15 @@ export function pathToUri(filePath: string): string {
   return `file://${encoded.startsWith('/') ? '' : '/'}${encoded}`;
 }
 
+/**
+ * Путь файла из `file://`-ссылки — в той же форме, что `TextDocument.path`.
+ *
+ * На Windows Monaco отдаёт `/C:/…`, а документы ключуются как `C:\…`: без снятия
+ * ведущего слэша и возврата родных разделителей LSP и быстрые правки не находят
+ * открытый документ — сравнение идёт по строке (`document.path`).
+ */
 export function uriToPath(uri: string): string {
-  const withoutScheme = uri.replace(/^file:\/\//, '');
-  return decodeURIComponent(withoutScheme);
+  let path = decodeURIComponent(uri.replace(/^file:\/\//, ''));
+  if (/^\/[A-Za-z]:/.test(path)) path = path.slice(1);
+  return /^[A-Za-z]:/.test(path) ? path.replace(/\//g, '\\') : path;
 }

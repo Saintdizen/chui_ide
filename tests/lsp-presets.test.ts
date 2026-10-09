@@ -27,6 +27,19 @@ describe('matchPresets', () => {
     expect(python[0]!.command).toBe('pylsp');
   });
 
+  it('полный путь к серверу в venv привязывается по имени файла', () => {
+    // Сервер из окружения приходит полным путём — сопоставляем по имени.
+    const result = matchPresets(['/p/.venv/bin/pylsp']);
+    const python = result.find((server) => server.language === 'python');
+    expect(python?.command).toBe('/p/.venv/bin/pylsp');
+  });
+
+  it('расширение .exe на Windows не мешает сопоставлению', () => {
+    const result = matchPresets(['C:/p/.venv/Scripts/pylsp.exe']);
+    const python = result.find((server) => server.language === 'python');
+    expect(python?.command).toBe('C:/p/.venv/Scripts/pylsp.exe');
+  });
+
   it('если pylsp нет, берётся pyright', () => {
     const result = matchPresets(['pyright-langserver']);
     const python = result.find((server) => server.language === 'python');

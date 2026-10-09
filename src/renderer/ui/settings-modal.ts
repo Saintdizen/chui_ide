@@ -543,6 +543,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'field-label' }, 'Подсказки и проверки'),
       switchRow('Подсказки по мере ввода', editor.quickSuggestions, (value) => editable({ quickSuggestions: value })),
       switchRow('Подсвечивать неиспользуемый код', editor.showUnused, (value) => editable({ showUnused: value })),
+      switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
       h(
         'div',
         { class: 'field-hint' },
