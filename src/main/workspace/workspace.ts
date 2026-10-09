@@ -15,6 +15,7 @@ import {
   type WorkspaceInfo,
 } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
+import { escapesRoot, isInsideRoot } from './path-guard';
 import { globToRegExp } from '../../shared/glob';
 import { replaceAll } from '../../shared/replace';
 
@@ -116,7 +117,10 @@ export class WorkspaceService {
   }
 
   async stat(filePath: string): Promise<FileStat> {
-    const file = await this.safePath(filePath);
+    // Метаданные — единственное, что читаем, поэтому симлинк наружу не запрещаем:
+    // так устроены виртуальные окружения (`.venv/bin/python` ссылается на системный
+    // интерпретатор), и по этой проверке IDE решает, каким питоном запускать код.
+    const file = await this.safePath(filePath, { allowOutsideSymlink: true });
     const stat = await fs.stat(file).catch(() => null);
     if (!stat) throw new RpcFailure(RpcErrorCode.NotFound, `Путь не найден: ${file}`);
     const kind = stat.isDirectory() ? 'directory' : stat.isSymbolicLink() ? 'symlink' : 'file';
@@ -375,16 +379,25 @@ export class WorkspaceService {
    * Защита от выхода за пределы рабочей папки: сначала по нормализованному пути,
    * затем по realpath (симлинк внутри проекта может вести куда угодно).
    */
-  private async safePath(target: string): Promise<string> {
+  /**
+   * Проверка пути на безопасность. Лексически он обязан лежать в проекте — это
+   * защищает от `..` в запросе.
+   *
+   * Симлинк внутри проекта может вести наружу, и для операций с содержимым это
+   * запрет: иначе через ссылку можно было бы читать и писать чужие файлы. Но
+   * `allowOutsideSymlink` снимает запрет там, где наружу уходит лишь чтение
+   * метаданных (см. `stat`): виртуальные окружения устроены именно так.
+   */
+  private async safePath(target: string, options: { allowOutsideSymlink?: boolean } = {}): Promise<string> {
     const root = this.requireRoot();
     const resolved = path.resolve(target);
-    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+    if (!isInsideRoot(root, resolved)) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Путь вне рабочей папки');
     }
 
-    const real = await fs.realpath(resolved).catch(() => null);
-    if (real && this.rootReal) {
-      if (real !== this.rootReal && !real.startsWith(this.rootReal + path.sep)) {
+    if (!options.allowOutsideSymlink) {
+      const real = await fs.realpath(resolved).catch(() => null);
+      if (escapesRoot(this.rootReal, real)) {
         throw new RpcFailure(RpcErrorCode.InvalidParams, 'Путь вне рабочей папки (симлинк)');
       }
     }
