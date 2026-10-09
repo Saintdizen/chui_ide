@@ -11,7 +11,7 @@ import {
   parseVitestList,
 } from '../src/shared/node-tests';
 
-const ROOT = '/p';
+const ROOTS = ['/p'];
 
 describe('nodeTestRunnerFrom', () => {
   it('раннер берём из объявленных зависимостей', () => {
@@ -76,7 +76,7 @@ describe('parseVitestList', () => {
   ]);
 
   it('полное имя даёт группу и сам тест: ` > ` разделяет их, как `::` у pytest', () => {
-    const suite = parseVitestList(output, ROOT);
+    const suite = parseVitestList(output, ROOTS);
     expect(suite.total).toBe(2);
     expect(suite.errors).toEqual([]);
     expect(suite.tests[0]).toEqual({
@@ -92,26 +92,26 @@ describe('parseVitestList', () => {
   it('вложенные группы остаются одной подписью: она же идёт в `-t`', () => {
     const suite = parseVitestList(
       JSON.stringify([{ name: 'внешняя > внутренняя > тест', file: '/p/tests/a.test.ts' }]),
-      ROOT,
+      ROOTS,
     );
     expect(suite.tests[0]?.className).toBe('внешняя > внутренняя');
     expect(suite.tests[0]?.id).toBe('tests/a.test.ts::внешняя > внутренняя > тест');
   });
 
   it('битый вывод — это ошибка сбора, а не исключение', () => {
-    expect(parseVitestList('не json', ROOT).errors.length).toBe(1);
-    expect(parseVitestList('{"tests":[]}', ROOT).errors.length).toBe(1);
+    expect(parseVitestList('не json', ROOTS).errors.length).toBe(1);
+    expect(parseVitestList('{"tests":[]}', ROOTS).errors.length).toBe(1);
   });
 
   it('записи без имени или файла пропускаются', () => {
-    const suite = parseVitestList(JSON.stringify([{ name: 'без файла' }, { file: '/p/tests/a.test.ts' }]), ROOT);
+    const suite = parseVitestList(JSON.stringify([{ name: 'без файла' }, { file: '/p/tests/a.test.ts' }]), ROOTS);
     expect(suite.tests).toEqual([]);
   });
 });
 
 describe('parseJestList', () => {
   it('строки-пути становятся узлами файлов', () => {
-    const suite = parseJestList(JSON.stringify(['/p/tests/a.test.js', '/p/src/b.spec.ts']), ROOT);
+    const suite = parseJestList(JSON.stringify(['/p/tests/a.test.js', '/p/src/b.spec.ts']), ROOTS);
     expect(suite.total).toBe(2);
     expect(suite.tests).toEqual([
       { id: 'tests/a.test.js', file: 'tests/a.test.js', className: null, name: '' },
@@ -120,12 +120,12 @@ describe('parseJestList', () => {
   });
 
   it('объекты с путём тоже понимаем: версии jest отвечают по-разному', () => {
-    const suite = parseJestList(JSON.stringify([{ testFilePath: '/p/tests/a.test.js' }, { path: '/p/tests/b.test.js' }]), ROOT);
+    const suite = parseJestList(JSON.stringify([{ testFilePath: '/p/tests/a.test.js' }, { path: '/p/tests/b.test.js' }]), ROOTS);
     expect(suite.tests.map((test) => test.file)).toEqual(['tests/a.test.js', 'tests/b.test.js']);
   });
 
   it('битый вывод — ошибка сбора', () => {
-    expect(parseJestList('не json', ROOT).errors.length).toBe(1);
+    expect(parseJestList('не json', ROOTS).errors.length).toBe(1);
   });
 });
 

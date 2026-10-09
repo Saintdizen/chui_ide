@@ -169,7 +169,7 @@ export class NodeAdapter {
    * не совпала бы со скриптом, и остановки бы не было.
    */
   private readonly aliases = new Map<string, string>();
-  /** Пути файлов, ставших скриптами: по ним точка ставится напрямую. */
+  /** Пути файлов, ставших скриптами, — ключом: на Windows регистр не важен. */
   private readonly scriptPaths = new Set<string>();
   /** Source-карты по пути сгенерированного файла — для перевода кадров стека. */
   private readonly mapsByPath = new Map<string, SourceMap>();
@@ -542,7 +542,7 @@ export class NodeAdapter {
     // Настоящее имя файла запоминаем: Node зовёт его иначе (развёрнутый симлинк), а
     // клиенту в стеке отдаём то имя, которым он сам назвал файл.
     const real = canonicalPath(file);
-    if (real && real !== file) this.aliases.set(real, file);
+    if (real && real !== file) this.aliases.set(pathKey(real), file);
     // Файл, которого нет среди скриптов и которого не знает ни одна карта, ещё
     // может оказаться исходником сборки, чей скрипт не загрузился: подержим в
     // отложенных, чтобы добавить перевод, когда карта появится.
@@ -564,21 +564,28 @@ export class NodeAdapter {
   /**
    * Куда в исполняемом коде ложится точка файла — все возможные места.
    *
-   * Первым идёт прямое: файл адресуется своим URL, позиция не меняется. Затем —
-   * места из карт, которые знают этот файл исходником. Прямое первое не случайно:
-   * для `.js` оно и есть настоящее, а перевод по карте нужен, когда файл в сборку
-   * не попадал (например, `.ts`).
+   * Первым идёт URL, которым файл назвал сам Node: своя сборка URL совпадает с ним
+   * не всегда (на Windows расходятся регистр диска и короткое имя), а точка в чужом
+   * написании скрипт не найдёт. Затем — прямые написания пути: скрипт может быть ещё
+   * не загружен, и тогда файл приходится адресовать заранее. Последними — места из
+   * карт, которые знают этот файл исходником (`.ts`).
    */
   private targetsFor(file: string, line: number): BreakpointTarget[] {
-    // Прямое адресование пробуем во всех написаниях пути: скрипт приходит от Node
-    // уже развёрнутым, а клиент называет файл так, как его открыл.
     const variants = this.pathVariants(file);
-    const targets: BreakpointTarget[] = variants.map((variant) => ({
-      url: pathToFileURL(variant).toString(),
-      line,
-      column: 0,
-      map: null,
-    }));
+    const targets: BreakpointTarget[] = [];
+    const urls = new Set<string>();
+
+    const known = this.scriptUrlFor(file);
+    if (known) {
+      urls.add(known);
+      targets.push({ url: known, line, column: 0, map: null });
+    }
+    for (const variant of variants) {
+      const url = pathToFileURL(variant).toString();
+      if (urls.has(url)) continue;
+      urls.add(url);
+      targets.push({ url, line, column: 0, map: null });
+    }
 
     for (const script of this.scripts.values()) {
       const map = script.map;
@@ -598,10 +605,23 @@ export class NodeAdapter {
     return real && real !== file ? [file, real] : [file];
   }
 
+  /**
+   * URL, которым файл назвал сам Node. Своя сборка URL (`pathToFileURL`) совпадает
+   * с серверным написанием не всегда: на Windows расходятся регистр диска и короткое
+   * имя. Скрипт уже загружен — берём его URL как есть, он точный.
+   */
+  private scriptUrlFor(file: string): string | null {
+    const wanted = new Set(this.pathVariants(file).map(pathKey));
+    for (const script of this.scripts.values()) {
+      if (script.path && wanted.has(pathKey(script.path))) return script.url;
+    }
+    return null;
+  }
+
   /** Файл уже знаком: он стал скриптом или его знает source-карта (в любом написании). */
   private isKnownFile(file: string): boolean {
     return this.pathVariants(file).some(
-      (variant) => this.scriptPaths.has(variant) || this.hasMapFor(variant),
+      (variant) => this.scriptPaths.has(pathKey(variant)) || this.hasMapFor(variant),
     );
   }
 
@@ -641,14 +661,13 @@ export class NodeAdapter {
     const file = urlToPath(url);
     const info: ScriptInfo = { url, path: file, map: null };
     this.scripts.set(scriptId, info);
-    if (file) for (const variant of this.pathVariants(file)) this.scriptPaths.add(variant);
+    if (file) for (const variant of this.pathVariants(file)) this.scriptPaths.add(pathKey(variant));
 
     const mapUrl = typeof params.sourceMapURL === 'string' ? params.sourceMapURL : '';
     if (mapUrl) this.loadSourceMap(info, mapUrl);
     if (!file) return;
-    // Файл стал скриптом — точка в нём ставится напрямую, отложенной её держать
-    // больше незачем. Чтение карты синхронное, поэтому чтение и повтор идут следом.
-    for (const variant of this.pathVariants(file)) this.pendingSources.delete(variant);
+    // Файл стал скриптом: точки, которые его ждали, переставляем — теперь место
+    // берётся из URL самого Node, а не из нашей сборки URL.
     this.retryPending();
   }
 
@@ -702,7 +721,7 @@ export class NodeAdapter {
     const map = SourceMap.parse(text, path.dirname(info.path));
     if (!map) return;
     info.map = map;
-    this.mapsByPath.set(info.path, map);
+    this.mapsByPath.set(pathKey(info.path), map);
     this.retryPending();
   }
 
@@ -716,15 +735,17 @@ export class NodeAdapter {
   }
 
   /**
-   * Повторить постановку точек, которые ждали карту.
+   * Повторить постановку точек, которые ждали свой файл.
    *
-   * Повторяем только те файлы, для которых карта теперь есть: иначе каждый новый
-   * скрипт снова и снова снимал бы и ставил одни и те же точки.
+   * Ждут по двум поводам: скрипт файла ещё не загрузился (тогда точку нельзя
+   * привязать к URL Node) или не прочиталась его source-карта. Повторяем только
+   * те файлы, которые теперь известны: иначе каждый новый скрипт снова и снова
+   * снимал бы и ставил одни и те же точки.
    */
   private retryPending(): void {
     if (this.pendingSources.size === 0) return;
     for (const file of [...this.pendingSources]) {
-      if (!this.hasMapFor(file)) continue;
+      if (!this.isKnownFile(file)) continue;
       const wanted = this.wantedBreakpoints.get(file);
       if (!wanted) {
         this.pendingSources.delete(file);
@@ -742,12 +763,12 @@ export class NodeAdapter {
       const file = urlToPath(frame.url || this.scripts.get(String(frame.location.scriptId))?.url || '');
       // Кадр из собранного файла показываем в исходнике: человек открыл `.ts`, а не
       // `.js`, и стек должен вести туда, где он поставил точку.
-      const map = file ? this.mapsByPath.get(file) : null;
+      const map = file ? this.mapsByPath.get(pathKey(file)) : null;
       const original = map?.originalPositionFor(frame.location.lineNumber, frame.location.columnNumber);
       // Путь кадра показываем так же, как файл называет клиент: он открывал его
       // по своему имени, и по этому же имени кликается кадр в стеке.
       const raw = original?.source ?? file;
-      const source = raw ? (this.aliases.get(raw) ?? raw) : null;
+      const source = raw ? (this.aliases.get(pathKey(raw)) ?? raw) : null;
       return {
         id: this.frameIds[index],
         name: frame.functionName || '(анонимная функция)',
@@ -1122,6 +1143,11 @@ function debuggeeEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   // Адаптер сам запущен как Node (ELECTRON_RUN_AS_NODE): цели это не нужно.
   delete env.ELECTRON_RUN_AS_NODE;
   return extra ? { ...env, ...extra } : env;
+}
+
+/** Ключ пути: на Windows один и тот же файл пишут разным регистром. */
+function pathKey(value: string): string {
+  return process.platform === 'win32' ? value.toLowerCase() : value;
 }
 
 /**

@@ -35,21 +35,26 @@ describe('isInsideRoot', () => {
 
 describe('escapesRoot', () => {
   const rootReal = path.resolve('/proj');
+  // Пути берём через `path.resolve`: модуль сравнивает готовые имена, а POSIX-литералы
+  // на Windows не совпали бы с ними ни разделителем, ни диском.
+  const inside = path.resolve('/proj/.venv/bin/python');
+  const outside = path.resolve('/usr/bin/python3');
+  const similar = path.resolve('/project/x');
 
   it('симлинк внутри проекта — не уход', () => {
-    expect(escapesRoot(rootReal, '/proj/.venv/bin/python')).toBe(false);
+    expect(escapesRoot(rootReal, inside)).toBe(false);
   });
 
   it('симлинк на системный интерпретатор — уход (так устроен venv)', () => {
-    expect(escapesRoot(rootReal, '/usr/bin/python3')).toBe(true);
+    expect(escapesRoot(rootReal, outside)).toBe(true);
   });
 
   it('нечего сравнивать — не уход', () => {
-    expect(escapesRoot(null, '/usr/bin/python3')).toBe(false);
+    expect(escapesRoot(null, outside)).toBe(false);
     expect(escapesRoot(rootReal, null)).toBe(false);
   });
 
   it('похожее имя каталога не считается своим', () => {
-    expect(escapesRoot(rootReal, '/project/x')).toBe(true);
+    expect(escapesRoot(rootReal, similar)).toBe(true);
   });
 });

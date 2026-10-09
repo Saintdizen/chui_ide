@@ -93,12 +93,23 @@ export function nodeTestNamePattern(name: string): string {
 
 /* ── сбор ───────────────────────────────────────────────────────────────── */
 
-/** Файл к корню проекта, с прямыми слэшами: путь пришёл от раннера, а не от нас. */
-export function relativeTo(root: string, file: string): string {
+/**
+ * Файл к корню проекта, с прямыми слэшами: путь пришёл от раннера, а не от нас.
+ *
+ * Написаний корня может быть два: исходное и настоящее (`realpath`). Раннер
+ * печатает путь от `process.cwd()` своего процесса, а тот называет каталог
+ * по-своему: на macOS раскрывает симлинк (`/var` → `/private/var`), на Windows
+ * берёт короткое имя (`RUNNER~1`), отличное от исходного. Поэтому примеряем все
+ * написания и берём то, под которое путь подошёл.
+ */
+export function relativeTo(roots: readonly string[], file: string): string {
   const slash = (value: string): string => value.split('\\').join('/');
-  const base = slash(root).replace(/\/+$/, '');
   const target = slash(file);
-  return target.startsWith(`${base}/`) ? target.slice(base.length + 1) : target;
+  for (const root of roots) {
+    const base = slash(root).replace(/\/+$/, '');
+    if (base && target.startsWith(`${base}/`)) return target.slice(base.length + 1);
+  }
+  return target;
 }
 
 /**
@@ -108,7 +119,7 @@ export function relativeTo(root: string, file: string): string {
  * принимает `-t`, поэтому id теста собираем из него. Часть до последнего ` > `
  * становится группой в дереве — как класс у pytest.
  */
-export function parseVitestList(json: string, root: string): CollectedSuite {
+export function parseVitestList(json: string, roots: readonly string[]): CollectedSuite {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -125,7 +136,7 @@ export function parseVitestList(json: string, root: string): CollectedSuite {
     const { name, file } = entry as { name?: unknown; file?: unknown };
     if (typeof name !== 'string' || typeof file !== 'string') continue;
 
-    const path = relativeTo(root, file);
+    const path = relativeTo(roots, file);
     const parts = name.split(' > ');
     const testName = parts.pop() ?? name;
     const group = parts.join(' > ');
@@ -147,7 +158,7 @@ export function parseVitestList(json: string, root: string): CollectedSuite {
  * узлы выходят файловыми. Форму ответа проверяем на оба вида: в разных версиях
  * это либо строки-пути, либо объекты с путём внутри.
  */
-export function parseJestList(json: string, root: string): CollectedSuite {
+export function parseJestList(json: string, roots: readonly string[]): CollectedSuite {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -158,7 +169,7 @@ export function parseJestList(json: string, root: string): CollectedSuite {
     return { tests: [], total: 0, errors: ['Список файлов jest пришёл не массивом'] };
   }
 
-  const files = parsed.map((entry) => filePathOf(entry)).filter(isString).map((file) => relativeTo(root, file));
+  const files = parsed.map((entry) => filePathOf(entry)).filter(isString).map((file) => relativeTo(roots, file));
   const tests = fileTests(files);
   return { tests, total: tests.length, errors: [] };
 }

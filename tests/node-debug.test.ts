@@ -210,7 +210,9 @@ function writeCompiled(dir: string): { original: string; generated: string } {
 describe('NodeAdapter', () => {
   afterEach(() => {
     for (const child of children.splice(0)) child.kill();
-    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+    // Windows не отпускает каталог сразу после убийства процесса: без повторов
+    // `rmSync` падает с EBUSY — и это падение засчитывается тесту.
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   });
 
   it('отлаживает JS: точки останова, стек, переменные, вычисление, шаг, продолжение', async () => {

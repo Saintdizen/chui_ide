@@ -50,20 +50,26 @@ export async function collectNodeTests(root: string): Promise<NodeTestSuite> {
 
   const args = runner === 'vitest' ? ['list', '--json'] : ['--listTests', '--json'];
   const output = await runScript(root, script, args);
-  // Раннер печатает пути, начиная с `process.cwd()`, а тот у процесса развёрнут:
-  // симлинки раскрыты, регистр приведён (macOS, Windows). Сравнивать с исходным
-  // написанием корня нельзя — путь вышел бы абсолютным вместо относительного.
-  const base = await realRoot(root);
-  const suite = runner === 'vitest' ? parseVitestList(output, base) : parseJestList(output, base);
+  const names = await rootNames(root);
+  const suite = runner === 'vitest' ? parseVitestList(output, names) : parseJestList(output, names);
   return { runner, ...suite };
 }
 
-/** Настоящее имя каталога — им же называют корень запущенные раннеры. */
-async function realRoot(root: string): Promise<string> {
+/**
+ * Написания корня: исходное и настоящее.
+ *
+ * Раннер печатает пути от `process.cwd()` своего процесса, а тот называет каталог
+ * по-своему: на macOS симлинк раскрыт (`/var` → `/private/var`), а на Windows взято
+ * короткое имя (`RUNNER~1`), и оно же остаётся исходным. Какое написание попадёт в
+ * вывод, заранее неизвестно, поэтому примеряем оба — иначе путь вышел бы
+ * абсолютным вместо относительного.
+ */
+async function rootNames(root: string): Promise<string[]> {
   try {
-    return await realpath(root);
+    const real = await realpath(root);
+    return real && real !== root ? [root, real] : [root];
   } catch {
-    return root;
+    return [root];
   }
 }
 
