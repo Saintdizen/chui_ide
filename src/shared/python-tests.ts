@@ -138,6 +138,11 @@ export interface CoverageRow {
   statements: number;
   /** Непокрытых строк. */
   missing: number;
+  /**
+   * Номера непокрытых строк — из колонки `Missing` отчёта `--cov-report=term-missing`.
+   * Пусто, если отчёт без неё (обычный `--cov`): тогда построчной подсветки нет.
+   */
+  missingLines: number[];
 }
 
 /** Итог покрытия: процент по проекту и разбивка по файлам. */
@@ -148,8 +153,37 @@ export interface CoverageReport {
   files: CoverageRow[];
 }
 
-/** Строка отчёта: `путь  стmts  miss  cover%`. Имя — всё, что до чисел. */
-const COVERAGE_ROW = /^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)%$/;
+/**
+ * Строка отчёта: `путь  stmts  miss  cover%` и, если отчёт с `term-missing`,
+ * ещё колонка `Missing` (`5-6, 12`). Имя — всё, что до чисел; список строк —
+ * всё, что после процента.
+ */
+const COVERAGE_ROW = /^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)%(?:\s+(.+))?$/;
+
+/** Предел строк в одном диапазоне Missing: защита от битого `1-999999` в отчёте. */
+const MAX_MISSING_LINES = 5000;
+
+/**
+ * Разобрать колонку `Missing`: `5-6, 12, 20-22`. Диапазоны раскрываем в список —
+ * дальше и редактор, и подсчёт работают с ним одинаково.
+ */
+export function parseMissingLines(value: string): number[] {
+  const lines: number[] = [];
+  for (const part of value.split(',')) {
+    const token = part.trim();
+    if (!token) continue;
+    const range = /^(\d+)-(\d+)$/.exec(token);
+    if (range) {
+      const from = Number(range[1]);
+      const to = Number(range[2]);
+      for (let line = from; line <= to && lines.length < MAX_MISSING_LINES; line += 1) lines.push(line);
+      continue;
+    }
+    if (/^\d+$/.test(token)) lines.push(Number(token));
+    if (lines.length >= MAX_MISSING_LINES) break;
+  }
+  return lines;
+}
 
 /**
  * Разбор полного отчёта покрытия `pytest --cov`.
@@ -175,7 +209,13 @@ export function parseCoverageReport(text: string): CoverageReport {
     }
     // Шапка и разделители под шаблон не подходят, а имя с пробелами шаблон берёт
     // целиком (группа нежадная): отдельной проверки на служебные строки не нужно.
-    files.push({ path: name, percent: Number(match[4]), statements: Number(match[2]), missing: Number(match[3]) });
+    files.push({
+      path: name,
+      percent: Number(match[4]),
+      statements: Number(match[2]),
+      missing: Number(match[3]),
+      missingLines: match[5] ? parseMissingLines(match[5]) : [],
+    });
   }
 
   // Сначала самое проблемное: по числу непокрытых строк, затем по проценту.

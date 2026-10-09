@@ -221,6 +221,26 @@ export interface SessionState {
   dockActive?: string;
   sidebarVisible: boolean;
   rightVisible: boolean;
+  /** Параметры запуска отладки: аргументы, окружение и рабочий каталог. */
+  debugLaunch?: DebugLaunchOptions;
+  /** Наблюдаемые в панели отладки выражения. */
+  debugWatch?: string[];
+  /** Точки останова отладки по файлам — их рабочее место помнит для проекта. */
+  breakpoints?: BreakpointRecord[];
+}
+
+/**
+ * Точка останова в сессии проекта: файл, строка и её настройки. Похожа на
+ * `DebugBreakpoint`, но без `verified`: подтверждает точку отладчик, а в сессии
+ * хранится только то, что задал человек.
+ */
+export interface BreakpointRecord {
+  /** Абсолютный путь файла. */
+  path: string;
+  line: number;
+  condition?: string;
+  hitCondition?: string;
+  logMessage?: string;
 }
 
 /** Полезная нагрузка события `PushTopic.WorkspaceChanged`. */
@@ -634,6 +654,23 @@ export interface DebugStoppedPayload {
 export interface DebugOutputPayload {
   category: string;
   text: string;
+}
+
+/**
+ * Как запускать программу: чего не хватает одному имени файла.
+ *
+ * Аргументы — то, что человек ввёл строкой и разобрал `parseArguments`;
+ * рабочий каталог — где запускать процесс (по умолчанию корень проекта);
+ * переменные окружения — дополнение к окружению проекта (`.env`), их видит
+ * только отлаживаемая программа, а не адаптер.
+ */
+export interface DebugLaunchOptions {
+  /** Аргументы командной строки программы (после имени файла). */
+  args?: string[];
+  /** Дополнительные переменные окружения программы (перекрывают `.env` и системные). */
+  env?: Record<string, string>;
+  /** Рабочий каталог процесса; не задан — корень проекта. */
+  cwd?: string;
 }
 
 export interface Settings {
@@ -1091,10 +1128,10 @@ export interface ChuiMethods {
 
   /* Отладчик: сессия debugpy по протоколу DAP. */
   /** Начать отладку файла интерпретатором окружения. */
-  'debug.start': { params: { program: string; cwd?: string }; result: { ok: boolean; message: string } };
+  'debug.start': { params: { program: string; args?: string[]; env?: Record<string, string>; cwd?: string }; result: { ok: boolean; message: string } };
   /** Точки останова файла: набор заменяется целиком, как в DAP. */
   'debug.setBreakpoints': {
-    params: { path: string; breakpoints: Array<{ line: number; condition?: string }> };
+    params: { path: string; breakpoints: Array<{ line: number; condition?: string; hitCondition?: string; logMessage?: string }> };
     result: DebugBreakpoint[];
   };
   'debug.continue': { params: void; result: void };
@@ -1110,6 +1147,15 @@ export interface ChuiMethods {
    * Ошибка выражения — это результат, а не сбой: текст ошибки возвращается как значение.
    */
   'debug.evaluate': { params: { expression: string; frameId?: number }; result: DebugVariable };
+  /**
+   * Значение выражения для подсказки под курсором. Ошибку не показываем: `null`
+   * означает «значения нет», и подсказка не появляется.
+   */
+  'debug.hover': { params: { expression: string; frameId?: number }; result: DebugVariable | null };
+  /** Задать новое значение переменной или поля; `null` — отладчик не смог присвоить. */
+  'debug.setVariable': { params: { reference: number; name: string; value: string }; result: DebugVariable | null };
+  /** Задать значение произвольному выражению в кадре; `null` — присвоить не удалось. */
+  'debug.setExpression': { params: { expression: string; value: string; frameId?: number }; result: DebugVariable | null };
 
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };

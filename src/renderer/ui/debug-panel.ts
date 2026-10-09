@@ -1,6 +1,7 @@
 import type { DebugFrame, DebugScope, DebugVariable } from '../../shared/api';
 import type { DebugController, DebugState } from '../core/debug';
 import { clear, h } from './dom';
+import { showToast } from './toast';
 
 /**
  * Панель отладки: управление сессией, стек вызовов и переменные.
@@ -17,6 +18,10 @@ export interface DebugPanelDeps {
   debug: DebugController;
   /** Кадр выбрали — показать его в редакторе и поставить там курсор. */
   onRevealFrame: (frame: DebugFrame) => void;
+  /** Наблюдение изменилось — рабочее место стоит сохранить. */
+  onWatchChange?: () => void;
+  /** Спросить у человека новое значение; `null` — отменили ввод. */
+  promptValue?: (input: { title: string; label: string; value: string }) => Promise<string | null>;
 }
 
 export interface DebugPanelView {
@@ -24,6 +29,10 @@ export interface DebugPanelView {
   /** Перерисовать по текущему состоянию (панель открыли заново). */
   refresh(): void;
   focus(): void;
+  /** Наблюдаемые выражения: рабочее место помнит их между запусками проекта. */
+  getWatch(): string[];
+  /** Задать выражения из сессии проекта. */
+  setWatch(expressions: readonly string[]): void;
 }
 
 /** Что показывает панель, когда отладка не идёт. */
@@ -68,8 +77,12 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
     );
   }
 
-  /** Строка переменной: имя, значение и раскрытие, если у значения есть дети. */
-  function variableRow(variable: DebugVariable, depth: number): HTMLElement {
+  /**
+   * Строка переменной: имя, значение и раскрытие, если у значения есть дети.
+   * `reference` — контейнер, в котором лежит переменная: по нему её и правят
+   * (`setVariable`), потому что DAP адресует значение парой «контейнер + имя».
+   */
+  function variableRow(variable: DebugVariable, depth: number, reference: number): HTMLElement {
     const hasChildren = variable.variablesReference > 0;
     const isOpen = expanded.has(variable.variablesReference);
     const toggle = h(
@@ -79,7 +92,11 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
     );
     const row = h(
       'div',
-      { class: 'debug-row', style: { paddingLeft: `${depth * 14 + 6}px` } },
+      {
+        class: 'debug-row',
+        style: { paddingLeft: `${depth * 14 + 6}px` },
+        title: 'Двойной клик — изменить значение',
+      },
       toggle,
       h('span', { class: 'debug-var-name' }, variable.name),
       h('span', { class: 'debug-var-value' }, variable.value),
@@ -89,7 +106,32 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
     if (hasChildren) {
       row.addEventListener('click', () => void toggleReference(variable.variablesReference));
     }
+    if (deps.promptValue) {
+      row.addEventListener('dblclick', () => void editVariable(reference, variable));
+    }
     return row;
+  }
+
+  /**
+   * Правка значения переменной прямо в панели. Отладчик может привести значение
+   * к типу, поэтому строку обновляем тем, что он вернул, а не тем, что ввели.
+   */
+  async function editVariable(reference: number, variable: DebugVariable): Promise<void> {
+    const prompt = deps.promptValue;
+    if (!prompt) return;
+    const next = await prompt({ title: 'Изменить значение', label: variable.name, value: variable.value });
+    if (next === null) return;
+
+    const result = await deps.debug.setVariable(reference, variable.name, next);
+    if (!result) {
+      showToast(`Не удалось изменить ${variable.name}`, 'error');
+      return;
+    }
+    const list = loadedVariables.get(reference);
+    if (list) {
+      loadedVariables.set(reference, list.map((item) => (item.name === variable.name ? result : item)));
+    }
+    render(stateSnapshot);
   }
 
   /** Раскрыть или свернуть узел: значения грузятся один раз и запоминаются. */
@@ -106,13 +148,14 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
     render(stateSnapshot);
   }
 
-  function variableTree(variables: readonly DebugVariable[], depth: number): HTMLElement[] {
+  function variableTree(variables: readonly DebugVariable[], depth: number, reference: number): HTMLElement[] {
     const nodes: HTMLElement[] = [];
     for (const variable of variables) {
-      nodes.push(variableRow(variable, depth));
+      nodes.push(variableRow(variable, depth, reference));
       if (expanded.has(variable.variablesReference)) {
         const children = loadedVariables.get(variable.variablesReference) ?? [];
-        nodes.push(...variableTree(children, depth + 1));
+        // Дети лежат в контейнере самой переменной — он и есть их reference.
+        nodes.push(...variableTree(children, depth + 1, variable.variablesReference));
       }
     }
     return nodes;
@@ -165,7 +208,7 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
       box.appendChild(h('div', { class: 'debug-scope' }, scope.name));
       const values = loadedVariables.get(scope.variablesReference) ?? [];
       if (values.length === 0) box.appendChild(h('div', { class: 'debug-empty' }, '—'));
-      else for (const node of variableTree(values, 1)) box.appendChild(node);
+      else for (const node of variableTree(values, 1, scope.variablesReference)) box.appendChild(node);
     }
     body.appendChild(h('section', { class: 'debug-section' }, h('h3', { class: 'debug-heading' }, 'Переменные'), box));
   }
@@ -182,16 +225,27 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
       const result = watchValues.get(expression);
       const row = h(
         'div',
-        { class: 'debug-row', title: 'Убрать из наблюдения' },
+        { class: 'debug-row', title: 'Двойной клик — изменить значение' },
         h('span', { class: 'debug-var-name' }, expression),
         h('span', { class: 'debug-var-value' }, result ? result.value : '…'),
         result?.type ? h('span', { class: 'debug-var-type' }, result.type) : null,
+        h(
+          'button',
+          {
+            class: 'icon-btn debug-watch-remove',
+            type: 'button',
+            title: 'Убрать из наблюдения',
+            onClick: (event: Event) => {
+              event.stopPropagation();
+              removeWatch(expression);
+            },
+          },
+          '×',
+        ),
       );
-      row.addEventListener('click', () => {
-        watchExpressions = watchExpressions.filter((item) => item !== expression);
-        watchValues.delete(expression);
-        render(stateSnapshot);
-      });
+      // Двойной клик правит значение выражения (`setExpression`): «убрать» переехало
+      // на кнопку, иначе одиночный клик гасил бы строку до двойного.
+      if (deps.promptValue) row.addEventListener('dblclick', () => void editWatch(expression));
       list.appendChild(row);
     }
 
@@ -214,12 +268,47 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
       if (!expression || watchExpressions.includes(expression)) return;
       input.value = '';
       watchExpressions.push(expression);
+      deps.onWatchChange?.();
       void evaluateWatch().then(() => render(stateSnapshot));
     });
 
     body.appendChild(
       h('section', { class: 'debug-section' }, h('h3', { class: 'debug-heading' }, 'Наблюдение'), list, input),
     );
+  }
+
+  /** Убрать выражение из наблюдения. */
+  function removeWatch(expression: string): void {
+    watchExpressions = watchExpressions.filter((item) => item !== expression);
+    watchValues.delete(expression);
+    deps.onWatchChange?.();
+    render(stateSnapshot);
+  }
+
+  /**
+   * Правка значения наблюдаемого выражения (`setExpression`). В отличие от правки
+   * переменной, тут человек задаёт любое выражение (`items[0]`, `config.debug`),
+   * которое в дереве переменных отдельной строкой не показано.
+   */
+  async function editWatch(expression: string): Promise<void> {
+    const prompt = deps.promptValue;
+    if (!prompt) return;
+    const current = watchValues.get(expression);
+    const next = await prompt({ title: 'Изменить значение', label: expression, value: current?.value ?? '' });
+    if (next === null) return;
+
+    const frameId = selectedFrameId ?? stateSnapshot.topFrame?.id;
+    if (frameId === undefined || frameId === null) {
+      showToast('Значение меняют на останове', 'error');
+      return;
+    }
+    const result = await deps.debug.setExpression(expression, next, frameId);
+    if (!result) {
+      showToast(`Не удалось изменить ${expression}`, 'error');
+      return;
+    }
+    watchValues.set(expression, result);
+    render(stateSnapshot);
   }
 
   /** Пересчитать все наблюдаемые выражения в контексте выбранного кадра. */
@@ -284,5 +373,13 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
       render(deps.debug.get());
     },
     focus: () => void 0,
+    getWatch: () => [...watchExpressions],
+    setWatch: (expressions) => {
+      // Значения не переносим: выражения из сессии ещё не считались в этой сессии
+      // отладки — они посчитаются на ближайшем останове.
+      watchExpressions = [...new Set(expressions)];
+      watchValues.clear();
+      render(stateSnapshot);
+    },
   };
 }

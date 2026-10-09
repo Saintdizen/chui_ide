@@ -752,6 +752,11 @@ textarea {
   background: var(--debug_line_background);
 }
 
+/* Строки, не исполненные тестами: подсвечиваются после прогона с покрытием. */
+.coverage-line {
+  background: var(--coverage_missing_background);
+}
+
 .editor-host {
   position: relative;
   flex: 1;
@@ -3447,6 +3452,19 @@ textarea {
   padding: 12px;
 }
 
+/* Параметры запуска: три поля столбиком, высота — по содержимому. */
+.launch-modal {
+  width: min(520px, 100%);
+  height: auto;
+}
+
+.launch-modal .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+}
+
 .modal-nav {
   display: flex;
   flex-direction: column;
@@ -4733,6 +4751,16 @@ textarea {
 .debug-watch-input {
   margin: 6px 8px 0;
   width: calc(100% - 16px);
+}
+
+/* Крестик «убрать из наблюдения» — в конце строки, появляется при наведении. */
+.debug-watch-remove {
+  margin-left: auto;
+  opacity: 0;
+}
+
+.debug-row:hover .debug-watch-remove {
+  opacity: 1;
 }
 
 .debug-empty {

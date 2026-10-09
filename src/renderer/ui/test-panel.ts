@@ -35,6 +35,8 @@ export interface TestPanelDeps {
   onCoverage: (selector: string | null) => void;
   /** Панель на виду: пересобирать список по правке имеет смысл только тогда. */
   isVisible: () => boolean;
+  /** Пришёл отчёт покрытия — по нему редактор подсвечивает непокрытые строки. */
+  onCoverageReport?: (report: CoverageReport) => void;
 }
 
 /** Исход последнего прогона узла. */
@@ -108,7 +110,11 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
     if (code === null) return;
     outcomes.set(pendingKey, code === 0 ? 'passed' : 'failed');
     // Строку покрытия печатает pytest-cov перед нашим маркером — берём её отсюда же.
-    if (pendingCoverage) coverage = parseCoverageReport(outputTail);
+    if (pendingCoverage) {
+      coverage = parseCoverageReport(outputTail);
+      // Построчную разбивку отдаём наружу: редактор подсветит непокрытые строки.
+      deps.onCoverageReport?.(coverage);
+    }
     pendingKey = null;
     pendingCoverage = false;
     outputTail = '';

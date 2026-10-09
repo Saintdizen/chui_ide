@@ -1,6 +1,7 @@
 import {
   PushTopic,
   type DebugFrame,
+  type DebugLaunchOptions,
   type DebugOutputPayload,
   type DebugPhase,
   type DebugScope,
@@ -74,6 +75,10 @@ export class DebugController {
   /** Вывод отлаживаемой программы: панель печатает его в свой лог. */
   readonly onOutput = this.outputEmitter.event;
 
+  /** Набор точек изменился — работа сохраняет их в сессии проекта. */
+  private readonly breakpointEmitter = new Emitter<void>();
+  readonly onDidChangeBreakpoints = this.breakpointEmitter.event;
+
   constructor(private readonly rpc: RpcClient) {
     rpc.onPush((message) => {
       switch (message.topic) {
@@ -116,6 +121,24 @@ export class DebugController {
     return this.breakpointsOf(path).map((item) => item.line);
   }
 
+  /** Все точки по файлам: рабочее место сохраняет их в сессии проекта. */
+  allBreakpoints(): Array<[string, BreakpointInput[]]> {
+    return [...this.breakpoints.entries()].map(([path, list]) => [path, [...list]]);
+  }
+
+  /**
+   * Восстановить точки из сессии проекта. В main не шлём: отладка ещё не идёт,
+   * а при старте контроллер отправит все точки сам. Значки рисует редактор.
+   */
+  restoreBreakpoints(entries: readonly (readonly [string, readonly BreakpointInput[]])[]): void {
+    this.breakpoints.clear();
+    for (const [path, list] of entries) {
+      const next = normalize(list);
+      if (next.length > 0) this.breakpoints.set(path, next);
+    }
+    this.breakpointEmitter.fire();
+  }
+
   /** Включить точку останова на строке, если её нет, и выключить, если есть. */
   async toggleBreakpoint(path: string, line: number): Promise<BreakpointInput[]> {
     const current = this.breakpointsOf(path).filter((item) => item.line !== line);
@@ -151,16 +174,22 @@ export class DebugController {
     // main подтверждает точки (он же отправит их отладчику); ошибка — не беда,
     // набор уже сохранён у нас и уедет при старте.
     await this.rpc.request('debug.setBreakpoints', { path, breakpoints: next }).catch(() => undefined);
+    this.breakpointEmitter.fire();
     return next;
   }
 
   /** Запустить отладку файла. Все известные точки main получит по событию `initialized`. */
-  async start(program: string, cwd?: string): Promise<{ ok: boolean; message: string }> {
+  async start(program: string, options: DebugLaunchOptions = {}): Promise<{ ok: boolean; message: string }> {
     // Точки всех файлов отправляем заранее: отладчик запросит их при инициализации.
     for (const [path, breakpoints] of this.breakpoints) {
       await this.rpc.request('debug.setBreakpoints', { path, breakpoints }).catch(() => undefined);
     }
-    return this.rpc.request('debug.start', { program, cwd });
+    return this.rpc.request('debug.start', {
+      program,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+      ...(options.args && options.args.length > 0 ? { args: options.args } : {}),
+      ...(options.env && Object.keys(options.env).length > 0 ? { env: options.env } : {}),
+    });
   }
 
   async resume(): Promise<void> {
@@ -192,6 +221,25 @@ export class DebugController {
     return this.rpc
       .request('debug.evaluate', { expression, ...(frameId !== undefined ? { frameId } : {}) })
       .catch(() => ({ name: expression, value: 'отладчик недоступен', type: null, variablesReference: 0 }));
+  }
+
+  /** Значение выражения для подсказки под курсором; `null` — значения нет. */
+  hover(expression: string, frameId?: number): Promise<DebugVariable | null> {
+    return this.rpc
+      .request('debug.hover', { expression, ...(frameId !== undefined ? { frameId } : {}) })
+      .catch(() => null);
+  }
+
+  /** Задать новое значение переменной или поля; `null` — присвоить не удалось. */
+  setVariable(reference: number, name: string, value: string): Promise<DebugVariable | null> {
+    return this.rpc.request('debug.setVariable', { reference, name, value }).catch(() => null);
+  }
+
+  /** Задать значение произвольному выражению в кадре; `null` — присвоить не удалось. */
+  setExpression(expression: string, value: string, frameId?: number): Promise<DebugVariable | null> {
+    return this.rpc
+      .request('debug.setExpression', { expression, value, ...(frameId !== undefined ? { frameId } : {}) })
+      .catch(() => null);
   }
 
   private apply(next: DebugState): void {

@@ -1,4 +1,11 @@
-import { PushTopic, type SessionState, type Settings, type WorkspaceChangedPayload } from '../shared/api';
+import {
+  PushTopic,
+  type BreakpointRecord,
+  type DebugLaunchOptions,
+  type SessionState,
+  type Settings,
+  type WorkspaceChangedPayload,
+} from '../shared/api';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -29,6 +36,7 @@ import {
 } from './core/run-config';
 import { isTestFile, type ProjectScan } from '../shared/project-scan';
 import { findRunnableTests } from '../shared/python-tests';
+import { joinPath, separatorOf, splitPath } from '../shared/paths';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
@@ -39,6 +47,7 @@ import { createDiffView } from './ui/diff-view';
 import { basename, clear, h, svgIcon, type IconName } from './ui/dom';
 import { createEmptyState } from './ui/empty-state';
 import { createExplorer } from './ui/explorer';
+import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
 import { logoMark } from './ui/logo';
 import { createPalette } from './ui/palette';
@@ -92,6 +101,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const edits = new EditService({ documents, editors, rpc });
   // Отладчик: состояние сессии держит контроллер, события идут из main push-ом.
   const debug = new DebugController(rpc);
+  // Подсказка под курсором на строке останова: значение выражения в кадре. Шов
+  // в редактор — потому что контроллер отладки живёт здесь, а не в Monaco.
+  editors.setDebugHover(async (expression) => {
+    if (debug.get().phase !== 'stopped') return null;
+    const result = await debug.hover(expression);
+    return result ? { value: result.value, type: result.type } : null;
+  });
   // Приёмник обратных вызовов из main: правки агента приходят сюда.
   const host = new HostService();
   // Языковые серверы: держим документы синхронными и кладём их пометки в Monaco.
@@ -201,6 +217,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // по ней панель и красит узлы. Покрытие — отдельная цель.
     onRun: (selector, options) => void runTarget(pytestTarget(tools.get(), selector, { ...options, platform: info.platform })),
     onCoverage: (selector) => void runTarget(pytestCoverageTarget(tools.get(), selector, { report: true, platform: info.platform })),
+    // Отчёт покрытия → подсветка непокрытых строк в редакторе. Отчёт даёт пути от
+    // корня проекта; редактор ключует файлы абсолютными — собираем их здесь.
+    onCoverageReport: (report) => {
+      const root = workspace.root;
+      if (!root) return;
+      const separator = separatorOf(root);
+      const entries = report.files
+        .filter((file) => file.missingLines.length > 0)
+        .map((file) => [joinPath(root, splitPath(file.path).join(separator)), file.missingLines] as const);
+      editors.setCoverage(entries);
+    },
     // Пересобирать список по правке стоит только когда панель тестов на виду.
     isVisible: () => dock.visible && dock.activeId === 'tests',
   });
@@ -623,6 +650,23 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const conditionInput = createPromptModal();
   document.body.appendChild(conditionInput.element);
 
+  /** Ввод одной строки как Promise: `null`, если окно закрыли без подтверждения. */
+  const promptValue = (input: { title: string; label: string; value: string }): Promise<string | null> =>
+    new Promise((resolve) => {
+      conditionInput.open({
+        title: input.title,
+        label: input.label,
+        value: input.value,
+        confirmLabel: 'Задать',
+        onAccept: (value) => resolve(value),
+        onCancel: () => resolve(null),
+      });
+    });
+
+  // Диалог параметров запуска отладки: аргументы, окружение и рабочий каталог.
+  const launchOptions = createLaunchOptionsModal();
+  document.body.appendChild(launchOptions.element);
+
   // Поиск символа по проекту (Ctrl+T): файл открываем тем же путём, что и дерево,
   // а затем встаём на строку объявления.
   const symbolPicker = createSymbolPicker({
@@ -640,6 +684,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       if (!frame.path) return;
       void openPath(frame.path).then(() => editors.revealDebugFrame(frame.path!, frame.line, frame.column));
     },
+    // Наблюдение изменилось — рабочее место стоит сохранить (см. сессию ниже).
+    onWatchChange: () => scheduleSessionSave(),
+    // Правка значения переменной: панель просит строку, ввод показывает app.
+    promptValue,
   });
   dock.register({ id: 'debug', title: 'Отладка', element: debugPanel.element, onShow: () => debugPanel.refresh() });
 
@@ -651,16 +699,61 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   let restoringSession = false;
   let sessionSaveTimer = 0;
 
+  /** Точки останова в виде записей сессии: файл + строка + настройки. */
+  const captureBreakpoints = (): BreakpointRecord[] => {
+    const records: BreakpointRecord[] = [];
+    for (const [path, list] of debug.allBreakpoints()) {
+      for (const item of list) {
+        records.push({
+          path,
+          line: item.line,
+          ...(item.condition ? { condition: item.condition } : {}),
+          ...(item.hitCondition ? { hitCondition: item.hitCondition } : {}),
+          ...(item.logMessage ? { logMessage: item.logMessage } : {}),
+        });
+      }
+    }
+    return records;
+  };
+
+  /** Восстановить точки останова проекта: в контроллер и значками в редактор. */
+  const restoreBreakpoints = (records: readonly BreakpointRecord[]): void => {
+    const byPath = new Map<string, Array<{ line: number; condition?: string; hitCondition?: string; logMessage?: string }>>();
+    for (const record of records) {
+      const list = byPath.get(record.path) ?? [];
+      list.push({
+        line: record.line,
+        ...(record.condition ? { condition: record.condition } : {}),
+        ...(record.hitCondition ? { hitCondition: record.hitCondition } : {}),
+        ...(record.logMessage ? { logMessage: record.logMessage } : {}),
+      });
+      byPath.set(record.path, list);
+    }
+    debug.restoreBreakpoints([...byPath.entries()]);
+    // Значки рисует редактор: карту держит он, а состояние — контроллер. Файлы
+    // значки получат сразу, даже не открытые: модель появится — отрисуется по карте.
+    for (const [path, list] of debug.allBreakpoints()) editors.setBreakpoints(path, list);
+  };
+
   /** Текущее рабочее место: что открыто, что раскрыто, какие панели видны. */
-  const captureSession = (): SessionState => ({
-    tabs: [...openEditors.paths],
-    ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
-    expanded: explorer.expandedPaths(),
-    dockVisible: layout.dockVisible,
-    ...(dock.activeId ? { dockActive: dock.activeId } : {}),
-    sidebarVisible: layout.sidebarVisible,
-    rightVisible: layout.rightVisible,
-  });
+  const captureSession = (): SessionState => {
+    const breakpoints = captureBreakpoints();
+    const watch = debugPanel.getWatch();
+    return {
+      tabs: [...openEditors.paths],
+      ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
+      expanded: explorer.expandedPaths(),
+      dockVisible: layout.dockVisible,
+      ...(dock.activeId ? { dockActive: dock.activeId } : {}),
+      sidebarVisible: layout.sidebarVisible,
+      rightVisible: layout.rightVisible,
+      // Параметры запуска, наблюдение и точки останова отладки — часть рабочего места:
+      // пустые не пишем, чтобы файл не разрастался полями-пустышками.
+      ...(Object.keys(debugOptions).length > 0 ? { debugLaunch: debugOptions } : {}),
+      ...(watch.length > 0 ? { debugWatch: watch } : {}),
+      ...(breakpoints.length > 0 ? { breakpoints } : {}),
+    };
+  };
 
   const scheduleSessionSave = (): void => {
     if (!sessionRoot || restoringSession) return;
@@ -701,6 +794,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       }
 
       explorer.restoreExpanded(state.expanded);
+      // Параметры запуска, наблюдение и точки останова — из прошлой сессии проекта.
+      debugOptions = state.debugLaunch ?? {};
+      debugPanel.setWatch(state.debugWatch ?? []);
+      restoreBreakpoints(state.breakpoints ?? []);
       layout.setSidebarVisible(state.sidebarVisible);
       // Панель ассистента не восстанавливаем, если AI выключен: её место свободно.
       layout.setRightVisible(state.rightVisible && aiEnabled());
@@ -720,6 +817,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   openEditors.onDidChange(scheduleSessionSave);
   dock.onVisibilityChange(scheduleSessionSave);
+  // Точки останова — тоже часть рабочего места: поставили или сняли — сохраняем.
+  debug.onDidChangeBreakpoints(scheduleSessionSave);
   // Закрытие окна: последний шанс сохранить рабочее место (без ожидания ответа).
   window.addEventListener('beforeunload', () => {
     if (sessionRoot && !restoringSession) {
@@ -973,22 +1072,51 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── отладка ───────────────────────────────────────────────────────────── */
 
-  /** Начать отладку активного файла: как запуск, но под debugpy. */
-  const startDebug = async (): Promise<void> => {
+  /** Запомненные параметры запуска: помнятся в сессии проекта, подставляются в F5. */
+  let debugOptions: DebugLaunchOptions = {};
+
+  /** Активный файл, если он на Python: иначе тост и `null`. Отладчик — только Python. */
+  const activePythonFile = (): TextDocument | null => {
     const active = openEditors.active;
-    if (!active || active.languageId !== 'python') {
+    if (active?.languageId !== 'python') {
       showToast('Отладчик работает с файлами Python', 'error');
-      return;
+      return null;
     }
+    return active;
+  };
+
+  /** Начать отладку активного файла: как запуск, но под debugpy. */
+  const startDebug = async (options: DebugLaunchOptions = debugOptions): Promise<void> => {
+    const active = activePythonFile();
+    if (!active) return;
     if (settings.run.saveBeforeRun) {
       for (const document of documents.dirty()) await saveDocument(document);
     }
-    const result = await debug.start(active.path);
+    const result = await debug.start(active.path, options);
     if (!result.ok) showToast(result.message, 'error');
     else dock.show('debug');
   };
 
-  define({ id: 'debug.start', title: 'Отладка: запустить файл', category: 'Отладка' }, startDebug);
+  define({ id: 'debug.start', title: 'Отладка: запустить файл', category: 'Отладка' }, () => startDebug());
+
+  // Параметры запуска одним окном: аргументы, переменные окружения и рабочий каталог.
+  // Заданные один раз, они держатся в памяти и подставляются в обычный F5.
+  define({ id: 'debug.startWithOptions', title: 'Отладка: параметры запуска…', category: 'Отладка' }, () => {
+    if (!activePythonFile()) return;
+    launchOptions.open({
+      options: debugOptions,
+      onAccept: (options) => {
+        debugOptions = options;
+        scheduleSessionSave();
+        void startDebug(options);
+      },
+      onReset: () => {
+        debugOptions = {};
+        scheduleSessionSave();
+        showToast('Параметры запуска сброшены');
+      },
+    });
+  });
 
   // F5 как в VS Code: не идёт отладка — начать, стоит на паузе — продолжить.
   define({ id: 'debug.continue', title: 'Отладка: продолжить / запустить', category: 'Отладка', keybinding: 'F5' }, async () => {

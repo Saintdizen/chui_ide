@@ -203,9 +203,11 @@ export function pytestCoverageTarget(
   selector: string | null,
   options: { report?: boolean; platform?: string } = {},
 ): RunTarget {
+  // `term-missing` просим явно, хотя `--cov` и так печатает терминальный отчёт:
+  // без него в отчёте нет колонки `Missing`, а по ней панель подсвечивает строки.
   const base = selector
-    ? `${tools.pythonCommand} -m pytest --cov -- ${shellQuote(selector)}`
-    : `${tools.pythonCommand} -m pytest --cov`;
+    ? `${tools.pythonCommand} -m pytest --cov --cov-report=term-missing -- ${shellQuote(selector)}`
+    : `${tools.pythonCommand} -m pytest --cov --cov-report=term-missing`;
   // Панель тестов и здесь просит отчёт: по маркеру она ставит исход, а строку
   // покрытия берёт из вывода pytest-cov, который печатается перед маркером.
   const command = options.report && options.platform ? `${base}${resultMarkerCommand(options.platform)}` : base;

@@ -18,6 +18,8 @@ export interface PromptOptions {
   confirmLabel?: string;
   /** Вызывается с введённым текстом (уже без пробелов по краям). */
   onAccept(value: string): void;
+  /** Вызывается, если окно закрыли, ничего не введя (Esc, крестик, клик мимо). */
+  onCancel?(): void;
 }
 
 export interface PromptModalView {
@@ -38,8 +40,9 @@ export function createPromptModal(): PromptModalView {
     svgIcon('close', 15),
   );
 
-  // Текущий обработчик: у каждого открытия свой (см. `open`).
+  // Текущие обработчики: у каждого открытия свои (см. `open`).
   let accept: ((value: string) => void) | null = null;
+  let cancel: (() => void) | null = null;
 
   const element = h(
     'div',
@@ -53,17 +56,22 @@ export function createPromptModal(): PromptModalView {
     ),
   );
 
-  function close(): void {
+  function close(cancelled = true): void {
     if (element.hidden) return;
     element.hidden = true;
+    const onCancel = cancel;
     accept = null;
+    cancel = null;
     document.removeEventListener('keydown', onKeyDown, true);
+    // Отмену сообщаем только тем, кто её ждёт: обычному диалогу она не нужна.
+    if (cancelled) onCancel?.();
   }
 
   function submit(): void {
     const value = input.value.trim();
     const handler = accept;
-    close();
+    // Закрытие «не отменой»: подрядчик уже получит значение, отмену не шлём.
+    close(false);
     handler?.(value);
   }
 
@@ -96,6 +104,7 @@ export function createPromptModal(): PromptModalView {
       hint.textContent = '';
       confirmButton.textContent = options.confirmLabel ?? 'ОК';
       accept = options.onAccept;
+      cancel = options.onCancel ?? null;
 
       element.hidden = false;
       // Слушаем в capture и позже текущего клика, иначе Esc сработает на открытии.

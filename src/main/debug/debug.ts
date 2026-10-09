@@ -3,6 +3,7 @@ import {
   PushTopic,
   type DebugBreakpoint,
   type DebugFrame,
+  type DebugLaunchOptions,
   type DebugScope,
   type DebugVariable,
   type DebugPhase,
@@ -80,11 +81,11 @@ export class DebugService {
   /* ── сессия ────────────────────────────────────────────────────────────── */
 
   /** Начать отладку файла. Прошлую сессию закрываем: двух быть не должно. */
-  async start(program: string, cwd?: string): Promise<{ ok: boolean; message: string }> {
+  async start(program: string, options: DebugLaunchOptions = {}): Promise<{ ok: boolean; message: string }> {
     const python = this.pythonPath() ?? (process.platform === 'win32' ? 'python' : 'python3');
     this.stop();
 
-    const workingDir = cwd ?? this.root() ?? undefined;
+    const workingDir = options.cwd ?? this.root() ?? undefined;
     const env = mergeEnv(process.env, await this.env());
 
     const spec = this.adapter ? this.adapter() : { command: python, args: ['-m', 'debugpy.adapter'] };
@@ -127,6 +128,13 @@ export class DebugService {
     void this.call('launch', {
       program,
       cwd: workingDir,
+      // Аргументы программы — стандартное поле DAP `args`. Пустой список не шлём:
+      // отсутствие поля и пустой массив отладчик понимает одинаково, но лишний
+      // параметр в запросе — шум в логе.
+      ...(options.args && options.args.length > 0 ? { args: options.args } : {}),
+      // Переменные окружения программы (`env` в DAP) — только для отлаживаемого
+      // процесса: адаптер и так наследует окружение проекта, а эти значения поверх.
+      ...(options.env && Object.keys(options.env).length > 0 ? { env: options.env } : {}),
       console: 'internalConsole',
       redirectOutput: true,
     }).catch((error) => this.publish(PushTopic.DebugOutput, { category: 'stderr', text: `launch: ${error.message}` }));
@@ -272,6 +280,87 @@ export class DebugService {
         variablesReference: 0,
       };
     }
+  }
+
+  /**
+   * Значение выражения для подсказки под курсором. Отличается от `evaluate` тем,
+   * что ошибку НЕ показываем: навести мышь можно на что угодно, и подсказка
+   * «name 'x' is not defined» под каждым служебным словом была бы шумом. Нет
+   * значения — `null`, и подсказка просто не появится.
+   */
+  async hover(expression: string, frameId?: number): Promise<DebugVariable | null> {
+    const text = expression.trim();
+    if (!text) return null;
+
+    const threadId = this.thread;
+    const frame = frameId ?? this.topFrameId ?? this.frames[0]?.id ?? null;
+    if (threadId === null || frame === null) return null;
+
+    try {
+      const response = await this.call('evaluate', { expression: text, frameId: frame, context: 'hover' });
+      const body = response.body as { result?: unknown; type?: unknown; variablesReference?: unknown } | undefined;
+      const value = typeof body?.result === 'string' ? body.result : '';
+      if (!value) return null;
+      return {
+        name: text,
+        value,
+        type: typeof body?.type === 'string' ? body.type : null,
+        variablesReference: typeof body?.variablesReference === 'number' ? body.variablesReference : 0,
+      };
+    } catch {
+      // Ошибку выражения прячем: для подсказки это не значение, а отсутствие значения.
+      return null;
+    }
+  }
+
+  /**
+   * Задать новое значение переменной или поля — правка прямо в панели отладки.
+   *
+   * DAP зовёт это `setVariable`: отладчик присваивает и возвращает фактическое
+   * значение (оно может отличаться от введённого, если тип приводится). Ответ
+   * отдаём в форме `DebugVariable`, чтобы панель обновила строку тем же типом,
+   * что и при чтении. Ошибку (нельзя присвоить, имя неизвестно) — `null`.
+   */
+  async setVariable(reference: number, name: string, value: string): Promise<DebugVariable | null> {
+    const text = name.trim();
+    if (!text) return null;
+    const response = await this
+      .call('setVariable', { variablesReference: reference, name: text, value })
+      .catch(() => null);
+    if (!response) return null;
+    const body = response.body as { value?: unknown; type?: unknown; variablesReference?: unknown } | undefined;
+    return {
+      name: text,
+      value: typeof body?.value === 'string' ? body.value : value,
+      type: typeof body?.type === 'string' ? body.type : null,
+      variablesReference: typeof body?.variablesReference === 'number' ? body.variablesReference : 0,
+    };
+  }
+
+  /**
+   * Задать значение произвольному выражению в кадре (`setExpression` в DAP).
+   * Отличие от `setVariable`: там имя берётся из контейнера, а здесь выражение
+   * задаёт сам человек — так правят элемент списка (`items[0]`) или поле объекта
+   * (`config.debug`), которым в дереве переменных не соответствовала строка.
+   * Ответ отладчика возвращаем как значение; не удалось — `null`.
+   */
+  async setExpression(expression: string, value: string, frameId?: number): Promise<DebugVariable | null> {
+    const text = expression.trim();
+    if (!text) return null;
+    const frame = frameId ?? this.topFrameId ?? this.frames[0]?.id ?? null;
+    if (this.thread === null || frame === null) return null;
+
+    const response = await this
+      .call('setExpression', { expression: text, value, frameId: frame })
+      .catch(() => null);
+    if (!response) return null;
+    const body = response.body as { value?: unknown; type?: unknown; variablesReference?: unknown } | undefined;
+    return {
+      name: text,
+      value: typeof body?.value === 'string' ? body.value : value,
+      type: typeof body?.type === 'string' ? body.type : null,
+      variablesReference: typeof body?.variablesReference === 'number' ? body.variablesReference : 0,
+    };
   }
 
   /** Кадры текущего останова: панель берёт их отсюда, не запрашивая заново. */

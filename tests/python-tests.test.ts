@@ -5,6 +5,7 @@ import {
   describeTest,
   parseCoverage,
   parseCoverageReport,
+  parseMissingLines,
   parsePytestCollect,
   parseResultMarker,
   resultMarkerCommand,
@@ -147,7 +148,8 @@ describe('parseCoverageReport', () => {
     expect(report.total).toBe(60);
     // Первым — app.py (10 непокрытых), затем два полностью покрытых по алфавиту.
     expect(report.files.map((file) => file.path)).toEqual(['src/app.py', 'src/empty.py', 'src/util.py']);
-    expect(report.files[0]).toEqual({ path: 'src/app.py', percent: 50, statements: 20, missing: 10 });
+    // Отчёт без `term-missing`: номеров строк нет, поле пустое, а не отсутствует.
+    expect(report.files[0]).toEqual({ path: 'src/app.py', percent: 50, statements: 20, missing: 10, missingLines: [] });
   });
 
   it('сначала самое проблемное: по непокрытым строкам', () => {
@@ -177,6 +179,46 @@ describe('parseCoverageReport', () => {
   it('ANSI-цвета не мешают', () => {
     const report = parseCoverageReport('\u001b[31mTOTAL   10   4   60%\u001b[0m');
     expect(report.total).toBe(60);
+  });
+
+  it('отчёт с term-missing даёт номера непокрытых строк', () => {
+    const report = parseCoverageReport(
+      [
+        'Name                  Stmts   Miss  Cover   Missing',
+        '---------------------------------------------------',
+        'src/app.py               20     10    50%   3-6, 12, 18-19',
+        'src/util.py               5      0   100%',
+        '---------------------------------------------------',
+        'TOTAL                    25     10    60%',
+      ].join('\n'),
+    );
+    // Диапазоны раскрыты в список: 3-6 → 3,4,5,6; плюс 12 и 18-19.
+    expect(report.files.find((file) => file.path === 'src/app.py')?.missingLines).toEqual([3, 4, 5, 6, 12, 18, 19]);
+    // У полностью покрытого файла строк нет — колонка Missing пустая.
+    expect(report.files.find((file) => file.path === 'src/util.py')?.missingLines).toEqual([]);
+  });
+});
+
+describe('parseMissingLines', () => {
+  it('раскрывает диапазоны и одиночные строки', () => {
+    expect(parseMissingLines('5-7, 10')).toEqual([5, 6, 7, 10]);
+  });
+
+  it('пробелы и пустые куски пропускаются', () => {
+    expect(parseMissingLines(' 3 , , 5-6 ')).toEqual([3, 5, 6]);
+  });
+
+  it('мусорные куски не ломают разбор', () => {
+    expect(parseMissingLines('1, abc, 2')).toEqual([1, 2]);
+  });
+
+  it('огромный диапазон ограничивается сверху', () => {
+    // Битый `1-999999` в отчёте не должен порождать миллион строк.
+    expect(parseMissingLines('1-999999').length).toBeLessThanOrEqual(5000);
+  });
+
+  it('пустая строка — пустой список', () => {
+    expect(parseMissingLines('')).toEqual([]);
   });
 });
 

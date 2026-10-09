@@ -215,6 +215,10 @@
   /* Отладка: подсветка строки, где стоит отладчик. Полупрозрачная, чтобы код
      на ней читался, а не тонул в цвете. */
   --debug_line_background: rgba(90, 140, 220, 0.18);
+
+  /* Покрытие: строки, не исполненные тестами. Красноватый и приглушённый, чтобы
+     не спутать с подсветкой останова (синей) и не мешать чтению кода. */
+  --coverage_missing_background: rgba(200, 80, 80, 0.16);
 }
 
 @media (prefers-color-scheme: light) {
@@ -302,6 +306,7 @@
     --folder_open: #4a6a96;
     --run_accent: #2f7d32;
     --debug_line_background: rgba(60, 110, 200, 0.16);
+    --coverage_missing_background: rgba(190, 70, 70, 0.14);
     --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 32%, transparent);
   }
 }

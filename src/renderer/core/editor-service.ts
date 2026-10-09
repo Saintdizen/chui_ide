@@ -4,7 +4,7 @@ import type { TextEdit } from '../../shared/edits';
 import './monaco-env';
 import type { RunnableTest } from '../../shared/python-tests';
 import type { BreakpointInput } from './debug';
-import type { TextDocument } from './document';
+import { uriToPath, type TextDocument } from './document';
 import type { DocumentStore } from './document-store';
 import { Emitter } from './events';
 import { applyTypeScriptDefaults, registerLanguageModes } from './language-modes';
@@ -40,6 +40,12 @@ export interface TestMarkerHit {
 export interface DiffEditorHandle {
   set(input: { language: string; original: string; modified: string }): void;
   dispose(): void;
+}
+
+/** Значение выражения для подсказки под курсором: что показать и какого типа. */
+export interface DebugHoverValue {
+  value: string;
+  type: string | null;
 }
 
 /**
@@ -86,6 +92,11 @@ export class EditorService {
   private debugLine: { path: string; line: number } | null = null;
   /** Украшения подсветки по файлам: перед новой отрисовкой их нужно снять. */
   private readonly debugDecorations = new Map<string, string[]>();
+  /** Оценка выражения под курсором на строке останова; задаёт app (там контроллер отладки). */
+  private debugHover: ((expression: string) => Promise<DebugHoverValue | null>) | null = null;
+  /** Непокрытые строки по файлам из отчёта покрытия; пусто — покрытие не считали. */
+  private readonly coverageLines = new Map<string, ReadonlySet<number>>();
+  private readonly coverageDecorations = new Map<string, string[]>();
   private options: EditorOptions;
   private applying = false;
   private activePath: string | null = null;
@@ -139,6 +150,30 @@ export class EditorService {
         return;
       }
       this.breakpointEmitter.fire({ path, line });
+    });
+
+    // Подсказка под курсором на строке останова: значение выражения в контексте
+    // кадра. Показываем только на строке, где стоит отладчик, — иначе наведение
+    // на любое слово показывало бы значение из чужого места.
+    monaco.languages.registerHoverProvider('python', {
+      provideHover: async (model, position) => {
+        const evaluate = this.debugHover;
+        const current = this.debugLine;
+        if (!evaluate || !current || current.line !== position.lineNumber) return null;
+        const uri = model.uri;
+        if (uri.scheme !== 'file' || uriToPath(uri.path) !== current.path) return null;
+
+        const word = model.getWordAtPosition(position);
+        if (!word) return null;
+        const result = await evaluate(word.word);
+        if (!result) return null;
+
+        const type = result.type ? ` — \`${result.type}\`` : '';
+        return {
+          contents: [{ value: `\`${word.word}\` = ${result.value}${type}` }],
+          range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+        };
+      },
     });
 
     // Monaco считает ширину символа по фактическому шрифту, а файл шрифта
@@ -198,6 +233,8 @@ export class EditorService {
     this.drawBreakpoints(document.path);
     // И значки тестов: их считает панель по тексту файла.
     this.drawTestMarkers(document.path);
+    // И подсветку непокрытых строк: отчёт покрытия мог прийти раньше файла.
+    this.drawCoverage(document.path);
     this.drawDebugLine();
     this.editor.focus();
     this.emitCursor();
@@ -444,6 +481,57 @@ export class EditorService {
     this.drawDebugLine();
   }
 
+  /**
+   * Подключить оценку выражений для подсказки под курсором. Отдельным швом,
+   * потому что контроллер отладки живёт в app, а редактор о нём знать не должен.
+   */
+  setDebugHover(evaluate: (expression: string) => Promise<DebugHoverValue | null>): void {
+    this.debugHover = evaluate;
+  }
+
+  /**
+   * Непокрытые строки файлов из отчёта покрытия: подсвечиваем приглушённым фоном,
+   * чтобы видеть, что тесты не исполнили. Набор заменяется целиком (как и у точек
+   * останова): прогон считается по всем файлам сразу, и старую подсветку надо снять.
+   */
+  setCoverage(files: Iterable<readonly [string, readonly number[]]>): void {
+    const affected = new Set(this.coverageLines.keys());
+    this.coverageLines.clear();
+    for (const [path, lines] of files) {
+      if (lines.length === 0) continue;
+      this.coverageLines.set(path, new Set(lines));
+      affected.add(path);
+    }
+    for (const path of affected) this.drawCoverage(path);
+  }
+
+  private drawCoverage(path: string): void {
+    const model = this.models.get(path);
+    const previous = this.coverageDecorations.get(path) ?? [];
+    // Модели нет — файл не открыт; при открытии подсветку нарисует `open`.
+    if (!model) return;
+
+    const lines = this.coverageLines.get(path);
+    if (!lines || lines.size === 0) {
+      this.coverageDecorations.delete(path);
+      if (previous.length > 0) model.deltaDecorations(previous, []);
+      return;
+    }
+
+    const next = model.deltaDecorations(
+      previous,
+      [...lines].map((line) => ({
+        range: new monaco.Range(line, 1, line, 1),
+        options: {
+          isWholeLine: true,
+          className: 'coverage-line',
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      })),
+    );
+    this.coverageDecorations.set(path, next);
+  }
+
   private drawDebugLine(): void {
     // Снимаем прежнюю подсветку с той модели, где она была.
     for (const [path, ids] of this.debugDecorations) {
@@ -575,6 +663,10 @@ export class EditorService {
     this.testDecorations.delete(path);
     this.testMarkers.delete(path);
     this.debugDecorations.delete(path);
+    // Подсветка покрытия тоже рисуется по модели: id удалённой модели в карте
+    // копились бы, а сама подсветка — нет. Записи о непокрытых строках держим:
+    // файл откроют снова, и строки нужно нарисовать снова.
+    this.coverageDecorations.delete(path);
     if (this.debugLine?.path === path) this.debugLine = null;
     model.dispose();
     this.models.delete(path);

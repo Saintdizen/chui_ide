@@ -36,6 +36,10 @@ function handle(message) {
       break;
     case 'launch':
       launchSeq = message.seq;
+      // Эхо параметров: тест проверяет, что аргументы и окружение дошли до адаптера
+      // (поля DAP args и env).
+      send({ type: 'event', event: 'output', body: { category: 'stdout', output: 'launch-args:' + JSON.stringify(args.args || null) } });
+      send({ type: 'event', event: 'output', body: { category: 'stdout', output: 'launch-env:' + JSON.stringify(args.env || null) } });
       send({ type: 'event', event: 'initialized' });
       break;
     case 'setBreakpoints':
@@ -56,6 +60,23 @@ function handle(message) {
       response(message.seq, 'evaluate', { result: '42', type: 'int', variablesReference: 0 });
       break;
     }
+    case 'setVariable':
+      // Отладчик возвращает фактическое значение (может отличаться от введённого):
+      // суффикс ! показывает, что клиент берёт ответ адаптера, а не то, что ввели.
+      response(message.seq, 'setVariable', {
+        value: String(args.value) + '!',
+        type: 'int',
+        variablesReference: 0,
+      });
+      break;
+    case 'setExpression':
+      // Как setVariable: возвращаем фактическое значение с тем же маркером !.
+      response(message.seq, 'setExpression', {
+        value: String(args.value) + '!',
+        type: 'int',
+        variablesReference: 0,
+      });
+      break;
     case 'configurationDone':
       response(message.seq, 'configurationDone');
       if (launchSeq !== null) {
@@ -255,6 +276,49 @@ describe('DebugService', () => {
     service.dispose();
   });
 
+  it('аргументы запуска доезжают до адаптера', async () => {
+    const { service, events } = fakeService();
+    await service.start('/proj/app.py', { args: ['--port', '8080', 'my file.txt'] });
+    expect(await waitPhase(service, 'running')).toBe('running');
+
+    // Адаптер шлёт эхо аргументов событием output — так тест видит, что они дошли
+    // в поле `args` запроса launch, а не потерялись по дороге.
+    const echo = events.find(
+      (event) => event.topic === 'debug:output' && String(event.payload.text).startsWith('launch-args:'),
+    );
+    expect(echo?.payload.text).toBe('launch-args:["--port","8080","my file.txt"]');
+    service.dispose();
+  });
+
+  it('переменные окружения запуска доезжают до адаптера', async () => {
+    const { service, events } = fakeService();
+    await service.start('/proj/app.py', { env: { LOG_LEVEL: 'debug', API_URL: 'http://localhost:8000' } });
+    expect(await waitPhase(service, 'running')).toBe('running');
+
+    const echo = events.find(
+      (event) => event.topic === 'debug:output' && String(event.payload.text).startsWith('launch-env:'),
+    );
+    expect(echo?.payload.text).toBe('launch-env:{"LOG_LEVEL":"debug","API_URL":"http://localhost:8000"}');
+    service.dispose();
+  });
+
+  it('пустые параметры не уходят в запрос launch', async () => {
+    const { service, events } = fakeService();
+    // Пустые args/env — это «настройки нет»: в запросе их быть не должно.
+    await service.start('/proj/app.py', { args: [], env: {} });
+    expect(await waitPhase(service, 'running')).toBe('running');
+
+    const argsEcho = events.find(
+      (event) => event.topic === 'debug:output' && String(event.payload.text).startsWith('launch-args:'),
+    );
+    const envEcho = events.find(
+      (event) => event.topic === 'debug:output' && String(event.payload.text).startsWith('launch-env:'),
+    );
+    expect(argsEcho?.payload.text).toBe('launch-args:null');
+    expect(envEcho?.payload.text).toBe('launch-env:null');
+    service.dispose();
+  });
+
   it('условие точки сохраняется и переживает ответ отладчика', async () => {
     const { service } = fakeService();
     // Условие задаём до старта: подтвердить некому, но и потерять его нельзя.
@@ -349,6 +413,94 @@ describe('DebugService', () => {
       const { service } = fakeService();
       const result = await service.evaluate('total');
       expect(result.value).toContain('нет остановленной программы');
+      service.dispose();
+    });
+  });
+
+  describe('hover', () => {
+    it('возвращает значение выражения в кадре', async () => {
+      const { service } = fakeService();
+      await service.setBreakpoints('/proj/app.py', [{ line: 4 }]);
+      await service.start('/proj/app.py');
+      await waitPhase(service, 'stopped');
+
+      const result = await service.hover('total');
+      expect(result).toMatchObject({ name: 'total', value: '42', type: 'int' });
+      service.dispose();
+    });
+
+    it('ошибку выражения прячет: подсказка не должна ругаться', async () => {
+      const { service } = fakeService();
+      await service.setBreakpoints('/proj/app.py', [{ line: 4 }]);
+      await service.start('/proj/app.py');
+      await waitPhase(service, 'stopped');
+
+      // Навести мышь можно на что угодно; «name 'bad' is not defined» в подсказке —
+      // шум, поэтому ошибка превращается в отсутствие значения.
+      expect(await service.hover('bad_name')).toBeNull();
+      service.dispose();
+    });
+
+    it('без останова значения нет', async () => {
+      const { service } = fakeService();
+      expect(await service.hover('total')).toBeNull();
+      service.dispose();
+    });
+
+    it('пустое выражение не уходит отладчику', async () => {
+      const { service } = fakeService();
+      expect(await service.hover('   ')).toBeNull();
+      service.dispose();
+    });
+  });
+
+  describe('setVariable', () => {
+    it('возвращает значение от отладчика, а не введённое', async () => {
+      const { service } = fakeService();
+      await service.setBreakpoints('/proj/app.py', [{ line: 4 }]);
+      await service.start('/proj/app.py');
+      await waitPhase(service, 'stopped');
+
+      const result = await service.setVariable(21, 'total', '7');
+      // Адаптер добавил `!`: значит взяли его ответ, а не то, что ввели.
+      expect(result).toMatchObject({ name: 'total', value: '7!', type: 'int' });
+      service.dispose();
+    });
+
+    it('без сессии присвоить нельзя', async () => {
+      const { service } = fakeService();
+      expect(await service.setVariable(21, 'total', '7')).toBeNull();
+      service.dispose();
+    });
+
+    it('пустое имя отладчику не шлём', async () => {
+      const { service } = fakeService();
+      expect(await service.setVariable(21, '   ', '7')).toBeNull();
+      service.dispose();
+    });
+  });
+
+  describe('setExpression', () => {
+    it('задаёт значение выражению и берёт ответ отладчика', async () => {
+      const { service } = fakeService();
+      await service.setBreakpoints('/proj/app.py', [{ line: 4 }]);
+      await service.start('/proj/app.py');
+      await waitPhase(service, 'stopped');
+
+      const result = await service.setExpression('items[0]', '9');
+      expect(result).toMatchObject({ name: 'items[0]', value: '9!', type: 'int' });
+      service.dispose();
+    });
+
+    it('без останова присвоить нельзя', async () => {
+      const { service } = fakeService();
+      expect(await service.setExpression('items[0]', '9')).toBeNull();
+      service.dispose();
+    });
+
+    it('пустое выражение отладчику не шлём', async () => {
+      const { service } = fakeService();
+      expect(await service.setExpression('   ', '9')).toBeNull();
       service.dispose();
     });
   });

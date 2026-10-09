@@ -408,7 +408,9 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     return deps.debug;
   };
 
-  router.register('debug.start', (params) => requireDebug().start(params.program, params.cwd));
+  router.register('debug.start', (params) =>
+    requireDebug().start(params.program, { cwd: params.cwd, args: params.args, env: params.env }),
+  );
   router.register('debug.setBreakpoints', (params) => requireDebug().setBreakpoints(params.path, params.breakpoints));
   router.register('debug.continue', () => requireDebug().resume());
   router.register('debug.step', (params) => requireDebug().step(params.kind));
@@ -419,6 +421,13 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('debug.scopes', (params) => requireDebug().scopes(params.frameId));
   router.register('debug.variables', (params) => requireDebug().variables(params.reference));
   router.register('debug.evaluate', (params) => requireDebug().evaluate(params.expression, params.frameId));
+  router.register('debug.hover', (params) => requireDebug().hover(params.expression, params.frameId));
+  router.register('debug.setVariable', (params) =>
+    requireDebug().setVariable(params.reference, params.name, params.value),
+  );
+  router.register('debug.setExpression', (params) =>
+    requireDebug().setExpression(params.expression, params.value, params.frameId),
+  );
 
   // Кроме PATH смотрим окружение проекта: pylsp, ruff и прочие, поставленные в
   // venv, видит только оно — системный питон чужие пакеты не видит. Окружение
