@@ -23,7 +23,7 @@ import { registerLspProviders } from './core/lsp-providers';
 import { OpenEditors } from './core/open-editors';
 import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
 import { envShortLabel, envVisible } from './core/python-view';
-import { DebugController } from './core/debug';
+import { DebugController, frameForHover } from './core/debug';
 import { RpcClient } from './core/rpc';
 import {
   collectRunTargets,
@@ -108,11 +108,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const edits = new EditService({ documents, editors, rpc });
   // Отладчик: состояние сессии держит контроллер, события идут из main push-ом.
   const debug = new DebugController(rpc);
-  // Подсказка под курсором на строке останова: значение выражения в кадре. Шов
+  // Подсказка под курсором в остановленном файле: значение выражения в кадре. Шов
   // в редактор — потому что контроллер отладки живёт здесь, а не в Monaco.
-  editors.setDebugHover(async (expression) => {
-    if (debug.get().phase !== 'stopped') return null;
-    const result = await debug.hover(expression);
+  editors.setDebugHover(async (expression, at) => {
+    const state = debug.get();
+    if (state.phase !== 'stopped') return null;
+    // Строка под курсором может принадлежать не верхнему кадру, а тому, кто его
+    // вызвал: считаем выражение в том кадре, чьи файл и строка совпали.
+    const frame = frameForHover(state.frames, at);
+    const result = await debug.hover(expression, frame?.id);
     return result ? { value: result.value, type: result.type } : null;
   });
   // Приёмник обратных вызовов из main: правки агента приходят сюда.

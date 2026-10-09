@@ -64,6 +64,18 @@ function normalize(breakpoints: readonly BreakpointInput[]): BreakpointInput[] {
   return [...byLine.values()].sort((a, b) => a.line - b.line);
 }
 
+/**
+ * Кадр, в контексте которого считать выражение под курсором.
+ *
+ * Строка под курсором может принадлежать не верхнему кадру, а тому, кто его
+ * вызвал: тогда значение надо брать из этого кадра — иначе подсказка покажет
+ * переменную из чужой области видимости. Нет совпадения — верхний кадр: на
+ * строке рядом с остановом выражение всё равно считается в своей области.
+ */
+export function frameForHover(frames: readonly DebugFrame[], at: { path: string; line: number }): DebugFrame | null {
+  return frames.find((frame) => frame.path === at.path && frame.line === at.line) ?? frames[0] ?? null;
+}
+
 export class DebugController {
   private state: DebugState = IDLE;
   /** Точки останова по файлам. Держим копию, чтобы отправить их при старте. */

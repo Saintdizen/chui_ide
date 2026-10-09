@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DebugService } from '../src/main/debug/debug';
+import { frameForHover } from '../src/renderer/core/debug';
 
 /**
  * Отладчик: DAP-клиент против фейкового адаптера.
@@ -538,6 +539,30 @@ describe('DebugService', () => {
       const { service } = fakeService();
       expect(await service.setExpression('   ', '9')).toBeNull();
       service.dispose();
+    });
+  });
+
+  describe('frameForHover', () => {
+    const frames = [
+      { id: 1, name: 'foo', path: '/p/app.js', line: 10, column: 3 },
+      { id: 2, name: 'bar', path: '/p/app.js', line: 20, column: 1 },
+      { id: 3, name: 'main', path: '/p/main.js', line: 5, column: 1 },
+    ];
+
+    it('берёт кадр, чьи файл и строка совпали с позицией под курсором', () => {
+      expect(frameForHover(frames, { path: '/p/app.js', line: 20 })?.id).toBe(2);
+    });
+
+    it('нет совпадения — верхний кадр', () => {
+      expect(frameForHover(frames, { path: '/p/app.js', line: 12 })?.id).toBe(1);
+    });
+
+    it('файл без своего кадра — тоже верхний кадр', () => {
+      expect(frameForHover(frames, { path: '/p/other.js', line: 1 })?.id).toBe(1);
+    });
+
+    it('пустой стек — подсказки не будет', () => {
+      expect(frameForHover([], { path: '/p/app.js', line: 1 })).toBeNull();
     });
   });
 });

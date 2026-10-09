@@ -48,6 +48,15 @@ export interface DebugHoverValue {
   type: string | null;
 }
 
+/** Где запрошена подсказка: файл и строка под курсором. */
+export interface DebugHoverPosition {
+  path: string;
+  line: number;
+}
+
+/** Языки, для которых под курсором показываем значение из остановленного кадра. */
+const DEBUG_HOVER_LANGUAGES = ['python', 'javascript', 'typescript'] as const;
+
 /**
  * Единственное место, где renderer знает про Monaco.
  *
@@ -92,8 +101,8 @@ export class EditorService {
   private debugLine: { path: string; line: number } | null = null;
   /** Украшения подсветки по файлам: перед новой отрисовкой их нужно снять. */
   private readonly debugDecorations = new Map<string, string[]>();
-  /** Оценка выражения под курсором на строке останова; задаёт app (там контроллер отладки). */
-  private debugHover: ((expression: string) => Promise<DebugHoverValue | null>) | null = null;
+  /** Оценка выражения под курсором в остановленном файле; задаёт app (там контроллер отладки). */
+  private debugHover: ((expression: string, at: DebugHoverPosition) => Promise<DebugHoverValue | null>) | null = null;
   /** Непокрытые строки по файлам из отчёта покрытия; пусто — покрытие не считали. */
   private readonly coverageLines = new Map<string, ReadonlySet<number>>();
   private readonly coverageDecorations = new Map<string, string[]>();
@@ -152,29 +161,33 @@ export class EditorService {
       this.breakpointEmitter.fire({ path, line });
     });
 
-    // Подсказка под курсором на строке останова: значение выражения в контексте
-    // кадра. Показываем только на строке, где стоит отладчик, — иначе наведение
-    // на любое слово показывало бы значение из чужого места.
-    monaco.languages.registerHoverProvider('python', {
-      provideHover: async (model, position) => {
-        const evaluate = this.debugHover;
-        const current = this.debugLine;
-        if (!evaluate || !current || current.line !== position.lineNumber) return null;
-        const uri = model.uri;
-        if (uri.scheme !== 'file' || uriToPath(uri.path) !== current.path) return null;
+    // Подсказка под курсором: значение выражения в контексте остановленного кадра.
+    // Показываем в файле останова на любой строке, а не только на строке останова:
+    // значение переменной видно и рядом с ней, как в VS Code. Где именно считать,
+    // решает app — для строки чужого кадра оно возьмёт тот кадр; слово вне области
+    // видимости просто не даст подсказки (ошибку прячет main).
+    for (const language of DEBUG_HOVER_LANGUAGES) {
+      monaco.languages.registerHoverProvider(language, {
+        provideHover: async (model, position) => {
+          const evaluate = this.debugHover;
+          const current = this.debugLine;
+          if (!evaluate || !current) return null;
+          const uri = model.uri;
+          if (uri.scheme !== 'file' || uriToPath(uri.path) !== current.path) return null;
 
-        const word = model.getWordAtPosition(position);
-        if (!word) return null;
-        const result = await evaluate(word.word);
-        if (!result) return null;
+          const word = model.getWordAtPosition(position);
+          if (!word) return null;
+          const result = await evaluate(word.word, { path: current.path, line: position.lineNumber });
+          if (!result) return null;
 
-        const type = result.type ? ` — \`${result.type}\`` : '';
-        return {
-          contents: [{ value: `\`${word.word}\` = ${result.value}${type}` }],
-          range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
-        };
-      },
-    });
+          const type = result.type ? ` — \`${result.type}\`` : '';
+          return {
+            contents: [{ value: `\`${word.word}\` = ${result.value}${type}` }],
+            range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+          };
+        },
+      });
+    }
 
     // Monaco считает ширину символа по фактическому шрифту, а файл шрифта
     // приходит асинхронно: до его загрузки строки измерены по запасному шрифту
@@ -484,8 +497,9 @@ export class EditorService {
   /**
    * Подключить оценку выражений для подсказки под курсором. Отдельным швом,
    * потому что контроллер отладки живёт в app, а редактор о нём знать не должен.
+   * Позицию передаём: app по ней выбирает кадр, в котором считать выражение.
    */
-  setDebugHover(evaluate: (expression: string) => Promise<DebugHoverValue | null>): void {
+  setDebugHover(evaluate: (expression: string, at: DebugHoverPosition) => Promise<DebugHoverValue | null>): void {
     this.debugHover = evaluate;
   }
 
