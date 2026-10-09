@@ -198,15 +198,22 @@ export function pytestTarget(
  * и `--cov tests/test_x.py` pytest-cov понимает как источник покрытия — тесты
  * тогда запускаются все, а покрытие выходит пустым. Проверено вживую.
  */
-export function pytestCoverageTarget(tools: ProjectTools, selector: string | null): RunTarget {
+export function pytestCoverageTarget(
+  tools: ProjectTools,
+  selector: string | null,
+  options: { report?: boolean; platform?: string } = {},
+): RunTarget {
   const base = selector
     ? `${tools.pythonCommand} -m pytest --cov -- ${shellQuote(selector)}`
     : `${tools.pythonCommand} -m pytest --cov`;
+  // Панель тестов и здесь просит отчёт: по маркеру она ставит исход, а строку
+  // покрытия берёт из вывода pytest-cov, который печатается перед маркером.
+  const command = options.report && options.platform ? `${base}${resultMarkerCommand(options.platform)}` : base;
   return {
     id: selector ? `pytest-cov:${selector}` : 'pytest-cov:all',
     label: selector ? `Покрытие: ${basename(selector)}` : 'Тесты с покрытием (pytest --cov)',
     detail: `${tools.pythonLabel} · pytest --cov`,
-    command: base,
+    command,
     source: 'test',
   };
 }

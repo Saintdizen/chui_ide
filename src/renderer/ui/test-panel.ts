@@ -1,4 +1,4 @@
-import { buildTestTree, parseResultMarker, type CollectedSuite, type TestFolder } from '../../shared/python-tests';
+import { buildTestTree, parseCoverage, parseResultMarker, type CollectedSuite, type TestFolder } from '../../shared/python-tests';
 import { PushTopic, type TerminalDataPayload } from '../../shared/api';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
@@ -59,7 +59,7 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   );
   const coverageButton = h(
     'button',
-    { class: 'btn btn-small', type: 'button', title: 'Запустить все тесты с покрытием', onClick: () => deps.onCoverage(null) },
+    { class: 'btn btn-small', type: 'button', title: 'Запустить все тесты с покрытием', onClick: () => run(ALL_KEY, null, true) },
     'С покрытием',
   );
 
@@ -79,30 +79,43 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   let pendingKey: string | null = null;
   /**
    * Хвост вывода терминала. Копим его, а не смотрим каждый кусок отдельно:
-   * маркер может прийти разорванным между двумя порциями вывода.
+   * маркер может прийти разорванным между двумя порциями, а строка покрытия —
+   * вообще задолго до маркера, поэтому хвост держим длиннее.
    */
   let outputTail = '';
+  /** Ждём ли от текущего прогона покрытие (кнопка «С покрытием»). */
+  let pendingCoverage = false;
+  /** Итог покрытия последнего прогона с покрытием, в процентах. */
+  let coverage: number | null = null;
 
   // Исход приходит из общего потока вывода терминала: своего канала у прогона нет.
   deps.rpc.onPush((message) => {
     if (message.topic !== PushTopic.TerminalData || pendingKey === null) return;
     const payload = message.payload as TerminalDataPayload;
-    outputTail = (outputTail + payload.data).slice(-500);
+    outputTail = (outputTail + payload.data).slice(-4000);
     const code = parseResultMarker(outputTail);
     if (code === null) return;
     outcomes.set(pendingKey, code === 0 ? 'passed' : 'failed');
+    // Строку покрытия печатает pytest-cov перед нашим маркером — берём её отсюда же.
+    if (pendingCoverage) coverage = parseCoverage(outputTail);
     pendingKey = null;
+    pendingCoverage = false;
     outputTail = '';
     render();
   });
 
-  /** Начать прогон узла: запомнить, чей исход ждём, и попросить отчёт. */
-  function run(key: string, selector: string | null): void {
+  /**
+   * Начать прогон узла: запомнить, чей исход ждём, и попросить отчёт. Покрытие —
+   * отдельный путь: там нужен `pytest --cov`, а отчёт печатает сам pytest-cov.
+   */
+  function run(key: string, selector: string | null, withCoverage = false): void {
     pendingKey = key;
+    pendingCoverage = withCoverage;
     outcomes.set(key, 'running');
     outputTail = '';
     render();
-    deps.onRun(selector, { report: true });
+    if (withCoverage) deps.onCoverage(selector);
+    else deps.onRun(selector, { report: true });
   }
 
   /** Значок исхода узла: точка, галочка или крестик. */
@@ -207,7 +220,8 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
           : outcome === 'running'
             ? ' · идёт прогон'
             : '';
-    summary.textContent = `Тестов: ${suite.total}${suffix}`;
+    const cover = coverage === null ? '' : ` · покрытие ${coverage}%`;
+    summary.textContent = `Тестов: ${suite.total}${suffix}${cover}`;
     if (suite.errors.length > 0) renderErrors(suite.errors);
 
     for (const node of buildTestTree(suite.tests)) body.appendChild(branch(node, 0));

@@ -128,6 +128,15 @@ export function parseResultMarker(text: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/**
+ * Итог покрытия из вывода `pytest --cov`: строка `TOTAL   N   M   P%`.
+ * null — строки нет: прогон был без покрытия или отчёт ещё не напечатан.
+ */
+export function parseCoverage(text: string): number | null {
+  const match = /^TOTAL\s+\d+\s+\d+\s+(\d+)%/m.exec(stripAnsi(text));
+  return match ? Number(match[1]) : null;
+}
+
 /** Разбор одной строки-идентификатора: `file.py::Class::name` или `file.py::name`. */
 export function describeTest(file: string, node: string): CollectedTest {
   const parts = node.split('::');

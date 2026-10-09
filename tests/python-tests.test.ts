@@ -3,6 +3,7 @@ import {
   buildTestTree,
   collectFailure,
   describeTest,
+  parseCoverage,
   parsePytestCollect,
   parseResultMarker,
   resultMarkerCommand,
@@ -114,6 +115,34 @@ describe('маркер результата прогона', () => {
 
   it('stripAnsi убирает цвет, но не текст', () => {
     expect(stripAnsi('\u001b[31mпровал\u001b[0m')).toBe('провал');
+  });
+});
+
+describe('parseCoverage', () => {
+  const tail = [
+    'Name                Stmts   Miss  Cover',
+    '---------------------------------------',
+    'app/main.py            10      4    60%',
+    '---------------------------------------',
+    'TOTAL                  10      4    60%',
+    '',
+    'chui-pytest-result 0',
+  ].join('\n');
+
+  it('берёт процент из строки TOTAL', () => {
+    expect(parseCoverage(tail)).toBe(60);
+  });
+
+  it('без строки TOTAL — null (прогон без покрытия)', () => {
+    expect(parseCoverage('5 passed in 0.1s\nchui-pytest-result 0')).toBeNull();
+  });
+
+  it('ANSI не мешает', () => {
+    expect(parseCoverage('\u001b[32mTOTAL   10   0   100%\u001b[0m')).toBe(100);
+  });
+
+  it('слово TOTAL не в строке отчёта не считается', () => {
+    expect(parseCoverage('TOTAL: покрытие не собрано')).toBeNull();
   });
 });
 

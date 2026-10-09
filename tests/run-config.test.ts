@@ -128,6 +128,12 @@ describe('pytestCoverageTarget', () => {
   it('селектор идёт после `--`: иначе --cov съест его как источник покрытия', () => {
     expect(pytestCoverageTarget(tools, 'tests/test_x.py').command).toBe('./.venv/bin/python -m pytest --cov -- tests/test_x.py');
   });
+
+  it('с report дописывает маркер — панель читает и исход, и покрытие', () => {
+    expect(pytestCoverageTarget(tools, null, { report: true, platform: 'linux' }).command).toBe(
+      './.venv/bin/python -m pytest --cov; echo "chui-pytest-result $?"',
+    );
+  });
 });
 
 describe('nodeInstallTarget', () => {

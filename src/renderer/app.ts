@@ -194,7 +194,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Панель просит отчёт — команда уносит в терминал и печать кода выхода,
     // по ней панель и красит узлы. Покрытие — отдельная цель.
     onRun: (selector, options) => void runTarget(pytestTarget(tools.get(), selector, { ...options, platform: info.platform })),
-    onCoverage: (selector) => void runTarget(pytestCoverageTarget(tools.get(), selector)),
+    onCoverage: (selector) => void runTarget(pytestCoverageTarget(tools.get(), selector, { report: true, platform: info.platform })),
   });
 
   const dock = createDock();
