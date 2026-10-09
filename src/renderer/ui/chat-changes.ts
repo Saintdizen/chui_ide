@@ -1,6 +1,7 @@
 import type { ToolFileChange } from '../../shared/api';
 import { fileWord } from './chat-text';
 import { basename, clear, h, svgIcon } from './dom';
+import { fileIcon } from './file-icons';
 
 /**
  * Панель изменений композера: что агент поменял в этой беседе.
@@ -79,12 +80,12 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
     syncPanel();
   });
 
-  /** Подпись и значок файловой операции. */
-  function fileLabel(change: ToolFileChange): { label: string; icon: 'trash' | 'filePlus' | 'file' } {
-    if (change.kind === 'created') return { label: 'создан', icon: 'filePlus' };
-    if (change.kind === 'deleted') return { label: 'удалён', icon: 'trash' };
-    if (change.kind === 'modified') return { label: 'заменено', icon: 'file' };
-    return { label: 'перенос', icon: 'file' };
+  /** Подпись файловой операции. */
+  function fileLabel(change: ToolFileChange): string {
+    if (change.kind === 'created') return 'создан';
+    if (change.kind === 'deleted') return 'удалён';
+    if (change.kind === 'modified') return 'заменено';
+    return 'перенос';
   }
 
   function render(source: ChangesSource): void {
@@ -118,7 +119,7 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
         h(
           'button',
           { class: 'chip', type: 'button', title: target, onClick: () => deps.reveal(target, 1, 1) },
-          svgIcon('file', 12),
+          fileIcon(target, 12),
           h('span', { class: 'chip-name' }, basename(target)),
           h(
             'span',
@@ -132,13 +133,13 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
 
     // Файловые операции: они уже на диске, но человеку важно видеть и их.
     for (const file of source.files) {
-      const { label, icon } = fileLabel(file);
+      const label = fileLabel(file);
       const title = file.from ? `${file.from} → ${file.path}` : file.path;
       files.appendChild(
         h(
           'button',
           { class: 'chip', type: 'button', title, onClick: () => deps.reveal(file.path, 1, 1) },
-          svgIcon(icon, 12),
+          fileIcon(file.path, 12),
           h('span', { class: 'chip-name' }, basename(file.path)),
           h('span', { class: `chip-kind chip-kind-${file.kind}` }, label),
         ),
