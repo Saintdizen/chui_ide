@@ -22,7 +22,7 @@ export interface StatusState {
   changes: number;
   /** Вид проекта — «Python», «Node.js». Слева, рядом с именем проекта. */
   projectKind: string | null;
-  /** Ключ вида проекта (`python`, `node`, …): у Node чип открывает попап. */
+  /** Ключ вида проекта (`python`, `node`, …): выбирает, какой попап открыть. */
   projectKindId: string | null;
   /** Выбранное Python-окружение (`.venv`, `python3`); null — виджет скрыт. */
   env: string | null;
@@ -38,7 +38,7 @@ export interface StatusBarDeps {
   openGitManager(anchor: HTMLElement): void;
   /** Открыть попап Python-окружения у кнопки окружения. */
   openPythonEnv(anchor: HTMLElement): void;
-  /** Открыть попап Node-окружения по клику на чип «Node.js». */
+  /** Открыть попап Node-окружения у кнопки окружения. */
   openNodeEnv(anchor: HTMLElement): void;
   /** Клик по пути файла — быстрый переход к другому файлу. */
   openFilePicker(): void;
@@ -72,15 +72,9 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   };
 
   const workspaceItem = h('span', { class: 'status-item' });
-  // У Node-проекта чип кликабелен и открывает попап окружения; у прочих видов
-  // он остаётся просто подписью — там показывать нечего.
-  const kindItem = h('button', {
-    class: 'status-item status-kind',
-    type: 'button',
-    onClick: (event: Event) => {
-      if (state.projectKindId === 'node') deps.openNodeEnv(event.currentTarget as HTMLElement);
-    },
-  });
+  // Чип вида проекта — просто подпись: попап окружения открывает виджет окружения
+  // справа, а второй вход из чипа показывал тот же попап дважды.
+  const kindItem = h('span', { class: 'status-item status-kind' });
   // Виджет окружения один, а попапов два: у Node открываем Node, иначе Python.
   const envItem = h(
     'button',
@@ -144,13 +138,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     workspaceItem.textContent = state.workspace ?? 'нет проекта';
     kindItem.textContent = state.projectKind ?? '';
     kindItem.hidden = !state.projectKind;
-    const nodeChip = state.projectKindId === 'node';
-    kindItem.classList.toggle('is-actionable', nodeChip);
-    kindItem.title = nodeChip
-      ? 'Node-окружение проекта'
-      : state.projectKind
-        ? `Проект: ${state.projectKind}`
-        : '';
+    kindItem.title = state.projectKind ? `Проект: ${state.projectKind}` : '';
     fileItem.textContent = state.file ? `${state.dirty ? '● ' : ''}${state.file}` : '';
     fileItem.hidden = !state.file;
     positionItem.textContent = `${state.line}:${state.column}`;

@@ -3411,18 +3411,6 @@ textarea {
   font: inherit;
 }
 
-/* У Node чип кликабелен и открывает попап окружения — подсвечиваем при наведении. */
-.status-kind.is-actionable {
-  padding: 0 4px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.status-kind.is-actionable:hover {
-  background: var(--element_background_hover);
-  color: var(--text_color_hover);
-}
-
 /* Окружение Python — кнопка: клик открывает попап с подробностями. */
 .status-env {
   padding: 0 4px;
