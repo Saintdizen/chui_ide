@@ -1,4 +1,4 @@
-import type { PackageManagerChoice, RunSettings } from '../../shared/api';
+import type { RunSettings } from '../../shared/api';
 import type { RpcClient } from './rpc';
 import { Emitter } from './events';
 
@@ -211,8 +211,4 @@ export function shellQuote(value: string): string {
   if (!/[^A-Za-z0-9_./:@%+-]/.test(value)) return value;
   if (value.includes("'")) return `"${value.replace(/"/g, '\\"')}"`;
   return `'${value}'`;
-}
-
-export function packageManagerLabel(choice: PackageManagerChoice): string {
-  return choice === 'auto' ? 'Автоматически' : choice;
 }
