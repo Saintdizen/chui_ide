@@ -36,7 +36,23 @@ export const LSP_PRESETS: readonly LspPreset[] = [
   { language: 'yaml', label: 'YAML Language Server', command: 'yaml-language-server', args: ['--stdio'] },
   { language: 'json', label: 'JSON Language Server', command: 'vscode-json-language-server', args: ['--stdio'] },
   { language: 'css', label: 'CSS Language Server', command: 'vscode-css-language-server', args: ['--stdio'] },
+  // SCSS и Less обслуживает тот же сервер, что и CSS: это его диалекты.
+  { language: 'scss', label: 'CSS Language Server', command: 'vscode-css-language-server', args: ['--stdio'] },
+  { language: 'less', label: 'CSS Language Server', command: 'vscode-css-language-server', args: ['--stdio'] },
   { language: 'html', label: 'HTML Language Server', command: 'vscode-html-language-server', args: ['--stdio'] },
+  { language: 'xml', label: 'XML Language Server (LemMinX)', command: 'lemminx', args: [] },
+  { language: 'sql', label: 'SQL Language Server', command: 'sqls', args: [] },
+  // Расширение `ini` покрывает и TOML — его обслуживает taplo.
+  { language: 'ini', label: 'Taplo (TOML)', command: 'taplo', args: ['lsp', 'stdio'] },
+  { language: 'dockerfile', label: 'Dockerfile Language Server', command: 'docker-langserver', args: ['--stdio'] },
+  { language: 'java', label: 'Eclipse JDT Language Server', command: 'jdtls', args: [] },
+  { language: 'kotlin', label: 'Kotlin Language Server', command: 'kotlin-language-server', args: [] },
+  { language: 'swift', label: 'SourceKit-LSP', command: 'sourcekit-lsp', args: [] },
+  { language: 'csharp', label: 'C# Language Server', command: 'csharp-ls', args: [] },
+  { language: 'ruby', label: 'Solargraph', command: 'solargraph', args: ['stdio'] },
+  { language: 'php', label: 'Intelephense', command: 'intelephense', args: ['--stdio'] },
+  { language: 'dart', label: 'Dart Analysis Server', command: 'dart', args: ['language-server', '--stdio'] },
+  { language: 'perl', label: 'Perl Navigator', command: 'perlnavigator', args: ['--stdio'] },
   { language: 'lua', label: 'Lua Language Server', command: 'lua-language-server', args: [] },
   { language: 'markdown', label: 'Marksman', command: 'marksman', args: ['server'] },
 ];

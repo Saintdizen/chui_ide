@@ -205,9 +205,11 @@ export function pytestCoverageTarget(
 ): RunTarget {
   // `term-missing` просим явно, хотя `--cov` и так печатает терминальный отчёт:
   // без него в отчёте нет колонки `Missing`, а по ней панель подсвечивает строки.
+  // `--cov-branch` добавляет колонки `Branch`/`BrPart`: видно не только «строка
+  // не исполнена», но и «ветвь условия пройдена лишь наполовину».
   const base = selector
-    ? `${tools.pythonCommand} -m pytest --cov --cov-report=term-missing -- ${shellQuote(selector)}`
-    : `${tools.pythonCommand} -m pytest --cov --cov-report=term-missing`;
+    ? `${tools.pythonCommand} -m pytest --cov --cov-branch --cov-report=term-missing -- ${shellQuote(selector)}`
+    : `${tools.pythonCommand} -m pytest --cov --cov-branch --cov-report=term-missing`;
   // Панель тестов и здесь просит отчёт: по маркеру она ставит исход, а строку
   // покрытия берёт из вывода pytest-cov, который печатается перед маркером.
   const command = options.report && options.platform ? `${base}${resultMarkerCommand(options.platform)}` : base;

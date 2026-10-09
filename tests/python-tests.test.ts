@@ -148,8 +148,32 @@ describe('parseCoverageReport', () => {
     expect(report.total).toBe(60);
     // Первым — app.py (10 непокрытых), затем два полностью покрытых по алфавиту.
     expect(report.files.map((file) => file.path)).toEqual(['src/app.py', 'src/empty.py', 'src/util.py']);
-    // Отчёт без `term-missing`: номеров строк нет, поле пустое, а не отсутствует.
-    expect(report.files[0]).toEqual({ path: 'src/app.py', percent: 50, statements: 20, missing: 10, missingLines: [] });
+    // Отчёт без `term-missing` и без `--cov-branch`: строк и ветвей нет, поля пустые.
+    expect(report.files[0]).toEqual({
+      path: 'src/app.py',
+      percent: 50,
+      statements: 20,
+      missing: 10,
+      missingLines: [],
+      branches: 0,
+      branchPartial: 0,
+    });
+  });
+
+  it('отчёт с --cov-branch даёт ветви', () => {
+    const report = parseCoverageReport(
+      [
+        'Name                  Stmts   Miss Branch BrPart  Cover   Missing',
+        '-----------------------------------------------------------------',
+        'src/app.py               20     10      8      2    50%   3-6, 12',
+        'TOTAL                    20     10      8      2    50%',
+      ].join('\n'),
+    );
+    const app = report.files.find((file) => file.path === 'src/app.py');
+    expect(app?.branches).toBe(8);
+    expect(app?.branchPartial).toBe(2);
+    expect(app?.missingLines).toEqual([3, 4, 5, 6, 12]);
+    expect(report.total).toBe(50);
   });
 
   it('сначала самое проблемное: по непокрытым строкам', () => {

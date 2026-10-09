@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { LANGUAGES } from '../src/shared/languages';
 import { LSP_PRESETS, matchPresets, presetCommands } from '../src/shared/lsp-presets';
 
 describe('presetCommands', () => {
@@ -74,6 +75,22 @@ describe('matchPresets', () => {
       const key = `${preset.language}:${preset.command}`;
       expect(seen.has(key)).toBe(false);
       seen.add(key);
+    }
+  });
+
+  it('языки пресетов есть в реестре языков', () => {
+    // Опечатка в идентификаторе языка оставила бы пресет мёртвым: сервер бы
+    // находился, а подсказки не появлялись — ни один файл не имеет такого языка.
+    const known = new Set(LANGUAGES.map((language) => language.id));
+    for (const preset of LSP_PRESETS) {
+      expect(known.has(preset.language)).toBe(true);
+    }
+  });
+
+  it('пресеты покрывают распространённые языки', () => {
+    const languages = new Set(LSP_PRESETS.map((preset) => preset.language));
+    for (const id of ['python', 'typescript', 'rust', 'go', 'java', 'ruby', 'php', 'csharp', 'xml', 'sql']) {
+      expect(languages.has(id)).toBe(true);
     }
   });
 });

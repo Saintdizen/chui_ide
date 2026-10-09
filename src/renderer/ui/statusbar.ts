@@ -36,6 +36,8 @@ export interface StatusBarDeps {
   openGitManager(anchor: HTMLElement): void;
   /** Открыть попап Python-окружения у кнопки окружения. */
   openPythonEnv(anchor: HTMLElement): void;
+  /** Клик по пути файла — быстрый переход к другому файлу. */
+  openFilePicker(): void;
 }
 
 /**
@@ -75,7 +77,12 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       onClick: (event: Event) => deps.openPythonEnv(event.currentTarget as HTMLElement),
     },
   );
-  const fileItem = h('span', { class: 'status-item status-file' });
+  const fileItem = h('button', {
+    class: 'status-item status-file',
+    type: 'button',
+    title: 'Быстрый переход к файлу',
+    onClick: () => deps.openFilePicker(),
+  });
   const gitItem = h(
     'button',
     {

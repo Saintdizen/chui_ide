@@ -1,4 +1,4 @@
-import { buildTestTree, parseCoverageReport, parseResultMarker, type CollectedSuite, type CoverageReport, type TestFolder } from '../../shared/python-tests';
+import { buildTestTree, parseCoverageReport, parseResultMarker, type CollectedSuite, type CoverageReport, type CoverageRow, type TestFolder } from '../../shared/python-tests';
 import { isTestFile } from '../../shared/project-scan';
 import { PushTopic, type TerminalDataPayload } from '../../shared/api';
 import type { RpcClient } from '../core/rpc';
@@ -250,6 +250,13 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
     renderCoverageFiles();
   }
 
+  /** Подсказка строки покрытия: строки и, если считали, ветви. */
+  function coverageTitle(file: CoverageRow): string {
+    const parts = [`Непокрытых строк: ${file.missing} из ${file.statements}`];
+    if (file.branches > 0) parts.push(`ветвей пройдено не полностью: ${file.branchPartial} из ${file.branches}`);
+    return parts.join(' · ');
+  }
+
   /** Покрытие по файлам: сначала те, где больше непокрытых строк. */
   function renderCoverageFiles(): void {
     const files = coverage?.files;
@@ -260,9 +267,14 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
       list.appendChild(
         h(
           'div',
-          { class: `tests-cov-row${file.percent === 0 ? ' is-bad' : ''}`, title: `Непокрытых строк: ${file.missing}` },
+          { class: `tests-cov-row${file.percent === 0 ? ' is-bad' : ''}`, title: coverageTitle(file) },
           h('span', { class: 'tests-cov-path' }, file.path),
           h('span', { class: 'tests-cov-percent' }, `${file.percent}%`),
+          // Колонку ветвей показываем, только когда прогон был с `--cov-branch`:
+          // иначе «ветвей: 0» путало бы — их просто не считали.
+          file.branches > 0
+            ? h('span', { class: 'tests-cov-branch' }, `ветви ${file.branches - file.branchPartial}/${file.branches}`)
+            : null,
         ),
       );
     }

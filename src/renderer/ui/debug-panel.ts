@@ -99,7 +99,13 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
       },
       toggle,
       h('span', { class: 'debug-var-name' }, variable.name),
-      h('span', { class: 'debug-var-value' }, variable.value),
+      // Значение показываем отдельным элементом с подсказкой: длинные строки
+      // обрезаются многоточием, и при наведении видно их целиком.
+      h(
+        'span',
+        { class: 'debug-var-value', title: `${variable.name} = ${variable.value}` },
+        variable.value,
+      ),
       variable.type ? h('span', { class: 'debug-var-type' }, variable.type) : null,
     );
 
@@ -227,7 +233,11 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
         'div',
         { class: 'debug-row', title: 'Двойной клик — изменить значение' },
         h('span', { class: 'debug-var-name' }, expression),
-        h('span', { class: 'debug-var-value' }, result ? result.value : '…'),
+        h(
+          'span',
+          { class: 'debug-var-value', title: result ? `${expression} = ${result.value}` : expression },
+          result ? result.value : '…',
+        ),
         result?.type ? h('span', { class: 'debug-var-type' }, result.type) : null,
         h(
           'button',

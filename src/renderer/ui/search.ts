@@ -1,8 +1,10 @@
 import type { SearchResult } from '../../shared/api';
 import type { CommandRegistry } from '../core/commands';
+import type { DocumentStore } from '../core/document-store';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { clear, debounce, h, svgIcon } from './dom';
+import { createSelect } from './select';
 import { showToast } from './toast';
 
 export interface SearchView {
@@ -15,9 +17,16 @@ export interface SearchDeps {
   rpc: RpcClient;
   commands: CommandRegistry;
   workspace: WorkspaceModel;
+  documents: DocumentStore;
   /** Перечитать открытый файл после замены на диске. */
   reloadFile?(path: string): void | Promise<void>;
 }
+
+/** Где искать: по всему проекту или только в открытых вкладках. */
+type SearchScope = 'project' | 'editors';
+
+/** Предел совпадений при поиске по вкладкам — как у серверного поиска. */
+const MAX_OPEN_HITS = 300;
 
 /**
  * Поиск по проекту в нижней панели. Идёт через тот же RPC, которым позже
@@ -45,10 +54,25 @@ export function createSearchView(deps: SearchDeps): SearchView {
   const status = h('div', { class: 'search-status' });
   const results = h('div', { class: 'search-results' });
 
+  // Где искать: проект (по умолчанию, ищет main) или открытые вкладки (ищем здесь,
+  // в renderer, — правки видны без сохранения на диск).
+  const scopeSelect = createSelect({ title: 'Где искать', class: 'search-scope-select' });
+  scopeSelect.setOptions([
+    { value: 'project', label: 'Весь проект' },
+    { value: 'editors', label: 'Открытые вкладки' },
+  ]);
+  scopeSelect.setValue('project');
+
   const element = h(
     'div',
     { class: 'search-view' },
-    h('div', { class: 'search-toolbar' }, h('div', { class: 'search-box' }, svgIcon('search', 14), input), scopeNote),
+    h(
+      'div',
+      { class: 'search-toolbar' },
+      h('div', { class: 'search-box' }, svgIcon('search', 14), input),
+      scopeSelect.element,
+      scopeNote,
+    ),
     h('div', { class: 'search-toolbar search-replace' }, replaceInput, replaceButton),
     status,
     results,
@@ -56,6 +80,17 @@ export function createSearchView(deps: SearchDeps): SearchView {
 
   let sequence = 0;
   let scope: string | null = null;
+  let mode: SearchScope = 'project';
+
+  scopeSelect.onChange((value) => {
+    mode = value === 'editors' ? 'editors' : 'project';
+    // Замена по проекту для вкладок не работает: там правки в памяти, не на диске.
+    replaceInput.disabled = mode === 'editors';
+    replaceButton.disabled = mode === 'editors';
+    replaceButton.title =
+      mode === 'editors' ? 'Замена доступна только в поиске по проекту' : 'Заменить все вхождения в проекте';
+    void search();
+  });
 
   const render = (result: SearchResult, query: string): void => {
     clear(results);
@@ -98,6 +133,35 @@ export function createSearchView(deps: SearchDeps): SearchView {
     status.textContent = `${result.hits.length} совпадений в ${groups.size} файлах${result.truncated ? ' (список обрезан)' : ''}`;
   };
 
+  /**
+   * Поиск по открытым вкладкам: без похода в main, по тексту документов в памяти.
+   * Так находятся и несохранённые правки — то, чего на диске ещё нет.
+   */
+  const searchOpenEditors = (query: string): SearchResult => {
+    const lower = query.toLowerCase();
+    const hits: SearchResult['hits'] = [];
+    let truncated = false;
+    // Ограничение области: искать только в конкретном файле, если он задан.
+    const documents = deps.documents.all().filter((document) => !scope || document.path === scope);
+
+    for (const document of documents) {
+      const lines = document.value.split(/\r?\n/);
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? '';
+        const column = line.toLowerCase().indexOf(lower);
+        if (column < 0) continue;
+        if (hits.length >= MAX_OPEN_HITS) {
+          truncated = true;
+          break;
+        }
+        hits.push({ path: document.path, line: index + 1, column: column + 1, text: line.trim() });
+      }
+      if (truncated) break;
+    }
+
+    return { hits, truncated, scanned: documents.length };
+  };
+
   const search = async (): Promise<void> => {
     const query = input.value.trim();
     if (!query) {
@@ -105,13 +169,18 @@ export function createSearchView(deps: SearchDeps): SearchView {
       status.textContent = '';
       return;
     }
-    if (!deps.workspace.root) {
+    // Поиск по вкладкам работает и без проекта: файлы уже открыты.
+    if (mode === 'project' && !deps.workspace.root) {
       status.textContent = 'Сначала откройте папку проекта';
       return;
     }
 
     const current = (sequence += 1);
     status.textContent = 'Ищу…';
+    if (mode === 'editors') {
+      render(searchOpenEditors(query), query);
+      return;
+    }
     try {
       const result = await deps.rpc.request('workspace.search', { query, maxResults: 300 });
       if (current !== sequence) return;
@@ -150,7 +219,8 @@ export function createSearchView(deps: SearchDeps): SearchView {
     } catch (error) {
       status.textContent = error instanceof Error ? error.message : String(error);
     } finally {
-      replaceButton.disabled = false;
+      // Возвращаем кнопку, но не включаем её в режиме вкладок: там замена недоступна.
+      replaceButton.disabled = mode === 'editors';
     }
   };
 

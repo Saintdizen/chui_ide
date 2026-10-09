@@ -6,8 +6,12 @@ import { showToast } from './toast';
 
 export interface QuickOpenView {
   element: HTMLElement;
-  /** Открыть список файлов. Список читается один раз и держится до смены проекта. */
-  open(): Promise<void>;
+  /**
+   * Открыть список файлов. Список читается один раз и держится до смены проекта.
+   * `initialQuery` — начальный отбор: крошка папки подставляет свой путь, чтобы
+   * сразу показать файлы рядом, а не весь проект.
+   */
+  open(initialQuery?: string): Promise<void>;
   close(): void;
 }
 
@@ -132,14 +136,16 @@ export function createQuickOpen(deps: {
 
   return {
     element: overlay,
-    async open() {
+    async open(initialQuery = '') {
       overlay.hidden = false;
-      input.value = '';
+      input.value = initialQuery;
       cursor = 0;
       // Список мог устареть: проект сменился или появились файлы. Читаем при открытии.
       await loadFiles();
       renderList();
       input.focus();
+      // Курсор ставим в конец: набранный отбор остаётся, но его видно целиком.
+      input.setSelectionRange(initialQuery.length, initialQuery.length);
     },
     close,
   };

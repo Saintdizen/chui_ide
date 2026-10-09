@@ -143,6 +143,10 @@ export interface CoverageRow {
    * Пусто, если отчёт без неё (обычный `--cov`): тогда построчной подсветки нет.
    */
   missingLines: number[];
+  /** Всего ветвей (колонка `Branch`); 0 — отчёт без `--cov-branch`. */
+  branches: number;
+  /** Частично покрытых ветвей (колонка `BrPart`). */
+  branchPartial: number;
 }
 
 /** Итог покрытия: процент по проекту и разбивка по файлам. */
@@ -154,11 +158,14 @@ export interface CoverageReport {
 }
 
 /**
- * Строка отчёта: `путь  stmts  miss  cover%` и, если отчёт с `term-missing`,
- * ещё колонка `Missing` (`5-6, 12`). Имя — всё, что до чисел; список строк —
- * всё, что после процента.
+ * Строка отчёта покрытия. Два вида:
+ * - `путь  stmts  miss  cover%` (+ необязательная колонка `Missing`);
+ * - с `--cov-branch`: `путь  stmts  miss  branch  brpart  cover%` (+ `Missing`).
+ *
+ * Имя — всё, что до чисел (нежадно, потому что в пути бывают пробелы); хвост
+ * после процента — список непокрытых строк `5-6, 12`.
  */
-const COVERAGE_ROW = /^(.+?)\s+(\d+)\s+(\d+)\s+(\d+)%(?:\s+(.+))?$/;
+const COVERAGE_ROW = /^(.+?)\s+(\d+)\s+(\d+)\s+(?:(\d+)\s+(\d+)\s+)?(\d+)%(?:\s+(.+))?$/;
 
 /** Предел строк в одном диапазоне Missing: защита от битого `1-999999` в отчёте. */
 const MAX_MISSING_LINES = 5000;
@@ -203,18 +210,22 @@ export function parseCoverageReport(text: string): CoverageReport {
     if (!match) continue;
 
     const name = match[1]!.trim();
+    // Процент — всегда шестая группа: колонки Branch/BrPart необязательны.
+    const percent = Number(match[6]);
     if (name === 'TOTAL') {
-      total = Number(match[4]);
+      total = percent;
       continue;
     }
     // Шапка и разделители под шаблон не подходят, а имя с пробелами шаблон берёт
     // целиком (группа нежадная): отдельной проверки на служебные строки не нужно.
     files.push({
       path: name,
-      percent: Number(match[4]),
+      percent,
       statements: Number(match[2]),
       missing: Number(match[3]),
-      missingLines: match[5] ? parseMissingLines(match[5]) : [],
+      missingLines: match[7] ? parseMissingLines(match[7]) : [],
+      branches: match[4] ? Number(match[4]) : 0,
+      branchPartial: match[5] ? Number(match[5]) : 0,
     });
   }
 

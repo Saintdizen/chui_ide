@@ -87,6 +87,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const statusBar = createStatusBar({
     openGitManager: (anchor) => openGitManager(anchor),
     openPythonEnv: (anchor) => openPythonEnv(anchor),
+    // Через команду, а не напрямую: палитра создаётся ниже, а команда уже есть.
+    openFilePicker: () => void commands.execute('file.quickOpen'),
   });
   layout.statusBarHost.appendChild(statusBar.element);
 
@@ -204,6 +206,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     rpc,
     commands,
     workspace,
+    documents,
     // Замена пишет файлы на диске: открытые вкладки перечитываем сразу.
     reloadFile: (path) => reloadIfOpen(path),
   });
@@ -1342,8 +1345,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     palette.open();
   });
 
-  define({ id: 'file.quickOpen', title: 'Быстрое открытие файла', category: 'Навигация', keybinding: 'Ctrl+Shift+O' }, () => {
-    void quickOpen.open();
+  // Необязательный аргумент — начальный отбор: крошки и статусбар передают путь
+  // папки, чтобы палитра сразу показала файлы рядом, а не весь проект.
+  define({ id: 'file.quickOpen', title: 'Быстрое открытие файла', category: 'Навигация', keybinding: 'Ctrl+Shift+O' }, (query) => {
+    void quickOpen.open(typeof query === 'string' ? query : '');
   });
 
   define(

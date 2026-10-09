@@ -45,14 +45,18 @@ export function createBreadcrumbs(deps: BreadcrumbsDeps): HTMLElement {
 
       const crumb = h(
         'button',
-        { class: `crumb${isFile ? ' is-file' : ''}`, type: 'button', title: target },
+        { class: `crumb${isFile ? ' is-file' : ''}`, type: 'button', title: isFile ? target : `${target}\nКлик — быстрый переход к файлу` },
         index > 0 ? svgIcon('chevron', 10) : null,
         isFile ? svgIcon('file', 12) : svgIcon('folder', 12),
         h('span', {}, segment),
       );
 
+      // Клик по крошке открывает палитру быстрого перехода: у папки — с её путём
+      // как отбором (файлы рядом), у файла — без отбора. Раскрыть папку в дереве
+      // по-прежнему можно двойным кликом.
+      const query = isFile ? '' : `${segments.slice(0, index + 1).join('/')}/`;
+      crumb.addEventListener('click', () => void deps.commands.execute('file.quickOpen', query));
       if (!isFile) {
-        crumb.addEventListener('click', () => void deps.commands.execute('view.showExplorer'));
         crumb.addEventListener('dblclick', () => void deps.commands.execute('workspace.revealPath', target));
       }
 

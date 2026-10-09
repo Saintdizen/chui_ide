@@ -1449,6 +1449,13 @@ textarea {
   font-size: var(--font_labels_size);
 }
 
+/* Выбор области поиска — компактный, не тянется вместе с полем. */
+.search-scope-select {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 120px;
+}
+
 .search-status {
   flex: 0 0 auto;
   padding: 0 12px 6px;
@@ -3316,10 +3323,21 @@ textarea {
   white-space: nowrap;
 }
 
+/* Путь файла — кнопка: клик открывает быстрый переход к другому файлу. */
 .status-file {
   overflow: hidden;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
   color: var(--text_color);
+  font: inherit;
   text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.status-file:hover {
+  background: var(--element_background_hover);
 }
 
 .status-muted {
@@ -4836,6 +4854,12 @@ textarea {
 .tests-cov-percent {
   margin-left: auto;
   color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Колонка ветвей — мельче и бледнее процента: это уточнение, а не главное число. */
+.tests-cov-branch {
+  color: var(--text_color_disabled);
   font-variant-numeric: tabular-nums;
 }
 

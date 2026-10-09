@@ -117,25 +117,25 @@ describe('pytestTarget', () => {
 });
 
 describe('pytestCoverageTarget', () => {
-  it('добавляет --cov и term-missing и помечается отдельным id', () => {
+  it('добавляет --cov, term-missing и --cov-branch и помечается отдельным id', () => {
     // term-missing нужен панели: без него в отчёте нет колонки Missing, а по ней
-    // редактор подсвечивает непокрытые строки.
+    // редактор подсвечивает непокрытые строки. --cov-branch добавляет колонки ветвей.
     expect(pytestCoverageTarget(tools, null)).toMatchObject({
       id: 'pytest-cov:all',
-      command: './.venv/bin/python -m pytest --cov --cov-report=term-missing',
+      command: './.venv/bin/python -m pytest --cov --cov-branch --cov-report=term-missing',
       source: 'test',
     });
   });
 
   it('селектор идёт после `--`: иначе --cov съест его как источник покрытия', () => {
     expect(pytestCoverageTarget(tools, 'tests/test_x.py').command).toBe(
-      './.venv/bin/python -m pytest --cov --cov-report=term-missing -- tests/test_x.py',
+      './.venv/bin/python -m pytest --cov --cov-branch --cov-report=term-missing -- tests/test_x.py',
     );
   });
 
   it('с report дописывает маркер — панель читает и исход, и покрытие', () => {
     expect(pytestCoverageTarget(tools, null, { report: true, platform: 'linux' }).command).toBe(
-      './.venv/bin/python -m pytest --cov --cov-report=term-missing; echo "chui-pytest-result $?"',
+      './.venv/bin/python -m pytest --cov --cov-branch --cov-report=term-missing; echo "chui-pytest-result $?"',
     );
   });
 });
