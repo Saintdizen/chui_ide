@@ -147,17 +147,16 @@
   --yellow_prime_background: #ffd600;
   --purple_prime_background: #db34f2;
 
-  /* Состояния файлов в git — цвета VS Code (Dark+: added #81b88b, modified
-     #e2c08d, deleted #c74e39, renamed #73c991, conflicted #e4676b), поднятые
-     на одну ступень насыщенности и яркости тем же правилом, что палитра кода
-     в core/theme.ts: пометка должна читаться на нашей поверхности, но
-     оттенки остаются VS Code. Значения продублированы в `core/theme.ts`
+  /* Состояния файлов в git — системные цвета Apple (HIG «System colors»,
+     колонка Default dark): added green #30D158, modified yellow #FFD600,
+     deleted red #FF4245, renamed teal #00D2E0, conflicted orange #FF9230.
+     added/modified/deleted продублированы и в `core/theme.ts`
      (`chrome.added/modified/deleted`) — менять в обоих местах. */
-  --git_modified: #edca96;
-  --git_added: #8bc997;
-  --git_deleted: #db5e48;
-  --git_renamed: #7ed99e;
-  --git_conflicted: #f27276;
+  --git_modified: #FFD600;
+  --git_added: #30D158;
+  --git_deleted: #FF4245;
+  --git_renamed: #00D2E0;
+  --git_conflicted: #FF9230;
 
   --focus_ring_color: var(--blue_prime_background);
   --link_color: #4da6ff;
@@ -214,11 +213,11 @@
 
   /* Отладка: подсветка строки, где стоит отладчик. Полупрозрачная, чтобы код
      на ней читался, а не тонул в цвете. */
-  --debug_line_background: rgba(90, 140, 220, 0.18);
+  --debug_line_background: rgba(0, 145, 255, 0.18);
 
   /* Покрытие: строки, не исполненные тестами. Красноватый и приглушённый, чтобы
      не спутать с подсветкой останова (синей) и не мешать чтению кода. */
-  --coverage_missing_background: rgba(200, 80, 80, 0.16);
+  --coverage_missing_background: rgba(255, 66, 69, 0.16);
 }
 
 @media (prefers-color-scheme: light) {
@@ -258,15 +257,17 @@
     --yellow_prime_background: #ffcc00;
     --purple_prime_background: #cb30e0;
 
-    /* Состояния git — цвета VS Code Light+ (added #587c0c, modified #895503,
-       deleted #ad0707, renamed #007100, conflicted #ad0707) с той же ступенью
-       насыщенности. Переименование и новый файл в VS Code делят зелёный:
-       состояния различает буква пометки (R и U), а не оттенок. */
-    --git_modified: #8c5600;
-    --git_added: #5b8602;
-    --git_deleted: #b40000;
-    --git_renamed: #007100;
-    --git_conflicted: #b40000;
+    /* Состояния git — системные цвета Apple (HIG «System colors», колонка
+       Increased contrast light): added green #008932, modified yellow #A16A00,
+       deleted red #E9152D, renamed teal #008198, conflicted orange #C55300.
+       Усиленная колонка взята, а не Default light, потому что эти цвета тут
+       идут как мелкий текст (color:) по светлому фону — Default light на
+       белом бледный и не проходит по контрасту. */
+    --git_modified: #A16A00;
+    --git_added: #008932;
+    --git_deleted: #E9152D;
+    --git_renamed: #008198;
+    --git_conflicted: #C55300;
 
     --focus_ring_color: var(--blue_prime_background);
     /* На белом акцентный синий даёт контраст около 3 — для текста он затемнён. */
@@ -305,8 +306,8 @@
     --folder_special: #8a7440;
     --folder_open: #4a6a96;
     --run_accent: #2f7d32;
-    --debug_line_background: rgba(60, 110, 200, 0.16);
-    --coverage_missing_background: rgba(190, 70, 70, 0.14);
+    --debug_line_background: rgba(0, 136, 255, 0.16);
+    --coverage_missing_background: rgba(255, 56, 60, 0.14);
     --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 32%, transparent);
   }
 }
@@ -326,6 +327,15 @@
     --blue_prime_background: #5cb8ff;
     --red_prime_background: #ff6165;
     --yellow_prime_background: #fedf43;
+
+    /* Повышенный контраст — HIG «System colors», колонка Increased contrast
+       dark: added green #4AD968, modified yellow #FEDF43, deleted red #FF6165,
+       renamed teal #3BDDEC, conflicted orange #FFA056. */
+    --git_modified: #FEDF43;
+    --git_added: #4AD968;
+    --git_deleted: #FF6165;
+    --git_renamed: #3BDDEC;
+    --git_conflicted: #FFA056;
     --purple_prime_background: #ea8dff;
   }
 }

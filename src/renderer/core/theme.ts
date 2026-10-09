@@ -283,11 +283,11 @@ const DARK_CHROME: Chrome = {
   warning: 'ffd600',
   highlight: 'ffd6003d',
   highlightStrong: 'ffd60073',
-  // Цвета изменений — те же, что `--git_*` в styles/theme.css: цвета VS Code из
-  // его таблицы состояний git (#81b88b, #e2c08d, #c74e39), поднятые `vivid()`.
-  added: '8bc997', // --git_added
-  modified: 'edca96', // --git_modified
-  deleted: 'db5e48', // --git_deleted
+  // Цвета изменений — те же, что `--git_*` в styles/theme.css: системные цвета
+  // Apple (HIG, Default dark: #30D158, #FFD600, #FF4245).
+  added: '30D158', // --git_added
+  modified: 'FFD600', // --git_modified
+  deleted: 'FF4245', // --git_deleted
   scrollbar: '79797966',
   scrollbarHover: '646464b3',
   scrollbarActive: 'bfbfbf66',
@@ -327,10 +327,10 @@ const LIGHT_CHROME: Chrome = {
   warning: 'ffcc00',
   highlight: 'ffcc0052',
   highlightStrong: 'ffcc0080',
-  // Светлая схема: цвета VS Code Light+, там же поднятые `vivid()`.
-  added: '5b8602', // --git_added
-  modified: '8c5600', // --git_modified
-  deleted: 'b40000', // --git_deleted
+  // Светлая схема: системные цвета Apple (HIG, Increased contrast light: #008932, #A16A00, #E9152D).
+  added: '008932', // --git_added
+  modified: 'A16A00', // --git_modified
+  deleted: 'E9152D', // --git_deleted
   scrollbar: '64646466',
   scrollbarHover: '646464b3',
   scrollbarActive: '00000099',
