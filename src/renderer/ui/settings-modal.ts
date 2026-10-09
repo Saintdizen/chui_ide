@@ -273,6 +273,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       { class: 'btn btn-small', type: 'button', onClick: () => void runTest() },
       'Проверить подключение',
     );
+    // Ключ можно не только заменить, но и убрать: иначе сохранённый ключ не стереть,
+    // а он мешает, когда переходишь на переменную окружения или меняешь провайдера.
+    const clearKeyButton = h(
+      'button',
+      { class: 'btn btn-small', type: 'button', onClick: () => void clearKey() },
+      'Убрать ключ',
+    );
 
     const statusText = testResult
       ? testResult.message
@@ -326,6 +333,15 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       render();
     }
 
+    /** Убрать сохранённый ключ: подсказка вернётся к «Ключ не задан». */
+    async function clearKey(): Promise<void> {
+      if (!provider) return;
+      settings = await deps.rpc.request('ai.clearApiKey', { providerId: provider.id });
+      testResult = null;
+      testedModels = [];
+      render();
+    }
+
     const prompt = h('textarea', { class: 'field-input', rows: 5, spellcheck: false });
     prompt.value = ai.systemPrompt;
     prompt.addEventListener('change', () => void patch({ ai: { systemPrompt: prompt.value } }));
@@ -347,7 +363,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       field('Название', labelInput),
       field('Адрес API', baseUrlInput),
       preset ? h('div', { class: 'field-hint' }, preset.hint) : null,
-      field('API-ключ', h('div', { class: 'field-row' }, keyInput, testButton)),
+      field('API-ключ', h('div', { class: 'field-row' }, keyInput, testButton, provider?.hasApiKey ? clearKeyButton : null)),
       status,
       h('div', { class: 'field-hint' }, 'Ключ хранится в main-процессе и в renderer не попадает.'),
       field('Модель', modelField),
