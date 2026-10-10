@@ -105,6 +105,49 @@ app.whenReady().then(async () => {
     await workspace.open(dir);
     const after = (await workspace.search({ query: MARK, maxResults: 100 })).scanned;
     check('исключения уменьшают число прочитанных файлов', after < before, { было: before, стало: after });
+
+    /* Кэш содержимого: повторный поиск по тому же дереву не перечитывает файлы.
+       Счётчики накопительные, поэтому смотрим их разницу между двумя поисками. */
+    await workspace.open(dir);
+    await workspace.search({ query: MARK, maxResults: 100 });
+    const beforeCache = workspace.cacheStats();
+    await workspace.search({ query: MARK, maxResults: 100 });
+    const afterCache = workspace.cacheStats();
+    const readAgain = afterCache.misses - beforeCache.misses;
+    const fromCache = afterCache.hits - beforeCache.hits;
+    check('первый поиск наполняет кэш', beforeCache.entries > 0, beforeCache);
+    check('повторный поиск не перечитывает файлы', readAgain === 0 && fromCache > 0, {
+      из_кэша: fromCache,
+      перечитано: readAgain,
+    });
+    check('в памяти держим разумный объём', afterCache.bytes < 8 * 1024 * 1024, afterCache.bytes);
+
+    /* Главное: кэш не должен отдавать устаревший текст. */
+    const changed = path.join(dir, 'src/app.ts');
+    await write(changed, `// ${MARK} новая версия\n`);
+    const outsideEdit = (await workspace.search({ query: `${MARK} новая версия`, maxResults: 100 })).hits.map(rel);
+    check('правка файла снаружи видна поиску сразу', outsideEdit.includes('src/app.ts'), outsideEdit);
+
+    const stale = path.join(dir, 'src/stale.ts');
+    await write(stale, `// ${MARK} старое содержимое\n`);
+    await workspace.search({ query: MARK, maxResults: 100 });
+    await workspace.writeFile(stale, `// ${MARK} новое содержимое\n`);
+    const newText = (await workspace.search({ query: `${MARK} новое содержимое`, maxResults: 100 })).hits.map(rel);
+    const oldText = (await workspace.search({ query: `${MARK} старое содержимое`, maxResults: 100 })).hits.map(rel);
+    check('запись через IDE сразу видна поиску', newText.includes('src/stale.ts'), newText);
+    check('старое содержимое больше не находится', !oldText.includes('src/stale.ts'), oldText);
+
+    /* Переименование: под старым путём содержимого быть не должно. */
+    const moved = path.join(dir, 'src/moved.ts');
+    await workspace.rename(stale, moved);
+    const afterRenameOld = (await workspace.search({ query: `${MARK} новое содержимое`, maxResults: 100 })).hits.map(
+      rel,
+    );
+    check(
+      'после переименования старый путь не находится, новый — находится',
+      !afterRenameOld.includes('src/stale.ts') && afterRenameOld.includes('src/moved.ts'),
+      afterRenameOld,
+    );
   } catch (error) {
     failed = true;
     console.error('[chui] ошибка проверки:', error.message);
