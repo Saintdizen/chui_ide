@@ -1784,6 +1784,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   // Счётчик правок и ветка в статусбаре живут по тому же снимку, что и дерево.
   git.onDidChange(refreshStatus);
+  // Коммит и push, сделанные мимо IDE (в терминале или внешней программой),
+  // меняют только `.git`, а рабочее дерево — нет: наблюдателя за этим может и
+  // не быть. На возврат фокуса перечитываем состояние репозитория, чтобы пометки
+  // в дереве и счётчик не отставали от жизни.
+  window.addEventListener('focus', () => void git.refresh());
   documents.onDidChange(({ document }) => {
     refreshStatus();
     // Правка текста может добавить или убрать точку входа — значок запуска

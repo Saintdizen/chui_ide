@@ -21,8 +21,8 @@
  *   • акценты — системные цвета из таблицы (blue, red, yellow, purple), у них
  *     есть отдельная колонка значений для повышенного контраста — она
  *     включается в `prefers-contrast: more`;
- *   • всплывающие слои — обычная поверхность карточки: прозрачности и блюра нет,
- *     слой держат рамка и тень;
+ *   • всплывающие слои — «материал»: полупрозрачная поверхность карточки плюс
+ *     блюр фона под ней, плюс рамка и тень (см. `--popup_material`, `--popup_filter`);
  *
  * Сознательные отступления от HIG (и причина каждого):
  *   • выделение — тонировка акцента, а не его сплошная заливка: сплошной акцент
@@ -134,9 +134,13 @@
   --separator_color: rgba(84, 84, 88, 0.65);
   --opaque_separator_color: #38383a;
 
-  /* Всплывающий слой — та же карточка, что у панелей: блюра и прозрачности нет,
-     слой держат рамка и тень. */
+  /* Всплывающий слой — материал: полупрозрачная поверхность карточки плюс блюр
+     фона под ней (Depth: слой лежит НАД содержимым, а не рядом). Непрозрачность
+     держим высокой — текст должен читаться независимо от того, что под ним.
+     `--popup_background` остаётся непрозрачным: его читает Monaco для своих меню. */
   --popup_background: var(--element_background_2);
+  --popup_material: color-mix(in srgb, var(--element_background_2) 84%, transparent);
+  --popup_filter: blur(24px) saturate(1.4);
   --popup_border: var(--border_color);
   --modal_scrim: rgba(0, 0, 0, 0.5);
 
@@ -169,8 +173,8 @@
 
   --blue_prime_background_tint_strong: rgba(0, 145, 255, 0.6);
 
-  --box_shadow_drop: 0 2px 6px rgb(0 0 0 / 26%), 0 14px 36px rgb(0 0 0 / 38%);
-  --box_shadow_modal: 0 4px 12px rgb(0 0 0 / 30%), 0 28px 72px rgb(0 0 0 / 46%);
+  --box_shadow_drop: 0 2px 8px rgb(0 0 0 / 14%), 0 16px 44px rgb(0 0 0 / 24%);
+  --box_shadow_modal: 0 4px 16px rgb(0 0 0 / 16%), 0 30px 80px rgb(0 0 0 / 30%);
 
   --scrollbar_thumb: rgba(255, 255, 255, 0.35);
 
@@ -250,6 +254,8 @@
     --opaque_separator_color: #c6c6c8;
 
     --popup_background: var(--element_background_2);
+    --popup_material: color-mix(in srgb, var(--element_background_2) 82%, transparent);
+    --popup_filter: blur(24px) saturate(1.3);
     --modal_scrim: rgba(0, 0, 0, 0.18);
 
     --blue_prime_background: #0088ff;
@@ -277,8 +283,8 @@
 
     --blue_prime_background_tint_strong: rgba(0, 136, 255, 0.6);
 
-    --box_shadow_drop: 0 2px 6px rgb(0 0 0 / 5%), 0 14px 36px rgb(0 0 0 / 9%);
-    --box_shadow_modal: 0 4px 12px rgb(0 0 0 / 6%), 0 28px 72px rgb(0 0 0 / 14%);
+    --box_shadow_drop: 0 2px 8px rgb(0 0 0 / 4%), 0 16px 44px rgb(0 0 0 / 8%);
+    --box_shadow_modal: 0 4px 16px rgb(0 0 0 / 5%), 0 30px 80px rgb(0 0 0 / 11%);
 
     --scrollbar_thumb: rgba(0, 0, 0, 0.3);
 

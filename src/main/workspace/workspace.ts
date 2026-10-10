@@ -40,6 +40,10 @@ const MAX_SEARCH_RESULTS = 2000;
 const SEARCH_CONCURRENCY = 8;
 /** Предохранитель от обхода гигантских деревьев без совпадений. */
 const MAX_SCAN_FILES = 20_000;
+/** Пауза перед повторной попыткой поднять наблюдение за файлами. */
+const WATCH_RETRY_MS = 3_000;
+/** Сколько раз подряд пробуем поднять наблюдение, прежде чем оставить попытки. */
+const WATCH_RETRY_LIMIT = 5;
 
 /**
  * Работа с рабочей директорией. Renderer никогда не трогает ФС напрямую:
@@ -52,6 +56,10 @@ export class WorkspaceService {
   private watcher: FSWatcher | null = null;
   private watchTimer: NodeJS.Timeout | null = null;
   private pendingChange: string | null = null;
+  /** Отложенный перезапуск наблюдения после сбоя (см. `scheduleWatchRetry`). */
+  private watchRetry: NodeJS.Timeout | null = null;
+  /** Сдаёмся после стольких подряд неудачных попыток поднять наблюдение. */
+  private watchRetries = 0;
   /** Правила исключения обхода: `.gitignore` и `.ai_ignore` из корня проекта. */
   private ignore: IgnoreRules = IgnoreRules.empty();
   /**
@@ -540,16 +548,36 @@ export class WorkspaceService {
         if (name && IGNORE_FILES.some((file) => file === name)) void this.reloadIgnore();
         this.scheduleChange(name ? path.join(root, name) : root);
       });
-      // Ошибку наблюдения (например, переполнение буфера inotify) не роняем в консоль:
-      // без него чужую правку не увидим, но свои изменения продолжаем сообщать сами.
+      this.watchRetries = 0;
+      // Ошибку наблюдения (переполнение буфера inotify, сетевой диск) не роняем
+      // в консоль: без наблюдения чужую правку не увидим, но свои изменения
+      // продолжаем сообщать сами. Пробуем поднять наблюдение заново — иначе
+      // после первой же ошибки дерево и git-пометки застыли бы до перезапуска IDE.
       this.watcher.on('error', () => {
         this.watcher?.close();
         this.watcher = null;
+        this.scheduleWatchRetry();
       });
     } catch {
-      // не на всех платформах есть рекурсивный watch — живём без автонаблюдения
+      // не на всех платформах есть рекурсивный watch — пробуем ещё раз позже
       this.watcher = null;
+      this.scheduleWatchRetry();
     }
+  }
+
+  /**
+   * Перезапуск наблюдения после сбоя. Пробуем несколько раз с паузой: сбой обычно
+   * временный (переполнение inotify от пачки правок), и наблюдение поднимается
+   * само. Если же платформа не умеет рекурсивный watch вовсе, после нескольких
+   * попыток перестаём повторять, чтобы не крутить пустой таймер.
+   */
+  private scheduleWatchRetry(): void {
+    if (this.watchRetry || !this.root || this.watchRetries >= WATCH_RETRY_LIMIT) return;
+    this.watchRetries += 1;
+    this.watchRetry = setTimeout(() => {
+      this.watchRetry = null;
+      if (this.root && !this.watcher) this.startWatcher(this.root);
+    }, WATCH_RETRY_MS);
   }
 
   private stopWatcher(): void {
@@ -557,6 +585,11 @@ export class WorkspaceService {
       clearTimeout(this.watchTimer);
       this.watchTimer = null;
     }
+    if (this.watchRetry) {
+      clearTimeout(this.watchRetry);
+      this.watchRetry = null;
+    }
+    this.watchRetries = 0;
     this.pendingChange = null;
     this.watcher?.close();
     this.watcher = null;

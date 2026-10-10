@@ -699,7 +699,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       if (message.role === 'user') {
         // Служебный дострой обрезанного ответа — не вопрос человека: в ленте не показываем.
         if (message.content === CONTINUE_PROMPT) return;
-        appendMessage(session, 'user', message.content, () => editUserMessage(session, index, message.content));
+        appendMessage(
+          session,
+          'user',
+          message.content,
+          () => editUserMessage(session, index, message.content),
+          message.images ?? [],
+        );
         return;
       }
 
@@ -1302,15 +1308,26 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return beginTurn(session);
   }
 
+  /** Картинки вопроса: показываем прямо в ленте, чтобы было видно отправленное. */
+  function imagesNode(images: readonly string[]): HTMLElement | null {
+    if (images.length === 0) return null;
+    return h(
+      'div',
+      { class: 'msg-images' },
+      ...images.map((src) => h('img', { class: 'msg-image', src, alt: 'Изображение к вопросу' })),
+    );
+  }
+
   function appendMessage(
     session: ChatSession,
     role: 'user' | 'assistant',
     text: string,
     onEdit?: () => void,
+    images: readonly string[] = [],
   ): HTMLElement {
     const content = h('div', { class: 'msg-body' });
     if (text) markdown.renderInto(content, text);
-    const messageEl = h('div', { class: `msg msg-${role}` }, content);
+    const messageEl = h('div', { class: `msg msg-${role}` }, content, imagesNode(images));
     // Действия есть только у вопросов пользователя — у ответов они рисуются
     // отдельно, когда ответ завершён (см. chat-stream.ts / renderHistory).
     if (role === 'user' && onEdit) attachUserActions(messageEl, text, onEdit);
@@ -1512,15 +1529,19 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     menu.hide();
     // Контекст приложен к конкретному вопросу: дальше он только мешает.
     const sent = attachments.takeForSend();
+    // Картинки кладём и в историю, и в ленту: в ленте видно, что ушло модели,
+    // а в истории они переживают повторную отрисовку (правка вопроса, «Повторить»).
+    // На провод их отдаёт не история, а вложения — см. `chat-stream.ts`.
+    const images = sent.filter((item) => item.kind === 'image' && item.dataUrl).map((item) => item.dataUrl!);
 
-    session.history.push({ role: 'user', content: text });
+    session.history.push({ role: 'user', content: text, ...(images.length > 0 ? { images } : {}) });
     if (session.history.length === 1) {
       // Первый вопрос убирает приветствие: беседа началась, подсказка больше не нужна.
       clear(session.thread);
       syncTabTitle(session, text);
     }
     const index = session.history.length - 1;
-    appendMessage(session, 'user', text, () => editUserMessage(session, index, text));
+    appendMessage(session, 'user', text, () => editUserMessage(session, index, text), images);
 
     // Новый вопрос — снова следим за низом ленты.
     autoScroll = true;

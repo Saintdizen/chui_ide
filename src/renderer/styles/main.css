@@ -62,6 +62,8 @@ textarea {
   outline-offset: var(--focus_outline_offset);
 }
 
+/* Скроллбары-оверлеи: в спокойном виде ползунка не видно — полоса не грузит
+   полотно и не спорит с кодом. Проявляется, когда курсор над областью прокрутки. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -72,10 +74,37 @@ textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--scrollbar_thumb);
+  background: transparent;
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: var(--radius_pill);
+  transition: background-color var(--motion_base) var(--motion_ease);
+}
+
+/* Курсор над областью прокрутки (или прямо по ползунку) — полоса проявляется. */
+:hover::-webkit-scrollbar-thumb,
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar_thumb);
+}
+
+/* Пока элемент активно тянут (в т.ч. ползунок) — держим его видимым. */
+:active::-webkit-scrollbar-thumb {
+  background: var(--scrollbar_thumb);
+}
+
+/* Все всплывающие слои лежат НАД содержимым: тот же материал (полупрозрачная
+   подложка + блюр фона) читается как «стекло» над интерфейсом и задаёт глубину
+   одним языком. Список один, чтобы слои не разъезжались по оформлению. */
+.select-popup,
+.context-menu,
+.composer-menu,
+.session-info,
+.popover,
+.palette,
+.toast,
+.modal {
+  backdrop-filter: var(--popup_filter);
+  -webkit-backdrop-filter: var(--popup_filter);
 }
 
 /* ── каркас ─────────────────────────────────────────────────────────────── */
@@ -1001,7 +1030,7 @@ textarea {
   overflow: auto;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--popup_background);
+  background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
   animation: popup-in var(--motion_base) var(--motion_ease);
 }
@@ -1576,12 +1605,13 @@ textarea {
   opacity: 0.5;
 }
 
+/* Плашка-подсказка: заливки хватает, чтобы отделить её от полотна, — рамка
+   тут лишний «хром» (Clarity: интерфейс не спорит с содержимым). */
 .chat.is-ai-disabled .chat-body::after {
   content: "AI выключен в настройках. Включить: Настройки → AI.";
   display: block;
   margin-bottom: 6px;
   padding: 8px 10px;
-  border: 1px solid var(--separator_color);
   border-radius: var(--radius_sm);
   background: var(--sunken_background);
   color: var(--text_color_tertiary);
@@ -1636,7 +1666,7 @@ textarea {
   padding: 10px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--popup_background);
+  background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
   animation: popup-in var(--motion_base) var(--motion_ease);
 }
@@ -1834,7 +1864,6 @@ textarea {
 }
 
 .thread-summary {
-  border: 1px solid var(--separator_color);
   border-radius: var(--radius_sm);
   background: var(--sunken_background);
   font-size: var(--font_labels_size);
@@ -1897,30 +1926,37 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-/* Промежуточный текст агента (за ним идёт вызов инструмента) — пузырь с плашкой:
-   иначе он сливается со строками действий. Итоговый ответ остаётся без плашки. */
+/* Плоская лента: у сообщений нет «пузырей» — ни рамки, ни подложки. Текст идёт
+   прямо по полотну, как в редакторе: коробки спорили с карточками инструментов
+   и размышлениями и мешали читать длинные ответы. Вопрос пользователя отличаем
+   тонкой полосой слева — этого хватает, чтобы отделить его от ответа. */
+.msg-user .msg-body {
+  padding: 1px 2px 1px 9px;
+  border-left: 2px solid var(--blue_prime_background);
+  color: var(--text_color);
+}
+
+.msg-assistant .msg-body,
 .msg-assistant .msg-body.msg-note {
-  align-self: flex-start;
+  padding: 0 2px;
+  color: var(--text_color);
+}
+
+/* Картинки вопроса — прямо в ленте: видно, что ушло модели вместе с вопросом. */
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.msg-image {
   max-width: 100%;
-  padding: 6px 9px;
+  max-height: 220px;
   border: 1px solid var(--separator_color);
   border-radius: var(--radius_sm);
   background: var(--sunken_background);
-  color: var(--text_color);
-}
-
-.msg-user .msg-body {
-  align-self: flex-end;
-  background: var(--blue_prime_background_tint_strong);
-  color: var(--text_color_hover);
-}
-
-/* Ответ ассистента — без «пузыря»: текст идёт прямо по полотну ленты.
-   Обводка и подложка мешали читать длинный ответ, а под размышлениями
-   выглядели лишней коробкой. Пользовательское сообщение плашку сохраняет. */
-.msg-assistant .msg-body {
-  padding: 0 2px;
-  color: var(--text_color);
+  object-fit: contain;
 }
 
 .text-block {
@@ -2922,7 +2958,7 @@ textarea {
   overflow: auto;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--popup_background);
+  background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
   animation: popup-in var(--motion_base) var(--motion_ease);
 }
@@ -3446,7 +3482,7 @@ textarea {
   padding: 5px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--popup_background);
+  background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
   animation: popup-in var(--motion_base) var(--motion_ease);
 }
@@ -3490,7 +3526,7 @@ textarea {
   overflow: hidden;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--popup_background);
+  background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
   animation: popup-in var(--motion_base) var(--motion_ease);
 }
@@ -3910,7 +3946,7 @@ textarea {
   padding: 4px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--popup_background);
+  background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
   animation: popup-in var(--motion_base) var(--motion_ease);
 }
@@ -3993,7 +4029,7 @@ textarea {
   overflow: hidden;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--popup_background);
+  background: var(--popup_material);
   box-shadow: var(--box_shadow_modal);
   animation: popup-in var(--motion_base) var(--motion_ease);
 }
@@ -4090,7 +4126,7 @@ textarea {
   padding: 8px 12px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--popup_background);
+  background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
   color: var(--text_color);
   font-size: var(--font_labels_size);

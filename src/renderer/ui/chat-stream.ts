@@ -2,6 +2,7 @@ import {
   ChatStreamEvent,
   type ChatAttachment,
   type ChatDeltaPayload,
+  type ChatMessage,
   type ChatPlanPayload,
   type ChatReasoningPayload,
   type ChatStreamDone,
@@ -79,6 +80,22 @@ export interface StreamHost {
 export interface StreamRunner {
   /** Отрисовать ответ на текущую историю беседы. */
   run(session: ChatSession, providerId: string, model: string, attachments: ChatAttachment[]): Promise<void>;
+}
+
+/**
+ * Сообщение истории без картинок. Картинки лежат в истории ради показа в ленте
+ * (и повторной отрисовки), но на провод уходит только текущий вопрос: старые
+ * изображения из истории повторно не шлём — иначе каждый ход нёс бы все
+ * картинки беседы, раздувая контекст. Картинки текущего вопроса прикладывает
+ * main из вложений (см. `attachImages` в `ai/service.ts`).
+ */
+function toWireMessage(message: ChatMessage): ChatMessage {
+  if (!message.images?.length) return { ...message };
+  const copy: ChatMessage = { role: message.role, content: message.content };
+  if (message.name) copy.name = message.name;
+  if (message.toolCallId) copy.toolCallId = message.toolCallId;
+  if (message.toolCalls?.length) copy.toolCalls = message.toolCalls;
+  return copy;
 }
 
 export function createStreamRunner(host: StreamHost): StreamRunner {
@@ -171,7 +188,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
           {
             providerId,
             model,
-            messages: session.history.map((message) => ({ ...message })),
+            messages: session.history.map(toWireMessage),
             useTools: modes.useTools,
             autoApprove: modes.autoApprove,
             planMode: modes.planMode,
