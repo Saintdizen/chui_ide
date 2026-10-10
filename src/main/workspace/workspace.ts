@@ -17,9 +17,22 @@ import {
 import { RpcFailure } from '../ipc/router';
 import { escapesRoot, isInsideRoot } from './path-guard';
 import { globToRegExp } from '../../shared/glob';
+import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
 import { replaceAll } from '../../shared/replace';
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
+
+/**
+ * Файлы исключений в корне проекта. `.gitignore` читаем тоже: проект уже сказал
+ * им, что не является его частью, и искать в собранном или сгенерированном —
+ * значит получать совпадения из мусора. `.ai_ignore` читается последним, поэтому
+ * его `!` может вернуть обратно то, что исключил git.
+ *
+ * Вложенные файлы правил не читаем: обход пришлось бы вести со стеком правил на
+ * каждую папку. Для корня этого хватает почти всегда, а лишнюю сложность без
+ * нужды в обход не тащим.
+ */
+const IGNORE_FILES = ['.gitignore', '.ai_ignore'] as const;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_SEARCH_RESULTS = 2000;
 /** Сколько файлов читаем параллельно: больше — уже перегрузка диска, меньше — простой. */
@@ -38,6 +51,8 @@ export class WorkspaceService {
   private watcher: FSWatcher | null = null;
   private watchTimer: NodeJS.Timeout | null = null;
   private pendingChange: string | null = null;
+  /** Правила исключения обхода: `.gitignore` и `.ai_ignore` из корня проекта. */
+  private ignore: IgnoreRules = IgnoreRules.empty();
 
   constructor(private readonly onChange: (topic: string, payload: unknown) => void) {}
 
@@ -55,6 +70,7 @@ export class WorkspaceService {
     this.stopWatcher();
     this.root = root;
     this.rootReal = await fs.realpath(root).catch(() => root);
+    this.ignore = await this.readIgnoreRules(root);
     this.startWatcher(root);
 
     return { root, name: path.basename(root) || root, entries: await this.readDir(root) };
@@ -64,6 +80,44 @@ export class WorkspaceService {
     this.stopWatcher();
     this.root = null;
     this.rootReal = null;
+    this.ignore = IgnoreRules.empty();
+  }
+
+  /**
+   * Прочитать правила исключения из корня. Файла нет — это нормально: правил
+   * просто не будет. Читаем до `MAX_FILE_BYTES`: файл правил такого размера уже
+   * не правила, а недоразумение, и разбирать его целиком незачем.
+   */
+  private async readIgnoreRules(root: string): Promise<IgnoreRules> {
+    const files: string[] = [];
+    for (const name of IGNORE_FILES) {
+      const text = await fs.readFile(path.join(root, name), 'utf8').catch(() => null);
+      if (text !== null && text.length <= MAX_FILE_BYTES) files.push(text);
+    }
+    return files.length > 0 ? combineIgnoreFiles(files) : IgnoreRules.empty();
+  }
+
+  /** Исключён ли путь по правилам проекта. Путь — относительно корня. */
+  private isIgnored(fullPath: string, isDir: boolean): boolean {
+    if (this.ignore.size === 0 || !this.root) return false;
+    const relative = path.relative(this.root, fullPath).split(path.sep).join('/');
+    // Пустой относительный путь — это сам корень: его правила не исключают.
+    return relative !== '' && this.ignore.ignores(relative, isDir);
+  }
+
+  /** Сколько правил исключения прочитано: по этому видно, действует ли файл. */
+  ignoreRuleCount(): number {
+    return this.ignore.size;
+  }
+
+  /**
+   * Перечитать правила исключения. Их правят во время работы — добавил строку в
+   * `.ai_ignore`, и поиск должен перестать находить лишнее в том же сеансе.
+   */
+  private async reloadIgnore(): Promise<void> {
+    if (!this.root) return;
+    this.ignore = await this.readIgnoreRules(this.root);
+    this.scheduleChange(this.root);
   }
 
   async readDir(dirPath: string): Promise<DirEntry[]> {
@@ -203,10 +257,11 @@ export class WorkspaceService {
         if (signal?.aborted || files.length >= MAX_SCAN_FILES) return;
         const full = path.join(dir, dirent.name);
         if (dirent.isDirectory()) {
-          if (!IGNORED_DIRS.has(dirent.name)) await collect(full);
+          if (!IGNORED_DIRS.has(dirent.name) && !this.isIgnored(full, true)) await collect(full);
           continue;
         }
         if (!dirent.isFile()) continue;
+        if (this.isIgnored(full, false)) continue;
         if (globMatcher && !globMatcher.test(path.relative(root, full))) continue;
         files.push(full);
       }
@@ -284,10 +339,10 @@ export class WorkspaceService {
         if (files.length >= MAX_SCAN_FILES) return;
         const full = path.join(dir, dirent.name);
         if (dirent.isDirectory()) {
-          if (!IGNORED_DIRS.has(dirent.name)) await collect(full);
+          if (!IGNORED_DIRS.has(dirent.name) && !this.isIgnored(full, true)) await collect(full);
           continue;
         }
-        if (dirent.isFile()) files.push(full);
+        if (dirent.isFile() && !this.isIgnored(full, false)) files.push(full);
       }
     };
 
@@ -439,7 +494,11 @@ export class WorkspaceService {
   private startWatcher(root: string): void {
     try {
       this.watcher = watch(root, { recursive: true }, (_eventType, filename) => {
-        this.scheduleChange(filename ? path.join(root, filename.toString()) : root);
+        const name = filename?.toString();
+        // Правила исключения перечитываем сразу: иначе правка `.ai_ignore`
+        // подействовала бы только при следующем открытии проекта.
+        if (name && IGNORE_FILES.some((file) => file === name)) void this.reloadIgnore();
+        this.scheduleChange(name ? path.join(root, name) : root);
       });
       // Ошибку наблюдения (например, переполнение буфера inotify) не роняем в консоль:
       // без него чужую правку не увидим, но свои изменения продолжаем сообщать сами.

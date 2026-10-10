@@ -53,9 +53,24 @@ import { assertChatImages } from './images';
 import { OpenAiCompatibleProvider } from './openai-compatible';
 import type { AiProvider } from './provider';
 
-/** Файлы с инструкциями проекта — подмешиваются в системный промпт. */
-const INSTRUCTION_FILES = ['AGENTS.md', 'CHUI.md', 'CLAUDE.md'];
+/**
+ * Файлы с правилами проекта — подмешиваются в системный промпт. Читаются все,
+ * а не первый найденный: имена разные не потому, что это варианты одного файла,
+ * а потому, что так их называют разные инструменты, и в проекте их заводит
+ * каждый свой. `.ai_rules` — наше имя, оно читается первым: если человек завёл
+ * его, его правила должны стоять выше чужих.
+ *
+ * Порядок в списке = порядок в промпте: сначала общие правила проекта, потом
+ * уточнения инструментов.
+ */
+const INSTRUCTION_FILES = ['.ai_rules', 'AGENTS.md', 'CHUI.md', 'CLAUDE.md'];
+/** Потолок на один файл: правила не должны вытеснять саму беседу из окна. */
 const MAX_INSTRUCTIONS_BYTES = 8000;
+/**
+ * Потолок на все файлы вместе. Файлы подмешиваются в каждый запрос, поэтому
+ * четыре разных по 8 КБ — это уже половина скромного окна под одни правила.
+ */
+const MAX_INSTRUCTIONS_TOTAL_BYTES = 20_000;
 
 /**
  * Сколько раз пробуем спасти шаг, если провайдер ответил «запрос не влез».
@@ -858,13 +873,21 @@ export class AiService {
     if (!root) return null;
 
     const parts = [`Рабочая папка проекта: ${root}`];
+    let spent = 0;
     for (const name of INSTRUCTION_FILES) {
+      if (spent >= MAX_INSTRUCTIONS_TOTAL_BYTES) break;
       try {
         const text = await fs.readFile(path.join(root, name), 'utf8');
-        if (text.trim()) {
-          parts.push(`Инструкции из ${name}:\n${text.slice(0, MAX_INSTRUCTIONS_BYTES)}`);
-          break;
-        }
+        if (!text.trim()) continue;
+
+        // Правила сверх общего потолка не добавляем: лучше показать часть, чем
+        // вытеснить беседу. Обрезка видна по пометке — модель должна знать,
+        // что прочитала не всё.
+        const room = Math.min(MAX_INSTRUCTIONS_BYTES, MAX_INSTRUCTIONS_TOTAL_BYTES - spent);
+        const trimmed = text.slice(0, room);
+        const cut = trimmed.length < text.length ? '\n… (правила обрезаны по размеру)' : '';
+        parts.push(`Инструкции из ${name}:\n${trimmed}${cut}`);
+        spent += trimmed.length;
       } catch {
         // файла нет — это нормально
       }
