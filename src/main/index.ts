@@ -8,6 +8,7 @@ import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
 import { registerIpc } from './ipc/register';
 import { LspService } from './lsp/lsp';
+import { McpService } from './mcp/mcp';
 import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
 import { registerAppScheme, serveRenderer } from './protocol';
@@ -134,6 +135,13 @@ if (!app.requestSingleInstanceLock()) {
       () => pythonInterpreterFor(workspace.rootPath(), settings.get().run.pythonPath),
       () => projectEnv(workspace.rootPath()),
     );
+    // Внешние инструменты (MCP): серверы задаются в настройках, а рабочая папка
+    // нужна им как каталог запуска — многие инструменты читают проект оттуда.
+    const mcp = new McpService(
+      () => settings.get().ai.mcpServers,
+      () => workspace.rootPath(),
+    );
+
     // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
     const sessions = new SessionStore();
     const projectConfig = new ProjectConfigStore();
@@ -148,6 +156,7 @@ if (!app.requestSingleInstanceLock()) {
       debug,
       sessions,
       projectConfig,
+      mcp,
       host: new HostClient(),
     });
     serveRenderer();
@@ -160,6 +169,8 @@ if (!app.requestSingleInstanceLock()) {
       terminals.dispose();
       lsp.dispose();
       debug.dispose();
+      // Серверы MCP — наши процессы: без остановки они остались бы висеть после выхода.
+      mcp.dispose();
       workspace.dispose();
     });
 

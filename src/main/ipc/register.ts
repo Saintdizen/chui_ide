@@ -21,6 +21,7 @@ import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
 import type { GitService } from '../git/git';
 import type { DebugService } from '../debug/debug';
 import type { LspService } from '../lsp/lsp';
+import type { McpService } from '../mcp/mcp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
 import { detectAvailableCommands, detectVenvCommands } from '../lsp/detect';
@@ -63,6 +64,8 @@ export interface AppDependencies {
   chatStore?: ChatStore;
   /** Языковые серверы. Необязательно: пробникам LSP не нужен. */
   lsp?: LspService;
+  /** Внешние инструменты (MCP). Необязательно: без серверов их и нет. */
+  mcp?: McpService;
   /** Отладчик (DAP). Необязательно: пробникам он не нужен. */
   debug?: DebugService;
   /** Сессия проекта (вкладки, папки, панели). Необязательно для пробников. */
@@ -91,6 +94,9 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Языковой сервер умеет искать по символам («перейти к символу») — это и есть
   // инструмент codebase_search. Нет сервера — инструмент модели не предлагаем.
   if (deps.lsp) deps.ai.attachSymbols(deps.lsp);
+  // Внешние инструменты (MCP): список ведут серверы из настроек, а запускает их
+  // этот сервис — агент получает готовые вызовы.
+  if (deps.mcp) deps.ai.attachMcp(deps.mcp);
 
   router.register(
     'app.info',

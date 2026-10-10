@@ -339,6 +339,85 @@ app.whenReady().then(async () => {
 
     settings.ai.webSearch = { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false };
 
+    /* 1д. внешние инструменты (MCP): список приходит снаружи, изменяющие требуют
+       подтверждения — как команды терминала. Роль сервиса здесь играет заглушка. */
+    const external = [];
+    ai.attachMcp({
+      list: async () => [
+        {
+          serverId: 'files',
+          toolName: 'read',
+          exposedName: 'mcp__files__read',
+          description: 'Внешнее чтение',
+          inputSchema: { type: 'object', properties: {} },
+          readOnly: true,
+        },
+        {
+          serverId: 'files',
+          toolName: 'write',
+          exposedName: 'mcp__files__write',
+          description: 'Внешняя запись',
+          inputSchema: { type: 'object', properties: {} },
+          readOnly: false,
+        },
+      ],
+      call: async (name, args) => {
+        external.push([name, args]);
+        return { text: `внешний вызов ${name}`, isError: false };
+      },
+    });
+
+    const externalHost = {
+      applyEdits: () => Promise.resolve({ rejected: true }),
+      confirmCommand: (command) => {
+        external.push(['confirm', command]);
+        return Promise.resolve(true);
+      },
+    };
+
+    requested = { name: 'mcp__files__read', args: { path: 'a.txt' } };
+    run = await chat(externalHost);
+    check('внешний инструмент предложен модели', run.toolNames.includes('mcp__files__read'), run.toolNames);
+    check('чтение внешнего инструмента не спрашивает разрешения', !external.some(([kind]) => kind === 'confirm'));
+    check(
+      'результат внешнего вызова ушёл модели',
+      String(run.results[0]?.detail ?? '').includes('внешний вызов mcp__files__read'),
+      run.results[0]?.detail,
+    );
+
+    requested = { name: 'mcp__files__write', args: { note: 'x' } };
+    run = await chat(externalHost);
+    check(
+      'изменяющий внешний вызов спрашивает подтверждение',
+      external.some(([kind]) => kind === 'confirm'),
+      external,
+    );
+    check('подтверждённый вызов исполнен', run.results[0]?.ok === true, run.results[0]?.summary);
+
+    run = await chat({
+      applyEdits: () => Promise.resolve({ rejected: true }),
+      confirmCommand: () => Promise.resolve(false),
+    });
+    check(
+      'отказ пользователя виден модели',
+      run.results[0]?.ok === false && /запретил/.test(String(run.results[0]?.summary)),
+      run.results[0]?.summary,
+    );
+
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
+    check(
+      'без confirmCommand изменяющий внешний инструмент не предлагается',
+      !run.toolNames.includes('mcp__files__write'),
+      run.toolNames,
+    );
+
+    run = await chat(externalHost, true, false, undefined, { planMode: true });
+    check(
+      'в режиме плана внешние инструменты не предлагаются',
+      !run.toolNames.some((name) => name.startsWith('mcp__')),
+      run.toolNames,
+    );
+
     /* 2. правки приняты */
     const recorded = [];
     const accepted = {

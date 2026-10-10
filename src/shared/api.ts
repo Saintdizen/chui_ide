@@ -16,6 +16,7 @@ import type { InstalledPackage } from './python-packages';
 import type { CollectedSuite } from './python-tests';
 import type { EnvironmentHealth } from './python-health';
 import type { ProjectSymbol } from './lsp-symbols';
+import type { McpServerConfig } from './mcp';
 import type { WebSearchProvider } from './web-search';
 
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
@@ -407,6 +408,11 @@ export interface AiSettings {
   compressOutput: boolean;
   /** Веб-поиск: выключен по умолчанию, инструмент предлагается только при включении. */
   webSearch: AiWebSearchSettings;
+  /**
+   * Серверы внешних инструментов (MCP). Пусто — агент работает только своими
+   * инструментами. Команду запуска задаёт человек: модель её не меняет.
+   */
+  mcpServers: McpServerConfig[];
 }
 
 /** Как показывать невидимые символы. */
@@ -793,6 +799,8 @@ export interface AiSettingsPatch {
   compressOutput?: boolean;
   /** Настройки веб-поиска: ключ задаётся отдельным вызовом `ai.setWebSearchKey`. */
   webSearch?: { enabled?: boolean; provider?: WebSearchProvider; endpoint?: string };
+  /** Список серверов MCP заменяется целиком: так его проще править из интерфейса. */
+  mcpServers?: McpServerConfig[];
   /** Добавить провайдера или обновить существующего по `id`. */
   provider?: AiProviderPatch;
   /** Убрать провайдера из списка. */

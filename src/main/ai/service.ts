@@ -19,7 +19,13 @@ import {
 import type { FileEdit } from '../../shared/edits';
 import { compressToolOutput } from '../../shared/output-compress';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
-import { AGENT_TOOLS, parseToolArguments, toOpenAiTools, type AgentToolSpec } from '../../shared/tools';
+import {
+  AGENT_TOOLS,
+  parseToolArguments,
+  toOpenAiTools,
+  type AgentToolSpec,
+  type ExposedToolSpec,
+} from '../../shared/tools';
 import {
   condenseCallArguments,
   estimateMessagesTokens,
@@ -31,9 +37,11 @@ import {
 import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
+import type { McpToolInfo } from '../../shared/mcp';
 import {
   runTool,
   type GitTools,
+  type McpRunner,
   type SymbolSearch,
   type TerminalAgent,
   type ToolContext,
@@ -219,6 +227,8 @@ export class AiService {
   private terminals?: TerminalAgent;
   /** Поиск символов проекта: без него codebase_search ищет только текстом. */
   private symbols?: SymbolSearch;
+  /** Внешние инструменты (MCP): нет сервиса — внешних инструментов не предлагаем. */
+  private mcp?: McpRunner;
   /**
    * Права доступа текущего прогона (кнопка в композере). Храним на сервисе, а не
    * снимком в запросе: renderer может переключить их прямо во время ответа агента.
@@ -259,6 +269,14 @@ export class AiService {
    */
   attachSymbols(symbols: SymbolSearch): void {
     this.symbols = symbols;
+  }
+
+  /**
+   * Подключить внешние инструменты (MCP): их список сервис берёт у серверов из
+   * настроек. Без подключения агент работает только своими инструментами.
+   */
+  attachMcp(mcp: McpRunner): void {
+    this.mcp = mcp;
   }
 
   /**
@@ -361,7 +379,12 @@ export class AiService {
     const available = useTools
       ? AGENT_TOOLS.filter((tool) => this.canRun(tool, host) && (!planMode || PLAN_MODE_TOOLS.has(tool.name)))
       : [];
-    const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
+
+    // Внешние инструменты (MCP) добавляем к нашим. В режиме плана их нет: что
+    // делает чужой инструмент, мы не знаем, а план ничего менять не должен.
+    const external = useTools && !planMode && this.mcp ? await this.externalTools(host) : [];
+    const offered = [...available, ...external];
+    const tools = offered.length > 0 ? toOpenAiTools(offered) : undefined;
     // Полный доступ: и правки, и команды без подтверждений.
     // Страховка — из настроек: по умолчанию выключена, включает пользователь.
     const toolContext: ToolContext = {
@@ -377,6 +400,7 @@ export class AiService {
     if (this.git) toolContext.git = this.git;
     if (this.terminals) toolContext.terminals = this.terminals;
     if (this.symbols) toolContext.symbols = this.symbols;
+    if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
     // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
     // в момент вызова: он мог появиться уже после старта приложения.
@@ -751,6 +775,34 @@ export class AiService {
    * от того, подключён ли мост. Лишний инструмент хуже отсутствующего: модель
    * потратит шаг на вызов, который заведомо не сработает.
    */
+  /**
+   * Внешние инструменты (MCP) в том виде, в каком они уходят модели.
+   *
+   * Инструмент, который меняет состояние, требует подтверждения — значит, без
+   * подключённого окна он заведомо не сработает, и предлагать его нельзя. Такие
+   * отсеиваем сразу: лишний инструмент стоит токенов в каждом запросе.
+   */
+  private async externalTools(host: ChatHostBridge | undefined): Promise<ExposedToolSpec[]> {
+    if (!this.mcp) return [];
+    let tools: readonly McpToolInfo[] = [];
+    try {
+      tools = await this.mcp.list();
+    } catch {
+      // Серверы недоступны — работаем без внешних инструментов, а не падаем.
+      return [];
+    }
+
+    return tools
+      .filter((tool) => tool.readOnly || host?.confirmCommand !== undefined)
+      .map((tool) => ({
+        name: tool.exposedName,
+        // Описание даёт сервер, но может его и не дать: пустое описание модель
+        // прочитает как «непонятно что», поэтому подставляем своё.
+        description: tool.description || `Внешний инструмент «${tool.toolName}» сервера «${tool.serverId}» (MCP)`,
+        inputSchema: tool.inputSchema,
+      }));
+  }
+
   /**
    * Готов ли веб-поиск к работе: включён и обеспечен ключом, если тот нужен.
    * Brave без ключа — это инструмент, который заведомо ответит ошибкой, поэтому

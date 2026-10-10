@@ -16,6 +16,7 @@ import {
   type WorkspaceSettings,
 } from '../shared/api';
 import { COMPACT_AT_TOKENS } from '../shared/context-fit';
+import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { isWebSearchProvider, type WebSearchProvider } from '../shared/web-search';
 import { RpcFailure } from './ipc/router';
 
@@ -64,6 +65,8 @@ interface StoredSettings {
       endpoint: string;
       apiKey?: string;
     };
+    /** Серверы внешних инструментов (MCP): их процессы запускает IDE. */
+    mcpServers: McpServerConfig[];
   };
   editor: EditorSettings;
   explorer: ExplorerSettings;
@@ -117,6 +120,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     compressOutput: true,
     // Веб-поиск выключен: агент не должен ходить в интернет без явного согласия.
     webSearch: { enabled: false, provider: 'searxng', endpoint: '' },
+    // Серверов MCP по умолчанию нет: их команды задаёт человек.
+    mcpServers: [],
   },
   editor: {
     tabSize: 4,
@@ -258,6 +263,12 @@ export class SettingsStore {
           endpoint: ai.webSearch?.endpoint ?? '',
           hasApiKey: Boolean(this.resolveWebSearchKey()),
         },
+        // Копия, а не ссылка: правка настроек не должна менять уже отданный снимок.
+        mcpServers: ai.mcpServers.map((server) => ({
+          ...server,
+          args: [...server.args],
+          ...(server.env ? { env: { ...server.env } } : {}),
+        })),
       },
       editor: { ...editor },
       explorer: { ...explorer, exclude: [...explorer.exclude] },
@@ -416,6 +427,12 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     if (incoming.endpoint !== undefined) target.webSearch.endpoint = incoming.endpoint.trim();
   }
 
+  // Серверы MCP заменяются целиком и проверяются той же функцией, что и при
+  // чтении файла: команду запуска берём только у человека, а не у модели.
+  if (patch.mcpServers !== undefined) {
+    target.mcpServers = normalizeMcpServers(patch.mcpServers) as McpServerConfig[];
+  }
+
   // Провайдеров можно добавлять и править из интерфейса: ключ к ним приходит
   // отдельным вызовом ai.setApiKey, здесь только адрес и список моделей.
   if (patch.provider) {
@@ -496,6 +513,9 @@ function loadSettings(filePath: string): StoredSettings {
     endpoint: typeof storedSearch.endpoint === 'string' ? storedSearch.endpoint : '',
   };
   if (typeof storedSearch.apiKey === 'string' && storedSearch.apiKey) ai.webSearch.apiKey = storedSearch.apiKey;
+
+  // Серверы MCP: файл правят руками, поэтому и команда, и аргументы проверяются.
+  ai.mcpServers = normalizeMcpServers(storedAi.mcpServers) as McpServerConfig[];
 
   // Сжатие выключено только явным `false`: отсутствие поля читаем как «включено» —
   // иначе настройка молча отключилась бы у всех, кто обновляется со старой версии.

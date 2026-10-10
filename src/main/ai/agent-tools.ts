@@ -12,6 +12,7 @@ import {
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
+import { isMcpToolName, type McpToolInfo } from '../../shared/mcp';
 import { compressToolOutput } from '../../shared/output-compress';
 import { parseToolArguments } from '../../shared/tools';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -76,6 +77,15 @@ export interface SymbolSearch {
  * `ai/service.ts` и `ai/web-search.ts`: сюда приходит уже готовый вызов, поэтому
  * инструмент остаётся проверяемым без сети.
  */
+/**
+ * Внешние инструменты (MCP). Их список приходит от чужих процессов, поэтому
+ * проверяем его на каждом вызове: сервер мог не подняться или его выключили.
+ */
+export interface McpRunner {
+  list(): Promise<readonly McpToolInfo[]>;
+  call(exposedName: string, args: Record<string, unknown>): Promise<{ text: string; isError: boolean }>;
+}
+
 export interface WebSearchRunner {
   search(
     query: string,
@@ -112,6 +122,8 @@ export interface ToolContext {
   symbols?: SymbolSearch;
   /** Веб-поиск: подключён только при включённой настройке. */
   webSearch?: WebSearchRunner;
+  /** Внешние инструменты (MCP): есть только при настроенных серверах. */
+  mcp?: McpRunner;
 }
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
@@ -175,6 +187,10 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
   if (!parsed.ok) return { ok: false, summary: parsed.message };
 
   try {
+    // Внешние инструменты (MCP) идут мимо оператора `switch`: их имена приходят
+    // из настроек и заранее неизвестны.
+    if (isMcpToolName(name)) return await runExternalTool(ctx, name, parsed.value);
+
     switch (name) {
       case 'list_dir':
         return await listDir(ctx.workspace, parsed.value);
@@ -711,6 +727,61 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
     ok: result.code === 0 && !result.timedOut,
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
     detail: `$ ${command}\n${output.length ? output : '(пустой вывод)'}`,
+  };
+}
+
+/**
+ * Вызов внешнего инструмента (MCP).
+ *
+ * Две проверки перед исполнением. Первая: инструмент всё ещё существует — сервер
+ * мог не подняться или его выключили в настройках, а модель работает со списком,
+ * собранным в начале прогона. Вторая: если сервер не пометил инструмент как
+ * «только чтение», спрашиваем человека — внешний инструмент может изменить что
+ * угодно, и подтверждение здесь то же, что для команд терминала.
+ */
+async function runExternalTool(
+  ctx: ToolContext,
+  exposedName: string,
+  args: Record<string, unknown>,
+): Promise<ToolOutcome> {
+  if (!ctx.mcp) return { ok: false, summary: `Внешний инструмент недоступен: ${exposedName}` };
+
+  let tool: McpToolInfo | undefined;
+  try {
+    tool = (await ctx.mcp.list()).find((item) => item.exposedName === exposedName);
+  } catch {
+    tool = undefined;
+  }
+  if (!tool) {
+    return {
+      ok: false,
+      summary: `Внешний инструмент «${exposedName}» сейчас недоступен`,
+      detail: 'Сервер не запущен или отключён. Не повторяй вызов — продолжи без него.',
+    };
+  }
+
+  if (!tool.readOnly) {
+    if (!ctx.confirmCommand) {
+      return { ok: false, summary: 'Внешний вызов требует подтверждения, но окно не подключено' };
+    }
+    const allowed = await ctx.confirmCommand(`${exposedName} ${JSON.stringify(args)}`);
+    if (!allowed) {
+      return {
+        ok: false,
+        summary: 'Пользователь запретил внешний вызов',
+        detail: 'Пользователь не разрешил этот вызов. Не повторяй его — предложи другое решение.',
+      };
+    }
+  }
+
+  const result = await ctx.mcp.call(exposedName, args);
+  const first = result.text.split('\n')[0] ?? '';
+  return {
+    ok: !result.isError,
+    summary: result.isError
+      ? `${exposedName}: ошибка — ${first.slice(0, 120)}`
+      : `${exposedName}${tool.readOnly ? '' : ' (подтверждено)'}`,
+    detail: result.text,
   };
 }
 

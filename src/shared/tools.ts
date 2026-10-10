@@ -52,10 +52,20 @@ export interface JsonSchema {
   required?: string[];
 }
 
-export interface AgentToolSpec {
+/**
+ * Минимум, нужный, чтобы предложить инструмент модели. Есть и у наших
+ * инструментов, и у внешних (MCP): их схемы приходят от чужой программы и в
+ * `JsonSchema` не помещаются, а `toOpenAiTools` отдаёт схему как есть.
+ */
+export interface ExposedToolSpec {
+  name: string;
+  description: string;
+  inputSchema: object;
+}
+
+export interface AgentToolSpec extends ExposedToolSpec {
   name: AgentToolName;
   side: AgentToolSide;
-  description: string;
   inputSchema: JsonSchema;
 }
 
@@ -447,10 +457,10 @@ export interface OpenAiFunctionTool {
   };
 }
 
-export function toOpenAiTools(specs: readonly AgentToolSpec[]): OpenAiFunctionTool[] {
+export function toOpenAiTools(specs: readonly ExposedToolSpec[]): OpenAiFunctionTool[] {
   return specs.map((spec) => ({
     type: 'function',
-    function: { name: spec.name, description: spec.description, parameters: spec.inputSchema },
+    function: { name: spec.name, description: spec.description, parameters: spec.inputSchema as JsonSchema },
   }));
 }
 
