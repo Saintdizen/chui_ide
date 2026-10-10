@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import type { McpServerTools } from '../../shared/api';
 import { mcpToolResultText, parseMcpTools, type McpServerConfig, type McpToolInfo } from '../../shared/mcp';
 
 /**
@@ -263,6 +264,38 @@ export class McpService {
 
     this.cached = all;
     return all;
+  }
+
+  /**
+   * Состояние каждого сервера по отдельности — для проверки в настройках.
+   *
+   * В отличие от `list`, здесь кеш не используется: кнопка проверки затем и нужна,
+   * чтобы поднять серверы заново и увидеть причину отказа. Ошибка одного сервера
+   * не мешает показать остальные.
+   */
+  async status(): Promise<McpServerTools[]> {
+    const out: McpServerTools[] = [];
+    for (const config of this.servers()) {
+      if (!config.enabled) {
+        out.push({ id: config.id, error: 'сервер выключен', tools: [] });
+        continue;
+      }
+      const connection = this.connectionFor(config);
+      try {
+        await connection.connect();
+        out.push({
+          id: config.id,
+          tools: connection.tools().map((tool) => ({
+            name: tool.toolName,
+            description: tool.description,
+            readOnly: tool.readOnly,
+          })),
+        });
+      } catch (error) {
+        out.push({ id: config.id, error: error instanceof Error ? error.message : String(error), tools: [] });
+      }
+    }
+    return out;
   }
 
   /** Вызвать внешний инструмент по имени, которое видела модель. */

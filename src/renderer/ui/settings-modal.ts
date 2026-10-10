@@ -9,7 +9,8 @@ import type {
   SettingsPatch,
   ThemeChoice,
 } from '../../shared/api';
-import type { AiProviderPatch } from '../../shared/api';
+import type { AiProviderPatch, McpServerTools } from '../../shared/api';
+import type { McpServerConfig } from '../../shared/mcp';
 import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
 import type { WebSearchProvider } from '../../shared/web-search';
 import { lspLanguagesForKind } from '../../shared/lsp-presets';
@@ -44,7 +45,7 @@ export interface SettingsModalView {
   applySettings(settings: Settings): void;
 }
 
-type SectionId = 'ai' | 'editor' | 'explorer' | 'run' | 'appearance' | 'project' | 'lsp';
+type SectionId = 'ai' | 'editor' | 'explorer' | 'run' | 'appearance' | 'project' | 'lsp' | 'mcp';
 
 const SECTIONS: ReadonlyArray<{
   id: SectionId;
@@ -57,6 +58,7 @@ const SECTIONS: ReadonlyArray<{
   { id: 'run', title: 'Запуск', icon: 'play' },
   { id: 'appearance', title: 'Внешний вид', icon: 'sun' },
   { id: 'lsp', title: 'Языки (LSP)', icon: 'command' },
+  { id: 'mcp', title: 'Внешние инструменты (MCP)', icon: 'sparkle' },
   { id: 'project', title: 'Проект', icon: 'panel' },
 ];
 
@@ -86,6 +88,8 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
    * это состояние, чтобы не обещать «ничего не запущено» до ответа main.
    */
   let lspRunning: string[] | null = null;
+  /** Итог проверки серверов MCP: что ответил каждый и что не поднялось. */
+  let mcpStatus: string | null = null;
 
   const nav = h('nav', { class: 'modal-nav' });
   const pane = h('div', { class: 'modal-pane' });
@@ -246,6 +250,24 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     select.setValue(value);
     select.onChange(onChange);
     return select.element;
+  }
+
+  /**
+   * Итог проверки серверов MCP человеческим текстом: по серверу в строке. Имена
+   * инструментов показываем целиком — по ним видно, что сервер даёт агенту.
+   */
+  function describeMcpStatus(list: McpServerTools[]): string {
+    if (list.length === 0) return 'Серверы не заданы — агент работает только своими инструментами.';
+    return list
+      .map((server) => {
+        if (server.error) return `${server.id}: ${server.error}`;
+        if (server.tools.length === 0) return `${server.id}: инструментов не объявлено`;
+        const names = server.tools
+          .map((tool) => `${tool.name}${tool.readOnly ? '' : ' (спросит подтверждение)'}`)
+          .join(', ');
+        return `${server.id}: инструментов ${server.tools.length} — ${names}`;
+      })
+      .join('\n');
   }
 
   /* ── секции ────────────────────────────────────────────────────────────── */
@@ -934,6 +956,76 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     ];
   }
 
+  /**
+   * Внешние инструменты (MCP). Список серверов редактируется JSON-полем — так же,
+   * как серверы LSP: команда с аргументами и окружением в одну строку не влезает,
+   * а привычка к формату у человека уже есть.
+   *
+   * Кнопка проверки поднимает серверы и показывает их инструменты: без неё
+   * настройка слепа, и об ошибке (нет команды, сервер молчит) видно только в
+   * консоли main.
+   */
+  function renderMcp(): Child[] {
+    const servers = h('textarea', { class: 'field-input', rows: 8, spellcheck: false });
+    servers.value = JSON.stringify(settings!.ai.mcpServers, null, 2);
+    servers.addEventListener('change', () => {
+      try {
+        const parsed = JSON.parse(servers.value) as unknown;
+        if (!Array.isArray(parsed)) throw new Error('ожидался массив серверов');
+        void patch({ ai: { mcpServers: parsed as McpServerConfig[] } }, true);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Некорректный JSON', 'error');
+      }
+    });
+
+    const checkButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Проверить серверы');
+    checkButton.addEventListener('click', () => {
+      checkButton.disabled = true;
+      mcpStatus = 'Поднимаю серверы…';
+      render();
+      void deps.rpc
+        .request('ai.mcpTools')
+        .then((list) => {
+          mcpStatus = describeMcpStatus(list);
+          render();
+        })
+        .catch((error) => {
+          mcpStatus = error instanceof Error ? error.message : String(error);
+          render();
+        })
+        .finally(() => {
+          checkButton.disabled = false;
+        });
+    });
+
+    const example = JSON.stringify(
+      [{ id: 'files', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '.'], enabled: true }],
+      null,
+      2,
+    );
+
+    return [
+      field('Серверы MCP (JSON)', servers),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Каждый сервер IDE запускает отдельным процессом и говорит с ним по stdio. Инструменты сервера ' +
+          'попадают модели вместе со встроенными, с именем mcp__<сервер>__<инструмент>. Нужны Node и npx ' +
+          'в PATH — команду запуска вы задаёте здесь, агент её не меняет.',
+      ),
+      field('Проверить', checkButton),
+      mcpStatus ? h('div', { class: 'field-hint' }, mcpStatus) : null,
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Инструмент, который сервер не пометил как «только чтение» (readOnlyHint), спрашивает ' +
+          'подтверждение — как команда в терминале. В режиме плана внешние инструменты не предлагаются. ' +
+          'Нерабочий сервер остальные не ломает: причина уходит в консоль.',
+      ),
+      h('div', { class: 'field-hint' }, `Пример: ${example}`),
+    ];
+  }
+
   function renderLsp(): Child[] {
     const lsp = settings!.lsp;
     // Показываем серверы только языков этого проекта; остальные не теряем —
@@ -1138,7 +1230,9 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
                 ? renderAppearance()
                 : section === 'lsp'
                   ? renderLsp()
-                  : renderProject();
+                  : section === 'mcp'
+                    ? renderMcp()
+                    : renderProject();
     append(pane, content);
     pane.scrollTop = 0;
     title.textContent = `Настройки · ${SECTIONS.find((item) => item.id === section)?.title ?? ''}`;

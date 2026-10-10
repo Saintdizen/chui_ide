@@ -814,6 +814,14 @@ export interface AiConnectionTestResult {
   message: string;
 }
 
+/** Что ответил один сервер MCP: его инструменты или причина, по которой он не поднялся. */
+export interface McpServerTools {
+  id: string;
+  /** Ошибка запуска или связи; нет — сервер ответил. */
+  error?: string;
+  tools: Array<{ name: string; description: string; readOnly: boolean }>;
+}
+
 /**
  * Веб-поиск ассистента. Выключен по умолчанию: это единственное действие агента,
  * которое ходит в интернет, и включать его без спроса невежливо.
@@ -1313,6 +1321,11 @@ export interface ChuiMethods {
   /** Ключ сервиса веб-поиска: отдельно от провайдеров — это не провайдер модели. */
   'ai.setWebSearchKey': { params: { apiKey: string }; result: Settings };
   'ai.clearWebSearchKey': { params: void; result: Settings };
+  /**
+   * Поднять серверы MCP из настроек и вернуть их инструменты. Нужно проверке в
+   * настройках: без неё конфигурация сервера слепа — ошибку видно только в stderr.
+   */
+  'ai.mcpTools': { params: void; result: McpServerTools[] };
   /** Проверить адрес и ключ до сохранения провайдера. */
   'ai.test': {
     params: { baseUrl: string; apiKey?: string; providerId?: string };
