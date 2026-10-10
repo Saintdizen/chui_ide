@@ -321,8 +321,14 @@ describe('DebugService', () => {
   function symlinkedProject(): { link: string; real: string; file: string } | null {
     // Настоящее имя каталога: на macOS `tmpdir()` возвращает `/var/…`, а за этим
     // путём стоит симлинк на `/private/var/…`. Разворачиваем его тем же приёмом,
-    // что и сервис (`realpathSync`): сырой путь сделал бы проверку неотличимой
-    // от отсутствия канонизации — на Linux `/tmp` не ссылка, и разницы не видно.
+    // что и сервис (`realpathSync`).
+    //
+    // Строка не косметическая: этот путь уходит ещё и в `FAKE_DAP_FRAME`, а отладчик
+    // возвращает кадр тем именем, каким его назвали — сервис ищет кадр по
+    // каноническому ключу. Сырой путь здесь рушит вторую половину проверки (кадр
+    // приходит не тем написанием), причём только на macOS: на Linux `/tmp` не ссылка,
+    // и разницы не видно. От случайной отмены строки защищает линт: `noUnusedImports`
+    // — ошибка, и мёртвый импорт `realpathSync` роняет `npm run check` на всех платформах.
     const real = realpathSync(mkdtempSync(path.join(tmpdir(), 'chui-debug-real-')));
     const link = path.join(tmpdir(), `chui-debug-link-${process.pid}-${Math.random().toString(36).slice(2)}`);
     try {
@@ -360,7 +366,13 @@ describe('DebugService', () => {
         .find((text) => text.startsWith('bp-source:'));
       expect(sent, 'точка не отправлена').toBeDefined();
       // На диск ушёл настоящий путь: точка в написании симлинка осталась бы неподтверждённой.
-      expect(JSON.parse(sent!.replace('bp-source:', ''))).toBe(path.join(project.real, 'app.py'));
+      // Настоящее имя считаем сами, а не берём из каталога: у tmpdir бывает своё имя
+      // (macOS: `/var` → `/private/var`), и сравнение с сырым путём на Linux проходило
+      // бы вхолостую — там разворачивать нечего, и поломка всплыла бы только на macOS.
+      const sentPath = JSON.parse(sent!.replace('bp-source:', '')) as string;
+      expect(sentPath).toBe(realpathSync(project.file));
+      // Настоящее имя — не то, каким файл открыт: иначе проверке нечего ловить.
+      expect(sentPath).not.toBe(project.file);
 
       // А кадр вернулся тем путём, каким файл открыт: иначе редактор его не найдёт.
       expect(service.stack()[0]?.path).toBe(project.file);
