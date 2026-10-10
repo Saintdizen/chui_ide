@@ -29,6 +29,7 @@
     "smoke:terminal": "npm run build:main && electron scripts/terminal-smoke.cjs",
     "smoke:window": "npm run build:main && electron scripts/window-smoke.cjs",
     "clean": "rm -rf dist",
+    "smoke:bridge": "npm run build:main && electron scripts/bridge-smoke.cjs",
     "smoke:git": "npm run build:main && electron scripts/git-smoke.cjs",
     "smoke:agent": "npm run build:main && electron scripts/agent-smoke.cjs",
     "smoke:anthropic": "npm run build:main && node scripts/anthropic-smoke.cjs",
