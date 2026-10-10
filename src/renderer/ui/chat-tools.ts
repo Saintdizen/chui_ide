@@ -1,4 +1,5 @@
-import type { ChatToolResultPayload, ChatToolStartPayload, ToolFileChange } from '../../shared/api';
+import type { ChatToolResultPayload, ChatToolStartPayload } from '../../shared/api';
+import { changeKindLabel, fileName, touchedFiles, type TouchedFile } from '../../shared/tool-files';
 import { highlightInto } from '../core/highlight';
 import { languageFromPath } from '../core/languages';
 import { basename, h, svgIcon, type IconName } from './dom';
@@ -96,51 +97,6 @@ function toolFilePath(name: string, raw: string): string | null {
 function toolIconNode(name: string, raw: string): SVGSVGElement {
   const path = toolFilePath(name, raw);
   return path ? fileIcon(path, 13) : svgIcon(toolIcon(name), 13);
-}
-
-/** Имя файла без пути: пути приходят и с `/`, и с `\`, — берём последний отрезок. */
-function fileName(target: string): string {
-  const parts = target.split(/[/\\]/).filter(Boolean);
-  return parts[parts.length - 1] ?? target;
-}
-
-/** Файл, которого коснулся вызов: путь и что с ним сделали — по этому чип и подписан. */
-interface TouchedFile {
-  path: string;
-  /** `edited` — правка через `apply_edit`: у неё своего вида операции нет. */
-  kind: ToolFileChange['kind'] | 'edited';
-}
-
-/**
- * Файлы, которых коснулся вызов. Инструмент возвращает их в `changes` (создание,
- * удаление, перенос, замена по проекту). У `apply_edit` такого списка нет — файлы
- * берём из аргументов: иначе правки в ленте не видны, а после перезапуска
- * (когда результата инструмента уже нет) — тем более.
- */
-function touchedFiles(name: string, args: string, changes?: readonly ToolFileChange[]): TouchedFile[] {
-  if (changes?.length) return changes.map((change) => ({ path: change.path, kind: change.kind }));
-
-  const kinds: Record<string, TouchedFile['kind']> = {
-    apply_edit: 'edited',
-    create_file: 'created',
-    delete_file: 'deleted',
-    move_file: 'moved',
-  };
-  const kind = kinds[name];
-  if (!kind) return [];
-
-  try {
-    const value = JSON.parse(args) as { path?: unknown; edits?: unknown };
-    // apply_edit правит пачкой: файлы лежат в `edits[].path`, и один файл
-    // может встретиться дважды — в ряду он должен быть один раз.
-    const raw = Array.isArray(value.edits)
-      ? value.edits.map((file) => (file && typeof file === 'object' ? (file as { path?: unknown }).path : undefined))
-      : [value.path];
-    const paths = raw.filter((path): path is string => typeof path === 'string' && !!path);
-    return [...new Set(paths)].map((path) => ({ path, kind }));
-  } catch {
-    return []; // аргументы не разобрались — это не повод ломать ленту
-  }
 }
 
 /** Аргументы вызова в одну строку: путь, запрос, маска. */
@@ -378,14 +334,6 @@ function createToolGroup(
       applyExpanded();
     }
   };
-  /** Вид операции в чипе: те же слова, что в панели изменений композера. */
-  const changeLabel = (kind: TouchedFile['kind']): string => {
-    if (kind === 'created') return 'создан';
-    if (kind === 'deleted') return 'удалён';
-    if (kind === 'moved') return 'перенос';
-    if (kind === 'modified') return 'заменено';
-    return 'правка';
-  };
 
   /**
    * Ряд файлов под строкой вызова: что именно тронул инструмент. Панель изменений
@@ -401,12 +349,12 @@ function createToolGroup(
           {
             class: 'tool-file-chip',
             type: 'button',
-            title: `${file.path} — ${changeLabel(file.kind)}`,
+            title: `${file.path} — ${changeKindLabel(file.kind)}`,
             onClick: () => onReveal?.(file.path),
           },
           fileIcon(file.path, 12),
           h('span', { class: 'tool-file-name' }, fileName(file.path)),
-          h('span', { class: 'tool-file-kind' }, changeLabel(file.kind)),
+          h('span', { class: 'tool-file-kind' }, changeKindLabel(file.kind)),
         ),
       );
     }
