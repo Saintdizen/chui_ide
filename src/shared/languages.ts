@@ -238,6 +238,8 @@ export const LANGUAGES: readonly LanguageInfo[] = [
     extensions: ['scala'],
     indent: { tabSize: 2, insertSpaces: true },
   },
+  // Groovy и Makefile в сборке Monaco отсутствуют: их грамматики приложение
+  // регистрирует само (`core/language-modes.ts`), поэтому обещание подсветки здесь честное.
   { id: 'groovy', label: 'Groovy', badge: 'GR', icon: 'code', extensions: ['gradle', 'groovy'], indent: FOUR_SPACES },
 ];
 

@@ -53,6 +53,13 @@ const MODES: Record<string, ModeRules> = {
     wordPattern: IDENTIFIER,
     bracketsOnly: true,
   },
+  // Грамматику Groovy приложение регистрирует само (см. `registerGroovy`), так что
+  // правила языка здесь не пропустятся.
+  groovy: {
+    lineComment: '//',
+    blockComment: ['/*', '*/'],
+    wordPattern: IDENTIFIER,
+  },
   shell: {
     lineComment: '#',
     wordPattern: IDENTIFIER,
@@ -89,6 +96,7 @@ export function registerLanguageModes(): void {
   registered = true;
 
   registerMakefile();
+  registerGroovy();
   const known = new Set(monaco.languages.getLanguages().map((language) => language.id));
 
   for (const [id, rules] of Object.entries(MODES)) {
@@ -158,6 +166,118 @@ function registerMakefile(): void {
         [/^\.?[A-Za-z0-9_./-]+\s*:(?!=)/, 'type'],
         [/[A-Za-z_][\w.]*/, 'identifier'],
         [/"[^"]*"|'[^']*'/, 'string'],
+      ],
+    },
+  });
+}
+
+/**
+ * Groovy в сборке Monaco тоже отсутствует, а `build.gradle` и `*.groovy` открывают
+ * часто: без токенизатора они читаются как обычный текст. Грамматика короткая —
+ * комментарии, строки (включая многострочные и с подстановкой), числа, ключевые
+ * слова и аннотации; остальное остаётся текстом. Подстановку в GString берём одним
+ * токеном (`$name` и `${…}`): вложенную подсветку внутри выражения не разбираем.
+ */
+function registerGroovy(): void {
+  const id = 'groovy';
+  if (monaco.languages.getLanguages().some((language) => language.id === id)) return;
+
+  const keywords = [
+    'abstract',
+    'as',
+    'assert',
+    'break',
+    'case',
+    'catch',
+    'class',
+    'const',
+    'continue',
+    'def',
+    'default',
+    'do',
+    'else',
+    'enum',
+    'extends',
+    'final',
+    'finally',
+    'for',
+    'goto',
+    'if',
+    'implements',
+    'import',
+    'in',
+    'instanceof',
+    'interface',
+    'native',
+    'new',
+    'package',
+    'private',
+    'protected',
+    'public',
+    'return',
+    'static',
+    'strictfp',
+    'super',
+    'switch',
+    'synchronized',
+    'this',
+    'throw',
+    'throws',
+    'trait',
+    'transient',
+    'try',
+    'volatile',
+    'while',
+  ];
+
+  monaco.languages.register({ id, extensions: ['.groovy', '.gradle'] });
+  monaco.languages.setMonarchTokensProvider(id, {
+    defaultToken: '',
+    keywords,
+    tokenizer: {
+      root: [
+        [/\/\/.*$/, 'comment'],
+        [/\/\*/, 'comment', '@comment'],
+        [/'''/, 'string', '@text'],
+        [/"""/, 'string', '@gtext'],
+        [/'/, 'string', '@plain'],
+        [/"/, 'string', '@interpolated'],
+        [/@[A-Za-z_]\w*/, 'annotation'],
+        [/\b\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][-+]?\d+)?[dDfFlLiIgG]?\b/, 'number'],
+        [/[A-Za-z_$]\w*/, { cases: { '@keywords': 'keyword', '@default': 'identifier' } }],
+      ],
+      comment: [
+        [/[^/*]+/, 'comment'],
+        [/\*\//, 'comment', '@pop'],
+        [/[/*]/, 'comment'],
+      ],
+      // Одинарные кавычки подстановку не разбирают — в Groovy это обычная строка.
+      plain: [
+        [/\\./, 'string.escape'],
+        [/'/, 'string', '@pop'],
+        [/[^\\']+/, 'string'],
+      ],
+      text: [
+        [/\\./, 'string.escape'],
+        [/'''/, 'string', '@pop'],
+        [/[^\\']+/, 'string'],
+        [/'/, 'string'],
+      ],
+      interpolated: [
+        [/\\./, 'string.escape'],
+        [/\$\{[^}]*\}/, 'variable'],
+        [/\$[A-Za-z_]\w*/, 'variable'],
+        [/"/, 'string', '@pop'],
+        [/[^\\"$]+/, 'string'],
+        [/["$]/, 'string'],
+      ],
+      gtext: [
+        [/\\./, 'string.escape'],
+        [/\$\{[^}]*\}/, 'variable'],
+        [/\$[A-Za-z_]\w*/, 'variable'],
+        [/"""/, 'string', '@pop'],
+        [/[^\\"$]+/, 'string'],
+        [/["$]/, 'string'],
       ],
     },
   });
