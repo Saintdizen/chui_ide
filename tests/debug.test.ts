@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -319,7 +319,11 @@ describe('DebugService', () => {
    * поэтому проверка молча пропускается, если его не создать.
    */
   function symlinkedProject(): { link: string; real: string; file: string } | null {
-    const real = mkdtempSync(path.join(tmpdir(), 'chui-debug-real-'));
+    // Настоящее имя каталога: на macOS `tmpdir()` возвращает `/var/…`, а за этим
+    // путём стоит симлинк на `/private/var/…`. Разворачиваем его тем же приёмом,
+    // что и сервис (`realpathSync`): сырой путь сделал бы проверку неотличимой
+    // от отсутствия канонизации — на Linux `/tmp` не ссылка, и разницы не видно.
+    const real = realpathSync(mkdtempSync(path.join(tmpdir(), 'chui-debug-real-')));
     const link = path.join(tmpdir(), `chui-debug-link-${process.pid}-${Math.random().toString(36).slice(2)}`);
     try {
       symlinkSync(real, link, 'dir');
