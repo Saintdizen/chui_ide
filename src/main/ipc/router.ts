@@ -57,14 +57,26 @@ export class RpcRouter {
   }
 
   attach(): void {
-    ipcMain.handle(RPC_CALL_CHANNEL, (event, call: RpcCall) => this.dispatch(event, call));
+    ipcMain.handle(RPC_CALL_CHANNEL, (event, call: unknown) => this.dispatch(event, call));
     ipcMain.handle(RPC_CANCEL_CHANNEL, (_event, id: unknown) => {
       if (typeof id === 'string') this.running.get(id)?.abort();
       return true;
     });
   }
 
-  private async dispatch(event: IpcMainInvokeEvent, call: RpcCall): Promise<RpcResult> {
+  private async dispatch(event: IpcMainInvokeEvent, raw: unknown): Promise<RpcResult> {
+    // Вызов приходит из renderer'а, то есть снаружи контракта: `RpcCall` — это
+    // ожидание, а не гарантия. Мусор в полях разбираем сами, иначе TypeError
+    // ушёл бы наружу вместо RpcError — уже мимо try.
+    const call = asRpcCall(raw);
+    if (!call) {
+      return {
+        id: '',
+        ok: false,
+        error: { code: RpcErrorCode.InvalidParams, message: 'Некорректный вызов: нужны строковые id и method' },
+      };
+    }
+
     const runner = this.runners.get(call.method);
     if (!runner) {
       return {
@@ -95,9 +107,20 @@ export class RpcRouter {
     } catch (error) {
       return { id: call.id, ok: false, error: toRpcError(error) };
     } finally {
-      this.running.delete(call.id);
+      // Снимаем только свою запись: с тем же id может идти другой вызов, и снести
+      // его controller — значит оставить этот вызов без отмены.
+      if (this.running.get(call.id) === controller) this.running.delete(call.id);
     }
   }
+}
+
+/** Проверка того, что пришло по каналу: без неё мусор в полях — это TypeError. */
+function asRpcCall(value: unknown): RpcCall | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { id, method } = value as Partial<RpcCall>;
+  if (typeof id !== 'string' || id === '') return null;
+  if (typeof method !== 'string' || method === '') return null;
+  return value as RpcCall;
 }
 
 function toRpcError(error: unknown): RpcError {
