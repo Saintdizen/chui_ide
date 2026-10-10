@@ -1,4 +1,5 @@
 import type { ToolFileChange } from '../../shared/api';
+import { changeKindLabel } from '../../shared/tool-files';
 import { fileWord } from './chat-text';
 import { basename, clear, h, svgIcon } from './dom';
 import { fileIcon } from './file-icons';
@@ -131,14 +132,6 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
     );
   }
 
-  /** Подпись файловой операции. */
-  function fileLabel(change: ToolFileChange): string {
-    if (change.kind === 'created') return 'создан';
-    if (change.kind === 'deleted') return 'удалён';
-    if (change.kind === 'modified') return 'заменено';
-    return 'перенос';
-  }
-
   function render(source: ChangesSource): void {
     const total = source.touched.size + source.files.length;
     if (total === 0) {
@@ -183,7 +176,7 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
     for (const file of source.files) {
       const title = file.from ? `${file.from} → ${file.path}` : file.path;
       list.appendChild(
-        row(file.path, h('span', { class: `chip-kind chip-kind-${file.kind}` }, fileLabel(file)), title),
+        row(file.path, h('span', { class: `chip-kind chip-kind-${file.kind}` }, changeKindLabel(file.kind)), title),
       );
     }
 

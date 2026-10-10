@@ -45,6 +45,8 @@
     "probe:menu": "npm run build:main && electron scripts/menu-probe.cjs",
     "probe:popover": "npm run build && electron scripts/popover-probe.cjs",
     "probe:mcp": "npm run build && electron scripts/mcp-ui-probe.cjs",
+    "probe:settings": "npm run build && electron scripts/settings-search-probe.cjs",
+    "probe:chat-files": "npm run build && electron scripts/chat-files-probe.cjs",
     "probe:python": "npm run build && electron scripts/python-ui-probe.cjs",
     "icon": "npm run build:main && node scripts/make-icon.mjs",
     "dist": "npm run build && electron-builder --publish never",

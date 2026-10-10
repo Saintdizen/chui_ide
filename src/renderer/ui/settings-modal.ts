@@ -78,6 +78,8 @@ const THEME_OPTIONS: ReadonlyArray<{ value: ThemeChoice; label: string }> = [
 export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView {
   let settings: Settings | null = null;
   let section: SectionId = 'ai';
+  /** Строка поиска по настройкам: пустая — обычный вид с разделом. */
+  let query = '';
   let recent: RecentProject[] = [];
   /** Итог последней проверки подключения: показываем прямо в панели. */
   let testResult: { ok: boolean; message: string } | null = null;
@@ -90,6 +92,20 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   let lspRunning: string[] | null = null;
   /** Итог проверки серверов MCP: что ответил каждый и что не поднялось. */
   let mcpStatus: string | null = null;
+
+  // Поиск по настройкам: подписи полей всех разделов сразу, а не обход разделов
+  // по одному. Живёт над списком разделов и не уезжает при его прокрутке.
+  const search = h('input', {
+    class: 'modal-search',
+    type: 'search',
+    placeholder: 'Поиск настроек',
+    spellcheck: false,
+    'aria-label': 'Поиск настроек',
+  });
+  search.addEventListener('input', () => {
+    query = search.value;
+    render();
+  });
 
   const nav = h('nav', { class: 'modal-nav' });
   const pane = h('div', { class: 'modal-pane' });
@@ -108,7 +124,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       'div',
       { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Настройки приложения' },
       h('header', { class: 'modal-header' }, svgIcon('settings', 15), title, closeButton),
-      h('div', { class: 'modal-body' }, nav, pane),
+      h('div', { class: 'modal-body' }, h('div', { class: 'modal-nav-column' }, search, nav), pane),
       h(
         'footer',
         { class: 'modal-footer' },
@@ -142,6 +158,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   function onKeyDown(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return;
     event.preventDefault();
+    // Esc в поиске сначала снимает запрос: закрывать окно, теряя набранное,
+    // человек не просил. Поиск пуст — закрываем, как раньше.
+    if (query) {
+      query = '';
+      search.value = '';
+      render();
+      return;
+    }
     close();
   }
 
@@ -164,6 +188,9 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     }
     // Статус серверов спрашиваем заново при каждом открытии окна: он меняется.
     lspRunning = null;
+    // Окно открывается в известном виде: прошлый поиск тут только запутал бы.
+    query = '';
+    search.value = '';
     render();
   }
 
@@ -1191,23 +1218,97 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
 
   /* ── отрисовка ─────────────────────────────────────────────────────────── */
 
+  /** Раздел настроек по его id: общий путь для обычного вида и поиска. */
+  function sectionContent(id: SectionId): Child[] {
+    if (id === 'ai') return renderAi();
+    if (id === 'editor') return renderEditor();
+    if (id === 'explorer') return renderExplorer();
+    if (id === 'run') return renderRun();
+    if (id === 'appearance') return renderAppearance();
+    if (id === 'lsp') return renderLsp();
+    if (id === 'mcp') return renderMcp();
+    return renderProject();
+  }
+
+  /**
+   * Поля разделов, подпись которых содержит запрос. Ищем только по `.field`:
+   * заголовки групп и подсказки — не настройки, в выдаче они были бы шумом.
+   * Разделы строятся целиком: «поискать по готовому» дешевле, чем держать рядом
+   * вторую таблицу подписей, которая со временем разойдётся с самими полями.
+   */
+  function searchMatches(needle: string): Map<SectionId, HTMLElement[]> {
+    const found = new Map<SectionId, HTMLElement[]>();
+    for (const item of SECTIONS) {
+      const hits = sectionContent(item.id).filter(
+        (child): child is HTMLElement =>
+          child instanceof HTMLElement &&
+          child.classList.contains('field') &&
+          (child.textContent ?? '').toLowerCase().includes(needle),
+      );
+      if (hits.length > 0) found.set(item.id, hits);
+    }
+    return found;
+  }
+
+  /** Перейти в раздел: поиск при этом снимается — так виден целый раздел. */
+  function openSection(id: SectionId): void {
+    section = id;
+    query = '';
+    search.value = '';
+    render();
+  }
+
+  /**
+   * Выдача поиска: находки сгруппированы по разделам. Заголовок группы — кнопка
+   * перехода в раздел: найденное поле меняют в окружении остальных настроек.
+   */
+  function renderSearchResults(matches: ReadonlyMap<SectionId, HTMLElement[]>): void {
+    let total = 0;
+    for (const item of SECTIONS) {
+      const hits = matches.get(item.id);
+      if (!hits?.length) continue;
+      total += hits.length;
+      pane.appendChild(
+        h(
+          'button',
+          { class: 'settings-search-group', type: 'button', onClick: () => openSection(item.id) },
+          svgIcon(item.icon, 13),
+          h('span', {}, item.title),
+          h('span', { class: 'settings-search-count' }, String(hits.length)),
+        ),
+      );
+      for (const hit of hits) pane.appendChild(hit);
+    }
+    if (total === 0) {
+      pane.appendChild(h('div', { class: 'field-hint' }, `Ничего не найдено по «${query.trim()}».`));
+    }
+    pane.scrollTop = 0;
+  }
+
   function render(): void {
     if (settings === null) return;
 
+    const needle = query.trim().toLowerCase();
+    const matches = needle ? searchMatches(needle) : null;
+
     clear(nav);
     for (const item of SECTIONS) {
+      const hits = matches?.get(item.id)?.length ?? 0;
       const button = h(
         'button',
         {
-          class: `modal-nav-item${item.id === section ? ' is-active' : ''}`,
+          // При поиске активный раздел не подсвечиваем: панель показывает выдачу,
+          // а не раздел, — подсветка обещала бы не то, что видно. Разделы без
+          // находок приглушены, а рядом с остальными стоит их число.
+          class:
+            `modal-nav-item${!needle && item.id === section ? ' is-active' : ''}` +
+            `${needle && hits === 0 ? ' is-dimmed' : ''}`,
           type: 'button',
-          onClick: () => {
-            section = item.id;
-            render();
-          },
+          onClick: () => openSection(item.id),
         },
         svgIcon(item.icon, 14),
         h('span', {}, item.title),
+        needle && hits > 0 ? h('span', { class: 'modal-nav-count' }, String(hits)) : null,
       );
       nav.appendChild(button);
     }
@@ -1217,25 +1318,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     if (section === 'lsp' && lspRunning === null) void refreshLspStatus();
 
     clear(pane);
-    const content =
-      section === 'ai'
-        ? renderAi()
-        : section === 'editor'
-          ? renderEditor()
-          : section === 'explorer'
-            ? renderExplorer()
-            : section === 'run'
-              ? renderRun()
-              : section === 'appearance'
-                ? renderAppearance()
-                : section === 'lsp'
-                  ? renderLsp()
-                  : section === 'mcp'
-                    ? renderMcp()
-                    : renderProject();
-    append(pane, content);
-    pane.scrollTop = 0;
-    title.textContent = `Настройки · ${SECTIONS.find((item) => item.id === section)?.title ?? ''}`;
+    if (needle && matches) renderSearchResults(matches);
+    else {
+      append(pane, sectionContent(section));
+      pane.scrollTop = 0;
+    }
+    title.textContent = needle
+      ? `Настройки · поиск: ${query.trim()}`
+      : `Настройки · ${SECTIONS.find((item) => item.id === section)?.title ?? ''}`;
   }
 
   return { element, open, close, applySettings };

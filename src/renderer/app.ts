@@ -538,6 +538,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     settings,
     settingsModal,
     host,
+    // Открытие файла — тем же путём, что у дерева и быстрого открытия: клик по
+    // файлу в ленте чата открывает вкладку, а не только ставит курсор.
+    openFile: (path) => openPath(path),
     toggleEditor: () => setChatInEditor(!chatInEditor),
     isInEditor: () => chatInEditor,
   });

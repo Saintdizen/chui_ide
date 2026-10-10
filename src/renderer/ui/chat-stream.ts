@@ -60,6 +60,8 @@ export interface StreamHost {
   hidePlan(): void;
   /** Перерисовать панель изменений после файловых операций инструмента. */
   renderChanges(): void;
+  /** Показать файл из ряда под вызовом инструмента (клик по чипу). */
+  reveal(path: string): void;
   /** Переключить «занято»: панель по этому гасит ввод и меняет кнопку. */
   setBusy(value: boolean, session: ChatSession): void;
   /** Закрыть открытые ожидания подтверждений (ревью правок, команда). */
@@ -133,7 +135,12 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     messageEl.appendChild(activity.element);
     activity.state('думает…');
     // Подряд идущие вызовы инструментов живут одной группой — см. createToolFeed.
-    const tools = createToolFeed(messageEl, activity.element, () => host.scrollToEnd(session));
+    const tools = createToolFeed(
+      messageEl,
+      activity.element,
+      () => host.scrollToEnd(session),
+      (path) => host.reveal(path),
+    );
     /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
     let reasoningView: ReasoningRowView | null = null;
     const toolCards = new Map<string, ToolCardView>();

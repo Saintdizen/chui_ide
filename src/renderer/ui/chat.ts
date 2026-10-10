@@ -59,6 +59,12 @@ export interface ChatDeps {
   documents: DocumentStore;
   editors: EditorService;
   edits: EditService;
+  /**
+   * Открыть файл так же, как это делают дерево и быстрое открытие. Клику по файлу
+   * в ленте нельзя обойтись одним `editors.reveal`: среди открытых документа может
+   * и не быть — агент его только что создал, — и показывать тогда нечего.
+   */
+  openFile?: (path: string) => Promise<void>;
   commands: CommandRegistry;
   /** Рабочая папка: её корень — ключ, по которому main находит историю бесед. */
   workspace: WorkspaceModel;
@@ -180,10 +186,20 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /* ── композер: панель изменений, чипы, тулбар, статус ──────────────────── */
 
+  /**
+   * Показать файл человеку: сперва открыть, потом встать на место. Документа может
+   * не быть вовсе — созданный агентом файл в редакторе ещё не открывали, — и тогда
+   * `editors.reveal` молчит: модели документа у него нет.
+   */
+  const revealFile = async (path: string, line = 1, column = 1): Promise<void> => {
+    await deps.openFile?.(path);
+    deps.editors.reveal(path, line, column);
+  };
+
   // Панель изменений и план агента — отдельные модули: они только рисуют по
   // состоянию беседы, а работа с документами и редактором остаётся здесь.
   const changesPanel = createChangesPanel({
-    reveal: (path, line, column) => deps.editors.reveal(path, line, column),
+    reveal: (path, line, column) => void revealFile(path, line, column),
     onRevert: () => void revertTouched(),
   });
   const planPanel = createPlanPanel();
@@ -968,7 +984,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           el.appendChild(content);
         }
         if (message.toolCalls?.length) {
-          const feed = createToolFeed(el);
+          const feed = createToolFeed(el, null, undefined, (path) => void revealFile(path));
           for (const call of message.toolCalls) {
             cards.set(call.id, feed.add({ id: call.id, name: call.name, args: call.arguments }));
           }
@@ -1854,7 +1870,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   // Показать файл в редакторе: открытие вкладки и позиция курсора — дело renderer.
   deps.host.handle('ai.openFile', async (params) => {
-    deps.editors.reveal(params.path, params.line ?? 1, params.column ?? 1);
+    await revealFile(params.path, params.line ?? 1, params.column ?? 1);
     return { ok: true };
   });
 
@@ -1915,6 +1931,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     renderPlan: (steps) => planPanel.render(steps),
     hidePlan: () => planPanel.hide(),
     renderChanges,
+    // Файл из ряда под вызовом инструмента открывается в редакторе — тем же
+    // путём, что и клик по файлу в панели изменений.
+    reveal: (path) => void revealFile(path),
     setBusy,
     closeApprovals,
     persist: (paths) => persistPaths(paths),

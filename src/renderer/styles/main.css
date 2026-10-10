@@ -2678,6 +2678,47 @@ textarea {
   color: var(--text_color_disabled);
 }
 
+/* Ряд файлов под вызовом: что тронул инструмент. Отступ слева — под подпись
+   строки, а не под узел рельса: чипы — продолжение строки, а не новая веха. */
+.tool-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 1px 6px 5px 30px;
+}
+
+.tool-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 7px 1px 5px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_pill);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-size: 11px;
+}
+
+.tool-file-chip:hover {
+  border-color: var(--border_color);
+  color: var(--text_color);
+}
+
+.tool-file-name {
+  overflow: hidden;
+  font-family: var(--font_mono);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Вид операции — тише имени: главное в чипе — какой это файл. */
+.tool-file-kind {
+  flex: 0 0 auto;
+  color: var(--text_color_disabled);
+  font-size: 10px;
+}
+
 .tool-raw {
   max-height: 240px;
   margin: 4px 0 0;
@@ -3545,13 +3586,43 @@ textarea {
   padding: 14px 16px;
 }
 
-.modal-nav {
+/* Столбец разделов: поиск сверху, список под ним — поиск не уезжает при
+   прокрутке длинного списка. Рамку полосы держит сам столбец. */
+.modal-nav-column {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--separator_color);
+}
+
+.modal-search {
+  flex: 0 0 auto;
+  margin: 8px 8px 0;
+  padding: var(--control_padding_sm) 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+}
+
+.modal-search::placeholder {
+  color: var(--placeholder_text_color);
+}
+
+.modal-search:focus {
+  outline: none;
+  border-color: var(--focus_ring_color);
+}
+
+.modal-nav {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: 2px;
+  min-height: 0;
   padding: 8px;
   overflow: auto;
-  border-right: 1px solid var(--separator_color);
 }
 
 .modal-nav-item {
@@ -3572,6 +3643,40 @@ textarea {
 
 .modal-nav-item.is-active {
   background: var(--element_background);
+  color: var(--text_color);
+}
+
+/* Поиск: у разделов без находок подпись блёкнет — видно, где искать нечего. */
+.modal-nav-item.is-dimmed {
+  opacity: 0.4;
+}
+
+/* Число находок в разделе — серым рядом с подписью, чтобы не спорить с ней. */
+.modal-nav-count,
+.settings-search-count {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: var(--radius_pill);
+  background: var(--element_background_2);
+  color: var(--text_color_tertiary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Заголовок группы в выдаче поиска — кнопка перехода в раздел. */
+.settings-search-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 420px;
+  padding: 4px 2px;
+  color: var(--text_color_disabled);
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.settings-search-group:hover {
   color: var(--text_color);
 }
 
