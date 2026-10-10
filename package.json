@@ -32,6 +32,7 @@
     "smoke:bridge": "npm run build:main && electron scripts/bridge-smoke.cjs",
     "smoke:mcp": "npm run build:main && node scripts/mcp-smoke.cjs",
     "smoke:ignore": "npm run build:main && electron scripts/ignore-smoke.cjs",
+    "smoke:folder": "npm run build && node scripts/folder-smoke.cjs",
     "smoke:git": "npm run build:main && electron scripts/git-smoke.cjs",
     "smoke:agent": "npm run build:main && electron scripts/agent-smoke.cjs",
     "smoke:anthropic": "npm run build:main && node scripts/anthropic-smoke.cjs",

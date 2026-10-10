@@ -1,12 +1,15 @@
 import { app, BrowserWindow, nativeTheme } from 'electron';
+import { statSync } from 'node:fs';
+import path from 'node:path';
 import { PushTopic } from '../shared/api';
+import { folderFromCommandLine, type CommandLineFolder } from '../shared/cli';
 import { AiService } from './ai/service';
 import { DebugService } from './debug/debug';
 import { installDiagnostics } from './diagnostics';
 import { GitService } from './git/git';
 import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
-import { registerIpc } from './ipc/register';
+import { openProjectFolder, registerIpc } from './ipc/register';
 import { LspService } from './lsp/lsp';
 import { McpService } from './mcp/mcp';
 import { createApplicationMenu } from './menu';
@@ -54,17 +57,67 @@ if (
 // окном, а оседает в userData вместе с причиной.
 installDiagnostics();
 
+/**
+ * Папка, которую просят открыть снаружи: `chui_iDE ~/project`, второй запуск с
+ * путём или `open -a` на macOS. До готовности приложения запоминаем её, после —
+ * открываем тем же путём, что и всё остальное (`openProjectFolder`).
+ */
+let pendingFolder: string | null = null;
+let requestOpenFolder: ((folder: string) => Promise<void>) | null = null;
+
+/**
+ * Путь из командной строки. `app.getAppPath()` в списке исключений не зря: при
+ * запуске `electron .` в разработке первый аргумент — это само приложение, и
+ * принять его за проект значило бы открыть репозиторий IDE вместо нужной папки.
+ */
+function folderFromArgs(args: readonly string[], workingDirectory?: string): CommandLineFolder {
+  return folderFromCommandLine({
+    args,
+    resolve: (value) => path.resolve(workingDirectory ?? process.cwd(), value),
+    ignore: [app.getAppPath()],
+    isDirectory: (candidate) => statSync(candidate, { throwIfNoEntry: false })?.isDirectory() === true,
+    caseInsensitive: process.platform === 'win32',
+  });
+}
+
+/** Попросить открыть папку: до готовности — запоминаем, после — открываем сразу. */
+function askToOpenFolder(folder: string | null): void {
+  if (!folder) return;
+  if (requestOpenFolder) void requestOpenFolder(folder);
+  else pendingFolder = folder;
+}
+
+/** Объяснить в консоли, какие аргументы выглядели путём, но папкой не оказались. */
+function reportUnusable(unusable: readonly string[]): void {
+  for (const candidate of unusable) {
+    process.stderr.write(`[chui] папка не найдена: ${candidate}\n`);
+  }
+}
+
+// macOS присылает этот событие при открытии папки из Finder; бывает и до готовности
+// приложения, поэтому обработчик ставим сразу и запоминаем путь.
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  askToOpenFolder(filePath);
+});
+
 // Второй экземпляр приложения не нужен: он бы писал в тот же settings.json.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv, workingDirectory) => {
     const [window] = BrowserWindow.getAllWindows();
-    if (!window) return;
-    if (window.isMinimized()) window.restore();
-    window.focus();
+    if (window) {
+      if (window.isMinimized()) window.restore();
+      window.focus();
+    }
+    // Второй запуск с путём — это просьба открыть проект в уже работающем окне.
+    // Путь ищем от рабочего каталога вызвавшей стороны: у второго запуска свой cwd.
+    const asked = folderFromArgs(argv.slice(1), workingDirectory);
+    reportUnusable(asked.unusable);
+    askToOpenFolder(asked.folder);
   });
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     const settings = new SettingsStore();
 
     // Схему выбирает main: после смены themeSource Chromium сам присылает renderer'у
@@ -146,7 +199,7 @@ if (!app.requestSingleInstanceLock()) {
     const sessions = new SessionStore();
     const projectConfig = new ProjectConfigStore();
 
-    registerIpc({
+    const deps = {
       settings,
       workspace,
       ai,
@@ -158,12 +211,33 @@ if (!app.requestSingleInstanceLock()) {
       projectConfig,
       mcp,
       host: new HostClient(),
-    });
+    };
+    registerIpc(deps);
     serveRenderer();
     createApplicationMenu();
-    // Приложение начинается со списка проектов: окно IDE откроется после
-    // того, как пользователь выберет папку или склонирует репозиторий.
-    createWelcomeWindow();
+
+    // Проект можно задать снаружи — путём в командной строке или открытием папки
+    // из системы. Тогда сразу открываем IDE; иначе начинаем со списка проектов:
+    // окно IDE откроется, когда человек выберет папку или склонирует репозиторий.
+    requestOpenFolder = async (folder) => {
+      try {
+        await openProjectFolder(deps, folder);
+      } catch (error) {
+        // Папку могли удалить или указать неверно: показываем причину в терминале
+        // и не оставляем приложение без окна вовсе.
+        process.stderr.write(
+          `[chui] не удалось открыть ${folder}: ${error instanceof Error ? error.message : error}\n`,
+        );
+        if (BrowserWindow.getAllWindows().length === 0) createWelcomeWindow();
+      }
+    };
+
+    const fromArgs = folderFromArgs(process.argv.slice(1));
+    reportUnusable(fromArgs.unusable);
+    const requested = pendingFolder ?? fromArgs.folder;
+    pendingFolder = null;
+    if (requested) await requestOpenFolder(requested);
+    else createWelcomeWindow();
 
     app.on('will-quit', () => {
       terminals.dispose();

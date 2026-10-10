@@ -78,6 +78,25 @@ export interface AppDependencies {
  * Связываем сервисы с контрактом RPC. Компилятор следит за тем, чтобы
  * аргументы и результат каждого метода совпадали с shared/api.ts.
  */
+/**
+ * Открыть папку как проект: запомнить её, поднять окно IDE, обновить git.
+ *
+ * Один путь на все входы: стартовое окно, путь в командной строке, `open-file`
+ * на macOS и второй запуск приложения. Разные пути означали бы, что проект,
+ * открытый из терминала, чем-то отличается от открытого из стартового окна —
+ * например, не попадает в историю или не обновляет состояние git.
+ */
+export async function openProjectFolder(
+  deps: AppDependencies,
+  folder: string,
+): Promise<{ root: string; name: string }> {
+  const info = await deps.workspace.open(folder);
+  deps.settings.rememberProject(info.root);
+  openIdeWindow();
+  await deps.git.refresh();
+  return { root: info.root, name: info.name };
+}
+
 export function registerIpc(deps: AppDependencies): RpcRouter {
   const router = new RpcRouter();
 
@@ -367,19 +386,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     return recentProjects();
   });
 
-  /**
-   * Переход из стартового окна в IDE: открываем папку, запоминаем её и создаём
-   * окно редактора. Стартовое окно закрывает сам лаунчер, получив ответ, —
-   * закрытие здесь уничтожило бы окно раньше отправки ответа, и вызов в renderer
-   * остался бы без результата.
-   */
-  router.register('app.openProject', async (params) => {
-    const info = await deps.workspace.open(params.path);
-    deps.settings.rememberProject(info.root);
-    openIdeWindow();
-    await deps.git.refresh();
-    return { root: info.root, name: info.name };
-  });
+  // Переход из стартового окна в IDE — тот же путь, что у запуска из командной
+  // строки. Стартовое окно закрывает сам лаунчер, получив ответ: закрытие здесь
+  // уничтожило бы окно раньше отправки ответа, и вызов остался бы без результата.
+  router.register('app.openProject', (params) => openProjectFolder(deps, params.path));
 
   router.register('git.status', () => deps.git.status());
   router.register('git.init', () => deps.git.init());
