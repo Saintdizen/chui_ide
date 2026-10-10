@@ -20,8 +20,7 @@ type LspRequest = (path: string, method: string, params: unknown) => Promise<unk
 
 /** Ошибка сервера — не повод падать: подсказки просто не будет. */
 function safeRequest(rpc: RpcClient): LspRequest {
-  return (path, method, params) =>
-    rpc.request('lsp.request', { path, method, params }).catch(() => null);
+  return (path, method, params) => rpc.request('lsp.request', { path, method, params }).catch(() => null);
 }
 
 export function registerLspProviders(rpc: RpcClient): monaco.IDisposable {
@@ -32,7 +31,11 @@ export function registerLspProviders(rpc: RpcClient): monaco.IDisposable {
     disposables.push(registerForLanguage(language.id, request));
   }
 
-  return { dispose: () => { for (const item of disposables) item.dispose(); } };
+  return {
+    dispose: () => {
+      for (const item of disposables) item.dispose();
+    },
+  };
 }
 
 function registerForLanguage(language: string, request: LspRequest): monaco.IDisposable {
@@ -134,13 +137,11 @@ function toPosition(position: monaco.Position): { line: number; character: numbe
   return { line: position.lineNumber - 1, character: position.column - 1 };
 }
 
-function fromRange(range: { start: { line: number; character: number }; end: { line: number; character: number } }): monaco.Range {
-  return new monaco.Range(
-    range.start.line + 1,
-    range.start.character + 1,
-    range.end.line + 1,
-    range.end.character + 1,
-  );
+function fromRange(range: {
+  start: { line: number; character: number };
+  end: { line: number; character: number };
+}): monaco.Range {
+  return new monaco.Range(range.start.line + 1, range.start.character + 1, range.end.line + 1, range.end.character + 1);
 }
 
 /** Путь файла из модели — в форме `document.path`: сервер ключует документы так же. */
@@ -207,8 +208,7 @@ function toSuggestion(
 ): monaco.languages.CompletionItem {
   const word = model.getWordUntilPosition(position);
   const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn);
-  const documentation =
-    typeof item.documentation === 'string' ? item.documentation : item.documentation?.value;
+  const documentation = typeof item.documentation === 'string' ? item.documentation : item.documentation?.value;
 
   return {
     label: item.label,
@@ -271,9 +271,14 @@ function definitionLocations(result: unknown): monaco.languages.Location[] {
   return locations;
 }
 
-function isRange(value: unknown): value is { start: { line: number; character: number }; end: { line: number; character: number } } {
+function isRange(
+  value: unknown,
+): value is { start: { line: number; character: number }; end: { line: number; character: number } } {
   if (!value || typeof value !== 'object') return false;
-  const range = value as { start?: { line?: unknown; character?: unknown }; end?: { line?: unknown; character?: unknown } };
+  const range = value as {
+    start?: { line?: unknown; character?: unknown };
+    end?: { line?: unknown; character?: unknown };
+  };
   return (
     typeof range.start?.line === 'number' &&
     typeof range.start.character === 'number' &&
@@ -284,7 +289,11 @@ function isRange(value: unknown): value is { start: { line: number; character: n
 
 /** Несколько регистраций — один выключатель: в app.ts его не придётся разбирать. */
 function combine(disposables: monaco.IDisposable[]): monaco.IDisposable {
-  return { dispose: () => { for (const item of disposables) item.dispose(); } };
+  return {
+    dispose: () => {
+      for (const item of disposables) item.dispose();
+    },
+  };
 }
 
 /* ── ссылки, переименование, символы, быстрые правки ────────────────────── */
@@ -364,9 +373,7 @@ function toDocumentSymbol(raw: unknown): monaco.languages.DocumentSymbol | null 
   if (!isRange(range)) return null;
   const selection = isRange(value.selectionRange) ? value.selectionRange : range;
   const children = Array.isArray(value.children)
-    ? value.children
-        .map(toDocumentSymbol)
-        .filter((child): child is monaco.languages.DocumentSymbol => child !== null)
+    ? value.children.map(toDocumentSymbol).filter((child): child is monaco.languages.DocumentSymbol => child !== null)
     : [];
 
   return {

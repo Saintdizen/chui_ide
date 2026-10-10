@@ -57,7 +57,9 @@ function insideRect(ux, uy, rect) {
   if (ux < rect.x || ux > rect.x + rect.width || uy < rect.y || uy > rect.y + rect.height) return false;
   const radius = Math.min(rect.rx ?? 0, rect.width / 2, rect.height / 2);
   if (radius <= 0) return true;
-  return roundedBoxDistance(ux, uy, rect.x + rect.width / 2, rect.y + rect.height / 2, rect.width, rect.height, radius) <= 0;
+  return (
+    roundedBoxDistance(ux, uy, rect.x + rect.width / 2, rect.y + rect.height / 2, rect.width, rect.height, radius) <= 0
+  );
 }
 
 const PLATE_RADIUS = SIZE * 0.22;

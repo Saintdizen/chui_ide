@@ -1,4 +1,9 @@
-import { diffRequirements, parseRequirements, requirementsNote, type InstalledPackage } from '../../shared/python-packages';
+import {
+  diffRequirements,
+  parseRequirements,
+  requirementsNote,
+  type InstalledPackage,
+} from '../../shared/python-packages';
 import type { PythonEnvironment, PythonInterpreter } from '../../shared/python-env';
 import type { EnvironmentHealth } from '../../shared/python-health';
 import type { ProjectTools } from '../core/project-tools';
@@ -52,12 +57,7 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
   const interpreterSelect = createSelect({ title: 'Каким интерпретатором работать в этом проекте' });
   interpreterSelect.onChange(() => deps.onSelect(interpreterSelect.value));
 
-  const element = h(
-    'div',
-    { class: 'python-env' },
-    h('div', { class: 'python-env-title' }, 'Python-окружение'),
-    body,
-  );
+  const element = h('div', { class: 'python-env' }, h('div', { class: 'python-env-title' }, 'Python-окружение'), body);
 
   function row(label: string, value: string, mono = true): HTMLElement {
     return h(
@@ -121,7 +121,12 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
       for (const entry of health) {
         for (const issue of entry.issues) {
           box.appendChild(
-            h('div', { class: `python-env-issue is-${issue.severity}` }, h('span', { class: 'python-env-issue-dot' }), issue.message),
+            h(
+              'div',
+              { class: `python-env-issue is-${issue.severity}` },
+              h('span', { class: 'python-env-issue-dot' }),
+              issue.message,
+            ),
           );
         }
       }
@@ -181,7 +186,14 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
         }),
       );
     }
-    body.appendChild(section('Окружения', list, ...envActions, button('Создать окружение…', () => deps.onCreate())));
+    body.appendChild(
+      section(
+        'Окружения',
+        list,
+        ...envActions,
+        button('Создать окружение…', () => deps.onCreate()),
+      ),
+    );
 
     // Интерпретатор для этого проекта: выбор важнее общего, когда проектов несколько.
     const options: SelectOption[] = [{ value: '', label: 'Автоматически (окружение проекта)' }];

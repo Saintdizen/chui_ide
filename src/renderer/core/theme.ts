@@ -90,8 +90,7 @@ function toHsl(hex: string): [number, number, number] {
 
   const delta = max - min;
   const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
-  const hue =
-    max === r ? ((g - b) / delta + (g < b ? 6 : 0)) : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
+  const hue = max === r ? (g - b) / delta + (g < b ? 6 : 0) : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
 
   return [hue * 60, saturation, lightness];
 }

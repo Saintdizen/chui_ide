@@ -16,8 +16,10 @@ const DOC_BODY = 'M4.4 1.4h4.3l3.9 3.9v8.4c0 .5-.4.9-.9.9H4.4c-.5 0-.9-.4-.9-.9V
 const DOC_FOLD = 'M8.7 1.4 12.6 5.3H8.7z';
 
 /** Папка: закрытая — цельный конверт, открытая — с отогнутой передней стенкой. */
-const FOLDER_CLOSED = 'M2 4.6c0-.6.5-1.1 1.1-1.1h2.7c.4 0 .7.2.9.5l.7 1h4.5c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H3.1C2.5 12.6 2 12.1 2 11.5z';
-const FOLDER_OPEN_BACK = 'M2.4 11.1V4.5c0-.6.5-1.1 1.1-1.1h2.6c.4 0 .7.2.9.5l.7 1h4.2c.6 0 1.1.5 1.1 1.1v1.1H5.6c-.9 0-1.6.6-1.9 1.4z';
+const FOLDER_CLOSED =
+  'M2 4.6c0-.6.5-1.1 1.1-1.1h2.7c.4 0 .7.2.9.5l.7 1h4.5c.6 0 1.1.5 1.1 1.1v5.4c0 .6-.5 1.1-1.1 1.1H3.1C2.5 12.6 2 12.1 2 11.5z';
+const FOLDER_OPEN_BACK =
+  'M2.4 11.1V4.5c0-.6.5-1.1 1.1-1.1h2.6c.4 0 .7.2.9.5l.7 1h4.2c.6 0 1.1.5 1.1 1.1v1.1H5.6c-.9 0-1.6.6-1.9 1.4z';
 const FOLDER_OPEN_FRONT = 'M3.4 14l1.4-5.2c.1-.4.5-.7 1-.7h7.5c.6 0 1 .5.9 1.1l-1.3 4.8z';
 
 /** Файлы без знакомого расширения — просто нейтральный лист. */
@@ -27,10 +29,7 @@ type Shape = { d: string; opacity?: number };
 
 /** Вместо букв у части видов — узнаваемый знак: картинка, замок, ветка git. */
 const GLYPHS: Partial<Record<FileIconKind, readonly Shape[]>> = {
-  image: [
-    { d: 'M5.2 12.4l1.9-2.3 1.3 1.5.9-1 1.6 1.8z' },
-    { d: 'M9.9 7.9a.8.8 0 1 1-1.6 0 .8.8 0 0 1 1.6 0' },
-  ],
+  image: [{ d: 'M5.2 12.4l1.9-2.3 1.3 1.5.9-1 1.6 1.8z' }, { d: 'M9.9 7.9a.8.8 0 1 1-1.6 0 .8.8 0 0 1 1.6 0' }],
   archive: [
     { d: 'M5.1 7.6h6v4.9h-6z', opacity: 0.9 },
     { d: 'M5.1 9.4h6', opacity: 0.55 },
@@ -58,7 +57,10 @@ const GLYPHS: Partial<Record<FileIconKind, readonly Shape[]>> = {
   ],
 };
 
-function element<K extends keyof SVGElementTagNameMap>(tag: K, attributes: Record<string, string | number>): SVGElementTagNameMap[K] {
+function element<K extends keyof SVGElementTagNameMap>(
+  tag: K,
+  attributes: Record<string, string | number>,
+): SVGElementTagNameMap[K] {
   const node = document.createElementNS(SVG_NS, tag);
   for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
   return node;

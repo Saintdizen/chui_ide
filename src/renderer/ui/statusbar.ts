@@ -67,18 +67,15 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   };
 
   // Виджет окружения один, а попапов два: у Node открываем Node, иначе Python.
-  const envItem = h(
-    'button',
-    {
-      class: 'status-item status-env',
-      type: 'button',
-      onClick: (event: Event) => {
-        const anchor = event.currentTarget as HTMLElement;
-        if (state.projectKindId === 'node') deps.openNodeEnv(anchor);
-        else deps.openPythonEnv(anchor);
-      },
+  const envItem = h('button', {
+    class: 'status-item status-env',
+    type: 'button',
+    onClick: (event: Event) => {
+      const anchor = event.currentTarget as HTMLElement;
+      if (state.projectKindId === 'node') deps.openNodeEnv(anchor);
+      else deps.openPythonEnv(anchor);
     },
-  );
+  });
   const fileItem = h('button', {
     class: 'status-item status-file',
     type: 'button',

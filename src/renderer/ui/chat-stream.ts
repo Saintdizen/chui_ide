@@ -33,7 +33,8 @@ import { showToast } from './toast';
 /** Сколько раз автоматически достраиваем ответ, оборвавшийся по лимиту токенов. */
 export const MAX_AUTO_CONTINUE = 2;
 /** Запрос продолжения: ответ оборвался — просим дописать без повторов. */
-export const CONTINUE_PROMPT = 'Ответ оборвался по лимиту токенов. Продолжи ровно с того места, где остановился, без повторов.';
+export const CONTINUE_PROMPT =
+  'Ответ оборвался по лимиту токенов. Продолжи ровно с того места, где остановился, без повторов.';
 
 /** Режим отладки/инструментов на момент прогона: показываем его адаптеру как есть. */
 export interface StreamModes {
@@ -282,11 +283,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             { class: 'finish-note' },
             svgIcon('warning', 12),
             h('span', {}, 'Ответ обрезан по лимиту токенов'),
-            h(
-              'button',
-              { class: 'link-btn', type: 'button', onClick: () => host.continueAnswer() },
-              'Продолжить',
-            ),
+            h('button', { class: 'link-btn', type: 'button', onClick: () => host.continueAnswer() }, 'Продолжить'),
           ),
           activity.element,
         );

@@ -66,7 +66,10 @@ app.whenReady().then(async () => {
 
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
-  const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
+  const git = new GitService(
+    () => workspace.rootPath(),
+    (topic, payload) => pushToRenderers(topic, payload),
+  );
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
   registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient() });
@@ -80,8 +83,12 @@ app.whenReady().then(async () => {
   ide.webContents.setZoomLevel(0);
   await wait(300);
 
-  console.log(`[меню] одно окно отрисовалось: ${JSON.stringify(await ask(ide, `Boolean(document.querySelector('.app'))`))}`);
-  console.log(`[меню] кнопка есть: ${JSON.stringify(await ask(ide, `document.querySelector('.topbar-left .icon-btn')?.title ?? null`))}`);
+  console.log(
+    `[меню] одно окно отрисовалось: ${JSON.stringify(await ask(ide, `Boolean(document.querySelector('.app'))`))}`,
+  );
+  console.log(
+    `[меню] кнопка есть: ${JSON.stringify(await ask(ide, `document.querySelector('.topbar-left .icon-btn')?.title ?? null`))}`,
+  );
 
   // 1. Клик по кнопке: меню должно появиться.
   await ask(ide, `document.querySelector('.topbar-left .icon-btn').click(); 'нажали'`);
@@ -108,7 +115,11 @@ app.whenReady().then(async () => {
       continue;
     }
     for (const step of [0.5, 0.8, 1]) {
-      ide.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(point.x * step), y: Math.round(point.y * step) });
+      ide.webContents.sendInputEvent({
+        type: 'mouseMove',
+        x: Math.round(point.x * step),
+        y: Math.round(point.y * step),
+      });
       await wait(60);
     }
     await wait(350);
@@ -168,7 +179,9 @@ app.whenReady().then(async () => {
   );
   await wait(800);
   const after = ide.webContents.getZoomLevel();
-  console.log(`[меню] масштаб: ${before} → ${after} (${after === before + 0.5 ? 'роль сработала' : 'роль НЕ сработала'})`);
+  console.log(
+    `[меню] масштаб: ${before} → ${after} (${after === before + 0.5 ? 'роль сработала' : 'роль НЕ сработала'})`,
+  );
 
   // 5. Настоящий ввод, а не вызов из скрипта: клик мышью по кнопке и Alt+F10.
   //    Так видно, доходит ли событие до renderer'а через оконный менеджер.
@@ -213,8 +226,7 @@ app.whenReady().then(async () => {
     return 'нажали';
   };
 
-  const sidebarHidden = () =>
-    ask(ide, `document.querySelector('.app').classList.contains('is-sidebar-hidden')`);
+  const sidebarHidden = () => ask(ide, `document.querySelector('.app').classList.contains('is-sidebar-hidden')`);
 
   const beforeToggle = await sidebarHidden();
   console.log(`[меню] клик по «Вид»: ${await clickText('Вид')}`);

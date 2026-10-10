@@ -57,5 +57,8 @@ export function snippetFor(text: string, query: string): string | null {
   const at = text.toLowerCase().indexOf(query.toLowerCase());
   if (at < 0) return null;
   const start = Math.max(0, at - 24);
-  return text.slice(start, at + query.length + 48).replace(/\s+/g, ' ').trim();
+  return text
+    .slice(start, at + query.length + 48)
+    .replace(/\s+/g, ' ')
+    .trim();
 }

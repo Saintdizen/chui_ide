@@ -30,13 +30,21 @@ describe('toProjectSymbols', () => {
   });
 
   it('записи без имени или ссылки пропускаются', () => {
-    const raw = [{ kind: 5 }, { name: 'ok', kind: 12, location: {} }, { name: 'good', kind: 12, location: { uri: 'file:///p/a.py' } }];
+    const raw = [
+      { kind: 5 },
+      { name: 'ok', kind: 12, location: {} },
+      { name: 'good', kind: 12, location: { uri: 'file:///p/a.py' } },
+    ];
     expect(toProjectSymbols(raw, toPath).map((item) => item.name)).toEqual(['good']);
   });
 
   it('битая ссылка не роняет разбор', () => {
     const raw = [{ name: 'x', kind: 12, location: { uri: 'file:///p/a.py' } }];
-    expect(toProjectSymbols(raw, () => { throw new Error('битая'); })).toEqual([]);
+    expect(
+      toProjectSymbols(raw, () => {
+        throw new Error('битая');
+      }),
+    ).toEqual([]);
   });
 
   it('не массив — пустой список', () => {

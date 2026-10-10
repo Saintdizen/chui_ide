@@ -2,12 +2,7 @@ import { app } from 'electron';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import * as pty from 'node-pty';
-import {
-  PushTopic,
-  RpcErrorCode,
-  type TerminalCreateOptions,
-  type TerminalSession,
-} from '../../shared/api';
+import { PushTopic, RpcErrorCode, type TerminalCreateOptions, type TerminalSession } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
 import { mergeEnv } from '../project-env';
 
@@ -63,9 +58,7 @@ export class TerminalService {
   ) {}
 
   list(): TerminalSession[] {
-    return [...this.sessions.values()]
-      .filter((session) => !session.exited)
-      .map((session) => describe(session));
+    return [...this.sessions.values()].filter((session) => !session.exited).map((session) => describe(session));
   }
 
   /**
@@ -86,8 +79,7 @@ export class TerminalService {
       throw new RpcFailure(RpcErrorCode.InvalidParams, `Больше ${MAX_SESSIONS} терминалов открывать не нужно`);
     }
 
-    const shell =
-      process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash');
+    const shell = process.env.SHELL || (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash');
     const cwd = options.cwd && existsSync(options.cwd) ? options.cwd : app.getPath('home');
 
     this.sequence += 1;

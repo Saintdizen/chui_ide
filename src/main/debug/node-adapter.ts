@@ -326,7 +326,9 @@ export class NodeAdapter {
   private async launch(args: LaunchArgs): Promise<void> {
     if (this.launched) throw new Error('Сессия отладки уже запущена');
     const cwd = args.cwd ?? process.cwd();
-    const program = path.isAbsolute(args.program ?? '') ? (args.program as string) : path.resolve(cwd, args.program ?? '');
+    const program = path.isAbsolute(args.program ?? '')
+      ? (args.program as string)
+      : path.resolve(cwd, args.program ?? '');
     const nodeExe = args.runtimeExecutable || 'node';
     const childArgs = ['--inspect-brk=127.0.0.1:0', program, ...(args.args ?? [])];
 
@@ -344,7 +346,9 @@ export class NodeAdapter {
     });
     this.child = child;
 
-    child.stdout?.on('data', (chunk: Buffer) => this.event('output', { category: 'stdout', output: chunk.toString('utf8') }));
+    child.stdout?.on('data', (chunk: Buffer) =>
+      this.event('output', { category: 'stdout', output: chunk.toString('utf8') }),
+    );
     child.stderr?.on('data', (chunk: Buffer) => this.onDebuggeeStderr(chunk));
     child.on('error', (error) => this.failInspector(error));
     child.on('exit', (code) => this.onDebuggeeExit(code));
@@ -506,7 +510,10 @@ export class NodeAdapter {
    * может быть и сборкой, и исходником чужой сборки. Лишняя точка в несуществующем
    * URL безвредна — она просто никогда не сработает.
    */
-  private async applyBreakpoints(file: string, wanted: SourceBreakpoint[]): Promise<Array<{ verified: boolean; line: number }>> {
+  private async applyBreakpoints(
+    file: string,
+    wanted: SourceBreakpoint[],
+  ): Promise<Array<{ verified: boolean; line: number }>> {
     const cdp = this.cdp;
     if (!cdp) return wanted.map((item) => ({ verified: false, line: item.line }));
 
@@ -632,9 +639,7 @@ export class NodeAdapter {
 
   /** Файл уже знаком: он стал скриптом или его знает source-карта (в любом написании). */
   private isKnownFile(file: string): boolean {
-    return this.pathVariants(file).some(
-      (variant) => this.scriptPaths.has(pathKey(variant)) || this.hasMapFor(variant),
-    );
+    return this.pathVariants(file).some((variant) => this.scriptPaths.has(pathKey(variant)) || this.hasMapFor(variant));
   }
 
   /**
@@ -792,7 +797,9 @@ export class NodeAdapter {
     return { stackFrames: frames, totalFrames: frames.length };
   }
 
-  private scopes(args: Record<string, unknown>): Array<{ name: string; variablesReference: number; expensive: boolean }> {
+  private scopes(
+    args: Record<string, unknown>,
+  ): Array<{ name: string; variablesReference: number; expensive: boolean }> {
     const frame = this.frameFor(args.frameId);
     if (!frame?.scopeChain) return [];
     return frame.scopeChain.map((scope) => ({
@@ -1002,7 +1009,9 @@ export class NodeAdapter {
 
   private async debuggerResume(command: 'continue' | 'stepOver' | 'stepInto' | 'stepOut'): Promise<void> {
     const method = command === 'continue' ? 'Debugger.resume' : `Debugger.${command}`;
-    await this.requireCdp().send(method).catch(() => undefined);
+    await this.requireCdp()
+      .send(method)
+      .catch(() => undefined);
   }
 
   private shutdown(killDebuggee: boolean): void {
@@ -1042,11 +1051,25 @@ export class NodeAdapter {
   }
 
   private respond(request: DapMessage, body: Record<string, unknown> = {}): void {
-    this.write({ seq: this.seq++, type: 'response', request_seq: request.seq, success: true, command: request.command, body });
+    this.write({
+      seq: this.seq++,
+      type: 'response',
+      request_seq: request.seq,
+      success: true,
+      command: request.command,
+      body,
+    });
   }
 
   private respondError(request: DapMessage, message: string): void {
-    this.write({ seq: this.seq++, type: 'response', request_seq: request.seq, success: false, command: request.command, message });
+    this.write({
+      seq: this.seq++,
+      type: 'response',
+      request_seq: request.seq,
+      success: false,
+      command: request.command,
+      message,
+    });
   }
 
   private event(event: string, body: Record<string, unknown>): void {

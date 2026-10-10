@@ -98,7 +98,10 @@ export class WorkspaceService {
     const stat = await fs.stat(file).catch(() => null);
     if (!stat?.isFile()) throw new RpcFailure(RpcErrorCode.NotFound, `Файл не найден: ${file}`);
     if (stat.size > MAX_FILE_BYTES) {
-      throw new RpcFailure(RpcErrorCode.InvalidParams, `Файл больше ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} МБ — открывать такое в редакторе пока нельзя`);
+      throw new RpcFailure(
+        RpcErrorCode.InvalidParams,
+        `Файл больше ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} МБ — открывать такое в редакторе пока нельзя`,
+      );
     }
 
     const buffer = await fs.readFile(file);
@@ -464,4 +467,3 @@ export class WorkspaceService {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-

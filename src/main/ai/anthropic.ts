@@ -57,7 +57,11 @@ export class AnthropicProvider implements AiProvider {
     const response = await fetchWithRetry(`${this.url()}/v1/models`, { headers: this.headers() }, signal);
     if (!response.ok) {
       const detail = await safeText(response);
-      throw new RpcFailure(RpcErrorCode.Internal, `Не удалось получить список моделей (HTTP ${response.status})`, detail);
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        `Не удалось получить список моделей (HTTP ${response.status})`,
+        detail,
+      );
     }
     const payload = (await response.json()) as { data?: Array<{ id?: unknown }> };
     return (payload.data ?? [])
@@ -280,7 +284,10 @@ function mapStopReason(reason: string): string {
  * инструментов (role='tool') должны лежать в user-ходе блоками `tool_result`.
  * Поэтому подряд идущие tool-сообщения склеиваются в одно user-сообщение.
  */
-export function toAnthropicMessages(messages: readonly ChatMessage[]): { system?: string; messages: AnthropicMessage[] } {
+export function toAnthropicMessages(messages: readonly ChatMessage[]): {
+  system?: string;
+  messages: AnthropicMessage[];
+} {
   const systemParts: string[] = [];
   const out: AnthropicMessage[] = [];
   let pendingResults: ContentBlock[] = [];
@@ -327,7 +334,8 @@ function userContent(message: ChatMessage): ContentBlock[] {
   if (message.content.trim()) blocks.push({ type: 'text', text: message.content });
   for (const image of message.images ?? []) {
     const parsed = parseDataUrl(image);
-    if (parsed) blocks.push({ type: 'image', source: { type: 'base64', media_type: parsed.mediaType, data: parsed.data } });
+    if (parsed)
+      blocks.push({ type: 'image', source: { type: 'base64', media_type: parsed.mediaType, data: parsed.data } });
   }
   if (blocks.length === 0) blocks.push({ type: 'text', text: '' });
   return blocks;
@@ -354,7 +362,11 @@ function toAnthropicTools(tools: readonly unknown[]): AnthropicTool[] {
   for (const tool of tools) {
     const fn = (tool as { function?: { name?: string; description?: string; parameters?: unknown } }).function;
     if (!fn?.name) continue;
-    out.push({ name: fn.name, description: fn.description, input_schema: fn.parameters ?? { type: 'object', properties: {} } });
+    out.push({
+      name: fn.name,
+      description: fn.description,
+      input_schema: fn.parameters ?? { type: 'object', properties: {} },
+    });
   }
   return out;
 }

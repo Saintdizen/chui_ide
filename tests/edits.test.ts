@@ -2,14 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { applyTextEdits, fromOffset, toOffset, type TextEdit } from '../src/shared/edits';
 
 /** Короткая обёртка: правка в одной строке. */
-function edit(
-  line: number,
-  startColumn: number,
-  endColumn: number,
-  newText: string,
-  oldText?: string,
-): TextEdit {
-  return { startLine: line, startColumn, endLine: line, endColumn, newText, ...(oldText !== undefined ? { oldText } : {}) };
+function edit(line: number, startColumn: number, endColumn: number, newText: string, oldText?: string): TextEdit {
+  return {
+    startLine: line,
+    startColumn,
+    endLine: line,
+    endColumn,
+    newText,
+    ...(oldText !== undefined ? { oldText } : {}),
+  };
 }
 
 describe('applyTextEdits', () => {
@@ -31,10 +32,7 @@ describe('applyTextEdits', () => {
   it('несколько правок не «съезжают»: применяются с конца', () => {
     const text = 'aaa\nbbb\nccc';
     // Меняем строки 1 и 3 — если бы применяли сверху, смещения бы поехали.
-    const edits: TextEdit[] = [
-      edit(1, 1, 4, 'XXX'),
-      edit(3, 1, 4, 'ZZZ'),
-    ];
+    const edits: TextEdit[] = [edit(1, 1, 4, 'XXX'), edit(3, 1, 4, 'ZZZ')];
     expect(applyTextEdits(text, edits)).toBe('XXX\nbbb\nZZZ');
   });
 

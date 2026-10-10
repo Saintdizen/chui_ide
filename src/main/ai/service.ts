@@ -18,7 +18,14 @@ import {
 import type { FileEdit } from '../../shared/edits';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, parseToolArguments, toOpenAiTools, type AgentToolSpec } from '../../shared/tools';
-import { condenseCallArguments, estimateMessagesTokens, estimateTokens, isContextOverflow, TokenCalibration, trimMessagesToFit } from '../../shared/context-fit';
+import {
+  condenseCallArguments,
+  estimateMessagesTokens,
+  estimateTokens,
+  isContextOverflow,
+  TokenCalibration,
+  trimMessagesToFit,
+} from '../../shared/context-fit';
 import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -243,11 +250,15 @@ export class AiService {
    * «Проверить подключение»: пробуем получить список моделей по указанному
    * адресу. Ошибки возвращаем текстом — это часть интерфейса, а не сбой.
    */
-  async testConnection(params: { baseUrl: string; apiKey?: string; providerId?: string }, signal?: AbortSignal): Promise<AiConnectionTestResult> {
+  async testConnection(
+    params: { baseUrl: string; apiKey?: string; providerId?: string },
+    signal?: AbortSignal,
+  ): Promise<AiConnectionTestResult> {
     const baseUrl = params.baseUrl.trim();
     if (!baseUrl) return { ok: false, models: [], message: 'Не указан адрес сервера' };
 
-    const apiKey = params.apiKey?.trim() || (params.providerId ? this.settings.resolveApiKey(params.providerId) : undefined);
+    const apiKey =
+      params.apiKey?.trim() || (params.providerId ? this.settings.resolveApiKey(params.providerId) : undefined);
     if (!apiKey && !isLocalEndpoint(baseUrl)) {
       return { ok: false, models: [], message: 'Нужен API-ключ: без него провайдер отклонит запрос' };
     }
@@ -263,7 +274,10 @@ export class AiService {
       return {
         ok: true,
         models,
-        message: models.length > 0 ? `Подключение работает · доступно моделей: ${models.length}` : 'Сервер ответил, но список моделей пуст',
+        message:
+          models.length > 0
+            ? `Подключение работает · доступно моделей: ${models.length}`
+            : 'Сервер ответил, но список моделей пуст',
       };
     } catch (error) {
       return { ok: false, models: [], message: describeConnectionError(error) };
@@ -301,7 +315,11 @@ export class AiService {
       messages.push({ role: 'system', content: renderImageNote(images) });
     }
     if (planMode) messages.push({ role: 'system', content: `${AGENT_PROMPT}\n${PLAN_PROMPT}` });
-    else if (useTools) messages.push({ role: 'system', content: autoApprove ? `${AGENT_PROMPT}\n${AUTO_APPROVE_PROMPT}` : AGENT_PROMPT });
+    else if (useTools)
+      messages.push({
+        role: 'system',
+        content: autoApprove ? `${AGENT_PROMPT}\n${AUTO_APPROVE_PROMPT}` : AGENT_PROMPT,
+      });
     else messages.push({ role: 'system', content: ASK_PROMPT });
 
     messages.push(...request.messages);
@@ -309,7 +327,11 @@ export class AiService {
     // Сами картинки идут частями ПОСЛЕДНЕГО сообщения пользователя: отдельным
     // system-сообщением их не примет почти ни один провайдер — изображение
     // допустимо только в сообщении пользователя.
-    if (images.length > 0) attachImages(messages, images.map((item) => item.dataUrl!));
+    if (images.length > 0)
+      attachImages(
+        messages,
+        images.map((item) => item.dataUrl!),
+      );
 
     // Предлагаем модели только то, что реально может исполнить эта сборка.
     const available = useTools
@@ -474,7 +496,12 @@ export class AiService {
           };
           messages.push(refused);
           produced.push(refused);
-          emit(ChatStreamEvent.ToolResult, { id: call.id, name: call.name, ok: false, summary: 'режим плана: изменение недоступно' });
+          emit(ChatStreamEvent.ToolResult, {
+            id: call.id,
+            name: call.name,
+            ok: false,
+            summary: 'режим плана: изменение недоступно',
+          });
           continue;
         }
 

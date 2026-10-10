@@ -120,7 +120,10 @@ describe('parseJestList', () => {
   });
 
   it('объекты с путём тоже понимаем: версии jest отвечают по-разному', () => {
-    const suite = parseJestList(JSON.stringify([{ testFilePath: '/p/tests/a.test.js' }, { path: '/p/tests/b.test.js' }]), ROOTS);
+    const suite = parseJestList(
+      JSON.stringify([{ testFilePath: '/p/tests/a.test.js' }, { path: '/p/tests/b.test.js' }]),
+      ROOTS,
+    );
     expect(suite.tests.map((test) => test.file)).toEqual(['tests/a.test.js', 'tests/b.test.js']);
   });
 

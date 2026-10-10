@@ -16,7 +16,13 @@ describe('findRunnableTests', () => {
   });
 
   it('учитывает класс и строит селектор с ним', () => {
-    const text = ['class TestSum:', '    def test_add(self):', '        assert 1', '    def test_sub(self):', '        assert 2'].join('\n');
+    const text = [
+      'class TestSum:',
+      '    def test_add(self):',
+      '        assert 1',
+      '    def test_sub(self):',
+      '        assert 2',
+    ].join('\n');
     expect(findRunnableTests('a.py', text).map((test) => test.selector)).toEqual([
       'a.py::TestSum::test_add',
       'a.py::TestSum::test_sub',

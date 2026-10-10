@@ -101,7 +101,12 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
           if (task) {
             const done = task[1]!.toLowerCase() === 'x';
             list.appendChild(
-              h('li', { class: `md-task${done ? ' is-done' : ''}` }, taskCheckbox(done), ...inlineMarkdown(task[2] ?? '')),
+              h(
+                'li',
+                { class: `md-task${done ? ' is-done' : ''}` },
+                taskCheckbox(done),
+                ...inlineMarkdown(task[2] ?? ''),
+              ),
             );
           } else {
             list.appendChild(h('li', {}, ...inlineMarkdown(itemText)));
@@ -116,7 +121,8 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
       const paragraph: string[] = [];
       while (index < lines.length) {
         const next = lines[index] ?? '';
-        if (!next.trim() || /^(#{1,4}\s|>|\s*[-*+]\s|\s*\d+[.)]\s)/.test(next) || next.trimStart().startsWith('```')) break;
+        if (!next.trim() || /^(#{1,4}\s|>|\s*[-*+]\s|\s*\d+[.)]\s)/.test(next) || next.trimStart().startsWith('```'))
+          break;
         paragraph.push(next.trim());
         index += 1;
       }
@@ -197,11 +203,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
   /** Таблица markdown: узлы создаются напрямую, без innerHTML. */
   function tableBlock(header: string[], rows: string[][]): HTMLElement {
-    const head = h(
-      'tr',
-      {},
-      ...header.map((cell) => h('th', {}, ...inlineMarkdown(cell))),
-    );
+    const head = h('tr', {}, ...header.map((cell) => h('th', {}, ...inlineMarkdown(cell))));
     const body = h('tbody', {});
     for (const row of rows) {
       body.appendChild(h('tr', {}, ...row.map((cell) => h('td', {}, ...inlineMarkdown(cell)))));
@@ -251,7 +253,12 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
       ),
     );
 
-    return h('div', { class: 'code-block' }, bar, h('pre', {}, language === 'diff' ? diffNode(code) : codeNode(code, language)));
+    return h(
+      'div',
+      { class: 'code-block' },
+      bar,
+      h('pre', {}, language === 'diff' ? diffNode(code) : codeNode(code, language)),
+    );
   }
 
   /** Диффом модель отвечает часто: + / − красим сами, Monaco его так не размечает. */

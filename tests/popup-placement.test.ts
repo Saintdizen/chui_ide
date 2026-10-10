@@ -13,7 +13,12 @@ describe('placePopup', () => {
   });
 
   it('попап выше якоря не влезает — кладём под ним', () => {
-    const placement = placePopup({ anchor: { top: 40, left: 100, right: 300, bottom: 60 }, size: { width: 200, height: 100 }, viewport, gap: 6 });
+    const placement = placePopup({
+      anchor: { top: 40, left: 100, right: 300, bottom: 60 },
+      size: { width: 200, height: 100 },
+      viewport,
+      gap: 6,
+    });
     expect(placement.top).toBe(66);
   });
 

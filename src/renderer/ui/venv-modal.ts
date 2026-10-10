@@ -237,16 +237,20 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
     setBusy(true);
 
     try {
-      const result = await deps.rpc.stream('python.createVenv', {
-        name: nameInput.value.trim() || DEFAULT_VENV_DIR,
-        // Пусто — создаём тем, что в системе по умолчанию (`python3`), иначе — выбранной версией.
-        base: baseSelect.value || undefined,
-        preset: presetSelect.value as VenvInstallPreset,
-        installRequirements: hasRequirements && requirementsBox.checked,
-      }, (event, payload) => {
-        if (event !== VenvEvent.Progress) return;
-        appendLog((payload as VenvProgressPayload).message);
-      });
+      const result = await deps.rpc.stream(
+        'python.createVenv',
+        {
+          name: nameInput.value.trim() || DEFAULT_VENV_DIR,
+          // Пусто — создаём тем, что в системе по умолчанию (`python3`), иначе — выбранной версией.
+          base: baseSelect.value || undefined,
+          preset: presetSelect.value as VenvInstallPreset,
+          installRequirements: hasRequirements && requirementsBox.checked,
+        },
+        (event, payload) => {
+          if (event !== VenvEvent.Progress) return;
+          appendLog((payload as VenvProgressPayload).message);
+        },
+      );
 
       const installed = result.installed.length > 0 ? ` В него поставлено: ${result.installed.join(', ')}.` : '';
       showToast(`Окружение ${result.environment.label} создано.${installed}`, 'info');

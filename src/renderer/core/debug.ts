@@ -105,7 +105,12 @@ export class DebugController {
         }
         case PushTopic.DebugStopped: {
           const payload = message.payload as DebugStoppedPayload;
-          this.apply({ phase: 'stopped', reason: payload.reason, frames: payload.frames, topFrame: payload.frames[0] ?? null });
+          this.apply({
+            phase: 'stopped',
+            reason: payload.reason,
+            frames: payload.frames,
+            topFrame: payload.frames[0] ?? null,
+          });
           break;
         }
         case PushTopic.DebugOutput: {

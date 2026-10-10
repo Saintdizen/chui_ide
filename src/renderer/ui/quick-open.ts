@@ -77,7 +77,9 @@ export function createQuickOpen(deps: {
     cursor = Math.min(cursor, Math.max(matches.length - 1, 0));
 
     if (matches.length === 0) {
-      list.appendChild(h('div', { class: 'palette-empty' }, files.length === 0 ? 'В проекте нет файлов' : 'Ничего не найдено'));
+      list.appendChild(
+        h('div', { class: 'palette-empty' }, files.length === 0 ? 'В проекте нет файлов' : 'Ничего не найдено'),
+      );
       return;
     }
 

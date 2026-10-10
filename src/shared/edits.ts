@@ -109,10 +109,7 @@ export function applyTextEdits(text: string, edits: readonly TextEdit[]): string
  * Сверка `oldText` с тем, что лежит в документе. Проверяем ДО применения, но
  * уже с учётом предыдущих правок набора: они могут сдвинуть текст под курсором.
  */
-function verifyOldText(
-  text: string,
-  range: { start: number; end: number; expected?: string; source: TextEdit },
-): void {
+function verifyOldText(text: string, range: { start: number; end: number; expected?: string; source: TextEdit }): void {
   const { start, end, expected, source } = range;
   if (expected === undefined) return;
 

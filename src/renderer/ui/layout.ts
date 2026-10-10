@@ -35,10 +35,7 @@ export interface Layout {
   setDockSize(size: number): void;
 }
 
-export function createLayout(
-  mount: HTMLElement,
-  options: { onChange?: () => void } = {},
-): Layout {
+export function createLayout(mount: HTMLElement, options: { onChange?: () => void } = {}): Layout {
   const topBarLeft = h('div', { class: 'topbar-left' });
   const topBarTitle = h('div', { class: 'topbar-title' });
   const topBarRight = h('div', { class: 'topbar-right' });
@@ -218,8 +215,7 @@ function readLayoutSize(root: HTMLElement, cssVar: string): number {
 function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: SplitterOptions): void {
   const horizontal = options.axis === 'x';
 
-  const readSize = (name: string): number =>
-    Number.parseFloat(getComputedStyle(root).getPropertyValue(name)) || 0;
+  const readSize = (name: string): number => Number.parseFloat(getComputedStyle(root).getPropertyValue(name)) || 0;
 
   splitter.addEventListener('pointerdown', (event) => {
     if (event.button !== 0) return;
@@ -228,9 +224,7 @@ function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: Split
     const start = horizontal ? event.clientX : event.clientY;
     const startSize = readSize(options.cssVar);
     const opposite = options.oppositeVar ? readSize(options.oppositeVar) : 0;
-    const limit = horizontal
-      ? window.innerWidth - opposite - MIN_EDITOR
-      : window.innerHeight - MIN_EDITOR;
+    const limit = horizontal ? window.innerWidth - opposite - MIN_EDITOR : window.innerHeight - MIN_EDITOR;
 
     // Захват может не сработать (например, указатель уже отпущен) — тогда
     // перетаскивание продолжит работать, просто без «резинки» за курсором.

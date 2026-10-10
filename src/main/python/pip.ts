@@ -33,7 +33,12 @@ export function installedPackages(python: string, cwd?: string): Promise<Install
       { cwd, timeout: 20_000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
-          reject(new RpcFailure(RpcErrorCode.Internal, `Не удалось получить список пакетов: ${stderr.trim() || error.message}`));
+          reject(
+            new RpcFailure(
+              RpcErrorCode.Internal,
+              `Не удалось получить список пакетов: ${stderr.trim() || error.message}`,
+            ),
+          );
           return;
         }
         resolve(parsePipList(stdout));

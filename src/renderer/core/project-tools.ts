@@ -230,7 +230,9 @@ export class ProjectToolsModel {
    * и только потом системный. Порядок важен — иначе код запустится не тем
    * Python, зависимости которого видит проект.
    */
-  private async detectPython(root: string): Promise<Pick<ProjectTools, 'pythonCommand' | 'pythonLabel' | 'pythonFromProject'>> {
+  private async detectPython(
+    root: string,
+  ): Promise<Pick<ProjectTools, 'pythonCommand' | 'pythonLabel' | 'pythonFromProject'>> {
     const configured = this.settings().pythonPath.trim();
     if (configured) {
       return { pythonCommand: shellQuote(configured), pythonLabel: configured, pythonFromProject: false };
@@ -238,7 +240,11 @@ export class ProjectToolsModel {
 
     for (const [relative, label] of PYTHON_ENVIRONMENTS) {
       if (await this.exists(`${root}/${relative}`)) {
-        return { pythonCommand: shellQuote(`./${relative}`), pythonLabel: `${label} · ./${relative}`, pythonFromProject: true };
+        return {
+          pythonCommand: shellQuote(`./${relative}`),
+          pythonLabel: `${label} · ./${relative}`,
+          pythonFromProject: true,
+        };
       }
     }
 

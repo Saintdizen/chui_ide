@@ -179,7 +179,10 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
     for (const part of parts) part.tokens = Math.round(part.tokens * scale);
     const total = parts.reduce((sum, part) => sum + part.tokens, 0);
 
-    gaugeValue.textContent = real !== undefined ? `${formatTokens(used)} / ${formatTokens(limit)} токенов` : `≈ ${formatTokens(used)} / ${formatTokens(limit)} токенов`;
+    gaugeValue.textContent =
+      real !== undefined
+        ? `${formatTokens(used)} / ${formatTokens(limit)} токенов`
+        : `≈ ${formatTokens(used)} / ${formatTokens(limit)} токенов`;
     gaugePercent.textContent = `${percent}%`;
 
     clear(gaugeBar);
@@ -226,7 +229,12 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
         h(
           'div',
           { class: 'session-info-row' },
-          h('span', { class: 'session-info-label' }, h('span', { class: `context-dot context-seg-${part.key}` }), part.label),
+          h(
+            'span',
+            { class: 'session-info-label' },
+            h('span', { class: `context-dot context-seg-${part.key}` }),
+            part.label,
+          ),
           h('span', { class: 'session-info-share' }, `${share.toFixed(1)}%`),
         ),
       );

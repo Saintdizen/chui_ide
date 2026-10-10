@@ -169,7 +169,10 @@ export function parseJestList(json: string, roots: readonly string[]): Collected
     return { tests: [], total: 0, errors: ['Список файлов jest пришёл не массивом'] };
   }
 
-  const files = parsed.map((entry) => filePathOf(entry)).filter(isString).map((file) => relativeTo(roots, file));
+  const files = parsed
+    .map((entry) => filePathOf(entry))
+    .filter(isString)
+    .map((file) => relativeTo(roots, file));
   const tests = fileTests(files);
   return { tests, total: tests.length, errors: [] };
 }

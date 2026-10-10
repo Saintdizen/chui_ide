@@ -244,14 +244,23 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     selected = entry?.path ?? null;
     render();
 
-    const parent = entry ? (entry.kind === 'directory' ? entry.path : parentOf(entry.path)) : (deps.workspace.root ?? '');
+    const parent = entry
+      ? entry.kind === 'directory'
+        ? entry.path
+        : parentOf(entry.path)
+      : (deps.workspace.root ?? '');
     const items = entry
       ? [
           { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },
           { label: 'Новая папка…', onSelect: () => startCreateIn(parent, 'directory') },
           { separator: true as const },
           { label: 'Переименовать…', hint: 'F2', onSelect: () => startRename(entry.path) },
-          { label: 'Удалить', hint: 'Del', danger: true, onSelect: () => void deps.commands.execute('file.delete', entry.path) },
+          {
+            label: 'Удалить',
+            hint: 'Del',
+            danger: true,
+            onSelect: () => void deps.commands.execute('file.delete', entry.path),
+          },
           { separator: true as const },
           {
             label: 'Копировать путь',
@@ -353,7 +362,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const isSelected = selected === entry.path;
 
       if (inlineEdit?.kind === 'rename' && inlineEdit.path === entry.path) {
-        container.appendChild(inlineInput(depth, inlineEdit.currentName, (value) => void commitRename(entry.path, value)));
+        container.appendChild(
+          inlineInput(depth, inlineEdit.currentName, (value) => void commitRename(entry.path, value)),
+        );
         continue;
       }
 
@@ -401,10 +412,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         gitChange && options.gitDecorations
           ? h('span', { class: `tree-badge is-${gitChange}`, title: CHANGE_TITLE[gitChange] }, CHANGE_LETTER[gitChange])
           : null,
-        unsaved && options.gitDecorations
-          ? h('span', { class: 'tree-dot is-modified', title: 'не сохранён' })
+        unsaved && options.gitDecorations ? h('span', { class: 'tree-dot is-modified', title: 'не сохранён' }) : null,
+        inside && options.folderChangeDot
+          ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle })
           : null,
-        inside && options.folderChangeDot ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle }) : null,
       );
 
       row.addEventListener('click', () => {
@@ -485,7 +496,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           h('p', {}, 'Проект не открыт'),
           h(
             'button',
-            { class: 'btn btn-primary', type: 'button', onClick: () => void deps.commands.execute('workspace.openFolder') },
+            {
+              class: 'btn btn-primary',
+              type: 'button',
+              onClick: () => void deps.commands.execute('workspace.openFolder'),
+            },
             'Открыть папку',
           ),
         ),
@@ -500,11 +515,42 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         // Вместо слова «Проект» — имя папки: заголовок говорит, что открыто,
         // а полный путь лежит в подсказке, чтобы длинное имя не резало кнопки.
         h('span', { class: 'panel-title', title: `${info.name} · ${info.root}` }, info.name),
-        h('div', { class: 'panel-actions' },
-          h('button', { class: 'icon-btn', type: 'button', title: 'Новый файл', onClick: () => startCreate('file') }, svgIcon('filePlus', 15)),
-          h('button', { class: 'icon-btn', type: 'button', title: 'Новая папка', onClick: () => startCreate('directory') }, svgIcon('folderPlus', 15)),
-          h('button', { class: 'icon-btn', type: 'button', title: 'Свернуть все папки', onClick: () => { expanded.clear(); render(); } }, svgIcon('collapse', 15)),
-          h('button', { class: 'icon-btn', type: 'button', title: 'Обновить', onClick: () => void deps.commands.execute('workspace.refresh') }, svgIcon('refresh', 14)),
+        h(
+          'div',
+          { class: 'panel-actions' },
+          h(
+            'button',
+            { class: 'icon-btn', type: 'button', title: 'Новый файл', onClick: () => startCreate('file') },
+            svgIcon('filePlus', 15),
+          ),
+          h(
+            'button',
+            { class: 'icon-btn', type: 'button', title: 'Новая папка', onClick: () => startCreate('directory') },
+            svgIcon('folderPlus', 15),
+          ),
+          h(
+            'button',
+            {
+              class: 'icon-btn',
+              type: 'button',
+              title: 'Свернуть все папки',
+              onClick: () => {
+                expanded.clear();
+                render();
+              },
+            },
+            svgIcon('collapse', 15),
+          ),
+          h(
+            'button',
+            {
+              class: 'icon-btn',
+              type: 'button',
+              title: 'Обновить',
+              onClick: () => void deps.commands.execute('workspace.refresh'),
+            },
+            svgIcon('refresh', 14),
+          ),
         ),
       ),
     );
@@ -673,9 +719,6 @@ function matchesGlob(name: string, relative: string, pattern: string): boolean {
 /* Имя и родителя пути считает shared/paths: разделитель там берётся из пути. */
 
 /** Есть ли активное создание внутри указанной папки. */
-function isCreateTarget(
-  edit: InlineEdit | null,
-  path: string,
-): edit is Extract<InlineEdit, { kind: 'create' }> {
+function isCreateTarget(edit: InlineEdit | null, path: string): edit is Extract<InlineEdit, { kind: 'create' }> {
   return edit?.kind === 'create' && edit.parent === path;
 }

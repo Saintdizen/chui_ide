@@ -32,7 +32,12 @@ interface Attempt {
   text: string;
 }
 
-export async function formatPython(root: string, python: string, path: string, text: string): Promise<PythonFormatResult> {
+export async function formatPython(
+  root: string,
+  python: string,
+  path: string,
+  text: string,
+): Promise<PythonFormatResult> {
   const env = { ...process.env, ...(await projectEnv(root)), PYTHONIOENCODING: 'utf-8', NO_COLOR: '1' };
 
   for (const tool of TOOLS) {
@@ -45,13 +50,7 @@ export async function formatPython(root: string, python: string, path: string, t
 }
 
 /** Запустить инструмент, отдав текст в stdin, и вернуть его вывод. */
-function run(
-  python: string,
-  args: string[],
-  cwd: string,
-  input: string,
-  env: NodeJS.ProcessEnv,
-): Promise<Attempt> {
+function run(python: string, args: string[], cwd: string, input: string, env: NodeJS.ProcessEnv): Promise<Attempt> {
   return new Promise((resolve) => {
     const child = spawn(python, args, { cwd, env, windowsHide: true });
 

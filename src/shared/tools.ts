@@ -168,7 +168,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         query: { type: 'string', description: 'Что заменить.' },
         replacement: { type: 'string', description: 'Чем заменить (пустая строка — удалить).' },
-        isRegex: { type: 'boolean', description: 'Считать query регулярным выражением (тогда в замене работают группы $1).' },
+        isRegex: {
+          type: 'boolean',
+          description: 'Считать query регулярным выражением (тогда в замене работают группы $1).',
+        },
         caseSensitive: { type: 'boolean', description: 'Учитывать регистр (по умолчанию — нет).' },
         glob: { type: 'string', description: 'Маска файлов, например **/*.ts' },
       },
@@ -241,8 +244,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'delete_file',
     side: 'main',
-    description:
-      'Удалить файл или папку (в корзину). Вызывай только когда уверен: отмена — из корзины вручную.',
+    description: 'Удалить файл или папку (в корзину). Вызывай только когда уверен: отмена — из корзины вручную.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -293,8 +295,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'git_diff',
     side: 'main',
-    description:
-      'Diff файла по git: рабочее дерево против индекса, а с staged=true — индекс против HEAD.',
+    description: 'Diff файла по git: рабочее дерево против индекса, а с staged=true — индекс против HEAD.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -417,7 +418,9 @@ export function toOpenAiTools(specs: readonly AgentToolSpec[]): OpenAiFunctionTo
 }
 
 /** Разбор аргументов вызова. Битый JSON не роняет цикл — агент получает ошибку текстом. */
-export function parseToolArguments(raw: string): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
+export function parseToolArguments(
+  raw: string,
+): { ok: true; value: Record<string, unknown> } | { ok: false; message: string } {
   const text = raw.trim();
   if (!text) return { ok: true, value: {} };
   try {
@@ -427,6 +430,9 @@ export function parseToolArguments(raw: string): { ok: true; value: Record<strin
     }
     return { ok: true, value: value as Record<string, unknown> };
   } catch (error) {
-    return { ok: false, message: `Не удалось разобрать аргументы: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      ok: false,
+      message: `Не удалось разобрать аргументы: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }

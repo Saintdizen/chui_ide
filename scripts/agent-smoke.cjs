@@ -189,7 +189,10 @@ app.whenReady().then(async () => {
       bodies: bodies.map((body) => ({ ...body })),
       starts: events.filter(([event]) => event === 'tool_start').map(([, payload]) => payload),
       results: events.filter(([event]) => event === 'tool_result').map(([, payload]) => payload),
-      reasoning: events.filter(([event]) => event === 'reasoning').map(([, payload]) => payload.text).join(''),
+      reasoning: events
+        .filter(([event]) => event === 'reasoning')
+        .map(([, payload]) => payload.text)
+        .join(''),
       toolNames: (bodies[0]?.tools ?? []).map((tool) => tool.function.name),
     };
   };
@@ -228,7 +231,10 @@ app.whenReady().then(async () => {
     requestTwice = false;
     check(
       'повторный одинаковый вызов помечен как повтор',
-      run.results.length === 2 && run.results[0]?.ok === true && run.results[1]?.ok === false && /повтор/i.test(String(run.results[1]?.summary)),
+      run.results.length === 2 &&
+        run.results[0]?.ok === true &&
+        run.results[1]?.ok === false &&
+        /повтор/i.test(String(run.results[1]?.summary)),
       run.results.map((item) => item.summary),
     );
     check('без моста apply_edit не предлагается', !run.toolNames.includes('apply_edit'), run.toolNames);
@@ -281,7 +287,14 @@ app.whenReady().then(async () => {
         return Promise.resolve({ rejected: true });
       },
     };
-    const oneEdit = (overrides) => ({ startLine: 1, startColumn: 1, endLine: 1, endColumn: 1, newText: 'x', ...overrides });
+    const oneEdit = (overrides) => ({
+      startLine: 1,
+      startColumn: 1,
+      endLine: 1,
+      endColumn: 1,
+      newText: 'x',
+      ...overrides,
+    });
 
     requested = { name: 'apply_edit', args: { edits: [{ path: 'notes.txt', edits: [oneEdit({})] }] } };
     run = await chat(guard);
@@ -293,7 +306,11 @@ app.whenReady().then(async () => {
 
     requested = { name: 'apply_edit', args: { edits: [{ path: file, edits: [oneEdit({ startLine: 0 })] }] } };
     run = await chat(guard);
-    check('нулевая строка отклонена', run.results[0]?.ok === false && run.results[0]?.summary.includes('≥ 1'), run.results[0]?.summary);
+    check(
+      'нулевая строка отклонена',
+      run.results[0]?.ok === false && run.results[0]?.summary.includes('≥ 1'),
+      run.results[0]?.summary,
+    );
     check('renderer не тронут битыми аргументами', touched.length === 0);
 
     /* 5. запуск команды */
@@ -310,7 +327,11 @@ app.whenReady().then(async () => {
     run = await chat(shellHost);
     check('с мостом run_terminal предлагается', run.toolNames.includes('run_terminal'), run.toolNames);
     check('команда выполнена успешно', run.results[0]?.ok === true, run.results[0]?.summary);
-    check('вывод команды ушёл модели', String(run.results[0]?.detail ?? '').includes('chui-cmd-ok'), run.results[0]?.detail);
+    check(
+      'вывод команды ушёл модели',
+      String(run.results[0]?.detail ?? '').includes('chui-cmd-ok'),
+      run.results[0]?.detail,
+    );
     check('команда дошла до подтверждения', commands[0] === 'echo chui-cmd-ok', commands);
 
     requested = { name: 'run_terminal', args: { command: 'exit 3' } };
@@ -368,7 +389,11 @@ app.whenReady().then(async () => {
     check('ai.test просит ключ для внешнего адреса', !noKey.ok && noKey.message.includes('ключ'), noKey.message);
 
     const refused = await ai.testConnection({ baseUrl: 'http://127.0.0.1:59999/v1' });
-    check('ai.test объясняет недоступный сервер', !refused.ok && refused.message.includes('не отвечает'), refused.message);
+    check(
+      'ai.test объясняет недоступный сервер',
+      !refused.ok && refused.message.includes('не отвечает'),
+      refused.message,
+    );
 
     /* 10. полный доступ */
     const autoCalls = [];
@@ -377,7 +402,10 @@ app.whenReady().then(async () => {
         autoCalls.push({ kind: 'edits', autoApprove });
         return Promise.resolve({
           rejected: false,
-          result: { reports: edits.map((item) => ({ path: item.path, applied: item.edits.length, version: 2 })), failed: [] },
+          result: {
+            reports: edits.map((item) => ({ path: item.path, applied: item.edits.length, version: 2 })),
+            failed: [],
+          },
         });
       },
       confirmCommand(command) {
@@ -389,23 +417,37 @@ app.whenReady().then(async () => {
     requested = { name: 'run_terminal', args: { command: 'echo полный-доступ' } };
     run = await chat(autoHost, true, true);
     check('полный доступ выполняет рядовую команду', run.results[0]?.ok === true, run.results[0]?.summary);
-    check('полный доступ не спрашивает про рядовую команду', autoCalls.filter((c) => c.kind === 'confirm').length === 0, autoCalls);
+    check(
+      'полный доступ не спрашивает про рядовую команду',
+      autoCalls.filter((c) => c.kind === 'confirm').length === 0,
+      autoCalls,
+    );
 
     requested = { name: 'run_terminal', args: { command: 'rm -rf /' } };
     run = await chat(autoHost, true, true);
-    check('полный доступ всё равно спрашивает про необратимую команду', autoCalls.some((c) => c.kind === 'confirm'), autoCalls);
+    check(
+      'полный доступ всё равно спрашивает про необратимую команду',
+      autoCalls.some((c) => c.kind === 'confirm'),
+      autoCalls,
+    );
 
     requested = {
       name: 'apply_edit',
       args: { edits: [{ path: file, edits: [oneEdit({})] }] },
     };
     run = await chat(autoHost, true, true);
-    check('полный доступ применяет правки без ревью', autoCalls.some((c) => c.kind === 'edits' && c.autoApprove === true), autoCalls);
+    check(
+      'полный доступ применяет правки без ревью',
+      autoCalls.some((c) => c.kind === 'edits' && c.autoApprove === true),
+      autoCalls,
+    );
     check('результат правок вернулся модели при полном доступе', run.results[0]?.ok === true, run.results[0]?.summary);
 
     /* 11. режим «План»: только чтение, изменения не исполняются */
     requested = { name: 'apply_edit', args: { edits: [{ path: file, edits: [oneEdit({})] }] } };
-    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) }, true, false, undefined, { planMode: true });
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) }, true, false, undefined, {
+      planMode: true,
+    });
     check(
       'в режиме «План» инструменты изменения не предлагаются',
       !run.toolNames.includes('apply_edit') && !run.toolNames.includes('run_terminal'),
@@ -455,8 +497,22 @@ app.whenReady().then(async () => {
       getDiagnostics: () =>
         Promise.resolve({
           items: [
-            { path: file, line: 3, column: 5, severity: 'error', message: 'Тип string не присваивается number', source: 'ts' },
-            { path: file, line: 8, column: 1, severity: 'warning', message: 'Переменная не используется', source: 'eslint' },
+            {
+              path: file,
+              line: 3,
+              column: 5,
+              severity: 'error',
+              message: 'Тип string не присваивается number',
+              source: 'ts',
+            },
+            {
+              path: file,
+              line: 8,
+              column: 1,
+              severity: 'warning',
+              message: 'Переменная не используется',
+              source: 'eslint',
+            },
           ],
         }),
     };
@@ -494,7 +550,11 @@ app.whenReady().then(async () => {
     /* 13. усилие размышления — только тем моделям, которые его понимают */
     requested = { name: 'read_file', args: { path: file } };
     run = await chat(undefined, false, false, undefined, { model: 'o3-mini', reasoningEffort: 'high' });
-    check('reasoning_effort доехал до провайдера', run.bodies[0]?.reasoning_effort === 'high', run.bodies[0]?.reasoning_effort);
+    check(
+      'reasoning_effort доехал до провайдера',
+      run.bodies[0]?.reasoning_effort === 'high',
+      run.bodies[0]?.reasoning_effort,
+    );
     check(
       'модели с фиксированным размышлением temperature не отправляется',
       run.bodies[0]?.temperature === undefined,
@@ -513,7 +573,11 @@ app.whenReady().then(async () => {
     check('обычной модели temperature уходит', run.bodies[0]?.temperature === 0, run.bodies[0]?.temperature);
 
     run = await chat(undefined, false, false, undefined, { model: 'o3-mini', reasoningEffort: 'off' });
-    check('«без размышлений» ничего не отправляет', run.bodies[0]?.reasoning_effort === undefined, run.bodies[0]?.reasoning_effort);
+    check(
+      '«без размышлений» ничего не отправляет',
+      run.bodies[0]?.reasoning_effort === undefined,
+      run.bodies[0]?.reasoning_effort,
+    );
 
     check('в режиме «Вопрос» инструменты не предлагаются', run.bodies[0]?.tools === undefined);
     check(
@@ -535,7 +599,10 @@ app.whenReady().then(async () => {
       parts.some((part) => part.type === 'image_url' && part.image_url?.url === shot),
       JSON.stringify(lastUser?.content)?.slice(0, 160),
     );
-    check('текст вопроса остался рядом с картинкой', parts.some((part) => part.type === 'text' && part.text === 'вопрос'));
+    check(
+      'текст вопроса остался рядом с картинкой',
+      parts.some((part) => part.type === 'text' && part.text === 'вопрос'),
+    );
     check(
       'файл-вложение по-прежнему едет системным текстом',
       wire.some((message) => message.role === 'system' && String(message.content).includes('const a = 1;')),
@@ -552,7 +619,13 @@ app.whenReady().then(async () => {
     let rejectedBodies = 0;
     try {
       const bad = await chat(undefined, false, false, [
-        { kind: 'image', label: 'big.png', title: 'Изображение big.png', text: '', dataUrl: 'data:text/plain;base64,AAAA' },
+        {
+          kind: 'image',
+          label: 'big.png',
+          title: 'Изображение big.png',
+          text: '',
+          dataUrl: 'data:text/plain;base64,AAAA',
+        },
       ]);
       rejectedBodies = bad.bodies.length;
     } catch {

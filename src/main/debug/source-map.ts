@@ -103,11 +103,19 @@ export class SourceMap {
 
   static fromJson(raw: unknown, base: string): SourceMap | null {
     if (!raw || typeof raw !== 'object') return null;
-    const data = raw as { version?: unknown; sources?: unknown; sourceRoot?: unknown; mappings?: unknown; file?: unknown };
+    const data = raw as {
+      version?: unknown;
+      sources?: unknown;
+      sourceRoot?: unknown;
+      mappings?: unknown;
+      file?: unknown;
+    };
     if (typeof data.mappings !== 'string' || !Array.isArray(data.sources)) return null;
     // Версию не проверяем жёстко: сборщики иногда опускают поле, а формат всё равно третий.
     const sourceRoot = typeof data.sourceRoot === 'string' ? data.sourceRoot : '';
-    const sources = data.sources.map((source) => resolveSource(typeof source === 'string' ? source : '', sourceRoot, base));
+    const sources = data.sources.map((source) =>
+      resolveSource(typeof source === 'string' ? source : '', sourceRoot, base),
+    );
     return new SourceMap(sources, typeof data.file === 'string' ? data.file : null, decodeMappings(data.mappings));
   }
 

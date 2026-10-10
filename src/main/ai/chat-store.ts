@@ -66,7 +66,11 @@ export class ChatStore {
   private fileFor(root: string): string {
     const resolved = path.resolve(root);
     const hash = createHash('sha1').update(resolved).digest('hex').slice(0, 12);
-    const safe = path.basename(resolved).replace(/[^\w.-]+/g, '_').slice(0, 40) || 'workspace';
+    const safe =
+      path
+        .basename(resolved)
+        .replace(/[^\w.-]+/g, '_')
+        .slice(0, 40) || 'workspace';
     const dir = this.dir ?? path.join(app.getPath('userData'), 'chats');
     return path.join(dir, `${safe}-${hash}.json`);
   }

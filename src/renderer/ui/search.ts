@@ -125,7 +125,10 @@ export function createSearchView(deps: SearchDeps): SearchView {
           h('span', { class: 'search-line' }, String(hit.line)),
           h('span', { class: 'search-text' }, highlight(hit.text, query)),
         );
-        row.addEventListener('click', () => void deps.commands.execute('file.revealAt', hit.path, hit.line, hit.column));
+        row.addEventListener(
+          'click',
+          () => void deps.commands.execute('file.revealAt', hit.path, hit.line, hit.column),
+        );
         results.appendChild(row);
       }
     }

@@ -210,7 +210,10 @@ function fakeAdapterFile(): string {
   return fake;
 }
 
-function fakeService(adapterID: 'node' | 'python' = 'python', threadDelayMs = 15): { service: DebugService; events: Push[] } {
+function fakeService(
+  adapterID: 'node' | 'python' = 'python',
+  threadDelayMs = 15,
+): { service: DebugService; events: Push[] } {
   const fake = fakeAdapterFile();
 
   const events: Push[] = [];
@@ -462,10 +465,7 @@ describe('DebugService', () => {
   it('условие точки сохраняется и переживает ответ отладчика', async () => {
     const { service } = fakeService();
     // Условие задаём до старта: подтвердить некому, но и потерять его нельзя.
-    const confirmed = await service.setBreakpoints('/proj/app.py', [
-      { line: 2 },
-      { line: 4, condition: 'n > 100' },
-    ]);
+    const confirmed = await service.setBreakpoints('/proj/app.py', [{ line: 2 }, { line: 4, condition: 'n > 100' }]);
     const conditional = confirmed.find((item) => item.line === 4);
     expect(conditional?.condition).toBe('n > 100');
     // У безусловной точки поля нет: пустая строка не должна выглядеть условием.
@@ -512,7 +512,9 @@ describe('DebugService', () => {
 
   it('точка без настроек не несёт пустых полей', async () => {
     const { service } = fakeService();
-    const [first] = await service.setBreakpoints('/proj/app.py', [{ line: 1, condition: '', logMessage: '', hitCondition: '  ' }]);
+    const [first] = await service.setBreakpoints('/proj/app.py', [
+      { line: 1, condition: '', logMessage: '', hitCondition: '  ' },
+    ]);
     // Пустое — это «настройки нет», а не «пустая настройка»: поле не должно появиться.
     expect(first).toEqual({ line: 1, verified: false });
     service.dispose();

@@ -49,7 +49,7 @@ describe('parsePythonImports', () => {
 
   it('строка и комментарий — не импорт', () => {
     expect(modulesOf('s = "import os"')).toEqual([]);
-    expect(modulesOf("# import os")).toEqual([]);
+    expect(modulesOf('# import os')).toEqual([]);
     expect(modulesOf("value = 'from a import b'")).toEqual([]);
   });
 
@@ -115,11 +115,7 @@ describe('isExternalSpecifier', () => {
 
 describe('parseScriptImports', () => {
   it('именованный, побочный и default-импорт', () => {
-    const text = [
-      "import { a } from 'pkg-a'",
-      "import 'pkg-b'",
-      "import React from 'react'",
-    ].join('\n');
+    const text = ["import { a } from 'pkg-a'", "import 'pkg-b'", "import React from 'react'"].join('\n');
     expect(scriptModules(text)).toEqual(['pkg-a', 'pkg-b', 'react']);
   });
 

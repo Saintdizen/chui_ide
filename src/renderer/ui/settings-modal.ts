@@ -45,7 +45,11 @@ export interface SettingsModalView {
 
 type SectionId = 'ai' | 'editor' | 'explorer' | 'run' | 'appearance' | 'project' | 'lsp';
 
-const SECTIONS: ReadonlyArray<{ id: SectionId; title: string; icon: 'sparkle' | 'file' | 'sun' | 'panel' | 'folder' | 'play' | 'command' }> = [
+const SECTIONS: ReadonlyArray<{
+  id: SectionId;
+  title: string;
+  icon: 'sparkle' | 'file' | 'sun' | 'panel' | 'folder' | 'play' | 'command';
+}> = [
   { id: 'ai', title: 'AI', icon: 'sparkle' },
   { id: 'editor', title: 'Редактор', icon: 'file' },
   { id: 'explorer', title: 'Проводник', icon: 'folder' },
@@ -86,7 +90,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   const pane = h('div', { class: 'modal-pane' });
   const title = h('span', { class: 'modal-title' }, 'Настройки');
 
-  const closeButton = h('button', { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: () => close() }, svgIcon('close', 15));
+  const closeButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: () => close() },
+    svgIcon('close', 15),
+  );
 
   const element = h(
     'div',
@@ -172,9 +180,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   /** Отправить патч и запомнить нормализованный ответ main. */
   async function patch(value: SettingsPatch, rerender = false): Promise<void> {
     try {
-      settings = deps.project
-        ? await deps.project.patch(value)
-        : await deps.rpc.request('settings.update', value);
+      settings = deps.project ? await deps.project.patch(value) : await deps.rpc.request('settings.update', value);
       if (rerender) render();
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -196,7 +202,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     return input;
   }
 
-  function numberInput(value: number, min: number, max: number, step: number, onCommit: (next: number) => void): HTMLInputElement {
+  function numberInput(
+    value: number,
+    min: number,
+    max: number,
+    step: number,
+    onCommit: (next: number) => void,
+  ): HTMLInputElement {
     const input = h('input', { class: 'field-input', type: 'number', min, max, step });
     input.value = String(value);
     input.addEventListener('change', () => {
@@ -325,7 +337,8 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     const models = [...new Set([...(provider?.models ?? []), ...testedModels])];
     const currentModel = ai.activeModel ?? provider?.defaultModel ?? models[0] ?? '';
     const modelOptions = models.map((model) => ({ value: model, label: model }));
-    if (currentModel && !models.includes(currentModel)) modelOptions.unshift({ value: currentModel, label: currentModel });
+    if (currentModel && !models.includes(currentModel))
+      modelOptions.unshift({ value: currentModel, label: currentModel });
 
     const modelField: Child =
       modelOptions.length > 0
@@ -390,7 +403,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       field('Название', labelInput),
       field('Адрес API', baseUrlInput),
       preset ? h('div', { class: 'field-hint' }, preset.hint) : null,
-      field('API-ключ', h('div', { class: 'field-row' }, keyInput, testButton, provider?.hasApiKey ? clearKeyButton : null)),
+      field(
+        'API-ключ',
+        h('div', { class: 'field-row' }, keyInput, testButton, provider?.hasApiKey ? clearKeyButton : null),
+      ),
       status,
       h('div', { class: 'field-hint' }, 'Ключ хранится в main-процессе и в renderer не попадает.'),
       field('Модель', modelField),
@@ -414,7 +430,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Сколько модель думает перед ответом. Отправляется только тем моделям, которые это понимают: ' +
           'у остальных параметр не уходит, чтобы не ломать запрос.',
       ),
-      field('Температура', numberInput(ai.temperature, 0, 2, 0.1, (value) => void patch({ ai: { temperature: value } }))),
+      field(
+        'Температура',
+        numberInput(ai.temperature, 0, 2, 0.1, (value) => void patch({ ai: { temperature: value } })),
+      ),
       h(
         'div',
         { class: 'field-hint' },
@@ -430,7 +449,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Сколько токенов модель может написать в ответе. Большие значения (вплоть до 1 000 000) ' +
           'уместны для моделей с широким лимитом; если модель ответит ошибкой про лимит — уменьшите число.',
       ),
-      field('Шагов агента', numberInput(ai.maxSteps, 1, 500, 1, (value) => void patch({ ai: { maxSteps: value } }))),
+      field(
+        'Шагов агента',
+        numberInput(ai.maxSteps, 1, 500, 1, (value) => void patch({ ai: { maxSteps: value } })),
+      ),
       field(
         'Шагов агента при полном доступе',
         numberInput(ai.maxAutopilotSteps, 1, 500, 1, (value) => void patch({ ai: { maxAutopilotSteps: value } })),
@@ -465,7 +487,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
       field(
         'Сжимать беседу при (токенов)',
-        numberInput(ai.compactAtTokens, 0, 2_000_000, 10_000, (value) => void patch({ ai: { compactAtTokens: value } })),
+        numberInput(
+          ai.compactAtTokens,
+          0,
+          2_000_000,
+          10_000,
+          (value) => void patch({ ai: { compactAtTokens: value } }),
+        ),
       ),
       h(
         'div',
@@ -543,7 +571,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     const showUnused = (deps.project?.kind() ?? null) !== 'python';
     return [
       h('div', { class: 'field-label' }, 'Шрифт'),
-      field('Размер шрифта', numberInput(editor.fontSize, 8, 32, 1, (value) => editable({ fontSize: value }))),
+      field(
+        'Размер шрифта',
+        numberInput(editor.fontSize, 8, 32, 1, (value) => editable({ fontSize: value })),
+      ),
       switchRow('Лигатуры шрифта', editor.fontLigatures, (value) => editable({ fontLigatures: value })),
       h('div', { class: 'field-hint' }, 'Связки символов (`=>`, `!==`, `!=`) одним знаком — свойство JetBrains Mono.'),
 
@@ -597,14 +628,20 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Вид редактора'),
       switchRow('Показывать миникарту', editor.minimap, (value) => editable({ minimap: value })),
-      switchRow('Номера строк', editor.lineNumbers !== 'off', (value) => editable({ lineNumbers: value ? 'on' : 'off' })),
+      switchRow('Номера строк', editor.lineNumbers !== 'off', (value) =>
+        editable({ lineNumbers: value ? 'on' : 'off' }),
+      ),
       switchRow('Подсвечивать строку курсора', editor.renderLineHighlight !== 'none', (value) =>
         editable({ renderLineHighlight: value ? 'all' : 'none' }),
       ),
-      switchRow('Разноцветные парные скобки', editor.bracketPairColorization, (value) => editable({ bracketPairColorization: value })),
+      switchRow('Разноцветные парные скобки', editor.bracketPairColorization, (value) =>
+        editable({ bracketPairColorization: value }),
+      ),
       switchRow('Липкий заголовок блока', editor.stickyScroll, (value) => editable({ stickyScroll: value })),
       switchRow('Плавная прокрутка', editor.smoothScrolling, (value) => editable({ smoothScrolling: value })),
-      switchRow('Прокрутка за последнюю строку', editor.scrollBeyondLastLine, (value) => editable({ scrollBeyondLastLine: value })),
+      switchRow('Прокрутка за последнюю строку', editor.scrollBeyondLastLine, (value) =>
+        editable({ scrollBeyondLastLine: value }),
+      ),
 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Подсказки и проверки'),
@@ -641,7 +678,12 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     const explorer: ExplorerSettings = settings!.explorer;
     const apply = (values: Partial<ExplorerSettings>): void => void patch({ explorer: values });
 
-    const exclude = h('textarea', { class: 'field-input', rows: 3, spellcheck: false, placeholder: 'node_modules\n*.min.js' });
+    const exclude = h('textarea', {
+      class: 'field-input',
+      rows: 3,
+      spellcheck: false,
+      placeholder: 'node_modules\n*.min.js',
+    });
     exclude.value = explorer.exclude.join('\n');
     exclude.addEventListener('change', () => {
       const patterns = exclude.value
@@ -654,7 +696,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     return [
       h('div', { class: 'field-label' }, 'Вид дерева'),
       switchRow('Значки по виду файла', explorer.icons, (value) => apply({ icons: value })),
-      h('div', { class: 'field-hint' }, 'Цветной значок говорит о языке и типе файла: JS, Python, JSON, папка с исходниками.'),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Цветной значок говорит о языке и типе файла: JS, Python, JSON, папка с исходниками.',
+      ),
       field(
         'Плотность строк',
         selectInput(
@@ -667,7 +713,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           (value) => apply({ rowDensity: value as ExplorerSettings['rowDensity'] }),
         ),
       ),
-      field('Отступ уровня, px', numberInput(explorer.indent, 6, 32, 2, (value) => apply({ indent: value }))),
+      field(
+        'Отступ уровня, px',
+        numberInput(explorer.indent, 6, 32, 2, (value) => apply({ indent: value })),
+      ),
 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Содержимое'),
@@ -685,11 +734,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         ),
       ),
       field('Что не показывать', exclude),
-      h('div', { class: 'field-hint' }, 'По строке на шаблон: `*.min.js`, `coverage`, `dist`. Поддерживаются `*`, `?` и `**`.'),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'По строке на шаблон: `*.min.js`, `coverage`, `dist`. Поддерживаются `*`, `?` и `**`.',
+      ),
 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Поведение'),
-      switchRow('Открывать файл одним кликом', explorer.openOnSingleClick, (value) => apply({ openOnSingleClick: value })),
+      switchRow('Открывать файл одним кликом', explorer.openOnSingleClick, (value) =>
+        apply({ openOnSingleClick: value }),
+      ),
       h('div', { class: 'field-hint' }, 'Выключено — как в PyCharm: одинарный клик выделяет, двойной открывает.'),
       switchRow('Пометки git у файлов', explorer.gitDecorations, (value) => apply({ gitDecorations: value })),
       switchRow('Точка у папок с правками', explorer.folderChangeDot, (value) => apply({ folderChangeDot: value })),
@@ -722,7 +777,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
             (value) => apply({ packageManager: value as RunSettings['packageManager'] }),
           ),
         ),
-        h('div', { class: 'field-hint' }, '«Автоматически» — по файлу блокировки в корне проекта: pnpm-lock.yaml, yarn.lock, bun.lockb, package-lock.json.'),
+        h(
+          'div',
+          { class: 'field-hint' },
+          '«Автоматически» — по файлу блокировки в корне проекта: pnpm-lock.yaml, yarn.lock, bun.lockb, package-lock.json.',
+        ),
       );
     }
 
@@ -762,9 +821,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     return [
       field(
         'Тема',
-        selectInput(THEME_OPTIONS.map((item) => ({ value: item.value, label: item.label })), settings!.appearance.theme, (value) => {
-          void deps.theme.set(value as ThemeChoice);
-        }),
+        selectInput(
+          THEME_OPTIONS.map((item) => ({ value: item.value, label: item.label })),
+          settings!.appearance.theme,
+          (value) => {
+            void deps.theme.set(value as ThemeChoice);
+          },
+        ),
       ),
       h('div', { class: 'field-hint' }, '«Как в системе» переключает палитру вслед за схемой рабочего стола.'),
     ];

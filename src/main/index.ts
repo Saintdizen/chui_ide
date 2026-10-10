@@ -103,7 +103,10 @@ if (!app.requestSingleInstanceLock()) {
     );
     // Git ничего не хранит сам: корень берётся у рабочей папки, а об изменениях
     // узнаём после своих же операций и после сохранения файла.
-    const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
+    const git = new GitService(
+      () => workspace.rootPath(),
+      (topic, payload) => pushToRenderers(topic, payload),
+    );
     // Языковые серверы — внешние процессы: настройка задаёт команду, main держит их жизненный цикл.
     // Сервер подсказок запускаем с интерпретатором окружения: иначе он не видит
     // установленные пакеты и не подсказывает импорты. Проверка путей — синхронная:
@@ -130,7 +133,18 @@ if (!app.requestSingleInstanceLock()) {
     const sessions = new SessionStore();
     const projectConfig = new ProjectConfigStore();
 
-    registerIpc({ settings, workspace, ai, terminals, git, lsp, debug, sessions, projectConfig, host: new HostClient() });
+    registerIpc({
+      settings,
+      workspace,
+      ai,
+      terminals,
+      git,
+      lsp,
+      debug,
+      sessions,
+      projectConfig,
+      host: new HostClient(),
+    });
     serveRenderer();
     createApplicationMenu();
     // Приложение начинается со списка проектов: окно IDE откроется после

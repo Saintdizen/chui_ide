@@ -1,10 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import {
-  applyProjectSettingsPatch,
-  sanitizeProjectSettings,
-  type ProjectSettings,
-} from '../shared/project-config';
+import { applyProjectSettingsPatch, sanitizeProjectSettings, type ProjectSettings } from '../shared/project-config';
 
 /** Папка конфигурации в корне проекта. */
 export const PROJECT_CONFIG_DIR = '.chui_ide';

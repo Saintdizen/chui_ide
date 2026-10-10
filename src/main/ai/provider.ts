@@ -26,9 +26,5 @@ export interface AiProvider {
   readonly id: string;
   readonly baseUrl: string;
   listModels(signal?: AbortSignal): Promise<string[]>;
-  streamChat(
-    params: StreamChatParams,
-    handlers: StreamChatHandlers,
-    signal: AbortSignal,
-  ): Promise<ChatStreamDone>;
+  streamChat(params: StreamChatParams, handlers: StreamChatHandlers, signal: AbortSignal): Promise<ChatStreamDone>;
 }

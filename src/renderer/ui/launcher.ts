@@ -62,7 +62,12 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
     'div',
     { class: 'launcher-clone', hidden: true },
     h('label', { class: 'field' }, h('span', {}, 'Адрес репозитория'), urlInput),
-    h('label', { class: 'field' }, h('span', {}, 'Папка назначения'), h('div', { class: 'field-row' }, destination, pickDestination)),
+    h(
+      'label',
+      { class: 'field' },
+      h('span', {}, 'Папка назначения'),
+      h('div', { class: 'field-row' }, destination, pickDestination),
+    ),
     h(
       'div',
       { class: 'launcher-row' },
@@ -84,7 +89,11 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
       'div',
       { class: 'launcher-intro' },
       h('h1', { class: 'launcher-title' }, 'chui_iDE'),
-      h('p', { class: 'launcher-subtitle' }, 'Откройте папку проекта или склонируйте репозиторий — дальше начнётся обычная работа в редакторе.'),
+      h(
+        'p',
+        { class: 'launcher-subtitle' },
+        'Откройте папку проекта или склонируйте репозиторий — дальше начнётся обычная работа в редакторе.',
+      ),
     ),
     h('div', { class: 'launcher-actions' }, openButton, cloneToggle),
     cloneForm,
@@ -121,7 +130,11 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
 
     if (projects.length === 0) {
       recentHost.appendChild(
-        h('p', { class: 'launcher-empty' }, 'Пока ничего не открывалось. Первый проект появится здесь, и его можно будет открыть одним нажатием.'),
+        h(
+          'p',
+          { class: 'launcher-empty' },
+          'Пока ничего не открывалось. Первый проект появится здесь, и его можно будет открыть одним нажатием.',
+        ),
       );
       return;
     }
@@ -142,9 +155,7 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
           h('span', { class: 'launcher-item-name' }, project.name),
           h('span', { class: 'launcher-item-path' }, project.path),
         ),
-        project.exists
-          ? null
-          : h('span', { class: 'launcher-item-hint' }, 'папка не найдена'),
+        project.exists ? null : h('span', { class: 'launcher-item-hint' }, 'папка не найдена'),
         h(
           'span',
           {

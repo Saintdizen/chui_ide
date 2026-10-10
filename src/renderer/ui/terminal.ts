@@ -1,12 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import {
-  PushTopic,
-  type TerminalDataPayload,
-  type TerminalExitPayload,
-  type TerminalSession,
-} from '../../shared/api';
+import { PushTopic, type TerminalDataPayload, type TerminalExitPayload, type TerminalSession } from '../../shared/api';
 import type { RpcClient } from '../core/rpc';
 import { TERMINAL_THEMES, type Scheme } from '../core/theme';
 import { h, svgIcon } from './dom';
@@ -150,7 +145,11 @@ export function createTerminalPanel(deps: {
         cwd: deps.cwd() ?? undefined,
       });
 
-      const tab = h('button', { class: 'term-tab', type: 'button', title: `${session.shell} · ${session.cwd}` }, session.title);
+      const tab = h(
+        'button',
+        { class: 'term-tab', type: 'button', title: `${session.shell} · ${session.cwd}` },
+        session.title,
+      );
       tab.addEventListener('click', () => activate(session.id));
       tab.addEventListener('auxclick', (event) => {
         if (event.button === 1) void closeSession(session.id);

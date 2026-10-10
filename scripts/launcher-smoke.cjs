@@ -74,7 +74,10 @@ app.whenReady().then(async () => {
 
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
-  const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
+  const git = new GitService(
+    () => workspace.rootPath(),
+    (topic, payload) => pushToRenderers(topic, payload),
+  );
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
 
@@ -90,17 +93,28 @@ app.whenReady().then(async () => {
   // Признак своей рамки появляется после первого запроса состояния окна,
   // поэтому даём кадру дорисоваться, а не проверяем сразу после загрузки.
   await new Promise((resolve) => setTimeout(resolve, 400));
-  const welcomeProbe = await probePage(welcome, `({
+  const welcomeProbe = await probePage(
+    welcome,
+    `({
     launcher: Boolean(document.querySelector('.launcher')),
     actions: [...document.querySelectorAll('.launcher-action')].map((button) => button.textContent.trim()),
     empty: Boolean(document.querySelector('.launcher-empty')),
     recent: [...document.querySelectorAll('.launcher-item-name')].map((node) => node.textContent),
     customFrame: document.documentElement.classList.contains('has-custom-frame'),
-  })`);
+  })`,
+  );
 
   check('разметка стартового окна на месте', Boolean(welcomeProbe?.launcher) && Boolean(welcomeProbe?.customFrame));
-  check('есть обе кнопки старта', welcomeProbe.actions.join('|') === 'Открыть проект|Склонировать проект', welcomeProbe.actions);
-  check('список недавних не пуст', welcomeProbe.recent.includes('demo-project') && !welcomeProbe.empty, welcomeProbe.recent);
+  check(
+    'есть обе кнопки старта',
+    welcomeProbe.actions.join('|') === 'Открыть проект|Склонировать проект',
+    welcomeProbe.actions,
+  );
+  check(
+    'список недавних не пуст',
+    welcomeProbe.recent.includes('demo-project') && !welcomeProbe.empty,
+    welcomeProbe.recent,
+  );
   await shot(welcome, 'chui-launcher-welcome.png');
 
   // Открываем проект так же, как это делает кнопка в окне: через мост и реальный роутер.
@@ -117,7 +131,11 @@ app.whenReady().then(async () => {
   } catch (error) {
     opened = { ok: false, error: String(error.message) };
   }
-  check('открытие проекта вернуло корень', opened.ok && opened.value.root === project, opened.ok ? opened.value : opened.error);
+  check(
+    'открытие проекта вернуло корень',
+    opened.ok && opened.value.root === project,
+    opened.ok ? opened.value : opened.error,
+  );
 
   // Лаунчер закрывает своё окно сам, получив ответ, — повторяем то же, что делает UI.
   await probePage(welcome, `void window.chui.call({ id: 'smoke-close', method: 'window.close' })`);

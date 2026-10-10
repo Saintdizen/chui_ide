@@ -44,8 +44,14 @@ function startServer() {
         const scenario = req.headers['x-scenario'];
         if (scenario === 'tool') {
           sse(res, 'message_start', { message: { usage: { input_tokens: 12 } } });
-          sse(res, 'content_block_start', { index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name: 'read_file' } });
-          sse(res, 'content_block_delta', { index: 0, delta: { type: 'input_json_delta', partial_json: '{"path":"/x.ts"' } });
+          sse(res, 'content_block_start', {
+            index: 0,
+            content_block: { type: 'tool_use', id: 'toolu_1', name: 'read_file' },
+          });
+          sse(res, 'content_block_delta', {
+            index: 0,
+            delta: { type: 'input_json_delta', partial_json: '{"path":"/x.ts"' },
+          });
           sse(res, 'content_block_delta', { index: 0, delta: { type: 'input_json_delta', partial_json: '}' } });
           sse(res, 'content_block_stop', { index: 0 });
           sse(res, 'message_delta', { delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 7 } });
@@ -108,7 +114,12 @@ async function main() {
 
   /* 4. Размышления */
   let reasoned = '';
-  const thinkDone = await streamWithScenario(provider, 'thinking', { onDelta: () => undefined, onReasoning: (t) => (reasoned += t) }, signal);
+  const thinkDone = await streamWithScenario(
+    provider,
+    'thinking',
+    { onDelta: () => undefined, onReasoning: (t) => (reasoned += t) },
+    signal,
+  );
   ok('размышления пришли', reasoned === 'Думаю…', reasoned);
   ok('reasoning в ответе', thinkDone.reasoning === 'Думаю…');
   ok('max_tokens → length', thinkDone.finishReason === 'length', thinkDone.finishReason);
@@ -116,7 +127,11 @@ async function main() {
   /* 6. tool_use */
   const toolCall = await streamWithScenario(provider, 'tool', { onDelta: () => undefined }, signal);
   ok('инструмент собран', toolCall.toolCalls?.length === 1 && toolCall.toolCalls[0].name === 'read_file');
-  ok('аргументы инструмента склеены', toolCall.toolCalls[0].arguments === '{"path":"/x.ts"}', toolCall.toolCalls[0].arguments);
+  ok(
+    'аргументы инструмента склеены',
+    toolCall.toolCalls[0].arguments === '{"path":"/x.ts"}',
+    toolCall.toolCalls[0].arguments,
+  );
   ok('stop_reason tool_use', toolCall.finishReason === 'tool_calls', toolCall.finishReason);
 
   /* 7. Сборка сообщений: system, tool_result в user, картинки */
@@ -131,9 +146,15 @@ async function main() {
   const roles = mapped.messages.map((m) => m.role).join(',');
   ok('tool_result лежит в user-ходе', roles === 'user,assistant,user,assistant', roles);
   const toolResultMsg = mapped.messages[2];
-  ok('tool_result на месте', toolResultMsg.content[0].type === 'tool_result' && toolResultMsg.content[0].tool_use_id === 't1');
+  ok(
+    'tool_result на месте',
+    toolResultMsg.content[0].type === 'tool_result' && toolResultMsg.content[0].tool_use_id === 't1',
+  );
   const userBlocks = mapped.messages[0].content;
-  ok('картинка стала блоком image', Array.isArray(userBlocks) && userBlocks.some((b) => b.type === 'image' && b.source.data === 'AAAA'));
+  ok(
+    'картинка стала блоком image',
+    Array.isArray(userBlocks) && userBlocks.some((b) => b.type === 'image' && b.source.data === 'AAAA'),
+  );
 
   /* 8. Расширенное мышление: thinking + без temperature */
   await streamWithScenario(provider, 'thinking', { onDelta: () => undefined }, signal, { reasoningEffort: 'medium' });

@@ -76,7 +76,9 @@ app.whenReady().then(async () => {
     const modified = await git.status();
     check(
       'правка в рабочем дереве помечена modified',
-      modified.files[0]?.change === 'modified' && modified.files[0]?.unstaged === true && modified.files[0]?.staged === false,
+      modified.files[0]?.change === 'modified' &&
+        modified.files[0]?.unstaged === true &&
+        modified.files[0]?.staged === false,
       modified.files[0],
     );
 
@@ -95,7 +97,9 @@ app.whenReady().then(async () => {
     const againstIndex = await git.diff(file);
     check(
       'diff рабочего дерева сравнивает с индексом, а не с HEAD',
-      againstIndex.original.includes('вторая строка') && !againstIndex.original.includes('третья') && againstIndex.modified.includes('третья'),
+      againstIndex.original.includes('вторая строка') &&
+        !againstIndex.original.includes('третья') &&
+        againstIndex.modified.includes('третья'),
       { original: JSON.stringify(againstIndex.original) },
     );
 
@@ -107,15 +111,27 @@ app.whenReady().then(async () => {
     );
 
     const afterDiscard = await git.discard([file]);
-    check('discard возвращает файл к HEAD', afterDiscard.files.length === 0, afterDiscard.files.map((f) => f.change));
+    check(
+      'discard возвращает файл к HEAD',
+      afterDiscard.files.length === 0,
+      afterDiscard.files.map((f) => f.change),
+    );
     const text = await fs.readFile(file, 'utf8');
     check('содержимое файла откатилось', text === 'первая строка\n', JSON.stringify(text));
 
     const branches = await git.branches();
-    check('список веток содержит текущую', branches.some((branch) => branch.current && !branch.remote), branches);
+    check(
+      'список веток содержит текущую',
+      branches.some((branch) => branch.current && !branch.remote),
+      branches,
+    );
 
     const created = await git.checkout('feature/smoke', true);
-    check('создание ветки переключает на неё', created.repository?.branch === 'feature/smoke', created.repository?.branch);
+    check(
+      'создание ветки переключает на неё',
+      created.repository?.branch === 'feature/smoke',
+      created.repository?.branch,
+    );
 
     check('push-события отправляются', published.length >= 4, published.length);
   } catch (error) {

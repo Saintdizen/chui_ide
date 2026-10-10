@@ -42,12 +42,7 @@ export interface NodeEnvPopoverView {
 
 export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverView {
   const body = h('div', { class: 'python-env-body' });
-  const element = h(
-    'div',
-    { class: 'python-env' },
-    h('div', { class: 'python-env-title' }, 'Node-окружение'),
-    body,
-  );
+  const element = h('div', { class: 'python-env' }, h('div', { class: 'python-env-title' }, 'Node-окружение'), body);
 
   // Разметка и классы общие с Python-попапом: это тот же виджет «окружение»,
   // отличается только содержимым. Дублировать стили незачем.
@@ -131,7 +126,9 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
     const extras: HTMLElement[] = [];
     if (manifest && manifest.dependencies.length > 0) {
       const diff = diffNodeDependencies(manifest.dependencies, packages);
-      extras.push(h('div', { class: 'python-env-requirements' }, nodeDependenciesNote(diff.missing.length, diff.present.length)));
+      extras.push(
+        h('div', { class: 'python-env-requirements' }, nodeDependenciesNote(diff.missing.length, diff.present.length)),
+      );
       extras.push(button(`Установить зависимости (${installCommand(manager)})`, () => deps.onInstall()));
     }
     body.appendChild(

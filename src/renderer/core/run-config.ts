@@ -1,5 +1,10 @@
 import { basename } from '../../shared/languages';
-import { nodeTestNamePattern, nodeTestRunnerLabel, parseNodeTestSelector, type NodeTestRunner } from '../../shared/node-tests';
+import {
+  nodeTestNamePattern,
+  nodeTestRunnerLabel,
+  parseNodeTestSelector,
+  type NodeTestRunner,
+} from '../../shared/node-tests';
 import { isNodeTestFile, type ProjectScan } from '../../shared/project-scan';
 import { resultMarkerCommand } from '../../shared/test-model';
 import type { ProjectTools } from './project-tools';
@@ -42,7 +47,8 @@ const JS_MAIN = /^[ \t]*(?:if[ \t]*\(?[ \t]*require\.main|require\.main[ \t]*===
 
 /** Номер строки первого совпадения (1-based), иначе null. */
 export function entryLine(languageId: string, text: string): number | null {
-  const pattern = languageId === 'python' ? PY_MAIN : languageId === 'javascript' || languageId === 'typescript' ? JS_MAIN : null;
+  const pattern =
+    languageId === 'python' ? PY_MAIN : languageId === 'javascript' || languageId === 'typescript' ? JS_MAIN : null;
   if (!pattern) return null;
   const match = pattern.exec(text);
   if (!match) return null;
@@ -59,7 +65,9 @@ export function fileRunTarget(file: RunnableFile, tools: ProjectTools): RunTarge
     return {
       id: `file:${file.path}`,
       label: `Запустить ${name}`,
-      detail: tools.pythonFromProject ? `${tools.pythonLabel} · файл запускается окружением проекта` : tools.pythonLabel,
+      detail: tools.pythonFromProject
+        ? `${tools.pythonLabel} · файл запускается окружением проекта`
+        : tools.pythonLabel,
       command: `${tools.pythonCommand} ${path}`,
       ...(line ? { line } : {}),
       source: 'file',
@@ -151,9 +159,10 @@ export function pytestRunTargets(
   ];
 
   // Активный тест — первой отдельной целью: чаще всего нужен именно он.
-  const ordered = activeRelative && tests.includes(activeRelative)
-    ? [activeRelative, ...tests.filter((file) => file !== activeRelative)]
-    : tests;
+  const ordered =
+    activeRelative && tests.includes(activeRelative)
+      ? [activeRelative, ...tests.filter((file) => file !== activeRelative)]
+      : tests;
 
   for (const file of ordered.slice(0, MAX_TEST_TARGETS)) {
     targets.push({

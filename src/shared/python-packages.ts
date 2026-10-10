@@ -98,7 +98,11 @@ export function parseRequirements(text: string): Requirement[] {
 
 /** Имя для сравнения: регистр, `-`, `_` и `.` не различаются — так велит PEP 503. */
 export function canonicalName(name: string): string {
-  return name.trim().toLowerCase().replace(/[-_.]+/g, '-').replace(/\[.*\]$/, '');
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[-_.]+/g, '-')
+    .replace(/\[.*\]$/, '');
 }
 
 /**

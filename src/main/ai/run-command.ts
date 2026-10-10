@@ -25,14 +25,9 @@ const TIMEOUT_MS = 120_000;
 /** Один `npm install` выдаёт мегабайты — в контекст модели всё не влезет. */
 const MAX_OUTPUT_CHARS = 60_000;
 
-export function runShellCommand(
-  command: string,
-  cwd: string,
-  signal?: AbortSignal,
-): Promise<CommandResult> {
+export function runShellCommand(command: string, cwd: string, signal?: AbortSignal): Promise<CommandResult> {
   return new Promise<CommandResult>((resolve, reject) => {
-    const shell =
-      process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : process.env.SHELL || '/bin/bash';
+    const shell = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : process.env.SHELL || '/bin/bash';
     const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command];
 
     // detached — чтобы убивать всю группу процессов: `npm run watch` порождает

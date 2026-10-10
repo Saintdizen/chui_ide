@@ -110,7 +110,12 @@ export class EditorService {
   private applying = false;
   private activePath: string | null = null;
 
-  constructor(container: HTMLElement, private readonly documents: DocumentStore, options: EditorOptions, themeId: string) {
+  constructor(
+    container: HTMLElement,
+    private readonly documents: DocumentStore,
+    options: EditorOptions,
+    themeId: string,
+  ) {
     // Обе схемы объявляем сразу: Monaco переключает их по имени, без пересоздания редактора.
     monaco.editor.defineTheme(MONACO_THEME_IDS.dark, MONACO_THEMES.dark);
     monaco.editor.defineTheme(MONACO_THEME_IDS.light, MONACO_THEMES.light);
@@ -621,10 +626,7 @@ export class EditorService {
     let owned: monaco.editor.ITextModel[] = [];
     return {
       set({ language, original, modified }) {
-        const next = [
-          monaco.editor.createModel(original, language),
-          monaco.editor.createModel(modified, language),
-        ];
+        const next = [monaco.editor.createModel(original, language), monaco.editor.createModel(modified, language)];
         editor.setModel({ original: next[0]!, modified: next[1]! });
         for (const model of owned) model.dispose();
         owned = next;

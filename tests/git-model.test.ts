@@ -35,7 +35,10 @@ describe('changeInsideFolders', () => {
 
   it('пути Windows с обратными слэшами тоже дают папки', () => {
     // Раньше путь резался только по «/»: на Windows папок не находилось вовсе.
-    const inside = changeInsideFolders([file('C:\\proj\\src\\a.ts', 'modified'), file('C:\\proj\\src\\b.ts', 'modified')]);
+    const inside = changeInsideFolders([
+      file('C:\\proj\\src\\a.ts', 'modified'),
+      file('C:\\proj\\src\\b.ts', 'modified'),
+    ]);
     expect(inside.get('C:\\proj\\src')).toEqual({ count: 2, change: 'modified' });
     expect(inside.get('C:\\proj')).toEqual({ count: 2, change: 'modified' });
   });

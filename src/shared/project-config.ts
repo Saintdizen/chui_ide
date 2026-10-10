@@ -24,10 +24,7 @@ export function mergeDeep<T>(base: T | undefined, patch: T | undefined): T | und
   if (base === undefined || !isPlainObject(base) || !isPlainObject(patch)) return patch;
   const result: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(patch)) {
-    result[key] =
-      isPlainObject(value) && isPlainObject(result[key])
-        ? mergeDeep(result[key], value)
-        : value;
+    result[key] = isPlainObject(value) && isPlainObject(result[key]) ? mergeDeep(result[key], value) : value;
   }
   return result as T;
 }
@@ -44,10 +41,7 @@ export function sanitizeProjectSettings(raw: unknown): ProjectSettings {
 }
 
 /** Дополняет проектные настройки патчем: послойно, по секциям и внутри них. */
-export function applyProjectSettingsPatch(
-  current: ProjectSettings,
-  patch: ProjectSettings,
-): ProjectSettings {
+export function applyProjectSettingsPatch(current: ProjectSettings, patch: ProjectSettings): ProjectSettings {
   const out: ProjectSettings = { ...current };
   for (const section of PROJECT_SETTINGS_SECTIONS) {
     const value = patch[section];

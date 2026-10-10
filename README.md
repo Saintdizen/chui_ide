@@ -43,7 +43,7 @@ npm run build && npm start
 Проверка кода — одной командой (типы, линт, юнит-тесты):
 
 ```bash
-npm run check            # typecheck + lint + test — то же гоняет CI
+npm run check            # typecheck + формат + lint + test — то же гоняет CI
 npm run typecheck        # только типы (tsc --noEmit, main и renderer)
 npm run lint             # Biome: ошибки и предупреждения
 npm run lint:fix         # Biome: починить что можно автоматически

@@ -257,8 +257,7 @@ async function readFile(workspace: WorkspaceService, args: Record<string, unknow
   const slice = allLines.slice(from - 1, last);
   const width = String(last).length;
   const body = slice.map((line, index) => `${String(from + index).padStart(width, ' ')} | ${line}`).join('\n');
-  const clipped =
-    last < to ? `\n… (показаны строки ${from}–${last} из ${to}; продолжай с ${last + 1})` : '';
+  const clipped = last < to ? `\n… (показаны строки ${from}–${last} из ${to}; продолжай с ${last + 1})` : '';
 
   // Диапазон тоже режем по символам: 2000 строк по ~40 символов — это ~80 КБ,
   // вчетверо больше общего потолка вывода. Без этого одно чтение диапазона
@@ -725,14 +724,18 @@ async function gitStatus(ctx: ToolContext): Promise<ToolOutcome> {
     : repo.detached
       ? `отделённый HEAD ${repo.head ?? ''}`.trim()
       : 'репозиторий без коммитов';
-  const sync = [repo.ahead > 0 ? `впереди ${repo.ahead}` : '', repo.behind > 0 ? `позади ${repo.behind}` : ''].filter(Boolean).join(', ');
+  const sync = [repo.ahead > 0 ? `впереди ${repo.ahead}` : '', repo.behind > 0 ? `позади ${repo.behind}` : '']
+    .filter(Boolean)
+    .join(', ');
 
   if (status.files.length === 0) {
     return { ok: true, summary: `${where}: изменений нет`, detail: 'Рабочее дерево чистое.' };
   }
 
   const shown = status.files.slice(0, MAX_GIT_FILES);
-  const lines = shown.map((file) => `${gitLetter(file.change)} ${file.staged ? '[индекс]' : '[ ]     '} ${file.relative}`);
+  const lines = shown.map(
+    (file) => `${gitLetter(file.change)} ${file.staged ? '[индекс]' : '[ ]     '} ${file.relative}`,
+  );
   if (status.files.length > shown.length) lines.push(`… ещё файлов: ${status.files.length - shown.length}`);
 
   return {

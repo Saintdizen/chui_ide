@@ -64,7 +64,10 @@ export async function readImageAsDataUrl(filePath: string): Promise<PickedImage>
  */
 export function assertChatImages(images: readonly string[]): void {
   if (images.length > MAX_CHAT_IMAGES) {
-    throw new RpcFailure(RpcErrorCode.InvalidParams, `К вопросу можно приложить не больше ${MAX_CHAT_IMAGES} изображений`);
+    throw new RpcFailure(
+      RpcErrorCode.InvalidParams,
+      `К вопросу можно приложить не больше ${MAX_CHAT_IMAGES} изображений`,
+    );
   }
 
   for (const image of images) {

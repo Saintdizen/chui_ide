@@ -41,7 +41,11 @@ function fakeTerminals() {
       if (!session) throw new Error('нет сессии');
       const total = session.dropped + session.log.length;
       const start = Math.max(from, session.dropped);
-      return { data: start >= total ? '' : session.log.slice(start - session.dropped), offset: total, alive: session.alive };
+      return {
+        data: start >= total ? '' : session.log.slice(start - session.dropped),
+        offset: total,
+        alive: session.alive,
+      };
     },
     kill(id) {
       const session = sessions.get(id);
@@ -102,9 +106,17 @@ async function main() {
     },
   };
   const guarded = await runTool(guardedCtx, 'terminal_write', JSON.stringify({ id: 't1', data: 'sudo rm -rf /\n' }));
-  ok('страховка спросила при полном доступе', guarded.ok && guardedLog.some((c) => c.includes('sudo rm -rf /')), guardedLog.join('; '));
+  ok(
+    'страховка спросила при полном доступе',
+    guarded.ok && guardedLog.some((c) => c.includes('sudo rm -rf /')),
+    guardedLog.join('; '),
+  );
   const guardedPlain = await runTool(guardedCtx, 'terminal_write', JSON.stringify({ id: 't1', data: 'pwd\n' }));
-  ok('рядовая команда прошла без вопроса', guardedPlain.ok && guardedLog.length === 1, `вопросов: ${guardedLog.length}`);
+  ok(
+    'рядовая команда прошла без вопроса',
+    guardedPlain.ok && guardedLog.length === 1,
+    `вопросов: ${guardedLog.length}`,
+  );
 
   // 5. Список и остановка.
   const list = await runTool(ctx, 'terminal_list', '{}');

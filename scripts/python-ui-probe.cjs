@@ -49,7 +49,10 @@ app.whenReady().then(async () => {
 
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
-  const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
+  const git = new GitService(
+    () => workspace.rootPath(),
+    (topic, payload) => pushToRenderers(topic, payload),
+  );
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
   registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient() });

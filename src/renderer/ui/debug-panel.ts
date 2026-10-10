@@ -136,11 +136,7 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
       h('span', { class: 'debug-var-name' }, variable.name),
       // Значение показываем отдельным элементом с подсказкой: длинные строки
       // обрезаются многоточием, и при наведении видно их целиком.
-      h(
-        'span',
-        { class: 'debug-var-value', title: `${variable.name} = ${variable.value}` },
-        variable.value,
-      ),
+      h('span', { class: 'debug-var-value', title: `${variable.name} = ${variable.value}` }, variable.value),
       variable.type ? h('span', { class: 'debug-var-type' }, variable.type) : null,
     );
 
@@ -170,7 +166,10 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
     }
     const list = loadedVariables.get(reference);
     if (list) {
-      loadedVariables.set(reference, list.map((item) => (item.name === variable.name ? result : item)));
+      loadedVariables.set(
+        reference,
+        list.map((item) => (item.name === variable.name ? result : item)),
+      );
     }
     render(stateSnapshot);
   }
@@ -218,7 +217,9 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
       row.addEventListener('click', () => void selectFrame(frame));
       list.appendChild(row);
     }
-    body.appendChild(h('section', { class: 'debug-section' }, h('h3', { class: 'debug-heading' }, 'Стек вызовов'), list));
+    body.appendChild(
+      h('section', { class: 'debug-section' }, h('h3', { class: 'debug-heading' }, 'Стек вызовов'), list),
+    );
   }
 
   /** Выбрать кадр: показать его в редакторе и перечитать переменные именно его. */
@@ -236,7 +237,8 @@ export function createDebugPanel(deps: DebugPanelDeps): DebugPanelView {
     expanded.clear();
     // Значения верхнего уровня грузим сразу: ради них панель и открывают.
     for (const scope of scopes) {
-      if (scope.variablesReference > 0) loadedVariables.set(scope.variablesReference, await deps.debug.variables(scope.variablesReference));
+      if (scope.variablesReference > 0)
+        loadedVariables.set(scope.variablesReference, await deps.debug.variables(scope.variablesReference));
     }
   }
 

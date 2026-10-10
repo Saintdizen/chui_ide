@@ -155,20 +155,30 @@ module.exports = [
     files: [
       { path: `${ROOT}/package.json`, relative: 'package.json', change: 'modified', staged: true, unstaged: false },
       { path: `${ROOT}/docs/roadmap.md`, relative: 'docs/roadmap.md', change: 'added', staged: true, unstaged: false },
-      { path: `${ROOT}/eslint.config.js`, relative: 'eslint.config.js', change: 'modified', staged: false, unstaged: true },
+      {
+        path: `${ROOT}/eslint.config.js`,
+        relative: 'eslint.config.js',
+        change: 'modified',
+        staged: false,
+        unstaged: true,
+      },
       { path: `${ROOT}/README.md`, relative: 'README.md', change: 'untracked', staged: false, unstaged: true },
       { path: `${ROOT}/src/queue.js`, relative: 'src/queue.js', change: 'deleted', staged: false, unstaged: true },
     ],
   };
 
-  const gitBranches = [    { name: 'main', current: true, remote: false },
+  const gitBranches = [
+    { name: 'main', current: true, remote: false },
     { name: 'feat/git', current: false, remote: false },
     { name: 'origin/main', current: false, remote: true },
   ];
 
   const fileText = (rel) => FILES.get(`${ROOT}/${rel}`) ?? '';
 
-  const gitStatus = () => ({ repository: { ...gitState.repository }, files: gitState.files.map((file) => ({ ...file })) });
+  const gitStatus = () => ({
+    repository: { ...gitState.repository },
+    files: gitState.files.map((file) => ({ ...file })),
+  });
 
   // Возвращаем статус: контракт требует результата, а не только push-события.
   const gitChanged = () => {
@@ -514,9 +524,7 @@ module.exports = [
 
     // Картинку отдаём настоящую (крошечный PNG): по ней видно, что миниатюра
     // в чипе действительно рисуется, а не только имя файла.
-    'dialog.pickImages': () => [
-      { name: 'screenshot.png', mime: 'image/png', bytes: 68, dataUrl: TINY_PNG },
-    ],
+    'dialog.pickImages': () => [{ name: 'screenshot.png', mime: 'image/png', bytes: 68, dataUrl: TINY_PNG }],
 
     'terminal.create': (params) => {
       const id = `t${sessions.size + 1}`;
@@ -577,7 +585,8 @@ module.exports = [
       // подсветка кода в чате, поэтому мок обязан её отдавать так же.
       if (params.appearance?.theme) {
         const chosen = settings.appearance.theme;
-        const scheme = chosen === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : chosen;
+        const scheme =
+          chosen === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : chosen;
         push('theme:changed', { theme: chosen, scheme });
       }
 

@@ -40,7 +40,11 @@ async function main() {
   await wait(700);
 
   const published = events.find((event) => event.topic === LSP_DIAGNOSTICS && event.payload.diagnostics.length > 0);
-  ok('сервер запустился и прислал диагностику', Boolean(published), published ? `${published.payload.diagnostics.length} шт.` : 'нет');
+  ok(
+    'сервер запустился и прислал диагностику',
+    Boolean(published),
+    published ? `${published.payload.diagnostics.length} шт.` : 'нет',
+  );
   if (published) {
     const [error, warning] = published.payload.diagnostics;
     ok('severity error/warning разобраны', error.severity === 'error' && warning.severity === 'warning');

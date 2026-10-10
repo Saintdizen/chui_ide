@@ -9,9 +9,7 @@ import {
 } from '../../shared/api';
 import type { ChuiBridge } from '../../shared/bridge';
 
-type Handler<M extends HostMethodName> = (
-  params: HostParamsOf<M>,
-) => HostResultOf<M> | Promise<HostResultOf<M>>;
+type Handler<M extends HostMethodName> = (params: HostParamsOf<M>) => HostResultOf<M> | Promise<HostResultOf<M>>;
 
 /**
  * Приёмник хостовых вызовов: main просит renderer выполнить действие, которое

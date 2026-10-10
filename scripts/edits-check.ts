@@ -93,7 +93,14 @@ check('несколько правок с якорями применяются 
   const second = 'const tail = 1;';
   const edits: TextEdit[] = [
     { startLine: 1, startColumn: 1, endLine: 1, endColumn: first.length + 1, newText: '// Заголовок', oldText: first },
-    { startLine: 3, startColumn: 1, endLine: 3, endColumn: second.length + 1, newText: 'const tail = 2;', oldText: second },
+    {
+      startLine: 3,
+      startColumn: 1,
+      endLine: 3,
+      endColumn: second.length + 1,
+      newText: 'const tail = 2;',
+      oldText: second,
+    },
   ];
   const next = applyTextEdits(file, edits);
   assert(next.startsWith('// Заголовок'), `первая правка не применилась: ${next}`);

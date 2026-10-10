@@ -79,8 +79,8 @@
   --focus_outline: 2px solid var(--focus_ring_color);
   --focus_outline_offset: 2px;
 
-  --font_ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Ubuntu, 'Helvetica Neue', sans-serif;
-  --font_mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Consolas, monospace;
+  --font_ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", sans-serif;
+  --font_mono: "JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace;
 
   /* Высота строки интерфейса — общая для текста приложения и пунктов меню Monaco:
      от неё зависит высота строки в меню и списках, а разойтись они не должны. */
@@ -152,11 +152,11 @@
      deleted red #FF4245, renamed teal #00D2E0, conflicted orange #FF9230.
      added/modified/deleted продублированы и в `core/theme.ts`
      (`chrome.added/modified/deleted`) — менять в обоих местах. */
-  --git_modified: #FFD600;
-  --git_added: #30D158;
-  --git_deleted: #FF4245;
-  --git_renamed: #00D2E0;
-  --git_conflicted: #FF9230;
+  --git_modified: #ffd600;
+  --git_added: #30d158;
+  --git_deleted: #ff4245;
+  --git_renamed: #00d2e0;
+  --git_conflicted: #ff9230;
 
   --focus_ring_color: var(--blue_prime_background);
   --link_color: #4da6ff;
@@ -182,30 +182,30 @@
      роль. Тона — системная палитра Apple (HIG «System colors»): в тёмной теме
      колонка Default dark, в светлой — Increased contrast light (на белом
      Default light бледный для мелких глифов). Цвета HIG переиспользуются. */
-  --file_text: #AEAEB2;      /* gray */
-  --file_code: #DB34F2;      /* purple */
-  --file_js: #FFD600;        /* yellow */
-  --file_ts: #0091FF;        /* blue */
-  --file_python: #30D158;    /* green */
-  --file_json: #FFD600;      /* yellow */
-  --file_markdown: #00D2E0;  /* teal */
-  --file_css: #6D7CFF;       /* indigo */
-  --file_html: #FF9230;      /* orange */
-  --file_shell: #00DAC3;     /* mint */
-  --file_yaml: #FF4245;      /* red */
-  --file_config: #B78A66;    /* brown */
-  --file_database: #FF9230;  /* orange */
-  --file_docker: #3CD3FE;    /* cyan */
-  --file_image: #FF375F;     /* pink */
-  --file_archive: #B78A66;   /* brown */
-  --file_lock: #AEAEB2;      /* gray */
-  --file_git: #FF4245;       /* red */
+  --file_text: #aeaeb2; /* gray */
+  --file_code: #db34f2; /* purple */
+  --file_js: #ffd600; /* yellow */
+  --file_ts: #0091ff; /* blue */
+  --file_python: #30d158; /* green */
+  --file_json: #ffd600; /* yellow */
+  --file_markdown: #00d2e0; /* teal */
+  --file_css: #6d7cff; /* indigo */
+  --file_html: #ff9230; /* orange */
+  --file_shell: #00dac3; /* mint */
+  --file_yaml: #ff4245; /* red */
+  --file_config: #b78a66; /* brown */
+  --file_database: #ff9230; /* orange */
+  --file_docker: #3cd3fe; /* cyan */
+  --file_image: #ff375f; /* pink */
+  --file_archive: #b78a66; /* brown */
+  --file_lock: #aeaeb2; /* gray */
+  --file_git: #ff4245; /* red */
   /* Промежутки внутри значка — это фон панели, а не белый: буквы читаются
      как вырез в цветной фигуре (так устроены значки Material Icon Theme). */
   --file_badge: var(--element_background_2);
-  --folder_default: #0091FF; /* blue */
-  --folder_special: #FFD600; /* yellow */
-  --folder_open: #0091FF;    /* blue */
+  --folder_default: #0091ff; /* blue */
+  --folder_special: #ffd600; /* yellow */
+  --folder_open: #0091ff; /* blue */
 
   /* Запуск: зелёный из палитры IDE — одна роль на кнопку, значок в жёлобе
      и подпись инструмента в статусбаре. */
@@ -263,11 +263,11 @@
        Усиленная колонка взята, а не Default light, потому что эти цвета тут
        идут как мелкий текст (color:) по светлому фону — Default light на
        белом бледный и не проходит по контрасту. */
-    --git_modified: #A16A00;
+    --git_modified: #a16a00;
     --git_added: #008932;
-    --git_deleted: #E9152D;
+    --git_deleted: #e9152d;
     --git_renamed: #008198;
-    --git_conflicted: #C55300;
+    --git_conflicted: #c55300;
 
     --focus_ring_color: var(--blue_prime_background);
     /* На белом акцентный синий даёт контраст около 3 — для текста он затемнён. */
@@ -284,28 +284,28 @@
 
     /* Значки файлов: те же роли, но в ступени Increased contrast light —
      на белом Default light бледный. */
-    --file_text: #6C6C70;      /* gray */
-    --file_code: #B02FC2;      /* purple */
-    --file_js: #A16A00;        /* yellow */
-    --file_ts: #1E6EF4;        /* blue */
-    --file_python: #008932;    /* green */
-    --file_json: #A16A00;      /* yellow */
-    --file_markdown: #008198;  /* teal */
-    --file_css: #564ADE;       /* indigo */
-    --file_html: #C55300;      /* orange */
-    --file_shell: #008575;     /* mint */
-    --file_yaml: #E9152D;      /* red */
-    --file_config: #956D51;    /* brown */
-    --file_database: #C55300;  /* orange */
-    --file_docker: #007EAE;    /* cyan */
-    --file_image: #E7124D;     /* pink */
-    --file_archive: #956D51;   /* brown */
-    --file_lock: #6C6C70;      /* gray */
-    --file_git: #E9152D;       /* red */
+    --file_text: #6c6c70; /* gray */
+    --file_code: #b02fc2; /* purple */
+    --file_js: #a16a00; /* yellow */
+    --file_ts: #1e6ef4; /* blue */
+    --file_python: #008932; /* green */
+    --file_json: #a16a00; /* yellow */
+    --file_markdown: #008198; /* teal */
+    --file_css: #564ade; /* indigo */
+    --file_html: #c55300; /* orange */
+    --file_shell: #008575; /* mint */
+    --file_yaml: #e9152d; /* red */
+    --file_config: #956d51; /* brown */
+    --file_database: #c55300; /* orange */
+    --file_docker: #007eae; /* cyan */
+    --file_image: #e7124d; /* pink */
+    --file_archive: #956d51; /* brown */
+    --file_lock: #6c6c70; /* gray */
+    --file_git: #e9152d; /* red */
     --file_badge: var(--element_background_2);
-    --folder_default: #1E6EF4; /* blue */
-    --folder_special: #A16A00; /* yellow */
-    --folder_open: #1E6EF4;    /* blue */
+    --folder_default: #1e6ef4; /* blue */
+    --folder_special: #a16a00; /* yellow */
+    --folder_open: #1e6ef4; /* blue */
     --run_accent: #2f7d32;
     --debug_line_background: rgba(0, 136, 255, 0.16);
     --coverage_missing_background: rgba(255, 56, 60, 0.14);
@@ -332,11 +332,11 @@
     /* Повышенный контраст — HIG «System colors», колонка Increased contrast
        dark: added green #4AD968, modified yellow #FEDF43, deleted red #FF6165,
        renamed teal #3BDDEC, conflicted orange #FFA056. */
-    --git_modified: #FEDF43;
-    --git_added: #4AD968;
-    --git_deleted: #FF6165;
-    --git_renamed: #3BDDEC;
-    --git_conflicted: #FFA056;
+    --git_modified: #fedf43;
+    --git_added: #4ad968;
+    --git_deleted: #ff6165;
+    --git_renamed: #3bddec;
+    --git_conflicted: #ffa056;
     --purple_prime_background: #ea8dff;
   }
 }

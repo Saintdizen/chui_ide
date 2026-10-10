@@ -36,9 +36,7 @@ export class EditService {
       try {
         const document = await this.ensureDocument(file.path);
         if (file.expectedVersion !== undefined && file.expectedVersion !== document.version) {
-          throw new Error(
-            `Версия документа устарела: ожидалась ${file.expectedVersion}, текущая ${document.version}`,
-          );
+          throw new Error(`Версия документа устарела: ожидалась ${file.expectedVersion}, текущая ${document.version}`);
         }
 
         const applied = document.applyEdits(file.edits, source);

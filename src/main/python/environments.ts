@@ -13,7 +13,12 @@ import {
   venvActivateCommand,
   type PythonEnvironment,
 } from '../../shared/python-env';
-import { RpcErrorCode, type CreateVenvOptions, type CreateVenvResult, type VenvProgressPayload } from '../../shared/api';
+import {
+  RpcErrorCode,
+  type CreateVenvOptions,
+  type CreateVenvResult,
+  type VenvProgressPayload,
+} from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
 
 /**
@@ -237,7 +242,12 @@ export async function runCommand(
  * пакет `python3.X-venv`: `venv` без ensurepip не может создать окружение, а уже
  * созданное окружение без pip не может ставить пакеты.
  */
-export function failureMessage(command: string, args: string[], code: number | null, output: readonly string[]): string {
+export function failureMessage(
+  command: string,
+  args: string[],
+  code: number | null,
+  output: readonly string[],
+): string {
   const text = output.join('\n');
   const last = [...output].reverse().find((line) => line.trim()) ?? '';
   const base = `${command} ${args.join(' ')} — код выхода ${code}${last ? `: ${last}` : ''}.`;
@@ -277,7 +287,9 @@ async function exists(target: string): Promise<boolean> {
 
 async function safeDirs(dir: string): Promise<Array<{ name: string; path: string }>> {
   const dirents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
-  return dirents.filter((entry) => entry.isDirectory()).map((entry) => ({ name: entry.name, path: path.join(dir, entry.name) }));
+  return dirents
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => ({ name: entry.name, path: path.join(dir, entry.name) }));
 }
 
 function toPosix(value: string): string {

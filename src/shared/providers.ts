@@ -156,10 +156,7 @@ export function modelCapabilities(model: string): ModelCapabilities {
 }
 
 /** Усилие доехало до провайдера только когда модель его понимает и оно не `off`. */
-export function reasoningEffortFor(
-  model: string,
-  effort: ReasoningEffort | undefined,
-): ReasoningEffort | undefined {
+export function reasoningEffortFor(model: string, effort: ReasoningEffort | undefined): ReasoningEffort | undefined {
   if (!effort || effort === 'off') return undefined;
   return modelCapabilities(model).reasoningEffort ? effort : undefined;
 }

@@ -39,7 +39,10 @@ async function makeProject(
 
   await fs.writeFile(
     path.join(root, 'package.json'),
-    JSON.stringify({ name: 'fixture', devDependencies: Object.fromEntries(dependencies.map((name) => [name, '^1.0.0'])) }),
+    JSON.stringify({
+      name: 'fixture',
+      devDependencies: Object.fromEntries(dependencies.map((name) => [name, '^1.0.0'])),
+    }),
   );
   for (const file of files) {
     const target = path.join(root, file);
@@ -80,7 +83,11 @@ const JEST_STUB = "console.log(JSON.stringify([process.cwd() + '/tests/a.test.js
 
 describe('collectNodeTests', () => {
   it('vitest: список тестов с именами и относительными путями', async () => {
-    const root = await makeProject(['vitest'], ['tests/a.test.ts'], [{ pkg: 'vitest', bin: 'vitest', body: VITEST_STUB }]);
+    const root = await makeProject(
+      ['vitest'],
+      ['tests/a.test.ts'],
+      [{ pkg: 'vitest', bin: 'vitest', body: VITEST_STUB }],
+    );
 
     const suite = await collectNodeTests(root);
     expect(suite.runner).toBe('vitest');
@@ -91,7 +98,11 @@ describe('collectNodeTests', () => {
   });
 
   it('шум перед JSON не мешает: массив вырезается из вывода', async () => {
-    const root = await makeProject(['vitest'], ['tests/a.test.ts'], [{ pkg: 'vitest', bin: 'vitest', body: VITEST_STUB }]);
+    const root = await makeProject(
+      ['vitest'],
+      ['tests/a.test.ts'],
+      [{ pkg: 'vitest', bin: 'vitest', body: VITEST_STUB }],
+    );
     expect((await collectNodeTests(root)).tests.length).toBe(1);
   });
 

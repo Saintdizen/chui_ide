@@ -36,11 +36,7 @@ import { createChangesPanel } from './chat-changes';
 import { createPlanPanel } from './chat-plan';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
-import {
-  createCommandApproval,
-  createEditReview,
-  type ApprovalHost,
-} from './chat-approvals';
+import { createCommandApproval, createEditReview, type ApprovalHost } from './chat-approvals';
 import { countLines, formatBytes, plural, snippetFor, titleFrom } from './chat-text';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
@@ -101,8 +97,6 @@ const COMPACT_CONTINUE_PROMPT = [
   'принятые решения, найденные ошибки, что осталось сделать. Пиши по пунктам, без кода целиком.',
 ].join('\n');
 
-
-
 /**
  * Доля окна, после которой освобождаем контекст заранее.
  *
@@ -148,7 +142,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   let saveTimer = 0;
   let uidSeq = 0;
   /** Идентификатор беседы: переживает перезапуск, поэтому не равен номеру вкладки. */
-  const newUid = (): string => `chat_${Date.now().toString(36)}_${(uidSeq += 1).toString(36)}`;
+  const newUid = (): string => `chat_${Date.now().toString(36)}_${((uidSeq += 1)).toString(36)}`;
 
   const active = (): ChatSession => sessions.find((session) => session.id === activeId) ?? sessions[0]!;
 
@@ -214,11 +208,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           'span',
           {
             class: `chip chip-static${image ? ' chip-image' : ''}`,
-            title: image ? `${item.title} · ${formatBytes(item.bytes ?? 0)}` : `${item.title}\n\n${item.text.slice(0, 300)}`,
+            title: image
+              ? `${item.title} · ${formatBytes(item.bytes ?? 0)}`
+              : `${item.title}\n\n${item.text.slice(0, 300)}`,
           },
           // У картинки вместо значка — она сама: по миниатюре видно, что приложено,
           // и не приходится открывать файл, чтобы это проверить.
-          image ? h('img', { class: 'chip-thumb', src: image.dataUrl!, alt: item.label }) : svgIcon(item.kind === 'problems' ? 'warning' : 'file', 12),
+          image
+            ? h('img', { class: 'chip-thumb', src: image.dataUrl!, alt: item.label })
+            : svgIcon(item.kind === 'problems' ? 'warning' : 'file', 12),
           h('span', { class: 'chip-name' }, item.label),
           image ? h('span', { class: 'chip-hint' }, formatBytes(item.bytes ?? 0)) : null,
           h(
@@ -306,7 +304,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     for (const file of images.slice(0, MAX_CHAT_IMAGES)) {
       if (file.size > MAX_IMAGE_BYTES) {
-        showToast(`${file.name || 'изображение'}: ${formatBytes(file.size)} — больше предела ${formatBytes(MAX_IMAGE_BYTES)}`, 'error');
+        showToast(
+          `${file.name || 'изображение'}: ${formatBytes(file.size)} — больше предела ${formatBytes(MAX_IMAGE_BYTES)}`,
+          'error',
+        );
         continue;
       }
       const dataUrl = await readAsDataUrl(file);
@@ -398,7 +399,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         };
       }
       const file = await deps.rpc.request('workspace.readFile', { path: target });
-      const text = file.text.length > MAX_ATTACHMENT_CHARS ? `${file.text.slice(0, MAX_ATTACHMENT_CHARS)}\n… (файл обрезан)` : file.text;
+      const text =
+        file.text.length > MAX_ATTACHMENT_CHARS
+          ? `${file.text.slice(0, MAX_ATTACHMENT_CHARS)}\n… (файл обрезан)`
+          : file.text;
       return {
         kind: 'file',
         label: basename(target),
@@ -1175,9 +1179,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       ];
       session.usage = undefined;
       renderCompacted(session, before, summary);
-      showToast(
-        `Беседа сжата: ${before} ${plural(before, 'сообщение', 'сообщения', 'сообщений')} → краткое резюме`,
-      );
+      showToast(`Беседа сжата: ${before} ${plural(before, 'сообщение', 'сообщения', 'сообщений')} → краткое резюме`);
       return true;
     } catch (error) {
       if (error instanceof RpcError && error.cancelled) showToast('Сжатие отменено');
@@ -1240,7 +1242,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       h(
         'details',
         { class: 'thread-summary', open: true },
-        h('summary', { class: 'thread-summary-head' }, svgIcon('collapse', 12), `Беседа сжата · было сообщений: ${before}`),
+        h(
+          'summary',
+          { class: 'thread-summary-head' },
+          svgIcon('collapse', 12),
+          `Беседа сжата · было сообщений: ${before}`,
+        ),
         h('div', { class: 'thread-summary-text' }, summary),
       ),
     );
@@ -1383,7 +1390,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     if (fileEdits.length === 0) {
       showToast(
-        undone > 0 ? `Отменено файловых операций: ${undone}` : skipped > 0 ? 'Удалённые файлы в корзине — верните их вручную' : 'Нечего отменять',
+        undone > 0
+          ? `Отменено файловых операций: ${undone}`
+          : skipped > 0
+            ? 'Удалённые файлы в корзине — верните их вручную'
+            : 'Нечего отменять',
         skipped > 0 && undone === 0 ? 'error' : 'info',
       );
       return;
@@ -1420,15 +1431,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       h(
         'div',
         { class: 'composer-toolbar' },
-        h(
-          'div',
-          { class: 'composer-group' },
-          contextButton,
-          modeSelect.element,
-          permButton,
-          modelButton,
-          effortField,
-        ),
+        h('div', { class: 'composer-group' }, contextButton, modeSelect.element, permButton, modelButton, effortField),
         h('div', { class: 'composer-group' }, actionButton),
       ),
       // Информация о сессии — индикатор заполнения контекста в правом нижнем углу:
@@ -1631,7 +1634,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     onRegenerate?: () => void,
     feedback?: MessageFeedback,
   ): void {
-    const actions = h('div', { class: 'msg-actions' }, messageAction('copy', 'Копировать', () => copyText(getText())));
+    const actions = h(
+      'div',
+      { class: 'msg-actions' },
+      messageAction('copy', 'Копировать', () => copyText(getText())),
+    );
     if (onRegenerate) {
       actions.appendChild(messageAction('refresh', 'Повторить', onRegenerate));
     }
@@ -1835,7 +1842,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   };
   const editReview = createEditReview(approvals);
   const commandApproval = createCommandApproval(approvals);
-
 
   deps.host.handle('ai.confirmCommand', async (params) => ({
     allowed: await commandApproval.confirm(params.command),

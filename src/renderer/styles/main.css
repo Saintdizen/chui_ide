@@ -230,7 +230,9 @@ textarea {
   height: var(--topbar_control_size);
   border-radius: var(--radius_sm);
   color: var(--text_color_tertiary);
-  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease);
 }
 
 .window-btn:hover {
@@ -334,7 +336,7 @@ textarea {
 /* Метка-хендл: три точки по центру полосы. До наведения её не видно, а сама
    полоса остаётся тонкой — прежний «толстый» фокус на всю ширину убран. */
 .splitter::after {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
   margin: auto;
@@ -351,14 +353,20 @@ textarea {
 .splitter-right::after {
   width: 4px;
   height: 16px;
-  background-position: center top, center center, center bottom;
+  background-position:
+    center top,
+    center center,
+    center bottom;
 }
 
 /* Горизонтальный разделитель дока — точки в ряд. */
 .splitter-dock::after {
   width: 16px;
   height: 4px;
-  background-position: left center, center center, right center;
+  background-position:
+    left center,
+    center center,
+    right center;
 }
 
 .splitter-left {
@@ -482,7 +490,9 @@ textarea {
   height: var(--toolbar_control_size);
   border-radius: var(--radius_sm);
   color: var(--text_color_tertiary);
-  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease);
 }
 
 .icon-btn:hover {
@@ -534,13 +544,7 @@ textarea {
 }
 
 .tabs.is-scrolled-start.is-scrolled-end {
-  mask-image: linear-gradient(
-    to right,
-    transparent 0,
-    #000 16px,
-    #000 calc(100% - 16px),
-    transparent 100%
-  );
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
 }
 
 .tab {
@@ -554,7 +558,9 @@ textarea {
   background: transparent;
   color: var(--text_color_disabled);
   white-space: nowrap;
-  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease);
 }
 
 .tab:hover {
@@ -584,7 +590,9 @@ textarea {
   border-radius: 4px;
   color: var(--text_color_tertiary);
   opacity: 0;
-  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease),
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease),
     opacity var(--motion_fast) var(--motion_ease);
 }
 
@@ -704,7 +712,7 @@ textarea {
 }
 
 .run-glyph::after {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
   margin: auto;
@@ -726,7 +734,7 @@ textarea {
 }
 
 .breakpoint-glyph::after {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
   margin: auto;
@@ -827,8 +835,11 @@ textarea {
 .palette-item,
 .dock-tab,
 .term-tab {
-  transition: background var(--motion_fast) var(--motion_ease), color var(--motion_fast) var(--motion_ease),
-    border-color var(--motion_fast) var(--motion_ease), transform var(--motion_fast) var(--motion_ease);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease),
+    border-color var(--motion_fast) var(--motion_ease),
+    transform var(--motion_fast) var(--motion_ease);
 }
 
 .btn:active:not(:disabled),
@@ -851,7 +862,9 @@ textarea {
   border-radius: var(--radius_sm);
   background: var(--button_background);
   color: var(--text_color);
-  transition: background var(--motion_fast) var(--motion_ease), border-color var(--motion_fast) var(--motion_ease);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    border-color var(--motion_fast) var(--motion_ease);
 }
 
 .btn:hover:not(:disabled) {
@@ -932,7 +945,9 @@ textarea {
   background: var(--sunken_background);
   color: var(--text_color);
   font-size: var(--font_labels_size);
-  transition: background var(--motion_fast) var(--motion_ease), border-color var(--motion_fast) var(--motion_ease);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    border-color var(--motion_fast) var(--motion_ease);
 }
 
 .select {
@@ -974,7 +989,7 @@ textarea {
   color: var(--placeholder_text_color);
 }
 
-.select[aria-expanded='true'] {
+.select[aria-expanded="true"] {
   border-color: var(--focus_ring_color);
 }
 
@@ -1081,11 +1096,11 @@ textarea {
 
 /* Плотность дерева — настройка проводника: строки ниже/выше, значок и отступ
    остаются те же, поэтому меняется только высота. */
-.explorer[data-rows='compact'] {
+.explorer[data-rows="compact"] {
   --tree_row_height: 21px;
 }
 
-.explorer[data-rows='cozy'] {
+.explorer[data-rows="cozy"] {
   --tree_row_height: 27px;
 }
 
@@ -1562,7 +1577,7 @@ textarea {
 }
 
 .chat.is-ai-disabled .chat-body::after {
-  content: 'AI выключен в настройках. Включить: Настройки → AI.';
+  content: "AI выключен в настройках. Включить: Настройки → AI.";
   display: block;
   margin-bottom: 6px;
   padding: 8px 10px;
@@ -1592,7 +1607,7 @@ textarea {
 
 /* Идёт генерация: точка у вкладки — тот же язык, что точка несохранённого файла. */
 .chat-tab.is-busy .tab-label::after {
-  content: '';
+  content: "";
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -2120,7 +2135,6 @@ textarea {
 
 /* ── размышления модели ─────────────────────────────────────────────────── */
 
-
 /* Счётчик шагов: по нему видно, что размышления собраны из нескольких врезок. */
 .reasoning-count:not(:empty) {
   margin-left: 6px;
@@ -2545,7 +2559,7 @@ textarea {
 }
 
 .tool-group-body::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 8px;
   top: 2px;
@@ -3771,7 +3785,7 @@ textarea {
 }
 
 .switch-track::after {
-  content: '';
+  content: "";
   position: absolute;
   top: 2px;
   left: 2px;
@@ -5030,7 +5044,6 @@ textarea {
   color: var(--text_color_hover);
   font-size: 10px;
 }
-
 
 /* Раздел выбора: подпись над списком, как у секций в других окнах. */
 .python-env-heading {

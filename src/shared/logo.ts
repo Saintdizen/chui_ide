@@ -61,7 +61,13 @@ const round = (value: number): number => Math.round(value * 100) / 100;
  */
 function glyphI(centerX: number): readonly LogoRect[] {
   return [
-    { x: centerX - LOGO_STROKE / 2, y: X_HEIGHT_TOP, width: LOGO_STROKE, height: LOGO_BASELINE - X_HEIGHT_TOP, rx: ROUNDING },
+    {
+      x: centerX - LOGO_STROKE / 2,
+      y: X_HEIGHT_TOP,
+      width: LOGO_STROKE,
+      height: LOGO_BASELINE - X_HEIGHT_TOP,
+      rx: ROUNDING,
+    },
     { x: centerX - DOT / 2, y: DOT_TOP, width: DOT, height: DOT, rx: DOT_ROUNDING },
     { x: centerX - SERIF_HALF, y: LOGO_BASELINE - SERIF, width: SERIF_HALF * 2, height: SERIF, rx: ROUNDING },
     { x: centerX - SERIF_HALF, y: X_HEIGHT_TOP, width: SERIF_HALF, height: SERIF, rx: ROUNDING },

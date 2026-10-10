@@ -203,8 +203,6 @@ export function describeTest(file: string, node: string): CollectedTest {
 
 /* ── запуск отдельного теста из редактора ───────────────────────────────── */
 
-
-
 /** Объявление теста: `def test_…` или `async def test_…`, с любым отступом. */
 const TEST_DEF = /^\s*(?:async\s+)?def\s+(test_[A-Za-z0-9_]*)\s*\(/;
 /** Объявление класса: `class TestX:` или `class TestX(Base):`. */
@@ -257,4 +255,3 @@ export function findRunnableTests(relativePath: string, text: string): RunnableT
 
   return tests;
 }
-

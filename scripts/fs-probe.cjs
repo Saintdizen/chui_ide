@@ -59,7 +59,10 @@ app.whenReady().then(async () => {
 
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
-  const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
+  const git = new GitService(
+    () => workspace.rootPath(),
+    (topic, payload) => pushToRenderers(topic, payload),
+  );
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
   registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient() });
@@ -67,10 +70,7 @@ app.whenReady().then(async () => {
   await workspace.open(project);
   const ide = openIdeWindow();
   // Ждём загрузку документа: до неё `executeJavaScript` копится в очереди.
-  await Promise.race([
-    new Promise((resolve) => ide.webContents.once('did-finish-load', resolve)),
-    wait(30000),
-  ]);
+  await Promise.race([new Promise((resolve) => ide.webContents.once('did-finish-load', resolve)), wait(30000)]);
   await wait(5000);
   console.log('[проба] старт:', JSON.stringify(await ask(ide, state)));
 
@@ -118,39 +118,60 @@ app.whenReady().then(async () => {
     console.log(`[проба] поле ввода имени через ${delay} мс:`, found);
     if (found === true) break;
   }
-  console.log('[проба] ввод имени папки:', await ask(ide, `(() => {
+  console.log(
+    '[проба] ввод имени папки:',
+    await ask(
+      ide,
+      `(() => {
     const input = document.querySelector('.tree-input');
     if (!input) return 'нет поля ввода';
     input.value = 'probe-dir';
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     return 'введено';
-  })()`));
+  })()`,
+    ),
+  );
   await wait(1500);
   console.log('[проба] после создания папки:', JSON.stringify(await ask(ide, state)));
   console.log('[проба] диск:', await fs.readdir(project));
 
   // 3. Кнопка «Обновить».
   const t0 = Date.now();
-  console.log('[проба] кнопка «Обновить»:', await ask(ide, `(() => {
+  console.log(
+    '[проба] кнопка «Обновить»:',
+    await ask(
+      ide,
+      `(() => {
     const button = [...document.querySelectorAll('.panel-actions button')].find((b) => b.title === 'Обновить');
     button?.click();
     return Boolean(button);
-  })()`));
+  })()`,
+    ),
+  );
   await wait(2000);
   const after = await ask(ide, state);
   console.log(`[проба] через ${Date.now() - t0} мс после «Обновить»:`, JSON.stringify(after));
 
   // 4. Контекстное меню редактора: правый клик настоящим событием и замер фона.
-  console.log('[проба] открываю index.js:', await ask(ide, `(() => {
+  console.log(
+    '[проба] открываю index.js:',
+    await ask(
+      ide,
+      `(() => {
     const row = [...document.querySelectorAll('.tree-row')].find((r) => r.textContent.includes('index.js'));
     row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     return Boolean(row);
-  })()`));
+  })()`,
+    ),
+  );
   await wait(1200);
-  const point = await ask(ide, `(() => {
+  const point = await ask(
+    ide,
+    `(() => {
     const rect = document.querySelector('.monaco-editor')?.getBoundingClientRect();
     return rect ? { x: Math.round(rect.x + 60), y: Math.round(rect.y + 40) } : null;
-  })()`);
+  })()`,
+  );
   if (point) {
     ide.focus();
     ide.webContents.focus();
@@ -161,7 +182,12 @@ app.whenReady().then(async () => {
     ide.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'right', clickCount: 1 });
     ide.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'right', clickCount: 1 });
     await wait(800);
-    console.log('[проба] меню редактора:', JSON.stringify(await ask(ide, `(() => {
+    console.log(
+      '[проба] меню редактора:',
+      JSON.stringify(
+        await ask(
+          ide,
+          `(() => {
       const root = document.querySelector('.shadow-root-host')?.shadowRoot;
       const menu = root?.querySelector('.monaco-menu');
       if (!menu) return 'меню не открылось';
@@ -172,7 +198,10 @@ app.whenReady().then(async () => {
         fore: item ? getComputedStyle(item).color : null,
         padding: getComputedStyle(menu).padding,
       };
-    })()`)));
+    })()`,
+        ),
+      ),
+    );
     const menuShot = await ide.capturePage();
     await fs.writeFile(path.join(process.env.TMPDIR ?? '/tmp', 'chui-menu-probe.png'), menuShot.toPNG());
   }

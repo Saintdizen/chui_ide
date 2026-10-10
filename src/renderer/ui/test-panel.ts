@@ -89,7 +89,12 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   );
   const coverageButton = h(
     'button',
-    { class: 'btn btn-small', type: 'button', title: 'Запустить все тесты с покрытием', onClick: () => run(ALL_KEY, null, true) },
+    {
+      class: 'btn btn-small',
+      type: 'button',
+      title: 'Запустить все тесты с покрытием',
+      onClick: () => run(ALL_KEY, null, true),
+    },
     'С покрытием',
   );
 
@@ -97,7 +102,15 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   const element = h(
     'div',
     { class: 'tests-panel' },
-    h('div', { class: 'tests-toolbar' }, summary, h('div', { class: 'toolbar-spacer' }), runAllButton, coverageButton, refreshButton),
+    h(
+      'div',
+      { class: 'tests-toolbar' },
+      summary,
+      h('div', { class: 'toolbar-spacer' }),
+      runAllButton,
+      coverageButton,
+      refreshButton,
+    ),
     body,
   );
 
@@ -185,7 +198,10 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
     const outcome = node.id ? outcomes.get(node.id) : undefined;
     const head = h(
       'div',
-      { class: `tests-row tests-${node.kind}${outcome ? ` is-${outcome}` : ''}`, style: { paddingLeft: `${depth * 14 + 8}px` } },
+      {
+        class: `tests-row tests-${node.kind}${outcome ? ` is-${outcome}` : ''}`,
+        style: { paddingLeft: `${depth * 14 + 8}px` },
+      },
       marker,
       h('span', { class: 'tests-label' }, node.label),
       statusBadge(node.id),
@@ -305,9 +321,13 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
       );
     }
     if (files.length > MAX_COVERAGE_ROWS) {
-      list.appendChild(h('div', { class: 'tests-cov-row is-more' }, `… ещё файлов: ${files.length - MAX_COVERAGE_ROWS}`));
+      list.appendChild(
+        h('div', { class: 'tests-cov-row is-more' }, `… ещё файлов: ${files.length - MAX_COVERAGE_ROWS}`),
+      );
     }
-    body.appendChild(h('section', { class: 'tests-coverage-box' }, h('div', { class: 'tests-cov-title' }, 'Покрытие по файлам'), list));
+    body.appendChild(
+      h('section', { class: 'tests-coverage-box' }, h('div', { class: 'tests-cov-title' }, 'Покрытие по файлам'), list),
+    );
   }
 
   async function refresh(): Promise<void> {

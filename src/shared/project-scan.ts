@@ -246,10 +246,7 @@ const LANGUAGE_MARKER: Readonly<Record<string, string>> = {
  * Python-проекта), решает преобладающий язык — он показывает, что за код здесь.
  * Манифестов нет вовсе — судим по коду: победивший язык и есть вид проекта.
  */
-export function detectProjectKind(
-  markers: readonly ProjectMarker[],
-  languages: readonly LanguageCount[],
-): ProjectKind {
+export function detectProjectKind(markers: readonly ProjectMarker[], languages: readonly LanguageCount[]): ProjectKind {
   const top = languages[0];
   const byLanguage = top ? (LANGUAGE_MARKER[top.id] ?? top.id) : null;
   // Из нескольких манифестов верим тому, что совпал с преобладающим языком.

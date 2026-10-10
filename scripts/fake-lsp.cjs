@@ -45,12 +45,20 @@ function handle(message) {
   }
 
   if (message.method === 'textDocument/didChange') {
-    send({ jsonrpc: '2.0', method: 'textDocument/publishDiagnostics', params: { uri: message.params.textDocument.uri, diagnostics: [] } });
+    send({
+      jsonrpc: '2.0',
+      method: 'textDocument/publishDiagnostics',
+      params: { uri: message.params.textDocument.uri, diagnostics: [] },
+    });
     return;
   }
 
   if (message.method === 'textDocument/didClose') {
-    send({ jsonrpc: '2.0', method: 'textDocument/publishDiagnostics', params: { uri: message.params.textDocument.uri, diagnostics: [] } });
+    send({
+      jsonrpc: '2.0',
+      method: 'textDocument/publishDiagnostics',
+      params: { uri: message.params.textDocument.uri, diagnostics: [] },
+    });
     return;
   }
 

@@ -25,7 +25,7 @@ jobs:
       - name: Установить зависимости
         run: npm ci
 
-      # check = typecheck + lint + test. Одна команда — чтобы локально и в CI
+      # check = typecheck + формат + lint + test. Одна команда — чтобы локально и в CI
       # проверялось ровно одно и то же.
       - name: Проверить код
         run: npm run check

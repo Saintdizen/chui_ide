@@ -124,9 +124,7 @@ describe('parseNodeManifest', () => {
   });
 
   it('читает engines.node и поле packageManager', () => {
-    const manifest = parseNodeManifest(
-      JSON.stringify({ engines: { node: '>=20' }, packageManager: 'pnpm@9.1.0' }),
-    );
+    const manifest = parseNodeManifest(JSON.stringify({ engines: { node: '>=20' }, packageManager: 'pnpm@9.1.0' }));
     expect(manifest.engines).toBe('>=20');
     expect(manifest.packageManager).toBe('pnpm@9.1.0');
   });
@@ -166,7 +164,12 @@ describe('describeNodeEnvIssues', () => {
   });
 
   it('нет node_modules при объявленных зависимостях — ошибка с командой установки', () => {
-    const issues = describeNodeEnvIssues({ ...base, nodeModulesPresent: false, nodeModulesFilled: false, installedCount: 0 });
+    const issues = describeNodeEnvIssues({
+      ...base,
+      nodeModulesPresent: false,
+      nodeModulesFilled: false,
+      installedCount: 0,
+    });
     const issue = issues.find((item) => item.kind === 'no-modules');
     expect(issue?.severity).toBe('error');
     expect(issue?.message).toContain('npm install');

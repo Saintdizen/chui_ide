@@ -19,7 +19,11 @@ function pathDirs(): string[] {
 function executableNames(command: string): string[] {
   if (process.platform !== 'win32') return [command];
   const pathext = (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';').filter(Boolean);
-  return [command, ...pathext.map((ext) => `${command}${ext.toLowerCase()}`), ...pathext.map((ext) => `${command}${ext}`)];
+  return [
+    command,
+    ...pathext.map((ext) => `${command}${ext.toLowerCase()}`),
+    ...pathext.map((ext) => `${command}${ext}`),
+  ];
 }
 
 /** Есть ли команда в PATH как исполняемый файл. */
@@ -40,7 +44,9 @@ export async function isOnPath(command: string): Promise<boolean> {
 
 /** Какие из известных команд LSP реально есть в PATH. */
 export async function detectAvailableCommands(): Promise<string[]> {
-  const checks = await Promise.all(presetCommands().map(async (command) => ((await isOnPath(command)) ? command : null)));
+  const checks = await Promise.all(
+    presetCommands().map(async (command) => ((await isOnPath(command)) ? command : null)),
+  );
   return checks.filter((command): command is string => command !== null);
 }
 

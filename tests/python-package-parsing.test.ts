@@ -110,4 +110,3 @@ describe('packageForModule', () => {
     expect(packageForModule('mymodule')).toBe('mymodule');
   });
 });
-

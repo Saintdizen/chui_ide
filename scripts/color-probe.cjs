@@ -109,7 +109,11 @@ async function measure() {
       const got = anchor.hexAt(x, anchor.y);
       const deltas = channels(got).map((value, channel) => value - [r, g, b][channel]);
       const mark =
-        got === color ? 'точно' : deltas.every((delta) => delta === deltas[0]) ? `сдвиг ${deltas[0] > 0 ? '+' : ''}${deltas[0]}` : 'не кривая';
+        got === color
+          ? 'точно'
+          : deltas.every((delta) => delta === deltas[0])
+            ? `сдвиг ${deltas[0] > 0 ? '+' : ''}${deltas[0]}`
+            : 'не кривая';
       return { name, color, got, mark };
     });
     return { rows, attempt };

@@ -13,7 +13,12 @@ import { projectEnv } from '../project-env';
  * импортируется. Тогда в сводке будут ошибки и пустой список — это ответ, а не падение.
  */
 export async function collectTests(root: string, python: string): Promise<CollectedSuite> {
-  const env: NodeJS.ProcessEnv = { ...process.env, ...(await projectEnv(root)), PYTHONIOENCODING: 'utf-8', NO_COLOR: '1' };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...(await projectEnv(root)),
+    PYTHONIOENCODING: 'utf-8',
+    NO_COLOR: '1',
+  };
 
   return new Promise((resolve) => {
     execFile(

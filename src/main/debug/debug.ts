@@ -155,20 +155,26 @@ export class DebugService {
 
   /** Начать отладку файла. Прошлую сессию закрываем: двух быть не должно. */
   async start(program: string, options: DebugLaunchOptions = {}): Promise<{ ok: boolean; message: string }> {
-    return this.openAdapter(this.resolveAdapter(program), options.cwd ?? this.root() ?? undefined, 'launch', {
-      program,
-      // Рабочий каталог нужен и программе: в нём она запускается.
-      cwd: options.cwd ?? this.root() ?? undefined,
-      // Аргументы программы — стандартное поле DAP `args`. Пустой список не шлём:
-      // отсутствие поля и пустой массив отладчик понимает одинаково, но лишний
-      // параметр в запросе — шум в логе.
-      ...(options.args && options.args.length > 0 ? { args: options.args } : {}),
-      // Переменные окружения программы (`env` в DAP) — только для отлаживаемого
-      // процесса: адаптер и так наследует окружение проекта, а эти значения поверх.
-      ...(options.env && Object.keys(options.env).length > 0 ? { env: options.env } : {}),
-      console: 'internalConsole',
-      redirectOutput: true,
-    }, 'Отладка запущена');
+    return this.openAdapter(
+      this.resolveAdapter(program),
+      options.cwd ?? this.root() ?? undefined,
+      'launch',
+      {
+        program,
+        // Рабочий каталог нужен и программе: в нём она запускается.
+        cwd: options.cwd ?? this.root() ?? undefined,
+        // Аргументы программы — стандартное поле DAP `args`. Пустой список не шлём:
+        // отсутствие поля и пустой массив отладчик понимает одинаково, но лишний
+        // параметр в запросе — шум в логе.
+        ...(options.args && options.args.length > 0 ? { args: options.args } : {}),
+        // Переменные окружения программы (`env` в DAP) — только для отлаживаемого
+        // процесса: адаптер и так наследует окружение проекта, а эти значения поверх.
+        ...(options.env && Object.keys(options.env).length > 0 ? { env: options.env } : {}),
+        console: 'internalConsole',
+        redirectOutput: true,
+      },
+      'Отладка запущена',
+    );
   }
 
   /**
@@ -191,7 +197,14 @@ export class DebugService {
     // Node: инспектор адресуется портом, а адаптер наш — поднимаем его по stdio и
     // отдаём ему адрес инспектора. Успех подтверждает сам адаптер: событием
     // `initialized` (см. `waitInitialized`).
-    return this.openAdapter(this.adapterFor('node'), this.root() ?? undefined, 'attach', { port: options.port, host }, 'Отладка подключена', true);
+    return this.openAdapter(
+      this.adapterFor('node'),
+      this.root() ?? undefined,
+      'attach',
+      { port: options.port, host },
+      'Отладка подключена',
+      true,
+    );
   }
 
   /**
@@ -250,12 +263,17 @@ export class DebugService {
       });
     } catch (error) {
       this.stop();
-      return { ok: false, message: `Не удалось запустить отладчик: ${error instanceof Error ? error.message : String(error)}` };
+      return {
+        ok: false,
+        message: `Не удалось запустить отладчик: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
 
     const request = this.call(command, args);
     if (!waitInitialized) {
-      void request.catch((error) => this.publish(PushTopic.DebugOutput, { category: 'stderr', text: `${command}: ${error.message}` }));
+      void request.catch((error) =>
+        this.publish(PushTopic.DebugOutput, { category: 'stderr', text: `${command}: ${error.message}` }),
+      );
       return { ok: true, message: ready };
     }
 
@@ -272,9 +290,14 @@ export class DebugService {
 
   /** Дождаться `initialized` или отказа запроса о подключении — что случится раньше. */
   private async waitInitialized(request: Promise<unknown>): Promise<Error | null> {
-    const failure = request.then(() => null, (error: Error) => error);
+    const failure = request.then(
+      () => null,
+      (error: Error) => error,
+    );
     return Promise.race([
-      this.awaitInitialized(REQUEST_TIMEOUT_MS).then((ok) => (ok ? null : new Error('отладчик не подтвердил подключение'))),
+      this.awaitInitialized(REQUEST_TIMEOUT_MS).then((ok) =>
+        ok ? null : new Error('отладчик не подтвердил подключение'),
+      ),
       failure,
     ]);
   }
@@ -336,7 +359,11 @@ export class DebugService {
    * ждал, пока цель подключится к нему, тогда как цель уже слушает сама. Отсюда
    * транспорт сокетом: тот же протокол, только не по stdio, а по сети.
    */
-  private async openSocket(host: string, port: number, args: Record<string, unknown>): Promise<{ ok: boolean; message: string }> {
+  private async openSocket(
+    host: string,
+    port: number,
+    args: Record<string, unknown>,
+  ): Promise<{ ok: boolean; message: string }> {
     this.stop();
     this.target = 'python';
     this.initializedSeen = false;
@@ -375,7 +402,10 @@ export class DebugService {
       });
     } catch (error) {
       this.stop();
-      return { ok: false, message: `Не удалось запустить отладчик: ${error instanceof Error ? error.message : String(error)}` };
+      return {
+        ok: false,
+        message: `Не удалось запустить отладчик: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
 
     const trouble = await this.waitInitialized(this.call('attach', args));
@@ -528,7 +558,12 @@ export class DebugService {
 
   async scopes(frameId: number): Promise<DebugScope[]> {
     const response = await this.call('scopes', { frameId }).catch(() => null);
-    const scopes = (response?.body as { scopes?: Array<{ name?: string; variablesReference?: number; expensive?: boolean }> } | undefined)?.scopes ?? [];
+    const scopes =
+      (
+        response?.body as
+          | { scopes?: Array<{ name?: string; variablesReference?: number; expensive?: boolean }> }
+          | undefined
+      )?.scopes ?? [];
     return scopes.map((scope) => ({
       name: scope.name ?? 'значения',
       variablesReference: scope.variablesReference ?? 0,
@@ -538,7 +573,12 @@ export class DebugService {
 
   async variables(reference: number): Promise<DebugVariable[]> {
     const response = await this.call('variables', { variablesReference: reference }).catch(() => null);
-    const variables = (response?.body as { variables?: Array<{ name?: string; value?: string; type?: string; variablesReference?: number }> } | undefined)?.variables ?? [];
+    const variables =
+      (
+        response?.body as
+          | { variables?: Array<{ name?: string; value?: string; type?: string; variablesReference?: number }> }
+          | undefined
+      )?.variables ?? [];
     return variables.map((variable) => ({
       name: variable.name ?? '',
       value: variable.value ?? '',
@@ -628,9 +668,9 @@ export class DebugService {
   async setVariable(reference: number, name: string, value: string): Promise<DebugVariable | null> {
     const text = name.trim();
     if (!text) return null;
-    const response = await this
-      .call('setVariable', { variablesReference: reference, name: text, value })
-      .catch(() => null);
+    const response = await this.call('setVariable', { variablesReference: reference, name: text, value }).catch(
+      () => null,
+    );
     if (!response) return null;
     const body = response.body as { value?: unknown; type?: unknown; variablesReference?: unknown } | undefined;
     return {
@@ -654,9 +694,7 @@ export class DebugService {
     const frame = frameId ?? this.topFrameId ?? this.frames[0]?.id ?? null;
     if (this.thread === null || frame === null) return null;
 
-    const response = await this
-      .call('setExpression', { expression: text, value, frameId: frame })
-      .catch(() => null);
+    const response = await this.call('setExpression', { expression: text, value, frameId: frame }).catch(() => null);
     if (!response) return null;
     const body = response.body as { value?: unknown; type?: unknown; variablesReference?: unknown } | undefined;
     return {
@@ -841,7 +879,10 @@ export class DebugService {
     return raw.map((frame) => ({
       id: typeof frame.id === 'number' ? frame.id : 0,
       name: typeof frame.name === 'string' ? frame.name : '',
-      path: typeof (frame.source as { path?: unknown } | undefined)?.path === 'string' ? ((frame.source as { path: string }).path) : null,
+      path:
+        typeof (frame.source as { path?: unknown } | undefined)?.path === 'string'
+          ? (frame.source as { path: string }).path
+          : null,
       line: typeof frame.line === 'number' ? frame.line : 1,
       column: typeof frame.column === 'number' ? frame.column : 1,
     }));

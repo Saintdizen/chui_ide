@@ -45,7 +45,11 @@ export function createBreadcrumbs(deps: BreadcrumbsDeps): HTMLElement {
 
       const crumb = h(
         'button',
-        { class: `crumb${isFile ? ' is-file' : ''}`, type: 'button', title: isFile ? target : `${target}\nКлик — быстрый переход к файлу` },
+        {
+          class: `crumb${isFile ? ' is-file' : ''}`,
+          type: 'button',
+          title: isFile ? target : `${target}\nКлик — быстрый переход к файлу`,
+        },
         index > 0 ? svgIcon('chevron', 10) : null,
         isFile ? svgIcon('file', 12) : svgIcon('folder', 12),
         h('span', {}, segment),

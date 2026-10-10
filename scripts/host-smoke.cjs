@@ -75,9 +75,12 @@ app.whenReady().then(async () => {
       true;
     `);
 
-    check('мост отдаёт onHostRequest и replyHostRequest', await window.webContents.executeJavaScript(
-      `typeof window.chui.onHostRequest === 'function' && typeof window.chui.replyHostRequest === 'function'`,
-    ));
+    check(
+      'мост отдаёт onHostRequest и replyHostRequest',
+      await window.webContents.executeJavaScript(
+        `typeof window.chui.onHostRequest === 'function' && typeof window.chui.replyHostRequest === 'function'`,
+      ),
+    );
 
     const value = await host.request(window.webContents, 'ai.applyEdits', {
       edits: [{ path: '/tmp/a.ts', edits: [] }],

@@ -62,7 +62,10 @@ app.whenReady().then(async () => {
 
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
-  const git = new GitService(() => workspace.rootPath(), (topic, payload) => pushToRenderers(topic, payload));
+  const git = new GitService(
+    () => workspace.rootPath(),
+    (topic, payload) => pushToRenderers(topic, payload),
+  );
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
   registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient() });
@@ -73,12 +76,16 @@ app.whenReady().then(async () => {
   const ide = openIdeWindow();
   for (const seconds of [5, 10, 20, 30]) {
     await wait(seconds === 5 ? 5000 : 5000);
-    const answer = await ask(ide, `({
+    const answer = await ask(
+      ide,
+      `({
       app: Boolean(document.querySelector('.app')),
       workspace: document.querySelector('.panel-title')?.textContent ?? null,
       entries: [...document.querySelectorAll('.tree-name')].map((node) => node.textContent),
       loading: document.querySelector('.tree-loading')?.textContent ?? null,
-    })`, 20000);
+    })`,
+      20000,
+    );
     console.log(`[проба] ${seconds} с: ${JSON.stringify(answer)}`);
   }
 

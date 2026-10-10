@@ -425,7 +425,9 @@ function loadSettings(filePath: string): StoredSettings {
 
   // Модель сжатия: строка без пробелов или ничего (тогда сжимаем активной моделью).
   ai.compactModel =
-    typeof storedAi.compactModel === 'string' && storedAi.compactModel.trim() ? storedAi.compactModel.trim() : undefined;
+    typeof storedAi.compactModel === 'string' && storedAi.compactModel.trim()
+      ? storedAi.compactModel.trim()
+      : undefined;
 
   // Лимиты шагов могли прийти из старого файла или быть правлены руками.
   ai.maxSteps = clampSteps(storedAi.maxSteps, DEFAULT_SETTINGS.ai.maxSteps);

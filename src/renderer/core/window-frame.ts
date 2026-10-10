@@ -42,7 +42,12 @@ export class WindowFrame {
   ) {
     const minimize = h(
       'button',
-      { class: 'window-btn', type: 'button', title: 'Свернуть', onClick: () => void closeSafe(this.rpc, 'window.minimize') },
+      {
+        class: 'window-btn',
+        type: 'button',
+        title: 'Свернуть',
+        onClick: () => void closeSafe(this.rpc, 'window.minimize'),
+      },
       svgIcon(this.glyph('minimize'), 14),
     );
     this.minimizeButton = minimize;
@@ -53,7 +58,12 @@ export class WindowFrame {
     );
     this.closeButton = h(
       'button',
-      { class: 'window-btn is-close', type: 'button', title: 'Закрыть', onClick: () => void closeSafe(this.rpc, 'window.close') },
+      {
+        class: 'window-btn is-close',
+        type: 'button',
+        title: 'Закрыть',
+        onClick: () => void closeSafe(this.rpc, 'window.close'),
+      },
       svgIcon('close', 13),
     );
 

@@ -1,11 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import {
-  PushTopic,
-  type LspDiagnostic,
-  type LspServerConfig,
-  type LspSettings,
-} from '../../shared/api';
+import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
 import { toProjectSymbols, type ProjectSymbol } from '../../shared/lsp-symbols';
 import { mergeEnv } from '../project-env';
 
@@ -111,7 +106,9 @@ class JsonRpcConnection {
       Promise.resolve()
         .then(() => this.onRequest(message.method!, message.params))
         .then((result) => this.send({ jsonrpc: '2.0', id: message.id, result: result ?? null }))
-        .catch((error) => this.send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: String(error) } }));
+        .catch((error) =>
+          this.send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: String(error) } }),
+        );
       return;
     }
 
@@ -252,7 +249,9 @@ export class LspService {
   private async startLanguage(language: string): Promise<ServerRuntime | null> {
     const settings = this.settings();
     if (!settings.enabled) return null;
-    const config = settings.servers.find((server) => server.language === language && server.enabled && server.command.trim());
+    const config = settings.servers.find(
+      (server) => server.language === language && server.enabled && server.command.trim(),
+    );
     if (!config) return null;
 
     // Пока поднимались, могли перезапустить серверы: тогда этот уже не нужен, и

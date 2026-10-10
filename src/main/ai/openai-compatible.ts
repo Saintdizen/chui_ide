@@ -107,7 +107,9 @@ export class OpenAiCompatibleProvider implements AiProvider {
     let response = await post(buildBody(true));
     if (!response.ok && (response.status === 400 || response.status === 422)) {
       const detail = await safeText(response);
-      if (/stream_options|stream options|unknown field|unrecognized|extra field|additional propert/i.test(detail ?? '')) {
+      if (
+        /stream_options|stream options|unknown field|unrecognized|extra field|additional propert/i.test(detail ?? '')
+      ) {
         response = await post(buildBody(false));
         if (!response.ok) {
           const retryDetail = await safeText(response);

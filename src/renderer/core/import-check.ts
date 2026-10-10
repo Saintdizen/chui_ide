@@ -1,5 +1,11 @@
 import type { LspDiagnostic } from '../../shared/api';
-import { missingImports, parsePythonImports, parseScriptImports, topLevelModules, type ImportRef } from '../../shared/imports';
+import {
+  missingImports,
+  parsePythonImports,
+  parseScriptImports,
+  topLevelModules,
+  type ImportRef,
+} from '../../shared/imports';
 import type { DocumentStore } from './document-store';
 import type { EditorService } from './editor-service';
 import type { RpcClient } from './rpc';

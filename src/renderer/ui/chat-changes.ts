@@ -182,7 +182,9 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
     // Файловые операции: они уже на диске, но человеку важно видеть и их.
     for (const file of source.files) {
       const title = file.from ? `${file.from} → ${file.path}` : file.path;
-      list.appendChild(row(file.path, h('span', { class: `chip-kind chip-kind-${file.kind}` }, fileLabel(file)), title));
+      list.appendChild(
+        row(file.path, h('span', { class: `chip-kind chip-kind-${file.kind}` }, fileLabel(file)), title),
+      );
     }
 
     syncPanel();

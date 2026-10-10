@@ -58,28 +58,40 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     spellcheck: false,
     placeholder: 'Сообщение коммита, Ctrl+Enter — закоммитить',
   });
-  const commitButton = h('button', {
-    class: 'btn btn-primary sc-commit',
-    type: 'button',
-    title: 'Закоммитить проиндексированное',
-    onClick: () => void commit(),
-  }, 'Закоммитить');
+  const commitButton = h(
+    'button',
+    {
+      class: 'btn btn-primary sc-commit',
+      type: 'button',
+      title: 'Закоммитить проиндексированное',
+      onClick: () => void commit(),
+    },
+    'Закоммитить',
+  );
 
   const stagedGroup = h('div', { class: 'sc-group' });
   const unstagedGroup = h('div', { class: 'sc-group' });
   const hint = h('p', { class: 'sc-hint' });
-  const initButton = h('button', {
-    class: 'btn',
-    type: 'button',
-    onClick: () => void deps.commands.execute('git.init'),
-  }, 'Создать репозиторий');
+  const initButton = h(
+    'button',
+    {
+      class: 'btn',
+      type: 'button',
+      onClick: () => void deps.commands.execute('git.init'),
+    },
+    'Создать репозиторий',
+  );
 
-  const newBranchButton = h('button', {
-    class: 'icon-btn',
-    type: 'button',
-    title: 'Новая ветка',
-    onClick: () => openBranchInput(),
-  }, svgIcon('plus', 14));
+  const newBranchButton = h(
+    'button',
+    {
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Новая ветка',
+      onClick: () => openBranchInput(),
+    },
+    svgIcon('plus', 14),
+  );
 
   const element = h(
     'div',
@@ -96,7 +108,12 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
         newBranchButton,
         h(
           'button',
-          { class: 'icon-btn', type: 'button', title: 'Обновить состояние', onClick: () => void deps.commands.execute('git.refresh') },
+          {
+            class: 'icon-btn',
+            type: 'button',
+            title: 'Обновить состояние',
+            onClick: () => void deps.commands.execute('git.refresh'),
+          },
           svgIcon('refresh', 14),
         ),
       ),
@@ -272,7 +289,7 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     const isRepo = repository !== null;
 
     branchName.textContent = repository
-      ? repository.branch ?? `HEAD ${repository.head ?? ''}`.trim()
+      ? (repository.branch ?? `HEAD ${repository.head ?? ''}`.trim())
       : 'не репозиторий';
     branchSelect.setHidden(!isRepo);
     newBranchButton.hidden = !isRepo;

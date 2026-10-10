@@ -42,7 +42,11 @@ describe('estimateMessagesTokens', () => {
   });
 
   it('картинку считает фиксированно, а не по длине data-URL', () => {
-    const withImage: ChatMessage = { role: 'user', content: 'a', images: [`data:image/png;base64,${'A'.repeat(50_000)}`] };
+    const withImage: ChatMessage = {
+      role: 'user',
+      content: 'a',
+      images: [`data:image/png;base64,${'A'.repeat(50_000)}`],
+    };
     // Огромная base64-строка не должна раздувать оценку: провайдер берёт за картинку не по символам.
     expect(estimateMessagesTokens([withImage])).toBeLessThan(5_000);
   });
@@ -217,7 +221,10 @@ describe('splitTranscript', () => {
   });
 
   it('гигантское одиночное сообщение режет, а не выбрасывает', () => {
-    const blocks = splitTranscript([{ role: 'tool', toolCallId: 'c1', name: 'read_file', content: 'д'.repeat(1_000) }], 100);
+    const blocks = splitTranscript(
+      [{ role: 'tool', toolCallId: 'c1', name: 'read_file', content: 'д'.repeat(1_000) }],
+      100,
+    );
     expect(blocks.length).toBeGreaterThan(1);
     expect(blocks.join('').length).toBeGreaterThanOrEqual(1_000);
   });
@@ -237,8 +244,14 @@ describe('splitTranscript', () => {
 describe('isContextOverflow', () => {
   it('узнаёт переполнение по исходному телу ответа в `details`', () => {
     // `message` у нас уже переведён, поэтому признак ищем в сыром теле провайдера.
-    const openai = { message: 'Превышен размер контекста модели', details: "This model's maximum context length is 128000 tokens" };
-    const anthropic = { message: 'Превышен размер контекста модели', details: 'prompt is too long: 210000 tokens > 200000 maximum' };
+    const openai = {
+      message: 'Превышен размер контекста модели',
+      details: "This model's maximum context length is 128000 tokens",
+    };
+    const anthropic = {
+      message: 'Превышен размер контекста модели',
+      details: 'prompt is too long: 210000 tokens > 200000 maximum',
+    };
     expect(isContextOverflow(openai)).toBe(true);
     expect(isContextOverflow(anthropic)).toBe(true);
   });
@@ -248,7 +261,9 @@ describe('isContextOverflow', () => {
   });
 
   it('прочие ошибки переполнением не считает', () => {
-    expect(isContextOverflow({ message: 'Ключ отклонён провайдером (HTTP 401)', details: 'invalid api key' })).toBe(false);
+    expect(isContextOverflow({ message: 'Ключ отклонён провайдером (HTTP 401)', details: 'invalid api key' })).toBe(
+      false,
+    );
     expect(isContextOverflow(new Error('сеть недоступна'))).toBe(false);
     expect(isContextOverflow(undefined)).toBe(false);
     expect(isContextOverflow(null)).toBe(false);
