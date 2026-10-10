@@ -18,6 +18,7 @@ export type AgentToolName =
   | 'read_file'
   | 'read_files'
   | 'search'
+  | 'codebase_search'
   | 'find_files'
   | 'get_diagnostics'
   | 'apply_edit'
@@ -112,6 +113,23 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         caseSensitive: { type: 'boolean', description: 'Учитывать регистр (по умолчанию — нет).' },
         filesOnly: { type: 'boolean', description: 'Вернуть только пути файлов с совпадением, без строк.' },
         glob: { type: 'string', description: 'Маска файлов, например **/*.ts' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'codebase_search',
+    side: 'main',
+    description:
+      'Поиск по коду, когда имя известно примерно, а файл — нет: сначала ищет объявления ' +
+      'символов через языковой сервер («где определён»), затем — текстовые совпадения, ' +
+      'свёрнутые по файлам (сколько раз и где первое). Умеет имена словами: запрос ' +
+      '«read file» находит readFile. Точную строку ищи через search.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Имя символа или слова из него, например `readFile`.' },
+        limit: { type: 'number', description: 'Сколько объявлений вернуть (по умолчанию 40).' },
       },
       required: ['query'],
     },

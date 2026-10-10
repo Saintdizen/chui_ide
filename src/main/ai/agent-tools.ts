@@ -9,6 +9,7 @@ import {
   type TerminalSession,
   type ToolFileChange,
 } from '../../shared/api';
+import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
 import { compressToolOutput } from '../../shared/output-compress';
 import { parseToolArguments } from '../../shared/tools';
@@ -60,6 +61,15 @@ export interface TerminalAgent {
   kill(id: string): void;
 }
 
+/**
+ * Поиск объявлений символов — его умеет языковой сервер («перейти к символу»),
+ * и другого способа найти класс по имени в проекте нет. Полный `LspService`
+ * подходит сюда структурно, как `GitTools` и `TerminalAgent`.
+ */
+export interface SymbolSearch {
+  projectSymbols(query: string): Promise<readonly SearchSymbol[]>;
+}
+
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
@@ -84,6 +94,8 @@ export interface ToolContext {
   openFile?(path: string, line?: number, column?: number): Promise<boolean>;
   /** Терминальные сессии (pty): нужны инструментам terminal_*. */
   terminals?: TerminalAgent;
+  /** Символы проекта (языковой сервер): нужен инструменту codebase_search. */
+  symbols?: SymbolSearch;
 }
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
@@ -156,6 +168,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await readFiles(ctx.workspace, parsed.value);
       case 'search':
         return await search(ctx, parsed.value);
+      case 'codebase_search':
+        return await codebaseSearch(ctx, parsed.value);
       case 'find_files':
         return await findFiles(ctx.workspace, parsed.value);
       case 'get_diagnostics':
@@ -407,6 +421,64 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     summary: `${result.hits.length} совпадений${result.truncated ? ', список обрезан' : ''} · просканировано файлов: ${result.scanned}`,
     detail: lines.length ? truncate(lines.join('\n')).text : 'Ничего не найдено',
   };
+}
+
+/** Сколько объявлений вернуть по умолчанию и сколько файлов-сводок показать. */
+const MAX_CODE_SYMBOLS = 40;
+const MAX_CODE_FILES = 25;
+
+/**
+ * Поиск по коду, когда имя известно примерно: сперва объявления символов через
+ * языковой сервер, затем текстовые совпадения, свёрнутые по файлам.
+ *
+ * Порядок именно такой: «где определён» — главный ответ, а «где встречается» —
+ * подсказка. Языковой сервер может быть не поднят (не настроен, ещё не
+ * стартовал, не тот язык) — это не ошибка инструмента: тогда ищем текстом и
+ * честно сообщаем об этом (см. `formatCodeSearch`).
+ */
+async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const query = requireString(args, 'query');
+  const limit = Math.min(optionalInteger(args, 'limit') ?? MAX_CODE_SYMBOLS, MAX_CODE_SYMBOLS);
+  const root = ctx.workspace.rootPath();
+
+  let found: readonly SearchSymbol[] = [];
+  let symbolsAvailable = false;
+  if (ctx.symbols) {
+    try {
+      found = await ctx.symbols.projectSymbols(query);
+      symbolsAvailable = true;
+    } catch {
+      // Сервер не ответил — не повод отказывать в поиске: продолжаем текстом.
+      symbolsAvailable = false;
+    }
+  }
+
+  // Запрос словами («read file») текстом не найти: ищем по спрессованной форме —
+  // так он совпадёт с `readFile`. Регистр `search` учитывает сам.
+  const compact = query.replace(/\s+/g, '');
+  const hits = await ctx.workspace.search(
+    { query: compact, isRegex: false, caseSensitive: false, maxResults: MAX_SEARCH_HITS },
+    ctx.signal,
+  );
+  const files = digestHits(
+    hits.hits.map((hit) => ({ path: relativePath(hit.path, root), line: hit.line, text: hit.text })),
+    MAX_CODE_FILES,
+  );
+
+  const shaped = formatCodeSearch({
+    query,
+    // Пути — как во всех инструментах: относительно рабочей папки, иначе модель
+    // видит длинный абсолютный путь и не понимает, что файл рядом.
+    symbols: rankSymbols(found, query, limit).map((symbol) => ({ ...symbol, path: relativePath(symbol.path, root) })),
+    symbolTotal: found.length,
+    files,
+    hitTotal: hits.hits.length,
+    scanned: hits.scanned,
+    truncated: hits.truncated || found.length > limit,
+    symbolsAvailable,
+  });
+
+  return { ok: true, summary: shaped.summary, detail: shaped.detail };
 }
 
 /**

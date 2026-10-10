@@ -88,6 +88,9 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   deps.ai.attachGit(deps.git);
   // Терминалы — тоже: агент работает с pty-сессиями, а не только разовыми командами.
   deps.ai.attachTerminals(deps.terminals);
+  // Языковой сервер умеет искать по символам («перейти к символу») — это и есть
+  // инструмент codebase_search. Нет сервера — инструмент модели не предлагаем.
+  if (deps.lsp) deps.ai.attachSymbols(deps.lsp);
 
   router.register(
     'app.info',

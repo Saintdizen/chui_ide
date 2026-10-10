@@ -252,6 +252,46 @@ app.whenReady().then(async () => {
     );
     check('без моста apply_edit не предлагается', !run.toolNames.includes('apply_edit'), run.toolNames);
 
+    /* 1в. codebase_search: сперва объявления символов, затем текстовые совпадения.
+       Символы приходят от языкового сервера — в проверке его роль играет заглушка. */
+    check('без языкового сервера codebase_search не предлагается', !run.toolNames.includes('codebase_search'));
+
+    ai.attachSymbols({
+      projectSymbols: async (query) =>
+        String(query).includes('read')
+          ? [
+              { name: 'readFileSync', kind: 'функция', container: null, path: file, line: 9, column: 1 },
+              { name: 'readFile', kind: 'функция', container: null, path: file, line: 2, column: 1 },
+            ]
+          : [],
+    });
+
+    requested = { name: 'codebase_search', args: { query: 'read file' } };
+    run = await chat(undefined);
+    const codeSearch = String(run.results[0]?.detail ?? '');
+    check('codebase_search предлагается с языковым сервером', run.toolNames.includes('codebase_search'), run.toolNames);
+    check('объявление символа в ответе', codeSearch.includes('функция readFile'), codeSearch);
+    check(
+      'точное имя идёт раньше похожего',
+      codeSearch.indexOf('readFile') < codeSearch.indexOf('readFileSync'),
+      codeSearch,
+    );
+    check('путь символа показан относительно папки', codeSearch.includes('notes.txt:2'), codeSearch);
+
+    requested = { name: 'codebase_search', args: { query: MARKER } };
+    run = await chat(undefined);
+    const textSearch = String(run.results[0]?.detail ?? '');
+    check('текстовые совпадения свёрнуты по файлам', textSearch.includes('Где встречается:'), textSearch);
+    check('сводка по файлу: сколько и где первое', /notes\.txt — \d+ совпадение/.test(textSearch), textSearch);
+
+    requested = { name: 'codebase_search', args: { query: 'нет-такого-имени' } };
+    run = await chat(undefined);
+    check(
+      'пустой результат назван честно',
+      /ничего не найдено/.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
+    );
+
     /* 2. правки приняты */
     const recorded = [];
     const accepted = {

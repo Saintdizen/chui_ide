@@ -30,7 +30,14 @@ import {
 import { RpcFailure } from '../ipc/router';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
-import { runTool, type GitTools, type TerminalAgent, type ToolContext, type ToolOutcome } from './agent-tools';
+import {
+  runTool,
+  type GitTools,
+  type SymbolSearch,
+  type TerminalAgent,
+  type ToolContext,
+  type ToolOutcome,
+} from './agent-tools';
 import { AnthropicProvider } from './anthropic';
 import { assertChatImages } from './images';
 import { OpenAiCompatibleProvider } from './openai-compatible';
@@ -122,6 +129,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'read_file',
   'read_files',
   'search',
+  'codebase_search',
   'find_files',
   'get_diagnostics',
   'git_status',
@@ -206,6 +214,8 @@ export class AiService {
   private git?: GitTools;
   /** Терминальные сессии тоже приходят снаружи: без них terminal_* не предлагаем. */
   private terminals?: TerminalAgent;
+  /** Поиск символов проекта: без него codebase_search ищет только текстом. */
+  private symbols?: SymbolSearch;
   /**
    * Права доступа текущего прогона (кнопка в композере). Храним на сервисе, а не
    * снимком в запросе: renderer может переключить их прямо во время ответа агента.
@@ -237,6 +247,15 @@ export class AiService {
   /** Подключить терминалы: включает инструменты terminal_start/read/write/stop. */
   attachTerminals(terminals: TerminalAgent): void {
     this.terminals = terminals;
+  }
+
+  /**
+   * Подключить поиск символов (языковой сервер): включает инструмент
+   * codebase_search. Без него инструмент не предлагаем — текстовый поиск уже
+   * есть отдельно (`search`), и дублировать его незачем.
+   */
+  attachSymbols(symbols: SymbolSearch): void {
+    this.symbols = symbols;
   }
 
   /**
@@ -353,6 +372,7 @@ export class AiService {
     const compressOutput = settings.ai.compressOutput !== false;
     if (this.git) toolContext.git = this.git;
     if (this.terminals) toolContext.terminals = this.terminals;
+    if (this.symbols) toolContext.symbols = this.symbols;
     if (host) {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
@@ -722,6 +742,7 @@ export class AiService {
       return this.git !== undefined;
     }
     if (tool.name.startsWith('terminal_')) return this.terminals !== undefined;
+    if (tool.name === 'codebase_search') return this.symbols !== undefined;
     return tool.side === 'main';
   }
 
