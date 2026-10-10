@@ -121,6 +121,20 @@ app.whenReady().then(async () => {
       return;
     }
 
+    // Веб-поиск: инструмент ходит на тот же локальный сервер, что и за моделями,
+    // поэтому проверка идёт через настоящий fetch (адрес — localhost, он разрешён).
+    if ((req.url ?? '').includes('/search?')) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          results: [
+            { title: 'Документация <b>scale</b>', url: 'https://docs.example/scale', content: 'фильтр <b>scale</b>' },
+          ],
+        }),
+      );
+      return;
+    }
+
     const body = await readBody(req);
     bodies.push(body);
 
@@ -149,6 +163,8 @@ app.whenReady().then(async () => {
       maxSteps: 8,
       maxAutopilotSteps: 24,
       confirmDangerous: true,
+      // Веб-поиск по умолчанию выключен и включается проверками ниже.
+      webSearch: { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false },
     },
     get() {
       return this;
@@ -159,6 +175,9 @@ app.whenReady().then(async () => {
       return path.join(dir, 'settings.json');
     },
     resolveApiKey() {
+      return undefined;
+    },
+    resolveWebSearchKey() {
       return undefined;
     },
   };
@@ -291,6 +310,34 @@ app.whenReady().then(async () => {
       /ничего не найдено/.test(String(run.results[0]?.summary ?? '')),
       run.results[0]?.summary,
     );
+
+    /* 1г. web_search: выключен по умолчанию, включается настройкой.
+       Адрес — тот же локальный сервер, поэтому проверяется настоящий fetch. */
+    check('без настройки web_search не предлагается', !run.toolNames.includes('web_search'), run.toolNames);
+
+    settings.ai.webSearch = {
+      enabled: true,
+      provider: 'searxng',
+      endpoint: `http://127.0.0.1:${server.address().port}`,
+      hasApiKey: false,
+    };
+    requested = { name: 'web_search', args: { query: 'ffmpeg scale' } };
+    run = await chat(undefined);
+    const searchResult = String(run.results[0]?.detail ?? '');
+    check('включённый web_search предлагается', run.toolNames.includes('web_search'), run.toolNames);
+    check('результаты поиска дошли до модели', searchResult.includes('https://docs.example/scale'), searchResult);
+    check(
+      'разметка в выдаче снята, а источник назван',
+      !searchResult.includes('<b>') && searchResult.includes('SearxNG'),
+      searchResult,
+    );
+
+    // Brave без ключа — заведомо нерабочий инструмент: модели его не показываем.
+    settings.ai.webSearch = { enabled: true, provider: 'brave', endpoint: '', hasApiKey: false };
+    run = await chat(undefined);
+    check('Brave без ключа не предлагается', !run.toolNames.includes('web_search'), run.toolNames);
+
+    settings.ai.webSearch = { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false };
 
     /* 2. правки приняты */
     const recorded = [];

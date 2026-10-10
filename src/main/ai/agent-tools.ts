@@ -10,6 +10,7 @@ import {
   type ToolFileChange,
 } from '../../shared/api';
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
+import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
 import { compressToolOutput } from '../../shared/output-compress';
 import { parseToolArguments } from '../../shared/tools';
@@ -70,6 +71,19 @@ export interface SymbolSearch {
   projectSymbols(query: string): Promise<readonly SearchSymbol[]>;
 }
 
+/**
+ * Веб-поиск для инструмента `web_search`. Настройки, ключ и сеть живут в
+ * `ai/service.ts` и `ai/web-search.ts`: сюда приходит уже готовый вызов, поэтому
+ * инструмент остаётся проверяемым без сети.
+ */
+export interface WebSearchRunner {
+  search(
+    query: string,
+    limit: number,
+    signal?: AbortSignal,
+  ): Promise<{ hits: readonly WebSearchHit[]; providerLabel: string }>;
+}
+
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
@@ -96,6 +110,8 @@ export interface ToolContext {
   terminals?: TerminalAgent;
   /** Символы проекта (языковой сервер): нужен инструменту codebase_search. */
   symbols?: SymbolSearch;
+  /** Веб-поиск: подключён только при включённой настройке. */
+  webSearch?: WebSearchRunner;
 }
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
@@ -180,6 +196,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await replaceInFiles(ctx.workspace, parsed.value);
       case 'run_terminal':
         return await runTerminal(ctx, parsed.value);
+      case 'web_search':
+        return await webSearch(ctx, parsed.value);
       case 'create_file':
         return await createFile(ctx.workspace, parsed.value);
       case 'delete_file':
@@ -694,6 +712,34 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
     detail: `$ ${command}\n${output.length ? output : '(пустой вывод)'}`,
   };
+}
+
+/** Сколько результатов веб-поиска отдаём модели: больше — уже шум, а не ответ. */
+const MAX_WEB_RESULTS = 10;
+
+/**
+ * Веб-поиск. Пустая выдача — не ошибка инструмента: модель должна узнать, что по
+ * такому запросу ничего нет, и сменить формулировку. Ошибкой считаем только
+ * недоступность сервиса — тогда в ответе есть текст причины.
+ */
+async function webSearch(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.webSearch) return { ok: false, summary: 'Веб-поиск не подключён' };
+
+  const query = requireString(args, 'query');
+  const limit = Math.min(Math.max(optionalInteger(args, 'limit') ?? MAX_WEB_RESULTS, 1), MAX_WEB_RESULTS);
+
+  try {
+    const { hits, providerLabel } = await ctx.webSearch.search(query, limit, ctx.signal);
+    const shaped = formatWebResults(query, providerLabel, hits);
+    return { ok: true, summary: shaped.summary, detail: shaped.detail };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      summary: `Веб-поиск недоступен: ${reason}`,
+      detail: 'Поиск не выполнился. Не повторяй тот же запрос — ответь по тому, что известно из проекта.',
+    };
+  }
 }
 
 /** История коммитов: read-only контекст «что тут менялось». */

@@ -4,6 +4,7 @@ import {
   ChatStreamEvent,
   RpcErrorCode,
   type AiConnectionTestResult,
+  type AiWebSearchSettings,
   type ApplyEditsHostResult,
   type ChatAttachment,
   type ChatMessage,
@@ -39,6 +40,7 @@ import {
   type ToolOutcome,
 } from './agent-tools';
 import { AnthropicProvider } from './anthropic';
+import { searchWeb, webSearchNeedsKey, webSearchProviderLabel } from './web-search';
 import { assertChatImages } from './images';
 import { OpenAiCompatibleProvider } from './openai-compatible';
 import type { AiProvider } from './provider';
@@ -130,6 +132,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'read_files',
   'search',
   'codebase_search',
+  'web_search',
   'find_files',
   'get_diagnostics',
   'git_status',
@@ -311,6 +314,7 @@ export class AiService {
     host?: ChatHostBridge,
   ): Promise<ChatStreamDone> {
     const settings = this.settings.get();
+    const webSearch = settings.ai.webSearch;
     const provider = this.createProvider(request.providerId);
     const useTools = request.useTools ?? false;
     const planMode = request.planMode ?? false;
@@ -373,6 +377,20 @@ export class AiService {
     if (this.git) toolContext.git = this.git;
     if (this.terminals) toolContext.terminals = this.terminals;
     if (this.symbols) toolContext.symbols = this.symbols;
+    // Веб-поиск читает настройки на каждый прогон: человек может включить его
+    // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
+    // в момент вызова: он мог появиться уже после старта приложения.
+    if (this.canUseWebSearch(webSearch)) {
+      toolContext.webSearch = {
+        search: (query, limit, callSignal) =>
+          searchWeb(
+            query,
+            { provider: webSearch.provider, endpoint: webSearch.endpoint, apiKey: this.settings.resolveWebSearchKey() },
+            limit,
+            callSignal,
+          ).then((hits) => ({ hits, providerLabel: webSearchProviderLabel(webSearch.provider) })),
+      };
+    }
     if (host) {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
@@ -733,6 +751,16 @@ export class AiService {
    * от того, подключён ли мост. Лишний инструмент хуже отсутствующего: модель
    * потратит шаг на вызов, который заведомо не сработает.
    */
+  /**
+   * Готов ли веб-поиск к работе: включён и обеспечен ключом, если тот нужен.
+   * Brave без ключа — это инструмент, который заведомо ответит ошибкой, поэтому
+   * модели он не предлагается.
+   */
+  private canUseWebSearch(search: AiWebSearchSettings): boolean {
+    if (!search.enabled) return false;
+    return !webSearchNeedsKey(search.provider) || Boolean(this.settings.resolveWebSearchKey());
+  }
+
   private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined): boolean {
     if (tool.name === 'apply_edit') return host?.applyEdits !== undefined;
     if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
@@ -743,6 +771,7 @@ export class AiService {
     }
     if (tool.name.startsWith('terminal_')) return this.terminals !== undefined;
     if (tool.name === 'codebase_search') return this.symbols !== undefined;
+    if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     return tool.side === 'main';
   }
 

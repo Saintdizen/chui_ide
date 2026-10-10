@@ -513,6 +513,8 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     deps.ai.setAutoApprove(params.autoApprove);
   });
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
+  router.register('ai.setWebSearchKey', (params) => deps.settings.setWebSearchKey(params.apiKey));
+  router.register('ai.clearWebSearchKey', () => deps.settings.clearWebSearchKey());
   router.register('ai.test', (params, ctx) => {
     requireAiEnabled();
     return deps.ai.testConnection(params, ctx.signal);

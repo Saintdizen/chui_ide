@@ -16,6 +16,7 @@ import {
   type WorkspaceSettings,
 } from '../shared/api';
 import { COMPACT_AT_TOKENS } from '../shared/context-fit';
+import { isWebSearchProvider, type WebSearchProvider } from '../shared/web-search';
 import { RpcFailure } from './ipc/router';
 
 interface StoredProvider {
@@ -55,6 +56,14 @@ interface StoredSettings {
     confirmDangerous: boolean;
     /** Убирать шум из вывода инструментов перед отправкой модели. */
     compressOutput: boolean;
+    /** Веб-поиск ассистента: выключен, пока человек не включит его сам. */
+    webSearch: {
+      enabled: boolean;
+      provider: WebSearchProvider;
+      /** Пусто — адрес по умолчанию для выбранного вида поиска. */
+      endpoint: string;
+      apiKey?: string;
+    };
   };
   editor: EditorSettings;
   explorer: ExplorerSettings;
@@ -106,6 +115,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     confirmDangerous: false,
     // Сжатие включено: оно снимает оформление, а не содержание.
     compressOutput: true,
+    // Веб-поиск выключен: агент не должен ходить в интернет без явного согласия.
+    webSearch: { enabled: false, provider: 'searxng', endpoint: '' },
   },
   editor: {
     tabSize: 4,
@@ -241,6 +252,12 @@ export class SettingsStore {
         maxAutopilotSteps: ai.maxAutopilotSteps,
         confirmDangerous: ai.confirmDangerous,
         compressOutput: ai.compressOutput !== false,
+        webSearch: {
+          enabled: ai.webSearch?.enabled === true,
+          provider: ai.webSearch?.provider ?? 'searxng',
+          endpoint: ai.webSearch?.endpoint ?? '',
+          hasApiKey: Boolean(this.resolveWebSearchKey()),
+        },
       },
       editor: { ...editor },
       explorer: { ...explorer, exclude: [...explorer.exclude] },
@@ -310,6 +327,28 @@ export class SettingsStore {
     return this.get();
   }
 
+  /** Ключ сервиса веб-поиска: не провайдер модели, поэтому хранится отдельно. */
+  setWebSearchKey(apiKey: string): Settings {
+    const trimmed = apiKey.trim();
+    if (trimmed) this.data.ai.webSearch.apiKey = trimmed;
+    else delete this.data.ai.webSearch.apiKey;
+    this.persist();
+    return this.get();
+  }
+
+  clearWebSearchKey(): Settings {
+    delete this.data.ai.webSearch.apiKey;
+    this.persist();
+    return this.get();
+  }
+
+  /** Ключ веб-поиска: settings.json → CHUI_WEB_SEARCH_KEY → BRAVE_API_KEY. */
+  resolveWebSearchKey(): string | undefined {
+    const stored = this.data.ai.webSearch?.apiKey;
+    if (stored) return stored;
+    return process.env.CHUI_WEB_SEARCH_KEY ?? process.env.BRAVE_API_KEY;
+  }
+
   /** Порядок поиска: settings.json → специфичная переменная окружения → CHUI_API_KEY. */
   resolveApiKey(providerId: string): string | undefined {
     const provider = this.data.ai.providers.find((item) => item.id === providerId);
@@ -367,6 +406,15 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
   }
   if (patch.confirmDangerous !== undefined) target.confirmDangerous = patch.confirmDangerous === true;
   if (patch.compressOutput !== undefined) target.compressOutput = patch.compressOutput === true;
+
+  // Веб-поиск: включение, вид сервиса и адрес. Ключ сюда не входит — он приходит
+  // отдельным вызовом `ai.setWebSearchKey`, как ключи провайдеров.
+  if (patch.webSearch) {
+    const incoming = patch.webSearch;
+    if (incoming.enabled !== undefined) target.webSearch.enabled = incoming.enabled === true;
+    if (isWebSearchProvider(incoming.provider)) target.webSearch.provider = incoming.provider;
+    if (incoming.endpoint !== undefined) target.webSearch.endpoint = incoming.endpoint.trim();
+  }
 
   // Провайдеров можно добавлять и править из интерфейса: ключ к ним приходит
   // отдельным вызовом ai.setApiKey, здесь только адрес и список моделей.
@@ -440,6 +488,15 @@ function loadSettings(filePath: string): StoredSettings {
   ai.maxAutopilotSteps = clampSteps(storedAi.maxAutopilotSteps, DEFAULT_SETTINGS.ai.maxAutopilotSteps);
   // Флаг могли записать чем угодно: оставляем строго булево значение.
   ai.confirmDangerous = ai.confirmDangerous === true;
+  // Веб-поиск: файл правят и руками, поэтому берём только известные значения.
+  const storedSearch = (storedAi.webSearch ?? {}) as Partial<StoredSettings['ai']['webSearch']>;
+  ai.webSearch = {
+    enabled: storedSearch.enabled === true,
+    provider: isWebSearchProvider(storedSearch.provider) ? storedSearch.provider : 'searxng',
+    endpoint: typeof storedSearch.endpoint === 'string' ? storedSearch.endpoint : '',
+  };
+  if (typeof storedSearch.apiKey === 'string' && storedSearch.apiKey) ai.webSearch.apiKey = storedSearch.apiKey;
+
   // Сжатие выключено только явным `false`: отсутствие поля читаем как «включено» —
   // иначе настройка молча отключилась бы у всех, кто обновляется со старой версии.
   ai.compressOutput = ai.compressOutput !== false;

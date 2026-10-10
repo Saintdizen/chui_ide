@@ -16,6 +16,7 @@ import type { InstalledPackage } from './python-packages';
 import type { CollectedSuite } from './python-tests';
 import type { EnvironmentHealth } from './python-health';
 import type { ProjectSymbol } from './lsp-symbols';
+import type { WebSearchProvider } from './web-search';
 
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
 
@@ -404,6 +405,8 @@ export interface AiSettings {
    * инструмента человек всё равно видит полный вывод.
    */
   compressOutput: boolean;
+  /** Веб-поиск: выключен по умолчанию, инструмент предлагается только при включении. */
+  webSearch: AiWebSearchSettings;
 }
 
 /** Как показывать невидимые символы. */
@@ -788,6 +791,8 @@ export interface AiSettingsPatch {
   confirmDangerous?: boolean;
   /** Сжимать ли вывод инструментов перед отправкой модели. */
   compressOutput?: boolean;
+  /** Настройки веб-поиска: ключ задаётся отдельным вызовом `ai.setWebSearchKey`. */
+  webSearch?: { enabled?: boolean; provider?: WebSearchProvider; endpoint?: string };
   /** Добавить провайдера или обновить существующего по `id`. */
   provider?: AiProviderPatch;
   /** Убрать провайдера из списка. */
@@ -799,6 +804,20 @@ export interface AiConnectionTestResult {
   ok: boolean;
   models: string[];
   message: string;
+}
+
+/**
+ * Веб-поиск ассистента. Выключен по умолчанию: это единственное действие агента,
+ * которое ходит в интернет, и включать его без спроса невежливо.
+ */
+export interface AiWebSearchSettings {
+  enabled: boolean;
+  /** SearxNG (ключ не нужен) или Brave Search API (нужен ключ). */
+  provider: WebSearchProvider;
+  /** Адрес сервиса; пусто — адрес по умолчанию для выбранного вида поиска. */
+  endpoint: string;
+  /** Ключ задан. Сам ключ наружу не отдаём — как и ключи провайдеров. */
+  hasApiKey: boolean;
 }
 
 export interface SettingsPatch {
@@ -1283,6 +1302,9 @@ export interface ChuiMethods {
 
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };
+  /** Ключ сервиса веб-поиска: отдельно от провайдеров — это не провайдер модели. */
+  'ai.setWebSearchKey': { params: { apiKey: string }; result: Settings };
+  'ai.clearWebSearchKey': { params: void; result: Settings };
   /** Проверить адрес и ключ до сохранения провайдера. */
   'ai.test': {
     params: { baseUrl: string; apiKey?: string; providerId?: string };

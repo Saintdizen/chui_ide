@@ -11,6 +11,7 @@ import type {
 } from '../../shared/api';
 import type { AiProviderPatch } from '../../shared/api';
 import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
+import type { WebSearchProvider } from '../../shared/web-search';
 import { lspLanguagesForKind } from '../../shared/lsp-presets';
 import type { CommandRegistry } from '../core/commands';
 import type { RpcClient } from '../core/rpc';
@@ -382,6 +383,56 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       render();
     }
 
+    // Ключ сервиса поиска сохраняется отдельной кнопкой, как ключ провайдера:
+    // он не часть обычной правки настроек и обратно в renderer не возвращается.
+    const webSearchKeyInput = h('input', {
+      class: 'field-input',
+      type: 'password',
+      placeholder: ai.webSearch.hasApiKey ? 'Ключ сохранён — введите новый, чтобы заменить' : 'Ключ сервиса поиска',
+    });
+
+    async function saveWebSearchKey(): Promise<void> {
+      const value = webSearchKeyInput.value.trim();
+      if (!value) return;
+      settings = await deps.rpc.request('ai.setWebSearchKey', { apiKey: value });
+      render();
+    }
+
+    async function clearWebSearchKey(): Promise<void> {
+      settings = await deps.rpc.request('ai.clearWebSearchKey');
+      render();
+    }
+
+    const webSearchKeyField =
+      ai.webSearch.provider === 'brave'
+        ? field(
+            'Ключ Brave',
+            h(
+              'div',
+              { class: 'field-row' },
+              webSearchKeyInput,
+              h(
+                'button',
+                { class: 'btn btn-small', type: 'button', onClick: () => void saveWebSearchKey() },
+                'Сохранить ключ',
+              ),
+              ai.webSearch.hasApiKey
+                ? h(
+                    'button',
+                    { class: 'btn btn-small', type: 'button', onClick: () => void clearWebSearchKey() },
+                    'Убрать ключ',
+                  )
+                : null,
+            ),
+          )
+        : h(
+            'div',
+            { class: 'field-hint' },
+            ai.webSearch.hasApiKey
+              ? 'Свой SearxNG обычно работает без ключа; ключ можно убрать в поле выше, если адрес его не требует.'
+              : 'SearxNG ключа не требует — достаточно адреса сервиса.',
+          );
+
     const prompt = h('textarea', { class: 'field-input', rows: 5, spellcheck: false });
     prompt.value = ai.systemPrompt;
     prompt.addEventListener('change', () => void patch({ ai: { systemPrompt: prompt.value } }));
@@ -488,6 +539,43 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'Содержание — код, диффы, ошибки — не меняется, а в карточке инструмента человек ' +
           'по-прежнему видит полный вывод.',
       ),
+      h('div', { class: 'settings-divider' }),
+      switchRow(
+        'Веб-поиск (инструмент web_search)',
+        ai.webSearch.enabled,
+        (value) => void patch({ ai: { webSearch: { enabled: value } } }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Даёт ассистенту искать в интернете: документация и внешние сведения, которых нет в проекте. ' +
+          'Это единственное действие агента, которое ходит наружу, поэтому выключено по умолчанию. ' +
+          'Обратный адрес задаёте вы — модель влияет только на запрос.',
+      ),
+      field(
+        'Сервис поиска',
+        selectInput(
+          [
+            { value: 'searxng', label: 'SearxNG (свой сервер, ключ не нужен)' },
+            { value: 'brave', label: 'Brave Search API (нужен ключ)' },
+          ],
+          ai.webSearch.provider,
+          (value) => void patch({ ai: { webSearch: { provider: value as WebSearchProvider } } }),
+        ),
+      ),
+      field(
+        'Адрес сервиса',
+        textInput(ai.webSearch.endpoint, (value) => void patch({ ai: { webSearch: { endpoint: value } } })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        ai.webSearch.provider === 'searxng'
+          ? 'Пусто — адрес по умолчанию http://localhost:8080 (своя установка SearxNG). ' +
+              'Открытый http допускается только для localhost и частных адресов: остальное — по https.'
+          : 'Пусто — адрес по умолчанию https://api.search.brave.com/res/v1/web/search.',
+      ),
+      webSearchKeyField,
       field(
         'Контекстное окно (токенов)',
         numberInput(ai.contextWindow ?? 0, 0, 2_000_000, 1000, (value) => void patch({ ai: { contextWindow: value } })),

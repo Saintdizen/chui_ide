@@ -24,6 +24,7 @@ export type AgentToolName =
   | 'apply_edit'
   | 'replace_in_files'
   | 'run_terminal'
+  | 'web_search'
   | 'create_file'
   | 'delete_file'
   | 'move_file'
@@ -228,6 +229,22 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['edits'],
+    },
+  },
+  {
+    name: 'web_search',
+    side: 'main',
+    description:
+      'Найти информацию в интернете: ссылки, заголовки и краткие описания. Нужен для документации ' +
+      'и внешних сведений, которых нет в проекте. Это только поисковая выдача — по ссылкам агент ' +
+      'не переходит, поэтому сведения из неё стоит перепроверять, а не выдавать за факт.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Поисковый запрос.' },
+        limit: { type: 'number', description: 'Сколько результатов вернуть (по умолчанию 10).' },
+      },
+      required: ['query'],
     },
   },
   {
