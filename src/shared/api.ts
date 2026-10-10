@@ -58,9 +58,7 @@ export interface RpcError {
   details?: string;
 }
 
-export type RpcResult =
-  | { id: string; ok: true; value: unknown }
-  | { id: string; ok: false; error: RpcError };
+export type RpcResult = { id: string; ok: true; value: unknown } | { id: string; ok: false; error: RpcError };
 
 /** Событие внутри одного RPC-вызова: стриминг токенов, прогресс, лог. */
 export interface RpcEventMessage {
@@ -84,9 +82,7 @@ export interface HostRequest {
   params: unknown;
 }
 
-export type HostReply =
-  | { id: string; ok: true; value: unknown }
-  | { id: string; ok: false; error: RpcError };
+export type HostReply = { id: string; ok: true; value: unknown } | { id: string; ok: false; error: RpcError };
 
 export const RpcErrorCode = {
   Cancelled: -32800,
@@ -1096,6 +1092,14 @@ export interface ChuiMethods {
     result: { confirmed: boolean };
   };
   /**
+   * Закрытие окна с несохранёнными файлами: исходов три, а не два, поэтому не
+   * `dialog.confirm`. Файлы — полные пути: имена для диалога выводит main.
+   */
+  'dialog.confirmClose': {
+    params: { files: string[] };
+    result: { choice: 'save' | 'discard' | 'cancel' };
+  };
+  /**
    * Выбор картинок системным диалогом. Читает файлы и отдаёт data-URL сам main:
    * renderer не имеет доступа к файловой системе и не должен его получать.
    */
@@ -1129,7 +1133,6 @@ export interface ChuiMethods {
    */
   'project.config': { params: { root: string }; result: ProjectSettings };
   'project.updateSettings': { params: { root: string; patch: ProjectSettings }; result: ProjectSettings };
-
 
   /** Виртуальные окружения Python в проекте: главное — первым. */
   'python.environments': { params: void; result: PythonEnvironment[] };
@@ -1221,7 +1224,10 @@ export interface ChuiMethods {
 
   /* Отладчик: сессия debugpy по протоколу DAP. */
   /** Начать отладку файла интерпретатором окружения. */
-  'debug.start': { params: { program: string; args?: string[]; env?: Record<string, string>; cwd?: string }; result: { ok: boolean; message: string } };
+  'debug.start': {
+    params: { program: string; args?: string[]; env?: Record<string, string>; cwd?: string };
+    result: { ok: boolean; message: string };
+  };
   /**
    * Подключиться к уже запущенному процессу: он стартовал сам, и запускать его
    * заново нельзя — отлаживаем то, что работает.
@@ -1229,7 +1235,10 @@ export interface ChuiMethods {
   'debug.attach': { params: DebugAttachOptions; result: { ok: boolean; message: string } };
   /** Точки останова файла: набор заменяется целиком, как в DAP. */
   'debug.setBreakpoints': {
-    params: { path: string; breakpoints: Array<{ line: number; condition?: string; hitCondition?: string; logMessage?: string }> };
+    params: {
+      path: string;
+      breakpoints: Array<{ line: number; condition?: string; hitCondition?: string; logMessage?: string }>;
+    };
     result: DebugBreakpoint[];
   };
   /**
@@ -1243,7 +1252,7 @@ export interface ChuiMethods {
   'debug.stop': { params: void; result: void };
   /** Области видимости кадра: локальные, глобальные. */
   'debug.scopes': { params: { frameId: number }; result: DebugScope[] };
-    /** Значения области или раскрытого узла. */
+  /** Значения области или раскрытого узла. */
   'debug.variables': { params: { reference: number }; result: DebugVariable[] };
   /**
    * Вычислить выражение в контексте кадра: панель «наблюдение».
@@ -1258,7 +1267,10 @@ export interface ChuiMethods {
   /** Задать новое значение переменной или поля; `null` — отладчик не смог присвоить. */
   'debug.setVariable': { params: { reference: number; name: string; value: string }; result: DebugVariable | null };
   /** Задать значение произвольному выражению в кадре; `null` — присвоить не удалось. */
-  'debug.setExpression': { params: { expression: string; value: string; frameId?: number }; result: DebugVariable | null };
+  'debug.setExpression': {
+    params: { expression: string; value: string; frameId?: number };
+    result: DebugVariable | null;
+  };
 
   'ai.setApiKey': { params: { providerId: string; apiKey: string }; result: Settings };
   'ai.clearApiKey': { params: { providerId: string }; result: Settings };

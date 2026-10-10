@@ -47,7 +47,8 @@ import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
 import { showApplicationMenu } from './ui/app-menu';
-import { createBreadcrumbs } from './ui/breadcrumbs';import { createChatPanel } from './ui/chat';
+import { createBreadcrumbs } from './ui/breadcrumbs';
+import { createChatPanel } from './ui/chat';
 import { createDock } from './ui/dock';
 import { createDiffView } from './ui/diff-view';
 import { basename, clear, h, svgIcon, type IconName } from './ui/dom';
@@ -388,7 +389,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     onRun: (selector, options) => void runTarget(testTargetFor(selector, options)),
     // Покрытие пока умеет только pytest: у Node своего отчёта нет, и кнопка
     // «С покрытием» в его проектах не показывается вовсе.
-    onCoverage: (selector) => void runTarget(pytestCoverageTarget(tools.get(), selector, { report: true, platform: info.platform })),
+    onCoverage: (selector) =>
+      void runTarget(pytestCoverageTarget(tools.get(), selector, { report: true, platform: info.platform })),
     canCoverage: () => isPythonProject(),
     // Отчёт покрытия → подсветка непокрытых строк в редакторе. Отчёт даёт пути от
     // корня проекта; редактор ключует файлы абсолютными — собираем их здесь.
@@ -766,7 +768,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // меню остаётся внутри main ради горячих клавиш (см. `shared/app-menu.ts`).
   const menuButton = h(
     'button',
-    { class: 'icon-btn', type: 'button', title: 'Меню приложения', onClick: () => void commands.execute('app.showMenu') },
+    {
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Меню приложения',
+      onClick: () => void commands.execute('app.showMenu'),
+    },
     svgIcon('menu', 16),
   );
   layout.topBarLeft.appendChild(menuButton);
@@ -900,7 +907,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /** Восстановить точки останова проекта: в контроллер и значками в редактор. */
   const restoreBreakpoints = (records: readonly BreakpointRecord[]): void => {
-    const byPath = new Map<string, Array<{ line: number; condition?: string; hitCondition?: string; logMessage?: string }>>();
+    const byPath = new Map<
+      string,
+      Array<{ line: number; condition?: string; hitCondition?: string; logMessage?: string }>
+    >();
     for (const record of records) {
       const list = byPath.get(record.path) ?? [];
       list.push({
@@ -944,9 +954,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     sessionSaveTimer = window.setTimeout(() => {
       sessionSaveTimer = 0;
       if (!sessionRoot || restoringSession) return;
-      void rpc
-        .request('session.save', { root: sessionRoot, state: captureSession() })
-        .catch(() => undefined); // не сохранилось — не повод мешать работе
+      void rpc.request('session.save', { root: sessionRoot, state: captureSession() }).catch(() => undefined); // не сохранилось — не повод мешать работе
     }, 400);
   };
 
@@ -1005,13 +1013,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   dock.onVisibilityChange(scheduleSessionSave);
   // Точки останова — тоже часть рабочего места: поставили или сняли — сохраняем.
   debug.onDidChangeBreakpoints(scheduleSessionSave);
-  // Закрытие окна: последний шанс сохранить рабочее место (без ожидания ответа).
-  window.addEventListener('beforeunload', () => {
-    if (sessionRoot && !restoringSession) {
-      void rpc.request('session.save', { root: sessionRoot, state: captureSession() }).catch(() => undefined);
-    }
-  });
-
   const saveDocument = async (document: TextDocument): Promise<void> => {
     // Форматирование при сохранении: правку проводит документ, поэтому на экране
     // и на диске оказывается одно и то же.
@@ -1020,6 +1021,43 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     document.markSaved();
     showToast(`Сохранено: ${basename(document.path)}`);
   };
+
+  /**
+   * Закрытие окна с несохранёнными файлами. Сессию пишем всегда — это последний
+   * шанс сохранить рабочее место. А правки терять нельзя, поэтому закрытие
+   * отменяем и спрашиваем системным диалогом; окно при этом остаётся живым:
+   * Electron по умолчанию не игнорирует отмену из `beforeunload`.
+   */
+  let closing = false;
+  const confirmClose = async (): Promise<void> => {
+    closing = true;
+    try {
+      const files = documents.dirty();
+      if (files.length === 0) return;
+      const { choice } = await rpc.request('dialog.confirmClose', { files: files.map((file) => file.path) });
+      if (choice === 'cancel') return;
+      if (choice === 'save') for (const file of files) await saveDocument(file);
+      // «Сохранить» и «Выйти без сохранения» ведут сюда: этот `window.close`
+      // проходит без повторного вопроса — флаг `closing` уже поднят.
+      await rpc.request('window.close');
+    } catch (error) {
+      // Сохранение не прошло — окно оставляем, иначе правки пропадут молча.
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    } finally {
+      closing = false;
+    }
+  };
+
+  window.addEventListener('beforeunload', (event) => {
+    if (sessionRoot && !restoringSession) {
+      void rpc.request('session.save', { root: sessionRoot, state: captureSession() }).catch(() => undefined);
+    }
+    if (closing || documents.dirty().length === 0) return;
+    event.preventDefault();
+    // Без `returnValue` Chromium не считает выгрузку отменённой — окно закрылось бы.
+    event.returnValue = false;
+    void confirmClose();
+  });
 
   /* ── Инструменты проекта: формат и установка ───────────────────────────── */
 
@@ -1236,7 +1274,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast(`В корзине: ${basename(path)}`);
   });
 
-  define({ id: 'file.revealAt', title: 'Перейти к позиции', category: 'Навигация' }, async (path, line, column) => {    if (typeof path !== 'string') return;
+  define({ id: 'file.revealAt', title: 'Перейти к позиции', category: 'Навигация' }, async (path, line, column) => {
+    if (typeof path !== 'string') return;
     await openPath(path);
     editors.reveal(path, typeof line === 'number' ? line : 1, typeof column === 'number' ? column : 1);
   });
@@ -1361,29 +1400,49 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   // F5 как в VS Code: не идёт отладка — начать, стоит на паузе — продолжить.
-  define({ id: 'debug.continue', title: 'Отладка: продолжить / запустить', category: 'Отладка', keybinding: 'F5' }, async () => {
-    if (debug.get().phase === 'idle') await startDebug();
-    else await debug.resume();
-  });
+  define(
+    { id: 'debug.continue', title: 'Отладка: продолжить / запустить', category: 'Отладка', keybinding: 'F5' },
+    async () => {
+      if (debug.get().phase === 'idle') await startDebug();
+      else await debug.resume();
+    },
+  );
   define({ id: 'debug.stop', title: 'Отладка: остановить', category: 'Отладка', keybinding: 'Shift+F5' }, async () => {
     await debug.stop();
   });
-  define({ id: 'debug.stepOver', title: 'Отладка: шаг с обходом', category: 'Отладка', keybinding: 'F10' }, async () => {
-    await debug.step('over');
-  });
-  define({ id: 'debug.stepInto', title: 'Отладка: шаг с заходом', category: 'Отладка', keybinding: 'F11' }, async () => {
-    await debug.step('into');
-  });
-  define({ id: 'debug.stepOut', title: 'Отладка: шаг из функции', category: 'Отладка', keybinding: 'Shift+F11' }, async () => {
-    await debug.step('out');
-  });
+  define(
+    { id: 'debug.stepOver', title: 'Отладка: шаг с обходом', category: 'Отладка', keybinding: 'F10' },
+    async () => {
+      await debug.step('over');
+    },
+  );
+  define(
+    { id: 'debug.stepInto', title: 'Отладка: шаг с заходом', category: 'Отладка', keybinding: 'F11' },
+    async () => {
+      await debug.step('into');
+    },
+  );
+  define(
+    { id: 'debug.stepOut', title: 'Отладка: шаг из функции', category: 'Отладка', keybinding: 'Shift+F11' },
+    async () => {
+      await debug.step('out');
+    },
+  );
 
   // F9 — точка останова на строке курсора: привычное место, не уводя руки с клавиатуры.
-  define({ id: 'debug.toggleBreakpoint', title: 'Отладка: переключить точку останова', category: 'Отладка', keybinding: 'F9' }, async () => {
-    const active = openEditors.active;
-    if (!active) return;
-    editors.setBreakpoints(active.path, await debug.toggleBreakpoint(active.path, editors.cursor().line));
-  });
+  define(
+    {
+      id: 'debug.toggleBreakpoint',
+      title: 'Отладка: переключить точку останова',
+      category: 'Отладка',
+      keybinding: 'F9',
+    },
+    async () => {
+      const active = openEditors.active;
+      if (!active) return;
+      editors.setBreakpoints(active.path, await debug.toggleBreakpoint(active.path, editors.cursor().line));
+    },
+  );
 
   define({ id: 'run.choose', title: 'Запустить…', category: 'Запуск', keybinding: 'Shift+F10' }, () => {
     const targets = targetsFor(openEditors.active);
@@ -1586,9 +1645,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   // Необязательный аргумент — начальный отбор: крошки и статусбар передают путь
   // папки, чтобы палитра сразу показала файлы рядом, а не весь проект.
-  define({ id: 'file.quickOpen', title: 'Быстрое открытие файла', category: 'Навигация', keybinding: 'Ctrl+Shift+O' }, (query) => {
-    void quickOpen.open(typeof query === 'string' ? query : '');
-  });
+  define(
+    { id: 'file.quickOpen', title: 'Быстрое открытие файла', category: 'Навигация', keybinding: 'Ctrl+Shift+O' },
+    (query) => {
+      void quickOpen.open(typeof query === 'string' ? query : '');
+    },
+  );
 
   define(
     {
@@ -1601,7 +1663,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     () => symbolPicker.open(),
   );
 
-  define({ id: 'settings.open', title: 'Настройки', category: 'Настройки', keybinding: 'Ctrl+,' }, () => settingsModal.open());
+  define({ id: 'settings.open', title: 'Настройки', category: 'Настройки', keybinding: 'Ctrl+,' }, () =>
+    settingsModal.open(),
+  );
 
   define(
     {
@@ -1681,8 +1745,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'ai.stop', title: 'Остановить генерацию', category: 'AI' }, () => chat.stop());
 
-  define({ id: 'ai.openInEditor', title: 'Перенести чат в окно редактора', category: 'AI', keybinding: 'Ctrl+Alt+E' }, () =>
-    showChatTab(),
+  define(
+    { id: 'ai.openInEditor', title: 'Перенести чат в окно редактора', category: 'AI', keybinding: 'Ctrl+Alt+E' },
+    () => showChatTab(),
   );
 
   define({ id: 'ai.backToPanel', title: 'Вернуть чат в боковую панель', category: 'AI' }, () => setChatInEditor(false));
@@ -1912,8 +1977,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
             });
           },
         },
-        { label: breakpoint ? 'Убрать точку останова' : 'Поставить точку останова', onSelect: () =>
-          void debug.toggleBreakpoint(path, line).then((list) => editors.setBreakpoints(path, list)) },
+        {
+          label: breakpoint ? 'Убрать точку останова' : 'Поставить точку останова',
+          onSelect: () => void debug.toggleBreakpoint(path, line).then((list) => editors.setBreakpoints(path, list)),
+        },
       ],
       lastPointer.x,
       lastPointer.y,
@@ -1923,10 +1990,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Правый клик на жёлобе: координаты берём из последнего события мыши — у самого
   // события Monaco нет координат окна, а меню ставится по месту нажатия.
   const lastPointer = { x: 0, y: 0 };
-  document.addEventListener('mousedown', (event) => {
-    lastPointer.x = event.clientX;
-    lastPointer.y = event.clientY;
-  }, true);
+  document.addEventListener(
+    'mousedown',
+    (event) => {
+      lastPointer.x = event.clientX;
+      lastPointer.y = event.clientY;
+    },
+    true,
+  );
   editors.onBreakpointMenu(openBreakpointMenu);
 
   // Останов: подсвечиваем строку и показываем панель. Пока программа идёт или

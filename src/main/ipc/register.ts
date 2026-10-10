@@ -27,7 +27,11 @@ import { detectAvailableCommands, detectVenvCommands } from '../lsp/detect';
 import { scanProject } from '../project/scan';
 import { activateCommand, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
 import { missingPackages } from '../node/packages';
-import { checkEnvironment as checkNodeEnvironment, nodeInfo, installedPackages as installedNodePackages } from '../node/environment';
+import {
+  checkEnvironment as checkNodeEnvironment,
+  nodeInfo,
+  installedPackages as installedNodePackages,
+} from '../node/environment';
 import { formatNode } from '../node/format';
 import { collectNodeTests } from '../node/tests';
 import { missingModules } from '../python/packages';
@@ -39,6 +43,7 @@ import { checkEnvironments } from '../python/health';
 import type { SessionStore } from '../session-store';
 import type { ProjectConfigStore } from '../project-config';
 import { matchPresets } from '../../shared/lsp-presets';
+import { unsavedClosePrompt } from '../../shared/unsaved';
 import type { TerminalService } from '../terminal/terminal';
 import { applyBounds, openIdeWindow, windowState } from '../window';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -84,13 +89,16 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Терминалы — тоже: агент работает с pty-сессиями, а не только разовыми командами.
   deps.ai.attachTerminals(deps.terminals);
 
-  router.register('app.info', (): AppInfo => ({
-    appVersion: app.getVersion(),
-    electron: process.versions.electron,
-    chrome: process.versions.chrome,
-    node: process.versions.node,
-    platform: process.platform,
-  }));
+  router.register(
+    'app.info',
+    (): AppInfo => ({
+      appVersion: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: process.platform,
+    }),
+  );
 
   router.register('dialog.pickFolder', async (params: ParamsOf<'dialog.pickFolder'>) => {
     const result = await dialog.showOpenDialog({
@@ -133,6 +141,24 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
       noLink: true,
     });
     return { confirmed: response === 0 };
+  });
+
+  // Закрытие окна с несохранёнными файлами. Диалог системный и модальный: тут
+  // нужен выбор из трёх исходов, и «Сохранить» — единственный путь без потерь.
+  router.register('dialog.confirmClose', async (params, ctx) => {
+    const prompt = unsavedClosePrompt(params.files);
+    const { response } = await dialog.showMessageBox(senderWindow(ctx), {
+      type: 'warning',
+      title: 'Несохранённые файлы',
+      message: prompt.message,
+      detail: prompt.detail,
+      buttons: ['Сохранить', 'Выйти без сохранения', 'Отмена'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+    });
+    const choice: 'save' | 'discard' | 'cancel' = response === 0 ? 'save' : response === 1 ? 'discard' : 'cancel';
+    return { choice };
   });
 
   router.register('workspace.readDir', (params) => deps.workspace.readDir(params.path));
@@ -296,20 +322,17 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
 
   // Сессия проекта: renderer собирает состояние и кладёт сюда, а при следующем
   // открытии забирает обратно. Без хранилища (пробники) отвечаем пустой сессией.
-  router.register('session.load', (params) =>
-    deps.sessions?.load(params.root) ?? { tabs: [], expanded: [] },
-  );
+  router.register('session.load', (params) => deps.sessions?.load(params.root) ?? { tabs: [], expanded: [] });
   router.register('session.save', (params) => {
     deps.sessions?.save(params.root, params.state);
   });
   // Настройки уровня проекта — в `<root>/.chui_ide/`. Свои для каждого проекта,
   // поэтому корень берём из параметров, а не из глобальных настроек. Макет
   // рабочей области сюда не входит: он общий и живёт в settings.json (userData).
-  router.register('project.config', (params) =>
-    deps.projectConfig?.load(params.root) ?? {},
-  );
-  router.register('project.updateSettings', (params) =>
-    deps.projectConfig?.updateSettings(params.root, params.patch) ?? {},
+  router.register('project.config', (params) => deps.projectConfig?.load(params.root) ?? {});
+  router.register(
+    'project.updateSettings',
+    (params) => deps.projectConfig?.updateSettings(params.root, params.patch) ?? {},
   );
   /* ── стартовое окно ────────────────────────────────────────────────────── */
 
@@ -320,7 +343,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
       recent.map(async (root) => ({
         path: root,
         name: path.basename(root) || root,
-        exists: await fs.stat(root).then((stat) => stat.isDirectory()).catch(() => false),
+        exists: await fs
+          .stat(root)
+          .then((stat) => stat.isDirectory())
+          .catch(() => false),
       })),
     );
   };
@@ -371,7 +397,6 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     deps.terminals.kill(params.id);
   });
 
-
   // Окно ищем по отправителю запроса, а не по «текущему»: у приложения может
   // быть несколько окон, и управлять должно то, из которого пришёл вызов.
   const senderWindow = (ctx: RpcContext): BrowserWindow => {
@@ -394,14 +419,13 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     senderWindow(ctx).close();
   });
   router.register('window.getBounds', (_params, ctx) => senderWindow(ctx).getBounds());
-  router.register('window.setBounds', (params: Partial<WindowBounds>, ctx) =>
-    applyBounds(senderWindow(ctx), params),
-  );
+  router.register('window.setBounds', (params: Partial<WindowBounds>, ctx) => applyBounds(senderWindow(ctx), params));
   router.register('menu.role', (params, ctx) => {
     performMenuRole(senderWindow(ctx).webContents, params.role);
   });
 
-  router.register('settings.get', () => deps.settings.get());  router.register('settings.update', (patch: SettingsPatch) => deps.settings.update(patch));
+  router.register('settings.get', () => deps.settings.get());
+  router.register('settings.update', (patch: SettingsPatch) => deps.settings.update(patch));
   router.register('settings.revealFile', async () => {
     const file = deps.settings.file();
     await shell.openPath(file).catch(() => undefined);
@@ -422,9 +446,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('lsp.status', () => deps.lsp?.status() ?? { running: [] });
   // Прокси к серверу: подсказки, наведение, переход к определению. Сервера нет —
   // возвращаем null, и редактор просто не покажет подсказку.
-  router.register('lsp.request', (params) =>
-    deps.lsp?.request(params.path, params.method, params.params) ?? null,
-  );
+  router.register('lsp.request', (params) => deps.lsp?.request(params.path, params.method, params.params) ?? null);
   // Символы проекта: сервер ищет по всему проекту, а не по открытому файлу.
   router.register('lsp.symbols', (params) => deps.lsp?.projectSymbols(params.query) ?? []);
 
@@ -508,9 +530,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
             .then((decision) => decision.allowed),
         getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
         openFile: (path, line, column) =>
-          deps.host
-            .request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal)
-            .then((result) => result.ok),
+          deps.host.request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal).then((result) => result.ok),
       },
     );
   });
