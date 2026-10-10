@@ -323,7 +323,7 @@ describe('DebugService', () => {
     // путём стоит симлинк на `/private/var/…`. Разворачиваем его тем же приёмом,
     // что и сервис (`realpathSync`): сырой путь сделал бы проверку неотличимой
     // от отсутствия канонизации — на Linux `/tmp` не ссылка, и разницы не видно.
-    const real = realpathSync(mkdtempSync(path.join(tmpdir(), 'chui-debug-real-')));
+    const real = mkdtempSync(path.join(tmpdir(), 'chui-debug-real-'));
     const link = path.join(tmpdir(), `chui-debug-link-${process.pid}-${Math.random().toString(36).slice(2)}`);
     try {
       symlinkSync(real, link, 'dir');
