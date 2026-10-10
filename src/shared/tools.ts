@@ -304,14 +304,15 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Создать новый файл с содержимым. Существующий файл НЕ перетирается — вернётся ошибка; ' +
-      'для правки существующего файла используй apply_edit.',
+      'для правки существующего файла используй apply_edit. Поле contents обязательно: пустая ' +
+      'строка создаст пустой файл осознанно, а забытое содержимое — ошибка, а не тихий пустой файл.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Абсолютный путь к новому файлу.' },
-        contents: { type: 'string', description: 'Содержимое нового файла.' },
+        contents: { type: 'string', description: 'Содержимое нового файла (обязательно).' },
       },
-      required: ['path'],
+      required: ['path', 'contents'],
     },
   },
   {

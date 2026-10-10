@@ -238,14 +238,28 @@ function attachSplitter(root: HTMLElement, splitter: HTMLElement, options: Split
     // переключает его на текстовый и непонятно, что вообще происходит.
     root.classList.add(horizontal ? 'is-resizing-x' : 'is-resizing-y');
 
+    // Кадр на жест: на мыши с высокой частотой опроса `pointermove` приходит
+    // сотни раз в секунду, и запись размера на каждое событие пересчитывала бы
+    // раскладку чаще, чем экран успевает показать кадр. Копим последнее значение
+    // и пишем раз в кадр — так же, как растягивание окна (window-frame.ts).
+    let frame = 0;
+    let queued = startSize;
+
     const onMove = (move: PointerEvent): void => {
       const current = horizontal ? move.clientX : move.clientY;
       const delta = options.invert ? start - current : current - start;
-      const size = Math.min(Math.max(startSize + delta, options.min), Math.min(options.max, limit));
-      root.style.setProperty(options.cssVar, `${size}px`);
+      queued = Math.min(Math.max(startSize + delta, options.min), Math.min(options.max, limit));
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        root.style.setProperty(options.cssVar, `${queued}px`);
+      });
     };
 
     const onUp = (): void => {
+      // Доводим последнее значение: отпустить могли, не дождавшись кадра.
+      if (frame) cancelAnimationFrame(frame);
+      root.style.setProperty(options.cssVar, `${queued}px`);
       splitter.classList.remove('is-dragging');
       root.classList.remove('is-resizing-x', 'is-resizing-y');
       splitter.removeEventListener('pointermove', onMove);

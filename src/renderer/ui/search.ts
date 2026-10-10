@@ -36,7 +36,7 @@ export function createSearchView(deps: SearchDeps): SearchView {
   const input = h('input', {
     class: 'field-input search-input',
     type: 'search',
-    placeholder: 'Найти в проекте (Enter — искать)',
+    placeholder: 'Поиск по проекту (Enter — искать)',
     spellcheck: false,
   });
   const replaceInput = h('input', {
@@ -216,7 +216,7 @@ export function createSearchView(deps: SearchDeps): SearchView {
         result.replaced > 0
           ? `Заменено вхождений: ${result.replaced} · файлов: ${result.files.length}`
           : 'Ничего не заменено',
-        result.replaced > 0 ? 'info' : 'error',
+        result.replaced > 0 ? 'success' : 'error',
       );
       await search();
     } catch (error) {

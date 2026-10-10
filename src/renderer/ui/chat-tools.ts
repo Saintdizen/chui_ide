@@ -190,8 +190,7 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
   let failed = 0;
   /** Сколько файлов тронули вызовы группы: видно в сводке, когда группа свёрнута. */
   let changedFiles = 0;
-  /** Раскрыта ли группа руками: тогда автоматика её не сворачивает. */
-  let pinned = false;
+  /** Раскрыта ли группа. Меняет только человек: само состояние не трогаем. */
   let expanded = true;
   const names: string[] = [];
 
@@ -298,7 +297,6 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
       'aria-expanded': 'true',
       onClick: () => {
         expanded = !expanded;
-        pinned = true;
         head.setAttribute('aria-expanded', String(expanded));
         applyExpanded();
       },
@@ -338,21 +336,9 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
 
     state.textContent = failed > 0 ? `ошибок: ${failed}` : 'готово';
     state.className = `tool-group-state${failed > 0 ? ' is-fail' : ' is-ok'}`;
-    // Работа закончилась — держать список перед глазами больше незачем.
-    if (!pinned) {
-      expanded = false;
-      applyExpanded();
-    }
   };
 
   const add = (call: ChatToolStartPayload): ToolCardView => {
-    // Новая порция вызовов (или ещё один шаг «только инструменты») — раскрываем
-    // группу, если её свернула автоматика: иначе строки ушли бы в скрытое тело.
-    // Ручное сворачивание (pinned) не трогаем.
-    if (!pinned && !expanded) {
-      expanded = true;
-      applyExpanded();
-    }
     count += 1;
     pending += 1;
     const label = toolLabel(call.name);
@@ -439,10 +425,6 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
         root.replaceWith(solo);
       }
       return;
-    }
-    if (pending === 0 && !pinned) {
-      expanded = false;
-      applyExpanded();
     }
   };
 

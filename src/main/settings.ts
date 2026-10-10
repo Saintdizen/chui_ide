@@ -136,8 +136,12 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Python и Makefile требуют разного отступа: пусть язык решает сам.
     languageIndent: true,
     renderWhitespace: 'selection',
-    cursorBlinking: 'smooth',
-    smoothScrolling: true,
+    // Курсор и прокрутка по умолчанию без «плавности»: ввод текста и навигация по
+    // коду — самые частые действия, и анимация тут только мешает (HIG: avoid
+    // motion in frequently performed interactions). Обе настройки можно включить
+    // обратно — движение остаётся необязательным.
+    cursorBlinking: 'blink',
+    smoothScrolling: false,
     // Как в PyCharm: ниже последней строки остаётся место для чтения.
     scrollBeyondLastLine: true,
     lineNumbers: 'on',

@@ -115,8 +115,8 @@ textarea {
      иначе сверху и снизу читаются лишние пустые полосы.
      Зазоры между панелями — колонки со сплиттерами; зазор скрытой панели
      схлопывается вместе с ней, иначе сбоку останется двойной отступ. */
-  --sidebar-gap: 6px;
-  --right-gap: 6px;
+  --sidebar-gap: var(--space_sm);
+  --right-gap: var(--space_sm);
   /* Размер и видимость — разные переменные: сплиттер пишет размер инлайном
      на этом же элементе, а инлайн перебивает класс. Здесь размер превращается
      в ширину панели, и уже её отменяет правило скрытия — иначе скрытая панель
@@ -127,6 +127,9 @@ textarea {
   grid-template-columns: 6px var(--sidebar-width) var(--sidebar-gap) minmax(0, 1fr) var(--right-gap) var(--right-width) 6px;
   grid-template-rows: var(--topbar_height) minmax(0, 1fr) 24px;
   height: 100%;
+  /* Safe areas: на мониторе нули (переменные из `theme.css`), а у выреза или
+     скруглённых углов содержимое отступает от края, а не упирается в него. */
+  padding: var(--safe_top) var(--safe_right) var(--safe_bottom) var(--safe_left);
   background: var(--main_background);
 }
 
@@ -135,6 +138,9 @@ textarea {
   box-shadow: inset 0 0 0 1px var(--border_color);
 }
 
+/* Сворачивание панелей — мгновенное, без анимации: панели меняют ширину дорожки
+   сетки, а анимировать раскладку нельзя (см. `tests/motion.test.ts`). Ступень
+   Normal из шкалы движения сюда не применяется намеренно. */
 .app.is-sidebar-hidden {
   --sidebar-width: 0px;
   --sidebar-gap: 0px;
@@ -175,8 +181,8 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
   align-items: center;
-  gap: 8px;
-  padding: 0 6px;
+  gap: var(--space_md);
+  padding: 0 var(--space_sm);
   /* Шапка — область перетаскивания окна: без системной рамки двигать окно больше нечем.
      Жест ведёт Chromium через оконный менеджер, поэтому движение плавное. */
   app-region: drag;
@@ -214,7 +220,7 @@ textarea {
 
 .topbar-title {
   overflow: hidden;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
   text-align: center;
   white-space: nowrap;
@@ -270,7 +276,7 @@ textarea {
 }
 
 .window-btn.is-close:hover {
-  background: var(--red_prime_background);
+  background: var(--danger_fill);
   color: var(--text_color_hover);
 }
 
@@ -485,7 +491,7 @@ textarea {
   gap: 6px;
   flex: 0 0 auto;
   height: 34px;
-  padding: 0 6px 0 10px;
+  padding: 0 var(--space_sm) 0 var(--space_lg);
   border-bottom: 1px solid var(--separator_color);
   color: var(--text_color_tertiary);
 }
@@ -585,11 +591,10 @@ textarea {
   padding: 0 6px 0 9px;
   border-radius: var(--radius_sm);
   background: transparent;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   white-space: nowrap;
-  transition:
-    background var(--motion_fast) var(--motion_ease),
-    color var(--motion_fast) var(--motion_ease);
+  /* Без перехода (ступень Instant): переключение вкладок — частое действие,
+     подсветка должна вставать мгновенно, а не проявляться переходом. */
 }
 
 .tab:hover {
@@ -685,7 +690,7 @@ textarea {
 }
 
 .crumb.is-file {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 /* ── запуск файла ────────────────────────────────────────────────────────
@@ -704,10 +709,11 @@ textarea {
   display: flex;
   align-items: center;
   gap: 5px;
-  height: 20px;
+  /* 24 — минимум интерактивного элемента для десктопа; было 20. */
+  height: 24px;
   padding: 0 8px;
   border-radius: var(--radius_sm);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
 }
 
@@ -807,6 +813,67 @@ textarea {
   background: var(--editor_background);
 }
 
+/* Зона редактора делится на панели при разделении: панели лежат в ряд, между
+   ними — разделитель. Пока панель одна, она занимает всю зону. */
+.editor-panes {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-pane {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Разделитель виден, только когда панелей две (иначе у него `hidden`). */
+.editor-splitter {
+  flex: 0 0 6px;
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+
+.editor-splitter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 4px;
+  height: 16px;
+  margin: auto;
+  opacity: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, var(--text_color_tertiary) 1.4px, transparent 1.5px);
+  background-repeat: no-repeat;
+  background-position:
+    center top,
+    center center,
+    center bottom;
+  transition: opacity var(--motion_fast) var(--motion_ease);
+}
+
+.editor-splitter:hover::after {
+  opacity: 1;
+}
+
+/* Активную панель отмечаем линией сверху: с двумя областями иначе не видно, куда
+   придёт открываемый файл и где стоит курсор. */
+.editor-panes.is-split .editor-pane.is-active::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  z-index: 3;
+  opacity: 0.7;
+  pointer-events: none;
+  background: var(--blue_prime_background);
+}
+
 /* ── приветствие ────────────────────────────────────────────────────────── */
 
 .welcome {
@@ -853,17 +920,16 @@ textarea {
 
 /* ── кнопки и поля ──────────────────────────────────────────────────────── */
 
-/* Одно поведение у всего кликабельного: короткий переход цвета и лёгкое сжатие
-   при нажатии. Так кнопки, значки и пункты списков ощущаются одинаково. */
+/* Отклик на наведение и нажатие — у РЕДКИХ действий: кнопки, значки, поля.
+   Вкладки, пункты палитры меню и строки списков сюда НЕ входят: переключение
+   вкладок и ходьба по списку стрелками — частые действия, и подсветка должна
+   вставать мгновенно, а не догонять курсор переходом (HIG: avoid motion in
+   frequently performed interactions). Их мгновенность стережёт
+   `tests/motion.test.ts`. */
 .btn,
 .icon-btn,
 .select,
-.window-btn,
-.context-item,
-.select-item,
-.palette-item,
-.dock-tab,
-.term-tab {
+.window-btn {
   transition:
     background var(--motion_fast) var(--motion_ease),
     color var(--motion_fast) var(--motion_ease),
@@ -874,11 +940,34 @@ textarea {
 .btn:active:not(:disabled),
 .icon-btn:active,
 .window-btn:active,
-.context-item:active,
-.select-item:active,
-.palette-item:active,
 .launcher-item:active {
   transform: scale(0.97);
+}
+
+/* Мишень мелких кнопок-значков: значок остаётся 14–18 px, а невидимая область
+   клика растягивается до 24×24 — минимум интерактивного элемента для десктопа.
+   Вид и раскладку это не меняет: псевдоэлемент прозрачен и не участвует в
+   потоке, а промах мимо значка перестаёт быть частым. */
+.chip-remove,
+.launcher-item-remove,
+.sc-row-action,
+.sc-group-action,
+.tab-close {
+  position: relative;
+}
+
+.chip-remove::after,
+.launcher-item-remove::after,
+.sc-row-action::after,
+.sc-group-action::after,
+.tab-close::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
 }
 
 .btn {
@@ -907,22 +996,26 @@ textarea {
   cursor: default;
 }
 
+/* Заливка основного действия — `--accent_fill`, а не сам акцент: под белым
+   текстом нужна ступень темнее (у акцента — 3.2:1, у ступени — 4.9:1). */
 .btn-primary {
   border-color: transparent;
-  background: var(--blue_prime_background);
+  background: var(--accent_fill);
   color: var(--text_color_hover);
   font-weight: 600;
 }
 
 .btn-primary:hover:not(:disabled) {
   border-color: transparent;
-  background: var(--blue_prime_background);
+  background: var(--accent_fill);
   filter: brightness(1.08);
 }
 
+/* Выключенная кнопка — серая, как у всех выключенных: белый текст на
+   полупрозрачном акценте давал 2.1:1 и выглядел «нажимаемым». */
 .btn-primary:disabled {
-  background: var(--blue_prime_background_tint_strong);
-  color: var(--text_color_hover);
+  background: var(--button_background_disabled);
+  color: var(--text_color_disabled);
 }
 
 .btn-small {
@@ -1070,7 +1163,7 @@ textarea {
 .select-item-hint {
   margin-left: auto;
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .select-item:hover .select-item-hint,
@@ -1142,7 +1235,7 @@ textarea {
   margin: 0 4px;
   padding-right: 8px;
   border-radius: calc(var(--radius_sm) - 3px);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   text-align: left;
 }
 
@@ -1270,6 +1363,26 @@ textarea {
   background: var(--element_background_hover);
 }
 
+/* Раскрытие папки: строки-дети «выезжают» из-под родителя вниз, а не возникают на
+   месте (HIG «realistic feedback motion»: движение идёт туда, откуда пришёл элемент).
+   Старт выше финала — строка въезжает сверху вниз, продолжая жест раскрытия.
+   Анимируются только `opacity` и `transform`, а под «уменьшить движение» анимация
+   гаснет общим правилом. */
+@keyframes tree-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.tree-row.is-entering {
+  animation: tree-reveal var(--motion_fast) var(--motion_ease);
+}
+
 .tree-twisty {
   display: grid;
   place-items: center;
@@ -1352,9 +1465,12 @@ textarea {
 }
 
 .dock-tab {
+  /* Та же ступень, что у вкладок терминала: это один вид контрола — вкладка
+     панели. Раньше здесь стоял `--text_color_tertiary`, и неактивная вкладка
+     дока была тише неактивной вкладки терминала без причины. */
   padding: 4px 10px;
   border-radius: var(--radius_sm);
-  color: var(--text_color_tertiary);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
 }
 
@@ -1413,7 +1529,7 @@ textarea {
   /* Геометрия та же, что у вкладок дока: это вкладки одного док-острова. */
   padding: 4px 10px;
   border-radius: var(--radius_sm);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
   white-space: nowrap;
 }
@@ -1527,7 +1643,7 @@ textarea {
   align-items: center;
   gap: 6px;
   padding: 6px 12px 2px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
 }
 
@@ -1543,7 +1659,7 @@ textarea {
   border-radius: var(--radius_pill);
   background: var(--element_background);
   color: var(--text_color_tertiary);
-  font-size: 10px;
+  font-size: var(--font_micro_size);
 }
 
 .search-hit {
@@ -1553,7 +1669,7 @@ textarea {
   margin: 0 8px;
   padding: 2px 8px 2px 14px;
   border-radius: 4px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   text-align: left;
   font-size: var(--font_labels_size);
 }
@@ -1567,14 +1683,14 @@ textarea {
   min-width: 28px;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   text-align: right;
 }
 
 .search-text {
   overflow: hidden;
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -1688,7 +1804,7 @@ textarea {
 .session-info-sub {
   margin-bottom: 4px;
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .session-info-gauge {
@@ -1701,12 +1817,12 @@ textarea {
 
 .session-info-value {
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .session-info-percent {
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 /* Полоса заполнения: доли частей контекста друг относительно друга. */
@@ -1718,30 +1834,34 @@ textarea {
   background: var(--sunken_background);
 }
 
+/* Состав контекста — категориальная диаграмма, а не состояния: у каждой доли
+   свой оттенок из `--context_seg_*`, и цвета ошибки/предупреждения/успеха
+   в неё не берём. Раньше «инструменты» и «файлы» делили один жёлтый, а
+   результаты/файлы тянули git-роли — доли путались. */
 .context-seg-system {
-  background: var(--purple_prime_background);
+  background: var(--context_seg_system);
 }
 
 .context-seg-tools {
-  background: var(--yellow_prime_background);
+  background: var(--context_seg_tools);
 }
 
 .context-seg-messages {
-  background: var(--blue_prime_background);
+  background: var(--context_seg_messages);
 }
 
 .context-seg-results {
-  background: var(--git_added);
+  background: var(--context_seg_results);
 }
 
 .context-seg-files {
-  background: var(--git_modified);
+  background: var(--context_seg_files);
 }
 
 .session-info-reserved {
   margin-top: 5px;
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .session-info-list {
@@ -1756,7 +1876,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
 }
 
@@ -1781,7 +1901,7 @@ textarea {
   flex: 0 0 auto;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .session-info-note {
@@ -1809,7 +1929,7 @@ textarea {
 
 .context-ring:hover {
   background: var(--element_background_hover);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .ring-track {
@@ -1874,7 +1994,7 @@ textarea {
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   cursor: pointer;
 }
 
@@ -1905,7 +2025,7 @@ textarea {
 }
 
 .chat-intro {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .chat-intro p {
@@ -1995,7 +2115,7 @@ textarea {
 }
 
 .code-action {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .code-action:hover {
@@ -2039,7 +2159,7 @@ textarea {
   gap: 8px;
   margin: 4px 0 2px;
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .msg-activity-dots {
@@ -2153,7 +2273,7 @@ textarea {
   margin: 0 0 6px;
   padding: 2px 0 2px 9px;
   border-left: 2px solid var(--separator_color);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .md-code {
@@ -2161,7 +2281,7 @@ textarea {
   border-radius: 3px;
   background: var(--element_background);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .md-link {
@@ -2177,21 +2297,21 @@ textarea {
   padding: 0 6px;
   border-radius: var(--radius_pill);
   background: var(--element_background);
-  font-size: 10px;
+  font-size: var(--font_micro_size);
   color: var(--text_color_tertiary);
 }
 
 /* Читаемый тон в обеих схемах: `--text_color_tertiary` в светлой теме
-   (26 % чёрного) почти не виден, поэтому берём `--text_color_disabled`
+   (26 % чёрного) почти не виден, поэтому берём `--text_color_secondary`
    (70 % белого / 50 % чёрного) — это вторичный, но различимый текст. */
 .reasoning-text {
   max-height: 180px;
   margin-top: 3px;
   overflow: auto;
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   line-height: 1.5;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2205,7 +2325,9 @@ textarea {
   gap: 2px;
   padding: 0 1px;
   opacity: 0;
-  transition: opacity 120ms ease;
+  /* Длительность — из общей шкалы: литерал 120ms тут был единственным «своим»
+     временем в файле и не совпадал ни с одной ступенью. */
+  transition: opacity var(--motion_fast) var(--motion_ease);
 }
 
 .msg:hover .msg-actions,
@@ -2223,7 +2345,7 @@ textarea {
 .msg-actions .icon-btn {
   width: 24px;
   height: 24px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 /* Выбранная оценка (👍/👎) красится акцентом — видно, что отмечено. */
@@ -2291,15 +2413,15 @@ textarea {
 .chat-search-snippet {
   overflow: hidden;
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .chat-search-empty {
   padding: 6px;
-  color: var(--text_color_disabled);
-  font-size: 11px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
 }
 
 .msg.is-search-hit .msg-body {
@@ -2316,12 +2438,13 @@ textarea {
   border-radius: var(--radius_sm);
   background: var(--sunken_background);
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
+/* Ответ оборван по лимиту токенов — это предупреждение, и значок носит его цвет. */
 .finish-note .icon {
   flex: 0 0 auto;
-  color: var(--git_modified, var(--text_color_tertiary));
+  color: var(--yellow_prime_background);
 }
 
 /* Ответ достраивается сам: это не предупреждение, а ход работы — тише и без рамки. */
@@ -2330,6 +2453,11 @@ textarea {
   background: none;
   padding-left: 0;
   font-style: italic;
+}
+
+/* Но «продолжаю ответ» — это ход работы, а не предупреждение: значок нейтральный. */
+.finish-note.is-continue .icon {
+  color: inherit;
 }
 
 /* Панель плана: чек-лист без собственного нижнего отступа — зазор даёт футер. */
@@ -2385,7 +2513,7 @@ textarea {
   margin-left: auto;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .plan-list {
@@ -2415,12 +2543,13 @@ textarea {
 }
 
 .plan-step.is-done .plan-text {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   text-decoration: line-through;
 }
 
+/* Выполненный шаг — ролью «успех», а не git-добавлением: это итог работы. */
 .plan-step.is-done .plan-mark {
-  color: var(--git_added);
+  color: var(--green_prime_background);
 }
 
 /* Кнопка «к последнему сообщению» в правом нижнем углу ленты. Крепится к футеру
@@ -2442,8 +2571,9 @@ textarea {
   box-shadow: var(--box_shadow_drop);
 }
 
+/* Кнопка не на цветной заливке, поэтому «ярче» — это основной текст, а не белый. */
 .chat-jump:hover {
-  color: var(--text_color_hover);
+  color: var(--text_color);
   background: var(--element_background_hover);
 }
 
@@ -2497,7 +2627,7 @@ textarea {
 }
 
 .md-task.is-done {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 /* Diff-блок: строки с плюсом - зелёные, с минусом - красные. */
@@ -2521,7 +2651,7 @@ textarea {
 }
 
 .diff-line.diff-hunk {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 /* ── вызовы инструментов ────────────────────────────────────────────────── */
@@ -2562,7 +2692,7 @@ textarea {
   text-overflow: ellipsis;
   color: var(--text_color);
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 /* Сколько вызовов в группе — серым и моноширинно, тем же кеглем, что заголовок. */
@@ -2570,7 +2700,7 @@ textarea {
   flex: 0 0 auto;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .tool-group-state {
@@ -2578,9 +2708,10 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
-/* Итог группы красим так же, как строки: зелёный — готово, красный — ошибки. */
+/* Итог группы красим так же, как строки: зелёный — готово, красный — ошибки.
+   Зелёный берём ролью «успех», а не git-добавлением: это итог работы, а не статус файла. */
 .tool-group-state.is-ok {
-  color: var(--git_added);
+  color: var(--green_prime_background);
 }
 
 .tool-group-state.is-fail {
@@ -2644,7 +2775,7 @@ textarea {
   transform: translateY(-50%);
   border-radius: 50%;
   background: var(--element_background_2);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .tool-failed .tool-head > .icon:first-child {
@@ -2657,7 +2788,7 @@ textarea {
   flex: 0 0 auto;
   color: var(--text_color);
   font-weight: 600;
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .tool-args {
@@ -2668,7 +2799,7 @@ textarea {
   text-overflow: ellipsis;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 /* Состояние — подпись, а не плашка: плашка только у ошибки, чтобы её было видно. */
@@ -2677,9 +2808,10 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
-/* Готово — зелёным, ошибка — красным: итог видно, не раскрывая строку. */
+/* Готово — зелёным, ошибка — красным: итог видно, не раскрывая строку.
+   «Готово» — роль «успех», а не git-добавление: это итог вызова, а не статус файла. */
 .tool-state.is-ok {
-  color: var(--git_added);
+  color: var(--green_prime_background);
 }
 
 .tool-state.is-fail {
@@ -2691,7 +2823,7 @@ textarea {
 
 .tool-chevron {
   flex: 0 0 auto;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   transition: transform var(--motion_fast) var(--motion_ease);
 }
 
@@ -2711,7 +2843,7 @@ textarea {
 }
 
 .tool-summary {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .tool-raw {
@@ -2719,7 +2851,7 @@ textarea {
   margin: 4px 0 0;
   overflow: auto;
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2739,7 +2871,7 @@ textarea {
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
 }
 
@@ -2792,9 +2924,9 @@ textarea {
 
 .review-path {
   overflow-wrap: anywhere;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .review-check {
@@ -2810,7 +2942,7 @@ textarea {
 }
 
 .review-all {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .review-all:hover {
@@ -2821,7 +2953,7 @@ textarea {
   padding: 4px 8px;
   overflow-wrap: anywhere;
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   line-height: 1.5;
   white-space: pre-wrap;
 }
@@ -2834,8 +2966,10 @@ textarea {
   color: var(--text_color_error);
 }
 
+/* Добавленная строка — цветом git-добавления, как в diff-блоке: синий тут
+   читался как ссылка и ничего не говорил про знак строки. */
 .review-add {
-  color: var(--link_color);
+  color: var(--git_added);
 }
 
 .review-error {
@@ -2883,7 +3017,7 @@ textarea {
   padding: 8px;
   overflow: auto;
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -2984,7 +3118,7 @@ textarea {
 
 .composer-menu-hint {
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .chat-input {
@@ -3028,7 +3162,7 @@ textarea {
 
 .changes-toggle svg {
   flex: 0 0 auto;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   transition: transform var(--motion_fast) var(--motion_ease);
 }
 
@@ -3046,7 +3180,7 @@ textarea {
   display: inline-flex;
   gap: 6px;
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 /* Операция агента с файлом: создан, удалён или перенесён. */
@@ -3055,11 +3189,14 @@ textarea {
   border-radius: var(--radius_pill);
   background: var(--element_background);
   color: var(--text_color_tertiary);
-  font-size: 10px;
+  font-size: var(--font_micro_size);
 }
 
+/* Созданный файл — цветом добавления, удалённый — цветом ошибки: как состояния git.
+   Запасное значение убрано: цвет приходит только из роли темы, а не из литерала,
+   который со сменой палитры разошёлся бы с ней. */
 .chip-kind-created {
-  color: var(--git_added, #5c9e5c);
+  color: var(--git_added);
 }
 
 .chip-kind-deleted {
@@ -3115,9 +3252,9 @@ textarea {
   padding: 4px 6px;
   border-radius: var(--radius_sm);
   background: none;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   text-align: left;
   cursor: pointer;
 }
@@ -3164,9 +3301,9 @@ textarea {
   border: 1px dashed var(--border_color);
   border-radius: var(--radius_sm);
   background: none;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   cursor: pointer;
 }
 
@@ -3193,7 +3330,7 @@ textarea {
 
 .chip-static:hover {
   border-color: var(--border_color);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .chip-remove {
@@ -3228,7 +3365,7 @@ textarea {
 
 .chip-hint {
   color: var(--text_color_tertiary);
-  font-size: 10px;
+  font-size: var(--font_micro_size);
 }
 
 /* Перетаскивание изображения на панель чата: подсвечиваем место приёма, иначе
@@ -3268,7 +3405,7 @@ textarea {
   border: 1px solid transparent;
   border-radius: var(--radius_sm);
   background: none;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
   cursor: pointer;
 }
@@ -3280,7 +3417,7 @@ textarea {
   padding: 0 4px 0 8px;
   border-color: transparent;
   background: none;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .composer-select svg {
@@ -3343,7 +3480,7 @@ textarea {
 
 /* Кнопка прав доступа: цвет меняется по состоянию — размер задаёт правило выше. */
 .composer-perm {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .composer-perm.is-active {
@@ -3384,7 +3521,7 @@ textarea {
   margin-top: 0;
   padding: 0 5px;
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .composer-status-item {
@@ -3409,9 +3546,9 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space_xl);
   height: 100%;
-  padding: 0 10px;
+  padding: 0 var(--space_lg);
   color: var(--text_color_tertiary);
   font-size: var(--font_labels_size);
 }
@@ -3467,11 +3604,34 @@ textarea {
 .status-ai {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   color: var(--text_color_tertiary);
 }
 
+/* Цвет — только подсказка: слово «генерация…» рядом читается без него. */
 .status-ai.is-busy {
   color: var(--blue_prime_background);
+}
+
+/* Проблемы: значок и число словами. Цвет различает ошибку и предупреждение, но
+   различить их можно и по порядку — сначала ошибки, потом предупреждения. */
+.status-problems {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text_color_tertiary);
+}
+
+.status-problems.has-errors {
+  color: var(--red_prime_background);
+}
+
+.status-problems.has-warnings {
+  color: var(--yellow_prime_background);
+}
+
+.status-problems:hover {
+  background: var(--element_background_hover);
 }
 
 /* ── всплывающие слои: полупрозрачный материал с блюром и тенью ─────────── */
@@ -3510,7 +3670,9 @@ textarea {
   display: grid;
   place-items: center;
   padding: 32px;
-  background: rgba(0, 0, 0, 0.42);
+  /* Затемнение под модальным окном — тем же токеном, что и под палитрой команд:
+     один слой затемнения на всё, а не свой оттенок у каждого окна. */
+  background: var(--modal_scrim);
 }
 
 /* Явно: у `.modal-backdrop` свой `display`, иначе он перебивает `[hidden]` из UA-стилей. */
@@ -3528,7 +3690,8 @@ textarea {
   border-radius: var(--radius_md);
   background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
-  animation: popup-in var(--motion_base) var(--motion_ease);
+  /* Модальное окно — крупное и нечастое появление: ступень Slow (см. шкалу в theme.css). */
+  animation: popup-in var(--motion_slow) var(--motion_ease);
 }
 
 .modal-header {
@@ -3627,7 +3790,7 @@ textarea {
   gap: 8px;
   padding: 7px 9px;
   border-radius: var(--radius_sm);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   text-align: left;
   font-size: var(--font_labels_size);
 }
@@ -3655,7 +3818,7 @@ textarea {
   border-radius: var(--radius_pill);
   background: var(--element_background_2);
   color: var(--text_color_tertiary);
-  font-size: 10px;
+  font-size: var(--font_micro_size);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3666,9 +3829,9 @@ textarea {
   gap: 7px;
   max-width: 420px;
   padding: 4px 2px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   text-align: left;
-  font-size: 11px;
+  font-size: var(--font_small_size);
   font-weight: 600;
 }
 
@@ -3707,9 +3870,11 @@ textarea {
   background: var(--separator_color);
 }
 
-/* Результат «Проверить подключение» — один из двух понятных исходов. */
+/* Результат «Проверить подключение» — один из двух понятных исходов.
+   Успех — зелёным, как «прогон прошёл» и тост об успехе: синий был цветом
+   ссылки и с ролью исхода не совпадал. */
 .field-hint.is-ok {
-  color: var(--link_color);
+  color: var(--green_prime_background);
 }
 
 .field-hint.is-error {
@@ -3749,8 +3914,8 @@ textarea {
 
 .venv-heading {
   margin: 0;
-  color: var(--text_color_disabled);
-  font-size: 11px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -3786,23 +3951,24 @@ textarea {
 .venv-version {
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .venv-badge {
   padding: 1px 6px;
   border-radius: var(--radius_pill);
-  background: var(--blue_prime_background_tint_strong);
+  /* Под белым текстом — заливка, а не полупрозрачный акцент: тот давал 2.1:1. */
+  background: var(--accent_fill);
   color: var(--text_color_hover);
-  font-size: 10px;
+  font-size: var(--font_micro_size);
 }
 
 .venv-path {
   margin-left: auto;
   overflow: hidden;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -3811,7 +3977,7 @@ textarea {
   padding: 12px;
   border: 1px dashed var(--separator_color);
   border-radius: var(--radius_sm);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
   text-align: center;
 }
@@ -3825,13 +3991,13 @@ textarea {
 .venv-label {
   flex: 0 0 auto;
   width: 80px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
 }
 
 .venv-hint {
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .venv-check {
@@ -3853,7 +4019,7 @@ textarea {
   background: var(--sunken_background);
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   line-height: 1.5;
   overflow: auto;
   white-space: pre-wrap;
@@ -3922,7 +4088,7 @@ textarea {
   gap: 8px;
   padding: 5px 6px;
   border-radius: var(--radius_sm);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
 }
 
@@ -3970,14 +4136,14 @@ textarea {
 }
 
 .context-item.is-danger:hover {
-  background: var(--red_prime_background);
+  background: var(--danger_fill);
   color: var(--text_color_hover);
 }
 
 .context-hint {
   margin-left: auto;
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 .context-item:hover .context-hint,
@@ -4068,6 +4234,17 @@ textarea {
   background: var(--selection_background);
 }
 
+/* Команда сейчас недоступна: пункт виден, но приглушён и не выбирается.
+   Так несработавшая команда не падает тостом, а заранее говорит о готовности. */
+.palette-item.is-disabled {
+  color: var(--text_color_disabled);
+  cursor: default;
+}
+
+.palette-item.is-disabled.is-active {
+  background: transparent;
+}
+
 .palette-item-title {
   overflow: hidden;
   white-space: nowrap;
@@ -4080,7 +4257,7 @@ textarea {
   border-radius: var(--radius_pill);
   background: var(--sunken_background);
   color: var(--text_color_tertiary);
-  font-size: 10px;
+  font-size: var(--font_micro_size);
   white-space: nowrap;
 }
 
@@ -4147,8 +4324,30 @@ textarea {
   color: var(--blue_prime_background);
 }
 
+.toast-success svg {
+  color: var(--green_prime_background);
+}
+
 .toast-text {
   overflow-wrap: anywhere;
+}
+
+/* Кнопка действия в тосте: короткий текст рядом с сообщением, как «Отменить».
+   Оттенок — `--link_color`, а не акцентный синий: по светлому фону акцент бледен
+   для текста, и роль ссылки тут ближе всего. */
+.toast-action {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  color: var(--link_color);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  transition: background var(--motion_fast) var(--motion_ease);
+}
+
+.toast-action:hover {
+  background: var(--element_background_hover);
 }
 
 /* Одно появление у всех всплывающих слоёв: список, меню, палитра, тост.
@@ -4162,6 +4361,40 @@ textarea {
     opacity: 1;
     transform: none;
   }
+}
+
+/* Появление слоя под «уменьшить движение» — чистый кросс-фейд: без сдвига и
+   масштаба (HIG: «use cross-fade instead of slide»). Слайд убран, но слой
+   всё равно проявляется, а не возникает рывком. */
+@keyframes popup-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Слой, растущий ВНИЗ от якоря (меню из клика, список под полем), въезжает
+   СВЕРХУ — из-под места вызова, а не наоборот. Базовый `popup-in` остаётся для
+   слоёв, растущих вверх (композер, подсказка сессии, тост у нижнего края): они
+   въезжают снизу. Сторону знает вызывающий код и ставит `is-below`
+   (см. `ui/select.ts`, `ui/popup-menu.ts`, `ui/popover.ts`). */
+@keyframes popup-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.select-popup.is-below,
+.context-menu.is-below,
+.popover.is-below {
+  animation-name: popup-in-down;
 }
 
 /* ── стартовое окно ─────────────────────────────────────────────────────── */
@@ -4200,7 +4433,7 @@ textarea {
 .launcher-subtitle {
   max-width: 560px;
   margin: 4px 0 0;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .launcher-actions {
@@ -4249,7 +4482,7 @@ textarea {
   overflow: hidden;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -4277,7 +4510,7 @@ textarea {
   padding: 8px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius_sm);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   text-align: left;
 }
 
@@ -4309,7 +4542,7 @@ textarea {
 .launcher-item-path {
   overflow: hidden;
   color: var(--text_color_tertiary);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -4317,7 +4550,7 @@ textarea {
 .launcher-item-hint {
   flex: 0 0 auto;
   color: var(--git_modified);
-  font-size: 11px;
+  font-size: var(--font_small_size);
 }
 
 /* Крестик появляется на наведении, как у вкладок и строк изменений. */
@@ -4349,10 +4582,45 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
+/* Уважаем системную настройку «уменьшить движение». Псевдоэлементы берём явно:
+   `*` их не покрывает, а пульс точки на вкладке живёт на `.tab-label::after` и
+   без этого остаётся бесконечным. `iteration-count: 1` не даёт бесконечной
+   анимации превратиться в мельтешение после обнуления длительности. */
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Пульс «идёт работа» — индикатор состояния, а не украшение: под reduce гасим
+     его целиком. Состояние читается текстом и цветом, а застывшая на конечном
+     кадре анимация сделала бы «в работе» бледнее «готово». */
+  .chat-tab.is-busy .tab-label::after,
+  .msg-activity-dots i,
+  .tool-state.is-running,
+  .tool-group-state.is-running {
+    animation: none !important;
+  }
+
+  /* Появление всплывающего слоя — кросс-фейдом, а не слайдом: сдвиг и масштаб
+     убраны, остаётся мягкое проявление. Длительность возвращаем явно — общий
+     сброс `*` выше обнулил бы и её. Список тот же, что у слоёв-материалов выше. */
+  .select-popup,
+  .context-menu,
+  .composer-menu,
+  .session-info,
+  .popover,
+  .palette,
+  .toast,
+  .modal,
+  .launcher-clone,
+  .monaco-editor .quick-input-widget {
+    animation-name: popup-fade !important;
+    animation-duration: var(--motion_base) !important;
   }
 }
 
@@ -4555,7 +4823,7 @@ textarea {
   margin: 0 4px;
   padding: 0 4px;
   border-radius: calc(var(--radius_sm) - 3px);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   text-align: left;
 }
 
@@ -4768,8 +5036,11 @@ textarea {
   font-weight: 600;
 }
 
+/* Иерархия узлов: файл — основной текст, класс — вторичный, тест — третичный.
+   Здесь стоял `--text_color_hover` (роль «текст на цветной заливке»), и в светлой
+   схеме белое имя класса сливалось с белой панелью. */
 .tests-class .tests-label {
-  color: var(--text_color_hover);
+  color: var(--text_color_secondary);
 }
 
 .tests-test .tests-label {
@@ -4779,7 +5050,7 @@ textarea {
 .tests-arrow {
   flex: 0 0 auto;
   width: 12px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .tests-arrow.is-toggle {
@@ -4815,11 +5086,11 @@ textarea {
 /* Исход последнего прогона узла: галочка прошёл, крестик упал, многоточие идёт. */
 .tests-status {
   flex: 0 0 auto;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .tests-status.is-passed {
-  color: var(--git_added);
+  color: var(--green_prime_background);
 }
 
 .tests-status.is-failed {
@@ -4939,13 +5210,13 @@ textarea {
 
 .debug-frame-line {
   margin-left: auto;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .debug-toggle {
   flex: 0 0 auto;
   width: 12px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .debug-toggle.is-active {
@@ -4964,7 +5235,7 @@ textarea {
 }
 
 .debug-var-type {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .debug-scope {
@@ -4991,7 +5262,7 @@ textarea {
 
 .debug-empty {
   padding: 8px 10px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 .debug-idle {
@@ -5001,7 +5272,7 @@ textarea {
 
 .tests-empty {
   padding: 12px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
   text-align: center;
 }
@@ -5024,7 +5295,7 @@ textarea {
 .tests-error-line {
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   overflow-wrap: anywhere;
 }
 
@@ -5056,7 +5327,7 @@ textarea {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  color: var(--text_color_secondary, var(--text_color));
+  color: var(--text_color_secondary);
 }
 
 .tests-cov-percent {
@@ -5067,7 +5338,7 @@ textarea {
 
 /* Колонка ветвей — мельче и бледнее процента: это уточнение, а не главное число. */
 .tests-cov-branch {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -5076,7 +5347,7 @@ textarea {
 }
 
 .tests-cov-row.is-more {
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 /* ── попап Python-окружения в статусбаре ──────────────────────────────── */
@@ -5097,8 +5368,8 @@ textarea {
 }
 
 .python-env-title {
-  color: var(--text_color_disabled);
-  font-size: 11px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -5120,7 +5391,7 @@ textarea {
 .python-env-key {
   flex: 0 0 auto;
   width: 92px;
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
 }
 
 /* Путь может быть длинным: переносим по любому месту, а не растягиваем попап. */
@@ -5128,7 +5399,7 @@ textarea {
   min-width: 0;
   color: var(--text_color);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   overflow-wrap: anywhere;
 }
 
@@ -5141,16 +5412,17 @@ textarea {
 .python-env-badge {
   padding: 1px 6px;
   border-radius: var(--radius_pill);
-  background: var(--blue_prime_background_tint_strong);
+  /* Под белым текстом — заливка, а не полупрозрачный акцент: тот давал 2.1:1. */
+  background: var(--accent_fill);
   color: var(--text_color_hover);
-  font-size: 10px;
+  font-size: var(--font_micro_size);
 }
 
 /* Раздел выбора: подпись над списком, как у секций в других окнах. */
 .python-env-heading {
   margin-top: 2px;
-  color: var(--text_color_disabled);
-  font-size: 11px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -5195,7 +5467,7 @@ textarea {
   overflow: hidden;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 11px;
+  font-size: var(--font_small_size);
   text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5205,7 +5477,7 @@ textarea {
   padding: 10px;
   border: 1px dashed var(--separator_color);
   border-radius: var(--radius_sm);
-  color: var(--text_color_disabled);
+  color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
   text-align: center;
 }
@@ -5220,9 +5492,11 @@ textarea {
   cursor: pointer;
 }
 
+/* Наведение подсвечиваем рамкой: текст остаётся основным, а не белым (фон тут
+   обычный, и в светлой схеме белый текст был бы невидим). */
 .python-env-manage:hover {
   border-color: var(--blue_prime_background);
-  color: var(--text_color_hover);
+  color: var(--text_color);
 }
 
 /* Поломки окружения: точка цветом важности и объяснение словами. */
@@ -5249,7 +5523,7 @@ textarea {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--text_color_disabled);
+  background: var(--text_color_secondary);
 }
 
 .python-env-issue.is-error .python-env-issue-dot {
@@ -5272,8 +5546,8 @@ textarea {
 
 .python-env-heading {
   margin: 0;
-  color: var(--text_color_disabled);
-  font-size: 10px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_micro_size);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;

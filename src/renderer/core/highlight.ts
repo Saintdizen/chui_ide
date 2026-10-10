@@ -1,5 +1,5 @@
 import * as monaco from 'monaco-editor';
-import { tokenColor, type Scheme } from './theme';
+import { tokenStyle, type Scheme } from './theme';
 
 /**
  * Подсветка кода вне редактора — для блоков кода в чате.
@@ -102,8 +102,17 @@ function buildHtml(code: string, language: string, current: Scheme): string {
       if (end <= start) continue;
 
       const text = escapeHtml(line.slice(start, end));
-      const color = tokenColor(current, tokens[token]!.type);
-      rendered += color ? `<span style="color:${color}">${text}</span>` : text;
+      const style = tokenStyle(current, tokens[token]!.type);
+      // Начертание идёт вместе с цветом: в редакторе комментарий курсивный, а
+      // ключевое слово полужирное — чат рисует тот же код и не должен отличаться.
+      const css = [
+        style.color ? `color:${style.color}` : '',
+        style.italic ? 'font-style:italic' : '',
+        style.bold ? 'font-weight:bold' : '',
+      ]
+        .filter(Boolean)
+        .join(';');
+      rendered += css ? `<span style="${css}">${text}</span>` : text;
     }
     out.push(rendered);
   }
@@ -222,7 +231,7 @@ export async function diagnoseHighlighting(): Promise<string> {
       await monaco.editor.colorize(sample, id, { tabSize: 2 });
       const lines = monaco.editor.tokenize(sample, id);
       const all = lines.flat();
-      const colored = all.filter((token) => tokenColor(scheme, token.type) !== null).length;
+      const colored = all.filter((token) => tokenStyle(scheme, token.type).color !== null).length;
       report.push(`${label} → ${id}: токенов ${all.length}, с цветом ${colored}`);
     } catch (error) {
       report.push(`${label} → ${id}: ошибка ${error instanceof Error ? error.message : String(error)}`);

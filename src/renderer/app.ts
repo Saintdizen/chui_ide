@@ -22,6 +22,7 @@ import { registerImportActions } from './core/import-actions';
 import { LspClient } from './core/lsp';
 import { registerLspProviders } from './core/lsp-providers';
 import { OpenEditors } from './core/open-editors';
+import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
 import { envWidgetLabel } from './core/env-widget';
 import { DebugController, frameForHover } from './core/debug';
@@ -91,12 +92,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const git = new GitModel(rpc, workspace);
 
   const layout = createLayout(mount, { onChange: () => void persistLayout() });
+  // Адаптив панелей по ширине окна: мнение о размере отдельно от желания человека,
+  // поэтому решение о видимости живёт в своей модели (`core/panel-layout`).
+  const panelAuto = new AutoPanelLayout();
   const statusBar = createStatusBar({
     openGitManager: (anchor) => openGitManager(anchor),
     openPythonEnv: (anchor) => openPythonEnv(anchor),
     openNodeEnv: (anchor) => openNodeEnv(anchor),
     // Через команду, а не напрямую: палитра создаётся ниже, а команда уже есть.
     openFilePicker: () => void commands.execute('file.quickOpen'),
+    openProblems: () => editors.revealNextProblem(),
   });
   layout.statusBarHost.appendChild(statusBar.element);
 
@@ -757,6 +762,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     viewButtons.get('project')?.classList.toggle('is-active', layout.sidebarVisible);
     viewButtons.get('search')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'search');
     viewButtons.get('terminal')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'terminal');
+    viewButtons.get('split')?.classList.toggle('is-active', editors.isSplit);
     // Выключенный AI прячем из шапки: неактивная кнопка всё равно звала бы в чат.
     const aiButton = viewButtons.get('ai');
     if (aiButton) {
@@ -764,6 +770,26 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       aiButton.classList.toggle('is-active', aiEnabled() && chatVisible());
     }
   };
+
+  /**
+   * Подстроить панели под ширину окна. Решение принимает `AutoPanelLayout` и только
+   * на переходе между полосами ширины. Свёрнутость от размера — не выбор человека,
+   * поэтому в настройки её не пишем (`withoutPersist`) и подсветку кнопок обновляем.
+   */
+  const syncAdaptivePanels = (): void => {
+    const change = panelAuto.update(window.innerWidth, {
+      sidebar: layout.sidebarVisible,
+      right: layout.rightVisible,
+    });
+    if (!change) return;
+    withoutPersist(() => {
+      layout.setSidebarVisible(change.sidebar);
+      layout.setRightVisible(change.right);
+    });
+    syncViewButtons();
+  };
+  window.addEventListener('resize', syncAdaptivePanels);
+  syncAdaptivePanels();
 
   // Системной полосы меню у безрамочного окна нет — открываем её кнопкой.
   // Меню рисует renderer, поэтому оно выглядит как остальные выпадашки; системное
@@ -788,8 +814,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Действия шапки. Слева — то, что показывает содержимое: файлы, поиск,
   // терминал. Справа — служебное: ассистент, палитра, настройки, тема.
   addTopButton(layout.topBarLeft, 'save', 'save', 'Сохранить всё (Ctrl+Shift+S)', 'file.saveAll');
-  addTopButton(layout.topBarLeft, 'search', 'search', 'Найти в проекте (Ctrl+Shift+F)', 'search.project');
+  addTopButton(layout.topBarLeft, 'search', 'search', 'Поиск по проекту (Ctrl+Shift+F)', 'search.project');
   addTopButton(layout.topBarLeft, 'terminal', 'terminal', 'Терминал (Alt+F12)', 'view.showTerminal');
+  // Разделение области редактора: два файла рядом. Кнопка помнит состояние.
+  addTopButton(layout.topBarLeft, 'split', 'split', 'Разделить редактор (Ctrl+\\)', 'view.splitEditor');
 
   // Ассистент носит знак приложения, а не звезду-искру: тот же знак, что
   // в пустом состоянии редактора, — кнопка и экран говорят одно и то же.
@@ -1079,38 +1107,75 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     hideChatTab();
   });
 
-  define({ id: 'file.close', title: 'Закрыть вкладку', category: 'Файл', keybinding: 'Ctrl+W' }, (path) => {
-    const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
-    if (!target) return;
-    openEditors.close(target);
-    const next = openEditors.active;
-    if (next) editors.open(next);
-  });
+  define(
+    {
+      id: 'file.close',
+      title: 'Закрыть вкладку',
+      category: 'Файл',
+      keybinding: 'Ctrl+W',
+      enabled: () => openEditors.active !== null,
+    },
+    (path) => {
+      const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
+      if (!target) return;
+      openEditors.close(target);
+      const next = openEditors.active;
+      if (next) editors.open(next);
+    },
+  );
 
-  define({ id: 'file.save', title: 'Сохранить', category: 'Файл', keybinding: 'Ctrl+S' }, async () => {
-    const document = openEditors.active;
-    if (!document) {
-      showToast('Нет открытого файла');
-      return;
-    }
-    await saveDocument(document);
-  });
+  define(
+    {
+      id: 'file.save',
+      title: 'Сохранить',
+      category: 'Файл',
+      keybinding: 'Ctrl+S',
+      enabled: () => openEditors.active !== null,
+    },
+    async () => {
+      const document = openEditors.active;
+      if (!document) {
+        showToast('Нет открытого файла');
+        return;
+      }
+      await saveDocument(document);
+    },
+  );
 
-  define({ id: 'file.saveAll', title: 'Сохранить всё', category: 'Файл', keybinding: 'Ctrl+Shift+S' }, async () => {
-    const dirty = documents.dirty();
-    if (dirty.length === 0) {
-      showToast('Все файлы уже сохранены');
-      return;
-    }
-    for (const document of dirty) await saveDocument(document);
-  });
+  define(
+    {
+      id: 'file.saveAll',
+      title: 'Сохранить всё',
+      category: 'Файл',
+      keybinding: 'Ctrl+Shift+S',
+      enabled: () => documents.dirty().length > 0,
+    },
+    async () => {
+      const dirty = documents.dirty();
+      if (dirty.length === 0) {
+        showToast('Все файлы уже сохранены');
+        return;
+      }
+      for (const document of dirty) await saveDocument(document);
+    },
+  );
 
   define({ id: 'file.createFile', title: 'Создать файл', category: 'Файл' }, async (path) => {
     if (typeof path !== 'string') return undefined;
     const created = await rpc.request('workspace.createFile', { path });
     await openPath(created.path);
     explorer.scheduleRefresh();
-    showToast(`Создан файл ${basename(created.path)}`);
+    // Сразу предлагаем отменить: файл могли создать по ошибке в неверной папке.
+    showToast(`Создан файл ${basename(created.path)}`, 'info', {
+      action: {
+        label: 'Отменить',
+        run: async () => {
+          await commands.execute('file.close', created.path);
+          await rpc.request('workspace.trash', { path: created.path });
+          explorer.scheduleRefresh();
+        },
+      },
+    });
     return created.path;
   });
 
@@ -1118,7 +1183,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (typeof path !== 'string') return undefined;
     const created = await rpc.request('workspace.createDir', { path });
     explorer.scheduleRefresh();
-    showToast(`Создана папка ${basename(created.path)}`);
+    showToast(`Создана папка ${basename(created.path)}`, 'info', {
+      action: {
+        label: 'Отменить',
+        run: async () => {
+          await rpc.request('workspace.trash', { path: created.path });
+          explorer.scheduleRefresh();
+        },
+      },
+    });
     return created.path;
   });
 
@@ -1139,7 +1212,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const renamed = await rpc.request('workspace.rename', { from, to });
     if (wasActive) await openPath(renamed.path);
     explorer.scheduleRefresh();
-    showToast(`Переименовано: ${basename(renamed.path)}`);
+    showToast(`Переименовано: ${basename(renamed.path)}`, 'info', {
+      action: {
+        label: 'Отменить',
+        run: async () => {
+          // Возвращаем прежнее имя и, если файл был открыт, открываем его там же.
+          await commands.execute('file.close', renamed.path);
+          await rpc.request('workspace.rename', { from: renamed.path, to: from });
+          if (wasActive) await openPath(from);
+          explorer.scheduleRefresh();
+        },
+      },
+    });
     return renamed.path;
   });
 
@@ -1172,34 +1256,55 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── запуск ────────────────────────────────────────────────────────────── */
 
-  define({ id: 'run.file', title: 'Запустить файл', category: 'Запуск', keybinding: 'Ctrl+F5' }, async () => {
-    // Именно файл, а не первая цель из набора: у Python первыми могли оказаться
-    // тесты, и Ctrl+F5 запускал бы их вместо самого файла.
-    const target = targetsFor(openEditors.active).find((item) => item.source === 'file');
-    if (!target) {
-      showToast('Запускать нечего: нужен скрипт или задача в package.json', 'error');
-      return;
-    }
-    await runTarget(target);
-  });
-
-  define({ id: 'run.tests', title: 'Запустить тесты', category: 'Запуск' }, async () => {
+  /**
+   * Цель прогона тестов: файл под курсором, иначе — все тесты проекта. Вынесено
+   * из команды, потому что тем же расчётом решается, доступна ли она вовсе.
+   */
+  const testTarget = (): RunTarget | undefined => {
     const active = openEditors.active;
     const relative = active ? workspace.relative(active.path) : null;
     const targets = collectRunTargets(runnableFileOf(active), tools.get(), projectScan, nodeRunner());
     const runnable = relative && relative !== active?.path ? relative : null;
     // Цели тестов у языков называются по-разному: у Python — `pytest:…`, у Node —
     // `node-tests:…`. Сначала пробуем файл, в котором стоит человек, потом — все тесты.
-    const target =
+    return (
       targets.find(
         (item) => item.source === 'test' && (item.id === `pytest:${runnable}` || item.id === `node-tests:${runnable}`),
-      ) ?? targets.find((item) => item.id === 'pytest:all' || item.id === 'node-tests:all');
-    if (!target) {
-      showToast('Тесты не найдены: нужен pytest, vitest, jest или файлы для `node --test`', 'error');
-      return;
-    }
-    await runTarget(target);
-  });
+      ) ?? targets.find((item) => item.id === 'pytest:all' || item.id === 'node-tests:all')
+    );
+  };
+
+  define(
+    {
+      id: 'run.file',
+      title: 'Запустить файл',
+      category: 'Запуск',
+      keybinding: 'Ctrl+F5',
+      enabled: () => targetsFor(openEditors.active).some((item) => item.source === 'file'),
+    },
+    async () => {
+      // Именно файл, а не первая цель из набора: у Python первыми могли оказаться
+      // тесты, и Ctrl+F5 запускал бы их вместо самого файла.
+      const target = targetsFor(openEditors.active).find((item) => item.source === 'file');
+      if (!target) {
+        showToast('Запускать нечего: нужен скрипт или задача в package.json', 'error');
+        return;
+      }
+      await runTarget(target);
+    },
+  );
+
+  define(
+    { id: 'run.tests', title: 'Запустить тесты', category: 'Запуск', enabled: () => testTarget() !== undefined },
+    async () => {
+      const target = testTarget();
+      if (!target) {
+        showToast('Тесты не найдены: нужен pytest, vitest, jest или файлы для `node --test`', 'error');
+        return;
+      }
+      await runTarget(target);
+    },
+  );
 
   /* ── отладка ───────────────────────────────────────────────────────────── */
 
@@ -1334,25 +1439,34 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
-  define({ id: 'run.choose', title: 'Запустить…', category: 'Запуск', keybinding: 'Shift+F10' }, () => {
-    const targets = targetsFor(openEditors.active);
-    if (targets.length === 0) {
-      showToast('Запускать нечего: нужен скрипт или задача в package.json', 'error');
-      return;
-    }
-    if (targets.length === 1) {
-      void runTarget(targets[0]!);
-      return;
-    }
-    const anchor = runControl.element;
-    const rect = anchor.getBoundingClientRect();
-    showPopupMenu(
-      targets.map((target) => ({ label: target.label, hint: target.detail, onSelect: () => void runTarget(target) })),
-      rect.right - 260,
-      rect.bottom + 4,
-      { anchor },
-    );
-  });
+  define(
+    {
+      id: 'run.choose',
+      title: 'Запустить…',
+      category: 'Запуск',
+      keybinding: 'Shift+F10',
+      enabled: () => targetsFor(openEditors.active).length > 0,
+    },
+    () => {
+      const targets = targetsFor(openEditors.active);
+      if (targets.length === 0) {
+        showToast('Запускать нечего: нужен скрипт или задача в package.json', 'error');
+        return;
+      }
+      if (targets.length === 1) {
+        void runTarget(targets[0]!);
+        return;
+      }
+      const anchor = runControl.element;
+      const rect = anchor.getBoundingClientRect();
+      showPopupMenu(
+        targets.map((target) => ({ label: target.label, hint: target.detail, onSelect: () => void runTarget(target) })),
+        rect.right - 260,
+        rect.bottom + 4,
+        { anchor },
+      );
+    },
+  );
 
   define({ id: 'view.showExplorer', title: 'Показать проводник', category: 'Вид', keybinding: 'Alt+1' }, () => {
     layout.setSidebarVisible(true);
@@ -1368,10 +1482,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     await git.refresh();
   });
 
-  define({ id: 'git.init', title: 'Создать репозиторий git', category: 'Git' }, async () => {
-    await git.init();
-    showToast('Репозиторий git создан');
-  });
+  define(
+    {
+      id: 'git.init',
+      title: 'Создать репозиторий git',
+      category: 'Git',
+      enabled: () => workspace.root !== null && !git.isRepository,
+    },
+    async () => {
+      await git.init();
+      showToast('Репозиторий git создан');
+    },
+  );
 
   define({ id: 'git.stage', title: 'Проиндексировать файл', category: 'Git' }, async (path) => {
     const target = asPath(path);
@@ -1446,43 +1568,57 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast(`Ветка создана: ${branch}`);
   });
 
-  define({ id: 'git.stageAll', title: 'Проиндексировать все изменения', category: 'Git' }, async () => {
-    const paths = git.unstaged.map((file) => file.path);
-    if (paths.length === 0) {
-      showToast('Нет изменений для индексации', 'error');
-      return;
-    }
-    await git.stage(paths);
-  });
+  define(
+    {
+      id: 'git.stageAll',
+      title: 'Проиндексировать все изменения',
+      category: 'Git',
+      enabled: () => git.unstaged.length > 0,
+    },
+    async () => {
+      const paths = git.unstaged.map((file) => file.path);
+      if (paths.length === 0) {
+        showToast('Нет изменений для индексации', 'error');
+        return;
+      }
+      await git.stage(paths);
+    },
+  );
 
-  define({ id: 'git.unstageAll', title: 'Убрать всё из индекса', category: 'Git' }, async () => {
-    const paths = git.staged.map((file) => file.path);
-    if (paths.length === 0) {
-      showToast('Индекс уже пуст', 'error');
-      return;
-    }
-    await git.unstage(paths);
-  });
+  define(
+    { id: 'git.unstageAll', title: 'Убрать всё из индекса', category: 'Git', enabled: () => git.staged.length > 0 },
+    async () => {
+      const paths = git.staged.map((file) => file.path);
+      if (paths.length === 0) {
+        showToast('Индекс уже пуст', 'error');
+        return;
+      }
+      await git.unstage(paths);
+    },
+  );
 
-  define({ id: 'git.discardAll', title: 'Откатить все правки', category: 'Git' }, async () => {
-    const paths = git.unstaged.map((file) => file.path);
-    if (paths.length === 0) {
-      showToast('Нет правок для отката', 'error');
-      return;
-    }
+  define(
+    { id: 'git.discardAll', title: 'Откатить все правки', category: 'Git', enabled: () => git.unstaged.length > 0 },
+    async () => {
+      const paths = git.unstaged.map((file) => file.path);
+      if (paths.length === 0) {
+        showToast('Нет правок для отката', 'error');
+        return;
+      }
 
-    // Откат необратим: спрашиваем системным диалогом, как и для одного файла.
-    const { confirmed } = await rpc.request('dialog.confirm', {
-      title: 'Откатить все правки',
-      message: 'Отменить все правки в рабочем дереве?',
-      detail: `Файлов: ${paths.length}. Изменённые вернутся к последнему коммиту, новые будут удалены. Вернуть правки будет нельзя.`,
-      confirmLabel: 'Откатить все',
-    });
-    if (!confirmed) return;
+      // Откат необратим: спрашиваем системным диалогом, как и для одного файла.
+      const { confirmed } = await rpc.request('dialog.confirm', {
+        title: 'Откатить все правки',
+        message: 'Отменить все правки в рабочем дереве?',
+        detail: `Файлов: ${paths.length}. Изменённые вернутся к последнему коммиту, новые будут удалены. Вернуть правки будет нельзя.`,
+        confirmLabel: 'Откатить все',
+      });
+      if (!confirmed) return;
 
-    await git.discard(paths);
-    showToast('Правки откатаны');
-  });
+      await git.discard(paths);
+      showToast('Правки откатаны');
+    },
+  );
 
   define({ id: 'view.showChanges', title: 'Показать изменения', category: 'Вид', keybinding: 'Ctrl+Shift+G' }, () => {
     dock.show('git');
@@ -1493,11 +1629,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncViewButtons();
   });
 
-  define({ id: 'view.showSearch', title: 'Поиск по проекту', category: 'Поиск', keybinding: 'Ctrl+Shift+F' }, () => {
-    dock.show('search');
-  });
-
-  define({ id: 'search.project', title: 'Найти в проекте', category: 'Поиск' }, () => dock.show('search'));
+  define({ id: 'search.project', title: 'Поиск по проекту', category: 'Поиск', keybinding: 'Ctrl+Shift+F' }, () =>
+    dock.show('search'),
+  );
 
   define({ id: 'view.showTerminal', title: 'Терминал', category: 'Вид', keybinding: 'Alt+F12' }, () => {
     dock.toggle('terminal');
@@ -1510,6 +1644,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'view.toggleRight', title: 'Панель AI', category: 'Вид', keybinding: 'Ctrl+Shift+A' }, () => {
     toggleChat();
+  });
+
+  // Разделение области редактора: одна кнопка включает и выключает, как и у панелей.
+  define({ id: 'view.splitEditor', title: 'Разделить редактор', category: 'Вид', keybinding: 'Ctrl+\\' }, () => {
+    if (editors.isSplit) editors.closeSplit();
+    else editors.splitEditor();
+    syncViewButtons();
   });
 
   define({ id: 'app.showMenu', title: 'Меню приложения', category: 'Вид', keybinding: 'Alt+F10' }, () => {
@@ -1682,6 +1823,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       branch: git.branch,
       changes: git.changeCount,
       projectKindId: projectScan && projectScan.kind.source !== 'none' ? projectScan.kind.id : null,
+      problems: editors.problemCounts(),
       // Виджет окружения говорит на языке проекта: у Node — версия и менеджер,
       // у Python — интерпретатор. Раньше в Node-проекте тут висел Python.
       env: envWidgetLabel(projectScan?.kind.id ?? null, projectTools, settings.run.pythonPath),
@@ -1940,7 +2082,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     }
   });
   editors.onCursorChange((state) => statusBar.update({ line: state.line, column: state.column }));
+  // Разделение меняют и кнопка, и команда — подсветка кнопки идёт за состоянием.
+  editors.onDidChangeSplit(() => syncViewButtons());
   rpc.onDidChangeStreaming((streaming) => statusBar.update({ ai: streaming ? 'генерация…' : 'готов' }));
+  // Счётчик проблем: пометки приходят из нескольких источников (Monaco, LSP,
+  // проверка импортов), поэтому слушаем одно событие сервиса и пересчитываем всё.
+  editors.onDidChangeMarkers(() => statusBar.update({ problems: editors.problemCounts() }));
 
   theme.onDidChange((scheme) => {
     editors.setTheme(scheme);
@@ -1953,8 +2100,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   new KeybindingService(commands, [
     { combo: 'Alt+1', command: 'view.showExplorer' },
     { combo: 'Alt+2', command: 'search.project' },
-    { combo: 'Ctrl+Shift+P', command: 'palette.open' },
-    { combo: 'Ctrl+Shift+O', command: 'file.quickOpen' },
+    // Палитра команд (Ctrl+Shift+P) и быстрое открытие (Ctrl+Shift+O) здесь не
+    // продублированы: их держат акселераторы меню, а те приходят раньше keydown.
     // Символ по проекту — привычка из VS Code и PyCharm.
     { combo: 'Ctrl+T', command: 'navigate.symbol' },
     { combo: 'Ctrl+,', command: 'settings.open' },

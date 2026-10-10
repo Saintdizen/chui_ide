@@ -30,8 +30,9 @@ export function createPopover(
   let anchor: HTMLElement | null = null;
 
   const place = (target: HTMLElement): void => {
+    const anchorRect = target.getBoundingClientRect();
     const { left, top } = placePopup({
-      anchor: target.getBoundingClientRect(),
+      anchor: anchorRect,
       // Размер берём из макета (`offset*`), а не из `getBoundingClientRect`:
       // появление идёт анимацией со `scale`, и сжатый размер смещал бы попап.
       size: { width: element.offsetWidth, height: element.offsetHeight },
@@ -39,6 +40,8 @@ export function createPopover(
       gap,
       align: options.align,
     });
+    // Встал под якорем — въезжает сверху; над якорем — снизу.
+    element.classList.toggle('is-below', top >= anchorRect.bottom);
     element.style.left = `${left}px`;
     element.style.top = `${top}px`;
   };

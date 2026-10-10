@@ -8,6 +8,12 @@ export interface CommandDescriptor {
   keywords?: readonly string[];
   /** Подсказка для UI; реальные акселераторы дублируются в меню приложения. */
   keybinding?: string;
+  /**
+   * Доступна ли команда прямо сейчас. Нет или `true` — всегда доступна, `false` —
+   * пункт в палитре показан выключенным. Так команда, которой сейчас нечего
+   * делать, заранее говорит об этом, вместо тоста «проект не открыт» после запуска.
+   */
+  enabled?: () => boolean;
 }
 
 export type CommandHandler = (...args: unknown[]) => unknown;
@@ -37,6 +43,11 @@ export class CommandRegistry {
 
   get(id: string): CommandDescriptor | undefined {
     return this.entries.get(id)?.descriptor;
+  }
+
+  /** Доступна ли команда сейчас: палитра по этому решает, гасить ли пункт. */
+  isEnabled(id: string): boolean {
+    return this.entries.get(id)?.descriptor.enabled?.() ?? true;
   }
 
   list(): CommandDescriptor[] {

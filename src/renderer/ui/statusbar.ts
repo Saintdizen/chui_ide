@@ -21,6 +21,8 @@ export interface StatusState {
   changes: number;
   /** Ключ вида проекта (`python`, `node`, …): выбирает, какой попап открыть. */
   projectKindId: string | null;
+  /** Пометки в открытых файлах: числа ошибок и предупреждений для виджета проблем. */
+  problems: { errors: number; warnings: number };
   /** Выбранное Python-окружение (`.venv`, `python3`); null — виджет скрыт. */
   env: string | null;
 }
@@ -39,6 +41,17 @@ export interface StatusBarDeps {
   openNodeEnv(anchor: HTMLElement): void;
   /** Клик по пути файла — быстрый переход к другому файлу. */
   openFilePicker(): void;
+  /** Клик по счётчику проблем — переход к первой пометке. */
+  openProblems(anchor: HTMLElement): void;
+}
+
+/** Русское склонение по числу: 1 ошибка, 2 ошибки, 5 ошибок. */
+function plural(count: number, one: string, few: string, many: string): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 /**
@@ -64,6 +77,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     changes: 0,
     projectKindId: null,
     env: null,
+    problems: { errors: 0, warnings: 0 },
   };
 
   // Виджет окружения один, а попапов два: у Node открываем Node, иначе Python.
@@ -101,7 +115,27 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const languageItem = h('span', { class: 'status-item' });
   const toolItem = h('span', { class: 'status-item status-tool' });
   const versionItem = h('span', { class: 'status-item status-muted' });
-  const aiItem = h('span', { class: 'status-item status-ai' }, svgIcon('sparkle', 12));
+  // Проблемы — значок и числа: цвет различает ошибку и предупреждение, а количество
+  // читается и без него. Пусто — виджет скрыт (нет проблем, нет и шума).
+  const problemsItem = h(
+    'button',
+    {
+      class: 'status-item status-problems',
+      type: 'button',
+      title: 'Ошибки и предупреждения в открытых файлах',
+      onClick: (event: Event) => deps.openProblems(event.currentTarget as HTMLElement),
+    },
+    svgIcon('warning', 12),
+    h('span', { class: 'status-problems-counts' }),
+  );
+  const problemsCounts = problemsItem.querySelector<HTMLElement>('.status-problems-counts')!;
+  const aiItem = h(
+    'span',
+    { class: 'status-item status-ai' },
+    svgIcon('sparkle', 12),
+    h('span', { class: 'status-ai-label' }),
+  );
+  const aiLabel = aiItem.querySelector<HTMLElement>('.status-ai-label')!;
 
   const element = h(
     'div',
@@ -111,6 +145,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       'div',
       { class: 'status-group' },
       aiItem,
+      problemsItem,
       versionItem,
       positionItem,
       eolItem,
@@ -141,8 +176,25 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     toolItem.hidden = !state.tool;
     toolItem.title = state.tool ? `Запуск: ${state.tool}` : '';
     versionItem.textContent = state.version ? `v${state.version}` : '';
+    // Состояние AI — слово и значок, а не только цвет: при `is-busy` меняется оттенок,
+    // но текст читается и без него (цвет — подсказка, а не единственный носитель смысла).
+    aiLabel.textContent = state.ai;
     aiItem.title = `AI: ${state.ai}`;
     aiItem.classList.toggle('is-busy', state.ai !== 'готов');
+    const { errors, warnings } = state.problems;
+    problemsItem.hidden = errors === 0 && warnings === 0;
+    problemsItem.classList.toggle('has-errors', errors > 0);
+    problemsItem.classList.toggle('has-warnings', errors === 0 && warnings > 0);
+    problemsCounts.textContent = [
+      errors > 0 ? `${errors} ${plural(errors, 'ошибка', 'ошибки', 'ошибок')}` : '',
+      warnings > 0 ? `${warnings} ${plural(warnings, 'предупреждение', 'предупреждения', 'предупреждений')}` : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+    problemsItem.title =
+      errors === 0 && warnings === 0
+        ? 'Ошибок и предупреждений нет'
+        : `Ошибок: ${errors}, предупреждений: ${warnings}. Нажмите, чтобы перейти к первой`;
     gitItem.hidden = state.branch === null;
     gitLabel.textContent = state.branch ? `${state.branch}${state.changes > 0 ? `  ±${state.changes}` : ''}` : '';
     gitItem.title = state.branch

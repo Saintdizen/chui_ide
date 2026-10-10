@@ -504,7 +504,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           role: 'tab',
           tabindex: '0',
           'aria-selected': String(isActive),
-          title: session.title,
+          // Пульс точки — не единственный носитель «идёт генерация»: то же сказано
+          // подписью для наведения и `aria-label` для озвучки (HIG: не передавай
+          // важное только анимацией). Под «уменьшить движение» точка статична, а
+          // смысл остаётся.
+          title: isStreaming ? `${session.title} — идёт генерация` : session.title,
+          'aria-label': isStreaming ? `${session.title}, идёт генерация` : undefined,
         },
         svgIcon('chat', 13),
         h('span', { class: 'tab-label' }, session.title),
@@ -1110,7 +1115,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       failed > 0
         ? `Не удалось сохранить файлов: ${failed}`
         : `Сохранено ${dirty.length} ${plural(dirty.length, 'файл', 'файла', 'файлов')}`,
-      failed > 0 ? 'error' : 'info',
+      failed > 0 ? 'error' : 'success',
     );
   }
 
@@ -1188,7 +1193,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         : skipped > 0
           ? `Правки отменены; удалённые файлы — в корзине`
           : 'Правки агента отменены',
-      failed > 0 ? 'error' : 'info',
+      failed > 0 ? 'error' : 'success',
     );
   }
 
@@ -1674,9 +1679,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     const result = await deps.edits.applyFileEdits(selected, 'programmatic');
-    // На диск не пишем: правки агента ложатся в документы в памяти (файлы
-    // помечаются «не сохранён»), а записывает их человек кнопкой «Сохранить»
-    // в панели изменений. Так решение «менять файл на диске» остаётся за ним.
+    // На диск пишем только при полном доступе (экрана ревью не было — значит,
+    // правки применяются сразу, как и говорит эта настройка). Иначе они ложатся
+    // в документы в памяти, файлы помечаются «не сохранён», а записывает их
+    // человек кнопкой «Сохранить» в панели изменений. Без записи на диск при
+    // полном доступе следующий read_file/search (main читает с диска) показывал
+    // бы старый текст, хотя инструмент уже отчитался «применено».
+    if (params.autoApprove === true && result.reports.length > 0) {
+      await persistPaths(result.reports.map((report) => report.path));
+    }
 
     for (const report of result.reports) {
       const { added, removed } = countLines(selected, report.path);

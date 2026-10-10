@@ -6,9 +6,9 @@ import type { RunnableTest } from '../../shared/python-tests';
 import type { BreakpointInput } from './debug';
 import { uriToPath, type TextDocument } from './document';
 import type { DocumentStore } from './document-store';
+import { EditorModels } from './editor-models';
 import { Emitter } from './events';
 import { applyTypeScriptDefaults, registerLanguageModes } from './language-modes';
-import { languageIndent } from './languages';
 import { MONACO_THEMES, MONACO_THEME_IDS, type Scheme } from './theme';
 
 /** Настройки редактора приходят из общего контракта: окно настроек и редактор — одно целое. */
@@ -57,16 +57,23 @@ export interface DebugHoverPosition {
 /** Языки, для которых под курсором показываем значение из остановленного кадра. */
 const DEBUG_HOVER_LANGUAGES = ['python', 'javascript', 'typescript'] as const;
 
+/** Панель области редактора: своя область Monaco и свой открытый в ней файл. */
+interface EditorPane {
+  host: HTMLElement;
+  editor: monaco.editor.IStandaloneCodeEditor;
+  /** Путь открытого в панели файла; `null` — панель пуста. */
+  path: string | null;
+}
+
 /**
  * Единственное место, где renderer знает про Monaco.
  *
- * Правило одного писателя: пользователь печатает → модель Monaco сообщает
- * документу; правки приходят программно → документ сообщает модели. Флаг
- * `applying` не даёт этим двум потокам зациклиться друг на друге.
+ * Область редактора делится на панели (одну или две). Моделями панели не владеют:
+ * их держит общий реестр `EditorModels`, поэтому один и тот же файл можно смотреть
+ * в двух панелях сразу, а правка видна в обеих. Правило одного писателя между
+ * моделью и документом стережёт реестр.
  */
 export class EditorService {
-  readonly editor: monaco.editor.IStandaloneCodeEditor;
-
   private readonly cursorEmitter = new Emitter<CursorState>();
   readonly onCursorChange = this.cursorEmitter.event;
 
@@ -86,7 +93,25 @@ export class EditorService {
   private readonly testMarkerEmitter = new Emitter<TestMarkerHit>();
   readonly onTestMarker = this.testMarkerEmitter.event;
 
-  private readonly models = new Map<string, monaco.editor.ITextModel>();
+  /** Разделение области редактора: кнопка и команда идут за этим состоянием. */
+  private readonly splitEmitter = new Emitter<boolean>();
+  readonly onDidChangeSplit = this.splitEmitter.event;
+
+  /** Пометки языка изменились — статусбар пересчитывает счётчик проблем. */
+  private readonly markersEmitter = new Emitter<void>();
+  readonly onDidChangeMarkers = this.markersEmitter.event;
+
+  /** Модели файлов — общие на приложение: владеет реестр, редактор их арендует. */
+  private readonly files: EditorModels;
+  /** Схема: новую панель тоже одеваем в текущую тему, а не в тему по умолчанию. */
+  private readonly theme: string;
+
+  /** Зона редактора — ряд панелей: одна, пока не разделили, и вторая после. */
+  private readonly panesHost: HTMLElement;
+  private readonly splitter: HTMLElement;
+  private readonly panes: EditorPane[] = [];
+  private activePane = 0;
+
   private readonly viewStates = new Map<string, monaco.editor.ICodeEditorViewState | null>();
   /** Значки запуска по файлам: нарисованные украшения нужно убирать перед новой отрисовкой. */
   private readonly runDecorations = new Map<string, string[]>();
@@ -107,7 +132,6 @@ export class EditorService {
   private readonly coverageLines = new Map<string, ReadonlySet<number>>();
   private readonly coverageDecorations = new Map<string, string[]>();
   private options: EditorOptions;
-  private applying = false;
   private activePath: string | null = null;
 
   constructor(
@@ -124,47 +148,31 @@ export class EditorService {
     registerLanguageModes();
     applyTypeScriptDefaults({ showUnused: options.showUnused });
     this.options = options;
+    this.theme = themeId;
 
-    this.editor = monaco.editor.create(container, {
-      theme: themeId,
-      automaticLayout: true,
-      ...editorOptions(options),
-      // Жёлоб шире обычного на ширину значка: там живёт кнопка запуска файла.
-      glyphMargin: true,
-      padding: { top: 12, bottom: 12 },
-      fixedOverflowWidgets: true,
-      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace',
-    });
+    // Пометки меняет кто угодно: собственная проверка Monaco, языковой сервер и
+    // проверка импортов. Ловим одно глобальное событие и отдаём наружу — по нему
+    // статусбар пересчитывает счётчики, не зная ни про один из источников.
+    monaco.editor.onDidChangeMarkers(() => this.markersEmitter.fire());
 
-    // Клик по значку ▶ в жёлобе запускает файл: то же действие, что Shift+F10,
-    // но в том месте, где человек видит точку входа.
-    this.editor.onMouseDown((event) => {
-      if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
-      const line = event.target.position?.lineNumber;
-      const path = this.activePath;
-      if (!line || !path) return;
+    // Модели общие на всё приложение: их отдают обе панели, и закрытие файла в
+    // одной не должно уносить модель из другой — поэтому владеет ими реестр.
+    this.files = new EditorModels(this.documents, () => ({
+      languageIndent: this.options.languageIndent,
+      tabSize: this.options.tabSize,
+      insertSpaces: this.options.insertSpaces,
+    }));
 
-      // Правый клик — меню точки останова: условие и удаление. Оно доступно и там,
-      // где точки ещё нет: «поставить условную» начинается так же, как обычная.
-      if (event.event.rightButton) {
-        this.breakpointMenuEmitter.fire({ path, line });
-        return;
-      }
-
-      // Значки запуска и точка останова делят одно поле номеров строк. Порядок
-      // важнее, чем кажется: у точки входа и у теста значки видны, а точку ставят
-      // где угодно — поэтому она последняя.
-      if (this.runLines.get(path)?.has(line)) {
-        this.runMarkerEmitter.fire({ path, line });
-        return;
-      }
-      const test = this.testMarkers.get(path)?.find((item) => item.line === line);
-      if (test) {
-        this.testMarkerEmitter.fire({ path, line, selector: test.selector, name: test.name });
-        return;
-      }
-      this.breakpointEmitter.fire({ path, line });
-    });
+    // Зона редактора — ряд панелей. Пока панель одна, она занимает всю зону;
+    // при разделении справа встаёт вторая, а между ними — разделитель (скрыт).
+    this.panesHost = document.createElement('div');
+    this.panesHost.className = 'editor-panes';
+    this.splitter = document.createElement('div');
+    this.splitter.className = 'editor-splitter';
+    this.splitter.hidden = true;
+    container.append(this.panesHost);
+    this.createPane();
+    this.panesHost.append(this.splitter);
 
     // Подсказка под курсором: значение выражения в контексте остановленного кадра.
     // Показываем в файле останова на любой строке, а не только на строке останова:
@@ -199,25 +207,135 @@ export class EditorService {
     // и «плывут» при подмене. Просим шрифт явно и перемеряем после загрузки.
     void document.fonts.load('14px "JetBrains Mono"').then(() => monaco.editor.remeasureFonts());
 
-    this.editor.onDidChangeCursorPosition((event) => {
+    // Закрытие файла уносит его модель из реестра: снять нарисованное по ней —
+    // наша забота, реестр о панелях ничего не знает.
+    this.files.onDidDispose((path) => this.forgetPath(path));
+    this.documents.onDidClose((document) => this.files.dispose(document.path));
+  }
+
+  /** Редактор активной панели: с ним работает всё, что требует «текущей» области. */
+  private get editor(): monaco.editor.IStandaloneCodeEditor {
+    return this.active.editor;
+  }
+
+  /** Панель, с которой сейчас работает человек: туда придёт следующий файл. */
+  private get active(): EditorPane {
+    return this.panes[this.activePane]!;
+  }
+
+  /** Разделена ли область редактора на две панели. */
+  get isSplit(): boolean {
+    return this.panes.length > 1;
+  }
+
+  /**
+   * Разделить область редактора: справа появляется вторая панель с тем же файлом.
+   * Модель у панелей общая (её держит реестр), поэтому правка видна в обеих; дальше
+   * в панель можно открыть другой файл — она станет активной по клику.
+   */
+  splitEditor(): void {
+    if (this.isSplit) return;
+    const pane = this.createPane();
+    const model = this.editor.getModel();
+    if (model) pane.editor.setModel(model);
+    pane.path = this.activePath;
+    this.panesHost.classList.add('is-split');
+    this.splitter.hidden = false;
+    this.setActivePane(this.panes.length - 1);
+    this.splitEmitter.fire(true);
+    pane.editor.focus();
+  }
+
+  /** Убрать разделение: остаётся первая панель. Модели не трогаем — ими владеет реестр. */
+  closeSplit(): void {
+    if (!this.isSplit) return;
+    const pane = this.panes.pop()!;
+    pane.editor.dispose();
+    pane.host.remove();
+    this.panesHost.classList.remove('is-split');
+    this.splitter.hidden = true;
+    this.setActivePane(0);
+    this.splitEmitter.fire(false);
+    this.editor.focus();
+  }
+
+  /**
+   * Создать панель: свою область Monaco и её реакции на ввод. Поведение панелей
+   * одинаково, поэтому навеска одна; какая из них «активная» — решает фокус.
+   */
+  private createPane(): EditorPane {
+    const host = document.createElement('div');
+    host.className = 'editor-pane';
+    const editor = monaco.editor.create(host, {
+      theme: this.theme,
+      automaticLayout: true,
+      ...editorOptions(this.options),
+      // Жёлоб шире обычного на ширину значка: там живёт кнопка запуска файла.
+      glyphMargin: true,
+      padding: { top: 12, bottom: 12 },
+      fixedOverflowWidgets: true,
+      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace',
+    });
+
+    const pane: EditorPane = { host, editor, path: null };
+    const index = this.panes.length;
+
+    // Клик по значку ▶ в жёлобе запускает файл: то же действие, что Shift+F10,
+    // но в том месте, где человек видит точку входа.
+    editor.onMouseDown((event) => {
+      if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
+      const line = event.target.position?.lineNumber;
+      const path = pane.path;
+      if (!line || !path) return;
+
+      // Правый клик — меню точки останова: условие и удаление. Оно доступно и там,
+      // где точки ещё нет: «поставить условную» начинается так же, как обычная.
+      if (event.event.rightButton) {
+        this.breakpointMenuEmitter.fire({ path, line });
+        return;
+      }
+
+      // Значки запуска и точка останова делят одно поле номеров строк. Порядок
+      // важнее, чем кажется: у точки входа и у теста значки видны, а точку ставят
+      // где угодно — поэтому она последняя.
+      if (this.runLines.get(path)?.has(line)) {
+        this.runMarkerEmitter.fire({ path, line });
+        return;
+      }
+      const test = this.testMarkers.get(path)?.find((item) => item.line === line);
+      if (test) {
+        this.testMarkerEmitter.fire({ path, line, selector: test.selector, name: test.name });
+        return;
+      }
+      this.breakpointEmitter.fire({ path, line });
+    });
+
+    // Курсор в статус-бар отдаёт только активная панель: у второй он не «текущий».
+    editor.onDidChangeCursorPosition((event) => {
+      if (this.activePane !== index) return;
       this.cursorEmitter.fire({
         path: this.activePath,
         line: event.position.lineNumber,
         column: event.position.column,
-        selections: this.editor.getSelections()?.length ?? 0,
+        selections: editor.getSelections()?.length ?? 0,
       });
     });
 
-    // Изменения с диска приходят уже после того, как кто-то перечитал файл:
-    // здесь допустима полная замена текста модели.
-    this.documents.onDidChange(({ document, change }) => {
-      if (change.source !== 'disk') return;
-      const model = this.models.get(document.path);
-      if (!model || model.getValue() === document.value) return;
-      this.withApplying(() => model.setValue(document.value));
-    });
+    // Фокус решает, куда придёт следующий файл и куда смотрит статус-бар.
+    editor.onDidFocusEditorText(() => this.setActivePane(index));
 
-    this.documents.onDidClose((document) => this.disposeModel(document.path));
+    this.panes.push(pane);
+    this.panesHost.append(host);
+    if (index === 0) host.classList.add('is-active');
+    return pane;
+  }
+
+  /** Активной панели — отметка: с двумя областями иначе не видно, где стоит курсор. */
+  private setActivePane(index: number): void {
+    this.activePane = index;
+    this.activePath = this.panes[index]?.path ?? null;
+    for (const [i, pane] of this.panes.entries()) pane.host.classList.toggle('is-active', i === index);
+    this.emitCursor();
   }
 
   /**
@@ -236,14 +354,16 @@ export class EditorService {
   }
 
   open(document: TextDocument): void {
-    if (this.activePath && this.activePath !== document.path) {
-      this.viewStates.set(this.activePath, this.editor.saveViewState());
+    const pane = this.active;
+    if (pane.path && pane.path !== document.path) {
+      this.viewStates.set(pane.path, pane.editor.saveViewState());
     }
 
-    const model = this.modelFor(document);
-    this.editor.setModel(model);
+    const model = this.files.resolve(document);
+    pane.editor.setModel(model);
     const state = this.viewStates.get(document.path);
-    if (state) this.editor.restoreViewState(state);
+    if (state) pane.editor.restoreViewState(state);
+    pane.path = document.path;
     this.activePath = document.path;
     // Модель появилась позже, чем узнали о точке входа — дорисовываем значок.
     this.drawRunMarkers(document.path);
@@ -264,23 +384,11 @@ export class EditorService {
    * ассистента тоже — без отдельного undo-стека.
    */
   applyEdits(document: TextDocument, edits: readonly TextEdit[]): void {
-    const model = this.models.get(document.path);
-    if (!model || edits.length === 0) return;
-    this.withApplying(() => {
-      model.pushEditOperations(
-        null,
-        edits.map((edit) => ({
-          range: new monaco.Range(edit.startLine, edit.startColumn, edit.endLine, edit.endColumn),
-          text: edit.newText,
-          forceMoveMarkers: true,
-        })),
-        () => null,
-      );
-    });
+    this.files.applyEdits(document, edits);
   }
 
   reveal(path: string, line: number, column: number): void {
-    const model = this.models.get(path);
+    const model = this.files.get(path);
     if (!model) return;
     if (this.editor.getModel() !== model) this.editor.setModel(model);
     const position = { lineNumber: line, column };
@@ -316,7 +424,7 @@ export class EditorService {
   markers(path?: string): DiagnosticItem[] {
     const items: DiagnosticItem[] = [];
 
-    for (const [filePath, model] of this.models) {
+    for (const [filePath, model] of this.files.entries()) {
       if (path && filePath !== path) continue;
       for (const marker of monaco.editor.getModelMarkers({ resource: model.uri })) {
         items.push({
@@ -339,12 +447,40 @@ export class EditorService {
   }
 
   /**
+   * Перейти к первой пометке активного файла. Действие берём у Monaco, а не
+   * ищем строку пометки сами: он же подсвечивает её и открывает файл, где нужно.
+   */
+  revealNextProblem(): void {
+    const editor = this.panes[this.activePane]?.editor;
+    void editor?.getAction('editor.action.marker.nextInFiles')?.run();
+  }
+
+  /**
+   * Сколько пометок «ошибка» и «предупреждение» в открытых файлах — для статусбара.
+   * Считаем тем же способом, что и `markers`, поэтому число в полосе и список,
+   * который видит агент, всегда про одни и те же пометки.
+   */
+  problemCounts(): { errors: number; warnings: number } {
+    let errors = 0;
+    let warnings = 0;
+
+    for (const [, model] of this.files.entries()) {
+      for (const marker of monaco.editor.getModelMarkers({ resource: model.uri })) {
+        if (marker.severity >= monaco.MarkerSeverity.Error) errors += 1;
+        else if (marker.severity >= monaco.MarkerSeverity.Warning) warnings += 1;
+      }
+    }
+
+    return { errors, warnings };
+  }
+
+  /**
    * Пометки из внешнего источника (LSP). Кладём их в Monaco под своим `owner`,
    * поэтому они живут рядом с собственными пометками и не затирают друг друга:
    * `getModelMarkers` (а значит и агент) видит и те, и другие.
    */
   setExternalMarkers(path: string, owner: string, diagnostics: readonly LspDiagnostic[]): void {
-    const model = this.models.get(path);
+    const model = this.files.get(path);
     if (!model) return;
 
     const severity = (value: LspDiagnostic['severity']): monaco.MarkerSeverity =>
@@ -371,13 +507,14 @@ export class EditorService {
   applyOptions(options: EditorOptions): void {
     const wasShowUnused = this.options.showUnused;
     this.options = options;
-    this.editor.updateOptions(editorOptions(options));
+    // Настройки — общие для всех панелей: вторая не должна жить со старым кеглем.
+    for (const pane of this.panes) pane.editor.updateOptions(editorOptions(options));
 
     if (wasShowUnused !== options.showUnused) applyTypeScriptDefaults({ showUnused: options.showUnused });
 
     // Отступы задаются модели, а не редактору: у Python и Makefile они свои,
     // поэтому при смене настройки переписываем их всем открытым файлам.
-    for (const model of this.models.values()) this.applyIndent(model);
+    this.files.refreshIndent();
   }
 
   /**
@@ -404,7 +541,7 @@ export class EditorService {
   }
 
   private drawTestMarkers(path: string): void {
-    const model = this.models.get(path);
+    const model = this.files.get(path);
     if (!model) return;
 
     const previous = this.testDecorations.get(path) ?? [];
@@ -431,7 +568,7 @@ export class EditorService {
 
   /** Нарисовать значки запуска по запомненным строкам. Без модели — нечего рисовать. */
   private drawRunMarkers(path: string): void {
-    const model = this.models.get(path);
+    const model = this.files.get(path);
     if (!model) return;
 
     const previous = this.runDecorations.get(path) ?? [];
@@ -468,7 +605,7 @@ export class EditorService {
   }
 
   private drawBreakpoints(path: string): void {
-    const model = this.models.get(path);
+    const model = this.files.get(path);
     if (!model) return;
 
     const previous = this.breakpointDecorations.get(path) ?? [];
@@ -525,7 +662,7 @@ export class EditorService {
   }
 
   private drawCoverage(path: string): void {
-    const model = this.models.get(path);
+    const model = this.files.get(path);
     const previous = this.coverageDecorations.get(path) ?? [];
     // Модели нет — файл не открыт; при открытии подсветку нарисует `open`.
     if (!model) return;
@@ -554,14 +691,14 @@ export class EditorService {
   private drawDebugLine(): void {
     // Снимаем прежнюю подсветку с той модели, где она была.
     for (const [path, ids] of this.debugDecorations) {
-      const model = this.models.get(path);
+      const model = this.files.get(path);
       if (ids.length > 0) model?.deltaDecorations(ids, []);
     }
     this.debugDecorations.clear();
 
     const current = this.debugLine;
     if (!current) return;
-    const model = this.models.get(current.path);
+    const model = this.files.get(current.path);
     if (!model) return;
     this.debugDecorations.set(
       current.path,
@@ -583,23 +720,11 @@ export class EditorService {
 
   /** Прокрутить к кадру останова и поставить курсор: панель кликает по стеку. */
   revealDebugFrame(path: string, line: number, column = 1): void {
-    const model = this.models.get(path);
+    const model = this.files.get(path);
     if (!model) return;
     const position = new monaco.Position(line, column);
     this.editor.setPosition(position);
     this.editor.revealPositionInCenterIfOutsideViewport(position);
-  }
-
-  /**
-   * Отступ документа: у языка свои значения (Python — 4 пробела, Makefile — таб),
-   * но только если пользователь оставил это на усмотрение языка.
-   */
-  private applyIndent(model: monaco.editor.ITextModel): void {
-    const perLanguage = this.options.languageIndent ? languageIndent(model.getLanguageId()) : null;
-    model.updateOptions({
-      tabSize: perLanguage?.tabSize ?? this.options.tabSize,
-      insertSpaces: perLanguage?.insertSpaces ?? this.options.insertSpaces,
-    });
   }
 
   /** Переключение схемы: Monaco меняет тему целиком, пересоздавать редактор не нужно. */
@@ -639,37 +764,19 @@ export class EditorService {
     };
   }
 
-  private modelFor(document: TextDocument): monaco.editor.ITextModel {
-    let model = this.models.get(document.path);
-    if (model) {
-      if (model.getValue() !== document.value) this.withApplying(() => model!.setValue(document.value));
-      return model;
+  /**
+   * Файл закрыт: реестр уже утилизировал модель и позвал сюда. Всё, что было по
+   * ней нарисовано, живёт вместе с ней — иначе при повторном открытии файла в
+   * `deltaDecorations` уходили бы id уже удалённой модели.
+   */
+  private forgetPath(path: string): void {
+    for (const pane of this.panes) {
+      if (pane.path !== path) continue;
+      pane.editor.setModel(null);
+      pane.path = null;
     }
-
-    const created = monaco.editor.createModel(document.value, document.languageId, monaco.Uri.parse(document.uri));
-    created.onDidChangeContent(() => {
-      if (this.applying) return;
-      const current = this.documents.get(document.path);
-      if (current) current.setText(created.getValue(), 'user');
-    });
-    this.applyIndent(created);
-
-    this.models.set(document.path, created);
-    model = created;
-    return model;
-  }
-
-  private disposeModel(path: string): void {
-    const model = this.models.get(path);
-    if (!model) return;
-    if (this.activePath === path) {
-      this.activePath = null;
-      this.editor.setModel(null);
-    }
+    if (this.activePath === path) this.activePath = null;
     this.viewStates.delete(path);
-    // Всё, что нарисовано по модели, живёт вместе с ней: карты украшений нужно
-    // чистить здесь, иначе при повторном открытии файла в deltaDecorations
-    // уходили бы id уже удалённой модели.
     this.runDecorations.delete(path);
     this.runLines.delete(path);
     // Карты украшений точек останова и подсветки отладки тоже живут с моделью:
@@ -684,18 +791,6 @@ export class EditorService {
     // файл откроют снова, и строки нужно нарисовать снова.
     this.coverageDecorations.delete(path);
     if (this.debugLine?.path === path) this.debugLine = null;
-    model.dispose();
-    this.models.delete(path);
-  }
-
-  private withApplying(action: () => void): void {
-    const previous = this.applying;
-    this.applying = true;
-    try {
-      action();
-    } finally {
-      this.applying = previous;
-    }
   }
 
   /** Позиция курсора прямо сейчас: нужна команде «точка останова на строке». */

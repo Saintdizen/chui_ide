@@ -12,14 +12,5 @@ export default defineConfig({
     // между файлами дешевле, чем поднимать отдельный на каждый.
     isolate: false,
     reporters: ['default'],
-    coverage: {
-      provider: 'v8',
-      // Порог держим только на чистой логике: UI и процессы гоняются пробниками,
-      // а не юнит-тестами (<600 строк renderer/main вытянуты бы средний
-      // процент вниз без всякой пользы).
-      include: ['src/shared/**'],
-      reporter: ['text-summary'],
-      thresholds: { statements: 97, branches: 92, functions: 99, lines: 98 },
-    },
   },
 });

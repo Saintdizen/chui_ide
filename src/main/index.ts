@@ -15,6 +15,7 @@ import { McpService } from './mcp/mcp';
 import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
 import { registerAppScheme, serveRenderer } from './protocol';
+import { windowBackground } from '../shared/colors';
 import { activateCommand, findEnvironments, pythonInterpreterFor } from './python/environments';
 import { SessionStore } from './session-store';
 import { ProjectConfigStore } from './project-config';
@@ -134,7 +135,7 @@ if (!app.requestSingleInstanceLock()) {
     const applyTheme = (): void => {
       const choice = settings.get().appearance.theme;
       nativeTheme.themeSource = choice;
-      const background = nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#ececec';
+      const background = windowBackground(nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
       for (const window of BrowserWindow.getAllWindows()) window.setBackgroundColor(background);
       pushTheme();
     };

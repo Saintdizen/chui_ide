@@ -22,6 +22,7 @@ interface TokenRules {
   keyword: string;
   keywordControl: string;
   identifier: string;
+  function: string;
   type: string;
   constant: string;
   tag: string;
@@ -35,20 +36,29 @@ const VSCODE_DARK_TOKENS: TokenRules = {
   keyword: '569cd6',
   keywordControl: 'c586c0',
   identifier: '9cdcfe',
+  function: 'dcdcaa',
   type: '4ec9b0',
   constant: '4fc1ff',
   tag: '569cd6',
   attribute: '9cdcfe',
 };
 
+/**
+ * Светлая палитра. От VS Code Light+ отличается ровно двумя значениями —
+ * `number` и `type`: их оригинальные тона (#098658, #267F99) на белом дают
+ * 4.14:1 и 4.25:1, то есть ниже нормы 4.5:1 для обычного текста (WCAG AA).
+ * Взяты те же оттенки на ступень темнее — это не своя палитра, а починка
+ * контраста; обе ступени стережёт тест `tests/theme.test.ts`.
+ */
 const VSCODE_LIGHT_TOKENS: TokenRules = {
   comment: '008000',
   string: 'a31515',
-  number: '098658',
+  number: '0a7a4d',
   keyword: '0000ff',
   keywordControl: 'af00db',
   identifier: '001080',
-  type: '267f99',
+  function: '795e26',
+  type: '22768d',
   constant: '0070c1',
   tag: '800000',
   attribute: 'e50000',
@@ -147,8 +157,16 @@ interface TokenRule {
   prefix: string;
   key: keyof TokenRules;
   italic?: boolean;
+  bold?: boolean;
 }
 
+/**
+ * Нецветовые признаки: часть ролей различается ещё и начертанием, чтобы код
+ * читался, даже если убрать цвет (дальтонизм, чёрно-белая печать, тема в
+ * оттенках серого). Комментарии — курсив (принято в VS Code), ключевые слова —
+ * полужирные (принято в IntelliJ). Это не украшение: признак несёт ту же роль,
+ * что и краска, и поэтому живёт рядом с цветом в одной таблице.
+ */
 const TOKEN_RULES: readonly TokenRule[] = [
   { prefix: 'comment', key: 'comment', italic: true },
   { prefix: 'string.escape', key: 'string' },
@@ -156,15 +174,20 @@ const TOKEN_RULES: readonly TokenRule[] = [
   { prefix: 'regexp', key: 'string' },
   { prefix: 'number', key: 'number' },
   // VS Code красит управляющие конструкции отдельно от const/let/class.
-  { prefix: 'keyword.flow', key: 'keywordControl' },
-  { prefix: 'keyword.control', key: 'keywordControl' },
-  { prefix: 'keyword', key: 'keyword' },
+  { prefix: 'keyword.flow', key: 'keywordControl', bold: true },
+  { prefix: 'keyword.control', key: 'keywordControl', bold: true },
+  { prefix: 'keyword', key: 'keyword', bold: true },
   { prefix: 'type.identifier', key: 'type' },
   { prefix: 'type', key: 'type' },
+  { prefix: 'function', key: 'function' },
   { prefix: 'constant', key: 'constant' },
   { prefix: 'tag', key: 'tag' },
   { prefix: 'attribute.name', key: 'attribute' },
   { prefix: 'annotation', key: 'identifier' },
+  // Имена переменных в VS Code того же цвета, что идентификаторы: отдельной
+  // краски у роли нет, но правило нужно — иначе `variable` из своих
+  // грамматик (Makefile, shell) остаётся неокрашенным.
+  { prefix: 'variable', key: 'identifier' },
   { prefix: 'identifier', key: 'identifier' },
 ];
 
@@ -182,16 +205,41 @@ function tokensFor(scheme: Scheme): TokenRules {
   return VIVID_TOKENS[scheme];
 }
 
-/**
- * Цвет токена для подсветки В ЧАТЕ. Тут мы красим сами, а не просим Monaco
- * отрисовать разметку: цвета его разметки живут в отдельной таблице стилей,
- * а если та не применилась — весь код в чате остаётся белым, хотя токены
- * размечены правильно. `null` — цвет по умолчанию (цвет текста).
- */
-export function tokenColor(scheme: Scheme, tokenType: string): string | null {
+/** Правило токена: частное (`keyword.control`) важнее общего (`keyword`). */
+function ruleFor(tokenType: string): TokenRule | undefined {
   const type = tokenType.toLowerCase();
-  const rule = TOKEN_RULES.find((item) => type === item.prefix || type.startsWith(`${item.prefix}.`));
-  return rule ? `#${tokensFor(scheme)[rule.key]}` : null;
+  return TOKEN_RULES.find((item) => type === item.prefix || type.startsWith(`${item.prefix}.`));
+}
+
+/**
+ * Оформление токена для подсветки В ЧАТЕ: цвет плюс нецветовые признаки.
+ *
+ * Тут мы красим сами, а не просим Monaco отрисовать разметку: цвета его разметки
+ * живут в отдельной таблице стилей, а если та не применилась — весь код в чате
+ * остаётся белым, хотя токены размечены правильно. Начертание отдаём вместе с
+ * цветом, иначе чат и редактор расходились бы: в редакторе комментарий курсивный
+ * и ключевое слово полужирное, а в чате — нет.
+ */
+export interface TokenStyle {
+  /** `null` — цвет по умолчанию (цвет текста). */
+  color: string | null;
+  italic: boolean;
+  bold: boolean;
+}
+
+export function tokenStyle(scheme: Scheme, tokenType: string): TokenStyle {
+  const rule = ruleFor(tokenType);
+  if (!rule) return { color: null, italic: false, bold: false };
+  return {
+    color: `#${tokensFor(scheme)[rule.key]}`,
+    italic: rule.italic === true,
+    bold: rule.bold === true,
+  };
+}
+
+/** Цвет токена — то же оформление без начертания (см. `tokenStyle`). */
+export function tokenColor(scheme: Scheme, tokenType: string): string | null {
+  return tokenStyle(scheme, tokenType).color;
 }
 
 /** Полупрозрачная ступень цвета: `#RRGGBB` плюс альфа в hex (`'40'` ≈ 25 %). */
@@ -229,7 +277,7 @@ interface Chrome {
   tint: string; // --element_background
   tintHover: string; // --element_background_hover
   text: string; // --text_color
-  textSecondary: string; // --text_color_disabled
+  textSecondary: string; // --text_color_secondary
   textTertiary: string; // --text_color_tertiary
   placeholder: string; // --placeholder_text_color
   selectionFill: string; // --selection_background
@@ -258,7 +306,7 @@ const DARK_CHROME: Chrome = {
   selection: '264f78',
   selectionInactive: '3a3d41',
   lineHighlight: '282828',
-  indentGuide: '404040',
+  indentGuide: '333333',
   indentGuideActive: '707070',
   whitespace: '3b3b3b',
 
@@ -271,8 +319,8 @@ const DARK_CHROME: Chrome = {
   tintHover: '7878805c',
   text: 'ffffffeb',
   textSecondary: 'ffffffb3',
-  textTertiary: 'ffffff73',
-  placeholder: 'ffffff66',
+  textTertiary: 'ffffff85',
+  placeholder: 'ffffff7a',
   // color-mix(синий 30 %, карточка): та же заливка, что у строки дерева и вкладки.
   selectionFill: '154162',
   accent: '0091ff',
@@ -314,9 +362,9 @@ const LIGHT_CHROME: Chrome = {
   tint: '78788029',
   tintHover: '7878803d',
   text: '000000d9',
-  textSecondary: '00000080',
-  textTertiary: '00000042',
-  placeholder: '00000040',
+  textSecondary: '000000ad',
+  textTertiary: '00000094',
+  placeholder: '0000008c',
   // color-mix(синий 14 %, карточка): на белом доля акцента меньше.
   selectionFill: 'dbeeff',
   accent: '0088ff',
@@ -345,11 +393,12 @@ function buildTheme(scheme: Scheme): monaco.editor.IStandaloneThemeData {
     base: scheme === 'dark' ? 'vs-dark' : 'vs',
     inherit: true,
     rules: [
-      // Правила собираются из той же таблицы, по которой красится чат.
+      // Правила собираются из той же таблицы, по которой красится чат, включая
+      // нецветовые признаки: без `fontStyle` код читался бы только по цвету.
       ...TOKEN_RULES.map((rule) => ({
         token: rule.prefix,
         foreground: tokens[rule.key],
-        fontStyle: rule.italic ? 'italic' : undefined,
+        fontStyle: [rule.italic ? 'italic' : '', rule.bold ? 'bold' : ''].filter(Boolean).join(' ') || undefined,
       })),
       { token: 'delimiter', foreground: chrome.foreground },
       { token: 'operator', foreground: chrome.foreground },

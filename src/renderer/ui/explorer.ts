@@ -90,6 +90,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let inlineEdit: InlineEdit | null = null;
   /** Просьба вернуть фокус дереву на ближайшей отрисовке (см. обработчик клика). */
   let refocusTreeOnce = false;
+  /**
+   * Папка, раскрытая кликом: её прямые дети «выезжают» из-под родителя вниз, а не
+   * возникают на месте (HIG «realistic feedback motion»: движение идёт туда, откуда
+   * элемент пришёл). Живёт до конца одной отрисовки — на следующих перерисовках
+   * строки появляются уже без движения, иначе дерево дёргалось бы на каждом
+   * обновлении git и сохранении.
+   */
+  let revealChildrenOf: string | null = null;
 
   /**
    * Клавиши дерева. Слушаем на самом дереве, а не глобально: `Delete` в общей
@@ -371,6 +379,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const classes = ['tree-row'];
       if (isActive) classes.push('is-active');
       if (isSelected) classes.push('is-selected');
+      // Дети только что раскрытой папки въезжают вниз, из-под родителя.
+      if (dir === revealChildrenOf) classes.push('is-entering');
 
       // Пометка git из дерева не ходит в репозиторий: модель уже разложила статус по путям.
       const gitChange = deps.git.statusOf(entry.path)?.change;
@@ -469,6 +479,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
     expanded.add(entry.path);
     if (!children.has(entry.path)) await load(entry.path);
+    revealChildrenOf = entry.path;
     render();
   };
 
@@ -580,6 +591,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       tree.appendChild(inlineInput(0, '', (value) => void commitCreate(edit, value)));
     }
     renderRows(tree, entries, 0, info.root);
+    // Раскрытие отыграно: следующая перерисовка — уже без движения.
+    revealChildrenOf = null;
 
     // Строку перерисовали — возвращаем фокус дереву, если его туда просили
     // (клик по строке). Один раз: иначе фокус выдёргивался бы из редактора при

@@ -51,6 +51,29 @@
   --toolbar_control_size: calc(28px * var(--density));
   --control_padding_sm: calc(5px * var(--density));
 
+  /* ── ритм отступов ─────────────────────────────────────────────────────── */
+  /* Единая шкала вместо россыпи px по правилам: компонент берёт шаг по смыслу,
+     а не подбирает число. Шаг 2 px — потому что каркас уже живёт на нём: зазоры
+     между «островами» 6, отступы полос 6 и 10, промежутки кнопок 4 и 8.
+     От `--density` не зависит: каркас окна меняет шрифт и контролы, а сетка
+     полос остаётся на месте, иначе острова разъезжаются при смене плотности. */
+  --space_2xs: 2px;
+  --space_xs: 4px;
+  --space_sm: 6px;
+  --space_md: 8px;
+  --space_lg: 10px;
+  --space_xl: 12px;
+  --space_2xl: 16px;
+
+  /* ── безопасные зоны ───────────────────────────────────────────────────── */
+  /* Вырез под камеру, скруглённые углы, жесты у края — там, где содержимое не
+     должно упираться в край окна, берём inset из окружения. На обычном мониторе
+     все они равны 0, поэтому раскладка не меняется. */
+  --safe_top: env(safe-area-inset-top, 0px);
+  --safe_right: env(safe-area-inset-right, 0px);
+  --safe_bottom: env(safe-area-inset-bottom, 0px);
+  --safe_left: env(safe-area-inset-left, 0px);
+
   /* Шапка — самая узкая полоса интерфейса, поэтому у её кнопок свой размер:
      36 px минус зазор 6 px сверху и снизу = 24 px. Тот же зазор у панелей по бокам
      и у кнопок от края окна, поэтому отступы ровные со всех сторон.
@@ -61,9 +84,38 @@
 
   --font_default_size: calc(14px * var(--font_scale));
   --font_labels_size: calc(12px * var(--font_scale));
+  /* Мелкие кегли — тоже ступени шкалы, а не литералы по правилам: 11px было
+     рассыпано по десяткам мест, 10px — по подписям плашек и бейджей. */
+  --font_small_size: calc(11px * var(--font_scale));
+  --font_micro_size: calc(10px * var(--font_scale));
 
+  /* ── движение ──────────────────────────────────────────────────────────── */
+  /* Движение — только там, где оно объясняет состояние, и никогда украшения
+     ради: нет «дыхания» панелей и прыгающих кнопок (HIG «Add motion
+     purposefully»). Три случая, и все короткие и точные:
+       • появление всплывающего слоя (меню, палитра, тост) — `popup-in`;
+       • отклик на наведение и нажатие — смена цвета и лёгкое сжатие;
+       • ход работы (генерация, вызов инструмента) — пульс индикатора.
+     Четыре ступени шкалы — по назначению, а не «на глаз»:
+       • Instant (0 ms)     — частые действия: переключение вкладок, ввод, ходьба
+                              по списку. Перехода здесь нет вовсе; что у частых
+                              селекторов он не появится, стережёт `tests/motion.test.ts`.
+       • Fast   (150 ms)    — отклик на наведение и нажатие: hover, подсветка строки;
+       • Normal (250 ms)    — появление всплывающего слоя (меню, палитра, тост) и
+                              раскрытие содержимого;
+       • Slow   (350 ms)    — крупное и нечастое: модальные окна и большие панели.
+     Раскладку анимация не трогает: анимируются только `transform` и `opacity`
+     (это стережёт `tests/motion.test.ts`). Системное «Уменьшить движение» гасит
+     всё — блок `prefers-reduced-motion` в main.css.
+
+     Про батарею (HIG: анимации тратят заряд, а IDE работает часами): движется
+     только видимое — скрытые панели убраны через `display: none`, и их анимации
+     останавливаются сами; тяжёлые жесты ограничены кадром (`requestAnimationFrame`
+     у растягивания окна и разделителей), а тянущее за курсором идёт без перехода. */
+  --motion_instant: 0s;
   --motion_fast: 0.15s;
   --motion_base: 0.25s;
+  --motion_slow: 0.35s;
   --motion_ease: cubic-bezier(0.32, 0.72, 0, 1);
 
   /* ── слои всплывающих элементов ────────────────────────────────────────── */
@@ -99,6 +151,7 @@
      теряет контраст быстрее, чем полупрозрачный чёрный на светлом —
      шаг 0.25 давал серый по серому и читался как «грязь», а не как иерархия. */
   --text_color: rgba(255, 255, 255, 0.92);
+  --text_color_secondary: rgba(255, 255, 255, 0.7);
   --text_color_disabled: rgba(255, 255, 255, 0.7);
   --text_color_tertiary: rgba(255, 255, 255, 0.45);
   --placeholder_text_color: rgba(255, 255, 255, 0.4);
@@ -110,8 +163,18 @@
      в тёмных интерфейсах показывают светлой поверхностью, а не тенью.
      Карточка совпадает по цвету с полотном редактора (как в VS Code Dark Modern),
      поэтому активная вкладка сливается с кодом, а «остров» читается одной поверхностью. */
-  --main_background: #161618;
-  --element_background_2: #1e1e1e;
+  /* Лестница высоты: окно → содержимое → всплывающий слой. Ступени задаются
+     один раз здесь, а роли (`--main_background`, `--element_background_2`,
+     `--popup_background`) ссылаются на них — так порядок слоёв нельзя развести,
+     не тронув саму ступень. */
+  --surface_window: #161618;
+  --surface_content: #1e1e1e;
+  /* Всплывающий слой — на ступень выше содержимого (HIG systemGray5): подъём
+     в тёмной схеме показывают светлой поверхностью, а не тенью. */
+  --surface_popup: #2c2c2e;
+
+  --main_background: var(--surface_window);
+  --element_background_2: var(--surface_content);
 
   /* Полотно редактора и консоли. Эти два значения продублированы в `core/theme.ts`
      (Monaco и xterm красят себя сами) — менять нужно в обоих местах. */
@@ -134,12 +197,14 @@
   --separator_color: rgba(84, 84, 88, 0.65);
   --opaque_separator_color: #38383a;
 
-  /* Всплывающий слой — материал: полупрозрачная поверхность карточки плюс блюр
-     фона под ней (Depth: слой лежит НАД содержимым, а не рядом). Непрозрачность
-     держим высокой — текст должен читаться независимо от того, что под ним.
-     `--popup_background` остаётся непрозрачным: его читает Monaco для своих меню. */
-  --popup_background: var(--element_background_2);
-  --popup_material: color-mix(in srgb, var(--element_background_2) 84%, transparent);
+  /* Всплывающий слой — материал: полупрозрачная ПРИПОДНЯТАЯ поверхность плюс блюр
+     фона под ней (Depth: слой лежит НАД содержимым, а не рядом). База материала —
+     та же ступень, что у непрозрачного `--popup_background` (его читает Monaco для
+     меню): со ступенью карточки наши попапы выходили темнее меню редактора и теряли
+     подъём, который обещает лестница высоты. Непрозрачность держим высокой — текст
+     должен читаться независимо от того, что под ним. */
+  --popup_background: var(--surface_popup);
+  --popup_material: color-mix(in srgb, var(--popup_background) 84%, transparent);
   --popup_filter: blur(24px) saturate(1.4);
   --popup_border: var(--border_color);
   --modal_scrim: rgba(0, 0, 0, 0.5);
@@ -149,7 +214,28 @@
   --blue_prime_background: #0091ff;
   --red_prime_background: #ff4245;
   --yellow_prime_background: #ffd600;
+  /* Успех — своя семантическая роль (прогон прошёл, действие выполнено).
+     Значение совпадает с `--git_added`, но роль независима: состояние файла в git
+     и «успех» — разные вещи, и одна не должна тянуть за собой другую. */
+  --green_prime_background: #30d158;
   --purple_prime_background: #db34f2;
+
+  /* Заливки под белым текстом — своя ступень, а не сам акцент: у акцента
+     контраст с белым около 3.2:1, у ступени — не ниже 4.5:1 (WCAG AA). Две
+     роли: основное действие (accent_fill) и опасное (danger_fill). Сторож —
+     `tests/theme.test.ts`, пара «--text_color_hover на заливке». */
+  --accent_fill: #0a63e6;
+  --danger_fill: #d93025;
+
+  /* Состав контекста — категориальная диаграмма: пять долей, пять разных
+     оттенков. Цвета состояний (красный/жёлтый/зелёный) сюда не берём — они
+     закреплены за ошибкой, предупреждением и успехом, а доли контекста — не
+     состояния; две доли одного цвета читались бы как одна. */
+  --context_seg_system: var(--purple_prime_background);
+  --context_seg_tools: #00d2e0; /* teal */
+  --context_seg_messages: var(--blue_prime_background);
+  --context_seg_results: #ff9230; /* orange */
+  --context_seg_files: #6d7cff; /* indigo */
 
   /* Состояния файлов в git — системные цвета Apple (HIG «System colors»,
      колонка Default dark): added green #30D158, modified yellow #FFD600,
@@ -229,14 +315,21 @@
     /* ── светлая схема ───────────────────────────────────────────────────── */
 
     --text_color: rgba(0, 0, 0, 0.85);
+    --text_color_secondary: rgba(0, 0, 0, 0.5);
     --text_color_disabled: rgba(0, 0, 0, 0.5);
     --text_color_tertiary: rgba(0, 0, 0, 0.26);
     --placeholder_text_color: rgba(0, 0, 0, 0.25);
     --text_color_hover: #ffffff;
     --text_color_error: #a1251e;
 
-    --main_background: #ececec;
-    --element_background_2: #ffffff;
+    --surface_window: #ececec;
+    --surface_content: #ffffff;
+    /* Выше белого подниматься некуда: всплывающий слой совпадает с содержимым,
+       а отделяет его тень. */
+    --surface_popup: #ffffff;
+
+    --main_background: var(--surface_window);
+    --element_background_2: var(--surface_content);
 
     --editor_background: #ffffff;
     --editor_terminal_background: #ffffff;
@@ -253,15 +346,25 @@
     --separator_color: rgba(60, 60, 67, 0.29);
     --opaque_separator_color: #c6c6c8;
 
-    --popup_background: var(--element_background_2);
-    --popup_material: color-mix(in srgb, var(--element_background_2) 82%, transparent);
+    --popup_background: var(--surface_popup);
+    --popup_material: color-mix(in srgb, var(--popup_background) 82%, transparent);
     --popup_filter: blur(24px) saturate(1.3);
     --modal_scrim: rgba(0, 0, 0, 0.18);
 
     --blue_prime_background: #0088ff;
     --red_prime_background: #ff383c;
     --yellow_prime_background: #ffcc00;
+    --green_prime_background: #008932;
     --purple_prime_background: #cb30e0;
+    /* Заливки — свои ступени под белым текстом (см. `:root`). */
+    --accent_fill: #0066cc;
+    --danger_fill: #c62828;
+
+    /* Доли контекста: те же роли, ступени Increased contrast light — на белом
+       Default-оттенки бледны. Система и сообщения берут акценты схемы. */
+    --context_seg_tools: #008198; /* teal */
+    --context_seg_results: #c55300; /* orange */
+    --context_seg_files: #564ade; /* indigo */
 
     /* Состояния git — системные цвета Apple (HIG «System colors», колонка
        Increased contrast light): added green #008932, modified yellow #A16A00,
@@ -326,6 +429,7 @@
 @media (prefers-contrast: more) {
   :root {
     --text_color: #ffffff;
+    --text_color_secondary: rgba(255, 255, 255, 0.85);
     --text_color_disabled: rgba(255, 255, 255, 0.85);
     --text_color_tertiary: rgba(255, 255, 255, 0.65);
     --placeholder_text_color: rgba(255, 255, 255, 0.6);
@@ -334,6 +438,7 @@
     --blue_prime_background: #5cb8ff;
     --red_prime_background: #ff6165;
     --yellow_prime_background: #fedf43;
+    --green_prime_background: #4ad968;
 
     /* Повышенный контраст — HIG «System colors», колонка Increased contrast
        dark: added green #4AD968, modified yellow #FEDF43, deleted red #FF6165,
@@ -350,6 +455,7 @@
 @media (prefers-color-scheme: light) and (prefers-contrast: more) {
   :root {
     --text_color: #000000;
+    --text_color_secondary: rgba(0, 0, 0, 0.7);
     --text_color_disabled: rgba(0, 0, 0, 0.7);
     --text_color_tertiary: rgba(0, 0, 0, 0.45);
 
@@ -357,5 +463,19 @@
     --red_prime_background: #e9152d;
     --yellow_prime_background: #a16a00;
     --purple_prime_background: #b02fc2;
+  }
+}
+
+/**
+ * Reduce Transparency: система просит меньше прозрачности — всплывающие слои
+ * становятся плотной поверхностью, а блюр уходит. Слой и так держат рамка и
+ * тень, поэтому вид почти не меняется, а текст перестаёт зависеть от того, что
+ * под ним. Блок после светлой темы намеренно: `--popup_material` там переопределён,
+ * и без порядка источник у светлой схемы остался бы прежним.
+ */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --popup_material: var(--popup_background);
+    --popup_filter: none;
   }
 }

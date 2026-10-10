@@ -53,7 +53,7 @@ const FILE: MenuNode = {
     { label: 'Сохранить всё', accelerator: 'Ctrl+Shift+S', command: 'file.saveAll' },
     { label: 'Закрыть вкладку', accelerator: 'Ctrl+W', command: 'file.close' },
     { separator: true },
-    { label: 'Обновить дерево', accelerator: 'Ctrl+R', command: 'workspace.refresh' },
+    { label: 'Обновить дерево', command: 'workspace.refresh' },
     { label: 'Быстрое открытие файла…', accelerator: 'Ctrl+Shift+O', command: 'file.quickOpen' },
     { separator: true },
     { label: 'Выход', role: 'quit' },
@@ -71,7 +71,7 @@ const EDIT: MenuNode = {
     { label: 'Вставить', accelerator: 'Ctrl+V', role: 'paste' },
     { label: 'Выделить всё', accelerator: 'Ctrl+A', role: 'selectAll' },
     { separator: true },
-    { label: 'Найти в проекте', accelerator: 'Ctrl+Shift+F', command: 'search.project' },
+    { label: 'Поиск по проекту', accelerator: 'Ctrl+Shift+F', command: 'search.project' },
   ],
 };
 
@@ -82,7 +82,6 @@ const VIEW: MenuNode = {
     { label: 'Панель AI', accelerator: 'Ctrl+Shift+A', command: 'view.toggleRight' },
     { separator: true },
     { label: 'Терминал', accelerator: 'Alt+F12', command: 'view.showTerminal' },
-    { label: 'Поиск по проекту', accelerator: 'Ctrl+Shift+F', command: 'search.project' },
     { separator: true },
     { label: 'Палитра команд…', accelerator: 'Ctrl+Shift+P', command: 'palette.open' },
     { separator: true },
@@ -93,11 +92,13 @@ const VIEW: MenuNode = {
     { label: 'Перезагрузить', accelerator: 'Ctrl+R', role: 'reload' },
     { label: 'Инструменты разработчика', accelerator: 'Ctrl+Shift+I', role: 'toggleDevTools' },
     { separator: true },
-    { label: 'Обычный масштаб', role: 'zoomReset' },
+    { label: 'Обычный масштаб', accelerator: 'Ctrl+0', role: 'zoomReset' },
     { label: 'Крупнее', accelerator: 'Ctrl+=', role: 'zoomIn' },
     { label: 'Мельче', accelerator: 'Ctrl+-', role: 'zoomOut' },
     { separator: true },
-    { label: 'Полный экран', accelerator: 'F11', role: 'fullscreen' },
+    // Без акселератора: `F11` держит шаг отладки с заходом (`debug.stepInto`) —
+    // привычка VS Code и PyCharm. Полный экран остаётся пунктом меню, а не клавишей.
+    { label: 'Полный экран', role: 'fullscreen' },
   ],
 };
 

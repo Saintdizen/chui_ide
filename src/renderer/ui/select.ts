@@ -101,6 +101,8 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
     // Верхний предел обязателен: кнопка может быть прокручена из виду внутри
     // модального окна, и без зажима список улетал бы под шапку приложения.
     const top = clamp(flip ? above : below, 8, Math.max(8, window.innerHeight - height - 8));
+    // Список под полем растёт ВНИЗ — въезжает сверху; при флипе вверх — снизу.
+    popup.classList.toggle('is-below', !flip);
     popup.style.left = `${left}px`;
     popup.style.top = `${top}px`;
   };

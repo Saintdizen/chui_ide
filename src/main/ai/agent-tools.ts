@@ -906,7 +906,13 @@ async function gitLog(ctx: ToolContext, args: Record<string, unknown>): Promise<
 /** Новый файл. Существующий не перетираем — для этого есть apply_edit. */
 async function createFile(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
   const target = requireString(args, 'path');
-  const contents = typeof args.contents === 'string' ? args.contents : '';
+  // Пустая строка — законное содержимое, а вот ОТСУТСТВИЕ поля — нет: раньше оно
+  // тихо превращалось в пустой файл, и инструмент отчитывался «создан (0 строк)».
+  // Опечатка в имени поля или потерянный аргумент давали не ошибку, а пустоту.
+  if (typeof args.contents !== 'string') {
+    throw new Error('Не задан аргумент «contents» (содержимое нового файла)');
+  }
+  const contents = args.contents;
   const created = await workspace.createFile(target, contents);
   const lines = contents.length === 0 ? 0 : contents.split('\n').length;
   return {

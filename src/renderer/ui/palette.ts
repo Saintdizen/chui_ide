@@ -25,6 +25,8 @@ export function createPalette(deps: { commands: CommandRegistry }): PaletteView 
   let cursor = 0;
 
   const run = (descriptor: CommandDescriptor): void => {
+    // Недоступную команду не запускаем ни кликом, ни Enter: она уже показана серой.
+    if (!deps.commands.isEnabled(descriptor.id)) return;
     close();
     void deps.commands.execute(descriptor.id);
   };
@@ -45,9 +47,14 @@ export function createPalette(deps: { commands: CommandRegistry }): PaletteView 
     cursor = Math.min(cursor, Math.max(matches.length - 1, 0));
 
     matches.forEach((descriptor, index) => {
+      const disabled = !deps.commands.isEnabled(descriptor.id);
       const item = h(
         'button',
-        { class: `palette-item${index === cursor ? ' is-active' : ''}`, type: 'button' },
+        {
+          class: `palette-item${index === cursor ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`,
+          type: 'button',
+          disabled,
+        },
         h('span', { class: 'palette-item-title' }, descriptor.title),
         h('span', { class: 'palette-item-category' }, descriptor.category),
         descriptor.keybinding ? h('span', { class: 'palette-item-key' }, descriptor.keybinding) : null,

@@ -96,6 +96,17 @@ describe('replace_in_files', () => {
   });
 });
 
+describe('create_file', () => {
+  it('требует и путь, и содержимое', () => {
+    // Раньше `contents` было необязательным: забытое содержимое давало пустой
+    // файл и отчёт «создан (0 строк)» — успех вместо ошибки.
+    const tool = byName.get('create_file')!;
+    expect(tool.side).toBe('main');
+    expect(tool.inputSchema.required).toEqual(['path', 'contents']);
+    expect(tool.inputSchema.properties.contents?.type).toBe('string');
+  });
+});
+
 describe('git_log', () => {
   it('главная сторона, read-only аргументы', () => {
     const tool = byName.get('git_log')!;
