@@ -117,12 +117,11 @@ describe('шкала движения — четыре ступени', () => {
 
   it('модальное окно — ступень Slow, а не Normal', () => {
     // У `.modal` две роли: общий материал слоя и само окно. Берём блок с анимацией.
-    expect(MAIN).toMatch(/\.modal\s*\{[^}]*animation:\s*popup-in\s+var\(--motion_slow\)/);
+    expect(MAIN).toMatch(/\.modal\s*\{[^}]*animation:\s*popup-fade\s+var\(--motion_slow\)/);
   });
 
   it('всплывающий слой — ступень Normal', () => {
-    const palette = MAIN.match(/\.palette\s*\{[^}]*\}/)?.[0] ?? '';
-    expect(palette).toMatch(/animation:\s*popup-in\s+var\(--motion_base\)/);
+    expect(MAIN).toMatch(/\.palette\s*\{[^}]*animation:\s*popup-fade\s+var\(--motion_base\)/);
   });
 });
 
@@ -263,32 +262,46 @@ describe('раскрытие дерева идёт в сторону появл�
   });
 });
 
-describe('попап въезжает со стороны якоря', () => {
+/* ── Слой с блюром не двигается: это дорого для GPU (HIG «battery») ────────── */
+
+/**
+ * `backdrop-filter` пересчитывается КаЖДЫЙ кадр, пока слой движется или
+ * масштабируется, а `scale` ещё и меняет область сэмплирования фона — самый
+ * дорогой случай. Поэтому любой слой с блюром появляется КРОСС-ФЕЙДОМ (только
+ * `opacity`): при одной прозрачности блюр кэшируется. Сдвиг остаётся лишь у
+ * поверхностей без блюра — там он бесплатен.
+ */
+describe('слой с блюром появляется кросс-фейдом, а не сдвигом', () => {
   const MAIN = readFileSync(resolve(process.cwd(), 'src/renderer/styles/main.css'), 'utf8');
 
-  it('базовый popup-in идёт снизу вверх (якорь ниже слоя)', () => {
-    const base = MAIN.match(/@keyframes\s+popup-in\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
-    expect(base).toMatch(/translateY\(\s*4px/);
+  /** Материал с блюром: тот же список, что у `backdrop-filter` в начале файла. */
+  const BLURRED = [
+    '.select-popup',
+    '.context-menu',
+    '.composer-menu',
+    '.session-info',
+    '.popover',
+    '.palette',
+    '.toast',
+    '.modal',
+  ];
+
+  it('каждый слой с backdrop-filter появляется только прозрачностью', () => {
+    for (const selector of BLURRED) {
+      const rule = MAIN.match(new RegExp(`\\${selector}\\s*\\{[^}]*animation:\\s*popup-fade`));
+      expect(rule, `${selector} → popup-fade`).not.toBeNull();
+    }
   });
 
-  it('popup-in-down идёт сверху вниз — для слоёв под якорем', () => {
-    const down = MAIN.match(/@keyframes\s+popup-in-down\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
-    expect(down).not.toBe('');
-    expect(down).toMatch(/translateY\(\s*-/);
-    // Слой, растущий вниз, выбирает этот кадр через класс is-below.
-    expect(MAIN).toMatch(/\.select-popup\.is-below[\s\S]*?animation-name:\s*popup-in-down/);
+  it('popup-fade не трогает transform', () => {
+    const fade = MAIN.match(/@keyframes\s+popup-fade\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
+    expect(fade).not.toBe('');
+    expect(fade).not.toMatch(/transform/);
   });
 
-  it('сторона слоя выбирается по месту, а не вслепую', () => {
-    const SELECT = readFileSync(resolve(process.cwd(), 'src/renderer/ui/select.ts'), 'utf8');
-    const MENU = readFileSync(resolve(process.cwd(), 'src/renderer/ui/popup-menu.ts'), 'utf8');
-    const POPOVER = readFileSync(resolve(process.cwd(), 'src/renderer/ui/popover.ts'), 'utf8');
-    // Список: вниз — is-below, при флипе вверх — нет.
-    expect(SELECT).toMatch(/classList\.toggle\('is-below',\s*!flip\)/);
-    // Контекстное меню: метим верхний уровень, подменю (растёт вбок) — нет.
-    expect(MENU).toMatch(/if \(!parent\)[^\n]*is-below/);
-    // Попап решает по фактической позиции относительно якоря.
-    expect(POPOVER).toMatch(/classList\.toggle\('is-below',\s*top [<>]=?/);
+  it('сдвиг остаётся только у поверхностей без блюра', () => {
+    // Клон лончера — без backdrop-filter, ему сдвиг ничего не стоит.
+    expect(MAIN).toMatch(/\.launcher-clone\s*\{[^}]*animation:\s*popup-in/);
   });
 });
 

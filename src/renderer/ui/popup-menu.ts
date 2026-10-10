@@ -113,9 +113,6 @@ function position(menu: HTMLElement, x: number, y: number): void {
 
 function openLevel(items: readonly PopupMenuItem[], x: number, y: number, parent?: HTMLElement): Level {
   const level: Level = { menu: h('div', { class: 'context-menu', role: 'menu' }), parent, entries: [], items };
-  // Верхний уровень раскрывается ВНИЗ от якоря (клик или кнопка меню) — въезжает
-  // сверху. Подменю растёт вбок, сторону вверх/вниз для него не выбираем.
-  if (!parent) level.menu.classList.add('is-below');
   buildLevel(level);
   document.body.appendChild(level.menu);
   position(level.menu, x, y);

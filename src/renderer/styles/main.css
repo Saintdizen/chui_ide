@@ -1125,7 +1125,7 @@ textarea {
   border-radius: var(--radius_md);
   background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
-  animation: popup-in var(--motion_base) var(--motion_ease);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
 .select-popup:focus {
@@ -1784,7 +1784,7 @@ textarea {
   border-radius: var(--radius_md);
   background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
-  animation: popup-in var(--motion_base) var(--motion_ease);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
 .session-info[hidden] {
@@ -3094,7 +3094,7 @@ textarea {
   border-radius: var(--radius_md);
   background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
-  animation: popup-in var(--motion_base) var(--motion_ease);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
 .composer-menu-item {
@@ -3644,7 +3644,7 @@ textarea {
   border-radius: var(--radius_md);
   background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
-  animation: popup-in var(--motion_base) var(--motion_ease);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
 .popover-title {
@@ -3691,7 +3691,7 @@ textarea {
   background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
   /* Модальное окно — крупное и нечастое появление: ступень Slow (см. шкалу в theme.css). */
-  animation: popup-in var(--motion_slow) var(--motion_ease);
+  animation: popup-fade var(--motion_slow) var(--motion_ease);
 }
 
 .modal-header {
@@ -4114,7 +4114,7 @@ textarea {
   border-radius: var(--radius_md);
   background: var(--popup_material);
   box-shadow: var(--box_shadow_drop);
-  animation: popup-in var(--motion_base) var(--motion_ease);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
 .context-item {
@@ -4197,7 +4197,7 @@ textarea {
   border-radius: var(--radius_md);
   background: var(--popup_material);
   box-shadow: var(--box_shadow_modal);
-  animation: popup-in var(--motion_base) var(--motion_ease);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
 .palette-input {
@@ -4308,7 +4308,7 @@ textarea {
   color: var(--text_color);
   font-size: var(--font_labels_size);
   cursor: pointer;
-  animation: popup-in var(--motion_base) var(--motion_ease);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
 .toast.is-leaving {
@@ -4350,8 +4350,10 @@ textarea {
   background: var(--element_background_hover);
 }
 
-/* Одно появление у всех всплывающих слоёв: список, меню, палитра, тост.
-   Ощущение «слой выехал поверх» вместо «элемент возник». */
+/* Появление сдвигом — только у поверхностей БЕЗ блюра (клоны лончера, меню
+   Monaco): там пересчёт фона на кадр ничего не стоит. Любой слой с
+   `backdrop-filter` берёт `popup-fade` ниже — иначе блюр пересчитывался бы
+   каждый кадр движения. Ощущение «слой выехал поверх» вместо «элемент возник». */
 @keyframes popup-in {
   from {
     opacity: 0;
@@ -4375,27 +4377,15 @@ textarea {
   }
 }
 
-/* Слой, растущий ВНИЗ от якоря (меню из клика, список под полем), въезжает
-   СВЕРХУ — из-под места вызова, а не наоборот. Базовый `popup-in` остаётся для
-   слоёв, растущих вверх (композер, подсказка сессии, тост у нижнего края): они
-   въезжают снизу. Сторону знает вызывающий код и ставит `is-below`
-   (см. `ui/select.ts`, `ui/popup-menu.ts`, `ui/popover.ts`). */
-@keyframes popup-in-down {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.select-popup.is-below,
-.context-menu.is-below,
-.popover.is-below {
-  animation-name: popup-in-down;
-}
+/* Ниже сдвиг не нужен: слои с блюром появляются КРОСС-ФЕЙДОМ, а не слайдом.
+   Пока слой движется или масштабируется, `backdrop-filter` пересчитывается
+   каждый кадр, а `scale` ещё и меняет область сэмплирования фона — самый
+   дорогой случай. При одной лишь прозрачности блюр кэшируется, и появление
+   почти не стоит GPU (HIG: следить за расходом батареи — IDE работает часами).
+   Тот же кросс-фейд уже был у нас под «уменьшить движение»: теперь обычный и
+   облегчённый путь — один. Список слоёв с блюром задан один раз (материал в
+   начале файла), и все они берут `popup-fade`. Сдвиг `popup-in` остаётся лишь
+   у поверхностей БЕЗ блюра (клоны лончера, меню Monaco): там он бесплатен. */
 
 /* ── стартовое окно ─────────────────────────────────────────────────────── */
 
