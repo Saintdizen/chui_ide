@@ -505,8 +505,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           tabindex: '0',
           'aria-selected': String(isActive),
           // Пульс точки — не единственный носитель «идёт генерация»: то же сказано
-          // подписью для наведения и `aria-label` для озвучки (HIG: не передавай
-          // важное только анимацией). Под «уменьшить движение» точка статична, а
+          // подписью для наведения и `aria-label` для озвучки — важное нельзя
+          // передавать только анимацией. Под «уменьшить движение» точка статична, а
           // смысл остаётся.
           title: isStreaming ? `${session.title} — идёт генерация` : session.title,
           'aria-label': isStreaming ? `${session.title}, идёт генерация` : undefined,
