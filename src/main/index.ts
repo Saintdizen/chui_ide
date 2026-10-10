@@ -2,6 +2,7 @@ import { app, BrowserWindow, nativeTheme } from 'electron';
 import { PushTopic } from '../shared/api';
 import { AiService } from './ai/service';
 import { DebugService } from './debug/debug';
+import { installDiagnostics } from './diagnostics';
 import { GitService } from './git/git';
 import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
@@ -47,6 +48,10 @@ if (
     passed === '' ? 'WaylandWpColorManagerV1' : `${passed},WaylandWpColorManagerV1`,
   );
 }
+
+// Сбои ловим раньше остального: тогда падение не выглядит просто закрывшимся
+// окном, а оседает в userData вместе с причиной.
+installDiagnostics();
 
 // Второй экземпляр приложения не нужен: он бы писал в тот же settings.json.
 if (!app.requestSingleInstanceLock()) {
