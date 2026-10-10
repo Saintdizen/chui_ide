@@ -8,10 +8,21 @@
  * через переменные окружения — тест не зависит от настроек git на машине.
  */
 const { app } = require('electron');
+const { execFile } = require('node:child_process');
 const { promises: fs } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { GitService } = require('../dist/main/git/git.js');
+
+/**
+ * Git напрямую: нужен там, где сервис нарочно ничего не умеет, — например,
+ * поставить репозиторию `diff.context`, чтобы проверить, что инструмент агента
+ * его не слушает. Ошибку глотаем: отсутствие git покажет проверка сервиса.
+ */
+const run = (args, cwd) =>
+  new Promise((resolve) => {
+    execFile('git', args, { cwd }, () => resolve());
+  });
 
 const AUTHOR = 'Chui Smoke';
 const EMAIL = 'chui@localhost';
@@ -109,6 +120,49 @@ app.whenReady().then(async () => {
       stagedDiff.original === 'первая строка\n' && stagedDiff.modified === 'первая строка\nвторая строка\n',
       { original: JSON.stringify(stagedDiff.original), modified: JSON.stringify(stagedDiff.modified) },
     );
+
+    /* diffText — текст для модели: контекст не должен зависеть от настроек git.
+       Файл на 40 строк с правкой ровно в середине: вокруг неё по 19 неизменённых
+       строк, и при diff.context=25 git отдал бы их все. Заодно проверяем
+       diff.external — с ним git подменил бы унифицированный diff чужой программой. */
+    const long = Array.from({ length: 40 }, (_, index) => `строка ${index + 1}`).join('\n');
+    const changed = long.replace('строка 20', 'строка 20 (правка)');
+    const contextProbe = path.join(dir, 'context.txt');
+    await write(contextProbe, `${long}\n`);
+
+    // Настройки ставим только этому репозиторию: глобальный конфиг машины не трогаем.
+    await run(['config', 'diff.context', '25'], dir);
+    // На Windows такого пути нет — и это тоже проверка: `--no-ext-diff` не даёт
+    // git запускать внешнюю программу, чей вывод модели не годится.
+    await run(['config', 'diff.external', process.platform === 'win32' ? 'nul' : '/bin/false'], dir);
+
+    await git.stage([contextProbe]);
+    await write(contextProbe, `${changed}\n`);
+
+    const countContext = (text) => text.split('\n').filter((line) => line.startsWith(' ')).length;
+    const probeDiff = await git.diffText(contextProbe);
+    check(
+      'diffText: контекст — 3 строки, несмотря на diff.context=25',
+      probeDiff.includes('+строка 20 (правка)') && countContext(probeDiff) > 0 && countContext(probeDiff) <= 6,
+      { контекстных: countContext(probeDiff), длина: probeDiff.length },
+    );
+    check('diffText: diff.external не подменил вывод', probeDiff.startsWith('diff --git'), probeDiff.slice(0, 40));
+
+    // Тот же путь по индексу: файла нет в HEAD, поэтому diff покажет его целиком
+    // как новый — важно, что это унифицированный diff с тем же контекстом.
+    await git.stage([contextProbe]);
+    const probeStagedDiff = await git.diffText(contextProbe, true);
+    check(
+      'diffText по индексу: тот же формат и контекст',
+      probeStagedDiff.startsWith('diff --git') &&
+        probeStagedDiff.includes('+строка 20 (правка)') &&
+        countContext(probeStagedDiff) <= 6,
+      { контекстных: countContext(probeStagedDiff) },
+    );
+
+    // Убираем пробный файл: дальше проверки считают файлы в статусе.
+    await git.unstage([contextProbe]);
+    await fs.rm(contextProbe, { force: true });
 
     const afterDiscard = await git.discard([file]);
     check(

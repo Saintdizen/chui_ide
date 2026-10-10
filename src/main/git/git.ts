@@ -155,9 +155,10 @@ export class GitService {
   }
 
   /**
-   * Унифицированный diff файла от самого git — так его видит человек в
-   * терминале (`+`/`-`). Нужен инструментам агента: `diff()` отдаёт обе версии
-   * целиком, а модели полезнее готовые строки изменений.
+   * Унифицированный diff файла от самого git (`+`/`-`). Нужен инструментам агента:
+   * `diff()` отдаёт обе версии целиком, а модели полезнее готовые строки изменений.
+   * Контекст здесь всегда 3 строки, как git показывает в терминале по умолчанию, —
+   * не зависит от `diff.context` в настройках git (почему — в теле метода).
    */
   async diffText(filePath: string, staged = false): Promise<string> {
     const status = await this.status();
@@ -167,7 +168,16 @@ export class GitService {
     const known = status.files.find((file) => file.path === path.resolve(filePath));
     if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
 
-    const args = staged ? ['diff', '--cached', '--', known.relative] : ['diff', '--', known.relative];
+    // Контекст задаём сами, а не берём из настроек git. Инструмент отдаёт текст
+    // модели, и у человека в `diff.context` может стоять 25 строк: тогда больше
+    // половины отведённого места уйдёт на неизменённый текст — на нашем репозитории
+    // такой конфиг раздувает diff в 2,5 раза (769 КБ против 298 КБ). `-U3` — обычная
+    // норма, её же ждёт модель, читая хунки. `--no-color` — цвет в ответе инструмента
+    // не нужен; `--no-ext-diff` — иначе `diff.external` подменил бы вывод чужой
+    // программой, а модели нужен именно унифицированный diff.
+    const args = staged
+      ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff', '--', known.relative]
+      : ['diff', '-U3', '--no-color', '--no-ext-diff', '--', known.relative];
     const result = await this.exec(args, repoRoot, { allowFailure: true });
     return result.stdout;
   }

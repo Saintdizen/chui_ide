@@ -295,7 +295,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'git_diff',
     side: 'main',
-    description: 'Diff файла по git: рабочее дерево против индекса, а с staged=true — индекс против HEAD.',
+    description:
+      'Diff файла по git: рабочее дерево против индекса, а с staged=true — индекс против HEAD. ' +
+      'Контекст — 3 строки вокруг правок, независимо от настроек git.',
     inputSchema: {
       type: 'object',
       properties: {
