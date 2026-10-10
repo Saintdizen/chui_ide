@@ -272,13 +272,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   }
 
   /**
-   * Попап Python-окружения у кнопки в статусбаре: что выбрано и откуда.
-   * Список окружений обновляем при открытии — попап мог провисеть долго.
+   * Попап Python-окружения у кнопки в статусбаре: что выбрано и откуда. Создаём
+   * лениво, но прогреваем снимок при открытии проекта (см. preloadEnvironment);
+   * список обновляем ещё и при каждом открытии — попап мог провисеть долго.
    */
   let pythonEnvPopover: PopoverView | null = null;
   let pythonEnvView: PythonEnvPopoverView | null = null;
 
-  function openPythonEnv(anchor: HTMLElement): void {
+  function ensurePythonEnv(): PythonEnvPopoverView {
     if (!pythonEnvPopover || !pythonEnvView) {
       pythonEnvView = createPythonEnvPopover({
         rpc,
@@ -308,18 +309,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       pythonEnvPopover = createPopover(pythonEnvView.element, { width: 340 });
       pythonEnvPopover.element.classList.add('popover-python-env');
     }
-    void pythonEnvView.refresh();
-    pythonEnvPopover.toggle(anchor);
+    return pythonEnvView;
+  }
+
+  function openPythonEnv(anchor: HTMLElement): void {
+    // Снимок обновляем при каждом открытии: попап мог провисеть долго (см. refresh).
+    void ensurePythonEnv().refresh();
+    pythonEnvPopover?.toggle(anchor);
   }
 
   /**
    * Попап Node-окружения по клику на чип «Node.js»: чем запускается код, чем
-   * ставятся зависимости и всё ли из `package.json` на месте.
+   * ставятся зависимости и всё ли из `package.json` на месте. Снимок греем при
+   * открытии проекта (см. preloadEnvironment), а при открытии попапа обновляем.
    */
   let nodeEnvPopover: PopoverView | null = null;
   let nodeEnvView: NodeEnvPopoverView | null = null;
 
-  function openNodeEnv(anchor: HTMLElement): void {
+  function ensureNodeEnv(): NodeEnvPopoverView {
     if (!nodeEnvPopover || !nodeEnvView) {
       nodeEnvView = createNodeEnvPopover({
         rpc,
@@ -335,8 +342,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       nodeEnvPopover = createPopover(nodeEnvView.element, { width: 340 });
       nodeEnvPopover.element.classList.add('popover-node-env');
     }
-    void nodeEnvView.refresh();
-    nodeEnvPopover.toggle(anchor);
+    return nodeEnvView;
+  }
+
+  function openNodeEnv(anchor: HTMLElement): void {
+    void ensureNodeEnv().refresh();
+    nodeEnvPopover?.toggle(anchor);
+  }
+
+  /**
+   * Окружение проекта читаем при его открытии, а не только по клику на чип: иначе
+   * попап открывался бы с пустым телом, пока данные едут. Греем ровно то, что
+   * может открыться: чип в статусбаре один — у Node-проекта он про Node, иначе про
+   * интерпретатор Python (см. envWidgetLabel). Попап обновляет снимок сам при
+   * открытии, поэтому устаревания тут не боимся — прогрев лишь убирает ожидание.
+   */
+  let preloadedProject = '';
+
+  function preloadEnvironment(): void {
+    const kind = projectScan?.kind.id ?? null;
+    if (!envWidgetLabel(kind, tools.get(), settings.run.pythonPath)) return;
+    // Прогрев — один на проект: открытие стартового проекта приходит и подпиской
+    // на workspace, и начальным кодом, и без этой метки окружение читалось бы дважды.
+    const signature = `${workspace.root ?? ''}|${kind ?? ''}`;
+    if (signature === preloadedProject) return;
+    preloadedProject = signature;
+    if (kind === 'node') void ensureNodeEnv().refresh();
+    else void ensurePythonEnv().refresh();
   }
 
   const diffView = createDiffView({ createDiff: (container) => editors.createDiff(container), git });
@@ -571,10 +603,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const breadcrumbs = createBreadcrumbs({ openEditors, documents, workspace, commands });
   layout.breadcrumbsHost.appendChild(breadcrumbs);
 
-  // Кнопка запуска живёт в той же полосе, что и крошки: это действие над файлом,
-  // а не настройка, и место у него — рядом с редактором, а не в шапке окна.
   const runControl = createRunButton((target) => void runTarget(target));
-  layout.breadcrumbsHost.appendChild(runControl.element);
+  // Имя открытого файла в центре шапки: показывается, когда кнопки запуска нет.
+  const topBarName = h('span', { class: 'topbar-name' });
 
   /* ── запуск ────────────────────────────────────────────────────────────── */
 
@@ -669,10 +700,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Запуск без файла никуда не девается — он есть в палитре (Shift+F10).
     runControl.update(active ? targetsFor(active) : []);
 
+    // Запускать нечего — кнопка прячется, но центр шапки не пустует: там имя файла.
+    topBarName.hidden = !runControl.element.hidden;
+
     // Полоса под вкладками нужна ровно тогда, когда в ней есть что показать:
-    // путь из одного сегмента крошек не рисует, и без кнопки запуска
-    // оставалась бы пустая полоска с линией на всю ширину.
-    layout.breadcrumbsHost.hidden = breadcrumbs.hidden && runControl.element.hidden;
+    // путь из одного сегмента крошек не рисует, и без них оставалась бы пустая
+    // полоска с линией на всю ширину.
+    layout.breadcrumbsHost.hidden = breadcrumbs.hidden;
 
     if (!active) return;
     const line = entryLine(active.languageId, active.value);
@@ -818,6 +852,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   addTopButton(layout.topBarLeft, 'terminal', 'terminal', 'Терминал (Alt+F12)', 'view.showTerminal');
   // Разделение области редактора: два файла рядом. Кнопка помнит состояние.
   addTopButton(layout.topBarLeft, 'split', 'split', 'Разделить редактор (Ctrl+\\)', 'view.splitEditor');
+
+  // Центр шапки отдан главному: кнопке запуска, а когда запускать нечего — имени
+  // открытого файла (см. syncRunControl). Одно сменяет другое, пустоты не бывает.
+  layout.topBarTitle.append(topBarName, runControl.element);
 
   // Ассистент носит знак приложения, а не звезду-искру: тот же знак, что
   // в пустом состоянии редактора, — кнопка и экран говорят одно и то же.
@@ -1829,17 +1867,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       env: envWidgetLabel(projectScan?.kind.id ?? null, projectTools, settings.run.pythonPath),
     });
 
-    // Заголовок окна: как в VS Code — открытый файл и проект.
+    // Имя открытого файла — в центре шапки; его сменяет кнопка запуска, когда есть
+    // что запускать, и оно остаётся запасным вариантом на пустом месте.
     const project = workspace.current?.name;
-    layout.topBarTitle.textContent = active
+    topBarName.textContent = active
       ? project
         ? `${basename(active.path)} — ${project}`
         : basename(active.path)
       : 'chui_iDE';
-    // Название приложения показываем моношрифтом (JetBrains Mono), а путь файла —
-    // интерфейсным: это не название, а данные.
-    layout.topBarTitle.classList.toggle('is-brand', !active);
-    layout.topBarTitle.title = active?.path ?? 'chui_iDE';
+    // Название приложения — моношрифтом (JetBrains Mono), имя файла — интерфейсным.
+    topBarName.classList.toggle('is-brand', !active);
+    topBarName.title = active?.path ?? 'chui_iDE';
   };
 
   const syncEmptyState = (): void => emptyState.update(openEditors.paths.length > 0);
@@ -2068,8 +2106,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   workspace.onDidChange((info) => {
     refreshStatus();
     syncEmptyState();
-    void tools.refresh(workspace.root).then(() => syncRunControl());
-    void refreshScan();
+    // Окружение нового проекта греем сразу: попап открывается без ожидания.
+    void (async () => {
+      await tools.refresh(workspace.root);
+      syncRunControl();
+      await refreshScan();
+      preloadEnvironment();
+    })();
     // Новый проект — могли появиться свои серверы в окружении (pylsp в venv).
     void ensureLspServers();
     // Другой проект — другое рабочее место: восстанавливаем его из сессии,
@@ -2138,6 +2181,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   await refreshScan();
   await ensureLspServers();
   syncRunControl();
+  // Окружение читаем тут же: к первому клику по чипу попап уже наполнен.
+  preloadEnvironment();
 
   syncViewButtons();
   refreshStatus();

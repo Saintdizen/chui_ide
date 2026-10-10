@@ -9,7 +9,7 @@ import type { EnvironmentHealth } from '../../shared/python-health';
 import type { ProjectTools } from '../core/project-tools';
 import { envList, envShortLabel, envSource, envSourceLabel } from '../core/python-view';
 import type { RpcClient } from '../core/rpc';
-import { clear, h } from './dom';
+import { h } from './dom';
 import { createSelect, type SelectOption } from './select';
 import { showToast } from './toast';
 
@@ -21,8 +21,10 @@ import { showToast } from './toast';
  * интерпретатором работать в этом проекте. Раньше половина этого была разбросана
  * по настройкам и окну окружений.
  *
- * Данные спрашиваем при каждом открытии: попап мог провисеть часами, а окружение,
- * пакеты и интерпретаторы меняются и вне приложения (git pull, pip install).
+ * Снимок окружения читается при открытии проекта (app зовёт `refresh` тогда же),
+ * а при каждом открытии попапа обновляется: попап мог провисеть часами, а окружение,
+ * пакеты и интерпретаторы меняются и вне приложения (git pull, pip install). Пока
+ * свежие данные едут, показано прошлое содержимое — тело не пустеет (см. refresh).
  */
 
 export interface PythonEnvPopoverDeps {
@@ -76,28 +78,32 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
     return h('button', { class: 'python-env-manage', type: 'button', onClick: () => onClick() }, label);
   }
 
-  // Данные спрашиваются асинхронно, а тело общее: без стража два наложившихся
-  // refresh (открыли, закрыли, открыли) дописали бы контент дважды.
+  // Данные спрашиваются асинхронно: без стража устаревший ответ (открыли, закрыли,
+  // открыли — а первый ответ пришёл позже свежего) переписал бы тело поверх нового.
   let generation = 0;
 
   async function refresh(): Promise<void> {
     const mine = ++generation;
     const root = deps.root();
     const tools = deps.tools();
-    clear(body);
+    // Прошлое содержимое не стираем: пока новые данные едут, на экране остаётся
+    // прежний снимок — тело не «мигает» пустым. Узлы копим и подменяем тело
+    // одним разом в конце (см. `body.replaceChildren`).
+    const nodes: Node[] = [];
 
     if (!root || !tools.root) {
-      body.appendChild(h('div', { class: 'python-env-empty' }, 'Проект не открыт.'));
+      nodes.push(h('div', { class: 'python-env-empty' }, 'Проект не открыт.'));
+      body.replaceChildren(...nodes);
       return;
     }
 
     // Что за интерпретатор и откуда он взялся.
     const source = envSource(deps.configured(), tools);
-    body.appendChild(row('Интерпретатор', envShortLabel(tools)));
-    body.appendChild(row('Путь', tools.pythonCommand));
-    body.appendChild(row('Источник', envSourceLabel(source), false));
+    nodes.push(row('Интерпретатор', envShortLabel(tools)));
+    nodes.push(row('Путь', tools.pythonCommand));
+    nodes.push(row('Источник', envSourceLabel(source), false));
     const kind = deps.projectKind?.();
-    if (kind) body.appendChild(row('Проект', kind, false));
+    if (kind) nodes.push(row('Проект', kind, false));
 
     const [environments, interpreters, packages, requirementsText, health, activation] = await Promise.all([
       deps.rpc.request('python.environments').catch(() => [] as PythonEnvironment[]),
@@ -130,7 +136,7 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
           );
         }
       }
-      body.appendChild(box);
+      nodes.push(box);
     }
 
     // Пакеты: сколько стоит, всё ли на месте из requirements.txt и быстрый путь поставить.
@@ -141,7 +147,7 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
       packageExtras.push(h('div', { class: 'python-env-requirements' }, requirementsNote(diff)));
       packageExtras.push(button('Установить из requirements.txt', () => deps.onInstallRequirements()));
     }
-    body.appendChild(
+    nodes.push(
       section(
         'Пакеты',
         h(
@@ -186,7 +192,7 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
         }),
       );
     }
-    body.appendChild(
+    nodes.push(
       section(
         'Окружения',
         list,
@@ -202,7 +208,9 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
     }
     interpreterSelect.setOptions(options);
     interpreterSelect.setValue(deps.projectPython?.() ?? '');
-    body.appendChild(section('Интерпретатор проекта', interpreterSelect.element));
+    nodes.push(section('Интерпретатор проекта', interpreterSelect.element));
+
+    body.replaceChildren(...nodes);
   }
 
   return { element, refresh };

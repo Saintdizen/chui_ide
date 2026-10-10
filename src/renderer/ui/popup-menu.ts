@@ -71,8 +71,12 @@ function buildLevel(level: Level): void {
         type: 'button',
         role: 'menuitem',
         'aria-haspopup': item.submenu ? 'true' : undefined,
+        // Подсказку справа показываем одной строкой и обрезаем по ширине панели:
+        // команды запуска длинные и растягивали меню на весь экран. Полный текст
+        // остаётся в системной подсказке при наведении.
+        title: item.hint && !item.submenu ? `${item.label} — ${item.hint}` : undefined,
       },
-      h('span', {}, item.label),
+      h('span', { class: 'context-label' }, item.label),
       item.hint && !item.submenu ? h('span', { class: 'context-hint' }, item.hint) : null,
       item.submenu ? h('span', { class: 'context-arrow' }, svgIcon('chevron', 11)) : null,
     );
@@ -157,6 +161,9 @@ function highlight(levelIndex: number, itemIndex: number): void {
   level.entries.forEach((entry, index) => {
     entry.classList.toggle('is-highlighted', index === itemIndex);
   });
+  // Панель может прокручиваться (потолок высоты в `.context-menu`): подсвеченный
+  // пункт держим в поле зрения, иначе стрелками можно уйти за край вслепую.
+  level.entries[itemIndex]?.scrollIntoView({ block: 'nearest' });
 }
 
 function highlighted(levelIndex: number): number {

@@ -8,7 +8,7 @@ import {
 } from '../../shared/node-env';
 import type { ProjectTools } from '../core/project-tools';
 import type { RpcClient } from '../core/rpc';
-import { clear, h } from './dom';
+import { h } from './dom';
 
 /**
  * Попап Node-окружения в статусбаре.
@@ -19,8 +19,10 @@ import { clear, h } from './dom';
  * всё ли из `package.json` на месте. Раньше про Node-проект в интерфейсе не было
  * ничего, кроме чипа в полосе.
  *
- * Данные спрашиваем при каждом открытии: `node_modules` и версия Node меняются и
- * вне приложения (git pull, npm install), а попап мог провисеть часами.
+ * Снимок окружения читается при открытии проекта (app зовёт `refresh` тогда же),
+ * а при каждом открытии попапа обновляется: `node_modules` и версия Node меняются
+ * и вне приложения (git pull, npm install), а попап мог провисеть часами. Пока
+ * свежие данные едут, показано прошлое содержимое — тело не пустеет (см. refresh).
  */
 
 export interface NodeEnvPopoverDeps {
@@ -63,18 +65,22 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
     return h('button', { class: 'python-env-manage', type: 'button', onClick: () => onClick() }, label);
   }
 
-  // Данные спрашиваются асинхронно, а тело общее: без стража два наложившихся
-  // refresh (открыли, закрыли, открыли) дописали бы контент дважды.
+  // Данные спрашиваются асинхронно: без стража устаревший ответ (открыли, закрыли,
+  // открыли — а первый ответ пришёл позже свежего) переписал бы тело поверх нового.
   let generation = 0;
 
   async function refresh(): Promise<void> {
     const mine = ++generation;
     const root = deps.root();
     const manager = deps.tools().packageManager;
-    clear(body);
+    // Прошлое содержимое не стираем: пока новые данные едут, на экране остаётся
+    // прежний снимок — тело не «мигает» пустым. Узлы копим и подменяем тело
+    // одним разом в конце (см. `body.replaceChildren`).
+    const nodes: Node[] = [];
 
     if (!root) {
-      body.appendChild(h('div', { class: 'python-env-empty' }, 'Проект не открыт.'));
+      nodes.push(h('div', { class: 'python-env-empty' }, 'Проект не открыт.'));
+      body.replaceChildren(...nodes);
       return;
     }
 
@@ -92,17 +98,17 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
     if (mine !== generation) return;
 
     // Чем запускается код и чем ставятся зависимости — это первое, что нужно.
-    body.appendChild(row('Node', info?.runtime.label ?? 'не найден'));
+    nodes.push(row('Node', info?.runtime.label ?? 'не найден'));
     const managerLabel = info
       ? `${info.packageManager.name}${info.packageManager.version ? ` ${info.packageManager.version}` : ''}`
       : manager;
-    body.appendChild(row('Менеджер', managerLabel, false));
+    nodes.push(row('Менеджер', managerLabel, false));
     const kind = deps.projectKind?.();
-    if (kind) body.appendChild(row('Проект', kind, false));
+    if (kind) nodes.push(row('Проект', kind, false));
 
     const manifest = manifestText === null ? null : parseNodeManifest(manifestText);
     // Версию Node проверяет main (engines.node), но показать диапазон полезно и тут.
-    if (manifest?.engines) body.appendChild(row('engines.node', manifest.engines));
+    if (manifest?.engines) nodes.push(row('engines.node', manifest.engines));
 
     // Поломки окружения — сразу под версией: это важнее списка пакетов.
     if (health.length > 0) {
@@ -119,7 +125,7 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
           );
         }
       }
-      body.appendChild(box);
+      nodes.push(box);
     }
 
     // Зависимости: сколько стоит и всё ли из `package.json` установлено.
@@ -131,7 +137,7 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
       );
       extras.push(button(`Установить зависимости (${installCommand(manager)})`, () => deps.onInstall()));
     }
-    body.appendChild(
+    nodes.push(
       section(
         'Пакеты',
         h(
@@ -142,6 +148,8 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
         ...extras,
       ),
     );
+
+    body.replaceChildren(...nodes);
   }
 
   return { element, refresh };
