@@ -8,7 +8,8 @@
  *  3. отказ пользователя — это решение, а не ошибка приложения;
  *  4. битый аргумент не доходит до renderer;
  *  5. без моста apply_edit и run_terminal модели не предлагаются;
- *  6. run_terminal: подтверждение, код выхода и отказ;
+ *  6. run_terminal: подтверждение, код выхода и отказ; сжатие вывода — модели
+ *     уходит текст без прогресса и повторов, а человек в карточке видит полный;
  *  7. ai.test объясняет удачу и неудачу словами;
  *  8. полный доступ: без подтверждений, но необратимые команды всё равно спрашивает;
  *  9. get_diagnostics — ошибки редактора доезжают до модели текстом;
@@ -152,6 +153,11 @@ app.whenReady().then(async () => {
     get() {
       return this;
     },
+    // AiService читает рядом с файлом настроек поправку к оценке токенов
+    // (см. `readCalibration`): без `file()` падало уже в конструкторе.
+    file() {
+      return path.join(dir, 'settings.json');
+    },
     resolveApiKey() {
       return undefined;
     },
@@ -196,6 +202,13 @@ app.whenReady().then(async () => {
       toolNames: (bodies[0]?.tools ?? []).map((tool) => tool.function.name),
     };
   };
+
+  /** Текст, который реально ушёл модели: tool-сообщения из тела последнего запроса. */
+  const sentToModel = (body) =>
+    (body?.messages ?? [])
+      .filter((message) => message.role === 'tool')
+      .map((message) => String(message.content ?? ''))
+      .join('\n');
 
   try {
     await workspace.open(dir);
@@ -333,6 +346,34 @@ app.whenReady().then(async () => {
       run.results[0]?.detail,
     );
     check('команда дошла до подтверждения', commands[0] === 'echo chui-cmd-ok', commands);
+    check('вывод доходит до модели без потерь', sentToModel(run.bodies[1]).includes('chui-cmd-ok'));
+
+    /* 6а. сжатие вывода: модели уходит текст без оформления, человеку — как есть.
+       Команда нарочно печатает прогресс-полосу и повтор строки. На Windows здесь
+       cmd.exe без printf, поэтому проверяем под POSIX-шелл. */
+    if (process.platform !== 'win32') {
+      requested = {
+        name: 'run_terminal',
+        args: { command: "printf '[####>  ] 45%%\\nwarn\\nwarn\\nwarn\\nитог-сжатия\\n'" },
+      };
+      run = await chat(shellHost);
+      const sent = sentToModel(run.bodies[1]);
+      // Эхо самой команды (`$ printf '…'`) — не вывод: проверяем строки вывода.
+      const output = sent.split('\n').filter((line) => !line.startsWith('$ '));
+      check('полоса прогресса не ушла модели', !output.some((line) => line.includes('[####')), output);
+      check('повтор строки схлопнут', sent.includes('повторена'), sent);
+      check('содержание вывода сохранено', sent.includes('итог-сжатия'), sent);
+      check(
+        'человеку в карточке — полный вывод',
+        String(run.results[0]?.detail ?? '').includes('[####>  ] 45%'),
+        run.results[0]?.detail,
+      );
+
+      settings.ai.compressOutput = false;
+      run = await chat(shellHost);
+      check('сжатие выключено — вывод уходит как есть', sentToModel(run.bodies[1]).includes('[####>  ] 45%'));
+      delete settings.ai.compressOutput;
+    }
 
     requested = { name: 'run_terminal', args: { command: 'exit 3' } };
     run = await chat(shellHost);

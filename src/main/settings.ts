@@ -53,6 +53,8 @@ interface StoredSettings {
     maxAutopilotSteps: number;
     /** Страховка полного доступа: спрашивать перед необратимыми командами. */
     confirmDangerous: boolean;
+    /** Убирать шум из вывода инструментов перед отправкой модели. */
+    compressOutput: boolean;
   };
   editor: EditorSettings;
   explorer: ExplorerSettings;
@@ -102,6 +104,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     maxAutopilotSteps: 24,
     // По умолчанию полный доступ полон: страховка — опт-ин.
     confirmDangerous: false,
+    // Сжатие включено: оно снимает оформление, а не содержание.
+    compressOutput: true,
   },
   editor: {
     tabSize: 4,
@@ -236,6 +240,7 @@ export class SettingsStore {
         maxSteps: ai.maxSteps,
         maxAutopilotSteps: ai.maxAutopilotSteps,
         confirmDangerous: ai.confirmDangerous,
+        compressOutput: ai.compressOutput !== false,
       },
       editor: { ...editor },
       explorer: { ...explorer, exclude: [...explorer.exclude] },
@@ -361,6 +366,7 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     target.maxAutopilotSteps = clampSteps(patch.maxAutopilotSteps, target.maxAutopilotSteps);
   }
   if (patch.confirmDangerous !== undefined) target.confirmDangerous = patch.confirmDangerous === true;
+  if (patch.compressOutput !== undefined) target.compressOutput = patch.compressOutput === true;
 
   // Провайдеров можно добавлять и править из интерфейса: ключ к ним приходит
   // отдельным вызовом ai.setApiKey, здесь только адрес и список моделей.
@@ -434,6 +440,9 @@ function loadSettings(filePath: string): StoredSettings {
   ai.maxAutopilotSteps = clampSteps(storedAi.maxAutopilotSteps, DEFAULT_SETTINGS.ai.maxAutopilotSteps);
   // Флаг могли записать чем угодно: оставляем строго булево значение.
   ai.confirmDangerous = ai.confirmDangerous === true;
+  // Сжатие выключено только явным `false`: отсутствие поля читаем как «включено» —
+  // иначе настройка молча отключилась бы у всех, кто обновляется со старой версии.
+  ai.compressOutput = ai.compressOutput !== false;
   // Ассистент выключен только явным `false`: отсутствие поля читаем как «включён».
   ai.enabled = ai.enabled !== false;
 

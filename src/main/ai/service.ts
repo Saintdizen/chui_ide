@@ -16,6 +16,7 @@ import {
   type ReasoningEffort,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
+import { compressToolOutput } from '../../shared/output-compress';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, parseToolArguments, toOpenAiTools, type AgentToolSpec } from '../../shared/tools';
 import {
@@ -347,6 +348,9 @@ export class AiService {
       allowAll: autoApprove,
       confirmDangerous: settings.ai.confirmDangerous === true,
     };
+    // Сжатие вывода — только для контекста модели: человек в карточке инструмента
+    // видит текст как он есть (см. `compressToolOutput`).
+    const compressOutput = settings.ai.compressOutput !== false;
     if (this.git) toolContext.git = this.git;
     if (this.terminals) toolContext.terminals = this.terminals;
     if (host) {
@@ -550,11 +554,14 @@ export class AiService {
           changes: outcome.changes,
         });
 
+        const result = outcome.ok ? (outcome.detail ?? outcome.summary) : `Ошибка: ${outcome.summary}`;
         const toolMessage: ChatMessage = {
           role: 'tool',
           toolCallId: call.id,
           name: call.name,
-          content: outcome.ok ? (outcome.detail ?? outcome.summary) : `Ошибка: ${outcome.summary}`,
+          // Единая точка сжатия для всех инструментов: в контекст модели уходит
+          // текст без оформления, а человек в карточке (событие выше) видит полный.
+          content: compressOutput ? compressToolOutput(result) : result,
         };
         messages.push(toolMessage);
         produced.push(toolMessage);

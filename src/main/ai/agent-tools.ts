@@ -10,6 +10,7 @@ import {
   type ToolFileChange,
 } from '../../shared/api';
 import type { FileEdit, TextEdit } from '../../shared/edits';
+import { compressToolOutput } from '../../shared/output-compress';
 import { parseToolArguments } from '../../shared/tools';
 import type { WorkspaceService } from '../workspace/workspace';
 import { runShellCommand } from './run-command';
@@ -936,16 +937,13 @@ function relativePath(target: string, root: string | null): string {
 }
 
 /**
- * Причесать вывод процесса перед отправкой модели: снять хвостовые пробелы и
- * сжать простыни пустых строк. В логах сборки и тестов их много, а смысла они не
- * несут — только жгут токены. Оформление по краям тоже убираем: это не содержание.
+ * Причесать вывод процесса. Правила живут в `shared/output-compress.ts` — там же,
+ * где сжатие перед отправкой модели (`ai/service.ts`): одному выводу незачем
+ * выглядеть по-разному в зависимости от того, кто его получил. Здесь важен ещё и
+ * `truncateTail` ниже: у вывода команд хвост информативнее начала.
  */
 function condenseOutput(text: string): string {
-  return text
-    .replace(/\r\n?/g, '\n')
-    .replace(/[ \t]+$/gm, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  return compressToolOutput(text);
 }
 
 /**
