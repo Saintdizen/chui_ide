@@ -2585,7 +2585,9 @@ textarea {
 
 /* Кнопка «к последнему сообщению» в правом нижнем углу ленты. Крепится к футеру
    и висит НАД композером: фиксированный отступ от низа панели не знал о высоте
-   поля ввода и при нескольких строках кнопка ложилась прямо на него. */
+   поля ввода и при нескольких строках кнопка ложилась прямо на него. Висит она
+   НАД содержимым, поэтому носит тот же стеклянный материал, что всплывающие
+   слои: код под кнопкой размывается, а не просвечивает сквозь неё резко. */
 .chat-jump {
   position: absolute;
   right: 14px;
@@ -2595,17 +2597,19 @@ textarea {
   place-items: center;
   width: 28px;
   height: 28px;
-  border: 1px solid var(--separator_color);
+  border: 1px solid var(--popup_border);
   border-radius: 50%;
-  background: var(--element_background);
+  background: var(--popup_material);
+  backdrop-filter: var(--popup_filter);
   color: var(--text_color_tertiary);
   box-shadow: var(--box_shadow_drop);
 }
 
-/* Кнопка не на цветной заливке, поэтому «ярче» — это основной текст, а не белый. */
+/* Кнопка не на цветной заливке, поэтому «ярче» — это основной текст, а не белый.
+   Материал под курсором плотнее, но остаётся стеклянным: блюр никуда не уходит. */
 .chat-jump:hover {
   color: var(--text_color);
-  background: var(--element_background_hover);
+  background: color-mix(in srgb, var(--popup_background) 94%, transparent);
 }
 
 .chat-jump[hidden] {

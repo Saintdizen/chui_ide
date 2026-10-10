@@ -190,8 +190,12 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
   let failed = 0;
   /** Сколько файлов тронули вызовы группы: видно в сводке, когда группа свёрнута. */
   let changedFiles = 0;
-  /** Раскрыта ли группа. Меняет только человек: само состояние не трогаем. */
-  let expanded = true;
+  /**
+   * Раскрыта ли группа. По умолчанию свёрнута: в шапке видно ЧТО делал агент и
+   * сколько, а десяток строк под ней — шум, который мешает читать ответ. Открыть
+   * их должен человек; во время работы состояние сами не трогаем.
+   */
+  let expanded = false;
   const names: string[] = [];
 
   const title = h('span', { class: 'tool-group-title' }, 'Действия');
@@ -294,7 +298,7 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
     {
       class: 'tool-group-head',
       type: 'button',
-      'aria-expanded': 'true',
+      'aria-expanded': 'false',
       onClick: () => {
         expanded = !expanded;
         head.setAttribute('aria-expanded', String(expanded));
@@ -308,7 +312,9 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
     chevron,
   );
 
-  const root = h('div', { class: 'tool-group is-open' }, head, body);
+  const root = h('div', { class: 'tool-group' }, head, body);
+  // Группа свёрнута по умолчанию: приводим тело и шеврон к состоянию `expanded`.
+  applyExpanded();
   // Вставляем перед «якорем» низа (индикатор работы), а не в конец сообщения:
   // иначе карточки действий встают после всего текста, и ответ, написанный
   // ПОСЛЕ вызовов, оказывается выше них. С якорем порядок — порядок прихода.
