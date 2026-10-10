@@ -608,7 +608,7 @@ import 'monaco-editor/nls/lang/ru.js';   // обязательно до `./app`
   `suggest-widget`, `monaco-hover`, `parameter-hints-widget`): палитра `F1` и прочие быстрые
   вводы приведены к нашему `.palette` — плотная поверхность карточки, радиус 12 px, модальная тень,
   шрифт Inter, заголовок с полем без рамки, отступ строк 6 px с радиусом 8 px,
-  сочетания клавиш как `.palette-item-key` (рамка, JetBrains Mono, 10.5 px), анимация `popup-in`.
+  сочетания клавиш как `.palette-item-key` (рамка, JetBrains Mono, 10.5 px), анимация `popup-fade`.
   Цвета этих попапов Monaco рисует inline-стилями из темы, поэтому в `monaco.css` они
   перекрываются `!important`.
 

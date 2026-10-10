@@ -29,27 +29,17 @@
 const STYLE_ID = 'chui-monaco-popovers';
 
 const CSS = `
-  /* Появление то же, что у наших попапов. Копия @keyframes из main.css не лишняя:
-     внутри теневого корня надёжнее иметь их рядом с правилом, которое их просит. */
-  @keyframes popup-in {
-    from {
-      opacity: 0;
-      transform: translateY(4px) scale(0.98);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
-
-  /* Кросс-фейд вместо слайда под «уменьшить движение». */
+  /* Появление всплывающего слоя — кросс-фейд, как у наших попапов. Копия
+     @keyframes из main.css не лишняя: внутри теневого корня надёжнее держать её
+     рядом с правилом, которое её просит. */
   @keyframes popup-fade {
     from { opacity: 0; }
     to { opacity: 1; }
   }
 
-  /* Системную настройку внутри теневого корня видно так же, но правила страницы
-     сюда не доходят: гасим слайд здесь, оставляя мягкое проявление. */
+  /* Правила страницы в теневой корень не доходят, поэтому «уменьшить движение»
+     учитываем здесь сами: меню появляется кросс-фейдом — он и есть облегчённая
+     форма появления (HIG: «cross-fade instead of slide»). */
   @media (prefers-reduced-motion: reduce) {
     .monaco-menu.monaco-menu {
       animation-name: popup-fade;
@@ -75,7 +65,7 @@ const CSS = `
     min-width: 210px;
     font-family: var(--font_ui);
     font-size: var(--font_labels_size);
-    animation: popup-in var(--motion_base) var(--motion_ease);
+    animation: popup-fade var(--motion_base) var(--motion_ease);
   }
 
   /* Панель действий добавляет по 4 px сверху и снизу, а обёртка каждого пункта —

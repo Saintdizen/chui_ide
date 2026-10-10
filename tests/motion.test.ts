@@ -299,9 +299,10 @@ describe('слой с блюром появляется кросс-фейдом,
     expect(fade).not.toMatch(/transform/);
   });
 
-  it('сдвиг остаётся только у поверхностей без блюра', () => {
-    // Клон лончера — без backdrop-filter, ему сдвиг ничего не стоит.
-    expect(MAIN).toMatch(/\.launcher-clone\s*\{[^}]*animation:\s*popup-in/);
+  it('сдвига нет нигде: все слои проявляются кросс-фейдом', () => {
+    // Кадра сдвига больше нет нигде — ни у блюрящих слоёв, ни у остальных.
+    expect(MAIN).not.toMatch(/@keyframes\s+popup-in\b/);
+    expect(MAIN).toMatch(/\.launcher-clone\s*\{[^}]*animation:\s*popup-fade/);
   });
 });
 
