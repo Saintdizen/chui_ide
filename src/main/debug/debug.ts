@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import {
@@ -12,6 +13,7 @@ import {
   type DebugPhase,
   type DebugStatePayload,
 } from '../../shared/api';
+import { PathAliases } from '../../shared/debug-paths';
 import { mergeEnv } from '../project-env';
 
 /**
@@ -100,6 +102,12 @@ export class DebugService {
   private exceptionsSet = false;
   /** Сторона отладки: от неё зависит имя фильтра у адаптера (`caught` против `raised`). */
   private target: 'node' | 'python' = 'node';
+  /**
+   * Написания путей: отладчик называет файл по-своему (развёрнутый симлинк,
+   * короткое имя на Windows), а редактору нужен путь, которым файл открыт.
+   * Правило — в `shared/debug-paths.ts`; у Node-адаптера своя такая же карта.
+   */
+  private readonly aliases = new PathAliases(process.platform === 'win32');
 
   constructor(
     private readonly publish: (topic: string, payload: unknown) => void,
@@ -117,6 +125,19 @@ export class DebugService {
   /** Текущая фаза: интерфейс спрашивает её при открытии панели. */
   status(): { phase: DebugPhase } {
     return { phase: this.phase };
+  }
+
+  /**
+   * Настоящий путь файла: разворачивает симлинки (на macOS `/var` — это
+   * `/private/var`, на Windows — короткие имена). Файла нет или путь не
+   * разрешился — `null`: тогда отладчик назовёт файл сам, а мы не угадываем.
+   */
+  private resolveRealPath(file: string): string | null {
+    try {
+      return realpathSync(file);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -155,6 +176,10 @@ export class DebugService {
 
   /** Начать отладку файла. Прошлую сессию закрываем: двух быть не должно. */
   async start(program: string, options: DebugLaunchOptions = {}): Promise<{ ok: boolean; message: string }> {
+    // Программу тоже запоминаем: стек может прийти и без точек останова —
+    // при останове по исключению или шаге, — а кадры всё равно нужно перевести
+    // в написание клиента.
+    this.aliases.remember(program, this.resolveRealPath(program));
     return this.openAdapter(
       this.resolveAdapter(program),
       options.cwd ?? this.root() ?? undefined,
@@ -476,10 +501,16 @@ export class DebugService {
     if (wanted.length === 0) this.breakpoints.delete(path);
     else this.breakpoints.set(path, wanted);
 
+    // Запоминаем написание до отправки: отладчику уйдёт настоящий путь, а кадры
+    // вернутся в том виде, каким файл открыт в редакторе.
+    this.aliases.remember(path, this.resolveRealPath(path));
+
     if (!this.child) return wanted.map((item) => ({ ...item, verified: false }));
 
     const response = await this.call('setBreakpoints', {
-      source: { path },
+      // Отладчик ищет файл на диске, поэтому настоящее написание — то, что он
+      // наверняка поймёт: точка в чужом написании осталась бы неподтверждённой.
+      source: { path: this.aliases.canonicalFor(path) },
       // Настройки точки (`condition`, `hitCondition`, `logMessage`) — стандартные
       // поля DAP, debugpy их понимает. Не заданные не шлём: пустое поле может
       // значить не то же самое, что отсутствие поля.
@@ -879,9 +910,11 @@ export class DebugService {
     return raw.map((frame) => ({
       id: typeof frame.id === 'number' ? frame.id : 0,
       name: typeof frame.name === 'string' ? frame.name : '',
+      // Путь отладчика переводим в написание клиента: по чужому пути редактор
+      // файл не найдёт, и кадр останется без исходника.
       path:
         typeof (frame.source as { path?: unknown } | undefined)?.path === 'string'
-          ? (frame.source as { path: string }).path
+          ? this.aliases.resolve((frame.source as { path: string }).path)
           : null,
       line: typeof frame.line === 'number' ? frame.line : 1,
       column: typeof frame.column === 'number' ? frame.column : 1,
@@ -907,6 +940,9 @@ export class DebugService {
     this.frames = [];
     this.topFrameId = null;
     this.thread = null;
+    // Написания путей — достояние одной сессии: проект могли переоткрыть по
+    // другому пути, и старая связь вернула бы не тот файл.
+    this.aliases.clear();
     // Ждущих `initialized` не оставляем без ответа: иначе подключение зависнет.
     for (const waiter of this.initializedWaiters) waiter(false);
     this.initializedWaiters.clear();

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -63,6 +63,9 @@ function handle(message) {
       break;
     case 'setBreakpoints':
       breakpoints = (args.breakpoints || []).length;
+      // Каким путём клиент назвал файл — в лог событием: по нему проверяется, что
+      // на диск уходит настоящее написание, а не то, каким файл открыт.
+      send({ type: 'event', event: 'output', body: { category: 'stdout', output: 'bp-source:' + JSON.stringify((args.source || {}).path) } });
       // Отладчик возвращает только строку и подтверждение: настройки точки
       // (условие, сообщение, счётчик) он не повторяет — клиент должен помнить их сам.
       response(message.seq, 'setBreakpoints', {
@@ -111,8 +114,12 @@ function handle(message) {
       }
       break;
     case 'stackTrace':
+      // Путь кадра можно подменить окружением: так проверяется перевод написаний
+      // (отладчик докладывает настоящий путь, редактор открыт по другому).
       response(message.seq, 'stackTrace', {
-        stackFrames: [{ id: 7, name: 'main', source: { path: '/proj/app.py' }, line: 4, column: 1 }],
+        stackFrames: [
+          { id: 7, name: 'main', source: { path: process.env.FAKE_DAP_FRAME || '/proj/app.py' }, line: 4, column: 1 },
+        ],
       });
       break;
     case 'scopes':
@@ -303,6 +310,61 @@ describe('DebugService', () => {
     expect(await waitPhase(service, 'idle')).toBe('idle');
 
     service.dispose();
+  });
+
+  /**
+   * Проект, открытый по симлинку. Так выглядит macOS (`/var` → `/private/var`) и
+   * Windows в CI (короткие имена): отладчик доложит настоящий путь, а редактор
+   * знает только тот, которым файл открыт. Симлинк на Windows требует прав,
+   * поэтому проверка молча пропускается, если его не создать.
+   */
+  function symlinkedProject(): { link: string; real: string; file: string } | null {
+    const real = mkdtempSync(path.join(tmpdir(), 'chui-debug-real-'));
+    const link = path.join(tmpdir(), `chui-debug-link-${process.pid}-${Math.random().toString(36).slice(2)}`);
+    try {
+      symlinkSync(real, link, 'dir');
+    } catch {
+      rmSync(real, { recursive: true, force: true });
+      return null;
+    }
+    dirs.push(real);
+    dirs.push(link);
+    const file = path.join(link, 'app.py');
+    writeFileSync(path.join(real, 'app.py'), 'print(1)\n', 'utf8');
+    return { link, real, file };
+  }
+
+  it('настоящий путь уходит отладчику, а кадр возвращается в написание клиента', async (ctx) => {
+    const project = symlinkedProject();
+    if (!project) {
+      ctx.skip();
+      return;
+    }
+
+    const previous = process.env.FAKE_DAP_FRAME;
+    // Отладчик называет файл настоящим путём — так делает debugpy с симлинками.
+    process.env.FAKE_DAP_FRAME = path.join(project.real, 'app.py');
+    try {
+      const { service, events } = fakeService();
+      await service.setBreakpoints(project.file, [{ line: 1 }]);
+      await service.start(project.file);
+      expect(await waitPhase(service, 'stopped')).toBe('stopped');
+
+      const sent = events
+        .filter((event) => event.topic === 'debug:output')
+        .map((event) => String(event.payload.text ?? ''))
+        .find((text) => text.startsWith('bp-source:'));
+      expect(sent, 'точка не отправлена').toBeDefined();
+      // На диск ушёл настоящий путь: точка в написании симлинка осталась бы неподтверждённой.
+      expect(JSON.parse(sent!.replace('bp-source:', ''))).toBe(path.join(project.real, 'app.py'));
+
+      // А кадр вернулся тем путём, каким файл открыт: иначе редактор его не найдёт.
+      expect(service.stack()[0]?.path).toBe(project.file);
+      service.dispose();
+    } finally {
+      if (previous === undefined) delete process.env.FAKE_DAP_FRAME;
+      else process.env.FAKE_DAP_FRAME = previous;
+    }
   });
 
   it('сообщает об останове событием и рассылает фазы', async () => {
