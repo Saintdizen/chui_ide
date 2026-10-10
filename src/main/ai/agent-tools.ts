@@ -14,7 +14,9 @@ import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
 import { isMcpToolName, type McpToolInfo } from '../../shared/mcp';
 import { compressToolOutput } from '../../shared/output-compress';
+import { formatProjectMap } from '../../shared/project-map';
 import { parseToolArguments } from '../../shared/tools';
+import { scanProject } from '../project/scan';
 import type { WorkspaceService } from '../workspace/workspace';
 import { runShellCommand } from './run-command';
 
@@ -202,6 +204,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await search(ctx, parsed.value);
       case 'codebase_search':
         return await codebaseSearch(ctx, parsed.value);
+      case 'project_map':
+        return await projectMap(ctx.workspace);
       case 'find_files':
         return await findFiles(ctx.workspace, parsed.value);
       case 'get_diagnostics':
@@ -247,6 +251,21 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
   } catch (error) {
     return { ok: false, summary: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/**
+ * Карта проекта: обход дерева без чтения содержимого. Тот же скан, что у окна
+ * (`project.scan`), поэтому карта в промпте и ответ инструмента не разъезжаются.
+ * Считается на каждый вызов: файлы за время работы могли появиться, а свежая
+ * карта стоит одного `readdir` по именам.
+ */
+async function projectMap(workspace: WorkspaceService): Promise<ToolOutcome> {
+  const root = workspace.rootPath();
+  if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
+
+  const scan = await scanProject(root);
+  const { summary, detail } = formatProjectMap(scan);
+  return { ok: true, summary, detail };
 }
 
 async function listDir(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {

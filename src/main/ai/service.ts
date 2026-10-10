@@ -18,6 +18,7 @@ import {
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
 import { compressToolOutput } from '../../shared/output-compress';
+import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import {
   AGENT_TOOLS,
@@ -35,6 +36,7 @@ import {
   trimMessagesToFit,
 } from '../../shared/context-fit';
 import { RpcFailure } from '../ipc/router';
+import { scanProject } from '../project/scan';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
 import type { McpToolInfo } from '../../shared/mcp';
@@ -155,6 +157,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'read_files',
   'search',
   'codebase_search',
+  'project_map',
   'web_search',
   'find_files',
   'get_diagnostics',
@@ -170,6 +173,7 @@ const READ_ONLY_TOOLS = new Set([
   'read_file',
   'read_files',
   'search',
+  'project_map',
   'find_files',
   'get_diagnostics',
   'git_status',
@@ -179,7 +183,9 @@ const READ_ONLY_TOOLS = new Set([
 /** Дописывается в системный промпт, когда агентный режим включён. */
 const AGENT_PROMPT = [
   'Работай с проектом инструментами, а не по догадке: назначение и аргументы у каждого инструмента описаны отдельно — читай их.',
+  'Устройство проекта видно по карте в начале беседы: не обходи дерево и не читай манифесты, чтобы понять, что это за проект. Подробнее — project_map.',
   'Не выдумывай содержимое файлов: то, чего не знаешь, читай инструментами.',
+  'Прежде чем читать файл целиком, найди место: codebase_search — где объявлен символ, search — где встречается, find_files — какие файлы есть.',
   'Большие файлы читай диапазоном строк и не перечитывай одно и то же много раз.',
   'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу.',
   'Перед тем как чинить код, посмотри get_diagnostics — так видно настоящую ошибку, а не догадку.',
@@ -257,6 +263,14 @@ export class AiService {
    * См. `TokenCalibration` и `streamStep`.
    */
   private readonly calibration = new TokenCalibration();
+
+  /**
+   * Карта проекта для промпта. Скан обходит дерево, поэтому держим результат до
+   * смены папки: в каждом запросе обходить проект заново — платить за одно и то
+   * же. Числа поэтому могут отстать от жизни (агент что-то создал) — за свежими
+   * он идёт в `project_map`, который сканирует на каждый вызов.
+   */
+  private mapCache: { root: string; text: string } | null = null;
 
   constructor(
     private readonly settings: SettingsStore,
@@ -360,7 +374,9 @@ export class AiService {
     const systemPrompt = request.systemPrompt ?? settings.ai.systemPrompt;
     if (systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt });
 
-    const context = await this.buildWorkspaceContext();
+    // Карта проекта нужна там, где агент работает с проектом; в «Вопросе»
+    // инструментов нет, и обход дерева за наши деньги был бы лишним.
+    const context = await this.buildWorkspaceContext(useTools || planMode);
     if (context) messages.push({ role: 'system', content: context });
     // Контекст, который пользователь приложил сам (выделение, файл, ошибки),
     // едет отдельным сообщением: в самом вопросе он мешал бы его читать.
@@ -868,11 +884,31 @@ export class AiService {
     });
   }
 
-  private async buildWorkspaceContext(): Promise<string | null> {
+  /**
+   * Карта проекта для промпта: устройство проекта по именам файлов. Пустая
+   * папка, ошибка обхода — карта не добавляется, но правила проекта всё равно
+   * читаются: без карты агент просто спросит её инструментом.
+   */
+  private async projectMapLine(root: string): Promise<string | null> {
+    if (this.mapCache?.root === root) return this.mapCache.text;
+    try {
+      const text = formatShortMap(await scanProject(root));
+      this.mapCache = { root, text };
+      return text;
+    } catch {
+      return null;
+    }
+  }
+
+  private async buildWorkspaceContext(withMap: boolean): Promise<string | null> {
     const root = this.workspace.rootPath();
     if (!root) return null;
 
     const parts = [`Рабочая папка проекта: ${root}`];
+    if (withMap) {
+      const map = await this.projectMapLine(root);
+      if (map) parts.push(map);
+    }
     let spent = 0;
     for (const name of INSTRUCTION_FILES) {
       if (spent >= MAX_INSTRUCTIONS_TOTAL_BYTES) break;

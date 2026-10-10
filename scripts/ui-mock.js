@@ -638,6 +638,7 @@ module.exports = [
       testFiles: [],
       testDirs: [],
       entryPoints: [],
+      topDirs: [],
     }),
     'python.environments': () => [],
     // Проверка импортов в моке ничего не находит: окружение не настоящее.

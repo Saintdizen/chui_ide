@@ -8,6 +8,7 @@ import {
   isIgnoredDirectory,
   isTestFile,
   parentDir,
+  topLevelDirs,
 } from '../src/shared/project-scan';
 
 describe('isIgnoredDirectory', () => {
@@ -140,6 +141,24 @@ describe('findEntryPoints', () => {
   });
 });
 
+describe('topLevelDirs', () => {
+  it('каталоги верхнего уровня, где больше файлов — выше', () => {
+    expect(topLevelDirs(['src/a.ts', 'src/b.ts', 'tests/a.test.ts', 'README.md'])).toEqual(['src', 'tests']);
+  });
+
+  it('файлы в корне каталогами не считаются', () => {
+    expect(topLevelDirs(['main.py', 'util.py'])).toEqual([]);
+  });
+
+  it('глубже первого уровня не идём', () => {
+    expect(topLevelDirs(['src/main/index.ts', 'src/renderer/app.ts'])).toEqual(['src']);
+  });
+
+  it('уважает предел списка', () => {
+    expect(topLevelDirs(['a/x.ts', 'b/x.ts', 'c/x.ts'], 2)).toHaveLength(2);
+  });
+});
+
 describe('buildScan', () => {
   it('собирает сводку из списка файлов', () => {
     const scan = buildScan({
@@ -163,6 +182,7 @@ describe('buildScan', () => {
       testFiles: ['tests/test_main.py', 'tests/unit/test_x.py'],
       testDirs: ['tests', 'tests/unit'],
       entryPoints: ['app/main.py'],
+      topDirs: ['tests', 'app'],
     });
   });
 

@@ -19,6 +19,7 @@ export type AgentToolName =
   | 'read_files'
   | 'search'
   | 'codebase_search'
+  | 'project_map'
   | 'find_files'
   | 'get_diagnostics'
   | 'apply_edit'
@@ -144,6 +145,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       },
       required: ['query'],
     },
+  },
+  {
+    name: 'project_map',
+    side: 'main',
+    description:
+      'Карта проекта: что за проект, из чего состоит, где тесты и точки входа — по именам файлов, ' +
+      'без чтения содержимого. Вызывай, чтобы сориентироваться до работы, вместо обхода дерева ' +
+      'и чтения манифестов. Краткая версия карты уже есть в системном промпте — этот вызов нужен, ' +
+      'если она устарела или нужны подробности.',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'find_files',

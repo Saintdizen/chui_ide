@@ -33,6 +33,8 @@ export interface ProjectScan {
   testDirs: string[];
   /** Файлы-точки входа (относительные POSIX-пути). */
   entryPoints: string[];
+  /** Каталоги верхнего уровня: по ним видно устройство проекта. */
+  topDirs: string[];
 }
 
 /**
@@ -280,6 +282,30 @@ export function findEntryPoints(files: readonly string[], limit = 12): string[] 
   return files.filter((file) => ENTRY_NAMES.has(fileName(file))).slice(0, limit);
 }
 
+/* ── каталоги верхнего уровня ──────────────────────────────────────────── */
+
+/**
+ * Каталоги верхнего уровня — по ним видно устройство проекта.
+ *
+ * Берём только первый сегмент пути и сортируем по числу файлов: где кода больше,
+ * тот каталог и главный. Глубже не идём — там уже `list_dir` по конкретной папке,
+ * а карта должна оставаться короткой. Файлы в корне каталогами не считаются.
+ */
+export function topLevelDirs(files: readonly string[], limit = Number.POSITIVE_INFINITY): string[] {
+  const counts = new Map<string, number>();
+  for (const file of files) {
+    const index = file.indexOf('/');
+    if (index <= 0) continue;
+    const dir = file.slice(0, index);
+    counts.set(dir, (counts.get(dir) ?? 0) + 1);
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, Math.max(0, limit))
+    .map(([dir]) => dir);
+}
+
 /**
  * Собрать сводку из списка файлов. Чистая функция: обход диска отдельно,
  * поэтому и проверяется без него. Пути — относительные POSIX, как их видит UI.
@@ -311,5 +337,6 @@ export function buildScan(input: {
     testFiles,
     testDirs,
     entryPoints: findEntryPoints(input.files),
+    topDirs: topLevelDirs(input.files),
   };
 }

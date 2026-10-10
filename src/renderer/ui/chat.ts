@@ -186,20 +186,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /* ── композер: панель изменений, чипы, тулбар, статус ──────────────────── */
 
-  /**
-   * Показать файл человеку: сперва открыть, потом встать на место. Документа может
-   * не быть вовсе — созданный агентом файл в редакторе ещё не открывали, — и тогда
-   * `editors.reveal` молчит: модели документа у него нет.
-   */
-  const revealFile = async (path: string, line = 1, column = 1): Promise<void> => {
-    await deps.openFile?.(path);
-    deps.editors.reveal(path, line, column);
-  };
-
   // Панель изменений и план агента — отдельные модули: они только рисуют по
   // состоянию беседы, а работа с документами и редактором остаётся здесь.
   const changesPanel = createChangesPanel({
-    reveal: (path, line, column) => void revealFile(path, line, column),
+    reveal: (path, line, column) => deps.editors.reveal(path, line, column),
     onRevert: () => void revertTouched(),
   });
   const planPanel = createPlanPanel();
@@ -984,7 +974,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           el.appendChild(content);
         }
         if (message.toolCalls?.length) {
-          const feed = createToolFeed(el, null, undefined, (path) => void revealFile(path));
+          const feed = createToolFeed(el, null, undefined, (path) => deps.editors.reveal(path, 1, 1));
           for (const call of message.toolCalls) {
             cards.set(call.id, feed.add({ id: call.id, name: call.name, args: call.arguments }));
           }
@@ -1870,7 +1860,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   // Показать файл в редакторе: открытие вкладки и позиция курсора — дело renderer.
   deps.host.handle('ai.openFile', async (params) => {
-    await revealFile(params.path, params.line ?? 1, params.column ?? 1);
+    deps.editors.reveal(params.path, params.line ?? 1, params.column ?? 1);
     return { ok: true };
   });
 
@@ -1933,7 +1923,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     renderChanges,
     // Файл из ряда под вызовом инструмента открывается в редакторе — тем же
     // путём, что и клик по файлу в панели изменений.
-    reveal: (path) => void revealFile(path),
+    reveal: (path) => deps.editors.reveal(path, 1, 1),
     setBusy,
     closeApprovals,
     persist: (paths) => persistPaths(paths),

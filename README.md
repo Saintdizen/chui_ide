@@ -68,6 +68,7 @@ npm run smoke:terminal   # TerminalService: сессия, ввод, вывод, 
 npm run smoke:window     # арифметика своей рамки: перенос, растягивание, зажим по минимуму
 npm run smoke:git        # GitService на временном репозитории: статус, индекс, коммит, diff, ветки
 npm run smoke:launcher   # стартовое окно и переход в IDE: два окна, настоящий IPC
+npm run smoke:map        # карта проекта: что уходит модели в промпте и что отвечает project_map
 ```
 
 Когда проверка должна заглянуть внутрь настоящего окна IDE, берём «пробники» — они не
@@ -78,6 +79,9 @@ npm run smoke:launcher   # стартовое окно и переход в IDE:
 ./node_modules/.bin/electron scripts/fs-probe.cjs      # создание файла и папки, «Обновить», меню редактора
 npm run probe:colors                                   # пиксель на экране против токенов темы (Linux + KDE)
 npm run probe:menu                                     # меню «☰» настоящими кликами мыши и Alt+F10
+npm run probe:settings                                 # поиск по настройкам: выдача, Esc, переход в раздел
+npm run probe:mcp                                      # раздел внешних инструментов и проверка серверов
+npm run probe:chat-files                               # ряд изменённых файлов под вызовом инструмента
 ```
 
 «Пробники» возвращают видимые значения вместо `ok`/`FAIL`, потому что у окна IDE есть
@@ -371,11 +375,21 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
 - Пределы: 4 изображения на вопрос, 5 МБ на изображение; проверяются и в интерфейсе, и в main
   (данные вставки из буфера собирает renderer, поэтому он не источник истины).
 - Инструменты агента (описания — `src/shared/tools.ts`, исполнение — `src/main/ai/agent-tools.ts`):
-  чтение проекта (`list_dir`, `read_file`, `read_files`, `search`, `find_files`, `get_diagnostics`),
+  чтение проекта (`list_dir`, `read_file`, `read_files`, `search`, `project_map`, `find_files`, `get_diagnostics`),
   правки и файловые операции (`apply_edit`, `replace_in_files`, `create_file`, `delete_file`, `move_file`),
   запуск (`run_terminal`, `terminal_*`), git (`git_status`, `git_diff`, `git_log`),
   интерфейс (`open_file`) и `update_plan`. Где исполняется инструмент — свойство `side`
   контракта: файлы и git — в main, правки и диагностика — в renderer.
+- Карта проекта: агент узнаёт, что за проект перед ним, **не читая файлов**. Карта собирается
+  по именам (тот же скан, что у окна) и кладётся в системный промпт перед работой — вид проекта,
+  число файлов и каталогов, языки, каталоги верхнего уровня, тесты и точки входа. В ней прямо
+  сказано, что содержимое не читалось, иначе модель приняла бы сводку за прочитанный код.
+  Подробнее — инструмент `project_map` (манифесты, примеры тестовых путей, куда смотреть дальше);
+  он сканирует на каждый вызов, поэтому даёт свежие числа, тогда как карта в промпте держится
+  в кэше до смены папки. В режиме «Вопрос» карты нет: инструментов там нет, и обход дерева
+  был бы расходом впустую. Сборка текста — `src/shared/project-map.ts` (чистый модуль с тестами),
+  обход — `src/main/project/scan.ts`. Проверка — `npm run smoke:map`: она смотрит, что реально
+  уходит провайдеру, и отдельно убеждается, что содержимое файлов в промпт не попало.
 - `codebase_search` — поиск, когда имя известно примерно, а файл нет: сперва объявления символов
   через языковой сервер (`workspace/symbol`, он же «перейти к символу»), затем текстовые совпадения,
   свёрнутые по файлам («в файле их 12, первое на строке 336»). Запрос можно писать словами:
@@ -804,7 +818,7 @@ vitest.config.mts    юнит-тесты (Vitest)
 .github/workflows/   ci.yml (проверки на push/PR), release.yml (дистрибутивы по тегу)
 .ai_ignore (нет)     необязательный: что не читать и не находить (синтаксис gitignore)
 .ai_rules (нет)      необязательный: правила проекта, первыми в системный промпт
-tests/               юнит-тесты чистой логики (58 файлов): edits, replace, session, glob,
+tests/               юнит-тесты чистой логики (59 файлов): edits, replace, session, glob,
 │                    tools, providers, languages, theme, chat-text, quick-open-rank,
 │                    ignore (правила исключения обхода), code-search, web-search, mcp,
 │                    output-compress, diagnostics, unsaved, url — и далее
@@ -814,6 +828,7 @@ tests/               юнит-тесты чистой логики (58 файл�
 │                    vitest и jest в temp-проекте), node-tests/test-model,
 │                    context-fit (сжатие беседы), uri-path, git-model, path-guard,
 │                    debug (DAP против фейкового адаптера), debug-paths, lsp-*,
+│                    project-scan, project-map (карта проекта для агента),
 │                    cli (папка из командной строки), tool-files (файлы вызова агента)
 
 src/
@@ -826,8 +841,9 @@ src/
 │                      format.ts (какой движок форматирует язык),
 │                      test-model.ts (дерево тестов и исход прогона) и node-tests.ts
 │                      (раннеры Node, их разбор), env-file.ts (разбор .env),
-│                      project-scan.ts (карта проекта),
 │                      lsp-presets.ts, lsp-symbols.ts,
+│                      project-scan.ts (карта проекта по именам файлов),
+│                      project-map.ts (карта проекта текстом: промпт и инструмент),
 │                      tool-files.ts (файлы вызова агента для ленты чата)
 ├── main/
 │   ├── index.ts       сборка сервисов, single-instance, выключение терминалов
