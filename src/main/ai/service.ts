@@ -158,6 +158,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'search',
   'codebase_search',
   'project_map',
+  'file_outline',
   'web_search',
   'find_files',
   'get_diagnostics',
@@ -174,6 +175,7 @@ const READ_ONLY_TOOLS = new Set([
   'read_files',
   'search',
   'project_map',
+  'file_outline',
   'find_files',
   'get_diagnostics',
   'git_status',
@@ -186,6 +188,7 @@ const AGENT_PROMPT = [
   'Устройство проекта видно по карте в начале беседы: не обходи дерево и не читай манифесты, чтобы понять, что это за проект. Подробнее — project_map.',
   'Не выдумывай содержимое файлов: то, чего не знаешь, читай инструментами.',
   'Прежде чем читать файл целиком, найди место: codebase_search — где объявлен символ, search — где встречается, find_files — какие файлы есть.',
+  'Устройство файла видно по скелету (file_outline): объявления с номерами строк. Дальше читай этим диапазоном, а не файл целиком.',
   'Большие файлы читай диапазоном строк и не перечитывай одно и то же много раз.',
   'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу.',
   'Перед тем как чинить код, посмотри get_diagnostics — так видно настоящую ошибку, а не догадку.',
@@ -853,7 +856,8 @@ export class AiService {
       return this.git !== undefined;
     }
     if (tool.name.startsWith('terminal_')) return this.terminals !== undefined;
-    if (tool.name === 'codebase_search') return this.symbols !== undefined;
+    // Оба инструмента символов живут на языковом сервере: без него их не предлагаем.
+    if (tool.name === 'codebase_search' || tool.name === 'file_outline') return this.symbols !== undefined;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     return tool.side === 'main';
   }

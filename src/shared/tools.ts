@@ -20,6 +20,7 @@ export type AgentToolName =
   | 'search'
   | 'codebase_search'
   | 'project_map'
+  | 'file_outline'
   | 'find_files'
   | 'get_diagnostics'
   | 'apply_edit'
@@ -144,6 +145,22 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         limit: { type: 'number', description: 'Сколько объявлений вернуть (по умолчанию 40).' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'file_outline',
+    side: 'main',
+    description:
+      'Скелет файла: объявления (классы, функции, методы) с номерами строк и вложенностью, ' +
+      'без тел. Вызывай перед чтением, чтобы понять устройство файла и не читать его целиком: ' +
+      'дальше бери нужные строки read_file с startLine и endLine. Требует языкового сервера; ' +
+      'если файл небольшой — читай его сразу.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Абсолютный путь к файлу.' },
+      },
+      required: ['path'],
     },
   },
   {

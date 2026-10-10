@@ -21,6 +21,8 @@ const TOOL_LABELS: Record<string, string> = {
   read_file: 'Чтение файла',
   read_files: 'Чтение файлов',
   search: 'Поиск по проекту',
+  project_map: 'Карта проекта',
+  file_outline: 'Скелет файла',
   find_files: 'Поиск файлов',
   get_diagnostics: 'Диагностика',
   apply_edit: 'Правка файлов',
@@ -47,6 +49,8 @@ const TOOL_ICONS: Record<string, IconName> = {
   read_file: 'file',
   read_files: 'file',
   search: 'search',
+  project_map: 'panel',
+  file_outline: 'checklist',
   find_files: 'folder',
   get_diagnostics: 'warning',
   apply_edit: 'wrench',
@@ -120,7 +124,9 @@ function summarizeArgs(raw: string): string {
         }
       }
     }
-    if (parts.length === 0) parts.push(raw.trim().slice(0, 80));
+    // Вызов без аргументов (`project_map`) — пустая подпись: `{}` в строке
+    // читалось бы как сломанный аргумент, а не как «инструменту ничего не нужно».
+    if (parts.length === 0 && raw.trim() !== '{}') parts.push(raw.trim().slice(0, 80));
     return parts.join(' · ');
   } catch {
     return raw.trim().slice(0, 80);

@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
-import { toProjectSymbols, type ProjectSymbol } from '../../shared/lsp-symbols';
+import { languageInfoForPath } from '../../shared/languages';
+import { toFileSymbols, toProjectSymbols, type FileSymbol, type ProjectSymbol } from '../../shared/lsp-symbols';
 import { mergeEnv } from '../project-env';
 
 /**
@@ -142,6 +143,8 @@ interface LspCapabilities {
   signatureHelpProvider?: { triggerCharacters?: string[] };
   /** Поиск символов по всему проекту — «перейти к символу». */
   workspaceSymbolProvider?: boolean;
+  /** Объявления внутри файла: на них строится скелет файла для агента. */
+  documentSymbolProvider?: boolean;
 }
 
 export class LspService {
@@ -380,6 +383,45 @@ export class LspService {
     }
 
     return results;
+  }
+
+  /**
+   * Скелет файла: объявления с номерами строк, без тел. Файл может быть и не
+   * открыт в редакторе — тогда открываем его серверу сами и закрываем после
+   * ответа: агенту скелет нужен ровно для того, чтобы не читать файл целиком,
+   * и ждать, пока человек откроет вкладку, он не может.
+   *
+   * Текст приходит снаружи: файловой системы у сервиса нет, её читает тот, кто
+   * спросил (у агента это `WorkspaceService` — с проверкой путей).
+   */
+  async outline(path: string, languageId: string, text: string): Promise<FileSymbol[] | null> {
+    const opened = this.runtimeForPath(path);
+    const runtime = opened ?? (await this.runtimeFor(languageId));
+    // `null` — сервера нет или он этого не умеет. Пустой список — другое: сервер
+    // ответил, объявлений в файле просто нет. Разница видна агенту в тексте.
+    if (!runtime?.capabilities.documentSymbolProvider) return null;
+    await runtime.initialized.catch(() => undefined);
+
+    const uri = pathToFileURL(path).toString();
+    if (!opened)
+      runtime.connection.notify('textDocument/didOpen', { textDocument: { uri, languageId, version: 1, text } });
+    try {
+      const raw = await runtime.connection.request('textDocument/documentSymbol', { textDocument: { uri } });
+      return toFileSymbols(raw);
+    } catch {
+      return []; // сервер не ответил — это не повод ломать агентный шаг
+    } finally {
+      if (!opened) runtime.connection.notify('textDocument/didClose', { textDocument: { uri } });
+    }
+  }
+
+  /**
+   * Язык файла для запроса к серверу: сперва то, что уже знает редактор (он
+   * открывал файл и назвал язык), затем — по расширению. Неизвестный язык
+   * вернёт null: сервера для него всё равно нет.
+   */
+  languageFor(path: string): string | null {
+    return this.languageOfPath.get(path) ?? languageInfoForPath(path)?.id ?? null;
   }
 
   private onNotification(method: string, params: unknown): void {

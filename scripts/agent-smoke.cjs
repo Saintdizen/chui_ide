@@ -112,6 +112,10 @@ app.whenReady().then(async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-agent-'));
   const file = path.join(dir, 'notes.txt');
   await fs.writeFile(file, `строка один\n${MARKER}\nстрока три\n`, 'utf8');
+  // Файл с распознаваемым языком — для скелета: у `notes.txt` языка нет,
+  // и инструмент должен честно сказать об этом (проверяется ниже).
+  const script = path.join(dir, 'parser.py');
+  await fs.writeFile(script, 'class Parser:\n    def parse(self):\n        pass\n', 'utf8');
 
   const server = http.createServer(async (req, res) => {
     // «Проверить подключение» — обычный GET /models.
@@ -275,6 +279,8 @@ app.whenReady().then(async () => {
        Символы приходят от языкового сервера — в проверке его роль играет заглушка. */
     check('без языкового сервера codebase_search не предлагается', !run.toolNames.includes('codebase_search'));
 
+    check('без языкового сервера file_outline не предлагается', !run.toolNames.includes('file_outline'), run.toolNames);
+
     ai.attachSymbols({
       projectSymbols: async (query) =>
         String(query).includes('read')
@@ -283,6 +289,18 @@ app.whenReady().then(async () => {
               { name: 'readFile', kind: 'функция', container: null, path: file, line: 2, column: 1 },
             ]
           : [],
+      // Скелет файла: языковой сервер отвечает объявлениями, строки у него
+      // нулевые — перевод в 1-based проверяем тут же (см. tests/file-outline).
+      languageFor: (path) => (String(path).endsWith('.py') ? 'python' : null),
+      outline: async (path) => [
+        {
+          name: 'Parser',
+          kind: 'класс',
+          line: 3,
+          endLine: 40,
+          children: [{ name: 'parse', kind: 'метод', line: 5, endLine: 9, children: [] }],
+        },
+      ],
     });
 
     requested = { name: 'codebase_search', args: { query: 'read file' } };
@@ -308,6 +326,43 @@ app.whenReady().then(async () => {
     check(
       'пустой результат назван честно',
       /ничего не найдено/.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
+    );
+
+    /* 1д. file_outline: скелет файла вместо чтения его целиком. */
+    requested = { name: 'file_outline', args: { path: script } };
+    run = await chat(undefined);
+    const outline = String(run.results[0]?.detail ?? '');
+    check('file_outline предлагается с языковым сервером', run.toolNames.includes('file_outline'), run.toolNames);
+    check('скелет содержит объявления с номерами строк', /3–40: класс Parser/.test(outline), outline);
+    check('вложенный метод показан с отступом', outline.includes('  5–9: метод parse'), outline);
+    check('скелет ушёл модели', sentToModel(run.bodies[run.bodies.length - 1]).includes('класс Parser'));
+    check('скелет не подменяет чтение: тел в нём нет', !outline.includes(MARKER), outline);
+    check(
+      'сводка называет файл и число объявлений',
+      /parser\.py: 2 объявления/.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
+    );
+    // Число строк то же, что покажет read_file: строка после последнего `\n`
+    // тоже считается строкой — иначе номера в скелете и в чтении разъедутся.
+    check('скелет знает размер файла', outline.includes('из 4 строк'), outline.split('\n')[0]);
+
+    requested = { name: 'file_outline', args: { path: file } };
+    run = await chat(undefined);
+    check(
+      'файл нераспознанного языка назван словами',
+      /язык не распознан/.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
+    );
+
+    // Сервер не умеет (или не поднят) — это другой случай, чем «объявлений нет»:
+    // модели сказано сменить способ, а не искать символы в пустом файле.
+    ai.attachSymbols({ projectSymbols: async () => [], languageFor: () => 'python', outline: async () => null });
+    requested = { name: 'file_outline', args: { path: script } };
+    run = await chat(undefined);
+    check(
+      'недоступный сервер назван отдельно от пустого файла',
+      /сервер недоступен/.test(String(run.results[0]?.summary ?? '')),
       run.results[0]?.summary,
     );
 

@@ -13,7 +13,11 @@ function send(message) {
 
 function handle(message) {
   if (message.method === 'initialize') {
-    send({ jsonrpc: '2.0', id: message.id, result: { capabilities: { textDocumentSync: 1 } } });
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { capabilities: { textDocumentSync: 1, documentSymbolProvider: true } },
+    });
     // Запрос сервер→клиент: клиент обязан ответить, иначе протокол ломается.
     send({ jsonrpc: '2.0', id: 'srv-1', method: 'window/workDoneProgress/create', params: { token: 'x' } });
     return;
@@ -58,6 +62,28 @@ function handle(message) {
       jsonrpc: '2.0',
       method: 'textDocument/publishDiagnostics',
       params: { uri: message.params.textDocument.uri, diagnostics: [] },
+    });
+    return;
+  }
+
+  // Скелет файла: класс с методом и функция — вложенность проверяется вместе
+  // с номерами строк. Строки здесь нулевые, как их шлёт настоящий сервер.
+  if (message.method === 'textDocument/documentSymbol') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [
+        {
+          name: 'Parser',
+          kind: 5,
+          range: { start: { line: 2, character: 0 }, end: { line: 40, character: 0 } },
+          selectionRange: { start: { line: 2, character: 6 }, end: { line: 2, character: 12 } },
+          children: [
+            { name: 'parse', kind: 6, range: { start: { line: 4, character: 4 }, end: { line: 9, character: 0 } } },
+          ],
+        },
+        { name: 'read_file', kind: 12, range: { start: { line: 43, character: 0 }, end: { line: 43, character: 0 } } },
+      ],
     });
     return;
   }

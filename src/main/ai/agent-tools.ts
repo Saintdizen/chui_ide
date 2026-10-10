@@ -12,6 +12,7 @@ import {
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
+import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
 import { isMcpToolName, type McpToolInfo } from '../../shared/mcp';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatProjectMap } from '../../shared/project-map';
@@ -72,6 +73,14 @@ export interface TerminalAgent {
  */
 export interface SymbolSearch {
   projectSymbols(query: string): Promise<readonly SearchSymbol[]>;
+  /** Язык файла для запроса к серверу: редактор знает его точнее расширения. */
+  languageFor?(path: string): string | null;
+  /**
+   * Скелет файла: объявления с номерами строк. Текст передаём снаружи — читает
+   * его агент через `WorkspaceService`, то есть с проверкой путей.
+   * `null` — сервер недоступен или не умеет; пустой список — объявлений нет.
+   */
+  outline?(path: string, languageId: string, text: string): Promise<readonly FileSymbol[] | null>;
 }
 
 /**
@@ -120,7 +129,7 @@ export interface ToolContext {
   openFile?(path: string, line?: number, column?: number): Promise<boolean>;
   /** Терминальные сессии (pty): нужны инструментам terminal_*. */
   terminals?: TerminalAgent;
-  /** Символы проекта (языковой сервер): нужен инструменту codebase_search. */
+  /** Символы проекта и скелет файла (языковой сервер): codebase_search, file_outline. */
   symbols?: SymbolSearch;
   /** Веб-поиск: подключён только при включённой настройке. */
   webSearch?: WebSearchRunner;
@@ -204,6 +213,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await search(ctx, parsed.value);
       case 'codebase_search':
         return await codebaseSearch(ctx, parsed.value);
+      case 'file_outline':
+        return await fileOutline(ctx, parsed.value);
       case 'project_map':
         return await projectMap(ctx.workspace);
       case 'find_files':
@@ -489,6 +500,44 @@ const MAX_CODE_FILES = 25;
  * стартовал, не тот язык) — это не ошибка инструмента: тогда ищем текстом и
  * честно сообщаем об этом (см. `formatCodeSearch`).
  */
+/**
+ * Скелет файла: объявления с номерами строк. Нужен, чтобы понять устройство
+ * файла, не читая его целиком: дальше агент берёт нужные строки диапазоном.
+ * Текст читаем сами (в main есть рабочая папка), разбор делает языковой сервер.
+ */
+async function fileOutline(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const target = requireString(args, 'path');
+  if (!ctx.symbols?.outline) {
+    return { ok: false, summary: 'Языковой сервер не подключён: скелет файла недоступен' };
+  }
+
+  const content = await ctx.workspace.readFile(target);
+  const language = ctx.symbols.languageFor?.(target);
+  if (!language) {
+    return {
+      ok: false,
+      summary: `${relative(target, ctx.workspace.rootPath())}: язык не распознан`,
+      detail: 'Для этого расширения языкового сервера нет — устройство файла смотри через search.',
+    };
+  }
+
+  const total = content.text.length === 0 ? 0 : content.text.split('\n').length;
+  const symbols = await ctx.symbols.outline(target, language, content.text);
+  const rel = relative(target, ctx.workspace.rootPath());
+  if (symbols === null) {
+    return {
+      ok: false,
+      summary: `${rel}: языковой сервер недоступен`,
+      detail:
+        'Сервер этого языка не запущен или не умеет разбирать объявления. ' +
+        'Устройство файла смотри через search или read_file.',
+    };
+  }
+
+  const { summary, detail } = formatOutline(rel, symbols, { totalLines: total });
+  return { ok: true, summary, detail };
+}
+
 async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const query = requireString(args, 'query');
   const limit = Math.min(optionalInteger(args, 'limit') ?? MAX_CODE_SYMBOLS, MAX_CODE_SYMBOLS);
