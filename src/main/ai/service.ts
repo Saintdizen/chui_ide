@@ -20,21 +20,15 @@ import type { FileEdit } from '../../shared/edits';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
+import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
 import {
-  AGENT_TOOLS,
-  parseToolArguments,
-  toOpenAiTools,
-  type AgentToolSpec,
-  type ExposedToolSpec,
-} from '../../shared/tools';
-import {
-  condenseCallArguments,
   estimateMessagesTokens,
   estimateTokens,
   isContextOverflow,
   TokenCalibration,
   trimMessagesToFit,
 } from '../../shared/context-fit';
+import { coveredRequest, rememberRead } from '../../shared/read-coverage';
 import { RpcFailure } from '../ipc/router';
 import { scanProject } from '../project/scan';
 import type { SettingsStore } from '../settings';
@@ -84,53 +78,6 @@ const OVERFLOW_RETRIES = 2;
 /** Во сколько раз ужимаем бюджет окна на каждом повторе после переполнения. */
 const OVERFLOW_SHRINK = 0.7;
 
-/** Пометка на свёрнутом результате инструмента; её наличие — признак уже свёрнутого. */
-const AGED_MARK = ' (детали свёрнуты — перечитай инструмент, если нужно)';
-
-/** Порог сворачивания. Отключён: сворачивание теряло прочитанные файлы, агент перечитывал их заново. */
-const AGED_MIN_CHARS = Number.POSITIVE_INFINITY; // CHUI: содержимое результатов не сворачиваем (агент терял прочитанное)
-
-/** Покрыт ли запрошенный диапазон одним из уже прочитанных. */
-function isCovered(ranges: ReadonlyArray<{ from: number; to: number }>, from: number, to: number): boolean {
-  return ranges.some((range) => range.from <= from && range.to >= to);
-}
-
-/**
- * Запрос read_file, целиком лежащий в уже прочитанном диапазоне: такой повтор не
- * исполняем — текст уже есть выше в ветке. Ловим только запросы с явным endLine:
- * без него верхняя граница (конец файла) нам неизвестна.
- */
-function coveredRequest(
-  name: string,
-  rawArguments: string,
-  reads: ReadonlyMap<string, Array<{ from: number; to: number }>>,
-): { path: string; from: number; to: number } | undefined {
-  if (name !== 'read_file') return undefined;
-  const parsed = parseToolArguments(rawArguments);
-  if (!parsed.ok) return undefined;
-  // force: явный запрос перечитать — контент мог выпасть из контекста.
-  if (parsed.value.force === true) return undefined;
-  const target = parsed.value.path;
-  const endLine = parsed.value.endLine;
-  if (typeof target !== 'string' || typeof endLine !== 'number' || !Number.isInteger(endLine)) return undefined;
-  const startLine = parsed.value.startLine;
-  const from = typeof startLine === 'number' && Number.isInteger(startLine) ? Math.max(1, startLine) : 1;
-  const to = Math.max(from, endLine);
-  const ranges = reads.get(target);
-  if (!ranges || !isCovered(ranges, from, to)) return undefined;
-  return { path: target, from, to };
-}
-
-/** Запомнить прочитанный диапазон файла. */
-function rememberRead(
-  reads: Map<string, Array<{ from: number; to: number }>>,
-  read: { path: string; from: number; to: number },
-): void {
-  const ranges = reads.get(read.path) ?? [];
-  ranges.push({ from: read.from, to: read.to });
-  reads.set(read.path, ranges);
-}
-
 /**
  * Заметка на месте обрезанной истории. Агент должен знать, что начало беседы
  * убрано, иначе будет ссылаться на то, чего в запросе уже нет.
@@ -141,11 +88,6 @@ const TRIM_MARKER =
 // Лимиты шагов «модель → инструмент → модель» живут в настройках
 // (`ai.maxSteps` и `ai.maxAutopilotSteps`): значения по умолчанию — там же.
 
-/**
- * Инструменты, которые только читают состояние. Их повтор без нового
- * результата — признак зацикливания, и повторный вызов можно не исполнять.
- * Правки и команды сюда не входят: они меняют мир, и повторить их бывает нужно.
- */
 /**
  * Инструменты режима «План»: только чтение проекта и ведение плана. Всё, что
  * меняет мир (правки, файловые операции, команды), здесь и не предлагается,
@@ -169,6 +111,11 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'update_plan',
 ]);
 
+/**
+ * Инструменты, которые только читают состояние. Их повтор без нового
+ * результата — признак зацикливания, и повторный вызов можно не исполнять.
+ * Правки и команды сюда не входят: они меняют мир, и повторить их бывает нужно.
+ */
 const READ_ONLY_TOOLS = new Set([
   'list_dir',
   'read_file',
@@ -486,44 +433,11 @@ export class AiService {
     // останавливается. Правка/команда сбрасывает кэш: состояние могло измениться.
     const executed = new Map<string, ToolOutcome>();
     let stallSteps = 0;
-    // Сводки результатов по id: ими заменяем детали, когда результат «стареет».
-    const toolSummaries = new Map<string, string>();
-    // id вызовов последнего хода — их результаты модель ещё не «отработала».
-    let freshToolIds = new Set<string>();
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
     const coveredReads = new Map<string, Array<{ from: number; to: number }>>();
 
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
-
-      // Свернуть детали результатов прошлых ходов: они уже отработали, а полный
-      // текст (прочитанный файл, вывод команды) снова грузит окно на каждом шаге.
-      for (let i = 0; i < messages.length; i += 1) {
-        const aged = messages[i]!;
-        if (aged.role !== 'tool' || !aged.toolCallId) continue;
-        if (freshToolIds.has(aged.toolCallId)) continue;
-        const content = aged.content ?? '';
-        if (content.length < AGED_MIN_CHARS || content.endsWith(AGED_MARK)) continue;
-        const summary = toolSummaries.get(aged.toolCallId) ?? 'результат инструмента';
-        messages[i] = { ...aged, content: summary + AGED_MARK };
-      }
-
-      // Аргументы уже применённых правок копятся ещё хуже: полный newText/oldText
-      // остаётся в истории навсегда, хотя файл давно изменён. Держим путь и
-      // размеры, а длинные тела правок заменяем пометкой.
-      for (let i = 0; i < messages.length; i += 1) {
-        const aged = messages[i]!;
-        if (aged.role !== 'assistant' || !aged.toolCalls?.length) continue;
-        let changed = false;
-        const toolCalls = aged.toolCalls.map((call) => {
-          if (freshToolIds.has(call.id)) return call;
-          const condensed = condenseCallArguments(call.arguments, AGED_MIN_CHARS);
-          if (condensed === call.arguments) return call;
-          changed = true;
-          return { ...call, arguments: condensed };
-        });
-        if (changed) messages[i] = { ...aged, toolCalls };
-      }
 
       // Каждый шаг сверяемся с окном: результаты инструментов копятся, и
       // длинный прогон легко переполняет контекст. Режем старые ходы целиком,
@@ -632,7 +546,6 @@ export class AiService {
           };
         } else {
           outcome = await runTool(toolContext, call.name, call.arguments);
-          toolSummaries.set(call.id, outcome.summary);
           if (outcome.read) rememberRead(coveredReads, outcome.read);
           if (READ_ONLY_TOOLS.has(call.name)) executed.set(key, outcome);
           else {
@@ -665,9 +578,6 @@ export class AiService {
 
       // Целый шаг из повторов — модель ходит по кругу. После двух таких шагов
       // останавливаемся: дальше это только сожжёт токены без прогресса.
-
-      // id вызовов этого хода: их результаты считаем свежими на следующем шаге.
-      freshToolIds = new Set(calls.map((call) => call.id));
       stallSteps = didNewWork ? 0 : stallSteps + 1;
       if (stallSteps >= 2) {
         const note = '\n\n[агент остановлен: повторяющиеся вызовы не дают нового результата]';

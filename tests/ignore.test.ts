@@ -142,3 +142,14 @@ describe('несколько файлов правил', () => {
     expect(rules.ignores('coverage/lcov.info')).toBe(true);
   });
 });
+
+describe('крайние случаи шаблонов', () => {
+  it('незакрытый класс символов — обычная открывающая скобка', () => {
+    expect(ignores('file[', 'file[')).toBe(true);
+    expect(ignores('a[b.txt', 'a[b.txt')).toBe(true);
+  });
+
+  it('правило, оставшееся пустым после разбора, ничего не исключает', () => {
+    expect(IgnoreRules.parse('/\n!\n').size).toBe(0);
+  });
+});

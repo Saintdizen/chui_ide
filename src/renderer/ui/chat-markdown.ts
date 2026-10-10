@@ -16,15 +16,15 @@ export interface MarkdownDeps {
 }
 
 export function createMarkdownRenderer(deps: MarkdownDeps): {
-  renderInto(container: HTMLElement, text: string): void;
+  renderInto(container: HTMLElement, text: string, options?: { streaming?: boolean }): void;
 } {
-  function renderInto(container: HTMLElement, text: string): void {
+  function renderInto(container: HTMLElement, text: string, options: { streaming?: boolean } = {}): void {
     clear(container);
     if (!text) return;
-    for (const node of markdownBlocks(text)) container.appendChild(node);
+    for (const node of markdownBlocks(text, options.streaming === true)) container.appendChild(node);
   }
 
-  function markdownBlocks(text: string): HTMLElement[] {
+  function markdownBlocks(text: string, streaming: boolean): HTMLElement[] {
     const nodes: HTMLElement[] = [];
     const lines = text.split('\n');
     let index = 0;
@@ -37,12 +37,20 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
         const language = line.trim().slice(3).trim();
         const body: string[] = [];
         index += 1;
-        while (index < lines.length && !(lines[index] ?? '').trimStart().startsWith('```')) {
+        let closed = false;
+        while (index < lines.length) {
+          if ((lines[index] ?? '').trimStart().startsWith('```')) {
+            closed = true;
+            break;
+          }
           body.push(lines[index] ?? '');
           index += 1;
         }
         index += 1;
-        nodes.push(codeBlock(body.join('\n'), language));
+        // Во время стрима незакрытый забор — это ещё растущий блок: не тратим
+        // время на подсветку, она всё равно изменится на следующем кадре.
+        // Красим, как только забор закроется (или ответ закончится).
+        nodes.push(codeBlock(body.join('\n'), language, streaming && !closed));
         continue;
       }
 
@@ -220,7 +228,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
   }
 
   /** Блок кода с действиями: без них ответ переносят руками. */
-  function codeBlock(code: string, language: string): HTMLElement {
+  function codeBlock(code: string, language: string, plain = false): HTMLElement {
     const bar = h(
       'div',
       { class: 'code-bar' },
@@ -257,8 +265,15 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
       'div',
       { class: 'code-block' },
       bar,
-      h('pre', {}, language === 'diff' ? diffNode(code) : codeNode(code, language)),
+      h('pre', {}, language === 'diff' ? diffNode(code) : plain ? plainCode(code) : codeNode(code, language)),
     );
+  }
+
+  /** Незакрытый во время стрима блок: текст без подсветки — она ещё изменится. */
+  function plainCode(code: string): HTMLElement {
+    const node = h('code', {});
+    node.textContent = code;
+    return node;
   }
 
   /** Диффом модель отвечает часто: + / − красим сами, Monaco его так не размечает. */

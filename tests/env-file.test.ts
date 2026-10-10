@@ -48,3 +48,31 @@ describe('parseEnvEntries', () => {
     ]);
   });
 });
+
+describe('экранирование и кавычки: крайние случаи', () => {
+  it('раскрываются \\r и \\t, а не только \\n', () => {
+    expect(parseEnvFile('A="a\\rb"')).toEqual({ A: 'a\rb' });
+    expect(parseEnvFile('A="a\\tb"')).toEqual({ A: 'a\tb' });
+  });
+
+  it('обратный слэш в значении сохраняется', () => {
+    expect(parseEnvFile('A="a\\\\b"')).toEqual({ A: 'a\\b' });
+  });
+
+  it('экранированная кавычка не закрывает значение', () => {
+    expect(parseEnvFile('A="a\\"b"')).toEqual({ A: 'a"b' });
+  });
+
+  it('хвост после закрывающей кавычки отбрасывается', () => {
+    expect(parseEnvFile('A="ab"c')).toEqual({ A: 'ab' });
+  });
+
+  it('закрывающая кавычка ищется с учётом экранирования', () => {
+    expect(parseEnvFile('A="a"\\"')).toEqual({ A: 'a' });
+  });
+
+  it('незакрытая кавычка берётся до конца строки', () => {
+    expect(parseEnvFile('A="unterminated')).toEqual({ A: 'unterminated' });
+    expect(parseEnvFile("A='unterminated")).toEqual({ A: 'unterminated' });
+  });
+});

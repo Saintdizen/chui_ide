@@ -30,6 +30,11 @@ jobs:
       - name: Проверить код
         run: npm run check
 
+      # Покрытие чистой логики — порог в vitest.config.mts. Отдельным шагом, а не
+      # в `check`: покрытие нужно раз на прогон, а не при каждой правке.
+      - name: Покрытие
+        run: npm run test:coverage
+
       - name: Собрать main и renderer
         run: npm run build
 

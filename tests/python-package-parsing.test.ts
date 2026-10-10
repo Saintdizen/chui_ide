@@ -110,3 +110,20 @@ describe('packageForModule', () => {
     expect(packageForModule('mymodule')).toBe('mymodule');
   });
 });
+
+describe('parsePipList: терпимость к мусору', () => {
+  it('не-объекты и элементы без имени пропускаются', () => {
+    const output = '[null, "строка", 42, {"name": "ok", "version": "1"}, {"version": "9"}, {"name": ""}]';
+    expect(parsePipList(output)).toEqual([{ name: 'ok', version: '1' }]);
+  });
+
+  it('битый JSON внутри массива — пустой список', () => {
+    expect(parsePipList('[не json]')).toEqual([]);
+  });
+});
+
+describe('parseRequirements: строка не похожа на зависимость', () => {
+  it('имя, начинающееся не с буквы или цифры, пропускается', () => {
+    expect(parseRequirements('.hidden==1\n==5\npytest==7')).toEqual([{ name: 'pytest', specifier: '==7', line: 3 }]);
+  });
+});

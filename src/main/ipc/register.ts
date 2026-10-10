@@ -100,12 +100,6 @@ export async function openProjectFolder(
 export function registerIpc(deps: AppDependencies): RpcRouter {
   const router = new RpcRouter();
 
-  // Любая правка в рабочей папке — это потенциальная правка в репозитории.
-  // Обновляем статус сразу, а результат отдаём push-событием.
-  const refreshGit = (): void => {
-    void deps.git.refresh().catch(() => undefined);
-  };
-
   // Git нужен и агенту (инструменты git_status/git_diff) — отдаём ему тот же сервис.
   deps.ai.attachGit(deps.git);
   // Терминалы — тоже: агент работает с pty-сессиями, а не только разовыми командами.
@@ -191,39 +185,17 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
 
   router.register('workspace.readDir', (params) => deps.workspace.readDir(params.path));
   router.register('workspace.readFile', (params) => deps.workspace.readFile(params.path));
-  router.register('workspace.writeFile', async (params) => {
-    const result = await deps.workspace.writeFile(params.path, params.text);
-    refreshGit();
-    return result;
-  });
+  router.register('workspace.writeFile', (params) => deps.workspace.writeFile(params.path, params.text));
   router.register('workspace.stat', (params) => deps.workspace.stat(params.path));
   router.register('workspace.search', (params) => deps.workspace.search(params));
   router.register('workspace.listFiles', () => deps.workspace.listFiles());
-  router.register('workspace.replace', async (params) => {
-    const result = await deps.workspace.replace(params);
-    // Замена дописала файлы на диске — обновляем и git-статус.
-    refreshGit();
-    return result;
-  });
-  router.register('workspace.createFile', async (params) => {
-    const path = await deps.workspace.createFile(params.path);
-    refreshGit();
-    return { path };
-  });
-  router.register('workspace.createDir', async (params) => {
-    const path = await deps.workspace.createDir(params.path);
-    refreshGit();
-    return { path };
-  });
-  router.register('workspace.rename', async (params) => {
-    const path = await deps.workspace.rename(params.from, params.to);
-    refreshGit();
-    return { path };
-  });
-  router.register('workspace.trash', async (params) => {
-    await deps.workspace.trash(params.path);
-    refreshGit();
-  });
+  router.register('workspace.replace', (params) => deps.workspace.replace(params));
+  router.register('workspace.createFile', async (params) => ({ path: await deps.workspace.createFile(params.path) }));
+  router.register('workspace.createDir', async (params) => ({ path: await deps.workspace.createDir(params.path) }));
+  router.register('workspace.rename', async (params) => ({
+    path: await deps.workspace.rename(params.from, params.to),
+  }));
+  router.register('workspace.trash', (params) => deps.workspace.trash(params.path));
 
   // Открытие рабочей папки меняет состояние репозитория целиком, поэтому
   // обновляем его сразу и рассылаем — UI не должен ходить за этим сам.
@@ -563,8 +535,8 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // с настройками, по одному файлу на рабочую папку.
   const chatStore = deps.chatStore ?? new ChatStore();
   router.register('ai.chats.load', (params) => chatStore.load(params.root));
-  router.register('ai.chats.save', (params) => {
-    chatStore.save(params.root, { conversations: params.conversations, activeUid: params.activeUid });
+  router.register('ai.chats.save', async (params) => {
+    await chatStore.save(params.root, { conversations: params.conversations, activeUid: params.activeUid });
   });
 
   router.attach();

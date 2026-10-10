@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AGENT_TOOLS, toOpenAiTools, type AgentToolName } from '../src/shared/tools';
+import { AGENT_TOOLS, parseToolArguments, toOpenAiTools, type AgentToolName } from '../src/shared/tools';
 
 const byName = new Map(AGENT_TOOLS.map((tool) => [tool.name, tool]));
 
@@ -110,5 +110,30 @@ describe('toOpenAiTools', () => {
     expect(first!.type).toBe('function');
     expect(first!.function.name).toBe('find_files');
     expect(first!.function.parameters).toBe(byName.get('find_files')!.inputSchema);
+  });
+});
+
+describe('parseToolArguments', () => {
+  it('пустая строка — пустой объект, а не ошибка', () => {
+    expect(parseToolArguments('')).toEqual({ ok: true, value: {} });
+    expect(parseToolArguments('   ')).toEqual({ ok: true, value: {} });
+  });
+
+  it('корректный JSON-объект разбирается', () => {
+    expect(parseToolArguments('{"a":1}')).toEqual({ ok: true, value: { a: 1 } });
+  });
+
+  it('JSON не-объект отвергается', () => {
+    for (const raw of ['[1,2]', '"str"', '123', 'null', 'true']) {
+      const result = parseToolArguments(raw);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.message).toContain('JSON-объектом');
+    }
+  });
+
+  it('битый JSON не роняет цикл, а возвращает текст ошибки', () => {
+    const result = parseToolArguments('{не json');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain('разобрать');
   });
 });

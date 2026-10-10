@@ -143,7 +143,16 @@ if (!app.requestSingleInstanceLock()) {
     settings.onDidChange(applyTheme);
     applyTheme();
 
-    const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
+    // Изменение в рабочей папке — это и потенциальная правка в репозитории.
+    // Статус git пересчитываем по тому же потоку, что и дерево: тогда пометки
+    // в проводнике обновляются для любой правки — агента, терминала, внешнего
+    // инструмента, — а не только для операций, прошедших через `workspace.*`.
+    // Сам пересчёт назначается ниже, когда появится сервис git.
+    let refreshGitSoon: (() => void) | null = null;
+    const workspace = new WorkspaceService((topic, payload) => {
+      pushToRenderers(topic, payload);
+      if (topic === PushTopic.WorkspaceChanged) refreshGitSoon?.();
+    });
     const ai = new AiService(settings, workspace);
     // Терминал сам активирует venv проекта: иначе pip, запуск и тесты работают
     // системным питоном, и человеку приходится вспоминать про `source`.
@@ -160,12 +169,24 @@ if (!app.requestSingleInstanceLock()) {
       // перезапуск IDE ради новой переменной — лишний.
       () => projectEnv(workspace.rootPath()),
     );
-    // Git ничего не хранит сам: корень берётся у рабочей папки, а об изменениях
-    // узнаём после своих же операций и после сохранения файла.
+    // Git ничего не хранит сам: корень берётся у рабочей папки. Статус обновляем
+    // по потоку изменений рабочей папки (см. `refreshGitSoon`) и по своим git-операциям.
     const git = new GitService(
       () => workspace.rootPath(),
       (topic, payload) => pushToRenderers(topic, payload),
     );
+    // Отложенный пересчёт статуса: поток сохранений и правок схлопывается в один
+    // `git status`. Задержка больше, чем у дерева (120 мс): git заметно дороже.
+    {
+      let timer: NodeJS.Timeout | null = null;
+      refreshGitSoon = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          timer = null;
+          void git.refresh().catch(() => undefined);
+        }, 300);
+      };
+    }
     // Языковые серверы — внешние процессы: настройка задаёт команду, main держит их жизненный цикл.
     // Сервер подсказок запускаем с интерпретатором окружения: иначе он не видит
     // установленные пакеты и не подсказывает импорты. Проверка путей — синхронная:

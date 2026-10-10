@@ -1,6 +1,7 @@
 import { RpcErrorCode, type ChatMessage, type ChatStreamDone, type ChatToolCall } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
-import { describeHttpError, fetchWithRetry, safeText } from './openai-compatible';
+import { fetchWithRetry } from '../../shared/retry';
+import { describeHttpError, safeText } from './openai-compatible';
 import type { AiProvider, StreamChatHandlers, StreamChatParams } from './provider';
 
 export interface AnthropicOptions {
@@ -200,7 +201,6 @@ export class AnthropicProvider implements AiProvider {
         if (chunk.type === 'message_delta') {
           if (chunk.delta?.stop_reason) finishReason = mapStopReason(chunk.delta.stop_reason);
           if (chunk.usage?.output_tokens !== undefined) completionTokens = chunk.usage.output_tokens;
-          continue;
         }
         // message_stop / ping / content_block_stop игнорируем
       }

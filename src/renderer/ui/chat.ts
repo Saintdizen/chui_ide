@@ -1,34 +1,28 @@
 import {
   ChatStreamEvent,
-  MAX_CHAT_IMAGES,
-  MAX_IMAGE_BYTES,
   type ApplyEditsHostParams,
   type ApplyEditsHostResult,
-  type ChatAttachment,
   type ChatConversation,
   type ChatDeltaPayload,
   type ChatHistory,
   type ChatMessage,
-  type DirEntry,
-  type PickedImage,
   type ReasoningEffort,
   type Settings,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
 import { compactionBudgetChars, contextUsage, splitTranscript } from '../../shared/context-fit';
 import { contextWindow, modelCapabilities } from '../../shared/providers';
-import { languageFromPath } from '../core/languages';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
 import type { EditService } from '../core/edits';
 import type { EditorService } from '../core/editor-service';
 import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
-import { relativePath } from '../core/workspace-model';
 import { type RpcClient, RpcError } from '../core/rpc';
-import { basename, clear, h, type IconName, svgIcon } from './dom';
+import { clear, h, type IconName, svgIcon } from './dom';
 import { createSelect } from './select';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
+import { createAttachments } from './chat-attachments';
 import { createToolFeed, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
 import { createComposerMenu } from './chat-composer-menu';
@@ -37,7 +31,7 @@ import { createPlanPanel } from './chat-plan';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
 import { createCommandApproval, createEditReview, type ApprovalHost } from './chat-approvals';
-import { countLines, formatBytes, plural, snippetFor, titleFrom } from './chat-text';
+import { countLines, plural, snippetFor, titleFrom } from './chat-text';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
 
@@ -201,284 +195,21 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const changesPanel = createChangesPanel({
     reveal: (path, line, column) => void revealFile(path, line, column),
     onRevert: () => void revertTouched(),
+    onSave: () => void saveTouched(),
   });
   const planPanel = createPlanPanel();
 
-  /* ── контекст, который прикладывает пользователь ───────────────────────── */
-
-  const attachmentChips = h('div', { class: 'composer-chips', hidden: true });
-
-  /** Больше в промпт не влезет: файл целиком нужен редко, а место занимает всегда. */
-  const MAX_ATTACHMENT_CHARS = 40_000;
-
-  /** Контекст приложен к конкретной беседе: у каждой вкладки свои чипы. */
-  function renderAttachments(): void {
-    const attachments = active().attachments;
-    clear(attachmentChips);
-    attachmentChips.hidden = attachments.length === 0;
-
-    attachments.forEach((item, index) => {
-      const image = item.kind === 'image' && item.dataUrl ? item : null;
-      attachmentChips.appendChild(
-        h(
-          'span',
-          {
-            class: `chip chip-static${image ? ' chip-image' : ''}`,
-            title: image
-              ? `${item.title} · ${formatBytes(item.bytes ?? 0)}`
-              : `${item.title}\n\n${item.text.slice(0, 300)}`,
-          },
-          // У картинки вместо значка — она сама: по миниатюре видно, что приложено,
-          // и не приходится открывать файл, чтобы это проверить.
-          image
-            ? h('img', { class: 'chip-thumb', src: image.dataUrl!, alt: item.label })
-            : svgIcon(item.kind === 'problems' ? 'warning' : 'file', 12),
-          h('span', { class: 'chip-name' }, item.label),
-          image ? h('span', { class: 'chip-hint' }, formatBytes(item.bytes ?? 0)) : null,
-          h(
-            'button',
-            {
-              class: 'chip-remove',
-              type: 'button',
-              title: 'Убрать из контекста',
-              onClick: () => removeAttachment(index),
-            },
-            svgIcon('close', 10),
-          ),
-        ),
-      );
-    });
-  }
-
-  function addAttachment(item: ChatAttachment | null): void {
-    if (!item) return;
-    const session = active();
-    if (session.attachments.some((existing) => existing.label === item.label)) {
-      showToast('Этот контекст уже приложен');
-      return;
-    }
-    session.attachments = [...session.attachments, item];
-    renderAttachments();
-  }
-
-  function removeAttachment(index: number): void {
-    const session = active();
-    session.attachments = session.attachments.filter((_, position) => position !== index);
-    renderAttachments();
-  }
-
-  /* ── изображения ───────────────────────────────────────────────────────── */
-
-  /** Файл из буфера или перетаскивания — в data-URL средствами браузера. */
-  function readAsDataUrl(file: File): Promise<string | null> {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
-      reader.onerror = () => resolve(null);
-      reader.readAsDataURL(file);
-    });
-  }
-
-  function addImage(image: PickedImage): void {
-    const session = active();
-    if (session.attachments.length >= MAX_CHAT_IMAGES) {
-      showToast(`К вопросу можно приложить не больше ${MAX_CHAT_IMAGES} изображений`, 'error');
-      return;
-    }
-
-    // Подпись у картинки — имя файла, а имя у двух разных вставок может совпасть:
-    // считаем повтором только те же имя, размер и данные.
-    const duplicate = session.attachments.some(
-      (item) => item.kind === 'image' && item.label === image.name && item.bytes === image.bytes,
-    );
-    if (duplicate) {
-      showToast('Это изображение уже приложено');
-      return;
-    }
-
-    session.attachments = [
-      ...session.attachments,
-      {
-        kind: 'image',
-        label: image.name,
-        title: `Изображение ${image.name}`,
-        text: '',
-        dataUrl: image.dataUrl,
-        bytes: image.bytes,
-      },
-    ];
-    renderAttachments();
-  }
-
-  /** Файлы из буфера и из перетаскивания идут одним путём: и там, и там это File. */
-  async function attachFiles(files: readonly File[]): Promise<void> {
-    const images = files.filter((file) => file.type.startsWith('image/'));
-    if (images.length === 0) {
-      showToast('Можно приложить только изображения', 'error');
-      return;
-    }
-
-    for (const file of images.slice(0, MAX_CHAT_IMAGES)) {
-      if (file.size > MAX_IMAGE_BYTES) {
-        showToast(
-          `${file.name || 'изображение'}: ${formatBytes(file.size)} — больше предела ${formatBytes(MAX_IMAGE_BYTES)}`,
-          'error',
-        );
-        continue;
-      }
-      const dataUrl = await readAsDataUrl(file);
-      if (dataUrl) addImage({ name: file.name || 'вставка из буфера', mime: file.type, bytes: file.size, dataUrl });
-    }
-    input.focus();
-  }
-
-  /** Кнопка меню: выбор файла системным диалогом (читает файлы main). */
-  async function attachImagesFromDialog(): Promise<void> {
-    try {
-      const picked = await deps.rpc.request('dialog.pickImages');
-      for (const image of picked) addImage(image);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-    input.focus();
-  }
-
-  /** Собрать вложение из того, что сейчас открыто в редакторе. */
-  function attachmentFrom(kind: 'selection' | 'file' | 'problems'): ChatAttachment | null {
-    const path = deps.editors.currentPath;
-
-    if (kind === 'problems') {
-      const items = deps.editors.markers(path ?? undefined);
-      if (items.length === 0) {
-        showToast('Ошибок и предупреждений нет');
-        return null;
-      }
-      return {
-        kind,
-        label: `ошибки: ${items.length}`,
-        title: path ? `Пометки языка в ${path}` : 'Пометки языка',
-        text: items
-          .map((item) => `${basename(item.path)}:${item.line}:${item.column} [${item.severity}] ${item.message}`)
-          .join('\n'),
-      };
-    }
-
-    const document = path ? deps.documents.get(path) : undefined;
-    if (!path || !document) {
-      showToast('Нет открытого файла', 'error');
-      return null;
-    }
-
-    if (kind === 'selection') {
-      const selection = deps.editors.selectedText();
-      if (!selection.trim()) {
-        showToast('Сначала выделите фрагмент в редакторе', 'error');
-        return null;
-      }
-      return {
-        kind,
-        label: `выделение · ${basename(path)}`,
-        title: `Выделение из ${path}`,
-        text: `\`\`\`${document.languageId}\n${selection}\n\`\`\``,
-      };
-    }
-
-    const text =
-      document.value.length > MAX_ATTACHMENT_CHARS
-        ? `${document.value.slice(0, MAX_ATTACHMENT_CHARS)}\n… (файл обрезан)`
-        : document.value;
-    return {
-      kind: 'file',
-      label: basename(path),
-      title: `Файл ${path}`,
-      text: `\`\`\`${document.languageId}\n${text}\n\`\`\``,
-    };
-  }
-
-  /** Выделение, а если его нет — файл целиком. */
-  function attachBest(): void {
-    if (deps.editors.selectedText().trim()) addAttachment(attachmentFrom('selection'));
-    else addAttachment(attachmentFrom('file'));
-  }
-
-  /** Собрать вложение по произвольному пути: файл целиком или список папки. */
-  async function attachmentFromPath(target: string, kind: 'file' | 'dir'): Promise<ChatAttachment | null> {
-    try {
-      if (kind === 'dir') {
-        const entries = await deps.workspace.readDir(target);
-        const list = entries.map((entry) => `${entry.name}${entry.kind === 'directory' ? '/' : ''}`).join('\n');
-        return {
-          kind: 'note',
-          label: `${basename(target)}/`,
-          title: `Папка ${target}`,
-          text: `Содержимое папки ${target}:\n\n${list}`,
-        };
-      }
-      const file = await deps.rpc.request('workspace.readFile', { path: target });
-      const text =
-        file.text.length > MAX_ATTACHMENT_CHARS
-          ? `${file.text.slice(0, MAX_ATTACHMENT_CHARS)}\n… (файл обрезан)`
-          : file.text;
-      return {
-        kind: 'file',
-        label: basename(target),
-        title: `Файл ${target}`,
-        text: `\`\`\`${languageFromPath(target)}\n${text}\n\`\`\``,
-      };
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-      return null;
-    }
-  }
-
-  /** Вложение из пути: тип определяем через stat, чтобы папка и файл шли разными путями. */
-  async function attachPath(target: string): Promise<void> {
-    try {
-      const stat = await deps.rpc.request('workspace.stat', { path: target });
-      addAttachment(await attachmentFromPath(target, stat.kind === 'directory' ? 'dir' : 'file'));
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  }
-
-  /* ── @-упоминания: список путей проекта ─────────────────────────────────── */
-
-  /** Плоский список путей для подсказки `@`: пересобирается при смене папки. */
-  let mentionCache: string[] | null = null;
-  const MENTION_SKIP = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
-  const MAX_MENTIONS = 4000;
-
-  async function collectMentions(): Promise<void> {
-    const root = deps.workspace.root;
-    if (!root) {
-      mentionCache = [];
-      return;
-    }
-
-    const result: string[] = [];
-    const walk = async (dir: string, depth: number): Promise<void> => {
-      if (depth > 6 || result.length >= MAX_MENTIONS) return;
-      let entries: DirEntry[];
-      try {
-        entries = await deps.workspace.readDir(dir);
-      } catch {
-        return;
-      }
-      for (const entry of entries) {
-        if (result.length >= MAX_MENTIONS) return;
-        const rel = relativePath(root, entry.path);
-        if (entry.kind === 'directory') {
-          if (MENTION_SKIP.has(entry.name)) continue;
-          result.push(`${rel}/`);
-          await walk(entry.path, depth + 1);
-        } else {
-          result.push(rel);
-        }
-      }
-    };
-    await walk(root, 0);
-    mentionCache = result;
-  }
+  // Контекст, который пользователь прикладывает к вопросу (выделение, файл,
+  // пометки, картинки, `@`-упоминания), и полоса чипов живут в отдельном модуле.
+  // Панель только подключает его к активной беседе и к полю ввода.
+  const attachments = createAttachments({
+    rpc: deps.rpc,
+    documents: deps.documents,
+    editors: deps.editors,
+    workspace: deps.workspace,
+    session: () => active(),
+    focus: () => input.focus(),
+  });
 
   /* ── меню композера: слэш-команды и контекст ───────────────────────────── */
 
@@ -487,15 +218,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // проектом остаётся здесь — модуль просит её через колбэки.
   const menu = createComposerMenu({
     input,
-    onContext: (kind) => addAttachment(attachmentFrom(kind)),
-    onAttachBest: () => attachBest(),
-    onPickImage: () => void attachImagesFromDialog(),
-    onMention: (path) => {
-      const root = deps.workspace.root ?? '';
-      void attachPath(root ? `${root}/${path.replace(/\/$/, '')}` : path);
-    },
-    mentionPaths: () => mentionCache,
-    requestMentions: () => void collectMentions(),
+    onContext: (kind) => attachments.attachFrom(kind),
+    onAttachBest: () => attachments.attachBest(),
+    onPickImage: () => void attachments.attachImagesFromDialog(),
+    onMention: (path) => attachments.attachMention(path),
+    mentionPaths: () => attachments.mentionPaths(),
+    requestMentions: () => attachments.requestMentions(),
   });
 
   /** Кнопка «+» открывает тот же список контекста: так его видно и без `#`. */
@@ -517,7 +245,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (files.length === 0) return;
 
     event.preventDefault();
-    void attachFiles(files);
+    void attachments.attachFiles(files);
   });
 
   // Перетаскивание файла на панель чата: тот же результат, что вставка из буфера.
@@ -853,12 +581,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     for (const session of sessions) session.thread.hidden = session.id !== id;
     const next = active();
     input.value = next.draft;
-    renderAttachments();
+    attachments.render();
     renderChanges();
     renderTabs();
     syncSessionInfo();
 
-    if (busy) input.disabled = true;
+    // Занятость общая: прогон в окне один, поэтому и поле одно на все вкладки.
+    input.disabled = busy;
     requestAnimationFrame(() => {
       body.scrollTop = body.scrollHeight;
       input.focus();
@@ -883,7 +612,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const next = active();
       for (const session of sessions) session.thread.hidden = session.id !== next.id;
       input.value = next.draft;
-      renderAttachments();
+      attachments.render();
       renderChanges();
     }
 
@@ -946,7 +675,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const next = active();
     for (const session of sessions) session.thread.hidden = session.id !== next.id;
     input.value = next.draft;
-    renderAttachments();
+    attachments.render();
     renderChanges();
     renderTabs();
     syncSessionInfo();
@@ -984,7 +713,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           el.appendChild(content);
         }
         if (message.toolCalls?.length) {
-          const feed = createToolFeed(el, null, undefined, (path) => void revealFile(path));
+          const feed = createToolFeed(el);
           for (const call of message.toolCalls) {
             cards.set(call.id, feed.add({ id: call.id, name: call.name, args: call.arguments }));
           }
@@ -1063,10 +792,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       renderTabs();
     }
     // Список путей для `@` собираем заранее: подсказка должна открыться мгновенно.
-    void collectMentions();
+    attachments.requestMentions();
     deps.workspace.onDidChange((info) => {
       applyRoot(info?.root ?? null);
-      void collectMentions();
+      attachments.requestMentions();
     });
   }
 
@@ -1332,13 +1061,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /** Отрисовать панель изменений по активной беседе. */
   function renderChanges(): void {
-    changesPanel.render(active());
+    const session = active();
+    const unsaved = [...session.touched.keys()].filter((path) => deps.documents.get(path)?.dirty).length;
+    changesPanel.render({ touched: session.touched, files: session.files, unsaved });
   }
 
   /**
-   * Записать документы на диск. Правки агента ложатся в файл сразу: дерево
-   * файлов, git и внешние инструменты работают с диском и без этого не видят
-   * изменений. Список правок при этом остаётся — по нему можно откатиться.
+   * Записать документы на диск. Кто именно решает — человек: правки агента
+   * ложатся в документы в памяти, а файл пишет кнопка «Сохранить» в панели
+   * изменений (см. `saveTouched`). Откат пишет на диск сразу: возвращая текст,
+   * странно оставлять файл версией агента.
    */
   async function persistPaths(paths: Iterable<string>): Promise<void> {
     for (const path of paths) {
@@ -1351,6 +1083,29 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         // не записалось — файл останется «грязным», следующая правка повторит
       }
     }
+  }
+
+  /**
+   * «Сохранить»: записать на диск то, что агент изменил в документах. Пишем
+   * только «грязные» файлы — уже сохранённые второй раз трогать незачем.
+   */
+  async function saveTouched(): Promise<void> {
+    const session = active();
+    const dirty = [...session.touched.keys()].filter((path) => deps.documents.get(path)?.dirty);
+    if (dirty.length === 0) {
+      showToast('Нечего сохранять: правки агента уже на диске');
+      return;
+    }
+
+    await persistPaths(dirty);
+    renderChanges();
+    const failed = dirty.filter((path) => deps.documents.get(path)?.dirty).length;
+    showToast(
+      failed > 0
+        ? `Не удалось сохранить файлов: ${failed}`
+        : `Сохранено ${dirty.length} ${plural(dirty.length, 'файл', 'файла', 'файлов')}`,
+      failed > 0 ? 'error' : 'info',
+    );
   }
 
   /** «Отменить» возвращает документы к тому, какими они были до правок агента. */
@@ -1439,7 +1194,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     { class: 'chat-footer' },
     planPanel.element,
     changesPanel.element,
-    attachmentChips,
+    attachments.element,
     h(
       'div',
       { class: 'composer-box' },
@@ -1496,8 +1251,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     event.preventDefault();
     element.classList.remove('is-dropping');
     // Путь из дерева и картинки из буфера идут разными путями.
-    if (path) void attachPath(path);
-    else void attachFiles(files);
+    if (path) void attachments.attachPath(path);
+    else void attachments.attachFiles(files);
   });
 
   /* ── провайдер и модель ────────────────────────────────────────────────── */
@@ -1756,9 +1511,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     session.draft = '';
     menu.hide();
     // Контекст приложен к конкретному вопросу: дальше он только мешает.
-    const sent = [...session.attachments];
-    session.attachments = [];
-    renderAttachments();
+    const sent = attachments.takeForSend();
 
     session.history.push({ role: 'user', content: text });
     if (session.history.length === 1) {
@@ -1776,9 +1529,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     await stream.run(session, provider.id, model, sent);
   }
 
-  function setBusy(value: boolean, session: ChatSession = active()): void {
+  function setBusy(value: boolean, _session: ChatSession = active()): void {
     busy = value;
-    if (session.id === activeId) input.disabled = value;
+    // Поле ввода гасит прогон, а он в окне один (см. `rpc.ts`: активный стрим —
+    // один). Поэтому блокируем поле разом для всех вкладок, а не только для
+    // стримящей: иначе, переключившись во время генерации в другую беседу,
+    // оставляли бы её поле заблокированным после конца ответа.
+    input.disabled = value;
     syncActionButton();
   }
 
@@ -1796,7 +1553,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     for (const item of sessions) item.thread.hidden = item.id !== session.id;
     activeId = session.id;
     input.value = '';
-    renderAttachments();
+    attachments.render();
     renderChanges();
     renderTabs();
     sessionInfo.hide();
@@ -1896,9 +1653,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     const result = await deps.edits.applyFileEdits(selected, 'programmatic');
-    // Сразу на диск, в любом режиме: правки должны быть видны дереву файлов, git
-    // и внешним инструментам, а не ждать ручного «Сохранить».
-    await persistPaths(result.reports.map((report) => report.path));
+    // На диск не пишем: правки агента ложатся в документы в памяти (файлы
+    // помечаются «не сохранён»), а записывает их человек кнопкой «Сохранить»
+    // в панели изменений. Так решение «менять файл на диске» остаётся за ним.
 
     for (const report of result.reports) {
       const { added, removed } = countLines(selected, report.path);
@@ -1931,12 +1688,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     renderPlan: (steps) => planPanel.render(steps),
     hidePlan: () => planPanel.hide(),
     renderChanges,
-    // Файл из ряда под вызовом инструмента открывается в редакторе — тем же
-    // путём, что и клик по файлу в панели изменений.
-    reveal: (path) => void revealFile(path),
     setBusy,
     closeApprovals,
-    persist: (paths) => persistPaths(paths),
     setStreaming: (session) => {
       streamingSession = session;
     },
@@ -1950,6 +1703,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     continueAnswer: () => void send('Продолжи ответ с того места, где остановился.'),
     afterStream: () => {
       renderTabs();
+      renderChanges();
       syncSessionInfo();
       scheduleSave();
     },
@@ -1990,7 +1744,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   syncMode();
   syncEffort();
   syncActionButton();
-  renderAttachments();
+  attachments.render();
   renderChanges();
 
   /**

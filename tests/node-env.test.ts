@@ -226,3 +226,49 @@ describe('installCommand', () => {
     expect(installCommand('pnpm')).toBe('pnpm install');
   });
 });
+
+describe('satisfiesNodeRange: операторы и крайние ветки', () => {
+  it('строгие неравенства и равенство', () => {
+    expect(satisfiesNodeRange('20.0.0', '>18')).toBe(true);
+    expect(satisfiesNodeRange('18.0.0', '>18')).toBe(false);
+    expect(satisfiesNodeRange('18.0.0', '<=20')).toBe(true);
+    expect(satisfiesNodeRange('21.0.0', '<=20')).toBe(false);
+    expect(satisfiesNodeRange('20.1.0', '=20.1.0')).toBe(true);
+    expect(satisfiesNodeRange('20.1.1', '=20.1.0')).toBe(false);
+  });
+
+  it('точная версия без оператора — равенство', () => {
+    expect(satisfiesNodeRange('20.10.1', '20.10.1')).toBe(true);
+    expect(satisfiesNodeRange('20.10.2', '20.10.1')).toBe(false);
+  });
+
+  it('каретка на 0.x и тильда на одном мажоре', () => {
+    expect(satisfiesNodeRange('0.2.5', '^0.2.0')).toBe(true);
+    expect(satisfiesNodeRange('0.3.0', '^0.2.0')).toBe(false);
+    expect(satisfiesNodeRange('0.0.5', '^0.0.5')).toBe(true);
+    expect(satisfiesNodeRange('1.5.0', '~1')).toBe(true);
+    expect(satisfiesNodeRange('2.0.0', '~1')).toBe(false);
+  });
+
+  it('пустая или неразборчивая часть диапазона не сужает выбор', () => {
+    expect(satisfiesNodeRange('16.0.0', '>=18 ||')).toBe(true);
+    expect(satisfiesNodeRange('5.0.0', '1.0.0 - v')).toBe(true);
+    expect(satisfiesNodeRange('20.0.0', '>=v')).toBe(true);
+  });
+
+  it('неразборчивая версия Node — судить не о чем', () => {
+    expect(satisfiesNodeRange('abc', '>=18')).toBe(true);
+  });
+});
+
+describe('parseNodeManifest: крайние случаи', () => {
+  it('JSON не-объект даёт пустой манифест', () => {
+    expect(parseNodeManifest('42')).toEqual({ dependencies: [], engines: null, packageManager: null });
+    expect(parseNodeManifest('null')).toEqual({ dependencies: [], engines: null, packageManager: null });
+  });
+
+  it('зависимость с нестроковым диапазоном пропускается', () => {
+    const manifest = parseNodeManifest(JSON.stringify({ dependencies: { a: 42, b: '^1.0.0' } }));
+    expect(manifest.dependencies).toEqual([{ name: 'b', range: '^1.0.0', dev: false }]);
+  });
+});

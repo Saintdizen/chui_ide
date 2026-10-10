@@ -89,3 +89,66 @@ describe('findProviderPreset', () => {
     expect(findProviderPreset('nope')).toBeUndefined();
   });
 });
+
+describe('modelCapabilities: разбор имён', () => {
+  it('OpenAI o-серия и gpt-5 думают сами, temperature отвергают', () => {
+    for (const name of ['o1-preview', 'o4-mini', 'gpt-5']) {
+      const caps = modelCapabilities(name);
+      expect(caps.reasoningEffort).toBe(true);
+      expect(caps.temperature).toBe(false);
+      expect(caps.note).toBeTruthy();
+    }
+  });
+
+  it('открытые reasoning-модели распознаются по имени', () => {
+    for (const name of ['qwq-32b', 'deepseek-r1', 'some-distill', 'grok-3-mini', 'grok-4']) {
+      const caps = modelCapabilities(name);
+      expect(caps.reasoningEffort).toBe(true);
+      expect(caps.temperature).toBe(true);
+    }
+  });
+
+  it('регистр и пробелы в имени не мешают', () => {
+    expect(modelCapabilities('  O3-MINI  ').reasoningEffort).toBe(true);
+  });
+});
+
+describe('contextWindow: разбор имён', () => {
+  it('deepseek и grok получают свои окна', () => {
+    expect(contextWindow('deepseek-chat')).toBe(64_000);
+    expect(contextWindow('grok-4')).toBe(131_072);
+  });
+
+  it('gpt-5 попадает в окно o-серии', () => {
+    expect(contextWindow('gpt-5-mini')).toBe(200_000);
+  });
+});
+
+describe('modelPricing: прайс по семействам', () => {
+  it('OpenAI', () => {
+    expect(modelPricing('gpt-4o')).toEqual({ input: 2.5, output: 10 });
+    expect(modelPricing('gpt-4.1-mini')).toEqual({ input: 0.4, output: 1.6 });
+    expect(modelPricing('gpt-4.1')).toEqual({ input: 2, output: 8 });
+    expect(modelPricing('o4-mini')).toEqual({ input: 1.1, output: 4.4 });
+    expect(modelPricing('o3')).toEqual({ input: 10, output: 40 });
+    expect(modelPricing('o1-mini')).toEqual({ input: 1.1, output: 4.4 });
+    expect(modelPricing('o1')).toEqual({ input: 15, output: 60 });
+    expect(modelPricing('gpt-5')).toEqual({ input: 1.25, output: 10 });
+  });
+
+  it('DeepSeek', () => {
+    expect(modelPricing('deepseek-reasoner')).toEqual({ input: 0.55, output: 2.19 });
+    expect(modelPricing('deepseek-chat')).toEqual({ input: 0.27, output: 1.1 });
+  });
+
+  it('Anthropic через шлюз', () => {
+    expect(modelPricing('claude-opus-4-1')).toEqual({ input: 15, output: 75 });
+    expect(modelPricing('claude-haiku-4-5')).toEqual({ input: 1, output: 5 });
+    expect(modelPricing('claude-sonnet-4-5')).toEqual({ input: 3, output: 15 });
+  });
+
+  it('из пресетов и прочее', () => {
+    expect(modelPricing('llama-3.3-70b-versatile')).toEqual({ input: 0.59, output: 0.79 });
+    expect(modelPricing('некая-модель')).toBeNull();
+  });
+});

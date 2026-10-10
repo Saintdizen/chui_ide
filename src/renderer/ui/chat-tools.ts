@@ -1,7 +1,8 @@
 import type { ChatToolResultPayload, ChatToolStartPayload } from '../../shared/api';
-import { changeKindLabel, fileName, touchedFiles, type TouchedFile } from '../../shared/tool-files';
+import { touchedFiles } from '../../shared/tool-files';
 import { highlightInto } from '../core/highlight';
 import { languageFromPath } from '../core/languages';
+import { fileWord, plural } from './chat-text';
 import { basename, h, svgIcon, type IconName } from './dom';
 import { fileIcon } from './file-icons';
 
@@ -183,15 +184,12 @@ interface ToolGroupView {
   seal(): void;
 }
 
-function createToolGroup(
-  container: HTMLElement,
-  anchor: Node | null,
-  onUpdate?: () => void,
-  onReveal?: (path: string) => void,
-): ToolGroupView {
+function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?: () => void): ToolGroupView {
   let count = 0;
   let pending = 0;
   let failed = 0;
+  /** Сколько файлов тронули вызовы группы: видно в сводке, когда группа свёрнута. */
+  let changedFiles = 0;
   /** Раскрыта ли группа руками: тогда автоматика её не сворачивает. */
   let pinned = false;
   let expanded = true;
@@ -324,7 +322,13 @@ function createToolGroup(
     // нужно: список имён говорит то же самое, но конкретнее.
     const brief = names.slice(0, 2).join(', ');
     title.textContent = names.length > 2 ? `${brief} и ещё ${names.length - 2}` : brief || 'Действия';
-    tools.textContent = count > 1 ? `· ${count}` : '';
+    // В сводке: сколько было вызовов и сколько файлов они тронули. Файлы —
+    // чтобы свёрнутая группа не прятала факт правок (подробности — в панели
+    // «Изменён N файл» композера).
+    const briefParts: string[] = [];
+    if (count > 1) briefParts.push(`${count} ${plural(count, 'вызов', 'вызова', 'вызовов')}`);
+    if (changedFiles > 0) briefParts.push(`${changedFiles} ${fileWord(changedFiles)}`);
+    tools.textContent = briefParts.length > 0 ? `· ${briefParts.join(' · ')}` : '';
 
     if (pending > 0) {
       state.textContent = 'выполняется';
@@ -341,33 +345,14 @@ function createToolGroup(
     }
   };
 
-  /**
-   * Ряд файлов под строкой вызова: что именно тронул инструмент. Панель изменений
-   * внизу перечисляет файлы всей беседы, а здесь видно, чем кончился этот шаг —
-   * и по чипу файл открывается без похода в дерево.
-   */
-  const fileRow = (files: readonly TouchedFile[]): HTMLElement => {
-    const row = h('div', { class: 'tool-files' });
-    for (const file of files) {
-      row.appendChild(
-        h(
-          'button',
-          {
-            class: 'tool-file-chip',
-            type: 'button',
-            title: `${file.path} — ${changeKindLabel(file.kind)}`,
-            onClick: () => onReveal?.(file.path),
-          },
-          fileIcon(file.path, 12),
-          h('span', { class: 'tool-file-name' }, fileName(file.path)),
-          h('span', { class: 'tool-file-kind' }, changeKindLabel(file.kind)),
-        ),
-      );
-    }
-    return row;
-  };
-
   const add = (call: ChatToolStartPayload): ToolCardView => {
+    // Новая порция вызовов (или ещё один шаг «только инструменты») — раскрываем
+    // группу, если её свернула автоматика: иначе строки ушли бы в скрытое тело.
+    // Ручное сворачивание (pinned) не трогаем.
+    if (!pinned && !expanded) {
+      expanded = true;
+      applyExpanded();
+    }
     count += 1;
     pending += 1;
     const label = toolLabel(call.name);
@@ -427,13 +412,10 @@ function createToolGroup(
         if (!result.ok) failed += 1;
         // Ряд файлов появляется только у удачного вызова: под ошибкой список
         // тронутого обещал бы изменения, которых нет.
-        const files = result.ok ? touchedFiles(call.name, call.args, result.changes) : [];
-        if (files.length > 0) {
-          card.insertBefore(fileRow(files), panel);
-          // Группа с правками не сворачивается сама: свёрнутая шапка спрятала бы
-          // ровно то, ради чего эти чипы и заведены. Свернуть можно руками.
-          pinned = true;
-        }
+        // Тронутые файлы отдельным рядом не показываем: список — в сводке шапки
+        // (счётчиком) и в панели «Изменён N файл» композера. Ряд чипов дублировал
+        // её и растягивал ленту на строку под каждым вызовом.
+        if (result.ok) changedFiles += touchedFiles(call.name, call.args, result.changes).length;
         sync();
       },
     };
@@ -479,14 +461,13 @@ export function createToolFeed(
   container: HTMLElement,
   anchor: Node | null = null,
   onUpdate?: () => void,
-  onReveal?: (path: string) => void,
 ): {
   add(call: ChatToolStartPayload): ToolCardView;
   reasoning(): ReasoningRowView;
   seal(): void;
 } {
   let current: ToolGroupView | null = null;
-  const ensure = (): ToolGroupView => (current ??= createToolGroup(container, anchor, onUpdate, onReveal));
+  const ensure = (): ToolGroupView => (current ??= createToolGroup(container, anchor, onUpdate));
 
   return {
     add: (call) => ensure().add(call),

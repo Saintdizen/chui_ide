@@ -26,13 +26,21 @@ export interface ToggledFile {
 export interface ChangesSource {
   touched: ReadonlyMap<string, ToggledFile>;
   files: readonly ToolFileChange[];
+  /**
+   * Сколько правок ещё не записано на диск. Сохранение — решение человека:
+   * агент меняет документы в памяти, а файл пишет кнопка «Сохранить». Ноль
+   * (или отсутствие) — сохранять нечего, кнопка неактивна.
+   */
+  unsaved?: number;
 }
 
 export interface ChangesPanelDeps {
   /** Показать файл в редакторе (клик по чипу). */
   reveal(path: string, line: number, column: number): void;
-  /** Откатить правки агента — кнопка «Отменить» в шапке панели. */
+  /** Откатить правки агента — кнопка «Отменить» в попапе. */
   onRevert(): void;
+  /** Записать правки агента на диск — кнопка «Сохранить». */
+  onSave(): void;
 }
 
 export interface ChangesPanelView {
@@ -47,10 +55,22 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
   // Файлы показываем списком в попапе: чипы в строке ломались переносом и при
   // десятке правок занимали пол-композера.
   const list = h('div', { class: 'changes-list' });
-  // «Отменить» — в попапе: это действие над его содержимым, а в шапке кнопка
-  // спорила со счётчиком и отнимала место в узкой панели.
-  // Правки уходят на диск сразу (см. applyAgentEdits в chat.ts), поэтому
-  // сохранять вручную нечего — остаётся только откат к состоянию до правок.
+  // Действия — в попапе: это операции над его содержимым, а в шапке кнопки
+  // спорили со счётчиком и отнимали место в узкой панели. «Сохранить» пишет
+  // правки агента на диск, «Отменить» возвращает к состоянию до них. Пока
+  // ничего не изменено, «Сохранить» неактивна — записывать нечего.
+  const saveButton = h(
+    'button',
+    {
+      class: 'btn btn-small btn-primary',
+      type: 'button',
+      onClick: () => {
+        popover.close();
+        deps.onSave();
+      },
+    },
+    'Сохранить',
+  );
   const content = h(
     'div',
     { class: 'changes-popover' },
@@ -58,6 +78,7 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
     h(
       'div',
       { class: 'changes-popover-actions' },
+      saveButton,
       h(
         'button',
         {
@@ -156,6 +177,14 @@ export function createChangesPanel(deps: ChangesPanelDeps): ChangesPanelView {
       h('span', { class: 'stat-add' }, `+${added}`),
       h('span', { class: 'stat-del' }, `−${removed}`),
     );
+
+    // «Сохранить» живёт, пока агент правил документы; активна, пока что-то из
+    // этого ещё не на диске. Файловые операции (создан/удалён/перенос) уже
+    // применены main-инструментами — сохранять их нечем, поэтому и не считаем.
+    const unsaved = source.unsaved ?? 0;
+    saveButton.hidden = source.touched.size === 0;
+    saveButton.disabled = unsaved === 0;
+    saveButton.textContent = unsaved > 0 ? `Сохранить (${unsaved})` : 'Сохранить';
 
     clear(list);
     for (const [target, entry] of source.touched) {

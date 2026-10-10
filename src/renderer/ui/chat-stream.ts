@@ -60,14 +60,10 @@ export interface StreamHost {
   hidePlan(): void;
   /** Перерисовать панель изменений после файловых операций инструмента. */
   renderChanges(): void;
-  /** Показать файл из ряда под вызовом инструмента (клик по чипу). */
-  reveal(path: string): void;
   /** Переключить «занято»: панель по этому гасит ввод и меняет кнопку. */
   setBusy(value: boolean, session: ChatSession): void;
   /** Закрыть открытые ожидания подтверждений (ревью правок, команда). */
   closeApprovals(): void;
-  /** Записать на диск то, что правил агент (страховка после стрима). */
-  persist(paths: Iterable<string>): Promise<void>;
   /** Сессия, которая сейчас стримит; `null` — стрим закончился. */
   setStreaming(session: ChatSession | null): void;
   /** Действия под готовым ответом: копировать, повторить, оценить. */
@@ -135,12 +131,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     messageEl.appendChild(activity.element);
     activity.state('думает…');
     // Подряд идущие вызовы инструментов живут одной группой — см. createToolFeed.
-    const tools = createToolFeed(
-      messageEl,
-      activity.element,
-      () => host.scrollToEnd(session),
-      (path) => host.reveal(path),
-    );
+    const tools = createToolFeed(messageEl, activity.element, () => host.scrollToEnd(session));
     /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
     let reasoningView: ReasoningRowView | null = null;
     const toolCards = new Map<string, ToolCardView>();
@@ -315,9 +306,8 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       activity.dispose();
       host.setStreaming(null);
       host.setBusy(false, session);
-      // Правки уже на диске: их записал applyHostEdits сразу после применения.
-      // Здесь остаётся только подстраховка — добить то, что не записалось.
-      if (session.touched.size > 0) await host.persist(session.touched.keys());
+      // Правки агента на диск не пишем: сохранение — решение человека (кнопка
+      // «Сохранить» в панели изменений). Здесь только обновляем вид панели.
       host.afterStream(session);
       void host.rpc
         .request('settings.update', { ai: { activeProviderId: providerId, activeModel: model } })
@@ -329,7 +319,8 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     if (frame) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
-      host.markdown.renderInto(target, buffer);
+      // Промежуточный кадр: незакрытый блок кода показываем без подсветки.
+      host.markdown.renderInto(target, buffer, { streaming: true });
       host.scrollToEnd(session);
     });
   }

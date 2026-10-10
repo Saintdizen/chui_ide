@@ -23,6 +23,11 @@ export default defineConfig({
     // Electron 30+ несёт Chromium, транспилировать в ES5 незачем.
     target: 'chrome124',
     sourcemap: true,
+    // Предупреждение о крупных чанках глушим: `index` несёт Monaco и xterm,
+    // он заведомо больше любого разумного порога, но это осознанно — делить
+    // его незачем, а шум в каждой сборке только мешает. Бесконечность —
+    // самый честный способ сказать «это не проблема».
+    chunkSizeWarningLimit: Number.POSITIVE_INFINITY,
     rollupOptions: {
       // Две точки входа: окно IDE и стартовое окно выбора проекта.
       // Стартовое не тянет Monaco и xterm, поэтому грузится мгновенно.
@@ -30,6 +35,11 @@ export default defineConfig({
         index: 'index.html',
         welcome: 'welcome.html',
       },
+    },
+    // Отчёт о таймингах плагинов (rolldown печатает его после каждой сборки)
+    // выключаем: это диагностика сборщика, к коду проекта отношения не имеет.
+    rolldownOptions: {
+      checks: { bundlerTimings: false },
     },
   },
   server: {

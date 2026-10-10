@@ -1,13 +1,13 @@
 import path from 'node:path';
-import {
-  type ApplyEditsHostResult,
-  type DiagnosticItem,
-  type DiagnosticsHostResult,
-  type DirEntry,
-  type GitStatus,
-  type TerminalCreateOptions,
-  type TerminalSession,
-  type ToolFileChange,
+import type {
+  ApplyEditsHostResult,
+  DiagnosticItem,
+  DiagnosticsHostResult,
+  DirEntry,
+  GitStatus,
+  TerminalCreateOptions,
+  TerminalSession,
+  ToolFileChange,
 } from '../../shared/api';
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
@@ -114,7 +114,7 @@ export interface ToolContext {
   allowAll?: boolean;
   /**
    * Страховка полного доступа: даже при нём спрашивать перед необратимыми
-   * командами. Идёт из `settings.ai.confirmDangerous`, по умолчанию выключена.
+   * командами. Идёт из `settings.ai.confirmDangerous`, по умолчанию включена.
    */
   confirmDangerous?: boolean;
   /** Правки в документах; нет обработчика — правки недоступны. */
@@ -185,8 +185,8 @@ export function isDangerousCommand(command: string): boolean {
 /**
  * Спрашивать ли разрешение на команду. Обычный агент спрашивает всегда; при
  * полном доступе — только если включена страховка `confirmDangerous`
- * и команда необратима. По умолчанию страховка выключена, и полный доступ
- * исполняет всё без вопросов.
+ * и команда необратима. По умолчанию страховка включена; человек может её
+ * снять, и тогда полный доступ исполняет всё без вопросов.
  */
 function needsConfirmation(ctx: ToolContext, command: string): boolean {
   if (!ctx.allowAll) return true;

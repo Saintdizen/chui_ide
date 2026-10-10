@@ -127,3 +127,30 @@ describe('formatWebResults', () => {
     expect(detail).toContain('другую формулировку');
   });
 });
+
+describe('isAllowedSearchEndpoint: частные диапазоны и имена', () => {
+  it('частные диапазоны считаются своими', () => {
+    expect(isAllowedSearchEndpoint('http://127.0.0.5:8080')).toBe(true);
+    expect(isAllowedSearchEndpoint('http://10.1.2.3:8080')).toBe(true);
+    expect(isAllowedSearchEndpoint('http://172.16.0.1:8080')).toBe(true);
+    expect(isAllowedSearchEndpoint('http://172.31.255.254')).toBe(true);
+  });
+
+  it('172 вне диапазона 16–31 — уже не свой', () => {
+    expect(isAllowedSearchEndpoint('http://172.15.0.1')).toBe(false);
+    expect(isAllowedSearchEndpoint('http://172.32.0.1')).toBe(false);
+  });
+
+  it('IPv6-петля в скобках — локальная', () => {
+    expect(isAllowedSearchEndpoint('http://[::1]:8080')).toBe(true);
+  });
+});
+
+describe('parseSearchResponse: мусор внутри выдачи', () => {
+  it('не-объекты в списке результатов пропускаются', () => {
+    const hits = parseSearchResponse('searxng', {
+      results: [null, 'строка', 42, { url: 'https://ok.example' }],
+    });
+    expect(hits).toEqual([{ title: 'https://ok.example', url: 'https://ok.example', snippet: '' }]);
+  });
+});

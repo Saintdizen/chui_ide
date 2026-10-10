@@ -1,9 +1,7 @@
 import {
   PushTopic,
-  type BreakpointRecord,
   type DebugLaunchOptions,
   type LayoutSettings,
-  type SessionState,
   type Settings,
   type SettingsPatch,
   type WorkspaceChangedPayload,
@@ -28,6 +26,7 @@ import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
 import { envWidgetLabel } from './core/env-widget';
 import { DebugController, frameForHover } from './core/debug';
 import { RpcClient } from './core/rpc';
+import { createSessionControl } from './core/session-control';
 import {
   collectRunTargets,
   entryLine,
@@ -875,9 +874,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       void openPath(frame.path).then(() => editors.revealDebugFrame(frame.path!, frame.line, frame.column));
     },
     // Наблюдение изменилось — рабочее место стоит сохранить (см. сессию ниже).
-    onWatchChange: () => scheduleSessionSave(),
+    onWatchChange: () => session.scheduleSave(),
     // Останов по исключению изменили — тоже часть рабочего места.
-    onExceptionChange: () => scheduleSessionSave(),
+    onExceptionChange: () => session.scheduleSave(),
     // Правка значения переменной: панель просит строку, ввод показывает app.
     promptValue,
   });
@@ -885,137 +884,27 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── сессия рабочей папки ──────────────────────────────────────────────── */
 
-  /** Какой проект сейчас восстановлен: ключ, по которому кладётся сессия. */
-  let sessionRoot: string | null = null;
-  /** Пока идёт восстановление, сохранять нельзя — иначе затрём файл пустотой. */
-  let restoringSession = false;
-  let sessionSaveTimer = 0;
-
-  /** Точки останова в виде записей сессии: файл + строка + настройки. */
-  const captureBreakpoints = (): BreakpointRecord[] => {
-    const records: BreakpointRecord[] = [];
-    for (const [path, list] of debug.allBreakpoints()) {
-      for (const item of list) {
-        records.push({
-          path,
-          line: item.line,
-          ...(item.condition ? { condition: item.condition } : {}),
-          ...(item.hitCondition ? { hitCondition: item.hitCondition } : {}),
-          ...(item.logMessage ? { logMessage: item.logMessage } : {}),
-        });
-      }
-    }
-    return records;
-  };
-
-  /** Восстановить точки останова проекта: в контроллер и значками в редактор. */
-  const restoreBreakpoints = (records: readonly BreakpointRecord[]): void => {
-    const byPath = new Map<
-      string,
-      Array<{ line: number; condition?: string; hitCondition?: string; logMessage?: string }>
-    >();
-    for (const record of records) {
-      const list = byPath.get(record.path) ?? [];
-      list.push({
-        line: record.line,
-        ...(record.condition ? { condition: record.condition } : {}),
-        ...(record.hitCondition ? { hitCondition: record.hitCondition } : {}),
-        ...(record.logMessage ? { logMessage: record.logMessage } : {}),
-      });
-      byPath.set(record.path, list);
-    }
-    debug.restoreBreakpoints([...byPath.entries()]);
-    // Значки рисует редактор: карту держит он, а состояние — контроллер. Файлы
-    // значки получат сразу, даже не открытые: модель появится — отрисуется по карте.
-    for (const [path, list] of debug.allBreakpoints()) editors.setBreakpoints(path, list);
-  };
-
-  /** Текущее рабочее место: что открыто, что раскрыто, какие панели видны. */
-  const captureSession = (): SessionState => {
-    const breakpoints = captureBreakpoints();
-    const watch = debugPanel.getWatch();
-    const exceptions = debug.exceptionFilters();
-    return {
-      tabs: [...openEditors.paths],
-      ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
-      expanded: explorer.expandedPaths(),
-      ...(dock.activeId ? { dockActive: dock.activeId } : {}),
-      // Видимость панелей сюда не входит: это общий макет (settings), а не
-      // свойство проекта. Рабочее место конкретной папки — вкладки и папки.
-      // Параметры запуска, наблюдение и точки останова отладки — часть рабочего места:
-      // пустые не пишем, чтобы файл не разрастался полями-пустышками.
-      ...(Object.keys(debugOptions).length > 0 ? { debugLaunch: debugOptions } : {}),
-      ...(watch.length > 0 ? { debugWatch: watch } : {}),
-      ...(exceptions.uncaught || exceptions.caught ? { debugExceptions: exceptions } : {}),
-      ...(breakpoints.length > 0 ? { breakpoints } : {}),
-    };
-  };
-
-  const scheduleSessionSave = (): void => {
-    if (!sessionRoot || restoringSession) return;
-    if (sessionSaveTimer) window.clearTimeout(sessionSaveTimer);
-    sessionSaveTimer = window.setTimeout(() => {
-      sessionSaveTimer = 0;
-      if (!sessionRoot || restoringSession) return;
-      void rpc.request('session.save', { root: sessionRoot, state: captureSession() }).catch(() => undefined); // не сохранилось — не повод мешать работе
-    }, 400);
-  };
-
-  /**
-   * Восстановление рабочего места при открытии проекта: вкладки, раскрытые
-   * папки, видимость панелей. Файлы могли исчезнуть — открытие каждого в `try`,
-   * чтобы один пропавший не сорвал восстановление остальных.
-   */
-  const restoreSession = async (root: string): Promise<void> => {
-    if (sessionRoot === root) return;
-    sessionRoot = root;
-    restoringSession = true;
-    try {
-      openEditors.closeAll();
-      const state = await rpc.request('session.load', { root });
-
-      for (const path of state.tabs) {
-        try {
-          await openPath(path);
-        } catch {
-          // файла больше нет — просто пропускаем
-        }
-      }
-      if (state.activeTab && openEditors.has(state.activeTab)) {
-        openEditors.activate(state.activeTab);
-        const document = documents.get(state.activeTab);
-        if (document) editors.open(document);
-      }
-
-      explorer.restoreExpanded(state.expanded);
-      // Параметры запуска, наблюдение и точки останова — из прошлой сессии проекта.
-      debugOptions = state.debugLaunch ?? {};
-      debugPanel.setWatch(state.debugWatch ?? []);
-      if (state.debugExceptions) void debug.setExceptionFilters(state.debugExceptions);
-      restoreBreakpoints(state.breakpoints ?? []);
-      // Видимость панелей — из общего макета (settings), а не из сессии проекта.
-      // Из сессии берём только то, какая вкладка нижней панели была открыта.
-      withoutPersist(() => {
-        // Панель ассистента не показываем, если AI выключен: её место свободно.
-        layout.setRightVisible(layout.rightVisible && aiEnabled());
-        // Нижняя панель: видимость — из макета, а какая вкладка открыта — из сессии.
-        const dockTab = state.dockActive ?? dock.activeId;
-        if (layout.dockVisible && dockTab) dock.show(dockTab);
-        else if (!layout.dockVisible) dock.hide();
-      });
-    } catch {
-      // повреждённый файл сессии не должен мешать — начинаем с чистого места
-    } finally {
-      restoringSession = false;
-    }
-    syncViewButtons();
-    scheduleSessionSave();
-  };
-
-  openEditors.onDidChange(scheduleSessionSave);
-  dock.onVisibilityChange(scheduleSessionSave);
-  // Точки останова — тоже часть рабочего места: поставили или сняли — сохраняем.
-  debug.onDidChangeBreakpoints(scheduleSessionSave);
+  // Рабочее место проекта вынесено в отдельный контроллер: здесь только сборка
+  // его зависимостей — восстановить место при открытии проекта и сохранить при изменении.
+  const session = createSessionControl({
+    rpc,
+    documents,
+    openEditors,
+    editors,
+    debug,
+    explorer,
+    dock,
+    debugPanel,
+    layout,
+    aiEnabled,
+    openPath,
+    withoutPersist,
+    syncViewButtons,
+    getDebugOptions: () => debugOptions,
+    setDebugOptions: (options) => {
+      debugOptions = options;
+    },
+  });
   const saveDocument = async (document: TextDocument): Promise<void> => {
     // Форматирование при сохранении: правку проводит документ, поэтому на экране
     // и на диске оказывается одно и то же.
@@ -1052,9 +941,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   };
 
   window.addEventListener('beforeunload', (event) => {
-    if (sessionRoot && !restoringSession) {
-      void rpc.request('session.save', { root: sessionRoot, state: captureSession() }).catch(() => undefined);
-    }
+    session.saveNow();
     if (closing || documents.dirty().length === 0) return;
     event.preventDefault();
     // Без `returnValue` Chromium не считает выгрузку отменённой — окно закрылось бы.
@@ -1364,12 +1251,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       options: debugOptions,
       onAccept: (options) => {
         debugOptions = options;
-        scheduleSessionSave();
+        session.scheduleSave();
         void startDebug(options);
       },
       onReset: () => {
         debugOptions = {};
-        scheduleSessionSave();
+        session.scheduleSave();
         showToast('Параметры запуска сброшены');
       },
     });
@@ -2041,9 +1928,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Другой проект — другое рабочее место: восстанавливаем его из сессии,
     // затем накладываем настройки и макет проекта из .chui_ide.
     if (info) {
-      void restoreSession(info.root).then(() => loadProjectConfig(info.root));
+      void session.restore(info.root).then(() => loadProjectConfig(info.root));
     } else {
-      sessionRoot = null;
+      session.setRoot(null);
       resetProjectConfig();
     }
   });
