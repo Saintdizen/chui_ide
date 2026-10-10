@@ -36,3 +36,24 @@ jobs:
       # Проверка правок с не-ASCII: чистый Node, без Electron и дисплея.
       - name: Smoke — правки текста
         run: npm run smoke:edits
+
+  # Windows отличается от Linux настолько, что расхождение ловится только тут:
+  # и разделители путей, и поведение нативного node-pty, и освобождение файлов
+  # (EBUSY). Гоняем лишь проверки из `check` — сборка дистрибутивов долгая и
+  # остаётся за release.yml.
+  check-windows:
+    name: Проверки на Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Установить зависимости
+        run: npm ci
+
+      - name: Проверить код
+        run: npm run check
