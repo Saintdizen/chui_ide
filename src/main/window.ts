@@ -3,6 +3,7 @@ import path from 'node:path';
 import { PushTopic, type WindowBounds, type WindowState } from '../shared/api';
 import { pushToRenderers } from './ipc/push';
 import { APP_ORIGIN } from './protocol';
+import { isSafeExternalUrl } from '../shared/url';
 
 /**
  * Адрес dev-сервера прокидывает scripts/dev.mjs. Если переменной нет —
@@ -76,8 +77,8 @@ function createAppWindow(options: WindowOptions): BrowserWindow {
     // Своя рамка. На macOS оставляем системные «светофоры» — без них окно
     // теряет привычные кнопки, — а на Linux и Windows рамку рисует renderer.
     ...(isMac
-      // Светофоры центрируются в шапке: `--topbar_height` = 36 px, кнопка 12 px → отступ 12 px.
-      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 12 } }
+      ? // Светофоры центрируются в шапке: `--topbar_height` = 36 px, кнопка 12 px → отступ 12 px.
+        { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 12, y: 12 } }
       : { frame: false }),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
@@ -100,9 +101,23 @@ function createAppWindow(options: WindowOptions): BrowserWindow {
   window.on('enter-full-screen', notifyState);
   window.on('leave-full-screen', notifyState);
 
+  // Ссылки из интерфейса отдаём системе, но только знакомые схемы: `file:` или
+  // своя схема в чужом обработчике — не то, чего человек ждёт от «открой ссылку».
+  const openExternal = (url: string): void => {
+    if (isSafeExternalUrl(url)) void shell.openExternal(url);
+  };
+
   window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    openExternal(url);
+    // Новое окно не создаём: у IDE своя рамка, и второе окно без неё выглядит чужим.
     return { action: 'deny' };
+  });
+
+  // Навигацию самой страницы запрещаем: IDE — не браузер, и уход вкладки на сайт
+  // оставил бы человека без редактора. Внешний адрес открываем в системном браузере.
+  window.webContents.on('will-navigate', (event, url) => {
+    event.preventDefault();
+    openExternal(url);
   });
 
   const base = (DEV_SERVER_URL ?? APP_ORIGIN).replace(/\/$/, '');
