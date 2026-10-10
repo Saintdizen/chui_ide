@@ -137,9 +137,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     languageIndent: true,
     renderWhitespace: 'selection',
     // Курсор и прокрутка по умолчанию без «плавности»: ввод текста и навигация по
-    // коду — самые частые действия, и анимация тут только мешает (HIG: avoid
-    // motion in frequently performed interactions). Обе настройки можно включить
-    // обратно — движение остаётся необязательным.
+    // коду — самые частые действия, и анимация тут только мешает. Обе настройки
+    // можно включить обратно — движение остаётся необязательным.
     cursorBlinking: 'blink',
     smoothScrolling: false,
     // Как в PyCharm: ниже последней строки остаётся место для чтения.

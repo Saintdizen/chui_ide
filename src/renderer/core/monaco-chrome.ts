@@ -39,7 +39,7 @@ const CSS = `
 
   /* Правила страницы в теневой корень не доходят, поэтому «уменьшить движение»
      учитываем здесь сами: меню появляется кросс-фейдом — он и есть облегчённая
-     форма появления (HIG: «cross-fade instead of slide»). */
+     форма появления. */
   @media (prefers-reduced-motion: reduce) {
     .monaco-menu.monaco-menu {
       animation-name: popup-fade;

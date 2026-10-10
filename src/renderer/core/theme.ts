@@ -330,8 +330,7 @@ const DARK_CHROME: Chrome = {
   warning: 'ffd600',
   highlight: 'ffd6003d',
   highlightStrong: 'ffd60073',
-  // Цвета изменений — те же, что `--git_*` в styles/theme.css: системные цвета
-  // Apple (HIG, Default dark: #30D158, #FFD600, #FF4245).
+  // Цвета изменений — те же, что `--git_*` в styles/theme.css (#30D158, #FFD600, #FF4245).
   added: '30D158', // --git_added
   modified: 'FFD600', // --git_modified
   deleted: 'FF4245', // --git_deleted
@@ -374,7 +373,7 @@ const LIGHT_CHROME: Chrome = {
   warning: 'ffcc00',
   highlight: 'ffcc0052',
   highlightStrong: 'ffcc0080',
-  // Светлая схема: системные цвета Apple (HIG, Increased contrast light: #008932, #A16A00, #E9152D).
+  // Светлая схема — те же роли темнее: #008932, #A16A00, #E9152D.
   added: '008932', // --git_added
   modified: 'A16A00', // --git_modified
   deleted: 'E9152D', // --git_deleted
