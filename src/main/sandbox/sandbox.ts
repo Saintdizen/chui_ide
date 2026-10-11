@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { sandboxDockerArgs, SANDBOX_ENGINES, type AiSandboxSettings } from '../../shared/sandbox';
-import { runProcess, type CommandResult } from '../ai/run-command';
+import { runProcess, type CommandResult, type RunOptions } from '../ai/run-command';
 
 /**
  * Песочница: команды агента идут в контейнер, а не на машину пользователя.
@@ -25,7 +25,7 @@ export interface SandboxRunner {
   readonly label: string;
   /** Можно ли выполнить команду: движок найден. */
   readonly available: boolean;
-  run(command: string, cwd: string, signal?: AbortSignal): Promise<CommandResult>;
+  run(command: string, cwd: string, options?: RunOptions): Promise<CommandResult>;
 }
 
 /** Путь к движку контейнеров в PATH. Ищем и `docker`, и `podman`. */
@@ -62,7 +62,7 @@ export class SandboxService implements SandboxRunner {
     return `контейнер ${this.config().image.trim()}`;
   }
 
-  async run(command: string, cwd: string, signal?: AbortSignal): Promise<CommandResult> {
+  async run(command: string, cwd: string, options: RunOptions = {}): Promise<CommandResult> {
     if (!this.engine) {
       throw new Error(
         'Песочница включена, но движок контейнеров не найден. Установите docker или podman ' +
@@ -81,7 +81,7 @@ export class SandboxService implements SandboxRunner {
 
     // Каталог запуска самого `docker` — домашний: если проекта уже нет на месте,
     // ошибка должна быть про контейнер, а не про cwd.
-    return runProcess(this.engine, args, os.homedir(), signal);
+    return runProcess(this.engine, args, os.homedir(), options);
   }
 }
 

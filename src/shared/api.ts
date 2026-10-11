@@ -143,6 +143,8 @@ export interface SearchOptions {
   caseSensitive?: boolean;
   maxResults?: number;
   glob?: string;
+  /** Искать только внутри этой папки (или файла). Без неё — по всему проекту. */
+  path?: string;
   /** Только имена файлов с совпадением, без строк — обзор «где это встречается». */
   filesOnly?: boolean;
   /**

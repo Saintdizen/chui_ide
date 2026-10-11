@@ -43,8 +43,18 @@ describe('globToRegExp', () => {
     expect(match('a+b.ts', 'aab.ts')).toBe(false);
   });
 
-  it('`?` — обычный символ, не квантификатор', () => {
-    expect(match('a?.ts', 'a?.ts')).toBe(true);
-    expect(match('a?.ts', 'ab.ts')).toBe(false);
+  it('`?` — ровно один символ, но не слэш', () => {
+    expect(match('router.?s', 'router.ts')).toBe(true);
+    expect(match('router.?s', 'router.js')).toBe(true);
+    expect(match('router.?s', 'router.tsx')).toBe(false);
+    // Уровень пути `?` не переходит: сегмент остаётся одним.
+    expect(match('src/?.ts', 'src/a.ts')).toBe(true);
+    expect(match('src/?.ts', 'src/a/b.ts')).toBe(false);
+  });
+
+  it('`?` не ломает экранирование: точка и скобки остаются буквами', () => {
+    expect(match('a.ts', 'a.ts')).toBe(true);
+    expect(match('a.ts', 'ats')).toBe(false);
+    expect(match('{a}', '{a}')).toBe(true);
   });
 });

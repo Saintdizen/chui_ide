@@ -282,6 +282,9 @@ export class WorkspaceService {
 
   async search(options: SearchOptions, signal?: AbortSignal): Promise<SearchResult> {
     const root = this.requireRoot();
+    // Область поиска: папка или файл внутри проекта. Путь проходит ту же границу,
+    // что и чтение, поэтому искать «где-нибудь снаружи» через search нельзя.
+    const scope = options.path ? await this.safePath(options.path) : root;
     const limit = Math.min(options.maxResults ?? 200, MAX_SEARCH_RESULTS);
     const flags = options.caseSensitive ? 'g' : 'gi';
     const pattern = options.isRegex ? options.query : escapeRegExp(options.query);
@@ -306,11 +309,21 @@ export class WorkspaceService {
         }
         if (!dirent.isFile()) continue;
         if (this.isIgnored(full, false)) continue;
-        if (globMatcher && !globMatcher.test(path.relative(root, full))) continue;
+        // Маска меряется от области поиска, а не от корня проекта: с `path=src`
+        // маска `*.ts` означает «файлы прямо в src», а не «в src на любой глубине».
+        if (globMatcher && !globMatcher.test(path.relative(scope, full))) continue;
         files.push(full);
       }
     };
-    await collect(root);
+
+    // Область может быть и одним файлом: тогда просто берём его, а маска
+    // проверяется по имени файла — `glob` тут означает «тот самый файл?».
+    const scopeStat = await fs.stat(scope).catch(() => null);
+    if (scopeStat?.isFile()) {
+      if (!globMatcher || globMatcher.test(path.basename(scope))) files.push(scope);
+    } else {
+      await collect(scope);
+    }
 
     const hits: SearchHit[] = [];
     let scanned = 0;

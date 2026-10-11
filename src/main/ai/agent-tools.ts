@@ -28,7 +28,7 @@ import { formatProjectMap } from '../../shared/project-map';
 import { parseToolArguments } from '../../shared/tools';
 import { scanProject } from '../project/scan';
 import type { WorkspaceService } from '../workspace/workspace';
-import { runShellCommand, type CommandResult } from './run-command';
+import { runShellCommand, type CommandResult, type RunOptions } from './run-command';
 
 /**
  * Исполнение инструментов агента.
@@ -230,7 +230,8 @@ export interface SandboxRunner {
   readonly label: string;
   /** Можно ли выполнить команду: движок найден. */
   readonly available: boolean;
-  run(command: string, cwd: string, signal?: AbortSignal): Promise<CommandResult>;
+  /** Те же опции запуска, что у хостового пути: отмена и предел времени. */
+  run(command: string, cwd: string, options?: RunOptions): Promise<CommandResult>;
 }
 
 export interface ToolContext {
@@ -608,6 +609,16 @@ async function readFile(workspace: WorkspaceService, args: Record<string, unknow
   const target = requireString(args, 'path');
   const content = await workspace.readFile(target);
   const rel = relative(target, workspace.rootPath());
+  // Бинарный файл в utf8 — это мусор, который зря жжёт контекст и ничего не
+  // объясняет. Отказываем словами (тот же нулевой байт, по которому поиск
+  // отличает бинарное от текстового).
+  if (isBinary(content.text)) {
+    return {
+      ok: false,
+      summary: `${rel}: бинарный файл`,
+      detail: 'Это не текстовый файл — читать его бессмысленно. Если нужны метаданные, используй list_dir.',
+    };
+  }
   const allLines = content.text.length === 0 ? [] : content.text.split('\n');
   const total = allLines.length;
 
@@ -695,6 +706,10 @@ async function readFiles(workspace: WorkspaceService, args: Record<string, unkno
     }
     try {
       const content = await workspace.readFile(target);
+      if (isBinary(content.text)) {
+        failed.push(`${rel}: бинарный файл`);
+        continue;
+      }
       const lines = content.text.length === 0 ? [] : content.text.split('\n');
       const width = String(lines.length).length;
       const body = lines.map((line, index) => `${String(index + 1).padStart(width, ' ')} | ${line}`).join('\n');
@@ -769,6 +784,10 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
   const caseSensitive = optionalBoolean(args, 'caseSensitive') ?? false;
   const filesOnly = optionalBoolean(args, 'filesOnly') ?? false;
   const glob = optionalString(args, 'glob');
+  const scope = optionalString(args, 'path');
+  // Область проверяем через `stat` — это заодно та же граница рабочей папки,
+  // что у чтения и правок: искать «где-нибудь снаружи» через search нельзя.
+  if (scope) await workspace.stat(scope);
   // Контекст — как -A/-B у grep. Ограничиваем здесь, а не только в workspace:
   // инструмент должен вести себя предсказуемо и в проверках, и на глаз модели.
   const context = optionalInteger(args, 'context') ?? 0;
@@ -780,6 +799,7 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
       caseSensitive,
       filesOnly,
       glob,
+      path: scope,
       context,
       maxResults: filesOnly ? MAX_FIND_FILES : MAX_SEARCH_HITS,
     },
@@ -1235,8 +1255,8 @@ async function runTests(ctx: ToolContext): Promise<ToolOutcome> {
 
   if (ctx.sandbox && !ctx.sandbox.available) return sandboxUnavailable(ctx.sandbox);
   const result = ctx.sandbox
-    ? await ctx.sandbox.run(resolved.command, root, ctx.signal)
-    : await runShellCommand(resolved.command, root, ctx.signal);
+    ? await ctx.sandbox.run(resolved.command, root, { signal: ctx.signal })
+    : await runShellCommand(resolved.command, root, { signal: ctx.signal });
   const output = truncateTail(condenseOutput(result.output));
   const notes = [result.timedOut ? 'превышено время' : '', result.truncated ? 'вывод обрезан' : ''].filter(Boolean);
   // Ненулевой код — это упавшие тесты, а не ошибка инструмента: ответ ok, но с кодом.
@@ -1492,6 +1512,11 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   if (command.length > MAX_COMMAND_CHARS) {
     throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
   }
+  // Предел времени — необязательный аргумент: у большинства команд хватает
+  // значения по умолчанию, а заведомо долгой (сборка, установка) нужно больше.
+  const timeoutSeconds = optionalInteger(args, 'timeout');
+  const timeoutMs = timeoutSeconds !== undefined ? Math.min(Math.max(timeoutSeconds, 1), 1800) * 1000 : undefined;
+  const runOptions = { signal: ctx.signal, ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
   if (!ctx.confirmCommand) {
     return { ok: false, summary: 'Запуск команд недоступен: окно редактора не подключено' };
   }
@@ -1515,8 +1540,8 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   // В песочнице та же команда идёт в контейнер: агент об этом не просит отдельно,
   // режим задаёт человек настройкой.
   const result = ctx.sandbox
-    ? await ctx.sandbox.run(command, root, ctx.signal)
-    : await runShellCommand(command, root, ctx.signal);
+    ? await ctx.sandbox.run(command, root, runOptions)
+    : await runShellCommand(command, root, runOptions);
   // Причёсываем и держим хвост: один `npm install` иначе завалит контекст логом.
   const output = truncateTail(condenseOutput(result.output));
   const notes: string[] = [];
@@ -2187,6 +2212,15 @@ function truncateTail(text: string, limit = MAX_OUTPUT_CHARS): string {
 function truncate(text: string): { text: string; truncated: boolean } {
   if (text.length <= MAX_OUTPUT_CHARS) return { text, truncated: false };
   return { text: `${text.slice(0, MAX_OUTPUT_CHARS)}\n… (вывод обрезан)`, truncated: true };
+}
+
+/**
+ * Бинарный ли это файл. Признак один и тот же по всему проекту — нулевой байт
+ * (так же его отличает `search` и кэш содержимого). Декодированный в utf8
+ * бинарник превращается в мусор с U+FFFD, и по нему не видно причины.
+ */
+function isBinary(text: string): boolean {
+  return text.includes('\u0000');
 }
 
 function requireString(args: Record<string, unknown>, key: string): string {

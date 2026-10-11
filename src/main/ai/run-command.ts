@@ -21,14 +21,30 @@ export interface CommandResult {
 }
 
 /** Дольше держать агента в ожидании бессмысленно: пользователь уже ушёл. */
-const TIMEOUT_MS = 120_000;
-/** Один `npm install` выдаёт мегабайты — в контекст модели всё не влезет. */
-const MAX_OUTPUT_CHARS = 60_000;
+export const DEFAULT_TIMEOUT_MS = 120_000;
+/** Потолок заданного агентом предела времени: больше — это уже не инструмент. */
+export const MAX_TIMEOUT_MS = 30 * 60_000;
 
-export function runShellCommand(command: string, cwd: string, signal?: AbortSignal): Promise<CommandResult> {
+/**
+ * Сколько оставляем от вывода. Один `npm install` выдаёт мегабайты, и всё это
+ * в контекст не влезет. Держим НАЧАЛО и КОНЕЦ, а середину выбрасываем: в начале
+ * видно, что запустилось и с какими аргументами, в конце — итог и ошибки. При
+ * обрезке только хвоста терялось именно начало, а по нему видно, что команда
+ * вообще сделала.
+ */
+const HEAD_CHARS = 24_000;
+const TAIL_CHARS = 36_000;
+
+export interface RunOptions {
+  signal?: AbortSignal;
+  /** Предел времени в миллисекундах; по умолчанию `DEFAULT_TIMEOUT_MS`. */
+  timeoutMs?: number;
+}
+
+export function runShellCommand(command: string, cwd: string, options: RunOptions = {}): Promise<CommandResult> {
   const shell = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : process.env.SHELL || '/bin/bash';
   const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command];
-  return runProcess(shell, args, cwd, signal);
+  return runProcess(shell, args, cwd, options);
 }
 
 /**
@@ -43,8 +59,10 @@ export function runProcess(
   file: string,
   args: readonly string[],
   cwd: string,
-  signal?: AbortSignal,
+  options: RunOptions = {},
 ): Promise<CommandResult> {
+  const { signal } = options;
+  const timeoutMs = Math.min(Math.max(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, 1_000), MAX_TIMEOUT_MS);
   return new Promise<CommandResult>((resolve, reject) => {
     // detached — чтобы убивать всю группу процессов: `npm run watch` порождает
     // детей, и SIGKILL одной оболочке оставил бы их висеть.
@@ -56,18 +74,25 @@ export function runProcess(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    let output = '';
-    let truncated = false;
+    // Голова и хвост держатся отдельно: середина не нужна, а копить весь вывод
+    // (десятки мегабайт от сборки) в памяти — лишнее.
+    let head = '';
+    let tail = '';
+    let total = 0;
     let timedOut = false;
     let settled = false;
 
     const collect = (chunk: Buffer): void => {
-      if (truncated) return;
-      output += chunk.toString('utf8');
-      if (output.length >= MAX_OUTPUT_CHARS) {
-        output = output.slice(0, MAX_OUTPUT_CHARS);
-        truncated = true;
+      const text = chunk.toString('utf8');
+      total += text.length;
+      if (head.length < HEAD_CHARS) {
+        const room = HEAD_CHARS - head.length;
+        head += text.slice(0, room);
+        const rest = text.slice(room);
+        if (rest) tail = (tail + rest).slice(-TAIL_CHARS);
+        return;
       }
+      tail = (tail + text).slice(-TAIL_CHARS);
     };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
@@ -85,7 +110,7 @@ export function runProcess(
     const timer = setTimeout(() => {
       timedOut = true;
       kill();
-    }, TIMEOUT_MS);
+    }, timeoutMs);
 
     const onAbort = (): void => kill();
 
@@ -99,12 +124,31 @@ export function runProcess(
 
     child.on('error', (error) => finish(() => reject(error)));
     child.on('close', (code, signalName) =>
-      finish(() => resolve({ code, signal: signalName, output, truncated, timedOut })),
+      finish(() =>
+        resolve({
+          code,
+          signal: signalName,
+          output: joinOutput(head, tail, total),
+          truncated: total > HEAD_CHARS + TAIL_CHARS,
+          timedOut,
+        }),
+      ),
     );
 
     if (signal?.aborted) onAbort();
     else signal?.addEventListener('abort', onAbort, { once: true });
   });
+}
+
+/**
+ * Собрать вывод из головы и хвоста. Когда середина отброшена, на её месте
+ * оставляем пометку с числом отброшенных символов: модель должна знать, что
+ * видит не всё, иначе примет обрывок за целый вывод.
+ */
+function joinOutput(head: string, tail: string, total: number): string {
+  if (total <= head.length + tail.length) return head + tail;
+  const dropped = total - head.length - tail.length;
+  return `${head}\n… (отброшено символов: ${dropped})\n${tail}`;
 }
 
 /** Цвета и прогресс-бары в выводе агента только мешают: просим утилиты молчать. */

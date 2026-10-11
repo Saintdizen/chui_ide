@@ -90,7 +90,7 @@ describe('find_files', () => {
 describe('search', () => {
   it('принимает регистр, режим «только файлы» и контекст вокруг совпадения', () => {
     const props = byName.get('search')!.inputSchema.properties;
-    expect(Object.keys(props)).toEqual(['query', 'isRegex', 'caseSensitive', 'filesOnly', 'glob', 'context']);
+    expect(Object.keys(props)).toEqual(['query', 'isRegex', 'caseSensitive', 'filesOnly', 'glob', 'path', 'context']);
     expect(byName.get('search')!.inputSchema.required).toEqual(['query']);
     // Контекст — как -A/-B у grep: без него результат остаётся одной строкой.
     expect(props.context?.type).toBe('number');

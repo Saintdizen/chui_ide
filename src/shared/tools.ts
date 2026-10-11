@@ -152,6 +152,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         caseSensitive: { type: 'boolean', description: 'Учитывать регистр (по умолчанию — нет).' },
         filesOnly: { type: 'boolean', description: 'Вернуть только пути файлов с совпадением, без строк.' },
         glob: { type: 'string', description: 'Маска файлов, например **/*.ts' },
+        path: {
+          type: 'string',
+          description:
+            'Искать только здесь (папка или файл, абсолютный путь). Без него — по всему проекту. ' +
+            'Маска glob при этом меряется от этой папки.',
+        },
         context: {
           type: 'number',
           description:
@@ -432,11 +438,18 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Выполнить команду оболочки в рабочей папке и вернуть её вывод. ' +
-      'Каждый запуск подтверждает пользователь, поэтому команда должна быть одной и по делу.',
+      'Каждый запуск подтверждает пользователь, поэтому команда должна быть одной и по делу. ' +
+      'У запуска есть предел времени: зависшая команда не держит агента вечно.',
     inputSchema: {
       type: 'object',
       properties: {
         command: { type: 'string', description: 'Команда для запуска.' },
+        timeout: {
+          type: 'number',
+          description:
+            'Предел времени в секундах (по умолчанию 120). Ставь больше только для заведомо ' +
+            'долгого: сборка, установка зависимостей.',
+        },
       },
       required: ['command'],
     },
