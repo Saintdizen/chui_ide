@@ -1,4 +1,4 @@
-import type { ChatAttachment, ChatMessage, ChatUsage, ToolFileChange } from '../../shared/api';
+import type { ChatAttachment, ChatMessage, ChatRunTrace, ChatUsage, ToolFileChange } from '../../shared/api';
 import type { ToggledFile } from './chat-changes';
 
 /**
@@ -27,4 +27,9 @@ export interface ChatSession {
   usage?: ChatUsage;
   /** Скорость последнего ответа в токенах в секунду (для «Информации о сессии»). */
   speed?: number;
+  /**
+   * Накопленный след беседы: шаги, вызовы и расход за всё время. Растёт с каждым
+   * прогоном и переживает перезапуск — по нему видно, во сколько обошлась беседа.
+   */
+  trace?: ChatRunTrace;
 }

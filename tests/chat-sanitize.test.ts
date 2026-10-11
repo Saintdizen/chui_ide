@@ -84,6 +84,22 @@ describe('sanitizeConversations', () => {
     expect(result[2]?.usage).toBeUndefined();
   });
 
+  it('trace переносим только с валидным расходом и целыми счётчиками', () => {
+    const result = sanitizeConversations([
+      { trace: { steps: 3, toolCalls: 7.9, usage: { promptTokens: 100, completionTokens: 20 } } },
+      // Расхода нет — след бессмысленен, отбрасываем целиком.
+      { trace: { steps: 2, toolCalls: 1, usage: {} } },
+      { trace: 'нет' },
+    ]);
+    expect(result[0]?.trace).toEqual({
+      steps: 3,
+      toolCalls: 7,
+      usage: { promptTokens: 100, completionTokens: 20, cachedTokens: undefined },
+    });
+    expect(result[1]?.trace).toBeUndefined();
+    expect(result[2]?.trace).toBeUndefined();
+  });
+
   it('число бесед ограничено', () => {
     const many = Array.from({ length: MAX_CONVERSATIONS + 5 }, () => ({}));
     expect(sanitizeConversations(many)).toHaveLength(MAX_CONVERSATIONS);

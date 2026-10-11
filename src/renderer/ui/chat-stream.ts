@@ -9,6 +9,7 @@ import {
   type ChatToolResultPayload,
   type ChatToolStartPayload,
 } from '../../shared/api';
+import { addRunTrace } from '../../shared/usage';
 import type { RpcClient } from '../core/rpc';
 import { RpcError } from '../core/rpc';
 import type { createMarkdownRenderer } from './chat-markdown';
@@ -261,6 +262,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         tools.seal();
         session.history.push(...(done.agentMessages ?? [{ role: 'assistant', content: done.text }]));
         session.usage = done.usage;
+        // След прогона копим в беседе: расход и число шагов видны за всё время,
+        // а не только за последний шаг (см. «Информацию о сессии»).
+        session.trace = addRunTrace(session.trace, done.trace);
 
         // Скорость ответа: токены / время потока. Без обоих чисел не показываем.
         const completion = done.usage?.completionTokens;

@@ -654,6 +654,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         return copy;
       }),
       ...(session.usage ? { usage: { ...session.usage } } : {}),
+      ...(session.trace ? { trace: { ...session.trace, usage: { ...session.trace.usage } } } : {}),
     };
   }
 
@@ -778,6 +779,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       session.title = conversation.title;
       session.history = [...conversation.messages];
       session.usage = conversation.usage;
+      session.trace = conversation.trace;
       renderHistory(session);
     }
     if (sessions.length === 0) createSession();
@@ -827,6 +829,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       reservedTokens: settings.ai.maxTokens,
       usage: session.usage,
       speed: session.speed,
+      trace: session.trace,
       contextWindow: settings.ai.contextWindow,
       ...(pending ? { pending } : {}),
     };

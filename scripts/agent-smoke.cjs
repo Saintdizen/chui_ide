@@ -244,6 +244,17 @@ app.whenReady().then(async () => {
     check('содержимое файла ушло модели', String(run.results[0]?.detail ?? '').includes(MARKER));
     check('стрим склеился в полный ответ', run.streamed === run.done.text && run.streamed.includes(MARKER));
     check('usage доехал до renderer', run.done.usage?.completionTokens === 7, run.done.usage);
+    // След прогона: шаг с инструментом + шаг с ответом; расход копится по шагам.
+    check(
+      'след прогона: шаги и вызовы посчитаны',
+      run.done.trace?.steps === 2 && run.done.trace?.toolCalls === 1,
+      JSON.stringify(run.done.trace),
+    );
+    check(
+      'след прогона несёт суммарный расход',
+      run.done.trace?.usage?.completionTokens === 7,
+      JSON.stringify(run.done.trace?.usage),
+    );
     check(
       'размышления пришли отдельным потоком',
       run.reasoning.includes('Сначала прочитаю файл') && run.done.reasoning === run.reasoning,

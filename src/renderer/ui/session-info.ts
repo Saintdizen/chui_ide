@@ -1,6 +1,6 @@
-import type { ChatAttachment, ChatMessage, ChatUsage } from '../../shared/api';
-import { modelPricing } from '../../shared/providers';
+import type { ChatAttachment, ChatMessage, ChatRunTrace, ChatUsage } from '../../shared/api';
 import { contextUsage, estimateContextParts, type ContextUsage } from '../../shared/context-fit';
+import { formatCost, formatTokens, usageCost } from '../../shared/usage';
 import { clear, h, svgIcon } from './dom';
 
 /**
@@ -26,6 +26,8 @@ export interface SessionInfoData {
   usage?: ChatUsage;
   /** Скорость последнего ответа в токенах в секунду: считается в чате. */
   speed?: number;
+  /** Накопленный расход беседы: шаги, вызовы и токены за всё время. */
+  trace?: ChatRunTrace;
   /** Явный размер окна из настроек; не задан — считается по имени модели. */
   contextWindow?: number;
   /**
@@ -46,19 +48,6 @@ interface Part {
   key: string;
   label: string;
   tokens: number;
-}
-
-/** Короткая запись числа: 1 200 → «1.2K». */
-function formatTokens(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}K`;
-  return String(Math.round(value));
-}
-
-/** Стоимость в долларах: мелкие суммы показываем с большей точностью. */
-function formatCost(value: number): string {
-  if (value > 0 && value < 0.01) return value.toFixed(4);
-  return value.toFixed(2);
 }
 
 /** Что занимает место в контексте: разбивка по частям запроса (см. `context-fit`). */
@@ -139,6 +128,7 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
   const gaugeBar = h('div', { class: 'context-bar' });
   const reservedNote = h('div', { class: 'session-info-reserved' });
   const usageNote = h('div', { class: 'field-hint session-info-usage' });
+  const traceNote = h('div', { class: 'field-hint session-info-trace', hidden: true });
   const list = h('div', { class: 'session-info-list' });
   const note = h('div', { class: 'field-hint session-info-note' });
 
@@ -158,6 +148,7 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
     gaugeBar,
     reservedNote,
     usageNote,
+    traceNote,
     list,
     note,
     compactButton,
@@ -210,16 +201,30 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
       }
       if (completion !== undefined) parts.push(`ответ ${formatTokens(completion)}`);
       // Стоимость — только когда модель есть в таблице цен: иначе это гадание.
-      const pricing = modelPricing(data.model);
-      if (pricing && (real !== undefined || completion !== undefined)) {
-        const cost = ((real ?? 0) / 1_000_000) * pricing.input + ((completion ?? 0) / 1_000_000) * pricing.output;
-        parts.push(`стоимость ≈ $${formatCost(cost)}`);
-      }
+      const cost = usageCost(data.usage, data.model);
+      if (cost !== null) parts.push(`стоимость ≈ $${formatCost(cost)}`);
       if (data.speed !== undefined && data.speed > 0) parts.push(`${data.speed.toFixed(1)} tok/s`);
       usageNote.textContent = `Последний обмен: ${parts.join(' · ')}`;
       usageNote.hidden = false;
     } else {
       usageNote.hidden = true;
+    }
+
+    // Накопленный расход беседы: видно, во сколько она обошлась за всё время, а не
+    // только последний шаг. Стоимость — как и выше, лишь для известной модели.
+    const trace = data.trace;
+    const traceTokens = (trace?.usage.promptTokens ?? 0) + (trace?.usage.completionTokens ?? 0);
+    if (trace && traceTokens > 0) {
+      const bits: string[] = [];
+      if (trace.steps > 0) bits.push(`шагов ${trace.steps}`);
+      if (trace.toolCalls > 0) bits.push(`вызовов ${trace.toolCalls}`);
+      bits.push(`токенов ${formatTokens(traceTokens)}`);
+      const total = usageCost(trace.usage, data.model);
+      if (total !== null) bits.push(`≈ $${formatCost(total)}`);
+      traceNote.textContent = `За беседу: ${bits.join(' · ')}`;
+      traceNote.hidden = false;
+    } else {
+      traceNote.hidden = true;
     }
 
     clear(list);

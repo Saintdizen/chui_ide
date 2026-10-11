@@ -9,6 +9,7 @@ import {
   type ChatAttachment,
   type ChatMessage,
   type ChatRequest,
+  type ChatRunTrace,
   type ChatStreamDone,
   type ChatUsage,
   type DiagnosticsHostResult,
@@ -29,6 +30,7 @@ import {
   trimMessagesToFit,
 } from '../../shared/context-fit';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
+import { addUsage } from '../../shared/usage';
 import { RpcFailure } from '../ipc/router';
 import { scanProject } from '../project/scan';
 import type { SettingsStore } from '../settings';
@@ -462,6 +464,13 @@ export class AiService {
     let reasoning = '';
     let usage: ChatUsage | undefined;
     let finishReason: string | undefined;
+    // Расход за весь прогон: провайдер сообщает его по шагу, а стоимость нужна за
+    // прогон целиком — иначе виден только последний шаг и она занижена.
+    let runUsage: ChatUsage = {};
+    let runSteps = 0;
+    let runToolCalls = 0;
+    /** След прогона для наблюдаемости: сколько шагов, вызовов и токенов он стоил. */
+    const trace = (): ChatRunTrace => ({ steps: runSteps, toolCalls: runToolCalls, usage: runUsage });
 
     // Дедупликация вызовов в рамках одной ветки: одинаковый read-only вызов
     // не исполняется дважды, а если шаг целиком состоит из повторов — цикл
@@ -499,13 +508,25 @@ export class AiService {
         },
       });
 
-      if (done.usage) usage = done.usage;
+      runSteps += 1;
+      if (done.usage) {
+        usage = done.usage;
+        runUsage = addUsage(runUsage, done.usage);
+      }
       if (done.finishReason) finishReason = done.finishReason;
 
       const calls = done.toolCalls ?? [];
+      runToolCalls += calls.length;
       if (calls.length === 0) {
         produced.push({ role: 'assistant', content: done.text });
-        return { text, finishReason, usage, agentMessages: produced, ...(reasoning ? { reasoning } : {}) };
+        return {
+          text,
+          finishReason,
+          usage,
+          trace: trace(),
+          agentMessages: produced,
+          ...(reasoning ? { reasoning } : {}),
+        };
       }
 
       // Модель попросила инструменты: сохраняем её ход, исполняем по очереди
@@ -619,7 +640,14 @@ export class AiService {
         text += note;
         emit(ChatStreamEvent.Delta, { text: note });
         produced.push({ role: 'assistant', content: note.trim() });
-        return { text, finishReason, usage, agentMessages: produced, ...(reasoning ? { reasoning } : {}) };
+        return {
+          text,
+          finishReason,
+          usage,
+          trace: trace(),
+          agentMessages: produced,
+          ...(reasoning ? { reasoning } : {}),
+        };
       }
     }
 
@@ -627,14 +655,21 @@ export class AiService {
     // «лимит шагов»: возвращаем то, что успели, без лишней приписки.
     if (signal.aborted) {
       produced.push({ role: 'assistant', content: text });
-      return { text, finishReason, usage, agentMessages: produced, ...(reasoning ? { reasoning } : {}) };
+      return {
+        text,
+        finishReason,
+        usage,
+        trace: trace(),
+        agentMessages: produced,
+        ...(reasoning ? { reasoning } : {}),
+      };
     }
 
     const note = '\n\n[агент остановлен: достигнут лимит шагов]';
     text += note;
     emit(ChatStreamEvent.Delta, { text: note });
     produced.push({ role: 'assistant', content: note.trim() });
-    return { text, finishReason, usage, agentMessages: produced, ...(reasoning ? { reasoning } : {}) };
+    return { text, finishReason, usage, trace: trace(), agentMessages: produced, ...(reasoning ? { reasoning } : {}) };
   }
 
   /**

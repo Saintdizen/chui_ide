@@ -1,4 +1,12 @@
-import type { ChatConversation, ChatHistory, ChatMessage, ChatRole, ChatToolCall, ChatUsage } from './api';
+import type {
+  ChatConversation,
+  ChatHistory,
+  ChatMessage,
+  ChatRole,
+  ChatRunTrace,
+  ChatToolCall,
+  ChatUsage,
+} from './api';
 
 /**
  * Проверка прочитанной истории бесед.
@@ -59,13 +67,10 @@ export function sanitizeConversations(raw: unknown): ChatConversation[] {
       messages,
     };
 
-    const usage = value.usage as { promptTokens?: unknown; completionTokens?: unknown } | undefined;
-    if (usage && typeof usage === 'object') {
-      const clean: ChatUsage = {};
-      if (typeof usage.promptTokens === 'number') clean.promptTokens = usage.promptTokens;
-      if (typeof usage.completionTokens === 'number') clean.completionTokens = usage.completionTokens;
-      if (clean.promptTokens !== undefined || clean.completionTokens !== undefined) conversation.usage = clean;
-    }
+    const usage = sanitizeUsage(value.usage);
+    if (usage) conversation.usage = usage;
+    const trace = sanitizeTrace(value.trace);
+    if (trace) conversation.trace = trace;
 
     used += conversationSize(messages);
     result.push(conversation);
@@ -117,6 +122,35 @@ export function sanitizeToolCalls(raw: unknown): ChatToolCall[] {
     if (calls.length >= MAX_TOOL_CALLS) break;
   }
   return calls;
+}
+
+/** Расход из файла: числа только там, где они числа; иначе поля просто нет. */
+function sanitizeUsage(raw: unknown): ChatUsage | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as { promptTokens?: unknown; completionTokens?: unknown; cachedTokens?: unknown };
+  const clean: ChatUsage = {};
+  if (typeof value.promptTokens === 'number') clean.promptTokens = value.promptTokens;
+  if (typeof value.completionTokens === 'number') clean.completionTokens = value.completionTokens;
+  if (typeof value.cachedTokens === 'number') clean.cachedTokens = value.cachedTokens;
+  return clean.promptTokens !== undefined || clean.completionTokens !== undefined || clean.cachedTokens !== undefined
+    ? clean
+    : undefined;
+}
+
+/** След беседы из файла: без валидного расхода он бессмысленен, поэтому тогда его нет. */
+function sanitizeTrace(raw: unknown): ChatRunTrace | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const value = raw as { steps?: unknown; toolCalls?: unknown; usage?: unknown };
+  const usage = sanitizeUsage(value.usage);
+  if (!usage) return undefined;
+  return {
+    steps: typeof value.steps === 'number' && Number.isFinite(value.steps) ? Math.max(0, Math.floor(value.steps)) : 0,
+    toolCalls:
+      typeof value.toolCalls === 'number' && Number.isFinite(value.toolCalls)
+        ? Math.max(0, Math.floor(value.toolCalls))
+        : 0,
+    usage,
+  };
 }
 
 /** Сколько символов содержимого несёт беседа: по этому считаем потолок файла. */
