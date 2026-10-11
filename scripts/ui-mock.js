@@ -245,6 +245,8 @@ module.exports = [
       systemPrompt: 'Ты ассистент внутри редактора.',
       maxSteps: 8,
       maxAutopilotSteps: 24,
+      // Автодополнение выключено, как и в main: включается осознанно.
+      inlineCompletion: { enabled: false, debounceMs: 350 },
       // Браузер агента: как main — секция есть всегда, по умолчанию выключена.
       browser: { enabled: false, executable: '', headless: true },
       // Песочница агента: как main — выключена, образ по умолчанию.
@@ -703,6 +705,8 @@ module.exports = [
         ...(params.activeUid ? { activeUid: params.activeUid } : {}),
       });
     },
+    // Inline-автодополнение: мок молча отдаёт короткую подсказку.
+    'ai.complete': async () => ({ text: '// подсказка от мока' }),
     'ai.chat': async (params, id) => {
       cancelRequested = false;
 

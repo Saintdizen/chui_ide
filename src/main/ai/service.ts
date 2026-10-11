@@ -13,6 +13,8 @@ import {
   type ChatStreamDone,
   type ChatUsage,
   type DiagnosticsHostResult,
+  type InlineCompletionRequest,
+  type InlineCompletionResult,
   type PlanStep,
   type PlanStepStatus,
   type ReasoningEffort,
@@ -31,6 +33,13 @@ import {
   trimMessagesToFit,
 } from '../../shared/context-fit';
 import { formatMemory } from '../../shared/memory';
+import {
+  cleanCompletion,
+  INLINE_MAX_CHARS,
+  INLINE_MAX_TOKENS,
+  INLINE_SYSTEM_PROMPT,
+  renderInlinePrompt,
+} from '../../shared/inline-ai';
 import { sandboxNote } from '../../shared/sandbox';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
 import { addUsage } from '../../shared/usage';
@@ -430,6 +439,57 @@ export class AiService {
     } catch (error) {
       return { ok: false, models: [], message: describeConnectionError(error) };
     }
+  }
+
+  /**
+   * Подсказка для inline-автодополнения: продолжить код в месте курсора.
+   *
+   * В отличие от `chat` здесь нет ни истории, ни инструментов — только контекст
+   * вокруг курсора и короткий ответ. Модель берём активную (ту, что выбрана в
+   * панели AI): отдельной настройки для подсказок не заводим.
+   */
+  async completeInline(request: InlineCompletionRequest, signal: AbortSignal): Promise<InlineCompletionResult> {
+    const ai = this.settings.get().ai;
+    const providerId = ai.activeProviderId;
+    const model = ai.activeModel;
+    if (!providerId || !model) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана модель для подсказок (панель AI)');
+    }
+    const provider = this.createProvider(providerId);
+
+    const messages: ChatMessage[] = [
+      { role: 'system', content: INLINE_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: renderInlinePrompt({
+          language: request.language,
+          relativePath: request.path,
+          prefix: request.prefix,
+          suffix: request.suffix,
+        }),
+      },
+    ];
+
+    let text = '';
+    try {
+      await provider.streamChat(
+        { model, messages, temperature: 0.1, maxTokens: INLINE_MAX_TOKENS },
+        {
+          onDelta: (piece) => {
+            // Потолок по символам: `maxTokens` — просьба, а не гарантия.
+            if (text.length < INLINE_MAX_CHARS) text += piece;
+          },
+        },
+        signal,
+      );
+    } catch (error) {
+      // Отмена — это человек печатает дальше, а не сбой. Отдаём пусто: подсказка
+      // не нужна, а ошибку в редакторе показывать негде.
+      if (signal.aborted) return { text: '' };
+      throw error;
+    }
+
+    return { text: cleanCompletion(text) };
   }
 
   async chat(

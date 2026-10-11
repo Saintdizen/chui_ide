@@ -25,6 +25,7 @@ import { ImportChecker } from './core/import-check';
 import { registerImportActions } from './core/import-actions';
 import { scriptFileTargets } from './core/language-modes';
 import { LspClient } from './core/lsp';
+import { registerInlineAi } from './core/inline-ai';
 import { registerLspProviders } from './core/lsp-providers';
 import { OpenEditors } from './core/open-editors';
 import { registerNavigation } from './core/navigation';
@@ -238,6 +239,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   new LspClient(rpc, documents, editors).attach();
   // Подсказки от языковых серверов: импорты, наведения и переход к определению.
   registerLspProviders(rpc);
+  // Inline-автодополнение: модель дописывает код в месте курсора (по желанию).
+  registerInlineAi({
+    rpc,
+    enabled: () => settings.ai.inlineCompletion.enabled,
+    debounceMs: () => settings.ai.inlineCompletion.debounceMs,
+    relativePath: (path) => workspace.relative(path),
+  });
   // Импорты с неустановленными библиотеками: своя проверка, не зависящая от LSP.
   const importChecker = new ImportChecker(rpc, documents, editors);
   importChecker.attach();

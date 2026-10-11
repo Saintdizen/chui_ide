@@ -496,6 +496,19 @@ export interface AiSettings {
    * инструментами. Команду запуска задаёт человек: модель её не меняет.
    */
   mcpServers: McpServerConfig[];
+  /** Подсказка «допиши за меня» (inline-автодополнение). Выключена по умолчанию. */
+  inlineCompletion: AiInlineCompletionSettings;
+}
+
+/**
+ * Inline-автодополнение (как Copilot): модель дописывает код прямо в месте
+ * курсора. Каждый такой запрос — обращение к модели (то есть время и деньги),
+ * поэтому выключено по умолчанию и имеет задержку перед запросом.
+ */
+export interface AiInlineCompletionSettings {
+  enabled: boolean;
+  /** Пауза после последнего ввода перед запросом, мс: на каждую букву не спрашиваем. */
+  debounceMs: number;
 }
 
 /** Как показывать невидимые символы. */
@@ -888,6 +901,8 @@ export interface AiSettingsPatch {
   sandbox?: { enabled?: boolean; image?: string; workdir?: string; network?: boolean };
   /** Список серверов MCP заменяется целиком: так его проще править из интерфейса. */
   mcpServers?: McpServerConfig[];
+  /** Настройка inline-автодополнения: включение и задержка. */
+  inlineCompletion?: Partial<AiInlineCompletionSettings>;
   /** Добавить провайдера или обновить существующего по `id`. */
   provider?: AiProviderPatch;
   /** Убрать провайдера из списка. */
@@ -1011,6 +1026,26 @@ export interface PickedImage {
   mime: string;
   bytes: number;
   dataUrl: string;
+}
+
+/**
+ * Запрос подсказки inline-автодополнения. Контекст — уже нарезанный в renderer
+ * текст вокруг курсора: main не читает файлы ради этого, он только спрашивает модель.
+ */
+export interface InlineCompletionRequest {
+  /** Путь открытого файла (для контекста в промпте). */
+  path: string;
+  /** Язык файла: модель подсказывает по нему. */
+  language: string;
+  /** Текст до курсора. */
+  prefix: string;
+  /** Текст после курсора. */
+  suffix: string;
+}
+
+/** Ответ подсказки: готовый к вставке текст (может быть пустым). */
+export interface InlineCompletionResult {
+  text: string;
 }
 
 export interface ChatRequest {
@@ -1509,6 +1544,11 @@ export interface ChuiMethods {
     result: AiConnectionTestResult;
   };
   'ai.chat': { params: ChatRequest; result: ChatStreamDone };
+  /**
+   * Подсказка для inline-автодополнения: продолжить код в месте курсора.
+   * Отдельно от `ai.chat` — это короткий запрос без истории и инструментов.
+   */
+  'ai.complete': { params: InlineCompletionRequest; result: InlineCompletionResult };
   /**
    * Права доступа агента (кнопка в композере). Меняются и во время ответа:
    * main перечитывает их перед каждым действием, а не только в начале прогона.

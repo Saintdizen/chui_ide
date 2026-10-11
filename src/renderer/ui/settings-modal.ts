@@ -609,6 +609,28 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
       h('div', { class: 'settings-divider' }),
       switchRow(
+        'Подсказка «допиши за меня» (inline)',
+        ai.inlineCompletion.enabled,
+        (value) => void patch({ ai: { inlineCompletion: { enabled: value } } }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Модель серым текстом дописывает код в месте курсора, принять — Tab. Каждая подсказка — ' +
+          'обращение к модели, поэтому выключено по умолчанию и спрашивается только после паузы в наборе.',
+      ),
+      field(
+        'Задержка перед подсказкой (мс)',
+        numberInput(
+          ai.inlineCompletion.debounceMs,
+          100,
+          5000,
+          50,
+          (value) => void patch({ ai: { inlineCompletion: { debounceMs: value } } }),
+        ),
+      ),
+      h('div', { class: 'settings-divider' }),
+      switchRow(
         'Веб-поиск (инструмент web_search)',
         ai.webSearch.enabled,
         (value) => void patch({ ai: { webSearch: { enabled: value } } }),

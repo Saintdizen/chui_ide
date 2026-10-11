@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   RpcErrorCode,
+  type AiInlineCompletionSettings,
   type AiSettingsPatch,
   type AppearanceSettings,
   type EditorSettings,
@@ -77,6 +78,8 @@ interface StoredSettings {
     sandbox: AiSandboxSettings;
     /** Серверы внешних инструментов (MCP): их процессы запускает IDE. */
     mcpServers: McpServerConfig[];
+    /** Inline-автодополнение: выключено, пока человек не включит его сам. */
+    inlineCompletion: AiInlineCompletionSettings;
   };
   editor: EditorSettings;
   explorer: ExplorerSettings;
@@ -140,6 +143,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     sandbox: { ...DEFAULT_SANDBOX },
     // Серверов MCP по умолчанию нет: их команды задаёт человек.
     mcpServers: [],
+    // Автодополнение выключено: каждый запрос — это обращение к модели (время и
+    // деньги) на каждую паузу в наборе. Включается осознанно.
+    inlineCompletion: { enabled: false, debounceMs: 350 },
   },
   editor: {
     tabSize: 4,
@@ -299,6 +305,8 @@ export class SettingsStore {
           args: [...server.args],
           ...(server.env ? { env: { ...server.env } } : {}),
         })),
+        // Копия: снимок настроек не должен меняться вслед за правкой.
+        inlineCompletion: { ...ai.inlineCompletion },
       },
       editor: { ...editor },
       explorer: { ...explorer, exclude: [...explorer.exclude] },
@@ -479,6 +487,17 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     target.mcpServers = normalizeMcpServers(patch.mcpServers) as McpServerConfig[];
   }
 
+  // Автодополнение: включатель и задержка. Задержку держим в разумных рамках —
+  // ноль означал бы запрос на каждую нажатую клавишу.
+  if (patch.inlineCompletion !== undefined) {
+    const { enabled, debounceMs } = patch.inlineCompletion;
+    if (enabled !== undefined) target.inlineCompletion.enabled = enabled;
+    if (debounceMs !== undefined) {
+      const value = Math.round(debounceMs);
+      if (Number.isFinite(value)) target.inlineCompletion.debounceMs = Math.min(Math.max(value, 100), 5000);
+    }
+  }
+
   // Провайдеров можно добавлять и править из интерфейса: ключ к ним приходит
   // отдельным вызовом ai.setApiKey, здесь только адрес и список моделей.
   if (patch.provider) {
@@ -576,6 +595,15 @@ function loadSettings(filePath: string): StoredSettings {
 
   // Серверы MCP: файл правят руками, поэтому и команда, и аргументы проверяются.
   ai.mcpServers = normalizeMcpServers(storedAi.mcpServers) as McpServerConfig[];
+
+  // Автодополнение: включено только явным `true` — каждый запрос стоит денег,
+  // поэтому у тех, кто обновляется со старой версии, оно останется выключенным.
+  const storedInline = (storedAi.inlineCompletion ?? {}) as Partial<AiInlineCompletionSettings>;
+  const debounce = Math.round(Number(storedInline.debounceMs));
+  ai.inlineCompletion = {
+    enabled: storedInline.enabled === true,
+    debounceMs: Number.isFinite(debounce) && debounce > 0 ? Math.min(Math.max(debounce, 100), 5000) : 350,
+  };
 
   // Сжатие выключено только явным `false`: отсутствие поля читаем как «включено» —
   // иначе настройка молча отключилась бы у всех, кто обновляется со старой версии.

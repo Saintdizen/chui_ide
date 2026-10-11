@@ -570,6 +570,12 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     );
   });
 
+  // Inline-автодополнение: короткий запрос без истории и инструментов.
+  router.register('ai.complete', (params, ctx) => {
+    requireAiEnabled();
+    return deps.ai.completeInline(params, ctx.signal);
+  });
+
   // История бесед: renderer её собирает, main только хранит. Каталог — рядом
   // с настройками, по одному файлу на рабочую папку.
   const chatStore = deps.chatStore ?? new ChatStore();

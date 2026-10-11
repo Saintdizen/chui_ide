@@ -996,6 +996,9 @@ function editorOptions(options: EditorOptions): monaco.editor.IEditorOptions & m
     bracketPairColorization: { enabled: options.bracketPairColorization },
     stickyScroll: { enabled: options.stickyScroll },
     quickSuggestions: options.quickSuggestions,
+    // Призрачная подсказка (inline-автодополнение от AI): сам вызов модели делает
+    // провайдер, а этот флаг разрешает Monaco её показывать и принимать по Tab.
+    inlineSuggest: { enabled: true },
     // Без отступа-сетки Monaco рисует табуляцию своей шириной, и файлы с табом «плывут».
     detectIndentation: false,
     tabSize: options.tabSize,
