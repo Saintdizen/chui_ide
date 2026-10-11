@@ -182,6 +182,8 @@ export interface ChatHostBridge {
   applyEdits(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Спросить у пользователя разрешение на запуск команды. */
   confirmCommand(command: string): Promise<boolean>;
+  /** Спросить разрешение на действие git (коммит, отправка, переключение ветки, откат). */
+  confirmGit(action: string): Promise<boolean>;
   /** Пометки языка: они живут в Monaco, то есть в renderer. */
   getDiagnostics(path?: string): Promise<DiagnosticsHostResult>;
   /** Показать файл в редакторе на нужной позиции. */
@@ -413,6 +415,7 @@ export class AiService {
     if (host) {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
+      toolContext.confirmGit = (action) => host.confirmGit(action);
       toolContext.diagnostics = (path) => host.getDiagnostics(path);
       toolContext.openFile = (path, line, column) => host.openFile(path, line, column);
     }
@@ -779,6 +782,8 @@ export class AiService {
     if (tool.name === 'git_status' || tool.name === 'git_diff' || tool.name === 'git_log') {
       return this.git !== undefined;
     }
+    // Записи в репозиторий спрашивают подтверждение: без моста подтверждений их не предлагаем.
+    if (tool.name.startsWith('git_')) return this.git !== undefined && host?.confirmGit !== undefined;
     if (tool.name.startsWith('terminal_')) return this.terminals !== undefined;
     // Оба инструмента символов живут на языковом сервере: без него их не предлагаем.
     if (tool.name === 'codebase_search' || tool.name === 'file_outline') return this.symbols !== undefined;

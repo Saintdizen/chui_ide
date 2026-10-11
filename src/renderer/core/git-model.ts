@@ -4,6 +4,8 @@ import {
   type GitCommitInfo,
   type GitDiff,
   type GitFileStatus,
+  type GitNetworkResult,
+  type GitRemote,
   type GitStatus,
 } from '../../shared/api';
 import { Emitter } from './events';
@@ -165,6 +167,29 @@ export class GitModel {
 
   async checkout(name: string, create = false): Promise<GitStatus> {
     return this.apply(await this.rpc.request('git.checkout', { name, create }));
+  }
+
+  remotes(): Promise<GitRemote[]> {
+    return this.rpc.request('git.remotes');
+  }
+
+  /** Забрать изменения из удалённого репозитория, не трогая рабочее дерево. */
+  async fetch(): Promise<GitNetworkResult> {
+    return this.network(await this.rpc.request('git.fetch'));
+  }
+
+  async pull(): Promise<GitNetworkResult> {
+    return this.network(await this.rpc.request('git.pull'));
+  }
+
+  async push(options: { setUpstream?: boolean; force?: boolean } = {}): Promise<GitNetworkResult> {
+    return this.network(await this.rpc.request('git.push', options));
+  }
+
+  /** Итог сетевой операции: свежий статус уже пришёл внутри ответа. */
+  private network(result: GitNetworkResult): GitNetworkResult {
+    this.apply(result.status);
+    return result;
   }
 
   private apply(status: GitStatus | undefined): GitStatus {

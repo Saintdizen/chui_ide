@@ -1,6 +1,6 @@
 import type { FileEdit } from '../../shared/edits';
 import { fileWord } from './chat-text';
-import { h, svgIcon } from './dom';
+import { h, svgIcon, type IconName } from './dom';
 
 /**
  * Решения, которые агент спрашивает у человека прямо в ленте чата: ревью правок и
@@ -185,19 +185,34 @@ export function createEditReview(host: ApprovalHost): EditReview {
   return { review };
 }
 
+/** Что показать в карточке подтверждения: команда и действие git отличаются только подписями. */
+interface ApprovalRequest {
+  /** Заголовок карточки. */
+  title: string;
+  /** Тело: сама команда или действие git. */
+  body: string;
+  /** Пояснение под телом. */
+  hint: string;
+  /** Подпись строки итога, когда разрешили. */
+  done: string;
+  /** Иконка карточки и строки итога. */
+  icon: IconName;
+}
+
 export interface CommandApproval {
   /** Спросить разрешение на запуск команды; `true` — выполнять. */
   confirm(command: string): Promise<boolean>;
+  /** Спросить разрешение на действие git (коммит, отправка, ветка, откат). */
+  confirmGit(action: string): Promise<boolean>;
 }
 
 export function createCommandApproval(host: ApprovalHost): CommandApproval {
-  function confirm(command: string): Promise<boolean> {
+  /** Общая карточка: рисуем, ждём нажатия, отдаём ответ обещанием. */
+  function show(request: ApprovalRequest): Promise<boolean> {
     const block = h('div', { class: 'approval' });
-    block.appendChild(
-      h('div', { class: 'approval-head' }, svgIcon('warning', 13), h('span', {}, 'Ассистент просит выполнить команду')),
-    );
-    block.appendChild(h('pre', { class: 'approval-command' }, command));
-    block.appendChild(h('div', { class: 'field-hint' }, 'Команда выполнится в папке проекта от вашего имени.'));
+    block.appendChild(h('div', { class: 'approval-head' }, svgIcon('warning', 13), h('span', {}, request.title)));
+    block.appendChild(h('pre', { class: 'approval-command' }, request.body));
+    block.appendChild(h('div', { class: 'field-hint' }, request.hint));
 
     const status = h('span', { class: 'approval-status' });
     let settle: (allowed: boolean) => void = () => undefined;
@@ -205,7 +220,7 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
       settle = resolve;
     });
 
-    /** Решение принято — команда и подсказка больше не нужны: остаётся строка статуса. */
+    /** Решение принято — тело и подсказка больше не нужны: остаётся строка статуса. */
     function finish(allowed: boolean, note: string): void {
       unregister();
       block.classList.add('decision-done');
@@ -213,8 +228,8 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
         h(
           'div',
           { class: 'decision-line' },
-          svgIcon('terminal', 12),
-          h('span', {}, 'Выполняется скрипт'),
+          svgIcon(request.icon, 12),
+          h('span', {}, request.done),
           note ? h('span', { class: 'decision-status' }, note) : null,
         ),
       );
@@ -242,5 +257,22 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
     return decision;
   }
 
-  return { confirm };
+  return {
+    confirm: (command) =>
+      show({
+        title: 'Ассистент просит выполнить команду',
+        body: command,
+        hint: 'Команда выполнится в папке проекта от вашего имени.',
+        done: 'Выполняется скрипт',
+        icon: 'terminal',
+      }),
+    confirmGit: (action) =>
+      show({
+        title: 'Ассистент просит действие git',
+        body: action,
+        hint: 'Действие изменит репозиторий в папке проекта.',
+        done: 'Действие git',
+        icon: 'branch',
+      }),
+  };
 }

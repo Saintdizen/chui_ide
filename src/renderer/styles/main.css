@@ -4759,6 +4759,15 @@ textarea {
   margin-left: auto;
 }
 
+/* Расхождение с удалённой веткой: ↑ уехало, ↓ не подтянуто. Держим у кнопок синхронизации. */
+.sc-sync-state {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+}
+
 .sc-commit-box {
   display: flex;
   flex: 0 0 auto;

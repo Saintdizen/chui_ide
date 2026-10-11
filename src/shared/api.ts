@@ -316,6 +316,24 @@ export interface GitCommitInfo {
   summary: string;
 }
 
+/** Удалённый репозиторий: как он назван в `git remote` и куда ведут адреса. */
+export interface GitRemote {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string;
+}
+
+/**
+ * Итог операции с внешним репозиторием (fetch/pull/push). Сбой не бросаем: сеть,
+ * авторизация и конфликты — обычные ответы, а не исключения, поэтому `ok` и текст
+ * от git едут вместе. Свежий статус — рядом: после операции состояние изменилось.
+ */
+export interface GitNetworkResult {
+  ok: boolean;
+  message: string;
+  status: GitStatus;
+}
+
 /** Строка в списке недавних: путь, имя и признак того, что папка ещё существует. */
 export interface RecentProject {
   path: string;
@@ -1071,6 +1089,15 @@ export interface ConfirmCommandHostResult {
   allowed: boolean;
 }
 
+/** Аргументы `ai.confirmGit`: действие git, которое просит выполнить агент. */
+export interface ConfirmGitHostParams {
+  action: string;
+}
+
+export interface ConfirmGitHostResult {
+  allowed: boolean;
+}
+
 /** Одна пометка языка: ошибка, предупреждение, подсказка. */
 export interface DiagnosticItem {
   path: string;
@@ -1110,6 +1137,7 @@ export interface OpenFileHostResult {
 export interface HostMethods {
   'ai.applyEdits': { params: ApplyEditsHostParams; result: ApplyEditsHostResult };
   'ai.confirmCommand': { params: ConfirmCommandHostParams; result: ConfirmCommandHostResult };
+  'ai.confirmGit': { params: ConfirmGitHostParams; result: ConfirmGitHostResult };
   /** Пометки языка живут в Monaco, то есть в renderer. */
   'ai.getDiagnostics': { params: DiagnosticsHostParams; result: DiagnosticsHostResult };
   /** Показать файл в редакторе: открытие вкладки — тоже дело renderer. */
@@ -1223,6 +1251,10 @@ export interface ChuiMethods {
   'git.diff': { params: { path: string; staged?: boolean }; result: GitDiff };
   'git.branches': { params: void; result: GitBranch[] };
   'git.checkout': { params: { name: string; create?: boolean }; result: GitStatus };
+  'git.remotes': { params: void; result: GitRemote[] };
+  'git.fetch': { params: void; result: GitNetworkResult };
+  'git.pull': { params: void; result: GitNetworkResult };
+  'git.push': { params: { setUpstream?: boolean; force?: boolean }; result: GitNetworkResult };
   'git.clone': { params: { url: string; directory: string }; result: { path: string } };
 
   'terminal.create': { params: TerminalCreateOptions; result: TerminalSession };

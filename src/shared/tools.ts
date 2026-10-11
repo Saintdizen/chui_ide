@@ -35,6 +35,14 @@ export type AgentToolName =
   | 'git_status'
   | 'git_diff'
   | 'git_log'
+  | 'git_stage'
+  | 'git_unstage'
+  | 'git_commit'
+  | 'git_checkout'
+  | 'git_discard'
+  | 'git_fetch'
+  | 'git_pull'
+  | 'git_push'
   | 'open_file'
   | 'terminal_list'
   | 'terminal_start'
@@ -411,6 +419,123 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         limit: { type: 'number', description: 'Сколько последних коммитов (по умолчанию 20, максимум 100).' },
         path: { type: 'string', description: 'Ограничить историю одним файлом (абсолютный путь).' },
+      },
+    },
+  },
+  {
+    name: 'git_stage',
+    side: 'main',
+    description:
+      'Проиндексировать файлы (git add). Пути абсолютные. Проиндексированное попадёт ' +
+      'в следующий коммит. Удаления тоже индексируются.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          description: 'Абсолютные пути файлов или папок.',
+          items: { type: 'string', description: 'Путь.' },
+        },
+      },
+      required: ['paths'],
+    },
+  },
+  {
+    name: 'git_unstage',
+    side: 'main',
+    description: 'Убрать файлы из индекса (git restore --staged). Правки в рабочем дереве остаются.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          description: 'Абсолютные пути файлов или папок.',
+          items: { type: 'string', description: 'Путь.' },
+        },
+      },
+      required: ['paths'],
+    },
+  },
+  {
+    name: 'git_commit',
+    side: 'main',
+    description:
+      'Закоммитить проиндексированное. С путями коммитит только их. Сообщение — одна ' +
+      'осмысленная строка о том, что и зачем изменено. Перед коммитом посмотри git_status ' +
+      'и git_diff: в коммит должно уйти то, что задумано.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'Сообщение коммита.' },
+        paths: {
+          type: 'array',
+          description: 'Если задано — коммитить только эти пути (абсолютные).',
+          items: { type: 'string', description: 'Путь.' },
+        },
+      },
+      required: ['message'],
+    },
+  },
+  {
+    name: 'git_checkout',
+    side: 'main',
+    description:
+      'Переключить ветку или создать новую. Переключение меняет файлы на диске под ' +
+      'содержимое ветки; при незакоммиченных правках git может отказать — это его защита.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Имя ветки.' },
+        create: { type: 'boolean', description: 'true — создать ветку и переключиться на неё.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'git_discard',
+    side: 'main',
+    description:
+      'Откатить правки: отслеживаемые файлы — к последнему коммиту, новые — в корзину. ' +
+      'Необратимо: незакоммиченная работа будет потеряна. Вызывай только по явной просьбе.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          description: 'Абсолютные пути файлов.',
+          items: { type: 'string', description: 'Путь.' },
+        },
+      },
+      required: ['paths'],
+    },
+  },
+  {
+    name: 'git_fetch',
+    side: 'main',
+    description:
+      'Забрать изменения из удалённого репозитория, не трогая рабочее дерево. Полезно, чтобы ' +
+      'сверить локальное с удалённым перед работой. Сеть может быть недоступна — об этом будет ответ.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'git_pull',
+    side: 'main',
+    description:
+      'Влить изменения из удалённого репозитория в текущую ветку. При расхождении путей git ' +
+      'может сообщить о конфликте — тогда разбирай его вручную, а не повторяй pull.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'git_push',
+    side: 'main',
+    description:
+      'Отправить коммиты в удалённый репозиторий. При первой отправке ветки upstream ставится ' +
+      'сам (origin). `force` шлёт принудительно через `--force-with-lease` — только по явной просьбе.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        setUpstream: { type: 'boolean', description: 'true — привязать ветку к origin (git push -u).' },
+        force: { type: 'boolean', description: 'true — принудительно (--force-with-lease).' },
       },
     },
   },

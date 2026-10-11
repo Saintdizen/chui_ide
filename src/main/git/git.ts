@@ -10,6 +10,8 @@ import {
   type GitCommitInfo,
   type GitDiff,
   type GitFileStatus,
+  type GitNetworkResult,
+  type GitRemote,
   type GitRepository,
   type GitStatus,
 } from '../../shared/api';
@@ -18,6 +20,11 @@ import { RpcFailure } from '../ipc/router';
 const GIT_TIMEOUT_MS = 20_000;
 /** Клонирование зависит от сети: здесь ограничение по времени много больше. */
 const CLONE_TIMEOUT_MS = 10 * 60_000;
+/**
+ * Сетевые операции (fetch/pull/push) тоже ждут сеть, но не так долго, как полный
+ * клон: обычный fetch укладывается в секунды, а зависший лучше прервать раньше.
+ */
+const NETWORK_TIMEOUT_MS = 3 * 60_000;
 const MAX_BUFFER = 8 * 1024 * 1024;
 /** Размер файла, выше которого diff не строим: сравнение такого в редакторе бессмысленно. */
 const MAX_DIFF_BYTES = 2 * 1024 * 1024;
@@ -239,6 +246,64 @@ export class GitService {
   }
 
   /**
+   * Удалённые репозитории: имя и адреса. Из `git remote -v` собираем карту по
+   * имени — одна строка на `(fetch)`, одна на `(push)`.
+   */
+  async remotes(): Promise<GitRemote[]> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) return [];
+
+    const result = await this.exec(['remote', '-v'], repoRoot, { allowFailure: true });
+    const byName = new Map<string, GitRemote>();
+    for (const line of result.stdout.split('\n')) {
+      // Формат: `origin\thttps://… (fetch)`. Пробелы в адресе недопустимы, поэтому хвост режем по нему.
+      const match = /^(\S+)\s+(\S+)\s+\((fetch|push)\)$/.exec(line.trim());
+      if (!match) continue;
+      const name = match[1]!;
+      const url = match[2]!;
+      const known = byName.get(name) ?? { name, fetchUrl: '', pushUrl: '' };
+      if (match[3] === 'fetch') known.fetchUrl = url;
+      else known.pushUrl = url;
+      byName.set(name, known);
+    }
+    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Забрать изменения из удалённого репозитория, не трогая рабочее дерево. */
+  async fetch(): Promise<GitNetworkResult> {
+    return this.network(['fetch', '--all', '--prune']);
+  }
+
+  /** Влить изменения из удалённого репозитория в текущую ветку. */
+  async pull(): Promise<GitNetworkResult> {
+    return this.network(['pull', '--no-edit']);
+  }
+
+  /**
+   * Отправить коммиты в удалённый репозиторий.
+   *
+   * Первая отправка ветки ставит upstream (`-u origin <ветка>`): без него
+   * следующий `push` и `pull` не знают, куда идут. Принудительную отправку делаем
+   * через `--force-with-lease`, а не `--force`: она не затрёт чужие коммиты,
+   * если удалённая ветка уехала вперёд, — то есть страхует от чужой работы.
+   */
+  async push(options: { setUpstream?: boolean; force?: boolean } = {}): Promise<GitNetworkResult> {
+    const status = await this.status();
+    const repoRoot = status.repository?.root;
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    const branch = status.repository?.branch;
+    if (!branch) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, 'HEAD оторван (detached): нечего отправлять');
+    }
+
+    const args = ['push'];
+    if (options.force) args.push('--force-with-lease');
+    if (options.setUpstream || !(await this.hasUpstream(repoRoot))) args.push('-u', 'origin', branch);
+    return this.network(args);
+  }
+
+  /**
    * Клонирование в новую папку. Прогресс git пишет в stderr, поэтому нужен
    * поток, а не буферизованный вызов: иначе пользователь видит только тишину.
    */
@@ -263,6 +328,31 @@ export class GitService {
   }
 
   /* ── внутреннее ────────────────────────────────────────────────────────── */
+
+  /**
+   * Сетевая операция git: запуск, разбор итога и свежий статус. Сбой (нет remote,
+   * отказ авторизации, конфликт слияния) — не исключение, а ответ: `ok: false` и
+   * текст от git. Ожидание много больше обычного — здесь ждут сеть.
+   */
+  private async network(args: string[]): Promise<GitNetworkResult> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    const result = await this.exec(args, repoRoot, { allowFailure: true, timeout: NETWORK_TIMEOUT_MS });
+    // У push/fetch итог идёт в stderr, у pull — в stdout: берём то, что непусто.
+    const text = (result.stderr.trim() || result.stdout.trim()).trim();
+    const message = text || `git ${args[0]}: выполнено`;
+    const status = await this.refresh();
+    return { ok: result.ok, message, status };
+  }
+
+  /** Настроен ли upstream у текущей ветки: без него `push`/`pull` не знают пары. */
+  private async hasUpstream(repoRoot: string): Promise<boolean> {
+    const result = await this.exec(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoRoot, {
+      allowFailure: true,
+    });
+    return result.ok && result.stdout.trim() !== '';
+  }
 
   private requireRoot(): string {
     const root = this.root();
@@ -366,7 +456,11 @@ export class GitService {
     });
   }
 
-  private exec(args: string[], cwd: string, options: { allowFailure?: boolean } = {}): Promise<GitResult> {
+  private exec(
+    args: string[],
+    cwd: string,
+    options: { allowFailure?: boolean; timeout?: number } = {},
+  ): Promise<GitResult> {
     return new Promise((resolve, reject) => {
       execFile(
         'git',
@@ -374,7 +468,7 @@ export class GitService {
         ['--no-optional-locks', '-c', 'core.quotepath=false', ...args],
         {
           cwd,
-          timeout: GIT_TIMEOUT_MS,
+          timeout: options.timeout ?? GIT_TIMEOUT_MS,
           maxBuffer: MAX_BUFFER,
           windowsHide: true,
           env: {

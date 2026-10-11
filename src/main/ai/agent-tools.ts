@@ -4,6 +4,8 @@ import type {
   DiagnosticItem,
   DiagnosticsHostResult,
   DirEntry,
+  GitCommitInfo,
+  GitNetworkResult,
   GitStatus,
   TerminalCreateOptions,
   TerminalSession,
@@ -52,6 +54,16 @@ export interface GitTools {
   diffText(path: string, staged?: boolean): Promise<string>;
   /** История коммитов текстом: hash, дата, автор, заголовок. */
   logText(limit?: number, path?: string): Promise<string>;
+  /** Записи: индексирование и коммит меняют состояние репозитория. */
+  stage(paths: string[]): Promise<GitStatus>;
+  unstage(paths: string[]): Promise<GitStatus>;
+  commit(message: string, paths?: string[]): Promise<GitCommitInfo>;
+  checkout(name: string, create?: boolean): Promise<GitStatus>;
+  discard(paths: string[]): Promise<GitStatus>;
+  /** Сеть: забрать, влить и отправить коммиты. */
+  fetch(): Promise<GitNetworkResult>;
+  pull(): Promise<GitNetworkResult>;
+  push(options?: { setUpstream?: boolean; force?: boolean }): Promise<GitNetworkResult>;
 }
 
 /**
@@ -132,6 +144,8 @@ export interface ToolContext {
   applyEdits?(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Спросить у пользователя разрешение на запуск команды. */
   confirmCommand?(command: string): Promise<boolean>;
+  /** Спросить разрешение на действие git (коммит, отправка, откат). */
+  confirmGit?(action: string): Promise<boolean>;
   /** Пометки языка из редактора. */
   diagnostics?(path?: string): Promise<DiagnosticsHostResult>;
   /** Git рабочей папки: нужен инструментам git_status/git_diff. */
@@ -259,6 +273,22 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await gitDiff(ctx, parsed.value);
       case 'git_log':
         return await gitLog(ctx, parsed.value);
+      case 'git_stage':
+        return await gitStage(ctx, parsed.value);
+      case 'git_unstage':
+        return await gitUnstage(ctx, parsed.value);
+      case 'git_commit':
+        return await gitCommit(ctx, parsed.value);
+      case 'git_checkout':
+        return await gitCheckout(ctx, parsed.value);
+      case 'git_discard':
+        return await gitDiscard(ctx, parsed.value);
+      case 'git_fetch':
+        return await gitNetwork(ctx, 'fetch');
+      case 'git_pull':
+        return await gitNetwork(ctx, 'pull');
+      case 'git_push':
+        return await gitPush(ctx, parsed.value);
       case 'open_file':
         return await openFile(ctx, parsed.value);
       case 'terminal_list':
@@ -1067,6 +1097,166 @@ async function gitDiff(ctx: ToolContext, args: Record<string, unknown>): Promise
 
   const { text } = truncate(diff);
   return { ok: true, summary: `diff ${rel}${staged ? ' (индекс)' : ''}`, detail: text };
+}
+
+/* ── git: правки репозитория ────────────────────────────────────────────── */
+
+/**
+ * Действия git, которые меняют состояние репозитория. В обычном режиме агент
+ * спрашивает на каждое; при полном доступе — только на эти: откат теряет работу
+ * безвозвратно, переключение ветки переписывает файлы, отправка и вливание
+ * затрагивают удалённый репозиторий и чужие коммиты.
+ */
+const DANGEROUS_GIT_ACTIONS = new Set(['git_discard', 'git_push', 'git_pull', 'git_checkout']);
+
+/** Тот же уговор, что у команд: обычный режим спрашивает всегда, полный — только за опасное. */
+function needsGitConfirmation(ctx: ToolContext, name: string): boolean {
+  if (!ctx.allowAll) return true;
+  return ctx.confirmDangerous === true && DANGEROUS_GIT_ACTIONS.has(name);
+}
+
+/** Пути аргумента `paths`, проверенные на принадлежность рабочей папке (без обращения к диску). */
+function gitPaths(ctx: ToolContext, args: Record<string, unknown>): string[] {
+  const value = args.paths;
+  if (!Array.isArray(value)) throw new Error('Не задан аргумент «paths»');
+  const root = ctx.workspace.rootPath();
+  if (!root) throw new Error('Рабочая папка не открыта');
+
+  const paths: string[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || !item.trim()) continue;
+    // Относительный путь (как в выводе `git status`) считаем от корня проекта,
+    // а не от рабочего каталога main: агенту привычнее пути из своего проекта.
+    const absolute = path.isAbsolute(item) ? path.resolve(item) : path.resolve(root, item);
+    const rel = path.relative(root, absolute);
+    // Граница та же, что у чтения и правок: файл должен лежать внутри проекта.
+    // Диск не читаем намеренно — откат бывает и у удалённого файла.
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(`Путь вне рабочей папки: ${item}`);
+    }
+    paths.push(absolute);
+  }
+  if (paths.length === 0) throw new Error('Не задан аргумент «paths»');
+  return paths;
+}
+
+/**
+ * Спросить разрешение на действие git. Нет моста подтверждений — действия git
+ * агенту недоступны (такие инструменты и не предлагаются: см. `canRun`).
+ */
+async function permitGit(ctx: ToolContext, name: string, action: string): Promise<ToolOutcome | null> {
+  if (!ctx.confirmGit) return { ok: false, summary: 'Действия git недоступны: окно редактора не подключено' };
+  if (!needsGitConfirmation(ctx, name)) return null;
+  const allowed = await ctx.confirmGit(action);
+  if (allowed) return null;
+  return {
+    ok: false,
+    summary: 'Пользователь отклонил действие git',
+    detail: 'Пользователь не разрешил это действие git. Не повторяй его — предложи другой ход.',
+  };
+}
+
+async function gitStage(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
+  const paths = gitPaths(ctx, args);
+  const denied = await permitGit(ctx, 'git_stage', `git add ${paths.length} ${pluralFiles(paths.length)}`);
+  if (denied) return denied;
+
+  await ctx.git.stage(paths);
+  return {
+    ok: true,
+    summary: `проиндексировано: ${paths.length}`,
+    detail: paths.map((target) => relative(target, ctx.workspace.rootPath())).join('\n'),
+  };
+}
+
+async function gitUnstage(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
+  const paths = gitPaths(ctx, args);
+  const denied = await permitGit(ctx, 'git_unstage', `git reset -- ${paths.length} ${pluralFiles(paths.length)}`);
+  if (denied) return denied;
+
+  await ctx.git.unstage(paths);
+  return {
+    ok: true,
+    summary: `убрано из индекса: ${paths.length}`,
+    detail: paths.map((target) => relative(target, ctx.workspace.rootPath())).join('\n'),
+  };
+}
+
+async function gitCommit(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
+
+  const message = requireString(args, 'message').trim();
+  const paths = Array.isArray(args.paths) ? gitPaths(ctx, args) : undefined;
+  const denied = await permitGit(ctx, 'git_commit', `git commit -m "${message}"`);
+  if (denied) return denied;
+
+  const info: GitCommitInfo = await ctx.git.commit(message, paths);
+  return { ok: true, summary: `коммит ${info.hash}`, detail: info.summary };
+}
+
+async function gitCheckout(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
+
+  const name = requireString(args, 'name').trim();
+  const create = optionalBoolean(args, 'create') ?? false;
+  const denied = await permitGit(ctx, 'git_checkout', create ? `git checkout -b ${name}` : `git checkout ${name}`);
+  if (denied) return denied;
+
+  const status = await ctx.git.checkout(name, create);
+  return {
+    ok: true,
+    summary: `${create ? 'создана и текущая' : 'текущая'} ветка: ${status.repository?.branch ?? name}`,
+    detail: `git ${create ? 'checkout -b' : 'checkout'} ${name}`,
+  };
+}
+
+async function gitDiscard(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
+  const paths = gitPaths(ctx, args);
+  const denied = await permitGit(ctx, 'git_discard', `git restore / вернуть в корзину: ${paths.length}`);
+  if (denied) return denied;
+
+  await ctx.git.discard(paths);
+  return {
+    ok: true,
+    summary: `откачено файлов: ${paths.length}`,
+    detail: 'Правки отменены: отслеживаемые файлы вернулись к последнему коммиту, новые удалены.',
+  };
+}
+
+/** Общее для fetch/pull: обе — сетевые операции без пути, разница только в команде. */
+async function gitNetwork(ctx: ToolContext, kind: 'fetch' | 'pull'): Promise<ToolOutcome> {
+  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
+  const name = kind === 'fetch' ? 'git_fetch' : 'git_pull';
+  const denied = await permitGit(ctx, name, `git ${kind}`);
+  if (denied) return denied;
+
+  const result: GitNetworkResult = kind === 'fetch' ? await ctx.git.fetch() : await ctx.git.pull();
+  return { ok: result.ok, summary: `git ${kind}: ${result.ok ? 'готово' : 'сбой'}`, detail: result.message };
+}
+
+async function gitPush(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
+
+  const setUpstream = optionalBoolean(args, 'setUpstream') ?? false;
+  const force = optionalBoolean(args, 'force') ?? false;
+  const action = `git push${force ? ' --force-with-lease' : ''}${setUpstream ? ' -u origin' : ''}`;
+  const denied = await permitGit(ctx, 'git_push', action);
+  if (denied) return denied;
+
+  const result: GitNetworkResult = await ctx.git.push({ setUpstream, force });
+  return { ok: result.ok, summary: `git push: ${result.ok ? 'отправлено' : 'сбой'}`, detail: result.message };
+}
+
+/** «1 файл», «2 файла», «5 файлов» — для подписи действия в подтверждении. */
+function pluralFiles(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'файл';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'файла';
+  return 'файлов';
 }
 
 /* ── открытие файла в редакторе ─────────────────────────────────────────── */

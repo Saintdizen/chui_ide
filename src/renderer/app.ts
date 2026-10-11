@@ -1516,6 +1516,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Путь приходит аргументом команды: так её можно вызвать из палитры и от ассистента. */
   const asPath = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
 
+  /** Первая содержательная строка ответа git — для уведомления: целиком оно не влезет. */
+  const firstLine = (text: string): string =>
+    text
+      .split('\n')
+      .find((line) => line.trim())
+      ?.trim() ?? text;
+
   define({ id: 'git.refresh', title: 'Обновить состояние репозитория', category: 'Git' }, async () => {
     await git.refresh();
   });
@@ -1605,6 +1612,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     await git.checkout(branch, true);
     showToast(`Ветка создана: ${branch}`);
   });
+
+  // Синхронизация с удалённым репозиторием. Нажатие кнопки — уже решение человека,
+  // поэтому отдельного вопроса не задаём; об исходе говорит уведомление, а провал
+  // (нет remote, отказ авторизации, конфликт) приходит текстом от git.
+  define(
+    { id: 'git.fetch', title: 'Забрать изменения (fetch)', category: 'Git', enabled: () => git.isRepository },
+    async () => {
+      const result = await git.fetch();
+      showToast(`fetch: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
+    },
+  );
+
+  define(
+    { id: 'git.pull', title: 'Влить изменения (pull)', category: 'Git', enabled: () => git.isRepository },
+    async () => {
+      const result = await git.pull();
+      showToast(`pull: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
+    },
+  );
+
+  define(
+    { id: 'git.push', title: 'Отправить коммиты (push)', category: 'Git', enabled: () => git.isRepository },
+    async () => {
+      const result = await git.push();
+      showToast(`push: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
+    },
+  );
 
   define(
     {

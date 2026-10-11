@@ -43,6 +43,14 @@ describe('набор инструментов агента', () => {
       'git_status',
       'git_diff',
       'git_log',
+      'git_stage',
+      'git_unstage',
+      'git_commit',
+      'git_checkout',
+      'git_discard',
+      'git_fetch',
+      'git_pull',
+      'git_push',
       'open_file',
       'terminal_list',
       'terminal_start',
@@ -112,6 +120,36 @@ describe('git_log', () => {
     const tool = byName.get('git_log')!;
     expect(tool.side).toBe('main');
     expect(Object.keys(tool.inputSchema.properties)).toEqual(['limit', 'path']);
+  });
+});
+
+describe('git-записи', () => {
+  it('все меняют репозиторий и живут в main', () => {
+    const writes: AgentToolName[] = [
+      'git_stage',
+      'git_unstage',
+      'git_commit',
+      'git_checkout',
+      'git_discard',
+      'git_fetch',
+      'git_pull',
+      'git_push',
+    ];
+    for (const name of writes) {
+      const tool = byName.get(name)!;
+      expect(tool.side).toBe('main');
+    }
+  });
+
+  it('git_commit требует сообщение, git_stage — пути', () => {
+    expect(byName.get('git_commit')!.inputSchema.required).toEqual(['message']);
+    expect(byName.get('git_stage')!.inputSchema.required).toEqual(['paths']);
+  });
+
+  it('git_fetch и git_pull без аргументов, git_push — только флаги', () => {
+    expect(byName.get('git_fetch')!.inputSchema.required).toBeUndefined();
+    expect(byName.get('git_pull')!.inputSchema.required).toBeUndefined();
+    expect(Object.keys(byName.get('git_push')!.inputSchema.properties)).toEqual(['setUpstream', 'force']);
   });
 });
 

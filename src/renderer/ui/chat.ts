@@ -1646,6 +1646,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     allowed: await commandApproval.confirm(params.command),
   }));
 
+  // Действия git спрашивают тем же способом, что и команды: карточка в ленте.
+  deps.host.handle('ai.confirmGit', async (params) => ({
+    allowed: await commandApproval.confirmGit(params.action),
+  }));
+
   deps.host.handle('ai.applyEdits', async (params) => applyAgentEdits(params));
 
   // Пометки языка живут в Monaco, поэтому их отдаёт renderer.

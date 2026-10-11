@@ -93,6 +93,21 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     svgIcon('plus', 14),
   );
 
+  /** Расхождение с удалённой веткой: сколько коммитов уехало и сколько не подтянуто. */
+  const syncState = h('span', { class: 'sc-sync-state', hidden: true });
+
+  /** Кнопка синхронизации: одна из трёх (fetch, pull, push) — различаются иконкой и командой. */
+  const syncButton = (title: string, icon: IconName, command: string): HTMLButtonElement =>
+    h(
+      'button',
+      { class: 'icon-btn', type: 'button', title, onClick: () => void deps.commands.execute(command) },
+      svgIcon(icon, 14),
+    );
+
+  const fetchButton = syncButton('Забрать изменения (git fetch)', 'refresh', 'git.fetch');
+  const pullButton = syncButton('Влить изменения из удалённого (git pull)', 'arrowDown', 'git.pull');
+  const pushButton = syncButton('Отправить коммиты (git push)', 'arrowUp', 'git.push');
+
   const element = h(
     'div',
     { class: 'source-control' },
@@ -102,9 +117,13 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       svgIcon('branch', 14),
       branchName,
       branchSelect.element,
+      syncState,
       h(
         'div',
         { class: 'panel-actions' },
+        fetchButton,
+        pullButton,
+        pushButton,
         newBranchButton,
         h(
           'button',
@@ -284,6 +303,28 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     branchSelect.setHidden(branches.length === 0);
   };
 
+  // Есть ли remote: без него push/pull/fetch бессмысленны, и кнопки только мешают.
+  // Список спрашиваем один раз на репозиторий — он не меняется от правок в дереве.
+  let remotesFor: string | null = null;
+  let hasRemote = false;
+  const syncRemotes = async (isRepo: boolean): Promise<void> => {
+    const root = deps.git.repository?.root ?? null;
+    if (!isRepo || !root) {
+      setSyncVisible(false);
+      return;
+    }
+    if (remotesFor !== root) {
+      remotesFor = root;
+      hasRemote = (await deps.git.remotes()).length > 0;
+    }
+    setSyncVisible(hasRemote);
+  };
+  const setSyncVisible = (visible: boolean): void => {
+    fetchButton.hidden = !visible;
+    pullButton.hidden = !visible;
+    pushButton.hidden = !visible;
+  };
+
   const render = (): void => {
     const repository = deps.git.repository;
     const isRepo = repository !== null;
@@ -293,6 +334,19 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       : 'не репозиторий';
     branchSelect.setHidden(!isRepo);
     newBranchButton.hidden = !isRepo;
+    // Синхронизация имеет смысл только в репозитории и только когда есть remote.
+    void syncRemotes(isRepo);
+    syncState.hidden = !isRepo || (repository?.ahead === 0 && repository?.behind === 0);
+    if (isRepo && repository) {
+      const parts: string[] = [];
+      if (repository.ahead > 0) parts.push(`↑${repository.ahead}`);
+      if (repository.behind > 0) parts.push(`↓${repository.behind}`);
+      syncState.textContent = parts.join(' ');
+      syncState.title =
+        repository.ahead || repository.behind
+          ? `Локально впереди на ${repository.ahead}, отстаёт на ${repository.behind}`
+          : '';
+    }
     if (!isRepo) closeBranchInput();
 
     const staged = deps.git.staged;

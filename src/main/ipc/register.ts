@@ -382,6 +382,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.diff', (params) => deps.git.diff(params.path, params.staged));
   router.register('git.branches', () => deps.git.branches());
   router.register('git.checkout', (params) => deps.git.checkout(params.name, params.create));
+  router.register('git.remotes', () => deps.git.remotes());
+  router.register('git.fetch', () => deps.git.fetch());
+  router.register('git.pull', () => deps.git.pull());
+  router.register('git.push', (params) => deps.git.push(params));
 
   router.register('git.clone', (params, ctx) =>
     deps.git.clone(params.url, params.directory, (line) => ctx.emit(CloneEvent.Progress, { line })),
@@ -534,6 +538,8 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
           deps.host
             .request(ctx.sender, 'ai.confirmCommand', { command }, ctx.signal)
             .then((decision) => decision.allowed),
+        confirmGit: (action) =>
+          deps.host.request(ctx.sender, 'ai.confirmGit', { action }, ctx.signal).then((decision) => decision.allowed),
         getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
         openFile: (path, line, column) =>
           deps.host.request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal).then((result) => result.ok),
