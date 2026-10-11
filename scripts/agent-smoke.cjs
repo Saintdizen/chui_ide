@@ -18,6 +18,8 @@
  * 12. режим «План»: только чтение, изменения не предлагаются и не исполняются;
  * 13. права доступа меняются на лету — агент подхватывает их во время ответа.
  *
+ * 14. подзадача (task): отдельный агент со своим контекстом — его чтения не растут в беседе.
+ *
  *   npm run smoke:agent
  *
  * Нужен собранный main (npm run build:main). Сеть и API-ключ не требуются.
@@ -74,6 +76,9 @@ let requestTwice = false;
 /** Если true — инструмент вызывается два шага подряд (проверка смены прав на лету). */
 let requestTwoCalls = false;
 let turn = 0;
+/** Подзадача (task): пока идёт сценарий, сервер отвечает ей по другой программе. */
+let subagentScript = false;
+let subTurn = 0;
 /** Тела запросов к провайдеру: по ним видно, какие инструменты ему предложили. */
 const bodies = [];
 
@@ -142,6 +147,22 @@ app.whenReady().then(async () => {
 
     const body = await readBody(req);
     bodies.push(body);
+
+    // Подзадача (task): её запросы отличаются системной инструкцией с «(sub-agent)».
+    // Отвечаем своим сценарием «прочитать файл → отчёт», чтобы основной агент
+    // получил готовую выжимку, не видя самого чтения.
+    const isSubagent = (body.messages ?? []).some(
+      (message) => message.role === 'system' && String(message.content ?? '').includes('(sub-agent)'),
+    );
+    if (subagentScript && isSubagent) {
+      if (subTurn === 0) {
+        subTurn += 1;
+        sendSse(res, toolCallSse('read_file', { path: file }));
+        return;
+      }
+      sendSse(res, textSse(`Отчёт подзадачи: нашёл ${MARKER} в notes.txt`));
+      return;
+    }
 
     // Первый шаг — вызов инструмента; второй — текст (результат уже в диалоге).
     // requestTwice заставляет сервер повторить тот же вызов и на втором шаге.
@@ -924,6 +945,50 @@ app.whenReady().then(async () => {
       rejected = true;
     }
     check('не изображение в data-URL отклонено', rejected && rejectedBodies === 0);
+    /* 14. подзадача (task): отдельный агент со своим контекстом.
+       Основной агент просит task; подзадача читает файл и отвечает отчётом,
+       после чего основной агент отвечает. Чтения подзадачи в беседу не попадают. */
+    subagentScript = true;
+    subTurn = 0;
+    requested = { name: 'task', args: { description: 'найти маркер', prompt: 'Найди маркер в заметках проекта' } };
+    run = await chat(undefined);
+    subagentScript = false;
+    check('task предложен модели', run.toolNames.includes('task'), run.toolNames);
+    check('подзадача исполнилась', run.results[0]?.ok === true, run.results[0]?.summary);
+    check(
+      'отчёт подзадачи ушёл основному агенту',
+      sentToModel(run.bodies[run.bodies.length - 1]).includes('Отчёт подзадачи'),
+      sentToModel(run.bodies[run.bodies.length - 1]).slice(0, 120),
+    );
+    const subBody = run.bodies.find((body) =>
+      (body.messages ?? []).some(
+        (message) => message.role === 'system' && String(message.content ?? '').includes('(sub-agent)'),
+      ),
+    );
+    const subTools = (subBody?.tools ?? []).map((tool) => tool.function.name);
+    check('подзадача предлагается со своими инструментами чтения', subTools.includes('read_file'), subTools);
+    check('у подзадачи нет самого task — без рекурсии', !subTools.includes('task'), subTools);
+    check(
+      'подзадаче не предлагают инструменты записи',
+      !subTools.includes('apply_edit') && !subTools.includes('run_terminal') && !subTools.includes('create_file'),
+      subTools,
+    );
+    check(
+      'след прогона включает шаги подзадачи',
+      run.done.trace?.steps === 4 && run.done.trace?.toolCalls === 2,
+      JSON.stringify(run.done.trace),
+    );
+    check(
+      'расход подзадачи копится в итог прогона',
+      run.done.trace?.usage?.completionTokens === 14,
+      JSON.stringify(run.done.trace?.usage),
+    );
+    check(
+      'чтения подзадачи не попали в беседу основного агента',
+      !(run.bodies[run.bodies.length - 1]?.messages ?? []).some((message) =>
+        String(message.content ?? '').includes('строка один'),
+      ),
+    );
   } catch (error) {
     failed = true;
     console.error('[chui] исключение:', error);

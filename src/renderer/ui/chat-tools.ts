@@ -33,6 +33,7 @@ const TOOL_LABELS: Record<string, string> = {
   delete_file: 'Удаление',
   move_file: 'Перемещение',
   update_plan: 'План',
+  task: 'Подзадача',
   git_status: 'Состояние git',
   git_diff: 'Diff git',
   git_log: 'История git',
@@ -61,6 +62,7 @@ const TOOL_ICONS: Record<string, IconName> = {
   delete_file: 'trash',
   move_file: 'file',
   update_plan: 'command',
+  task: 'sparkle',
   git_status: 'branch',
   git_diff: 'branch',
   git_log: 'command',
@@ -110,6 +112,7 @@ function summarizeArgs(raw: string): string {
     const value = JSON.parse(raw) as Record<string, unknown>;
     const parts: string[] = [];
     if (typeof value.path === 'string') parts.push(value.path);
+    if (typeof value.description === 'string') parts.push(value.description);
     if (typeof value.from === 'string' && typeof value.to === 'string') parts.push(`${value.from} → ${value.to}`);
     if (typeof value.query === 'string') parts.push(`«${value.query}»`);
     if (typeof value.glob === 'string') parts.push(value.glob);

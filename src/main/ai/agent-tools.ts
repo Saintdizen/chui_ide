@@ -185,6 +185,15 @@ export interface MemoryTools {
   forget(query: string): Promise<{ notes: readonly MemoryNote[]; removed: number }>;
 }
 
+/**
+ * Подзадача (`task`): отдельный агент со своим контекстом. Цикл подзадачи живёт
+ * в `service.ts` — там есть провайдер и модель, которых здесь нет. Сюда приходит
+ * готовый вызов: инструмент остаётся проверяемым без сети и Electron.
+ */
+export interface SubagentRunner {
+  run(params: { description: string; prompt: string }): Promise<ToolOutcome>;
+}
+
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
@@ -223,6 +232,8 @@ export interface ToolContext {
   webSearch?: WebSearchRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
   mcp?: McpRunner;
+  /** Подзадачи (инструмент `task`): запускает service — у него есть провайдер. */
+  subagent?: SubagentRunner;
 }
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
@@ -336,6 +347,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       case 'update_plan':
         // План не исполняется здесь: его показывает service отдельным событием.
         return { ok: true, summary: 'план обновлён' };
+      case 'task':
+        return await task(ctx, parsed.value);
       case 'remember':
         return await remember(ctx, parsed.value);
       case 'forget':
@@ -382,6 +395,23 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
   } catch (error) {
     return { ok: false, summary: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/* ── подзадача (sub-agent) ────────────────────────────────────────────── */
+
+/**
+ * Делегировать подзадачу отдельному агенту со своим контекстом. Цикл подзадачи
+ * живёт в `service.ts` (там провайдер и модель), поэтому здесь — только разбор
+ * аргументов и перевод её отчёта в обычный результат инструмента. Подзадача
+ * видит проект теми же инструментами чтения, а её чтения в беседу не попадают:
+ * до основного агента доезжает только отчёт.
+ */
+async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.subagent) return { ok: false, summary: 'Подзадачи недоступны' };
+
+  const prompt = requireString(args, 'prompt').trim();
+  const description = optionalString(args, 'description')?.trim() || 'подзадача';
+  return ctx.subagent.run({ description, prompt });
 }
 
 /**

@@ -36,6 +36,7 @@ export type AgentToolName =
   | 'delete_file'
   | 'move_file'
   | 'update_plan'
+  | 'task'
   | 'remember'
   | 'forget'
   | 'git_status'
@@ -460,6 +461,26 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['steps'],
+    },
+  },
+  {
+    name: 'task',
+    side: 'main',
+    description:
+      'Делегировать подзадачу отдельному агенту с собственным контекстом. Он исследует проект ' +
+      'инструментами чтения и возвращает краткий отчёт — файлы, строки, вывод команд — а твоя ' +
+      'беседа от его чтений не растёт. Зови, когда нужно перечитать много файлов ради одного ' +
+      'факта: сам он этого в переписку не вываливает.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'Короткое название подзадачи — попадёт в карточку.' },
+        prompt: {
+          type: 'string',
+          description: 'Что именно исследовать: вопрос или задача. Чем конкретнее, тем полезнее отчёт.',
+        },
+      },
+      required: ['prompt'],
     },
   },
   {

@@ -119,6 +119,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'git_blame',
   'open_file',
   'update_plan',
+  'task',
 ]);
 
 /**
@@ -141,10 +142,44 @@ const READ_ONLY_TOOLS = new Set([
   'git_status',
   'git_log',
   'git_blame',
+  // Подзадача тоже только читает — а стоит дорого, поэтому повтор пропускаем.
+  'task',
 ]);
+
+/**
+ * Инструменты подзадачи (`task`): только чтение. Правки и команды остаются за
+ * основным агентом — он показывает ревью и спрашивает пользователя. Так подзадача
+ * выходит дешёвой и безопасной: контекст тратится на чтение, а назад едет выжимка.
+ */
+const SUBAGENT_TOOLS = new Set<string>([
+  'list_dir',
+  'read_file',
+  'read_files',
+  'search',
+  'codebase_search',
+  'find_references',
+  'go_to_definition',
+  'project_map',
+  'file_outline',
+  'run_linter',
+  'find_files',
+  'get_diagnostics',
+  'git_status',
+  'git_log',
+  'git_diff',
+  'git_blame',
+  'web_search',
+]);
+
+/** Шагов подзадаче меньше, чем основному агенту: её дело — собрать факты, а не работать. */
+const SUBAGENT_MAX_STEPS = 16;
+
+/** Потолок отчёта подзадачи: это выжимка для основного агента, а не второй контекст. */
+const SUBAGENT_REPORT_CHARS = 8000;
 
 /** Дописывается в системный промпт, когда агентный режим включён. */
 const AGENT_PROMPT = [
+  'Когда ради одного ответа нужно перечитать много файлов, делегируй это подзадаче (`task`): её чтения твою беседу не раздувают, а назад придёт готовый отчёт.',
   'Работай с проектом инструментами, а не по догадке: назначение и аргументы у каждого инструмента описаны отдельно — читай их.',
   'Устройство проекта видно по карте в начале беседы: не обходи дерево и не читай манифесты, чтобы понять, что это за проект. Подробнее — project_map.',
   'Не выдумывай содержимое файлов: то, чего не знаешь, читай инструментами.',
@@ -183,6 +218,18 @@ const PLAN_PROMPT = [
 const ASK_PROMPT = [
   'Инструменты в этом режиме выключены: они тебе недоступны.',
   'Отвечай обычным текстом и не вызывай инструменты — их вызов не выполнится.',
+].join('\n');
+
+/**
+ * Системная инструкция подзадачи (`task`). Подзадача не видит беседу и не
+ * продолжает её: её единственный результат — отчёт, по которому основной агент
+ * действует, не перечитывая всё сам.
+ */
+const SUBAGENT_PROMPT = [
+  'Ты — подзадача (sub-agent) внутри IDE. У тебя свой контекст: основной агент не видит твоих шагов и получит только твой итоговый отчёт.',
+  'Исследуй проект доступными инструментами чтения и верни КРАТКИЙ, но конкретный отчёт: файлы и номера строк, имена символов, нужные фрагменты, вывод команд — то, по чему можно действовать, не читая всё заново.',
+  'Пиши по делу: что нашёл, где именно (путь:строка) и что это значит. Не пересказывай задание и не извиняйся.',
+  'Инструменты только для чтения: менять проект ты не можешь.',
 ].join('\n');
 
 /**
@@ -493,6 +540,32 @@ export class AiService {
     // останавливается. Правка/команда сбрасывает кэш: состояние могло измениться.
     const executed = new Map<string, ToolOutcome>();
     let stallSteps = 0;
+
+    // Подзадача (`task`): отдельный агент со своим контекстом. Его расход и шаги
+    // прибавляем к прогону — иначе наблюдаемость показала бы только шаги основного
+    // агента, а токены подзадачи выпали бы из итога беседы.
+    toolContext.subagent = {
+      run: async ({ description, prompt }) => {
+        const sub = await this.runSubAgent({
+          description,
+          prompt,
+          providerId: request.providerId,
+          provider,
+          model: request.model,
+          temperature,
+          maxTokens,
+          reasoningEffort,
+          signal,
+          host,
+          context,
+          windowTokens,
+        });
+        runUsage = addUsage(runUsage, sub.usage);
+        runSteps += sub.steps;
+        runToolCalls += sub.toolCalls;
+        return sub.outcome;
+      },
+    };
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
     const coveredReads = new Map<string, Array<{ from: number; to: number }>>();
 
@@ -782,6 +855,164 @@ export class AiService {
         wire = tighter;
       }
     }
+  }
+
+  /**
+   * Подзадача: тот же агентный цикл, но в своём контексте. Основной агент её
+   * шагов не видит — до него доезжает только отчёт, поэтому длинное чтение не
+   * раздувает беседу. Инструменты только для чтения (`SUBAGENT_TOOLS`): правки и
+   * команды остаются за основным агентом, который показывает ревью и спрашивает
+   * пользователя. Расход и число шагов возвращаем наверх — основной прогон
+   * прибавляет их к своим, иначе токены подзадачи выпали бы из итога беседы.
+   */
+  private async runSubAgent(params: {
+    description: string;
+    prompt: string;
+    providerId: string;
+    provider: AiProvider;
+    model: string;
+    temperature: number | undefined;
+    maxTokens: number;
+    reasoningEffort: ReasoningEffort | undefined;
+    signal: AbortSignal;
+    host: ChatHostBridge | undefined;
+    context: string | null;
+    windowTokens: number;
+  }): Promise<{ outcome: ToolOutcome; steps: number; toolCalls: number; usage: ChatUsage }> {
+    const settings = this.settings.get();
+    const compressOutput = settings.ai.compressOutput !== false;
+
+    // Свой контекст: инструкция подзадачи и карта проекта (с памятью), но без
+    // истории беседы. Задание — одно сообщение.
+    const messages: ChatMessage[] = [{ role: 'system', content: SUBAGENT_PROMPT }];
+    if (params.context) messages.push({ role: 'system', content: params.context });
+    messages.push({ role: 'user', content: `Подзадача «${params.description}»:\n\n${params.prompt}` });
+
+    const available = AGENT_TOOLS.filter((tool) => SUBAGENT_TOOLS.has(tool.name) && this.canRun(tool, params.host));
+    const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
+    const toolsTokens = tools ? estimateTokens(JSON.stringify(tools).length) : 0;
+
+    // Контекст исполнения подзадачи: те же сервисы, что у основного агента, но
+    // без правок, подтверждений и памяти — подзадача ничего не меняет.
+    const subContext: ToolContext = {
+      workspace: this.workspace,
+      signal: params.signal,
+      autoApprove: false,
+      allowAll: false,
+      confirmDangerous: true,
+    };
+    if (this.git) subContext.git = this.git;
+    if (this.symbols) subContext.symbols = this.symbols;
+    if (this.linter) subContext.linter = this.linter;
+    const host = params.host;
+    if (host) subContext.diagnostics = (path) => host.getDiagnostics(path);
+    const webSearch = settings.ai.webSearch;
+    if (this.canUseWebSearch(webSearch)) {
+      subContext.webSearch = {
+        search: (query, limit, callSignal) =>
+          searchWeb(
+            query,
+            { provider: webSearch.provider, endpoint: webSearch.endpoint, apiKey: this.settings.resolveWebSearchKey() },
+            limit,
+            callSignal,
+          ).then((hits) => ({ hits, providerLabel: webSearchProviderLabel(webSearch.provider) })),
+      };
+    }
+
+    let steps = 0;
+    let toolCalls = 0;
+    let usage: ChatUsage = {};
+    let report = '';
+    // Тот же предохранитель от зацикливания, что у основного цикла: повторы
+    // чтения не исполняем, а шаг целиком из повторов — повод остановиться.
+    const executed = new Map<string, ToolOutcome>();
+    let stall = 0;
+
+    try {
+      for (let step = 0; step < SUBAGENT_MAX_STEPS; step += 1) {
+        if (params.signal.aborted) break;
+
+        const done = await this.streamStep(params.provider, {
+          model: params.model,
+          messages,
+          tools,
+          temperature: params.temperature,
+          maxTokens: params.maxTokens,
+          reasoningEffort: params.reasoningEffort,
+          signal: params.signal,
+          windowTokens: params.windowTokens,
+          toolsTokens,
+          calibrationKey: `${params.providerId}::${params.model}`,
+          onDelta: () => {},
+          onReasoning: () => {},
+        });
+        steps += 1;
+        if (done.usage) usage = addUsage(usage, done.usage);
+        report = done.text;
+
+        const calls = done.toolCalls ?? [];
+        if (calls.length === 0) break;
+        toolCalls += calls.length;
+        messages.push({ role: 'assistant', content: done.text, toolCalls: calls });
+
+        let didNewWork = false;
+        for (const call of calls) {
+          const key = `${call.name}:${call.arguments}`;
+          let content: string;
+          if (executed.has(key)) {
+            // Результат уже есть выше — не повторяем дорогое чтение.
+            content = `Повтор вызова «${call.name}» пропущен: такой вызов уже был, его результат выше.`;
+          } else {
+            const outcome = await runTool(subContext, call.name, call.arguments);
+            executed.set(key, outcome);
+            didNewWork = true;
+            const result = outcome.ok ? (outcome.detail ?? outcome.summary) : `Ошибка: ${outcome.summary}`;
+            content = compressOutput ? compressToolOutput(result) : result;
+          }
+          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content });
+        }
+
+        stall = didNewWork ? 0 : stall + 1;
+        if (stall >= 2) break;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        outcome: {
+          ok: false,
+          summary: `подзадача «${params.description}» не удалась`,
+          detail: `Сбой подзадачи: ${message}. Сделай сам или переформулируй задание.`,
+        },
+        steps,
+        toolCalls,
+        usage,
+      };
+    }
+
+    const text = report.trim();
+    if (!text) {
+      return {
+        outcome: {
+          ok: false,
+          summary: `подзадача «${params.description}»: пустой отчёт`,
+          detail: 'Подзадача не вернула текст. Сделай сам или переформулируй задание.',
+        },
+        steps,
+        toolCalls,
+        usage,
+      };
+    }
+
+    const clipped =
+      text.length > SUBAGENT_REPORT_CHARS
+        ? `${text.slice(0, SUBAGENT_REPORT_CHARS)}\n… (отчёт подзадачи обрезан)`
+        : text;
+    return {
+      outcome: { ok: true, summary: `подзадача «${params.description}»: готово`, detail: clipped },
+      steps,
+      toolCalls,
+      usage,
+    };
   }
 
   /**
