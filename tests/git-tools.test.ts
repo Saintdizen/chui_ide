@@ -132,10 +132,14 @@ describe('git_blame', () => {
     git.blame.mockResolvedValueOnce([
       { line: 5, hash: 'abc1234', author: 'Alice', date: '2026-01-01', summary: 'fix', text: 'code' },
     ]);
-    const outcome = await runTool(context(git), 'git_blame', `{"path":"${ROOT}/a.ts","startLine":5,"endLine":5}`);
+    // Путь в JSON — через `JSON.stringify`: на Windows обратный слэш в шаблонной
+    // строке дал бы недопустимую escape-последовательность (`\p`) и `JSON.parse`
+    // свалился бы до самого инструмента.
+    const file = path.join(ROOT, 'a.ts');
+    const outcome = await runTool(context(git), 'git_blame', JSON.stringify({ path: file, startLine: 5, endLine: 5 }));
 
     expect(outcome.ok).toBe(true);
-    expect(git.blame).toHaveBeenCalledWith(`${ROOT}/a.ts`, { startLine: 5, endLine: 5 });
+    expect(git.blame).toHaveBeenCalledWith(file, { startLine: 5, endLine: 5 });
     expect(outcome.detail).toContain('Alice');
   });
 });
