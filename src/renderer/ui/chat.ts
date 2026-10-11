@@ -2,6 +2,7 @@ import {
   ChatStreamEvent,
   type ApplyEditsHostParams,
   type ApplyEditsHostResult,
+  type ApplyPatchesHostParams,
   type ChatConversation,
   type ChatDeltaPayload,
   type ChatHistory,
@@ -9,7 +10,8 @@ import {
   type ReasoningEffort,
   type Settings,
 } from '../../shared/api';
-import type { FileEdit } from '../../shared/edits';
+import type { ApplyFailure, FileEdit } from '../../shared/edits';
+import { resolvePatches } from '../../shared/patch';
 import { compactionBudgetChars, contextUsage, splitTranscript } from '../../shared/context-fit';
 import { contextWindow, modelCapabilities } from '../../shared/providers';
 import type { CommandRegistry } from '../core/commands';
@@ -1662,6 +1664,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   deps.host.handle('ai.applyEdits', async (params) => applyAgentEdits(params));
 
+  // Правки по якорю: позиции считаем здесь, потому что только здесь есть текст
+  // документа — в том числе несохранённый. Дальше набор правок идёт тем же путём,
+  // что apply_edit: ревью, undo и панель изменений работают как обычно.
+  deps.host.handle('ai.applyPatches', async (params) => applyAgentPatches(params));
+
   // Пометки языка живут в Monaco, поэтому их отдаёт renderer.
   deps.host.handle('ai.getDiagnostics', async (params) => ({ items: deps.editors.markers(params.path) }));
 
@@ -1717,6 +1724,47 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     renderChanges();
 
     return { rejected: false, result };
+  }
+
+  /**
+   * Правки по якорю: сперва разбираем якоря в позиции по тексту документа, потом
+   * применяем обычным путём. В чём смысл: модель не называет столбцы, поэтому
+   * промах мимо места невозможен по построению. Не сошёлся якорь — файл не
+   * применяется вовсе, и в ответе будет сказано, что именно не нашлось: агент
+   * перечитает файл, а не «поправит» похожее место.
+   */
+  async function applyAgentPatches(params: ApplyPatchesHostParams): Promise<ApplyEditsHostResult> {
+    const edits: FileEdit[] = [];
+    const failed: ApplyFailure[] = [];
+
+    for (const file of params.patches) {
+      const text = await currentText(file.path);
+      if (text === null) {
+        failed.push({ path: file.path, message: 'не удалось прочитать файл — проверь путь' });
+        continue;
+      }
+      const resolved = resolvePatches(text, file.patches);
+      if (!resolved.ok) {
+        failed.push({ path: file.path, message: resolved.message });
+        continue;
+      }
+      edits.push({ path: file.path, edits: resolved.edits });
+    }
+
+    // Ни один файл не разрешился — ревью показывать нечего: сразу говорим причину.
+    if (edits.length === 0) {
+      return { rejected: false, result: { reports: [], failed } };
+    }
+
+    const outcome = await applyAgentEdits({ edits, autoApprove: params.autoApprove });
+    if (outcome.rejected) return outcome;
+    return {
+      rejected: false,
+      result: {
+        reports: outcome.result?.reports ?? [],
+        failed: [...(outcome.result?.failed ?? []), ...failed],
+      },
+    };
   }
 
   /** Разбор ответа в узлы: движок markdown живёт в отдельном модуле. */

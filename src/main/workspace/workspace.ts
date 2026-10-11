@@ -36,6 +36,10 @@ const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '
 const IGNORE_FILES = ['.gitignore', '.ai_ignore'] as const;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_SEARCH_RESULTS = 2000;
+/** Потолок контекста вокруг совпадения: `-C 5` уже показывает блок целиком. */
+const MAX_SEARCH_CONTEXT = 5;
+/** Потолок длины строки в выводе поиска: и у совпадения, и у соседних строк. */
+const MAX_HIT_LINE_CHARS = 400;
 /** Сколько файлов читаем параллельно: больше — уже перегрузка диска, меньше — простой. */
 const SEARCH_CONCURRENCY = 8;
 /** Предохранитель от обхода гигантских деревьев без совпадений. */
@@ -283,6 +287,9 @@ export class WorkspaceService {
     const pattern = options.isRegex ? options.query : escapeRegExp(options.query);
     const matcher = new RegExp(pattern, flags);
     const globMatcher = options.glob ? globToRegExp(options.glob) : null;
+    // Контекст — это удобство навигации, а не запрос всего файла: держим его
+    // маленьким, чтобы вывод поиска не вытеснял саму беседу из окна модели.
+    const context = options.filesOnly ? 0 : Math.min(Math.max(options.context ?? 0, 0), MAX_SEARCH_CONTEXT);
 
     // Сначала дешёвый обход: собрать список файлов. Чтение — тяжёлое, поэтому
     // его распараллеливаем с ограничением, а не идём по дереву последовательно.
@@ -347,12 +354,20 @@ export class WorkspaceService {
           const match = matcher.exec(line);
           if (!match) continue;
 
-          hits.push({
+          const hit: SearchHit = {
             path: full,
             line: lineIndex + 1,
             column: match.index + 1,
-            text: line.trim().slice(0, 400),
-          });
+            text: line.trim().slice(0, MAX_HIT_LINE_CHARS),
+          };
+          // Соседние строки отдаём как есть, без trim: отступы в коде значимы, и
+          // именно по ним видно, к какому блоку относится совпадение. Потолок
+          // длины тот же, что у строки совпадения.
+          if (context > 0) {
+            hit.before = lines.slice(Math.max(0, lineIndex - context), lineIndex).map(clipLine);
+            hit.after = lines.slice(lineIndex + 1, lineIndex + 1 + context).map(clipLine);
+          }
+          hits.push(hit);
           if (hits.length >= limit) {
             stop = true;
             return;
@@ -598,4 +613,16 @@ export class WorkspaceService {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Строка контекста в вывод поиска. Отступы сохраняем (в коде они значимы), но
+ * длину ограничиваем тем же потолком, что и у строки совпадения: файл, где одна
+ * строка занимает килобайты, не должен раздувать ответ инструмента.
+ */
+function clipLine(line: string): string {
+  const withoutCarriage = line.endsWith('\r') ? line.slice(0, -1) : line;
+  return withoutCarriage.length > MAX_HIT_LINE_CHARS
+    ? `${withoutCarriage.slice(0, MAX_HIT_LINE_CHARS)}…`
+    : withoutCarriage;
 }

@@ -7,6 +7,7 @@ import type {
   GitCommitInfo,
   GitNetworkResult,
   GitStatus,
+  SearchHit,
   TerminalCreateOptions,
   TerminalSession,
   ToolFileChange,
@@ -17,6 +18,7 @@ import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import type { MemoryNote, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
+import { parsePatchFiles, type PatchFile } from '../../shared/patch';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
 import { formatLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
@@ -245,6 +247,11 @@ export interface ToolContext {
   confirmDangerous?: boolean;
   /** Правки в документах; нет обработчика — правки недоступны. */
   applyEdits?(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
+  /**
+   * Правки по якорю. Якоря разрешает renderer: только у него есть текст
+   * документа (в том числе несохранённый). Позиции он же и считает.
+   */
+  applyPatches?(patches: PatchFile[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Спросить у пользователя разрешение на запуск команды. */
   confirmCommand?(command: string): Promise<boolean>;
   /** Спросить разрешение на действие git (коммит, отправка, откат). */
@@ -375,6 +382,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await diagnostics(ctx, parsed.value);
       case 'apply_edit':
         return await applyEdit(ctx, parsed.value);
+      case 'apply_patch':
+        return await applyPatch(ctx, parsed.value);
       case 'replace_in_files':
         return await replaceInFiles(ctx.workspace, parsed.value);
       case 'run_terminal':
@@ -760,9 +769,20 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
   const caseSensitive = optionalBoolean(args, 'caseSensitive') ?? false;
   const filesOnly = optionalBoolean(args, 'filesOnly') ?? false;
   const glob = optionalString(args, 'glob');
+  // Контекст — как -A/-B у grep. Ограничиваем здесь, а не только в workspace:
+  // инструмент должен вести себя предсказуемо и в проверках, и на глаз модели.
+  const context = optionalInteger(args, 'context') ?? 0;
 
   const result = await workspace.search(
-    { query, isRegex, caseSensitive, filesOnly, glob, maxResults: filesOnly ? MAX_FIND_FILES : MAX_SEARCH_HITS },
+    {
+      query,
+      isRegex,
+      caseSensitive,
+      filesOnly,
+      glob,
+      context,
+      maxResults: filesOnly ? MAX_FIND_FILES : MAX_SEARCH_HITS,
+    },
     ctx.signal,
   );
   const root = workspace.rootPath();
@@ -777,13 +797,50 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     };
   }
 
-  const lines = result.hits.map((hit) => `${relativePath(hit.path, root)}:${hit.line}:${hit.column}: ${hit.text}`);
+  const detail = formatSearchHits(result.hits, root, context);
 
   return {
     ok: true,
     summary: `${result.hits.length} совпадений${result.truncated ? ', список обрезан' : ''} · просканировано файлов: ${result.scanned}`,
-    detail: lines.length ? truncate(lines.join('\n')).text : 'Ничего не найдено',
+    detail: detail.length ? truncate(detail).text : 'Ничего не найдено',
   };
+}
+
+/**
+ * Совпадения поиска в виде текста. Без контекста — по строке на совпадение
+ * (`путь:строка:столбец: текст`), с контекстом — блоками, как `grep -C`: строка
+ * совпадения помечена `:`, соседние — `-`. Номера строк настоящие, поэтому их
+ * сразу можно передать в `read_file` с диапазоном.
+ */
+function formatSearchHits(hits: readonly SearchHit[], root: string | null, context: number): string {
+  if (hits.length === 0) return '';
+  if (context <= 0) {
+    return hits.map((hit) => `${relativePath(hit.path, root)}:${hit.line}:${hit.column}: ${hit.text}`).join('\n');
+  }
+
+  const blocks: string[] = [];
+  let lastPath: string | null = null;
+  for (const hit of hits) {
+    const before = hit.before ?? [];
+    const after = hit.after ?? [];
+    // Ширину номера берём по самой большой строке блока: колонка цифр не «пляшет».
+    const last = hit.line + after.length;
+    const width = String(last).length;
+    const number = (value: number): string => String(value).padStart(width, ' ');
+
+    const lines = [
+      ...before.map((text, index) => `${number(hit.line - before.length + index)}- ${text}`),
+      `${number(hit.line)}: ${hit.text}`,
+      ...after.map((text, index) => `${number(hit.line + 1 + index)}- ${text}`),
+    ];
+
+    // Путь печатаем заголовком один раз на файл: в блоке он повторялся бы в
+    // каждой строке и съедал место, которого ради контекста и не хватало.
+    const rel = relativePath(hit.path, root);
+    blocks.push(rel === lastPath ? lines.join('\n') : `${rel}\n${lines.join('\n')}`);
+    lastPath = rel;
+  }
+  return blocks.join('\n\n');
 }
 
 /** Сколько объявлений вернуть по умолчанию и сколько файлов-сводок показать. */
@@ -1385,6 +1442,43 @@ function parseTextEdit(value: unknown, fileIndex: number, editIndex: number): Te
   }
 
   return edit;
+}
+
+/**
+ * Правка по якорю (`apply_patch`). Разбор аргументов — здесь, а сами якоря
+ * разрешает renderer: только у него есть текст документа (в том числе ещё не
+ * сохранённый). Дальше правки идут тем же путём, что `apply_edit`, — ревью, undo
+ * и панель изменений работают как обычно.
+ */
+async function applyPatch(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.applyPatches) {
+    return { ok: false, summary: 'Правки сейчас недоступны: окно редактора не подключено' };
+  }
+
+  const patches = parsePatchFiles(args.patches);
+  const names = patches.map((file) => path.basename(file.path));
+  const decision = await ctx.applyPatches(patches, ctx.autoApprove === true);
+
+  if (decision.rejected) {
+    return {
+      ok: false,
+      summary: `Пользователь отклонил правки: ${names.join(', ')}`,
+      detail: 'Пользователь отклонил правки. Не повторяй этот вызов — предложи другое решение.',
+    };
+  }
+
+  const applied = decision.result?.reports ?? [];
+  const failed = decision.result?.failed ?? [];
+  const lines = [
+    ...applied.map((report) => `ok ${path.basename(report.path)}: применено правок — ${report.applied}`),
+    ...failed.map((failure) => `ошибка ${path.basename(failure.path)}: ${failure.message}`),
+  ];
+
+  return {
+    ok: failed.length === 0,
+    summary: `применено файлов: ${applied.length}${failed.length ? `, с ошибками: ${failed.length}` : ''}`,
+    detail: lines.join('\n') || 'Правки не применены',
+  };
 }
 
 /* ── запуск команд ──────────────────────────────────────────────────────── */

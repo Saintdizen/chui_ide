@@ -18,6 +18,7 @@ import {
   type ReasoningEffort,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
+import type { PatchFile } from '../../shared/patch';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
@@ -190,11 +191,14 @@ const AGENT_PROMPT = [
   'Устройство проекта видно по карте в начале беседы: не обходи дерево и не читай манифесты, чтобы понять, что это за проект. Подробнее — project_map.',
   'Не выдумывай содержимое файлов: то, чего не знаешь, читай инструментами.',
   'Прежде чем читать файл целиком, найди место: codebase_search — где объявлен символ, find_references — где он используется, search — где встречается текстом, find_files — какие файлы есть.',
+  'У search есть context (как -A/-B у grep): с ним рядом с совпадением видно соседние строки. Часто этого хватает, и отдельный read_file не нужен — бери context=2–3, когда важно окружение совпадения.',
   'Устройство файла видно по скелету (file_outline): объявления с номерами строк. Дальше читай этим диапазоном, а не файл целиком.',
   'Большие файлы читай диапазоном строк и не перечитывай одно и то же много раз.',
   'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу.',
   'Перед тем как чинить код, посмотри get_diagnostics — так видно настоящую ошибку, а не догадку.',
+  'Для правок по умолчанию бери apply_patch: там не нужно называть строки и столбцы — ты даёшь точный фрагмент, который надо заменить, а позиции IDE считает сама. Позиционный apply_edit уместен, когда место уже посчитано тобой точно.',
   'Если apply_edit ответил «не совпало с текстом документа» — перечитай файл и повтори правку, а не меняй формулировку наугад.',
+  'Если apply_patch ответил, что фрагмент не найден или найден несколько раз — перечитай файл и возьми якорь дословно и шире (с соседней строкой или именем функции), а не меняй формулировку наугад.',
   'Правки и команды пользователь подтверждает — не считай их сделанными, пока не получил ответ инструмента.',
   'Договорённости и предпочтения, важные надолго, записывай в память проекта (`remember`): она переживает беседу и её сжатие. Разовый контекст в память не пиши.',
 ].join('\n');
@@ -245,6 +249,8 @@ const SUBAGENT_PROMPT = [
  */
 export interface ChatHostBridge {
   applyEdits(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
+  /** Правки по якорю: позиции считает renderer, у него есть текст документа. */
+  applyPatches(patches: PatchFile[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Спросить у пользователя разрешение на запуск команды. */
   confirmCommand(command: string): Promise<boolean>;
   /** Спросить разрешение на действие git (коммит, отправка, переключение ветки, откат). */
@@ -539,6 +545,7 @@ export class AiService {
     if (sandboxSettings.enabled && this.sandbox) toolContext.sandbox = this.sandbox;
     if (host) {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
+      toolContext.applyPatches = (patches, auto) => host.applyPatches(patches, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
       toolContext.confirmGit = (action) => host.confirmGit(action);
       toolContext.confirmBrowser = (action) => host.confirmBrowser(action);
@@ -1119,6 +1126,7 @@ export class AiService {
 
   private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined): boolean {
     if (tool.name === 'apply_edit') return host?.applyEdits !== undefined;
+    if (tool.name === 'apply_patch') return host?.applyPatches !== undefined;
     if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
     if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
     if (tool.name === 'open_file') return host?.openFile !== undefined;

@@ -7,6 +7,7 @@
 
 import type { MenuRole } from './app-menu';
 import type { ApplyResult, FileEdit } from './edits';
+import type { PatchFile } from './patch';
 import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
@@ -144,6 +145,12 @@ export interface SearchOptions {
   glob?: string;
   /** Только имена файлов с совпадением, без строк — обзор «где это встречается». */
   filesOnly?: boolean;
+  /**
+   * Строк контекста вокруг совпадения — как `-A`/`-B` у grep. 0 или не задано —
+   * только строка совпадения. С контекстом навигация не требует отдельного
+   * `read_file` и экономит шаг агента.
+   */
+  context?: number;
 }
 
 export interface SearchHit {
@@ -151,6 +158,10 @@ export interface SearchHit {
   line: number;
   column: number;
   text: string;
+  /** Строки до совпадения (только при `context` в запросе), ближняя — последняя. */
+  before?: string[];
+  /** Строки после совпадения (только при `context`), ближняя — первая. */
+  after?: string[];
 }
 
 export interface SearchResult {
@@ -1120,6 +1131,13 @@ export interface ApplyEditsHostResult {
   result?: ApplyResult;
 }
 
+/** Аргументы `ai.applyPatches`: правки по якорю, без позиций. */
+export interface ApplyPatchesHostParams {
+  patches: PatchFile[];
+  /** Полный доступ: применить сразу, без экрана ревью. */
+  autoApprove?: boolean;
+}
+
 /** Аргументы `ai.confirmCommand`: команда, которую просит выполнить агент. */
 export interface ConfirmCommandHostParams {
   command: string;
@@ -1185,6 +1203,8 @@ export interface OpenFileHostResult {
  */
 export interface HostMethods {
   'ai.applyEdits': { params: ApplyEditsHostParams; result: ApplyEditsHostResult };
+  /** Правки по якорю: позиции считает renderer — у него есть текст документа. */
+  'ai.applyPatches': { params: ApplyPatchesHostParams; result: ApplyEditsHostResult };
   'ai.confirmCommand': { params: ConfirmCommandHostParams; result: ConfirmCommandHostResult };
   'ai.confirmGit': { params: ConfirmGitHostParams; result: ConfirmGitHostResult };
   'ai.confirmBrowser': { params: ConfirmBrowserHostParams; result: ConfirmBrowserHostResult };

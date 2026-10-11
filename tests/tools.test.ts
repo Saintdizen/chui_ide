@@ -39,6 +39,7 @@ describe('набор инструментов агента', () => {
       'find_files',
       'get_diagnostics',
       'apply_edit',
+      'apply_patch',
       'replace_in_files',
       'run_terminal',
       'create_file',
@@ -87,10 +88,12 @@ describe('find_files', () => {
 });
 
 describe('search', () => {
-  it('принимает регистр и режим «только файлы»', () => {
+  it('принимает регистр, режим «только файлы» и контекст вокруг совпадения', () => {
     const props = byName.get('search')!.inputSchema.properties;
-    expect(Object.keys(props)).toEqual(['query', 'isRegex', 'caseSensitive', 'filesOnly', 'glob']);
+    expect(Object.keys(props)).toEqual(['query', 'isRegex', 'caseSensitive', 'filesOnly', 'glob', 'context']);
     expect(byName.get('search')!.inputSchema.required).toEqual(['query']);
+    // Контекст — как -A/-B у grep: без него результат остаётся одной строкой.
+    expect(props.context?.type).toBe('number');
   });
 });
 
@@ -116,6 +119,19 @@ describe('replace_in_files', () => {
       'caseSensitive',
       'glob',
     ]);
+  });
+});
+
+describe('apply_patch', () => {
+  it('правки по якорю живут в renderer и не требуют позиций', () => {
+    const tool = byName.get('apply_patch')!;
+    expect(tool.side).toBe('renderer');
+    expect(tool.inputSchema.required).toEqual(['patches']);
+    // В схеме нет ни строк, ни столбцов: позиции считает документ.
+    expect(tool.inputSchema.properties).toEqual({
+      patches: expect.objectContaining({ type: 'array' }),
+    });
+    expect(tool.description).toContain('якор');
   });
 });
 

@@ -21,7 +21,8 @@
  * 14. подзадача (task): отдельный агент со своим контекстом — его чтения не растут в беседе;
  * 15. браузер (browser_*): выключен по умолчанию, действия спрашивают подтверждение,
  *     снимок страницы доезжает до модели текстом;
- * 16. песочница: команды и тесты идут в контейнер, а без движка — отказ, не откат на хост.
+ * 16. песочница: команды и тесты идут в контейнер, а без движка — отказ, не откат на хост;
+ * 17. правки по якорю (apply_patch): позиций не требуется, но нужен renderer, который их считает.
  *
  *   npm run smoke:agent
  *
@@ -1138,6 +1139,58 @@ app.whenReady().then(async () => {
     );
 
     settings.ai.browser = { enabled: false, executable: '', headless: true };
+
+    /* 17. правки по якорю (apply_patch): позиций нет, фрагмент ищет документ.
+       Само разрешение якорей живёт в renderer и проверено юнит-тестами
+       (tests/patch.test.ts); здесь — маршрутизация инструмента: когда он
+       предлагается, что уходит в renderer и как виден отказ. */
+    requested = {
+      name: 'apply_patch',
+      args: { patches: [{ path: file, patches: [{ oldText: 'строка три', newText: 'строка 3' }] }] },
+    };
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
+    check('без поддержки якорей apply_patch не предлагается', !run.toolNames.includes('apply_patch'), run.toolNames);
+
+    const patchLog = [];
+    const patchHost = {
+      applyEdits: () => Promise.resolve({ rejected: true }),
+      applyPatches: (patches) => {
+        patchLog.push(patches);
+        return Promise.resolve({
+          rejected: false,
+          result: { reports: [{ path: file, applied: 1, version: 2 }], failed: [] },
+        });
+      },
+    };
+    run = await chat(patchHost);
+    check('apply_patch предложен, когда renderer умеет якоря', run.toolNames.includes('apply_patch'), run.toolNames);
+    check('патч доехал до renderer как есть', patchLog.length === 1, JSON.stringify(patchLog[0] ?? null).slice(0, 120));
+    check(
+      'в патче нет ни строк, ни столбцов',
+      !JSON.stringify(patchLog[0] ?? null).includes('startLine') &&
+        !JSON.stringify(patchLog[0] ?? null).includes('startColumn'),
+      JSON.stringify(patchLog[0] ?? null).slice(0, 120),
+    );
+    check(
+      'успешная правка отчиталась числом файлов',
+      /применено файлов: 1/.test(String(run.results[0]?.summary)),
+      run.results[0]?.summary,
+    );
+
+    // Отказ renderer (якорь не найден) приходит модели текстом, а не «применено 0».
+    run = await chat({
+      applyEdits: () => Promise.resolve({ rejected: true }),
+      applyPatches: () =>
+        Promise.resolve({
+          rejected: false,
+          result: { reports: [], failed: [{ path: file, message: 'текст «нет такого» в файле не найден' }] },
+        }),
+    });
+    check(
+      'несшедшийся якорь виден модели с причиной',
+      run.results[0]?.ok === false && String(run.results[0]?.detail ?? '').includes('не найден'),
+      run.results[0]?.detail,
+    );
   } catch (error) {
     failed = true;
     console.error('[chui] исключение:', error);

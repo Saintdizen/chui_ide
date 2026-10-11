@@ -543,6 +543,8 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
       {
         applyEdits: (edits, autoApprove) =>
           deps.host.request(ctx.sender, 'ai.applyEdits', { edits, autoApprove }, ctx.signal),
+        applyPatches: (patches, autoApprove) =>
+          deps.host.request(ctx.sender, 'ai.applyPatches', { patches, autoApprove }, ctx.signal),
         confirmCommand: (command) =>
           deps.host
             .request(ctx.sender, 'ai.confirmCommand', { command }, ctx.signal)

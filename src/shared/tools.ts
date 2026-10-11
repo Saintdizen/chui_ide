@@ -29,6 +29,7 @@ export type AgentToolName =
   | 'find_files'
   | 'get_diagnostics'
   | 'apply_edit'
+  | 'apply_patch'
   | 'replace_in_files'
   | 'run_terminal'
   | 'web_search'
@@ -140,7 +141,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Поиск подстроки или регулярного выражения по содержимому файлов рабочей директории. ' +
-      'Для обзора «где это вообще встречается» ставь filesOnly=true — вернутся только имена файлов.',
+      'Для обзора «где это вообще встречается» ставь filesOnly=true — вернутся только имена файлов. ' +
+      'С context рядом с совпадением видны соседние строки — как -A/-B у grep: часто этого хватает, ' +
+      'и отдельный read_file не нужен. Без context результат — одна строка на совпадение.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -149,6 +152,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         caseSensitive: { type: 'boolean', description: 'Учитывать регистр (по умолчанию — нет).' },
         filesOnly: { type: 'boolean', description: 'Вернуть только пути файлов с совпадением, без строк.' },
         glob: { type: 'string', description: 'Маска файлов, например **/*.ts' },
+        context: {
+          type: 'number',
+          description:
+            'Строк до и после совпадения (0–5). Ставь 2–3, когда важно видеть окружение ' +
+            'совпадения, и 0 — когда нужен просто список мест.',
+        },
       },
       required: ['query'],
     },
@@ -357,6 +366,28 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         path: { type: 'string', description: 'Ограничить одним файлом (абсолютный путь).' },
       },
+    },
+  },
+  {
+    name: 'apply_patch',
+    side: 'renderer',
+    description:
+      'Правка по якорю: найти в файле точный фрагмент и заменить его. Позиции называть НЕ нужно — ' +
+      'их считает IDE, поэтому промахнуть мимо места невозможно. Это надёжнее apply_edit там, где ' +
+      'столбцы считать неудобно: текст с кириллицей, длинные строки, файл, который мог сдвинуться. ' +
+      'Якорь обязан быть единственным в файле: если такой текст встречается дважды — возьми фрагмент ' +
+      'шире (с соседней строкой, отступом, именем функции). Правку видит и подтверждает пользователь, ' +
+      'она попадает в undo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        patches: {
+          type: 'array',
+          description: 'Массив объектов { path, patches: [{ oldText, newText }] }.',
+          items: { type: 'object', description: 'PatchFile' },
+        },
+      },
+      required: ['patches'],
     },
   },
   {
