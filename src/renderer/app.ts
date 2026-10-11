@@ -1,3 +1,4 @@
+import * as monaco from 'monaco-editor';
 import {
   PushTopic,
   type DebugLaunchOptions,
@@ -8,6 +9,7 @@ import {
 } from '../shared/api';
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
+import { mergeLspServers } from '../shared/lsp-presets';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -20,9 +22,12 @@ import { KeybindingService } from './core/keybindings';
 import { languageLabel, languageIndent } from './core/languages';
 import { ImportChecker } from './core/import-check';
 import { registerImportActions } from './core/import-actions';
+import { scriptFileTargets } from './core/language-modes';
 import { LspClient } from './core/lsp';
 import { registerLspProviders } from './core/lsp-providers';
 import { OpenEditors } from './core/open-editors';
+import { registerNavigation } from './core/navigation';
+import { createTsProjectFeed } from './core/ts-project';
 import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
 import { envWidgetLabel } from './core/env-widget';
@@ -226,6 +231,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const importChecker = new ImportChecker(rpc, documents, editors);
   importChecker.attach();
 
+  // Файлы проекта — встроенному сервису TypeScript: без них он не видит соседние
+  // модули и подчёркивает импорты, а Ctrl+Click не находит цель.
+  const tsProject = createTsProjectFeed({
+    rpc,
+    documents,
+    root: () => workspace.root,
+    targets: scriptFileTargets(),
+  });
+  // Набор зависит от того, что открыто (открытые — уже модели) и что есть на диске.
+  documents.onDidOpen(() => tsProject.refresh());
+  documents.onDidClose(() => tsProject.refresh());
+  workspace.onDidChange(() => tsProject.refresh());
+
   // Настройки — модальное окно поверх всего: и шапка, и панель AI открывают одно и то же.
   const settingsModal = createSettingsModal({
     rpc,
@@ -295,8 +313,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           // должны подменять друг другу окружение. Пусто — вернуться к общему.
           void setProjectInterpreter(command);
           pythonEnvPopover?.close();
-          // Сервер подсказок поднят со старым интерпретатором — перезапускаем.
-          reopenLsp();
+          // Сервер подсказок поднят со старым интерпретатором — перезапускаем; у
+          // выбранного окружения могло найтись и своё (pylsp в его `bin`).
+          refreshLsp();
         },
         onCreate: () => {
           pythonEnvPopover?.close();
@@ -614,6 +633,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const tools = new ProjectToolsModel(rpc, () => settings.run, info.platform);
   /** Подпись последнего нарисованного значка запуска: не трогаем украшения зря. */
   let runMarkerSignature = '';
+  /** Про выключенные подсказки говорим один раз за сеанс — иначе это стал бы шум. */
+  let lspHintShown = false;
 
   /** Перечитать карту проекта: дёшево — обход имён без чтения содержимого. */
   async function refreshScan(): Promise<void> {
@@ -626,17 +647,49 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   }
 
   /**
-   * Языковые серверы: если LSP включён, а список серверов пуст — подставляем
-   * найденные. Без этого типичные грабли: «включил LSP, а подсказок нет» — просто
-   * потому, что ни один сервер не выбран. Ничего не запускаем: только проверяем,
-   * что команда есть (PATH и главное окружение проекта).
+   * Языковые серверы: дополнить настроенные найденными.
+   *
+   * Список может пополниться не только «с нуля»: сервер появляется позже — его
+   * поставили в только что созданное окружение проекта. Поэтому выходим не на
+   * непустом списке, а сверяем языки: чего в списке нет, а в системе нашлось —
+   * добавляем (`mergeLspServers`). Настроенные записи не трогаем: в них решения
+   * человека — свой путь, свои аргументы, выключенный сервер.
+   *
+   * Ничего не запускаем: только проверяем, что команда есть (PATH и главное
+   * окружение проекта).
+   *
+   * Возвращает признак «список пополнился»: после этого серверы нужно
+   * перезапустить, иначе новый так и не поднимется.
    */
-  async function ensureLspServers(): Promise<void> {
-    if (!settings.lsp.enabled || settings.lsp.servers.length > 0) return;
+  async function ensureLspServers(): Promise<boolean> {
+    // Мастер-тумблер — решение человека: в обход него серверы не подставляем и не
+    // запускаем. Но если серверы в проекте есть, а подсказки выключены, сказать об
+    // этом стоит — иначе причину ищут в окружении, а не в настройке. Один раз за
+    // сеанс: на каждое окружение это стало бы шумом.
+    if (!settings.lsp.enabled) {
+      if (!lspHintShown) {
+        const available = await rpc.request('lsp.detect').catch(() => []);
+        if (available.length > 0) {
+          lspHintShown = true;
+          showToast('Языковые серверы установлены, но выключены в настройках', 'info', {
+            action: { label: 'Открыть', run: () => settingsModal.open('lsp') },
+          });
+        }
+      }
+      return false;
+    }
+
     const found = await rpc.request('lsp.detect').catch(() => []);
-    if (found.length === 0) return;
-    await rpc.request('settings.update', { lsp: { servers: found } }).catch(() => undefined);
-    showToast(`Языковые серверы подключены: ${found.map((server) => server.language).join(', ')}`);
+    const configured = settings.lsp.servers;
+    const merged = mergeLspServers(configured, found);
+    if (merged.length === configured.length) return false;
+
+    // Дописанное всегда идёт в хвосте (см. `mergeLspServers`) — по длине исходного
+    // списка видно, что именно подключилось, и об этом стоит сказать.
+    const added = merged.slice(configured.length).map((server) => server.language);
+    await rpc.request('settings.update', { lsp: { servers: merged } }).catch(() => undefined);
+    showToast(`Языковые серверы подключены: ${added.join(', ')}`);
+    return true;
   }
 
   /**
@@ -663,6 +716,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       .catch(() => undefined);
   }
 
+  /**
+   * Подхватить появившиеся серверы и перезапустить уже настроенные.
+   *
+   * Одно без другого бессмысленно: без перезапуска новый сервер не поднимется, а
+   * без перезапуска со сменившимся окружением старый останется с прошлым
+   * интерпретатором. Поэтому порядок один и тот же во всех случаях, когда
+   * окружение могло измениться: сначала дополнить список, потом перезапуск.
+   */
+  function refreshLsp(): void {
+    void ensureLspServers().then(() => reopenLsp());
+  }
+
   /** Окружение изменилось: перечитать инструменты, карту проекта, подсказки и импорты. */
   function reloadPythonEnvironment(): void {
     void tools.refresh(workspace.root, true).then(() => {
@@ -670,7 +735,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       refreshStatus();
     });
     void refreshScan();
-    reopenLsp();
+    refreshLsp();
     // Импорты, которых не хватало, могли появиться вместе с окружением.
     importChecker.refresh();
   }
@@ -896,6 +961,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Открыли файл — на экране он, вкладка чата ждёт в полосе.
     hideChatTab();
   };
+
+  // Переход внутрь кода: Ctrl+Click по символу и по пути. Monaco сам файлов не
+  // открывает, поэтому определения из соседних файлов (и от сервиса TypeScript,
+  // и от языкового сервера Python) доходят сюда — и открываются тем же `openPath`,
+  // что у дерева и вкладок.
+  registerNavigation(monaco.editor, {
+    open: (path) => openPath(path),
+    reveal: (path, line, column) => editors.reveal(path, line, column),
+    root: () => workspace.root,
+  });
 
   // Быстрый открыватель файлов (Ctrl+Shift+O): отдельный вход, тот же `openPath`,
   // что у дерева и вкладок, поэтому открытие ведёт себя одинаково.
@@ -1226,6 +1301,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const created = await rpc.request('workspace.createFile', { path });
     await openPath(created.path);
     explorer.scheduleRefresh();
+    tsProject.refresh();
     // Сразу предлагаем отменить: файл могли создать по ошибке в неверной папке.
     showToast(`Создан файл ${basename(created.path)}`, 'info', {
       action: {
@@ -1273,6 +1349,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const renamed = await rpc.request('workspace.rename', { from, to });
     if (wasActive) await openPath(renamed.path);
     explorer.scheduleRefresh();
+    tsProject.refresh();
     showToast(`Переименовано: ${basename(renamed.path)}`, 'info', {
       action: {
         label: 'Отменить',
@@ -1306,6 +1383,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (openEditors.has(path)) openEditors.close(path);
     await rpc.request('workspace.trash', { path });
     explorer.scheduleRefresh();
+    tsProject.refresh();
     showToast(`В корзине: ${basename(path)}`);
   });
 
@@ -2002,6 +2080,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       }
       case PushTopic.WorkspaceChanged: {
         explorer.scheduleRefresh();
+        // Файлы могли появиться или исчезнуть — набор для сервиса TypeScript устарел.
+        tsProject.refresh();
         // Открытый файл мог измениться снаружи — обновляем и его содержимое.
         const payload = message.payload as WorkspaceChangedPayload;
         if (payload?.path) void reloadIfOpen(payload.path);

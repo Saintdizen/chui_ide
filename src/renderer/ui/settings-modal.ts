@@ -38,14 +38,18 @@ export interface SettingsModalDeps {
 export interface SettingsModalView {
   /** Слой модального окна: живёт в body, чтобы не обрезаться панелями. */
   element: HTMLElement;
-  /** Перечитать настройки и показать окно. */
-  open(): Promise<void>;
+  /**
+   * Перечитать настройки и показать окно. `sectionId` — сразу открыть нужный
+   * раздел: по нему ведёт подсказка («серверы выключены»). Без него открывается
+   * тот раздел, где человек был в прошлый раз.
+   */
+  open(sectionId?: SectionId): Promise<void>;
   close(): void;
   /** Текущее состояние из main (push `settings:changed`). */
   applySettings(settings: Settings): void;
 }
 
-type SectionId = 'ai' | 'editor' | 'explorer' | 'run' | 'appearance' | 'project' | 'lsp' | 'mcp';
+export type SectionId = 'ai' | 'editor' | 'explorer' | 'run' | 'appearance' | 'project' | 'lsp' | 'mcp';
 
 const SECTIONS: ReadonlyArray<{
   id: SectionId;
@@ -174,7 +178,9 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     if (event.target === element) close();
   });
 
-  async function open(): Promise<void> {
+  async function open(sectionId?: SectionId): Promise<void> {
+    // Раздел — до первой отрисовки: `render` ниже берёт текущее значение.
+    if (sectionId) section = sectionId;
     element.hidden = false;
     // Слушаем в capture и позже текущего клика, иначе Esc сработает на открытии.
     document.removeEventListener('keydown', onKeyDown, true);

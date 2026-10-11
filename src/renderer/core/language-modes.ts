@@ -291,6 +291,15 @@ function registerGroovy(): void {
  * (allowJs, moduleResolution) включают привычную картину, а `noUnused*`
  * подсвечивает неиспользуемые импорты — как в VS Code.
  */
+/**
+ * Наборы сервиса TypeScript, куда кладутся файлы проекта (см. `core/ts-project.ts`).
+ * Их два: файл на JavaScript может быть импортирован из файла на TypeScript — и
+ * наоборот, — а сервис держит списки известных файлов отдельно для каждого языка.
+ */
+export function scriptFileTargets(): Array<{ addExtraLib(text: string, filePath: string): { dispose(): void } }> {
+  return [typescript.typescriptDefaults, typescript.javascriptDefaults];
+}
+
 export function applyTypeScriptDefaults(options: { showUnused: boolean }): void {
   const { javascriptDefaults, typescriptDefaults, ModuleResolutionKind, ScriptTarget, JsxEmit } = typescript;
 

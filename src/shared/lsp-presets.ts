@@ -124,6 +124,30 @@ export function matchPresets(available: Iterable<string>): LspServerConfig[] {
   return [...byLanguage.values()];
 }
 
+/**
+ * Дополнить настроенные серверы найденными: у языка, который нашёлся, должен быть
+ * сервер, даже если список уже не пуст.
+ *
+ * Записи человека не трогаем: в них могут быть свой путь, свои аргументы или
+ * осознанно выключенный сервер — затирать такое нельзя, иначе настройка будет
+ * возвращаться к чужому виду после каждого пересмотра окружения. Язык, для
+ * которого запись уже есть, второй раз не добавляем: в рантайме ключ — язык, два
+ * сервера одного языка спорили бы.
+ */
+export function mergeLspServers(
+  existing: readonly LspServerConfig[],
+  found: readonly LspServerConfig[],
+): LspServerConfig[] {
+  const configured = new Set(existing.map((server) => server.language));
+  const merged = existing.map((server) => ({ ...server, args: [...server.args] }));
+  for (const server of found) {
+    if (configured.has(server.language)) continue;
+    configured.add(server.language);
+    merged.push({ ...server, args: [...server.args] });
+  }
+  return merged;
+}
+
 /** Имя файла без каталога: пути на Windows и POSIX режутся одним правилом. */
 function baseName(target: string): string {
   const index = Math.max(target.lastIndexOf('/'), target.lastIndexOf('\\'));

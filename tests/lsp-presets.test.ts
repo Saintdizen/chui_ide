@@ -5,7 +5,9 @@ import {
   PYTHON_LSP_PACKAGES,
   lspLanguagesForKind,
   matchPresets,
+  mergeLspServers,
   presetCommands,
+  type LspServerConfig,
 } from '../src/shared/lsp-presets';
 import { VENV_INSTALL_OPTIONS } from '../src/shared/python-env';
 
@@ -99,6 +101,58 @@ describe('matchPresets', () => {
     for (const id of ['python', 'typescript', 'rust', 'go', 'java', 'ruby', 'php', 'csharp', 'xml', 'sql']) {
       expect(languages.has(id)).toBe(true);
     }
+  });
+});
+
+describe('mergeLspServers', () => {
+  const server = (language: string, command = language): LspServerConfig => ({
+    language,
+    command,
+    args: [],
+    enabled: true,
+  });
+
+  it('пустой список заполняется найденным', () => {
+    expect(mergeLspServers([], [server('python', 'pylsp')])).toEqual([server('python', 'pylsp')]);
+  });
+
+  it('язык, у которого сервер уже есть, второй раз не добавляется', () => {
+    // Два сервера одного языка спорили бы: в рантайме ключ — язык.
+    const existing = [server('python', 'pylsp')];
+    expect(mergeLspServers(existing, [server('python', '/p/.venv/bin/pylsp')])).toEqual(existing);
+  });
+
+  it('настроенный сервер не перебивается найденным', () => {
+    // Свой путь, свои аргументы или выключенный сервер — решение человека.
+    const existing: LspServerConfig[] = [{ language: 'python', command: 'my-pylsp', args: ['--x'], enabled: false }];
+    expect(mergeLspServers(existing, [server('python', 'pylsp')])).toEqual(existing);
+  });
+
+  it('недостающий язык добирается, когда список уже не пуст', () => {
+    // Ровно этот случай и не работал: сервер TypeScript настроен, а pylsp
+    // появился позже — в только что созданном окружении проекта.
+    const merged = mergeLspServers([server('typescript')], [server('typescript'), server('python', 'pylsp')]);
+    expect(merged.map((item) => item.language)).toEqual(['typescript', 'python']);
+    expect(merged[1]!.command).toBe('pylsp');
+  });
+
+  it('дописанное идёт в хвост — по длине исходного списка видно, что подключилось', () => {
+    const merged = mergeLspServers([server('typescript')], [server('rust'), server('go')]);
+    expect(merged.slice(1).map((item) => item.language)).toEqual(['rust', 'go']);
+  });
+
+  it('повторный вызов с тем же набором ничего не меняет', () => {
+    const existing = [server('typescript'), server('python', 'pylsp')];
+    const found = [server('python', 'pylsp'), server('typescript')];
+    expect(mergeLspServers(existing, found)).toEqual(existing);
+  });
+
+  it('входные списки не меняются', () => {
+    const existing = [server('typescript')];
+    const found = [server('python', 'pylsp')];
+    mergeLspServers(existing, found);
+    expect(existing).toHaveLength(1);
+    expect(found).toHaveLength(1);
   });
 });
 
