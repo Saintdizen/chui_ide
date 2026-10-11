@@ -162,6 +162,15 @@ export interface Linter {
   lint(target?: string): Promise<LintOutcome>;
 }
 
+/**
+ * Резолвер команды запуска тестов проекта: чем гонять тесты, решает main (там
+ * процессы и карта проекта), а не агент — иначе половина прогонов падала бы на
+ * «команда не найдена». `null` — тестов нет или запускать нечем.
+ */
+export interface TestRunner {
+  command(): Promise<{ command: string; label: string } | null>;
+}
+
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
@@ -192,6 +201,8 @@ export interface ToolContext {
   symbols?: SymbolSearch;
   /** Линтер проекта: нужен инструменту run_linter. */
   linter?: Linter;
+  /** Команда запуска тестов: нужна инструменту run_tests. */
+  tests?: TestRunner;
   /** Веб-поиск: подключён только при включённой настройке. */
   webSearch?: WebSearchRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
@@ -284,6 +295,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await fileOutline(ctx, parsed.value);
       case 'run_linter':
         return await runLinter(ctx, parsed.value);
+      case 'run_tests':
+        return await runTests(ctx);
       case 'project_map':
         return await projectMap(ctx.workspace);
       case 'find_files':
@@ -925,6 +938,54 @@ async function runLinter(ctx: ToolContext, args: Record<string, unknown>): Promi
   const target = requested ? relativePath(requested, root) : '.';
   const report = formatLintReport({ tool: outcome.tool, target, problems: outcome.problems });
   return { ok: true, summary: report.summary, detail: report.detail };
+}
+
+/**
+ * Запуск тестов проекта: команду (pytest, vitest, jest, `node --test`) собирает
+ * main — агент не должен угадывать раннер. Запуск спрашивает подтверждение, как
+ * и `run_terminal`: тесты выполняют код проекта. Вывод отдаём хвостом — он важнее
+ * начала, а падение (упавший тест — код выхода не 0) это результат, а не сбой.
+ */
+async function runTests(ctx: ToolContext): Promise<ToolOutcome> {
+  if (!ctx.tests) return { ok: false, summary: 'Запуск тестов недоступен' };
+  if (!ctx.confirmCommand) return { ok: false, summary: 'Запуск тестов недоступен: окно редактора не подключено' };
+
+  const resolved = await ctx.tests.command();
+  if (!resolved) {
+    return {
+      ok: false,
+      summary: 'Тесты проекта не найдены',
+      detail:
+        'В проекте нет тестов или известного раннера: у Python это pytest с файлами `test_*.py`, ' +
+        'у Node — vitest, jest или встроенный `node --test`. Отдельный файл можно запустить через run_terminal.',
+    };
+  }
+
+  if (needsConfirmation(ctx, resolved.command)) {
+    const allowed = await ctx.confirmCommand(resolved.command);
+    if (!allowed) {
+      return {
+        ok: false,
+        summary: 'Пользователь запретил запуск тестов',
+        detail: 'Пользователь не разрешил запустить тесты. Не повторяй вызов — предложи другой ход.',
+      };
+    }
+  }
+
+  const root = ctx.workspace.rootPath();
+  if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
+
+  const result = await runShellCommand(resolved.command, root, ctx.signal);
+  const output = truncateTail(condenseOutput(result.output));
+  const notes = [result.timedOut ? 'превышено время' : '', result.truncated ? 'вывод обрезан' : ''].filter(Boolean);
+  // Ненулевой код — это упавшие тесты, а не ошибка инструмента: ответ ok, но с кодом.
+  const passed = result.code === 0 && !result.timedOut;
+
+  return {
+    ok: passed,
+    summary: `тесты (${resolved.label}): код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
+    detail: `$ ${resolved.command}\n${output.length ? output : '(пустой вывод)'}`,
+  };
 }
 
 /**

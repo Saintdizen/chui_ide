@@ -27,6 +27,7 @@ import type { SettingsStore } from '../settings';
 import { detectAvailableCommands, detectVenvCommands } from '../lsp/detect';
 import { lintProject } from '../project/lint';
 import { scanProject } from '../project/scan';
+import { testCommand } from '../project/tests';
 import { activateCommand, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
 import { missingPackages } from '../node/packages';
 import {
@@ -115,6 +116,14 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     lint: (target) => {
       const root = requireRoot();
       return lintProject(root, resolvePython(root), target);
+    },
+  });
+  // Команда запуска тестов — инструмент run_tests. Резолвер общий с панелью
+  // тестов по логике; здесь в main, потому что агент работает в main.
+  deps.ai.attachTests({
+    command: () => {
+      const root = requireRoot();
+      return testCommand(root, resolvePython(root));
     },
   });
   // Внешние инструменты (MCP): список ведут серверы из настроек, а запускает их

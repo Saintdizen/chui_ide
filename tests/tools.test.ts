@@ -35,6 +35,7 @@ describe('набор инструментов агента', () => {
       'find_references',
       'go_to_definition',
       'rename_symbol',
+      'run_tests',
       'find_files',
       'get_diagnostics',
       'apply_edit',

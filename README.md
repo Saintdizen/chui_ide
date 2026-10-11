@@ -224,6 +224,11 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   а для проекта целиком — по манифесту в корне (`pyproject.toml` против `package.json`). Файлы не меняются,
   `--fix` не передаётся. Ответ — список найденного (`файл:строка:столбец [уровень] правило сообщение`);
   разбор ответов линтеров — `src/shared/lint.ts`.
+- Запуск тестов агенту: инструмент `run_tests` сам определяет, чем гонять тесты проекта (pytest у Python;
+  vitest, jest или встроенный `node --test` у Node — по зависимостям и карте проекта), поэтому агенту
+  не приходится угадывать команду. Резолвер — `src/main/project/tests.ts`, общий по логике с панелью тестов.
+  Прогон подтверждает пользователь (как `run_terminal`), а вывод и код выхода возвращаются агенту:
+  ненулевой код — упавшие тесты, а не сбой инструмента.
 - У подчёркнутого импорта есть быстрая правка (`Ctrl+.`): «Установить пакет». У Python его ставит
   `pip` в окружение проекта (имя пакета берётся из таблицы: `yaml` → `PyYAML`), у JS/TS —
   менеджер пакетов проекта (`npm`/`pnpm`/`yarn`/`bun`) в терминале.
@@ -395,7 +400,8 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   (данные вставки из буфера собирает renderer, поэтому он не источник истины).
 - Инструменты агента (описания — `src/shared/tools.ts`, исполнение — `src/main/ai/agent-tools.ts`):
   чтение проекта (`list_dir`, `read_file`, `read_files`, `search`, `project_map`, `file_outline`,
-  `find_files`, `get_diagnostics`, `run_linter`, `find_references`, `go_to_definition`, `rename_symbol`),
+  `find_files`, `get_diagnostics`, `run_linter`, `run_tests`, `find_references`, `go_to_definition`,
+  `rename_symbol`),
   правки и файловые операции (`apply_edit`, `replace_in_files`, `create_file`, `delete_file`, `move_file`),
   запуск (`run_terminal`, `terminal_*`),
   git — чтение (`git_status`, `git_diff`, `git_log`) и записи (`git_stage`, `git_unstage`, `git_commit`,

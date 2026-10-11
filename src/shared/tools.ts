@@ -25,6 +25,7 @@ export type AgentToolName =
   | 'project_map'
   | 'file_outline'
   | 'run_linter'
+  | 'run_tests'
   | 'find_files'
   | 'get_diagnostics'
   | 'apply_edit'
@@ -252,6 +253,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
     },
+  },
+  {
+    name: 'run_tests',
+    side: 'main',
+    description:
+      'Запустить тесты проекта: чем — определяет IDE (pytest у Python, vitest, jest или `node --test` ' +
+      'у Node), гадать о команде не нужно. Возвращает вывод и код выхода: ненулевой — упавшие ' +
+      'тесты. Запуск подтверждает пользователь. Вызывай после правок, чтобы убедиться, что ничего ' +
+      'не сломал.',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'project_map',

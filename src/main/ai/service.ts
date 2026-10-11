@@ -41,6 +41,7 @@ import {
   type McpRunner,
   type SymbolSearch,
   type TerminalAgent,
+  type TestRunner,
   type ToolContext,
   type ToolOutcome,
 } from './agent-tools';
@@ -209,6 +210,8 @@ export class AiService {
   private symbols?: SymbolSearch;
   /** Линтер проекта: без него инструмент run_linter модели не предлагаем. */
   private linter?: Linter;
+  /** Команда тестов проекта: без неё инструмент run_tests модели не предлагаем. */
+  private tests?: TestRunner;
   /** Внешние инструменты (MCP): нет сервиса — внешних инструментов не предлагаем. */
   private mcp?: McpRunner;
   /**
@@ -267,6 +270,14 @@ export class AiService {
    */
   attachLinter(linter: Linter): void {
     this.linter = linter;
+  }
+
+  /**
+   * Подключить резолвер команды тестов: включает инструмент `run_tests`. Чем
+   * гонять тесты, решает main (`project/tests.ts`) — агенту это знать незачем.
+   */
+  attachTests(tests: TestRunner): void {
+    this.tests = tests;
   }
 
   /**
@@ -401,6 +412,7 @@ export class AiService {
     if (this.terminals) toolContext.terminals = this.terminals;
     if (this.symbols) toolContext.symbols = this.symbols;
     if (this.linter) toolContext.linter = this.linter;
+    if (this.tests) toolContext.tests = this.tests;
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
     // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
@@ -801,6 +813,8 @@ export class AiService {
     // Переименование меняет код через сервер — нужен и сервер, и применение правок.
     if (tool.name === 'rename_symbol') return this.symbols !== undefined && host?.applyEdits !== undefined;
     if (tool.name === 'run_linter') return this.linter !== undefined;
+    // Тесты выполняют код проекта: нужен и резолвер команды, и подтверждение.
+    if (tool.name === 'run_tests') return this.tests !== undefined && host?.confirmCommand !== undefined;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     return tool.side === 'main';
   }
