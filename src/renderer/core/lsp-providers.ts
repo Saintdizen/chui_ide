@@ -1,5 +1,6 @@
 import * as monaco from 'monaco-editor';
 import { LANGUAGES } from '../../shared/languages';
+import { commandFromLens, toCodeLenses, type CodeLensCommand, type CodeLensEntry } from '../../shared/lsp-code-lens';
 import { uriToPath } from './document';
 import type { RpcClient } from './rpc';
 
@@ -26,6 +27,15 @@ function safeRequest(rpc: RpcClient): LspRequest {
 export function registerLspProviders(rpc: RpcClient): monaco.IDisposable {
   const request = safeRequest(rpc);
   const disposables: monaco.IDisposable[] = [];
+
+  // Клик по код-линзе исполняет команду сервера — для этого и нужен этот мост.
+  // Регистрируем его один раз: команда Monaco — глобальная, не на язык.
+  monaco.editor.addCommand({
+    id: LSP_COMMAND_ID,
+    run: (_accessor, path: string, command: string, args: readonly unknown[]) => {
+      void request(path, 'workspace/executeCommand', { command, arguments: args });
+    },
+  });
 
   for (const language of LANGUAGES) {
     disposables.push(registerForLanguage(language.id, request));
@@ -125,6 +135,29 @@ function registerForLanguage(language: string, request: LspRequest): monaco.IDis
           context: { diagnostics: lspDiagnostics(context.markers) },
         });
         return { actions: codeActions(result), dispose: () => undefined };
+      },
+    }),
+    // Код-линзы: подписи над объявлениями с действием. Клик исполняет команду
+    // сервера; часть серверов отдаёт линзу без команды — её просим через resolve.
+    monaco.languages.registerCodeLensProvider(language, {
+      async provideCodeLenses(model) {
+        const path = pathOf(model);
+        if (!path) return null;
+        const result = await request(path, 'textDocument/codeLens', {
+          textDocument: { uri: model.uri.toString() },
+        });
+        const lenses = toCodeLenses(result);
+        if (lenses.length === 0) return null;
+        return { lenses: lenses.map((entry) => toMonacoCodeLens(entry, path)) };
+      },
+      async resolveCodeLens(model, lens) {
+        const path = pathOf(model);
+        const entry = lensSource.get(lens);
+        if (!path || !entry) return lens;
+        const resolved = await request(path, 'codeLens/resolve', entry.source);
+        const command = commandFromLens(resolved);
+        if (command) lens.command = toMonacoCommand(path, command);
+        return lens;
       },
     }),
   ]);
@@ -391,6 +424,36 @@ function toDocumentSymbol(raw: unknown): monaco.languages.DocumentSymbol | null 
 function symbolKind(value: unknown): monaco.languages.SymbolKind {
   const lsp = typeof value === 'number' ? value : 1;
   return Math.min(Math.max(lsp - 1, 0), 25) as monaco.languages.SymbolKind;
+}
+
+/* ── код-линзы ──────────────────────────────────────────────────────────── */
+
+/** Идентификатор команды Monaco, которая исполняет команду сервера. */
+const LSP_COMMAND_ID = 'chui.lsp.executeCommand';
+
+/**
+ * Исходная линза LSP по объекту Monaco. Сервер держит в ней своё `data`, без
+ * которого `codeLens/resolve` не поймёт запрос, а Monaco его не хранит — поэтому
+ * запоминаем объект до разрешения (тем же приёмом, что и в иерархии вызовов).
+ */
+const lensSource = new WeakMap<monaco.languages.CodeLens, CodeLensEntry>();
+
+/** Команда сервера в команду Monaco: клик уйдёт обратно серверу, а не нам. */
+function toMonacoCommand(path: string, command: CodeLensCommand): monaco.languages.Command {
+  return {
+    id: LSP_COMMAND_ID,
+    title: command.title,
+    // Первым аргументом — путь: по нему main находит нужный сервер.
+    arguments: [path, command.command, command.arguments],
+  };
+}
+
+function toMonacoCodeLens(entry: CodeLensEntry, path: string): monaco.languages.CodeLens {
+  const lens: monaco.languages.CodeLens = { range: fromRange(entry.range) };
+  // Команды нет — линза ждёт `resolveCodeLens`; исходный объект сохраняем заранее.
+  if (entry.command) lens.command = toMonacoCommand(path, entry.command);
+  else lensSource.set(lens, entry);
+  return lens;
 }
 
 /** Быстрые правки сервера, у которых есть собственная правка текста. */
