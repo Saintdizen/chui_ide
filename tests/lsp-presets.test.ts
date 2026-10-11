@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { LANGUAGES } from '../src/shared/languages';
-import { LSP_PRESETS, lspLanguagesForKind, matchPresets, presetCommands } from '../src/shared/lsp-presets';
+import {
+  LSP_PRESETS,
+  PYTHON_LSP_PACKAGES,
+  lspLanguagesForKind,
+  matchPresets,
+  presetCommands,
+} from '../src/shared/lsp-presets';
+import { VENV_INSTALL_OPTIONS } from '../src/shared/python-env';
 
 describe('presetCommands', () => {
   it('без повторов', () => {
@@ -115,5 +122,20 @@ describe('lspLanguagesForKind', () => {
     for (const kind of ['python', 'node', 'deno']) {
       for (const id of lspLanguagesForKind(kind) ?? []) expect(known.has(id)).toBe(true);
     }
+  });
+});
+
+describe('PYTHON_LSP_PACKAGES', () => {
+  it('ставит сервер Python и его линтеры', () => {
+    // Без плагинов базовый pylsp код не проверяет: диагностику дают pyflakes и pycodestyle.
+    expect(PYTHON_LSP_PACKAGES).toContain('python-lsp-server');
+    expect(PYTHON_LSP_PACKAGES).toContain('pyflakes');
+    expect(PYTHON_LSP_PACKAGES).toContain('pycodestyle');
+  });
+
+  it('согласован с пресетом «Полное окружение»', () => {
+    // Кнопка установки сервера и пресет окружения не должны разъезжаться.
+    const full = VENV_INSTALL_OPTIONS.find((option) => option.id === 'full')!.packages;
+    for (const name of PYTHON_LSP_PACKAGES) expect(full).toContain(name);
   });
 });

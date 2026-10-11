@@ -67,6 +67,17 @@ export const LSP_PRESETS: readonly LspPreset[] = [
   { language: 'markdown', label: 'Marksman', command: 'marksman', args: ['server'] },
 ];
 
+/**
+ * Пакеты pip, поднимающие языковой сервер Python в окружении проекта.
+ *
+ * Ставим их в проект (кнопка в разделе «Языки (LSP)»), а не в систему: только
+ * окружение проекта видит его пакеты, и только тогда сервер подсказывает по
+ * зависимостям. Базовый `python-lsp-server` код не проверяет — диагностику дают
+ * его плагины, поэтому `pyflakes` и `pycodestyle` в наборе (тот же вывод, что у
+ * пресета «Полное окружение» в `python-env.ts`).
+ */
+export const PYTHON_LSP_PACKAGES: readonly string[] = ['python-lsp-server', 'pyflakes', 'pycodestyle'];
+
 /** Все команды, которые имеет смысл искать в PATH: без повторов. */
 export function presetCommands(): string[] {
   return [...new Set(LSP_PRESETS.map((preset) => preset.command))];

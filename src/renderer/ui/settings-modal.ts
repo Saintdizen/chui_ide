@@ -13,7 +13,7 @@ import type { AiProviderPatch, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
 import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
 import type { WebSearchProvider } from '../../shared/web-search';
-import { lspLanguagesForKind } from '../../shared/lsp-presets';
+import { PYTHON_LSP_PACKAGES, lspLanguagesForKind } from '../../shared/lsp-presets';
 import type { CommandRegistry } from '../core/commands';
 import type { RpcClient } from '../core/rpc';
 import type { ThemeService } from '../core/theme-service';
@@ -1077,24 +1077,46 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
 
     // Поиск установленных серверов: команды ищутся в PATH в main, здесь только
     // показываем найденное и подставляем в список — автозапуска без ведома нет.
+    const detect = async (): Promise<void> => {
+      const found = await deps.rpc.request('lsp.detect');
+      const relevant = found.filter(isOwn);
+      if (relevant.length === 0) {
+        showToast('Языковые серверы в PATH не найдены', 'error');
+        return;
+      }
+      servers.value = JSON.stringify(relevant, null, 2);
+      void patch({ lsp: { servers: [...foreign, ...relevant], enabled: true } }, true);
+      showToast(`Найдено серверов: ${relevant.length}`);
+    };
+
     const detectButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Найти установленные');
     detectButton.addEventListener('click', () => {
       detectButton.disabled = true;
-      void deps.rpc
-        .request('lsp.detect')
-        .then((found) => {
-          const relevant = found.filter(isOwn);
-          if (relevant.length === 0) {
-            showToast('Языковые серверы в PATH не найдены', 'error');
-            return;
-          }
-          servers.value = JSON.stringify(relevant, null, 2);
-          void patch({ lsp: { servers: [...foreign, ...relevant], enabled: true } }, true);
-          showToast(`Найдено серверов: ${relevant.length}`);
-        })
+      void detect()
         .catch((error) => showToast(error instanceof Error ? error.message : String(error), 'error'))
         .finally(() => {
           detectButton.disabled = false;
+        });
+    });
+
+    // Установка сервера в окружение проекта: серверу нужны пакеты проекта, а
+    // системный питон их не видит. Ставим питоном проекта через `python.install` —
+    // тем же путём, что зависимости импортов: с прогрессом и без терминала.
+    // Кнопка только для Python: у Node сервер ставится пакетным менеджером.
+    const isPythonProject = languages?.includes('python') ?? false;
+    const installButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Установить сервер (Python)');
+    installButton.addEventListener('click', () => {
+      installButton.disabled = true;
+      showToast(`Ставлю: ${PYTHON_LSP_PACKAGES.join(', ')}…`);
+      void deps.rpc
+        .stream('python.install', { packages: [...PYTHON_LSP_PACKAGES], requirements: false }, () => undefined)
+        .then(async (result) => {
+          showToast(result.installed.length > 0 ? `Установлено: ${result.installed.join(', ')}` : 'Нечего ставить');
+          await detect();
+        })
+        .catch((error) => showToast(error instanceof Error ? error.message : String(error), 'error'))
+        .finally(() => {
+          installButton.disabled = false;
         });
     });
 
@@ -1148,6 +1170,15 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Кнопка проверяет PATH и подставляет найденное (pylsp/pyright, typescript-language-server, ' +
           'rust-analyzer, gopls и другие). Запускать сервер без вашего ведома IDE не станет.',
       ),
+      isPythonProject ? field('Установить сервер', installButton) : null,
+      isPythonProject
+        ? h(
+            'div',
+            { class: 'field-hint' },
+            'Ставит python-lsp-server с линтерами (pyflakes, pycodestyle) в окружение проекта и сразу ' +
+              'подставляет найденное. Серверу нужно окружение проекта: без него он не увидит зависимости.',
+          )
+        : null,
       h(
         'div',
         { class: 'field-hint' },
