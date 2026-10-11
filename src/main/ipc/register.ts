@@ -25,6 +25,7 @@ import type { McpService } from '../mcp/mcp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
 import { detectAvailableCommands, detectVenvCommands } from '../lsp/detect';
+import { lintProject } from '../project/lint';
 import { scanProject } from '../project/scan';
 import { activateCommand, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
 import { missingPackages } from '../node/packages';
@@ -107,6 +108,15 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Языковой сервер умеет искать по символам («перейти к символу») — это и есть
   // инструмент codebase_search. Нет сервера — инструмент модели не предлагаем.
   if (deps.lsp) deps.ai.attachSymbols(deps.lsp);
+  // Линтер проекта — инструмент run_linter. Движок и запуск живут в main
+  // (`project/lint.ts`); корень и интерпретатор Python разрешает это окно, где
+  // они уже собраны. Без подключения инструмент модели не предлагается.
+  deps.ai.attachLinter({
+    lint: (target) => {
+      const root = requireRoot();
+      return lintProject(root, resolvePython(root), target);
+    },
+  });
   // Внешние инструменты (MCP): список ведут серверы из настроек, а запускает их
   // этот сервис — агент получает готовые вызовы.
   if (deps.mcp) deps.ai.attachMcp(deps.mcp);

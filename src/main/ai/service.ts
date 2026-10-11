@@ -37,6 +37,7 @@ import type { McpToolInfo } from '../../shared/mcp';
 import {
   runTool,
   type GitTools,
+  type Linter,
   type McpRunner,
   type SymbolSearch,
   type TerminalAgent,
@@ -101,6 +102,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'codebase_search',
   'project_map',
   'file_outline',
+  'run_linter',
   'web_search',
   'find_files',
   'get_diagnostics',
@@ -123,6 +125,7 @@ const READ_ONLY_TOOLS = new Set([
   'search',
   'project_map',
   'file_outline',
+  'run_linter',
   'find_files',
   'get_diagnostics',
   'git_status',
@@ -198,6 +201,8 @@ export class AiService {
   private terminals?: TerminalAgent;
   /** Поиск символов проекта: без него codebase_search ищет только текстом. */
   private symbols?: SymbolSearch;
+  /** Линтер проекта: без него инструмент run_linter модели не предлагаем. */
+  private linter?: Linter;
   /** Внешние инструменты (MCP): нет сервиса — внешних инструментов не предлагаем. */
   private mcp?: McpRunner;
   /**
@@ -248,6 +253,14 @@ export class AiService {
    */
   attachSymbols(symbols: SymbolSearch): void {
     this.symbols = symbols;
+  }
+
+  /**
+   * Подключить линтер проекта: включает инструмент `run_linter`. Движок и запуск
+   * живут в main (`project/lint.ts`) — сервису передаётся готовый вызов.
+   */
+  attachLinter(linter: Linter): void {
+    this.linter = linter;
   }
 
   /**
@@ -381,6 +394,7 @@ export class AiService {
     if (this.git) toolContext.git = this.git;
     if (this.terminals) toolContext.terminals = this.terminals;
     if (this.symbols) toolContext.symbols = this.symbols;
+    if (this.linter) toolContext.linter = this.linter;
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
     // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
@@ -768,6 +782,7 @@ export class AiService {
     if (tool.name.startsWith('terminal_')) return this.terminals !== undefined;
     // Оба инструмента символов живут на языковом сервере: без него их не предлагаем.
     if (tool.name === 'codebase_search' || tool.name === 'file_outline') return this.symbols !== undefined;
+    if (tool.name === 'run_linter') return this.linter !== undefined;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     return tool.side === 'main';
   }

@@ -21,6 +21,7 @@ export type AgentToolName =
   | 'codebase_search'
   | 'project_map'
   | 'file_outline'
+  | 'run_linter'
   | 'find_files'
   | 'get_diagnostics'
   | 'apply_edit'
@@ -161,6 +162,24 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         path: { type: 'string', description: 'Абсолютный путь к файлу.' },
       },
       required: ['path'],
+    },
+  },
+  {
+    name: 'run_linter',
+    side: 'main',
+    description:
+      'Проверить код линтером проекта: ruff у Python, eslint или biome у Node. Возвращает ' +
+      'найденные проблемы (файл, строка, правило, сообщение). Без пути проверяется весь проект, ' +
+      'с путём — файл или папка. Файлы не меняются: это только проверка. Вызывай после правок, ' +
+      'чтобы убедиться, что не внёс новых замечаний, и вместо догадок о качестве кода.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Файл или папка (абсолютный путь). Без него — проект целиком.',
+        },
+      },
     },
   },
   {

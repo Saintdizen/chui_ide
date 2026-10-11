@@ -12,6 +12,7 @@ import type {
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
+import { formatLintReport, type LintOutcome } from '../../shared/lint';
 import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
 import { isMcpToolName, type McpToolInfo } from '../../shared/mcp';
 import { compressToolOutput } from '../../shared/output-compress';
@@ -105,6 +106,16 @@ export interface WebSearchRunner {
   ): Promise<{ hits: readonly WebSearchHit[]; providerLabel: string }>;
 }
 
+/**
+ * Линтер проекта: проверка кода на замечания. Выбор движка и запуск живут в main
+ * (`project/lint.ts`), сюда приходит готовый вызов — тот же уговор, что у `GitTools`
+ * и `TerminalAgent`. Инструмент остаётся проверяемым без запуска линтеров.
+ */
+export interface Linter {
+  /** Проверить файл, папку или весь проект (цель не задана). */
+  lint(target?: string): Promise<LintOutcome>;
+}
+
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
@@ -131,6 +142,8 @@ export interface ToolContext {
   terminals?: TerminalAgent;
   /** Символы проекта и скелет файла (языковой сервер): codebase_search, file_outline. */
   symbols?: SymbolSearch;
+  /** Линтер проекта: нужен инструменту run_linter. */
+  linter?: Linter;
   /** Веб-поиск: подключён только при включённой настройке. */
   webSearch?: WebSearchRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
@@ -215,6 +228,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await codebaseSearch(ctx, parsed.value);
       case 'file_outline':
         return await fileOutline(ctx, parsed.value);
+      case 'run_linter':
+        return await runLinter(ctx, parsed.value);
       case 'project_map':
         return await projectMap(ctx.workspace);
       case 'find_files':
@@ -581,6 +596,34 @@ async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): 
   });
 
   return { ok: true, summary: shaped.summary, detail: shaped.detail };
+}
+
+/**
+ * Проверка кода линтером проекта. Путь необязателен: без него проверяем проект
+ * целиком. Названную цель прогоняем через `workspace.stat` — это заодно проверка,
+ * что путь внутри рабочей папки (та же граница, что у чтения и правок).
+ */
+async function runLinter(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.linter) return { ok: false, summary: 'Линтер недоступен' };
+  const root = ctx.workspace.rootPath();
+  if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
+
+  const requested = optionalString(args, 'path');
+  if (requested) await ctx.workspace.stat(requested);
+  const outcome = await ctx.linter.lint(requested);
+  if (!outcome.tool) {
+    return {
+      ok: false,
+      summary: 'Линтер не найден',
+      detail:
+        'В окружении проекта нет подходящего линтера: у Python это ruff, у Node — eslint или biome. ' +
+        'Поставь его или проверь код вручную. Не читай файлы заново ради той же проверки.',
+    };
+  }
+
+  const target = requested ? relativePath(requested, root) : '.';
+  const report = formatLintReport({ tool: outcome.tool, target, problems: outcome.problems });
+  return { ok: true, summary: report.summary, detail: report.detail };
 }
 
 /**

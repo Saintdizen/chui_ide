@@ -219,6 +219,11 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   него `black` из окружения; у JS/TS и соседних языков (`json`, `css`, `html`, `markdown`, `yaml`) — `prettier`,
   а без него `biome` из `node_modules`; объявленный в `package.json` идёт первым. Правку проводит документ,
   поэтому работает undo; в настройках есть «Форматировать при сохранении».
+- Проверка кода: инструмент агента `run_linter` прогоняет линтер проекта — `ruff` у Python, `eslint` или
+  `biome` у Node (что объявлено в проекте, то и первым). Движок выбирается по цели: по расширению файла,
+  а для проекта целиком — по манифесту в корне (`pyproject.toml` против `package.json`). Файлы не меняются,
+  `--fix` не передаётся. Ответ — список найденного (`файл:строка:столбец [уровень] правило сообщение`);
+  разбор ответов линтеров — `src/shared/lint.ts`.
 - У подчёркнутого импорта есть быстрая правка (`Ctrl+.`): «Установить пакет». У Python его ставит
   `pip` в окружение проекта (имя пакета берётся из таблицы: `yaml` → `PyYAML`), у JS/TS —
   менеджер пакетов проекта (`npm`/`pnpm`/`yarn`/`bun`) в терминале.
@@ -386,7 +391,7 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   (данные вставки из буфера собирает renderer, поэтому он не источник истины).
 - Инструменты агента (описания — `src/shared/tools.ts`, исполнение — `src/main/ai/agent-tools.ts`):
   чтение проекта (`list_dir`, `read_file`, `read_files`, `search`, `project_map`, `file_outline`,
-  `find_files`, `get_diagnostics`),
+  `find_files`, `get_diagnostics`, `run_linter`),
   правки и файловые операции (`apply_edit`, `replace_in_files`, `create_file`, `delete_file`, `move_file`),
   запуск (`run_terminal`, `terminal_*`), git (`git_status`, `git_diff`, `git_log`),
   интерфейс (`open_file`) и `update_plan`. Где исполняется инструмент — свойство `side`
