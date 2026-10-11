@@ -74,6 +74,14 @@ export function parseBlamePorcelain(output: string): BlameLine[] {
   return result;
 }
 
+/**
+ * Подпись строки рядом с кодом: «Автор, дата · заголовок». Пустая строка —
+ * вместо заголовка ставим прочерк: подпись без текста выглядела бы обрезанной.
+ */
+export function formatBlameAnnotation(line: BlameLine): string {
+  return `${line.author}, ${line.date} · ${line.summary || '—'}`;
+}
+
 /** Unix-время → `ГГГГ-ММ-ДД` (UTC). Мусор даёт пустую строку, а не «Invalid Date». */
 function formatDate(seconds: number): string {
   if (!Number.isFinite(seconds)) return '';

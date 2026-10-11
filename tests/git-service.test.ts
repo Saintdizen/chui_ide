@@ -228,3 +228,62 @@ describe('GitService: индексирование по блокам', () => {
     expect(after.modified).toContain('line 20 changed');
   });
 });
+
+describe('GitService: история и просмотр против коммита', () => {
+  it('log() отдаёт записи с хешем, автором, датой и заголовком', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    await fs.writeFile(path.join(work, 'b.txt'), 'new file\n');
+    await git(work, ['add', '-A']);
+    await git(work, ['commit', '-q', '-m', 'add b']);
+
+    const commits = await serviceFor(work).log();
+
+    expect(commits.length).toBeGreaterThanOrEqual(2);
+    expect(commits[0]).toMatchObject({ author: 'Test', summary: 'add b' });
+    expect(commits[0]!.hash).toHaveLength(7);
+    expect(commits[0]!.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('log() с путём оставляет только коммиты этого файла', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    // Второй коммит трогает только b.txt — в истории a.txt его быть не должно.
+    await fs.writeFile(path.join(work, 'b.txt'), 'bee\n');
+    await git(work, ['add', '-A']);
+    await git(work, ['commit', '-q', '-m', 'only b']);
+
+    const commits = await serviceFor(work).log(50, path.join(work, 'a.txt'));
+
+    expect(commits).toHaveLength(1);
+    expect(commits[0]!.summary).toBe('init');
+  });
+
+  it('diff() против коммита показывает правки, сделанные после него', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const file = path.join(work, 'a.txt');
+    const [first] = await serviceFor(work).log(50, file);
+    await fs.writeFile(file, 'one\ntwo\n');
+
+    const diff = await serviceFor(work).diff(file, false, first!.hash);
+
+    // original — состояние в коммите, modified — текущее дерево.
+    expect(diff.original).toBe('one\n');
+    expect(diff.modified).toBe('one\ntwo\n');
+    expect(diff.hunks).toHaveLength(1);
+  });
+
+  it('diff() против коммита работает и когда файл сейчас без правок', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const file = path.join(work, 'a.txt');
+    const [first] = await serviceFor(work).log(50, file);
+
+    // Файл не менялся — обычное сравнение сказало бы «нет изменений», а просмотр
+    // против коммита должен работать.
+    const diff = await serviceFor(work).diff(file, false, first!.hash);
+    expect(diff.original).toBe(diff.modified);
+    expect(diff.hunks).toEqual([]);
+  });
+});

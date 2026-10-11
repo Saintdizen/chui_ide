@@ -7,6 +7,7 @@ import {
   RpcErrorCode,
   type GitBranch,
   type GitChange,
+  type GitCommit,
   type GitCommitInfo,
   type GitDiff,
   type GitFileStatus,
@@ -80,7 +81,7 @@ export class GitService {
    */
   async stageHunk(filePath: string, index: number): Promise<GitStatus> {
     const { repoRoot, relative } = await this.locateHunk(filePath);
-    const patch = hunkPatch(await this.rawDiff(relative, repoRoot, false), index);
+    const patch = hunkPatch(await this.rawDiff(relative, repoRoot, { staged: false }), index);
     if (!patch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Блок изменений не найден');
     await this.applyToIndex(patch, repoRoot, false);
     return this.refresh();
@@ -89,7 +90,7 @@ export class GitService {
   /** Убрать из индекса один блок: обратный патч индекса против HEAD. */
   async unstageHunk(filePath: string, index: number): Promise<GitStatus> {
     const { repoRoot, relative } = await this.locateHunk(filePath);
-    const patch = hunkPatch(await this.rawDiff(relative, repoRoot, true), index);
+    const patch = hunkPatch(await this.rawDiff(relative, repoRoot, { staged: true }), index);
     if (!patch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Блок изменений не найден');
     await this.applyToIndex(patch, repoRoot, true);
     return this.refresh();
@@ -165,26 +166,33 @@ export class GitService {
    * Сравнение файла: `staged` — индекс против HEAD, иначе рабочее дерево
    * против индекса. Одну из сторон всегда отдаёт git, вторую — либо git, либо ФС.
    */
-  async diff(filePath: string, staged = false): Promise<GitDiff> {
+  async diff(filePath: string, staged = false, commit?: string): Promise<GitDiff> {
     const status = await this.status();
     const repoRoot = status.repository?.root;
     if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
 
     const absolute = path.resolve(filePath);
     const known = status.files.find((file) => file.path === absolute);
-    if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
+    // Обычное сравнение требует правок: без них показывать нечего. Просмотр против
+    // коммита возможен и для файла без текущих правок — тогда путь берём от корня.
+    if (!commit && !known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
+    const relative = known?.relative ?? path.relative(repoRoot, absolute);
 
-    // staged: индекс против HEAD, иначе рабочее дерево против индекса.
-    // Именно против индекса, а не HEAD: иначе в diff попадали бы уже
-    // проиндексированные правки, и сравнение теряло бы смысл.
-    const original = staged
-      ? await this.show(`HEAD:${known.relative}`, repoRoot)
-      : await this.show(`:${known.relative}`, repoRoot);
-    const modified = staged ? await this.show(`:${known.relative}`, repoRoot) : await this.readText(absolute);
+    // staged: индекс против HEAD, иначе рабочее дерево против индекса. Против
+    // названного коммита — рабочее дерево (что реально лежит на диске сейчас).
+    let original: string;
+    let modified: string;
+    if (commit) {
+      original = await this.show(`${commit}:${relative}`, repoRoot);
+      modified = await this.readText(absolute);
+    } else {
+      original = staged ? await this.show(`HEAD:${relative}`, repoRoot) : await this.show(`:${relative}`, repoRoot);
+      modified = staged ? await this.show(`:${relative}`, repoRoot) : await this.readText(absolute);
+    }
 
     // Границы блоков нужны интерфейсу: у каждого будет своя кнопка. Считаем из
     // того же diff, что приложит `git apply`, — тогда номера блоков совпадают.
-    const hunks = hunkRanges(await this.rawDiff(known.relative, repoRoot, staged));
+    const hunks = hunkRanges(await this.rawDiff(relative, repoRoot, { staged, commit }));
     return { original, modified, hunks };
   }
 
@@ -202,7 +210,7 @@ export class GitService {
     const known = status.files.find((file) => file.path === path.resolve(filePath));
     if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
 
-    return this.rawDiff(known.relative, repoRoot, staged);
+    return this.rawDiff(known.relative, repoRoot, { staged });
   }
 
   /**
@@ -215,10 +223,16 @@ export class GitService {
    * инструмента не нужен; `--no-ext-diff` — иначе `diff.external` подменил бы
    * вывод чужой программой, а нам нужен именно унифицированный diff.
    */
-  private async rawDiff(relative: string, repoRoot: string, staged: boolean): Promise<string> {
-    const args = staged
-      ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff', '--', relative]
-      : ['diff', '-U3', '--no-color', '--no-ext-diff', '--', relative];
+  private async rawDiff(
+    relative: string,
+    repoRoot: string,
+    target: { staged: boolean; commit?: string },
+  ): Promise<string> {
+    const args = target.commit
+      ? ['diff', target.commit, '-U3', '--no-color', '--no-ext-diff', '--', relative]
+      : target.staged
+        ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff', '--', relative]
+        : ['diff', '-U3', '--no-color', '--no-ext-diff', '--', relative];
     const result = await this.exec(args, repoRoot, { allowFailure: true });
     return result.stdout;
   }
@@ -240,6 +254,37 @@ export class GitService {
     // а это не сбой — просто истории ещё нет.
     const result = await this.exec(args, repoRoot, { allowFailure: true });
     return result.ok ? result.stdout : '';
+  }
+
+  /**
+   * История коммитов в виде записей: хеш, автор, дата, заголовок. Нужна списку
+   * в интерфейсе — в отличие от `logText`, здесь поля разделены, а не собраны
+   * в одну строку. Файл (`path`) ограничивает историю теми коммитами, что его трогали.
+   */
+  async log(limit = 50, filePath?: string): Promise<GitCommit[]> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    const count = Math.min(Math.max(Math.round(limit) || 50, 1), 200);
+    // Поля разделяем байтом US (0x1f), который git вставляет по `%x1f`: автор или
+    // заголовок могут содержать пробелы и двоеточия, и печатный разделитель
+    // рано или поздно совпал бы с текстом.
+    const args = ['log', `-n${count}`, '--date=short', '--format=%h%x1f%ad%x1f%an%x1f%s'];
+    if (filePath) args.push('--', path.relative(repoRoot, path.resolve(filePath)));
+
+    // allowFailure: в репозитории без коммитов `git log` завершается ошибкой,
+    // а это не сбой — просто истории ещё нет.
+    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    if (!result.ok) return [];
+
+    const commits: GitCommit[] = [];
+    for (const line of result.stdout.split('\n')) {
+      if (!line) continue;
+      const [hash, date, author, ...rest] = line.split('\u001f');
+      if (!hash || !date || !author) continue;
+      commits.push({ hash, date, author, summary: rest.join('\u001f') });
+    }
+    return commits;
   }
 
   /**

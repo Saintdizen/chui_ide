@@ -147,6 +147,9 @@ export class EditorService {
   /** Непокрытые строки по файлам из отчёта покрытия; пусто — покрытие не считали. */
   private readonly coverageLines = new Map<string, ReadonlySet<number>>();
   private readonly coverageDecorations = new Map<string, string[]>();
+  /** Подпись blame у строки (автор, дата, коммит); null — подписи нет. */
+  private blameLine: { path: string; line: number; text: string } | null = null;
+  private readonly blameDecorations = new Map<string, string[]>();
   private options: EditorOptions;
   private activePath: string | null = null;
 
@@ -406,6 +409,8 @@ export class EditorService {
     // И подсветку непокрытых строк: отчёт покрытия мог прийти раньше файла.
     this.drawCoverage(document.path);
     this.drawDebugLine();
+    // Подпись blame привязана к файлу и строке — на новой модели её нужно перерисовать.
+    this.drawBlame();
     this.editor.focus();
     this.emitCursor();
   }
@@ -743,6 +748,45 @@ export class EditorService {
     this.coverageDecorations.set(path, next);
   }
 
+  /**
+   * Подпись blame у строки: автор, дата и коммит — серым текстом после кода, как
+   * в VS Code. `null` — подпись убрать. Одна на всё приложение: показывается
+   * только у строки под курсором.
+   */
+  setBlame(annotation: { path: string; line: number; text: string } | null): void {
+    this.blameLine = annotation;
+    this.drawBlame();
+  }
+
+  private drawBlame(): void {
+    for (const [path, ids] of this.blameDecorations) {
+      const model = this.files.get(path);
+      if (ids.length > 0) model?.deltaDecorations(ids, []);
+    }
+    this.blameDecorations.clear();
+
+    const current = this.blameLine;
+    if (!current) return;
+    const model = this.files.get(current.path);
+    if (!model) return;
+    this.blameDecorations.set(
+      current.path,
+      model.deltaDecorations(
+        [],
+        [
+          {
+            range: new monaco.Range(current.line, 1, current.line, 1),
+            options: {
+              // `after` рисует текст после конца строки, не трогая содержимое файла.
+              after: { content: `  ${current.text}`, inlineClassName: 'blame-inline' },
+              stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+            },
+          },
+        ],
+      ),
+    );
+  }
+
   private drawDebugLine(): void {
     // Снимаем прежнюю подсветку с той модели, где она была.
     for (const [path, ids] of this.debugDecorations) {
@@ -889,6 +933,8 @@ export class EditorService {
     // копились бы, а сама подсветка — нет. Записи о непокрытых строках держим:
     // файл откроют снова, и строки нужно нарисовать снова.
     this.coverageDecorations.delete(path);
+    this.blameDecorations.delete(path);
+    if (this.blameLine?.path === path) this.blameLine = null;
     if (this.debugLine?.path === path) this.debugLine = null;
   }
 

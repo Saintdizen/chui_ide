@@ -10,6 +10,7 @@ import {
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
 import { mergeLspServers } from '../shared/lsp-presets';
+import { createBlameController } from './core/blame';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -208,6 +209,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   const editors = new EditorService(layout.editorHost, documents, settings.editor, theme.monacoThemeId);
   const edits = new EditService({ documents, editors, rpc });
+  // Подпись blame у строки под курсором. Запрос идёт в git за одной строкой;
+  // показ по умолчанию выключен и включается командой (см. `git.toggleBlame`).
+  const blame = createBlameController({
+    blameLine: async (path, line) => {
+      const lines = await git.blame(path, { startLine: line, endLine: line }).catch(() => []);
+      return lines[0] ?? null;
+    },
+    show: (annotation) => editors.setBlame(annotation),
+  });
   // Отладчик: состояние сессии держит контроллер, события идут из main push-ом.
   const debug = new DebugController(rpc);
   // Подсказка под курсором в остановленном файле: значение выражения в кадре. Шов
@@ -1705,6 +1715,41 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (target) await diffView.open(target, staged === true);
   });
 
+  /** Показать или скрыть автора строки у курсора (blame). */
+  define({ id: 'git.toggleBlame', title: 'Автор строки (blame): показать/скрыть', category: 'Git' }, () => {
+    const on = blame.toggle();
+    showToast(on ? 'Blame включён: у строки под курсором видно автора' : 'Blame выключен');
+  });
+
+  /** История коммитов файла: выбор записи открывает сравнение с текущим текстом. */
+  define({ id: 'git.fileHistory', title: 'История файла', category: 'Git' }, async (path) => {
+    const target = asPath(path) ?? editors.currentPath;
+    if (!target) {
+      showToast('Откройте файл, историю которого хотите посмотреть', 'error');
+      return;
+    }
+
+    const commits = await git.log(target, 50);
+    if (commits.length === 0) {
+      showToast('Истории нет: файл не в git или коммитов ещё нет');
+      return;
+    }
+
+    // Команда может прийти и из палитры, поэтому якоря под курсором нет —
+    // отсчитываем панель от угла самой области редактора.
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(
+      commits.map((commit) => ({
+        label: `${commit.hash} ${commit.date} ${commit.author}`,
+        hint: commit.summary,
+        onSelect: () => void diffView.open(target, false, commit.hash),
+      })),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+  });
+
   define({ id: 'git.checkout', title: 'Переключить ветку', category: 'Git' }, async (name) => {
     if (typeof name !== 'string' || !name) return;
     await git.checkout(name);
@@ -2112,6 +2157,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   // Счётчик правок и ветка в статусбаре живут по тому же снимку, что и дерево.
   git.onDidChange(refreshStatus);
+  // История могла измениться (коммит, rebase) — кэш подписи blame устарел.
+  git.onDidChange(() => blame.refresh());
   // Коммит и push, сделанные мимо IDE (в терминале или внешней программой),
   // меняют только `.git`, а рабочее дерево — нет: наблюдателя за этим может и
   // не быть. На возврат фокуса перечитываем состояние репозитория, чтобы пометки
@@ -2272,7 +2319,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       resetProjectConfig();
     }
   });
-  editors.onCursorChange((state) => statusBar.update({ line: state.line, column: state.column }));
+  editors.onCursorChange((state) => {
+    statusBar.update({ line: state.line, column: state.column });
+    // Строка под курсором сменилась — обновляем подпись blame (если показ включён).
+    blame.update(state.path, state.line);
+  });
   // Разделение меняют и кнопка, и команда — подсветка кнопки идёт за состоянием.
   editors.onDidChangeSplit(() => syncViewButtons());
   rpc.onDidChangeStreaming((streaming) => statusBar.update({ ai: streaming ? 'генерация…' : 'готов' }));

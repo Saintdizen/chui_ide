@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatBlame, parseBlamePorcelain } from '../src/shared/git-blame';
+import { formatBlame, formatBlameAnnotation, parseBlamePorcelain } from '../src/shared/git-blame';
 
 /**
  * Разбор `git blame --line-porcelain` и отчёт по нему. Правило, а не запуск:
@@ -78,6 +78,18 @@ describe('parseBlamePorcelain', () => {
     expect(lines).toHaveLength(3);
     expect(lines[0]!.text).toBe('one');
     expect(lines[1]!.text).toBe('CHANGED');
+  });
+});
+
+describe('formatBlameAnnotation', () => {
+  it('собирает автора, дату и заголовок в одну строку', () => {
+    const line = { line: 1, hash: 'abc1234', author: 'Аня', date: '2024-01-02', summary: 'правка', text: 'x' };
+    expect(formatBlameAnnotation(line)).toBe('Аня, 2024-01-02 · правка');
+  });
+
+  it('без заголовка ставит прочерк, а не обрывает подпись', () => {
+    const line = { line: 1, hash: 'abc1234', author: 'Аня', date: '2024-01-02', summary: '', text: 'x' };
+    expect(formatBlameAnnotation(line)).toBe('Аня, 2024-01-02 · —');
   });
 });
 

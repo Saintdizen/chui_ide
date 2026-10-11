@@ -225,6 +225,7 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     showContextMenu(
       [
         { label: 'Показать различия', onSelect: () => void deps.commands.execute('git.showDiff', file.path, staged) },
+        { label: 'История файла', onSelect: () => void deps.commands.execute('git.fileHistory', file.path) },
         { label: 'Открыть файл', onSelect: () => void deps.commands.execute('file.revealAt', file.path, 1, 1) },
         { separator: true as const },
         staged

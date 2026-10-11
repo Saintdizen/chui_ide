@@ -821,6 +821,12 @@ textarea {
   background: var(--debug_line_background);
 }
 
+/* Подпись blame у строки под курсором: тихий текст после кода, не мешая чтению. */
+.blame-inline {
+  color: var(--text_color_tertiary);
+  font-style: italic;
+}
+
 /* Строки, не исполненные тестами: подсвечиваются после прогона с покрытием. */
 .coverage-line {
   background: var(--coverage_missing_background);

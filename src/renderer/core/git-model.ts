@@ -1,6 +1,7 @@
 import {
   PushTopic,
   type GitBranch,
+  type GitCommit,
   type GitCommitInfo,
   type GitDiff,
   type GitFileStatus,
@@ -8,6 +9,7 @@ import {
   type GitRemote,
   type GitStatus,
 } from '../../shared/api';
+import type { BlameLine } from '../../shared/git-blame';
 import { Emitter } from './events';
 import { separatorOf } from '../../shared/paths';
 import type { RpcClient } from './rpc';
@@ -157,8 +159,18 @@ export class GitModel {
     return info;
   }
 
-  diff(path: string, staged = false): Promise<GitDiff> {
-    return this.rpc.request('git.diff', { path, staged });
+  diff(path: string, staged = false, commit?: string): Promise<GitDiff> {
+    return this.rpc.request('git.diff', { path, staged, commit });
+  }
+
+  /** Происхождение строк файла: кто и когда их менял. `range` — только эти строки. */
+  blame(path: string, range?: { startLine?: number; endLine?: number }): Promise<BlameLine[]> {
+    return this.rpc.request('git.blame', { path, startLine: range?.startLine, endLine: range?.endLine });
+  }
+
+  /** История коммитов: без пути — всего репозитория, с путём — только трогавшие файл. */
+  log(path?: string, limit = 50): Promise<GitCommit[]> {
+    return this.rpc.request('git.log', { path, limit });
   }
 
   /** Проиндексировать один блок изменений файла (не весь файл). */

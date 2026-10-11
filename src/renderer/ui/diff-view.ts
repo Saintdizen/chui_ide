@@ -14,10 +14,21 @@ export interface DiffViewDeps {
 
 export interface DiffView {
   element: HTMLElement;
-  /** Показать сравнение файла; `staged` — индекс против HEAD. */
-  open(path: string, staged: boolean): Promise<void>;
+  /**
+   * Показать сравнение файла. `staged` — индекс против HEAD; `commit` — рабочее
+   * дерево против названного коммита (просмотр истории, блоки не индексируются).
+   */
+  open(path: string, staged: boolean, commit?: string): Promise<void>;
   close(): void;
   readonly isOpen: boolean;
+}
+
+/** Что показано сейчас: после правки перерисовываем тот же diff. */
+interface DiffTarget {
+  path: string;
+  staged: boolean;
+  /** Коммит для просмотра истории; нет — обычное рабочее сравнение. */
+  commit?: string;
 }
 
 /**
@@ -40,7 +51,7 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
   let handle: DiffEditorHandle | null = null;
   let open = false;
   /** Что показано сейчас: после правки перерисовываем тот же diff. */
-  let current: { path: string; staged: boolean } | null = null;
+  let current: DiffTarget | null = null;
   /** Идёт операция с блоком: повторное нажатие не должно запускать её снова. */
   let busy = false;
 
@@ -79,23 +90,32 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
       busy = false;
     }
     // Правки в индексе изменились — сравнение и блоки нужно построить заново.
-    if (current) await render(current.path, current.staged);
+    if (current) await render(current);
   };
 
-  /** Нарисовать блоки: у каждого кнопка, ведущая в `applyHunk` по его номеру. */
-  const drawHunks = (hunks: readonly GitDiffHunk[]): void => {
+  /**
+   * Нарисовать блоки: у каждого кнопка, ведущая в `applyHunk` по его номеру.
+   * В просмотре против коммита кнопок нет: часть правки относительно коммита
+   * индексировать неотчего — индекс тут не при чём.
+   */
+  const drawHunks = (target: DiffTarget, hunks: readonly GitDiffHunk[]): void => {
     if (!handle) return;
-    const label = current?.staged ? 'Убрать из индекса' : 'Проиндексировать блок';
+    if (target.commit) {
+      handle.setHunkActions(null, () => undefined);
+      return;
+    }
+    const label = target.staged ? 'Убрать из индекса' : 'Проиндексировать блок';
     handle.setHunkActions(
       hunks.map((hunk, index) => ({ index, line: hunk.newStart, label })),
       (index) => void applyHunk(index),
     );
   };
 
-  const render = async (path: string, staged: boolean): Promise<void> => {
+  const render = async (target: DiffTarget): Promise<void> => {
+    const { path, staged, commit } = target;
     let diff: GitDiff;
     try {
-      diff = await deps.git.diff(path, staged);
+      diff = await deps.git.diff(path, staged, commit);
     } catch {
       // Правок больше нет — например, проиндексировали последний блок. Скажем это
       // прямо: пустое сравнение выглядело бы как сбой.
@@ -107,14 +127,21 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
 
     title.textContent = path.split('/').pop() ?? path;
     title.title = path;
-    subtitle.textContent = staged ? 'индекс против HEAD' : 'рабочее дерево против индекса';
-    subtitle.title = staged ? 'Показаны правки, которые уйдут в коммит' : 'Показаны правки, которых в индексе ещё нет';
+    if (commit) {
+      subtitle.textContent = `${commit} против рабочего дерева`;
+      subtitle.title = 'Показаны правки, сделанные после этого коммита';
+    } else {
+      subtitle.textContent = staged ? 'индекс против HEAD' : 'рабочее дерево против индекса';
+      subtitle.title = staged
+        ? 'Показаны правки, которые уйдут в коммит'
+        : 'Показаны правки, которых в индексе ещё нет';
+    }
 
     // Редактор создаём уже видимым: Monaco измеряет контейнер при создании,
     // а у скрытого контейнера ширина нулевая.
     if (!handle) handle = deps.createDiff(body);
     handle.set({ language: languageFromPath(path), original: diff.original, modified: diff.modified });
-    drawHunks(diff.hunks);
+    drawHunks(target, diff.hunks);
   };
 
   return {
@@ -123,11 +150,11 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
       return open;
     },
     close,
-    async open(path, staged) {
-      current = { path, staged };
+    async open(path, staged, commit) {
+      current = { path, staged, commit };
       open = true;
       element.hidden = false;
-      await render(path, staged);
+      await render(current);
     },
   };
 }

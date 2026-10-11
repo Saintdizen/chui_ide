@@ -384,6 +384,12 @@ module.exports = [
       const hunks = [{ oldStart: 1, oldCount: 1, newStart: 1, newCount: 1 }];
       return { original, modified: text, hunks };
     },
+    // Blame и история: мок отвечает одной строкой и одним коммитом — этого хватает,
+    // чтобы проверить, что подпись и список в UI собираются.
+    'git.blame': (params) => [
+      { line: params.startLine ?? 1, hash: 'abc1234', author: 'Мок', date: '2024-01-02', summary: 'правка', text: '' },
+    ],
+    'git.log': () => [{ hash: 'abc1234', author: 'Мок', date: '2024-01-02', summary: 'первый коммит' }],
     'git.branches': () => gitBranches.map((branch) => ({ ...branch })),
     'git.checkout': (params) => {
       gitState.repository.branch = params.name;

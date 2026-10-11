@@ -7,6 +7,7 @@
 
 import type { MenuRole } from './app-menu';
 import type { ApplyResult, FileEdit } from './edits';
+import type { BlameLine } from './git-blame';
 import type { PatchFile } from './patch';
 import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
@@ -349,6 +350,16 @@ export interface GitDiff {
 
 export interface GitCommitInfo {
   hash: string;
+  summary: string;
+}
+
+/** Один коммит из истории: то, что нужно списку, без тела сообщения и диффа. */
+export interface GitCommit {
+  /** Короткий хеш (7 символов), как его печатает git. */
+  hash: string;
+  author: string;
+  /** Дата коммита, `ГГГГ-ММ-ДД`. */
+  date: string;
   summary: string;
 }
 
@@ -1355,9 +1366,16 @@ export interface ChuiMethods {
   'git.unstage': { params: { paths: string[] }; result: GitStatus };
   'git.discard': { params: { paths: string[] }; result: GitStatus };
   'git.commit': { params: { message: string; paths?: string[] }; result: GitCommitInfo };
-  'git.diff': { params: { path: string; staged?: boolean }; result: GitDiff };
+  'git.diff': { params: { path: string; staged?: boolean; commit?: string }; result: GitDiff };
   'git.stageHunk': { params: { path: string; index: number }; result: GitStatus };
   'git.unstageHunk': { params: { path: string; index: number }; result: GitStatus };
+  /**
+   * Происхождение строк файла: кто, когда и каким коммитом их менял. Без
+   * границ — весь файл; неотслеживаемый файл даёт пустой список, а не сбой.
+   */
+  'git.blame': { params: { path: string; startLine?: number; endLine?: number }; result: BlameLine[] };
+  /** История коммитов: все или только трогавшие указанный файл. */
+  'git.log': { params: { path?: string; limit?: number }; result: GitCommit[] };
   'git.branches': { params: void; result: GitBranch[] };
   'git.checkout': { params: { name: string; create?: boolean }; result: GitStatus };
   'git.remotes': { params: void; result: GitRemote[] };
