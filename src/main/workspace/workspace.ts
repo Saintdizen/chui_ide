@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { promises as fs, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import { shell } from 'electron';
@@ -18,6 +19,7 @@ import { RpcFailure } from '../ipc/router';
 import { ContentCache, type ContentCacheStats } from './content-cache';
 import { escapesRoot, isInsideRoot } from './path-guard';
 import { globToRegExp } from '../../shared/glob';
+import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
 import { replaceAll } from '../../shared/replace';
 
@@ -72,6 +74,8 @@ export class WorkspaceService {
    * изменившееся. Свежесть сверяется по `mtime` и размеру при каждом обращении.
    */
   private readonly contents = new ContentCache();
+  /** Есть ли ripgrep в системе: `null` — ещё не выяснили. */
+  private ripgrepFound: boolean | null = null;
 
   constructor(private readonly onChange: (topic: string, payload: unknown) => void) {}
 
@@ -286,14 +290,68 @@ export class WorkspaceService {
     // что и чтение, поэтому искать «где-нибудь снаружи» через search нельзя.
     const scope = options.path ? await this.safePath(options.path) : root;
     const limit = Math.min(options.maxResults ?? 200, MAX_SEARCH_RESULTS);
+    const context = options.filesOnly ? 0 : Math.min(Math.max(options.context ?? 0, 0), MAX_SEARCH_CONTEXT);
+
+    // Сперва пробуем ripgrep: он обходит проект потоком и на большом дереве
+    // быстрее нашего обхода. Нет его в системе или он не справился — ищем сами:
+    // результат у обоих путей один, выбор пути наружу не видён.
+    const viaRipgrep = await this.searchWithRipgrep(scope, options, limit, context, signal);
+    if (viaRipgrep) return viaRipgrep;
+
+    return this.searchWithFs(scope, options, limit, context, signal);
+  }
+
+  /**
+   * Поиск через ripgrep. `null` — искать надо своим обходом (нет команды или сбой).
+   */
+  private async searchWithRipgrep(
+    scope: string,
+    options: SearchOptions,
+    limit: number,
+    context: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult | null> {
+    if (!(await this.hasRipgrep())) return null;
+    // Маска и исключения меряются от области поиска — как в собственном обходе.
+    // Для файла «областью» становится его каталог, а сам файл — единственным путём.
+    const stat = await fs.stat(scope).catch(() => null);
+    const cwd = stat?.isFile() ? path.dirname(scope) : scope;
+    const target = stat?.isFile() ? path.basename(scope) : '.';
+    const args = ripgrepArgs({ ...options, path: target }, [...IGNORED_DIRS], limit, context);
+
+    try {
+      const output = await runRipgrep(args, cwd, signal);
+      // Команда есть, но совпадений нет — это результат, а не сбой.
+      if (output === null) return null;
+      return parseRipgrepJson(output, options, limit);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Есть ли ripgrep в системе. Спрашиваем один раз и запоминаем ответ. */
+  private async hasRipgrep(): Promise<boolean> {
+    if (this.ripgrepFound === null) {
+      this.ripgrepFound = await new Promise<boolean>((resolve) => {
+        const child = spawn('rg', ['--version'], { windowsHide: true });
+        child.on('error', () => resolve(false));
+        child.on('close', (code) => resolve(code === 0));
+      }).catch(() => false);
+    }
+    return this.ripgrepFound;
+  }
+
+  private async searchWithFs(
+    scope: string,
+    options: SearchOptions,
+    limit: number,
+    context: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult> {
     const flags = options.caseSensitive ? 'g' : 'gi';
     const pattern = options.isRegex ? options.query : escapeRegExp(options.query);
     const matcher = new RegExp(pattern, flags);
     const globMatcher = options.glob ? globToRegExp(options.glob) : null;
-    // Контекст — это удобство навигации, а не запрос всего файла: держим его
-    // маленьким, чтобы вывод поиска не вытеснял саму беседу из окна модели.
-    const context = options.filesOnly ? 0 : Math.min(Math.max(options.context ?? 0, 0), MAX_SEARCH_CONTEXT);
-
     // Сначала дешёвый обход: собрать список файлов. Чтение — тяжёлое, поэтому
     // его распараллеливаем с ограничением, а не идём по дереву последовательно.
     const files: string[] = [];
@@ -638,4 +696,38 @@ function clipLine(line: string): string {
   return withoutCarriage.length > MAX_HIT_LINE_CHARS
     ? `${withoutCarriage.slice(0, MAX_HIT_LINE_CHARS)}…`
     : withoutCarriage;
+}
+
+/**
+ * Запустить ripgrep и собрать вывод. `null` — совпадений нет или команду прервали;
+ * сбой запуска летит исключением, чтобы вызывающий откатился на свой обход.
+ */
+function runRipgrep(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string | null> {
+  return new Promise((resolve, reject) => {
+    const child = spawn('rg', [...args], { cwd, windowsHide: true });
+    // Вывод собираем целиком: он ограничен числом совпадений, а склеивать
+    // поток частями пришлось бы всё равно — запись рвётся посредине.
+    let out = '';
+    let failed = '';
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      out += chunk.toString('utf8');
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      failed += chunk.toString('utf8');
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      // 0 — есть совпадения, 1 — их нет (это не ошибка), 2 — сбой самого поиска.
+      if (code === 0) resolve(out);
+      else if (code === 1) resolve(null);
+      else reject(new Error(`rg завершился с кодом ${code}: ${failed.trim()}`));
+    });
+
+    const abort = (): void => {
+      child.kill();
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    child.on('close', () => signal?.removeEventListener('abort', abort));
+  });
 }
