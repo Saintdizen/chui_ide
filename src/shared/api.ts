@@ -241,6 +241,14 @@ export interface SessionState {
   debugExceptions?: DebugExceptionFilters;
   /** Точки останова отладки по файлам — их рабочее место помнит для проекта. */
   breakpoints?: BreakpointRecord[];
+  /** Где стоял курсор в каждом открытом файле (1-based). */
+  cursors?: Record<string, CursorPosition>;
+}
+
+/** Позиция курсора в файле (1-based) - как её считает редактор. */
+export interface CursorPosition {
+  line: number;
+  column: number;
 }
 
 /**

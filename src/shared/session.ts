@@ -1,4 +1,4 @@
-import type { BreakpointRecord, DebugExceptionFilters, DebugLaunchOptions, SessionState } from './api';
+import type { BreakpointRecord, CursorPosition, DebugExceptionFilters, DebugLaunchOptions, SessionState } from './api';
 
 /**
  * Проверка и границы сессии — в `shared`, а не в main: это чистая логика без
@@ -12,6 +12,8 @@ export const MAX_EXPANDED = 400;
 export const MAX_ARGS = 100;
 export const MAX_WATCH = 50;
 export const MAX_BREAKPOINTS = 500;
+/** Позиции курсоров меряются открытыми вкладками; с запасом на разделённые панели. */
+export const MAX_CURSORS = 200;
 const MAX_ENV_ENTRIES = 100;
 /** Настройки точки — короткие строки; общий предел пути здесь избыточен, но безопасен. */
 const MAX_SETTING_CHARS = 4096;
@@ -66,8 +68,32 @@ export function sanitizeSession(raw: unknown): SessionState {
   if (exceptions) state.debugExceptions = exceptions;
   const breakpoints = breakpointRecords(value.breakpoints);
   if (breakpoints.length > 0) state.breakpoints = breakpoints;
+  // Позиции курсоров — только для открытых файлов: у закрытого она мертва.
+  const cursors = cursorPositions(value.cursors, tabs);
+  if (Object.keys(cursors).length > 0) state.cursors = cursors;
 
   return state;
+}
+
+/**
+ * Позиции курсоров из сессии. Храним только для файлов, которые всё ещё открыты
+ * (у остальных она мертва), и только целые положительные числа: битый файл сессии
+ * не должен уронить редактор в неверную позицию.
+ */
+function cursorPositions(raw: unknown, tabs: readonly string[]): Record<string, CursorPosition> {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {};
+  const open = new Set(tabs);
+  const result: Record<string, CursorPosition> = {};
+  for (const [path, position] of Object.entries(raw as Record<string, unknown>)) {
+    if (Object.keys(result).length >= MAX_CURSORS) break;
+    if (!open.has(path)) continue;
+    if (typeof position !== 'object' || position === null) continue;
+    const value = position as Record<string, unknown>;
+    if (!Number.isInteger(value.line) || (value.line as number) < 1) continue;
+    if (!Number.isInteger(value.column) || (value.column as number) < 1) continue;
+    result[path] = { line: value.line as number, column: value.column as number };
+  }
+  return result;
 }
 
 /**

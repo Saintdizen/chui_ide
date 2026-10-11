@@ -128,6 +128,39 @@ describe('sanitizeSession', () => {
     expect(sanitizeSession({ breakpoints: [] }).breakpoints).toBeUndefined();
     expect(sanitizeSession({ breakpoints: 'нет' }).breakpoints).toBeUndefined();
   });
+
+  it('позиции курсоров читаются для открытых файлов', () => {
+    const state = sanitizeSession({
+      tabs: ['/p/a.ts', '/p/b.ts'],
+      cursors: { '/p/a.ts': { line: 12, column: 4 } },
+    });
+    expect(state.cursors).toEqual({ '/p/a.ts': { line: 12, column: 4 } });
+  });
+
+  it('позиция закрытого файла отбрасывается: она мертва', () => {
+    const state = sanitizeSession({
+      tabs: ['/p/a.ts'],
+      cursors: { '/p/a.ts': { line: 1, column: 1 }, '/p/gone.ts': { line: 5, column: 2 } },
+    });
+    expect(Object.keys(state.cursors ?? {})).toEqual(['/p/a.ts']);
+  });
+
+  it('битые позиции курсоров отбрасываются', () => {
+    const state = sanitizeSession({
+      tabs: ['/p/a.ts', '/p/b.ts', '/p/c.ts'],
+      cursors: {
+        '/p/a.ts': { line: 0, column: 1 },
+        '/p/b.ts': { line: 3, column: 1.5 },
+        '/p/c.ts': 'нет',
+      },
+    });
+    expect(state.cursors).toBeUndefined();
+  });
+
+  it('строки без позиций в сессию не пишутся', () => {
+    expect(sanitizeSession({ tabs: ['/p/a.ts'] }).cursors).toBeUndefined();
+    expect(sanitizeSession({ tabs: [], cursors: [] }).cursors).toBeUndefined();
+  });
 });
 
 describe('границы пустой сессии не мутируются', () => {

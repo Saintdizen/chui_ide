@@ -1,5 +1,5 @@
 import * as monaco from 'monaco-editor';
-import type { DiagnosticItem, EditorSettings, LspDiagnostic } from '../../shared/api';
+import type { CursorPosition, DiagnosticItem, EditorSettings, LspDiagnostic } from '../../shared/api';
 import type { TextEdit } from '../../shared/edits';
 import './monaco-env';
 import type { RunnableTest } from '../../shared/python-tests';
@@ -113,6 +113,11 @@ export class EditorService {
   private activePane = 0;
 
   private readonly viewStates = new Map<string, monaco.editor.ICodeEditorViewState | null>();
+  /**
+   * Где стоит курсор в каждом открытом файле. `viewStates` хранит то же, но
+   * только в памяти процесса: при перезапуске его нет, и курсор терялся.
+   */
+  private readonly cursors = new Map<string, CursorPosition>();
   /** Значки запуска по файлам: нарисованные украшения нужно убирать перед новой отрисовкой. */
   private readonly runDecorations = new Map<string, string[]>();
   private readonly runLines = new Map<string, ReadonlySet<number>>();
@@ -313,6 +318,10 @@ export class EditorService {
     // Курсор в статус-бар отдаёт только активная панель: у второй он не «текущий».
     editor.onDidChangeCursorPosition((event) => {
       if (this.activePane !== index) return;
+      // Запоминаем позицию по файлу: её берёт сессия проекта при сохранении.
+      if (this.activePath) {
+        this.cursors.set(this.activePath, { line: event.position.lineNumber, column: event.position.column });
+      }
       this.cursorEmitter.fire({
         path: this.activePath,
         line: event.position.lineNumber,
@@ -362,7 +371,19 @@ export class EditorService {
     const model = this.files.resolve(document);
     pane.editor.setModel(model);
     const state = this.viewStates.get(document.path);
-    if (state) pane.editor.restoreViewState(state);
+    if (state) {
+      pane.editor.restoreViewState(state);
+    } else {
+      // Состояния в памяти нет — файл открывается впервые за этот запуск. Если он
+      // был открыт в прошлой сессии, возвращаем позицию оттуда: иначе курсор встанет
+      // в начало файла и место работы придётся искать заново.
+      const saved = this.cursors.get(document.path);
+      if (saved) {
+        const position = new monaco.Position(saved.line, saved.column);
+        pane.editor.setPosition(position);
+        pane.editor.revealPositionInCenterIfOutsideViewport(position);
+      }
+    }
     pane.path = document.path;
     this.activePath = document.path;
     // Модель появилась позже, чем узнали о точке входа — дорисовываем значок.
@@ -385,6 +406,29 @@ export class EditorService {
    */
   applyEdits(document: TextDocument, edits: readonly TextEdit[]): void {
     this.files.applyEdits(document, edits);
+  }
+
+  /**
+   * Позиции курсоров по файлам — их берёт сессия проекта. Активный файл берём
+   * «живьём»: его позиция могла измениться не через событие (например, переходом).
+   */
+  cursorPositions(): Record<string, CursorPosition> {
+    const result: Record<string, CursorPosition> = {};
+    for (const [path, position] of this.cursors) result[path] = position;
+    const current = this.editor.getPosition();
+    if (this.activePath && current) {
+      result[this.activePath] = { line: current.lineNumber, column: current.column };
+    }
+    return result;
+  }
+
+  /**
+   * Позиции курсоров из сессии проекта. Ставим до открытия файлов: `open`
+   * подхватит их при первом показе файла в этом запуске.
+   */
+  restoreCursorPositions(positions: Record<string, CursorPosition>): void {
+    this.cursors.clear();
+    for (const [path, position] of Object.entries(positions)) this.cursors.set(path, position);
   }
 
   reveal(path: string, line: number, column: number): void {

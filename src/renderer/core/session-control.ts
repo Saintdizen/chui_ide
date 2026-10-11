@@ -116,6 +116,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     const watch = debugPanel.getWatch();
     const exceptions = debug.exceptionFilters();
     const options = deps.getDebugOptions();
+    const cursors = editors.cursorPositions();
     return {
       tabs: [...openEditors.paths],
       ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
@@ -129,6 +130,9 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       ...(watch.length > 0 ? { debugWatch: watch } : {}),
       ...(exceptions.uncaught || exceptions.caught ? { debugExceptions: exceptions } : {}),
       ...(breakpoints.length > 0 ? { breakpoints } : {}),
+      // Место работы в каждом файле — часть рабочего места: без него после
+      // перезапуска вкладки те же, а курсор в начале файла.
+      ...(Object.keys(cursors).length > 0 ? { cursors } : {}),
     };
   };
 
@@ -160,6 +164,9 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     try {
       openEditors.closeAll();
       const state = await rpc.request('session.load', { root: target });
+
+      // Позиции курсоров ставим ДО открытия файлов: `open` подхватит их при показе.
+      editors.restoreCursorPositions(state.cursors ?? {});
 
       for (const path of state.tabs) {
         try {

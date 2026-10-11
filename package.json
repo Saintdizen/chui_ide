@@ -53,6 +53,7 @@
     "probe:settings": "npm run build && electron scripts/settings-search-probe.cjs",
     "probe:nav": "npm run build && electron scripts/nav-probe.cjs",
     "probe:lsp": "npm run build && electron scripts/lsp-pickup-probe.cjs",
+    "probe:cursor": "npm run build && bash scripts/cursor-probe.sh",
     "icon": "npm run build:main && node scripts/make-icon.mjs",
     "dist": "npm run build && electron-builder --publish never",
     "dist:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
