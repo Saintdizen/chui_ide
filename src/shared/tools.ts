@@ -21,6 +21,7 @@ export type AgentToolName =
   | 'codebase_search'
   | 'find_references'
   | 'go_to_definition'
+  | 'rename_symbol'
   | 'project_map'
   | 'file_outline'
   | 'run_linter'
@@ -195,6 +196,27 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         line: { type: 'number', description: 'Строка использования в этом файле (1-based).' },
         column: { type: 'number', description: 'Столбец (1-based). Без него — начало строки.' },
       },
+    },
+  },
+  {
+    name: 'rename_symbol',
+    side: 'main',
+    description:
+      'Переименовать символ с учётом семантики: языковой сервер меняет имя только там, где это ' +
+      'именно этот символ, — в объявлении и во всех ссылках, включая другие файлы. Это не то же, ' +
+      'что `replace_in_files`: та бьёт по подстроке и заденет одноимённые переменные и комментарии. ' +
+      'Перед вызовом полезно посмотреть `find_references`. Правки проходят ревью, как у `apply_edit`.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Текущее имя символа.' },
+        newName: { type: 'string', description: 'Новое имя.' },
+        path: {
+          type: 'string',
+          description: 'Если у символа несколько объявлений — сузить поиск этим файлом (абсолютный путь).',
+        },
+      },
+      required: ['symbol', 'newName'],
     },
   },
   {

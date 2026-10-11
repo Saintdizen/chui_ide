@@ -798,6 +798,8 @@ export class AiService {
     ) {
       return this.symbols !== undefined;
     }
+    // Переименование меняет код через сервер — нужен и сервер, и применение правок.
+    if (tool.name === 'rename_symbol') return this.symbols !== undefined && host?.applyEdits !== undefined;
     if (tool.name === 'run_linter') return this.linter !== undefined;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     return tool.side === 'main';

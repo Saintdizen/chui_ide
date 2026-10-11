@@ -130,6 +130,23 @@ async function main() {
   const noReferences = await lsp.references(path.join(root, 'scripts', 'x.unknown'), 'unknown', '', 1, 1, true);
   ok('без сервера ссылок нет (null)', noReferences === null, String(noReferences));
 
+  /* Переименование (инструмент rename_symbol): правки в нескольких файлах одной
+     формой `changes`, каждая — в нашем виде (позиции 1-based), сгруппированная по
+     файлу. Это то, что применяет документная модель renderer. */
+  const renameEdits = await lsp.rename(sample, 'python', 'print(1)\n', 3, 7, 'Renamed');
+  ok(
+    'правки переименования получены',
+    Array.isArray(renameEdits) && renameEdits.length === 2,
+    JSON.stringify(renameEdits),
+  );
+  ok(
+    'правки сгруппированы по файлам с 1-based координатами',
+    renameEdits?.[0]?.path.endsWith('other.py') &&
+      renameEdits?.[1]?.edits[0]?.startLine === 3 &&
+      renameEdits[1].edits[0].newText === 'Renamed',
+    JSON.stringify(renameEdits),
+  );
+
   const restarted = lsp.restart();
   ok('restart останавливает серверы', restarted.running.length === 0 && lsp.status().running.length === 0);
 

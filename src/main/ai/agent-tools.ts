@@ -116,6 +116,18 @@ export interface SymbolSearch {
     line: number,
     column: number,
   ): Promise<readonly SymbolLocation[] | null>;
+  /**
+   * Правки переименования символа во всех местах использования. `null` — сервер
+   * не умеет переименование; пустой список — умеет, но менять нечего.
+   */
+  rename?(
+    path: string,
+    languageId: string,
+    text: string,
+    line: number,
+    column: number,
+    newName: string,
+  ): Promise<readonly FileEdit[] | null>;
 }
 
 /**
@@ -266,6 +278,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await findReferences(ctx, parsed.value);
       case 'go_to_definition':
         return await goToDefinition(ctx, parsed.value);
+      case 'rename_symbol':
+        return await renameSymbol(ctx, parsed.value);
       case 'file_outline':
         return await fileOutline(ctx, parsed.value);
       case 'run_linter':
@@ -810,6 +824,79 @@ async function goToDefinition(ctx: ToolContext, args: Record<string, unknown>): 
   }));
   const report = formatLocations(`определение ${name}`, locations, (target) => relativePath(target, root));
   return { ok: true, summary: report.summary, detail: report.detail };
+}
+
+/**
+ * Переименование символа с учётом семантики: сервер находит объявление по имени,
+ * возвращает правки во всех местах использования (включая другие файлы) — их
+ * применяет документная модель renderer, тем же путём, что `apply_edit`, поэтому
+ * работает undo и ревью. Это не `replace_in_files`: та бьёт по подстроке и не
+ * знает границ символа, а здесь имя меняется только там, где оно — этот символ.
+ */
+async function renameSymbol(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.symbols?.rename) {
+    return { ok: false, summary: 'Языковой сервер не подключён: переименование символа недоступно' };
+  }
+  if (!ctx.applyEdits) {
+    return { ok: false, summary: 'Правки сейчас недоступны: окно редактора не подключено' };
+  }
+
+  const name = requireString(args, 'symbol').trim();
+  const newName = requireString(args, 'newName').trim();
+  if (name === newName) {
+    return { ok: false, summary: 'Новое имя совпадает со старым' };
+  }
+
+  const root = ctx.workspace.rootPath();
+  const target = await resolveSymbol(ctx, name, resolvePathArg(ctx, optionalString(args, 'path')));
+  if (!target) {
+    return {
+      ok: true,
+      summary: `объявление «${name}» не найдено`,
+      detail:
+        'Языковой сервер не нашёл объявления с таким именем. Уточни имя либо посмотри codebase_search. ' +
+        'Для массовой замены подстроки есть `replace_in_files`, но он не знает семантики.',
+    };
+  }
+
+  const doc = await documentOf(ctx, target.path);
+  if ('error' in doc) return doc.error;
+
+  const edits = await ctx.symbols.rename(target.path, doc.language, doc.text, target.line, target.column, newName);
+  if (edits === null) {
+    return {
+      ok: false,
+      summary: `${target.name}: сервер этого языка не умеет переименование`,
+      detail:
+        'Языковой сервер не поддерживает `textDocument/rename`. Для замены подстроки используй `replace_in_files`.',
+    };
+  }
+  if (edits.length === 0) {
+    return { ok: true, summary: `переименовывать нечего: ${target.name}`, detail: 'Сервер не вернул правок.' };
+  }
+
+  const files = edits.map((file) => ({ ...file, path: path.resolve(file.path) }));
+  const decision = await ctx.applyEdits(files, ctx.autoApprove === true);
+  if (decision.rejected) {
+    return {
+      ok: false,
+      summary: `Пользователь отклонил переименование: ${name} → ${newName}`,
+      detail: 'Пользователь отклонил правки. Не повторяй вызов — предложи другой ход.',
+    };
+  }
+
+  const applied = decision.result?.reports ?? [];
+  const failed = decision.result?.failed ?? [];
+  const lines = [
+    ...applied.map((report) => `ok ${relative(report.path, root)}: правок — ${report.applied}`),
+    ...failed.map((failure) => `ошибка ${relative(failure.path, root)}: ${failure.message}`),
+  ];
+
+  return {
+    ok: failed.length === 0,
+    summary: `${name} → ${newName}: файлов ${applied.length}${failed.length ? `, с ошибками ${failed.length}` : ''}`,
+    detail: lines.join('\n') || 'Правки не применены',
+  };
 }
 
 /**

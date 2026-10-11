@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
+import type { FileEdit } from '../../shared/edits';
+import { toWorkspaceFileEdits } from '../../shared/lsp-workspace-edit';
 import { languageInfoForPath } from '../../shared/languages';
 import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { toFileSymbols, toProjectSymbols, type FileSymbol, type ProjectSymbol } from '../../shared/lsp-symbols';
@@ -148,6 +150,8 @@ interface LspCapabilities {
   documentSymbolProvider?: boolean;
   /** Ссылки на символ по всему проекту — «найти все ссылки». */
   referencesProvider?: boolean;
+  /** Переименование символа с учётом семантики — «переименовать» в редакторе. */
+  renameProvider?: unknown;
 }
 
 export class LspService {
@@ -462,6 +466,39 @@ export class LspService {
         })
         .then((raw) => toLocations(raw, fileURLToPath))
         .catch(() => [] as SymbolLocation[]),
+    );
+  }
+
+  /**
+   * Переименование символа с учётом семантики: сервер возвращает правки во всех
+   * местах, где символ используется, — включая другие файлы. Это и отличает его
+   * от текстовой замены `replace_in_files`: та бьёт по подстроке и не знает
+   * границ символа.
+   *
+   * Правки возвращаем уже в нашей форме (`FileEdit[]`) — их применяет документная
+   * модель renderer, тем же путём, что и `apply_edit`. `null` — сервер не умеет
+   * переименование.
+   */
+  async rename(
+    path: string,
+    languageId: string,
+    text: string,
+    line: number,
+    column: number,
+    newName: string,
+  ): Promise<FileEdit[] | null> {
+    const runtime = await this.runtimeForDocument(path, languageId);
+    if (!runtime?.capabilities.renameProvider) return null;
+
+    return this.withDocument(runtime, path, languageId, text, (uri) =>
+      runtime.connection
+        .request('textDocument/rename', {
+          textDocument: { uri },
+          position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
+          newName,
+        })
+        .then((raw) => toWorkspaceFileEdits(raw, fileURLToPath))
+        .catch(() => null),
     );
   }
 

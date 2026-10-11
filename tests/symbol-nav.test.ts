@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SearchSymbol } from '../src/shared/code-search';
+import type { FileEdit } from '../src/shared/edits';
 import type { SymbolLocation } from '../src/shared/lsp-locations';
 import { runTool, type SymbolSearch, type ToolContext } from '../src/main/ai/agent-tools';
 import type { WorkspaceService } from '../src/main/workspace/workspace';
@@ -26,7 +27,7 @@ const declaration = (over: Partial<SearchSymbol> = {}): SearchSymbol => ({
   ...over,
 });
 
-/** Заглушка языкового сервера: поиск символов и запросы про ссылки/переход. */
+/** Заглушка языкового сервера: поиск символов и запросы про ссылки/переход/переименование. */
 function makeSymbols(over: Partial<SymbolSearch> = {}) {
   return {
     // Возвращаем символ с именем из запроса: так его пропустит ранжирование по имени.
@@ -34,16 +35,26 @@ function makeSymbols(over: Partial<SymbolSearch> = {}) {
     languageFor: vi.fn(() => 'typescript'),
     references: vi.fn(async () => [] as readonly SymbolLocation[]),
     definition: vi.fn(async () => [] as readonly SymbolLocation[]),
+    rename: vi.fn(async () => [] as readonly FileEdit[]),
     ...over,
   };
 }
 
-function context(symbols: SymbolSearch, options: Partial<ToolContext> = {}): ToolContext {
+function context(symbols: SymbolSearch | undefined, options: Partial<ToolContext> = {}): ToolContext {
   const workspace = {
     rootPath: () => ROOT,
     readFile: async () => ({ text: 'const x = 1;\n', mtimeMs: 0 }),
   } as unknown as WorkspaceService;
   return { workspace, symbols, ...options };
+}
+
+/** Мост применения правок: запоминает, что ушло в документную модель. */
+function applySpy(rejected = false) {
+  return vi.fn(async (edits: FileEdit[]) => ({
+    ...(rejected
+      ? { rejected: true as const }
+      : { result: { reports: edits.map((f) => ({ path: f.path, applied: f.edits.length, version: 1 })), failed: [] } }),
+  }));
 }
 
 describe('find_references', () => {
@@ -184,5 +195,83 @@ describe('go_to_definition', () => {
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('язык не распознан');
+  });
+});
+
+describe('rename_symbol', () => {
+  const edits: FileEdit[] = [
+    {
+      path: `${ROOT}/src/a.ts`,
+      edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 3, newText: 'newName' }],
+    },
+  ];
+
+  it('находит символ по имени, спрашивает сервер и применяет правки', async () => {
+    const symbols = makeSymbols({ rename: vi.fn(async () => edits) });
+    const applyEdits = applySpy();
+    const outcome = await runTool(
+      context(symbols, { applyEdits }),
+      'rename_symbol',
+      '{"symbol":"saveCalibration","newName":"newName"}',
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.summary).toContain('saveCalibration → newName');
+    // Позиция объявления уходит 1-based как есть; перевод в 0-based делает сервис.
+    expect(symbols.rename).toHaveBeenCalledWith(
+      `${ROOT}/src/settings.ts`,
+      'typescript',
+      expect.any(String),
+      42,
+      3,
+      'newName',
+    );
+    expect(applyEdits).toHaveBeenCalledOnce();
+  });
+
+  it('отклонённые пользователем правки — не ошибка инструмента, а ответ', async () => {
+    const symbols = makeSymbols({ rename: vi.fn(async () => edits) });
+    const outcome = await runTool(
+      context(symbols, { applyEdits: applySpy(true) }),
+      'rename_symbol',
+      '{"symbol":"x","newName":"y"}',
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('отклонил переименование');
+  });
+
+  it('сервер не умеет переименование — говорим об этом прямо', async () => {
+    const symbols = makeSymbols({ rename: vi.fn(async () => null) });
+    const outcome = await runTool(
+      context(symbols, { applyEdits: applySpy() }),
+      'rename_symbol',
+      '{"symbol":"x","newName":"y"}',
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('не умеет переименование');
+  });
+
+  it('новое имя совпадает со старым — нечего делать', async () => {
+    const outcome = await runTool(
+      context(makeSymbols(), { applyEdits: applySpy() }),
+      'rename_symbol',
+      '{"symbol":"x","newName":"x"}',
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('совпадает');
+  });
+
+  it('без моста правок инструмент недоступен', async () => {
+    const outcome = await runTool(
+      context(makeSymbols(), { applyEdits: undefined }),
+      'rename_symbol',
+      '{"symbol":"x","newName":"y"}',
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('не подключено');
   });
 });

@@ -22,6 +22,7 @@ function handle(message) {
           documentSymbolProvider: true,
           referencesProvider: true,
           definitionProvider: true,
+          renameProvider: true,
         },
       },
     });
@@ -124,6 +125,33 @@ function handle(message) {
           targetSelectionRange: { start: { line: 2, character: 6 }, end: { line: 2, character: 12 } },
         },
       ],
+    });
+    return;
+  }
+
+  // Переименование: правки в двух файлах, форма `changes` — проверяем и разбор,
+  // и перевод координат (сервер шлёт 0-based, клиент отдаёт 1-based).
+  if (message.method === 'textDocument/rename') {
+    const uri = message.params.textDocument.uri;
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: {
+        changes: {
+          [uri]: [
+            {
+              range: { start: { line: 2, character: 6 }, end: { line: 2, character: 12 } },
+              newText: message.params.newName,
+            },
+          ],
+          [`file://${process.cwd()}/scripts/other.py`]: [
+            {
+              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+              newText: message.params.newName,
+            },
+          ],
+        },
+      },
     });
     return;
   }

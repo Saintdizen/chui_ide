@@ -395,7 +395,7 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   (данные вставки из буфера собирает renderer, поэтому он не источник истины).
 - Инструменты агента (описания — `src/shared/tools.ts`, исполнение — `src/main/ai/agent-tools.ts`):
   чтение проекта (`list_dir`, `read_file`, `read_files`, `search`, `project_map`, `file_outline`,
-  `find_files`, `get_diagnostics`, `run_linter`, `find_references`, `go_to_definition`),
+  `find_files`, `get_diagnostics`, `run_linter`, `find_references`, `go_to_definition`, `rename_symbol`),
   правки и файловые операции (`apply_edit`, `replace_in_files`, `create_file`, `delete_file`, `move_file`),
   запуск (`run_terminal`, `terminal_*`),
   git — чтение (`git_status`, `git_diff`, `git_log`) и записи (`git_stage`, `git_unstage`, `git_commit`,
@@ -448,6 +448,12 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   `src/shared/lsp-locations.ts`: понимает и `Location`, и `LocationLink`, сводит к общему списку
   `путь:строка:столбец`, убирает повторы. Отсутствие сервера или его неумение — это честное
   «сервер этого языка не ищет ссылки», а не «ничего не найдено»: агенту это разные подсказки.
+- `rename_symbol` — переименование символа с учётом семантики (`textDocument/rename`): сервер
+  меняет имя только там, где это именно символ, — в объявлении и ссылках, включая другие файлы.
+  Это не `replace_in_files`: та бьёт по подстроке и заденет одноимённые переменные и комментарии.
+  Правки от сервера приходят `WorkspaceEdit` и ложатся в ту же форму `FileEdit[]`, что и
+  `apply_edit`, — значит, проходят ревью и попадают в undo. Разбор обеих форм ответа (`changes`
+  и `documentChanges`) — `src/shared/lsp-workspace-edit.ts`.
 - Внешние инструменты по **MCP** (`mcp__<сервер>__<инструмент>`): серверы задаются в
   `settings.json` (`ai.mcpServers`), IDE запускает их дочерними процессами и говорит с ними
   JSON-RPC по stdio (`src/main/mcp/mcp.ts`; имена и разбор ответов — `src/shared/mcp.ts`).
