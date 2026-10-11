@@ -158,10 +158,11 @@ describe('vivid', () => {
  * Порог 4.5:1 берём для всего, что красится в CSS через `color:`: подписи,
  * ссылки, состояния git и значки файлов — это текст и мелкие глифы, а не
  * крупная графика. Ступени `--text_color_secondary`, `--text_color_disabled`,
- * `--text_color_tertiary` и `--placeholder_text_color` исключены намеренно: это
- * тихие тона, и
- * светлая схема сознательно уходит в них ниже нормы ради тишины (см. `main.css`
- * про `reasoning-text`), поэтому требовать от них 4.5:1 — значит ломать замысел.
+ * `--text_color_tertiary` и `--placeholder_text_color` исключены из ЭТОГО порога
+ * намеренно — это тихие тона, и требовать от них 4.5:1 значит ломать замысел
+ * (см. `main.css` про `reasoning-text`). Но пол снизу обязателен: у tertiary и
+ * placeholder он 3:1, иначе «тихо» превращается в «не видно» — в светлой схеме
+ * так и было (1.9:1). Порядок ступеней держит отдельный сторож про иерархию.
  */
 const THEME_CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles/theme.css'), 'utf8').replace(
   /\/\*[\s\S]*?\*\//g,
@@ -325,6 +326,36 @@ describe('контраст палитры (WCAG AA)', () => {
           contrast(color('--text_color_hover'), color(fill)),
           `${scheme}: текст на ${fill}`,
         ).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+  }
+});
+
+/* ── Пол для тихих ступеней текста ──────────────────────────────────────── */
+
+/**
+ * Тихие ступени — tertiary и placeholder — держат пол ниже прочего текста: 3:1.
+ * Это не «открытая дверь»: ещё ниже начинается «не видно» (в светлой схеме
+ * tertiary был 1.9:1 и читался как грязь). Проверяем на всех поверхностях, где
+ * такой текст встречается: карточка содержимого, окно и всплывающий слой.
+ */
+const QUIET_TEXT: readonly string[] = ['--text_color_tertiary', '--placeholder_text_color'];
+const QUIET_BACKGROUNDS: readonly string[] = ['--element_background_2', '--main_background', '--popup_background'];
+
+describe('контраст тихих ступеней текста (пол 3:1)', () => {
+  for (const scheme of ['dark', 'light'] as const) {
+    it(`${scheme}: tertiary и placeholder — не ниже 3:1`, () => {
+      const tokens = schemeTokens(scheme);
+      const color = (name: string): Rgba => {
+        const raw = tokens.get(name.slice(2));
+        expect(raw, `токен ${name} не объявлен в theme.css`).toBeDefined();
+        return parseColor(raw!);
+      };
+
+      for (const fg of QUIET_TEXT) {
+        for (const bg of QUIET_BACKGROUNDS) {
+          expect(contrast(color(fg), color(bg)), `${scheme}: ${fg} на ${bg}`).toBeGreaterThanOrEqual(3);
+        }
       }
     });
   }

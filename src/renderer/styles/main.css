@@ -2332,9 +2332,9 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
-/* Читаемый тон в обеих схемах: `--text_color_tertiary` в светлой теме
-   (26 % чёрного) почти не виден, поэтому берём `--text_color_secondary`
-   (70 % белого / 50 % чёрного) — это вторичный, но различимый текст. */
+/* Читаемый тон в обеих схемах: берём `--text_color_secondary`
+   (70 % белого / 50 % чёрного) — вторичный, но различимый текст; для
+   рассуждения тихой ступени tertiary уже мало. */
 .reasoning-text {
   max-height: 180px;
   margin-top: 3px;
@@ -3220,11 +3220,12 @@ textarea {
 
 /* Операция агента с файлом: создан, удалён или перенесён. */
 .chip-kind {
-  padding: 0 5px;
+  padding: 0 6px;
   border-radius: var(--radius_pill);
   background: var(--element_background);
   color: var(--text_color_tertiary);
   font-size: var(--font_micro_size);
+  white-space: nowrap;
 }
 
 /* Созданный файл — цветом добавления, удалённый — цветом ошибки: как состояния git.
@@ -3318,6 +3319,12 @@ textarea {
 .changes-row .chip-kind {
   flex: 0 0 auto;
   margin-left: auto;
+}
+
+/* Зазор от края строки нужен только счётчику правок; пилюля вида операции
+   держит симметричные отступы: с правым 2px против левого 5px текст уезжал к
+   правому круглому торцу и выглядел срезанным. */
+.changes-row .chip-stat {
   padding-right: 2px;
 }
 

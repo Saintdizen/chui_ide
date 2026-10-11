@@ -312,8 +312,11 @@
     --text_color: rgba(0, 0, 0, 0.85);
     --text_color_secondary: rgba(0, 0, 0, 0.5);
     --text_color_disabled: rgba(0, 0, 0, 0.5);
-    --text_color_tertiary: rgba(0, 0, 0, 0.26);
-    --placeholder_text_color: rgba(0, 0, 0, 0.25);
+    /* Тихие ступени держим на полу 3:1, а не «как бледно выйдет»: 0.26 на белом
+       давало 1.9:1 — подсказки места и поля почти не читались. Всё ещё тише
+       secondary (0.5); порядок ступеней сохранён: tertiary различимее placeholder. */
+    --text_color_tertiary: rgba(0, 0, 0, 0.46);
+    --placeholder_text_color: rgba(0, 0, 0, 0.44);
     --text_color_hover: #ffffff;
     --text_color_error: #a1251e;
 
@@ -450,7 +453,8 @@
     --text_color: #000000;
     --text_color_secondary: rgba(0, 0, 0, 0.7);
     --text_color_disabled: rgba(0, 0, 0, 0.7);
-    --text_color_tertiary: rgba(0, 0, 0, 0.45);
+    --text_color_tertiary: rgba(0, 0, 0, 0.55);
+    --placeholder_text_color: rgba(0, 0, 0, 0.5);
 
     --blue_prime_background: #1e6ef4;
     --red_prime_background: #e9152d;
