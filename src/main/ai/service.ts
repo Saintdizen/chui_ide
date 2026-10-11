@@ -29,8 +29,10 @@ import {
   TokenCalibration,
   trimMessagesToFit,
 } from '../../shared/context-fit';
+import { formatMemory } from '../../shared/memory';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
 import { addUsage } from '../../shared/usage';
+import { ProjectMemory } from './project-memory';
 import { RpcFailure } from '../ipc/router';
 import { scanProject } from '../project/scan';
 import type { SettingsStore } from '../settings';
@@ -153,6 +155,7 @@ const AGENT_PROMPT = [
   'Перед тем как чинить код, посмотри get_diagnostics — так видно настоящую ошибку, а не догадку.',
   'Если apply_edit ответил «не совпало с текстом документа» — перечитай файл и повтори правку, а не меняй формулировку наугад.',
   'Правки и команды пользователь подтверждает — не считай их сделанными, пока не получил ответ инструмента.',
+  'Договорённости и предпочтения, важные надолго, записывай в память проекта (`remember`): она переживает беседу и её сжатие. Разовый контекст в память не пиши.',
 ].join('\n');
 
 /** Дописывается, когда включён полный доступ: подтверждения не нужны. */
@@ -240,10 +243,19 @@ export class AiService {
    */
   private mapCache: { root: string; text: string } | null = null;
 
+  /**
+   * Память проекта: заметки агента, переживающие беседу. Она нужна и для промпта,
+   * и для инструментов. Хранилище можно подменить (проверки пишут в temp-каталог,
+   * а не в userData разработчика), поэтому приходит параметром.
+   */
+  private readonly memory: ProjectMemory;
+
   constructor(
     private readonly settings: SettingsStore,
     private readonly workspace: WorkspaceService,
+    memory?: ProjectMemory,
   ) {
+    this.memory = memory ?? new ProjectMemory();
     // Поправки оценки токенов переживают перезапуск: без них первые шаги снова
     // промахиваются мимо окна, пока калибровка не наберёт замеры заново.
     this.calibration.load(readCalibration(this.settings.file()));
@@ -417,6 +429,10 @@ export class AiService {
     if (this.symbols) toolContext.symbols = this.symbols;
     if (this.linter) toolContext.linter = this.linter;
     if (this.tests) toolContext.tests = this.tests;
+    toolContext.memory = {
+      remember: (text) => this.memory.remember(this.workspace.rootPath(), text),
+      forget: (query) => this.memory.forget(this.workspace.rootPath(), query),
+    };
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
     // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
@@ -857,6 +873,9 @@ export class AiService {
     if (tool.name === 'run_linter') return this.linter !== undefined;
     // Тесты выполняют код проекта: нужен и резолвер команды, и подтверждение.
     if (tool.name === 'run_tests') return this.tests !== undefined && host?.confirmCommand !== undefined;
+    // Память проекта живёт в main и доступна всегда — подтверждений не требует:
+    // заметка обратима (её снимает `forget`).
+    if (tool.name === 'remember' || tool.name === 'forget') return true;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     return tool.side === 'main';
   }
@@ -912,6 +931,10 @@ export class AiService {
       const map = await this.projectMapLine(root);
       if (map) parts.push(map);
     }
+    // Память проекта — рядом с картой: заметки агента переживают беседу и её
+    // сжатие, поэтому их видно в начале каждого ответа, а не только в исходной.
+    const memory = formatMemory(await this.memory.list(root));
+    if (memory) parts.push(memory);
     let spent = 0;
     for (const name of INSTRUCTION_FILES) {
       if (spent >= MAX_INSTRUCTIONS_TOTAL_BYTES) break;

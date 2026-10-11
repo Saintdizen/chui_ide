@@ -36,6 +36,8 @@ export type AgentToolName =
   | 'delete_file'
   | 'move_file'
   | 'update_plan'
+  | 'remember'
+  | 'forget'
   | 'git_status'
   | 'git_diff'
   | 'git_log'
@@ -458,6 +460,36 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['steps'],
+    },
+  },
+  {
+    name: 'remember',
+    side: 'main',
+    description:
+      'Записать заметку в память проекта — она переживает беседу и её сжатие. Сюда уходит то, ' +
+      'о чём договорились насовсем: предпочтения пользователя, принятые решения, как собирать и ' +
+      'запускать, важные договорённости. Не для разового контекста (он и так в беседе). Заметки ' +
+      'видны тебе в начале каждого ответа.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Короткая заметка в одну мысль, не больше пары строк.' },
+      },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'forget',
+    side: 'main',
+    description:
+      'Убрать из памяти проекта заметки, в которых встречается подстрока. Нужен, когда заметка ' +
+      'устарела или память переполнилась.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Подстрока, по которой узнать заметки для удаления.' },
+      },
+      required: ['query'],
     },
   },
   {

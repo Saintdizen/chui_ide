@@ -29,6 +29,7 @@ const path = require('node:path');
 const { promises: fs } = require('node:fs');
 
 const { AiService } = require('../dist/main/ai/service.js');
+const { ProjectMemory } = require('../dist/main/ai/project-memory.js');
 const { WorkspaceService } = require('../dist/main/workspace/workspace.js');
 
 const MARKER = 'chui-agent-marker';
@@ -187,7 +188,9 @@ app.whenReady().then(async () => {
   };
 
   const workspace = new WorkspaceService(() => undefined);
-  const ai = new AiService(settings, workspace);
+  // Память пишем в temp, а не в userData: проверка не должна трогать профиль.
+  const memory = new ProjectMemory(path.join(dir, 'memory'));
+  const ai = new AiService(settings, workspace, memory);
 
   /** Один прогон агента: что просили, какие события пришли, что ушло провайдеру. */
   const chat = async (host, useTools = true, autoApprove = false, attachments, extra = {}) => {
@@ -255,6 +258,22 @@ app.whenReady().then(async () => {
       run.done.trace?.usage?.completionTokens === 7,
       JSON.stringify(run.done.trace?.usage),
     );
+
+    // Память проекта: инструменты предлагаются, а записанная заметка попадает
+    // в системный промпт — значит переживёт беседу и её сжатие.
+    check(
+      'remember и forget предложены модели',
+      run.toolNames.includes('remember') && run.toolNames.includes('forget'),
+    );
+    await memory.remember(dir, 'В этом проекте договорились использовать pytest');
+    run = await chat(undefined);
+    check(
+      'заметка памяти ушла в промпт',
+      (run.bodies[0]?.messages ?? []).some(
+        (message) => message.role === 'system' && String(message.content).includes('использовать pytest'),
+      ),
+    );
+
     check(
       'размышления пришли отдельным потоком',
       run.reasoning.includes('Сначала прочитаю файл') && run.done.reasoning === run.reasoning,

@@ -13,6 +13,7 @@ import type {
 } from '../../shared/api';
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import { formatBlame, type BlameLine } from '../../shared/git-blame';
+import type { MemoryNote, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
@@ -174,6 +175,16 @@ export interface TestRunner {
   command(): Promise<{ command: string; label: string } | null>;
 }
 
+/**
+ * Память проекта для инструментов `remember` и `forget`. Хранилище живёт в main
+ * (`ai/project-memory.ts`), сюда приходит готовый вызов: инструменты остаются
+ * проверяемыми без файловой системы.
+ */
+export interface MemoryTools {
+  remember(text: string): Promise<RememberResult>;
+  forget(query: string): Promise<{ notes: readonly MemoryNote[]; removed: number }>;
+}
+
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
@@ -206,6 +217,8 @@ export interface ToolContext {
   linter?: Linter;
   /** Команда запуска тестов: нужна инструменту run_tests. */
   tests?: TestRunner;
+  /** Память проекта: нужна инструментам remember/forget. */
+  memory?: MemoryTools;
   /** Веб-поиск: подключён только при включённой настройке. */
   webSearch?: WebSearchRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
@@ -323,6 +336,10 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       case 'update_plan':
         // План не исполняется здесь: его показывает service отдельным событием.
         return { ok: true, summary: 'план обновлён' };
+      case 'remember':
+        return await remember(ctx, parsed.value);
+      case 'forget':
+        return await forget(ctx, parsed.value);
       case 'git_status':
         return await gitStatus(ctx);
       case 'git_diff':
@@ -1602,6 +1619,61 @@ async function gitPush(ctx: ToolContext, args: Record<string, unknown>): Promise
 
   const result: GitNetworkResult = await ctx.git.push({ setUpstream, force });
   return { ok: result.ok, summary: `git push: ${result.ok ? 'отправлено' : 'сбой'}`, detail: result.message };
+}
+
+/* ── память проекта ─────────────────────────────────────────────────────── */
+
+/**
+ * Записать заметку в память проекта. Память переживает беседу и её сжатие —
+ * сюда уходит то, о чём договорились насовсем: предпочтения, решения, «как
+ * запускать». Не дублируем точные повторы и честно отказываем, когда заметок
+ * стало слишком много: терять новую из-за переполнения молча нельзя.
+ */
+async function remember(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.memory) return { ok: false, summary: 'Память проекта недоступна' };
+
+  const text = requireString(args, 'text');
+  const result = await ctx.memory.remember(text);
+
+  if (!result.ok) {
+    if (result.reason === 'full') {
+      return {
+        ok: false,
+        summary: 'Память заполнена',
+        detail:
+          'Заметок стало слишком много. Убери устаревшие через `forget`, а затем запиши нужную снова — ' +
+          'иначе новая заметка потеряется среди старых.',
+      };
+    }
+    return { ok: false, summary: 'Пустая заметка', detail: 'Передай непустой текст в аргументе `text`.' };
+  }
+
+  return {
+    ok: true,
+    summary: result.added ? 'заметка записана' : 'такая заметка уже есть',
+    detail: `В памяти проекта заметок: ${result.notes.length}.`,
+  };
+}
+
+/** Убрать из памяти проекта заметки, в которых встречается подстрока. */
+async function forget(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.memory) return { ok: false, summary: 'Память проекта недоступна' };
+
+  const query = requireString(args, 'query');
+  const result = await ctx.memory.forget(query);
+  if (result.removed === 0) {
+    return {
+      ok: true,
+      summary: 'подходящих заметок нет',
+      detail: `В памяти нет заметок с «${query}». Посмотри список, чтобы уточнить формулировку.`,
+    };
+  }
+
+  return {
+    ok: true,
+    summary: `убрано заметок: ${result.removed}`,
+    detail: `В памяти проекта осталось заметок: ${result.notes.length}.`,
+  };
 }
 
 /** «1 файл», «2 файла», «5 файлов» — для подписи действия в подтверждении. */

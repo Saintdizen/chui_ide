@@ -45,6 +45,8 @@ describe('набор инструментов агента', () => {
       'delete_file',
       'move_file',
       'update_plan',
+      'remember',
+      'forget',
       'git_status',
       'git_diff',
       'git_log',
