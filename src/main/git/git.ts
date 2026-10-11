@@ -674,6 +674,22 @@ export class GitService {
     return entries.map((entry, index) => ({ ...entry, ref: `HEAD@{${index}}` }));
   }
 
+  /**
+   * История в виде графа веток — текстом, как её рисует сам git. Свой разбор
+   * графа не делаем: `--graph` рисует ASCII-схему, а её проще показать как есть,
+   * чем воспроизводить колонки и связи своим кодом.
+   */
+  async logGraph(limit = 100): Promise<string> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) return '';
+    const result = await this.exec(
+      ['log', '--graph', '--oneline', '--decorate', '--all', '-n', String(Math.max(Math.trunc(limit), 1))],
+      repoRoot,
+      { allowFailure: true },
+    );
+    return result.stdout;
+  }
+
   /** Имя коммита может начинаться с `-` — тогда git примет его за флаг, а не за ссылку. */
   private commitArg(commit: string): string {
     const value = commit.trim();

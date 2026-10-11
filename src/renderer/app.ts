@@ -82,6 +82,7 @@ import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
 import { createSourceControl } from './ui/source-control';
 import { createStashModal } from './ui/stash-modal';
+import { createTextModal } from './ui/text-modal';
 import { createStatusBar } from './ui/statusbar';
 import { createSettingsModal } from './ui/settings-modal';
 import { createTabs } from './ui/tabs';
@@ -236,7 +237,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       const lines = await git.blame(path, { startLine: line, endLine: line }).catch(() => []);
       return lines[0] ?? null;
     },
+    blameFile: (path) => git.blame(path).catch(() => []),
     show: (annotation) => editors.setBlame(annotation),
+    showAll: (path, annotations) => editors.setBlameAll(path, annotations),
   });
   // Полоски изменений в жёлобе: добавленные, изменённые и удалённые строки файла
   // относительно HEAD. Включены по умолчанию (см. `git.toggleChangeGutter`).
@@ -1082,6 +1085,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   document.body.appendChild(stashModal.element);
 
+  // Окно с текстом от git: сюда показываем граф веток.
+  const textModal = createTextModal();
+  document.body.appendChild(textModal.element);
+
   /** Ввод одной строки как Promise: `null`, если окно закрыли без подтверждения. */
   const promptValue = (input: { title: string; label: string; value: string }): Promise<string | null> =>
     new Promise((resolve) => {
@@ -1824,6 +1831,43 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   define({ id: 'git.toggleBlame', title: 'Автор строки (blame): показать/скрыть', category: 'Git' }, () => {
     const on = blame.toggle();
     showToast(on ? 'Blame включён: у строки под курсором видно автора' : 'Blame выключен');
+  });
+
+  /** Подписи blame у всех строк файла: разом видно, кто и когда писал каждую строку. */
+  define({ id: 'git.toggleFileBlame', title: 'Blame всего файла: показать/скрыть', category: 'Git' }, () => {
+    const on = blame.toggleFile();
+    showToast(on ? 'Подписи у всех строк файла включены' : 'Подписи у всех строк файла выключены');
+  });
+
+  /** Перейти к коммиту, изменившему строку под курсором. */
+  define({ id: 'git.showLineCommit', title: 'Коммит строки под курсором', category: 'Git' }, async () => {
+    const path = editors.currentPath;
+    if (!path) {
+      showToast('Откройте файл, строку которого смотрите', 'error');
+      return;
+    }
+    const at = editors.cursor();
+    const lines = await git.blame(path, { startLine: at.line, endLine: at.line }).catch(() => []);
+    const line = lines[0];
+    if (!line) {
+      showToast('У этой строки нет истории: файл не в git или строка не менялась', 'error');
+      return;
+    }
+    await diffView.open(path, false, line.hash);
+  });
+
+  /** История в виде графа веток — текстом, как её рисует git. */
+  define({ id: 'git.logGraph', title: 'История с графом веток', category: 'Git' }, async () => {
+    if (!git.isRepository) {
+      showToast('Рабочая папка не в репозитории git', 'error');
+      return;
+    }
+    const text = await git.logGraph(100);
+    if (!text.trim()) {
+      showToast('Истории ещё нет');
+      return;
+    }
+    textModal.open('История (граф веток)', text);
   });
 
   /** Показать или скрыть полоски изменений в жёлобе редактора. */

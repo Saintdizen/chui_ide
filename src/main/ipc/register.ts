@@ -453,6 +453,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.renameBranch', (params) => deps.git.renameBranch(params.from, params.to));
   router.register('git.ignore', (params) => deps.git.ignore(params.paths));
   router.register('git.reflog', (params) => deps.git.reflog(params.limit));
+  router.register('git.logGraph', (params) => deps.git.logGraph(params.limit));
   router.register('git.conflictParts', (params) => deps.git.conflictParts(params.path));
   router.register('git.markResolved', (params) => deps.git.markResolved(params.path));
   router.register('git.branches', () => deps.git.branches());

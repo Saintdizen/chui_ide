@@ -1468,6 +1468,8 @@ export interface ChuiMethods {
   'git.ignore': { params: { paths: string[] }; result: GitStatus };
   /** Журнал ссылок: чем можно откатить неудачный merge, rebase или reset. */
   'git.reflog': { params: { limit?: number }; result: GitReflogEntry[] };
+  /** История в виде графа веток — текстом, как её рисует git. */
+  'git.logGraph': { params: { limit?: number }; result: string };
   /** Три версии конфликтного файла: общий предок и обе стороны. */
   'git.conflictParts': { params: { path: string }; result: GitConflictParts };
   /** Отметить конфликт решённым: содержимое файла уходит в индекс (`git add`). */

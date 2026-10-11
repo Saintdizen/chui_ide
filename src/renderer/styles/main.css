@@ -4995,6 +4995,24 @@ textarea {
   margin: 0;
 }
 
+/* ── окно с текстом от git (граф веток) ─────────────────────────────────── */
+
+.text-modal {
+  width: min(900px, 94vw);
+}
+
+.text-modal-body {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 70vh;
+  overflow: auto;
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.4;
+  white-space: pre;
+}
+
 .sc-hint {
   margin: 0;
   color: var(--text_color_tertiary);

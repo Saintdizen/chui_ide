@@ -275,6 +275,11 @@ export class GitModel {
     return this.rpc.request('git.reflog', { limit });
   }
 
+  /** История в виде графа веток — текстом, как её рисует git. */
+  logGraph(limit = 100): Promise<string> {
+    return this.rpc.request('git.logGraph', { limit });
+  }
+
   /** Три версии конфликтного файла: общий предок и обе стороны. */
   conflictParts(path: string): Promise<GitConflictParts> {
     return this.rpc.request('git.conflictParts', { path });

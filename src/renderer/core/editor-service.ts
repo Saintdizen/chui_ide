@@ -171,6 +171,9 @@ export class EditorService {
   /** Подпись blame у строки (автор, дата, коммит); null — подписи нет. */
   private blameLine: { path: string; line: number; text: string } | null = null;
   private readonly blameDecorations = new Map<string, string[]>();
+  /** Подписи blame у ВСЕХ строк файла и их украшения — по тому же правилу. */
+  private readonly blameAllDecorations = new Map<string, string[]>();
+  private readonly blameAll = new Map<string, readonly { line: number; text: string }[]>();
   private options: EditorOptions;
   private activePath: string | null = null;
 
@@ -446,6 +449,8 @@ export class EditorService {
     this.drawDebugLine();
     // Подпись blame привязана к файлу и строке — на новой модели её нужно перерисовать.
     this.drawBlame();
+    // И подписи у всего файла (если этот режим включён).
+    this.drawBlameAll(document.path);
     this.editor.focus();
     this.emitCursor();
   }
@@ -855,6 +860,47 @@ export class EditorService {
     this.drawBlame();
   }
 
+  /**
+   * Подписи blame у всех строк файла: автор, дата и коммит у каждой строки.
+   * Пустой список снимает подписи у этого файла. Набор хранится по файлу —
+   * при повторном открытии файла подписи дорисовываются (см. `open`).
+   */
+  setBlameAll(path: string, annotations: readonly { line: number; text: string }[]): void {
+    if (annotations.length === 0) this.blameAll.delete(path);
+    else this.blameAll.set(path, annotations);
+    this.drawBlameAll(path);
+  }
+
+  private drawBlameAll(path: string): void {
+    const model = this.files.get(path);
+    const previous = this.blameAllDecorations.get(path) ?? [];
+    // Модели нет — файл не открыт; при открытии подписи нарисует `open`.
+    if (!model) {
+      this.blameAllDecorations.delete(path);
+      return;
+    }
+
+    const annotations = this.blameAll.get(path) ?? [];
+    if (annotations.length === 0) {
+      this.blameAllDecorations.delete(path);
+      if (previous.length > 0) model.deltaDecorations(previous, []);
+      return;
+    }
+
+    const next = model.deltaDecorations(
+      previous,
+      annotations.map((item) => ({
+        range: new monaco.Range(item.line, 1, item.line, 1),
+        options: {
+          // `after` кладёт текст после конца строки, не трогая содержимое файла.
+          after: { content: `  ${item.text}`, inlineClassName: 'blame-inline' },
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      })),
+    );
+    this.blameAllDecorations.set(path, next);
+  }
+
   private drawBlame(): void {
     for (const [path, ids] of this.blameDecorations) {
       const model = this.files.get(path);
@@ -1061,6 +1107,8 @@ export class EditorService {
     this.changeDecorations.delete(path);
     this.changeLines.delete(path);
     if (this.blameLine?.path === path) this.blameLine = null;
+    // Подписи всего файла живут с моделью так же: id удалённой модели копились бы.
+    this.blameAllDecorations.delete(path);
     if (this.debugLine?.path === path) this.debugLine = null;
   }
 

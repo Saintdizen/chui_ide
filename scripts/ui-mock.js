@@ -434,6 +434,7 @@ module.exports = [
       { hash: 'a1b2c3d', ref: 'HEAD@{0}', date: '2024-01-02', action: 'commit: первый коммит' },
       { hash: 'b2c3d4e', ref: 'HEAD@{1}', date: '2024-01-01', action: 'reset: moving to HEAD~1' },
     ],
+    'git.logGraph': () => '* a1b2c3d (HEAD -> main) первый коммит\n* b2c3d4e начало\n',
     // Стороны конфликта: в моке все три — один и тот же текст файла.
     'git.conflictParts': (params) => {
       const file = gitState.files.find((item) => item.path === params.path);

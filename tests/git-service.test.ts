@@ -363,6 +363,14 @@ describe('GitService: удалённые и сеть', () => {
     expect(entries[0]!.hash).toHaveLength(7);
   });
 
+  it('logGraph отдаёт граф веток текстом', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const text = await serviceFor(work).logGraph(10);
+    expect(text).toContain('*');
+    expect(text).toContain('init');
+  });
+
   it('push() без удалённого возвращает сбой текстом, а не бросает', async () => {
     if (!gitAvailable) return;
     const { work } = await makeRepos();
