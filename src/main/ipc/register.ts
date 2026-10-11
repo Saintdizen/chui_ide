@@ -46,6 +46,7 @@ import { checkEnvironments } from '../python/health';
 import type { SessionStore } from '../session-store';
 import type { ProjectConfigStore } from '../project-config';
 import { matchPresets } from '../../shared/lsp-presets';
+import { parseThemeFile } from '../../shared/theme-file';
 import { unsavedClosePrompt } from '../../shared/unsaved';
 import type { TerminalService } from '../terminal/terminal';
 import { applyBounds, openIdeWindow, windowState } from '../window';
@@ -200,6 +201,39 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     });
     const choice: 'save' | 'discard' | 'cancel' = response === 0 ? 'save' : response === 1 ? 'discard' : 'cancel';
     return { choice };
+  });
+
+  // Тема из файла: диалог и чтение — в main, renderer файловой системы не видит.
+  // Разбор — общим кодом (`shared/theme-file`): та же проверка, что при чтении настроек.
+  router.register('theme.import', async (_params, ctx) => {
+    const result = await dialog.showOpenDialog(senderWindow(ctx), {
+      title: 'Импортировать тему',
+      properties: ['openFile'],
+      filters: [{ name: 'Тема chui_iDE', extensions: ['json'] }],
+    });
+    const file = result.filePaths[0];
+    if (result.canceled || !file) return { settings: deps.settings.get(), name: null };
+    const text = await fs.readFile(file, 'utf8');
+    const parsed = parseThemeFile(text);
+    if (!parsed.ok) throw new RpcFailure(RpcErrorCode.InvalidParams, parsed.error);
+    return {
+      settings: deps.settings.update({ appearance: { customTheme: parsed.theme } }),
+      name: parsed.theme.name,
+    };
+  });
+
+  router.register('theme.clear', () => deps.settings.update({ appearance: { customTheme: null } }));
+
+  // Экспорт шаблона: содержимое готовит renderer (там живёт палитра), main пишет файл.
+  router.register('theme.export', async (params, ctx) => {
+    const result = await dialog.showSaveDialog(senderWindow(ctx), {
+      title: 'Сохранить тему',
+      defaultPath: params.name,
+      filters: [{ name: 'Тема chui_iDE', extensions: ['json'] }],
+    });
+    if (result.canceled || !result.filePath) return { path: null };
+    await fs.writeFile(result.filePath, params.contents, 'utf8');
+    return { path: result.filePath };
   });
 
   router.register('workspace.readDir', (params) => deps.workspace.readDir(params.path));

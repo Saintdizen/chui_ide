@@ -12,6 +12,7 @@ import type { PatchFile } from './patch';
 import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
 import type { Snippet } from './snippets';
+import type { ThemeFile } from './theme-file';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { NodeTestSuite } from './node-tests';
 import type { PythonEnvironment, PythonInterpreter } from './python-env';
@@ -607,6 +608,8 @@ export interface AppearanceSettings {
   theme: ThemeChoice;
   /** Масштаб интерфейса: 1 — как есть. Редактора не касается (у него свой кегль). */
   uiScale: number;
+  /** Тема из файла: `null`/не задано — встроенная палитра. */
+  customTheme?: ThemeFile | null;
 }
 
 /** Что приложение помнит о работе: история открытых папок для стартового окна. */
@@ -727,6 +730,8 @@ export interface LspDiagnosticsPayload {
 export interface ThemeChangedPayload {
   theme: ThemeChoice;
   scheme: 'dark' | 'light';
+  /** Активная тема из файла — или `null`, если работает встроенная палитра. */
+  customTheme?: ThemeFile | null;
 }
 
 /* ── Отладчик (DAP) ─────────────────────────────────────────────────────── */
@@ -1466,6 +1471,11 @@ export interface ChuiMethods {
   'settings.get': { params: void; result: Settings };
   'settings.update': { params: SettingsPatch; result: Settings };
   'settings.revealFile': { params: void; result: { path: string } };
+
+  /* Темы из файла: импорт, экспорт шаблона и снятие. */
+  'theme.import': { params: void; result: { settings: Settings; name: string | null } };
+  'theme.export': { params: { contents: string; name: string }; result: { path: string | null } };
+  'theme.clear': { params: void; result: Settings };
 
   /* Языковые серверы: синхронизация документа и перезапуск. */
   'lsp.open': { params: { path: string; languageId: string; text: string }; result: void };

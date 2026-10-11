@@ -12,12 +12,14 @@ import type {
 import type { AiProviderPatch, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
 import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
+import { serializeThemeFile } from '../../shared/theme-file';
 import { uiScaleOptions } from '../../shared/ui-scale';
 import type { WebSearchProvider } from '../../shared/web-search';
 import { PYTHON_LSP_PACKAGES, lspLanguagesForKind } from '../../shared/lsp-presets';
 import type { CommandRegistry } from '../core/commands';
 import type { RpcClient } from '../core/rpc';
 import type { ThemeService } from '../core/theme-service';
+import { themeTemplate } from '../core/theme';
 import { type Child, append, clear, h, svgIcon } from './dom';
 import { createSelect } from './select';
 import { showToast } from './toast';
@@ -1082,6 +1084,64 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     return items;
   }
 
+  /**
+   * Тема из файла: JSON с частичным набором ролей. Одна кнопка импортирует
+   * (main читает файл и проверяет его), вторая кладёт шаблон встроенной схемы —
+   * из него удобно начать свою.
+   */
+  function renderThemeFileSection(): Child[] {
+    const current = settings!.appearance.customTheme ?? null;
+
+    const importButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Импортировать…');
+    importButton.addEventListener('click', async () => {
+      try {
+        const result = await deps.rpc.request('theme.import');
+        settings = result.settings;
+        render();
+        if (result.name) showToast(`Тема «${result.name}» применена`);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+      }
+    });
+
+    const exportButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Сохранить шаблон…');
+    exportButton.addEventListener('click', async () => {
+      try {
+        const contents = serializeThemeFile(themeTemplate(deps.theme.resolved));
+        const result = await deps.rpc.request('theme.export', { contents, name: 'chui-theme.json' });
+        if (result.path) showToast(`Шаблон сохранён: ${result.path}`);
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+      }
+    });
+
+    const actions = h('div', { class: 'field-actions' }, importButton, exportButton);
+
+    if (current) {
+      const clearButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Убрать');
+      clearButton.addEventListener('click', async () => {
+        try {
+          settings = await deps.rpc.request('theme.clear');
+          render();
+        } catch (error) {
+          showToast(error instanceof Error ? error.message : String(error), 'error');
+        }
+      });
+      actions.append(clearButton);
+    }
+
+    const hint = current
+      ? `Активна тема «${current.name}» (${current.scheme === 'dark' ? 'тёмная' : 'светлая'}). ` +
+        'Она задаёт фон, текст, акценты и подсветку кода; выбор схемы выше на неё не влияет.'
+      : 'JSON с частью ролей (фон, текст, акценты, подсветка кода). «Сохранить шаблон…» кладёт файл, из которого удобно начать свою тему.';
+
+    return [
+      h('div', { class: 'settings-divider' }),
+      field('Тема из файла', actions),
+      h('div', { class: 'field-hint' }, hint),
+    ];
+  }
+
   function renderAppearance(): Child[] {
     return [
       field(
@@ -1109,6 +1169,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Крупнее или плотнее оболочка — панели, меню, дерево. Кегль кода настраивается отдельно ' +
           'в разделе «Редактор».',
       ),
+      ...renderThemeFileSection(),
     ];
   }
 

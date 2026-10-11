@@ -10,7 +10,7 @@ import type { DocumentStore } from './document-store';
 import { EditorModels } from './editor-models';
 import { Emitter } from './events';
 import { applyTypeScriptDefaults, registerLanguageModes } from './language-modes';
-import { MONACO_THEMES, MONACO_THEME_IDS, type Scheme } from './theme';
+import { MONACO_THEMES, MONACO_THEME_IDS, buildTheme, type Scheme } from './theme';
 
 /** Настройки редактора приходят из общего контракта: окно настроек и редактор — одно целое. */
 export type EditorOptions = EditorSettings;
@@ -842,8 +842,13 @@ export class EditorService {
     this.editor.revealPositionInCenterIfOutsideViewport(position);
   }
 
-  /** Переключение схемы: Monaco меняет тему целиком, пересоздавать редактор не нужно. */
+  /**
+   * Переключение схемы: Monaco меняет тему целиком, пересоздавать редактор не нужно.
+   * Данные темы пересобираем каждый раз — вместе со схемой могла смениться тема из
+   * файла (см. `setThemeOverrides`), а она меняет и правила токенов, и цвета обвязки.
+   */
   setTheme(scheme: Scheme): void {
+    monaco.editor.defineTheme(MONACO_THEME_IDS[scheme], buildTheme(scheme));
     monaco.editor.setTheme(MONACO_THEME_IDS[scheme]);
   }
 

@@ -20,6 +20,7 @@ import { COMPACT_AT_TOKENS } from '../shared/context-fit';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
+import { sanitizeThemeFile, type ThemeFile } from '../shared/theme-file';
 import { sanitizeUiScale } from '../shared/ui-scale';
 import { isWebSearchProvider, type WebSearchProvider } from '../shared/web-search';
 import { RpcFailure } from './ipc/router';
@@ -207,6 +208,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     theme: 'system',
     // Масштаб 1 — оболочка как задумана; крупнее/плотнее человек выбирает сам.
     uiScale: 1,
+    // Встроенная палитра: тему из файла человек приносит сам.
+    customTheme: null,
   },
   workspace: {
     // История открытых папок живёт в настройках, а не в renderer: её показывает
@@ -319,7 +322,12 @@ export class SettingsStore {
       editor: { ...editor, snippets: editor.snippets.map((snippet) => ({ ...snippet })) },
       explorer: { ...explorer, exclude: [...explorer.exclude] },
       run: { ...run },
-      appearance: { ...this.data.appearance },
+      // Тема из файла — вложенный объект: отдаём копию, чтобы правка снимка не
+      // меняла уже сохранённые настройки.
+      appearance: {
+        ...this.data.appearance,
+        customTheme: cloneThemeFile(this.data.appearance.customTheme),
+      },
       workspace: { recent: [...this.data.workspace.recent] },
       layout: { ...this.data.layout },
       lsp: {
@@ -361,6 +369,13 @@ export class SettingsStore {
     if (patch.appearance) {
       const next = { ...this.data.appearance, ...patch.appearance };
       next.uiScale = sanitizeUiScale(next.uiScale);
+      // Тему из файла перепроверяем тем же разбором, что при чтении: она приходит
+      // из интерфейса, а туда — из файла, который человек мог править руками.
+      if ('customTheme' in patch.appearance) {
+        const theme = sanitizeThemeFile(patch.appearance.customTheme);
+        if (theme) next.customTheme = theme;
+        else delete next.customTheme;
+      }
       this.data.appearance = next;
     }
     if (patch.layout) {
@@ -649,6 +664,8 @@ function loadSettings(filePath: string): StoredSettings {
       ...(parsed.appearance ?? {}),
       // Масштаб — число из файла: поджимаем к допустимым ступеням.
       uiScale: sanitizeUiScale(parsed.appearance?.uiScale),
+      // Тему из файла могли править руками: принимаем только корректную.
+      customTheme: sanitizeThemeFile(parsed.appearance?.customTheme),
     },
     layout: sanitizeLayout({ ...DEFAULT_SETTINGS.layout, ...(parsed.layout ?? {}) }),
     workspace: {
@@ -661,6 +678,12 @@ function loadSettings(filePath: string): StoredSettings {
     },
     lsp: sanitizeLsp({ ...DEFAULT_SETTINGS.lsp, ...(parsed.lsp ?? {}) }),
   };
+}
+
+/** Копия темы из файла: снимок настроек не должен меняться вслед за правкой. */
+function cloneThemeFile(theme: ThemeFile | null | undefined): ThemeFile | null {
+  if (!theme) return null;
+  return { ...theme, chrome: { ...theme.chrome }, tokens: { ...theme.tokens } };
 }
 
 /** Лимиты шагов агента: целое в разумном диапазоне, иначе — значение по умолчанию. */

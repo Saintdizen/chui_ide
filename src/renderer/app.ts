@@ -223,7 +223,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   console.info(`[chui] Electron ${info.electron} · Chromium ${info.chrome} · Node ${info.node} · ${info.platform}`);
 
   // Тема: main — источник истины, сервис знает и выбор пользователя, и фактическую схему.
-  const theme = new ThemeService(rpc, settings.appearance.theme);
+  const theme = new ThemeService(rpc, settings.appearance.theme, settings.appearance.customTheme ?? null);
 
   const editors = new EditorService(layout.editorHost, documents, settings.editor, theme.monacoThemeId);
   const edits = new EditService({ documents, editors, rpc });

@@ -292,7 +292,7 @@ module.exports = [
     // Языковые серверы: как main — секция есть всегда, по умолчанию выключена.
     lsp: { enabled: false, servers: [] },
     // «Системная» — чтобы схему в проверке задавал Playwright (`emulateMedia`).
-    appearance: { theme: 'system', uiScale: 1 },
+    appearance: { theme: 'system', uiScale: 1, customTheme: null },
     // Макет рабочей области: размеры и видимость панелей (общий для всех проектов).
     layout: {
       sidebarSize: 260,
@@ -613,7 +613,11 @@ module.exports = [
         const chosen = settings.appearance.theme;
         const scheme =
           chosen === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : chosen;
-        push('theme:changed', { theme: chosen, scheme });
+        push('theme:changed', {
+          theme: chosen,
+          scheme,
+          customTheme: settings.appearance.customTheme ?? null,
+        });
       }
 
       const snapshot = structuredClone(settings);
@@ -621,6 +625,34 @@ module.exports = [
       return snapshot;
     },
     'settings.revealFile': () => ({ path: '/mock/config/settings.json' }),
+
+    // Тема из файла: мок сразу берёт готовую тему, чтобы кнопки в настройках
+    // можно было проверить без реального диалога выбора файла.
+    'theme.import': () => {
+      settings.appearance.customTheme = {
+        name: 'Мок-тема',
+        scheme: 'dark',
+        chrome: { background: '#101418', accent: '#7c5cff' },
+        tokens: { keyword: '#ff79c6' },
+      };
+      push('theme:changed', {
+        theme: settings.appearance.theme,
+        scheme: 'dark',
+        customTheme: settings.appearance.customTheme,
+      });
+      const snapshot = structuredClone(settings);
+      push('settings:changed', snapshot);
+      return { settings: snapshot, name: settings.appearance.customTheme.name };
+    },
+    'theme.export': () => ({ path: '/mock/config/chui-theme.json' }),
+    'theme.clear': () => {
+      settings.appearance.customTheme = null;
+      const scheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      push('theme:changed', { theme: settings.appearance.theme, scheme, customTheme: null });
+      const snapshot = structuredClone(settings);
+      push('settings:changed', snapshot);
+      return snapshot;
+    },
 
     'ai.setApiKey': (params) => {
       const provider = settings.ai.providers.find((item) => item.id === params.providerId);

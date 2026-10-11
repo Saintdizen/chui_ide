@@ -1,5 +1,6 @@
 import type { ITheme } from '@xterm/xterm';
 import type * as monaco from 'monaco-editor';
+import type { ChromeKey, ThemeFile, TokenKey } from '../../shared/theme-file';
 
 export type Scheme = 'dark' | 'light';
 
@@ -9,25 +10,41 @@ export const MONACO_THEME_IDS: Record<Scheme, string> = {
 };
 
 /**
+ * Переопределения активной темы из файла. Значения — HEX без `#` (как в самой
+ * палитре ниже). Пусто — работают встроенные роли. Хранятся рядом с палитрой, а
+ * не в сервисе темы: их читают и `buildTheme`, и подсветка кода в чате
+ * (`tokenStyle`), которым сервис недоступен.
+ */
+let chromeOverrides: Partial<Record<ChromeKey, string>> = {};
+let tokenOverrides: Partial<Record<TokenKey, string>> = {};
+
+const withoutHash = (value: string): string => (value.startsWith('#') ? value.slice(1) : value);
+
+/**
+ * Включить переопределения темы из файла; `null` — вернуть встроенную палитру.
+ * Вызывается до пересборки темы Monaco и перерисовки чата — там уже читают
+ * новые значения.
+ */
+export function setThemeOverrides(theme: ThemeFile | null): void {
+  chromeOverrides = {};
+  tokenOverrides = {};
+  if (!theme) return;
+  for (const [key, value] of Object.entries(theme.chrome)) {
+    chromeOverrides[key as ChromeKey] = withoutHash(value);
+  }
+  for (const [key, value] of Object.entries(theme.tokens)) {
+    tokenOverrides[key as TokenKey] = withoutHash(value);
+  }
+}
+
+/**
  * Подсветка кода — цвета VS Code (Dark+ и Light+).
  *
  * Здесь лежат ИСХОДНЫЕ значения VS Code: перед применением их прогоняет `vivid()`,
  * который поднимает насыщенность и яркость. Так и Monaco, и чат в одном проекте
  * получают один и тот же цвет, а таблица остаётся узнаваемой палитрой VS Code.
  */
-interface TokenRules {
-  comment: string;
-  string: string;
-  number: string;
-  keyword: string;
-  keywordControl: string;
-  identifier: string;
-  function: string;
-  type: string;
-  constant: string;
-  tag: string;
-  attribute: string;
-}
+type TokenRules = Record<TokenKey, string>;
 
 const VSCODE_DARK_TOKENS: TokenRules = {
   comment: '6a9955',
@@ -202,7 +219,9 @@ const VIVID_TOKENS: Record<Scheme, TokenRules> = {
 };
 
 function tokensFor(scheme: Scheme): TokenRules {
-  return VIVID_TOKENS[scheme];
+  // На тему из файла правило накладывается поверх: её цвета берём как заданы,
+  // без усиления `vivid` — человек назвал их сам.
+  return { ...VIVID_TOKENS[scheme], ...tokenOverrides };
 }
 
 /** Правило токена: частное (`keyword.control`) важнее общего (`keyword`). */
@@ -255,7 +274,7 @@ const NONE = '#00000000';
  * местах. Полотно, гуттер и цвета кода остаются как в VS Code: подсветка кода
  * живёт по правилам VS Code, а обвязка редактора — по нашим.
  */
-interface Chrome {
+interface Chrome extends Record<ChromeKey, string> {
   /* полотно и код — цвета VS Code */
   background: string;
   foreground: string;
@@ -392,9 +411,18 @@ const LIGHT_CHROME: Chrome = {
   shadow: '00000026',
 };
 
-function buildTheme(scheme: Scheme): monaco.editor.IStandaloneThemeData {
+/** Роли обвязки схемы с наложенной темой из файла. */
+function chromeFor(scheme: Scheme): Chrome {
+  return { ...(scheme === 'dark' ? DARK_CHROME : LIGHT_CHROME), ...chromeOverrides };
+}
+
+/**
+ * Данные темы Monaco. Объявлена наружу: её пересобирают, когда приходит тема из
+ * файла — тогда `MONACO_THEMES` (встроенный снимок) уже не годится.
+ */
+export function buildTheme(scheme: Scheme): monaco.editor.IStandaloneThemeData {
   const tokens = tokensFor(scheme);
-  const chrome = scheme === 'dark' ? DARK_CHROME : LIGHT_CHROME;
+  const chrome = chromeFor(scheme);
 
   return {
     // Встроенная светлая тема Monaco называется 'vs', а не 'vs-light'.
@@ -638,6 +666,74 @@ export const MONACO_THEMES: Record<Scheme, monaco.editor.IStandaloneThemeData> =
   dark: buildTheme('dark'),
   light: buildTheme('light'),
 };
+
+/** `RRGGBB` / `RRGGBBAA` (без `#`) → цвет CSS. */
+const cssHex = (value: string): string => `#${value}`;
+
+/**
+ * Роли обвязки → CSS-переменные приложения (см. `styles/theme.css`). Нужны только
+ * активной теме из файла: встроенные схемы заданы прямо в таблице стилей, и
+ * трогать их из кода незачем. Фоном окна и содержимого становится один цвет —
+ * тема из файла задаёт плоскую поверхность, а не нашу лестницу высоты.
+ */
+export function themeCssVariables(scheme: Scheme): Record<string, string> {
+  const chrome = chromeFor(scheme);
+  return {
+    '--surface_window': cssHex(chrome.background),
+    '--surface_content': cssHex(chrome.background),
+    '--main_background': cssHex(chrome.background),
+    '--element_background_2': cssHex(chrome.background),
+    '--editor_background': cssHex(chrome.background),
+    '--editor_terminal_background': cssHex(chrome.background),
+    '--surface_popup': cssHex(chrome.popover),
+    '--popup_background': cssHex(chrome.popover),
+    '--popup_border': cssHex(chrome.border),
+    '--border_color': cssHex(chrome.border),
+    '--separator_color': cssHex(chrome.separator),
+    '--sunken_background': cssHex(chrome.sunken),
+    '--element_background': cssHex(chrome.tint),
+    '--button_background': cssHex(chrome.tint),
+    '--element_background_hover': cssHex(chrome.tintHover),
+    '--text_color': cssHex(chrome.text),
+    '--text_color_secondary': cssHex(chrome.textSecondary),
+    '--text_color_tertiary': cssHex(chrome.textTertiary),
+    '--placeholder_text_color': cssHex(chrome.placeholder),
+    '--text_color_disabled': cssHex(chrome.textDisabled),
+    '--selection_background': cssHex(chrome.selectionFill),
+    '--blue_prime_background': cssHex(chrome.accent),
+    '--focus_ring_color': cssHex(chrome.accent),
+    '--accent_fill': cssHex(chrome.accentFill),
+    '--link_color': cssHex(chrome.accentText),
+    '--text_color_hover': cssHex(chrome.textOnFill),
+    '--purple_prime_background': cssHex(chrome.purple),
+    '--red_prime_background': cssHex(chrome.error),
+    '--yellow_prime_background': cssHex(chrome.warning),
+    '--highlight_background': cssHex(chrome.highlight),
+    '--git_added': cssHex(chrome.added),
+    '--git_modified': cssHex(chrome.modified),
+    '--git_deleted': cssHex(chrome.deleted),
+    '--scrollbar_thumb': cssHex(chrome.scrollbar),
+  };
+}
+
+/**
+ * Полный файл встроенной схемы — заготовка для правки: человек сохраняет её,
+ * меняет цвета и импортирует обратно. Схему берём без активной темы из файла.
+ */
+export function themeTemplate(scheme: Scheme): ThemeFile {
+  const withHash = (value: string): string => `#${value}`;
+  const fill = <K extends string>(source: Record<K, string>): Record<K, string> => {
+    const out = {} as Record<K, string>;
+    for (const [key, value] of Object.entries(source) as Array<[K, string]>) out[key] = withHash(value);
+    return out;
+  };
+  return {
+    name: scheme === 'dark' ? 'Моя тёмная тема' : 'Моя светлая тема',
+    scheme,
+    chrome: fill(scheme === 'dark' ? DARK_CHROME : LIGHT_CHROME),
+    tokens: fill(VIVID_TOKENS[scheme]),
+  };
+}
 
 /** Палитра консоли VS Code; фон тот же, что у редактора, поэтому панели не спорят. */
 export const TERMINAL_THEMES: Record<Scheme, ITheme> = {

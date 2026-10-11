@@ -200,7 +200,8 @@ export function highlightInto(node: HTMLElement, code: string, label: string): v
 
 /** Смена схемы: цвета в кеше посчитаны по старой палитре. */
 export function setHighlightScheme(next: Scheme): void {
-  if (next === scheme) return;
+  // Не выходим, если схема та же: вместе с ней могла смениться тема из файла,
+  // и цвета в кеше посчитаны по старой палитре.
   scheme = next;
   cache.clear();
   prune();

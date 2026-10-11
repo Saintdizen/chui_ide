@@ -128,15 +128,18 @@ if (!app.requestSingleInstanceLock()) {
     // А для того, что CSS не описать (Monaco, xterm), main шлёт resolved-схему
     // отдельным событием — полагаться на событие matchMedia в renderer нельзя.
     const pushTheme = (): void => {
+      const { appearance } = settings.get();
       pushToRenderers(PushTopic.ThemeChanged, {
-        theme: settings.get().appearance.theme,
+        theme: appearance.theme,
         scheme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+        customTheme: appearance.customTheme ?? null,
       });
     };
 
     const applyTheme = (): void => {
-      const choice = settings.get().appearance.theme;
-      nativeTheme.themeSource = choice;
+      const { appearance } = settings.get();
+      // Тема из файла задаёт схему сама: выбранное «как в системе» тут не решает.
+      nativeTheme.themeSource = appearance.customTheme?.scheme ?? appearance.theme;
       const background = windowBackground(nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
       for (const window of BrowserWindow.getAllWindows()) window.setBackgroundColor(background);
       pushTheme();

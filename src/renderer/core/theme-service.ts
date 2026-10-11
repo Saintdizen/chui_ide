@@ -1,7 +1,8 @@
 import { PushTopic, type ThemeChangedPayload, type ThemeChoice } from '../../shared/api';
 import { Emitter } from './events';
 import type { RpcClient } from './rpc';
-import { MONACO_THEME_IDS, type Scheme } from './theme';
+import type { ThemeFile } from '../../shared/theme-file';
+import { MONACO_THEME_IDS, setThemeOverrides, themeCssVariables, type Scheme } from './theme';
 
 export type { ThemeChoice };
 
@@ -17,7 +18,9 @@ export type { ThemeChoice };
 export class ThemeService {
   private choice: ThemeChoice;
   private scheme: Scheme;
-  private applied: Scheme | null = null;
+  private custom: ThemeFile | null;
+  /** Что мы выставили на корне документа: при снятии темы из файла это и убираем. */
+  private cssKeys: string[] = [];
 
   private readonly emitter = new Emitter<Scheme>();
   readonly onDidChange = this.emitter.event;
@@ -25,15 +28,26 @@ export class ThemeService {
   constructor(
     private readonly rpc: RpcClient,
     initial: ThemeChoice,
+    initialCustom: ThemeFile | null = null,
   ) {
     this.choice = initial;
-    this.scheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    this.custom = initialCustom;
+    // Тема из файла задаёт схему жёстко: «как в системе» тут уже не решает.
+    this.scheme =
+      initialCustom?.scheme ?? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    setThemeOverrides(this.custom);
+    this.applyCss();
 
     rpc.onPush((message) => {
       if (message.topic !== PushTopic.ThemeChanged) return;
       const payload = message.payload as ThemeChangedPayload;
       this.choice = payload.theme;
-      this.apply(payload.scheme);
+      this.custom = payload.customTheme ?? null;
+      // Переопределения ставим ДО рассылки: обработчик пересобирает тему Monaco
+      // из текущих значений, и они должны быть уже новыми.
+      setThemeOverrides(this.custom);
+      this.applyCss(payload.scheme);
+      this.fire(payload.scheme);
     });
   }
 
@@ -50,12 +64,34 @@ export class ThemeService {
     return MONACO_THEME_IDS[this.scheme];
   }
 
-  /** Разослать схему подписчикам (Monaco, xterm). Без аргумента берётся текущая. */
+  /** Разослать схему подписчикам (Monaco, xterm, чат). Без аргумента берётся текущая. */
   apply(scheme: Scheme = this.scheme): void {
+    this.fire(scheme);
+  }
+
+  /**
+   * Схему шлём всегда, даже если она та же: вместе с ней могла смениться тема из
+   * файла, а подписчики должны пересобрать краски (Monaco, кеш подсветки чата).
+   */
+  private fire(scheme: Scheme): void {
     this.scheme = scheme;
-    if (this.applied === scheme) return;
-    this.applied = scheme;
     this.emitter.fire(scheme);
+  }
+
+  /**
+   * Тема из файла красит обвязку сама — своими значениями на корне документа.
+   * Встроенные схемы этого не требуют: их задаёт таблица стилей. Снимая тему,
+   * убираем ровно те переменные, что выставляли.
+   */
+  private applyCss(scheme: Scheme = this.scheme): void {
+    const root = document.documentElement;
+    for (const key of this.cssKeys) root.style.removeProperty(key);
+    this.cssKeys = [];
+    if (!this.custom) return;
+    for (const [key, value] of Object.entries(themeCssVariables(scheme))) {
+      root.style.setProperty(key, value);
+      this.cssKeys.push(key);
+    }
   }
 
   async set(choice: ThemeChoice): Promise<void> {
