@@ -2,6 +2,7 @@ import * as monaco from 'monaco-editor';
 import type { CursorPosition, DiagnosticItem, EditorSettings, LspDiagnostic } from '../../shared/api';
 import type { TextEdit } from '../../shared/edits';
 import './monaco-env';
+import type { GitLineChange } from '../../shared/git-line-changes';
 import type { RunnableTest } from '../../shared/python-tests';
 import type { TestOutcome } from '../../shared/test-model';
 import type { BreakpointInput } from './debug';
@@ -24,6 +25,12 @@ export interface CursorState {
 
 /** Нажали на значок запуска в жёлобе — этот файл и строку и просят выполнить. */
 export interface RunMarkerHit {
+  path: string;
+  line: number;
+}
+
+/** Нажали на полоску изменения в жёлобе — файл и строка этой полоски. */
+export interface ChangeMarkerHit {
   path: string;
   line: number;
 }
@@ -105,6 +112,10 @@ export class EditorService {
   private readonly testMarkerEmitter = new Emitter<TestMarkerHit>();
   readonly onTestMarker = this.testMarkerEmitter.event;
 
+  /** Клик по полоске изменения в жёлобе — открыть различие этой строки. */
+  private readonly changeMarkerEmitter = new Emitter<ChangeMarkerHit>();
+  readonly onChangeMarker = this.changeMarkerEmitter.event;
+
   /** Разделение области редактора: кнопка и команда идут за этим состоянием. */
   private readonly splitEmitter = new Emitter<boolean>();
   readonly onDidChangeSplit = this.splitEmitter.event;
@@ -139,6 +150,9 @@ export class EditorService {
   /** Значки запуска отдельных тестов: строка → селектор pytest. */
   private readonly testDecorations = new Map<string, string[]>();
   private readonly testMarkers = new Map<string, readonly RunnableTest[]>();
+  /** Полоски изменений в жёлобе по файлам: добавлено / изменено / удалено. */
+  private readonly changeDecorations = new Map<string, string[]>();
+  private readonly changeLines = new Map<string, readonly GitLineChange[]>();
   /** Исходы последних прогонов по селекторам: значок теста красится по ним. */
   private testOutcomes: ReadonlyMap<string, TestOutcome> = new Map();
   /** Подсветка строки, на которой стоит отладчик; null — отладка не стоит. */
@@ -305,6 +319,18 @@ export class EditorService {
     // Клик по значку ▶ в жёлобе запускает файл: то же действие, что Shift+F10,
     // но в том месте, где человек видит точку входа.
     editor.onMouseDown((event) => {
+      // Полоски изменений лежат в своей колонке жёлоба: клик по ней просит
+      // показать различие этой строки. Проверяем, что на строке есть правка, —
+      // колонка шире, чем сами полоски.
+      if (event.target.type === monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS) {
+        const marked = event.target.position?.lineNumber;
+        const changed = pane.path;
+        if (marked && changed && this.changeLines.get(changed)?.some((change) => change.line === marked)) {
+          this.changeMarkerEmitter.fire({ path: changed, line: marked });
+        }
+        return;
+      }
+
       if (event.target.type !== monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return;
       const line = event.target.position?.lineNumber;
       const path = pane.path;
@@ -411,6 +437,8 @@ export class EditorService {
     this.drawTestMarkers(document.path);
     // И подсветку непокрытых строк: отчёт покрытия мог прийти раньше файла.
     this.drawCoverage(document.path);
+    // И полоски изменений: их набор мог прийти раньше модели.
+    this.drawLineChanges(document.path);
     this.drawDebugLine();
     // Подпись blame привязана к файлу и строке — на новой модели её нужно перерисовать.
     this.drawBlame();
@@ -765,6 +793,55 @@ export class EditorService {
   }
 
   /**
+   * Полоски изменений в жёлобе: добавленные, изменённые и удалённые строки файла
+   * относительно сохранённой версии (считает `core/change-gutter.ts`). Пустой
+   * список снимает полоски — файл без изменений или вне репозитория.
+   */
+  setLineChanges(path: string, changes: readonly GitLineChange[]): void {
+    if (changes.length === 0) this.changeLines.delete(path);
+    else this.changeLines.set(path, changes);
+    this.drawLineChanges(path);
+  }
+
+  private drawLineChanges(path: string): void {
+    const model = this.files.get(path);
+    if (!model) return;
+
+    const previous = this.changeDecorations.get(path) ?? [];
+    const changes = this.changeLines.get(path) ?? [];
+    if (changes.length === 0) {
+      this.changeDecorations.delete(path);
+      if (previous.length > 0) model.deltaDecorations(previous, []);
+      return;
+    }
+
+    const next = model.deltaDecorations(
+      previous,
+      changes.map((change) => ({
+        range: new monaco.Range(change.line, 1, change.line, 1),
+        options: {
+          linesDecorationsClassName: `change-gutter is-${change.kind}`,
+          linesDecorationsTooltip: changeGutterTooltip(change.kind),
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      })),
+    );
+    this.changeDecorations.set(path, next);
+  }
+
+  /** Текст файла в модели — то, что видно в редакторе (с несохранёнными правками). */
+  currentText(path: string): string | null {
+    return this.files.get(path)?.getValue() ?? null;
+  }
+
+  /** Файлы, открытые в панелях сейчас: их и показывает жёлоб изменений. */
+  visiblePaths(): string[] {
+    const paths = new Set<string>();
+    for (const pane of this.panes) if (pane.path) paths.add(pane.path);
+    return [...paths];
+  }
+
+  /**
    * Подпись blame у строки: автор, дата и коммит — серым текстом после кода, как
    * в VS Code. `null` — подпись убрать. Одна на всё приложение: показывается
    * только у строки под курсором.
@@ -955,6 +1032,9 @@ export class EditorService {
     // файл откроют снова, и строки нужно нарисовать снова.
     this.coverageDecorations.delete(path);
     this.blameDecorations.delete(path);
+    // Полоски изменений тоже нарисованы по модели: их id умрут вместе с ней.
+    this.changeDecorations.delete(path);
+    this.changeLines.delete(path);
     if (this.blameLine?.path === path) this.blameLine = null;
     if (this.debugLine?.path === path) this.debugLine = null;
   }
@@ -1004,6 +1084,13 @@ function testGlyphTooltip(test: RunnableTest, outcome: TestOutcome | undefined):
   if (outcome === 'failed') return `Упал: ${test.name}`;
   if (outcome === 'running') return `Идёт прогон: ${test.name}`;
   return `Запустить тест ${test.name}`;
+}
+
+/** Подсказка полоски изменения в жёлобе: что именно случилось со строкой. */
+function changeGutterTooltip(kind: GitLineChange['kind']): string {
+  if (kind === 'added') return 'Добавлено (по сравнению с HEAD)';
+  if (kind === 'deleted') return 'Удалено (по сравнению с HEAD)';
+  return 'Изменено (по сравнению с HEAD)';
 }
 
 /**

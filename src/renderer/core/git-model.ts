@@ -174,6 +174,11 @@ export class GitModel {
     return this.rpc.request('git.log', { path, limit });
   }
 
+  /** Содержимое файла в HEAD — база для полосок изменений в жёлобе. */
+  headText(path: string): Promise<string | null> {
+    return this.rpc.request('git.headText', { path });
+  }
+
   /** Три версии конфликтного файла: общий предок и обе стороны. */
   conflictParts(path: string): Promise<GitConflictParts> {
     return this.rpc.request('git.conflictParts', { path });

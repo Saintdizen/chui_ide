@@ -1435,6 +1435,11 @@ export interface ChuiMethods {
   'git.blame': { params: { path: string; startLine?: number; endLine?: number }; result: BlameLine[] };
   /** История коммитов: все или только трогавшие указанный файл. */
   'git.log': { params: { path?: string; limit?: number }; result: GitCommit[] };
+  /**
+   * Содержимое файла в HEAD — база для полосок изменений в жёлобе. `null` —
+   * файл вне репозитория; пустая строка — файл новый или без коммитов.
+   */
+  'git.headText': { params: { path: string }; result: string | null };
   /** Три версии конфликтного файла: общий предок и обе стороны. */
   'git.conflictParts': { params: { path: string }; result: GitConflictParts };
   /** Отметить конфликт решённым: содержимое файла уходит в индекс (`git add`). */

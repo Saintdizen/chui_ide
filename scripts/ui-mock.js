@@ -394,6 +394,8 @@ module.exports = [
       { line: params.startLine ?? 1, hash: 'abc1234', author: 'Мок', date: '2024-01-02', summary: 'правка', text: '' },
     ],
     'git.log': () => [{ hash: 'abc1234', author: 'Мок', date: '2024-01-02', summary: 'первый коммит' }],
+    // База для полосок изменений: в моке считаем, что в HEAD файл был короче.
+    'git.headText': () => 'строка первая\nстрока вторая\n',
     // Стороны конфликта: в моке все три — один и тот же текст файла.
     'git.conflictParts': (params) => {
       const file = gitState.files.find((item) => item.path === params.path);

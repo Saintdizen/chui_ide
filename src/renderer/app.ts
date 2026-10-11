@@ -11,6 +11,7 @@ import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../s
 import { menuChecks } from '../shared/app-menu';
 import { mergeLspServers } from '../shared/lsp-presets';
 import { createBlameController } from './core/blame';
+import { createChangeGutterController } from './core/change-gutter';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -236,6 +237,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     show: (annotation) => editors.setBlame(annotation),
   });
+  // Полоски изменений в жёлобе: добавленные, изменённые и удалённые строки файла
+  // относительно HEAD. Включены по умолчанию (см. `git.toggleChangeGutter`).
+  const changeGutter = createChangeGutterController({
+    headText: (path) => git.headText(path),
+    currentText: (path) => editors.currentText(path),
+    paths: () => editors.visiblePaths(),
+    show: (path, changes) => editors.setLineChanges(path, changes),
+  });
+  /** Файл, для которого полоски посчитаны последними: смена файла — повод пересчитать. */
+  let gutterPath: string | null = null;
   // Отладчик: состояние сессии держит контроллер, события идут из main push-ом.
   const debug = new DebugController(rpc);
   // Подсказка под курсором в остановленном файле: значение выражения в кадре. Шов
@@ -1785,6 +1796,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast(on ? 'Blame включён: у строки под курсором видно автора' : 'Blame выключен');
   });
 
+  /** Показать или скрыть полоски изменений в жёлобе редактора. */
+  define(
+    { id: 'git.toggleChangeGutter', title: 'Полоски изменений в жёлобе: показать/скрыть', category: 'Git' },
+    () => {
+      const on = changeGutter.toggle();
+      showToast(on ? 'Полоски изменений включены' : 'Полоски изменений скрыты');
+    },
+  );
+
   /** История коммитов файла: выбор записи открывает сравнение с текущим текстом. */
   define({ id: 'git.fileHistory', title: 'История файла', category: 'Git' }, async (path) => {
     const target = asPath(path) ?? editors.currentPath;
@@ -2287,6 +2307,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   git.onDidChange(refreshStatus);
   // История могла измениться (коммит, rebase) — кэш подписи blame устарел.
   git.onDidChange(() => blame.refresh());
+  // Вместе с историей могли сдвинуться и полоски изменений: перечитываем HEAD.
+  git.onDidChange(() => changeGutter.refresh());
   // Коммит и push, сделанные мимо IDE (в терминале или внешней программой),
   // меняют только `.git`, а рабочее дерево — нет: наблюдателя за этим может и
   // не быть. На возврат фокуса перечитываем состояние репозитория, чтобы пометки
@@ -2299,6 +2321,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncRunControl();
     // Тестовый файл изменился — панель тестов сама решит, пересобирать ли дерево.
     testPanel.notifyChange(document.path);
+    // Содержимое файла изменилось — полоски изменений в жёлобе пересчитываем.
+    changeGutter.refreshContent();
   });
   // Значок ▶ в жёлобе: запускаем тот файл, в котором на него нажали.
   editors.onRunMarker(({ path }) => {
@@ -2316,6 +2340,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         : pytestTarget(tools.get(), selector),
     );
     showToast(`Запускаю тест ${name}`);
+  });
+
+  // Клик по полоске изменения в жёлобе: переходим на строку и показываем автора
+  // (blame). Вместе со строкой blame это и есть «различие этой строки».
+  editors.onChangeMarker(({ path, line }) => {
+    if (!blame.enabled) blame.toggle();
+    editors.reveal(path, line, 1);
   });
 
   // Клик по полю номеров строк — точка останова: контроллер держит набор, а
@@ -2451,9 +2482,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     statusBar.update({ line: state.line, column: state.column });
     // Строка под курсором сменилась — обновляем подпись blame (если показ включён).
     blame.update(state.path, state.line);
+    // Смена файла — повод пересчитать его полоски изменений (содержимое — ниже).
+    if (state.path !== gutterPath) {
+      gutterPath = state.path;
+      changeGutter.refreshContent();
+    }
   });
   // Разделение меняют и кнопка, и команда — подсветка кнопки идёт за состоянием.
-  editors.onDidChangeSplit(() => syncViewButtons());
+  editors.onDidChangeSplit(() => {
+    syncViewButtons();
+    // Во второй панели может оказаться другой файл — его полоски тоже нужны.
+    changeGutter.refresh();
+  });
   rpc.onDidChangeStreaming((streaming) => statusBar.update({ ai: streaming ? 'генерация…' : 'готов' }));
   // Счётчик проблем: пометки приходят из нескольких источников (Monaco, LSP,
   // проверка импортов), поэтому слушаем одно событие сервиса и пересчитываем всё.
@@ -2466,6 +2506,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncThemeButton();
   });
   theme.apply();
+  // Полоски изменений для уже открытых файлов — если при старте что-то открыто.
+  changeGutter.refresh();
 
   new KeybindingService(commands, [
     { combo: 'Alt+1', command: 'view.showExplorer' },

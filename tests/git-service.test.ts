@@ -155,6 +155,29 @@ describe('GitService: удалённые и сеть', () => {
     expect(await serviceFor(work).blame(path.join(work, 'new.txt'))).toEqual([]);
   });
 
+  it('headText() отдаёт версию файла в HEAD; новый файл — пустая строка', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const service = serviceFor(work);
+
+    expect(await service.headText(path.join(work, 'a.txt'))).toBe('one\n');
+    // Правка в рабочем дереве на версию в HEAD не влияет — это и есть база полосок.
+    await fs.writeFile(path.join(work, 'a.txt'), 'one\ntwo\n');
+    expect(await service.headText(path.join(work, 'a.txt'))).toBe('one\n');
+
+    await fs.writeFile(path.join(work, 'new.txt'), 'x\n');
+    expect(await service.headText(path.join(work, 'new.txt'))).toBe('');
+  });
+
+  it('headText() вне репозитория — null (полосок быть не должно)', async () => {
+    if (!gitAvailable) return;
+    const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-git-plain-')));
+    roots.push(base);
+    // Если сам temp-каталог лежит внутри репозитория, проверка «вне репозитория» бессмысленна.
+    if ((await git(base, ['rev-parse', '--show-toplevel'])).code === 0) return;
+    expect(await serviceFor(base).headText(path.join(base, 'x.txt'))).toBeNull();
+  });
+
   it('push() без удалённого возвращает сбой текстом, а не бросает', async () => {
     if (!gitAvailable) return;
     const { work } = await makeRepos();

@@ -864,6 +864,26 @@ textarea {
   background: var(--coverage_missing_background);
 }
 
+/* Полоски изменений в жёлобе: узкая черта в полосе украшений справа от номеров
+   строк — добавлено (зелёная), изменено (жёлтая), удалено (красная). Цвета — те
+   же роли git, что у пометок в дереве и в панели изменений. */
+.change-gutter {
+  border-left: 3px solid transparent;
+  cursor: pointer;
+}
+
+.change-gutter.is-added {
+  border-left-color: var(--git_added);
+}
+
+.change-gutter.is-modified {
+  border-left-color: var(--git_modified);
+}
+
+.change-gutter.is-deleted {
+  border-left-color: var(--git_deleted);
+}
+
 .editor-host {
   position: relative;
   flex: 1;

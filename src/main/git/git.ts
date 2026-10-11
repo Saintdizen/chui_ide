@@ -458,6 +458,17 @@ export class GitService {
     return status;
   }
 
+  /**
+   * Содержимое файла в HEAD. `null` — рабочая папка не репозиторий (тогда полосок
+   * изменений быть не должно); пустая строка — файл новый или без коммитов.
+   */
+  async headText(filePath: string): Promise<string | null> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) return null;
+    const relative = path.relative(repoRoot, path.resolve(filePath));
+    return this.show(`HEAD:${relative}`, repoRoot);
+  }
+
   /* ── внутреннее ────────────────────────────────────────────────────────── */
 
   /**
