@@ -323,6 +323,46 @@ describe('GitService: удалённые и сеть', () => {
     await expect(serviceFor(work).cherryPick('-x')).rejects.toThrow();
   });
 
+  it('deleteBranch удаляет ветку, renameBranch переименовывает текущую', async () => {
+    if (!gitAvailable) return;
+    const { work, branch } = await makeRepos();
+    const service = serviceFor(work);
+    await git(work, ['branch', 'temp']);
+    await service.deleteBranch('temp');
+    expect((await service.branches()).map((item) => item.name)).not.toContain('temp');
+
+    await service.renameBranch(branch, 'renamed');
+    const names = (await service.branches()).map((item) => item.name);
+    expect(names).toContain('renamed');
+    expect(names).not.toContain(branch);
+  });
+
+  it('ignore добавляет путь в .gitignore и не дублирует его', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const service = serviceFor(work);
+    await fs.writeFile(path.join(work, 'debug.log'), 'x\n');
+
+    await service.ignore([path.join(work, 'debug.log')]);
+    const content = await fs.readFile(path.join(work, '.gitignore'), 'utf8');
+    expect(content).toContain('debug.log');
+    // Игнорируемый файл пропадает из статуса.
+    expect((await service.status()).files.some((file) => file.relative === 'debug.log')).toBe(false);
+
+    await service.ignore([path.join(work, 'debug.log')]);
+    const again = await fs.readFile(path.join(work, '.gitignore'), 'utf8');
+    expect(again.match(/debug\.log/g)).toHaveLength(1);
+  });
+
+  it('reflog отдаёт записи с ссылкой и описанием', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const entries = await serviceFor(work).reflog(10);
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries[0]!.ref).toBe('HEAD@{0}');
+    expect(entries[0]!.hash).toHaveLength(7);
+  });
+
   it('push() без удалённого возвращает сбой текстом, а не бросает', async () => {
     if (!gitAvailable) return;
     const { work } = await makeRepos();

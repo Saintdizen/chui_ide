@@ -2010,6 +2010,140 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showPopupMenu(items, rect.left + 40, rect.top + 40, { anchor: layout.editorHost });
   });
 
+  /** Отменить последний коммит, оставив его правки в индексе (reset --soft HEAD~1). */
+  define({ id: 'git.undoCommit', title: 'Отменить последний коммит (правки остаются)', category: 'Git' }, async () => {
+    if (!git.repository?.head) {
+      showToast('Коммитов ещё нет', 'error');
+      return;
+    }
+    const { confirmed } = await rpc.request('dialog.confirm', {
+      title: 'Отменить коммит',
+      message: 'Отменить последний коммит?',
+      detail: 'Коммит уйдёт из истории, а его правки останутся в индексе — их можно поправить и закоммитить заново.',
+      confirmLabel: 'Отменить коммит',
+    });
+    if (!confirmed) return;
+    try {
+      await git.reset('soft', 'HEAD~1');
+      showToast('Последний коммит отменён, правки в индексе');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  });
+
+  /** Журнал ссылок: сюда смотрят, чтобы откатить неудачный merge, rebase или reset. */
+  define({ id: 'git.reflog', title: 'Журнал ссылок (reflog)', category: 'Git' }, async () => {
+    if (!git.isRepository) {
+      showToast('Рабочая папка не в репозитории git', 'error');
+      return;
+    }
+    const entries = await git.reflog(50);
+    if (entries.length === 0) {
+      showToast('Журнал ссылок пуст');
+      return;
+    }
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(
+      entries.map((entry) => ({
+        label: `${entry.ref} → ${entry.hash}`,
+        hint: entry.action,
+        submenu: [
+          {
+            label: 'Перенести в текущую ветку (cherry-pick)',
+            onSelect: () => {
+              void git.cherryPick(entry.hash).then(
+                () => showToast(`Коммит ${entry.hash} перенесён`),
+                (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
+              );
+            },
+          },
+          { separator: true },
+          {
+            label: 'Сбросить ветку сюда (soft) — правки в индексе',
+            onSelect: () => void resetTo('soft', entry.hash, entry.action),
+          },
+          { label: 'Сбросить ветку сюда (mixed)', onSelect: () => void resetTo('mixed', entry.hash, entry.action) },
+          {
+            label: 'Сбросить ветку сюда (hard) — правки теряются',
+            danger: true,
+            onSelect: () => void resetTo('hard', entry.hash, entry.action),
+          },
+        ],
+      })),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+  });
+
+  /** Удалить ветку. Имя можно передать аргументом, иначе спрашиваем. */
+  define({ id: 'git.deleteBranch', title: 'Удалить ветку', category: 'Git' }, async (nameArg) => {
+    if (!git.isRepository) {
+      showToast('Рабочая папка не в репозитории git', 'error');
+      return;
+    }
+    const name =
+      typeof nameArg === 'string' && nameArg
+        ? nameArg
+        : await promptValue({ title: 'Удалить ветку', label: 'Имя ветки', value: '' });
+    if (!name) return;
+    try {
+      await git.deleteBranch(name);
+      showToast(`Ветка ${name} удалена`);
+    } catch (error) {
+      // git не даёт удалить невлитую ветку — предложим сделать это силой.
+      const { confirmed } = await rpc.request('dialog.confirm', {
+        title: 'Ветка не влита',
+        message: `Удалить ветку ${name} принудительно?`,
+        detail: error instanceof Error ? error.message : String(error),
+        confirmLabel: 'Удалить принудительно',
+      });
+      if (!confirmed) return;
+      try {
+        await git.deleteBranch(name, true);
+        showToast(`Ветка ${name} удалена принудительно`);
+      } catch (forced) {
+        showToast(forced instanceof Error ? forced.message : String(forced), 'error');
+      }
+    }
+  });
+
+  /** Переименовать текущую ветку. */
+  define({ id: 'git.renameBranch', title: 'Переименовать текущую ветку', category: 'Git' }, async () => {
+    const from = git.branch;
+    if (!git.isRepository || !from) {
+      showToast('Мы не на ветке — переименовывать нечего', 'error');
+      return;
+    }
+    const to = await promptValue({ title: 'Переименовать ветку', label: `Новое имя для «${from}»`, value: from });
+    if (!to || to === from) return;
+    try {
+      await git.renameBranch(from, to);
+      showToast(`Ветка переименована в ${to}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  });
+
+  /** Добавить файл (или файлы) в .gitignore. Пути принимаем аргументом команды. */
+  define({ id: 'git.ignore', title: 'Добавить в .gitignore', category: 'Git' }, async (pathArg) => {
+    const paths = Array.isArray(pathArg)
+      ? (pathArg as unknown[]).filter((item): item is string => typeof item === 'string')
+      : typeof pathArg === 'string'
+        ? [pathArg]
+        : [];
+    if (paths.length === 0) {
+      showToast('Нечего добавлять: файл не выбран', 'error');
+      return;
+    }
+    try {
+      await git.ignore(paths);
+      showToast(paths.length === 1 ? 'Добавлено в .gitignore' : `В .gitignore добавлено файлов: ${paths.length}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  });
+
   /** История коммитов файла: выбор записи открывает сравнение с текущим текстом. */
   define({ id: 'git.fileHistory', title: 'История файла', category: 'Git' }, async (path) => {
     const target = asPath(path) ?? editors.currentPath;

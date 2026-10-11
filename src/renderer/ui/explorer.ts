@@ -276,6 +276,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
               void navigator.clipboard.writeText(entry.path).catch(() => undefined);
             },
           },
+          {
+            label: 'Добавить в .gitignore',
+            onSelect: () => void deps.commands.execute('git.ignore', entry.path),
+          },
         ]
       : [
           { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },

@@ -12,6 +12,7 @@ import type { PatchFile } from './patch';
 import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
 import type { Snippet } from './snippets';
+import type { GitReflogEntry } from './git-reflog';
 import type { GitStashEntry } from './git-stash';
 import type { GitTag } from './git-tags';
 import type { ThemeFile } from './theme-file';
@@ -1460,6 +1461,13 @@ export interface ChuiMethods {
   'git.createTag': { params: { name: string; message?: string; commit?: string }; result: GitStatus };
   'git.deleteTag': { params: { name: string }; result: GitStatus };
   'git.pushTag': { params: { name: string }; result: GitNetworkResult };
+
+  /* Ветки, .gitignore и журнал ссылок (reflog). */
+  'git.deleteBranch': { params: { name: string; force?: boolean }; result: GitStatus };
+  'git.renameBranch': { params: { from: string; to: string }; result: GitStatus };
+  'git.ignore': { params: { paths: string[] }; result: GitStatus };
+  /** Журнал ссылок: чем можно откатить неудачный merge, rebase или reset. */
+  'git.reflog': { params: { limit?: number }; result: GitReflogEntry[] };
   /** Три версии конфликтного файла: общий предок и обе стороны. */
   'git.conflictParts': { params: { path: string }; result: GitConflictParts };
   /** Отметить конфликт решённым: содержимое файла уходит в индекс (`git add`). */

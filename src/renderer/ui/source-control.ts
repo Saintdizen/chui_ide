@@ -42,7 +42,7 @@ export interface SourceControlView {
  * она шлёт команды, поэтому то же действие доступно из палитры и от ассистента.
  */
 export function createSourceControl(deps: SourceControlDeps): SourceControlView {
-  const branchName = h('span', { class: 'sc-branch-name' });
+  const branchName = h('span', { class: 'sc-branch-name', title: 'Правый клик — действия с ветками' });
   const branchSelect = createSelect({ title: 'Текущая ветка', placeholder: 'нет ветки', class: 'sc-branch-select' });
   const branchInput = h('input', {
     class: 'sc-branch-input',
@@ -211,6 +211,23 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
 
   // Уход фокуса закрывает поле — как у строки переименования в дереве.
   branchInput.addEventListener('blur', () => closeBranchInput());
+
+  // Правый клик по имени ветки — операции, которые в строку не влезают:
+  // создание, переименование и удаление.
+  branchName.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    if (!deps.git.isRepository) return;
+    showContextMenu(
+      [
+        { label: 'Новая ветка…', onSelect: () => openBranchInput() },
+        { separator: true as const },
+        { label: 'Переименовать текущую ветку…', onSelect: () => void deps.commands.execute('git.renameBranch') },
+        { label: 'Удалить ветку…', danger: true, onSelect: () => void deps.commands.execute('git.deleteBranch') },
+      ],
+      event.clientX,
+      event.clientY,
+    );
+  });
 
   const commit = async (): Promise<void> => {
     const amend = amendBox.checked;

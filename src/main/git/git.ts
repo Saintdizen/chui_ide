@@ -19,6 +19,7 @@ import {
 } from '../../shared/api';
 import { parseBlamePorcelain, type BlameLine } from '../../shared/git-blame';
 import { hunkPatch, hunkRanges } from '../../shared/git-hunks';
+import { parseReflog, type GitReflogEntry } from '../../shared/git-reflog';
 import { parseStashList, type GitStashEntry } from '../../shared/git-stash';
 import { parseTagList, type GitTag } from '../../shared/git-tags';
 import { RpcFailure } from '../ipc/router';
@@ -610,6 +611,67 @@ export class GitService {
   /** Отправить один тег в origin. */
   async pushTag(name: string): Promise<GitNetworkResult> {
     return this.network(['push', 'origin', `refs/tags/${this.nameArg(name)}`]);
+  }
+
+  /* ── ветки, .gitignore и журнал ссылок ────────────────────────────────── */
+
+  /**
+   * Удалить ветку. `force` — когда git отказывается: ветка не влита, а человек
+   * всё равно настаивает (это его выбор, но предупредить должно быть в UI).
+   */
+  async deleteBranch(name: string, force = false): Promise<GitStatus> {
+    const repoRoot = await this.requireRoot();
+    await this.exec(['branch', force ? '-D' : '-d', this.nameArg(name)], repoRoot);
+    return this.refresh();
+  }
+
+  /** Переименовать ветку (у текущей — без указания старого имени). */
+  async renameBranch(from: string, to: string): Promise<GitStatus> {
+    const repoRoot = await this.requireRoot();
+    await this.exec(['branch', '-m', this.nameArg(from), this.nameArg(to)], repoRoot);
+    return this.refresh();
+  }
+
+  /**
+   * Добавить пути в `.gitignore` корня репозитория. Уже перечисленные не дублируем,
+   * а сам файл создаём, если его ещё нет. Путь пишем от корня и со слэшами: так
+   * его понимает gitignore на любой системе.
+   */
+  async ignore(paths: string[]): Promise<GitStatus> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+    const current = await this.readText(path.join(repoRoot, '.gitignore')).catch(() => '');
+    const lines = current.split('\n').filter((line) => line.trim() !== '');
+    const known = new Set(lines.map((line) => line.trim()));
+
+    const added: string[] = [];
+    for (const target of paths) {
+      const relative = path.relative(repoRoot, path.resolve(target)).split(path.sep).join('/');
+      if (!relative || relative.startsWith('..') || known.has(relative)) continue;
+      known.add(relative);
+      added.push(relative);
+    }
+
+    if (added.length > 0) {
+      const text = [...lines, ...added].join('\n');
+      await fs.writeFile(path.join(repoRoot, '.gitignore'), `${text}\n`, 'utf8');
+    }
+    return this.refresh();
+  }
+
+  /** Журнал ссылок: свежие записи — первыми. */
+  async reflog(limit = 50): Promise<GitReflogEntry[]> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) return [];
+    const result = await this.exec(
+      ['reflog', '--date=short', '-n', String(Math.max(Math.trunc(limit), 1)), '--format=%h%x1f%gd%x1f%ad%x1f%gs'],
+      repoRoot,
+      { allowFailure: true },
+    );
+    const entries = parseReflog(result.stdout);
+    // `--date=short` превращает селектор в `HEAD@{2026-10-12}`, а нам нужна ссылка
+    // на запись: берём номер по порядку вывода — он же и есть её индекс у git.
+    return entries.map((entry, index) => ({ ...entry, ref: `HEAD@{${index}}` }));
   }
 
   /** Имя коммита может начинаться с `-` — тогда git примет его за флаг, а не за ссылку. */

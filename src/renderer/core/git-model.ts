@@ -11,6 +11,7 @@ import {
   type GitStatus,
 } from '../../shared/api';
 import type { BlameLine } from '../../shared/git-blame';
+import type { GitReflogEntry } from '../../shared/git-reflog';
 import type { GitStashEntry } from '../../shared/git-stash';
 import type { GitTag } from '../../shared/git-tags';
 import { Emitter } from './events';
@@ -250,6 +251,28 @@ export class GitModel {
   /** Отправить тег в origin. */
   async pushTag(name: string): Promise<GitNetworkResult> {
     return this.network(await this.rpc.request('git.pushTag', { name }));
+  }
+
+  /* ── ветки, .gitignore и журнал ссылок ────────────────────────────────── */
+
+  /** Удалить ветку; `force` — когда она не влита, а удалить всё равно нужно. */
+  async deleteBranch(name: string, force = false): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.deleteBranch', { name, force }));
+  }
+
+  /** Переименовать ветку. */
+  async renameBranch(from: string, to: string): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.renameBranch', { from, to }));
+  }
+
+  /** Добавить пути в .gitignore корня репозитория. */
+  async ignore(paths: string[]): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.ignore', { paths }));
+  }
+
+  /** Журнал ссылок: откат неудачного merge/rebase/reset. */
+  reflog(limit = 50): Promise<GitReflogEntry[]> {
+    return this.rpc.request('git.reflog', { limit });
   }
 
   /** Три версии конфликтного файла: общий предок и обе стороны. */

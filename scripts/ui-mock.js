@@ -424,6 +424,16 @@ module.exports = [
     'git.createTag': () => gitChanged(),
     'git.deleteTag': () => gitChanged(),
     'git.pushTag': () => ({ ok: true, message: 'мок: тег отправлен', status: gitState }),
+    'git.deleteBranch': () => gitChanged(),
+    'git.renameBranch': () => gitChanged(),
+    'git.ignore': (params) => {
+      gitState.files = gitState.files.filter((file) => !params.paths.includes(file.path));
+      return gitChanged();
+    },
+    'git.reflog': () => [
+      { hash: 'a1b2c3d', ref: 'HEAD@{0}', date: '2024-01-02', action: 'commit: первый коммит' },
+      { hash: 'b2c3d4e', ref: 'HEAD@{1}', date: '2024-01-01', action: 'reset: moving to HEAD~1' },
+    ],
     // Стороны конфликта: в моке все три — один и тот же текст файла.
     'git.conflictParts': (params) => {
       const file = gitState.files.find((item) => item.path === params.path);
