@@ -3218,13 +3218,16 @@ textarea {
   font-size: var(--font_small_size);
 }
 
-/* Операция агента с файлом: создан, удалён или перенесён. */
+/* Операция агента с файлом: создан, удалён или перенесён. Вертикальный паддинг и
+   плотный line-height сами задают высоту пилюли: при нулевом паддинге буквы упирались
+   в круглые торцы (радиус 999px при высоте строки ~14.5px) и текст выглядел срезанным. */
 .chip-kind {
-  padding: 0 6px;
+  padding: 1px 8px;
   border-radius: var(--radius_pill);
   background: var(--element_background);
   color: var(--text_color_tertiary);
   font-size: var(--font_micro_size);
+  line-height: 1.2;
   white-space: nowrap;
 }
 
