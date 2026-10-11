@@ -166,3 +166,65 @@ describe('GitService: удалённые и сеть', () => {
     expect(result.message.length).toBeGreaterThan(0);
   });
 });
+
+describe('GitService: индексирование по блокам', () => {
+  /**
+   * Файл из двадцати строк с двумя правками врозь: между ними больше шести
+   * строк контекста, поэтому git покажет их двумя разными блоками.
+   */
+  async function makeTwoHunks(): Promise<{ work: string; file: string }> {
+    const { work } = await makeRepos();
+    const file = path.join(work, 'a.txt');
+    const lines = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`);
+    await fs.writeFile(file, `${lines.join('\n')}\n`);
+    await git(work, ['add', '-A']);
+    await git(work, ['commit', '-q', '-m', 'base']);
+
+    lines[0] = 'line 1 changed';
+    lines[19] = 'line 20 changed';
+    await fs.writeFile(file, `${lines.join('\n')}\n`);
+    return { work, file };
+  }
+
+  it('в индекс уходит только выбранный блок, остальные правки остаются', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeTwoHunks();
+    const service = serviceFor(work);
+
+    // Правки далеки друг от друга — git видит два блока.
+    expect((await service.diff(file)).hunks).toHaveLength(2);
+
+    const status = await service.stageHunk(file, 0);
+
+    // Первый блок в индексе, второй — пока нет.
+    const staged = await service.diff(file, true);
+    expect(staged.modified).toContain('line 1 changed');
+    expect(staged.modified).not.toContain('line 20 changed');
+
+    // Второй блок остался правкой в рабочем дереве (и виден как один блок).
+    const remaining = await service.diff(file, false);
+    expect(remaining.hunks).toHaveLength(1);
+    expect(remaining.modified).toContain('line 20 changed');
+
+    // Файл и проиндексирован, и правится далее — как в настоящем частичном индексе.
+    const entry = status.files.find((item) => item.path === file);
+    expect(entry?.staged).toBe(true);
+    expect(entry?.unstaged).toBe(true);
+  });
+
+  it('unstageHunk() убирает из индекса только выбранный блок', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeTwoHunks();
+    const service = serviceFor(work);
+    await service.stage([file]);
+
+    expect((await service.diff(file, true)).hunks).toHaveLength(2);
+
+    await service.unstageHunk(file, 0);
+
+    const after = await service.diff(file, true);
+    expect(after.hunks).toHaveLength(1);
+    expect(after.modified).not.toContain('line 1 changed');
+    expect(after.modified).toContain('line 20 changed');
+  });
+});

@@ -16,6 +16,7 @@ import {
   type GitStatus,
 } from '../../shared/api';
 import { parseBlamePorcelain, type BlameLine } from '../../shared/git-blame';
+import { hunkPatch, hunkRanges } from '../../shared/git-hunks';
 import { RpcFailure } from '../ipc/router';
 
 const GIT_TIMEOUT_MS = 20_000;
@@ -69,6 +70,28 @@ export class GitService {
     const { repoRoot, relative } = await this.locate(paths);
     // `-A` нужен, чтобы одной командой уходили и удаления: `add --` их не замечает.
     await this.exec(['add', '-A', '--', ...relative], repoRoot);
+    return this.refresh();
+  }
+
+  /**
+   * Проиндексировать только один блок изменений файла. Блок берётся из diff
+   * рабочего дерева против индекса и прикладывается к индексу (`apply --cached`),
+   * не трогая остальные правки: файл целиком в индекс не попадает.
+   */
+  async stageHunk(filePath: string, index: number): Promise<GitStatus> {
+    const { repoRoot, relative } = await this.locateHunk(filePath);
+    const patch = hunkPatch(await this.rawDiff(relative, repoRoot, false), index);
+    if (!patch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Блок изменений не найден');
+    await this.applyToIndex(patch, repoRoot, false);
+    return this.refresh();
+  }
+
+  /** Убрать из индекса один блок: обратный патч индекса против HEAD. */
+  async unstageHunk(filePath: string, index: number): Promise<GitStatus> {
+    const { repoRoot, relative } = await this.locateHunk(filePath);
+    const patch = hunkPatch(await this.rawDiff(relative, repoRoot, true), index);
+    if (!patch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Блок изменений не найден');
+    await this.applyToIndex(patch, repoRoot, true);
     return this.refresh();
   }
 
@@ -159,7 +182,10 @@ export class GitService {
       : await this.show(`:${known.relative}`, repoRoot);
     const modified = staged ? await this.show(`:${known.relative}`, repoRoot) : await this.readText(absolute);
 
-    return { original, modified };
+    // Границы блоков нужны интерфейсу: у каждого будет своя кнопка. Считаем из
+    // того же diff, что приложит `git apply`, — тогда номера блоков совпадают.
+    const hunks = hunkRanges(await this.rawDiff(known.relative, repoRoot, staged));
+    return { original, modified, hunks };
   }
 
   /**
@@ -176,16 +202,23 @@ export class GitService {
     const known = status.files.find((file) => file.path === path.resolve(filePath));
     if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
 
-    // Контекст задаём сами, а не берём из настроек git. Инструмент отдаёт текст
-    // модели, и у человека в `diff.context` может стоять 25 строк: тогда больше
-    // половины отведённого места уйдёт на неизменённый текст — на нашем репозитории
-    // такой конфиг раздувает diff в 2,5 раза (769 КБ против 298 КБ). `-U3` — обычная
-    // норма, её же ждёт модель, читая хунки. `--no-color` — цвет в ответе инструмента
-    // не нужен; `--no-ext-diff` — иначе `diff.external` подменил бы вывод чужой
-    // программой, а модели нужен именно унифицированный diff.
+    return this.rawDiff(known.relative, repoRoot, staged);
+  }
+
+  /**
+   * Сырой унифицированный diff файла от git. Контекст задаём сами, а не берём из
+   * настроек git: инструмент отдаёт текст модели, и у человека в `diff.context`
+   * может стоять 25 строк — тогда больше половины отведённого места уйдёт на
+   * неизменённый текст (на нашем репозитории такой конфиг раздувает diff в 2,5
+   * раза — 769 КБ против 298 КБ). `-U3` — обычная норма, её же ждёт модель, читая
+   * хунки, и те же границы блоков видит интерфейс. `--no-color` — цвет в ответе
+   * инструмента не нужен; `--no-ext-diff` — иначе `diff.external` подменил бы
+   * вывод чужой программой, а нам нужен именно унифицированный diff.
+   */
+  private async rawDiff(relative: string, repoRoot: string, staged: boolean): Promise<string> {
     const args = staged
-      ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff', '--', known.relative]
-      : ['diff', '-U3', '--no-color', '--no-ext-diff', '--', known.relative];
+      ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff', '--', relative]
+      : ['diff', '-U3', '--no-color', '--no-ext-diff', '--', relative];
     const result = await this.exec(args, repoRoot, { allowFailure: true });
     return result.stdout;
   }
@@ -412,6 +445,52 @@ export class GitService {
     });
 
     return { repoRoot, relative };
+  }
+
+  /** Один файл для операции с блоком: должен быть в нашем репозитории и с правками. */
+  private async locateHunk(filePath: string): Promise<{ repoRoot: string; relative: string }> {
+    const status = await this.status();
+    const repoRoot = status.repository?.root;
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    const known = status.files.find((file) => file.path === path.resolve(filePath));
+    if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
+    return { repoRoot, relative: known.relative };
+  }
+
+  /**
+   * Приложить патч к индексу (`--cached`), не трогая рабочее дерево. `reverse`
+   * убирает блок из индекса. Патч идёт на stdin: так не нужен временный файл,
+   * а `git apply` читает его оттуда без оговорок.
+   */
+  private applyToIndex(patch: string, repoRoot: string, reverse: boolean): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const args = ['apply', '--cached', '--whitespace=nowarn'];
+      if (reverse) args.push('--reverse');
+      const child = spawn('git', ['--no-optional-locks', ...args], {
+        cwd: repoRoot,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          // Никаких диалогов и редакторов: всё, что требует ввода, в IDE решается иначе.
+          GIT_TERMINAL_PROMPT: '0',
+          GIT_EDITOR: 'true',
+          GIT_PAGER: 'cat',
+        },
+      });
+
+      let stderr = '';
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk: string) => {
+        stderr += chunk;
+      });
+      child.on('error', (error) => reject(new RpcFailure(RpcErrorCode.Internal, `git: ${error.message}`)));
+      child.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(new RpcFailure(RpcErrorCode.Internal, `git apply: ${stderr.trim() || `код ${code}`}`));
+      });
+      child.stdin.end(patch);
+    });
   }
 
   /** Содержимое из дерева git; если объекта нет (новый файл) — пустая строка. */

@@ -36,9 +36,20 @@ export interface TestMarkerHit {
   name: string;
 }
 
+/** Действие у блока изменений в сравнении: индекс блока, строка и надпись кнопки. */
+export interface DiffHunkAction {
+  /** Порядковый номер блока — тот же, по которому его узнаёт main. */
+  index: number;
+  /** Строка новой версии, у которой рисуем кнопку (1-based). */
+  line: number;
+  label: string;
+}
+
 /** Управление одним экраном сравнения; модели Monaco живут внутри сервиса. */
 export interface DiffEditorHandle {
   set(input: { language: string; original: string; modified: string }): void;
+  /** Показать у блоков кнопки действия; `null` — убрать. Индекс — номер блока. */
+  setHunkActions(actions: readonly DiffHunkAction[] | null, onSelect: (index: number) => void): void;
   dispose(): void;
 }
 
@@ -793,14 +804,58 @@ export class EditorService {
     });
 
     let owned: monaco.editor.ITextModel[] = [];
+    // Кнопки у блоков: живут в изменённом редакторе, но в метаданных не хранятся —
+    // их нужно снимать самим (при новой версии и утилизации).
+    const widgets: monaco.editor.IContentWidget[] = [];
+    const clearActions = (): void => {
+      const modified = editor.getModifiedEditor();
+      for (const widget of widgets) modified.removeContentWidget(widget);
+      widgets.length = 0;
+    };
     return {
       set({ language, original, modified }) {
         const next = [monaco.editor.createModel(original, language), monaco.editor.createModel(modified, language)];
         editor.setModel({ original: next[0]!, modified: next[1]! });
         for (const model of owned) model.dispose();
         owned = next;
+        // Модель новая — старые кнопки указывали бы на строки прежнего текста.
+        clearActions();
+      },
+      setHunkActions(actions, onSelect) {
+        clearActions();
+        if (!actions) return;
+        const modified = editor.getModifiedEditor();
+        for (const action of actions) {
+          const node = document.createElement('div');
+          node.className = 'diff-hunk-bar';
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'diff-hunk-action';
+          button.textContent = action.label;
+          button.addEventListener('click', (event) => {
+            event.preventDefault();
+            onSelect(action.index);
+          });
+          node.appendChild(button);
+
+          const widget: monaco.editor.IContentWidget = {
+            getId: () => `chui.hunk.${action.index}`,
+            getDomNode: () => node,
+            getPosition: () => ({
+              // Удаление выше начала файла даёт newStart = 0 — ставим на первую строку.
+              position: { lineNumber: Math.max(action.line, 1), column: 1 },
+              preference: [
+                monaco.editor.ContentWidgetPositionPreference.ABOVE,
+                monaco.editor.ContentWidgetPositionPreference.BELOW,
+              ],
+            }),
+          };
+          modified.addContentWidget(widget);
+          widgets.push(widget);
+        }
       },
       dispose() {
+        clearActions();
         editor.dispose();
         for (const model of owned) model.dispose();
         owned = [];

@@ -326,11 +326,25 @@ export interface GitBranch {
   remote: boolean;
 }
 
+/** Границы блока изменений в сравнении: по строкам старой и новой версий. */
+export interface GitDiffHunk {
+  oldStart: number;
+  oldCount: number;
+  newStart: number;
+  newCount: number;
+}
+
 export interface GitDiff {
   /** С чем сравниваем: HEAD или индекс. */
   original: string;
   /** Что сравниваем: индекс или рабочее дерево. */
   modified: string;
+  /**
+   * Блоки изменений в порядке файла: по ним интерфейс ставит у каждого свою
+   * кнопку «проиндексировать блок». Границы совпадают с теми, что приложил бы
+   * `git apply`, поэтому номер блока из этого списка годится и в main.
+   */
+  hunks: GitDiffHunk[];
 }
 
 export interface GitCommitInfo {
@@ -1342,6 +1356,8 @@ export interface ChuiMethods {
   'git.discard': { params: { paths: string[] }; result: GitStatus };
   'git.commit': { params: { message: string; paths?: string[] }; result: GitCommitInfo };
   'git.diff': { params: { path: string; staged?: boolean }; result: GitDiff };
+  'git.stageHunk': { params: { path: string; index: number }; result: GitStatus };
+  'git.unstageHunk': { params: { path: string; index: number }; result: GitStatus };
   'git.branches': { params: void; result: GitBranch[] };
   'git.checkout': { params: { name: string; create?: boolean }; result: GitStatus };
   'git.remotes': { params: void; result: GitRemote[] };

@@ -5012,6 +5012,28 @@ textarea {
   min-height: 0;
 }
 
+/* Кнопка у блока изменений: висит над его первой строкой в изменённой части. */
+.diff-hunk-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 6px 2px 0;
+}
+
+.diff-hunk-action {
+  padding: 2px 8px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.diff-hunk-action:hover {
+  background: var(--blue_prime_background);
+}
+
 /* ── ветка в статусбаре ─────────────────────────────────────────────────── */
 
 .status-git {

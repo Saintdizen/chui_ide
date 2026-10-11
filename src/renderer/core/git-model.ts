@@ -161,6 +161,16 @@ export class GitModel {
     return this.rpc.request('git.diff', { path, staged });
   }
 
+  /** Проиндексировать один блок изменений файла (не весь файл). */
+  async stageHunk(path: string, index: number): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.stageHunk', { path, index }));
+  }
+
+  /** Убрать из индекса один блок изменений файла. */
+  async unstageHunk(path: string, index: number): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.unstageHunk', { path, index }));
+  }
+
   branches(): Promise<GitBranch[]> {
     return this.rpc.request('git.branches');
   }

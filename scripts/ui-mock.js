@@ -360,6 +360,9 @@ module.exports = [
     'git.init': () => gitChanged(),
     'git.stage': (params) => setStaged(params.paths, true),
     'git.unstage': (params) => setStaged(params.paths, false),
+    // Частичное индексирование: в моке правок по блокам нет — переносим файл целиком.
+    'git.stageHunk': (params) => setStaged([params.path], true),
+    'git.unstageHunk': (params) => setStaged([params.path], false),
     'git.discard': (params) => {
       gitState.files = gitState.files.filter((file) => !params.paths.includes(file.path));
       return gitChanged();
@@ -377,7 +380,9 @@ module.exports = [
       // Оригинал делаем отличимым: без последней строки, как было до правки.
       const lines = text.split('\n');
       const original = lines.slice(0, Math.max(1, lines.length - 2)).join('\n') + '\n';
-      return { original, modified: text };
+      // Один блок изменений — чтобы в проверке была видна кнопка индексирования.
+      const hunks = [{ oldStart: 1, oldCount: 1, newStart: 1, newCount: 1 }];
+      return { original, modified: text, hunks };
     },
     'git.branches': () => gitBranches.map((branch) => ({ ...branch })),
     'git.checkout': (params) => {

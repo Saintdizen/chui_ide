@@ -391,7 +391,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     else void ensurePythonEnv().refresh();
   }
 
-  const diffView = createDiffView({ createDiff: (container) => editors.createDiff(container), git });
+  const diffView = createDiffView({
+    createDiff: (container) => editors.createDiff(container),
+    git,
+    notify: (message) => showToast(message, 'error'),
+  });
   layout.editorHost.appendChild(diffView.element);
 
   const searchView = createSearchView({
