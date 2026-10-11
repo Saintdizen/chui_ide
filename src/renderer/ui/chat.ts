@@ -228,11 +228,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     requestMentions: () => attachments.requestMentions(),
   });
 
-  /** Кнопка «+» открывает тот же список контекста: так его видно и без `#`. */
+  /** Скрепка открывает тот же список контекста, что и «#»: его видно и без подсказки. */
   const contextButton = h(
     'button',
-    { class: 'icon-btn', type: 'button', title: 'Приложить контекст', onClick: () => menu.toggleContext() },
-    svgIcon('plus', 14),
+    {
+      class: 'icon-btn composer-attach',
+      type: 'button',
+      title: 'Приложить контекст (или «#»)',
+      onClick: () => menu.toggleContext(),
+    },
+    svgIcon('attach', 16),
   );
 
   // Вставка из буфера: screenshot в буфере — самое частое, что прикладывают к
@@ -276,7 +281,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   function syncActionButton(): void {
     clear(actionButton);
-    actionButton.appendChild(svgIcon(busy ? 'stop' : 'send', 15));
+    actionButton.appendChild(svgIcon(busy ? 'stop' : 'arrowUp', 16));
     actionButton.title = busy ? 'Остановить генерацию' : 'Отправить (Enter)';
     actionButton.classList.toggle('composer-action-send', !busy);
     actionButton.classList.toggle('composer-action-stop', busy);
@@ -309,23 +314,31 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     svgIcon('sparkle', 12),
     h('span', {}, 'модель не выбрана'),
   );
-  const effortSelect = createSelect({
-    class: 'composer-select',
-    title: 'Усилие размышления: сколько модель думает перед ответом',
-  });
-  effortSelect.setOptions([
-    { value: 'off', label: 'Без размышлений' },
-    { value: 'low', label: 'Low' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'high', label: 'High' },
-  ]);
-  effortSelect.onChange((value) => void saveEffort(value as ReasoningEffort));
+  /**
+   * «Глубокое мышление» — тумблер усилия размышления. Ступени (low/medium/high)
+   * остались в настройках: в композере — одно понятное «включено/выключено»,
+   * при включении возвращается последняя ненулевая ступень.
+   */
+  const deepThinkPill = h(
+    'button',
+    { class: 'composer-pill', type: 'button', onClick: () => void toggleEffort() },
+    h('span', { class: 'composer-pill-icon' }, svgIcon('bulb', 14)),
+    h('span', {}, 'Глубокое мышление'),
+  );
 
   /**
-   * Подсказку вешаем на обёртку: у выключенного контрола браузер не показывает
-   * `title`, а именно там и нужно объяснить, почему он выключен.
+   * «Умный поиск» — тумблер веб-поиска ассистента: модель ищет в интернете перед
+   * ответом. По умолчанию выключено: поиск тратит запросы сервиса и время.
    */
-  const effortField = h('span', { class: 'composer-field' }, effortSelect.element);
+  const searchPill = h(
+    'button',
+    { class: 'composer-pill', type: 'button', onClick: () => void toggleWebSearch() },
+    h('span', { class: 'composer-pill-icon' }, svgIcon('globe', 14)),
+    h('span', {}, 'Умный поиск'),
+  );
+
+  /** Последняя ненулевая ступень размышления: её возвращает тумблер при включении. */
+  let lastEffort: ReasoningEffort = 'medium';
 
   /** Значок статуса — тот же, что у режима в селекте: картинка и подпись совпадают. */
   const modeIcon = h('span', { class: 'composer-status-icon' }, svgIcon('bubble', 12));
@@ -1051,29 +1064,58 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (text) text.textContent = `${provider} - ${label}`;
     modelButton.title = `${provider} · ${label}\nНажмите, чтобы сменить провайдера, модель или ключ`;
     // Усилие размышления относится к модели: сменилась модель — сменилась и доступность.
-    syncEffort();
+    syncComposerToggles();
   }
 
   /**
-   * Усилие размышления относится к модели, а не к беседе: показываем его
-   * только там, где модель действительно принимает `reasoning_effort`.
-   * Иначе контрол выглядел бы работающим, ничего не меняя.
+   * Состояние тумблеров композера. Обе настройки — глобальные, поэтому подписи
+   * идут за `settings`, а не за состоянием беседы: тумблер не врёт о том, что
+   * случится со следующим запросом.
    */
-  function syncEffort(): void {
+  function syncComposerToggles(): void {
     const effort = settings.ai.reasoningEffort ?? 'off';
-    effortSelect.setValue(effort);
+    if (effort !== 'off') lastEffort = effort;
+    deepThinkPill.classList.toggle('is-on', effort !== 'off');
 
+    // Усилие размышления относится к модели, а не к беседе: там, где модель его
+    // не принимает, тумблер выключен и не нажимается — иначе он выглядел бы
+    // работающим, ничего не меняя.
     const capabilities = modelCapabilities(currentModel());
-    effortSelect.setDisabled(!capabilities.reasoningEffort);
-    effortField.title = capabilities.reasoningEffort
-      ? 'Усилие размышления: сколько модель думает перед ответом'
+    deepThinkPill.disabled = !capabilities.reasoningEffort;
+    deepThinkPill.title = capabilities.reasoningEffort
+      ? 'Глубокое мышление: модель рассуждает перед ответом (ступени — в настройках)'
       : `Модель не принимает усилие размышления: ${capabilities.note ?? 'параметр не поддерживается'}`;
+
+    const search = settings.ai.webSearch.enabled;
+    searchPill.classList.toggle('is-on', search);
+    searchPill.title = search
+      ? 'Умный поиск включён: модель ищет в интернете'
+      : 'Умный поиск: искать в интернете перед ответом';
+  }
+
+  /** Включить или выключить «Глубокое мышление», помня последнюю ненулевую ступень. */
+  async function toggleEffort(): Promise<void> {
+    const current = settings.ai.reasoningEffort ?? 'off';
+    await saveEffort(current === 'off' ? lastEffort : 'off');
+  }
+
+  /** Включить или выключить «Умный поиск» (веб-поиск ассистента). */
+  async function toggleWebSearch(): Promise<void> {
+    const enabled = !settings.ai.webSearch.enabled;
+    try {
+      settings = await deps.rpc.request('settings.update', { ai: { webSearch: { enabled } } });
+      syncComposerToggles();
+      showToast(enabled ? 'Умный поиск включён' : 'Умный поиск выключен');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
   }
 
   async function saveEffort(effort: ReasoningEffort): Promise<void> {
     try {
       settings = await deps.rpc.request('settings.update', { ai: { reasoningEffort: effort } });
-      showToast(effort === 'off' ? 'Размышления выключены' : `Усилие размышления: ${effort}`);
+      syncComposerToggles();
+      showToast(effort === 'off' ? 'Глубокое мышление выключено' : 'Глубокое мышление включено');
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error');
     }
@@ -1226,8 +1268,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       h(
         'div',
         { class: 'composer-toolbar' },
-        h('div', { class: 'composer-group' }, contextButton, modeSelect.element, permButton, modelButton, effortField),
-        h('div', { class: 'composer-group' }, actionButton),
+        // Слева — режим, права и модель; за ними тумблеры (в узкой панели уходят
+        // на свою строку); справа — приложить и отправить.
+        h('div', { class: 'composer-group' }, modeSelect.element, permButton, modelButton),
+        h('div', { class: 'composer-group' }, deepThinkPill, searchPill),
+        h('div', { class: 'composer-group composer-group-end' }, contextButton, actionButton),
       ),
       // Информация о сессии — индикатор заполнения контекста в правом нижнем углу:
       // он всегда перед глазами и не занимает места в шапке.
@@ -1844,7 +1889,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   initPersistence();
   syncProviderFields();
   syncMode();
-  syncEffort();
+  syncComposerToggles();
   syncActionButton();
   attachments.render();
   renderChanges();
@@ -1871,7 +1916,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     applySettings(next: Settings) {
       settings = next;
       syncProviderFields();
-      syncEffort();
+      syncComposerToggles();
       // Размер контекстного окна тоже в настройках: кольцо должно пересчитаться
       // сразу, а не после следующего ответа модели.
       syncSessionInfo();

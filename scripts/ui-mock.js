@@ -250,6 +250,9 @@ module.exports = [
       maxAutopilotSteps: 24,
       // Автодополнение выключено, как и в main: включается осознанно.
       inlineCompletion: { enabled: false, debounceMs: 350 },
+      // Усилие размышления и веб-поиск: тумблеры композера читают их напрямую.
+      reasoningEffort: 'off',
+      webSearch: { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false },
       // Браузер агента: как main — секция есть всегда, по умолчанию выключена.
       browser: { enabled: false, executable: '', headless: true },
       // Песочница агента: как main — выключена, образ по умолчанию.
@@ -307,8 +310,6 @@ module.exports = [
     },
     // История открытых папок — для стартового окна; в моке пусто.
     workspace: { recent: [] },
-    // Усилие размышления: по умолчанию не отправляется (см. shared/providers.ts).
-    reasoningEffort: 'off',
   };
 
   /* ── шина: события вызова и широковещательные push-сообщения ───────────── */
