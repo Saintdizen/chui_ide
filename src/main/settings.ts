@@ -17,6 +17,7 @@ import {
 } from '../shared/api';
 import { COMPACT_AT_TOKENS } from '../shared/context-fit';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
+import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { isWebSearchProvider, type WebSearchProvider } from '../shared/web-search';
 import { RpcFailure } from './ipc/router';
 
@@ -72,6 +73,8 @@ interface StoredSettings {
       executable: string;
       headless: boolean;
     };
+    /** Песочница: команды агента выполняются в контейнере. */
+    sandbox: AiSandboxSettings;
     /** Серверы внешних инструментов (MCP): их процессы запускает IDE. */
     mcpServers: McpServerConfig[];
   };
@@ -132,6 +135,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Браузер выключен: агент ходил бы по чужим страницам и нажимал там кнопки.
     // Включается осознанно — вместе с ним включаются и подтверждения действий.
     browser: { enabled: false, executable: '', headless: true },
+    // Песочница выключена: команды агента идут на хосте, как раньше. Включив её,
+    // человек сам выбирает образ — в нём должны быть инструменты проекта.
+    sandbox: { ...DEFAULT_SANDBOX },
     // Серверов MCP по умолчанию нет: их команды задаёт человек.
     mcpServers: [],
   },
@@ -285,6 +291,8 @@ export class SettingsStore {
           // того, чтобы он всплывал поверх редактора.
           headless: ai.browser?.headless !== false,
         },
+        // Копия: правка настроек не должна менять уже отданный снимок.
+        sandbox: { ...sanitizeSandbox(ai.sandbox) },
         // Копия, а не ссылка: правка настроек не должна менять уже отданный снимок.
         mcpServers: ai.mcpServers.map((server) => ({
           ...server,
@@ -458,6 +466,13 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     if (incoming.headless !== undefined) target.browser.headless = incoming.headless === true;
   }
 
+  // Песочница: проверяем образ и рабочий каталог теми же функциями, что и при
+  // чтении файла, — значение из интерфейса ничем не надёжнее файла.
+  if (patch.sandbox) {
+    const incoming = patch.sandbox;
+    target.sandbox = sanitizeSandbox({ ...target.sandbox, ...incoming });
+  }
+
   // Серверы MCP заменяются целиком и проверяются той же функцией, что и при
   // чтении файла: команду запуска берём только у человека, а не у модели.
   if (patch.mcpServers !== undefined) {
@@ -553,6 +568,11 @@ function loadSettings(filePath: string): StoredSettings {
     executable: typeof storedBrowser.executable === 'string' ? storedBrowser.executable : '',
     headless: storedBrowser.headless !== false,
   };
+
+  // Песочница: образ и рабочий каталог задаёт человек, файл правят и руками.
+  // Побитое имя образа заменяется образцом, а не запускается как есть: имя уходит
+  // в позицию флагов docker, и `--privileged` там был бы не образом.
+  ai.sandbox = sanitizeSandbox(storedAi.sandbox);
 
   // Серверы MCP: файл правят руками, поэтому и команда, и аргументы проверяются.
   ai.mcpServers = normalizeMcpServers(storedAi.mcpServers) as McpServerConfig[];

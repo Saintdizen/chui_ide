@@ -30,9 +30,11 @@ import {
   trimMessagesToFit,
 } from '../../shared/context-fit';
 import { formatMemory } from '../../shared/memory';
+import { sandboxNote } from '../../shared/sandbox';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
 import { addUsage } from '../../shared/usage';
 import { ProjectMemory } from './project-memory';
+import type { SandboxService } from '../sandbox/sandbox';
 import { RpcFailure } from '../ipc/router';
 import { scanProject } from '../project/scan';
 import type { SettingsStore } from '../settings';
@@ -276,6 +278,8 @@ export class AiService {
   private mcp?: McpRunner;
   /** Браузер: без него инструменты `browser_*` не предлагаем. */
   private browser?: BrowserTools;
+  /** Песочница: без неё команды и тесты идут на хосте, как раньше. */
+  private sandbox?: SandboxService;
   /**
    * Права доступа текущего прогона (кнопка в композере). Храним на сервисе, а не
    * снимком в запросе: renderer может переключить их прямо во время ответа агента.
@@ -369,6 +373,14 @@ export class AiService {
   }
 
   /**
+   * Подключить песочницу: команды и тесты пойдут в контейнер вместо хоста.
+   * Режим задаёт человек настройкой — агент его не переключает.
+   */
+  attachSandbox(sandbox: SandboxService): void {
+    this.sandbox = sandbox;
+  }
+
+  /**
    * Обновить права доступа агента. Вызывается кнопкой в композере — в том числе
    * пока агент работает: следующее действие возьмёт уже новое значение.
    */
@@ -422,6 +434,7 @@ export class AiService {
   ): Promise<ChatStreamDone> {
     const settings = this.settings.get();
     const webSearch = settings.ai.webSearch;
+    const sandboxSettings = settings.ai.sandbox;
     const provider = this.createProvider(request.providerId);
     const useTools = request.useTools ?? false;
     const planMode = request.planMode ?? false;
@@ -447,11 +460,17 @@ export class AiService {
     if (images.length > 0) {
       messages.push({ role: 'system', content: renderImageNote(images) });
     }
+    // Песочница меняет то, где выполняются команды, поэтому агенту об этом
+    // говорят прямо: иначе он будет искать инструменты хоста в контейнере и
+    // удивляться, почему установленные пакеты исчезли.
+    const sandboxed = sandboxSettings.enabled && this.sandbox !== undefined;
+    const sandboxPrompt = sandboxed ? sandboxNote(sandboxSettings, this.sandbox!.available) : '';
+
     if (planMode) messages.push({ role: 'system', content: `${AGENT_PROMPT}\n${PLAN_PROMPT}` });
     else if (useTools)
       messages.push({
         role: 'system',
-        content: autoApprove ? `${AGENT_PROMPT}\n${AUTO_APPROVE_PROMPT}` : AGENT_PROMPT,
+        content: [AGENT_PROMPT, autoApprove ? AUTO_APPROVE_PROMPT : '', sandboxPrompt].filter(Boolean).join('\n'),
       });
     else messages.push({ role: 'system', content: ASK_PROMPT });
 
@@ -515,6 +534,9 @@ export class AiService {
     // Браузер читает настройку на каждый прогон, как и веб-поиск: человек может
     // включить его посреди работы, и следующее действие это должно увидеть.
     if (this.browser && settings.ai.browser.enabled) toolContext.browser = this.browser;
+    // Песочница: команды и тесты идут в контейнер. Подключена она или нет, решает
+    // настройка: агент этот режим не переключает и не может «выйти» из него.
+    if (sandboxSettings.enabled && this.sandbox) toolContext.sandbox = this.sandbox;
     if (host) {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);

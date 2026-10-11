@@ -247,6 +247,8 @@ module.exports = [
       maxAutopilotSteps: 24,
       // Браузер агента: как main — секция есть всегда, по умолчанию выключена.
       browser: { enabled: false, executable: '', headless: true },
+      // Песочница агента: как main — выключена, образ по умолчанию.
+      sandbox: { enabled: false, image: 'python:3.12-slim', workdir: '/workspace', network: true },
     },
     editor: {
       tabSize: 2,

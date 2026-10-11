@@ -137,6 +137,8 @@ app.whenReady().then(async () => {
       maxSteps: 8,
       confirmDangerous: true,
       webSearch: { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false },
+      // Песочница выключена: в этой проверке агент ходит на хост, как раньше.
+      sandbox: { enabled: false, image: 'python:3.12-slim', workdir: '/workspace', network: true },
     },
     get() {
       return this;

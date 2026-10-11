@@ -26,7 +26,7 @@ import { formatProjectMap } from '../../shared/project-map';
 import { parseToolArguments } from '../../shared/tools';
 import { scanProject } from '../project/scan';
 import type { WorkspaceService } from '../workspace/workspace';
-import { runShellCommand } from './run-command';
+import { runShellCommand, type CommandResult } from './run-command';
 
 /**
  * Исполнение инструментов агента.
@@ -217,6 +217,20 @@ export interface BrowserTools {
   readonly running?: boolean;
 }
 
+/**
+ * Песочница: команды выполняются в контейнере, а не на машине пользователя.
+ * Запуск и поиск движка — в `main/sandbox/sandbox.ts`. Настройка включена, но
+ * движка нет (`available === false`) — команда не выполняется вовсе: тихий откат
+ * на хост дал бы ложное чувство изоляции.
+ */
+export interface SandboxRunner {
+  /** Подпись для вывода: где именно шла команда. */
+  readonly label: string;
+  /** Можно ли выполнить команду: движок найден. */
+  readonly available: boolean;
+  run(command: string, cwd: string, signal?: AbortSignal): Promise<CommandResult>;
+}
+
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
@@ -261,6 +275,8 @@ export interface ToolContext {
   browser?: BrowserTools;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
   confirmBrowser?(action: string): Promise<boolean>;
+  /** Песочница: подключена только при включённой настройке. */
+  sandbox?: SandboxRunner;
 }
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
@@ -1160,7 +1176,10 @@ async function runTests(ctx: ToolContext): Promise<ToolOutcome> {
   const root = ctx.workspace.rootPath();
   if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
 
-  const result = await runShellCommand(resolved.command, root, ctx.signal);
+  if (ctx.sandbox && !ctx.sandbox.available) return sandboxUnavailable(ctx.sandbox);
+  const result = ctx.sandbox
+    ? await ctx.sandbox.run(resolved.command, root, ctx.signal)
+    : await runShellCommand(resolved.command, root, ctx.signal);
   const output = truncateTail(condenseOutput(result.output));
   const notes = [result.timedOut ? 'превышено время' : '', result.truncated ? 'вывод обрезан' : ''].filter(Boolean);
   // Ненулевой код — это упавшие тесты, а не ошибка инструмента: ответ ok, но с кодом.
@@ -1169,7 +1188,31 @@ async function runTests(ctx: ToolContext): Promise<ToolOutcome> {
   return {
     ok: passed,
     summary: `тесты (${resolved.label}): код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
-    detail: `$ ${resolved.command}\n${output.length ? output : '(пустой вывод)'}`,
+    detail: `${commandLine(ctx, resolved.command)}\n${output.length ? output : '(пустой вывод)'}`,
+  };
+}
+
+/**
+ * Строка команды для вывода: видно, что именно выполнялось и где. В песочнице
+ * это ещё и подсказка человеку, что код шёл в контейнере, а не на его машине.
+ */
+function commandLine(ctx: ToolContext, command: string): string {
+  return ctx.sandbox ? `$ (в ${ctx.sandbox.label}) ${command}` : `$ ${command}`;
+}
+
+/**
+ * Песочница включена, а движка нет: команду не выполняем и прямо говорим, что на
+ * хост она не переключится. Тихий откат был бы худшим исходом — человек считал бы,
+ * что чужой код идёт в изоляции, а он шёл бы на его машине.
+ */
+function sandboxUnavailable(sandbox: SandboxRunner): ToolOutcome {
+  return {
+    ok: false,
+    summary: 'Песочница включена, но движок контейнеров не найден',
+    detail:
+      `Команды должны идти в ${sandbox.label}, но docker (или podman) в PATH нет. ` +
+      'На хост команда НЕ выполняется. Скажи об этом пользователю: пусть установит движок ' +
+      'или выключит песочницу в настройках.',
   };
 }
 
@@ -1374,7 +1417,12 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
     }
   }
 
-  const result = await runShellCommand(command, root, ctx.signal);
+  if (ctx.sandbox && !ctx.sandbox.available) return sandboxUnavailable(ctx.sandbox);
+  // В песочнице та же команда идёт в контейнер: агент об этом не просит отдельно,
+  // режим задаёт человек настройкой.
+  const result = ctx.sandbox
+    ? await ctx.sandbox.run(command, root, ctx.signal)
+    : await runShellCommand(command, root, ctx.signal);
   // Причёсываем и держим хвост: один `npm install` иначе завалит контекст логом.
   const output = truncateTail(condenseOutput(result.output));
   const notes: string[] = [];
@@ -1384,7 +1432,7 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   return {
     ok: result.code === 0 && !result.timedOut,
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
-    detail: `$ ${command}\n${output.length ? output : '(пустой вывод)'}`,
+    detail: `${commandLine(ctx, command)}\n${output.length ? output : '(пустой вывод)'}`,
   };
 }
 

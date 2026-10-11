@@ -15,6 +15,7 @@ import { LspService } from './lsp/lsp';
 import { McpService } from './mcp/mcp';
 import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
+import { SandboxService } from './sandbox/sandbox';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { windowBackground } from '../shared/colors';
 import { activateCommand, findEnvironments, pythonInterpreterFor } from './python/environments';
@@ -226,6 +227,12 @@ if (!app.requestSingleInstanceLock()) {
       return { executable: settingsForBrowser.executable, headless: settingsForBrowser.headless };
     });
     ai.attachBrowser(browser);
+
+    // Песочница: команды и тесты агента идут в контейнер вместо хоста. Движок
+    // ищем один раз при старте — по PATH, как браузер: включённая песочница без
+    // движка должна честно отказать, а не тихо вернуться на хост.
+    const sandbox = new SandboxService(() => settings.get().ai.sandbox);
+    ai.attachSandbox(sandbox);
 
     // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
     const sessions = new SessionStore();

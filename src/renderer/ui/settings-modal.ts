@@ -657,6 +657,42 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'С окном работу агента видно, но браузер всплывает поверх редактора. Без окна — тихо и ' +
           'годится на машинах без экрана.',
       ),
+      h('div', { class: 'settings-divider' }),
+      switchRow(
+        'Песочница (команды в контейнере)',
+        ai.sandbox.enabled,
+        (value) => void patch({ ai: { sandbox: { enabled: value } } }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Команды и тесты агента выполняются не на вашей машине, а в контейнере: в него монтируется ' +
+          'только папка проекта, а домашний каталог, ключи и переменные окружения остаются снаружи. ' +
+          'Установленное внутри контейнера исчезает после запуска. Если движка (docker или podman) ' +
+          'в PATH нет, команда не выполнится — на хост она не переключается.',
+      ),
+      field(
+        'Образ',
+        textInput(ai.sandbox.image, (value) => void patch({ ai: { sandbox: { image: value } } })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'В образе должны быть инструменты проекта. По умолчанию python:3.12-slim — годится для Python ' +
+          'из коробки; для Node подойдёт node:22-bookworm, для смешанного проекта — свой образ.',
+      ),
+      field(
+        'Рабочий каталог в контейнере',
+        textInput(ai.sandbox.workdir, (value) => void patch({ ai: { sandbox: { workdir: value } } })),
+      ),
+      h('div', { class: 'field-hint' }, 'Куда монтируется папка проекта. Пустое или непонятное значение — /workspace.'),
+      switchRow('Разрешить сеть', ai.sandbox.network, (value) => void patch({ ai: { sandbox: { network: value } } })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Без сети контейнер не сможет скачать зависимости: команды установки будут падать. ' +
+          'Выключите, если запускаете код, которому наружу ходить незачем.',
+      ),
       field(
         'Контекстное окно (токенов)',
         numberInput(ai.contextWindow ?? 0, 0, 2_000_000, 1000, (value) => void patch({ ai: { contextWindow: value } })),

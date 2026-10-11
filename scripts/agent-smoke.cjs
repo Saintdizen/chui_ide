@@ -20,7 +20,8 @@
  *
  * 14. подзадача (task): отдельный агент со своим контекстом — его чтения не растут в беседе;
  * 15. браузер (browser_*): выключен по умолчанию, действия спрашивают подтверждение,
- *     снимок страницы доезжает до модели текстом.
+ *     снимок страницы доезжает до модели текстом;
+ * 16. песочница: команды и тесты идут в контейнер, а без движка — отказ, не откат на хост.
  *
  *   npm run smoke:agent
  *
@@ -195,6 +196,8 @@ app.whenReady().then(async () => {
       webSearch: { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false },
       // Браузер тоже выключен: включается проверками ниже, вместе с заглушкой сервиса.
       browser: { enabled: false, executable: '', headless: true },
+      // Песочница: включается проверками ниже, вместе с заглушкой сервиса.
+      sandbox: { enabled: false, image: 'python:3.12-slim', workdir: '/workspace', network: true },
     },
     get() {
       return this;
@@ -1062,6 +1065,76 @@ app.whenReady().then(async () => {
       'отказ в браузере виден модели',
       run.results[0]?.ok === false && /отклонил/i.test(String(run.results[0]?.summary)),
       run.results[0]?.summary,
+    );
+
+    /* 16. песочница: команды и тесты идут в контейнер, а не на хост.
+       Сам Docker здесь не поднимаем — вместо него заглушка с тем же контрактом:
+       проверяем маршрутизацию команды, видимую пометку в выводе, строку в
+       системном промпте и честный отказ, когда движка нет. Настоящий контейнер
+       проверяет `npm run smoke:sandbox`. */
+    let sandboxRuns = [];
+    const fakeSandbox = {
+      label: 'контейнер python:3.12-slim',
+      available: true,
+      run: async (command) => {
+        sandboxRuns.push(command);
+        return { code: 0, signal: null, output: `из контейнера: ${command}`, truncated: false, timedOut: false };
+      },
+    };
+    ai.attachSandbox(fakeSandbox);
+    settings.ai.sandbox = { enabled: true, image: 'python:3.12-slim', workdir: '/workspace', network: true };
+
+    requested = { name: 'run_terminal', args: { command: 'echo привет' } };
+    const sandboxHost = {
+      applyEdits: () => Promise.resolve({ rejected: true }),
+      confirmCommand: () => Promise.resolve(true),
+    };
+    run = await chat(sandboxHost);
+    check(
+      'команда ушла в песочницу, а не на хост',
+      sandboxRuns.length === 1 && sandboxRuns[0] === 'echo привет',
+      sandboxRuns,
+    );
+    check(
+      'в выводе видно, что команда шла в контейнере',
+      String(run.results[0]?.detail ?? '').includes('в контейнер python:3.12-slim'),
+      String(run.results[0]?.detail ?? '').slice(0, 80),
+    );
+    check(
+      'модели сказано, что она работает в контейнере',
+      (run.bodies[0]?.messages ?? []).some(
+        (message) => message.role === 'system' && String(message.content ?? '').includes('контейнере python:3.12-slim'),
+      ),
+    );
+
+    // Движка нет — команда не выполняется вовсе. Тихий откат на хост дал бы
+    // ложное чувство изоляции, и это худший исход из возможных.
+    sandboxRuns = [];
+    ai.attachSandbox({ label: 'контейнер python:3.12-slim', available: false, run: fakeSandbox.run });
+    run = await chat(sandboxHost);
+    check('без движка команда на хосте не выполняется', sandboxRuns.length === 0, sandboxRuns);
+    check(
+      'отказ песочницы назван прямо',
+      run.results[0]?.ok === false && /не найден/i.test(String(run.results[0]?.summary)),
+      run.results[0]?.summary,
+    );
+    check(
+      'модели сказано, что на хост команды не переключаются',
+      (run.bodies[0]?.messages ?? []).some(
+        (message) => message.role === 'system' && String(message.content ?? '').includes('НЕ переключаются'),
+      ),
+    );
+
+    // Выключенная песочница — прежнее поведение: команда идёт на хост и там же
+    // выполняется. Это проверяет и то, что наш настоящий runShellCommand цел.
+    settings.ai.sandbox = { enabled: false, image: 'python:3.12-slim', workdir: '/workspace', network: true };
+    requested = { name: 'run_terminal', args: { command: 'echo на-хосте' } };
+    run = await chat(sandboxHost);
+    check('выключенная песочница не перехватывает команды', sandboxRuns.length === 0, sandboxRuns);
+    check(
+      'без песочницы команда выполнилась на хосте',
+      run.results[0]?.ok === true && String(run.results[0]?.detail ?? '').includes('на-хосте'),
+      String(run.results[0]?.detail ?? '').slice(0, 80),
     );
 
     settings.ai.browser = { enabled: false, executable: '', headless: true };

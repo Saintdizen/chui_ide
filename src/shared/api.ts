@@ -18,6 +18,7 @@ import type { EnvironmentHealth } from './python-health';
 import type { ProjectSymbol } from './lsp-symbols';
 import type { McpServerConfig } from './mcp';
 import type { WebSearchProvider } from './web-search';
+import type { AiSandboxSettings } from './sandbox';
 
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
 
@@ -428,6 +429,8 @@ export interface AiSettings {
   webSearch: AiWebSearchSettings;
   /** Браузерная автоматизация: выключена по умолчанию, как и веб-поиск. */
   browser: AiBrowserSettings;
+  /** Песочница: команды агента идут в контейнер, а не на машину пользователя. */
+  sandbox: AiSandboxSettings;
   /**
    * Серверы внешних инструментов (MCP). Пусто — агент работает только своими
    * инструментами. Команду запуска задаёт человек: модель её не меняет.
@@ -821,6 +824,8 @@ export interface AiSettingsPatch {
   webSearch?: { enabled?: boolean; provider?: WebSearchProvider; endpoint?: string };
   /** Браузерная автоматизация: включение, путь к браузеру и режим без окна. */
   browser?: { enabled?: boolean; executable?: string; headless?: boolean };
+  /** Песочница: включение, образ, рабочий каталог и сеть. */
+  sandbox?: { enabled?: boolean; image?: string; workdir?: string; network?: boolean };
   /** Список серверов MCP заменяется целиком: так его проще править из интерфейса. */
   mcpServers?: McpServerConfig[];
   /** Добавить провайдера или обновить существующего по `id`. */

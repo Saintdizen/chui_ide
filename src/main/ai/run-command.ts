@@ -26,13 +26,29 @@ const TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_CHARS = 60_000;
 
 export function runShellCommand(command: string, cwd: string, signal?: AbortSignal): Promise<CommandResult> {
-  return new Promise<CommandResult>((resolve, reject) => {
-    const shell = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : process.env.SHELL || '/bin/bash';
-    const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command];
+  const shell = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : process.env.SHELL || '/bin/bash';
+  const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command];
+  return runProcess(shell, args, cwd, signal);
+}
 
+/**
+ * Запуск без оболочки: исполняемый файл и готовый список аргументов.
+ *
+ * Этим путём идёт всё, что собирается из чужих данных, — например команда в
+ * контейнере (`docker run … sh -c "…"`). Здесь аргументы не проходят через
+ * разбор строки, поэтому текст команды не может «вылезти» из своей позиции и
+ * подставить хосту лишний флаг: никакой склейки и экранирования.
+ */
+export function runProcess(
+  file: string,
+  args: readonly string[],
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<CommandResult> {
+  return new Promise<CommandResult>((resolve, reject) => {
     // detached — чтобы убивать всю группу процессов: `npm run watch` порождает
     // детей, и SIGKILL одной оболочке оставил бы их висеть.
-    const child = spawn(shell, args, {
+    const child = spawn(file, [...args], {
       cwd,
       env: commandEnv(),
       detached: process.platform !== 'win32',
