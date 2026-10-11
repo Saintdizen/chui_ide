@@ -62,3 +62,25 @@ jobs:
 
       - name: Проверить код
         run: npm run check
+
+  # macOS тоже расходится с Linux в мелочах работы с путями и файлами: `os.tmpdir()`
+  # возвращает `/var/folders/…` — симлинк на `/private/var/…`, а `git` и дочерние
+  # процессы отвечают уже развёрнутым путём; файловая система по умолчанию не
+  # различает регистр. Ни на Linux, ни на Windows это не видно, поэтому проверяем
+  # отдельной задачей — теми же проверками из `check`.
+  check-macos:
+    name: Проверки на macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Установить зависимости
+        run: npm ci
+
+      - name: Проверить код
+        run: npm run check
