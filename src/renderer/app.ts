@@ -25,6 +25,7 @@ import { ImportChecker } from './core/import-check';
 import { registerImportActions } from './core/import-actions';
 import { scriptFileTargets } from './core/language-modes';
 import { LspClient } from './core/lsp';
+import { fetchCallHierarchy, type CallDirection } from './core/call-hierarchy';
 import { registerInlineAi } from './core/inline-ai';
 import { registerSnippets } from './core/snippets';
 import { registerLspProviders } from './core/lsp-providers';
@@ -1800,6 +1801,55 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       { anchor: layout.editorHost },
     );
   });
+
+  /**
+   * Иерархия вызовов символа: кто его вызывает или кого вызывает он. Показываем
+   * списком (Monaco такой панели не даёт) — тем же попапом, что и прочие переходы.
+   */
+  const openCallHierarchy = async (direction: CallDirection): Promise<void> => {
+    const path = editors.currentPath;
+    if (!path) {
+      showToast('Откройте файл', 'error');
+      return;
+    }
+    const position = editors.cursor();
+    const result = await fetchCallHierarchy(rpc, path, position, direction).catch(() => null);
+    if (!result) {
+      showToast('Сервер символов не отвечает: нужен языковой сервер для этого языка', 'error');
+      return;
+    }
+    if (result.calls.length === 0) {
+      showToast(
+        direction === 'incoming'
+          ? `Никто не вызывает ${result.symbol.name}`
+          : `${result.symbol.name} ничего не вызывает`,
+      );
+      return;
+    }
+
+    const rect = layout.editorHost.getBoundingClientRect();
+    const heading = direction === 'incoming' ? `Вызывают ${result.symbol.name}` : `${result.symbol.name} вызывает`;
+    showPopupMenu(
+      result.calls.map((target) => ({
+        label: target.name,
+        hint: `${workspace.relative(target.path)}:${target.line}`,
+        onSelect: () => void openPath(target.path).then(() => editors.reveal(target.path, target.line, target.column)),
+      })),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+    showToast(`${heading}: ${result.calls.length}`);
+  };
+
+  define(
+    { id: 'editor.callers', title: 'Кто вызывает символ', category: 'Навигация' },
+    () => void openCallHierarchy('incoming'),
+  );
+  define(
+    { id: 'editor.callees', title: 'Кого вызывает символ', category: 'Навигация' },
+    () => void openCallHierarchy('outgoing'),
+  );
 
   /** Разрешить конфликт слияния: экран с обеими сторонами и выбором по блокам. */
   define({ id: 'git.resolveConflicts', title: 'Разрешить конфликт слияния', category: 'Git' }, async (path) => {
