@@ -2,7 +2,13 @@ import { PushTopic, type TerminalDataPayload } from '../../shared/api';
 import { isTestFile } from '../../shared/project-scan';
 // Покрытие пока умеет только pytest: отчёт `pytest --cov` разбирается в его модуле.
 import { parseCoverageReport, type CoverageReport, type CoverageRow } from '../../shared/python-tests';
-import { buildTestTree, parseResultMarker, type TestFolder, type TestSuite } from '../../shared/test-model';
+import {
+  buildTestTree,
+  parseResultMarker,
+  type TestFolder,
+  type TestOutcome,
+  type TestSuite,
+} from '../../shared/test-model';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
 
@@ -57,8 +63,6 @@ export interface TestPanelDeps {
   onCoverageReport?: (report: CoverageReport) => void;
 }
 
-/** Исход последнего прогона узла. */
-type TestOutcome = 'running' | 'passed' | 'failed';
 /** Ключ для узла «все тесты»: у него нет собственного id в дереве. */
 const ALL_KEY = '__all__';
 /** Пауза перед авто-перечитыванием: пока человек печатает, pytest не зовём. */
@@ -73,6 +77,10 @@ export interface TestPanelView {
   /** Сообщить о правке файла: панель сама решит, надо ли пересобирать. */
   notifyChange(path: string): void;
   focus(): void;
+  /** Исходы прогонов по селекторам: значок в жёлобе редактора берёт их отсюда. */
+  outcomes(): ReadonlyMap<string, TestOutcome>;
+  /** Исходы изменились — редактор перерисовывает значки. Возвращает отписку. */
+  onDidChangeOutcomes(listener: () => void): () => void;
 }
 
 export function createTestPanel(deps: TestPanelDeps): TestPanelView {
@@ -118,6 +126,11 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   let suite: TestSuite | null = null;
   /** Исход последнего прогона по ключу узла (id теста/класса/файла или ALL_KEY). */
   const outcomes = new Map<string, TestOutcome>();
+  /** Слушатели смены исходов: редактор по ним перерисовывает значки тестов. */
+  const outcomeListeners = new Set<() => void>();
+  const notifyOutcomes = (): void => {
+    for (const listener of [...outcomeListeners]) listener();
+  };
   /** Ключ узла, прогон которого сейчас ждём по маркеру. null — ничего не ждём. */
   let pendingKey: string | null = null;
   /**
@@ -146,10 +159,13 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
       // Построчную разбивку отдаём наружу: редактор подсветит непокрытые строки.
       deps.onCoverageReport?.(coverage);
     }
+    const finished = pendingKey;
     pendingKey = null;
     pendingCoverage = false;
     outputTail = '';
     render();
+    // Значок теста в жёлобе красится по исходу — о завершении прогона сообщаем.
+    if (finished !== null) notifyOutcomes();
   });
 
   /**
@@ -162,6 +178,8 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
     outcomes.set(key, 'running');
     outputTail = '';
     render();
+    // Прогон стартовал — значок в жёлобе должен сразу показать «идёт».
+    notifyOutcomes();
     if (withCoverage) deps.onCoverage?.(selector);
     else deps.onRun(selector, { report: true });
   }
@@ -357,5 +375,15 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   }
 
   render();
-  return { element, refresh, notifyChange, focus: () => refreshButton.focus() };
+  return {
+    element,
+    refresh,
+    notifyChange,
+    focus: () => refreshButton.focus(),
+    outcomes: () => outcomes,
+    onDidChangeOutcomes: (listener) => {
+      outcomeListeners.add(listener);
+      return () => outcomeListeners.delete(listener);
+    },
+  };
 }

@@ -508,6 +508,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Пересобирать список по правке стоит только когда панель тестов на виду.
     isVisible: () => dock.visible && dock.activeId === 'tests',
   });
+  // Исход прогона — в значок теста в жёлобе: панель знает его по селекторам,
+  // редактор превращает их в цвет значка у строки объявления теста.
+  testPanel.onDidChangeOutcomes(() => editors.setTestOutcomes(testPanel.outcomes()));
 
   const dock = createDock();
   dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });

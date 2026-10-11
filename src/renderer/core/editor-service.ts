@@ -3,6 +3,7 @@ import type { CursorPosition, DiagnosticItem, EditorSettings, LspDiagnostic } fr
 import type { TextEdit } from '../../shared/edits';
 import './monaco-env';
 import type { RunnableTest } from '../../shared/python-tests';
+import type { TestOutcome } from '../../shared/test-model';
 import type { BreakpointInput } from './debug';
 import { uriToPath, type TextDocument } from './document';
 import type { DocumentStore } from './document-store';
@@ -138,6 +139,8 @@ export class EditorService {
   /** Значки запуска отдельных тестов: строка → селектор pytest. */
   private readonly testDecorations = new Map<string, string[]>();
   private readonly testMarkers = new Map<string, readonly RunnableTest[]>();
+  /** Исходы последних прогонов по селекторам: значок теста красится по ним. */
+  private testOutcomes: ReadonlyMap<string, TestOutcome> = new Map();
   /** Подсветка строки, на которой стоит отладчик; null — отладка не стоит. */
   private debugLine: { path: string; line: number } | null = null;
   /** Украшения подсветки по файлам: перед новой отрисовкой их нужно снять. */
@@ -600,6 +603,16 @@ export class EditorService {
     this.drawTestMarkers(path);
   }
 
+  /**
+   * Исходы прогонов по селекторам: значок теста в жёлобе становится галочкой
+   * или крестиком. Набор берётся целиком (его ведёт панель тестов) и
+   * перерисовывает значки во всех файлах, где они есть.
+   */
+  setTestOutcomes(outcomes: ReadonlyMap<string, TestOutcome>): void {
+    this.testOutcomes = new Map(outcomes);
+    for (const path of this.testMarkers.keys()) this.drawTestMarkers(path);
+  }
+
   private drawTestMarkers(path: string): void {
     const model = this.files.get(path);
     if (!model) return;
@@ -614,14 +627,17 @@ export class EditorService {
 
     const next = model.deltaDecorations(
       previous,
-      tests.map((test) => ({
-        range: new monaco.Range(test.line, 1, test.line, 1),
-        options: {
-          glyphMarginClassName: 'run-glyph test-glyph',
-          glyphMarginHoverMessage: { value: `Запустить тест ${test.name}` },
-          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
-        },
-      })),
+      tests.map((test) => {
+        const outcome = this.testOutcomes.get(test.selector);
+        return {
+          range: new monaco.Range(test.line, 1, test.line, 1),
+          options: {
+            glyphMarginClassName: `run-glyph test-glyph${outcome ? ` is-${outcome}` : ''}`,
+            glyphMarginHoverMessage: { value: testGlyphTooltip(test, outcome) },
+            stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+          },
+        };
+      }),
     );
     this.testDecorations.set(path, next);
   }
@@ -972,6 +988,17 @@ function breakpointTooltip(item: BreakpointInput): string {
   if (item.condition) parts.push(`условие: ${item.condition}`);
   if (item.hitCondition) parts.push(`попаданий: ${item.hitCondition}`);
   return parts.length > 0 ? `Точка останова (${parts.join(', ')})` : 'Точка останова';
+}
+
+/**
+ * Подсказка значка теста: что это за тест и, если был прогон, чем он кончился.
+ * Без исхода подсказка говорит только приглашение — так и выглядит ▶ до запуска.
+ */
+function testGlyphTooltip(test: RunnableTest, outcome: TestOutcome | undefined): string {
+  if (outcome === 'passed') return `Прошёл: ${test.name}`;
+  if (outcome === 'failed') return `Упал: ${test.name}`;
+  if (outcome === 'running') return `Идёт прогон: ${test.name}`;
+  return `Запустить тест ${test.name}`;
 }
 
 /**

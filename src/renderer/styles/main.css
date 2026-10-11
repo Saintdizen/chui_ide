@@ -778,6 +778,38 @@ textarea {
   border-bottom: 4.5px solid transparent;
 }
 
+/* Значок теста после прогона: вместо ▶ — галочка (прошёл) или крестик (упал).
+   До первого прогона это всё тот же ▶: запускать есть что. */
+.run-glyph.test-glyph.is-passed::after,
+.run-glyph.test-glyph.is-failed::after {
+  width: auto;
+  height: auto;
+  border: none;
+  margin: 0;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.run-glyph.test-glyph.is-passed::after {
+  content: "✓";
+  color: var(--green_prime_background);
+}
+
+.run-glyph.test-glyph.is-failed::after {
+  content: "✗";
+  color: var(--red_prime_background);
+}
+
+/* Прогон идёт — значок приглушён, чтобы не читался как готовый исход. */
+.run-glyph.test-glyph.is-running {
+  opacity: 0.5;
+}
+
 .status-tool {
   color: var(--run_accent);
 }
