@@ -292,7 +292,7 @@ module.exports = [
     // Языковые серверы: как main — секция есть всегда, по умолчанию выключена.
     lsp: { enabled: false, servers: [] },
     // «Системная» — чтобы схему в проверке задавал Playwright (`emulateMedia`).
-    appearance: { theme: 'system' },
+    appearance: { theme: 'system', uiScale: 1 },
     // Макет рабочей области: размеры и видимость панелей (общий для всех проектов).
     layout: {
       sidebarSize: 260,

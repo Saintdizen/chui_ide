@@ -12,6 +12,7 @@ import type {
 import type { AiProviderPatch, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
 import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
+import { uiScaleOptions } from '../../shared/ui-scale';
 import type { WebSearchProvider } from '../../shared/web-search';
 import { PYTHON_LSP_PACKAGES, lspLanguagesForKind } from '../../shared/lsp-presets';
 import type { CommandRegistry } from '../core/commands';
@@ -1094,6 +1095,20 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         ),
       ),
       h('div', { class: 'field-hint' }, '«Как в системе» переключает палитру вслед за схемой рабочего стола.'),
+      field(
+        'Масштаб интерфейса',
+        selectInput(
+          uiScaleOptions(),
+          String(settings!.appearance.uiScale),
+          (value) => void patch({ appearance: { uiScale: Number(value) } }),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Крупнее или плотнее оболочка — панели, меню, дерево. Кегль кода настраивается отдельно ' +
+          'в разделе «Редактор».',
+      ),
     ];
   }
 

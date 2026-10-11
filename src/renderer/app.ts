@@ -120,6 +120,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   let projectSettings: ProjectSettings = {};
   let settings = baseSettings;
   const layoutGuard = { applying: false };
+  /**
+   * Масштаб интерфейса: одна пара переменных, от которой считаются все кегли и
+   * размеры элементов (см. `theme.css`). Ставим на корень документа — пересчёт
+   * делает CSS, перерисовывать ничего не нужно. Ставится сразу после чтения
+   * настроек: с окна без проекта тоже.
+   */
+  const applyUiScale = (scale: number): void => {
+    const root = document.documentElement;
+    root.style.setProperty('--font_scale', String(scale));
+    root.style.setProperty('--density', String(scale));
+  };
+  applyUiScale(settings.appearance.uiScale);
+
   const rebuildSettings = (): Settings => {
     const merged = mergeDeep(baseSettings, projectSettings);
     settings = (merged ?? baseSettings) as Settings;
@@ -2123,6 +2136,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   const applySettings = (next: Settings): void => {
     settings = next;
+    applyUiScale(next.appearance.uiScale);
     editors.applyOptions(next.editor);
     explorer.applySettings(next.explorer);
     chat.applySettings(next);

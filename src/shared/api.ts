@@ -605,6 +605,8 @@ export interface RunSettings {
 export type ThemeChoice = 'dark' | 'light' | 'system';
 export interface AppearanceSettings {
   theme: ThemeChoice;
+  /** Масштаб интерфейса: 1 — как есть. Редактора не касается (у него свой кегль). */
+  uiScale: number;
 }
 
 /** Что приложение помнит о работе: история открытых папок для стартового окна. */

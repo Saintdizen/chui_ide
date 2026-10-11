@@ -20,6 +20,7 @@ import { COMPACT_AT_TOKENS } from '../shared/context-fit';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
+import { sanitizeUiScale } from '../shared/ui-scale';
 import { isWebSearchProvider, type WebSearchProvider } from '../shared/web-search';
 import { RpcFailure } from './ipc/router';
 
@@ -204,6 +205,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
   appearance: {
     // «Системная» — разумная точка входа: IDE подстраивается под схему рабочего стола.
     theme: 'system',
+    // Масштаб 1 — оболочка как задумана; крупнее/плотнее человек выбирает сам.
+    uiScale: 1,
   },
   workspace: {
     // История открытых папок живёт в настройках, а не в renderer: её показывает
@@ -356,7 +359,9 @@ export class SettingsStore {
       this.data.run = { ...this.data.run, ...patch.run };
     }
     if (patch.appearance) {
-      this.data.appearance = { ...this.data.appearance, ...patch.appearance };
+      const next = { ...this.data.appearance, ...patch.appearance };
+      next.uiScale = sanitizeUiScale(next.uiScale);
+      this.data.appearance = next;
     }
     if (patch.layout) {
       this.data.layout = sanitizeLayout({ ...this.data.layout, ...patch.layout });
@@ -639,7 +644,12 @@ function loadSettings(filePath: string): StoredSettings {
         : [],
     },
     run: sanitizeRun({ ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) }),
-    appearance: { ...DEFAULT_SETTINGS.appearance, ...(parsed.appearance ?? {}) },
+    appearance: {
+      ...DEFAULT_SETTINGS.appearance,
+      ...(parsed.appearance ?? {}),
+      // Масштаб — число из файла: поджимаем к допустимым ступеням.
+      uiScale: sanitizeUiScale(parsed.appearance?.uiScale),
+    },
     layout: sanitizeLayout({ ...DEFAULT_SETTINGS.layout, ...(parsed.layout ?? {}) }),
     workspace: {
       ...DEFAULT_SETTINGS.workspace,
