@@ -30,6 +30,7 @@ export class TextDocument {
   private text: string;
   private currentVersion = 1;
   private savedVersion = 1;
+  private diskMtimeMs = 0;
 
   constructor(
     readonly path: string,
@@ -55,6 +56,15 @@ export class TextDocument {
 
   get dirty(): boolean {
     return this.currentVersion !== this.savedVersion;
+  }
+
+  /**
+   * Время файла на диске, каким мы его видели в последний раз (READ/WRITE).
+   * `0` — ещё не знаем: документ открыт до появления этой отметки или файла нет.
+   * По нему при сохранении видно, изменил ли файл кто-то снаружи.
+   */
+  get diskMtime(): number {
+    return this.diskMtimeMs;
   }
 
   get lineCount(): number {
@@ -88,8 +98,15 @@ export class TextDocument {
     return edits.length;
   }
 
-  markSaved(): void {
+  /** Отмечает, что содержимое совпадает с диском. `mtimeMs` — время той записи. */
+  markSaved(mtimeMs: number = this.diskMtimeMs): void {
     this.savedVersion = this.currentVersion;
+    this.diskMtimeMs = mtimeMs;
+  }
+
+  /** Запомнить состояние диска без сброса «грязности» — при чтении файла. */
+  markDisk(mtimeMs: number): void {
+    this.diskMtimeMs = mtimeMs;
   }
 
   private bump(source: EditSource): void {
@@ -101,6 +118,18 @@ export class TextDocument {
 /** Одна модель документа — один формат переводов строк. */
 export function normalize(text: string): string {
   return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+/**
+ * Разошёлся ли файл на диске с тем, что мы читали или писали.
+ *
+ * `knownMtime` — время нашей последней записи/чтения (`0` — ещё не знаем, тогда
+ * не мешаем: ругаться на всякое сохранение хуже, чем пропустить редкий случай).
+ * `diskMtime` — фактическое время файла сейчас (`null` — файла нет или stat не
+ * удался). Признак нужен, чтобы не записать буфер поверх чужой правки молча.
+ */
+export function diskConflict(knownMtime: number, diskMtime: number | null): boolean {
+  return knownMtime > 0 && diskMtime !== null && diskMtime !== knownMtime;
 }
 
 export function pathToUri(filePath: string): string {

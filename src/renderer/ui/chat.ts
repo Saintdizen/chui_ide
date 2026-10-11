@@ -21,7 +21,7 @@ import type { EditorService } from '../core/editor-service';
 import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { type RpcClient, RpcError } from '../core/rpc';
-import { clear, h, type IconName, svgIcon } from './dom';
+import { basename, clear, h, type IconName, svgIcon } from './dom';
 import { createSelect } from './select';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
@@ -1097,8 +1097,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const document = deps.documents.get(path);
       if (!document?.dirty) continue;
       try {
-        await deps.rpc.request('workspace.writeFile', { path, text: document.value });
-        document.markSaved();
+        // Пишем через сервис правок: он сверяет время файла и не даёт молча
+        // перетереть чужую правку (того же файла мог коснуться другой инструмент).
+        const result = await deps.edits.saveDocument(document);
+        if (result === 'conflict') {
+          showToast(`Файл изменён на диске, не перезаписан: ${basename(path)}`, 'error');
+        }
       } catch {
         // не записалось — файл останется «грязным», следующая правка повторит
       }

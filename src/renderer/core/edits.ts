@@ -1,5 +1,5 @@
 import type { ApplyFailure, ApplyReport, ApplyResult, FileEdit } from '../../shared/edits';
-import type { TextDocument } from './document';
+import { diskConflict, type TextDocument } from './document';
 import type { DocumentStore } from './document-store';
 import type { EditSource } from './document';
 import type { EditorService } from './editor-service';
@@ -25,7 +25,28 @@ export class EditService {
     if (existing) return existing;
 
     const file = await this.deps.rpc.request('workspace.readFile', { path });
-    return this.deps.documents.open(path, file.text);
+    const document = this.deps.documents.open(path, file.text);
+    document.markDisk(file.mtimeMs);
+    return document;
+  }
+
+  /**
+   * Записать документ на диск. Перед записью сверяем время файла: если он
+   * изменился снаружи после нашего чтения, писать буфер нельзя — иначе молча
+   * перетрём чужую правку (ассистента, из терминала, другим инструментом).
+   * Решение принимает вызывающий: `force` — человек уже подтвердил перезапись.
+   */
+  async saveDocument(document: TextDocument, options: { force?: boolean } = {}): Promise<'saved' | 'conflict'> {
+    if (!options.force) {
+      const stat = await this.deps.rpc.request('workspace.stat', { path: document.path }).catch(() => null);
+      if (diskConflict(document.diskMtime, stat?.mtimeMs ?? null)) return 'conflict';
+    }
+    const { mtimeMs } = await this.deps.rpc.request('workspace.writeFile', {
+      path: document.path,
+      text: document.value,
+    });
+    document.markSaved(mtimeMs);
+    return 'saved';
   }
 
   async applyFileEdits(fileEdits: readonly FileEdit[], source: EditSource = 'programmatic'): Promise<ApplyResult> {
@@ -65,6 +86,10 @@ export class EditService {
     const file = await this.deps.rpc.request('workspace.readFile', { path });
     const target = document ?? this.deps.documents.open(path, file.text);
     target.setText(file.text, 'disk');
+    // Перечитали — содержимое снова совпадает с диском, и мы знаем время файла.
+    // Без `markSaved` документ считался бы правленым: следующее внешнее изменение
+    // молча пропустилось бы как «грязный», а в редакторе висела бы пометка правок.
+    target.markSaved(file.mtimeMs);
     return target;
   }
 }

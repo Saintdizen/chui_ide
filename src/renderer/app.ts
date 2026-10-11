@@ -972,13 +972,30 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       debugOptions = options;
     },
   });
-  const saveDocument = async (document: TextDocument): Promise<void> => {
+  /**
+   * Сохранить документ на диск. Если файл изменился снаружи после нашего чтения,
+   * молча писать нельзя — перетрём чужую правку (ассистента, из терминала).
+   * Спрашиваем и перезаписываем только с согласия. `false` — человек отменил.
+   */
+  const saveDocument = async (document: TextDocument): Promise<boolean> => {
     // Форматирование при сохранении: правку проводит документ, поэтому на экране
     // и на диске оказывается одно и то же.
     if (settings.editor.formatOnSave) await formatDocument(document);
-    await rpc.request('workspace.writeFile', { path: document.path, text: document.value });
-    document.markSaved();
+    const result = await edits.saveDocument(document);
+    if (result === 'conflict') {
+      const { confirmed } = await rpc.request('dialog.confirm', {
+        title: 'Файл изменён на диске',
+        message: `Файл «${basename(document.path)}» изменён после того, как его открыли.`,
+        detail:
+          'На диске уже другая версия — вероятно, её записал ассистент или другой инструмент. ' +
+          'Если сохранить сейчас, правки из редактора заменят то, что там записано. Продолжить?',
+        confirmLabel: 'Перезаписать',
+      });
+      if (!confirmed) return false;
+      await edits.saveDocument(document, { force: true });
+    }
     showToast(`Сохранено: ${basename(document.path)}`);
+    return true;
   };
 
   /**
@@ -995,7 +1012,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       if (files.length === 0) return;
       const { choice } = await rpc.request('dialog.confirmClose', { files: files.map((file) => file.path) });
       if (choice === 'cancel') return;
-      if (choice === 'save') for (const file of files) await saveDocument(file);
+      if (choice === 'save') {
+        for (const file of files) {
+          // Отмена перезаписи — окно оставляем: правки ещё в редакторе.
+          if (!(await saveDocument(file))) return;
+        }
+      }
       // «Сохранить» и «Выйти без сохранения» ведут сюда: этот `window.close`
       // проходит без повторного вопроса — флаг `closing` уже поднят.
       await rpc.request('window.close');
