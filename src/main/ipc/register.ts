@@ -438,6 +438,17 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.stashPop', (params) => deps.git.stashPop(params.index));
   router.register('git.stashDrop', (params) => deps.git.stashDrop(params.index));
   router.register('git.stashShow', (params) => deps.git.stashShow(params.index));
+
+  // Отдельные коммиты и теги.
+  router.register('git.cherryPick', (params) => deps.git.cherryPick(params.commit));
+  router.register('git.revert', (params) => deps.git.revert(params.commit));
+  router.register('git.reset', (params) => deps.git.reset(params.mode, params.commit));
+  router.register('git.tags', () => deps.git.tags());
+  router.register('git.createTag', (params) =>
+    deps.git.createTag(params.name, { message: params.message, commit: params.commit }),
+  );
+  router.register('git.deleteTag', (params) => deps.git.deleteTag(params.name));
+  router.register('git.pushTag', (params) => deps.git.pushTag(params.name));
   router.register('git.conflictParts', (params) => deps.git.conflictParts(params.path));
   router.register('git.markResolved', (params) => deps.git.markResolved(params.path));
   router.register('git.branches', () => deps.git.branches());

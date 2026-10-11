@@ -416,6 +416,14 @@ module.exports = [
       return gitChanged();
     },
     'git.stashShow': () => 'diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-старое\n+новое\n',
+    // Отдельные коммиты и теги: операции меняют состояние в памяти.
+    'git.cherryPick': () => gitChanged(),
+    'git.revert': () => gitChanged(),
+    'git.reset': () => gitChanged(),
+    'git.tags': () => [{ name: 'v0.0.6', commit: 'a1b2c3d', subject: 'релиз' }],
+    'git.createTag': () => gitChanged(),
+    'git.deleteTag': () => gitChanged(),
+    'git.pushTag': () => ({ ok: true, message: 'мок: тег отправлен', status: gitState }),
     // Стороны конфликта: в моке все три — один и тот же текст файла.
     'git.conflictParts': (params) => {
       const file = gitState.files.find((item) => item.path === params.path);

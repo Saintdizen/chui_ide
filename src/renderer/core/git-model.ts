@@ -12,6 +12,7 @@ import {
 } from '../../shared/api';
 import type { BlameLine } from '../../shared/git-blame';
 import type { GitStashEntry } from '../../shared/git-stash';
+import type { GitTag } from '../../shared/git-tags';
 import { Emitter } from './events';
 import { separatorOf } from '../../shared/paths';
 import type { RpcClient } from './rpc';
@@ -210,6 +211,45 @@ export class GitModel {
   /** Полный патч записи — содержимое для просмотра. */
   stashShow(index: number): Promise<string> {
     return this.rpc.request('git.stashShow', { index });
+  }
+
+  /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
+
+  /** Перенести один коммит в текущую ветку. */
+  async cherryPick(commit: string): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.cherryPick', { commit }));
+  }
+
+  /** Отменить один коммит новым коммитом с обратными правками. */
+  async revert(commit: string): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.revert', { commit }));
+  }
+
+  /** Передвинуть ветку на коммит: soft, mixed или hard. */
+  async reset(mode: 'soft' | 'mixed' | 'hard', commit: string): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.reset', { mode, commit }));
+  }
+
+  /** Список тегов репозитория. */
+  tags(): Promise<GitTag[]> {
+    return this.rpc.request('git.tags');
+  }
+
+  /** Поставить тег: с сообщением — аннотированный, без — лёгкий. */
+  async createTag(name: string, options: { message?: string; commit?: string } = {}): Promise<GitStatus> {
+    return this.apply(
+      await this.rpc.request('git.createTag', { name, message: options.message, commit: options.commit }),
+    );
+  }
+
+  /** Удалить тег из локального репозитория. */
+  async deleteTag(name: string): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.deleteTag', { name }));
+  }
+
+  /** Отправить тег в origin. */
+  async pushTag(name: string): Promise<GitNetworkResult> {
+    return this.network(await this.rpc.request('git.pushTag', { name }));
   }
 
   /** Три версии конфликтного файла: общий предок и обе стороны. */

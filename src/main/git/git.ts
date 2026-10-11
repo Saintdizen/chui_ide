@@ -20,6 +20,7 @@ import {
 import { parseBlamePorcelain, type BlameLine } from '../../shared/git-blame';
 import { hunkPatch, hunkRanges } from '../../shared/git-hunks';
 import { parseStashList, type GitStashEntry } from '../../shared/git-stash';
+import { parseTagList, type GitTag } from '../../shared/git-tags';
 import { RpcFailure } from '../ipc/router';
 
 const GIT_TIMEOUT_MS = 20_000;
@@ -547,6 +548,85 @@ export class GitService {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Номер записи stash — целое число, начиная с нуля');
     }
     return { repoRoot, ref: `stash@{${index}}` };
+  }
+
+  /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
+
+  /** Перенести один коммит в текущую ветку. */
+  async cherryPick(commit: string): Promise<GitStatus> {
+    const repoRoot = await this.requireRoot();
+    await this.exec(['cherry-pick', this.commitArg(commit)], repoRoot);
+    return this.refresh();
+  }
+
+  /** Отменить один коммит новым коммитом с обратными правками. */
+  async revert(commit: string): Promise<GitStatus> {
+    const repoRoot = await this.requireRoot();
+    // --no-edit: сообщение берём готовое, редактор не открываем.
+    await this.exec(['revert', '--no-edit', this.commitArg(commit)], repoRoot);
+    return this.refresh();
+  }
+
+  /** Передвинуть ветку на коммит: soft (только указатель), mixed (+ индекс), hard (+ дерево). */
+  async reset(mode: 'soft' | 'mixed' | 'hard', commit: string): Promise<GitStatus> {
+    const repoRoot = await this.requireRoot();
+    await this.exec(['reset', `--${mode}`, this.commitArg(commit)], repoRoot);
+    return this.refresh();
+  }
+
+  /** Список тегов: от новых к старым, как их показывает git. */
+  async tags(): Promise<GitTag[]> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) return [];
+    const result = await this.exec(
+      ['tag', '--list', '--format=%(refname:short)\t%(objectname:short)\t%(contents:subject)'],
+      repoRoot,
+      {
+        allowFailure: true,
+      },
+    );
+    return parseTagList(result.stdout);
+  }
+
+  /** Поставить тег. С сообщением — аннотированный, без — лёгкий. */
+  async createTag(name: string, options: { message?: string; commit?: string } = {}): Promise<GitStatus> {
+    const repoRoot = await this.requireRoot();
+    const args = ['tag'];
+    const message = options.message?.trim();
+    if (message) args.push('-a', '-m', message);
+    args.push(this.nameArg(name));
+    if (options.commit) args.push(this.commitArg(options.commit));
+    await this.exec(args, repoRoot);
+    return this.refresh();
+  }
+
+  /** Удалить тег из репозитория (удалённый не трогаем). */
+  async deleteTag(name: string): Promise<GitStatus> {
+    const repoRoot = await this.requireRoot();
+    await this.exec(['tag', '-d', this.nameArg(name)], repoRoot);
+    return this.refresh();
+  }
+
+  /** Отправить один тег в origin. */
+  async pushTag(name: string): Promise<GitNetworkResult> {
+    return this.network(['push', 'origin', `refs/tags/${this.nameArg(name)}`]);
+  }
+
+  /** Имя коммита может начинаться с `-` — тогда git примет его за флаг, а не за ссылку. */
+  private commitArg(commit: string): string {
+    const value = commit.trim();
+    if (!value) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задан коммит');
+    if (value.startsWith('-'))
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `Некорректная ссылка на коммит: ${value}`);
+    return value;
+  }
+
+  /** То же для имени тега. */
+  private nameArg(name: string): string {
+    const value = name.trim();
+    if (!value) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задано имя тега');
+    if (value.startsWith('-')) throw new RpcFailure(RpcErrorCode.InvalidParams, `Некорректное имя тега: ${value}`);
+    return value;
   }
 
   /* ── внутреннее ────────────────────────────────────────────────────────── */

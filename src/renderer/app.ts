@@ -76,7 +76,7 @@ import { createPopover, type PopoverView } from './ui/popover';
 import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-env-popover';
 import { createQuickOpen } from './ui/quick-open';
 import { createSymbolPicker } from './ui/symbol-picker';
-import { closePopupMenu, isPopupOpen, showPopupMenu } from './ui/popup-menu';
+import { closePopupMenu, isPopupOpen, showPopupMenu, type PopupMenuItem } from './ui/popup-menu';
 import { createPromptModal } from './ui/prompt-modal';
 import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
@@ -1842,6 +1842,172 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       return;
     }
     await stashModal.open();
+  });
+
+  /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
+
+  /** Сбросить ветку на коммит. Режим выбирает, что будет с правками; спрашиваем всегда. */
+  const resetTo = async (mode: 'soft' | 'mixed' | 'hard', hash: string, summary: string): Promise<void> => {
+    const detail =
+      mode === 'hard'
+        ? 'Правки в рабочем дереве и индексе будут потеряны безвозвратно.'
+        : mode === 'mixed'
+          ? 'Индекс сбросится, правки в файлах останутся.'
+          : 'Правки останутся и в файлах, и в индексе — они не пропадут.';
+    const { confirmed } = await rpc.request('dialog.confirm', {
+      title: 'Сброс ветки',
+      message: `Сбросить ${git.branch ?? 'ветку'} на ${hash}?`,
+      detail: `${summary}\n${detail}`,
+      confirmLabel: mode === 'hard' ? 'Сбросить жёстко' : 'Сбросить',
+    });
+    if (!confirmed) return;
+    try {
+      await git.reset(mode, hash);
+      showToast(`Ветка сброшена на ${hash}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  };
+
+  /** Действия над одним коммитом: перенос, откат и сброс ветки на него. */
+  const commitActions = (hash: string, summary: string): PopupMenuItem[] => [
+    {
+      label: 'Перенести в текущую ветку (cherry-pick)',
+      onSelect: () => {
+        void git.cherryPick(hash).then(
+          () => showToast(`Коммит ${hash} перенесён`),
+          (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
+        );
+      },
+    },
+    {
+      label: 'Отменить коммит (revert)',
+      onSelect: () => {
+        void git.revert(hash).then(
+          () => showToast(`Коммит ${hash} отменён`),
+          (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
+        );
+      },
+    },
+    { separator: true },
+    {
+      label: 'Сбросить ветку на этот коммит',
+      submenu: [
+        { label: 'Мягкий (soft) — правки в индексе', onSelect: () => void resetTo('soft', hash, summary) },
+        { label: 'Смешанный (mixed) — индекс чист', onSelect: () => void resetTo('mixed', hash, summary) },
+        {
+          label: 'Жёсткий (hard) — правки теряются',
+          danger: true,
+          onSelect: () => void resetTo('hard', hash, summary),
+        },
+      ],
+    },
+  ];
+
+  /** История коммитов репозитория: у каждого — действия над этим коммитом. */
+  define({ id: 'git.showLog', title: 'История коммитов', category: 'Git' }, async () => {
+    if (!git.isRepository) {
+      showToast('Рабочая папка не в репозитории git', 'error');
+      return;
+    }
+    const commits = await git.log(undefined, 50);
+    if (commits.length === 0) {
+      showToast('Коммитов ещё нет');
+      return;
+    }
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(
+      commits.map((commit) => ({
+        label: `${commit.hash} ${commit.date} ${commit.author}`,
+        hint: commit.summary,
+        submenu: commitActions(commit.hash, commit.summary),
+      })),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+  });
+
+  /** Создать тег на текущем коммите. */
+  define({ id: 'git.createTag', title: 'Создать тег', category: 'Git' }, async () => {
+    if (!git.isRepository) {
+      showToast('Рабочая папка не в репозитории git', 'error');
+      return;
+    }
+    const name = await promptValue({ title: 'Создать тег', label: 'Имя тега', value: '' });
+    if (!name) return;
+    try {
+      await git.createTag(name);
+      showToast(`Тег ${name} создан`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  });
+
+  /** Теги: список с действиями и создание нового. */
+  define({ id: 'git.tags', title: 'Теги', category: 'Git' }, async () => {
+    if (!git.isRepository) {
+      showToast('Рабочая папка не в репозитории git', 'error');
+      return;
+    }
+    const tags = await git.tags();
+    const items: PopupMenuItem[] = [
+      { label: 'Создать тег…', onSelect: () => void commands.execute('git.createTag') },
+      { separator: true },
+    ];
+    if (tags.length === 0) {
+      items.push({ label: 'Тегов нет', hint: 'поставьте первый', onSelect: () => undefined });
+    }
+    for (const tag of tags) {
+      items.push({
+        label: tag.name,
+        hint: tag.commit,
+        submenu: [
+          {
+            label: 'Переключиться на тег',
+            onSelect: () => {
+              void rpc
+                .request('dialog.confirm', {
+                  title: 'Переключение на тег',
+                  message: `Перейти на тег ${tag.name}?`,
+                  detail: 'Ветка станет отсоединённой (detached HEAD): новые коммиты в неё не попадут.',
+                  confirmLabel: 'Перейти',
+                })
+                .then(({ confirmed }) => (confirmed ? git.checkout(tag.name) : undefined))
+                .catch((error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'));
+            },
+          },
+          {
+            label: 'Отправить в origin',
+            onSelect: () => {
+              void git.pushTag(tag.name).then(
+                (result) => showToast(result.message),
+                (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
+              );
+            },
+          },
+          { separator: true },
+          {
+            label: 'Удалить тег',
+            danger: true,
+            onSelect: () => {
+              void rpc
+                .request('dialog.confirm', {
+                  title: 'Удалить тег',
+                  message: `Удалить тег ${tag.name}?`,
+                  detail: 'Удалённый тег останется в origin — там его нужно убирать отдельно.',
+                  confirmLabel: 'Удалить',
+                })
+                .then(({ confirmed }) => (confirmed ? git.deleteTag(tag.name) : undefined))
+                .then(() => undefined)
+                .catch((error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'));
+            },
+          },
+        ],
+      });
+    }
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(items, rect.left + 40, rect.top + 40, { anchor: layout.editorHost });
   });
 
   /** История коммитов файла: выбор записи открывает сравнение с текущим текстом. */

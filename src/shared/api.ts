@@ -13,6 +13,7 @@ import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
 import type { Snippet } from './snippets';
 import type { GitStashEntry } from './git-stash';
+import type { GitTag } from './git-tags';
 import type { ThemeFile } from './theme-file';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { NodeTestSuite } from './node-tests';
@@ -1450,6 +1451,15 @@ export interface ChuiMethods {
   'git.stashDrop': { params: { index: number }; result: GitStatus };
   /** Полный патч записи — для просмотра содержимого. */
   'git.stashShow': { params: { index: number }; result: string };
+
+  /* Отдельные коммиты и теги: перенос, откат, сброс и метки. */
+  'git.cherryPick': { params: { commit: string }; result: GitStatus };
+  'git.revert': { params: { commit: string }; result: GitStatus };
+  'git.reset': { params: { mode: 'soft' | 'mixed' | 'hard'; commit: string }; result: GitStatus };
+  'git.tags': { params: void; result: GitTag[] };
+  'git.createTag': { params: { name: string; message?: string; commit?: string }; result: GitStatus };
+  'git.deleteTag': { params: { name: string }; result: GitStatus };
+  'git.pushTag': { params: { name: string }; result: GitNetworkResult };
   /** Три версии конфликтного файла: общий предок и обе стороны. */
   'git.conflictParts': { params: { path: string }; result: GitConflictParts };
   /** Отметить конфликт решённым: содержимое файла уходит в индекс (`git add`). */

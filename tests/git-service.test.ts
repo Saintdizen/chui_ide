@@ -256,6 +256,73 @@ describe('GitService: удалённые и сеть', () => {
     expect(await serviceFor(work).stashList()).toEqual([]);
   });
 
+  it('cherry-pick переносит коммит из другой ветки', async () => {
+    if (!gitAvailable) return;
+    const { work, branch } = await makeRepos();
+    const service = serviceFor(work);
+    await git(work, ['checkout', '-q', '-b', 'feature']);
+    await fs.writeFile(path.join(work, 'c.txt'), 'c\n');
+    await git(work, ['add', '-A']);
+    await git(work, ['commit', '-q', '-m', 'feature commit']);
+    const hash = (await git(work, ['rev-parse', 'HEAD'])).stdout.trim();
+    await git(work, ['checkout', '-q', branch]);
+
+    await service.cherryPick(hash);
+
+    expect(await fs.readFile(path.join(work, 'c.txt'), 'utf8')).toBe('c\n');
+  });
+
+  it('revert отменяет коммит новым коммитом', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const service = serviceFor(work);
+    await fs.writeFile(path.join(work, 'a.txt'), 'one\ntwo\n');
+    await git(work, ['add', '-A']);
+    await git(work, ['commit', '-q', '-m', 'add two']);
+    const hash = (await git(work, ['rev-parse', 'HEAD'])).stdout.trim();
+
+    await service.revert(hash);
+
+    expect(await fs.readFile(path.join(work, 'a.txt'), 'utf8')).toBe('one\n');
+    // Отменяющий коммит — третий в репозитории.
+    expect((await git(work, ['rev-list', '--count', 'HEAD'])).stdout.trim()).toBe('3');
+  });
+
+  it('reset hard откатывает рабочее дерево к коммиту', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const service = serviceFor(work);
+    const head = (await git(work, ['rev-parse', 'HEAD'])).stdout.trim();
+    await fs.writeFile(path.join(work, 'a.txt'), 'грязная правка\n');
+
+    await service.reset('hard', head);
+
+    expect(await fs.readFile(path.join(work, 'a.txt'), 'utf8')).toBe('one\n');
+  });
+
+  it('tags: создать, перечислить и удалить', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const service = serviceFor(work);
+    expect(await service.tags()).toEqual([]);
+
+    await service.createTag('v1.0.0');
+
+    const tags = await service.tags();
+    expect(tags).toHaveLength(1);
+    expect(tags[0]!.name).toBe('v1.0.0');
+    expect(tags[0]!.commit).toHaveLength(7);
+
+    await service.deleteTag('v1.0.0');
+    expect(await service.tags()).toEqual([]);
+  });
+
+  it('ссылка на коммит не может начинаться с дефиса', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    await expect(serviceFor(work).cherryPick('-x')).rejects.toThrow();
+  });
+
   it('push() без удалённого возвращает сбой текстом, а не бросает', async () => {
     if (!gitAvailable) return;
     const { work } = await makeRepos();
