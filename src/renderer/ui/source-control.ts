@@ -69,6 +69,17 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     'Закоммитить',
   );
 
+  // «Исправить последний коммит»: флажок вместо отдельной кнопки — режим виден
+  // рядом с полем сообщения и снимается сам. Пустое сообщение при нём сохраняет
+  // прежнее (см. `git.amendCommit`).
+  const amendBox = h('input', { class: 'sc-amend-box', type: 'checkbox' });
+  const amendRow = h(
+    'label',
+    { class: 'sc-amend', title: 'Заменить последний коммит вместо создания нового' },
+    amendBox,
+    h('span', {}, 'Исправить последний коммит'),
+  );
+
   const stagedGroup = h('div', { class: 'sc-group' });
   const unstagedGroup = h('div', { class: 'sc-group' });
   const hint = h('p', { class: 'sc-hint' });
@@ -138,7 +149,13 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       ),
     ),
     branchCreate,
-    h('div', { class: 'sc-commit-box' }, message, h('div', { class: 'sc-commit-actions' }, hint, commitButton)),
+    h(
+      'div',
+      { class: 'sc-commit-box' },
+      message,
+      amendRow,
+      h('div', { class: 'sc-commit-actions' }, hint, commitButton),
+    ),
     h('div', { class: 'sc-list' }, stagedGroup, unstagedGroup, initButton),
   );
 
@@ -184,9 +201,21 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
   branchInput.addEventListener('blur', () => closeBranchInput());
 
   const commit = async (): Promise<void> => {
-    const info = await deps.commands.execute('git.commit', message.value);
+    const amend = amendBox.checked;
+    const info = await deps.commands.execute(amend ? 'git.amendCommit' : 'git.commit', message.value);
     // Сообщение очищаем только при успешном коммите: иначе текст не вернуть.
-    if (info) message.value = '';
+    if (info) {
+      message.value = '';
+      // Режим — на один раз: следующее нажатие снова создаёт обычный коммит.
+      if (amend) amendBox.checked = false;
+    }
+    syncCommitDisabled();
+  };
+
+  /** Кнопка коммита активна, если есть сообщение — или выбран amend (тогда
+      сообщение можно не писать: сохранится прежнее). */
+  const syncCommitDisabled = (): void => {
+    commitButton.disabled = message.value.trim().length === 0 && !amendBox.checked;
   };
 
   const row = (file: GitFileStatus, staged: boolean): HTMLElement => {
@@ -368,7 +397,10 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
 
     const total = staged.length + unstaged.length;
     hint.textContent = total === 0 ? '' : `${total} ${plural(total)}`;
-    commitButton.disabled = message.value.trim().length === 0;
+    syncCommitDisabled();
+    // Исправлять можно только когда есть что: в репозитории и с хотя бы одним коммитом.
+    amendRow.hidden = !isRepo || repository?.head == null;
+    if (amendRow.hidden) amendBox.checked = false;
     initButton.hidden = isRepo;
 
     if (!isRepo) {
@@ -381,8 +413,10 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
   };
 
   message.addEventListener('input', () => {
-    commitButton.disabled = message.value.trim().length === 0;
+    syncCommitDisabled();
   });
+
+  amendBox.addEventListener('change', () => syncCommitDisabled());
 
   deps.git.onDidChange(render);
   render();

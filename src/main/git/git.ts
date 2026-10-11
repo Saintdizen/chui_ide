@@ -139,17 +139,28 @@ export class GitService {
     return this.refresh();
   }
 
-  /** Коммит. С путями — только они, как «закоммитить этот файл» в других IDE. */
-  async commit(message: string, paths?: string[]): Promise<GitCommitInfo> {
+  /**
+   * Коммит. С путями — только они, как «закоммитить этот файл» в других IDE.
+   * `amend` заменяет последний коммит: пустое сообщение сохраняет прежнее.
+   */
+  async commit(message: string, paths?: string[], amend = false): Promise<GitCommitInfo> {
     const text = message.trim();
-    if (!text) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Пустое сообщение коммита');
+    // При amend пустое сообщение — это «оставить прежнее»: git возьмёт его через --no-edit.
+    if (!amend && !text) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Пустое сообщение коммита');
 
     const status = await this.status();
     const repoRoot = status.repository?.root;
     if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+    if (amend && !status.repository?.head) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Исправлять нечего: коммитов ещё нет');
+    }
 
-    const args = ['commit', '-m', text];
-    if (paths?.length) {
+    const args = ['commit'];
+    if (amend) args.push('--amend');
+    if (text) args.push('-m', text);
+    else args.push('--no-edit');
+    // Пути вместе с amend не передаём: `git` не поддерживает частичное исправление.
+    if (paths?.length && !amend) {
       const known = new Map(status.files.map((file) => [file.path, file]));
       const relative = paths.map((target) => known.get(path.resolve(target))?.relative ?? path.resolve(target));
       args.push('--', ...relative);

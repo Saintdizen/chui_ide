@@ -178,6 +178,42 @@ describe('GitService: удалённые и сеть', () => {
     expect(await serviceFor(base).headText(path.join(base, 'x.txt'))).toBeNull();
   });
 
+  it('commit с amend заменяет последний коммит, не добавляя новый', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const service = serviceFor(work);
+    const count = (): Promise<string> =>
+      git(work, ['rev-list', '--count', 'HEAD']).then((result) => result.stdout.trim());
+
+    const before = await count();
+    await fs.writeFile(path.join(work, 'a.txt'), 'one\nchanged\n');
+    await git(work, ['add', '-A']);
+    // Пустое сообщение при amend сохраняет прежнее.
+    const kept = await service.commit('', undefined, true);
+    expect(kept.summary).toBe('init');
+    expect(await count()).toBe(before);
+    // Новое сообщение — заменяет.
+    const renamed = await service.commit('исправлено', undefined, true);
+    expect(renamed.summary).toBe('исправлено');
+    expect(await count()).toBe(before);
+  });
+
+  it('commit без amend отказывается от пустого сообщения', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    await expect(serviceFor(work).commit('   ')).rejects.toThrow();
+  });
+
+  it('commit с amend в репозитории без коммитов — понятная ошибка', async () => {
+    if (!gitAvailable) return;
+    const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-git-empty-')));
+    roots.push(base);
+    await git(base, ['init', '-q']);
+    await git(base, ['config', 'user.email', 'test@example.com']);
+    await git(base, ['config', 'user.name', 'Test']);
+    await expect(serviceFor(base).commit('', undefined, true)).rejects.toThrow();
+  });
+
   it('push() без удалённого возвращает сбой текстом, а не бросает', async () => {
     if (!gitAvailable) return;
     const { work } = await makeRepos();

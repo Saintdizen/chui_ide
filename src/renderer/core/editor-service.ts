@@ -58,6 +58,10 @@ export interface DiffEditorHandle {
   set(input: { language: string; original: string; modified: string }): void;
   /** Показать у блоков кнопки действия; `null` — убрать. Индекс — номер блока. */
   setHunkActions(actions: readonly DiffHunkAction[] | null, onSelect: (index: number) => void): void;
+  /** Режим сравнения: рядом (side-by-side) или одним столбцом (inline). */
+  setLayout(sideBySide: boolean): void;
+  /** Перейти к следующему (1) или предыдущему (-1) блоку изменений. */
+  goToChange(direction: 1 | -1): void;
   dispose(): void;
 }
 
@@ -995,6 +999,27 @@ export class EditorService {
           modified.addContentWidget(widget);
           widgets.push(widget);
         }
+      },
+      setLayout(sideBySide) {
+        // Опция редактора меняется на лету: сравнение не надо пересоздавать.
+        editor.updateOptions({ renderSideBySide: sideBySide });
+      },
+      goToChange(direction) {
+        const changes = editor.getLineChanges() ?? [];
+        if (changes.length === 0) return;
+        const modified = editor.getModifiedEditor();
+        const line = modified.getPosition()?.lineNumber ?? 1;
+        // Ищем блок после текущей строки; не нашли (мы в конце) — к первому, по кругу.
+        // Для обратного хода — то же самое, но с конца: иначе круга не получится.
+        const target =
+          direction > 0
+            ? (changes.find((change) => change.modifiedStartLineNumber > line) ?? changes[0]!)
+            : ([...changes].reverse().find((change) => change.modifiedStartLineNumber < line) ??
+              changes[changes.length - 1]!);
+        const at = Math.max(target.modifiedStartLineNumber, 1);
+        modified.setPosition({ lineNumber: at, column: 1 });
+        modified.revealLineInCenter(at);
+        modified.focus();
       },
       dispose() {
         clearActions();

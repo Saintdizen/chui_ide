@@ -421,7 +421,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.stage', (params) => deps.git.stage(params.paths));
   router.register('git.unstage', (params) => deps.git.unstage(params.paths));
   router.register('git.discard', (params) => deps.git.discard(params.paths));
-  router.register('git.commit', (params) => deps.git.commit(params.message, params.paths));
+  router.register('git.commit', (params) => deps.git.commit(params.message, params.paths, params.amend));
   router.register('git.diff', (params) => deps.git.diff(params.path, params.staged, params.commit));
   router.register('git.stageHunk', (params) => deps.git.stageHunk(params.path, params.index));
   router.register('git.unstageHunk', (params) => deps.git.unstageHunk(params.path, params.index));

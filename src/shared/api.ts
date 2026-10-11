@@ -1424,7 +1424,7 @@ export interface ChuiMethods {
   'git.stage': { params: { paths: string[] }; result: GitStatus };
   'git.unstage': { params: { paths: string[] }; result: GitStatus };
   'git.discard': { params: { paths: string[] }; result: GitStatus };
-  'git.commit': { params: { message: string; paths?: string[] }; result: GitCommitInfo };
+  'git.commit': { params: { message: string; paths?: string[]; amend?: boolean }; result: GitCommitInfo };
   'git.diff': { params: { path: string; staged?: boolean; commit?: string }; result: GitDiff };
   'git.stageHunk': { params: { path: string; index: number }; result: GitStatus };
   'git.unstageHunk': { params: { path: string; index: number }; result: GitStatus };

@@ -154,8 +154,8 @@ export class GitModel {
     return this.apply(await this.rpc.request('git.discard', { paths }));
   }
 
-  async commit(message: string, paths?: string[]): Promise<GitCommitInfo> {
-    const info = await this.rpc.request('git.commit', { message, paths });
+  async commit(message: string, paths?: string[], amend = false): Promise<GitCommitInfo> {
+    const info = await this.rpc.request('git.commit', { message, paths, amend });
     await this.refresh();
     return info;
   }

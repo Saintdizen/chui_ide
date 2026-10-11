@@ -4862,6 +4862,23 @@ textarea {
   gap: 8px;
 }
 
+/* «Исправить последний коммит»: флажок рядом с полем сообщения, тихий — это режим,
+   а не действие. */
+.sc-amend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sc-amend-box {
+  accent-color: var(--blue_prime_background);
+  margin: 0;
+}
+
 .sc-hint {
   margin: 0;
   color: var(--text_color_tertiary);
@@ -5071,6 +5088,19 @@ textarea {
 
 .diff-header .icon-btn {
   margin-left: auto;
+}
+
+/* Действия экрана (блоки, режим, закрытие) — одной группой у правого края:
+   правило выше прижимало каждую кнопку по отдельности, и они разъезжались. */
+.diff-header .diff-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.diff-header .diff-actions .icon-btn {
+  margin-left: 0;
 }
 
 .diff-body {

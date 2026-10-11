@@ -1785,6 +1785,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     return info;
   });
 
+  /**
+   * Исправить последний коммит (amend). Пустое сообщение — оставить прежнее:
+   * так можно просто добавить в него дозревшие правки.
+   */
+  define(
+    { id: 'git.amendCommit', title: 'Исправить последний коммит (amend)', category: 'Git' },
+    async (messageArg) => {
+      const text = typeof messageArg === 'string' ? messageArg : '';
+      if (!git.repository || git.repository.head === null) {
+        showToast('Исправлять нечего: коммитов ещё нет', 'error');
+        return undefined;
+      }
+      const info = await git.commit(text, undefined, true);
+      showToast(`Коммит ${info.hash} исправлен: ${info.summary}`);
+      return info;
+    },
+  );
+
   define({ id: 'git.showDiff', title: 'Показать различия файла', category: 'Git' }, async (path, staged) => {
     const target = asPath(path);
     if (target) await diffView.open(target, staged === true);

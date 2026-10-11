@@ -54,6 +54,8 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
   let current: DiffTarget | null = null;
   /** Идёт операция с блоком: повторное нажатие не должно запускать её снова. */
   let busy = false;
+  /** Режим сравнения: рядом или одним столбцом. Помнится между открытиями. */
+  let sideBySide = true;
 
   const close = (): void => {
     open = false;
@@ -68,12 +70,61 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
     { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
     svgIcon('close', 14),
   );
-  const header = h('div', { class: 'diff-header' }, svgIcon('file', 14), title, subtitle, closeButton);
+
+  // Навигация по блокам и режим отображения — действия экрана сравнения, поэтому
+  // стоят в шапке рядом с закрытием, а не в самом редакторе.
+  const prevButton = h(
+    'button',
+    {
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Предыдущий блок (Alt+↑)',
+      onClick: () => handle?.goToChange(-1),
+    },
+    svgIcon('chevronUp', 14),
+  );
+  const nextButton = h(
+    'button',
+    {
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Следующий блок (Alt+↓)',
+      onClick: () => handle?.goToChange(1),
+    },
+    svgIcon('chevronDown', 14),
+  );
+  const layoutButton = h('button', { class: 'icon-btn is-active', type: 'button' }, svgIcon('split', 14));
+  const syncLayoutButton = (): void => {
+    layoutButton.classList.toggle('is-active', sideBySide);
+    layoutButton.title = sideBySide ? 'Показать одним столбцом' : 'Показать рядом';
+  };
+  layoutButton.addEventListener('click', () => {
+    sideBySide = !sideBySide;
+    handle?.setLayout(sideBySide);
+    syncLayoutButton();
+  });
+  syncLayoutButton();
+
+  const headerActions = h('div', { class: 'diff-actions' }, prevButton, nextButton, layoutButton, closeButton);
+  const header = h('div', { class: 'diff-header' }, svgIcon('file', 14), title, subtitle, headerActions);
   const element = h('div', { class: 'diff-view' }, header, body);
   element.hidden = true;
 
   document.addEventListener('keydown', (event) => {
-    if (open && event.key === 'Escape') close();
+    if (!open) return;
+    if (event.key === 'Escape') {
+      close();
+      return;
+    }
+    // Alt+↑/↓ — ходьба по блокам, как в других IDE. Без Alt стрелки не трогаем:
+    // они принадлежат курсору, а он в сравнении тоже нужен.
+    if (event.altKey && event.key === 'ArrowDown') {
+      event.preventDefault();
+      handle?.goToChange(1);
+    } else if (event.altKey && event.key === 'ArrowUp') {
+      event.preventDefault();
+      handle?.goToChange(-1);
+    }
   });
 
   /** Проиндексировать блок или убрать его из индекса, затем перерисовать сравнение. */
@@ -139,7 +190,11 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
 
     // Редактор создаём уже видимым: Monaco измеряет контейнер при создании,
     // а у скрытого контейнера ширина нулевая.
-    if (!handle) handle = deps.createDiff(body);
+    if (!handle) {
+      handle = deps.createDiff(body);
+      // Режим, выбранный человеком в прошлый раз, восстанавливаем.
+      handle.setLayout(sideBySide);
+    }
     handle.set({ language: languageFromPath(path), original: diff.original, modified: diff.modified });
     drawHunks(target, diff.hunks);
   };
