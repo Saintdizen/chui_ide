@@ -16,13 +16,14 @@
  * 10. вложения контекста уходят в промпт отдельным сообщением;
  * 11. режим «Вопрос»: инструменты не предлагаются, моделе сказано об этом;
  * 12. режим «План»: только чтение, изменения не предлагаются и не исполняются;
- * 13. права доступа меняются на лету — агент подхватывает их во время ответа.
- *
+ * 13. права доступа меняются на лету — агент подхватывает их во время ответа;
  * 14. подзадача (task): отдельный агент со своим контекстом — его чтения не растут в беседе;
  * 15. браузер (browser_*): выключен по умолчанию, действия спрашивают подтверждение,
  *     снимок страницы доезжает до модели текстом;
  * 16. песочница: команды и тесты идут в контейнер, а без движка — отказ, не откат на хост;
- * 17. правки по якорю (apply_patch): позиций не требуется, но нужен renderer, который их считает.
+ * 17. правки по якорю (apply_patch): позиций не требуется, но нужен renderer, который их считает;
+ * 18. вес описаний инструментов в следе прогона, потолок на внешние инструменты
+ *     и отказ вместо пустого прогона, когда инструменты не влезают в окно.
  *
  *   npm run smoke:agent
  *
@@ -524,6 +525,62 @@ app.whenReady().then(async () => {
       !run.toolNames.includes('mcp__files__write'),
       run.toolNames,
     );
+
+    /* 1е. вес описаний инструментов: main отдаёт факт, а не догадку. Панель
+       «Информация о сессии» без него считала бы по всему списку и ошибалась бы
+       в обе стороны — лишние выключенные плюс неучтённые внешние. */
+    requested = { name: 'read_file', args: { path: file } };
+    run = await chat(externalHost);
+    const tracked = run.done.trace?.toolsTokens;
+    check('след прогона несёт вес описаний инструментов', typeof tracked === 'number' && tracked > 0, tracked);
+    // Больше одного инструмента, но меньше всего списка: значит это вес реально
+    // предложенного набора, а не константа по всем 50 инструментам.
+    check('вес соответствует предложенному набору', tracked > 100 && tracked < 9000, tracked);
+
+    /* 1ж. потолок на внешние инструменты: описание каждого уходит в КАЖДЫЙ
+       запрос, поэтому сервер с сотней инструментов съел бы окно сам. */
+    ai.attachMcp({
+      list: async () =>
+        Array.from({ length: 40 }, (_, index) => ({
+          serverId: 'big',
+          toolName: `tool_${String(index).padStart(2, '0')}`,
+          exposedName: `mcp__big__tool_${String(index).padStart(2, '0')}`,
+          description: 'инструмент большого сервера',
+          inputSchema: { type: 'object', properties: {} },
+          readOnly: true,
+        })),
+      call: async () => ({ text: 'ок', isError: false }),
+    });
+    requested = { name: 'mcp__big__tool_00', args: {} };
+    run = await chat(externalHost);
+    const mcpOffered = run.toolNames.filter((name) => name.startsWith('mcp__'));
+    check('от одного сервера берётся не больше потолка', mcpOffered.length === 24, mcpOffered.length);
+    check(
+      'в набор попали первые по алфавиту — порядок стабильный',
+      mcpOffered.includes('mcp__big__tool_00') && mcpOffered.includes('mcp__big__tool_23'),
+      mcpOffered.slice(0, 3),
+    );
+    check('за потолком инструменты не предлагаются', !mcpOffered.includes('mcp__big__tool_30'));
+
+    /* 1з. отказ вместо пустого прогона: если описания инструментов не влезают в
+       окно, шага не получится вовсе, и об этом надо сказать словами. */
+    requested = { name: 'read_file', args: { path: file } };
+    let tooSmall = '';
+    // Окно заведомо меньше веса описаний (проверка выше показала реальный вес).
+    settings.ai.contextWindow = 2_000;
+    try {
+      await chat(externalHost);
+    } catch (error) {
+      tooSmall = String(error.message);
+    }
+    delete settings.ai.contextWindow;
+    ai.attachMcp(undefined);
+    check(
+      'непомещающиеся инструменты — отказ с числами',
+      /не помещаются в окно/.test(tooSmall) && /2000/.test(tooSmall),
+      tooSmall,
+    );
+    check('в отказе сказано, что делать', /модель с большим окном|выключите/.test(tooSmall), tooSmall);
 
     run = await chat(externalHost, true, false, undefined, { planMode: true });
     check(

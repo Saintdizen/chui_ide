@@ -1,6 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { McpServerTools } from '../../shared/api';
-import { mcpToolResultText, parseMcpTools, type McpServerConfig, type McpToolInfo } from '../../shared/mcp';
+import {
+  mcpToolResultText,
+  parseMcpTools,
+  selectMcpTools,
+  type McpServerConfig,
+  type McpToolInfo,
+} from '../../shared/mcp';
 
 /**
  * Внешние инструменты по Model Context Protocol.
@@ -283,12 +289,18 @@ export class McpService {
       const connection = this.connectionFor(config);
       try {
         await connection.connect();
+        const tools = connection.tools();
+        // Какие из них реально уйдут модели — считает тот же отбор, что и агент:
+        // иначе настройки показывали бы список полным, а за потолком часть
+        // инструментов молча не предлагалась бы.
+        const offeredNames = new Set(selectMcpTools(tools).offered.map((tool) => tool.exposedName));
         out.push({
           id: config.id,
-          tools: connection.tools().map((tool) => ({
+          tools: tools.map((tool) => ({
             name: tool.toolName,
             description: tool.description,
             readOnly: tool.readOnly,
+            offered: offeredNames.has(tool.exposedName),
           })),
         });
       } catch (error) {

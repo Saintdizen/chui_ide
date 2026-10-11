@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   exposedToolName,
   isMcpToolName,
+  MAX_MCP_TOOLS,
   mcpToolResultText,
   normalizeMcpServers,
   parseMcpTools,
+  selectMcpTools,
+  type McpToolInfo,
 } from '../src/shared/mcp';
 
 /**
@@ -170,5 +173,67 @@ describe('normalizeMcpServers', () => {
   it('не список — пустой список', () => {
     expect(normalizeMcpServers(null)).toEqual([]);
     expect(normalizeMcpServers({ id: 'x' })).toEqual([]);
+  });
+});
+
+/** Инструмент для отбора: имя и сервер — всё, что важно потолкам. */
+function tool(serverId: string, toolName: string): McpToolInfo {
+  return {
+    serverId,
+    toolName,
+    exposedName: exposedToolName(serverId, toolName),
+    description: '',
+    inputSchema: { type: 'object', properties: {} },
+    readOnly: true,
+  };
+}
+
+describe('selectMcpTools', () => {
+  it('потолки не трогают обычный набор', () => {
+    const selection = selectMcpTools([tool('files', 'read'), tool('files', 'write'), tool('git', 'log')]);
+    expect(selection.offered).toHaveLength(3);
+    expect(selection.skipped).toBe(0);
+    expect(selection.skippedByServer).toEqual({});
+  });
+
+  it('от одного сервера берёт не больше потолка', () => {
+    const many = Array.from({ length: 30 }, (_, index) => tool('files', `t${String(index).padStart(2, '0')}`));
+    const selection = selectMcpTools(many, { perServer: 5, total: 100 });
+
+    expect(selection.offered).toHaveLength(5);
+    expect(selection.skipped).toBe(25);
+    expect(selection.skippedByServer.files).toBe(25);
+    // Берём первые по алфавиту: набор не «прыгает» между шагами.
+    expect(selection.offered.map((item) => item.toolName)).toEqual(['t00', 't01', 't02', 't03', 't04']);
+  });
+
+  it('общий потолок режет поперёк серверов', () => {
+    const many = [
+      ...Array.from({ length: 10 }, (_, index) => tool('a', `a${index}`)),
+      ...Array.from({ length: 10 }, (_, index) => tool('b', `b${index}`)),
+    ];
+    const selection = selectMcpTools(many, { perServer: 100, total: 12 });
+
+    expect(selection.offered).toHaveLength(12);
+    expect(selection.skipped).toBe(8);
+    // Серверы идут по алфавиту: из «a» возьмём все 10, из «b» — 2.
+    expect(selection.skippedByServer).toEqual({ b: 8 });
+  });
+
+  it('порядок стабилен независимо от порядка входа', () => {
+    const forward = selectMcpTools([tool('a', 'x'), tool('a', 'y'), tool('b', 'z')]);
+    const backward = selectMcpTools([tool('b', 'z'), tool('a', 'y'), tool('a', 'x')]);
+    expect(forward.offered.map((item) => item.exposedName)).toEqual(backward.offered.map((item) => item.exposedName));
+  });
+
+  it('потолки не могут обнулить набор', () => {
+    // Ноль или отрицательное — ошибка вызова, а не «ничего не предлагать».
+    expect(selectMcpTools([tool('a', 'x')], { perServer: 0, total: 0 }).offered).toHaveLength(1);
+  });
+
+  it('умолчания ограничивают, но не режут обычную установку', () => {
+    expect(MAX_MCP_TOOLS).toBeGreaterThanOrEqual(32);
+    const typical = Array.from({ length: 20 }, (_, index) => tool('files', `t${index}`));
+    expect(selectMcpTools(typical).skipped).toBe(0);
   });
 });

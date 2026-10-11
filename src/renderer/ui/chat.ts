@@ -828,6 +828,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       attachments: session.attachments,
       systemPrompt: settings.ai.systemPrompt,
       tools: useTools,
+      // Вес описаний берём из следа последнего прогона: его знает main. Пока
+      // ответа не было — числа нет, и панель оценит по всему списку, честно
+      // помечая «≈».
+      ...(session.trace?.toolsTokens !== undefined ? { toolsTokens: session.trace.toolsTokens } : {}),
       reservedTokens: settings.ai.maxTokens,
       usage: session.usage,
       speed: session.speed,

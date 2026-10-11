@@ -102,6 +102,13 @@ export interface ContextPartsInput {
   /** Предлагаются ли модели описания инструментов. */
   tools: boolean;
   /**
+   * Реальный вес описаний инструментов из последнего прогона (main кладёт его
+   * в след беседы). Если он известен, берём его: какой набор предложить, решает
+   * main (`canRun` + внешние инструменты), и по общему списку renderer ошибался
+   * бы в обе стороны. Не задан — считаем по полному списку, как раньше.
+   */
+  toolsTokens?: number;
+  /**
    * Вопрос, который вот-вот уйдёт в модель, но ещё не попал в историю. Без него
    * оценка перед отправкой занижена ровно на вес отправляемого сообщения.
    */
@@ -126,7 +133,9 @@ export function estimateContextParts(input: ContextPartsInput): ContextParts {
 
   return {
     system: estimateTextTokens(input.systemPrompt),
-    tools: input.tools ? estimateTextTokens(JSON.stringify(AGENT_TOOLS)) : 0,
+    // Факт из последнего прогона важнее расчёта: он про тот набор, который
+    // реально ушёл. Без него — оценка по всему списку инструментов.
+    tools: input.tools ? (input.toolsTokens ?? estimateTextTokens(JSON.stringify(AGENT_TOOLS))) : 0,
     messages,
     results,
     files: input.attachments.reduce((sum, item) => sum + estimateTextTokens(item.text), 0),

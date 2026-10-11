@@ -21,6 +21,11 @@ export interface SessionInfoData {
   systemPrompt: string;
   /** Предлагаются ли модели описания инструментов. */
   tools: boolean;
+  /**
+   * Реальный вес описаний инструментов из последнего прогона: его знает main.
+   * Без него панель считала бы по всему списку и показывала не то, что уходит.
+   */
+  toolsTokens?: number;
   /** Сколько токенов отдано под ответ. */
   reservedTokens: number;
   usage?: ChatUsage;

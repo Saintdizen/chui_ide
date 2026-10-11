@@ -43,6 +43,71 @@ export interface McpToolInfo {
   readOnly: boolean;
 }
 
+/**
+ * Потолки на внешние инструменты. Описания уходят модели в КАЖДОМ запросе,
+ * поэтому сервер с сотней инструментов съел бы окно сам по себе. Числа выбраны
+ * так, чтобы хватало на обычную установку (файловый сервер, git, память) и при
+ * этом оставался запас: дальше начинается уже «модель путается в выборе».
+ */
+export const MAX_MCP_TOOLS_PER_SERVER = 24;
+export const MAX_MCP_TOOLS = 64;
+
+/** Итог отбора: что предложим модели и по сколько инструментов пропущено. */
+export interface McpToolSelection {
+  offered: McpToolInfo[];
+  /** Сколько инструментов пропущено у каждого сервера (для пометки в настройках). */
+  skippedByServer: Record<string, number>;
+  /** Сколько пропущено всего. */
+  skipped: number;
+}
+
+/**
+ * Отобрать инструменты, которые пойдут модели. Порядок стабильный — по серверу и
+ * имени: иначе набор «прыгал» бы между шагами, а с ним и кеш промпта.
+ *
+ * Обрезка осознанно простая: список сервера — не приоритетный, а произвольный,
+ * и угадать, какие из двухсот инструментов нужнее, мы всё равно не можем.
+ * Поэтому берём первые по алфавиту, а сколько пропущено — показываем в настройках,
+ * чтобы человек знал про потолок, а не считал список полным.
+ */
+export function selectMcpTools(
+  tools: readonly McpToolInfo[],
+  limits: { perServer?: number; total?: number } = {},
+): McpToolSelection {
+  const perServerLimit = Math.max(1, limits.perServer ?? MAX_MCP_TOOLS_PER_SERVER);
+  const totalLimit = Math.max(1, limits.total ?? MAX_MCP_TOOLS);
+
+  const ordered = [...tools].sort((a, b) =>
+    a.serverId === b.serverId ? a.exposedName.localeCompare(b.exposedName) : a.serverId.localeCompare(b.serverId),
+  );
+
+  const offered: McpToolInfo[] = [];
+  const taken = new Map<string, number>();
+  const skippedByServer: Record<string, number> = {};
+  let skipped = 0;
+
+  const skip = (serverId: string): void => {
+    skippedByServer[serverId] = (skippedByServer[serverId] ?? 0) + 1;
+    skipped += 1;
+  };
+
+  for (const tool of ordered) {
+    if (offered.length >= totalLimit) {
+      skip(tool.serverId);
+      continue;
+    }
+    const seen = taken.get(tool.serverId) ?? 0;
+    if (seen >= perServerLimit) {
+      skip(tool.serverId);
+      continue;
+    }
+    taken.set(tool.serverId, seen + 1);
+    offered.push(tool);
+  }
+
+  return { offered, skippedByServer, skipped };
+}
+
 /** Привести часть имени к допустимым символам: буквы, цифры, `_`, `-`. */
 function sanitizePart(value: string): string {
   return value

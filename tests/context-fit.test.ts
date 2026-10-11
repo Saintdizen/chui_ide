@@ -90,6 +90,26 @@ describe('estimateContextParts', () => {
     });
     expect(parts.files).toBeGreaterThan(0);
   });
+
+  it('без веса инструментов считает по всему списку', () => {
+    expect(estimateContextParts({ ...base, tools: true }).tools).toBeGreaterThan(0);
+    expect(estimateContextParts({ ...base, tools: false }).tools).toBe(0);
+  });
+
+  it('реальный вес из прогона важнее расчёта по списку', () => {
+    // Панель без этого показывала не то, что уходит: набор решает main (`canRun`
+    // плюс внешние инструменты), а общий список — только догадка.
+    const guessed = estimateContextParts({ ...base, tools: true }).tools;
+    const actual = estimateContextParts({ ...base, tools: true, toolsTokens: 1234 }).tools;
+    expect(actual).toBe(1234);
+    expect(actual).not.toBe(guessed);
+  });
+
+  it('нулевой вес из прогона — тоже факт, а не «неизвестно»', () => {
+    // Режим «Вопрос»: инструменты выключены, прогон сообщил 0. Брать вместо него
+    // оценку по списку значило бы показать несуществующий расход.
+    expect(estimateContextParts({ ...base, tools: true, toolsTokens: 0 }).tools).toBe(0);
+  });
 });
 
 describe('contextUsage', () => {

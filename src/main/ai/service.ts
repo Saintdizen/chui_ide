@@ -40,7 +40,7 @@ import { RpcFailure } from '../ipc/router';
 import { scanProject } from '../project/scan';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
-import type { McpToolInfo } from '../../shared/mcp';
+import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
 import {
   runTool,
   type BrowserTools,
@@ -570,6 +570,21 @@ export class AiService {
     const windowTokens = contextWindow(request.model, settings.ai.contextWindow);
     const toolsTokens = tools ? estimateTokens(JSON.stringify(tools).length) : 0;
 
+    // Отказ вместо пустого прогона: если описания инструментов (или вместе с
+    // запасом под ответ) уже не влезают в окно, шага не получится вовсе —
+    // запрос отвергнет сам провайдер, а причина осталась бы невидимой. Числа
+    // называем прямо, чтобы человек знал, что делать: взять модель с окном
+    // побольше или выключить лишние наборы инструментов.
+    if (tools && windowTokens - toolsTokens - maxTokens <= 0) {
+      throw new RpcFailure(
+        RpcErrorCode.InvalidParams,
+        `Инструменты не помещаются в окно модели: окно ${windowTokens} токенов, описания инструментов — ` +
+          `${toolsTokens}${maxTokens > 0 ? `, запас под ответ — ${maxTokens}` : ''}. ` +
+          'Возьмите модель с большим окном (или увеличьте «Контекстное окно» в настройках), ' +
+          'либо выключите лишние наборы инструментов: браузер, веб-поиск или серверы MCP.',
+      );
+    }
+
     // Вся ветка, порождённая этим вызовом. Renderer дописывает её в историю —
     // поэтому в следующем вопросе модель помнит, что успела прочитать.
     const produced: ChatMessage[] = [];
@@ -582,8 +597,18 @@ export class AiService {
     let runUsage: ChatUsage = {};
     let runSteps = 0;
     let runToolCalls = 0;
-    /** След прогона для наблюдаемости: сколько шагов, вызовов и токенов он стоил. */
-    const trace = (): ChatRunTrace => ({ steps: runSteps, toolCalls: runToolCalls, usage: runUsage });
+    /**
+     * След прогона для наблюдаемости: сколько шагов, вызовов и токенов он стоил.
+     * Вес описаний инструментов отдаём здесь же — renderer без него оценивал бы
+     * по всему списку и ошибался бы в обе стороны (лишние выключенные плюс
+     * неучтённые внешние).
+     */
+    const trace = (): ChatRunTrace => ({
+      steps: runSteps,
+      toolCalls: runToolCalls,
+      usage: runUsage,
+      toolsTokens,
+    });
 
     // Дедупликация вызовов в рамках одной ветки: одинаковый read-only вызов
     // не исполняется дважды, а если шаг целиком состоит из повторов — цикл
@@ -1103,15 +1128,17 @@ export class AiService {
       return [];
     }
 
-    return tools
-      .filter((tool) => tool.readOnly || host?.confirmCommand !== undefined)
-      .map((tool) => ({
-        name: tool.exposedName,
-        // Описание даёт сервер, но может его и не дать: пустое описание модель
-        // прочитает как «непонятно что», поэтому подставляем своё.
-        description: tool.description || `Внешний инструмент «${tool.toolName}» сервера «${tool.serverId}» (MCP)`,
-        inputSchema: tool.inputSchema,
-      }));
+    // Сперва отсеиваем то, что заведомо не сработает без подтверждения, затем
+    // применяем потолки: описание каждого инструмента уходит в КАЖДЫЙ запрос, и
+    // один сервер с парой сотен инструментов съел бы окно сам по себе.
+    const usable = tools.filter((tool) => tool.readOnly || host?.confirmCommand !== undefined);
+    return selectMcpTools(usable).offered.map((tool) => ({
+      name: tool.exposedName,
+      // Описание даёт сервер, но может его и не дать: пустое описание модель
+      // прочитает как «непонятно что», поэтому подставляем своё.
+      description: tool.description || `Внешний инструмент «${tool.toolName}» сервера «${tool.serverId}» (MCP)`,
+      inputSchema: tool.inputSchema,
+    }));
   }
 
   /**

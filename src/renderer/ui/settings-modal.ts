@@ -289,10 +289,22 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       .map((server) => {
         if (server.error) return `${server.id}: ${server.error}`;
         if (server.tools.length === 0) return `${server.id}: инструментов не объявлено`;
+        // У инструмента за потолком помечаем, что модели он не достанется: иначе
+        // список выглядел бы полным, а часть описаний молча не уходила бы.
         const names = server.tools
-          .map((tool) => `${tool.name}${tool.readOnly ? '' : ' (спросит подтверждение)'}`)
+          .map((tool) => {
+            const notes = [
+              tool.readOnly ? '' : 'спросит подтверждение',
+              tool.offered ? '' : 'за потолком — модели не предлагается',
+            ]
+              .filter(Boolean)
+              .join(', ');
+            return notes ? `${tool.name} (${notes})` : tool.name;
+          })
           .join(', ');
-        return `${server.id}: инструментов ${server.tools.length} — ${names}`;
+        const hidden = server.tools.filter((tool) => !tool.offered).length;
+        if (hidden === 0) return `${server.id}: инструментов ${server.tools.length} — ${names}`;
+        return `${server.id}: инструментов ${server.tools.length}, модели пойдёт ${server.tools.length - hidden} — ${names}`;
       })
       .join('\n');
   }

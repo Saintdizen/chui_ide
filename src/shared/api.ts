@@ -859,7 +859,13 @@ export interface McpServerTools {
   id: string;
   /** Ошибка запуска или связи; нет — сервер ответил. */
   error?: string;
-  tools: Array<{ name: string; description: string; readOnly: boolean }>;
+  tools: Array<{
+    name: string;
+    description: string;
+    readOnly: boolean;
+    /** Пойдёт ли инструмент модели: за потолком остаётся `false`. */
+    offered: boolean;
+  }>;
 }
 
 /**
@@ -1008,6 +1014,13 @@ export interface ChatRunTrace {
   toolCalls: number;
   /** Суммарный расход токенов за весь прогон. */
   usage: ChatUsage;
+  /**
+   * Сколько контекста заняли описания инструментов, реально ушедших в этом
+   * прогоне. Число знает только main: какой набор предложить, решает `canRun`
+   * (наличие git, терминалов, языкового сервера, MCP), а renderer этого не
+   * видит и оценивал бы по всему списку — то есть врал бы в обе стороны.
+   */
+  toolsTokens?: number;
 }
 
 export interface ChatStreamDone {
