@@ -77,6 +77,10 @@ npm run smoke:launcher   # стартовое окно и переход в IDE:
 npm run smoke:map        # карта проекта: что уходит модели в промпте и что отвечает project_map
 npm run smoke:browser    # браузер агента: свой Chromium по CDP на локальной странице
 npm run smoke:sandbox    # песочница: команды в настоящем контейнере (нужен docker или podman)
+npm run smoke:host       # обратный мост main → renderer: результат, ошибки и отмена
+npm run smoke:agent-terminal  # инструменты терминала агента на фейковом pty: провод, ANSI, подтверждение
+npm run smoke:anthropic  # Anthropic Messages API без сети: поток SSE, инструменты, thinking, картинки
+npm run smoke:edits      # правки на не-ASCII тексте: «применено 1» и файл действительно изменился
 ```
 
 Когда проверка должна заглянуть внутрь настоящего окна IDE, берём «пробники» — они не
