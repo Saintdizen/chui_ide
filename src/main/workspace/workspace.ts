@@ -417,7 +417,7 @@ export class WorkspaceService {
    */
   async findFiles(glob?: string, limit = 200): Promise<string[]> {
     const root = this.requireRoot();
-    const matcher = glob && glob.trim() ? globToRegExp(glob.trim()) : null;
+    const matcher = glob?.trim() ? globToRegExp(glob.trim()) : null;
     const cap = Math.min(Math.max(limit, 1), 2000);
 
     const files = await this.collectFiles();
@@ -442,7 +442,7 @@ export class WorkspaceService {
   async replace(options: ReplaceFilesOptions): Promise<{ files: string[]; replaced: number }> {
     const root = this.requireRoot();
     const targets = await this.collectFiles();
-    const matcher = options.glob && options.glob.trim() ? globToRegExp(options.glob.trim()) : null;
+    const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
     const changed: string[] = [];
     let replaced = 0;
 

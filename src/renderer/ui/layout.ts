@@ -169,13 +169,13 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
       return readLayoutSize(root, '--dock-size');
     },
     setSidebarSize(size: number) {
-      root.style.setProperty('--sidebar-size', String(Math.round(size)) + 'px');
+      root.style.setProperty('--sidebar-size', `${Math.round(size)}px`);
     },
     setRightSize(size: number) {
-      root.style.setProperty('--right-size', String(Math.round(size)) + 'px');
+      root.style.setProperty('--right-size', `${Math.round(size)}px`);
     },
     setDockSize(size: number) {
-      root.style.setProperty('--dock-size', String(Math.round(size)) + 'px');
+      root.style.setProperty('--dock-size', `${Math.round(size)}px`);
     },
   };
 }

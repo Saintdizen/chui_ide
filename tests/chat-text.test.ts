@@ -108,7 +108,7 @@ describe('snippetFor', () => {
   });
 
   it('возвращает окрестность совпадения', () => {
-    const text = 'а'.repeat(100) + 'ИСКОМОЕ' + 'б'.repeat(100);
+    const text = `${'а'.repeat(100)}ИСКОМОЕ${'б'.repeat(100)}`;
     const snippet = snippetFor(text, 'искомое');
     expect(snippet).toContain('ИСКОМОЕ');
     expect(snippet!.length).toBeLessThan(text.length);

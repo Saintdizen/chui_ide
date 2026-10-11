@@ -34,7 +34,7 @@ describe('меню приложения', () => {
     expect(APP_MENU.length).toBeGreaterThan(0);
     for (const group of APP_MENU) {
       expect(group.label).toBeTruthy();
-      expect(group.children && group.children.length).toBeTruthy();
+      expect(group.children?.length).toBeTruthy();
     }
   });
 

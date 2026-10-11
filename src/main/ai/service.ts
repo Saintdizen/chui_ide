@@ -705,7 +705,7 @@ export class AiService {
   private saveCalibration(): void {
     try {
       const file = calibrationPath(this.settings.file());
-      const temporary = file + '.tmp';
+      const temporary = `${file}.tmp`;
       writeFileSync(temporary, JSON.stringify(this.calibration.snapshot()), 'utf8');
       renameSync(temporary, file);
     } catch {
