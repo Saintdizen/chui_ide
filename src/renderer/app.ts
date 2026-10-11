@@ -7,6 +7,7 @@ import {
   type WorkspaceChangedPayload,
 } from '../shared/api';
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
+import { menuChecks } from '../shared/app-menu';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
@@ -1737,6 +1738,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       {
         execute: (command) => void commands.execute(command),
         runRole: (role) => void rpc.request('menu.role', { role }),
+        checks: menuChecks({
+          sidebar: layout.sidebarVisible,
+          aiPanel: aiEnabled() && chatVisible(),
+          terminal: layout.dockVisible && dock.activeId === 'terminal',
+          theme: theme.selected,
+        }),
       },
       () => menuButton.classList.remove('is-menu-open'),
     );
@@ -1904,11 +1911,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Имя открытого файла — в центре шапки; его сменяет кнопка запуска, когда есть
     // что запускать, и оно остаётся запасным вариантом на пустом месте.
     const project = workspace.current?.name;
-    topBarName.textContent = active
-      ? project
-        ? `${basename(active.path)} — ${project}`
-        : basename(active.path)
-      : 'chui_iDE';
+    // Имя файла и проекта — и в шапке, и в заголовке окна. Заголовок описывает
+    // содержимое, а не повторяет имя приложения: оно тут только запасной вариант,
+    // когда ничего не открыто.
+    const title = active ? (project ? `${basename(active.path)} — ${project}` : basename(active.path)) : 'chui_iDE';
+    topBarName.textContent = title;
+    document.title = title;
     // Название приложения — моношрифтом (JetBrains Mono), имя файла — интерфейсным.
     topBarName.classList.toggle('is-brand', !active);
     topBarName.title = active?.path ?? 'chui_iDE';

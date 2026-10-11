@@ -13,6 +13,11 @@ export interface AppMenuDeps {
   execute(command: string): void;
   /** Действие, которое умеет только main: буфер обмена, масштаб, окно. */
   runRole(role: MenuRole): void;
+  /**
+   * Состояние пунктов-переключателей по идентификатору команды. Есть запись —
+   * пункт получает отметку слева; нет — обычный пункт без отметки.
+   */
+  checks: Readonly<Record<string, boolean>>;
 }
 
 export function showApplicationMenu(anchor: HTMLElement, deps: AppMenuDeps, onClose?: () => void): void {
@@ -38,7 +43,13 @@ function toItems(nodes: readonly MenuNode[], deps: AppMenuDeps): PopupMenuItem[]
     }
     if (node.command) {
       const command = node.command;
-      items.push({ label: node.label ?? command, hint: node.accelerator, onSelect: () => deps.execute(command) });
+      const checked = deps.checks[command];
+      items.push({
+        label: node.label ?? command,
+        hint: node.accelerator,
+        onSelect: () => deps.execute(command),
+        ...(checked === undefined ? {} : { checked }),
+      });
     }
   }
 

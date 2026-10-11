@@ -4196,6 +4196,18 @@ textarea {
   color: var(--text_color_hover);
 }
 
+/* Отметка пункта-переключателя. Столбец под неё зарезервирован у всего уровня,
+   поэтому подписи не смещаются вбок из-за того, что у одного пункта есть отметка. */
+.context-check {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-left: -3px;
+  color: var(--accent_fill);
+}
+
 /* Подпись пункта занимает свободное место и обрезается многоточием: подсказка
    справа (команда запуска, горячая клавиша) не должна растягивать панель. */
 .context-label {
@@ -4757,15 +4769,6 @@ textarea {
   max-width: 240px;
   min-height: 22px;
   margin-left: auto;
-}
-
-/* Расхождение с удалённой веткой: ↑ уехало, ↓ не подтянуто. Держим у кнопок синхронизации. */
-.sc-sync-state {
-  flex: 0 0 auto;
-  color: var(--text_color_tertiary);
-  font-family: var(--font_mono);
-  font-size: var(--font_small_size);
-  white-space: nowrap;
 }
 
 .sc-commit-box {

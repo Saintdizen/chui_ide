@@ -125,3 +125,36 @@ const PYTHON: MenuNode = {
 
 /** Верхний уровень: те же группы, что в системном меню. */
 export const APP_MENU: readonly MenuNode[] = [FILE, EDIT, VIEW, AI, PYTHON];
+
+/** Команды-переключатели: их состояние меню показывает отметкой слева. */
+export const MENU_TOGGLES = {
+  sidebar: 'view.toggleSidebar',
+  aiPanel: 'view.toggleRight',
+  terminal: 'view.showTerminal',
+  themeDark: 'view.theme.dark',
+  themeLight: 'view.theme.light',
+  themeSystem: 'view.theme.system',
+} as const;
+
+/** Что включено прямо сейчас: про панели и тему меню иначе молчит. */
+export interface MenuState {
+  sidebar: boolean;
+  aiPanel: boolean;
+  terminal: boolean;
+  theme: 'dark' | 'light' | 'system';
+}
+
+/**
+ * Состояние переключателей меню по идентификатору команды. Живёт рядом с шаблоном:
+ * так отметки и сами пункты не разъедутся, и это проверяется тестом без DOM.
+ */
+export function menuChecks(state: MenuState): Record<string, boolean> {
+  return {
+    [MENU_TOGGLES.sidebar]: state.sidebar,
+    [MENU_TOGGLES.aiPanel]: state.aiPanel,
+    [MENU_TOGGLES.terminal]: state.terminal,
+    [MENU_TOGGLES.themeDark]: state.theme === 'dark',
+    [MENU_TOGGLES.themeLight]: state.theme === 'light',
+    [MENU_TOGGLES.themeSystem]: state.theme === 'system',
+  };
+}

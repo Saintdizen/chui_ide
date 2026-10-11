@@ -15,6 +15,11 @@ export type PopupMenuItem =
       /** Подсказка справа: горячая клавиша или пояснение. */
       hint?: string;
       danger?: boolean;
+      /**
+       * Пункт-переключатель: `true`/`false` — состояние, отсутствие поля — не переключатель.
+       * Отметка слева показывает, что включено прямо сейчас (тема, видимость панели).
+       */
+      checked?: boolean;
       /** Подменю: открывается рядом с пунктом. */
       submenu?: readonly PopupMenuItem[];
       onSelect?(): void;
@@ -57,6 +62,9 @@ export function isPopupOpen(): boolean {
  */
 function buildLevel(level: Level): void {
   const menu = level.menu;
+  // Отметку состояния резервируем сразу для всего уровня: если она есть хоть у
+  // одного пункта, столбец под неё получают все — иначе подписи «пляшут» вбок.
+  const anyCheck = level.items.some((item) => 'checked' in item);
 
   for (const item of level.items) {
     if ('separator' in item) {
@@ -69,13 +77,17 @@ function buildLevel(level: Level): void {
       {
         class: `context-item${item.danger ? ' is-danger' : ''}${item.submenu ? ' has-submenu' : ''}`,
         type: 'button',
-        role: 'menuitem',
+        // Переключатель отдаём флажком: состояние читают и экранные читалки, а не
+        // только глаз по отметке слева.
+        role: 'checked' in item ? 'menuitemcheckbox' : 'menuitem',
+        'aria-checked': 'checked' in item ? String(item.checked) : undefined,
         'aria-haspopup': item.submenu ? 'true' : undefined,
         // Подсказку справа показываем одной строкой и обрезаем по ширине панели:
         // команды запуска длинные и растягивали меню на весь экран. Полный текст
         // остаётся в системной подсказке при наведении.
         title: item.hint && !item.submenu ? `${item.label} — ${item.hint}` : undefined,
       },
+      anyCheck ? h('span', { class: 'context-check' }, item.checked ? svgIcon('check', 13) : null) : null,
       h('span', { class: 'context-label' }, item.label),
       item.hint && !item.submenu ? h('span', { class: 'context-hint' }, item.hint) : null,
       item.submenu ? h('span', { class: 'context-arrow' }, svgIcon('chevron', 11)) : null,
