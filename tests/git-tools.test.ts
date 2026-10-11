@@ -21,6 +21,7 @@ function makeGit() {
     status: vi.fn(async () => STATUS),
     diffText: vi.fn(async () => ''),
     logText: vi.fn(async () => ''),
+    blame: vi.fn(async () => []),
     stage: vi.fn(async () => STATUS),
     unstage: vi.fn(async () => STATUS),
     commit: vi.fn(async () => ({ hash: 'abc1234', summary: 'done' })),
@@ -119,6 +120,20 @@ describe('граница рабочей папки', () => {
 
     expect(outcome.ok).toBe(false);
     expect(git.stage).not.toHaveBeenCalled();
+  });
+});
+
+describe('git_blame', () => {
+  it('читает происхождение строк и передаёт диапазон в сервис', async () => {
+    const git = makeGit();
+    git.blame.mockResolvedValueOnce([
+      { line: 5, hash: 'abc1234', author: 'Alice', date: '2026-01-01', summary: 'fix', text: 'code' },
+    ]);
+    const outcome = await runTool(context(git), 'git_blame', `{"path":"${ROOT}/a.ts","startLine":5,"endLine":5}`);
+
+    expect(outcome.ok).toBe(true);
+    expect(git.blame).toHaveBeenCalledWith(`${ROOT}/a.ts`, { startLine: 5, endLine: 5 });
+    expect(outcome.detail).toContain('Alice');
   });
 });
 

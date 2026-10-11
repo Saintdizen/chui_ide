@@ -15,6 +15,7 @@ import {
   type GitRepository,
   type GitStatus,
 } from '../../shared/api';
+import { parseBlamePorcelain, type BlameLine } from '../../shared/git-blame';
 import { RpcFailure } from '../ipc/router';
 
 const GIT_TIMEOUT_MS = 20_000;
@@ -206,6 +207,29 @@ export class GitService {
     // а это не сбой — просто истории ещё нет.
     const result = await this.exec(args, repoRoot, { allowFailure: true });
     return result.ok ? result.stdout : '';
+  }
+
+  /**
+   * Кто и когда менял строки файла. `range` ограничивает вывод строками — на
+   * большом файле blame целиком никому не нужен. Пустой список — файл не
+   * отслеживается или blame не сложился: это ответ, а не сбой.
+   */
+  async blame(filePath: string, range?: { startLine?: number; endLine?: number }): Promise<BlameLine[]> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    // `-L` требует обе границы: если задана только одна, вторую берём из файла.
+    const relative = path.relative(repoRoot, path.resolve(filePath));
+    const args = ['blame', '--line-porcelain'];
+    const start = range?.startLine;
+    const end = range?.endLine;
+    if (start !== undefined || end !== undefined) {
+      args.push('-L', `${Math.max(start ?? 1, 1)},${Math.max(end ?? start ?? 1, 1)}`);
+    }
+    args.push('--', relative);
+
+    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    return result.ok ? parseBlamePorcelain(result.stdout) : [];
   }
 
   async branches(): Promise<GitBranch[]> {

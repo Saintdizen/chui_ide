@@ -404,7 +404,7 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   `rename_symbol`),
   правки и файловые операции (`apply_edit`, `replace_in_files`, `create_file`, `delete_file`, `move_file`),
   запуск (`run_terminal`, `terminal_*`),
-  git — чтение (`git_status`, `git_diff`, `git_log`) и записи (`git_stage`, `git_unstage`, `git_commit`,
+  git — чтение (`git_status`, `git_diff`, `git_log`, `git_blame`) и записи (`git_stage`, `git_unstage`, `git_commit`,
   `git_checkout`, `git_discard`, `git_fetch`, `git_pull`, `git_push`),
   интерфейс (`open_file`) и `update_plan`. Где исполняется инструмент — свойство `side`
   контракта: файлы и git — в main, правки и диагностика — в renderer.
@@ -504,7 +504,9 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
 - `find_files` ищет по glob-маске пути (`**` — любая глубина, `*` — в пределах сегмента),
   `search` умеет учитывать регистр и режим `filesOnly` (только пути файлов с совпадением),
   `read_files` читает 2–5 файлов за один вызов, `replace_in_files` делает массовую замену
-  (с той же маской glob), `git_log` — read-only история коммитов.
+  (с той же маской glob), `git_log` — read-only история коммитов, `git_blame` — кто и когда менял
+  строки файла (автор, коммит, его сообщение; `startLine`/`endLine` сужают вывод) — разбор
+  `git blame --line-porcelain` в `src/shared/git-blame.ts`.
   Разбор маски — в `src/shared/glob.ts`, замена — в `src/shared/replace.ts`.
 - Git у ассистента — не только чтение: `git_status`/`git_diff`/`git_log` показывают состояние, а
   `git_stage`, `git_unstage`, `git_commit`, `git_checkout`, `git_discard`, `git_fetch`, `git_pull`,

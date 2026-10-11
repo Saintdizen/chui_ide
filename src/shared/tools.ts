@@ -39,6 +39,7 @@ export type AgentToolName =
   | 'git_status'
   | 'git_diff'
   | 'git_log'
+  | 'git_blame'
   | 'git_stage'
   | 'git_unstage'
   | 'git_commit'
@@ -494,6 +495,23 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         limit: { type: 'number', description: 'Сколько последних коммитов (по умолчанию 20, максимум 100).' },
         path: { type: 'string', description: 'Ограничить историю одним файлом (абсолютный путь).' },
       },
+    },
+  },
+  {
+    name: 'git_blame',
+    side: 'main',
+    description:
+      'Кто и когда менял строки файла: автор, коммит, его сообщение. Отвечает на «почему тут так» — ' +
+      'по сообщению коммита часто виден замысел, которого в коде уже нет. startLine/endLine сужают ' +
+      'вывод до нужного места. Read-only.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Абсолютный путь к файлу.' },
+        startLine: { type: 'number', description: 'Первая строка диапазона (1-based). Без него — с начала.' },
+        endLine: { type: 'number', description: 'Последняя строка диапазона (включительно).' },
+      },
+      required: ['path'],
     },
   },
   {

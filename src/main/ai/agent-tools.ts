@@ -12,6 +12,7 @@ import type {
   ToolFileChange,
 } from '../../shared/api';
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
+import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
@@ -55,6 +56,8 @@ export interface GitTools {
   diffText(path: string, staged?: boolean): Promise<string>;
   /** История коммитов текстом: hash, дата, автор, заголовок. */
   logText(limit?: number, path?: string): Promise<string>;
+  /** Происхождение строк файла: кто, когда и каким коммитом их менял. */
+  blame(filePath: string, range?: { startLine?: number; endLine?: number }): Promise<readonly BlameLine[]>;
   /** Записи: индексирование и коммит меняют состояние репозитория. */
   stage(paths: string[]): Promise<GitStatus>;
   unstage(paths: string[]): Promise<GitStatus>;
@@ -326,6 +329,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await gitDiff(ctx, parsed.value);
       case 'git_log':
         return await gitLog(ctx, parsed.value);
+      case 'git_blame':
+        return await gitBlame(ctx, parsed.value);
       case 'git_stage':
         return await gitStage(ctx, parsed.value);
       case 'git_unstage':
@@ -1429,6 +1434,23 @@ async function gitDiff(ctx: ToolContext, args: Record<string, unknown>): Promise
 
   const { text } = truncate(diff);
   return { ok: true, summary: `diff ${rel}${staged ? ' (индекс)' : ''}`, detail: text };
+}
+
+/**
+ * Происхождение строк файла: кто, когда и каким коммитом их менял. Отвечает на
+ * «почему тут так» — по автору и сообщению коммита часто видно замысел, которого
+ * в коде уже нет. Чтение: ничего не меняет. `startLine`/`endLine` сужают вывод.
+ */
+async function gitBlame(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
+
+  const target = requireString(args, 'path');
+  const startLine = optionalInteger(args, 'startLine');
+  const endLine = optionalInteger(args, 'endLine');
+  const lines: readonly BlameLine[] = await ctx.git.blame(target, { startLine, endLine });
+  const rel = relative(target, ctx.workspace.rootPath());
+  const report = formatBlame(rel, lines);
+  return { ok: true, summary: report.summary, detail: report.detail };
 }
 
 /* ── git: правки репозитория ────────────────────────────────────────────── */

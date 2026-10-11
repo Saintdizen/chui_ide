@@ -112,6 +112,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'git_status',
   'git_log',
   'git_diff',
+  'git_blame',
   'open_file',
   'update_plan',
 ]);
@@ -135,6 +136,7 @@ const READ_ONLY_TOOLS = new Set([
   'get_diagnostics',
   'git_status',
   'git_log',
+  'git_blame',
 ]);
 
 /** Дописывается в системный промпт, когда агентный режим включён. */
@@ -795,7 +797,12 @@ export class AiService {
     if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
     if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
     if (tool.name === 'open_file') return host?.openFile !== undefined;
-    if (tool.name === 'git_status' || tool.name === 'git_diff' || tool.name === 'git_log') {
+    if (
+      tool.name === 'git_status' ||
+      tool.name === 'git_diff' ||
+      tool.name === 'git_log' ||
+      tool.name === 'git_blame'
+    ) {
       return this.git !== undefined;
     }
     // Записи в репозиторий спрашивают подтверждение: без моста подтверждений их не предлагаем.

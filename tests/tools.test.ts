@@ -48,6 +48,7 @@ describe('набор инструментов агента', () => {
       'git_status',
       'git_diff',
       'git_log',
+      'git_blame',
       'git_stage',
       'git_unstage',
       'git_commit',

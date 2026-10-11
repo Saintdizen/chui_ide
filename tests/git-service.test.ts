@@ -125,6 +125,27 @@ describe('GitService: удалённые и сеть', () => {
     expect(await fs.readFile(path.join(work, 'b.txt'), 'utf8')).toBe('from peer\n');
   });
 
+  it('blame() называет автора строки и её коммит', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+
+    const lines = await serviceFor(work).blame(path.join(work, 'a.txt'));
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.text).toBe('one');
+    expect(lines[0]!.author).toBe('Test');
+    expect(lines[0]!.summary).toBe('init');
+    expect(lines[0]!.hash).toHaveLength(7);
+  });
+
+  it('blame() неотслеживаемого файла — пустой список, а не сбой', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    await fs.writeFile(path.join(work, 'new.txt'), 'x\n');
+
+    expect(await serviceFor(work).blame(path.join(work, 'new.txt'))).toEqual([]);
+  });
+
   it('push() без удалённого возвращает сбой текстом, а не бросает', async () => {
     if (!gitAvailable) return;
     const { work } = await makeRepos();
