@@ -118,6 +118,17 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
   const fetchButton = syncButton('Забрать изменения (git fetch)', 'refresh', 'git.fetch');
   const pullButton = syncButton('Влить изменения из удалённого (git pull)', 'arrowDown', 'git.pull');
   const pushButton = syncButton('Отправить коммиты (git push)', 'arrowUp', 'git.push');
+  // Отложенные изменения: своё окно — записи не мешают текущим правкам.
+  const stashButton = h(
+    'button',
+    {
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Отложенные изменения (stash)',
+      onClick: () => void deps.commands.execute('git.openStash'),
+    },
+    svgIcon('archive', 14),
+  );
 
   const element = h(
     'div',
@@ -135,6 +146,7 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
         fetchButton,
         pullButton,
         pushButton,
+        stashButton,
         newBranchButton,
         h(
           'button',
@@ -375,6 +387,7 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       : 'не репозиторий';
     branchSelect.setHidden(!isRepo);
     newBranchButton.hidden = !isRepo;
+    stashButton.hidden = !isRepo;
     // Синхронизация имеет смысл только в репозитории и только когда есть remote.
     void syncRemotes(isRepo);
     syncState.hidden = !isRepo || (repository?.ahead === 0 && repository?.behind === 0);

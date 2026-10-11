@@ -11,6 +11,7 @@ import {
   type GitStatus,
 } from '../../shared/api';
 import type { BlameLine } from '../../shared/git-blame';
+import type { GitStashEntry } from '../../shared/git-stash';
 import { Emitter } from './events';
 import { separatorOf } from '../../shared/paths';
 import type { RpcClient } from './rpc';
@@ -177,6 +178,38 @@ export class GitModel {
   /** Содержимое файла в HEAD — база для полосок изменений в жёлобе. */
   headText(path: string): Promise<string | null> {
     return this.rpc.request('git.headText', { path });
+  }
+
+  /* ── отложенные изменения (stash) ─────────────────────────────────────── */
+
+  /** Список записей stash: свежая — первой. */
+  stashList(): Promise<GitStashEntry[]> {
+    return this.rpc.request('git.stashList');
+  }
+
+  /** Отложить текущие правки; при `includeUntracked` в запись попадут и новые файлы. */
+  async stashSave(options: { message?: string; includeUntracked?: boolean } = {}): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.stashSave', options));
+  }
+
+  /** Применить запись, оставив её в списке. */
+  async stashApply(index: number): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.stashApply', { index }));
+  }
+
+  /** Применить запись и убрать из списка. */
+  async stashPop(index: number): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.stashPop', { index }));
+  }
+
+  /** Удалить запись, не трогая рабочее дерево. */
+  async stashDrop(index: number): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.stashDrop', { index }));
+  }
+
+  /** Полный патч записи — содержимое для просмотра. */
+  stashShow(index: number): Promise<string> {
+    return this.rpc.request('git.stashShow', { index });
   }
 
   /** Три версии конфликтного файла: общий предок и обе стороны. */

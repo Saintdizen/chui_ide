@@ -81,6 +81,7 @@ import { createPromptModal } from './ui/prompt-modal';
 import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
 import { createSourceControl } from './ui/source-control';
+import { createStashModal } from './ui/stash-modal';
 import { createStatusBar } from './ui/statusbar';
 import { createSettingsModal } from './ui/settings-modal';
 import { createTabs } from './ui/tabs';
@@ -1070,6 +1071,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const conditionInput = createPromptModal();
   document.body.appendChild(conditionInput.element);
 
+  // Отложенные изменения (stash): своё окно — открывается из панели изменений.
+  const stashModal = createStashModal({
+    git,
+    confirm: async (options) => {
+      const { confirmed } = await rpc.request('dialog.confirm', options);
+      return confirmed;
+    },
+    notify: (message) => showToast(message, 'error'),
+  });
+  document.body.appendChild(stashModal.element);
+
   /** Ввод одной строки как Promise: `null`, если окно закрыли без подтверждения. */
   const promptValue = (input: { title: string; label: string; value: string }): Promise<string | null> =>
     new Promise((resolve) => {
@@ -1822,6 +1834,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       showToast(on ? 'Полоски изменений включены' : 'Полоски изменений скрыты');
     },
   );
+
+  /** Отложенные изменения (stash): список записей и действия над ними. */
+  define({ id: 'git.openStash', title: 'Отложенные изменения (stash)', category: 'Git' }, async () => {
+    if (!git.isRepository) {
+      showToast('Рабочая папка не в репозитории git', 'error');
+      return;
+    }
+    await stashModal.open();
+  });
 
   /** История коммитов файла: выбор записи открывает сравнение с текущим текстом. */
   define({ id: 'git.fileHistory', title: 'История файла', category: 'Git' }, async (path) => {

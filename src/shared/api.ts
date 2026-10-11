@@ -12,6 +12,7 @@ import type { PatchFile } from './patch';
 import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
 import type { Snippet } from './snippets';
+import type { GitStashEntry } from './git-stash';
 import type { ThemeFile } from './theme-file';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { NodeTestSuite } from './node-tests';
@@ -1440,6 +1441,15 @@ export interface ChuiMethods {
    * файл вне репозитория; пустая строка — файл новый или без коммитов.
    */
   'git.headText': { params: { path: string }; result: string | null };
+
+  /* Отложенные изменения (stash): список, сохранить, применить, всплыть, удалить. */
+  'git.stashList': { params: void; result: GitStashEntry[] };
+  'git.stashSave': { params: { message?: string; includeUntracked?: boolean }; result: GitStatus };
+  'git.stashApply': { params: { index: number }; result: GitStatus };
+  'git.stashPop': { params: { index: number }; result: GitStatus };
+  'git.stashDrop': { params: { index: number }; result: GitStatus };
+  /** Полный патч записи — для просмотра содержимого. */
+  'git.stashShow': { params: { index: number }; result: string };
   /** Три версии конфликтного файла: общий предок и обе стороны. */
   'git.conflictParts': { params: { path: string }; result: GitConflictParts };
   /** Отметить конфликт решённым: содержимое файла уходит в индекс (`git add`). */

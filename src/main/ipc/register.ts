@@ -430,6 +430,14 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   );
   router.register('git.log', (params) => deps.git.log(params.limit, params.path));
   router.register('git.headText', (params) => deps.git.headText(params.path));
+
+  // Отложенные изменения: список, сохранение, применение, удаление и просмотр.
+  router.register('git.stashList', () => deps.git.stashList());
+  router.register('git.stashSave', (params) => deps.git.stashSave(params));
+  router.register('git.stashApply', (params) => deps.git.stashApply(params.index));
+  router.register('git.stashPop', (params) => deps.git.stashPop(params.index));
+  router.register('git.stashDrop', (params) => deps.git.stashDrop(params.index));
+  router.register('git.stashShow', (params) => deps.git.stashShow(params.index));
   router.register('git.conflictParts', (params) => deps.git.conflictParts(params.path));
   router.register('git.markResolved', (params) => deps.git.markResolved(params.path));
   router.register('git.branches', () => deps.git.branches());

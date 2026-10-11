@@ -214,6 +214,48 @@ describe('GitService: удалённые и сеть', () => {
     await expect(serviceFor(base).commit('', undefined, true)).rejects.toThrow();
   });
 
+  it('stash: сохранить, показать, всплыть', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const service = serviceFor(work);
+    await fs.writeFile(path.join(work, 'a.txt'), 'one\ntwo\n');
+
+    await service.stashSave({ message: 'моя правка' });
+    // Рабочее дерево вернулось к HEAD, правка уехала в запись.
+    expect(await fs.readFile(path.join(work, 'a.txt'), 'utf8')).toBe('one\n');
+
+    const list = await service.stashList();
+    expect(list).toHaveLength(1);
+    expect(list[0]!.message).toBe('моя правка');
+    expect(list[0]!.branch).toBeTruthy();
+
+    expect(await service.stashShow(0)).toContain('two');
+
+    await service.stashPop(0);
+    expect(await fs.readFile(path.join(work, 'a.txt'), 'utf8')).toBe('one\ntwo\n');
+    expect(await service.stashList()).toEqual([]);
+  });
+
+  it('stash: apply оставляет запись, drop её удаляет', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    const service = serviceFor(work);
+    await fs.writeFile(path.join(work, 'a.txt'), 'one\nx\n');
+    await service.stashSave();
+
+    await service.stashApply(0);
+    expect(await service.stashList()).toHaveLength(1);
+
+    await service.stashDrop(0);
+    expect(await service.stashList()).toEqual([]);
+  });
+
+  it('stash: список пуст в чистом репозитории', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    expect(await serviceFor(work).stashList()).toEqual([]);
+  });
+
   it('push() без удалённого возвращает сбой текстом, а не бросает', async () => {
     if (!gitAvailable) return;
     const { work } = await makeRepos();

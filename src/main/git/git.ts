@@ -19,6 +19,7 @@ import {
 } from '../../shared/api';
 import { parseBlamePorcelain, type BlameLine } from '../../shared/git-blame';
 import { hunkPatch, hunkRanges } from '../../shared/git-hunks';
+import { parseStashList, type GitStashEntry } from '../../shared/git-stash';
 import { RpcFailure } from '../ipc/router';
 
 const GIT_TIMEOUT_MS = 20_000;
@@ -478,6 +479,74 @@ export class GitService {
     if (!repoRoot) return null;
     const relative = path.relative(repoRoot, path.resolve(filePath));
     return this.show(`HEAD:${relative}`, repoRoot);
+  }
+
+  /* ── отложенные изменения (stash) ─────────────────────────────────────── */
+
+  /** Список записей stash: свежая — первой. */
+  async stashList(): Promise<GitStashEntry[]> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) return [];
+    const result = await this.exec(['stash', 'list', '--format=%gd%x1f%gs'], repoRoot, { allowFailure: true });
+    return parseStashList(result.stdout);
+  }
+
+  /**
+   * Отложить текущие правки. `git stash push` без изменений ничего не делает
+   * и завершается успешно — это не сбой, а пустой результат.
+   */
+  async stashSave(options: { message?: string; includeUntracked?: boolean } = {}): Promise<GitStatus> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    const args = ['stash', 'push'];
+    if (options.includeUntracked) args.push('--include-untracked');
+    const message = options.message?.trim();
+    if (message) args.push('-m', message);
+    await this.exec(args, repoRoot);
+    return this.refresh();
+  }
+
+  /** Применить запись, оставив её в списке. */
+  async stashApply(index: number): Promise<GitStatus> {
+    return this.stashOp('apply', index);
+  }
+
+  /** Применить запись и убрать из списка. */
+  async stashPop(index: number): Promise<GitStatus> {
+    return this.stashOp('pop', index);
+  }
+
+  /** Удалить запись, не трогая рабочее дерево. */
+  async stashDrop(index: number): Promise<GitStatus> {
+    return this.stashOp('drop', index);
+  }
+
+  /** Полный патч записи — содержимое для просмотра. */
+  async stashShow(index: number): Promise<string> {
+    const { repoRoot, ref } = await this.locateStash(index);
+    const result = await this.exec(['stash', 'show', '-p', '--no-color', '--no-ext-diff', ref], repoRoot, {
+      allowFailure: true,
+    });
+    // Пусто — в записи нет правок отслеживаемых файлов (бывают только новые):
+    // скажем это словами, а не пустым экраном.
+    return result.stdout.trim() ? result.stdout : 'В этой записи нет правок отслеживаемых файлов.';
+  }
+
+  private async stashOp(op: 'apply' | 'pop' | 'drop', index: number): Promise<GitStatus> {
+    const { repoRoot, ref } = await this.locateStash(index);
+    await this.exec(['stash', op, ref], repoRoot);
+    return this.refresh();
+  }
+
+  /** Проверить номер записи и получить её ссылку. */
+  private async locateStash(index: number): Promise<{ repoRoot: string; ref: string }> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+    if (!Number.isInteger(index) || index < 0) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Номер записи stash — целое число, начиная с нуля');
+    }
+    return { repoRoot, ref: `stash@{${index}}` };
   }
 
   /* ── внутреннее ────────────────────────────────────────────────────────── */

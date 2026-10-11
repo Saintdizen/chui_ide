@@ -167,6 +167,9 @@ module.exports = [
     ],
   };
 
+  // Отложенные изменения в моке: список, который правится действиями окна stash.
+  const mockStash = [{ index: 0, ref: 'stash@{0}', message: 'мок-доработка', branch: 'main' }];
+
   const gitBranches = [
     { name: 'main', current: true, remote: false },
     { name: 'feat/git', current: false, remote: false },
@@ -396,6 +399,23 @@ module.exports = [
     'git.log': () => [{ hash: 'abc1234', author: 'Мок', date: '2024-01-02', summary: 'первый коммит' }],
     // База для полосок изменений: в моке считаем, что в HEAD файл был короче.
     'git.headText': () => 'строка первая\nстрока вторая\n',
+    // Отложенные изменения: список и действия.
+    'git.stashList': () => mockStash.map((entry, index) => ({ ...entry, index, ref: `stash@{${index}}` })),
+    'git.stashSave': (params) => {
+      gitState.files = [];
+      mockStash.unshift({ index: 0, ref: 'stash@{0}', message: params.message || 'WIP', branch: 'main' });
+      return gitChanged();
+    },
+    'git.stashApply': () => gitChanged(),
+    'git.stashPop': () => {
+      mockStash.shift();
+      return gitChanged();
+    },
+    'git.stashDrop': (params) => {
+      mockStash.splice(params.index, 1);
+      return gitChanged();
+    },
+    'git.stashShow': () => 'diff --git a/README.md b/README.md\n@@ -1 +1 @@\n-старое\n+новое\n',
     // Стороны конфликта: в моке все три — один и тот же текст файла.
     'git.conflictParts': (params) => {
       const file = gitState.files.find((item) => item.path === params.path);
