@@ -9,6 +9,7 @@ import {
   type GitChange,
   type GitCommit,
   type GitCommitInfo,
+  type GitConflictParts,
   type GitDiff,
   type GitFileStatus,
   type GitNetworkResult,
@@ -308,6 +309,34 @@ export class GitService {
 
     const result = await this.exec(args, repoRoot, { allowFailure: true });
     return result.ok ? parseBlamePorcelain(result.stdout) : [];
+  }
+
+  /**
+   * Три версии конфликтного файла из индекса: общий предок и обе стороны.
+   * Нет объекта в индексе (файл добавлен только одной стороной) — пустая строка:
+   * для интерфейса это «сравнивать не с чем», а не ошибка.
+   */
+  async conflictParts(filePath: string): Promise<GitConflictParts> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    const relative = path.relative(repoRoot, path.resolve(filePath));
+    const [base, ours, theirs] = await Promise.all([
+      this.show(`:1:${relative}`, repoRoot),
+      this.show(`:2:${relative}`, repoRoot),
+      this.show(`:3:${relative}`, repoRoot),
+    ]);
+    return { base, ours, theirs };
+  }
+
+  /**
+   * Отметить конфликт решённым: содержимое рабочего файла уходит в индекс.
+   * Отдельно от `stage`: `add -A` тронул бы и соседние пути, а тут нужен ровно этот.
+   */
+  async markResolved(filePath: string): Promise<GitStatus> {
+    const { repoRoot, relative } = await this.locateHunk(filePath);
+    await this.exec(['add', '--', relative], repoRoot);
+    return this.refresh();
   }
 
   async branches(): Promise<GitBranch[]> {

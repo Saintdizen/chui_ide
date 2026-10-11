@@ -3,6 +3,7 @@ import {
   type GitBranch,
   type GitCommit,
   type GitCommitInfo,
+  type GitConflictParts,
   type GitDiff,
   type GitFileStatus,
   type GitNetworkResult,
@@ -171,6 +172,16 @@ export class GitModel {
   /** История коммитов: без пути — всего репозитория, с путём — только трогавшие файл. */
   log(path?: string, limit = 50): Promise<GitCommit[]> {
     return this.rpc.request('git.log', { path, limit });
+  }
+
+  /** Три версии конфликтного файла: общий предок и обе стороны. */
+  conflictParts(path: string): Promise<GitConflictParts> {
+    return this.rpc.request('git.conflictParts', { path });
+  }
+
+  /** Отметить конфликт решённым: текущее содержимое файла уходит в индекс. */
+  async markResolved(path: string): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.markResolved', { path }));
   }
 
   /** Проиндексировать один блок изменений файла (не весь файл). */

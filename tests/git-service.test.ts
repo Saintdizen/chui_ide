@@ -287,3 +287,65 @@ describe('GitService: история и просмотр против комми
     expect(diff.hunks).toEqual([]);
   });
 });
+
+describe('GitService: конфликты слияния', () => {
+  /**
+   * Репозиторий с настоящим конфликтом: обе ветки правят одну строку.
+   * Возвращает имя файла и ожидаемые стороны.
+   */
+  async function makeConflict(): Promise<{ work: string; file: string }> {
+    const { work, branch } = await makeRepos();
+    const file = path.join(work, 'conflict.txt');
+    await fs.writeFile(file, 'base\n');
+    await git(work, ['add', '-A']);
+    await git(work, ['commit', '-q', '-m', 'base']);
+
+    // Ветка со своей правкой той же строки.
+    await git(work, ['checkout', '-q', '-b', 'feature']);
+    await fs.writeFile(file, 'feature\n');
+    await git(work, ['add', '-A']);
+    await git(work, ['commit', '-q', '-m', 'feature edit']);
+
+    // Возвращаемся на основную ветку и правим ту же строку иначе — слияние конфликтует.
+    await git(work, ['checkout', '-q', branch]);
+    await fs.writeFile(file, 'main\n');
+    await git(work, ['add', '-A']);
+    await git(work, ['commit', '-q', '-m', 'main edit']);
+    await git(work, ['merge', 'feature']);
+    return { work, file };
+  }
+
+  it('статус показывает конфликтный файл', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeConflict();
+
+    const status = await serviceFor(work).status();
+
+    expect(status.files.find((item) => item.path === file)?.change).toBe('conflicted');
+  });
+
+  it('conflictParts() отдаёт общий предок и обе стороны', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeConflict();
+
+    const parts = await serviceFor(work).conflictParts(file);
+
+    expect(parts.base).toBe('base\n');
+    expect(parts.ours).toBe('main\n');
+    expect(parts.theirs).toBe('feature\n');
+  });
+
+  it('markResolved() убирает конфликт, забрав текущий текст в индекс', async () => {
+    if (!gitAvailable) return;
+    const { work, file } = await makeConflict();
+    const service = serviceFor(work);
+
+    // «Разрешаем» вручную: пишем выбранный текст без маркеров.
+    await fs.writeFile(file, 'resolved\n');
+    const status = await service.markResolved(file);
+
+    const entry = status.files.find((item) => item.path === file);
+    expect(entry?.change).not.toBe('conflicted');
+    expect(entry?.staged).toBe(true);
+  });
+});

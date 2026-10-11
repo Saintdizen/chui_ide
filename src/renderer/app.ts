@@ -57,6 +57,7 @@ import { showApplicationMenu } from './ui/app-menu';
 import { createBreadcrumbs } from './ui/breadcrumbs';
 import { createChatPanel } from './ui/chat';
 import { createDock } from './ui/dock';
+import { createConflictView } from './ui/conflict-view';
 import { createDiffView } from './ui/diff-view';
 import { basename, clear, h, svgIcon, type IconName } from './ui/dom';
 import { createEmptyState } from './ui/empty-state';
@@ -407,6 +408,29 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     notify: (message) => showToast(message, 'error'),
   });
   layout.editorHost.appendChild(diffView.element);
+
+  // Разрешение конфликтов слияния: экран с обеими сторонами и выбором по блокам.
+  const conflictView = createConflictView({
+    createDiff: (container) => editors.createDiff(container),
+    git,
+    readText: async (path) => documents.get(path)?.value ?? (await rpc.request('workspace.readFile', { path })).text,
+    applyEdits: async (path, list) => {
+      // Документ и Monaco меняются вместе (см. EditService): правка попадает в undo
+      // и в сохранение, а не только в буфер.
+      const result = await edits.applyFileEdits([{ path, edits: [...list] }]);
+      const failure = result.failed[0];
+      if (failure) throw new Error(failure.message);
+    },
+    finish: async (path) => {
+      const document = await edits.ensureDocument(path);
+      const outcome = await edits.saveDocument(document);
+      if (outcome === 'conflict') throw new Error('Файл изменён на диске — сохраните вручную и отметьте решённым');
+      await git.markResolved(path);
+    },
+    openInEditor: (path) => void openPath(path),
+    notify: (message, kind) => showToast(message, kind === 'error' ? 'error' : 'info'),
+  });
+  layout.editorHost.appendChild(conflictView.element);
 
   const searchView = createSearchView({
     rpc,
@@ -1748,6 +1772,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       rect.top + 40,
       { anchor: layout.editorHost },
     );
+  });
+
+  /** Разрешить конфликт слияния: экран с обеими сторонами и выбором по блокам. */
+  define({ id: 'git.resolveConflicts', title: 'Разрешить конфликт слияния', category: 'Git' }, async (path) => {
+    const target = asPath(path) ?? editors.currentPath;
+    if (!target) {
+      showToast('Откройте файл с конфликтом', 'error');
+      return;
+    }
+    if (!(await conflictView.open(target))) showToast('В этом файле нет конфликтов слияния');
   });
 
   define({ id: 'git.checkout', title: 'Переключить ветку', category: 'Git' }, async (name) => {

@@ -353,6 +353,20 @@ export interface GitCommitInfo {
   summary: string;
 }
 
+/**
+ * Три версии файла из конфликта слияния: общий предок и две стороны.
+ * Пустая строка — соответствующего объекта в индексе нет (например, файл
+ * добавлен только одной стороной: у него нет ни базы, ни второй стороны).
+ */
+export interface GitConflictParts {
+  /** Общий предок (стадия 1). */
+  base: string;
+  /** Наша версия (стадия 2, HEAD). */
+  ours: string;
+  /** Их версия (стадия 3, входящая ветка). */
+  theirs: string;
+}
+
 /** Один коммит из истории: то, что нужно списку, без тела сообщения и диффа. */
 export interface GitCommit {
   /** Короткий хеш (7 символов), как его печатает git. */
@@ -1376,6 +1390,10 @@ export interface ChuiMethods {
   'git.blame': { params: { path: string; startLine?: number; endLine?: number }; result: BlameLine[] };
   /** История коммитов: все или только трогавшие указанный файл. */
   'git.log': { params: { path?: string; limit?: number }; result: GitCommit[] };
+  /** Три версии конфликтного файла: общий предок и обе стороны. */
+  'git.conflictParts': { params: { path: string }; result: GitConflictParts };
+  /** Отметить конфликт решённым: содержимое файла уходит в индекс (`git add`). */
+  'git.markResolved': { params: { path: string }; result: GitStatus };
   'git.branches': { params: void; result: GitBranch[] };
   'git.checkout': { params: { name: string; create?: boolean }; result: GitStatus };
   'git.remotes': { params: void; result: GitRemote[] };

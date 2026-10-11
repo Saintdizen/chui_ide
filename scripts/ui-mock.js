@@ -390,6 +390,13 @@ module.exports = [
       { line: params.startLine ?? 1, hash: 'abc1234', author: 'Мок', date: '2024-01-02', summary: 'правка', text: '' },
     ],
     'git.log': () => [{ hash: 'abc1234', author: 'Мок', date: '2024-01-02', summary: 'первый коммит' }],
+    // Стороны конфликта: в моке все три — один и тот же текст файла.
+    'git.conflictParts': (params) => {
+      const file = gitState.files.find((item) => item.path === params.path);
+      const text = fileText(file?.relative ?? '');
+      return { base: text, ours: text, theirs: text };
+    },
+    'git.markResolved': (params) => setStaged([params.path], true),
     'git.branches': () => gitBranches.map((branch) => ({ ...branch })),
     'git.checkout': (params) => {
       gitState.repository.branch = params.name;

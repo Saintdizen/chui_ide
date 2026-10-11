@@ -227,6 +227,17 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
         { label: 'Показать различия', onSelect: () => void deps.commands.execute('git.showDiff', file.path, staged) },
         { label: 'История файла', onSelect: () => void deps.commands.execute('git.fileHistory', file.path) },
         { label: 'Открыть файл', onSelect: () => void deps.commands.execute('file.revealAt', file.path, 1, 1) },
+        // У конфликтного файла предлагаем сначала разрешение: обычное сравнение
+        // здесь мало помогает — смотреть надо на обе стороны.
+        ...(file.change === 'conflicted'
+          ? [
+              { separator: true as const },
+              {
+                label: 'Разрешить конфликт',
+                onSelect: () => void deps.commands.execute('git.resolveConflicts', file.path),
+              },
+            ]
+          : []),
         { separator: true as const },
         staged
           ? { label: 'Убрать из индекса', onSelect: () => void deps.commands.execute('git.unstage', file.path) }
