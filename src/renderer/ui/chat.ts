@@ -39,6 +39,11 @@ import { showToast } from './toast';
 
 export interface ChatView {
   element: HTMLElement;
+  /**
+   * Строка статуса ассистента (режим и заполнение контекста). Композер её не
+   * держит у себя: окно монтирует её в общую полосу статус-бара.
+   */
+  statusElement: HTMLElement;
   newChat(): void;
   stop(): void;
   askAboutSelection(mode: 'explain' | 'fix'): Promise<void>;
@@ -232,7 +237,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const contextButton = h(
     'button',
     {
-      class: 'icon-btn composer-attach',
+      class: 'icon-btn',
       type: 'button',
       title: 'Приложить контекст (или «#»)',
       onClick: () => menu.toggleContext(),
@@ -314,31 +319,23 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     svgIcon('sparkle', 12),
     h('span', {}, 'модель не выбрана'),
   );
-  /**
-   * «Глубокое мышление» — тумблер усилия размышления. Ступени (low/medium/high)
-   * остались в настройках: в композере — одно понятное «включено/выключено»,
-   * при включении возвращается последняя ненулевая ступень.
-   */
-  const deepThinkPill = h(
-    'button',
-    { class: 'composer-pill', type: 'button', onClick: () => void toggleEffort() },
-    h('span', { class: 'composer-pill-icon' }, svgIcon('bulb', 14)),
-    h('span', {}, 'Глубокое мышление'),
-  );
+  const effortSelect = createSelect({
+    class: 'composer-select',
+    title: 'Усилие размышления: сколько модель думает перед ответом',
+  });
+  effortSelect.setOptions([
+    { value: 'off', label: 'Без размышлений' },
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+  ]);
+  effortSelect.onChange((value) => void saveEffort(value as ReasoningEffort));
 
   /**
-   * «Умный поиск» — тумблер веб-поиска ассистента: модель ищет в интернете перед
-   * ответом. По умолчанию выключено: поиск тратит запросы сервиса и время.
+   * Подсказку вешаем на обёртку: у выключенного контрола браузер не показывает
+   * `title`, а именно там и нужно объяснить, почему он выключен.
    */
-  const searchPill = h(
-    'button',
-    { class: 'composer-pill', type: 'button', onClick: () => void toggleWebSearch() },
-    h('span', { class: 'composer-pill-icon' }, svgIcon('globe', 14)),
-    h('span', {}, 'Умный поиск'),
-  );
-
-  /** Последняя ненулевая ступень размышления: её возвращает тумблер при включении. */
-  let lastEffort: ReasoningEffort = 'medium';
+  const effortField = h('span', { class: 'composer-field' }, effortSelect.element);
 
   /** Значок статуса — тот же, что у режима в селекте: картинка и подпись совпадают. */
   const modeIcon = h('span', { class: 'composer-status-icon' }, svgIcon('bubble', 12));
@@ -830,8 +827,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   /* ── информация о сессии ───────────────────────────────────────────────── */
 
   const sessionInfo = createSessionInfo({ onCompact: () => void compactActive() });
-  /** Кольцо в углу композера показывает то же число, что и окно информации. */
+  /** Кольцо показывает то же число, что и окно информации. */
   const contextRing = createUsageRing(() => toggleSessionInfo());
+
+  /**
+   * Статус ассистента — режим и заполнение контекста — живёт в общей полосе окна
+   * (статус-баре), а не в композере: там он не занимает высоту панели. Композер
+   * отдаёт готовую строку наружу (`statusElement`), а окно «Информация о сессии»
+   * раскрывается вверх от неё же — как и раньше от строки в композере.
+   */
+  const statusElement = h('div', { class: 'chat-status' }, modeBadge, contextRing.element, sessionInfo.element);
 
   function sessionInfoData(session: ChatSession = active(), pending = ''): SessionInfoData {
     return {
@@ -1064,58 +1069,29 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (text) text.textContent = `${provider} - ${label}`;
     modelButton.title = `${provider} · ${label}\nНажмите, чтобы сменить провайдера, модель или ключ`;
     // Усилие размышления относится к модели: сменилась модель — сменилась и доступность.
-    syncComposerToggles();
+    syncEffort();
   }
 
   /**
-   * Состояние тумблеров композера. Обе настройки — глобальные, поэтому подписи
-   * идут за `settings`, а не за состоянием беседы: тумблер не врёт о том, что
-   * случится со следующим запросом.
+   * Усилие размышления относится к модели, а не к беседе: показываем его
+   * только там, где модель действительно принимает `reasoning_effort`.
+   * Иначе контрол выглядел бы работающим, ничего не меняя.
    */
-  function syncComposerToggles(): void {
+  function syncEffort(): void {
     const effort = settings.ai.reasoningEffort ?? 'off';
-    if (effort !== 'off') lastEffort = effort;
-    deepThinkPill.classList.toggle('is-on', effort !== 'off');
+    effortSelect.setValue(effort);
 
-    // Усилие размышления относится к модели, а не к беседе: там, где модель его
-    // не принимает, тумблер выключен и не нажимается — иначе он выглядел бы
-    // работающим, ничего не меняя.
     const capabilities = modelCapabilities(currentModel());
-    deepThinkPill.disabled = !capabilities.reasoningEffort;
-    deepThinkPill.title = capabilities.reasoningEffort
-      ? 'Глубокое мышление: модель рассуждает перед ответом (ступени — в настройках)'
+    effortSelect.setDisabled(!capabilities.reasoningEffort);
+    effortField.title = capabilities.reasoningEffort
+      ? 'Усилие размышления: сколько модель думает перед ответом'
       : `Модель не принимает усилие размышления: ${capabilities.note ?? 'параметр не поддерживается'}`;
-
-    const search = settings.ai.webSearch.enabled;
-    searchPill.classList.toggle('is-on', search);
-    searchPill.title = search
-      ? 'Умный поиск включён: модель ищет в интернете'
-      : 'Умный поиск: искать в интернете перед ответом';
-  }
-
-  /** Включить или выключить «Глубокое мышление», помня последнюю ненулевую ступень. */
-  async function toggleEffort(): Promise<void> {
-    const current = settings.ai.reasoningEffort ?? 'off';
-    await saveEffort(current === 'off' ? lastEffort : 'off');
-  }
-
-  /** Включить или выключить «Умный поиск» (веб-поиск ассистента). */
-  async function toggleWebSearch(): Promise<void> {
-    const enabled = !settings.ai.webSearch.enabled;
-    try {
-      settings = await deps.rpc.request('settings.update', { ai: { webSearch: { enabled } } });
-      syncComposerToggles();
-      showToast(enabled ? 'Умный поиск включён' : 'Умный поиск выключен');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
   }
 
   async function saveEffort(effort: ReasoningEffort): Promise<void> {
     try {
       settings = await deps.rpc.request('settings.update', { ai: { reasoningEffort: effort } });
-      syncComposerToggles();
-      showToast(effort === 'off' ? 'Глубокое мышление выключено' : 'Глубокое мышление включено');
+      showToast(effort === 'off' ? 'Размышления выключены' : `Усилие размышления: ${effort}`);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), 'error');
     }
@@ -1268,15 +1244,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       h(
         'div',
         { class: 'composer-toolbar' },
-        // Слева — режим, права и модель; за ними тумблеры (в узкой панели уходят
-        // на свою строку); справа — приложить и отправить.
-        h('div', { class: 'composer-group' }, modeSelect.element, permButton, modelButton),
-        h('div', { class: 'composer-group' }, deepThinkPill, searchPill),
+        h('div', { class: 'composer-group' }, modeSelect.element, permButton, modelButton, effortField),
         h('div', { class: 'composer-group composer-group-end' }, contextButton, actionButton),
       ),
-      // Информация о сессии — индикатор заполнения контекста в правом нижнем углу:
-      // он всегда перед глазами и не занимает места в шапке.
-      h('div', { class: 'composer-status' }, modeBadge, contextRing.element, sessionInfo.element),
     ),
     menu.element,
   );
@@ -1889,7 +1859,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   initPersistence();
   syncProviderFields();
   syncMode();
-  syncComposerToggles();
+  syncEffort();
   syncActionButton();
   attachments.render();
   renderChanges();
@@ -1902,6 +1872,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   function syncAiAvailability(): void {
     const enabled = settings.ai.enabled;
     element.classList.toggle('is-ai-disabled', !enabled);
+    // Строка статуса живёт вне композера — гасим её тем же классом, чтобы
+    // выключенный ассистент не выглядел работающим и в статус-баре.
+    statusElement.classList.toggle('is-ai-disabled', !enabled);
     // Останавливаем только идущую генерацию: иначе stop() сообщит «ничего не генерируется».
     if (!enabled && busy) stop();
   }
@@ -1910,13 +1883,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   return {
     element,
+    statusElement,
     newChat,
     stop,
     askAboutSelection,
     applySettings(next: Settings) {
       settings = next;
       syncProviderFields();
-      syncComposerToggles();
+      syncEffort();
       // Размер контекстного окна тоже в настройках: кольцо должно пересчитаться
       // сразу, а не после следующего ответа модели.
       syncSessionInfo();

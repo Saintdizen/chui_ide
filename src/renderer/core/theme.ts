@@ -328,13 +328,13 @@ const DARK_CHROME: Chrome = {
   selection: '264f78',
   selectionInactive: '3a3d41',
   lineHighlight: '282828',
-  indentGuide: '333333',
-  indentGuideActive: '707070',
+  indentGuide: '2b2b2b',
+  indentGuideActive: '6a6a6a',
   whitespace: '3b3b3b',
 
   // Карточка интерфейса — та же поверхность, что у наших попапов: без прозрачности.
   popover: '1e1e1e',
-  border: '3a3a3c',
+  border: '313134',
   separator: '545458a6',
   sunken: '00000033',
   tint: '78788052',
@@ -374,13 +374,13 @@ const LIGHT_CHROME: Chrome = {
   selection: 'add6ff',
   selectionInactive: 'e5ebf1',
   lineHighlight: 'f5f5f5',
-  indentGuide: 'd3d3d3',
-  indentGuideActive: '939393',
+  indentGuide: 'e3e3e3',
+  indentGuideActive: 'a0a0a0',
   whitespace: '33333333',
 
   // Карточка интерфейса — та же поверхность, что у наших попапов: без прозрачности.
   popover: 'ffffff',
-  border: 'c7c7cc',
+  border: 'dfdfe3',
   separator: '3c3c4349',
   sunken: '0000000d',
   tint: '78788029',

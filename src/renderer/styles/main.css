@@ -1858,8 +1858,8 @@ textarea {
 
 .session-info {
   position: absolute;
-  /* Якорь — строка статуса (.composer-status): отсчёт этого bottom идёт от неё,
-     а не от всего футера, поэтому окно встаёт прямо над кольцом «4%». */
+  /* Якорь — слот статус-бара (.status-chat): отсчёт этого bottom идёт от него,
+     а не от всего окна, поэтому окно встаёт прямо над кольцом «4%». */
   right: 5px;
   bottom: calc(100% + 6px);
   z-index: 30;
@@ -3143,9 +3143,9 @@ textarea {
   flex-direction: column;
   gap: 5px;
   /* Небольшой зазор со всех сторон: стопка не липнет к рамке панели,
-     а верхний отступ отделяет её от ленты. */
+     а верхний отступ отделяет её от ленты. Отдельной линии сверху нет —
+     границу композера носит его собственная карточка. */
   padding: 5px;
-  border-top: 1px solid var(--separator_color);
 }
 
 /* Чипы контекста держат свой боковой отступ — шире общего зазора футера:
@@ -3166,17 +3166,17 @@ textarea {
   flex: 1 1 auto;
   min-height: 84px;
   max-height: 40vh;
-  /* Поле лежит внутри карточки композера: своя рамка ему не нужна — границу
-     носит карточка, а фокус подсвечивает её целиком (см. :focus-within). */
+  /* Поле лежит внутри карточки: свою рамку и подложку оно не несёт — границу
+     носит карточка, и фокус подсвечивает её целиком (см. :focus-within). */
   padding: 2px 4px;
   border: none;
   border-radius: 0;
   background: transparent;
 }
 
-/* Композер — карточка: поле ввода и ряд действий лежат одной поверхностью с
-   рамкой, как в чат-ассистентах. Подъём показывает не тень, а заливка-тонировка:
-   в тёмной схеме она светлее полотна, в светлой — чуть плотнее фона. */
+/* Композер — карточка: поле ввода и ряд действий лежат одной поверхностью.
+   Подложка — «утопленная», как была у поля ввода; рамка намеренно тише
+   границы панели, чтобы карточка читалась фоном, а не контуром. */
 .composer-box {
   display: flex;
   flex-direction: column;
@@ -3185,12 +3185,7 @@ textarea {
   padding: 8px 8px 7px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--element_background);
-}
-
-/* Фокус в поле подсвечивает всю карточку: у самого поля рамки больше нет. */
-.composer-box:focus-within {
-  border-color: var(--focus_ring_color);
+  background: var(--sunken_background);
 }
 
 /* ── меню композера: команды «/» и контекст «#» ─────────────────────────── */
@@ -3502,9 +3497,6 @@ textarea {
   outline-offset: -3px;
 }
 
-/* Ряд действий: в узкой панели контролы переносятся на вторую строку, а не
-   сжимаются в нечитаемое месиво. Межстрочный зазор — свой, чуть шире.
-   Кнопка отправки остаётся справа на своей строке (margin-left: auto). */
 .composer-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -3518,14 +3510,14 @@ textarea {
 
 .composer-group {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
+  row-gap: 6px;
   min-width: 0;
 }
 
-/* Правый край тулбара — приложить и отправить. Прижатие к правому краю идёт
-   от него, а не от «последнего ребёнка»: последним в разметке идёт группа
-   тумблеров, которой прижиматься вправо не нужно. */
+/* Правый край ряда — «приложить» и «отправить»: к нему и прижимается группа. */
 .composer-group-end {
   margin-left: auto;
   gap: 6px;
@@ -3599,58 +3591,16 @@ textarea {
   color: var(--purple_prime_background);
 }
 
-/* ── тумблеры композера: «Глубокое мышление» и «Умный поиск» ────────────── */
-
-/* Пилюля-тумблер: имя и значок в одной таблетке. Нейтральный вид — выключено,
-   акцентный (рамка, подпись и значок одним цветом) — включено. */
-.composer-pill {
+/* Обёртка контролов тулбара: подсказка должна работать и у выключенного контрола,
+   а сам disabled-элемент событий мыши не получает. */
+.composer-field {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 10px;
-  border: 1px solid var(--border_color);
-  border-radius: var(--radius_pill);
-  background: none;
-  color: var(--text_color_secondary);
-  font-size: var(--font_labels_size);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.composer-pill:hover {
-  border-color: var(--button_border_color_hover);
-  color: var(--text_color);
-}
-
-/* Включено — акцент нашей палитры: рамка и текст одним цветом, подложка —
-   его тихой тонировкой (сплошной акцент спорил бы с текстом поля). */
-.composer-pill.is-on {
-  border-color: var(--blue_prime_background);
-  background: color-mix(in srgb, var(--blue_prime_background) 14%, transparent);
-  color: var(--blue_prime_background);
-}
-
-.composer-pill.is-on:hover {
-  border-color: var(--blue_prime_background);
-  color: var(--blue_prime_background);
-}
-
-/* Недоступный тумблер (модель без усилия размышления) гаснет, но виден. */
-.composer-pill:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.composer-pill-icon {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
+  min-width: 0;
 }
 
 /* Кнопки-иконки тулбара композера держат высоту строки (24px), а не панельную
-   (28px): иначе скрепка, замок и селекты встают вразнобой, и ряд выглядит рвано.
-   Круглую кнопку отправки это правило не задаёт — её форму задаём ниже. */
+   (28px): иначе «+», замок и «отправить» выше селектов, и ряд выглядит рвано. */
 .chat-footer .composer-toolbar .icon-btn {
   width: 24px;
   height: 24px;
@@ -3671,9 +3621,7 @@ textarea {
 }
 
 .composer-model {
-  /* Теснее прежнего: рядом встали тумблеры, и на узкой панели подпись модели
-     уступает им место раньше, чем ряд уйдёт на вторую строку. */
-  max-width: 150px;
+  max-width: 190px;
   min-width: 0;
 }
 
@@ -3683,9 +3631,9 @@ textarea {
   text-overflow: ellipsis;
 }
 
-/* Кнопка отправки — круглая и залитая: главное действие композера видно сразу,
-   как в чат-ассистентах. Форму задаём с весом селектора не ниже ряда иконок,
-   иначе правило выше (.icon-btn: 24px) срежет круг до квадрата. */
+/* Кнопка отправки — круглая и залитая акцентом: главное действие композера
+   видно сразу. Форму задаём с весом селектора не ниже ряда иконок, иначе
+   правило `.icon-btn { 24px }` срежет круг до квадрата. */
 .chat-footer .composer-toolbar .composer-action {
   width: 30px;
   height: 30px;
@@ -3706,19 +3654,25 @@ textarea {
   color: var(--text_color);
 }
 
-.composer-status {
-  /* Строка статуса — containing block для окна «Информация о сессии»: оно
-     раскрывается вверх от кольца, а не от всего композера. */
-  position: relative;
+/* Строка статуса ассистента — режим и заполнение контекста. Живёт в общей
+   полосе окна (статус-баре), а не в композере, поэтому своей подложки и
+   собственного размера не несёт: наследует цвет и кегль полосы. */
+.chat-status {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 0;
-  /* Строка лежит внутри карточки: свой боковой отступ почти не нужен —
-     выравниваем по полю ввода, а не по краю панели. */
-  padding: 2px 2px 0;
-  color: var(--text_color_tertiary);
-  font-size: var(--font_small_size);
+  min-width: 0;
+}
+
+/* Выключенный ассистент гаснет и здесь — тем же тоном, что и панель чата. */
+.chat-status.is-ai-disabled {
+  opacity: 0.5;
+}
+
+/* Кольцо контекста в полосе стоит сразу за подписью режима: в углу композера
+   его отжимало вправо, здесь это лишнее. */
+.chat-status .context-ring {
+  margin-left: 0;
 }
 
 .composer-status-item {
@@ -3726,6 +3680,9 @@ textarea {
   align-items: center;
   gap: 5px;
   min-width: 0;
+  /* В общей полосе подпись держим в одну строку: иначе длинное имя режима
+     раздувает статус-бар вверх. */
+  white-space: nowrap;
 }
 
 /* Значок режима: обёртка центрирует иконку по вертикали. У инлайнового svg
@@ -3754,6 +3711,15 @@ textarea {
   display: flex;
   align-items: center;
   gap: 14px;
+  min-width: 0;
+}
+
+/* Слот статус-бара под статус ассистента (приходит из композера). Он —
+   containing block для окна «Информация о сессии» (см. .session-info). */
+.status-chat {
+  position: relative;
+  display: flex;
+  align-items: center;
   min-width: 0;
 }
 

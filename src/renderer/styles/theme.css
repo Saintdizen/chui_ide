@@ -185,10 +185,10 @@
   --button_background_disabled: rgba(120, 120, 128, 0.18);
   --sunken_background: rgba(0, 0, 0, 0.2);
 
-  /* Линии: рамку носит каждый блок, поэтому она плотнее разделителя. Контур блока
-     на тёмной поверхности светлее фона, но тише контура контрола: иначе карточки
-     превращаются в сетку из светлых рамок. */
-  --border_color: #3a3a3c;
+  /* Линии: рамку носит каждый блок, но контур намеренно тихий — панели читаются
+     фоном и воздухом, а не сеткой контуров. Направляющие отступа (тем же тоном
+     в `core/theme.ts`) остаются ещё тише — см. сторож «направляющая тише границы». */
+  --border_color: #313134;
   --button_border_color: #48484a;
   --button_border_color_hover: #0091ff;
   --separator_color: rgba(84, 84, 88, 0.65);
@@ -338,7 +338,7 @@
     --button_background_disabled: rgba(120, 120, 128, 0.08);
     --sunken_background: rgba(0, 0, 0, 0.05);
 
-    --border_color: #c7c7cc;
+    --border_color: #dfdfe3;
     --button_border_color: #c7c7cc;
     --button_border_color_hover: #0088ff;
     --separator_color: rgba(60, 60, 67, 0.29);

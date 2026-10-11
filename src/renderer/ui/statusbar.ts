@@ -29,6 +29,12 @@ export interface StatusState {
 
 export interface StatusBarView {
   element: HTMLElement;
+  /**
+   * Куда монтируется статус ассистента: режим работы и заполнение контекста.
+   * Композер отдаёт сюда свою строку статуса, чтобы она жила в общей полосе окна,
+   * а не занимала высоту панели чата.
+   */
+  chatSlot: HTMLElement;
   update(patch: Partial<StatusState>): void;
 }
 
@@ -137,6 +143,9 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   );
   const aiLabel = aiItem.querySelector<HTMLElement>('.status-ai-label')!;
 
+  // Статус ассистента (режим и заполнение контекста) приходит из чата и встаёт
+  // первым в правой группе — рядом с состоянием AI, а не отдельной полосой.
+  const chatSlot = h('div', { class: 'status-chat' });
   const element = h(
     'div',
     { class: 'statusbar' },
@@ -144,6 +153,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h(
       'div',
       { class: 'status-group' },
+      chatSlot,
       aiItem,
       problemsItem,
       versionItem,
@@ -206,6 +216,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
 
   return {
     element,
+    chatSlot,
     update(patch) {
       Object.assign(state, patch);
       render();

@@ -694,6 +694,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     isInEditor: () => chatInEditor,
   });
   layout.rightBody.appendChild(chat.element);
+  // Статус ассистента (режим и заполнение контекста) живёт в общей полосе окна:
+  // композер отдаёт готовую строку, статус-бар принимает её в свой слот.
+  statusBar.chatSlot.appendChild(chat.statusElement);
 
   const tabs = createTabs({
     openEditors,
