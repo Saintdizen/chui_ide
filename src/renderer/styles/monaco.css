@@ -33,14 +33,33 @@
   --vscode-menu-background: var(--popup_background);
   --vscode-quickInput-background: var(--popup_background);
   --vscode-strokeThickness: 1px;
+  /* Мелкий текст в списке палитры (подпись разделителя): Monaco берёт его из
+     переменной размера без запасного значения — без объявления свойство
+     откатывается к унаследованному кеглю. */
+  --vscode-bodyFontSize-xSmall: var(--font_small_size);
 
   /* Радиусы: у нас три ступени, у Monaco — свои имена. */
   --vscode-cornerRadius-small: var(--radius_sm);
   --vscode-cornerRadius-medium: var(--radius_sm);
   --vscode-cornerRadius-large: var(--radius_md);
+  /* Палитра берёт из «xLarge» свой радиус, а круглая форма нужна
+     переключателю-тумблеру: без объявления весь поворот свойства пропадает, и
+     углы остаются прямыми. */
+  --vscode-cornerRadius-xLarge: var(--radius_md);
+  --vscode-cornerRadius-circle: 9999px;
 
   --vscode-shadow-lg: var(--box_shadow_drop);
+  /* «xl» — тень палитры (в VS Code — отдельная, самая высокая ступень). У нас
+     её роль и есть модальная тень. */
+  --vscode-shadow-xl: var(--box_shadow_modal);
   --vscode-widget-shadow: var(--box_shadow_drop);
+
+  /* Лента unicode-предупреждения (много неоднозначных символов). Цвета этой
+     ленты живут в VS Code, но НЕ в теме Monaco: в сборке редактора их никто не
+     объявляет, и без значений лента осталась бы совсем без фона. */
+  --vscode-banner-background: var(--element_background);
+  --vscode-banner-foreground: var(--text_color);
+  --vscode-banner-iconForeground: var(--blue_prime_background);
 
   /* Текст в списках и подписях попапов — наши ступени, а не палитра VS Code. */
   --vscode-foreground: var(--text_color);
@@ -62,6 +81,30 @@
   border-radius: var(--radius_sm);
   box-shadow: var(--box_shadow_drop);
   overflow: hidden;
+}
+
+/* Просмотр определения и ссылок, а также переход по проблемам — карточка как у
+   наших попапов: то же скругление. Обрезаем содержимое по контейнеру: у перехода
+   по проблемам `overflow: hidden` ставит сам Monaco, у просмотра ссылок — нет, и
+   нижние углы, которые рисуют вложенные панели, оставались прямыми. Стрелку
+   виджета и подсказки встроенного редактора обрезка не задевает: стрелка —
+   украшение в коде, а подсказки крепятся к окну (fixed). Акцент серьёзности
+   у перехода по проблемам оставлен — он и сообщает, ошибка это или предупреждение.
+   Заголовок — шрифтом интерфейса нашей ступени (Monaco ставит 13px стека редактора). */
+.monaco-editor .peekview-widget {
+  border-radius: var(--radius_md);
+  overflow: hidden;
+}
+
+/* Линия под заголовком: Monaco рисует её цветом текста (`currentColor`) — у нас
+   почти белым, для разделителя это слишком громко. Берём нашу же ступень. */
+.monaco-editor .peekview-widget > .body {
+  border-top-color: var(--separator_color);
+}
+
+.monaco-editor .peekview-widget .head .peekview-title {
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
 }
 
 /* ── палитра команд (F1) и прочие быстрые вводы: как наш .palette ──────── */
