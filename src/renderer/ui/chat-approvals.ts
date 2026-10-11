@@ -204,6 +204,8 @@ export interface CommandApproval {
   confirm(command: string): Promise<boolean>;
   /** Спросить разрешение на действие git (коммит, отправка, ветка, откат). */
   confirmGit(action: string): Promise<boolean>;
+  /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
+  confirmBrowser(action: string): Promise<boolean>;
 }
 
 export function createCommandApproval(host: ApprovalHost): CommandApproval {
@@ -273,6 +275,14 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
         hint: 'Действие изменит репозиторий в папке проекта.',
         done: 'Действие git',
         icon: 'branch',
+      }),
+    confirmBrowser: (action) =>
+      show({
+        title: 'Ассистент просит действие в браузере',
+        body: action,
+        hint: 'Действие выполнится в отдельном браузере IDE — он не видит ваши сессии и закладки.',
+        done: 'Действие в браузере',
+        icon: 'search',
       }),
   };
 }

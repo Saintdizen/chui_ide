@@ -36,6 +36,7 @@
     "smoke:folder": "npm run build && node scripts/folder-smoke.cjs",
     "smoke:git": "npm run build:main && electron scripts/git-smoke.cjs",
     "smoke:agent": "npm run build:main && electron scripts/agent-smoke.cjs",
+    "smoke:browser": "npm run build:main && node scripts/browser-smoke.cjs",
     "smoke:map": "npm run build:main && electron scripts/project-map-smoke.cjs",
     "smoke:anthropic": "npm run build:main && node scripts/anthropic-smoke.cjs",
     "smoke:lsp": "npm run build:main && node scripts/lsp-smoke.cjs",

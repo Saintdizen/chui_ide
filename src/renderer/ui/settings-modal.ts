@@ -626,6 +626,37 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           : 'Пусто — адрес по умолчанию https://api.search.brave.com/res/v1/web/search.',
       ),
       webSearchKeyField,
+      h('div', { class: 'settings-divider' }),
+      switchRow(
+        'Браузер (инструменты browser_*)',
+        ai.browser.enabled,
+        (value) => void patch({ ai: { browser: { enabled: value } } }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Даёт ассистенту открывать страницы, нажимать кнопки и заполнять формы: он запускает свой ' +
+          'Chromium с пустым профилем в системном временном каталоге, поэтому не видит ваши сессии, ' +
+          'закладки и пароли. Действия на странице спрашивают подтверждение, пока включён обычный ' +
+          'режим доступа. Выключено по умолчанию: это ход наружу.',
+      ),
+      field(
+        'Путь к браузеру',
+        textInput(ai.browser.executable, (value) => void patch({ ai: { browser: { executable: value } } })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Пусто — искать в PATH известные имена (google-chrome, chromium, brave-browser, msedge). ' +
+          'Firefox не подойдёт: он говорит не на том протоколе, которым управляет IDE.',
+      ),
+      switchRow('Без окна', ai.browser.headless, (value) => void patch({ ai: { browser: { headless: value } } })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'С окном работу агента видно, но браузер всплывает поверх редактора. Без окна — тихо и ' +
+          'годится на машинах без экрана.',
+      ),
       field(
         'Контекстное окно (токенов)',
         numberInput(ai.contextWindow ?? 0, 0, 2_000_000, 1000, (value) => void patch({ ai: { contextWindow: value } })),

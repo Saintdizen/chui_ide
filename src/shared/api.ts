@@ -426,6 +426,8 @@ export interface AiSettings {
   compressOutput: boolean;
   /** Веб-поиск: выключен по умолчанию, инструмент предлагается только при включении. */
   webSearch: AiWebSearchSettings;
+  /** Браузерная автоматизация: выключена по умолчанию, как и веб-поиск. */
+  browser: AiBrowserSettings;
   /**
    * Серверы внешних инструментов (MCP). Пусто — агент работает только своими
    * инструментами. Команду запуска задаёт человек: модель её не меняет.
@@ -817,6 +819,8 @@ export interface AiSettingsPatch {
   compressOutput?: boolean;
   /** Настройки веб-поиска: ключ задаётся отдельным вызовом `ai.setWebSearchKey`. */
   webSearch?: { enabled?: boolean; provider?: WebSearchProvider; endpoint?: string };
+  /** Браузерная автоматизация: включение, путь к браузеру и режим без окна. */
+  browser?: { enabled?: boolean; executable?: string; headless?: boolean };
   /** Список серверов MCP заменяется целиком: так его проще править из интерфейса. */
   mcpServers?: McpServerConfig[];
   /** Добавить провайдера или обновить существующего по `id`. */
@@ -852,6 +856,18 @@ export interface AiWebSearchSettings {
   endpoint: string;
   /** Ключ задан. Сам ключ наружу не отдаём — как и ключи провайдеров. */
   hasApiKey: boolean;
+}
+
+/**
+ * Браузерная автоматизация. Выключена по умолчанию: агент ходит в интернет и
+ * нажимает кнопки на чужих страницах — это осознанное действие, а не фон.
+ */
+export interface AiBrowserSettings {
+  enabled: boolean;
+  /** Путь к исполняемому файлу Chromium; пусто — ищем известные имена в PATH. */
+  executable: string;
+  /** Работать без окна: браузер не отвлекает и заводится на машинах без экрана. */
+  headless: boolean;
 }
 
 export interface SettingsPatch {
@@ -1113,6 +1129,15 @@ export interface ConfirmGitHostParams {
   action: string;
 }
 
+/** Аргументы `ai.confirmBrowser`: действие в браузере, которое просит выполнить агент. */
+export interface ConfirmBrowserHostParams {
+  action: string;
+}
+
+export interface ConfirmBrowserHostResult {
+  allowed: boolean;
+}
+
 export interface ConfirmGitHostResult {
   allowed: boolean;
 }
@@ -1157,6 +1182,7 @@ export interface HostMethods {
   'ai.applyEdits': { params: ApplyEditsHostParams; result: ApplyEditsHostResult };
   'ai.confirmCommand': { params: ConfirmCommandHostParams; result: ConfirmCommandHostResult };
   'ai.confirmGit': { params: ConfirmGitHostParams; result: ConfirmGitHostResult };
+  'ai.confirmBrowser': { params: ConfirmBrowserHostParams; result: ConfirmBrowserHostResult };
   /** Пометки языка живут в Monaco, то есть в renderer. */
   'ai.getDiagnostics': { params: DiagnosticsHostParams; result: DiagnosticsHostResult };
   /** Показать файл в редакторе: открытие вкладки — тоже дело renderer. */

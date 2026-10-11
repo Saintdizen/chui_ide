@@ -4,6 +4,7 @@ import path from 'node:path';
 import { PushTopic } from '../shared/api';
 import { folderFromCommandLine, type CommandLineFolder } from '../shared/cli';
 import { AiService } from './ai/service';
+import { BrowserService } from './browser/browser';
 import { DebugService } from './debug/debug';
 import { installDiagnostics } from './diagnostics';
 import { GitService } from './git/git';
@@ -217,6 +218,15 @@ if (!app.requestSingleInstanceLock()) {
       () => workspace.rootPath(),
     );
 
+    // Браузер агента: свой Chromium под управлением CDP. Процесс поднимается
+    // лениво — только когда настройка включена и агент позвал инструмент. Профиль
+    // живёт в temp и удаляется при закрытии: браузер не видит сессий человека.
+    const browser = new BrowserService(() => {
+      const settingsForBrowser = settings.get().ai.browser;
+      return { executable: settingsForBrowser.executable, headless: settingsForBrowser.headless };
+    });
+    ai.attachBrowser(browser);
+
     // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
     const sessions = new SessionStore();
     const projectConfig = new ProjectConfigStore();
@@ -265,6 +275,8 @@ if (!app.requestSingleInstanceLock()) {
       terminals.dispose();
       lsp.dispose();
       debug.dispose();
+      // Браузер — наш процесс: без остановки он остался бы висеть после выхода.
+      browser.dispose();
       // Серверы MCP — наши процессы: без остановки они остались бы висеть после выхода.
       mcp.dispose();
       workspace.dispose();

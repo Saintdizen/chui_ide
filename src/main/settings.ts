@@ -65,6 +65,13 @@ interface StoredSettings {
       endpoint: string;
       apiKey?: string;
     };
+    /** Браузерная автоматизация: свой Chromium под управлением агента. */
+    browser: {
+      enabled: boolean;
+      /** Путь к браузеру; пусто — ищем известные имена в PATH. */
+      executable: string;
+      headless: boolean;
+    };
     /** Серверы внешних инструментов (MCP): их процессы запускает IDE. */
     mcpServers: McpServerConfig[];
   };
@@ -122,6 +129,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     compressOutput: true,
     // Веб-поиск выключен: агент не должен ходить в интернет без явного согласия.
     webSearch: { enabled: false, provider: 'searxng', endpoint: '' },
+    // Браузер выключен: агент ходил бы по чужим страницам и нажимал там кнопки.
+    // Включается осознанно — вместе с ним включаются и подтверждения действий.
+    browser: { enabled: false, executable: '', headless: true },
     // Серверов MCP по умолчанию нет: их команды задаёт человек.
     mcpServers: [],
   },
@@ -267,6 +277,13 @@ export class SettingsStore {
           provider: ai.webSearch?.provider ?? 'searxng',
           endpoint: ai.webSearch?.endpoint ?? '',
           hasApiKey: Boolean(this.resolveWebSearchKey()),
+        },
+        browser: {
+          enabled: ai.browser?.enabled === true,
+          executable: ai.browser?.executable ?? '',
+          // Без окна по умолчанию: браузер заводят ради автоматизации, а не ради
+          // того, чтобы он всплывал поверх редактора.
+          headless: ai.browser?.headless !== false,
         },
         // Копия, а не ссылка: правка настроек не должна менять уже отданный снимок.
         mcpServers: ai.mcpServers.map((server) => ({
@@ -432,6 +449,15 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     if (incoming.endpoint !== undefined) target.webSearch.endpoint = incoming.endpoint.trim();
   }
 
+  // Браузер: включение, путь к исполняемому файлу и режим без окна. Путь задаёт
+  // человек — запускаем ровно то, что он назвал.
+  if (patch.browser) {
+    const incoming = patch.browser;
+    if (incoming.enabled !== undefined) target.browser.enabled = incoming.enabled === true;
+    if (incoming.executable !== undefined) target.browser.executable = incoming.executable.trim();
+    if (incoming.headless !== undefined) target.browser.headless = incoming.headless === true;
+  }
+
   // Серверы MCP заменяются целиком и проверяются той же функцией, что и при
   // чтении файла: команду запуска берём только у человека, а не у модели.
   if (patch.mcpServers !== undefined) {
@@ -518,6 +544,15 @@ function loadSettings(filePath: string): StoredSettings {
     endpoint: typeof storedSearch.endpoint === 'string' ? storedSearch.endpoint : '',
   };
   if (typeof storedSearch.apiKey === 'string' && storedSearch.apiKey) ai.webSearch.apiKey = storedSearch.apiKey;
+
+  // Браузер: путь запуска задаёт человек, поэтому берём строку как есть, а
+  // отсутствие поля читаем как «без окна» — так автоматизацию не видно поверх IDE.
+  const storedBrowser = (storedAi.browser ?? {}) as Partial<StoredSettings['ai']['browser']>;
+  ai.browser = {
+    enabled: storedBrowser.enabled === true,
+    executable: typeof storedBrowser.executable === 'string' ? storedBrowser.executable : '',
+    headless: storedBrowser.headless !== false,
+  };
 
   // Серверы MCP: файл правят руками, поэтому и команда, и аргументы проверяются.
   ai.mcpServers = normalizeMcpServers(storedAi.mcpServers) as McpServerConfig[];

@@ -245,6 +245,8 @@ module.exports = [
       systemPrompt: 'Ты ассистент внутри редактора.',
       maxSteps: 8,
       maxAutopilotSteps: 24,
+      // Браузер агента: как main — секция есть всегда, по умолчанию выключена.
+      browser: { enabled: false, executable: '', headless: true },
     },
     editor: {
       tabSize: 2,

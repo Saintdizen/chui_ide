@@ -40,6 +40,7 @@ import type { WorkspaceService } from '../workspace/workspace';
 import type { McpToolInfo } from '../../shared/mcp';
 import {
   runTool,
+  type BrowserTools,
   type GitTools,
   type Linter,
   type McpRunner,
@@ -144,6 +145,9 @@ const READ_ONLY_TOOLS = new Set([
   'git_blame',
   // Подзадача тоже только читает — а стоит дорого, поэтому повтор пропускаем.
   'task',
+  // Снимок страницы читает её состояние. После действия (клик, переход, ввод)
+  // кэш всё равно сбрасывается: те инструменты меняют мир.
+  'browser_snapshot',
 ]);
 
 /**
@@ -243,6 +247,8 @@ export interface ChatHostBridge {
   confirmCommand(command: string): Promise<boolean>;
   /** Спросить разрешение на действие git (коммит, отправка, переключение ветки, откат). */
   confirmGit(action: string): Promise<boolean>;
+  /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
+  confirmBrowser(action: string): Promise<boolean>;
   /** Пометки языка: они живут в Monaco, то есть в renderer. */
   getDiagnostics(path?: string): Promise<DiagnosticsHostResult>;
   /** Показать файл в редакторе на нужной позиции. */
@@ -268,6 +274,8 @@ export class AiService {
   private tests?: TestRunner;
   /** Внешние инструменты (MCP): нет сервиса — внешних инструментов не предлагаем. */
   private mcp?: McpRunner;
+  /** Браузер: без него инструменты `browser_*` не предлагаем. */
+  private browser?: BrowserTools;
   /**
    * Права доступа текущего прогона (кнопка в композере). Храним на сервисе, а не
    * снимком в запросе: renderer может переключить их прямо во время ответа агента.
@@ -349,6 +357,15 @@ export class AiService {
    */
   attachMcp(mcp: McpRunner): void {
     this.mcp = mcp;
+  }
+
+  /**
+   * Подключить браузер: включает инструменты `browser_*`. Сам браузер поднимается
+   * лениво, при первом действии, — и только если настройка включена: держать
+   * процесс Chromium ради выключенной возможности незачем.
+   */
+  attachBrowser(browser: BrowserTools): void {
+    this.browser = browser;
   }
 
   /**
@@ -495,10 +512,14 @@ export class AiService {
           ).then((hits) => ({ hits, providerLabel: webSearchProviderLabel(webSearch.provider) })),
       };
     }
+    // Браузер читает настройку на каждый прогон, как и веб-поиск: человек может
+    // включить его посреди работы, и следующее действие это должно увидеть.
+    if (this.browser && settings.ai.browser.enabled) toolContext.browser = this.browser;
     if (host) {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
       toolContext.confirmGit = (action) => host.confirmGit(action);
+      toolContext.confirmBrowser = (action) => host.confirmBrowser(action);
       toolContext.diagnostics = (path) => host.getDiagnostics(path);
       toolContext.openFile = (path, line, column) => host.openFile(path, line, column);
     }
@@ -1108,6 +1129,13 @@ export class AiService {
     // заметка обратима (её снимает `forget`).
     if (tool.name === 'remember' || tool.name === 'forget') return true;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
+    // Браузер: включается настройкой (как веб-поиск), а действия на странице
+    // спрашивают подтверждение — значит, без подключённого окна их не предлагаем.
+    if (tool.name.startsWith('browser_')) {
+      if (!this.browser || !this.settings.get().ai.browser.enabled) return false;
+      if (tool.name === 'browser_snapshot' || tool.name === 'browser_close') return true;
+      return host?.confirmBrowser !== undefined;
+    }
     return tool.side === 'main';
   }
 

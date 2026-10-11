@@ -549,6 +549,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
             .then((decision) => decision.allowed),
         confirmGit: (action) =>
           deps.host.request(ctx.sender, 'ai.confirmGit', { action }, ctx.signal).then((decision) => decision.allowed),
+        confirmBrowser: (action) =>
+          deps.host
+            .request(ctx.sender, 'ai.confirmBrowser', { action }, ctx.signal)
+            .then((decision) => decision.allowed),
         getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
         openFile: (path, line, column) =>
           deps.host.request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal).then((result) => result.ok),

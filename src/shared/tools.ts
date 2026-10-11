@@ -37,6 +37,12 @@ export type AgentToolName =
   | 'move_file'
   | 'update_plan'
   | 'task'
+  | 'browser_open'
+  | 'browser_snapshot'
+  | 'browser_click'
+  | 'browser_type'
+  | 'browser_evaluate'
+  | 'browser_close'
   | 'remember'
   | 'forget'
   | 'git_status'
@@ -482,6 +488,79 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       },
       required: ['prompt'],
     },
+  },
+  {
+    name: 'browser_open',
+    side: 'main',
+    description:
+      'Открыть адрес в браузере (свой Chromium, управляемый по CDP). Запускает браузер, если тот ' +
+      'ещё не запущен, и переходит на страницу. Дальше смотри её через browser_snapshot. ' +
+      'Работает только при включённой настройке «Браузер» и только с http/https.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Адрес страницы. Без схемы — значит https (локальные — http).' },
+      },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'browser_snapshot',
+    side: 'main',
+    description:
+      'Снимок открытой страницы: заголовок, адрес, интерактивные элементы с номерами и видимый текст. ' +
+      'Номера — это ссылки (ref) для browser_click и browser_type. Вызывай после каждого действия: ' +
+      'страница меняется, старые номера устаревают.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'browser_click',
+    side: 'main',
+    description: 'Нажать элемент страницы по номеру из снимка (browser_snapshot). Номер живёт до перезагрузки снимка.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Номер элемента из снимка, например «3».' },
+      },
+      required: ['ref'],
+    },
+  },
+  {
+    name: 'browser_type',
+    side: 'main',
+    description:
+      'Ввести текст в поле по номеру из снимка. Для поиска и адресной строки сайта: форма отправляется ' +
+      'клавишей Enter — поставь submit=true.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Номер поля из снимка.' },
+        text: { type: 'string', description: 'Что ввести.' },
+        submit: { type: 'boolean', description: 'Нажать Enter после ввода (отправить форму).' },
+      },
+      required: ['ref', 'text'],
+    },
+  },
+  {
+    name: 'browser_evaluate',
+    side: 'main',
+    description:
+      'Выполнить выражение JavaScript на открытой странице и вернуть результат. Для чтения состояния, ' +
+      'которого нет в снимке. Результат приводится к тексту; менять так страницу можно, но клик и ввод ' +
+      'надёжнее — они видимы в ленте и повторяемы.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        expression: { type: 'string', description: 'Выражение или код JS. Возвращай значение через return.' },
+      },
+      required: ['expression'],
+    },
+  },
+  {
+    name: 'browser_close',
+    side: 'main',
+    description: 'Закрыть управляемый браузер: процесс и профиль удаляются. Нужен, когда просмотр закончен.',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'remember',

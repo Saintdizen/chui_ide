@@ -18,7 +18,9 @@
  * 12. режим «План»: только чтение, изменения не предлагаются и не исполняются;
  * 13. права доступа меняются на лету — агент подхватывает их во время ответа.
  *
- * 14. подзадача (task): отдельный агент со своим контекстом — его чтения не растут в беседе.
+ * 14. подзадача (task): отдельный агент со своим контекстом — его чтения не растут в беседе;
+ * 15. браузер (browser_*): выключен по умолчанию, действия спрашивают подтверждение,
+ *     снимок страницы доезжает до модели текстом.
  *
  *   npm run smoke:agent
  *
@@ -191,6 +193,8 @@ app.whenReady().then(async () => {
       confirmDangerous: true,
       // Веб-поиск по умолчанию выключен и включается проверками ниже.
       webSearch: { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false },
+      // Браузер тоже выключен: включается проверками ниже, вместе с заглушкой сервиса.
+      browser: { enabled: false, executable: '', headless: true },
     },
     get() {
       return this;
@@ -989,6 +993,78 @@ app.whenReady().then(async () => {
         String(message.content ?? '').includes('строка один'),
       ),
     );
+    /* 15. браузер: выключен по умолчанию, включается настройкой.
+       Сам Chromium здесь не поднимаем — вместо него заглушка с тем же
+       контрактом: проверяем предложение инструментов, подтверждение и то,
+       что снимок доехал до модели текстом. Настоящий браузер проверяет
+       `npm run smoke:browser`. */
+    const fakeBrowser = {
+      open: async (url) => ({
+        title: 'Пример',
+        url,
+        elements: [{ ref: '1', tag: 'button', role: 'button', name: 'Войти', note: 'submit' }],
+        text: `Текст страницы ${MARKER}`,
+      }),
+      snapshot: async () => ({ title: 'Пример', url: 'https://example.com/', elements: [], text: 'пусто' }),
+      click: async () => ({ title: 'После клика', url: 'https://example.com/', elements: [], text: 'ок' }),
+      type: async () => ({ title: 'После ввода', url: 'https://example.com/', elements: [], text: 'ок' }),
+      evaluate: async () => '3',
+      close: async () => undefined,
+    };
+    ai.attachBrowser(fakeBrowser);
+
+    requested = { name: 'browser_open', args: { url: 'example.com' } };
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
+    check('выключенный браузер инструментов не даёт', !run.toolNames.includes('browser_open'), run.toolNames);
+
+    settings.ai.browser = { enabled: true, executable: '', headless: true };
+    const browserLog = [];
+    const browserHost = {
+      applyEdits: () => Promise.resolve({ rejected: true }),
+      confirmBrowser: (action) => {
+        browserLog.push(action);
+        return Promise.resolve(true);
+      },
+    };
+    run = await chat(browserHost);
+    check('включённый браузер предлагает инструменты', run.toolNames.includes('browser_open'), run.toolNames);
+    check('действие в браузере спросило разрешение', browserLog.length === 1, browserLog);
+    check('адрес ушёл в подтверждение как есть', browserLog[0] === 'открыть example.com', browserLog);
+    const snapshotText = sentToModel(run.bodies[run.bodies.length - 1]);
+    check('снимок страницы ушёл модели', snapshotText.includes(`Текст страницы ${MARKER}`), snapshotText.slice(0, 120));
+    check('элементы снимка названы с номерами', snapshotText.includes('1. button «Войти» → submit'), snapshotText);
+
+    // Чтение снимка подтверждения не спрашивает — это осмотр, а не действие.
+    requested = { name: 'browser_snapshot', args: {} };
+    const idleLog = [];
+    run = await chat({
+      applyEdits: () => Promise.resolve({ rejected: true }),
+      confirmBrowser: (action) => {
+        idleLog.push(action);
+        return Promise.resolve(true);
+      },
+    });
+    check('снимок страницы не спрашивает разрешения', idleLog.length === 0, idleLog);
+
+    // Без моста подтверждений действия на странице предлагать нельзя: их некому
+    // разрешить. А чтение снимка — можно: оно ничего не меняет.
+    run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
+    check('без моста подтверждений действия в браузере не предлагаются', !run.toolNames.includes('browser_click'));
+    check('но чтение снимка предлагается', run.toolNames.includes('browser_snapshot'), run.toolNames);
+
+    // Отказ пользователя — решение, а не ошибка приложения.
+    requested = { name: 'browser_click', args: { ref: '1' } };
+    run = await chat({
+      applyEdits: () => Promise.resolve({ rejected: true }),
+      confirmBrowser: () => Promise.resolve(false),
+    });
+    check(
+      'отказ в браузере виден модели',
+      run.results[0]?.ok === false && /отклонил/i.test(String(run.results[0]?.summary)),
+      run.results[0]?.summary,
+    );
+
+    settings.ai.browser = { enabled: false, executable: '', headless: true };
   } catch (error) {
     failed = true;
     console.error('[chui] исключение:', error);

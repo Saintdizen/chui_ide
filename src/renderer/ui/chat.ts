@@ -1654,6 +1654,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     allowed: await commandApproval.confirmGit(params.action),
   }));
 
+  // Действия в браузере — тоже карточка в ленте: страница может сделать что угодно
+  // от имени пользователя, поэтому вопрос задаётся тем же способом.
+  deps.host.handle('ai.confirmBrowser', async (params) => ({
+    allowed: await commandApproval.confirmBrowser(params.action),
+  }));
+
   deps.host.handle('ai.applyEdits', async (params) => applyAgentEdits(params));
 
   // Пометки языка живут в Monaco, поэтому их отдаёт renderer.

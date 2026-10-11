@@ -11,6 +11,7 @@ import type {
   TerminalSession,
   ToolFileChange,
 } from '../../shared/api';
+import { formatBrowserSnapshot, type BrowserSnapshot } from '../../shared/browser';
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import type { MemoryNote, RememberResult } from '../../shared/memory';
@@ -194,6 +195,28 @@ export interface SubagentRunner {
   run(params: { description: string; prompt: string }): Promise<ToolOutcome>;
 }
 
+/**
+ * Браузер для инструментов `browser_*`: свой Chromium, управляемый по CDP.
+ * Запуск и подключение живут в main (`browser/browser.ts`), сюда приходит готовый
+ * вызов — инструменты остаются проверяемыми без браузера.
+ */
+export interface BrowserTools {
+  /** Перейти на адрес; возвращает снимок страницы после загрузки. */
+  open(url: string): Promise<BrowserSnapshot>;
+  /** Снимок текущей страницы. */
+  snapshot(): Promise<BrowserSnapshot>;
+  /** Нажать элемент по номеру из снимка; возвращает новый снимок. */
+  click(ref: string): Promise<BrowserSnapshot>;
+  /** Ввести текст в поле; `submit` — отправить форму клавишей Enter. */
+  type(ref: string, text: string, submit: boolean): Promise<BrowserSnapshot>;
+  /** Выполнить выражение на странице и вернуть результат текстом. */
+  evaluate(expression: string): Promise<string>;
+  /** Закрыть браузер и убрать временный профиль. */
+  close(): Promise<void>;
+  /** Идёт ли сессия: `false` — браузер ещё не поднимали (или уже закрыли). */
+  readonly running?: boolean;
+}
+
 export interface ToolContext {
   workspace: WorkspaceService;
   signal?: AbortSignal;
@@ -234,6 +257,10 @@ export interface ToolContext {
   mcp?: McpRunner;
   /** Подзадачи (инструмент `task`): запускает service — у него есть провайдер. */
   subagent?: SubagentRunner;
+  /** Браузер: подключён только при включённой настройке. */
+  browser?: BrowserTools;
+  /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
+  confirmBrowser?(action: string): Promise<boolean>;
 }
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
@@ -349,6 +376,18 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return { ok: true, summary: 'план обновлён' };
       case 'task':
         return await task(ctx, parsed.value);
+      case 'browser_open':
+        return await browserOpen(ctx, parsed.value);
+      case 'browser_snapshot':
+        return await browserSnapshot(ctx);
+      case 'browser_click':
+        return await browserClick(ctx, parsed.value);
+      case 'browser_type':
+        return await browserType(ctx, parsed.value);
+      case 'browser_evaluate':
+        return await browserEvaluate(ctx, parsed.value);
+      case 'browser_close':
+        return await browserClose(ctx);
       case 'remember':
         return await remember(ctx, parsed.value);
       case 'forget':
@@ -412,6 +451,100 @@ async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<To
   const prompt = requireString(args, 'prompt').trim();
   const description = optionalString(args, 'description')?.trim() || 'подзадача';
   return ctx.subagent.run({ description, prompt });
+}
+
+/* ── браузер ────────────────────────────────────────────────────────────── */
+
+/**
+ * Действие в браузере меняет чужую страницу (переход, нажатие, ввод, скрипт):
+ * обычный режим спрашивает разрешение, полный доступ — нет. Чтение снимка
+ * подтверждения не требует: это осмотр, а не действие.
+ *
+ * Сравнение с командами терминала тут не в пользу осторожности: браузер мы
+ * запускаем сами, с одноразовым профилем в temp, и он не видит ни файлов
+ * проекта, ни сессий человека. А вот страница может сделать что угодно от его
+ * имени — поэтому вопрос всё равно нужен, но только в обычном режиме.
+ */
+async function permitBrowser(ctx: ToolContext, action: string): Promise<ToolOutcome | null> {
+  if (!ctx.confirmBrowser) return { ok: false, summary: 'Браузер недоступен: окно редактора не подключено' };
+  if (ctx.allowAll) return null;
+  const allowed = await ctx.confirmBrowser(action);
+  if (allowed) return null;
+  return {
+    ok: false,
+    summary: 'Пользователь отклонил действие в браузере',
+    detail: 'Пользователь не разрешил это действие. Не повторяй его — предложи другой ход.',
+  };
+}
+
+/** Снимок страницы в ответ инструмента: текст собирает `shared/browser.ts`. */
+function snapshotOutcome(snapshot: BrowserSnapshot, summary: string): ToolOutcome {
+  return { ok: true, summary, detail: formatBrowserSnapshot(snapshot) };
+}
+
+/** «Страница: Заголовок» — короткая сводка для карточки вызова. */
+function pageSummary(snapshot: BrowserSnapshot): string {
+  const title = snapshot.title.trim() || snapshot.url;
+  return `${title} · элементов: ${snapshot.elements.length}`;
+}
+
+async function browserOpen(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
+  const url = requireString(args, 'url').trim();
+  const denied = await permitBrowser(ctx, `открыть ${url}`);
+  if (denied) return denied;
+
+  const snapshot = await ctx.browser.open(url);
+  return snapshotOutcome(snapshot, pageSummary(snapshot));
+}
+
+async function browserSnapshot(ctx: ToolContext): Promise<ToolOutcome> {
+  if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
+  const snapshot = await ctx.browser.snapshot();
+  return snapshotOutcome(snapshot, pageSummary(snapshot));
+}
+
+async function browserClick(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
+  const ref = requireString(args, 'ref').trim();
+  const denied = await permitBrowser(ctx, `нажать элемент ${ref} на странице`);
+  if (denied) return denied;
+
+  const snapshot = await ctx.browser.click(ref);
+  return snapshotOutcome(snapshot, `нажат ${ref} · ${pageSummary(snapshot)}`);
+}
+
+async function browserType(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
+  const ref = requireString(args, 'ref').trim();
+  const text = requireString(args, 'text');
+  const submit = optionalBoolean(args, 'submit') ?? false;
+  const denied = await permitBrowser(ctx, `ввести текст в поле ${ref}${submit ? ' и отправить форму' : ''}`);
+  if (denied) return denied;
+
+  const snapshot = await ctx.browser.type(ref, text, submit);
+  return snapshotOutcome(snapshot, `введено в ${ref}${submit ? ' и отправлено' : ''} · ${pageSummary(snapshot)}`);
+}
+
+async function browserEvaluate(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
+  const expression = requireString(args, 'expression');
+  const denied = await permitBrowser(ctx, `выполнить на странице: ${expression.slice(0, 120)}`);
+  if (denied) return denied;
+
+  const result = await ctx.browser.evaluate(expression);
+  return { ok: true, summary: 'выражение выполнено', detail: result };
+}
+
+async function browserClose(ctx: ToolContext): Promise<ToolOutcome> {
+  if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
+  // Сессии нет — закрывать нечего: «браузер закрыт» здесь звучало бы как отчёт
+  // о сделанном, хотя браузера ещё не было.
+  if (ctx.browser.running === false) {
+    return { ok: true, summary: 'браузер не запущен', detail: 'Сессии браузера нет — закрывать нечего.' };
+  }
+  await ctx.browser.close();
+  return { ok: true, summary: 'браузер закрыт', detail: 'Процесс браузера остановлен, временный профиль удалён.' };
 }
 
 /**

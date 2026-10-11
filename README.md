@@ -75,6 +75,7 @@ npm run smoke:window     # арифметика своей рамки: пере�
 npm run smoke:git        # GitService на временном репозитории: статус, индекс, коммит, diff, ветки
 npm run smoke:launcher   # стартовое окно и переход в IDE: два окна, настоящий IPC
 npm run smoke:map        # карта проекта: что уходит модели в промпте и что отвечает project_map
+npm run smoke:browser    # браузер агента: свой Chromium по CDP на локальной странице
 ```
 
 Когда проверка должна заглянуть внутрь настоящего окна IDE, берём «пробники» — они не
@@ -406,7 +407,9 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   запуск (`run_terminal`, `terminal_*`),
   git — чтение (`git_status`, `git_diff`, `git_log`, `git_blame`) и записи (`git_stage`, `git_unstage`, `git_commit`,
   `git_checkout`, `git_discard`, `git_fetch`, `git_pull`, `git_push`),
-  интерфейс (`open_file`), `update_plan`, подзадача (`task`) и память проекта (`remember`, `forget`). Где исполняется
+  интерфейс (`open_file`), `update_plan`, подзадача (`task`), браузер (`browser_open`, `browser_snapshot`,
+  `browser_click`, `browser_type`, `browser_evaluate`, `browser_close`) и память проекта
+  (`remember`, `forget`). Где исполняется
   инструмент — свойство `side` контракта: файлы и git — в main, правки и диагностика — в renderer.
 - Память проекта: заметки агента, которые переживают беседу и её сжатие. Сюда уходит то, о чём
   договорились надолго, — предпочтения, решения, «как запускать»: `remember` записывает, `forget`
@@ -512,6 +515,35 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   {
     "ai": {
       "webSearch": { "enabled": true, "provider": "searxng", "endpoint": "https://searx.example.org" }
+    }
+  }
+  ```
+
+- Браузерная автоматизация (`browser_*`) — второй выход наружу, и тоже выключена по умолчанию.
+  Ассистент работает в **своём** Chromium: IDE запускает его отдельным процессом (`--remote-debugging-port=0`,
+  профиль в системном temp) и говорит с ним по Chrome DevTools Protocol — тем же клиентом
+  (`src/main/debug/cdp.ts`), что и отладчик Node. Значит, браузер агента не видит закладок, сессий и паролей
+  человека, а профиль удаляется вместе с сессией. Порт браузер выбирает сам, и узнать его можно только из
+  строки `DevTools listening on ws://…` в stderr — её разбирает `parseDevToolsEndpoint`.
+  Инструменты: `browser_open` (переход; запускает браузер, если тот ещё не поднят), `browser_snapshot`
+  (заголовок, адрес, интерактивные элементы с номерами и видимый текст), `browser_click` и `browser_type`
+  (действие по номеру из снимка; после действия сразу приходит новый снимок, поэтому отдельный шаг не нужен),
+  `browser_evaluate` (выражение на странице) и `browser_close`. Номера — это `data-chui-ref` в DOM: их ставит
+  скрипт-снимок, поэтому клик бьёт именно по тому элементу, который агент видел.
+  Клик и ввод идут средствами CDP (`Input.insertText`, `Input.dispatchKeyEvent`), а не присваиванием
+  значения: так события приходят настоящими и React-подобные формы их видят. Открываем только http и https
+  (адрес без схемы — https, локальный — http): `file:` и `javascript:` отклоняются с причиной.
+  Действия на странице спрашивают подтверждение карточкой в ленте (как команды и git), чтение снимка — нет;
+  при полном доступе вопросов нет вовсе — браузер одноразовый. В режиме «План» инструменты не предлагаются.
+  Исполнение — `src/main/browser/browser.ts`, правило и разбор снимка — `src/shared/browser.ts`
+  (чистый модуль с тестами), проверка — `npm run smoke:browser` (настоящий Chromium на локальной странице;
+  нет браузера — проверка честно об этом говорит и не считается упавшей).
+  Пример настройки в `settings.json`:
+
+  ```json
+  {
+    "ai": {
+      "browser": { "enabled": true, "executable": "", "headless": true }
     }
   }
   ```
