@@ -900,6 +900,12 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       switchRow('Прокрутка за последнюю строку', editor.scrollBeyondLastLine, (value) =>
         editable({ scrollBeyondLastLine: value }),
       ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Свои сниппеты (шаблоны кода) задаются в settings.json — поле `editor.snippets`: ' +
+          'массив из `{ prefix, body, description?, languages? }`. К ним добавляется небольшой набор по умолчанию.',
+      ),
 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Подсказки и проверки'),

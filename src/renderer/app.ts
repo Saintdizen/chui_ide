@@ -26,6 +26,7 @@ import { registerImportActions } from './core/import-actions';
 import { scriptFileTargets } from './core/language-modes';
 import { LspClient } from './core/lsp';
 import { registerInlineAi } from './core/inline-ai';
+import { registerSnippets } from './core/snippets';
 import { registerLspProviders } from './core/lsp-providers';
 import { OpenEditors } from './core/open-editors';
 import { registerNavigation } from './core/navigation';
@@ -246,6 +247,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     debounceMs: () => settings.ai.inlineCompletion.debounceMs,
     relativePath: (path) => workspace.relative(path),
   });
+  // Сниппеты: свои шаблоны из настроек плюс небольшой набор по умолчанию.
+  registerSnippets({ custom: () => settings.editor.snippets });
   // Импорты с неустановленными библиотеками: своя проверка, не зависящая от LSP.
   const importChecker = new ImportChecker(rpc, documents, editors);
   importChecker.attach();

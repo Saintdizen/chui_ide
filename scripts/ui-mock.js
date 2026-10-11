@@ -271,6 +271,8 @@ module.exports = [
       quickSuggestions: true,
       showUnused: true,
       formatOnSave: false,
+      // Свои сниппеты: как в main — по умолчанию пусто, набор знает редактор.
+      snippets: [],
     },
     // Проводник и запуск: мок повторяет контракт настроек из shared/api.ts.
     explorer: {

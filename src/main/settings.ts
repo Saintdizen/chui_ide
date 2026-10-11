@@ -19,6 +19,7 @@ import {
 import { COMPACT_AT_TOKENS } from '../shared/context-fit';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
+import { normalizeSnippets } from '../shared/snippets';
 import { isWebSearchProvider, type WebSearchProvider } from '../shared/web-search';
 import { RpcFailure } from './ipc/router';
 
@@ -174,6 +175,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Форматирование при сохранении по умолчанию выключено: правка пробелов
     // на каждое сохранение — заметное вмешательство, включается осознанно.
     formatOnSave: false,
+    // Своих сниппетов по умолчанию нет: набор, что знает редактор, живёт в коде
+    // (`shared/snippets.ts`), а здесь — только добавленное человеком.
+    snippets: [],
   },
   explorer: {
     icons: true,
@@ -308,7 +312,8 @@ export class SettingsStore {
         // Копия: снимок настроек не должен меняться вслед за правкой.
         inlineCompletion: { ...ai.inlineCompletion },
       },
-      editor: { ...editor },
+      // Копии вложенных списков: снимок настроек не должен меняться вслед за правкой.
+      editor: { ...editor, snippets: editor.snippets.map((snippet) => ({ ...snippet })) },
       explorer: { ...explorer, exclude: [...explorer.exclude] },
       run: { ...run },
       appearance: { ...this.data.appearance },
@@ -339,7 +344,10 @@ export class SettingsStore {
       applyPatch(target, patch.ai);
     }
     if (patch.editor) {
-      this.data.editor = { ...this.data.editor, ...patch.editor };
+      const next = { ...this.data.editor, ...patch.editor };
+      // Сниппеты — данные из файла: прогоняем их через ту же проверку, что при чтении.
+      if (patch.editor.snippets !== undefined) next.snippets = normalizeSnippets(patch.editor.snippets);
+      this.data.editor = next;
     }
     if (patch.explorer) {
       this.data.explorer = { ...this.data.explorer, ...patch.explorer };
@@ -613,7 +621,13 @@ function loadSettings(filePath: string): StoredSettings {
 
   return {
     ai,
-    editor: { ...DEFAULT_SETTINGS.editor, ...(parsed.editor ?? {}) },
+    editor: {
+      ...DEFAULT_SETTINGS.editor,
+      ...(parsed.editor ?? {}),
+      // Сниппеты правит человек в файле, поэтому и триггер, и тело проверяются:
+      // тело уходит в подсказку редактора разметкой Monaco.
+      snippets: normalizeSnippets(parsed.editor?.snippets),
+    },
     // Секции появились позже первых версий: старый settings.json их не знает,
     // поэтому неполный файл догружается значениями по умолчанию, а список
     // исключений приводим к строкам — его могли править руками.

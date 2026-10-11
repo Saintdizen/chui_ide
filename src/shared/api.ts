@@ -11,6 +11,7 @@ import type { BlameLine } from './git-blame';
 import type { PatchFile } from './patch';
 import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
+import type { Snippet } from './snippets';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { NodeTestSuite } from './node-tests';
 import type { PythonEnvironment, PythonInterpreter } from './python-env';
@@ -547,6 +548,8 @@ export interface EditorSettings {
   showUnused: boolean;
   /** Форматировать документ при сохранении (ruff или black из окружения). */
   formatOnSave: boolean;
+  /** Свои сниппеты (шаблоны кода); к ним добавляется набор по умолчанию. */
+  snippets: Snippet[];
 }
 
 /** Плотность строк дерева проекта. */
