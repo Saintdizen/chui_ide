@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countFileSymbols, formatOutline, toFileSymbols } from '../src/shared/lsp-symbols';
+import { countFileSymbols, formatOutline, outlineState, toFileSymbols } from '../src/shared/lsp-symbols';
 
 /**
  * Скелет файла: ответ `textDocument/documentSymbol` в строки с номерами.
@@ -83,6 +83,21 @@ describe('countFileSymbols', () => {
     ]);
 
     expect(countFileSymbols(symbols)).toBe(3);
+  });
+});
+
+describe('outlineState', () => {
+  const one = toFileSymbols([{ name: 'f', kind: 12, range: { start: { line: 0 }, end: { line: 1 } } }]);
+
+  it('отличает «сервера нет» от пустого файла', () => {
+    // Это разные причины и разные сообщения в панели структуры.
+    expect(outlineState(null, [])).toBe('unavailable');
+    expect(outlineState([], [])).toBe('empty');
+    expect(outlineState([], one)).toBe('ready');
+  });
+
+  it('не пришёл ответ — тоже «недоступно»', () => {
+    expect(outlineState(undefined, [])).toBe('unavailable');
   });
 });
 

@@ -69,6 +69,7 @@ import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
 import { logoMark } from './ui/logo';
 import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-popover';
+import { createOutline } from './ui/outline';
 import { createPalette } from './ui/palette';
 import { createPopover, type PopoverView } from './ui/popover';
 import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-env-popover';
@@ -529,6 +530,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // редактор превращает их в цвет значка у строки объявления теста.
   testPanel.onDidChangeOutcomes(() => editors.setTestOutcomes(testPanel.outcomes()));
 
+  // Структура текущего файла: классы и функции списком, клик — переход к объявлению.
+  const outline = createOutline({
+    rpc,
+    openEditors,
+    documents,
+    reveal: (path, line, column) => editors.reveal(path, line, column),
+    isVisible: () => dock.visible && dock.activeId === 'outline',
+  });
+
   const dock = createDock();
   dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });
   dock.register({ id: 'tests', title: 'Тесты', element: testPanel.element, onShow: () => void testPanel.refresh() });
@@ -544,6 +554,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     element: sourceControl.element,
     onShow: () => sourceControl.focus(),
   });
+  // Структуру собираем при показе вкладки: файл мог смениться, пока панель была скрыта.
+  dock.register({ id: 'outline', title: 'Структура', element: outline.element, onShow: () => outline.refresh() });
   layout.dockHost.appendChild(dock.element);
 
   /* ── чат ───────────────────────────────────────────────────────────────── */
@@ -1968,6 +1980,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'view.showTerminal', title: 'Терминал', category: 'Вид', keybinding: 'Alt+F12' }, () => {
     dock.toggle('terminal');
+  });
+
+  define({ id: 'view.showOutline', title: 'Структура файла', category: 'Вид' }, () => {
+    dock.toggle('outline');
   });
 
   define({ id: 'view.toggleDock', title: 'Свернуть нижнюю панель', category: 'Вид' }, () => {

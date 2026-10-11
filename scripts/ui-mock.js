@@ -639,7 +639,34 @@ module.exports = [
     'lsp.restart': () => ({ running: [] }),
     'lsp.status': () => ({ running: [] }),
     // Подсказок в моке нет: пустой ответ — как у сервера без таких возможностей.
-    'lsp.request': () => null,
+    // Исключение — структура файла: мок отдаёт силуэт, чтобы панель Outline показывалась.
+    'lsp.request': (params) => {
+      if (params?.method === 'textDocument/documentSymbol') {
+        return [
+          {
+            name: 'main',
+            kind: 12,
+            range: { start: { line: 4, character: 0 }, end: { line: 12, character: 0 } },
+            selectionRange: { start: { line: 4, character: 4 }, end: { line: 4, character: 8 } },
+            children: [
+              {
+                name: 'helper',
+                kind: 6,
+                range: { start: { line: 7, character: 1 }, end: { line: 9, character: 0 } },
+                selectionRange: { start: { line: 7, character: 8 }, end: { line: 7, character: 14 } },
+              },
+            ],
+          },
+          {
+            name: 'Widget',
+            kind: 5,
+            range: { start: { line: 15, character: 0 }, end: { line: 30, character: 0 } },
+            selectionRange: { start: { line: 15, character: 6 }, end: { line: 15, character: 12 } },
+          },
+        ];
+      }
+      return null;
+    },
     'lsp.symbols': () => [],
     // Как main: «нашлись» только pylsp и typescript-language-server.
     'lsp.detect': () => [

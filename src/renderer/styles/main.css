@@ -5208,6 +5208,83 @@ textarea {
   min-height: 0;
 }
 
+/* ── панель структуры файла (Outline) ──────────────────────────────────── */
+
+.outline-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.outline-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.outline-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.outline-summary {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.outline-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0;
+}
+
+.outline-empty {
+  padding: 6px 10px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Строка символа: значок вида, имя и отступ по вложенности (задаёт paddingLeft). */
+.outline-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: 8px;
+  border: none;
+  background: none;
+  color: var(--text_color);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.outline-row:hover {
+  background: var(--element_background_hover);
+}
+
+/* Значок вида — моноширинный и приглушённый: имя символа важнее. */
+.outline-kind {
+  flex: 0 0 auto;
+  width: 14px;
+  color: var(--run_accent);
+  font-family: "JetBrains Mono", monospace;
+  text-align: center;
+}
+
+.outline-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .tests-toolbar {
   display: flex;
   align-items: center;

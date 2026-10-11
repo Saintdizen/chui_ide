@@ -197,6 +197,20 @@ export function countFileSymbols(symbols: readonly FileSymbol[]): number {
   return total;
 }
 
+/**
+ * Что показывает панель структуры. Различать важно: `null` от сервера — это «взять
+ * структуру неоткуда» (нет сервера для языка), а пустой список — «сервер ответил,
+ * объявлений в файле нет». Сливать их в одно значило бы врать про причину.
+ */
+export type OutlineState = 'unavailable' | 'empty' | 'ready';
+
+/** Состояние панели структуры по ответу сервера и разобранным символам. */
+export function outlineState(raw: unknown, symbols: readonly FileSymbol[]): OutlineState {
+  // `null` — прокси вернул «сервера нет»; `undefined` — та же беда, если ответ не пришёл.
+  if (raw === null || raw === undefined) return 'unavailable';
+  return countFileSymbols(symbols) > 0 ? 'ready' : 'empty';
+}
+
 /** «1 объявление», «2 объявления», «5 объявлений». */
 function declarations(count: number): string {
   const mod10 = count % 10;

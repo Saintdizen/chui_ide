@@ -82,6 +82,7 @@ const VIEW: MenuNode = {
     { label: 'Панель AI', accelerator: 'Ctrl+Shift+A', command: 'view.toggleRight' },
     { separator: true },
     { label: 'Терминал', accelerator: 'Alt+F12', command: 'view.showTerminal' },
+    { label: 'Структура файла', command: 'view.showOutline' },
     { separator: true },
     { label: 'Палитра команд…', accelerator: 'Ctrl+Shift+P', command: 'palette.open' },
     { separator: true },
