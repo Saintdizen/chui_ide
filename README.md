@@ -395,7 +395,7 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   (данные вставки из буфера собирает renderer, поэтому он не источник истины).
 - Инструменты агента (описания — `src/shared/tools.ts`, исполнение — `src/main/ai/agent-tools.ts`):
   чтение проекта (`list_dir`, `read_file`, `read_files`, `search`, `project_map`, `file_outline`,
-  `find_files`, `get_diagnostics`, `run_linter`),
+  `find_files`, `get_diagnostics`, `run_linter`, `find_references`, `go_to_definition`),
   правки и файловые операции (`apply_edit`, `replace_in_files`, `create_file`, `delete_file`, `move_file`),
   запуск (`run_terminal`, `terminal_*`),
   git — чтение (`git_status`, `git_diff`, `git_log`) и записи (`git_stage`, `git_unstage`, `git_commit`,
@@ -437,6 +437,17 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   остаётся для точной строки. Инструмент предлагается модели только при подключённом языковом
   сервере: без него он превратился бы в дубль `search`. Ранжирование и сборка ответа —
   в `src/shared/code-search.ts` (проверяется без Electron).
+- `find_references` и `go_to_definition` — навигация по коду через языковой сервер (те же
+  `textDocument/references` и `textDocument/definition`, что в редакторе). `find_references`
+  отвечает на вопрос «где этот символ ещё используется» — настоящие ссылки, без комментариев и
+  одноимённых переменных, которых наберёт текстовый `search`: перед переименованием или удалением
+  это главное, что нужно знать. Обе работают **по имени**: у агента нет курсора, поэтому позицию
+  он не задаёт — сначала символ ищется через `workspace/symbol`, и уже в его позиции спрашиваются
+  ссылки (`go_to_definition` дополнительно умеет переход из позиции использования — `path` + `line`).
+  Файл, не открытый в редакторе, сервис открывает сам, как и для скелета. Разбор локаций —
+  `src/shared/lsp-locations.ts`: понимает и `Location`, и `LocationLink`, сводит к общему списку
+  `путь:строка:столбец`, убирает повторы. Отсутствие сервера или его неумение — это честное
+  «сервер этого языка не ищет ссылки», а не «ничего не найдено»: агенту это разные подсказки.
 - Внешние инструменты по **MCP** (`mcp__<сервер>__<инструмент>`): серверы задаются в
   `settings.json` (`ai.mcpServers`), IDE запускает их дочерними процессами и говорит с ними
   JSON-RPC по stdio (`src/main/mcp/mcp.ts`; имена и разбор ответов — `src/shared/mcp.ts`).

@@ -15,6 +15,7 @@ import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '..
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { FileEdit, TextEdit } from '../../shared/edits';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
+import { formatLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
 import { isMcpToolName, type McpToolInfo } from '../../shared/mcp';
 import { compressToolOutput } from '../../shared/output-compress';
@@ -94,6 +95,27 @@ export interface SymbolSearch {
    * `null` — сервер недоступен или не умеет; пустой список — объявлений нет.
    */
   outline?(path: string, languageId: string, text: string): Promise<readonly FileSymbol[] | null>;
+  /**
+   * Ссылки на символ: где он ещё встречается. Позиция — объявление символа
+   * (1-based, как её отдаёт `workspace/symbol`). `null` — сервер не умеет искать
+   * ссылки; пустой список — умеет, но мест не нашёл.
+   */
+  references?(
+    path: string,
+    languageId: string,
+    text: string,
+    line: number,
+    column: number,
+    includeDeclaration: boolean,
+  ): Promise<readonly SymbolLocation[] | null>;
+  /** Переход к определению из позиции использования. `null` — сервер не умеет. */
+  definition?(
+    path: string,
+    languageId: string,
+    text: string,
+    line: number,
+    column: number,
+  ): Promise<readonly SymbolLocation[] | null>;
 }
 
 /**
@@ -240,6 +262,10 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await search(ctx, parsed.value);
       case 'codebase_search':
         return await codebaseSearch(ctx, parsed.value);
+      case 'find_references':
+        return await findReferences(ctx, parsed.value);
+      case 'go_to_definition':
+        return await goToDefinition(ctx, parsed.value);
       case 'file_outline':
         return await fileOutline(ctx, parsed.value);
       case 'run_linter':
@@ -626,6 +652,164 @@ async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): 
   });
 
   return { ok: true, summary: shaped.summary, detail: shaped.detail };
+}
+
+/* ── ссылки и переход к определению (языковой сервер) ───────────────────── */
+
+/** Сколько объявлений учитываем при выборе цели: важно ближайшее по имени, а не все. */
+const MAX_SYMBOL_CANDIDATES = 20;
+
+/** Путь аргумента, приведённый к абсолютному внутри рабочей папки; null — аргумента нет. */
+function resolvePathArg(ctx: ToolContext, value: string | undefined): string | null {
+  if (!value) return null;
+  const root = ctx.workspace.rootPath();
+  if (!root) return null;
+  const absolute = path.isAbsolute(value) ? path.resolve(value) : path.resolve(root, value);
+  const rel = path.relative(root, absolute);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return absolute;
+}
+
+/**
+ * Ближайшее объявление символа по имени. Сервер отдаёт список совпадений, а нам
+ * нужна одна цель — та, чьи ссылки смотреть или от которой перейти к определению;
+ * `rankSymbols` ставит точные совпадения и короткие имена вперёд.
+ */
+async function resolveSymbol(ctx: ToolContext, name: string, pathFilter: string | null): Promise<SearchSymbol | null> {
+  if (!ctx.symbols) return null;
+  const found = await ctx.symbols.projectSymbols(name).catch(() => [] as readonly SearchSymbol[]);
+  const ranked = rankSymbols(found, name, MAX_SYMBOL_CANDIDATES);
+  if (pathFilter) {
+    const inFile = ranked.find((symbol) => symbol.path === pathFilter);
+    if (inFile) return inFile;
+  }
+  return ranked[0] ?? null;
+}
+
+/** Текст и язык файла — их требует запрос к серверу по позиции. */
+async function documentOf(
+  ctx: ToolContext,
+  target: string,
+): Promise<{ text: string; language: string } | { error: ToolOutcome }> {
+  const language = ctx.symbols?.languageFor?.(target);
+  if (!language) {
+    return {
+      error: {
+        ok: false,
+        summary: `${relative(target, ctx.workspace.rootPath())}: язык не распознан`,
+        detail: 'Для этого расширения языкового сервера нет — ссылки и переход недоступны.',
+      },
+    };
+  }
+  const content = await ctx.workspace.readFile(target);
+  return { text: content.text, language };
+}
+
+/**
+ * Ссылки на символ: где он ещё встречается. Сперва находим объявление по имени
+ * (`workspace/symbol`), затем просим сервер о ссылках в этой позиции. Позиция
+ * объявления известна точно, а курсора у агента нет — поэтому и по имени, а не
+ * по позиции.
+ */
+async function findReferences(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.symbols?.references) {
+    return { ok: false, summary: 'Языковой сервер не подключён: поиск ссылок недоступен' };
+  }
+
+  const name = requireString(args, 'symbol').trim();
+  const root = ctx.workspace.rootPath();
+  const target = await resolveSymbol(ctx, name, resolvePathArg(ctx, optionalString(args, 'path')));
+  if (!target) {
+    return {
+      ok: true,
+      summary: `объявление «${name}» не найдено`,
+      detail:
+        'Языковой сервер не нашёл объявления с таким именем. Уточни имя (или напиши его словами, ' +
+        'например «read file») либо посмотри codebase_search.',
+    };
+  }
+
+  const doc = await documentOf(ctx, target.path);
+  if ('error' in doc) return doc.error;
+
+  const includeDeclaration = optionalBoolean(args, 'includeDeclaration') ?? true;
+  const locations = await ctx.symbols.references(
+    target.path,
+    doc.language,
+    doc.text,
+    target.line,
+    target.column,
+    includeDeclaration,
+  );
+  if (locations === null) {
+    return {
+      ok: false,
+      summary: `${target.name}: сервер этого языка не ищет ссылки`,
+      detail:
+        'Языковой сервер не умеет `textDocument/references`. Ищи вхождения через search — но ' +
+        'текстовый поиск ловит и комментарии с одноимёнными переменными.',
+    };
+  }
+
+  const subject = `ссылки на ${target.name} (объявлен в ${relative(target.path, root)})`;
+  const report = formatLocations(subject, locations, (target) => relativePath(target, root));
+  return { ok: true, summary: report.summary, detail: report.detail };
+}
+
+/**
+ * Переход к определению: по имени (где символ объявлен) или из позиции
+ * использования (переход делает сервер). Имя — обычный случай: у агента нет
+ * курсора, а позицию он берёт из тех же ссылок.
+ */
+async function goToDefinition(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.symbols) {
+    return { ok: false, summary: 'Языковой сервер не подключён: переход к определению недоступен' };
+  }
+
+  const root = ctx.workspace.rootPath();
+  const pathArg = resolvePathArg(ctx, optionalString(args, 'path'));
+  const line = optionalInteger(args, 'line');
+
+  // Позиционный переход: файл и строка с использованием известны — решает сервер.
+  if (pathArg && line) {
+    if (!ctx.symbols.definition) {
+      return { ok: false, summary: 'Языковой сервер не подключён: переход по позиции недоступен' };
+    }
+    const doc = await documentOf(ctx, pathArg);
+    if ('error' in doc) return doc.error;
+
+    const column = optionalInteger(args, 'column') ?? 1;
+    const locations = await ctx.symbols.definition(pathArg, doc.language, doc.text, line, column);
+    if (locations === null) {
+      return {
+        ok: false,
+        summary: 'Сервер этого языка не умеет переход к определению',
+        detail: 'Попробуй назвать символ аргументом `symbol` — тогда объявление ищется по имени.',
+      };
+    }
+    const subject = `определение из ${relative(pathArg, root)}:${line}`;
+    const report = formatLocations(subject, locations, (target) => relativePath(target, root));
+    return { ok: true, summary: report.summary, detail: report.detail };
+  }
+
+  // Переход по имени: сервер отдаёт объявления символа прямо по имени.
+  const name = optionalString(args, 'symbol');
+  if (!name) {
+    return {
+      ok: false,
+      summary: 'Нужен symbol или path вместе с line',
+      detail: 'Передай имя символа (`symbol`) либо файл и строку с использованием (`path` и `line`).',
+    };
+  }
+
+  const found = await ctx.symbols.projectSymbols(name).catch(() => [] as readonly SearchSymbol[]);
+  const locations: SymbolLocation[] = rankSymbols(found, name, MAX_SYMBOL_CANDIDATES).map((symbol) => ({
+    path: symbol.path,
+    line: symbol.line,
+    column: symbol.column,
+  }));
+  const report = formatLocations(`определение ${name}`, locations, (target) => relativePath(target, root));
+  return { ok: true, summary: report.summary, detail: report.detail };
 }
 
 /**

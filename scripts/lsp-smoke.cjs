@@ -107,6 +107,29 @@ async function main() {
   const unknown = await lsp.outline(path.join(root, 'scripts', 'x.unknown'), 'unknown', '');
   ok('неизвестный язык скелета не даёт', unknown === null, String(unknown));
 
+  /* Ссылки и переход к определению (инструменты find_references/go_to_definition).
+     Файл не открыт — сервис поднимает сервер и открывает документ сам. Координаты
+     сервер шлёт 0-based, клиент обязан отдать 1-based; оба вида ответа (Location и
+     LocationLink) разбираются в один список. */
+  const references = await lsp.references(sample, 'python', 'print(1)\n', 10, 5, true);
+  ok('ссылки получены', Array.isArray(references) && references.length === 2, JSON.stringify(references));
+  ok(
+    'координаты ссылок переведены в 1-based',
+    references?.[0]?.line === 10 && references[0].column === 5,
+    JSON.stringify(references?.[0]),
+  );
+
+  const definition = await lsp.definition(sample, 'python', 'print(1)\n', 10, 5);
+  ok(
+    'переход к определению понимает LocationLink',
+    definition?.[0]?.line === 3 && definition[0].column === 7,
+    JSON.stringify(definition?.[0]),
+  );
+
+  // Язык без сервера: `null` — «сервера нет», а не «мест нет».
+  const noReferences = await lsp.references(path.join(root, 'scripts', 'x.unknown'), 'unknown', '', 1, 1, true);
+  ok('без сервера ссылок нет (null)', noReferences === null, String(noReferences));
+
   const restarted = lsp.restart();
   ok('restart останавливает серверы', restarted.running.length === 0 && lsp.status().running.length === 0);
 

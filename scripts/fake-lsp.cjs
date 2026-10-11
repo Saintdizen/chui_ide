@@ -16,7 +16,14 @@ function handle(message) {
     send({
       jsonrpc: '2.0',
       id: message.id,
-      result: { capabilities: { textDocumentSync: 1, documentSymbolProvider: true } },
+      result: {
+        capabilities: {
+          textDocumentSync: 1,
+          documentSymbolProvider: true,
+          referencesProvider: true,
+          definitionProvider: true,
+        },
+      },
     });
     // Запрос сервер→клиент: клиент обязан ответить, иначе протокол ломается.
     send({ jsonrpc: '2.0', id: 'srv-1', method: 'window/workDoneProgress/create', params: { token: 'x' } });
@@ -83,6 +90,39 @@ function handle(message) {
           ],
         },
         { name: 'read_file', kind: 12, range: { start: { line: 43, character: 0 }, end: { line: 43, character: 0 } } },
+      ],
+    });
+    return;
+  }
+
+  // Ссылки на символ: два места в разных файлах — проверяем и разбор, и перевод
+  // координат (сервер шлёт 0-based, клиент отдаёт 1-based).
+  if (message.method === 'textDocument/references') {
+    const uri = message.params.textDocument.uri;
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [
+        { uri, range: { start: { line: 9, character: 4 }, end: { line: 9, character: 16 } } },
+        {
+          uri: `file://${process.cwd()}/scripts/other.py`,
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+        },
+      ],
+    });
+    return;
+  }
+
+  // Переход к определению: LocationLink — вторая форма ответа, её тоже понимаем.
+  if (message.method === 'textDocument/definition') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [
+        {
+          targetUri: message.params.textDocument.uri,
+          targetSelectionRange: { start: { line: 2, character: 6 }, end: { line: 2, character: 12 } },
+        },
       ],
     });
     return;

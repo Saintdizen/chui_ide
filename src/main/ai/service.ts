@@ -100,6 +100,8 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'read_files',
   'search',
   'codebase_search',
+  'find_references',
+  'go_to_definition',
   'project_map',
   'file_outline',
   'run_linter',
@@ -123,6 +125,8 @@ const READ_ONLY_TOOLS = new Set([
   'read_file',
   'read_files',
   'search',
+  'find_references',
+  'go_to_definition',
   'project_map',
   'file_outline',
   'run_linter',
@@ -137,7 +141,7 @@ const AGENT_PROMPT = [
   'Работай с проектом инструментами, а не по догадке: назначение и аргументы у каждого инструмента описаны отдельно — читай их.',
   'Устройство проекта видно по карте в начале беседы: не обходи дерево и не читай манифесты, чтобы понять, что это за проект. Подробнее — project_map.',
   'Не выдумывай содержимое файлов: то, чего не знаешь, читай инструментами.',
-  'Прежде чем читать файл целиком, найди место: codebase_search — где объявлен символ, search — где встречается, find_files — какие файлы есть.',
+  'Прежде чем читать файл целиком, найди место: codebase_search — где объявлен символ, find_references — где он используется, search — где встречается текстом, find_files — какие файлы есть.',
   'Устройство файла видно по скелету (file_outline): объявления с номерами строк. Дальше читай этим диапазоном, а не файл целиком.',
   'Большие файлы читай диапазоном строк и не перечитывай одно и то же много раз.',
   'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу.',
@@ -786,7 +790,14 @@ export class AiService {
     if (tool.name.startsWith('git_')) return this.git !== undefined && host?.confirmGit !== undefined;
     if (tool.name.startsWith('terminal_')) return this.terminals !== undefined;
     // Оба инструмента символов живут на языковом сервере: без него их не предлагаем.
-    if (tool.name === 'codebase_search' || tool.name === 'file_outline') return this.symbols !== undefined;
+    if (
+      tool.name === 'codebase_search' ||
+      tool.name === 'file_outline' ||
+      tool.name === 'find_references' ||
+      tool.name === 'go_to_definition'
+    ) {
+      return this.symbols !== undefined;
+    }
     if (tool.name === 'run_linter') return this.linter !== undefined;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     return tool.side === 'main';

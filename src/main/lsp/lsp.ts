@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
 import { languageInfoForPath } from '../../shared/languages';
+import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { toFileSymbols, toProjectSymbols, type FileSymbol, type ProjectSymbol } from '../../shared/lsp-symbols';
 import { mergeEnv } from '../project-env';
 
@@ -145,6 +146,8 @@ interface LspCapabilities {
   workspaceSymbolProvider?: boolean;
   /** Объявления внутри файла: на них строится скелет файла для агента. */
   documentSymbolProvider?: boolean;
+  /** Ссылки на символ по всему проекту — «найти все ссылки». */
+  referencesProvider?: boolean;
 }
 
 export class LspService {
@@ -395,21 +398,98 @@ export class LspService {
    * спросил (у агента это `WorkspaceService` — с проверкой путей).
    */
   async outline(path: string, languageId: string, text: string): Promise<FileSymbol[] | null> {
-    const opened = this.runtimeForPath(path);
-    const runtime = opened ?? (await this.runtimeFor(languageId));
+    const runtime = await this.runtimeForDocument(path, languageId);
     // `null` — сервера нет или он этого не умеет. Пустой список — другое: сервер
     // ответил, объявлений в файле просто нет. Разница видна агенту в тексте.
     if (!runtime?.capabilities.documentSymbolProvider) return null;
-    await runtime.initialized.catch(() => undefined);
 
+    return this.withDocument(runtime, path, languageId, text, (uri) =>
+      runtime.connection
+        .request('textDocument/documentSymbol', { textDocument: { uri } })
+        .then(toFileSymbols)
+        // сервер не ответил — это не повод ломать агентный шаг
+        .catch(() => [] as FileSymbol[]),
+    );
+  }
+
+  /**
+   * Ссылки на символ: где он ещё встречается. Позиция — объявление символа
+   * (её даёт `workspace/symbol`). `includeDeclaration` — включать ли в ответ само
+   * объявление: агенту оно обычно уже известно, и он просит только использования.
+   *
+   * Как и у скелета, файл открываем сами, если он не открыт в редакторе: агенту
+   * он нужен сейчас, а не когда человек откроет вкладку.
+   */
+  async references(
+    path: string,
+    languageId: string,
+    text: string,
+    line: number,
+    column: number,
+    includeDeclaration: boolean,
+  ): Promise<SymbolLocation[] | null> {
+    const runtime = await this.runtimeForDocument(path, languageId);
+    if (!runtime?.capabilities.referencesProvider) return null;
+
+    return this.withDocument(runtime, path, languageId, text, (uri) =>
+      runtime.connection
+        .request('textDocument/references', {
+          textDocument: { uri },
+          position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
+          context: { includeDeclaration },
+        })
+        .then((raw) => toLocations(raw, fileURLToPath))
+        .catch(() => [] as SymbolLocation[]),
+    );
+  }
+
+  /** Переход к определению из позиции использования: где символ объявлен. */
+  async definition(
+    path: string,
+    languageId: string,
+    text: string,
+    line: number,
+    column: number,
+  ): Promise<SymbolLocation[] | null> {
+    const runtime = await this.runtimeForDocument(path, languageId);
+    if (!runtime?.capabilities.definitionProvider) return null;
+
+    return this.withDocument(runtime, path, languageId, text, (uri) =>
+      runtime.connection
+        .request('textDocument/definition', {
+          textDocument: { uri },
+          position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
+        })
+        .then((raw) => toLocations(raw, fileURLToPath))
+        .catch(() => [] as SymbolLocation[]),
+    );
+  }
+
+  /** Сервер для файла: уже открытый в редакторе или поднятый по языку. */
+  private async runtimeForDocument(path: string, languageId: string): Promise<ServerRuntime | null> {
+    return this.runtimeForPath(path) ?? (await this.runtimeFor(languageId));
+  }
+
+  /**
+   * Выполнить запрос к документу, открыв его серверу при необходимости и закрыв
+   * после — если открывали мы. Общий уговор у скелета, ссылок и перехода: текст
+   * приходит снаружи (файловой системы у сервиса нет), а открытие/закрытие не
+   * должно остаться на совести вызывающего.
+   */
+  private async withDocument<T>(
+    runtime: ServerRuntime,
+    path: string,
+    languageId: string,
+    text: string,
+    run: (uri: string) => Promise<T>,
+  ): Promise<T> {
+    await runtime.initialized.catch(() => undefined);
+    const opened = this.runtimeForPath(path) === runtime;
     const uri = pathToFileURL(path).toString();
     if (!opened)
       runtime.connection.notify('textDocument/didOpen', { textDocument: { uri, languageId, version: 1, text } });
     try {
-      const raw = await runtime.connection.request('textDocument/documentSymbol', { textDocument: { uri } });
-      return toFileSymbols(raw);
-    } catch {
-      return []; // сервер не ответил — это не повод ломать агентный шаг
+      return await run(uri);
     } finally {
       if (!opened) runtime.connection.notify('textDocument/didClose', { textDocument: { uri } });
     }

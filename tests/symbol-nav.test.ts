@@ -1,0 +1,188 @@
+import { describe, expect, it, vi } from 'vitest';
+import type { SearchSymbol } from '../src/shared/code-search';
+import type { SymbolLocation } from '../src/shared/lsp-locations';
+import { runTool, type SymbolSearch, type ToolContext } from '../src/main/ai/agent-tools';
+import type { WorkspaceService } from '../src/main/workspace/workspace';
+
+/**
+ * Ссылки и переход к определению глазами агента.
+ *
+ * Проверяем без живого языкового сервера: важно поведение обёртки — по имени
+ * находится объявление, к серверу уходит правильная позиция, недоступный сервер
+ * честно называется, а путь вне проекта не проходит. Сам разбор ответов сервера
+ * проверяется в `lsp-locations.test.ts`.
+ */
+
+const ROOT = '/proj';
+
+/** Объявление символа так, как его отдаёт `workspace/symbol`. */
+const declaration = (over: Partial<SearchSymbol> = {}): SearchSymbol => ({
+  name: 'saveCalibration',
+  kind: 'метод',
+  container: 'SettingsStore',
+  path: `${ROOT}/src/settings.ts`,
+  line: 42,
+  column: 3,
+  ...over,
+});
+
+/** Заглушка языкового сервера: поиск символов и запросы про ссылки/переход. */
+function makeSymbols(over: Partial<SymbolSearch> = {}) {
+  return {
+    // Возвращаем символ с именем из запроса: так его пропустит ранжирование по имени.
+    projectSymbols: vi.fn(async (query: string) => [declaration({ name: query })] as readonly SearchSymbol[]),
+    languageFor: vi.fn(() => 'typescript'),
+    references: vi.fn(async () => [] as readonly SymbolLocation[]),
+    definition: vi.fn(async () => [] as readonly SymbolLocation[]),
+    ...over,
+  };
+}
+
+function context(symbols: SymbolSearch, options: Partial<ToolContext> = {}): ToolContext {
+  const workspace = {
+    rootPath: () => ROOT,
+    readFile: async () => ({ text: 'const x = 1;\n', mtimeMs: 0 }),
+  } as unknown as WorkspaceService;
+  return { workspace, symbols, ...options };
+}
+
+describe('find_references', () => {
+  it('находит объявление по имени и спрашивает ссылки в его позиции', async () => {
+    const symbols = makeSymbols({
+      references: vi.fn(async () => [
+        { path: `${ROOT}/src/a.ts`, line: 10, column: 1 },
+        { path: `${ROOT}/src/b.ts`, line: 3, column: 5 },
+      ]),
+    });
+
+    const outcome = await runTool(context(symbols), 'find_references', '{"symbol":"saveCalibration"}');
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.summary).toContain('мест 2');
+    // Позиция объявления уходит 1-based как есть — перевод в 0-based делает сервис.
+    expect(symbols.references).toHaveBeenCalledWith(
+      `${ROOT}/src/settings.ts`,
+      'typescript',
+      expect.any(String),
+      42,
+      3,
+      true,
+    );
+    expect(outcome.detail).toBe('src/a.ts:10:1\nsrc/b.ts:3:5');
+  });
+
+  it('includeDeclaration=false передаётся в сервис', async () => {
+    const symbols = makeSymbols();
+    await runTool(context(symbols), 'find_references', '{"symbol":"x","includeDeclaration":false}');
+
+    expect(symbols.references).toHaveBeenCalledWith(expect.any(String), 'typescript', expect.any(String), 42, 3, false);
+  });
+
+  it('объявление не найдено — не ошибка, а понятный ответ', async () => {
+    const symbols = makeSymbols({ projectSymbols: vi.fn(async () => [] as readonly SearchSymbol[]) });
+    const outcome = await runTool(context(symbols), 'find_references', '{"symbol":"nope"}');
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.summary).toContain('не найдено');
+    expect(symbols.references).not.toHaveBeenCalled();
+  });
+
+  it('сервер не умеет ссылки — говорим об этом, а не «ничего не найдено»', async () => {
+    const symbols = makeSymbols({ references: vi.fn(async () => null) });
+    const outcome = await runTool(context(symbols), 'find_references', '{"symbol":"x"}');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('не ищет ссылки');
+  });
+
+  it('без языкового сервера инструмент недоступен', async () => {
+    const outcome = await runTool(context(makeSymbols(), { symbols: undefined }), 'find_references', '{"symbol":"x"}');
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('не подключён');
+  });
+
+  it('фильтр по файлу выбирает объявление из него, а не первое по рангу', async () => {
+    const symbols = makeSymbols({
+      projectSymbols: vi.fn(
+        async () =>
+          [
+            declaration({ path: `${ROOT}/src/first.ts`, line: 1 }),
+            declaration({ path: `${ROOT}/src/second.ts`, line: 99 }),
+          ] as readonly SearchSymbol[],
+      ),
+    });
+    await runTool(context(symbols), 'find_references', `{"symbol":"saveCalibration","path":"${ROOT}/src/second.ts"}`);
+
+    expect(symbols.references).toHaveBeenCalledWith(
+      `${ROOT}/src/second.ts`,
+      'typescript',
+      expect.any(String),
+      99,
+      3,
+      true,
+    );
+  });
+
+  it('путь вне рабочей папки не сужает поиск молча (фильтр игнорируется)', async () => {
+    const symbols = makeSymbols();
+    await runTool(context(symbols), 'find_references', '{"symbol":"x","path":"/etc/passwd"}');
+
+    // Фильтр отброшен, взят лучший символ по имени.
+    expect(symbols.references).toHaveBeenCalledWith(
+      `${ROOT}/src/settings.ts`,
+      'typescript',
+      expect.any(String),
+      42,
+      3,
+      true,
+    );
+  });
+});
+
+describe('go_to_definition', () => {
+  it('по имени отдаёт объявления символа', async () => {
+    const symbols = makeSymbols();
+    const outcome = await runTool(context(symbols), 'go_to_definition', '{"symbol":"saveCalibration"}');
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.summary).toContain('мест 1');
+    expect(outcome.detail).toBe('src/settings.ts:42:3');
+  });
+
+  it('из позиции использования спрашивает сервер и переводит позицию в 0-based', async () => {
+    const symbols = makeSymbols({
+      definition: vi.fn(async () => [{ path: `${ROOT}/src/settings.ts`, line: 42, column: 3 }]),
+    });
+    const outcome = await runTool(
+      context(symbols),
+      'go_to_definition',
+      `{"path":"${ROOT}/src/use.ts","line":8,"column":11}`,
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(symbols.definition).toHaveBeenCalledWith(`${ROOT}/src/use.ts`, 'typescript', expect.any(String), 8, 11);
+    expect(outcome.detail).toBe('src/settings.ts:42:3');
+  });
+
+  it('без столбца позиция использования берётся с начала строки', async () => {
+    const symbols = makeSymbols({ definition: vi.fn(async () => [{ path: `${ROOT}/a.ts`, line: 1, column: 1 }]) });
+    await runTool(context(symbols), 'go_to_definition', `{"path":"${ROOT}/use.ts","line":8}`);
+
+    expect(symbols.definition).toHaveBeenCalledWith(`${ROOT}/use.ts`, 'typescript', expect.any(String), 8, 1);
+  });
+
+  it('ни имени, ни позиции — понятная подсказка', async () => {
+    const outcome = await runTool(context(makeSymbols()), 'go_to_definition', '{}');
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('symbol');
+  });
+
+  it('язык не распознан — честный отказ вместо пустого перехода', async () => {
+    const symbols = makeSymbols({ languageFor: vi.fn(() => null) });
+    const outcome = await runTool(context(symbols), 'go_to_definition', `{"path":"${ROOT}/a.txt","line":1}`);
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('язык не распознан');
+  });
+});

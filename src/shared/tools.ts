@@ -19,6 +19,8 @@ export type AgentToolName =
   | 'read_files'
   | 'search'
   | 'codebase_search'
+  | 'find_references'
+  | 'go_to_definition'
   | 'project_map'
   | 'file_outline'
   | 'run_linter'
@@ -154,6 +156,45 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         limit: { type: 'number', description: 'Сколько объявлений вернуть (по умолчанию 40).' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'find_references',
+    side: 'main',
+    description:
+      'Где символ используется во всём проекте (языковой сервер, не текстовый поиск): ссылки ' +
+      'без комментариев и одноимённых переменных. Вызывай перед переименованием или удалением — ' +
+      'понять, что ещё сломается. Имя символа можно писать словами («read file»).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Имя символа, например `saveCalibration` или «read file».' },
+        path: {
+          type: 'string',
+          description: 'Если у символа несколько объявлений — сузить поиск этим файлом (абсолютный путь).',
+        },
+        includeDeclaration: {
+          type: 'boolean',
+          description: 'Включить само объявление в список (по умолчанию да).',
+        },
+      },
+      required: ['symbol'],
+    },
+  },
+  {
+    name: 'go_to_definition',
+    side: 'main',
+    description:
+      'Перейти к объявлению символа. Либо по имени (`symbol`) — где он определён, либо из позиции ' +
+      'использования (`path` + `line`): тогда переход делает языковой сервер. Требует языкового сервера.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        symbol: { type: 'string', description: 'Имя символа — если известно, где искать по имени.' },
+        path: { type: 'string', description: 'Файл с использованием (абсолютный путь).' },
+        line: { type: 'number', description: 'Строка использования в этом файле (1-based).' },
+        column: { type: 'number', description: 'Столбец (1-based). Без него — начало строки.' },
+      },
     },
   },
   {
