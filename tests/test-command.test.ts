@@ -97,8 +97,10 @@ describe('testCommand: Python', () => {
 
     const result = await testCommand(root, 'python3');
 
+    // Кавычки — свои у каждой оболочки: posix спасает одиночными, cmd.exe — двойными.
+    const interpreter = process.platform === 'win32' ? '"python3"' : "'python3'";
     expect(result?.label).toBe('pytest');
-    expect(result?.command).toBe("'python3' -m pytest");
+    expect(result?.command).toBe(`${interpreter} -m pytest`);
   });
 
   it('Python-проект без тестовых файлов — нечего запускать', async () => {

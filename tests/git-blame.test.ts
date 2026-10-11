@@ -67,6 +67,18 @@ describe('parseBlamePorcelain', () => {
     const broken = ['abc123 1 1 1', 'summary x', '\ttext'].join('\n');
     expect(parseBlamePorcelain(broken)).toEqual([]);
   });
+
+  it('строки с CRLF разбираются так же, как с LF', () => {
+    // Так выглядит вывод git на Windows: возврат каретки не должен ломать ни
+    // заголовок блока, ни текст строки.
+    const crlf = PORCELAIN.replace(/\n/g, '\r\n');
+
+    const lines = parseBlamePorcelain(crlf);
+
+    expect(lines).toHaveLength(3);
+    expect(lines[0]!.text).toBe('one');
+    expect(lines[1]!.text).toBe('CHANGED');
+  });
 });
 
 describe('formatBlame', () => {

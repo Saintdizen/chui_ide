@@ -53,7 +53,11 @@ async function makeProject(input: {
   manifests?: Record<string, string>;
   installed?: ReadonlyArray<{ pkg: string; tool: string; script: string }>;
 }): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-node-lint-'));
+  // Каталог разворачиваем: на macOS `tmpdir()` — `/var/folders/…` через симлинк
+  // на `/private/var/…`, а заглушка eslint (как и настоящая) печатает путь от
+  // `process.cwd()` дочернего процесса — тот же канонический вид. Иначе
+  // относительный путь в отчёте обрастал бы `../../..`. Приём — как в `debug.test.ts`.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-node-lint-')));
   roots.push(root);
 
   await fs.writeFile(

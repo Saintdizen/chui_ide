@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { GitStatus } from '../src/shared/api';
 import { runTool, type GitTools, type ToolContext } from '../src/main/ai/agent-tools';
@@ -11,7 +12,9 @@ import type { WorkspaceService } from '../src/main/workspace/workspace';
  * Сам git-сервис проверяется отдельно (`git-service.test.ts`).
  */
 
-const ROOT = '/proj';
+// Корень — через `path.resolve`: инструмент приводит пути диска и разделителя,
+// и POSIX-литерал на Windows сошёлся бы ни разделителем, ни диском.
+const ROOT = path.resolve('/proj');
 
 const STATUS: GitStatus = { repository: null, files: [] };
 
@@ -80,7 +83,7 @@ describe('подтверждение git-действий', () => {
     await runTool(ctx, 'git_commit', '{"message":"fix"}');
     expect(confirmGit).not.toHaveBeenCalled();
 
-    await runTool(ctx, 'git_discard', `{"paths":["${ROOT}/a.ts"]}`);
+    await runTool(ctx, 'git_discard', JSON.stringify({ paths: [path.join(ROOT, 'a.ts')] }));
     expect(confirmGit).toHaveBeenCalledOnce();
   });
 
@@ -89,7 +92,7 @@ describe('подтверждение git-действий', () => {
     const confirmGit = approver(true);
     const ctx = context(git, { confirmGit, allowAll: true, confirmDangerous: false });
 
-    await runTool(ctx, 'git_discard', `{"paths":["${ROOT}/a.ts"]}`);
+    await runTool(ctx, 'git_discard', JSON.stringify({ paths: [path.join(ROOT, 'a.ts')] }));
     expect(confirmGit).not.toHaveBeenCalled();
     expect(git.discard).toHaveBeenCalledOnce();
   });
@@ -111,7 +114,7 @@ describe('граница рабочей папки', () => {
     const outcome = await runTool(context(git, { confirmGit: approver(true) }), 'git_stage', '{"paths":["src/a.ts"]}');
 
     expect(outcome.ok).toBe(true);
-    expect(git.stage).toHaveBeenCalledWith([`${ROOT}/src/a.ts`]);
+    expect(git.stage).toHaveBeenCalledWith([path.join(ROOT, 'src', 'a.ts')]);
   });
 
   it('пустой список путей — ошибка, а не «всё проиндексировано»', async () => {

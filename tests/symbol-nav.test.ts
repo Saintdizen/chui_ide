@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { SearchSymbol } from '../src/shared/code-search';
 import type { FileEdit } from '../src/shared/edits';
@@ -14,7 +15,10 @@ import type { WorkspaceService } from '../src/main/workspace/workspace';
  * проверяется в `lsp-locations.test.ts`.
  */
 
-const ROOT = '/proj';
+// Корень — через `path.resolve`, а аргументы-пути подаём через `JSON.stringify`:
+// инструмент приводит путь к своему диску и разделителю, и POSIX-литерал на
+// Windows не совпал бы с ним (как и обратный слэш внутри строки JSON).
+const ROOT = path.resolve('/proj');
 
 /** Объявление символа так, как его отдаёт `workspace/symbol`. */
 const declaration = (over: Partial<SearchSymbol> = {}): SearchSymbol => ({
@@ -123,7 +127,11 @@ describe('find_references', () => {
           ] as readonly SearchSymbol[],
       ),
     });
-    await runTool(context(symbols), 'find_references', `{"symbol":"saveCalibration","path":"${ROOT}/src/second.ts"}`);
+    await runTool(
+      context(symbols),
+      'find_references',
+      JSON.stringify({ symbol: 'saveCalibration', path: path.join(ROOT, 'src', 'second.ts') }),
+    );
 
     expect(symbols.references).toHaveBeenCalledWith(
       `${ROOT}/src/second.ts`,
@@ -165,22 +173,24 @@ describe('go_to_definition', () => {
     const symbols = makeSymbols({
       definition: vi.fn(async () => [{ path: `${ROOT}/src/settings.ts`, line: 42, column: 3 }]),
     });
+    const usePath = path.join(ROOT, 'src', 'use.ts');
     const outcome = await runTool(
       context(symbols),
       'go_to_definition',
-      `{"path":"${ROOT}/src/use.ts","line":8,"column":11}`,
+      JSON.stringify({ path: usePath, line: 8, column: 11 }),
     );
 
     expect(outcome.ok).toBe(true);
-    expect(symbols.definition).toHaveBeenCalledWith(`${ROOT}/src/use.ts`, 'typescript', expect.any(String), 8, 11);
+    expect(symbols.definition).toHaveBeenCalledWith(usePath, 'typescript', expect.any(String), 8, 11);
     expect(outcome.detail).toBe('src/settings.ts:42:3');
   });
 
   it('без столбца позиция использования берётся с начала строки', async () => {
     const symbols = makeSymbols({ definition: vi.fn(async () => [{ path: `${ROOT}/a.ts`, line: 1, column: 1 }]) });
-    await runTool(context(symbols), 'go_to_definition', `{"path":"${ROOT}/use.ts","line":8}`);
+    const usePath = path.join(ROOT, 'use.ts');
+    await runTool(context(symbols), 'go_to_definition', JSON.stringify({ path: usePath, line: 8 }));
 
-    expect(symbols.definition).toHaveBeenCalledWith(`${ROOT}/use.ts`, 'typescript', expect.any(String), 8, 1);
+    expect(symbols.definition).toHaveBeenCalledWith(usePath, 'typescript', expect.any(String), 8, 1);
   });
 
   it('ни имени, ни позиции — понятная подсказка', async () => {
@@ -191,7 +201,11 @@ describe('go_to_definition', () => {
 
   it('язык не распознан — честный отказ вместо пустого перехода', async () => {
     const symbols = makeSymbols({ languageFor: vi.fn(() => null) });
-    const outcome = await runTool(context(symbols), 'go_to_definition', `{"path":"${ROOT}/a.txt","line":1}`);
+    const outcome = await runTool(
+      context(symbols),
+      'go_to_definition',
+      JSON.stringify({ path: path.join(ROOT, 'a.txt'), line: 1 }),
+    );
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('язык не распознан');

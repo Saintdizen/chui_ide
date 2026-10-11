@@ -975,6 +975,11 @@ function resolvePathArg(ctx: ToolContext, value: string | undefined): string | n
   return absolute;
 }
 
+/** Один и тот же файл: пути могут отличаться разделителем или регистром диска. */
+function samePath(left: string, right: string): boolean {
+  return path.resolve(left) === path.resolve(right);
+}
+
 /**
  * Ближайшее объявление символа по имени. Сервер отдаёт список совпадений, а нам
  * нужна одна цель — та, чьи ссылки смотреть или от которой перейти к определению;
@@ -985,7 +990,9 @@ async function resolveSymbol(ctx: ToolContext, name: string, pathFilter: string 
   const found = await ctx.symbols.projectSymbols(name).catch(() => [] as readonly SearchSymbol[]);
   const ranked = rankSymbols(found, name, MAX_SYMBOL_CANDIDATES);
   if (pathFilter) {
-    const inFile = ranked.find((symbol) => symbol.path === pathFilter);
+    // Сравниваем приведённые пути, а не строки: языковой сервер может написать
+    // тот же файл другим разделителем или регистром диска.
+    const inFile = ranked.find((symbol) => samePath(symbol.path, pathFilter));
     if (inFile) return inFile;
   }
   return ranked[0] ?? null;
@@ -1346,7 +1353,7 @@ async function diagnostics(ctx: ToolContext, args: Record<string, unknown>): Pro
 }
 
 function formatDiagnostic(item: DiagnosticItem, root: string | null): string {
-  const where = root ? path.relative(root, item.path) : item.path;
+  const where = relativePath(item.path, root);
   return `${where}:${item.line}:${item.column} [${item.severity}] ${item.message}${item.source ? ` (${item.source})` : ''}`;
 }
 
@@ -2182,10 +2189,19 @@ function relative(target: string, root: string | null): string {
   return relativePath(target, root);
 }
 
+/**
+ * Путь относительно корня проекта в каноническом виде — прямыми слэшами.
+ *
+ * Разделитель не оставляем «как есть»: на Windows `path.relative` вернул бы
+ * обратные слэши, и один и тот же путь выглядел бы по-разному до и после —
+ * в выводе `search`, `list_dir` и в самом проекте (`workspace.ts` уже отдаёт
+ * относительные пути POSIX-вида). Путь в ответе модели должен быть один и тот же
+ * на любой системе: по нему она ходит в следующие инструменты.
+ */
 function relativePath(target: string, root: string | null): string {
   if (!root) return target;
   const rel = path.relative(root, target);
-  return rel.length === 0 ? '.' : rel;
+  return rel.length === 0 ? '.' : rel.split(path.sep).join('/');
 }
 
 /**

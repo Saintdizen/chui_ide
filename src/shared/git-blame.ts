@@ -32,7 +32,10 @@ export function parseBlamePorcelain(output: string): BlameLine[] {
   // Поля текущего блока; начинается он заголовком с хешем и номерами строк.
   let current: Partial<BlameLine> | null = null;
 
-  for (const line of lines) {
+  for (const raw of lines) {
+    // Windows-версия git заканчивает строки `\r\n`: возврат каретки ломал бы и
+    // заголовок блока, и текст строки (он бы приходил с лишним `\r` в конце).
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     const header = /^([0-9a-f]{40}) \d+ (\d+)(?: \d+)?$/.exec(line);
     if (header) {
       current = { hash: header[1]!.slice(0, 7), line: Number(header[2]) };

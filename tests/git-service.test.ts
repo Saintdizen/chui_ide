@@ -39,7 +39,12 @@ beforeAll(async () => {
  * `branch` — имя текущей ветки (зависит от настроек git: master или main).
  */
 async function makeRepos(): Promise<{ work: string; bare: string; branch: string }> {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-git-net-'));
+  // Каталог сразу разворачиваем: на macOS `tmpdir()` — это `/var/folders/…`, за
+  // которым стоит симлинк на `/private/var/…`. А `git rev-parse --show-toplevel`
+  // возвращает канонический путь, и относительный путь от него к цели, названной
+  // через симлинк, обрастал бы `../../..` — blame не находил бы файл. Приём тот
+  // же, что в `debug.test.ts`: посторонний фактор (симлинк) убираем из проверки.
+  const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-git-net-')));
   roots.push(base);
   const work = path.join(base, 'work');
   const bare = path.join(base, 'origin.git');
@@ -51,6 +56,10 @@ async function makeRepos(): Promise<{ work: string; bare: string; branch: string
   await git(work, ['config', 'user.email', 'test@example.com']);
   await git(work, ['config', 'user.name', 'Test']);
   await git(work, ['config', 'commit.gpgsign', 'false']);
+  // Содержимое сверяем посимвольно, а на Windows `core.autocrlf` по умолчанию
+  // переводит строки в CRLF при выдаче файла на диск — тогда `pull` давал бы
+  // `from peer\r\n` там, где в коммите лежит `from peer\n`.
+  await git(work, ['config', 'core.autocrlf', 'false']);
   await fs.writeFile(path.join(work, 'a.txt'), 'one\n');
   await git(work, ['add', '-A']);
   await git(work, ['commit', '-q', '-m', 'init']);
