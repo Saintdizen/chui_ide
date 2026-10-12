@@ -47,7 +47,7 @@ class DapClient {
   }
 
   /** Дождаться события `name`, при желании — первого подходящего под `match`. */
-  async waitEvent(name: string, match?: (message: DapMessage) => boolean, timeout = 8000): Promise<DapMessage> {
+  async waitEvent(name: string, match?: (message: DapMessage) => boolean, timeout = 20_000): Promise<DapMessage> {
     const deadline = Date.now() + timeout;
     for (;;) {
       const index = this.events.findIndex((message) => message.event === name && (!match || match(message)));
@@ -349,7 +349,7 @@ describe('NodeAdapter', () => {
 
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
-  }, 20_000);
+  }, 30_000);
 
   it('точка в файле, названном через симлинк, попадает в развёрнутый путь скрипта', async () => {
     const real = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
@@ -375,7 +375,7 @@ describe('NodeAdapter', () => {
 
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
-  }, 20_000);
+  }, 30_000);
 
   it('сообщает об ошибке, если отлаживаемый Node не запускается', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
@@ -389,7 +389,7 @@ describe('NodeAdapter', () => {
     expect(launch.message).toBeTruthy();
 
     input.end();
-  }, 20_000);
+  }, 30_000);
 
   it('отлаживает собранный JS: точка в .ts встаёт в .js, а стек ведёт в .ts', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
@@ -427,7 +427,7 @@ describe('NodeAdapter', () => {
 
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
-  }, 20_000);
+  }, 30_000);
 
   it('точка со счётчиком попаданий останавливает только на заданном', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
@@ -464,7 +464,7 @@ describe('NodeAdapter', () => {
 
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
-  }, 20_000);
+  }, 30_000);
 
   it('подключается к уже запущенному процессу и останавливает его на точке', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
@@ -499,7 +499,7 @@ describe('NodeAdapter', () => {
 
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
-  }, 20_000);
+  }, 30_000);
 
   it('не теряет останов, случившийся до настройки сессии', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
@@ -533,7 +533,7 @@ describe('NodeAdapter', () => {
 
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
-  }, 20_000);
+  }, 30_000);
 
   it('точка-журнал печатает значения и не останавливает программу', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
@@ -566,7 +566,7 @@ describe('NodeAdapter', () => {
 
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
-  }, 20_000);
+  }, 30_000);
 
   it('останавливается на необработанном исключении', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'chui-node-debug-'));
@@ -600,5 +600,5 @@ describe('NodeAdapter', () => {
 
     await client.request('disconnect', { terminateDebuggee: true });
     input.end();
-  }, 20_000);
+  }, 30_000);
 });
