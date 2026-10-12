@@ -1575,6 +1575,17 @@ textarea {
   color: var(--text_color);
 }
 
+/* Значок на вкладке дока: те же числа, что у проблем в статус-баре. */
+.dock-tab-badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--element_background_hover);
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  line-height: 14px;
+}
+
 .dock-body {
   flex: 1;
   min-height: 0;
@@ -5538,6 +5549,138 @@ body > .overlay {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* ── панель проблем ────────────────────────────────────────────────────── */
+
+.problems-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.problems-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.problems-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.problems-summary {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Поле фильтра — как остальные поля панелей: живёт в тулбаре справа. */
+.problems-filter {
+  width: 220px;
+  padding: 3px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+}
+
+.problems-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.problems-empty {
+  padding: 6px 10px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Заголовок файла в списке: имя важнее отдельных строк под ним. */
+.problem-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 2px;
+}
+
+.problem-file {
+  overflow: hidden;
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.problem-group-counts {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.problem-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 10px 3px 22px;
+  border: none;
+  background: none;
+  color: var(--text_color);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.problem-row:hover {
+  background: var(--element_background_hover);
+}
+
+/* Значок вида: те же цвета, что у волнистого подчёркивания в редакторе. */
+.problem-severity {
+  flex: 0 0 auto;
+  width: 12px;
+  font-family: "JetBrains Mono", monospace;
+  text-align: center;
+}
+
+.problem-severity.is-error {
+  color: #e5484d;
+}
+
+.problem-severity.is-warning {
+  color: #d29922;
+}
+
+.problem-severity.is-info {
+  color: #5c9bd6;
+}
+
+.problem-message {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.problem-source,
+.problem-position {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.problem-position {
+  font-family: "JetBrains Mono", monospace;
 }
 
 .tests-toolbar {

@@ -68,6 +68,8 @@ import { createLayout } from './ui/layout';
 import { logoMark } from './ui/logo';
 import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-popover';
 import { createOutline } from './ui/outline';
+import { createProblemPanel } from './ui/problem-panel';
+import { problemBadgeText } from '../shared/problem-list';
 import { createPalette } from './ui/palette';
 import { createPopover, type PopoverView } from './ui/popover';
 import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-env-popover';
@@ -631,6 +633,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   const dock = createDock();
+  // Проблемы: ошибки и предупреждения по всем открытым файлам, клик — переход к месту.
+  // Панель ничего не знает ни о языковом сервере, ни о проверке импортов: берёт готовые
+  // пометки у рабочего места и группирует их (правила — `shared/problem-list.ts`).
+  const problemPanel = createProblemPanel({
+    markers: () => editors.markers(),
+    // Из панели файла может и не быть на экране — открываем его тем же путём, что и всё.
+    reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
+    label: (path) => workspace.relative(path),
+  });
   dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });
   dock.register({ id: 'tests', title: 'Тесты', element: testPanel.element, onShow: () => void testPanel.refresh() });
   dock.register({
@@ -647,6 +658,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   // Структуру собираем при показе вкладки: файл мог смениться, пока панель была скрыта.
   dock.register({ id: 'outline', title: 'Структура', element: outline.element, onShow: () => outline.refresh() });
+  // Список собираем при показе вкладки и по изменению пометок (ниже). Значок на вкладке —
+  // те же числа, что в статус-баре: ошибки, а без ошибок — предупреждения.
+  dock.register({
+    id: 'problems',
+    title: 'Проблемы',
+    element: problemPanel.element,
+    badge: () => problemBadgeText(problemPanel.counts()),
+    onShow: () => problemPanel.refresh(),
+  });
   layout.dockHost.appendChild(dock.element);
 
   /* ── чат ───────────────────────────────────────────────────────────────── */
@@ -2488,6 +2508,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     dock.toggle('outline');
   });
 
+  define({ id: 'view.showProblems', title: 'Проблемы', category: 'Вид', keywords: ['ошибки', 'warning'] }, () => {
+    dock.show('problems');
+  });
+
   define({ id: 'view.toggleDock', title: 'Свернуть нижнюю панель', category: 'Вид' }, () => {
     if (dock.visible) dock.hide();
     else dock.show(dock.activeId ?? 'terminal');
@@ -2978,7 +3002,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   rpc.onDidChangeStreaming((streaming) => statusBar.update({ ai: streaming ? 'генерация…' : 'готов' }));
   // Счётчик проблем: пометки приходят из нескольких источников (LSP,
   // проверка импортов), поэтому слушаем одно событие сервиса и пересчитываем всё.
-  editors.onDidChangeMarkers(() => statusBar.update({ problems: editors.problemCounts() }));
+  editors.onDidChangeMarkers(() => {
+    statusBar.update({ problems: editors.problemCounts() });
+    // Значок вкладки и список проблем читают те же пометки: обновляем их вместе.
+    dock.refreshBadges();
+    if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
+  });
 
   theme.onDidChange((scheme) => {
     editors.setTheme(scheme);

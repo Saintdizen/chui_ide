@@ -4,6 +4,8 @@ export interface DockTab {
   id: string;
   title: string;
   element: HTMLElement;
+  /** Число-значок на вкладке (проблемы): `null`/пусто — значка нет. */
+  badge?: () => string | null;
   /** Вызывается, когда вкладка становится видимой: терминалу нужно пересчитать размер. */
   onShow?(): void;
 }
@@ -14,6 +16,8 @@ export interface DockView {
   show(id: string): void;
   toggle(id: string): void;
   hide(): void;
+  /** Перечитать значки вкладок: их источник изменился (число проблем). */
+  refreshBadges(): void;
   readonly visible: boolean;
   readonly activeId: string | null;
   onVisibilityChange(listener: (visible: boolean) => void): void;
@@ -36,6 +40,8 @@ export function createDock(): DockView {
 
   const tabs: DockTab[] = [];
   const buttons = new Map<string, HTMLButtonElement>();
+  /** Значки вкладок по id: текст берём у самой вкладки (`badge`). */
+  const badges = new Map<string, HTMLElement>();
   const listeners = new Set<(visible: boolean) => void>();
   let activeId: string | null = null;
   let visible = false;
@@ -58,6 +64,16 @@ export function createDock(): DockView {
     notify();
   };
 
+  const refreshBadges = (): void => {
+    for (const tab of tabs) {
+      const node = badges.get(tab.id);
+      if (!node) continue;
+      const text = tab.badge?.() ?? null;
+      node.textContent = text ?? '';
+      node.hidden = !text;
+    }
+  };
+
   const hide = (): void => {
     visible = false;
     element.classList.remove('is-visible');
@@ -71,9 +87,17 @@ export function createDock(): DockView {
       tab.element.hidden = true;
       body.appendChild(tab.element);
 
-      const button = h('button', { class: 'dock-tab', type: 'button', onClick: () => activate(tab.id) }, tab.title);
+      const badge = h('span', { class: 'dock-tab-badge', hidden: true });
+      const button = h(
+        'button',
+        { class: 'dock-tab', type: 'button', onClick: () => activate(tab.id) },
+        tab.title,
+        badge,
+      );
       buttons.set(tab.id, button);
+      badges.set(tab.id, badge);
       tabsHost.appendChild(button);
+      refreshBadges();
 
       // Первую вкладку только запоминаем: панель откроется, когда её попросят.
       if (!activeId) activeId = tab.id;
@@ -84,6 +108,7 @@ export function createDock(): DockView {
       else activate(id);
     },
     hide,
+    refreshBadges,
     get visible() {
       return visible;
     },

@@ -26,6 +26,8 @@ import { EditorWorkspace } from '../editor/host/editor-workspace';
 import { DocumentRegistry } from '../editor/host/document-registry';
 import { FileDecorations } from '../editor/view/decorations';
 import { OwnDiffEditor } from '../editor/host/diff-editor';
+import { createProblemPanel } from '../ui/problem-panel';
+import type { DiagnosticItem } from '../../shared/api';
 import type { SymbolLocation } from '../../shared/lsp-locations';
 
 /**
@@ -420,4 +422,41 @@ window.probeProblems = {
   doc: problemsDoc,
   spots: problemSpots,
   notices: problemNotices,
+};
+
+// Панель «Проблемы» — на своём скрытом узле: проверяем строки, фильтр и переход по клику.
+// Пометки панель берёт у вызывающего (в приложении — у рабочего места), а переход —
+// через шов: здесь это запись места, там — открытие файла и курсор.
+const problemPanelRoot = document.createElement('div');
+problemPanelRoot.id = 'probe-problem-panel';
+problemPanelRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(problemPanelRoot);
+
+let panelMarkers: DiagnosticItem[] = [];
+const panelClicks: Array<{ path: string; line: number; column: number }> = [];
+const problemsPanel = createProblemPanel({
+  markers: () => panelMarkers,
+  reveal: (path, line, column) => panelClicks.push({ path, line, column }),
+  // Подпись — как в приложении: короткий путь, а не полный.
+  label: (path) => path.replace(/^\/probe\//, ''),
+});
+problemPanelRoot.append(problemsPanel.element);
+
+declare global {
+  interface Window {
+    probeProblemPanel: {
+      panel: ReturnType<typeof createProblemPanel>;
+      clicks: Array<{ path: string; line: number; column: number }>;
+      setMarkers: (markers: DiagnosticItem[]) => void;
+    };
+  }
+}
+
+window.probeProblemPanel = {
+  panel: problemsPanel,
+  clicks: panelClicks,
+  setMarkers: (markers) => {
+    panelMarkers = markers;
+    problemsPanel.refresh();
+  },
 };

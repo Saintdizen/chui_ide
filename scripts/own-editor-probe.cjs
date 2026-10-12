@@ -1216,6 +1216,68 @@ async function languageHoverCheck(win) {
  * место решает, что с ними делать. Проверяем все три случая: одно место — прыжок сразу,
  * несколько — список, ни одного — весть без списка.
  */
+async function problemPanelCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  // Пометки ставим через шов панели: две в одном файле, одна в другом.
+  const filled = await script(`(() => {
+    const { setMarkers } = window.probeProblemPanel;
+    setMarkers([
+      { path: '/probe/a.ts', line: 2, column: 1, severity: 'error', message: 'тип не тот', source: 'ts' },
+      { path: '/probe/a.ts', line: 7, column: 3, severity: 'warning', message: 'не используется', source: 'ts' },
+      { path: '/probe/b.py', line: 1, column: 1, severity: 'error', message: 'неизвестное имя', source: 'import-check' },
+    ]);
+    const root = document.querySelector('#probe-problem-panel .problems-panel');
+    return {
+      заголовок: root.querySelector('.problems-summary').textContent,
+      файлов: root.querySelectorAll('.problem-group-head').length,
+      строк: root.querySelectorAll('.problem-row').length,
+      первый_файл: root.querySelector('.problem-file').textContent,
+      первое_сообщение: root.querySelector('.problem-row .problem-message').textContent,
+      место: root.querySelector('.problem-row .problem-position').textContent,
+    };
+  })()`);
+
+  // Нажатие на третью строку — переход именно к её месту.
+  const clicked = await script(`(() => {
+    const root = document.querySelector('#probe-problem-panel .problems-panel');
+    root.querySelectorAll('.problem-row')[2].click();
+    return { переходы: window.probeProblemPanel.clicks.slice() };
+  })()`);
+
+  // Фильтр: остаётся только файл с подходящим источником.
+  const filtered = await script(`(() => {
+    const filter = document.querySelector('#probe-problem-panel .problems-filter');
+    filter.value = 'import-check';
+    filter.dispatchEvent(new Event('input'));
+    const root = document.querySelector('#probe-problem-panel .problems-panel');
+    const result = {
+      файлов: root.querySelectorAll('.problem-group-head').length,
+      строк: root.querySelectorAll('.problem-row').length,
+      заголовок: root.querySelector('.problems-summary').textContent,
+    };
+    // Пустой список: фильтр, под который ничего не подходит.
+    filter.value = 'нет такого';
+    filter.dispatchEvent(new Event('input'));
+    result.пусто = root.querySelector('.problems-empty')?.textContent ?? null;
+    filter.value = '';
+    filter.dispatchEvent(new Event('input'));
+    return result;
+  })()`);
+
+  // Без пометок панель говорит об этом прямо.
+  const empty = await script(`(() => {
+    window.probeProblemPanel.setMarkers([]);
+    const root = document.querySelector('#probe-problem-panel .problems-panel');
+    return {
+      заголовок: root.querySelector('.problems-summary').textContent,
+      пусто: root.querySelector('.problems-empty')?.textContent ?? null,
+    };
+  })()`);
+
+  return { список: filled, клик: clicked, фильтр: filtered, без_пометок: empty };
+}
+
 async function signatureCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
   const send = (event) => win.webContents.sendInputEvent(event);
@@ -1697,6 +1759,11 @@ async function main() {
   const signature = await signatureCheck(win);
   log('## Подсказка о параметрах вызова');
   log(JSON.stringify(signature, null, 2));
+  log('');
+
+  const problemPanel = await problemPanelCheck(win);
+  log('## Панель проблем');
+  log(JSON.stringify(problemPanel, null, 2));
   log('');
 
   const inline = await inlineCheck(win);
