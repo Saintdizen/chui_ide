@@ -20,10 +20,15 @@
  * правило простое — показываем, когда есть что сказать: роль слова (ключевое, тип,
  * функция) или оно встречается в файле больше одного раза. Когда сервер ответил, его
  * ответ важнее: он и есть подсказка.
+ *
+ * Внутри строк и комментариев карточки о слове нет: там это не код, и «встречается
+ * 2 раза / впервые на строке 18» про литерал — шум, а не польза. Ровно то же правило
+ * у автодополнения (`complete/assistant.ts`). Ответ языкового сервера при этом не
+ * гасится: он может быть по делу и внутри строки.
  */
 
 import { describeWord, wordInfoAt } from '../hover/word-info';
-import { roleLabel } from '../highlight/tokens';
+import { COMMENT, roleLabel, STRING } from '../highlight/tokens';
 import type { TextBuffer } from '../core/text-buffer';
 import type { EditorView } from '../view/editor-view';
 
@@ -100,9 +105,13 @@ export class HoverWidget {
 
     // 1. Что видно в файле — показываем сразу, не ждя сервера.
     const info = wordInfoAt(this.buffer, offset);
-    const role = roleLabel(this.view.tokenTypeAt(offset));
+    const tokenType = this.view.tokenTypeAt(offset);
+    // Внутри строк и комментариев слова — не код: «встречается N раз / впервые на строке»
+    // там только мешает (то же правило, что у автодополнения, см. `complete/assistant.ts`).
+    const quiet = tokenType === STRING || tokenType === COMMENT;
+    const role = roleLabel(tokenType);
     let shownLocal = false;
-    if (info) {
+    if (info && !quiet) {
       const worthShowing = role !== null || info.occurrences > 1 || info.declaredAt !== null;
       if (worthShowing) {
         const described = describeWord(info);
@@ -111,7 +120,9 @@ export class HoverWidget {
         shownLocal = true;
       }
     }
-    if (!shownLocal) this.hide();
+    // Прячем карточку, но НЕ отменяем запрос: «локально сказать нечего» — не значит,
+    // что не ответит языковой сервер. `hide()` сдвинул бы `requestId` и заглушил ответ.
+    if (!shownLocal) this.hideCard();
 
     // 2. Что знает сервер (или отладчик) — подставляем, когда ответит; его ответ важнее
     // локального. Источники идут по приоритету: первый непустой и показывается.
@@ -149,14 +160,20 @@ export class HoverWidget {
     this.position(clientX, clientY);
   }
 
+  /** Спрятать карточку, не отменяя запрос к источникам: так локальное молчание
+   *  не гасит ответ языкового сервера (см. `showAt`). */
+  private hideCard(): void {
+    this.visible = false;
+    this.root.hidden = true;
+  }
+
   hide(): void {
     if (this.timer !== null) {
       clearTimeout(this.timer);
       this.timer = null;
     }
     this.requestId += 1;
-    this.visible = false;
-    this.root.hidden = true;
+    this.hideCard();
   }
 
   private render(title: string, lines: readonly string[]): void {
