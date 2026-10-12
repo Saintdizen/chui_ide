@@ -175,12 +175,13 @@ const CHECKS = {
     const view = window.probe.view;
     const buffer = window.probe.buffer;
     const root = document.querySelector('.own-editor');
-    const caret = root.querySelector('.own-editor-caret');
+    // Координату каретки спрашиваем у вида (caretPoint), а не у DOM-узла: слой кареток
+    // пересобирается на каждое движение (replaceChildren), и узел, взятый один раз,
+    // остаётся отсоединённым со старым translate(0px) — проба мерила бы нули.
     const xAt = (line, column) => {
       const offset = buffer.lineStart(line) + column - 1;
       view.setSelection({ anchor: offset, active: offset });
-      const matrix = caret.style.transform.match(/translate\\(([-\\d.]+)px/);
-      return Number(matrix?.[1] ?? 'NaN');
+      return view.caretPoint(offset).left;
     };
     const line = root.querySelector('.own-editor-line');
     const probe = document.createElement('span');
@@ -212,7 +213,9 @@ const CHECKS = {
   selection: `(() => {
     const view = window.probe.view;
     const root = document.querySelector('.own-editor');
-    const caret = root.querySelector('.own-editor-caret');
+    // Каретку спрашиваем заново после каждого движения: слой кареток пересобирается
+    // (replaceChildren), и узел, взятый один раз, остаётся отсоединённым и не меняется.
+    const caretDisplay = () => root.querySelector('.own-editor-caret')?.style.display ?? 'нет';
     const rects = () => [...root.querySelectorAll('.own-editor-selection-rect')].map((node) => {
       const match = node.style.transform.match(/translate\\(([-\\d.]+)px,\\s*([-\\d.]+)px\\)/);
       return {
@@ -222,10 +225,10 @@ const CHECKS = {
       };
     });
     view.setSelection({ anchor: 0, active: 0 });
-    const пусто = { каретка: caret.style.display, прямоугольников: rects().length };
+    const пусто = { каретка: caretDisplay(), прямоугольников: rects().length };
     // Выделение от конца третьей строки до столбца 6 четвёртой — две строки.
     view.setSelection({ anchor: 60, active: 140 });
-    const итог = { каретка: caret.style.display, прямоугольников: rects().length, прямоугольники: rects() };
+    const итог = { каретка: caretDisplay(), прямоугольников: rects().length, прямоугольники: rects() };
     return { пусто, выделение: итог };
   })()`,
 
