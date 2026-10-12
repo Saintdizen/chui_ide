@@ -1,5 +1,5 @@
 import type { ApplyFailure, ApplyReport, ApplyResult, FileEdit } from '../../shared/edits';
-import { diskConflict, type TextDocument } from './document';
+import { diskConflict, normalize, type TextDocument } from './document';
 import type { DocumentStore } from './document-store';
 import type { EditSource } from './document';
 import type { EditorApi } from './editor-api';
@@ -39,7 +39,18 @@ export class EditService {
   async saveDocument(document: TextDocument, options: { force?: boolean } = {}): Promise<'saved' | 'conflict'> {
     if (!options.force) {
       const stat = await this.deps.rpc.request('workspace.stat', { path: document.path }).catch(() => null);
-      if (diskConflict(document.diskMtime, stat?.mtimeMs ?? null)) return 'conflict';
+      if (diskConflict(document.diskMtime, stat?.mtimeMs ?? null)) {
+        // Файл изменился снаружи — но, может быть, ровно на нашу правку (её записал
+        // другой инструмент: агент применил к документу, а на диск записал файловый
+        // инструмент). Тогда сохранять нечего: снимаем «грязность» и рапортуем успех,
+        // иначе человек видит ложный конфликт и файл навсегда остаётся «не сохранён».
+        const file = await this.deps.rpc.request('workspace.readFile', { path: document.path }).catch(() => null);
+        if (file && normalize(file.text) === document.value) {
+          document.markSaved(file.mtimeMs);
+          return 'saved';
+        }
+        return 'conflict';
+      }
     }
     const { mtimeMs } = await this.deps.rpc.request('workspace.writeFile', {
       path: document.path,
@@ -78,13 +89,26 @@ export class EditService {
     return { reports, failed };
   }
 
-  /** Перечитывает файл с диска. Несохранённые изменения не перетираются. */
+  /**
+   * Перечитывает файл с диска.
+   *
+   * Несохранённые правки в буфере НЕ перетираются. Но если на диске ровно то же,
+   * что в буфере, «грязность» снимаем: файл уже сохранён — просто записал его не
+   * редактор (правку агента продублировал файловый инструмент, файл перезаписал
+   * терминал или git). Без этого такой документ навсегда оставался бы «не сохранён»:
+   * обе точки перечитывания пропускают «грязные» документы, и сам он не очистится.
+   */
   async reloadFromDisk(path: string): Promise<TextDocument> {
-    const document = this.deps.documents.get(path);
-    if (document?.dirty) return document;
-
     const file = await this.deps.rpc.request('workspace.readFile', { path });
-    const target = document ?? this.deps.documents.open(path, file.text);
+    const existing = this.deps.documents.get(path);
+
+    if (existing?.dirty) {
+      // Содержимое совпало — сохранять нечего; разошлось — это чужая правка, буфер не трогаем.
+      if (normalize(file.text) === existing.value) existing.markSaved(file.mtimeMs);
+      return existing;
+    }
+
+    const target = existing ?? this.deps.documents.open(path, file.text);
     target.setText(file.text, 'disk');
     // Перечитали — содержимое снова совпадает с диском, и мы знаем время файла.
     // Без `markSaved` документ считался бы правленым: следующее внешнее изменение

@@ -28,8 +28,8 @@ describe('diskConflict', () => {
   });
 });
 
-/** Мок RPC: отдаём время файла на диске (`diskMtime`) и время записи (`writeMtime`). */
-function makeService(diskMtime: number | null, writeMtime = 5000) {
+/** Мок RPC: отдаём время файла на диске (`diskMtime`), время записи и текст файла. */
+function makeService(diskMtime: number | null, writeMtime = 5000, diskText = '') {
   const documents = new DocumentStore();
   const calls: string[] = [];
   const rpc = {
@@ -40,6 +40,10 @@ function makeService(diskMtime: number | null, writeMtime = 5000) {
         return { path: '/p/a.ts', kind: 'file', size: 1, mtimeMs: diskMtime };
       }
       if (method === 'workspace.writeFile') return { mtimeMs: writeMtime };
+      if (method === 'workspace.readFile') {
+        if (diskMtime === null) throw new Error('файла нет');
+        return { text: diskText, mtimeMs: diskMtime };
+      }
       return {};
     }),
   } as unknown as RpcClient;
@@ -94,5 +98,57 @@ describe('EditService.saveDocument', () => {
     const document = editedDocument(documents, 1000);
 
     expect(await service.saveDocument(document)).toBe('saved');
+  });
+
+  it('снаружи записали РОВНО наш текст — не конфликт, «грязность» снимается', async () => {
+    // Правку агента применяет документ в памяти, а на диск её записал файловый
+    // инструмент: время файла разошлось, но содержимое то же — сохранять нечего.
+    const { service, documents } = makeService(2000, 5000, 'правка в редакторе');
+    const document = editedDocument(documents, 1000);
+
+    expect(await service.saveDocument(document)).toBe('saved');
+    expect(documents.get('/p/a.ts')?.dirty).toBe(false);
+  });
+});
+
+/**
+ * Ложное «не сохранён». Правку может применить документ в памяти, а на диск её
+ * запишет кто-то другой (файловый инструмент, терминал, git) — тогда буфер и диск
+ * совпадают, но пометка «грязный» осталась. Перечитывание обязано её снять, иначе
+ * файл висел бы «не сохранён» до бесконечности: грязные документы пропускаются.
+ */
+describe('EditService.reloadFromDisk', () => {
+  it('буфер совпал с диском — «грязность» снимается, редактор не дёргается', async () => {
+    const { service, documents } = makeService(2000, 5000, 'правка в редакторе');
+    const document = editedDocument(documents, 1000);
+
+    const result = await service.reloadFromDisk('/p/a.ts');
+
+    expect(result).toBe(document);
+    expect(document.value).toBe('правка в редакторе');
+    expect(document.dirty).toBe(false);
+    expect(document.diskMtime).toBe(2000);
+  });
+
+  it('на диске чужая правка — буфер не трогаем', async () => {
+    const { service, documents } = makeService(2000, 5000, 'чужая правка');
+    const document = editedDocument(documents, 1000);
+
+    await service.reloadFromDisk('/p/a.ts');
+
+    expect(document.value).toBe('правка в редакторе');
+    expect(document.dirty).toBe(true);
+  });
+
+  it('чистый документ перечитывается и остаётся чистым', async () => {
+    const { service, documents } = makeService(2000, 5000, 'новый текст');
+    const document = documents.open('/p/a.ts', 'старый текст');
+    document.markSaved(1000);
+
+    await service.reloadFromDisk('/p/a.ts');
+
+    expect(document.value).toBe('новый текст');
+    expect(document.dirty).toBe(false);
+    expect(document.diskMtime).toBe(2000);
   });
 });

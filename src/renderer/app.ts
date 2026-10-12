@@ -2851,13 +2851,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   /**
-   * Файл изменился на диске. Открытый и не «грязный» документ перечитываем:
-   * иначе в редакторе останется старая версия — например, после правки во
-   * внешнем инструменте или в терминале. Несохранённые правки не трогаем.
+   * Файл изменился на диске. Открытый документ перечитываем: иначе в редакторе
+   * останется старая версия — например, после правки во внешнем инструменте или в
+   * терминале. Несохранённые правки при этом НЕ теряются — решение принимает сам
+   * `reloadFromDisk` (содержимое совпало — снимаем «грязность», разошлось — оставляем буфер).
    */
   const reloadIfOpen = async (path: string): Promise<void> => {
-    const document = documents.get(path);
-    if (!document || document.dirty) return;
+    if (!documents.get(path)) return;
     await edits.reloadFromDisk(path).catch(() => undefined);
   };
 
