@@ -1,12 +1,12 @@
 import type { GitDiff, GitDiffHunk } from '../../shared/api';
-import type { DiffEditorHandle } from '../core/editor-service';
+import type { OwnDiffHandle } from '../editor/host/diff-editor';
 import type { GitModel } from '../core/git-model';
 import { languageFromPath } from '../core/languages';
 import { h, svgIcon } from './dom';
 
 export interface DiffViewDeps {
-  /** Фабрика сравнения: Monaco остаётся за editor-service, здесь только тексты. */
-  createDiff: (container: HTMLElement) => DiffEditorHandle;
+  /** Фабрика сравнения: движок приходит извне, здесь только тексты. */
+  createDiff: (container: HTMLElement) => OwnDiffHandle;
   git: GitModel;
   /** Сообщить о сбое операции с блоком (например, патч не приложился). */
   notify?: (message: string) => void;
@@ -48,7 +48,7 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
   const subtitle = h('span', { class: 'diff-subtitle' });
   const body = h('div', { class: 'diff-body' });
 
-  let handle: DiffEditorHandle | null = null;
+  let handle: OwnDiffHandle | null = null;
   let open = false;
   /** Что показано сейчас: после правки перерисовываем тот же diff. */
   let current: DiffTarget | null = null;

@@ -51,7 +51,9 @@
     "probe:mcp": "npm run build && electron scripts/mcp-ui-probe.cjs",
     "probe:python": "npm run build && electron scripts/python-ui-probe.cjs",
     "probe:settings": "npm run build && electron scripts/settings-search-probe.cjs",
-    "probe:nav": "npm run build && electron scripts/nav-probe.cjs",
+    "probe:palette": "npm run build && electron scripts/palette-probe.cjs",
+    "probe:editor": "electron scripts/own-editor-probe.cjs",
+    "probe:f1": "npm run build && electron scripts/f1-probe.cjs",
     "probe:lsp": "npm run build && electron scripts/lsp-pickup-probe.cjs",
     "probe:cursor": "npm run build && bash scripts/cursor-probe.sh",
     "icon": "npm run build:main && node scripts/make-icon.mjs",
@@ -77,7 +79,6 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "monaco-editor": "^0.57.0",
     "node-pty": "^1.1.0"
   }
 }

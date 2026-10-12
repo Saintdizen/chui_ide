@@ -1,0 +1,759 @@
+/*
+ * Оформление своего редактора (`src/renderer/editor/view/editor-view.ts`).
+ *
+ * Свои имена классов (`own-editor*`) — свои у каждого слоя: строки, номера, каретка,
+ * выделение, попапы. Общие имена вроде `.lines` или `.gutter` обязательно столкнулись бы
+ * с чем-нибудь ещё на странице. Префикс закрывает этот риск целиком.
+ *
+ * Раскладка держится на двух вещах: строка одна высокая (переменная
+ * `--own-editor-line-height`, её задаёт представление из метрик шрифта), а слои
+ * (строки, выделение, каретка) лежат друг на друге абсолютно и двигаются сдвигом,
+ * а не пересборкой. Поэтому здесь почти нет отступов — вся геометрия приходит из JS.
+ */
+
+.own-editor {
+  position: relative;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  font-family: var(--font_mono);
+  font-size: var(--font_default_size);
+  line-height: 1.4;
+  color: var(--text_color);
+  background: var(--editor_background);
+  /* Строки сами не переносятся и не тянутся — раскладка считает ширину заранее. */
+  white-space: pre;
+  contain: layout paint style;
+}
+
+.own-editor:focus,
+.own-editor:focus-visible {
+  outline: none;
+}
+
+/* Поле номеров строк: своё место слева, не едет по горизонтали вместе с кодом. */
+.own-editor-gutter {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  background: var(--editor_background);
+  border-right: 1px solid var(--border_color);
+  user-select: none;
+}
+
+.own-editor-gutter-lines {
+  position: absolute;
+  inset: 0 0 auto 0;
+  will-change: transform;
+}
+
+.own-editor-gutter-row {
+  height: var(--own-editor-line-height);
+  line-height: var(--own-editor-line-height);
+  padding: 0 8px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Поле значков: узкая колонка слева от номеров строк (точки останова, запуск,
+   тесты). Ширину задаёт представление. Сами значки — глобальные классы (`main.css`),
+   поэтому их вид не дублируется: это те же `run-glyph` и `breakpoint-glyph`. */
+.own-editor-glyphs {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  background: var(--editor_background);
+  user-select: none;
+}
+
+.own-editor-glyph-lines {
+  position: absolute;
+  inset: 0 0 auto 0;
+  will-change: transform;
+}
+
+.own-editor-glyph-row {
+  position: relative;
+  height: var(--own-editor-line-height);
+}
+
+/* Значок занимает всю клетку строки: он центрирует себя сам (::after с margin:auto). */
+.own-editor-glyph-row > * {
+  position: absolute;
+  inset: 0;
+}
+
+/* Полоса украшений: узкая черта справа от номеров (изменения git). Ширина — 3px. */
+.own-editor-strip {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  background: var(--editor_background);
+  user-select: none;
+}
+
+.own-editor-strip-lines {
+  position: absolute;
+  inset: 0 0 auto 0;
+  will-change: transform;
+}
+
+.own-editor-strip-row {
+  height: var(--own-editor-line-height);
+}
+
+/* Когда панель поиска видна, поле прокрутки сдвигается вниз на её высоту: код под
+   панелью читать нельзя, а высоту сообщает сама панель переменной. */
+.own-editor-has-find .own-editor-viewport {
+  padding-top: var(--own-editor-find-height, 0px);
+}
+
+/* Прокручиваемое поле: горизонталь и вертикаль — родные полосы браузера. */
+.own-editor-viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  contain: layout paint;
+}
+
+/* Полотно: высота — по числу строк, ширина — по самой широкой. Задаёт JS. */
+.own-editor-content {
+  position: relative;
+  min-width: 100%;
+  min-height: 100%;
+}
+
+.own-editor-lines {
+  position: absolute;
+  inset: 0 auto auto 0;
+  will-change: transform;
+}
+
+/* Заливка всей строки (покрытие, строка отладчика). Лежит ниже всего — под текстом и
+   под выделением: цвет строки не должен перекрашивать сам код. */
+.own-editor-backgrounds {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.own-editor-line-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  will-change: transform;
+}
+
+/* Волнистые подчёркивания пометок. Цвет — по серьёзности; линия нарисована фоном
+   у самого низа строки, чтобы не закрывать буквы (как в Monaco). */
+.own-editor-squiggly {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.own-editor-squiggly-rect {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background-repeat: repeat-x;
+  background-position: left bottom;
+  background-size: 6px 3px;
+  will-change: transform;
+}
+
+.own-editor-squiggly-rect.is-error {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5' fill='none' stroke='%23e5484d' stroke-width='1'/%3E%3C/svg%3E");
+}
+
+.own-editor-squiggly-rect.is-warning {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5' fill='none' stroke='%23d29922' stroke-width='1'/%3E%3C/svg%3E");
+}
+
+.own-editor-squiggly-rect.is-info {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5' fill='none' stroke='%235c9bd6' stroke-width='1'/%3E%3C/svg%3E");
+}
+
+.own-editor-line {
+  height: var(--own-editor-line-height);
+  line-height: var(--own-editor-line-height);
+  tab-size: var(--own-editor-tab-size);
+  /* Переносить строки нельзя: ширина столбца у нас одна клетка знака. */
+  white-space: pre;
+}
+
+/* Слой выделения и прямоугольники: заливка поверх текста, по одному на строку. */
+.own-editor-selection {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.own-editor-selection-rect {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 2px;
+  background: var(--selection_background);
+  will-change: transform;
+}
+
+/* Призрачный текст подсказки «допиши за меня»: серые знаки, будто уже набранные
+   сразу за кареткой. Лежит над текстом и не ловит мышь — его только читают.
+   Место (сдвиг к каретке) задаёт представление. */
+.own-editor-ghost-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.own-editor-ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--text_color_tertiary);
+  opacity: 0.75;
+  white-space: pre;
+}
+
+.own-editor-ghost-line {
+  display: block;
+  height: var(--own-editor-line-height);
+  line-height: var(--own-editor-line-height);
+}
+
+/* Каретка: тонкая полоса, мигает. Высоту и место задаёт представление. */
+.own-editor-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  background: var(--accent_fill);
+  will-change: transform;
+  animation: own-editor-caret-blink 1s step-end infinite;
+}
+
+@keyframes own-editor-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .own-editor-caret {
+    animation: none;
+  }
+}
+
+/* Скрытое поле ввода: в нём живёт IME. Текст рисуем сами, поэтому поле почти
+   невидимо — шириной в клетку и высотой в строку, чтобы окно выбора знака
+   появилось у курсора. Свою каретку тоже рисуем сами, здешняя не нужна. */
+.own-editor-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  min-width: 1px;
+  height: 1em;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font: inherit;
+  line-height: inherit;
+  white-space: pre;
+  z-index: 3;
+}
+
+/* Слой совпадений поиска. Рисуется прямоугольниками ПОД выделением, потому что при
+   переходе к совпадению оно же и выделяется — заливка выделения важнее. Текущее
+   совпадение отличается сильнее: его ищут глазами после каждого нажатия Enter. */
+.own-editor-search {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.own-editor-search-rect {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 2px;
+  background: var(--highlight_background);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--highlight_background) 70%, transparent);
+  will-change: transform;
+}
+
+.own-editor-search-rect.is-current {
+  background: var(--selection_background);
+  box-shadow: inset 0 0 0 1px var(--accent_fill);
+}
+
+/* Панель поиска и замены: поверх текста у правого верхнего края. Пока она видна,
+   поле прокрутки сдвигается вниз на её высоту — код под панелью читать нельзя. */
+.own-editor-find {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--popup_background);
+  border: 1px solid var(--border_color);
+  border-top: none;
+  border-right: none;
+  border-bottom-left-radius: 8px;
+  box-shadow: var(--box_shadow_small);
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  color: var(--text_color);
+}
+
+.own-editor-find-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Поле замены и кнопки замены — только в режиме замены. */
+.own-editor-find-row.is-replace {
+  display: none;
+}
+
+.own-editor-find.is-replace .own-editor-find-row.is-replace {
+  display: flex;
+}
+
+.own-editor-find-input {
+  width: 180px;
+  padding: 3px 6px;
+  background: var(--sunken_background);
+  border: 1px solid var(--border_color);
+  border-radius: 5px;
+  color: var(--text_color);
+  font: inherit;
+}
+
+.own-editor-find-input:focus {
+  outline: none;
+  border-color: var(--accent_fill);
+}
+
+.own-editor-find-counter {
+  min-width: 84px;
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.own-editor-find-counter.is-empty {
+  color: var(--text_color_error);
+}
+
+.own-editor-find-btn {
+  min-width: 24px;
+  padding: 3px 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text_color_secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.own-editor-find-btn:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color_hover);
+}
+
+.own-editor-find-btn.is-toggle[aria-pressed="true"] {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+.own-editor-find-message {
+  color: var(--text_color_error);
+  font-size: var(--font_small_size);
+  max-width: 280px;
+}
+
+/* Панель перехода к строке: сверху по центру, одна строка полей. */
+.own-editor-goto {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--popup_background);
+  border: 1px solid var(--border_color);
+  border-top: none;
+  border-bottom-right-radius: 8px;
+  border-bottom-left-radius: 8px;
+  box-shadow: var(--box_shadow_small);
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  color: var(--text_color);
+}
+
+.own-editor-goto-label {
+  color: var(--text_color_secondary);
+}
+
+.own-editor-goto-input {
+  width: 90px;
+  padding: 3px 6px;
+  background: var(--sunken_background);
+  border: 1px solid var(--border_color);
+  border-radius: 5px;
+  color: var(--text_color);
+  font: inherit;
+  text-align: right;
+}
+
+.own-editor-goto-input:focus {
+  outline: none;
+  border-color: var(--accent_fill);
+}
+
+.own-editor-goto-hint {
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Попап подсказок. Стоит в системе окна (не внутри полотна): попап, помещённый внутрь
+   полотна, ехал бы вместе с прокруткой и уходил за край экрана. Материал — как у наших
+   попапов: та же поверхность, рамка и тень. */
+.own-editor-suggest {
+  position: fixed;
+  z-index: 40;
+  min-width: 220px;
+  max-width: 420px;
+  padding: 4px;
+  background: var(--popup_background);
+  border: 1px solid var(--border_color);
+  border-radius: 8px;
+  box-shadow: var(--box_shadow_small);
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  color: var(--text_color);
+}
+
+.own-editor-suggest-list {
+  overflow-y: auto;
+}
+
+.own-editor-suggest-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 6px;
+  max-height: 20px;
+  line-height: 16px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.own-editor-suggest-item.is-active {
+  background: var(--selection_background);
+}
+
+.own-editor-suggest-label {
+  overflow: hidden;
+  font-family: var(--font_mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.own-editor-suggest-detail {
+  flex: none;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+/* Слово языка — заметно иное, чем имя из файла: по этой пометке и выбирают. */
+.own-editor-suggest-detail.is-language {
+  color: var(--text_color_secondary);
+}
+
+.own-editor-suggest-detail.is-external {
+  color: var(--accent);
+}
+
+/* Список мест: определения и ссылки. Материал и место — как у попапа подсказок, но со
+   заголовком: у перехода и ссылок разный смысл, и его надо назвать. */
+.own-editor-locations {
+  position: fixed;
+  z-index: 40;
+  min-width: 240px;
+  max-width: 420px;
+  padding: 4px;
+  background: var(--popup_background);
+  border: 1px solid var(--border_color);
+  border-radius: 8px;
+  box-shadow: var(--box_shadow_small);
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  color: var(--text_color);
+}
+
+.own-editor-locations-title {
+  height: 22px;
+  padding: 2px 6px;
+  line-height: 18px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.own-editor-locations-list {
+  overflow-y: auto;
+}
+
+.own-editor-locations-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 6px;
+  max-height: 20px;
+  line-height: 16px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.own-editor-locations-item.is-active {
+  background: var(--selection_background);
+}
+
+.own-editor-locations-label {
+  overflow: hidden;
+  font-family: var(--font_mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.own-editor-locations-detail {
+  flex: none;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Подсказка при наведении: тоже в системе окна — её ставят у курсора мыши. */
+.own-editor-hover {
+  position: fixed;
+  z-index: 39;
+  max-width: 420px;
+  padding: 6px 10px;
+  background: var(--popup_background);
+  border: 1px solid var(--border_color);
+  border-radius: 8px;
+  box-shadow: var(--box_shadow_small);
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  color: var(--text_color);
+}
+
+.own-editor-hover-title {
+  margin-bottom: 2px;
+  font-family: var(--font_mono);
+  font-size: var(--font_default_size);
+}
+
+.own-editor-hover-body {
+  color: var(--text_color_secondary);
+}
+
+/* ── Токены подсветки ───────────────────────────────────────────────────────
+   Цвета приходят переменными с корня редактора (`applyTheme` в `editor-view.ts`),
+   а сюда приходит только роль: `comment`, `string`, `keyword`… Классы названы
+   ролями палитры (`shared/theme-file.ts`), поэтому своё оформление не заводится —
+   меняется тема, меняются и цвета. Начертание (курсив комментария, полужирное
+   ключевое слово) задано здесь: оно одинаково для обеих схем и от цвета не зависит. */
+
+.own-editor-token-comment {
+  color: var(--own-token-comment);
+  font-style: italic;
+}
+
+.own-editor-token-string {
+  color: var(--own-token-string);
+}
+
+.own-editor-token-number {
+  color: var(--own-token-number);
+}
+
+.own-editor-token-keyword {
+  color: var(--own-token-keyword);
+  font-weight: bold;
+}
+
+.own-editor-token-keywordControl {
+  color: var(--own-token-keywordControl);
+  font-weight: bold;
+}
+
+.own-editor-token-identifier {
+  color: var(--own-token-identifier);
+}
+
+.own-editor-token-function {
+  color: var(--own-token-function);
+}
+
+.own-editor-token-type {
+  color: var(--own-token-type);
+}
+
+.own-editor-token-constant {
+  color: var(--own-token-constant);
+}
+
+.own-editor-token-tag {
+  color: var(--own-token-tag);
+}
+
+.own-editor-token-attribute {
+  color: var(--own-token-attribute);
+}
+
+/* ── Сравнение версий ────────────────────────────────────────────────────
+   Ряд выровненных строк: две половины — исходная и изменённая. Рядом — две
+   колонки, одним столбцом — исходная половина скрыта. Фон строки и цвет номера
+   зависят от того, что случилось со строкой: вставка, удаление или замена. */
+
+.own-diff {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  font-family: var(--font_mono);
+  font-size: var(--font_default_size);
+  color: var(--text_color);
+  background: var(--editor_background);
+}
+
+.own-diff-body {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  contain: layout paint;
+}
+
+.own-diff-content {
+  position: relative;
+  min-width: 100%;
+}
+
+.own-diff-rows {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  will-change: transform;
+}
+
+.own-diff-row {
+  display: flex;
+  height: var(--own-diff-line-height);
+  line-height: var(--own-diff-line-height);
+}
+
+.own-diff-side {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre;
+}
+
+.own-diff-num {
+  flex: none;
+  width: 3.5em;
+  padding: 0 8px;
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+.own-diff-text {
+  white-space: pre;
+}
+
+/* Встроенный режим: остаётся только изменённая половина. */
+.own-diff.is-inline .own-diff-side.is-original {
+  display: none;
+}
+
+.own-diff-row.is-insert .own-diff-side.is-modified {
+  background: color-mix(in srgb, var(--git_added) 16%, transparent);
+}
+
+.own-diff-row.is-insert .own-diff-side.is-modified .own-diff-num {
+  border-left: 3px solid var(--git_added);
+}
+
+.own-diff-row.is-delete .own-diff-side.is-original {
+  background: color-mix(in srgb, var(--git_deleted) 16%, transparent);
+}
+
+.own-diff-row.is-delete .own-diff-side.is-original .own-diff-num {
+  border-left: 3px solid var(--git_deleted);
+}
+
+.own-diff-row.is-replace .own-diff-side.is-original {
+  background: color-mix(in srgb, var(--git_deleted) 12%, transparent);
+}
+
+.own-diff-row.is-replace .own-diff-side.is-modified {
+  background: color-mix(in srgb, var(--git_modified) 16%, transparent);
+}
+
+.own-diff-row.is-replace .own-diff-side.is-original .own-diff-num {
+  border-left: 3px solid var(--git_deleted);
+}
+
+.own-diff-row.is-replace .own-diff-side.is-modified .own-diff-num {
+  border-left: 3px solid var(--git_modified);
+}
+
+/* Кнопки у блоков: накрывают ряды, но пропускают события мимо себя. */
+.own-diff-actions {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.own-diff-actions .diff-hunk-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: auto;
+  will-change: transform;
+}

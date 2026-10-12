@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { MONACO_THEMES, tokenColor, tokenStyle, vivid } from '../src/renderer/core/theme';
+import { tokenColor, tokenStyle, vivid } from '../src/renderer/core/theme';
 import { WINDOW_BACKGROUND } from '../src/shared/colors';
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -483,149 +483,6 @@ describe('поверхности — лестница высоты', () => {
   });
 });
 
-/**
- * Линии — тоже лестница: от почти незаметных направляющих отступа внутри кода
- * до явных границ панелей. Направляющая обязана быть ТИШЕ границы, иначе
- * служебная сетка спорит с каркасом интерфейса. Направляющие живут в палитре
- * Monaco (`core/theme.ts`, Monaco не читает CSS-переменные), границы — в
- * `theme.css`, поэтому сторож сводит обе таблицы и сравнивает их на своих фонах.
- */
-describe('линии: направляющая тише границы', () => {
-  const cssTokens = schemeTokens;
-  for (const scheme of ['dark', 'light'] as const) {
-    it(`${scheme}: направляющая отступа тише границы панели`, () => {
-      const guide = parseColor(MONACO_THEMES[scheme].colors!['editorIndentGuide.background1']!);
-      const editor = parseColor(MONACO_THEMES[scheme].colors!['editor.background']!);
-      const border = parseColor(cssTokens(scheme).get('border_color')!);
-      const content = parseColor(cssTokens(scheme).get('element_background_2')!);
-
-      expect(contrast(guide, editor), `${scheme}: направляющая`).toBeLessThan(contrast(border, content));
-    });
-  }
-});
-
-/* ── Всплывающие слои редактора — на наших поверхностях ────────────────── */
-
-/**
- * Попапы Monaco (меню, палитра, подсказки, просмотр определения) должны стоять
- * на той же карточке, что и наши попапы, а не на цветах VS Code по умолчанию:
- * слой, который Monaco рисует сам, иначе выбивается из интерфейса. Сторож
- * связывает ключи темы с общими токенами — правка одного места без другого
- * падает здесь, а не обнаруживается глазом на экране просмотра или у лампочки.
- */
-describe('попапы редактора — на нашей карточке', () => {
-  for (const scheme of ['dark', 'light'] as const) {
-    const colors = MONACO_THEMES[scheme].colors!;
-
-    it(`${scheme}: поверхности — одна карточка`, () => {
-      const card = colors['editorWidget.background'];
-      for (const key of [
-        'menu.background',
-        'quickInput.background',
-        'peekViewTitle.background',
-        'peekViewResult.background',
-      ]) {
-        expect(colors[key], `${scheme}: ${key}`).toBe(card);
-      }
-    });
-
-    it(`${scheme}: у попапов одна рамка`, () => {
-      for (const key of ['menu.border', 'peekView.border']) {
-        expect(colors[key], `${scheme}: ${key}`).toBe(colors['editorWidget.border']);
-      }
-    });
-
-    it(`${scheme}: полотно просмотра — как у редактора`, () => {
-      expect(colors['peekViewEditor.background']).toBe(colors['editor.background']);
-    });
-
-    it(`${scheme}: выделение в списках — одна заливка`, () => {
-      const fill = colors['list.activeSelectionBackground'];
-      for (const key of ['quickInputList.focusBackground', 'peekViewResult.selectionBackground']) {
-        expect(colors[key], `${scheme}: ${key}`).toBe(fill);
-      }
-    });
-
-    it(`${scheme}: лампочка быстрых правок — наш акцент`, () => {
-      const accent = colors['editorInfo.foreground'];
-      expect(colors['editorLightBulb.foreground']).toBe(accent);
-      expect(colors['editorLightBulbAutoFix.foreground']).toBe(accent);
-      expect(colors['problemsErrorIcon.foreground']).toBe(colors['editorError.foreground']);
-    });
-
-    it(`${scheme}: ссылки и код в наведении, меню действий, inlay-подсказки — наши`, () => {
-      expect(colors['textLink.foreground']).toBe(colors['editorLink.activeForeground']);
-      expect(colors['textCodeBlock.background']).toBe(colors['editorInlayHint.background']);
-      expect(colors['editorActionList.background']).toBe(colors['menu.background']);
-      expect(colors['editorActionList.focusBackground']).toBe(colors['list.activeSelectionBackground']);
-    });
-
-    it(`${scheme}: переход по проблемам — наша карточка, акцент серьёзности сохранён`, () => {
-      expect(colors['editorMarkerNavigation.background']).toBe(colors['editorWidget.background']);
-      // Акцент выведен из тех же ролей, что и диагностика: один цвет и на
-      // подчёркивании в коде, и на шапке виджета.
-      expect(colors['editorMarkerNavigationError.background']).toBe(colors['editorError.foreground']);
-      expect(colors['editorMarkerNavigationWarning.background']).toBe(colors['editorWarning.foreground']);
-      expect(colors['editorMarkerNavigationInfo.background']).toBe(colors['editorInfo.foreground']);
-    });
-
-    it(`${scheme}: оверлей-сообщение редактора — рамка нашей роли`, () => {
-      // «Файл только для чтения», «ничего не найдено» (F12) — Monaco берёт рамку
-      // из роли inputValidation, а не из рамки попапов.
-      expect(colors['inputValidation.infoBorder']).toBe(colors['editorInfo.foreground']);
-      expect(colors['editorHoverWidget.statusBarBackground']).toBeDefined();
-    });
-
-    it(`${scheme}: кнопки Monaco — наша акцентная заливка, а не синий VS Code`, () => {
-      // Действие в баннере редактора («отключить для этого файла»), «вставить» в
-      // палитре цвета — те же .monaco-button.
-      expect(colors['button.background']).toMatch(HEX);
-      expect(colors['button.foreground']).toBe('#ffffff');
-      // Наведение — тот же акцент, что у фокуса (он светлее заливки).
-      expect(colors['button.hoverBackground']).toBe(colors.focusBorder);
-      // Вторичная кнопка — тихая серая поверхность, как у нас.
-      expect(colors['button.secondaryBackground']).toBe(colors['list.inactiveSelectionBackground']);
-      expect(colors['button.secondaryHoverBackground']).toBe(colors['list.hoverBackground']);
-    });
-
-    it(`${scheme}: текст попапов — как наш основной`, () => {
-      for (const key of ['editorWidget.foreground', 'list.hoverForeground']) {
-        expect(colors[key], `${scheme}: ${key}`).toBe(colors['menu.foreground']);
-      }
-    });
-
-    it(`${scheme}: подсветки в подсказках и наведении — наш акцент`, () => {
-      const accent = colors['editorSuggestWidget.highlightForeground'];
-      for (const key of ['editorHoverWidget.highlightForeground', 'editorSuggestWidget.focusHighlightForeground']) {
-        expect(colors[key], `${scheme}: ${key}`).toBe(accent);
-      }
-    });
-
-    it(`${scheme}: наведение — та же заливка, что в списках и на мини-карте`, () => {
-      expect(colors['editorStickyScrollHover.background']).toBe(colors['list.hoverBackground']);
-      expect(colors['minimapSlider.hoverBackground']).toBe(colors['scrollbarSlider.hoverBackground']);
-    });
-
-    it(`${scheme}: общие роли Monaco — наши`, () => {
-      // Monaco объявляет эти переменные на самом редакторе (`.monaco-editor`),
-      // поэтому они живут в теме, а не только в styles/monaco.css (:root):
-      // без ключей поиск и панели действий держат цвета VS Code.
-      expect(colors.foreground).toBe(colors['menu.foreground']);
-      expect(colors.descriptionForeground).toBe(colors['peekViewTitleDescription.foreground']);
-      expect(colors['widget.border']).toBe(colors['menu.border']);
-      expect(colors.focusBorder).toBe(colors['editorInfo.foreground']);
-      expect(colors.errorForeground).toBe(colors['editorError.foreground']);
-      expect(colors['icon.foreground']).toBe(colors['menu.foreground']);
-      expect(colors['toolbar.hoverBackground']).toBe(colors['list.hoverBackground']);
-    });
-
-    it(`${scheme}: свёртка и подсветка вхождений — тот же тихий тон`, () => {
-      expect(colors['editor.foldBackground']).toBe(colors['list.inactiveSelectionBackground']);
-      expect(colors['editor.wordHighlightTextBackground']).toBe(colors['editor.wordHighlightBackground']);
-    });
-  }
-});
-
 /* ── Состав контекста: доли различимы ───────────────────────────────────── */
 
 /* ── Фон окна не расходится с палитрой ─────────────────────────────────── */
@@ -682,9 +539,7 @@ describe('доли контекста различимы', () => {
  * `--vscode-*` пропускаем: их пишет сам Monaco в рантайме, в наших файлах их нет.
  */
 describe('токены стилей объявлены', () => {
-  const STYLE_FILES = ['theme.css', 'main.css', 'monaco.css'].map((name) =>
-    resolve(process.cwd(), 'src/renderer/styles', name),
-  );
+  const STYLE_FILES = ['theme.css', 'main.css'].map((name) => resolve(process.cwd(), 'src/renderer/styles', name));
 
   it('нет var(--…) без объявления и без запасного значения', () => {
     const defined = new Set<string>();

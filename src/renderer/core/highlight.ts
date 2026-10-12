@@ -1,19 +1,21 @@
-import * as monaco from 'monaco-editor';
+import { LineHighlighter } from '../editor/highlight/highlighter';
+import { grammarFor } from '../editor/highlight/registry';
 import { tokenStyle, type Scheme } from './theme';
 
 /**
  * Подсветка кода вне редактора — для блоков кода в чате.
  *
- * ГраМматика и токенизатор берутся у Monaco (те же, что в редакторе), а цвета
- * расставляет наш код по палитре `theme.ts`.
+ * Грамматики и токенизатор — свои, те же, что в своём редакторе
+ * (`editor/highlight/`): один разбор на всё приложение, а не вторая правда о языке.
+ * Цвета берутся из общей палитры `theme.ts` — по роли токена, тем же `tokenStyle`,
+ * что и в редакторе. Поэтому чат и редактор выглядят одинаково.
  *
- * Почему не `monaco.editor.colorize` целиком: он отдаёт разметку с классами
- * `mtk*`, а сами цвета лежат в отдельной таблице стилей Monaco. Если таблица
- * не применилась, весь код оставался белым, хотя токены размечены верно.
- * Своя разметка снимает эту зависимость: цвета приходят inline.
+ * Почему разметка строками, а цвета — inline (в атрибуте `style`), а не классами:
+ * блок кода живёт в чате, вне редактора, и не должен зависеть от того, какие
+ * таблицы стилей успели примениться.
  */
 
-/** Модель пишет метку вольно: «js», «bash», «py». Приводим к идентификаторам Monaco. */
+/** Модель пишет метку вольно: «js», «bash», «py». Приводим к идентификаторам языков. */
 const LANGUAGE_ALIASES: Record<string, string> = {
   js: 'javascript',
   jsx: 'javascript',
@@ -74,20 +76,26 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Разметка по токенам: `tokenize` отдаёт типы токенов, мы превращаем их в спаны
- * с цветами нашей палитры. Токены без своего цвета остаются обычным текстом.
- * Строки собираются отдельно, а склейка идёт по переводу строки: если собирать
- * всё в один список, переводы строк встают между токенами и код рассыпается
- * по одному слову на строку.
+ * Разметка по токенам: свои грамматики дают участки строки с ролью, мы превращаем
+ * их в спаны с цветами палитры. Токены без роли остаются обычным текстом, а текст
+ * между токенами (скобки, пробелы) добавляем как есть — так в разметке нет дыр.
+ *
+ * Границы токенов и тексты экранируем: разметку собираем строкой, значит тексту
+ * нужны HTML-сущности.
  */
 function buildHtml(code: string, language: string, current: Scheme): string {
-  const lines = monaco.editor.tokenize(code, language);
   const source = code.split('\n');
+  const grammar = grammarFor(language);
+  // Языка без грамматики показываем как простой текст — это честнее, чем красить
+  // наугад чужой грамматикой (та же логика, что в своём редакторе).
+  if (!grammar) return source.map(escapeHtml).join('\n');
+
+  const highlighter = new LineHighlighter(grammar, (line) => source[line] ?? '');
   const out: string[] = [];
 
   for (let index = 0; index < source.length; index += 1) {
     const line = source[index] ?? '';
-    const tokens = lines[index] ?? [];
+    const tokens = highlighter.tokensFor(index);
 
     if (tokens.length === 0) {
       out.push(escapeHtml(line));
@@ -95,14 +103,11 @@ function buildHtml(code: string, language: string, current: Scheme): string {
     }
 
     let rendered = '';
-    for (let token = 0; token < tokens.length; token += 1) {
-      const start = tokens[token]!.offset;
-      // Конец токена — начало следующего: длина берётся без обращения к грамматике.
-      const end = token + 1 < tokens.length ? tokens[token + 1]!.offset : line.length;
-      if (end <= start) continue;
-
-      const text = escapeHtml(line.slice(start, end));
-      const style = tokenStyle(current, tokens[token]!.type);
+    let cursor = 0;
+    for (const token of tokens) {
+      if (token.start > cursor) rendered += escapeHtml(line.slice(cursor, token.start));
+      const text = escapeHtml(line.slice(token.start, token.end));
+      const style = tokenStyle(current, token.type);
       // Начертание идёт вместе с цветом: в редакторе комментарий курсивный, а
       // ключевое слово полужирное — чат рисует тот же код и не должен отличаться.
       const css = [
@@ -113,7 +118,9 @@ function buildHtml(code: string, language: string, current: Scheme): string {
         .filter(Boolean)
         .join(';');
       rendered += css ? `<span style="${css}">${text}</span>` : text;
+      cursor = token.end;
     }
+    if (cursor < line.length) rendered += escapeHtml(line.slice(cursor));
     out.push(rendered);
   }
 
@@ -121,19 +128,11 @@ function buildHtml(code: string, language: string, current: Scheme): string {
 }
 
 /**
- * Ждём загрузку языка (это умеет только `colorize`) и красим токены сами.
- * `null` — языка нет или он не загрузился: блок останется обычным текстом.
+ * Готовая разметка блока. `null` — для языка нет грамматики: блок останется текстом.
+ * Разбор синхронный: свои грамматики уже загружены, ждать нечего.
  */
-async function build(code: string, language: string): Promise<string | null> {
-  try {
-    await monaco.editor.colorize(code, language, { tabSize: 2 });
-  } catch (error) {
-    console.warn(`[chui] язык «${language}» не загрузился, подсветка пропущена`, error);
-    return null;
-  }
-
-  const lines = monaco.editor.tokenize(code, language);
-  if (!lines || lines.length === 0) return null;
+function build(code: string, language: string): string | null {
+  if (!grammarFor(language)) return null;
   return buildHtml(code, language, scheme);
 }
 
@@ -151,11 +150,16 @@ function render(target: Target): void {
     return;
   }
 
-  void paint(target, key, id);
+  paint(target, key, id);
 }
 
-async function paint(target: Target, key: string, id: string): Promise<void> {
-  const built = await build(target.code, id);
+/**
+ * Посчитать и запомнить разметку. Разбор синхронный, поэтому кладём сразу: блок
+ * кода может быть ещё не в документе — это не мешает — а `innerHTML` работает и
+ * вне дерева.
+ */
+function paint(target: Target, key: string, id: string): void {
+  const built = build(target.code, id);
   if (built === null) return;
 
   if (cache.size >= MAX_CACHE) cache.clear();
@@ -166,36 +170,15 @@ async function paint(target: Target, key: string, id: string): Promise<void> {
 }
 
 /**
- * Очередь на отрисовку. Красить надо не в момент создания узла, а после того,
- * как дерево собрано: блок кода появляется вне документа и подключается только
- * в конце `renderInto`. Именно из-за этого «подсветка тухла, как только ответ
- * заканчивался»: готовый блок брался из кеша, но узел ещё не был в документе.
- */
-const pending = new Set<Target>();
-let flushing = false;
-
-function scheduleFlush(): void {
-  if (flushing) return;
-  flushing = true;
-  queueMicrotask(() => {
-    flushing = false;
-    const batch = [...pending];
-    pending.clear();
-    for (const target of batch) render(target);
-  });
-}
-
-/**
- * Подсветить фрагмент. Текст ставится сразу, подсветка — как придёт:
- * ждать её, чтобы показать ответ, незачем.
+ * Подсветить фрагмент. Подсветка ставится сразу (разбор синхронный), а текст
+ * кладём первым — чтобы даже для языка без грамматики блок был виден.
  */
 export function highlightInto(node: HTMLElement, code: string, label: string): void {
   if (live.size >= PRUNE_AT) prune();
   const target: Target = { node, code, label };
   live.add(target);
   node.textContent = code;
-  pending.add(target);
-  scheduleFlush();
+  render(target);
 }
 
 /** Смена схемы: цвета в кеше посчитаны по старой палитре. */
@@ -213,10 +196,10 @@ export function setHighlightScheme(next: Scheme): void {
 
 /**
  * Самопроверка: сколько токенов и цветов даёт подсветка по языкам. Нужна, когда
- * приходит «в чате не подсвечивается» — отчёт показывает, где обрыв: язык
- * не загрузился, токены без цвета или всё в порядке.
+ * приходит «в чате не подсвечивается» — отчёт показывает, где обрыв: нет грамматики
+ * для языка, токены без цвета или всё в порядке.
  */
-export async function diagnoseHighlighting(): Promise<string> {
+export function diagnoseHighlighting(): string {
   const samples: Array<[string, string]> = [
     ['js', 'const answer = 42; // проверка'],
     ['python', 'def greet(name: str) -> str:\n    return f"привет, {name}"'],
@@ -228,15 +211,22 @@ export async function diagnoseHighlighting(): Promise<string> {
   const report: string[] = [`схема: ${scheme}`];
   for (const [label, sample] of samples) {
     const id = languageId(label);
-    try {
-      await monaco.editor.colorize(sample, id, { tabSize: 2 });
-      const lines = monaco.editor.tokenize(sample, id);
-      const all = lines.flat();
-      const colored = all.filter((token) => tokenStyle(scheme, token.type).color !== null).length;
-      report.push(`${label} → ${id}: токенов ${all.length}, с цветом ${colored}`);
-    } catch (error) {
-      report.push(`${label} → ${id}: ошибка ${error instanceof Error ? error.message : String(error)}`);
+    const grammar = grammarFor(id);
+    if (!grammar) {
+      report.push(`${label} → ${id}: грамматики нет`);
+      continue;
     }
+    const lines = sample.split('\n');
+    const highlighter = new LineHighlighter(grammar, (line) => lines[line] ?? '');
+    let total = 0;
+    let colored = 0;
+    for (let index = 0; index < lines.length; index += 1) {
+      for (const token of highlighter.tokensFor(index)) {
+        total += 1;
+        if (tokenStyle(scheme, token.type).color !== null) colored += 1;
+      }
+    }
+    report.push(`${label} → ${id}: токенов ${total}, с цветом ${colored}`);
   }
   return report.join('\n');
 }

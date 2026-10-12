@@ -195,7 +195,7 @@ export class WorkspaceService {
 
     const buffer = await fs.readFile(file);
     // EOL нормализуем к \n: одна модель документа — один формат, иначе позиции правок расходятся
-    // между документом, Monaco и AI-ассистентом.
+    // между документом, редактором и AI-ассистентом.
     return { text: buffer.toString('utf8').replace(/\r\n/g, '\n'), mtimeMs: stat.mtimeMs };
   }
 

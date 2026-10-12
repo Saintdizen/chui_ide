@@ -266,7 +266,7 @@ export interface ChatHostBridge {
   confirmGit(action: string): Promise<boolean>;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
   confirmBrowser(action: string): Promise<boolean>;
-  /** Пометки языка: они живут в Monaco, то есть в renderer. */
+  /** Пометки языка: они живут в renderer (в редакторе). */
   getDiagnostics(path?: string): Promise<DiagnosticsHostResult>;
   /** Показать файл в редакторе на нужной позиции. */
   openFile(path: string, line?: number, column?: number): Promise<boolean>;

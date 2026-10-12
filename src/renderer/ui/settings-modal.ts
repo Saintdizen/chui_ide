@@ -827,20 +827,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   function renderEditor(): Child[] {
     const editor: EditorSettings = settings!.editor;
     const editable = (values: Partial<EditorSettings>): void => void patch({ editor: values });
-    // Подсветка неиспользуемого кода — проверка JS/TS в редакторе; в Python-проекте
-    // её показывать нечего, там этим занимается языковой сервер.
-    const showUnused = (deps.project?.kind() ?? null) !== 'python';
     return [
       h('div', { class: 'field-label' }, 'Шрифт'),
       field(
         'Размер шрифта',
         numberInput(editor.fontSize, 8, 32, 1, (value) => editable({ fontSize: value })),
       ),
-      switchRow('Лигатуры шрифта', editor.fontLigatures, (value) => editable({ fontLigatures: value })),
-      h('div', { class: 'field-hint' }, 'Связки символов (`=>`, `!==`, `!=`) одним знаком — свойство JetBrains Mono.'),
-
       h('div', { class: 'settings-divider' }),
-      h('div', { class: 'field-label' }, 'Отступы и строки'),
+      h('div', { class: 'field-label' }, 'Отступы'),
       field(
         'Размер отступа',
         selectInput(
@@ -860,83 +854,21 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         { class: 'field-hint' },
         'Python получает 4 пробела, Makefile — символ табуляции, TypeScript — 2 пробела. Выключено — везде общие значения сверху.',
       ),
-      field(
-        'Перенос длинных строк',
-        selectInput(
-          [
-            { value: 'off', label: 'Выключен' },
-            { value: 'on', label: 'По ширине окна' },
-          ],
-          editor.wordWrap ? 'on' : 'off',
-          (value) => editable({ wordWrap: value === 'on' }),
-        ),
-      ),
-      field(
-        'Невидимые символы',
-        selectInput(
-          [
-            { value: 'none', label: 'Не показывать' },
-            { value: 'selection', label: 'В выделении' },
-            { value: 'boundary', label: 'По краям слов' },
-            { value: 'trailing', label: 'Пробелы в конце строк' },
-            { value: 'all', label: 'Всегда' },
-          ],
-          editor.renderWhitespace,
-          (value) => editable({ renderWhitespace: value as EditorSettings['renderWhitespace'] }),
-        ),
-      ),
 
       h('div', { class: 'settings-divider' }),
-      h('div', { class: 'field-label' }, 'Вид редактора'),
-      switchRow('Показывать миникарту', editor.minimap, (value) => editable({ minimap: value })),
-      switchRow('Номера строк', editor.lineNumbers !== 'off', (value) =>
-        editable({ lineNumbers: value ? 'on' : 'off' }),
-      ),
-      switchRow('Подсвечивать строку курсора', editor.renderLineHighlight !== 'none', (value) =>
-        editable({ renderLineHighlight: value ? 'all' : 'none' }),
-      ),
-      switchRow('Разноцветные парные скобки', editor.bracketPairColorization, (value) =>
-        editable({ bracketPairColorization: value }),
-      ),
-      switchRow('Липкий заголовок блока', editor.stickyScroll, (value) => editable({ stickyScroll: value })),
-      switchRow('Плавная прокрутка', editor.smoothScrolling, (value) => editable({ smoothScrolling: value })),
-      switchRow('Прокрутка за последнюю строку', editor.scrollBeyondLastLine, (value) =>
-        editable({ scrollBeyondLastLine: value }),
-      ),
+      h('div', { class: 'field-label' }, 'Сохранение'),
+      switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
       h(
         'div',
         { class: 'field-hint' },
         'Свои сниппеты (шаблоны кода) задаются в settings.json — поле `editor.snippets`: ' +
           'массив из `{ prefix, body, description?, languages? }`. К ним добавляется небольшой набор по умолчанию.',
       ),
-
-      h('div', { class: 'settings-divider' }),
-      h('div', { class: 'field-label' }, 'Подсказки и проверки'),
-      switchRow('Подсказки по мере ввода', editor.quickSuggestions, (value) => editable({ quickSuggestions: value })),
-      ...(showUnused
-        ? [
-            switchRow('Подсвечивать неиспользуемый код', editor.showUnused, (value) => editable({ showUnused: value })),
-            h(
-              'div',
-              { class: 'field-hint' },
-              'Проверка JavaScript и TypeScript работает в самом редакторе: неиспользуемые импорты и переменные подчёркиваются сразу.',
-            ),
-          ]
-        : []),
-      switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
-      field(
-        'Мигание курсора',
-        selectInput(
-          [
-            { value: 'blink', label: 'Мигает' },
-            { value: 'smooth', label: 'Плавно' },
-            { value: 'phase', label: 'Волной' },
-            { value: 'expand', label: 'Растёт' },
-            { value: 'solid', label: 'Не мигает' },
-          ],
-          editor.cursorBlinking,
-          (value) => editable({ cursorBlinking: value as EditorSettings['cursorBlinking'] }),
-        ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Вид движка (миникарта, перенос строк, свёртка, липкий заголовок, раскраска скобок, ' +
+          'плавная прокрутка) своё ядро редактора пока не умеет — настроек к нему нет.',
       ),
     ];
   }

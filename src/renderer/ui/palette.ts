@@ -8,6 +8,14 @@ export interface PaletteView {
 }
 
 /**
+ * Сколько пунктов показывать. Сорока стало мало: к нашим командам добавляются действия
+ * редактора, и при пустом поле хвост списка просто отрезался (живой замер — 231 пункт).
+ * Теперь это только страховка от отрисовки: предел выше
+ * любого реального списка, а сужает выдачу сам поиск.
+ */
+const MAX_ITEMS = 500;
+
+/**
  * Палитра команд (Ctrl+Shift+P). Работает поверх реестра команд,
  * поэтому любая новая команда появляется здесь автоматически.
  */
@@ -42,7 +50,7 @@ export function createPalette(deps: { commands: CommandRegistry }): PaletteView 
           `${descriptor.title} ${descriptor.category} ${descriptor.id} ${(descriptor.keywords ?? []).join(' ')}`.toLowerCase();
         return haystack.includes(query);
       })
-      .slice(0, 40);
+      .slice(0, MAX_ITEMS);
 
     cursor = Math.min(cursor, Math.max(matches.length - 1, 0));
 

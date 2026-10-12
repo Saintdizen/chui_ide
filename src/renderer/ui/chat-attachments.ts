@@ -6,7 +6,7 @@ import {
   type PickedImage,
 } from '../../shared/api';
 import type { DocumentStore } from '../core/document-store';
-import type { EditorService } from '../core/editor-service';
+import type { EditorApi } from '../core/editor-api';
 import { languageFromPath } from '../core/languages';
 import type { RpcClient } from '../core/rpc';
 import { relativePath, type WorkspaceModel } from '../core/workspace-model';
@@ -34,7 +34,7 @@ const MAX_MENTIONS = 4000;
 export interface AttachmentsDeps {
   rpc: RpcClient;
   documents: DocumentStore;
-  editors: EditorService;
+  editors: EditorApi;
   workspace: WorkspaceModel;
   /** Активная беседа: у каждой вкладки свои вложения. */
   session(): ChatSession;

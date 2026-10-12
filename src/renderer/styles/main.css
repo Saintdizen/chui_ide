@@ -463,7 +463,7 @@ textarea {
   user-select: none;
 }
 
-.center {
+.app > .center {
   grid-column: 4;
   grid-row: 2;
   display: grid;
@@ -1201,7 +1201,7 @@ textarea {
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--popup_material);
-  box-shadow: var(--box_shadow_drop);
+  box-shadow: var(--box_shadow_small);
   animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
@@ -1291,13 +1291,17 @@ textarea {
   overflow: auto;
 }
 
-.tree {
+/* Отступ списка дерева проекта. Селектор привязан к панели проводника не для красоты:
+   класс `tree` есть и у виджета подсказок Monaco (`.suggest-widget > .tree` — это сам
+   список), и это правило протекало туда. Отступ 4/12 px воровал у списка подсказок
+   16 px высоты: строки обрезались по краям — отсюда «поехавшие» подсказки. */
+.explorer .tree {
   padding: 4px 0 12px;
 }
 
 /* Дерево фокусируется программно (клик по строке) ради клавиш F2/Del: рамка
    фокуса тут не нужна — выделенная строка и так подсвечена. */
-.tree:focus {
+.explorer .tree:focus {
   outline: none;
 }
 
@@ -1868,7 +1872,7 @@ textarea {
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--popup_material);
-  box-shadow: var(--box_shadow_drop);
+  box-shadow: var(--box_shadow_small);
   animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
@@ -3205,7 +3209,7 @@ textarea {
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--popup_material);
-  box-shadow: var(--box_shadow_drop);
+  box-shadow: var(--box_shadow_small);
   animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
@@ -3807,7 +3811,7 @@ textarea {
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--popup_material);
-  box-shadow: var(--box_shadow_drop);
+  box-shadow: var(--box_shadow_small);
   animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
@@ -4287,7 +4291,7 @@ textarea {
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--popup_material);
-  box-shadow: var(--box_shadow_drop);
+  box-shadow: var(--box_shadow_small);
   animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
@@ -4378,7 +4382,12 @@ textarea {
 
 /* ── палитра команд ─────────────────────────────────────────────────────── */
 
-.overlay {
+/* Затемнение модального слоя (палитра, быстрый переход, символы). Слой — прямой
+   потомок `body`, поэтому селектор это и говорит: класс `overlay` есть и у Monaco
+   (ползунки в виджете выбора цвета — `.colorpicker-body .strip .overlay`), и без
+   уточнения правило накрывало их `position: fixed; inset: 0` — виджет обливался
+   затемнением на весь экран. */
+body > .overlay {
   position: fixed;
   inset: 0;
   z-index: var(--layer_overlay);
@@ -4426,6 +4435,8 @@ textarea {
   align-items: center;
   gap: 10px;
   width: 100%;
+  /* Высота строки — из общего токена: одна ступень со строками дерева и меню. */
+  min-height: var(--popup_row_height);
   padding: var(--control_padding_sm) 10px;
   border-radius: var(--radius_sm);
   text-align: left;
@@ -4505,7 +4516,7 @@ textarea {
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--popup_material);
-  box-shadow: var(--box_shadow_drop);
+  box-shadow: var(--box_shadow_small);
   color: var(--text_color);
   font-size: var(--font_labels_size);
   cursor: pointer;
@@ -4786,8 +4797,7 @@ textarea {
   .palette,
   .toast,
   .modal,
-  .launcher-clone,
-  .monaco-editor .quick-input-widget {
+  .launcher-clone {
     animation-name: popup-fade !important;
     animation-duration: var(--motion_base) !important;
   }

@@ -8,9 +8,9 @@ export const APP_ORIGIN = `${APP_SCHEME}://bundle`;
 /**
  * В продакшене renderer отдаётся не через file://, а через собственный протокол.
  *
- * Причина простая: у схемы file:// «непрозрачный» origin, и Chromium запрещает
- * создавать из такой страницы web worker'ы. Monaco работает именно на worker'ах,
- * так что с file:// подсветка и TS-сервисы молча не заведутся.
+ * Причина простая: у схемы file:// «непрозрачный» origin — Chromium запрещает
+ * из такой страницы создавать web worker'ы и обращаться с ней как с обычным сайтом
+ * (модули, CSP, `history`). С app:// origin у страницы есть, и всё это работает.
  */
 export function registerAppScheme(): void {
   protocol.registerSchemesAsPrivileged([

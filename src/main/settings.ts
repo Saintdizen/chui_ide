@@ -153,27 +153,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
   editor: {
     tabSize: 4,
     fontSize: 14,
-    wordWrap: false,
-    // В PyCharm миникарты нет — по умолчанию она выключена.
-    minimap: false,
-    fontLigatures: true,
     insertSpaces: true,
     // Python и Makefile требуют разного отступа: пусть язык решает сам.
     languageIndent: true,
-    renderWhitespace: 'selection',
-    // Курсор и прокрутка по умолчанию без «плавности»: ввод текста и навигация по
-    // коду — самые частые действия, и анимация тут только мешает. Обе настройки
-    // можно включить обратно — движение остаётся необязательным.
-    cursorBlinking: 'blink',
-    smoothScrolling: false,
-    // Как в PyCharm: ниже последней строки остаётся место для чтения.
-    scrollBeyondLastLine: true,
-    lineNumbers: 'on',
-    renderLineHighlight: 'all',
-    bracketPairColorization: true,
-    stickyScroll: false,
-    quickSuggestions: true,
-    showUnused: true,
     // Форматирование при сохранении по умолчанию выключено: правка пробелов
     // на каждое сохранение — заметное вмешательство, включается осознанно.
     formatOnSave: false,

@@ -17,9 +17,7 @@ import { describe, expect, it } from 'vitest';
  * Что движение осмысленно (а не украшение ради) — сторож не проверит: это
  * вопрос ревью. Здесь ловится лишь то, что нарушает правило молча.
  */
-const STYLE_FILES = ['theme.css', 'main.css', 'monaco.css'].map((name) =>
-  resolve(process.cwd(), 'src/renderer/styles', name),
-);
+const STYLE_FILES = ['theme.css', 'main.css'].map((name) => resolve(process.cwd(), 'src/renderer/styles', name));
 
 /** Свойства, которые трогать анимацией дорого: они тянут за собой раскладку. */
 const LAYOUT_PROPERTIES = [
@@ -190,13 +188,6 @@ describe('движение отключается системной настр�
     expect(LAYOUT).toMatch(/requestAnimationFrame/);
     expect(LAYOUT).toMatch(/cancelAnimationFrame/);
   });
-
-  it('меню Monaco в теневом корне тоже уважает reduce motion', () => {
-    // Правила страницы в теневой корень не доходят: у него своя копия.
-    const chrome = readFileSync(resolve(process.cwd(), 'src/renderer/core/monaco-chrome.ts'), 'utf8');
-    expect(chrome).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)/);
-    expect(chrome).toMatch(/animation-name:\s*popup-fade/);
-  });
 });
 
 /* ── Частые действия — без движения ─────────────────────────────────────── */
@@ -332,10 +323,6 @@ describe('нет анимации там, где она раздражает', (
     /\/\*[\s\S]*?\*\//g,
     '',
   );
-  const MONACO = readFileSync(resolve(process.cwd(), 'src/renderer/styles/monaco.css'), 'utf8').replace(
-    /\/\*[\s\S]*?\*\//g,
-    '',
-  );
 
   it('точка «не сохранён» статична — сохранение не анимируется', () => {
     const dirty = MAIN.match(/\.tab-dirty\s*\{[^}]*\}/)?.[0] ?? '';
@@ -352,12 +339,6 @@ describe('нет анимации там, где она раздражает', (
       if (/animation\s*:/.test(body ?? '')) offenders.push(selector!.trim().replace(/\s+/g, ' '));
     }
     expect(offenders).toEqual([]);
-  });
-
-  it('автодополнение появляется без анимации появления', () => {
-    const suggest = MONACO.match(/\.monaco-editor \.suggest-widget[^{]*\{[^}]*\}/)?.[0] ?? '';
-    expect(suggest).not.toBe('');
-    expect(suggest).not.toMatch(/animation\s*:/);
   });
 
   it('открытие проекта — прогресс текстом, без блокирующего слоя появления', () => {

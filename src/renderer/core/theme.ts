@@ -1,19 +1,13 @@
 import type { ITheme } from '@xterm/xterm';
-import type * as monaco from 'monaco-editor';
-import type { ChromeKey, ThemeFile, TokenKey } from '../../shared/theme-file';
+import { TOKEN_KEYS, type ChromeKey, type ThemeFile, type TokenKey } from '../../shared/theme-file';
 
 export type Scheme = 'dark' | 'light';
-
-export const MONACO_THEME_IDS: Record<Scheme, string> = {
-  dark: 'chui-dark',
-  light: 'chui-light',
-};
 
 /**
  * Переопределения активной темы из файла. Значения — HEX без `#` (как в самой
  * палитре ниже). Пусто — работают встроенные роли. Хранятся рядом с палитрой, а
- * не в сервисе темы: их читают и `buildTheme`, и подсветка кода в чате
- * (`tokenStyle`), которым сервис недоступен.
+ * не в сервисе темы: их читают и подсветка кода в чате (`tokenStyle`), и тема из
+ * файла (`themeCssVariables`), которым сервис недоступен.
  */
 let chromeOverrides: Partial<Record<ChromeKey, string>> = {};
 let tokenOverrides: Partial<Record<TokenKey, string>> = {};
@@ -22,8 +16,7 @@ const withoutHash = (value: string): string => (value.startsWith('#') ? value.sl
 
 /**
  * Включить переопределения темы из файла; `null` — вернуть встроенную палитру.
- * Вызывается до пересборки темы Monaco и перерисовки чата — там уже читают
- * новые значения.
+ * Вызывается до перерисовки редактора и чата — там уже читают новые значения.
  */
 export function setThemeOverrides(theme: ThemeFile | null): void {
   chromeOverrides = {};
@@ -261,11 +254,22 @@ export function tokenColor(scheme: Scheme, tokenType: string): string | null {
   return tokenStyle(scheme, tokenType).color;
 }
 
-/** Полупрозрачная ступень цвета: `#RRGGBB` плюс альфа в hex (`'40'` ≈ 25 %). */
-const fade = (color: string, alpha: string): string => `#${color}${alpha}`;
+/**
+ * Роль палитры для типа токена. Нужна нашему редактору: он ставит на корень
+ * переменные цветов по ролям, а каждый токен получает класс этой роли — и краску
+ * берёт переменной, а не строкой стиля на каждый знак (см. `editor/style.ts`).
+ */
+export function tokenKeyFor(tokenType: string): TokenKey | null {
+  return ruleFor(tokenType)?.key ?? null;
+}
 
-/** Прозрачный цвет: рамки и тени, которых в нашем оформлении нет. */
-const NONE = '#00000000';
+/** Цвета всех ролей подсветки в текущей схеме — с учётом переопределений из файла. */
+export function tokenPalette(scheme: Scheme): Record<TokenKey, string> {
+  const rules = tokensFor(scheme);
+  const out = {} as Record<TokenKey, string>;
+  for (const key of TOKEN_KEYS) out[key] = `#${rules[key]}`;
+  return out;
+}
 
 /**
  * Оформление редактора и его всплывающих слоёв. Значения повторяют токены
@@ -333,7 +337,11 @@ const DARK_CHROME: Chrome = {
   whitespace: '3b3b3b',
 
   // Карточка интерфейса — та же поверхность, что у наших попапов: без прозрачности.
-  popover: '1e1e1e',
+  // Значение совпадает с `--surface_popup` в `styles/theme.css` (#2c2c2e): виджеты
+  // редактора и наши дропдауны должны читаться как один и тот же слой. Прозрачность и
+  // блюр наших попапов сюда не переносятся — виджет редактора лежит над живым кодом, и
+  // размытие пришлось бы пересчитывать на каждой правке (см. README о попапах Monaco).
+  popover: '2c2c2e',
   border: '313134',
   separator: '545458a6',
   sunken: '00000033',
@@ -415,257 +423,6 @@ const LIGHT_CHROME: Chrome = {
 function chromeFor(scheme: Scheme): Chrome {
   return { ...(scheme === 'dark' ? DARK_CHROME : LIGHT_CHROME), ...chromeOverrides };
 }
-
-/**
- * Данные темы Monaco. Объявлена наружу: её пересобирают, когда приходит тема из
- * файла — тогда `MONACO_THEMES` (встроенный снимок) уже не годится.
- */
-export function buildTheme(scheme: Scheme): monaco.editor.IStandaloneThemeData {
-  const tokens = tokensFor(scheme);
-  const chrome = chromeFor(scheme);
-
-  return {
-    // Встроенная светлая тема Monaco называется 'vs', а не 'vs-light'.
-    base: scheme === 'dark' ? 'vs-dark' : 'vs',
-    inherit: true,
-    rules: [
-      // Правила собираются из той же таблицы, по которой красится чат, включая
-      // нецветовые признаки: без `fontStyle` код читался бы только по цвету.
-      ...TOKEN_RULES.map((rule) => ({
-        token: rule.prefix,
-        foreground: tokens[rule.key],
-        fontStyle: [rule.italic ? 'italic' : '', rule.bold ? 'bold' : ''].filter(Boolean).join(' ') || undefined,
-      })),
-      { token: 'delimiter', foreground: chrome.foreground },
-      { token: 'operator', foreground: chrome.foreground },
-    ],
-    colors: {
-      /* Общие роли. Их Monaco объявляет на самом редакторе (`.monaco-editor`),
-         а не на `:root`, поэтому одних правил из `styles/monaco.css` внутри
-         редактора мало — без этих ключей поиск, подсказки и панели действий
-         держат цвета VS Code по умолчанию. */
-      foreground: `#${chrome.text}`,
-      descriptionForeground: `#${chrome.textTertiary}`,
-      disabledForeground: `#${chrome.textDisabled}`,
-      errorForeground: `#${chrome.error}`,
-      'icon.foreground': `#${chrome.text}`,
-      focusBorder: `#${chrome.accent}`,
-      'widget.border': `#${chrome.border}`,
-      'toolbar.hoverBackground': `#${chrome.tintHover}`,
-      'toolbar.activeBackground': `#${chrome.tint}`,
-
-      /* полотно, гуттер, служебные символы */
-      'editor.background': `#${chrome.background}`,
-      'editor.foreground': `#${chrome.foreground}`,
-      'editorLineNumber.foreground': `#${chrome.lineNumber}`,
-      'editorLineNumber.activeForeground': `#${chrome.lineNumberActive}`,
-      'editorCursor.foreground': `#${chrome.cursor}`,
-      'editorGutter.background': `#${chrome.background}`,
-      'editorGutter.foldingControlForeground': `#${chrome.textTertiary}`,
-      'editor.lineHighlightBackground': `#${chrome.lineHighlight}`,
-      // Строка подсвечивается заливкой без рамки: рамку носят наши блоки, не редактор.
-      'editor.lineHighlightBorder': NONE,
-      'editorIndentGuide.background1': `#${chrome.indentGuide}`,
-      'editorIndentGuide.activeBackground1': `#${chrome.indentGuideActive}`,
-      'editorWhitespace.foreground': `#${chrome.whitespace}`,
-      // Свёрнутый блок, многоточие свёртки и стрелка переноса — наши тихие тона.
-      'editor.foldBackground': `#${chrome.tint}`,
-      'editor.foldPlaceholderForeground': `#${chrome.textTertiary}`,
-      'editorWordWrapIndicator.foreground': `#${chrome.textTertiary}`,
-      // Невидимые и похожие символы (кириллица рядом с латиницей) — цветом предупреждения.
-      'editorUnicodeHighlight.border': `#${chrome.warning}`,
-      'editorUnicodeHighlight.background': NONE,
-      'editorBracketMatch.background': fade(chrome.accent, '1f'),
-      'editorBracketMatch.border': fade(chrome.accent, '80'),
-      'editorBracketHighlight.foreground1': `#${chrome.warning}`,
-      'editorBracketHighlight.foreground2': `#${chrome.purple}`,
-      'editorBracketHighlight.foreground3': `#${chrome.accent}`,
-      // Лишняя (непарная) скобка — цветом ошибки, как и всё, что неверно.
-      'editorBracketHighlight.unexpectedBracket.foreground': fade(chrome.error, 'cc'),
-      'editorLink.activeForeground': `#${chrome.accentText}`,
-      // Ссылки и блоки кода в markdown-наведении — наши токены ссылки и подложки.
-      'textLink.foreground': `#${chrome.accentText}`,
-      'textLink.activeForeground': `#${chrome.accentText}`,
-      'textCodeBlock.background': `#${chrome.sunken}`,
-      'editorCodeLens.foreground': `#${chrome.textTertiary}`,
-      'editorGhostText.foreground': `#${chrome.textTertiary}`,
-      'editorMultiCursor.primary.foreground': `#${chrome.cursor}`,
-
-      /* выделение, поиск, подсветка вхождений */
-      'editor.selectionBackground': `#${chrome.selection}`,
-      'editor.inactiveSelectionBackground': `#${chrome.selectionInactive}`,
-      'editor.selectionHighlightBackground': fade(chrome.accent, '2e'),
-      'editor.wordHighlightBackground': `#${chrome.tint}`,
-      'editor.wordHighlightTextBackground': `#${chrome.tint}`,
-      'editor.wordHighlightStrongBackground': fade(chrome.accent, '33'),
-      'editor.rangeHighlightBackground': `#${chrome.tint}`,
-      // Символ под курсором в момент наведения — тише, чем поиск и выделение.
-      'editor.hoverHighlightBackground': fade(chrome.accent, '1f'),
-      'editor.findMatchBackground': `#${chrome.highlightStrong}`,
-      'editor.findMatchHighlightBackground': `#${chrome.highlight}`,
-      'editor.findRangeHighlightBackground': `#${chrome.tint}`,
-      'editorOverviewRuler.border': NONE,
-      'editorOverviewRuler.errorForeground': fade(chrome.error, 'b3'),
-      'editorOverviewRuler.warningForeground': fade(chrome.warning, 'b3'),
-      'editorOverviewRuler.infoForeground': fade(chrome.accent, 'b3'),
-      'minimap.background': `#${chrome.background}`,
-      'minimap.selectionHighlight': fade(chrome.accent, '40'),
-      'minimap.errorHighlight': fade(chrome.error, 'b3'),
-      'minimap.warningHighlight': fade(chrome.warning, 'b3'),
-      'minimapSlider.hoverBackground': `#${chrome.scrollbarHover}`,
-      'minimapSlider.activeBackground': `#${chrome.scrollbarActive}`,
-
-      /* диагностика — наши акценты, а не палитра VS Code */
-      'editorError.foreground': `#${chrome.error}`,
-      'editorWarning.foreground': `#${chrome.warning}`,
-      'editorInfo.foreground': `#${chrome.accent}`,
-      'editorHint.foreground': `#${chrome.textTertiary}`,
-      // Лампочка быстрых правок — акцентом, как прочие действия редактора: это
-      // приглашение нажать, а не предупреждение. В VS Code она золотая — цветом
-      // спорила бы с жёлтым диагностики, а роль у неё другая.
-      'editorLightBulb.foreground': `#${chrome.accent}`,
-      'editorLightBulbAutoFix.foreground': `#${chrome.accent}`,
-      // Значки степени серьёзности в наведении на пометку и в заголовке просмотра —
-      // те же роли, что у самих пометок.
-      'problemsErrorIcon.foreground': `#${chrome.error}`,
-      'problemsWarningIcon.foreground': `#${chrome.warning}`,
-      'problemsInfoIcon.foreground': `#${chrome.accent}`,
-      // Подсказки inline (имена параметров, типы) — наши тихие тона вместо серого
-      // VS Code: они включены по умолчанию и видны в TypeScript/JavaScript.
-      'editorInlayHint.foreground': `#${chrome.textTertiary}`,
-      'editorInlayHint.background': `#${chrome.sunken}`,
-      'editorInlayHint.typeForeground': `#${chrome.textTertiary}`,
-      'editorInlayHint.typeBackground': `#${chrome.sunken}`,
-      'editorInlayHint.parameterForeground': `#${chrome.textTertiary}`,
-      'editorInlayHint.parameterBackground': `#${chrome.sunken}`,
-
-      /* всплывающие слои: материал, рамка и одна заливка «это текущее» */
-      'widget.shadow': `#${chrome.shadow}`,
-      'editorWidget.background': `#${chrome.popover}`,
-      'editorWidget.border': `#${chrome.border}`,
-      'editorWidget.foreground': `#${chrome.text}`,
-      'editorHoverWidget.background': `#${chrome.popover}`,
-      'editorHoverWidget.border': `#${chrome.border}`,
-      'editorHoverWidget.foreground': `#${chrome.text}`,
-      // Ссылки и пути в наведении — акцентом, как прочие переходы редактора.
-      'editorHoverWidget.highlightForeground': `#${chrome.accent}`,
-      'editorHoverWidget.statusBarBackground': fade(chrome.background, '99'),
-      'editorSuggestWidget.background': `#${chrome.popover}`,
-      'editorSuggestWidget.border': `#${chrome.border}`,
-      'editorSuggestWidget.foreground': `#${chrome.text}`,
-      'editorSuggestWidget.selectedBackground': `#${chrome.selectionFill}`,
-      'editorSuggestWidget.selectedForeground': `#${chrome.text}`,
-      'editorSuggestWidget.selectedIconForeground': `#${chrome.text}`,
-      'editorSuggestWidget.highlightForeground': `#${chrome.accent}`,
-      'editorSuggestWidget.focusHighlightForeground': `#${chrome.accent}`,
-      'list.hoverBackground': `#${chrome.tintHover}`,
-      'list.hoverForeground': `#${chrome.text}`,
-      'list.focusBackground': `#${chrome.selectionFill}`,
-      'list.activeSelectionBackground': `#${chrome.selectionFill}`,
-      'list.activeSelectionForeground': `#${chrome.text}`,
-      'list.inactiveSelectionBackground': `#${chrome.tint}`,
-      'list.highlightForeground': `#${chrome.accent}`,
-      'input.background': `#${chrome.sunken}`,
-      'input.foreground': `#${chrome.text}`,
-      'input.border': `#${chrome.border}`,
-      'input.placeholderForeground': `#${chrome.placeholder}`,
-      'inputOption.activeBorder': `#${chrome.accent}`,
-      'inputOption.hoverBackground': `#${chrome.tintHover}`,
-      // Рамка оверлей-сообщения редактора («файл только для чтения», «ничего не
-      // найдено» у F12): Monaco берёт её из этой роли, а не из рамки попапов.
-      'inputValidation.infoBorder': `#${chrome.accent}`,
-      'inputValidation.infoBackground': `#${chrome.popover}`,
-      'inputValidation.infoForeground': `#${chrome.text}`,
-      'menu.background': `#${chrome.popover}`,
-      'menu.foreground': `#${chrome.text}`,
-      'menu.border': `#${chrome.border}`,
-      'menu.selectionBackground': `#${chrome.selectionFill}`,
-      'menu.selectionForeground': `#${chrome.text}`,
-      'menu.selectionBorder': NONE,
-      'menu.separatorBackground': `#${chrome.separator}`,
-      // Меню действий редактора (быстрые правки, рефакторинг) — как наш попап.
-      'editorActionList.background': `#${chrome.popover}`,
-      'editorActionList.foreground': `#${chrome.text}`,
-      'editorActionList.focusBackground': `#${chrome.selectionFill}`,
-      'editorActionList.focusForeground': `#${chrome.text}`,
-      'quickInput.background': `#${chrome.popover}`,
-      'quickInput.foreground': `#${chrome.text}`,
-      'quickInputTitle.background': NONE,
-      'quickInputList.focusBackground': `#${chrome.selectionFill}`,
-      'quickInputList.focusForeground': `#${chrome.text}`,
-      'quickInputList.focusIconForeground': `#${chrome.accent}`,
-      // Кнопки Monaco: действие в баннере редактора («отключить для этого
-      // файла»), «вставить» в палитре цвета. Заливка — наша акцентная (под белым
-      // текстом; сам акцент для этого слишком светлый), вторичная — тихая серая
-      // кнопка, как у нас. Рамки нет: кнопку держит заливка.
-      'button.background': `#${chrome.accentFill}`,
-      'button.foreground': `#${chrome.textOnFill}`,
-      'button.hoverBackground': `#${chrome.accent}`,
-      'button.border': NONE,
-      'button.secondaryBackground': `#${chrome.tint}`,
-      'button.secondaryForeground': `#${chrome.text}`,
-      'button.secondaryHoverBackground': `#${chrome.tintHover}`,
-      'button.secondaryBorder': NONE,
-
-      /* просмотр определения и ссылок (F12/Shift+F12): та же карточка, что у
-         прочих попапов — заголовок и список на поверхности попапа, код — на
-         полотне редактора, выделения — наш акцент. Тень виджета Monaco берёт из
-         `--vscode-shadow-lg`, который объявлен в monaco.css нашим токеном. */
-      'peekView.border': `#${chrome.border}`,
-      'peekViewTitle.background': `#${chrome.popover}`,
-      'peekViewTitleLabel.foreground': `#${chrome.text}`,
-      'peekViewTitleDescription.foreground': `#${chrome.textTertiary}`,
-      'peekViewEditor.background': `#${chrome.background}`,
-      'peekViewEditorGutter.background': `#${chrome.background}`,
-      'peekViewEditorStickyScroll.background': `#${chrome.background}`,
-      'peekViewEditorStickyScrollGutter.background': `#${chrome.background}`,
-      'peekViewEditor.matchHighlightBackground': fade(chrome.accent, '40'),
-      'peekViewEditor.matchHighlightBorder': NONE,
-      'peekViewResult.background': `#${chrome.popover}`,
-      'peekViewResult.fileForeground': `#${chrome.text}`,
-      'peekViewResult.lineForeground': `#${chrome.textSecondary}`,
-      'peekViewResult.selectionBackground': `#${chrome.selectionFill}`,
-      'peekViewResult.selectionForeground': `#${chrome.text}`,
-      'peekViewResult.matchHighlightBackground': fade(chrome.accent, '40'),
-      // Переход по проблемам (F8): тело виджета — наша карточка, а акцент
-      // серьёзности (тонированная шапка, значок, полоса) остаётся и выводится из
-      // тех же ролей, что и сама диагностика. Значения совпадают с ними — правка
-      // цвета ошибки меняет и подчёркивание в коде, и шапку этого виджета.
-      'editorMarkerNavigation.background': `#${chrome.popover}`,
-      'editorMarkerNavigationError.background': `#${chrome.error}`,
-      'editorMarkerNavigationWarning.background': `#${chrome.warning}`,
-      'editorMarkerNavigationInfo.background': `#${chrome.accent}`,
-
-      /* закреплённые строки и скроллбары */
-      'editorStickyScroll.background': `#${chrome.background}`,
-      'editorStickyScroll.border': `#${chrome.border}`,
-      'editorStickyScroll.shadow': `#${chrome.shadow}`,
-      'editorStickyScrollGutter.background': `#${chrome.background}`,
-      'editorStickyScrollHover.background': `#${chrome.tintHover}`,
-      'scrollbarSlider.background': `#${chrome.scrollbar}`,
-      'scrollbarSlider.hoverBackground': `#${chrome.scrollbarHover}`,
-      'scrollbarSlider.activeBackground': `#${chrome.scrollbarActive}`,
-      'scrollbar.shadow': NONE,
-
-      /* экран сравнения: добавленное и удалённое — в цветах git */
-      'diffEditor.border': `#${chrome.border}`,
-      'diffEditor.insertedLineBackground': fade(chrome.added, '1f'),
-      'diffEditor.removedLineBackground': fade(chrome.deleted, '1f'),
-      'diffEditor.insertedTextBackground': fade(chrome.added, '40'),
-      'diffEditor.removedTextBackground': fade(chrome.deleted, '40'),
-      'diffEditor.diagonalFill': `#${chrome.separator}`,
-      'diffEditorOverview.insertedForeground': `#${chrome.added}`,
-      'diffEditorOverview.removedForeground': `#${chrome.deleted}`,
-      'diffEditorGutter.insertedLineBackground': fade(chrome.added, '33'),
-      'diffEditorGutter.removedLineBackground': fade(chrome.deleted, '33'),
-    },
-  };
-}
-
-export const MONACO_THEMES: Record<Scheme, monaco.editor.IStandaloneThemeData> = {
-  dark: buildTheme('dark'),
-  light: buildTheme('light'),
-};
 
 /** `RRGGBB` / `RRGGBBAA` (без `#`) → цвет CSS. */
 const cssHex = (value: string): string => `#${value}`;

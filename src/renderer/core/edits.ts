@@ -2,12 +2,12 @@ import type { ApplyFailure, ApplyReport, ApplyResult, FileEdit } from '../../sha
 import { diskConflict, type TextDocument } from './document';
 import type { DocumentStore } from './document-store';
 import type { EditSource } from './document';
-import type { EditorService } from './editor-service';
+import type { EditorApi } from './editor-api';
 import type { RpcClient } from './rpc';
 
 export interface EditServiceDeps {
   documents: DocumentStore;
-  editors: EditorService;
+  editors: EditorApi;
   rpc: RpcClient;
 }
 

@@ -17,7 +17,7 @@ import { contextWindow, modelCapabilities } from '../../shared/providers';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
 import type { EditService } from '../core/edits';
-import type { EditorService } from '../core/editor-service';
+import type { EditorApi } from '../core/editor-api';
 import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { type RpcClient, RpcError } from '../core/rpc';
@@ -58,7 +58,7 @@ export interface SettingsOpener {
 export interface ChatDeps {
   rpc: RpcClient;
   documents: DocumentStore;
-  editors: EditorService;
+  editors: EditorApi;
   edits: EditService;
   /**
    * Открыть файл так же, как это делают дерево и быстрое открытие. Клику по файлу
@@ -1692,7 +1692,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // что apply_edit: ревью, undo и панель изменений работают как обычно.
   deps.host.handle('ai.applyPatches', async (params) => applyAgentPatches(params));
 
-  // Пометки языка живут в Monaco, поэтому их отдаёт renderer.
+  // Пометки языка живут в renderer (в редакторе), поэтому их отдаёт он.
   deps.host.handle('ai.getDiagnostics', async (params) => ({ items: deps.editors.markers(params.path) }));
 
   // Показать файл в редакторе: открытие вкладки и позиция курсора — дело renderer.

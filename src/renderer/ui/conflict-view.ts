@@ -6,14 +6,14 @@ import {
   parseConflicts,
 } from '../../shared/conflicts';
 import type { TextEdit } from '../../shared/edits';
-import type { DiffEditorHandle } from '../core/editor-service';
+import type { OwnDiffHandle } from '../editor/host/diff-editor';
 import type { GitModel } from '../core/git-model';
 import { languageFromPath } from '../core/languages';
 import { clear, h, svgIcon } from './dom';
 
 export interface ConflictViewDeps {
-  /** Фабрика сравнения: Monaco остаётся за editor-service, здесь только тексты. */
-  createDiff: (container: HTMLElement) => DiffEditorHandle;
+  /** Фабрика сравнения: движок приходит извне, здесь только тексты. */
+  createDiff: (container: HTMLElement) => OwnDiffHandle;
   git: GitModel;
   /** Текущий текст файла в рабочем дереве: в нём и лежат маркеры конфликта. */
   readText: (path: string) => Promise<string>;
@@ -85,7 +85,7 @@ export function createConflictView(deps: ConflictViewDeps): ConflictView {
   const element = h('div', { class: 'conflict-view' }, header, diffBody, blocksHost, footer);
   element.hidden = true;
 
-  let handle: DiffEditorHandle | null = null;
+  let handle: OwnDiffHandle | null = null;
   let open = false;
   let path: string | null = null;
   let blocks: readonly ConflictBlock[] = [];

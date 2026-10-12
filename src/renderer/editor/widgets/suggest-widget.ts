@@ -1,0 +1,240 @@
+/**
+ * Попап подсказок: список того, что можно вставить.
+ *
+ * Виджет — только вид и клавиши. Что в списке — решает `complete/completions.ts`, а
+ * куда вставить — вызывающий (в приложении это связка ввода с контроллером). Так попап
+ * можно переставить или переоформить, не трогая подбор слов.
+ *
+ * Показывается рядом с кареткой, а не у края экрана: глаз уже там, где он печатает.
+ * Если снизу места нет, попап раскрывается ВВЕРХ — правило позиционирования берётся из
+ * `core/popup-placement.ts`, общего для всех наших попапов: попап, вылезший за край окна,
+ * бесполезен, его содержимое просто не видно.
+ *
+ * Клавиши попап обрабатывает сам и говорит об этом вводу (`handleKey`): стрелки вверх и
+ * вниз при видимом списке должны ходить по списку, а не двигать курсор. Поэтому ввод
+ * спрашивает попап прежде, чем браться за клавишу сам.
+ */
+
+import { placePopup } from '../../core/popup-placement';
+import type { CompletionItem } from '../complete/completions';
+
+/** Сколько строк показываем без прокрутки — дальше список прокручивается. */
+const MAX_VISIBLE = 10;
+/** Высота строки списка и его ширина: попап ставим до отрисовки, размеры нужны заранее. */
+const ROW_HEIGHT = 20;
+const WIDTH = 280;
+
+export interface SuggestAnchor {
+  /** Координаты каретки в системе окна. */
+  left: number;
+  top: number;
+  bottom: number;
+}
+
+export class SuggestWidget {
+  private readonly root: HTMLElement;
+  private readonly list: HTMLElement;
+  private items: CompletionItem[] = [];
+  private selected = 0;
+  private visible = false;
+  private prefixLength = 0;
+
+  /** Что делать при выборе мышью. Задаёт тот, кто виджет создал. */
+  onAccept: (() => void) | null = null;
+
+  constructor(host: HTMLElement) {
+    this.root = document.createElement('div');
+    this.root.className = 'own-editor-suggest';
+    this.root.hidden = true;
+    this.root.setAttribute('role', 'listbox');
+
+    this.list = document.createElement('div');
+    this.list.className = 'own-editor-suggest-list';
+    this.root.append(this.list);
+    host.append(this.root);
+
+    // Мышь: наведение выбирает строку, щелчок вставляет — как в любом списке.
+    this.list.addEventListener('mousemove', this.onMouseMove);
+    this.list.addEventListener('mousedown', this.onMouseDown);
+  }
+
+  get isVisible(): boolean {
+    return this.visible;
+  }
+
+  /** Выбранная подсказка или `null`, если списка нет. */
+  get current(): CompletionItem | null {
+    return this.visible ? (this.items[this.selected] ?? null) : null;
+  }
+
+  /**
+   * Все строки списка — для подмешивания ответа сервера языка (см. `assistant.ts`).
+   * Отдаём как есть: список пересобирается целиком, копия тут ни к чему.
+   */
+  get allItems(): readonly CompletionItem[] {
+    return this.items;
+  }
+
+  /** Сколько набранных знаков заменит вставка: их сообщил тот, кто показал список. */
+  get replaces(): number {
+    return this.prefixLength;
+  }
+
+  /**
+   * Показать список у каретки. `anchor` — где стоит каретка, `prefixLength` — сколько
+   * знаков перед ней набрано (их и заменит вставка).
+   */
+  show(items: readonly CompletionItem[], anchor: SuggestAnchor, prefixLength: number): void {
+    if (items.length === 0) {
+      this.hide();
+      return;
+    }
+    this.items = [...items];
+    // Выделено всегда первое: обычно оно и нужное, а выбор стрелкой — уже уточнение.
+    this.selected = 0;
+    this.prefixLength = prefixLength;
+    this.visible = true;
+    this.root.hidden = false;
+    this.render();
+    this.position(anchor);
+  }
+
+  hide(): void {
+    this.visible = false;
+    this.root.hidden = true;
+    this.items = [];
+  }
+
+  /** Передвинуть выбор. По краям не заворачиваем: конец списка должен быть заметен. */
+  move(delta: number): void {
+    if (!this.visible || this.items.length === 0) return;
+    const next = Math.max(0, Math.min(this.selected + delta, this.items.length - 1));
+    if (next === this.selected) return;
+    this.selected = next;
+    this.highlight();
+    this.ensureVisible();
+  }
+
+  /**
+   * Обработать клавишу раньше редактора. `true` — клавиша наша. Стрелки, Enter, Tab и
+   * Escape работают со списком; всё остальное уходит в редактор, и попап сам закроется
+   * при следующем изменении текста (ввод об этом сообщит).
+   */
+  handleKey(event: KeyboardEvent): boolean {
+    if (!this.visible) return false;
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        this.move(1);
+        return true;
+      case 'ArrowUp':
+        event.preventDefault();
+        this.move(-1);
+        return true;
+      case 'Enter':
+      case 'Tab':
+        event.preventDefault();
+        this.onAccept?.();
+        return true;
+      case 'Escape':
+        event.preventDefault();
+        this.hide();
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  private render(): void {
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < this.items.length; index += 1) {
+      fragment.append(this.row(this.items[index]!, index));
+    }
+    this.list.replaceChildren(fragment);
+  }
+
+  private row(item: CompletionItem, index: number): HTMLElement {
+    const node = document.createElement('div');
+    node.className = index === this.selected ? 'own-editor-suggest-item is-active' : 'own-editor-suggest-item';
+    node.setAttribute('role', 'option');
+    node.dataset.index = String(index);
+
+    const label = document.createElement('span');
+    label.className = 'own-editor-suggest-label';
+    label.textContent = item.label;
+
+    const detail = document.createElement('span');
+    // Вид подсказки красим классом: значок в списке — по нему, а не по тексту.
+    detail.className = `own-editor-suggest-detail is-${item.kind}`;
+    detail.textContent = item.detail;
+
+    node.append(label, detail);
+    return node;
+  }
+
+  /** Обновить только выделение: перерисовка списка на каждую стрелку не нужна. */
+  private highlight(): void {
+    const rows = this.list.children;
+    for (let index = 0; index < rows.length; index += 1) {
+      rows[index]!.classList.toggle('is-active', index === this.selected);
+    }
+  }
+
+  /** Прокрутить список так, чтобы выбранная строка была видна. */
+  private ensureVisible(): void {
+    const row = this.list.children[this.selected] as HTMLElement | undefined;
+    if (!row) return;
+    const top = row.offsetTop;
+    const bottom = top + row.offsetHeight;
+    if (top < this.list.scrollTop) this.list.scrollTop = top;
+    else if (bottom > this.list.scrollTop + this.list.clientHeight) {
+      this.list.scrollTop = bottom - this.list.clientHeight;
+    }
+  }
+
+  /** Поставить попап у каретки: снизу, если есть место, иначе сверху. */
+  private position(anchor: SuggestAnchor): void {
+    const height = Math.min(this.items.length, MAX_VISIBLE) * ROW_HEIGHT + 8;
+    const placement = placePopup({
+      // Правый край якоря совпадает с левым — попап растёт вправо от каретки.
+      anchor: { top: anchor.top, left: anchor.left, right: anchor.left, bottom: anchor.bottom },
+      size: { width: WIDTH, height },
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      gap: 2,
+      align: 'start',
+    });
+    this.root.style.left = `${placement.left}px`;
+    this.root.style.top = `${placement.top}px`;
+    this.list.style.maxHeight = `${MAX_VISIBLE * ROW_HEIGHT}px`;
+  }
+
+  private readonly onMouseMove = (event: MouseEvent): void => {
+    const index = this.rowIndexAt(event.target);
+    if (index < 0 || index === this.selected) return;
+    this.selected = index;
+    this.highlight();
+  };
+
+  private readonly onMouseDown = (event: MouseEvent): void => {
+    // Гасим нажатие: иначе фокус уйдёт из редактора и попап закроется до вставки.
+    event.preventDefault();
+    const index = this.rowIndexAt(event.target);
+    if (index < 0) return;
+    this.selected = index;
+    this.onAccept?.();
+  };
+
+  /** Номер строки списка под узлом события; `-1` — не по строке попали. */
+  private rowIndexAt(target: EventTarget | null): number {
+    if (!(target instanceof HTMLElement)) return -1;
+    const row = target.closest<HTMLElement>('.own-editor-suggest-item');
+    if (!row) return -1;
+    return Number(row.dataset.index ?? '-1');
+  }
+
+  dispose(): void {
+    this.list.removeEventListener('mousemove', this.onMouseMove);
+    this.list.removeEventListener('mousedown', this.onMouseDown);
+    this.root.remove();
+  }
+}

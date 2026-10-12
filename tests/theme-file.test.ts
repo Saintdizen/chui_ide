@@ -6,13 +6,7 @@ import {
   serializeThemeFile,
   sanitizeThemeFile,
 } from '../src/shared/theme-file';
-import {
-  buildTheme,
-  setThemeOverrides,
-  themeCssVariables,
-  themeTemplate,
-  tokenColor,
-} from '../src/renderer/core/theme';
+import { setThemeOverrides, themeCssVariables, themeTemplate, tokenColor } from '../src/renderer/core/theme';
 
 afterEach(() => {
   // Переопределения — состояние модуля: тесты не должны влиять друг на друга.
@@ -132,11 +126,11 @@ describe('setThemeOverrides', () => {
     });
 
     expect(tokenColor('dark', 'keyword')).toBe('#ab12cd');
-    expect(buildTheme('dark').colors!['editor.background']).toBe('#000000');
+    expect(themeCssVariables('dark')['--editor_background']).toBe('#000000');
 
     setThemeOverrides(null);
     expect(tokenColor('dark', 'keyword')).toBe(before);
-    expect(buildTheme('dark').colors!['editor.background']).not.toBe('#000000');
+    expect(themeCssVariables('dark')['--editor_background']).not.toBe('#000000');
   });
 });
 

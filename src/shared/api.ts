@@ -516,40 +516,19 @@ export interface AiInlineCompletionSettings {
   debounceMs: number;
 }
 
-/** Как показывать невидимые символы. */
-export type RenderWhitespace = 'none' | 'boundary' | 'selection' | 'trailing' | 'all';
-/** Как мигает курсор. */
-export type CursorBlinking = 'blink' | 'smooth' | 'phase' | 'expand' | 'solid';
-/** Номера строк: обычные, относительные, скрытые. */
-export type LineNumbersMode = 'on' | 'off' | 'relative' | 'interval';
-/** Что подсвечивать в строке курсора. */
-export type LineHighlightMode = 'none' | 'gutter' | 'line' | 'all';
-
+/**
+ * Настройки редактора. Здесь только то, что читает своё ядро редактора
+ * (`src/renderer/editor/`): вид движка (миникарта, перенос строк, свёртка,
+ * липкий заголовок, раскраска скобок, плавная прокрутка и прочее) у нас не
+ * реализован, поэтому и настроек к нему нет — обещать переключателем нечего.
+ */
 export interface EditorSettings {
   tabSize: number;
+  /** Кегль текста в редакторе, px. */
   fontSize: number;
-  wordWrap: boolean;
-  minimap: boolean;
-  /** Лигатуры шрифта: `=>`, `!==` и прочие связки JetBrains Mono. */
-  fontLigatures: boolean;
   insertSpaces: boolean;
   /** Язык задаёт свои отступы: Python — 4 пробела, Makefile — символ табуляции. */
   languageIndent: boolean;
-  renderWhitespace: RenderWhitespace;
-  cursorBlinking: CursorBlinking;
-  smoothScrolling: boolean;
-  /** Разрешить прокрутку за последнюю строку (в PyCharm так по умолчанию). */
-  scrollBeyondLastLine: boolean;
-  lineNumbers: LineNumbersMode;
-  renderLineHighlight: LineHighlightMode;
-  /** Разноцветные парные скобки (в VS Code включено по умолчанию). */
-  bracketPairColorization: boolean;
-  /** Заголовок области видимости, прилипающий к верху (липкий скролл). */
-  stickyScroll: boolean;
-  /** Подсказки по мере ввода. */
-  quickSuggestions: boolean;
-  /** Подсвечивать неиспользуемые импорты и переменные в JS/TS. */
-  showUnused: boolean;
   /** Форматировать документ при сохранении (ruff или black из окружения). */
   formatOnSave: boolean;
   /** Свои сниппеты (шаблоны кода); к ним добавляется набор по умолчанию. */
@@ -1318,7 +1297,7 @@ export interface HostMethods {
   'ai.confirmCommand': { params: ConfirmCommandHostParams; result: ConfirmCommandHostResult };
   'ai.confirmGit': { params: ConfirmGitHostParams; result: ConfirmGitHostResult };
   'ai.confirmBrowser': { params: ConfirmBrowserHostParams; result: ConfirmBrowserHostResult };
-  /** Пометки языка живут в Monaco, то есть в renderer. */
+  /** Пометки языка живут в renderer (в редакторе), а не на диске. */
   'ai.getDiagnostics': { params: DiagnosticsHostParams; result: DiagnosticsHostResult };
   /** Показать файл в редакторе: открытие вкладки — тоже дело renderer. */
   'ai.openFile': { params: OpenFileHostParams; result: OpenFileHostResult };

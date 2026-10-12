@@ -1,0 +1,83 @@
+import { describe, expect, it } from 'vitest';
+import { resolveKey } from '../src/renderer/editor/input/keymap';
+
+describe('движения', () => {
+  it('стрелки без модификаторов', () => {
+    expect(resolveKey({ key: 'ArrowLeft' })).toEqual({ kind: 'move', motion: 'left', extend: false });
+    expect(resolveKey({ key: 'ArrowRight', shift: true })).toEqual({ kind: 'move', motion: 'right', extend: true });
+  });
+
+  it('Ctrl+стрелка — по словам, Ctrl+Home/End — в начало и конец документа', () => {
+    expect(resolveKey({ key: 'ArrowLeft', ctrl: true })).toEqual({ kind: 'move', motion: 'wordLeft', extend: false });
+    expect(resolveKey({ key: 'ArrowRight', ctrl: true, shift: true })).toEqual({
+      kind: 'move',
+      motion: 'wordRight',
+      extend: true,
+    });
+    expect(resolveKey({ key: 'Home', ctrl: true })).toEqual({ kind: 'move', motion: 'docStart', extend: false });
+    expect(resolveKey({ key: 'End', ctrl: true })).toEqual({ kind: 'move', motion: 'docEnd', extend: false });
+  });
+
+  it('Home без Ctrl — к началу текста строки, PageUp/PageDown — постранично', () => {
+    expect(resolveKey({ key: 'Home' })).toEqual({ kind: 'move', motion: 'smartLineStart', extend: false });
+    expect(resolveKey({ key: 'PageDown' })).toEqual({ kind: 'move', motion: 'pageDown', extend: false });
+  });
+});
+
+describe('правки', () => {
+  it('Backspace и Delete, с Ctrl — по словам', () => {
+    expect(resolveKey({ key: 'Backspace' })).toEqual({ kind: 'edit', edit: 'backspace' });
+    expect(resolveKey({ key: 'Backspace', ctrl: true })).toEqual({ kind: 'edit', edit: 'deleteWordBackward' });
+    expect(resolveKey({ key: 'Delete' })).toEqual({ kind: 'edit', edit: 'delete' });
+    expect(resolveKey({ key: 'Delete', ctrl: true })).toEqual({ kind: 'edit', edit: 'deleteWordForward' });
+  });
+
+  it('Enter — перевод строки, Tab — отступ, Shift+Tab — снятие отступа', () => {
+    expect(resolveKey({ key: 'Enter' })).toEqual({ kind: 'edit', edit: 'newline' });
+    expect(resolveKey({ key: 'Tab' })).toEqual({ kind: 'edit', edit: 'indent' });
+    expect(resolveKey({ key: 'Tab', shift: true })).toEqual({ kind: 'edit', edit: 'outdent' });
+  });
+
+  it('Ctrl+Z отменяет, Ctrl+Shift+Z и Ctrl+Y повторяют', () => {
+    expect(resolveKey({ key: 'z', ctrl: true })).toEqual({ kind: 'edit', edit: 'undo' });
+    expect(resolveKey({ key: 'z', ctrl: true, shift: true })).toEqual({ kind: 'edit', edit: 'redo' });
+    expect(resolveKey({ key: 'y', ctrl: true })).toEqual({ kind: 'edit', edit: 'redo' });
+  });
+
+  it('F1 открывает палитру команд (у Monaco — его действие)', () => {
+    expect(resolveKey({ key: 'F1' })).toEqual({ kind: 'edit', edit: 'palette' });
+  });
+
+  it('Ctrl+A, C, X, V — выделить, копировать, вырезать, вставить', () => {
+    expect(resolveKey({ key: 'a', ctrl: true })).toEqual({ kind: 'edit', edit: 'selectAll' });
+    expect(resolveKey({ key: 'c', ctrl: true })).toEqual({ kind: 'edit', edit: 'copy' });
+    expect(resolveKey({ key: 'x', ctrl: true })).toEqual({ kind: 'edit', edit: 'cut' });
+    expect(resolveKey({ key: 'v', ctrl: true })).toEqual({ kind: 'edit', edit: 'paste' });
+  });
+});
+
+describe('ввод символов', () => {
+  it('обычный символ идёт на ввод', () => {
+    expect(resolveKey({ key: 'a' })).toEqual({ kind: 'insert', text: 'a' });
+    expect(resolveKey({ key: 'Я' })).toEqual({ kind: 'insert', text: 'Я' });
+    expect(resolveKey({ key: ' ' })).toEqual({ kind: 'insert', text: ' ' });
+    // Буква с Shift (заглавная) — тоже ввод.
+    expect(resolveKey({ key: 'A', shift: true })).toEqual({ kind: 'insert', text: 'A' });
+    // Составной эмодзи — один печатный символ.
+    expect(resolveKey({ key: '😀' })).toEqual({ kind: 'insert', text: '😀' });
+  });
+
+  it('без Ctrl неизвестные команды не перехватываются', () => {
+    // F5 и подобные — не наше дело, возвращаем null (пусть решает приложение).
+    expect(resolveKey({ key: 'F5' })).toBeNull();
+    expect(resolveKey({ key: 'Shift' })).toBeNull();
+  });
+
+  it('Ctrl с незнакомой буквой гасим, чтобы символ не просочился', () => {
+    expect(resolveKey({ key: 'k', ctrl: true })).toEqual({ kind: 'swallow' });
+  });
+
+  it('Alt+Enter не переводит строку (его слушает приложение)', () => {
+    expect(resolveKey({ key: 'Enter', alt: true })).toBeNull();
+  });
+});

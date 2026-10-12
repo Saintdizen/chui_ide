@@ -7,7 +7,7 @@ import {
   type ImportRef,
 } from '../../shared/imports';
 import type { DocumentStore } from './document-store';
-import type { EditorService } from './editor-service';
+import type { EditorApi } from './editor-api';
 import type { RpcClient } from './rpc';
 
 /**
@@ -36,14 +36,14 @@ export class ImportChecker {
   private readonly checked = new Map<string, string>();
   /**
    * Недостающие импорты по файлам. Нужны быстрой правке «поставить пакет»:
-   * маркер Monaco не помнит имя модуля, а по позиции его не восстановить.
+   * пометка помнит только место, а имя модуля по позиции не восстановить.
    */
   private readonly lastMissing = new Map<string, ImportRef[]>();
 
   constructor(
     private readonly rpc: RpcClient,
     private readonly documents: DocumentStore,
-    private readonly editors: EditorService,
+    private readonly editors: EditorApi,
   ) {}
 
   attach(): void {
@@ -129,7 +129,7 @@ export class ImportChecker {
 
     const names = new Set(missing);
     const refs = missingImports(imports, names);
-    // Быстрая правка берёт отсюда имя модуля: у маркера Monaco его нет.
+    // Быстрая правка берёт отсюда имя модуля: у пометки его нет.
     this.lastMissing.set(path, refs);
 
     const diagnostics: LspDiagnostic[] = refs.map((item) => ({

@@ -65,8 +65,8 @@ describe('ProjectConfigStore', () => {
     const store = new ProjectConfigStore();
     const base = await makeRoot();
     await store.updateSettings(base, { editor: { tabSize: 4 } });
-    const next = await store.updateSettings(base, { editor: { wordWrap: true } });
-    expect(next.editor).toEqual({ tabSize: 4, wordWrap: true });
+    const next = await store.updateSettings(base, { editor: { fontSize: 20 } });
+    expect(next.editor).toEqual({ tabSize: 4, fontSize: 20 });
   });
 
   it('битый JSON не роняет загрузку', async () => {

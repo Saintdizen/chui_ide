@@ -1,13 +1,13 @@
 /**
  * Один реестр языков на всё приложение.
  *
- * Из него берут данные и редактор (идентификатор для Monaco, отступы, правила
+ * Из него берут данные и редактор (идентификатор языка, отступы, правила
  * комментариев), и дерево проекта (значок файла), и статусбар (человеческая
  * подпись), и запуск (чем файл этого языка запускается). Раньше сведения о
  * языках были размазаны по трём модулям и расходились — например, `.mts`
  * подсвечивался как TypeScript, но в подписи стояло сырое `typescript`.
  *
- * Идентификаторы языков (`id`) — ровно те, что понимает Monaco: от них зависит
+ * Идентификаторы языков (`id`) — стабильные строки (не завязаны на чужой движок): от них зависит
  * и подсветка, и подсказки. Всё остальное — наши надстройки.
  */
 
@@ -238,12 +238,12 @@ export const LANGUAGES: readonly LanguageInfo[] = [
     extensions: ['scala'],
     indent: { tabSize: 2, insertSpaces: true },
   },
-  // Groovy и Makefile в сборке Monaco отсутствуют: их грамматики приложение
-  // регистрирует само (`core/language-modes.ts`), поэтому обещание подсветки здесь честное.
+  // У Groovy и Makefile грамматики свои (`editor/highlight/languages/`), поэтому
+  // обещание подсветки здесь честное.
   { id: 'groovy', label: 'Groovy', badge: 'GR', icon: 'code', extensions: ['gradle', 'groovy'], indent: FOUR_SPACES },
 ];
 
-/** Язык для файла, чьё расширение мы не знаем: Monaco подсветит как простой текст. */
+/** Язык для файла, чьё расширение мы не знаем: подсветится как простой текст. */
 export const PLAIN_LANGUAGE = 'plaintext';
 
 const BY_ID = new Map(LANGUAGES.map((language) => [language.id, language]));
@@ -277,7 +277,7 @@ export function languageInfo(languageId: string): LanguageInfo | null {
   return BY_ID.get(languageId) ?? null;
 }
 
-/** Идентификатор языка для Monaco. */
+/** Идентификатор языка для файла по пути. */
 export function languageFromPath(filePath: string): string {
   return languageInfoForPath(filePath)?.id ?? PLAIN_LANGUAGE;
 }

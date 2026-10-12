@@ -2,7 +2,7 @@ import { PushTopic, type ThemeChangedPayload, type ThemeChoice } from '../../sha
 import { Emitter } from './events';
 import type { RpcClient } from './rpc';
 import type { ThemeFile } from '../../shared/theme-file';
-import { MONACO_THEME_IDS, setThemeOverrides, themeCssVariables, type Scheme } from './theme';
+import { setThemeOverrides, themeCssVariables, type Scheme } from './theme';
 
 export type { ThemeChoice };
 
@@ -11,7 +11,7 @@ export type { ThemeChoice };
  * и CSS переключается сам — Chromium сразу отдаёт новое значение
  * `prefers-color-scheme`, никаких правок в DOM для этого не нужно.
  *
- * А то, что CSS-переменными не описать (Monaco, xterm), получает схему от main
+ * А то, что CSS-переменными не описать (терминал xterm), получает схему от main
  * push-событием: полагаться на событие `matchMedia` в renderer нельзя — оно
  * обновляется не во всех окружениях и может прийти с задержкой.
  */
@@ -43,7 +43,7 @@ export class ThemeService {
       const payload = message.payload as ThemeChangedPayload;
       this.choice = payload.theme;
       this.custom = payload.customTheme ?? null;
-      // Переопределения ставим ДО рассылки: обработчик пересобирает тему Monaco
+      // Переопределения ставим ДО рассылки: подписчики пересобирают краски
       // из текущих значений, и они должны быть уже новыми.
       setThemeOverrides(this.custom);
       this.applyCss(payload.scheme);
@@ -60,18 +60,14 @@ export class ThemeService {
     return this.scheme;
   }
 
-  get monacoThemeId(): string {
-    return MONACO_THEME_IDS[this.scheme];
-  }
-
-  /** Разослать схему подписчикам (Monaco, xterm, чат). Без аргумента берётся текущая. */
+  /** Разослать схему подписчикам (редактор, xterm, чат). Без аргумента берётся текущая. */
   apply(scheme: Scheme = this.scheme): void {
     this.fire(scheme);
   }
 
   /**
    * Схему шлём всегда, даже если она та же: вместе с ней могла смениться тема из
-   * файла, а подписчики должны пересобрать краски (Monaco, кеш подсветки чата).
+   * файла, а подписчики должны пересобрать краски (редактор, кеш подсветки чата).
    */
   private fire(scheme: Scheme): void {
     this.scheme = scheme;

@@ -1,6 +1,6 @@
 import { PushTopic, type LspDiagnosticsPayload } from '../../shared/api';
 import type { DocumentStore } from './document-store';
-import type { EditorService } from './editor-service';
+import type { EditorApi } from './editor-api';
 import type { RpcClient } from './rpc';
 
 /**
@@ -8,14 +8,14 @@ import type { RpcClient } from './rpc';
  *
  * Серверы живут в main (это процессы), а документы — здесь. Задача этого класса
  * ровно одна: держать их синхронными. Открылся или изменился документ — уезжает
- * `lsp.open`/`lsp.change`; пришла пачка пометок — ложится в Monaco маркерами
- * под своим `owner` (см. `EditorService.setExternalMarkers`).
+ * `lsp.open`/`lsp.change`; пришла пачка пометок — ложится в редактор пометками
+ * под своим `owner` (см. `setExternalMarkers` в `editor-api.ts`).
  */
 export class LspClient {
   constructor(
     private readonly rpc: RpcClient,
     private readonly documents: DocumentStore,
-    private readonly editors: EditorService,
+    private readonly editors: EditorApi,
   ) {}
 
   attach(): void {

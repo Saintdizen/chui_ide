@@ -2,7 +2,7 @@ import type { BreakpointRecord, DebugLaunchOptions, SessionState } from '../../s
 import type { DockView } from '../ui/dock';
 import type { DebugController } from './debug';
 import type { DocumentStore } from './document-store';
-import type { EditorService } from './editor-service';
+import type { EditorApi } from './editor-api';
 import type { OpenEditors } from './open-editors';
 import type { RpcClient } from './rpc';
 
@@ -29,7 +29,7 @@ export interface SessionDeps {
   rpc: RpcClient;
   documents: DocumentStore;
   openEditors: OpenEditors;
-  editors: EditorService;
+  editors: EditorApi;
   debug: DebugController;
   explorer: ExpandedTree;
   dock: DockView;

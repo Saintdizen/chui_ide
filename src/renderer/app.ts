@@ -1,4 +1,3 @@
-import * as monaco from 'monaco-editor';
 import {
   PushTopic,
   type DebugLaunchOptions,
@@ -10,6 +9,7 @@ import {
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
 import { mergeLspServers } from '../shared/lsp-presets';
+import { DEFAULT_SNIPPETS } from '../shared/snippets';
 import { createBlameController } from './core/blame';
 import { createChangeGutterController } from './core/change-gutter';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
@@ -17,22 +17,17 @@ import type { TextDocument } from './core/document';
 import { DocumentStore } from './core/document-store';
 import { EditService } from './core/edits';
 import { HostService } from './core/host';
-import { EditorService } from './core/editor-service';
+import { EditorWorkspace } from './editor/host/editor-workspace';
+import { DocumentRegistry } from './editor/host/document-registry';
+import { LspFeatures } from './editor/host/lsp-features';
 import { GitModel } from './core/git-model';
 import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
 import { languageLabel, languageIndent } from './core/languages';
 import { ImportChecker } from './core/import-check';
-import { registerImportActions } from './core/import-actions';
-import { scriptFileTargets } from './core/language-modes';
 import { LspClient } from './core/lsp';
 import { fetchCallHierarchy, type CallDirection } from './core/call-hierarchy';
-import { registerInlineAi } from './core/inline-ai';
-import { registerSnippets } from './core/snippets';
-import { registerLspProviders } from './core/lsp-providers';
 import { OpenEditors } from './core/open-editors';
-import { registerNavigation } from './core/navigation';
-import { createTsProjectFeed } from './core/ts-project';
 import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
 import { envWidgetLabel } from './core/env-widget';
@@ -228,7 +223,70 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Тема: main — источник истины, сервис знает и выбор пользователя, и фактическую схему.
   const theme = new ThemeService(rpc, settings.appearance.theme, settings.appearance.customTheme ?? null);
 
-  const editors = new EditorService(layout.editorHost, documents, settings.editor, theme.monacoThemeId);
+  // Языковой сервер: наведение, определение, ссылки, подсказки, переименование.
+  // Сервер живёт в main — здесь только мост, который уходит швами в рабочее место.
+  const lsp = new LspFeatures(rpc);
+
+  /**
+   * Редактор — своё ядро (`src/renderer/editor/`), без Monaco. Всё, что раньше навешивалось
+   * на движок (подсказки LSP, inline-AI, сниппеты, Ctrl+Click), приходит сюда опциями:
+   * у рабочего места для каждого из них есть шов.
+   */
+  const editors = new EditorWorkspace(layout.editorHost, new DocumentRegistry(documents), {
+    scheme: theme.resolved,
+    tabSize: settings.editor.tabSize,
+    fontSize: settings.editor.fontSize,
+    snippets: () => [...settings.editor.snippets, ...DEFAULT_SNIPPETS],
+    // Наведение от сервера: текст разметки в карточку.
+    hoverFromLanguage: async (path, position) => {
+      const text = await lsp.hover(path, position);
+      return text ? { text } : null;
+    },
+    // Подсказки от сервера подмешиваются к словам языка и документа.
+    completionFromLanguage: (path, position) => lsp.completion(path, position),
+    // Определение и ссылки — списком мест, как и прочие переходы.
+    symbols: {
+      definition: (path, position) => lsp.definition(path, position),
+      references: (path, position) => lsp.references(path, position),
+    },
+    // Переход к месту: открыть файл (это умеет приложение) и встать на строку.
+    revealLocation: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
+    relativePath: (path) => workspace.relative(path),
+    onNotice: (text) => showToast(text),
+    // Переименование: имя спрашиваем диалогом, правки применяет документная модель.
+    renameSymbol: (path, position) => {
+      void (async () => {
+        const newName = await promptValue({ title: 'Переименовать символ', label: 'Новое имя', value: '' });
+        if (!newName) return;
+        const fileEdits = await lsp.rename(path, position, newName);
+        if (!fileEdits) {
+          showToast('Сервер не смог переименовать этот символ', 'error');
+          return;
+        }
+        const result = await edits.applyFileEdits(fileEdits);
+        if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
+      })();
+    },
+    // Inline-подсказка «допиши за меня»: запрос к модели уходит в main через RPC.
+    inlineCompletion: {
+      enabled: () => settings.ai.inlineCompletion.enabled,
+      debounceMs: () => settings.ai.inlineCompletion.debounceMs,
+      complete: async ({ path, language, prefix, suffix }) => {
+        try {
+          const result = await rpc.request('ai.complete', {
+            path: workspace.relative(path),
+            language,
+            prefix,
+            suffix,
+          });
+          return result.text || null;
+        } catch {
+          // Модель недоступна, ключа нет, выключено — подсказки просто нет.
+          return null;
+        }
+      },
+    },
+  });
   const edits = new EditService({ documents, editors, rpc });
   // Подпись blame у строки под курсором. Запрос идёт в git за одной строкой;
   // показ по умолчанию выключен и включается командой (см. `git.toggleBlame`).
@@ -254,7 +312,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Отладчик: состояние сессии держит контроллер, события идут из main push-ом.
   const debug = new DebugController(rpc);
   // Подсказка под курсором в остановленном файле: значение выражения в кадре. Шов
-  // в редактор — потому что контроллер отладки живёт здесь, а не в Monaco.
+  // в редактор — потому что контроллер отладки живёт здесь, в приложении, а не в ядре.
   editors.setDebugHover(async (expression, at) => {
     const state = debug.get();
     if (state.phase !== 'stopped') return null;
@@ -266,35 +324,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   // Приёмник обратных вызовов из main: правки агента приходят сюда.
   const host = new HostService();
-  // Языковые серверы: держим документы синхронными и кладём их пометки в Monaco.
+  // Языковые серверы: держим документы синхронными и кладём их пометки в редактор.
   new LspClient(rpc, documents, editors).attach();
-  // Подсказки от языковых серверов: импорты, наведения и переход к определению.
-  registerLspProviders(rpc);
-  // Inline-автодополнение: модель дописывает код в месте курсора (по желанию).
-  registerInlineAi({
-    rpc,
-    enabled: () => settings.ai.inlineCompletion.enabled,
-    debounceMs: () => settings.ai.inlineCompletion.debounceMs,
-    relativePath: (path) => workspace.relative(path),
-  });
-  // Сниппеты: свои шаблоны из настроек плюс небольшой набор по умолчанию.
-  registerSnippets({ custom: () => settings.editor.snippets });
   // Импорты с неустановленными библиотеками: своя проверка, не зависящая от LSP.
   const importChecker = new ImportChecker(rpc, documents, editors);
   importChecker.attach();
-
-  // Файлы проекта — встроенному сервису TypeScript: без них он не видит соседние
-  // модули и подчёркивает импорты, а Ctrl+Click не находит цель.
-  const tsProject = createTsProjectFeed({
-    rpc,
-    documents,
-    root: () => workspace.root,
-    targets: scriptFileTargets(),
-  });
-  // Набор зависит от того, что открыто (открытые — уже модели) и что есть на диске.
-  documents.onDidOpen(() => tsProject.refresh());
-  documents.onDidClose(() => tsProject.refresh());
-  workspace.onDidChange(() => tsProject.refresh());
 
   // Настройки — модальное окно поверх всего: и шапка, и панель AI открывают одно и то же.
   const settingsModal = createSettingsModal({
@@ -456,7 +490,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     git,
     readText: async (path) => documents.get(path)?.value ?? (await rpc.request('workspace.readFile', { path })).text,
     applyEdits: async (path, list) => {
-      // Документ и Monaco меняются вместе (см. EditService): правка попадает в undo
+      // Документ и редактор меняются вместе (см. EditService): правка попадает в undo
       // и в сохранение, а не только в буфер.
       const result = await edits.applyFileEdits([{ path, edits: [...list] }]);
       const failure = result.failed[0];
@@ -1058,16 +1092,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     hideChatTab();
   };
 
-  // Переход внутрь кода: Ctrl+Click по символу и по пути. Monaco сам файлов не
-  // открывает, поэтому определения из соседних файлов (и от сервиса TypeScript,
-  // и от языкового сервера Python) доходят сюда — и открываются тем же `openPath`,
-  // что у дерева и вкладок.
-  registerNavigation(monaco.editor, {
-    open: (path) => openPath(path),
-    reveal: (path, line, column) => editors.reveal(path, line, column),
-    root: () => workspace.root,
-  });
-
   // Быстрый открыватель файлов (Ctrl+Shift+O): отдельный вход, тот же `openPath`,
   // что у дерева и вкладок, поэтому открытие ведёт себя одинаково.
   const quickOpen = createQuickOpen({ rpc, workspace, openFile: (path) => openPath(path) });
@@ -1292,13 +1316,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     importChecker.refresh();
   };
 
-  // Быстрая правка у подчёркнутого импорта: «Установить пакет» — прямо из редактора.
-  registerImportActions({
-    checker: importChecker,
-    installPython: (packages) => installPythonPackages(packages),
-    installNode: (packages) => installNodePackages(packages),
-  });
-
   /** Запомнить интерпретатор для этого проекта (пусто — вернуться к общему). */
   const setProjectInterpreter = async (command: string): Promise<void> => {
     const root = workspace.root;
@@ -1322,6 +1339,39 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         return undefined;
       }
     });
+  };
+
+  /**
+   * Действия редактора, которых нет среди наших команд: переносим их в свою палитру.
+   * Список короткий и честный — только то, что редактор действительно умеет, — поэтому
+   * путаницы из двух палитр больше нет. Набор пересобираем на каждое открытие палитры:
+   * он зависит от панели в фокусе (сравнение, отладка), а прежние пункты снимаем — иначе
+   * мёртвые действия остались бы в списке.
+   *
+   * Регистрируем в обход `define`: нужен `() => void` для снятия с реестра. Ошибки
+   * ловим здесь же — пункт палитры не должен падать молча.
+   */
+  let editorActionDisposers: Array<() => void> = [];
+  const syncEditorActions = (): void => {
+    for (const dispose of editorActionDisposers) dispose();
+    editorActionDisposers = editors.listActions().map((action) =>
+      commands.register(
+        {
+          id: `editor.${action.id}`,
+          title: action.label,
+          category: 'Редактор',
+          keywords: [action.id, action.alias].filter(Boolean),
+        },
+        async () => {
+          try {
+            editors.runAction(action.id);
+          } catch (error) {
+            console.error(`[chui] действие ${action.id} упало:`, error);
+            showToast(error instanceof Error ? error.message : String(error), 'error');
+          }
+        },
+      ),
+    );
   };
 
   define({ id: 'workspace.openFolder', title: 'Открыть папку', category: 'Файл', keybinding: 'Ctrl+O' }, async () => {
@@ -1412,7 +1462,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const created = await rpc.request('workspace.createFile', { path });
     await openPath(created.path);
     explorer.scheduleRefresh();
-    tsProject.refresh();
     // Сразу предлагаем отменить: файл могли создать по ошибке в неверной папке.
     showToast(`Создан файл ${basename(created.path)}`, 'info', {
       action: {
@@ -1460,7 +1509,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const renamed = await rpc.request('workspace.rename', { from, to });
     if (wasActive) await openPath(renamed.path);
     explorer.scheduleRefresh();
-    tsProject.refresh();
     showToast(`Переименовано: ${basename(renamed.path)}`, 'info', {
       action: {
         label: 'Отменить',
@@ -1494,7 +1542,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (openEditors.has(path)) openEditors.close(path);
     await rpc.request('workspace.trash', { path });
     explorer.scheduleRefresh();
-    tsProject.refresh();
     showToast(`В корзине: ${basename(path)}`);
   });
 
@@ -2432,6 +2479,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   define({ id: 'palette.open', title: 'Палитра команд', category: 'Вид', keybinding: 'Ctrl+Shift+P' }, () => {
+    syncEditorActions();
     palette.open();
   });
 
@@ -2663,8 +2711,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       }
       case PushTopic.WorkspaceChanged: {
         explorer.scheduleRefresh();
-        // Файлы могли появиться или исчезнуть — набор для сервиса TypeScript устарел.
-        tsProject.refresh();
         // Открытый файл мог измениться снаружи — обновляем и его содержимое.
         const payload = message.payload as WorkspaceChangedPayload;
         if (payload?.path) void reloadIfOpen(payload.path);
@@ -2803,7 +2849,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   };
 
   // Правый клик на жёлобе: координаты берём из последнего события мыши — у самого
-  // события Monaco нет координат окна, а меню ставится по месту нажатия.
+  // события контекстного меню нет координат окна, а меню ставится по месту нажатия.
   const lastPointer = { x: 0, y: 0 };
   document.addEventListener(
     'mousedown',
@@ -2881,7 +2927,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     changeGutter.refresh();
   });
   rpc.onDidChangeStreaming((streaming) => statusBar.update({ ai: streaming ? 'генерация…' : 'готов' }));
-  // Счётчик проблем: пометки приходят из нескольких источников (Monaco, LSP,
+  // Счётчик проблем: пометки приходят из нескольких источников (LSP,
   // проверка импортов), поэтому слушаем одно событие сервиса и пересчитываем всё.
   editors.onDidChangeMarkers(() => statusBar.update({ problems: editors.problemCounts() }));
 

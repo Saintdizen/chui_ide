@@ -1320,7 +1320,7 @@ async function findFiles(workspace: WorkspaceService, args: Record<string, unkno
 
 const MAX_DIAGNOSTICS = 100;
 
-/** Пометки языка собирает renderer: они живут в Monaco, а не на диске. */
+/** Пометки языка собирает renderer: они живут в редакторе, а не на диске. */
 async function diagnostics(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.diagnostics) {
     return { ok: false, summary: 'Диагностика недоступна: окно редактора не подключено' };
