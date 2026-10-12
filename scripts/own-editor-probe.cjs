@@ -209,6 +209,28 @@ const CHECKS = {
     };
   })()`,
 
+  // 3b. Выравнивание: строка в DOM стоит там же, где её считает модель. Ловит сдвиг
+  // слоёв: текст (слой со translateY) и абсолютные координаты считаются по-разному.
+  alignment: `(() => {
+    const view = window.probe.view;
+    const buffer = window.probe.buffer;
+    const scope = view.element;
+    const content = scope.querySelector('.own-editor-content');
+    const contentTop = content.getBoundingClientRect().top;
+    const rows = [...scope.querySelectorAll('.own-editor-line')];
+    const numbers = [...scope.querySelectorAll('.own-editor-gutter-row')].map((n) => Number(n.textContent));
+    const out = [];
+    for (let i = 0; i < Math.min(rows.length, 5); i += 1) {
+      const line = numbers[i];
+      if (line === undefined) break;
+      const domY = Math.round(rows[i].getBoundingClientRect().top - contentTop);
+      const modelY = Math.round(view.caretPoint(buffer.lineStart(line)).top);
+      out.push({ строка: line, domY, modelY, сдвиг: domY - modelY });
+    }
+    const firstNumber = numbers[0] ?? null;
+    return { первая_строка: firstNumber, выравнивание: out, линия_1_видна: numbers.includes(1) };
+  })()`,
+
   // 4. Каретка и выделение: каретка прячется при выделении, прямоугольники появляются.
   selection: `(() => {
     const view = window.probe.view;
@@ -1919,6 +1941,11 @@ async function main() {
   const layout = await run('layout');
   log('## Раскладка: табуляция и широкие знаки');
   log(JSON.stringify(layout, null, 2));
+  log('');
+
+  const alignment = await run('alignment');
+  log('## Выравнивание текста и модели');
+  log(JSON.stringify(alignment, null, 2));
   log('');
 
   const selection = await run('selection');

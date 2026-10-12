@@ -744,7 +744,8 @@ export class EditorView {
     if (same) return;
 
     const fragment = document.createDocumentFragment();
-    for (let line = first + 1; line <= last + 1; line += 1) {
+    // `first`/`last` — видимые строки (с единицы): идём по ним самим, а не по first+1..last+1.
+    for (let line = first; line <= last; line += 1) {
       // Скрытые строки в слое не рисуем: ряды идут подряд, без провалов.
       if (this.isHidden(line)) continue;
       const text = this.buffer.lineText(line);
@@ -818,7 +819,8 @@ export class EditorView {
   private renderGutter(first: number, last: number): void {
     if (!this.gutterLines || !this.gutter) return;
     const fragment = document.createDocumentFragment();
-    for (let line = first + 1; line <= last + 1; line += 1) {
+    // `first`/`last` — видимые строки (с единицы): идём по ним самим, а не по first+1..last+1.
+    for (let line = first; line <= last; line += 1) {
       if (this.isHidden(line)) continue;
       const row = document.createElement('div');
       row.className = `${ROOT_CLASS}-gutter-row`;
@@ -874,7 +876,8 @@ export class EditorView {
   private renderGlyphs(first: number, last: number): void {
     if (!this.glyphLines) return;
     const fragment = document.createDocumentFragment();
-    for (let line = first + 1; line <= last + 1; line += 1) {
+    // `first`/`last` — видимые строки (с единицы): идём по ним самим, а не по first+1..last+1.
+    for (let line = first; line <= last; line += 1) {
       if (this.isHidden(line)) continue;
       const row = document.createElement('div');
       row.className = `${ROOT_CLASS}-glyph-row`;
@@ -895,7 +898,8 @@ export class EditorView {
   private renderStrip(first: number, last: number): void {
     if (!this.stripLines) return;
     const fragment = document.createDocumentFragment();
-    for (let line = first + 1; line <= last + 1; line += 1) {
+    // `first`/`last` — видимые строки (с единицы): идём по ним самим, а не по first+1..last+1.
+    for (let line = first; line <= last; line += 1) {
       if (this.isHidden(line)) continue;
       const row = document.createElement('div');
       row.className = `${ROOT_CLASS}-strip-row`;
@@ -913,7 +917,8 @@ export class EditorView {
   /** Заливка всей строки (покрытие, строка отладчика). Тянется на ширину полотна. */
   private renderBackgrounds(first: number, last: number): void {
     const fragment = document.createDocumentFragment();
-    for (let line = first + 1; line <= last + 1; line += 1) {
+    // `first`/`last` — видимые строки (с единицы): идём по ним самим, а не по first+1..last+1.
+    for (let line = first; line <= last; line += 1) {
       if (this.isHidden(line)) continue;
       const background = this.decorations.backgroundFor(line);
       if (!background) continue;
@@ -929,7 +934,8 @@ export class EditorView {
   /** Волнистые подчёркивания пометок. Геометрия считается в `decorations.ts`. */
   private renderSquiggles(first: number, last: number): void {
     const fragment = document.createDocumentFragment();
-    for (let line = first + 1; line <= last + 1; line += 1) {
+    // `first`/`last` — видимые строки (с единицы): идём по ним самим, а не по first+1..last+1.
+    for (let line = first; line <= last; line += 1) {
       if (this.isHidden(line)) continue;
       const squiggles = this.decorations.squigglesFor(line);
       if (squiggles.length === 0) continue;
