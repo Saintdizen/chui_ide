@@ -79,7 +79,8 @@ export class EditorView {
   private readonly highlightLayer: HTMLElement;
   private readonly squigglyLayer: HTMLElement;
   private readonly ghostLayer: HTMLElement;
-  private readonly caret: HTMLElement;
+  /** Слой кареток: у мультикурсора их несколько, поэтому каретка — узел внутри слоя. */
+  private readonly caretLayer: HTMLElement;
   private readonly gutter: HTMLElement | null;
   private readonly gutterLines: HTMLElement | null;
   private readonly glyphMargin: HTMLElement | null;
@@ -92,7 +93,8 @@ export class EditorView {
   private buffer: TextBuffer;
   /** Метрики меняются один раз — когда догрузится шрифт (см. конструктор). */
   private metrics: GlyphMetrics;
-  private selection: Selection;
+  /** Курсоры. Обычно один; при мультикурсоре — несколько (последний — главный). */
+  private selections: Selection[] = [caret(0)];
   private scrollTop = 0;
   private disposed = false;
   /** Подсветка видимых строк: кэш токенов по строкам (см. `highlight/highlighter.ts`). */
@@ -144,7 +146,7 @@ export class EditorView {
     this.host = host;
     this.buffer = buffer;
     this.overscan = options.overscan ?? 2;
-    this.selection = caret(0);
+    this.selections = [caret(0)];
     this.scheme = options.scheme ?? 'dark';
     this.lineCount = buffer.lineCount;
     // Текст строки подсветка берёт сама — ей довольно функции: так её можно проверить
@@ -184,8 +186,8 @@ export class EditorView {
     this.ghostLayer.className = `${ROOT_CLASS}-ghost-layer`;
     this.linesLayer = document.createElement('div');
     this.linesLayer.className = `${ROOT_CLASS}-lines`;
-    this.caret = document.createElement('div');
-    this.caret.className = `${ROOT_CLASS}-caret`;
+    this.caretLayer = document.createElement('div');
+    this.caretLayer.className = `${ROOT_CLASS}-carets`;
 
     // Порядок слоёв, снизу вверх: заливка строки, совпадения, выделение, подчёркивания,
     // текст, призрачная подсказка, каретка. Текст читается поверх заливок, а волнистые
@@ -200,7 +202,7 @@ export class EditorView {
       this.squigglyLayer,
       this.linesLayer,
       this.ghostLayer,
-      this.caret,
+      this.caretLayer,
     );
     this.viewport.append(this.content);
 
@@ -266,14 +268,27 @@ export class EditorView {
     return this.root;
   }
 
-  /** Текущее выделение (два конца). Пустое — каретка. */
+  /** Текущее выделение (главное). Пустое — каретка. */
   get selectionState(): Selection {
-    return this.selection;
+    return this.primarySelection;
+  }
+
+  /** Главное выделение — последнее из поставленных. */
+  private get primarySelection(): Selection {
+    return this.selections[this.selections.length - 1]!;
   }
 
   /** Поставить выделение и перерисовать каретку с заливкой. */
   setSelection(selection: Selection): void {
-    this.selection = selection;
+    this.setSelections([selection]);
+  }
+
+  /**
+   * Поставить все курсоры (мультикурсор) и перерисовать каретки с заливкой. Последний —
+   * главный: у него мигает каретка, по нему идут IME и попапы.
+   */
+  setSelections(selections: readonly Selection[]): void {
+    this.selections = selections.length > 0 ? [...selections] : [caret(0)];
     this.updateCaretAndSelection();
     this.updateContextHighlights();
   }
@@ -304,8 +319,8 @@ export class EditorView {
    * скобок. Зовётся при каждом переезде курсора.
    */
   private updateContextHighlights(): void {
-    this.occurrences = findOccurrences(this.buffer, this.selection);
-    this.brackets = findBracketPair(this.buffer, this.selection.active);
+    this.occurrences = findOccurrences(this.buffer, this.primarySelection);
+    this.brackets = findBracketPair(this.buffer, this.primarySelection.active);
     this.renderHighlight();
   }
 
@@ -565,7 +580,7 @@ export class EditorView {
   /** Сменить документ (новая вкладка). Прокрутку и выделение сбрасываем к началу. */
   setBuffer(buffer: TextBuffer): void {
     this.buffer = buffer;
-    this.selection = caret(0);
+    this.selections = [caret(0)];
     this.scrollTop = 0;
     this.widest = 0;
     this.layoutCache = null;
@@ -992,26 +1007,38 @@ export class EditorView {
   private updateCaretAndSelection(): void {
     const lineHeight = this.metrics.lineHeight;
 
-    const activeLine = this.buffer.lineAt(this.selection.active);
-    const activeColumn = this.selection.active - this.buffer.lineStart(activeLine);
-    const activeX = xForColumn(this.offsetsFor(activeLine), activeColumn);
-    this.caret.style.transform = `translate(${activeX}px, ${this.yOfLine(activeLine)}px)`;
-    this.caret.style.height = `${lineHeight}px`;
-    this.caret.style.display = isEmpty(this.selection) ? '' : 'none';
+    const primary = this.primarySelection;
+    const carets = document.createDocumentFragment();
+    const shades = document.createDocumentFragment();
 
-    const fragment = document.createDocumentFragment();
-    if (!isEmpty(this.selection)) {
-      for (const rect of selectionRects(this.buffer, this.selection, this.metrics)) {
+    for (const selection of this.selections) {
+      const line = this.buffer.lineAt(selection.active);
+      const column = selection.active - this.buffer.lineStart(line);
+      const x = xForColumn(this.offsetsFor(line), column);
+
+      const node = document.createElement('div');
+      node.className = `${ROOT_CLASS}-caret`;
+      // У неглавной каретки не мигаем: при десятке кареток мигание рябит, а главную
+      // и так видно по миганию.
+      if (selection !== primary) node.classList.add('is-idle');
+      node.style.transform = `translate(${x}px, ${this.yOfLine(line)}px)`;
+      node.style.height = `${lineHeight}px`;
+      // При непустом выделении каретка не нужна — его конец и так виден заливкой.
+      if (!isEmpty(selection)) node.style.display = 'none';
+      carets.append(node);
+
+      for (const rect of selectionRects(this.buffer, selection, this.metrics)) {
         if (this.isHidden(rect.line)) continue;
-        const node = document.createElement('div');
-        node.className = `${ROOT_CLASS}-selection-rect`;
-        node.style.transform = `translate(${rect.left}px, ${this.yOfLine(rect.line)}px)`;
-        node.style.width = `${rect.width}px`;
-        node.style.height = `${rect.height}px`;
-        fragment.append(node);
+        const shade = document.createElement('div');
+        shade.className = `${ROOT_CLASS}-selection-rect`;
+        shade.style.transform = `translate(${rect.left}px, ${this.yOfLine(rect.line)}px)`;
+        shade.style.width = `${rect.width}px`;
+        shade.style.height = `${rect.height}px`;
+        shades.append(shade);
       }
     }
-    this.selectionLayer.replaceChildren(fragment);
+    this.caretLayer.replaceChildren(carets);
+    this.selectionLayer.replaceChildren(shades);
   }
 
   /** Раскладка строки по x с кэшем на одну строку: обычно спрашивают про одну и ту же. */

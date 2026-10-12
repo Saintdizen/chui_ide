@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { TextBuffer } from '../src/renderer/editor/core/text-buffer';
 import { monospaceMetrics } from '../src/renderer/editor/view/glyph-metrics';
-import { caret, isEmpty, selectionEnd, selectionRects, selectionStart } from '../src/renderer/editor/view/selection';
+import {
+  caret,
+  columnSelections,
+  isEmpty,
+  selectionEnd,
+  selectionRects,
+  selectionStart,
+} from '../src/renderer/editor/view/selection';
 
 /** Клетка 10 px, строка 20 px, табуляция 4 столбца. */
 const metrics = monospaceMetrics(10, 20, 4);
@@ -63,5 +70,35 @@ describe('прямоугольники выделения', () => {
   it('строки за концом выделения прямоугольников не получают', () => {
     const rects = selectionRects(buffer, { anchor: 0, active: 3 }, metrics);
     expect(rects.map((rect) => rect.line)).toEqual([1]);
+  });
+});
+
+describe('блочное выделение по столбцу', () => {
+  it('берёт по выделению на каждой строке между концами', () => {
+    // От столбца 1 первой строки до столбца 3 третьей: строки 1..3.
+    const selections = columnSelections(buffer, 1, 12);
+    expect(selections).toEqual([
+      { anchor: 1, active: 2 },
+      { anchor: 5, active: 6 },
+      { anchor: 11, active: 12 },
+    ]);
+  });
+
+  it('короткая строка прижимается к своему концу', () => {
+    // Якорь на второй строке в столбце 5, курсор на третьей в столбце 2.
+    // Столбец 5 не влезает в третью строку «ij» (длина 2) — там берём её конец.
+    const selections = columnSelections(buffer, 9, 12);
+    expect(selections[1]).toEqual({ anchor: 12, active: 12 });
+  });
+
+  it('обратный порядок концов даёт те же строки', () => {
+    const forward = columnSelections(buffer, 1, 12);
+    const reversed = columnSelections(buffer, 12, 1);
+    expect(reversed).toHaveLength(forward.length);
+    expect(reversed.map((sel) => selectionStart(sel))).toEqual(forward.map((sel) => selectionStart(sel)));
+  });
+
+  it('выделение в одной строке — обычное', () => {
+    expect(columnSelections(buffer, 0, 3)).toEqual([{ anchor: 0, active: 3 }]);
   });
 });

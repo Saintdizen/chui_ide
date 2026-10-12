@@ -56,6 +56,12 @@ export interface EditorCommandContext {
   unfold(): void;
   foldAll(): void;
   unfoldAll(): void;
+  /** Мультикурсор: следующее вхождение слова, все вхождения, каретка по столбцу. */
+  selectNextOccurrence(): void;
+  selectAllOccurrences(): void;
+  addCursorAbove(): void;
+  addCursorBelow(): void;
+  collapseSelections(): void;
 }
 
 /** Что команда требует от контекста сверх обязательного. */
@@ -192,6 +198,46 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: CATEGORY,
     requires: 'formatCode',
     run: (context) => context.formatCode?.(),
+  },
+  {
+    id: 'editor.selectNextOccurrence',
+    label: 'Добавить следующее вхождение',
+    alias: 'selectNextOccurrence',
+    keybinding: 'Ctrl+D',
+    category: 'Мультикурсор',
+    run: (context) => context.selectNextOccurrence(),
+  },
+  {
+    id: 'editor.selectAllOccurrences',
+    label: 'Выделить все вхождения',
+    alias: 'selectAllOccurrences',
+    keybinding: 'Ctrl+Shift+L',
+    category: 'Мультикурсор',
+    run: (context) => context.selectAllOccurrences(),
+  },
+  {
+    id: 'editor.addCursorAbove',
+    label: 'Добавить каретку выше',
+    alias: 'addCursorAbove',
+    keybinding: 'Ctrl+Alt+↑',
+    category: 'Мультикурсор',
+    run: (context) => context.addCursorAbove(),
+  },
+  {
+    id: 'editor.addCursorBelow',
+    label: 'Добавить каретку ниже',
+    alias: 'addCursorBelow',
+    keybinding: 'Ctrl+Alt+↓',
+    category: 'Мультикурсор',
+    run: (context) => context.addCursorBelow(),
+  },
+  {
+    id: 'editor.collapseSelections',
+    label: 'Оставить одну каретку',
+    alias: 'collapseSelections',
+    keybinding: 'Escape',
+    category: 'Мультикурсор',
+    run: (context) => context.collapseSelections(),
   },
   {
     id: 'editor.fold',

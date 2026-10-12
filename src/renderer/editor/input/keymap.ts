@@ -77,6 +77,14 @@ export type EditCommand =
   | 'palette'
   /** Ctrl+. — быстрые исправления под курсором (список показывает приложение). */
   | 'codeActions'
+  /** Ctrl+D — добавить следующее вхождение слова; Ctrl+Shift+L — сразу все. */
+  | 'selectNextOccurrence'
+  | 'selectAllOccurrences'
+  /** Ctrl+Alt+↑/↓ — каретка на строку выше или ниже (столбец кареток). */
+  | 'addCursorAbove'
+  | 'addCursorBelow'
+  /** Escape — оставить только главную каретку после мультикурсора. */
+  | 'collapseSelections'
   /** Ctrl+Shift+[ и Ctrl+Shift+] — свернуть и развернуть блок у курсора. */
   | 'fold'
   | 'unfold';
@@ -109,9 +117,17 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   // F1 — палитра команд: у Monaco её открывало его же действие, своему редактору
   // нужна своя обработка. Сочетания клавиш у неё нет — это клавиша панели.
   if (key === 'F1') return { kind: 'edit', edit: 'palette' };
+  // Escape после мультикурсора оставляет одну каретку — как в других редакторах.
+  if (key === 'Escape') return { kind: 'edit', edit: 'collapseSelections' };
 
   if (key === 'ArrowLeft') return motion(control ? 'wordLeft' : 'left', extend);
   if (key === 'ArrowRight') return motion(control ? 'wordRight' : 'right', extend);
+  // Ctrl+Alt+↑/↓ добавляет каретку на соседнюю строку — проверяем раньше переноса строк
+  // (Alt+↑), иначе сочеталось бы с переносом.
+  if (control && chord.alt) {
+    if (key === 'ArrowUp') return { kind: 'edit', edit: 'addCursorAbove' };
+    if (key === 'ArrowDown') return { kind: 'edit', edit: 'addCursorBelow' };
+  }
   // Alt со стрелками переносит и копирует строки — проверяем раньше обычного хода
   // курсора, иначе Alt+↑ ничем не отличался бы от ↑.
   if (chord.alt) {
@@ -135,6 +151,9 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     if (lower === 'f') return { kind: 'edit', edit: 'find' };
     if (lower === 'h') return { kind: 'edit', edit: 'replace' };
     if (lower === 'g') return { kind: 'edit', edit: 'gotoLine' };
+    // Ctrl+D — следующее вхождение слова, Ctrl+Shift+L — все вхождения сразу.
+    if (lower === 'd') return { kind: 'edit', edit: 'selectNextOccurrence' };
+    if (lower === 'l' && extend) return { kind: 'edit', edit: 'selectAllOccurrences' };
     // Ctrl+/ — комментарий строки: буквенного имени у клавиши нет, проверяем сам знак.
     if (key === '/') return { kind: 'edit', edit: 'toggleComment' };
     // Ctrl+. — быстрые исправления: как в других редакторах, на той же клавише.

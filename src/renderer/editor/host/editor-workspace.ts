@@ -458,6 +458,12 @@ export class EditorWorkspace {
       unfold: () => this.pane.unfoldAtCursor(),
       foldAll: () => this.pane.foldAll(),
       unfoldAll: () => this.pane.unfoldAll(),
+      // Мультикурсор: команды палитры делают то же, что клавиши в панели.
+      selectNextOccurrence: () => void this.pane.selectNextOccurrence(),
+      selectAllOccurrences: () => void this.pane.selectAllOccurrences(),
+      addCursorAbove: () => this.pane.addCursorAbove(),
+      addCursorBelow: () => this.pane.addCursorBelow(),
+      collapseSelections: () => void this.pane.collapseSelections(),
     };
     const formatCode = this.formatCode;
     if (formatCode) context.formatCode = () => path && formatCode(path);

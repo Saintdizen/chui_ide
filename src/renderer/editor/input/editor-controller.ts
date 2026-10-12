@@ -1,7 +1,7 @@
 /**
  * Контроллер редактора: связывает текст, курсор и историю правок.
  *
- * Он держит состояние сессии — буфер, выделение, `goalColumn` (желаемый столбец для
+ * Он держит состояние сессии — буфер, курсоры, `goalColumn` (желаемый столбец для
  * вертикальных движений) и историю — и выполняет команды: «вправо», «backspace»,
  * «отменить». Модуль не знает про DOM и не рисует: о том, что что-то изменилось,
  * он сообщает подписчику (`onChange`). Кто подписан — дело вызывающего: в приложении
@@ -25,7 +25,8 @@ import {
   type TextChange,
 } from '../core/history';
 import type { TextBuffer } from '../core/text-buffer';
-import { isEmpty, type Selection } from '../view/selection';
+import { findOccurrences } from '../view/context-highlight';
+import { isEmpty, selectionEnd, selectionStart, type Selection } from '../view/selection';
 import {
   closerFor,
   copyLinesDown,
@@ -75,14 +76,26 @@ export interface EditorControllerOptions {
   historyLimit?: number;
 }
 
+/**
+ * Курсор и его желаемый столбец. Желаемый столбец — состояние между нажатиями: он
+ * держится у каждого курсора свой, иначе при вертикальном движении мультикурсор
+ * разъехался бы по столбцам.
+ */
+interface Cursor {
+  sel: Selection;
+  goal: number;
+}
+
 export class EditorController {
   private buffer: TextBuffer;
   private readonly history: EditHistory;
   private readonly listeners = new Set<(change: EditorChange) => void>();
   private tabSize: number;
-  private selectionState: Selection = { anchor: 0, active: 0 };
-  /** Желаемый столбец: держится между вертикальными движениями, сбрасывается вбок. */
-  private goalColumn = 0;
+  /**
+   * Курсоры панели. Обычно он один, но их бывает и несколько (мультикурсор): последний
+   * в списке — «главный», по нему идут IME, попапы и статус-бар.
+   */
+  private cursors: Cursor[] = [{ sel: { anchor: 0, active: 0 }, goal: 0 }];
 
   constructor(buffer: TextBuffer, options: EditorControllerOptions = {}) {
     this.buffer = buffer;
@@ -95,11 +108,24 @@ export class EditorController {
   }
 
   get selection(): Selection {
-    return this.selectionState;
+    return this.primary.sel;
+  }
+
+  /**
+   * Все курсоры (последний — главный). Представление рисует каретку у каждого.
+   * Массив пересобирается на чтение: его меняют только внутри контроллера.
+   */
+  get selections(): readonly Selection[] {
+    return this.cursors.map((cursor) => cursor.sel);
   }
 
   get caret(): number {
-    return this.selectionState.active;
+    return this.primary.sel.active;
+  }
+
+  /** Главный курсор — последний в списке. */
+  private get primary(): Cursor {
+    return this.cursors[this.cursors.length - 1]!;
   }
 
   get canUndo(): boolean {
@@ -134,9 +160,90 @@ export class EditorController {
    * вертикальное движение начнётся с этого места.
    */
   setSelection(selection: Selection, notify = true): void {
-    this.selectionState = selection;
-    this.goalColumn = columnAt(this.buffer, selection.active);
-    if (notify) this.emit('selection', selection.active);
+    this.setSelections([selection], notify);
+  }
+
+  /**
+   * Поставить НЕСКОЛЬКО курсоров (мультикурсор). Курсоры нормализуются: перекрывающиеся
+   * сливаются, а последний переданный становится главным.
+   */
+  setSelections(selections: readonly Selection[], notify = true): void {
+    this.restoreCursors(selections);
+    if (notify) this.emit('selection', this.caret);
+  }
+
+  /** Добавить курсор (Alt+клик, Ctrl+Alt+↑/↓, Ctrl+D). Новый становится главным. */
+  addCursor(selection: Selection): void {
+    this.setSelections([...this.selections, selection]);
+  }
+
+  /**
+   * Ctrl+D: следующее вхождение текущего слова. Первое нажатие выделяет слово
+   * под кареткой, дальше вхождения добавляются по кругу новыми каретками.
+   * `false` — вхождений нет, добавлять нечего.
+   */
+  selectNextOccurrence(): boolean {
+    const occurrences = findOccurrences(this.buffer, this.selection);
+    if (occurrences.length === 0) return false;
+    const selected = this.selections.filter((sel) => !isEmpty(sel));
+    if (selected.length === 0) {
+      const at = occurrences.find((range) => this.caret >= range.start && this.caret <= range.end) ?? occurrences[0]!;
+      this.setSelection({ anchor: at.start, active: at.end });
+      return true;
+    }
+    const taken = new Set(selected.map((sel) => `${selectionStart(sel)}:${selectionEnd(sel)}`));
+    const from = Math.max(...selected.map((sel) => selectionEnd(sel)));
+    const next =
+      occurrences.find((range) => range.start >= from && !taken.has(`${range.start}:${range.end}`)) ??
+      occurrences.find((range) => !taken.has(`${range.start}:${range.end}`));
+    if (!next) return false;
+    this.addCursor({ anchor: next.start, active: next.end });
+    return true;
+  }
+
+  /**
+   * Ctrl+Shift+L: выделить ВСЕ вхождения текущего слова сразу. Печатаешь один раз —
+   * текст меняется во всех местах.
+   */
+  selectAllOccurrences(): boolean {
+    const occurrences = findOccurrences(this.buffer, this.selection);
+    if (occurrences.length === 0) return false;
+    this.setSelections(occurrences.map((range) => ({ anchor: range.start, active: range.end })));
+    return true;
+  }
+
+  /** Оставить только главный курсор: Escape после мультикурсора. */
+  collapseToPrimary(): void {
+    this.setSelections([this.selection]);
+  }
+
+  /** Ctrl+Alt+↑: добавить каретку на строку выше (по столбцу каждой имеющейся). */
+  addCursorAbove(): void {
+    this.addCursorVertical(-1);
+  }
+
+  /** Ctrl+Alt+↓: добавить каретку на строку ниже. */
+  addCursorBelow(): void {
+    this.addCursorVertical(1);
+  }
+
+  /**
+   * Добавить по каретке на соседнюю строку у каждого курсора. Столбец берётся у самого
+   * курсора, поэтому вертикальная «колонка» кареток выходит ровной — по ней и набирают
+   * таблицы и правят однотипные строки.
+   */
+  private addCursorVertical(delta: number): void {
+    const added: Selection[] = [];
+    for (const cursor of this.cursors) {
+      const line = this.buffer.lineAt(cursor.sel.active);
+      const target = line + delta;
+      if (target < 1 || target > this.buffer.lineCount) continue;
+      const goal = columnAt(this.buffer, cursor.sel.active);
+      const position = moveVertical(this.buffer, cursor.sel.active, delta, goal);
+      added.push({ anchor: position, active: position });
+    }
+    if (added.length === 0) return;
+    this.setSelections([...this.selections, ...added]);
   }
 
   /** Выделить весь документ. */
@@ -151,10 +258,9 @@ export class EditorController {
    */
   setBuffer(buffer: TextBuffer, selection: Selection = { anchor: 0, active: 0 }): void {
     this.buffer = buffer;
-    this.selectionState = selection;
-    this.goalColumn = columnAt(this.buffer, selection.active);
+    this.restoreCursors([selection]);
     this.history.clear();
-    this.emit('selection', selection.active);
+    this.emit('selection', this.caret);
   }
 
   // — движения —
@@ -163,70 +269,66 @@ export class EditorController {
    * Общее для движений вбок: курсор переезжает, желаемый столбец обновляется — от
    * него отсчитывается вертикаль. `extend` — движение с Shift (тянет выделение).
    */
-  private moveHorizontal(target: number, extend: boolean): void {
-    this.applySelection(target, extend);
-    this.goalColumn = columnAt(this.buffer, target);
-    this.emit('selection', target);
-  }
-
-  private moveVerticalTo(target: number, extend: boolean): void {
-    this.applySelection(target, extend);
-    this.emit('selection', target);
-  }
-
-  /** Новое выделение: при протяжке якорь остаётся, иначе курсор — точка. */
-  private applySelection(target: number, extend: boolean): void {
-    this.selectionState = extend
-      ? { anchor: this.selectionState.anchor, active: target }
-      : { anchor: target, active: target };
+  /**
+   * Применить движение к КАЖДОМУ курсору. `horizontal` — движение вбок: оно
+   * пересчитывает желаемый столбец, вертикальное его бережёт (ради этого он и хранится).
+   */
+  private moveAll(compute: (cursor: Cursor) => number, extend: boolean, horizontal: boolean): void {
+    const next = this.cursors.map((cursor) => {
+      const position = compute(cursor);
+      const sel: Selection = extend
+        ? { anchor: cursor.sel.anchor, active: position }
+        : { anchor: position, active: position };
+      const goal = horizontal ? columnAt(this.buffer, position) : cursor.goal;
+      return { sel, goal };
+    });
+    this.commitCursors(next);
   }
 
   moveLeft(extend = false): void {
-    this.moveHorizontal(moveLeft(this.buffer, this.selectionState.active), extend);
+    this.moveAll((cursor) => moveLeft(this.buffer, cursor.sel.active), extend, true);
   }
 
   moveRight(extend = false): void {
-    this.moveHorizontal(moveRight(this.buffer, this.selectionState.active), extend);
+    this.moveAll((cursor) => moveRight(this.buffer, cursor.sel.active), extend, true);
   }
 
   moveWordLeft(extend = false): void {
-    this.moveHorizontal(moveWordLeft(this.buffer, this.selectionState.active), extend);
+    this.moveAll((cursor) => moveWordLeft(this.buffer, cursor.sel.active), extend, true);
   }
 
   moveWordRight(extend = false): void {
-    this.moveHorizontal(moveWordRight(this.buffer, this.selectionState.active), extend);
+    this.moveAll((cursor) => moveWordRight(this.buffer, cursor.sel.active), extend, true);
   }
 
   moveLineStart(extend = false): void {
-    this.moveHorizontal(moveLineStart(this.buffer, this.selectionState.active), extend);
+    this.moveAll((cursor) => moveLineStart(this.buffer, cursor.sel.active), extend, true);
   }
 
   moveSmartLineStart(extend = false): void {
-    this.moveHorizontal(moveSmartLineStart(this.buffer, this.selectionState.active), extend);
+    this.moveAll((cursor) => moveSmartLineStart(this.buffer, cursor.sel.active), extend, true);
   }
 
   moveLineEnd(extend = false): void {
-    this.moveHorizontal(moveLineEnd(this.buffer, this.selectionState.active), extend);
+    this.moveAll((cursor) => moveLineEnd(this.buffer, cursor.sel.active), extend, true);
   }
 
   moveDocStart(extend = false): void {
-    this.moveHorizontal(moveDocStart(), extend);
+    this.moveAll(() => moveDocStart(), extend, true);
   }
 
   moveDocEnd(extend = false): void {
-    this.moveHorizontal(moveDocEnd(this.buffer), extend);
+    this.moveAll(() => moveDocEnd(this.buffer), extend, true);
   }
 
   /** Вверх или вниз на строку (со знаком). Желаемый столбец не трогаем — ради него всё и есть. */
   moveVertical(delta: number, extend = false): void {
-    const target = moveVertical(this.buffer, this.selectionState.active, delta, this.goalColumn);
-    this.moveVerticalTo(target, extend);
+    this.moveAll((cursor) => moveVertical(this.buffer, cursor.sel.active, delta, cursor.goal), extend, false);
   }
 
   /** Страница вверх или вниз: шаг — почти во весь экран (число строк задаёт представление). */
   movePage(direction: number, lines: number, extend = false): void {
-    const target = movePage(this.buffer, this.selectionState.active, direction * lines, this.goalColumn);
-    this.moveVerticalTo(target, extend);
+    this.moveAll((cursor) => movePage(this.buffer, cursor.sel.active, direction * lines, cursor.goal), extend, false);
   }
 
   // — правки —
@@ -237,23 +339,113 @@ export class EditorController {
    * но и куда человек смотрел.
    */
   private commit(result: EditResult, kind: HistoryChangeKind): void {
-    const entry: HistoryEntry = {
-      changes: [result.change],
-      before: [this.selectionState],
-      after: [result.selection],
-      kind,
-      time: Date.now(),
-    };
-    // Набор и удаление подряд схлопываются в один шаг отмены (см. `core/history.ts`).
-    this.history.push(entry, { merge: kind === 'typing' || kind === 'delete' });
-    this.selectionState = result.selection;
-    this.goalColumn = columnAt(this.buffer, result.selection.active);
-    this.emit('text', result.change.start);
+    this.pushEntry([result.change], [this.selection], [result.selection], kind);
   }
 
-  /** Ввести текст: символ за символом, вставка из буфера обмена, ответ IME. */
+  /**
+   * Правка на КАЖДОЙ каретке — одним шагом истории. Правки применяем от конца текста:
+   * правка в начале сдвинула бы смещения соседних. В том же порядке (по убыванию) они
+   * ложатся в историю, поэтому и отмена, разворачивая список, идёт от начала — так ни
+   * одна правка не съезжает.
+   */
+  private editAll(compute: (selection: Selection) => EditResult | null, kind: HistoryChangeKind): void {
+    const order = this.cursors
+      .map((_, index) => index)
+      .sort((a, b) => selectionStart(this.cursors[b]!.sel) - selectionStart(this.cursors[a]!.sel));
+    const applied = new Map<number, EditResult>();
+    for (const index of order) {
+      const result = compute(this.cursors[index]!.sel);
+      if (result) applied.set(index, result);
+    }
+    if (applied.size === 0) return;
+
+    const changes: TextChange[] = order
+      .filter((index) => applied.has(index))
+      .map((index) => applied.get(index)!.change);
+    const before = this.cursors.map((cursor) => cursor.sel);
+
+    // Идём с конца, поэтому правки ЛЕВЕЕ каретки применяются ПОСЛЕ неё и сдвигают её
+    // место. Новые каретки правим на эту разницу — иначе после набора на нескольких
+    // каретках текст верен, а курсоры стоят не там.
+    const deltas = order
+      .filter((index) => applied.has(index))
+      .map((index) => ({ start: selectionStart(before[index]!), delta: deltaOf(applied.get(index)!.change) }))
+      .sort((a, b) => a.start - b.start);
+    const shiftFor = (position: number): number => {
+      let shift = 0;
+      for (const item of deltas) {
+        if (item.start >= position) break;
+        shift += item.delta;
+      }
+      return shift;
+    };
+
+    const after = this.cursors.map((cursor, index) => {
+      const target = applied.get(index)?.selection ?? cursor.sel;
+      const shift = shiftFor(selectionStart(cursor.sel));
+      return { anchor: target.anchor + shift, active: target.active + shift };
+    });
+    this.pushEntry(changes, before, after, kind);
+  }
+
+  /** Записать шаг истории и поставить курсоры, которые из него вышли. */
+  private pushEntry(
+    changes: readonly TextChange[],
+    before: readonly Selection[],
+    after: readonly Selection[],
+    kind: HistoryChangeKind,
+  ): void {
+    const entry: HistoryEntry = { changes, before: [...before], after: [...after], kind, time: Date.now() };
+    // Набор и удаление подряд схлопываются в один шаг отмены (см. `core/history.ts`).
+    this.history.push(entry, { merge: kind === 'typing' || kind === 'delete' });
+    this.cursors = this.normalizeCursors(after.map((sel) => ({ sel, goal: columnAt(this.buffer, sel.active) })));
+    this.emit('text', earliestStart(changes));
+  }
+
+  /** Поставить курсоры из готового списка (отмена, смена документа, программный выбор). */
+  private restoreCursors(selections: readonly Selection[]): void {
+    const list = selections.length > 0 ? selections : [{ anchor: 0, active: 0 }];
+    this.cursors = this.normalizeCursors(list.map((sel) => ({ sel, goal: columnAt(this.buffer, sel.active) })));
+  }
+
+  /** Применить движение: курсоры переставляются и не дают слипнуться в один. */
+  private commitCursors(next: readonly Cursor[]): void {
+    this.cursors = this.normalizeCursors(next);
+    this.emit('selection', this.caret);
+  }
+
+  /**
+   * Привести курсоры в порядок: по возрастанию места, перекрывающиеся — в один. Главный
+   * остаётся главным (переносится в конец списка). Так после сближения курсоров в панели
+   * не остаётся двух кареток в одном месте.
+   */
+  private normalizeCursors(cursors: readonly Cursor[]): Cursor[] {
+    const items = cursors.map((cursor, index) => ({ ...cursor, primary: index === cursors.length - 1 }));
+    items.sort((a, b) => selectionStart(a.sel) - selectionStart(b.sel) || selectionEnd(a.sel) - selectionEnd(b.sel));
+    const merged: typeof items = [];
+    for (const item of items) {
+      const last = merged[merged.length - 1];
+      if (last && selectionStart(item.sel) <= selectionEnd(last.sel)) {
+        last.sel = {
+          anchor: Math.min(selectionStart(last.sel), selectionStart(item.sel)),
+          active: Math.max(selectionEnd(last.sel), selectionEnd(item.sel)),
+        };
+        last.primary = last.primary || item.primary;
+      } else {
+        merged.push({ ...item });
+      }
+    }
+    const primaryAt = merged.findIndex((item) => item.primary);
+    if (primaryAt >= 0 && primaryAt !== merged.length - 1) {
+      const [primary] = merged.splice(primaryAt, 1);
+      merged.push(primary!);
+    }
+    return merged.map(({ sel, goal }) => ({ sel, goal }));
+  }
+
+  /** Ввести текст на каждой каретке (набор, вставка из буфера, ответ IME). */
   type(text: string): void {
-    this.run(insertText(this.buffer, this.selectionState, text), 'typing');
+    this.editAll((selection) => insertText(this.buffer, selection, text), 'typing');
   }
 
   /**
@@ -262,13 +454,13 @@ export class EditorController {
    * было бы навязчивым (вставили кусок кода — получили лишние скобки).
    */
   typeWithPairs(text: string): void {
-    if (text.length === 1) {
+    if (this.cursors.length === 1 && text.length === 1) {
       const closer = closerFor(text);
       if (closer !== null) {
-        this.run(insertPair(this.buffer, this.selectionState, text, closer), 'typing');
+        this.run(insertPair(this.buffer, this.selection, text, closer), 'typing');
         return;
       }
-      const skipped = skipClosing(this.buffer, this.selectionState, text);
+      const skipped = skipClosing(this.buffer, this.selection, text);
       if (skipped) {
         this.setSelection(skipped);
         return;
@@ -279,18 +471,18 @@ export class EditorController {
 
   /** Ctrl+/ — переключить строчный комментарий у строк выделения. */
   toggleComment(token: string): void {
-    const result = toggleLineComment(this.buffer, this.selectionState, token);
+    const result = toggleLineComment(this.buffer, this.selection, token);
     if (result) this.applyEdits(result.changes, result.selection);
   }
 
   /** Alt+↑/↓ — перенести строку (или строки выделения) выше или ниже. */
   moveLines(direction: -1 | 1): void {
-    this.run(moveLines(this.buffer, this.selectionState, direction), 'other');
+    this.run(moveLines(this.buffer, this.selection, direction), 'other');
   }
 
   /** Shift+Alt+↓ — скопировать строку (или строки выделения) ниже. */
   copyLinesDown(): void {
-    this.run(copyLinesDown(this.buffer, this.selectionState), 'other');
+    this.run(copyLinesDown(this.buffer, this.selection), 'other');
   }
 
   /**
@@ -304,7 +496,7 @@ export class EditorController {
    */
   applyEdit(edit: { start: number; removed: string; inserted: string }, selection?: Selection): void {
     if (edit.removed.length === 0 && edit.inserted.length === 0) return;
-    const before = this.selectionState;
+    const before = this.selection;
     this.buffer.replace(edit.start, edit.removed.length, edit.inserted);
     const end = edit.start + edit.inserted.length;
     const after: Selection = selection ?? { anchor: end, active: end };
@@ -316,8 +508,7 @@ export class EditorController {
       time: Date.now(),
     };
     this.history.push(entry);
-    this.selectionState = after;
-    this.goalColumn = columnAt(this.buffer, after.active);
+    this.restoreCursors([after]);
     this.emit('text', edit.start);
   }
 
@@ -337,7 +528,7 @@ export class EditorController {
     const usable = changes.filter((change) => change.removed !== change.inserted);
     if (usable.length === 0) return;
 
-    const before = this.selectionState;
+    const before = this.selection;
     for (const change of usable) this.buffer.replace(change.start, change.removed.length, change.inserted);
 
     // Курсор — в конец верхней правки: после неё текст виден целиком, и это то место,
@@ -355,8 +546,7 @@ export class EditorController {
       time: Date.now(),
     };
     this.history.push(entry);
-    this.selectionState = after;
-    this.goalColumn = columnAt(this.buffer, after.active);
+    this.restoreCursors([after]);
     this.emit(
       'text',
       usable.reduce((min, change) => Math.min(min, change.start), Number.POSITIVE_INFINITY),
@@ -369,37 +559,49 @@ export class EditorController {
   }
 
   newline(): void {
-    this.run(insertNewline(this.buffer, this.selectionState), 'other');
+    this.editAll((selection) => insertNewline(this.buffer, selection), 'other');
   }
 
   backspace(): void {
-    // Сперва пробуем снять пару скобок целиком: Backspace внутри `()` должен убрать оба
-    // знака, а не оставить висящую открывающую скобку.
-    const paired = deletePairBackward(this.buffer, this.selectionState);
-    this.run(paired ?? deleteBackward(this.buffer, this.selectionState), 'delete');
+    // Сперва снимаем пару скобок целиком: Backspace внутри `()` должен убрать оба
+    // знака, а не оставить висящую открывающую.
+    this.editAll(
+      (selection) => deletePairBackward(this.buffer, selection) ?? deleteBackward(this.buffer, selection),
+      'delete',
+    );
   }
 
   deleteForward(): void {
-    this.run(deleteForward(this.buffer, this.selectionState), 'delete');
+    this.editAll((selection) => deleteForward(this.buffer, selection), 'delete');
   }
 
   deleteWordBackward(): void {
-    this.run(deleteWordBackward(this.buffer, this.selectionState), 'delete');
+    this.editAll((selection) => deleteWordBackward(this.buffer, selection), 'delete');
   }
 
   deleteWordForward(): void {
-    this.run(deleteWordForward(this.buffer, this.selectionState), 'delete');
+    this.editAll((selection) => deleteWordForward(this.buffer, selection), 'delete');
   }
 
-  /** Tab: вставить отступ. По выделению (когда оно есть) сдвигаем строку целиком. */
+  /** Tab: вставить отступ на каждой каретке. */
   indent(): void {
     const text = ' '.repeat(this.tabSize);
-    this.run(insertText(this.buffer, this.selectionState, text), 'other');
+    this.editAll((selection) => insertText(this.buffer, selection, text), 'other');
   }
 
-  /** Shift+Tab: снять отступ у текущей строки — один таб или до `tabSize` пробелов. */
+  /**
+   * Shift+Tab: снять отступ у каждой строки — один таб или до `tabSize` пробелов.
+   * Строка обрабатывается один раз, даже если на ней несколько кареток: иначе отступ
+   * снялся бы дважды.
+   */
   outdent(): void {
-    this.run(outdentLine(this.buffer, this.selectionState.active, this.tabSize), 'other');
+    const seen = new Set<number>();
+    this.editAll((selection) => {
+      const line = this.buffer.lineAt(selection.active);
+      if (seen.has(line)) return null;
+      seen.add(line);
+      return outdentLine(this.buffer, selection.active, this.tabSize);
+    }, 'other');
   }
 
   /** Сдвинуть текст из буфера обмена: замена выделенного. Отдельно от `type` — иной шаг истории. */
@@ -411,21 +613,23 @@ export class EditorController {
    * Удалить выделенное и вернуть его текст — для вырезания. Если выделения нет,
    * возвращает пустую строку и ничего не меняет.
    */
+  /**
+   * Удалить выделенное на каждой каретке и вернуть текст. Куски соединяем переводом
+   * строки — так же копируются несколько выделений. Пусто — ничего не выделено.
+   */
   cutSelection(): string {
-    if (isEmpty(this.selectionState)) return '';
-    const { anchor, active } = this.selectionState;
-    const start = Math.min(anchor, active);
-    const end = Math.max(anchor, active);
-    const text = this.buffer.getText(start, end);
-    this.run(deleteBackward(this.buffer, this.selectionState), 'delete');
+    const text = this.selectedText();
+    if (text === '') return '';
+    this.editAll((selection) => (isEmpty(selection) ? null : deleteBackward(this.buffer, selection)), 'delete');
     return text;
   }
 
-  /** Текст выделенного участка — для копирования. Пустая строка, если выделения нет. */
+  /** Текст выделенных участков — для копирования. Пустая строка, если выделения нет. */
   selectedText(): string {
-    if (isEmpty(this.selectionState)) return '';
-    const { anchor, active } = this.selectionState;
-    return this.buffer.getText(Math.min(anchor, active), Math.max(anchor, active));
+    return this.cursors
+      .filter((cursor) => !isEmpty(cursor.sel))
+      .map((cursor) => this.buffer.getText(selectionStart(cursor.sel), selectionEnd(cursor.sel)))
+      .join('\n');
   }
 
   private run(result: EditResult | null, kind: HistoryChangeKind): void {
@@ -440,8 +644,7 @@ export class EditorController {
     if (!entry) return;
     const changes = inverseChanges(entry);
     this.replay(changes);
-    this.selectionState = entry.before[0] ?? this.selectionState;
-    this.goalColumn = columnAt(this.buffer, this.selectionState.active);
+    this.restoreCursors(entry.before);
     this.emit('text', earliestStart(changes));
   }
 
@@ -450,8 +653,7 @@ export class EditorController {
     if (!entry) return;
     const changes = forwardChanges(entry);
     this.replay(changes);
-    this.selectionState = entry.after[0] ?? this.selectionState;
-    this.goalColumn = columnAt(this.buffer, this.selectionState.active);
+    this.restoreCursors(entry.after);
     this.emit('text', earliestStart(changes));
   }
 
@@ -461,6 +663,11 @@ export class EditorController {
       this.buffer.replace(change.start, change.removed.length, change.inserted);
     }
   }
+}
+
+/** На сколько правка меняет длину текста: плюс — вставка, минус — удаление. */
+function deltaOf(change: TextChange): number {
+  return change.inserted.length - change.removed.length;
 }
 
 /** Самое раннее начало среди правок: с этой строки и надо переразобрать подсветку. */

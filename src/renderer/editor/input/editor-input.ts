@@ -31,7 +31,7 @@ import { resolveKey, type EditCommand, type Motion } from './keymap';
 import type { EditorChange, EditorController } from './editor-controller';
 
 import type { EditorView } from '../view/editor-view';
-import type { Selection } from '../view/selection';
+import { columnSelections, type Selection } from '../view/selection';
 
 /** Команды, которые выполняются по событию `beforeinput`, а не по клавише. */
 const CLIPBOARD_COMMANDS: ReadonlySet<EditCommand> = new Set(['copy', 'cut', 'paste']);
@@ -70,6 +70,8 @@ export class EditorInputBinding {
   private readonly interceptors: readonly KeyInterceptor[];
   private readonly language: (() => string | null) | undefined;
   private dragging = false;
+  /** Начало блочного выделения (Alt+протяжка): столбец берётся от этого места. */
+  private boxAnchor: number | null = null;
   /** Идёт ли состав IME: пока он идёт, ввод не перехватываем — его завершит `compositionend`. */
   private composing = false;
   private readonly unsubscribe: () => void;
@@ -130,7 +132,7 @@ export class EditorInputBinding {
 
   /** Перерисовать представление после изменения в контроллере и подвинуть поле ввода. */
   private sync(change: EditorChange): void {
-    this.view.setSelection(this.controller.selection);
+    this.view.setSelections(this.controller.selections);
     // При правке текста сообщаем представлению смещение — от него оно считает строку,
     // с которой переразобрать подсветку (см. `view/editor-view.ts`).
     if (change.kind === 'text') this.view.refresh(change.from);
@@ -256,6 +258,15 @@ export class EditorInputBinding {
     event.preventDefault();
     this.focus();
     const offset = this.view.offsetAt(event.clientX, event.clientY);
+    // Alt+клик добавляет каретку, не трогая уже стоящие, — так набирают мультикурсор
+    // вручную. Протяжка после такого клика не начинается.
+    if (event.altKey) {
+      // Alt+клик добавляет каретку; Alt+протяжка — блочное выделение по столбцу.
+      this.controller.addCursor({ anchor: offset, active: offset });
+      this.boxAnchor = offset;
+      this.dragging = true;
+      return;
+    }
     if (event.shiftKey) {
       // Shift+клик тянет выделение от прежнего места, а не ставит каретку заново.
       this.controller.setSelection({ anchor: this.controller.selection.anchor, active: offset });
@@ -269,11 +280,17 @@ export class EditorInputBinding {
   private readonly onMouseMove = (event: MouseEvent): void => {
     if (!this.dragging) return;
     const offset = this.view.offsetAt(event.clientX, event.clientY);
+    // Блочное выделение: по выделению на каждой строке между концами.
+    if (this.boxAnchor !== null) {
+      this.controller.setSelections(columnSelections(this.controller.bufferRef, this.boxAnchor, offset));
+      return;
+    }
     this.controller.setSelection({ anchor: this.controller.selection.anchor, active: offset });
   };
 
   private readonly onMouseUp = (): void => {
     this.dragging = false;
+    this.boxAnchor = null;
   };
 
   /** Двойной щелчок — слово под курсором, тройной — строка целиком. */
@@ -282,6 +299,7 @@ export class EditorInputBinding {
     const range = event.detail >= 3 ? this.lineRange(offset) : this.wordRange(offset);
     this.controller.setSelection(range);
     this.dragging = false;
+    this.boxAnchor = null;
   };
 
   private wordRange(offset: number): Selection {
@@ -418,6 +436,22 @@ export class EditorInputBinding {
       // Ctrl+. — быстрые исправления: список действий языка показывает вызывающий.
       case 'codeActions':
         this.onCommand?.('codeActions');
+        break;
+      // Мультикурсор: вхождения слова, каретки по столбцу и сброс к главной.
+      case 'selectNextOccurrence':
+        this.controller.selectNextOccurrence();
+        break;
+      case 'selectAllOccurrences':
+        this.controller.selectAllOccurrences();
+        break;
+      case 'addCursorAbove':
+        this.controller.addCursorAbove();
+        break;
+      case 'addCursorBelow':
+        this.controller.addCursorBelow();
+        break;
+      case 'collapseSelections':
+        this.controller.collapseToPrimary();
         break;
       // Свернуть и развернуть блок у курсора — это состояние вида, вызывающий не нужен.
       case 'fold':

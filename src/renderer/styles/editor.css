@@ -255,6 +255,14 @@
 }
 
 /* Каретка: тонкая полоса, мигает. Высоту и место задаёт представление. */
+/* Слой кареток: их может быть несколько (мультикурсор), поэтому каретка — узел внутри,
+   а не отдельный слой полотна. */
+.own-editor-carets {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 .own-editor-caret {
   position: absolute;
   top: 0;
@@ -263,6 +271,12 @@
   background: var(--accent_fill);
   will-change: transform;
   animation: own-editor-caret-blink 1s step-end infinite;
+}
+
+/* Неглавные каретки не мигают: при десятке кареток мигание рябит, а главную видно
+   по одному мигающему курсору. */
+.own-editor-caret.is-idle {
+  animation: none;
 }
 
 @keyframes own-editor-caret-blink {

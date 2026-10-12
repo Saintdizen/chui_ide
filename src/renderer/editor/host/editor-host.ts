@@ -999,6 +999,34 @@ export class EditorHost {
     this.view.foldAll();
   }
 
+  // — мультикурсор —
+
+  /** Следующее вхождение слова под кареткой (Ctrl+D). `false` — вхождений нет. */
+  selectNextOccurrence(): boolean {
+    return this.controller.selectNextOccurrence();
+  }
+
+  /** Выделить все вхождения слова под кареткой (Ctrl+Shift+L). */
+  selectAllOccurrences(): boolean {
+    return this.controller.selectAllOccurrences();
+  }
+
+  /** Добавить каретку на строку выше или ниже по столбцу. */
+  addCursorAbove(): void {
+    this.controller.addCursorAbove();
+  }
+
+  addCursorBelow(): void {
+    this.controller.addCursorBelow();
+  }
+
+  /** Оставить только главную каретку (Escape). `true` — кареток было несколько. */
+  collapseSelections(): boolean {
+    const many = this.controller.selections.length > 1;
+    this.controller.collapseToPrimary();
+    return many;
+  }
+
   unfoldAll(): void {
     this.view.unfoldAll();
   }

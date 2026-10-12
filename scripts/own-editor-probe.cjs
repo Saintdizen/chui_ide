@@ -317,6 +317,123 @@ const CHECKS = {
  * контроллера. Так проверяется связка DOM-события с контроллером, которую юнит-тесты
  * обойти не могут.
  */
+async function multicursorCheck(win) {
+  const send = (event) => win.webContents.sendInputEvent(event);
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const keys = async (keyCode, modifiers) => {
+    send({ type: 'keyDown', keyCode, modifiers });
+    send({ type: 'keyUp', keyCode, modifiers });
+    await wait(90);
+  };
+
+  win.focus();
+  // Две каретки — ставим прямо контроллеру, а печатаем живой клавишей: важно, что
+  // ввод доходит до обеих и попадает в документ.
+  await script(`(() => {
+    const { view, buffer, controller, input } = window.probe;
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    viewport.scrollTop = 0; viewport.scrollLeft = 0;
+    for (const popup of document.querySelectorAll('.own-editor-suggest')) popup.hidden = true;
+    input.focus();
+    controller.setSelections([
+      { anchor: 1, active: 1 },
+      { anchor: buffer.lineStart(3) + 1, active: buffer.lineStart(3) + 1 },
+    ]);
+    return true;
+  })()`);
+
+  const placed = await script(`(() => ({
+    кареток: window.probe.view.element.querySelectorAll('.own-editor-caret').length,
+    заливок: window.probe.view.element.querySelectorAll('.own-editor-selection-rect').length,
+    строки_до: [window.probe.buffer.lineText(1), window.probe.buffer.lineText(3)],
+  }))()`);
+
+  send({ type: 'char', keyCode: 'Z' });
+  await wait(90);
+  const typed = await script(`(() => ({
+    строки_после: [window.probe.buffer.lineText(1), window.probe.buffer.lineText(3)],
+    каретки: window.probe.controller.selections.map((sel) => sel.active),
+  }))()`);
+
+  // Одно Ctrl+Z снимает ввод в обоих местах: шаг истории один.
+  await keys('Z', ['control']);
+  const undone = await script(`(() => ({
+    строки_отмены: [window.probe.buffer.lineText(1), window.probe.buffer.lineText(3)],
+    каретка: window.probe.controller.selections.length,
+  }))()`);
+
+  // Ctrl+Alt+↓ — каретка строкой ниже по тому же столбцу.
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.setSelection({ anchor: buffer.lineStart(3) + 2, active: buffer.lineStart(3) + 2 });
+    return true;
+  })()`);
+  await keys('Down', ['control', 'alt']);
+  const added = await script(`(() => ({
+    каретки: window.probe.controller.selections.map((sel) => sel.active),
+    кареток_в_виде: window.probe.view.element.querySelectorAll('.own-editor-caret').length,
+  }))()`);
+
+  // Escape оставляет одну каретку.
+  await keys('Escape');
+  const collapsed = await script('window.probe.controller.selections.length');
+
+  // Ctrl+D: слово под кареткой и следующее его вхождение (в файле пробы `const` повторяется).
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.setSelection({ anchor: buffer.lineStart(3) + 1, active: buffer.lineStart(3) + 1 });
+    return true;
+  })()`);
+  await keys('D', ['control']);
+  const occurrenceOne = await script(`(() => {
+    const { controller, buffer } = window.probe;
+    return {
+      пары: controller.selections.map((sel) => [sel.anchor, sel.active]),
+      текст: buffer.getText(controller.selections[0].anchor, controller.selections[0].active),
+    };
+  })()`);
+  await keys('D', ['control']);
+  const occurrenceTwo = await script('window.probe.controller.selections.map((sel) => [sel.anchor, sel.active])');
+
+  // Alt+протяжка — блочное выделение по столбцу: по выделению на каждой строке.
+  const box = await script(`(() => {
+    const { view, buffer, controller, input } = window.probe;
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    viewport.scrollTop = 0; viewport.scrollLeft = 0;
+    input.focus();
+    controller.setSelection({ anchor: 0, active: 0 });
+    const rect = viewport.getBoundingClientRect();
+    const a = view.caretPoint(buffer.lineStart(3));
+    const b = view.caretPoint(buffer.lineStart(6));
+    return {
+      старт: { x: Math.round(rect.left + a.left + 2), y: Math.round(rect.top + a.top + 8) },
+      конец: { x: Math.round(rect.left + b.left + 22), y: Math.round(rect.top + b.top + 8) },
+    };
+  })()`);
+  send({ type: 'mouseDown', x: box.старт.x, y: box.старт.y, button: 'left', clickCount: 1, modifiers: ['alt'] });
+  send({ type: 'mouseMove', x: box.конец.x, y: box.конец.y, button: 'left', modifiers: ['alt'] });
+  await wait(60);
+  send({ type: 'mouseMove', x: box.конец.x, y: box.конец.y, button: 'left', modifiers: ['alt'] });
+  send({ type: 'mouseUp', x: box.конец.x, y: box.конец.y, button: 'left', clickCount: 1, modifiers: ['alt'] });
+  await wait(60);
+  const boxResult = await script(`(() => ({
+    выделений: window.probe.controller.selections.length,
+    пары: window.probe.controller.selections.map((sel) => [sel.anchor, sel.active]),
+    заливок: window.probe.view.element.querySelectorAll('.own-editor-selection-rect').length,
+  }))()`);
+
+  return {
+    две_каретки: placed,
+    печать: typed,
+    отмена: undone,
+    каретка_ниже: added,
+    escape: collapsed,
+    вхождение_один: occurrenceOne,
+    вхождение_два: occurrenceTwo,
+    блочное: boxResult,
+  };
+}
+
 async function typingCheck(win) {
   const send = (event) => win.webContents.sendInputEvent(event);
   const script = (expression) => win.webContents.executeJavaScript(expression);
@@ -1922,6 +2039,11 @@ async function main() {
 
   // 7. Ввод настоящими клавишами и мышью: то, чего юнит-тесты не видят — связку
   // DOM-события с контроллером. Клавиши идут через Chromium, как от человека.
+  const multicursor = await multicursorCheck(win);
+  log('## Мультикурсор');
+  log(JSON.stringify(multicursor, null, 2));
+  log('');
+
   const typing = await typingCheck(win);
   log('## Ввод: клавиши и мышь');
   log(JSON.stringify(typing, null, 2));

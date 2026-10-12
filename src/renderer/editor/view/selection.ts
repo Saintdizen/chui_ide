@@ -58,6 +58,32 @@ export function isEmpty(selection: Selection): boolean {
 }
 
 /**
+ * Блочное (колоночное) выделение: по одному выделению на каждую строку между концами —
+ * от столбца якоря до столбца курсора. Так набирают, потянув мышью с Alt: правится
+ * одна вертикальная «дорожка» через несколько строк. Столбцы прижимаются к концу
+ * короткой строки — выделения там просто нет.
+ */
+export function columnSelections(buffer: TextBuffer, anchorOffset: number, headOffset: number): Selection[] {
+  const anchorLine = buffer.lineAt(anchorOffset);
+  const headLine = buffer.lineAt(headOffset);
+  const anchorColumn = anchorOffset - buffer.lineStart(anchorLine);
+  const headColumn = headOffset - buffer.lineStart(headLine);
+  const first = Math.min(anchorLine, headLine);
+  const last = Math.max(anchorLine, headLine);
+
+  const selections: Selection[] = [];
+  for (let line = first; line <= last; line += 1) {
+    const start = buffer.lineStart(line);
+    const length = buffer.lineText(line).length;
+    selections.push({
+      anchor: start + Math.min(anchorColumn, length),
+      active: start + Math.min(headColumn, length),
+    });
+  }
+  return selections;
+}
+
+/**
  * Прямоугольники выделения по строкам. Прокрутка тут не учтена: координаты — от
  * начала документа, сдвиг на экран делает представление. Так функцию можно проверить
  * без окна и переиспользовать, когда появится миникарта или обзор файла.

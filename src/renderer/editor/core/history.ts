@@ -148,18 +148,45 @@ export class EditHistory {
   private shouldMerge(last: HistoryEntry, entry: HistoryEntry, now: number): boolean {
     if (entry.kind === 'other' || last.kind !== entry.kind) return false;
     if (now - last.time > MERGE_WINDOW_MS) return false;
-    const previous = last.changes[last.changes.length - 1];
-    const next = entry.changes[0];
-    if (!previous || !next || entry.changes.length !== 1) return false;
-    return touches(previous, next);
+    // Сколько правок в новой группе (одна при обычной каретке, по правке на каретку
+    // при мультикурсоре) — столько же берём из конца прежней и сверяем по очереди.
+    // Каждая новая должна примыкать к своей прежней: тогда это продолжение одного
+    // действия (набор, удаление подряд), где бы оно ни шло.
+    const count = entry.changes.length;
+    if (count === 0 || last.changes.length < count) return false;
+    const tail = last.changes.slice(last.changes.length - count);
+    // Правки в группе идут по убыванию места, поэтому у каждой каретки есть сдвиг от
+    // правок левее её — при мультикурсоре он как раз и объясняет, почему второй набор
+    // начинается там, где начинается.
+    return entry.changes.every((change, index) => touches(tail[index]!, change, shiftBefore(tail, index)));
   }
 }
 
-/** Правки примыкают: вторая начинается там, где кончилась первая (набор или удаление назад). */
-function touches(previous: TextChange, next: TextChange): boolean {
-  const previousEnd = previous.start + previous.inserted.length;
+/**
+ * Сдвиг правки `index` от правок, стоящих ЛЕВЕЕ её в той же группе. При мультикурсоре
+ * они применяются позже и двигают её место — без этой поправки набор на нескольких
+ * каретках не считался бы одним действием.
+ */
+function shiftBefore(group: readonly TextChange[], index: number): number {
+  const start = group[index]!.start;
+  let shift = 0;
+  for (let i = index + 1; i < group.length; i += 1) {
+    const change = group[i]!;
+    if (change.start >= start) continue;
+    shift += change.inserted.length - change.removed.length;
+  }
+  return shift;
+}
+
+/**
+ * Правки примыкают: вторая начинается там, где кончилась первая (набор или удаление
+ * назад). `shift` — поправка на правки левее (см. `shiftBefore`).
+ */
+function touches(previous: TextChange, next: TextChange, shift = 0): boolean {
+  const previousStart = previous.start + shift;
+  const previousEnd = previousStart + previous.inserted.length;
   if (next.start === previousEnd && next.removed.length === 0) return true;
   // Удаление назад: Backspace сдвигает начало влево, а конец совпадает с прежним началом.
   const nextEnd = next.start + next.removed.length;
-  return next.inserted.length === 0 && nextEnd === previous.start;
+  return next.inserted.length === 0 && nextEnd === previousStart;
 }
