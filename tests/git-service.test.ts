@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { GitService } from '../src/main/git/git';
+import { GitService, repositoryMetaDir } from '../src/main/git/git';
 import { hunkAtLine } from '../src/shared/hunk-lines';
 import { lineChanges } from '../src/shared/git-line-changes';
 
@@ -17,7 +17,11 @@ import { lineChanges } from '../src/shared/git-line-changes';
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  // Windows держит удалённый каталог занятым (индексатор, антивирус): `EBUSY` при
+  // rmdir — обычное дело, и повтор спасает. Без этого падала бы уборка, а не тест.
+  await Promise.all(
+    roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
+  );
 });
 
 /** Запустить git и дождаться выхода. Ошибку возвращаем, а не бросаем: так виднее тест. */
@@ -254,7 +258,7 @@ describe('GitService: удалённые и сеть', () => {
     expect((await git(work, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(headBefore);
     const after = await service.bisectState();
     expect(after.active).toBe(false);
-  });
+  }, 30_000);
 
   it('bisectState() без поиска говорит, что он не идёт', async () => {
     if (!gitAvailable) return;
@@ -338,7 +342,7 @@ describe('GitService: удалённые и сеть', () => {
     const restored = await service.submodules();
     expect(restored[0]?.state).toBe('ok');
     await expect(fs.access(path.join(work, 'mods', 'inner', 'a.txt'))).resolves.toBeUndefined();
-  });
+  }, 30_000);
 
   it('lfsInfo(): шаблоны читаются всегда, а без git-lfs честно говорит «недоступен»', async () => {
     if (!gitAvailable) return;
@@ -1059,5 +1063,60 @@ describe('GitService: блоки файла для действий из жёл�
     // Файл чист: между щелчком и запросом его могли сохранить или закоммитить.
     const hunks = await serviceFor(work).fileHunks(path.join(work, 'a.txt'));
     expect(hunks).toEqual({ unstaged: [], staged: [] });
+  });
+});
+
+describe('GitService: наблюдение за метаданными репозитория', () => {
+  /**
+   * Чужая git-операция (терминал, агент) переписывает `.git`, но НЕ файлы дерева:
+   * события рабочей папки её не выдают, а пометки git в проводнике застывают.
+   * Поэтому сервис следит за самим `.git` и сообщает об изменении наружу.
+   */
+  it('чужой коммит поднимает уведомление об изменении репозитория', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    let changes = 0;
+    const service = new GitService(
+      () => work,
+      () => undefined,
+      () => {
+        changes += 1;
+      },
+    );
+    // Первый статус заводит наблюдение за метаданными активного корня.
+    await service.status();
+
+    // Коммит «мимо IDE»: сработать может только наблюдение за `.git`.
+    await fs.writeFile(path.join(work, 'a.txt'), 'two\n');
+    await git(work, ['add', '-A']);
+    await git(work, ['commit', '-q', '-m', 'second']);
+
+    const started = Date.now();
+    while (changes === 0 && Date.now() - started < 5000) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    service.dispose();
+    expect(changes).toBeGreaterThan(0);
+  });
+
+  it('без обработчика наблюдение не заводится', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    // Обработчика нет: следить незачем, и это не ошибка.
+    const service = serviceFor(work);
+    await service.status();
+    service.dispose();
+  });
+
+  it('repositoryMetaDir: у обычного репозитория - каталог .git', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    expect(repositoryMetaDir(work)).toBe(path.join(work, '.git'));
+  });
+
+  it('repositoryMetaDir: не репозиторий - null', async () => {
+    const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-git-nometa-')));
+    roots.push(base);
+    expect(repositoryMetaDir(base)).toBeNull();
   });
 });

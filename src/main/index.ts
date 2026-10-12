@@ -182,6 +182,9 @@ if (!app.requestSingleInstanceLock()) {
     const git = new GitService(
       () => workspace.rootPath(),
       (topic, payload) => pushToRenderers(topic, payload),
+      // Чужой коммит (терминал, агент, внешний инструмент) переписывает `.git`, а не
+      // файлы дерева: о таком изменении сервис сообщает сюда - и статус пересчитывается.
+      () => refreshGitSoon?.(),
     );
     // Отложенный пересчёт статуса: поток сохранений и правок схлопывается в один
     // `git status`. Задержка больше, чем у дерева (120 мс): git заметно дороже.
@@ -303,6 +306,7 @@ if (!app.requestSingleInstanceLock()) {
       terminals.dispose();
       lsp.dispose();
       debug.dispose();
+      git.dispose();
       // Браузер — наш процесс: без остановки он остался бы висеть после выхода.
       browser.dispose();
       // Серверы MCP — наши процессы: без остановки они остались бы висеть после выхода.

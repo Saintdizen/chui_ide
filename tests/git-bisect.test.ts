@@ -36,6 +36,13 @@ describe('parseBisectFirstBad', () => {
   it('если итога нет — null', () => {
     expect(parseBisectFirstBad('Bisecting: 3 revisions left')).toBeNull();
   });
+
+  it('строку журнала «# first bad commit: [hash]» тоже понимает', () => {
+    // Журнал надёжнее сообщения: хеш в нём полный, и он не зависит от того, в какой
+    // поток git отправил человекочитаемый итог.
+    const text = '# first bad commit: [4f2a1b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a] bad';
+    expect(parseBisectFirstBad(text)).toBe('4f2a1b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a');
+  });
 });
 
 describe('parseBisectState', () => {

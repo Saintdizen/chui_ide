@@ -44,6 +44,11 @@ export function parseBisectProgress(text: string): { remaining: number | null; s
 
 /** «abc1234 is the first bad commit» — поиск завершился и назвал виновника. */
 export function parseBisectFirstBad(text: string): string | null {
+  // Сперва журнал bisect: в нём хеш полный и всегда в скобках. Сообщение
+  // «X is the first bad commit» git может отправить в другой поток или сократить
+  // хеш — тогда в разбор оно не попадёт (и виновник потеряется).
+  const logged = /#\s*first bad commit:\s*\[([0-9a-f]{7,40})\]/i.exec(text);
+  if (logged) return logged[1]!;
   const match = /([0-9a-f]{7,40})\s+is the first bad commit/i.exec(text);
   return match ? match[1]! : null;
 }

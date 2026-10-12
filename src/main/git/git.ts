@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync, statSync, watch, type FSWatcher } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { shell } from 'electron';
@@ -64,6 +64,11 @@ const NETWORK_TIMEOUT_MS = 3 * 60_000;
 const MAX_BUFFER = 8 * 1024 * 1024;
 /** Размер файла, выше которого diff не строим: сравнение такого в редакторе бессмысленно. */
 const MAX_DIFF_BYTES = 2 * 1024 * 1024;
+/**
+ * Пересчёт статуса после чужой git-операции схлопываем: запись в `.git` идёт
+ * пачкой (индекс, ссылка, журнал) - одного пересчёта на пачку хватает.
+ */
+const REPOSITORY_WATCH_DEBOUNCE_MS = 300;
 
 /**
  * Редактор списка шагов для `git rebase -i`: кладёт наш готовый список на место
@@ -116,10 +121,78 @@ interface GitResult {
  * публикует push-событие, когда состояние репозитория изменилось.
  */
 export class GitService {
+  /** Наблюдение за метаданными репозитория: показывает чужие коммиты в дереве. */
+  private watcher: FSWatcher | null = null;
+  /** Корень, за метаданными которого следим: чтобы не пересоздавать на каждый статус. */
+  private watchedRoot: string | null = null;
+  private watchTimer: NodeJS.Timeout | null = null;
+
   constructor(
     private readonly root: () => string | null,
     private readonly publish: (topic: string, payload: unknown) => void,
+    /**
+     * «Метаданные репозитория изменились»: чужая операция (коммит из терминала,
+     * агента, внешнего инструмента) переписала `.git`, но НЕ файлы дерева. Такую
+     * правку в проводнике не видно, а пометки git остались бы старыми. Обработчик
+     * пересчитывает статус (см. `main/index.ts`).
+     *
+     * Без обработчика слежение не заводим: уведомлять некого.
+     */
+    private readonly onRepositoryChange: (() => void) | null = null,
   ) {}
+
+  /**
+   * Следить за метаданными репозитория активного корня.
+   *
+   * Зачем отдельно от общего наблюдения за рабочей папкой: коммит из терминала или
+   * чужого инструмента меняет `.git/HEAD` и `.git/index`, но не файлы дерева - правки
+   * в проводнике не появятся, а пометки git застынут. Общий наблюдатель за корнем
+   * такие события ловит не всегда (буфер inotify переполняется на пачках правок), а
+   * тут файлов мало и события редкие.
+   */
+  private syncWatcher(repoRoot: string | null): void {
+    if (!this.onRepositoryChange || repoRoot === this.watchedRoot) return;
+    this.closeWatcher();
+    this.watchedRoot = repoRoot;
+    if (!repoRoot) return;
+    const gitDir = repositoryMetaDir(repoRoot);
+    if (!gitDir) {
+      this.watchedRoot = null;
+      return;
+    }
+    try {
+      const watcher = watch(gitDir, { recursive: true }, () => this.scheduleRepositoryChange());
+      // Сбой наблюдения - не беда: пометки обновятся по следующему событию папки.
+      watcher.on('error', () => this.closeWatcher());
+      this.watcher = watcher;
+    } catch {
+      // не на всех платформах есть рекурсивное наблюдение - живём без него
+      this.watchedRoot = null;
+    }
+  }
+
+  private scheduleRepositoryChange(): void {
+    if (this.watchTimer) clearTimeout(this.watchTimer);
+    this.watchTimer = setTimeout(() => {
+      this.watchTimer = null;
+      this.onRepositoryChange?.();
+    }, REPOSITORY_WATCH_DEBOUNCE_MS);
+  }
+
+  private closeWatcher(): void {
+    this.watcher?.close();
+    this.watcher = null;
+    this.watchedRoot = null;
+    if (this.watchTimer) {
+      clearTimeout(this.watchTimer);
+      this.watchTimer = null;
+    }
+  }
+
+  /** Остановить наблюдение за метаданными: вызывается при выходе приложения. */
+  dispose(): void {
+    this.closeWatcher();
+  }
 
   /**
    * Статус рабочей папки; если она не в репозитории — `repository: null`.
@@ -128,6 +201,9 @@ export class GitService {
    */
   async status(rootPath?: string): Promise<GitStatus> {
     const repoRoot = await this.repositoryRoot(rootPath);
+    // Наблюдение ставим по активному корню (его зовут без пути): чужой коммит в
+    // другой папке области статус активной не меняет.
+    if (rootPath === undefined) this.syncWatcher(repoRoot);
     if (!repoRoot) return { repository: null, files: [] };
 
     const result = await this.exec(['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'], repoRoot);
@@ -439,15 +515,17 @@ export class GitService {
     const args = ['bisect', 'start'];
     if (options.bad) args.push(this.commitArg(options.bad));
     if (options.good) args.push(this.commitArg(options.good));
+    // Берём ОБА потока: git может сказать во stderr (предупреждение), а итог —
+    // в stdout. Выбор «stderr || stdout» терял бы сообщение с виновником.
     const result = await this.exec(args, repoRoot, { allowFailure: true });
-    return this.readBisectState(repoRoot, result.stderr || result.stdout);
+    return this.readBisectState(repoRoot, `${result.stdout}\n${result.stderr}`);
   }
 
   /** Пометить текущий проверяемый коммит хорошим, плохим или пропустить его. */
   async bisectMark(mark: 'good' | 'bad' | 'skip'): Promise<GitBisectState> {
     const repoRoot = await this.requireRoot();
     const result = await this.exec(['bisect', mark], repoRoot, { allowFailure: true });
-    return this.readBisectState(repoRoot, result.stderr || result.stdout);
+    return this.readBisectState(repoRoot, `${result.stdout}\n${result.stderr}`);
   }
 
   /** Закончить поиск: ветка возвращается туда, где была до него. */
@@ -1461,7 +1539,9 @@ export class GitService {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return [];
     const result = await this.exec(['worktree', 'list', '--porcelain'], repoRoot, { allowFailure: true });
-    return result.ok ? parseWorktrees(result.stdout) : [];
+    // git отдаёт пути со слэшами ВСЕГДА, даже на Windows. Приводим к разделителям
+    // платформы: иначе путь не совпадёт с тем, что дают fs и остальное приложение.
+    return result.ok ? parseWorktrees(result.stdout).map((item) => ({ ...item, path: path.normalize(item.path) })) : [];
   }
 
   /**
@@ -1928,5 +2008,26 @@ export class GitService {
     else change = 'modified';
 
     return { path: path.join(repoRoot, relative), relative, change, staged, unstaged };
+  }
+}
+
+/**
+ * Каталог метаданных репозитория: за ним следим, чтобы увидеть чужую git-операцию.
+ *
+ * У обычного репозитория это `<root>/.git`, но у рабочего дерева (worktree,
+ * подмодуль) `.git` — ФАЙЛ со ссылкой `gitdir: <путь>`: тогда идём по ссылке.
+ * Не репозиторий или битая ссылка — `null`: следить не за чем.
+ */
+export function repositoryMetaDir(repoRoot: string): string | null {
+  const dotGit = path.join(repoRoot, '.git');
+  try {
+    if (statSync(dotGit).isDirectory()) return dotGit;
+    const match = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'));
+    const target = match?.[1]?.trim();
+    if (!target) return null;
+    const dir = path.resolve(repoRoot, target);
+    return statSync(dir).isDirectory() ? dir : null;
+  } catch {
+    return null;
   }
 }

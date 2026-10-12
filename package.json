@@ -57,6 +57,7 @@
     "probe:hunkmenu": "npm run build && electron scripts/hunk-menu-probe.cjs",
     "probe:editor": "electron scripts/own-editor-probe.cjs",
     "probe:lspbundled": "npm run build:main && electron scripts/lsp-bundled-probe.cjs",
+    "probe:gitwatch": "npm run build:main && electron scripts/git-watch-probe.cjs",
     "probe:typing": "npm run build && electron scripts/type-probe.cjs",
     "probe:f1": "npm run build && electron scripts/f1-probe.cjs",
     "probe:lsp": "npm run build && electron scripts/lsp-pickup-probe.cjs",
