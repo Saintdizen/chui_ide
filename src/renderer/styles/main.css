@@ -2369,20 +2369,16 @@ textarea {
   }
 }
 
-/* Подпись инструмента в работе мягко пульсирует, пока не придёт итог. */
-.tool-state.is-running,
-.tool-group-state.is-running {
-  animation: activity-pulse 1.2s ease-in-out infinite;
+/* Значок «в работе» — круг с разрывом, который вращается: движение тут показывает,
+   что процесс жив. Ему и только ему анимация здесь и нужна. */
+.tool-state.is-running .icon,
+.tool-group-state.is-running .icon {
+  animation: tool-spin 0.9s linear infinite;
 }
 
-@keyframes activity-pulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-
-  50% {
-    opacity: 1;
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -2978,7 +2974,9 @@ textarea {
   font-size: var(--font_small_size);
 }
 
-/* Состояние — подпись, а не плашка: плашка только у ошибки, чтобы её было видно. */
+/* Состояние — ЗНАЧОК, а не подпись: галочка в круге, крест в круге или круг «идёт».
+   Форма читается быстрее слова, а цвет дублирует её (зелёный — готово, красный —
+   ошибка). Слово живёт в подсказке значка (см. `paintToolState`). */
 .tool-state {
   flex: 0 0 auto;
   color: var(--text_color_tertiary);
@@ -2991,10 +2989,12 @@ textarea {
 }
 
 .tool-state.is-fail {
-  padding: 1px 6px;
-  border-radius: var(--radius_pill);
-  background: color-mix(in srgb, var(--text_color_error) 16%, transparent);
   color: var(--text_color_error);
+}
+
+.tool-state .icon,
+.tool-group-state .icon {
+  display: block;
 }
 
 .tool-chevron {
@@ -4855,13 +4855,13 @@ body > .overlay {
     scroll-behavior: auto !important;
   }
 
-  /* Пульс «идёт работа» — индикатор состояния, а не украшение: под reduce гасим
-     его целиком. Состояние читается текстом и цветом, а застывшая на конечном
-     кадре анимация сделала бы «в работе» бледнее «готово». */
+  /* Индикаторы «идёт работа» — состояние, а не украшение: под reduce гасим их
+     целиком. Значок «в работе» при этом остаётся виден — это круг с разрывом,
+     застывший на первом кадре, он не бледнеет и не путается с «готово». */
   .chat-tab.is-busy .tab-label::after,
   .msg-activity-dots i,
-  .tool-state.is-running,
-  .tool-group-state.is-running {
+  .tool-state.is-running .icon,
+  .tool-group-state.is-running .icon {
     animation: none !important;
   }
 

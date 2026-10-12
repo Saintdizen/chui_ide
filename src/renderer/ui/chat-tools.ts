@@ -170,16 +170,47 @@ function toolDetailLanguage(call: ChatToolStartPayload): string {
   }
 }
 
-/** Состояние строки вызова: пока идёт — «выполняется» (класс даёт пульсацию), потом итог. */
+/** Состояние вызова: идёт работа, готово или ошибка. */
+type ToolState = 'running' | 'ok' | 'fail';
+
+/** Что значит каждый значок — словами: нужны подсказке и озвучке. */
+const TOOL_STATE_LABEL: Record<ToolState, string> = {
+  running: 'выполняется',
+  ok: 'готово',
+  fail: 'ошибка',
+};
+
+/** Какой значок отвечает состоянию: галочка в круге, крест в круге, круг «идёт». */
+const TOOL_STATE_ICON: Record<ToolState, IconName> = {
+  running: 'spinner',
+  ok: 'checkCircle',
+  fail: 'xCircle',
+};
+
+/**
+ * Нарисовать состояние значком, а не словом: итог вызова видно с одного взгляда,
+ * и значок не спорит шириной с подписью. Круг «в работе» ещё и вращается — тут
+ * движение по делу: оно показывает, что процесс жив, а не украшает.
+ *
+ * Слово не выбрасываем совсем: оно уходит в `title` и `aria-label` — иначе значок
+ * не прочитать ни подсказкой, ни экранным диктором.
+ */
+function paintToolState(element: HTMLElement, base: string, state: ToolState): void {
+  element.className = `${base} is-${state}`;
+  element.replaceChildren(svgIcon(TOOL_STATE_ICON[state], 14));
+  element.title = TOOL_STATE_LABEL[state];
+  element.setAttribute('aria-label', TOOL_STATE_LABEL[state]);
+}
+
+/** Строка состояния вызова: значок «идёт работа», который сменится итогом. */
 function toolStateElement(): HTMLElement {
-  return h('span', { class: 'tool-state is-running' }, 'выполняется');
+  const element = h('span', { class: 'tool-state' });
+  paintToolState(element, 'tool-state', 'running');
+  return element;
 }
 
 function setToolState(element: HTMLElement, ok: boolean): void {
-  element.textContent = ok ? 'готово' : 'ошибка';
-  element.classList.toggle('is-ok', ok);
-  element.classList.toggle('is-fail', !ok);
-  element.classList.remove('is-running');
+  paintToolState(element, 'tool-state', ok ? 'ok' : 'fail');
 }
 
 /** Размышления — сворачиваемая строка внутри группы действий. */
@@ -215,7 +246,8 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
 
   const title = h('span', { class: 'tool-group-title' }, 'Действия');
   const tools = h('span', { class: 'tool-group-tools' });
-  const state = h('span', { class: 'tool-group-state is-running' }, 'выполняется');
+  const state = h('span', { class: 'tool-group-state' });
+  paintToolState(state, 'tool-group-state', 'running');
   const body = h('div', { class: 'tool-group-body' });
   const chevron = svgIcon('chevronDown', 12);
   chevron.classList.add('tool-chevron');
@@ -346,17 +378,18 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
     // «Изменён N файл» композера).
     const briefParts: string[] = [];
     if (count > 1) briefParts.push(`${count} ${plural(count, 'вызов', 'вызова', 'вызовов')}`);
+    // Сколько из вызовов упало — числом: значок говорит «есть ошибка», а счётчик —
+    // сколько их. Терять это нельзя: по одному кресту не понять размах.
+    if (failed > 0) briefParts.push(`ошибок: ${failed}`);
     if (changedFiles > 0) briefParts.push(`${changedFiles} ${fileWord(changedFiles)}`);
     tools.textContent = briefParts.length > 0 ? `· ${briefParts.join(' · ')}` : '';
 
     if (pending > 0) {
-      state.textContent = 'выполняется';
-      state.className = 'tool-group-state is-running';
+      paintToolState(state, 'tool-group-state', 'running');
       return;
     }
 
-    state.textContent = failed > 0 ? `ошибок: ${failed}` : 'готово';
-    state.className = `tool-group-state${failed > 0 ? ' is-fail' : ' is-ok'}`;
+    paintToolState(state, 'tool-group-state', failed > 0 ? 'fail' : 'ok');
   };
 
   const add = (call: ChatToolStartPayload): ToolCardView => {

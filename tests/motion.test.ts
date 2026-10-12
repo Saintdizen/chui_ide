@@ -146,8 +146,8 @@ describe('движение отключается системной настр�
   });
 
   it('бесконечные индикаторы «в работе» под reduce замирают', () => {
-    // Пульс — единственная бесконечная анимация; у каждой должен быть стоп.
-    for (const name of ['tab-pulse', 'activity-dot', 'activity-pulse']) {
+    // Бесконечные анимации — только индикаторы «в работе»; у каждой должен быть стоп.
+    for (const name of ['tab-pulse', 'activity-dot', 'tool-spin']) {
       expect(MAIN).toContain(`@keyframes ${name}`);
     }
     expect(REDUCE).toMatch(/animation:\s*none/);
@@ -163,9 +163,11 @@ describe('движение отключается системной настр�
    * за кадром; (3) жест, пишущий в раскладку, не чаще кадра.
    */
   it('бесконечных анимаций ровно три — все индикаторы «в работе»', () => {
+    // Значок состояния вызова «идёт работа» — круг, который вращается: движение тут
+    // показывает, что процесс жив, а не украшает.
     const names = [...MAIN.matchAll(/animation:\s*([\w-]+)[^;]*\binfinite\b/g)].map((match) => match[1]);
     expect(names.length).toBeGreaterThan(0);
-    expect(new Set(names)).toEqual(new Set(['tab-pulse', 'activity-dot', 'activity-pulse']));
+    expect(new Set(names)).toEqual(new Set(['tab-pulse', 'activity-dot', 'tool-spin']));
   });
 
   it('скрытые панели гасят свои анимации — их убирают через display: none', () => {
