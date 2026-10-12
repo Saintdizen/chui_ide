@@ -1216,6 +1216,97 @@ async function languageHoverCheck(win) {
  * место решает, что с ними делать. Проверяем все три случая: одно место — прыжок сразу,
  * несколько — список, ни одного — весть без списка.
  */
+async function foldCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const send = (event) => win.webContents.sendInputEvent(event);
+
+  // Диапазоны задаём прямо виду: в пробах страницы сервера и отступов нет.
+  const applied = await script(`(() => {
+    try {
+      const { view, buffer } = window.probe;
+      // К началу файла: строки 8 и 12 должны быть на экране, иначе значков в жёлобе не будет.
+      view.element.querySelector('.own-editor-viewport').scrollTop = 0;
+      view.setFoldRanges([{ startLine: 8, endLine: 10 }, { startLine: 12, endLine: 15 }]);
+      const lines = () => view.element.querySelectorAll('.own-editor-line').length;
+      const before = {
+        ряды: view.foldState().rows,
+        строк_в_dom: lines(),
+        верх_12: view.clientPoint(buffer.lineStart(12)).top,
+      };
+      view.toggleFold(8);
+      const after = {
+        ряды: view.foldState().rows,
+        строк_в_dom: lines(),
+        верх_12: view.clientPoint(buffer.lineStart(12)).top,
+      };
+      return {
+        схлопнуто: view.foldState().collapsed,
+        ряды_до: before.ряды,
+        ряды_после: after.ряды,
+        строк_в_dom_до: before.строк_в_dom,
+        строк_в_dom_после: after.строк_в_dom,
+        сдвиг_строки_12: before.верх_12 - after.верх_12,
+        маркеров_в_жёлобе: view.element.querySelectorAll('.own-editor-fold.is-visible').length,
+      };
+    } catch (error) {
+      return { ошибка: String(error) };
+    }
+  })()`);
+
+  // Щелчок по значку в жёлобе раскрывает блок: он был сложен первым (строка 8).
+  const clicked = await script(`(() => {
+    try {
+      const { view } = window.probe;
+      view.element.querySelectorAll('.own-editor-fold.is-visible')[0]
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      return { схлопнуто: view.foldState().collapsed, ряды: view.foldState().rows };
+    } catch (error) {
+      return { ошибка: String(error) };
+    }
+  })()`);
+
+  // Живая клавиша Ctrl+Shift+[ сворачивает блок под курсором (строка 9 — внутри 8–10).
+  // Со сдвигом браузер отдаёт знак «{» — раскладка меняет знак, а команда та же.
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    window.probe.input.focus();
+    const offset = buffer.lineStart(9);
+    controller.selectRange(offset, offset);
+    return true;
+  })()`).catch(() => undefined);
+  send({ type: 'keyDown', keyCode: '[', modifiers: ['control', 'shift'] });
+  send({ type: 'keyUp', keyCode: '[', modifiers: ['control', 'shift'] });
+  await wait(60);
+  const byKey = await script(`(() => {
+    try {
+      return {
+        схлопнуто: window.probe.view.foldState().collapsed,
+        курсор_строка: window.probe.controller.bufferRef.lineAt(window.probe.controller.caret),
+      };
+    } catch (error) {
+      return { ошибка: String(error) };
+    }
+  })()`);
+
+  // Свернуть всё и развернуть всё: рядов остаётся по одному на блок.
+  const all = await script(`(() => {
+    try {
+      const { view } = window.probe;
+      view.foldAll();
+      const collapsed = view.foldState();
+      const rowsCollapsed = view.foldState().rows;
+      view.unfoldAll();
+      const rowsExpanded = view.foldState().rows;
+      view.setFoldRanges([]);
+      return { сложено_всего: collapsed.collapsed, ряды_свёрнутые: rowsCollapsed, ряды_раскрытые: rowsExpanded };
+    } catch (error) {
+      return { ошибка: String(error) };
+    }
+  })()`);
+
+  return { свёртка: applied, щелчок_по_значку: clicked, клавиша: byKey, всё: all };
+}
+
 async function codeActionsCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
   const send = (event) => win.webContents.sendInputEvent(event);
@@ -1792,6 +1883,11 @@ async function main() {
   const problemPanel = await problemPanelCheck(win);
   log('## Панель проблем');
   log(JSON.stringify(problemPanel, null, 2));
+  log('');
+
+  const fold = await foldCheck(win);
+  log('## Свёртка блоков');
+  log(JSON.stringify(fold, null, 2));
   log('');
 
   const codeActions = await codeActionsCheck(win);

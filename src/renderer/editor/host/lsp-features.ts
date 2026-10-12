@@ -26,6 +26,7 @@ import type { FileEdit } from '../../../shared/edits';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
 import { toCompletions } from '../../../shared/lsp-completions';
 import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
+import { toFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
 import { toSignatureHelp, type SignatureHelp } from '../../../shared/lsp-signature';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import { toFileSymbols } from '../../../shared/lsp-symbols';
@@ -167,6 +168,17 @@ export class LspFeatures {
    */
   async executeCommand(path: string, command: string, args: readonly unknown[]): Promise<unknown> {
     return this.request(path, 'workspace/executeCommand', { command, arguments: [...args] });
+  }
+
+  /**
+   * Диапазоны свёртки файла от сервера. Пустой список — сервер ответил, сворачивать
+   * нечего или он этого не умеет: вызывающий тогда считает блоки по отступам.
+   */
+  async foldingRanges(path: string): Promise<FoldRange[]> {
+    const result = await this.request(path, 'textDocument/foldingRange', {
+      textDocument: { uri: pathToUri(path) },
+    });
+    return toFoldRanges(result);
   }
 }
 

@@ -76,7 +76,10 @@ export type EditCommand =
   /** F1 — палитра команд (у Monaco её открывало его же действие). */
   | 'palette'
   /** Ctrl+. — быстрые исправления под курсором (список показывает приложение). */
-  | 'codeActions';
+  | 'codeActions'
+  /** Ctrl+Shift+[ и Ctrl+Shift+] — свернуть и развернуть блок у курсора. */
+  | 'fold'
+  | 'unfold';
 
 /**
  * Во что превращается нажатие.
@@ -136,6 +139,10 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     if (key === '/') return { kind: 'edit', edit: 'toggleComment' };
     // Ctrl+. — быстрые исправления: как в других редакторах, на той же клавише.
     if (key === '.') return { kind: 'edit', edit: 'codeActions' };
+    // Ctrl+Shift+[ сворачивает блок, Ctrl+Shift+] раскрывает — как в других редакторах.
+    // Со сдвигом те же клавиши дают «{» и «}»: раскладка меняет знак, команда — та же.
+    if (key === '[' || key === '{') return { kind: 'edit', edit: 'fold' };
+    if (key === ']' || key === '}') return { kind: 'edit', edit: 'unfold' };
     // Ctrl+Z — отмена; Ctrl+Shift+Z и Ctrl+Y — повтор (обе привычки поддержаны).
     if (lower === 'z') return { kind: 'edit', edit: extend ? 'redo' : 'undo' };
     if (lower === 'y') return { kind: 'edit', edit: 'redo' };

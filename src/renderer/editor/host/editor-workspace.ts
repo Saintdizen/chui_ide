@@ -38,6 +38,7 @@ import type { SymbolSource } from './symbol-navigation';
 import type { HoverExternalInfo } from '../widgets/hover-widget';
 import type { CompletionItem } from '../complete/completions';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
+import type { FoldRange } from '../../../shared/fold-ranges';
 import type { DocumentRegistry } from './document-registry';
 import type { TranslatedEdits } from './document-edits';
 import {
@@ -74,6 +75,8 @@ export interface EditorWorkspaceOptions {
   formatCode?: (path: string) => void;
   /** Быстрые исправления под курсором: список и правки — дело приложения. */
   codeActions?: (path: string, position: { line: number; column: number }) => void;
+  /** Диапазоны свёртки файла: у сервера спрашивает приложение, а без — считает по отступам. */
+  foldRanges?: (path: string, text: string) => Promise<readonly FoldRange[]>;
   /** Наведение от языкового сервера: путь и позиция → текст разметки. */
   hoverFromLanguage?: (path: string, position: { line: number; column: number }) => Promise<HoverExternalInfo | null>;
   /** Подсказки языкового сервера: путь и позиция → дополнения (см. `LspFeatures.completion`). */
@@ -151,6 +154,8 @@ export class EditorWorkspace {
   private readonly revealLocation: ((path: string, line: number, column: number) => void) | undefined;
   /** Быстрые исправления: шов к приложению (сервер, список, применение правок). */
   private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
+  /** Диапазоны свёртки файла — тоже шов: у приложения и сервер, и подсчёт по отступам. */
+  private readonly foldRanges: ((path: string, text: string) => Promise<readonly FoldRange[]>) | undefined;
   /** Короткий путь для подписи места в списке. */
   private readonly relativePath: ((path: string) => string) | undefined;
   /** Сообщить, что мест не нашлось. */
@@ -203,6 +208,7 @@ export class EditorWorkspace {
     this.snippets = options.snippets;
     this.formatCode = options.formatCode;
     this.codeActions = options.codeActions;
+    this.foldRanges = options.foldRanges;
     this.hoverFromLanguage = options.hoverFromLanguage;
     this.completionFromLanguage = options.completionFromLanguage;
     this.signatureFromLanguage = options.signatureFromLanguage;
@@ -279,6 +285,7 @@ export class EditorWorkspace {
       signatureFromLanguage: this.signatureFromLanguage,
       // Быстрые исправления — шов приложения: ему и сервер, и попап, и документная модель.
       codeActions: this.codeActions,
+      foldRanges: this.foldRanges,
       symbols: this.symbols,
       revealLocation: this.revealLocation,
       relativePath: this.relativePath,
@@ -446,6 +453,11 @@ export class EditorWorkspace {
       openGoto: () => this.pane.openGoto(),
       indent: () => this.pane.indent(),
       outdent: () => this.pane.outdent(),
+      // Свёртка — состояние самой панели: она знает и диапазоны, и что сложено.
+      fold: () => this.pane.foldAtCursor(),
+      unfold: () => this.pane.unfoldAtCursor(),
+      foldAll: () => this.pane.foldAll(),
+      unfoldAll: () => this.pane.unfoldAll(),
     };
     const formatCode = this.formatCode;
     if (formatCode) context.formatCode = () => path && formatCode(path);

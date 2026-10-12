@@ -51,6 +51,7 @@ import { detectNodeTestRunner, findRunnableNodeTests, type NodeTestRunner } from
 import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
 import { codeActionKindLabel, type CodeActionItem } from '../shared/lsp-code-actions';
 import { installSuggestions } from '../shared/import-install';
+import { indentFoldRanges } from '../shared/fold-ranges';
 import { packageForModule } from '../shared/python-packages';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
@@ -300,6 +301,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Быстрые исправления: список действий языка показывает приложение — у него и попапы,
     // и языковой сервер, и документная модель для правок.
     codeActions: (path, position) => void runCodeActions(path, position),
+    // Свёртка: диапазоны берём у сервера, а если он их не умеет — считаем по отступам.
+    foldRanges: async (path, text) => {
+      const fromServer = await lsp.foldingRanges(path);
+      return fromServer.length > 0 ? fromServer : indentFoldRanges(text, settings.editor.tabSize);
+    },
     // Правый клик по тексту: меню собираем здесь, а не в панели, — пункты это команды
     // приложения (отмена, буфер обмена, поиск, переходы), и реестр команд у него.
     contextMenu: (info, event) => {

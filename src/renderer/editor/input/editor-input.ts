@@ -419,6 +419,13 @@ export class EditorInputBinding {
       case 'codeActions':
         this.onCommand?.('codeActions');
         break;
+      // Свернуть и развернуть блок у курсора — это состояние вида, вызывающий не нужен.
+      case 'fold':
+        this.view.foldAt(this.controller.caret);
+        break;
+      case 'unfold':
+        this.view.unfoldAt(this.controller.caret);
+        break;
     }
   }
 }

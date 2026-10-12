@@ -51,6 +51,11 @@ export interface EditorCommandContext {
   formatCode?(): void;
   /** Показать быстрые исправления под курсором (нужен языковой сервер). */
   codeActions?(): void;
+  /** Свернуть блок у курсора, развернуть его, свернуть или развернуть всё. */
+  fold(): void;
+  unfold(): void;
+  foldAll(): void;
+  unfoldAll(): void;
 }
 
 /** Что команда требует от контекста сверх обязательного. */
@@ -187,6 +192,36 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: CATEGORY,
     requires: 'formatCode',
     run: (context) => context.formatCode?.(),
+  },
+  {
+    id: 'editor.fold',
+    label: 'Свернуть блок',
+    alias: 'fold',
+    keybinding: 'Ctrl+Shift+[',
+    category: CATEGORY,
+    run: (context) => context.fold(),
+  },
+  {
+    id: 'editor.unfold',
+    label: 'Развернуть блок',
+    alias: 'unfold',
+    keybinding: 'Ctrl+Shift+]',
+    category: CATEGORY,
+    run: (context) => context.unfold(),
+  },
+  {
+    id: 'editor.foldAll',
+    label: 'Свернуть всё',
+    alias: 'foldAll',
+    category: CATEGORY,
+    run: (context) => context.foldAll(),
+  },
+  {
+    id: 'editor.unfoldAll',
+    label: 'Развернуть всё',
+    alias: 'unfoldAll',
+    category: CATEGORY,
+    run: (context) => context.unfoldAll(),
   },
   {
     id: 'editor.codeActions',

@@ -50,11 +50,39 @@
 }
 
 .own-editor-gutter-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
   height: var(--own-editor-line-height);
   line-height: var(--own-editor-line-height);
   padding: 0 8px;
   font-variant-numeric: tabular-nums;
+}
+
+.own-editor-gutter-number {
   text-align: right;
+}
+
+/* Значок свёртки — слева от номера. Виден только у сворачиваемых строк: там, где
+   сворачивать нечего, пустое место у номера молчит. */
+.own-editor-fold {
+  flex: none;
+  width: 14px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  line-height: var(--own-editor-line-height);
+  text-align: center;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.own-editor-fold.is-visible {
+  visibility: visible;
+}
+
+.own-editor-fold:hover {
+  color: var(--text_color);
 }
 
 /* Поле значков: узкая колонка слева от номеров строк (точки останова, запуск,

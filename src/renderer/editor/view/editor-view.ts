@@ -35,6 +35,8 @@ import { FileDecorations, squigglyRect } from './decorations';
 import { findBracketPair, findOccurrences, type BracketPair } from './context-highlight';
 import { caret, isEmpty, rangesRects, selectionRects, type Selection } from './selection';
 import { clamp, contentHeight, lineAtY, maxScrollLeft, maxScrollTop, revealLine, visibleLines } from './viewport';
+import { FoldModel } from './fold-model';
+import type { FoldRange } from '../../../shared/fold-ranges';
 
 /** Класс корня и его частей — за него цепляется оформление (`styles/editor.css`). */
 const ROOT_CLASS = 'own-editor';
@@ -110,6 +112,11 @@ export class EditorView {
   /** Что сейчас в DOM: версия буфера, границы видимых строк и версия украшений — чтобы не пересобирать зря. */
   private rendered = { version: -1, first: -1, last: -1, decorations: -1 };
   private layoutCache: LineLayoutCache | null = null;
+  /**
+   * Свёрнутые строки. Пока ничего не свёрнуто, ряд совпадает со строкой и вся
+   * арифметика ниже — прежняя; ради этого перевод «строка ↔ ряд» и вынесен сюда.
+   */
+  private readonly folds = new FoldModel();
 
   /** Украшения текущего файла: значки, полоски, фон, подписи, подчёркивания. */
   private decorations = new FileDecorations();
@@ -314,10 +321,12 @@ export class EditorView {
     const paint = (range: { start: number; end: number }, className: string): void => {
       const line = this.buffer.lineAt(range.start) - 1;
       if (line < first || line > last) return;
+      if (this.isHidden(line + 1)) return;
       for (const rect of rangesRects(this.buffer, [range], this.metrics)) {
+        if (this.isHidden(rect.line)) continue;
         const node = document.createElement('div');
         node.className = `${ROOT_CLASS}-highlight-rect ${className}`;
-        node.style.transform = `translate(${rect.left}px, ${rect.top}px)`;
+        node.style.transform = `translate(${rect.left}px, ${this.yOfLine(rect.line)}px)`;
         node.style.width = `${rect.width}px`;
         node.style.height = `${rect.height}px`;
         fragment.append(node);
@@ -375,7 +384,7 @@ export class EditorView {
 
     const container = document.createElement('div');
     container.className = `${ROOT_CLASS}-ghost`;
-    container.style.transform = `translate(${left}px, ${(line - 1) * this.metrics.lineHeight}px)`;
+    container.style.transform = `translate(${left}px, ${this.yOfLine(line)}px)`;
 
     const rows = text.split('\n');
     for (let index = 0; index < rows.length; index += 1) {
@@ -407,11 +416,13 @@ export class EditorView {
       const match = this.searchMatches[index]!;
       const line = this.buffer.lineAt(match.start) - 1;
       if (line < first || line > last) continue;
+      if (this.isHidden(line + 1)) continue;
       for (const rect of rangesRects(this.buffer, [match], this.metrics)) {
+        if (this.isHidden(rect.line)) continue;
         const node = document.createElement('div');
         node.className =
           index === this.searchCurrent ? `${ROOT_CLASS}-search-rect is-current` : `${ROOT_CLASS}-search-rect`;
-        node.style.transform = `translate(${rect.left}px, ${rect.top}px)`;
+        node.style.transform = `translate(${rect.left}px, ${this.yOfLine(rect.line)}px)`;
         node.style.width = `${rect.width}px`;
         node.style.height = `${rect.height}px`;
         fragment.append(node);
@@ -440,7 +451,7 @@ export class EditorView {
     const rect = this.viewport.getBoundingClientRect();
     const x = clientX - rect.left + this.viewport.scrollLeft;
     const y = clientY - rect.top + this.viewport.scrollTop;
-    const line = lineAtY(y, this.metrics.lineHeight, this.buffer.lineCount) + 1;
+    const line = this.lineOfRow(lineAtY(y, this.metrics.lineHeight, this.rowCount()));
     const text = this.buffer.lineText(line);
     const column = columnForX(layoutLine(text, this.metrics), x);
     return this.buffer.lineStart(line) + column;
@@ -460,7 +471,7 @@ export class EditorView {
     const line = this.buffer.lineAt(offset);
     const column = offset - this.buffer.lineStart(line);
     const left = xForColumn(this.offsetsFor(line), column);
-    return { left, top: (line - 1) * this.metrics.lineHeight, height: this.metrics.lineHeight };
+    return { left, top: this.yOfLine(line), height: this.metrics.lineHeight };
   }
 
   /**
@@ -559,6 +570,8 @@ export class EditorView {
     this.widest = 0;
     this.layoutCache = null;
     this.lineCount = buffer.lineCount;
+    // Диапазоны свёртки и схлопнутое состояние — прошлого файла: начинаем с чистого листа.
+    this.folds.reset();
     this.highlighter.reset();
     this.viewport.scrollTo({ top: 0, left: 0 });
     // Украшения принадлежали прошлому файлу (полоски git, точки останова): их
@@ -583,6 +596,78 @@ export class EditorView {
     this.root.remove();
   }
 
+  // — свёртка —
+
+  /**
+   * Диапазоны свёртки файла: от языкового сервера или по отступам — считает
+   * вызывающий. Схлопнутое состояние сохраняется: правка файла не должна раскрывать
+   * то, что человек сложил сам.
+   */
+  setFoldRanges(ranges: readonly FoldRange[]): void {
+    this.folds.setRanges(ranges);
+    this.render();
+  }
+
+  /** Сложить или раскрыть блок, начинающийся на этой строке (значок в жёлобе). */
+  toggleFold(line: number): void {
+    if (!this.folds.all.some((range) => range.startLine === line)) return;
+    this.folds.toggle(line);
+    this.render();
+  }
+
+  /** Сложить блок у этой позиции: начинающийся тут или вмещающий её. */
+  foldAt(offset: number): boolean {
+    const region = this.folds.regionAt(this.buffer.lineAt(offset));
+    if (!region) return false;
+    if (!this.folds.isCollapsed(region.startLine)) this.folds.toggle(region.startLine);
+    this.render();
+    return true;
+  }
+
+  /** Раскрыть блок, который закрывает эту позицию. */
+  unfoldAt(offset: number): boolean {
+    const region = this.folds.collapsedAt(this.buffer.lineAt(offset));
+    if (!region) return false;
+    this.folds.toggle(region.startLine);
+    this.render();
+    return true;
+  }
+
+  foldAll(): void {
+    this.folds.collapseAll();
+    this.render();
+  }
+
+  unfoldAll(): void {
+    this.folds.expandAll();
+    this.render();
+  }
+
+  /** Что со свёрткой сейчас — для проб и проверок. */
+  foldState(): { rows: number; collapsed: number[] } {
+    return { rows: this.rowCount(), collapsed: this.folds.collapsedStarts() };
+  }
+
+  /** Сколько рядов занимает документ: строки минус скрытые. */
+  private rowCount(): number {
+    return this.folds.rowCount(this.buffer.lineCount);
+  }
+
+  /** Верх строки в координатах полотна: по РЯДУ строки, а не по её номеру. */
+  private yOfLine(line: number): number {
+    return this.folds.rowOf(line) * this.metrics.lineHeight;
+  }
+
+  /** Строка, которой принадлежит ряд (с нуля) — обратный перевод к `yOfLine`. */
+  private lineOfRow(row: number): number {
+    return this.folds.lineAtRow(row);
+  }
+
+  /** Скрыта ли строка свёрткой (её не рисуем и места она не занимает). */
+  private isHidden(line: number): boolean {
+    return this.folds.isHidden(line);
+  }
+
   // — отрисовка —
 
   /**
@@ -593,14 +678,19 @@ export class EditorView {
     const lineHeight = this.metrics.lineHeight;
     const width = this.viewport.clientWidth;
     const height = this.viewport.clientHeight;
-    const scrollTop = clamp(this.viewport.scrollTop, maxScrollTop(this.buffer.lineCount, lineHeight, height));
+    // Прокрутка и видимый отрезок считаются в РЯДАХ: свёрнутые строки экрана не занимают.
+    const rows = this.rowCount();
+    const scrollTop = clamp(this.viewport.scrollTop, maxScrollTop(rows, lineHeight, height));
     // Прокрутку вбок при необходимости подрежем: полотно уже сузилось до самой
     // широкой строки, и без этого правый край остался бы за экраном.
     const maxLeft = maxScrollLeft(this.widest, width);
     if (this.viewport.scrollLeft > maxLeft) this.viewport.scrollLeft = maxLeft;
     this.scrollTop = scrollTop;
 
-    const { first, last } = visibleLines(scrollTop, lineHeight, height, this.buffer.lineCount, this.overscan);
+    const { first: firstRow, last: lastRow } = visibleLines(scrollTop, lineHeight, height, rows, this.overscan);
+    // Ряды — в строки буфера: дальше всё считается строками, а скрытые слои пропускают.
+    const first = this.lineOfRow(firstRow);
+    const last = Math.min(this.buffer.lineCount, this.lineOfRow(lastRow + 1) - 1);
 
     // Порядок важен: сначала строки — они уточняют самую широкую, потом размер
     // полотна по ней, иначе широкая строка кадр останется за краем.
@@ -620,7 +710,7 @@ export class EditorView {
 
   /** Размер полотна: высота — по числу строк, ширина — по самой широкой известной строке. */
   private sizeContent(viewportWidth: number, viewportHeight: number): void {
-    const height = Math.max(contentHeight(this.buffer.lineCount, this.metrics.lineHeight), viewportHeight);
+    const height = Math.max(contentHeight(this.rowCount(), this.metrics.lineHeight), viewportHeight);
     const width = Math.max(this.widest, viewportWidth);
     this.content.style.height = `${height}px`;
     this.content.style.width = `${width}px`;
@@ -640,6 +730,8 @@ export class EditorView {
 
     const fragment = document.createDocumentFragment();
     for (let line = first + 1; line <= last + 1; line += 1) {
+      // Скрытые строки в слое не рисуем: ряды идут подряд, без провалов.
+      if (this.isHidden(line)) continue;
       const text = this.buffer.lineText(line);
       const offsets = layoutLine(text, this.metrics);
       const width = lineWidth(offsets);
@@ -653,7 +745,7 @@ export class EditorView {
 
     this.linesLayer.replaceChildren(fragment);
     // Слой сдвигаем к первой видимой строке, а не пересоздаём на её месте.
-    this.linesLayer.style.transform = `translateY(${first * this.metrics.lineHeight}px)`;
+    this.linesLayer.style.transform = `translateY(${this.yOfLine(first)}px)`;
     this.rendered = { version, first, last, decorations: this.decorationsVersion };
   }
 
@@ -703,21 +795,44 @@ export class EditorView {
     row.replaceChildren(fragment);
   }
 
-  /** Номера строк — отдельный слой слева, он не едет по горизонтали. */
+  /**
+   * Номера строк — отдельный слой слева, он не едет по горизонтали. У сворачиваемых
+   * строк есть значок: он и складывает блок. Значок гасит событие, иначе клик по нему
+   * ушёл бы хозяину как клик по номеру (там — точка останова).
+   */
   private renderGutter(first: number, last: number): void {
     if (!this.gutterLines || !this.gutter) return;
     const fragment = document.createDocumentFragment();
     for (let line = first + 1; line <= last + 1; line += 1) {
+      if (this.isHidden(line)) continue;
       const row = document.createElement('div');
       row.className = `${ROOT_CLASS}-gutter-row`;
-      row.textContent = String(line);
+
+      const marker = document.createElement('span');
+      marker.className = `${ROOT_CLASS}-fold`;
+      if (this.folds.all.some((range) => range.startLine === line)) {
+        const collapsed = this.folds.isCollapsed(line);
+        marker.classList.add('is-visible');
+        marker.textContent = collapsed ? '▸' : '▾';
+        marker.title = collapsed ? 'Развернуть' : 'Свернуть';
+        marker.addEventListener('mousedown', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          this.toggleFold(line);
+        });
+      }
+
+      const number = document.createElement('span');
+      number.className = `${ROOT_CLASS}-gutter-number`;
+      number.textContent = String(line);
+      row.append(marker, number);
       fragment.append(row);
     }
     this.gutterLines.replaceChildren(fragment);
-    this.gutterLines.style.transform = `translateY(${first * this.metrics.lineHeight}px)`;
-    // Ширина по числу разрядов последней строки: цифры моноширинны, ширина известна.
+    this.gutterLines.style.transform = `translateY(${this.yOfLine(first)}px)`;
+    // Ширина по числу разрядов последней строки плюс значок свёртки: цифры моноширинны.
     const digits = String(this.buffer.lineCount).length;
-    this.gutter.style.width = `${digits * this.metrics.charWidth + 16}px`;
+    this.gutter.style.width = `${digits * this.metrics.charWidth + 34}px`;
   }
 
   // — украшения —
@@ -745,6 +860,7 @@ export class EditorView {
     if (!this.glyphLines) return;
     const fragment = document.createDocumentFragment();
     for (let line = first + 1; line <= last + 1; line += 1) {
+      if (this.isHidden(line)) continue;
       const row = document.createElement('div');
       row.className = `${ROOT_CLASS}-glyph-row`;
       const glyph = this.decorations.glyphFor(line);
@@ -757,7 +873,7 @@ export class EditorView {
       fragment.append(row);
     }
     this.glyphLines.replaceChildren(fragment);
-    this.glyphLines.style.transform = `translateY(${first * this.metrics.lineHeight}px)`;
+    this.glyphLines.style.transform = `translateY(${this.yOfLine(first)}px)`;
   }
 
   /** Полоски изменений — узкая колонка справа от номеров. */
@@ -765,6 +881,7 @@ export class EditorView {
     if (!this.stripLines) return;
     const fragment = document.createDocumentFragment();
     for (let line = first + 1; line <= last + 1; line += 1) {
+      if (this.isHidden(line)) continue;
       const row = document.createElement('div');
       row.className = `${ROOT_CLASS}-strip-row`;
       const strip = this.decorations.stripFor(line);
@@ -775,18 +892,19 @@ export class EditorView {
       fragment.append(row);
     }
     this.stripLines.replaceChildren(fragment);
-    this.stripLines.style.transform = `translateY(${first * this.metrics.lineHeight}px)`;
+    this.stripLines.style.transform = `translateY(${this.yOfLine(first)}px)`;
   }
 
   /** Заливка всей строки (покрытие, строка отладчика). Тянется на ширину полотна. */
   private renderBackgrounds(first: number, last: number): void {
     const fragment = document.createDocumentFragment();
     for (let line = first + 1; line <= last + 1; line += 1) {
+      if (this.isHidden(line)) continue;
       const background = this.decorations.backgroundFor(line);
       if (!background) continue;
       const node = document.createElement('div');
       node.className = `${ROOT_CLASS}-line-bg ${background.className}`;
-      node.style.transform = `translateY(${(line - 1) * this.metrics.lineHeight}px)`;
+      node.style.transform = `translateY(${this.yOfLine(line)}px)`;
       node.style.height = `${this.metrics.lineHeight}px`;
       fragment.append(node);
     }
@@ -797,6 +915,7 @@ export class EditorView {
   private renderSquiggles(first: number, last: number): void {
     const fragment = document.createDocumentFragment();
     for (let line = first + 1; line <= last + 1; line += 1) {
+      if (this.isHidden(line)) continue;
       const squiggles = this.decorations.squigglesFor(line);
       if (squiggles.length === 0) continue;
       const offsets = this.offsetsFor(line);
@@ -805,7 +924,7 @@ export class EditorView {
         if (rect.width <= 0) continue;
         const node = document.createElement('div');
         node.className = `${ROOT_CLASS}-squiggly-rect ${squiggly.className}`;
-        node.style.transform = `translate(${rect.left}px, ${rect.top}px)`;
+        node.style.transform = `translate(${rect.left}px, ${this.yOfLine(line)}px)`;
         node.style.width = `${rect.width}px`;
         node.style.height = `${rect.height}px`;
         fragment.append(node);
@@ -821,7 +940,7 @@ export class EditorView {
   lineAtPoint(clientY: number): number {
     const rect = this.viewport.getBoundingClientRect();
     const y = clientY - rect.top + this.viewport.scrollTop;
-    return lineAtY(y, this.metrics.lineHeight, this.buffer.lineCount) + 1;
+    return this.lineOfRow(lineAtY(y, this.metrics.lineHeight, this.rowCount()));
   }
 
   /**
@@ -876,16 +995,17 @@ export class EditorView {
     const activeLine = this.buffer.lineAt(this.selection.active);
     const activeColumn = this.selection.active - this.buffer.lineStart(activeLine);
     const activeX = xForColumn(this.offsetsFor(activeLine), activeColumn);
-    this.caret.style.transform = `translate(${activeX}px, ${(activeLine - 1) * lineHeight}px)`;
+    this.caret.style.transform = `translate(${activeX}px, ${this.yOfLine(activeLine)}px)`;
     this.caret.style.height = `${lineHeight}px`;
     this.caret.style.display = isEmpty(this.selection) ? '' : 'none';
 
     const fragment = document.createDocumentFragment();
     if (!isEmpty(this.selection)) {
       for (const rect of selectionRects(this.buffer, this.selection, this.metrics)) {
+        if (this.isHidden(rect.line)) continue;
         const node = document.createElement('div');
         node.className = `${ROOT_CLASS}-selection-rect`;
-        node.style.transform = `translate(${rect.left}px, ${rect.top}px)`;
+        node.style.transform = `translate(${rect.left}px, ${this.yOfLine(rect.line)}px)`;
         node.style.width = `${rect.width}px`;
         node.style.height = `${rect.height}px`;
         fragment.append(node);
@@ -907,11 +1027,11 @@ export class EditorView {
 
   private revealLineInternal(line: number): void {
     const scrollTop = revealLine(
-      line - 1,
+      this.folds.rowOf(line) - 1,
       this.scrollTop,
       this.metrics.lineHeight,
       this.viewport.clientHeight,
-      this.buffer.lineCount,
+      this.rowCount(),
     );
     if (scrollTop !== this.scrollTop) {
       this.viewport.scrollTop = scrollTop;

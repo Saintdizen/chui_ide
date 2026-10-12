@@ -23,6 +23,7 @@
 
 import type { CursorPosition, LspDiagnostic } from '../../../shared/api';
 import type { TextEdit } from '../../../shared/edits';
+import type { FoldRange } from '../../../shared/fold-ranges';
 import type { GitLineChange } from '../../../shared/git-line-changes';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { RunnableTest } from '../../../shared/python-tests';
@@ -53,6 +54,9 @@ import type { DocumentRegistry } from './document-registry';
 import { translateEdits, type TranslatedEdits } from './document-edits';
 import { breakpointGlyphClass, breakpointTooltip, changeGutterTooltip, testGlyphTooltip } from './gutter-marks';
 import { SymbolNavigation, type SymbolSource } from './symbol-navigation';
+
+/** Пауза перед пересчётом диапазонов свёртки: на каждое нажатие считать блоки незачем. */
+const FOLD_REFRESH_DELAY_MS = 300;
 
 /** Нажали на значок запуска в жёлобе — этот файл и строку и просят выполнить. */
 export interface RunMarkerHit {
@@ -157,6 +161,11 @@ export interface EditorHostOptions {
    */
   codeActions?: (path: string, position: { line: number; column: number }) => void;
   /**
+   * Диапазоны свёртки файла: у языкового сервера спрашивает приложение, а без сервера
+   * их считают по отступам. Не задано — свёртки нет вовсе (и значков в жёлобе тоже).
+   */
+  foldRanges?: (path: string, text: string) => Promise<readonly FoldRange[]>;
+  /**
    * Inline-подсказка «допиши за меня»: включение, задержка и запрос к модели. Не задана —
    * призрачного текста в панели нет вовсе (у Monaco это был его провайдер подсказок).
    */
@@ -203,6 +212,12 @@ export class EditorHost {
   private readonly contextMenu: ((info: EditorContextInfo, event: MouseEvent) => void) | undefined;
   /** Быстрые исправления: список показывает приложение (см. `codeActions` в опциях). */
   private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
+  /** Диапазоны свёртки — от приложения (языковой сервер или отступы). */
+  private readonly foldRanges: ((path: string, text: string) => Promise<readonly FoldRange[]>) | undefined;
+  /** Номер запроса диапазонов свёртки: ответ на прежний текст не показываем. */
+  private foldRequestId = 0;
+  /** Пауза перед пересчётом свёртки по правке: на каждое нажатие считать незачем. */
+  private foldTimer: number | null = null;
   /** Поле прокрутки: на нём слушаем Ctrl+Click по слову (переход к определению). */
   private readonly viewport: HTMLElement | null;
 
@@ -267,6 +282,7 @@ export class EditorHost {
     this.openPalette = options.openPalette ?? null;
     this.contextMenu = options.contextMenu;
     this.codeActions = options.codeActions;
+    this.foldRanges = options.foldRanges;
 
     // До первого `open` редактор держит пустой буфер: слои не терпят «нет документа», а
     // пустая вкладка — нормальное состояние панели, пока файл не открыт.
@@ -427,6 +443,8 @@ export class EditorHost {
     // Нарисовать украшения именно этого файла: у прежнего они свои (его полоски git,
     // его точки останова) и в новом показываться не должны.
     this.refreshDecorations(document.path);
+    // Свёртка — тоже про файл: диапазоны нового берём у сервера или считаем по отступам.
+    void this.refreshFolds();
     this.input.focus();
     this.emitCursor();
   }
@@ -932,6 +950,7 @@ export class EditorHost {
     this.suggest.dispose();
     this.locations?.dispose();
     this.inline?.dismiss();
+    if (this.foldTimer !== null) window.clearTimeout(this.foldTimer);
     this.view.dispose();
     this.cursorEmitter.dispose();
     this.changeTextEmitter.dispose();
@@ -956,10 +975,55 @@ export class EditorHost {
       if (change.kind === 'text') {
         this.registry.push(this.path);
         this.changeTextEmitter.fire();
+        // Правка могла тронуть границы блоков: диапазоны свёртки пересчитываем с паузой.
+        this.scheduleFolds();
       }
       this.cursors.set(this.path, this.cursorPosition());
     }
     this.emitCursor();
+  }
+
+  // — свёртка —
+
+  /** Сложить блок у каретки. `false` — сворачивать нечего. */
+  foldAtCursor(): boolean {
+    return this.view.foldAt(this.controller.caret);
+  }
+
+  /** Раскрыть блок, закрывающий каретку. `false` — раскрывать нечего. */
+  unfoldAtCursor(): boolean {
+    return this.view.unfoldAt(this.controller.caret);
+  }
+
+  foldAll(): void {
+    this.view.foldAll();
+  }
+
+  unfoldAll(): void {
+    this.view.unfoldAll();
+  }
+
+  /** Диапазоны свёртки текущего файла: спросить у приложения и отдать виду. */
+  private async refreshFolds(): Promise<void> {
+    const source = this.foldRanges;
+    const path = this.path;
+    if (!source || !path) return;
+    const text = this.registry.get(path)?.text ?? '';
+    const id = (this.foldRequestId += 1);
+    const ranges = await source(path, text).catch(() => []);
+    // Пока спрашивали, файл сменился или текст переписали — ответ уже не к месту.
+    if (id !== this.foldRequestId || this.path !== path) return;
+    this.view.setFoldRanges(ranges);
+  }
+
+  /** Пересчитать свёртку с паузой: на каждое нажатие считать блоки незачем. */
+  private scheduleFolds(): void {
+    if (!this.foldRanges) return;
+    if (this.foldTimer !== null) window.clearTimeout(this.foldTimer);
+    this.foldTimer = window.setTimeout(() => {
+      this.foldTimer = null;
+      void this.refreshFolds();
+    }, FOLD_REFRESH_DELAY_MS);
   }
 
   /** Позиция курсора активного файла в понятиях «строка и столбец». */
