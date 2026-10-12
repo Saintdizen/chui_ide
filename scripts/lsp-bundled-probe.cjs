@@ -59,20 +59,58 @@ async function main() {
   lsp.dispose();
 }
 
-/** Файл-образец языка: по нему проверяем, что сервер действительно отвечает. */
+/**
+ * Файл-образец языка: по нему проверяем, что сервер действительно отвечает.
+ *
+ * Сперва пробуем файл из репозитория (он живой и настоящий), а если его нет —
+ * пишем свой образец во временный каталог. Так проба не ломается, когда файл
+ * нужного языка из репозитория убрали: раньше образцом питона служил случайный
+ * рабочий скрипт, и его удаление обрывало проверку языка.
+ */
 function sampleFile(language) {
   const path = require('node:path');
+  const fs = require('node:fs');
   const candidates = {
     typescript: 'src/shared/lsp-bundled.ts',
     javascript: 'scripts/dev.mjs',
-    python: 'scripts/_cov4.py',
     json: 'package.json',
     yaml: '.github/workflows/ci.yml',
   };
   const relative = candidates[language];
-  if (!relative) return null;
-  const full = path.join(ROOT, relative);
-  return require('node:fs').existsSync(full) ? full : null;
+  if (relative) {
+    const full = path.join(ROOT, relative);
+    if (fs.existsSync(full)) return full;
+  }
+
+  // Запасной путь: свой образец. Значок `config` — под него проба и спрашивает символы.
+  const samples = {
+    python: 'def config() -> int:\n    return 1\n',
+    typescript: 'export function config(): number {\n  return 1;\n}\n',
+    javascript: 'export function config() {\n  return 1;\n}\n',
+    json: '{"config": 1}\n',
+    yaml: 'config: 1\n',
+    html: '<div class="config"></div>\n',
+    css: '.config { color: red; }\n',
+    scss: '$gap: 4px;\n.config { margin: $gap; }\n',
+    less: '@gap: 4px;\n.config { margin: @gap; }\n',
+  };
+  const text = samples[language];
+  if (!text) return null;
+  const extensions = {
+    python: 'py',
+    typescript: 'ts',
+    javascript: 'js',
+    json: 'json',
+    yaml: 'yml',
+    html: 'html',
+    css: 'css',
+    scss: 'scss',
+    less: 'less',
+  };
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'lsp-sample-'));
+  const file = path.join(dir, `sample.${extensions[language] ?? 'txt'}`);
+  fs.writeFileSync(file, text);
+  return file;
 }
 
 app.whenReady().then(() =>
