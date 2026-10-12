@@ -85,10 +85,12 @@ function createAppWindow(options: WindowOptions): BrowserWindow {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      // sandbox выключен осознанно: preload использует общий контракт из shared/api.ts.
-      // Изоляция контекста включена, у renderer нет доступа к Node — в него попадает
+      // Песочница включена: renderer живёт в OS-песочнице Chromium, а preload
+      // собирается одним файлом без require на локальные модули
+      // (scripts/bundle-preload.mjs) — иначе sandbox его не запустит. Изоляция
+      // контекста тоже включена, у renderer нет доступа к Node — в него попадает
       // только узкий мост window.chui.
-      sandbox: false,
+      sandbox: true,
       spellcheck: false,
     },
   });

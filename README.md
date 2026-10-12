@@ -1437,10 +1437,12 @@ fixtures/*
 ## Безопасность
 
 - `contextIsolation: true`, `nodeIntegration: false`; в renderer доступен только `window.chui`.
-- `sandbox: false` — осознанный компромисс: preload использует общий контракт из `shared/api.ts`,
-  а `tsc` компилирует его без бандлинга, поэтому мост тянет `shared/api` относительным `require`.
-  Песочному preload такой `require` недоступен, и с `sandbox: true` интерфейс остаётся пустым
-  (видно по `npm run smoke:bridge -- true`): включить песочницу можно только вместе с бандлом preload.
+- `sandbox: true` — renderer живёт в OS-песочнице Chromium. Песочному preload относительный
+  `require` недоступен (он умеет требовать только `electron`, `events`, `timers` и `url`), поэтому
+  preload собирается одним файлом: контракт из `shared/api.ts` и ключ моста вшиваются бандлером
+  (`scripts/bundle-preload.mjs`, запускается внутри `build:main`), а наружу остаётся единственный
+  `require('electron')`. Без бандла `sandbox: true` оставил бы мост пустым без строки в консоли —
+  это стережёт `npm run smoke:bridge` (идёт уже в песочнице; без неё — `npm run smoke:bridge -- false`).
 - Секреты только в main. CSP запрещает renderer'у ходить в сеть наружу, кроме dev-сервера, и
   закрывает то, под чем в интерфейсе ничего нет: `object-src`, `base-uri` и `frame-src` — иначе
   вставленный извне `<object>` или `<iframe>` получил бы доступ к странице.

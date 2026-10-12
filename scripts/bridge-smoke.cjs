@@ -2,18 +2,18 @@
  * Проверка моста `window.chui`: preload собирается, contextBridge отдаёт его
  * странице и renderer видит только четыре метода, а не весь ipcRenderer.
  *
- * Отдельная проверка на песочницу — не роскошь: с `sandbox: true` preload не
- * грузится вовсе, а интерфейс остаётся пустым без единой строки в консоли.
- * Сейчас песочница выключена (`window.ts`), и вот почему: `tsc` компилирует
- * preload без бандлинга, а песочному preload относительный `require` недоступен
- * — он умеет требовать только `electron`, `events`, `timers` и `url`.
- * Проверить: `npm run smoke:bridge -- true` (сегодня — падение с `module not found`).
+ * Проверка идёт в боевой конфигурации — `sandbox: true`, как в `window.ts`:
+ * песочному preload относительный `require` недоступен (он умеет требовать
+ * только `electron`, `events`, `timers` и `url`), поэтому контракт вшивается
+ * в один файл бандлером `scripts/bundle-preload.mjs`. Если бандлинг отвалится,
+ * preload без единой строки в консоли не загрузится, а мост окажется пустым —
+ * это и ловит проверка. Прогон без песочницы: `npm run smoke:bridge -- false`.
  */
 const path = require('node:path');
 const { app, BrowserWindow } = require('electron');
 
 // По умолчанию — то же, что в `window.ts`: тогда проверка отвечает за сборку.
-const SANDBOX = process.argv[2] === 'true';
+const SANDBOX = process.argv[2] !== 'false';
 const dist = path.join(__dirname, '..', 'dist');
 
 const EXPECTED_KEYS = [
