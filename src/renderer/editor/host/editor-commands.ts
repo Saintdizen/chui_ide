@@ -49,6 +49,8 @@ export interface EditorCommandContext {
   previousProblem?(): void;
   /** Отформатировать файл (нужен инструмент языка). */
   formatCode?(): void;
+  /** Показать быстрые исправления под курсором (нужен языковой сервер). */
+  codeActions?(): void;
 }
 
 /** Что команда требует от контекста сверх обязательного. */
@@ -58,7 +60,8 @@ export type EditorCommandRequirement =
   | 'renameSymbol'
   | 'formatCode'
   | 'nextProblem'
-  | 'previousProblem';
+  | 'previousProblem'
+  | 'codeActions';
 
 export interface EditorCommand {
   /** Наш идентификатор: `editor.undo`. Приставка отделяет от команд приложения. */
@@ -184,6 +187,15 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: CATEGORY,
     requires: 'formatCode',
     run: (context) => context.formatCode?.(),
+  },
+  {
+    id: 'editor.codeActions',
+    label: 'Быстрые исправления',
+    alias: 'quickFix',
+    keybinding: 'Ctrl+.',
+    category: CATEGORY,
+    requires: 'codeActions',
+    run: (context) => context.codeActions?.(),
   },
   {
     id: 'editor.nextProblem',

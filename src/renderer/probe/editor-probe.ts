@@ -176,6 +176,8 @@ document.body.append(hostRoot);
 
 const store = new DocumentStore();
 const registry = new DocumentRegistry(store);
+/** Куда пробе записываются вызовы быстрых исправлений (Ctrl+.). */
+const codeActionCalls: Array<{ path: string; position: { line: number; column: number } }> = [];
 const host = new EditorHost(hostRoot, registry, {
   scheme: 'dark',
   // Подсказка о параметрах вызова: подставной источник — пробе важно не «откуда сигнатура»,
@@ -195,6 +197,9 @@ const host = new EditorHost(hostRoot, registry, {
     activeSignature: 0,
     activeParameter: 1,
   }),
+  // Быстрые исправления: пробе важно, что Ctrl+. доходит до приложения (в приложении
+  // там запрос к серверу и список) — запоминаем, с какой позицией его позвали.
+  codeActions: (path, position) => codeActionCalls.push({ path, position }),
 });
 const docA = store.open('/probe/a.ts', 'const a = 1;\nconst b = 2;\n', 'typescript');
 const docB = store.open('/probe/b.py', 'def f():\n    return 1\n', 'python');
@@ -208,11 +213,12 @@ declare global {
       registry: DocumentRegistry;
       docA: TextDocument;
       docB: TextDocument;
+      codeActions: Array<{ path: string; position: { line: number; column: number } }>;
     };
   }
 }
 
-window.probeHost = { host, store, registry, docA, docB };
+window.probeHost = { host, store, registry, docA, docB, codeActions: codeActionCalls };
 
 // Рабочее место (одна или две панели) — на своём скрытом полотне. Оно проверяется
 // отдельно от хозяина: тут важны разделение, активная панель и общий буфер.

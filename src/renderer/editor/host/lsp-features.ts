@@ -21,9 +21,11 @@
  * Поэтому его видно в тестах без окна (с подставным `rpc`).
  */
 
+import type { LspDiagnostic } from '../../../shared/api';
 import type { FileEdit } from '../../../shared/edits';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
 import { toCompletions } from '../../../shared/lsp-completions';
+import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
 import { toSignatureHelp, type SignatureHelp } from '../../../shared/lsp-signature';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import { toFileSymbols } from '../../../shared/lsp-symbols';
@@ -137,6 +139,34 @@ export class LspFeatures {
       position: toLspPosition(position),
     });
     return toSignatureHelp(result);
+  }
+
+  /**
+   * Быстрые исправления и действия языка в позиции курсора. `diagnostics` — пометки этой
+   * строки: сервер отвечает исправлениями именно на них, и без них ответа часто нет.
+   * Пустой список — сервер ответил, действий не предложил; это не ошибка.
+   */
+  async codeActions(
+    path: string,
+    position: LspPosition,
+    diagnostics: readonly LspDiagnostic[],
+  ): Promise<CodeActionItem[]> {
+    const range = toLspPosition(position);
+    const result = await this.request(path, 'textDocument/codeAction', {
+      textDocument: { uri: pathToUri(path) },
+      // Курсор — точкой: сервер сам решит, что взять из пометок контекста.
+      range: { start: range, end: range },
+      context: { diagnostics: toLspDiagnostics(diagnostics), triggerKind: 1 },
+    });
+    return toCodeActions(result, uriToPath);
+  }
+
+  /**
+   * Выполнить команду сервера. Ответ бывает разным: чаще `null`, но бывают и правки
+   * (`WorkspaceEdit`) — тогда их возвращаем, чтобы вызывающий применил их обычным путём.
+   */
+  async executeCommand(path: string, command: string, args: readonly unknown[]): Promise<unknown> {
+    return this.request(path, 'workspace/executeCommand', { command, arguments: [...args] });
   }
 }
 

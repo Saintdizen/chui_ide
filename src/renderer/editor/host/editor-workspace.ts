@@ -72,6 +72,8 @@ export interface EditorWorkspaceOptions {
   snippets?: () => readonly Snippet[];
   /** Форматировать файл (инструмент языка спрашивает app, у редактора его нет). */
   formatCode?: (path: string) => void;
+  /** Быстрые исправления под курсором: список и правки — дело приложения. */
+  codeActions?: (path: string, position: { line: number; column: number }) => void;
   /** Наведение от языкового сервера: путь и позиция → текст разметки. */
   hoverFromLanguage?: (path: string, position: { line: number; column: number }) => Promise<HoverExternalInfo | null>;
   /** Подсказки языкового сервера: путь и позиция → дополнения (см. `LspFeatures.completion`). */
@@ -147,6 +149,8 @@ export class EditorWorkspace {
   private readonly renameSymbol: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Перейти к месту — открыть файл и поставить курсор. */
   private readonly revealLocation: ((path: string, line: number, column: number) => void) | undefined;
+  /** Быстрые исправления: шов к приложению (сервер, список, применение правок). */
+  private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Короткий путь для подписи места в списке. */
   private readonly relativePath: ((path: string) => string) | undefined;
   /** Сообщить, что мест не нашлось. */
@@ -198,6 +202,7 @@ export class EditorWorkspace {
     this.fontSize = options.fontSize;
     this.snippets = options.snippets;
     this.formatCode = options.formatCode;
+    this.codeActions = options.codeActions;
     this.hoverFromLanguage = options.hoverFromLanguage;
     this.completionFromLanguage = options.completionFromLanguage;
     this.signatureFromLanguage = options.signatureFromLanguage;
@@ -272,6 +277,8 @@ export class EditorWorkspace {
       hoverFromLanguage: this.hoverFromLanguage,
       completionFromLanguage: this.completionFromLanguage,
       signatureFromLanguage: this.signatureFromLanguage,
+      // Быстрые исправления — шов приложения: ему и сервер, и попап, и документная модель.
+      codeActions: this.codeActions,
       symbols: this.symbols,
       revealLocation: this.revealLocation,
       relativePath: this.relativePath,
@@ -451,6 +458,9 @@ export class EditorWorkspace {
     // Переименование — шов приложения: ему нужен диалог имени и документная модель.
     const renameSymbol = this.renameSymbol;
     if (renameSymbol) context.renameSymbol = () => path && renameSymbol(path, this.pane.cursor());
+    // Быстрые исправления — тот же порядок: список показывает приложение.
+    const codeActions = this.codeActions;
+    if (codeActions) context.codeActions = () => path && codeActions(path, this.pane.cursor());
     // Переход по пометкам есть всегда: хранилище пометок — у самого рабочего места.
     context.nextProblem = () => this.problems.next();
     context.previousProblem = () => this.problems.previous();
@@ -596,6 +606,16 @@ export class EditorWorkspace {
   /** Поставить фокус в активную панель. */
   focus(): void {
     this.pane.focus();
+  }
+
+  /** Где каретка активной панели в системе окна (`null` — ничего не открыто). */
+  caretPoint(): { left: number; top: number; bottom: number } | null {
+    return this.pane.caretPoint();
+  }
+
+  /** Пометки языка файла с диапазонами — контекст для запроса быстрых исправлений. */
+  lspDiagnostics(path: string): LspDiagnostic[] {
+    return this.diagnostics.forPath(path);
   }
 
   /**

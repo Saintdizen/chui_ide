@@ -1216,6 +1216,34 @@ async function languageHoverCheck(win) {
  * место решает, что с ними делать. Проверяем все три случая: одно место — прыжок сразу,
  * несколько — список, ни одного — весть без списка.
  */
+async function codeActionsCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const send = (event) => win.webContents.sendInputEvent(event);
+
+  // Курсор в панель хозяина: Ctrl+. должен дойти до шва приложения (там запрос к серверу).
+  await script(`(() => {
+    const { host, docA, codeActions } = window.probeHost;
+    codeActions.length = 0;
+    host.open(docA);
+    host.reveal(docA.path, 2, 3);
+    return true;
+  })()`);
+
+  send({ type: 'keyDown', keyCode: '.', modifiers: ['control'] });
+  send({ type: 'keyUp', keyCode: '.', modifiers: ['control'] });
+  await wait(60);
+
+  return script(`(() => {
+    const { codeActions, host } = window.probeHost;
+    return {
+      вызовов: codeActions.length,
+      путь: codeActions[0]?.path ?? null,
+      позиция: codeActions[0]?.position ?? null,
+      курсор: host.cursorState,
+    };
+  })()`);
+}
+
 async function problemPanelCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
 
@@ -1764,6 +1792,11 @@ async function main() {
   const problemPanel = await problemPanelCheck(win);
   log('## Панель проблем');
   log(JSON.stringify(problemPanel, null, 2));
+  log('');
+
+  const codeActions = await codeActionsCheck(win);
+  log('## Быстрые исправления: Ctrl+.');
+  log(JSON.stringify(codeActions, null, 2));
   log('');
 
   const inline = await inlineCheck(win);

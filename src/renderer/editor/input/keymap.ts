@@ -74,7 +74,9 @@ export type EditCommand =
   | 'moveLineDown'
   | 'copyLineDown'
   /** F1 — палитра команд (у Monaco её открывало его же действие). */
-  | 'palette';
+  | 'palette'
+  /** Ctrl+. — быстрые исправления под курсором (список показывает приложение). */
+  | 'codeActions';
 
 /**
  * Во что превращается нажатие.
@@ -132,6 +134,8 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     if (lower === 'g') return { kind: 'edit', edit: 'gotoLine' };
     // Ctrl+/ — комментарий строки: буквенного имени у клавиши нет, проверяем сам знак.
     if (key === '/') return { kind: 'edit', edit: 'toggleComment' };
+    // Ctrl+. — быстрые исправления: как в других редакторах, на той же клавише.
+    if (key === '.') return { kind: 'edit', edit: 'codeActions' };
     // Ctrl+Z — отмена; Ctrl+Shift+Z и Ctrl+Y — повтор (обе привычки поддержаны).
     if (lower === 'z') return { kind: 'edit', edit: extend ? 'redo' : 'undo' };
     if (lower === 'y') return { kind: 'edit', edit: 'redo' };

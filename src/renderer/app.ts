@@ -14,6 +14,7 @@ import { createBlameController } from './core/blame';
 import { createChangeGutterController } from './core/change-gutter';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
 import type { TextDocument } from './core/document';
+import { uriToPath } from './core/document';
 import { DocumentStore } from './core/document-store';
 import { EditService } from './core/edits';
 import { HostService } from './core/host';
@@ -48,6 +49,10 @@ import { isNodeTestFile, isPythonTestFile, type ProjectScan } from '../shared/pr
 import { findRunnableTests } from '../shared/python-tests';
 import { detectNodeTestRunner, findRunnableNodeTests, type NodeTestRunner } from '../shared/node-tests';
 import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
+import { codeActionKindLabel, type CodeActionItem } from '../shared/lsp-code-actions';
+import { installSuggestions } from '../shared/import-install';
+import { packageForModule } from '../shared/python-packages';
+import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
 import { joinPath, separatorOf, splitPath } from '../shared/paths';
 import { ThemeService } from './core/theme-service';
@@ -292,6 +297,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         }
       },
     },
+    // Быстрые исправления: список действий языка показывает приложение — у него и попапы,
+    // и языковой сервер, и документная модель для правок.
+    codeActions: (path, position) => void runCodeActions(path, position),
     // Правый клик по тексту: меню собираем здесь, а не в панели, — пункты это команды
     // приложения (отмена, буфер обмена, поиск, переходы), и реестр команд у него.
     contextMenu: (info, event) => {
@@ -328,10 +336,82 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           { label: 'Переименовать символ', onSelect: () => editors.runAction('editor.renameSymbol') },
         );
       }
+      // Быстрые исправления: пункт есть там, где он что-то даст — с языковым сервером.
+      if (info.path && editors.listActions().some((action) => action.id === 'editor.codeActions')) {
+        items.push({
+          label: 'Быстрые исправления…',
+          hint: 'Ctrl+.',
+          onSelect: () => void runCodeActions(info.path!, { line: info.line, column: info.column }),
+        });
+      }
       showContextMenu(items, event.clientX, event.clientY);
     },
   });
   const edits = new EditService({ documents, editors, rpc });
+
+  /**
+   * Наши быстрые правки: поставить не установленный пакет. Своя проверка импортов
+   * (`core/import-check.ts`) знает, чего не хватает, а перевод «модуль → пакет» — таблица
+   * Python (`yaml` → `PyYAML`). У языков разные пути установки: Python идёт `pip` в своё
+   * окружение, Node — менеджером проекта в терминале.
+   */
+  const importInstallActions = (path: string, position: { line: number; column: number }): PopupMenuItem[] => {
+    const language = documents.get(path)?.languageId ?? '';
+    const python = language === 'python';
+    if (!python && language !== 'javascript' && language !== 'typescript') return [];
+    const refs = importChecker.missingFor(path);
+    if (refs.length === 0) return [];
+    // Ориентируемся на строку под курсором: имя модуля берём из импорта, а не из позиции.
+    const suggestions = installSuggestions(refs, new Set([position.line]), python ? packageForModule : undefined);
+    return suggestions.map((item) => ({
+      label: `Установить пакет «${item.package}»`,
+      hint: 'быстрое исправление',
+      onSelect: () => void (python ? installPythonPackages([item.package]) : installNodePackages([item.package])),
+    }));
+  };
+
+  /**
+   * Быстрые исправления под курсором: спросить сервер, показать список у каретки,
+   * применить выбранное. Правки идут через документную модель — значит с undo; команда
+   * сервера выполняется там, где он живёт.
+   */
+  const runCodeActions = async (path: string, position: { line: number; column: number }): Promise<void> => {
+    // Контекст запроса — пометки ЭТОЙ строки: сервер отвечает исправлениями на них.
+    const diagnostics = editors.lspDiagnostics(path).filter((item) => item.line === position.line);
+    const actions = await lsp.codeActions(path, position, diagnostics);
+    // Свои правки идут вперёд: они отвечают на наши же пометки и понятнее серверных.
+    const items: PopupMenuItem[] = [
+      ...importInstallActions(path, position),
+      ...actions.map((action) => ({
+        label: action.title,
+        hint: codeActionKindLabel(action.kind),
+        onSelect: () => void applyCodeAction(path, action),
+      })),
+    ];
+    if (items.length === 0) {
+      showToast('Быстрых исправлений здесь нет');
+      return;
+    }
+    // Список ставим у каретки — как список подсказок: глаз уже там, где он печатает.
+    const point = editors.caretPoint();
+    showPopupMenu(items, point?.left ?? 0, (point?.bottom ?? 0) + 2);
+  };
+
+  /** Применить выбранное действие: его правки и/или команду сервера. */
+  const applyCodeAction = async (path: string, action: CodeActionItem): Promise<void> => {
+    if (action.edits) {
+      const result = await edits.applyFileEdits(action.edits);
+      if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
+    }
+    if (!action.command) return;
+    const answer = await lsp.executeCommand(path, action.command.command, action.command.arguments);
+    // Часть серверов возвращает из команды правки — применяем их тем же путём.
+    const fileEdits = toWorkspaceFileEdits(answer, uriToPath);
+    if (fileEdits) {
+      const result = await edits.applyFileEdits(fileEdits);
+      if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
+    }
+  };
   // Подпись blame у строки под курсором. Запрос идёт в git за одной строкой;
   // показ по умолчанию выключен и включается командой (см. `git.toggleBlame`).
   const blame = createBlameController({

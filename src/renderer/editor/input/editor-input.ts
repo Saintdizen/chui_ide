@@ -37,7 +37,7 @@ import type { Selection } from '../view/selection';
 const CLIPBOARD_COMMANDS: ReadonlySet<EditCommand> = new Set(['copy', 'cut', 'paste']);
 
 /** Команды, которые ввод не выполняет сам, а передаёт наружу. */
-export type CommandName = 'find' | 'replace' | 'gotoLine' | 'palette';
+export type CommandName = 'find' | 'replace' | 'gotoLine' | 'palette' | 'codeActions';
 
 /**
  * Кто может забрать клавишу себе раньше редактора. Так устроены попапы: при видимом
@@ -414,6 +414,10 @@ export class EditorInputBinding {
       // F1 — палитра команд: её показывает вызывающий (в приложении — реестр команд).
       case 'palette':
         this.onCommand?.('palette');
+        break;
+      // Ctrl+. — быстрые исправления: список действий языка показывает вызывающий.
+      case 'codeActions':
+        this.onCommand?.('codeActions');
         break;
     }
   }

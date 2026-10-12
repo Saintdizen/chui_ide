@@ -152,6 +152,11 @@ export interface EditorHostOptions {
    */
   contextMenu?: (info: EditorContextInfo, event: MouseEvent) => void;
   /**
+   * Быстрые исправления под курсором (Ctrl+.): показать список действий языка. Дело
+   * приложения — у него и попапы, и языковой сервер, и документная модель для правок.
+   */
+  codeActions?: (path: string, position: { line: number; column: number }) => void;
+  /**
    * Inline-подсказка «допиши за меня»: включение, задержка и запрос к модели. Не задана —
    * призрачного текста в панели нет вовсе (у Monaco это был его провайдер подсказок).
    */
@@ -196,6 +201,8 @@ export class EditorHost {
   openPalette: (() => void) | null = null;
   /** Правый клик по тексту: приложение показывает своё меню (см. `EditorContextInfo`). */
   private readonly contextMenu: ((info: EditorContextInfo, event: MouseEvent) => void) | undefined;
+  /** Быстрые исправления: список показывает приложение (см. `codeActions` в опциях). */
+  private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Поле прокрутки: на нём слушаем Ctrl+Click по слову (переход к определению). */
   private readonly viewport: HTMLElement | null;
 
@@ -259,6 +266,7 @@ export class EditorHost {
     this.scheme = options.scheme ?? 'dark';
     this.openPalette = options.openPalette ?? null;
     this.contextMenu = options.contextMenu;
+    this.codeActions = options.codeActions;
 
     // До первого `open` редактор держит пустой буфер: слои не терпят «нет документа», а
     // пустая вкладка — нормальное состояние панели, пока файл не открыт.
@@ -636,6 +644,14 @@ export class EditorHost {
     this.navigation.goToDefinition();
   };
 
+  /**
+   * Где каретка в системе окна (`null` — панель пуста). Нужно приложению: свои попапы
+   * (например, список быстрых исправлений) оно ставит у каретки.
+   */
+  caretPoint(): { left: number; top: number; bottom: number } | null {
+    return this.path ? this.caretAnchor() : null;
+  }
+
   /** Где каретка в системе окна: там показывается список мест. */
   private caretAnchor(): { left: number; top: number; bottom: number } {
     const point = this.view.clientPoint(this.controller.caret);
@@ -925,7 +941,10 @@ export class EditorHost {
   private runCommand(command: CommandName): void {
     if (command === 'gotoLine') this.goto.show();
     else if (command === 'palette') this.openPalette?.();
-    else this.find.show(command === 'replace' ? 'replace' : 'find');
+    else if (command === 'codeActions') {
+      // Быстрые исправления — дело приложения: ему и сервер, и список, и правки.
+      if (this.path) this.codeActions?.(this.path, this.cursorPosition());
+    } else this.find.show(command === 'replace' ? 'replace' : 'find');
   }
 
   /**

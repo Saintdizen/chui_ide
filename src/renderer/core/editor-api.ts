@@ -38,6 +38,10 @@ export interface EditorApi {
   markers(path?: string): DiagnosticItem[];
   /** Пометки одного источника (языковой сервер, проверка импортов). */
   setExternalMarkers(path: string, owner: string, diagnostics: readonly LspDiagnostic[]): void;
+  /** Пометки языка файла с диапазонами — контекст для быстрых исправлений. */
+  lspDiagnostics(path: string): LspDiagnostic[];
+  /** Где каретка в системе окна (`null` — ничего не открыто): приложение ставит там попапы. */
+  caretPoint(): { left: number; top: number; bottom: number } | null;
   /** Точки останова файла: строка и, если задано, условие останова. */
   setBreakpoints(path: string, breakpoints: readonly BreakpointInput[]): void;
 }
