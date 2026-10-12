@@ -39,7 +39,7 @@ import { type EditorChange, EditorController } from '../input/editor-controller'
 import { type CommandName, EditorInputBinding, type KeyInterceptor } from '../input/editor-input';
 import { InlineCompletions } from '../input/inline-completions';
 import { EditorView } from '../view/editor-view';
-import { caret, type Selection } from '../view/selection';
+import { caret, isEmpty, type Selection } from '../view/selection';
 import { FileDecorations } from '../view/decorations';
 import { FindWidget } from '../widgets/find-widget';
 import { GotoLineWidget } from '../widgets/goto-widget';
@@ -70,6 +70,20 @@ export interface TestMarkerHit {
   /** Селектор pytest из разбора файла: `файл::Класс::тест`. */
   selector: string;
   name: string;
+}
+
+/** Что редактор знает о месте правого клика: приложению этого хватает для меню. */
+export interface EditorContextInfo {
+  /** Файл панели (`null` — ничего не открыто). */
+  path: string | null;
+  /** Место под кликом (1-based). */
+  line: number;
+  column: number;
+  /** Есть ли выделение и его текст — от этого зависит доступность «вырезать»/«копировать». */
+  hasSelection: boolean;
+  selectedText: string;
+  canUndo: boolean;
+  canRedo: boolean;
 }
 
 /** Что изменилось с курсором: файл, позиция и сколько выделений (у нас всегда одно). */
@@ -124,6 +138,12 @@ export interface EditorHostOptions {
   /** F1 — открыть палитру команд. Не задано — F1 в редакторе может только гаситься. */
   openPalette?: () => void;
   /**
+   * Правый клик по тексту: приложение показывает своё меню. Шов, потому что пункты
+   * меню — это команды приложения (отмена, буфер обмена, поиск, переходы), а не
+   * знание панели.
+   */
+  contextMenu?: (info: EditorContextInfo, event: MouseEvent) => void;
+  /**
    * Inline-подсказка «допиши за меня»: включение, задержка и запрос к модели. Не задана —
    * призрачного текста в панели нет вовсе (у Monaco это был его провайдер подсказок).
    */
@@ -164,6 +184,8 @@ export class EditorHost {
    * создаётся раньше, чем палитра готова, и опцию ставит `openPaletteOnF1` позже.
    */
   openPalette: (() => void) | null = null;
+  /** Правый клик по тексту: приложение показывает своё меню (см. `EditorContextInfo`). */
+  private readonly contextMenu: ((info: EditorContextInfo, event: MouseEvent) => void) | undefined;
   /** Поле прокрутки: на нём слушаем Ctrl+Click по слову (переход к определению). */
   private readonly viewport: HTMLElement | null;
 
@@ -226,6 +248,7 @@ export class EditorHost {
     this.registry = registry;
     this.scheme = options.scheme ?? 'dark';
     this.openPalette = options.openPalette ?? null;
+    this.contextMenu = options.contextMenu;
 
     // До первого `open` редактор держит пустой буфер: слои не терпят «нет документа», а
     // пустая вкладка — нормальное состояние панели, пока файл не открыт.
@@ -304,6 +327,8 @@ export class EditorHost {
     this.input = new EditorInputBinding(this.view, this.controller, {
       onCommand: (command) => this.runCommand(command),
       interceptors,
+      // Язык: по нему ввод выбирает знак комментария для Ctrl+/.
+      language: () => this.languageId,
     });
     // После закрытия панели фокус возвращается в текст: работа продолжается там.
     this.find.onClose = () => this.input.focus();
@@ -512,6 +537,33 @@ export class EditorHost {
 
   selectAll(): void {
     this.controller.selectAll();
+    this.input.focus();
+  }
+
+  /**
+   * Буфер обмена из меню. С клавиш копирование идёт событиями copy/cut/paste, а у
+   * пункта меню такого события нет — поле ввода в этот момент не имеет нативного
+   * выделения, поэтому кладём и читаем текст сами (navigator.clipboard).
+   */
+  copyToClipboard(): void {
+    const text = this.controller.selectedText();
+    if (text) void navigator.clipboard.writeText(text).catch(() => undefined);
+    this.input.focus();
+  }
+
+  cutToClipboard(): void {
+    const text = this.controller.cutSelection();
+    if (text) void navigator.clipboard.writeText(text).catch(() => undefined);
+    this.input.focus();
+  }
+
+  pasteFromClipboard(): void {
+    void navigator.clipboard
+      .readText()
+      .then((text) => {
+        if (text) this.controller.paste(text);
+      })
+      .catch(() => undefined);
     this.input.focus();
   }
 
@@ -770,6 +822,31 @@ export class EditorHost {
     this.view.onGlyphClick = (line) => this.onGlyphClick(line);
     this.view.onGlyphContextMenu = (line) => this.onGlyphClick(line, true);
     this.view.onStripClick = (line) => this.onStripClick(line);
+    this.view.onContextMenu = (event) => this.openContextMenu(event);
+  }
+
+  /**
+   * Правый клик по тексту. Сперва ставим каретку в место клика — человек ожидает, что
+   * меню относится к слову под курсором (дальше это нужно переходам к определению и
+   * ссылкам). Затем отдаём сбор меню приложению: у него есть реестр команд и буфер обмена.
+   */
+  private openContextMenu(event: MouseEvent): void {
+    const offset = this.view.offsetAt(event.clientX, event.clientY);
+    this.controller.setSelection({ anchor: offset, active: offset });
+    this.input.focus();
+    const position = this.cursorPosition();
+    this.contextMenu?.(
+      {
+        path: this.path,
+        line: position.line,
+        column: position.column,
+        hasSelection: !isEmpty(this.controller.selection),
+        selectedText: this.controller.selectedText(),
+        canUndo: this.controller.canUndo,
+        canRedo: this.controller.canRedo,
+      },
+      event,
+    );
   }
 
   /**

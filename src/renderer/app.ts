@@ -53,6 +53,7 @@ import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
 import { showApplicationMenu } from './ui/app-menu';
+import { showContextMenu } from './ui/context-menu';
 import { createBreadcrumbs } from './ui/breadcrumbs';
 import { createChatPanel } from './ui/chat';
 import { createDock } from './ui/dock';
@@ -285,6 +286,44 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           return null;
         }
       },
+    },
+    // Правый клик по тексту: меню собираем здесь, а не в панели, — пункты это команды
+    // приложения (отмена, буфер обмена, поиск, переходы), и реестр команд у него.
+    contextMenu: (info, event) => {
+      const items: PopupMenuItem[] = [
+        { label: 'Отменить', hint: 'Ctrl+Z', onSelect: () => editors.runAction('editor.undo') },
+        { label: 'Повторить', hint: 'Ctrl+Y', onSelect: () => editors.runAction('editor.redo') },
+        { separator: true },
+      ];
+      if (info.hasSelection) {
+        items.push(
+          { label: 'Вырезать', hint: 'Ctrl+X', onSelect: () => editors.cutToClipboard() },
+          { label: 'Копировать', hint: 'Ctrl+C', onSelect: () => editors.copyToClipboard() },
+        );
+      }
+      items.push(
+        { label: 'Вставить', hint: 'Ctrl+V', onSelect: () => editors.pasteFromClipboard() },
+        { separator: true },
+        { label: 'Выделить всё', hint: 'Ctrl+A', onSelect: () => editors.runAction('editor.selectAll') },
+        { separator: true },
+        { label: 'Увеличить отступ', hint: 'Tab', onSelect: () => editors.runAction('editor.indent') },
+        { label: 'Уменьшить отступ', hint: 'Shift+Tab', onSelect: () => editors.runAction('editor.outdent') },
+        { separator: true },
+        { label: 'Найти', hint: 'Ctrl+F', onSelect: () => editors.runAction('editor.find') },
+        { label: 'Найти и заменить', hint: 'Ctrl+H', onSelect: () => editors.runAction('editor.replace') },
+        { label: 'Перейти к строке', hint: 'Ctrl+G', onSelect: () => editors.runAction('editor.gotoLine') },
+      );
+      // Переходы по символу и переименование доступны только с языковым сервером:
+      // без него этих команд в каталоге редактора нет — и пункты не показываем.
+      if (editors.listActions().some((action) => action.id === 'editor.goToDefinition')) {
+        items.push(
+          { separator: true },
+          { label: 'Перейти к определению', onSelect: () => editors.runAction('editor.goToDefinition') },
+          { label: 'Найти все ссылки', onSelect: () => editors.runAction('editor.references') },
+          { label: 'Переименовать символ', onSelect: () => editors.runAction('editor.renameSymbol') },
+        );
+      }
+      showContextMenu(items, event.clientX, event.clientY);
     },
   });
   const edits = new EditService({ documents, editors, rpc });

@@ -27,15 +27,22 @@ import {
 import type { TextBuffer } from '../core/text-buffer';
 import { isEmpty, type Selection } from '../view/selection';
 import {
+  closerFor,
+  copyLinesDown,
   deleteBackward,
   deleteForward,
+  deletePairBackward,
   deleteWordBackward,
   deleteWordForward,
   insertNewline,
+  insertPair,
   insertText,
+  moveLines,
   outdentLine,
+  skipClosing,
   type EditResult,
 } from './editing';
+import { toggleLineComment } from './comments';
 import {
   columnAt,
   moveDocEnd,
@@ -250,6 +257,43 @@ export class EditorController {
   }
 
   /**
+   * Ввод с ОДНОЙ клавиши: дописываем пару за скобкой или кавычкой и перешагиваем через
+   * уже стоящий закрывающий знак. Вставка из буфера идёт через `type`: там такое поведение
+   * было бы навязчивым (вставили кусок кода — получили лишние скобки).
+   */
+  typeWithPairs(text: string): void {
+    if (text.length === 1) {
+      const closer = closerFor(text);
+      if (closer !== null) {
+        this.run(insertPair(this.buffer, this.selectionState, text, closer), 'typing');
+        return;
+      }
+      const skipped = skipClosing(this.buffer, this.selectionState, text);
+      if (skipped) {
+        this.setSelection(skipped);
+        return;
+      }
+    }
+    this.type(text);
+  }
+
+  /** Ctrl+/ — переключить строчный комментарий у строк выделения. */
+  toggleComment(token: string): void {
+    const result = toggleLineComment(this.buffer, this.selectionState, token);
+    if (result) this.applyEdits(result.changes, result.selection);
+  }
+
+  /** Alt+↑/↓ — перенести строку (или строки выделения) выше или ниже. */
+  moveLines(direction: -1 | 1): void {
+    this.run(moveLines(this.buffer, this.selectionState, direction), 'other');
+  }
+
+  /** Shift+Alt+↓ — скопировать строку (или строки выделения) ниже. */
+  copyLinesDown(): void {
+    this.run(copyLinesDown(this.buffer, this.selectionState), 'other');
+  }
+
+  /**
    * Применить готовую правку участка — так работает замена по файлу. Одной правкой
    * на весь диапазон: набор независимых правок не годится для истории (смещения
    * второй после применения первой уже съехали бы), а одна правка отменяется целиком,
@@ -329,7 +373,10 @@ export class EditorController {
   }
 
   backspace(): void {
-    this.run(deleteBackward(this.buffer, this.selectionState), 'delete');
+    // Сперва пробуем снять пару скобок целиком: Backspace внутри `()` должен убрать оба
+    // знака, а не оставить висящую открывающую скобку.
+    const paired = deletePairBackward(this.buffer, this.selectionState);
+    this.run(paired ?? deleteBackward(this.buffer, this.selectionState), 'delete');
   }
 
   deleteForward(): void {

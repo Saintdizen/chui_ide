@@ -167,3 +167,124 @@ export function indentLine(buffer: TextBuffer, offset: number, tabSize: number):
   const change = replaceRange(buffer, start, 0, ' '.repeat(tabSize));
   return { selection: caretAt(offset + tabSize), change };
 }
+
+/* ── парные символы ──────────────────────────────────────────────────── */
+
+/** Открывающий знак → закрывающий. По нему ввод знает, что дописать за человеком. */
+const PAIRS: Readonly<Record<string, string>> = {
+  '(': ')',
+  '[': ']',
+  '{': '}',
+  '"': '"',
+  "'": "'",
+  '`': '`',
+};
+
+/** Закрывающий знак для открытого, иначе `null`. */
+export function closerFor(char: string): string | null {
+  return PAIRS[char] ?? null;
+}
+
+/** Открывающий ли это знак (за него редактор дописывает пару). */
+export function isOpener(char: string): boolean {
+  return char in PAIRS;
+}
+
+/** Обёртки выделения: круглые, квадратные и фигурные. Кавычки — только текст. */
+function wrapsSelection(char: string): boolean {
+  return char === '(' || char === '[' || char === '{';
+}
+
+/**
+ * Ввести открывающий знак. Выделение есть — оборачиваем его в пару (как `(текст)`);
+ * пусто — вставляем пару и ставим каретку между знаками, чтобы сразу писать внутри.
+ */
+export function insertPair(buffer: TextBuffer, selection: Selection, open: string, close: string): EditResult | null {
+  const start = selectionStart(selection);
+  const end = selectionEnd(selection);
+  if (wrapsSelection(open) && start !== end) {
+    const selected = buffer.getText(start, end);
+    const change = replaceRange(buffer, start, end - start, `${open}${selected}${close}`);
+    return { selection: caretAt(start + open.length + selected.length + close.length), change };
+  }
+  const change = replaceRange(buffer, start, end - start, `${open}${close}`);
+  return { selection: caretAt(start + open.length), change };
+}
+
+/**
+ * Ввести закрывающий знак, когда такой же уже стоит справа: не вставляем второй, а
+ * просто перешагиваем через него. `null` — перешагивать некуда, ввод обычный.
+ */
+export function skipClosing(buffer: TextBuffer, selection: Selection, closer: string): Selection | null {
+  if (!isEmpty(selection)) return null;
+  const offset = selection.active;
+  if (buffer.getText(offset, offset + closer.length) !== closer) return null;
+  return caretAt(offset + closer.length);
+}
+
+/**
+ * Backspace между пустой парой: снять оба знака разом, а не по одному. `null` —
+ * по обе стороны от каретки не пара, удаление обычное.
+ */
+export function deletePairBackward(buffer: TextBuffer, selection: Selection): EditResult | null {
+  if (!isEmpty(selection)) return null;
+  const offset = selection.active;
+  if (offset <= 0 || offset >= buffer.length) return null;
+
+  const line = buffer.lineAt(offset);
+  const start = buffer.lineStart(line);
+  const local = offset - start;
+  const text = buffer.lineText(line);
+  const open = text.slice(local - 1, local);
+  const close = PAIRS[open];
+  if (!close || text.slice(local, local + close.length) !== close) return null;
+
+  const change = replaceRange(buffer, offset - 1, 1 + close.length, '');
+  return { selection: caretAt(offset - 1), change };
+}
+
+/* ── строки ──────────────────────────────────────────────────────────── */
+
+/**
+ * Сдвинуть строку (или строки выделения) выше или ниже. `direction` — `-1` вверх,
+ * `1` вниз; за край документа не выходим — тогда `null`.
+ */
+export function moveLines(buffer: TextBuffer, selection: Selection, direction: -1 | 1): EditResult | null {
+  const first = buffer.lineAt(selectionStart(selection));
+  const last = buffer.lineAt(selectionEnd(selection));
+  if (direction === -1 && first <= 1) return null;
+  if (direction === 1 && last >= buffer.lineCount) return null;
+
+  const blockStart = buffer.lineStart(first);
+  const blockEnd = buffer.lineStart(last) + buffer.lineText(last).length;
+  const blockText = buffer.getText(blockStart, blockEnd);
+
+  if (direction === -1) {
+    const aboveStart = buffer.lineStart(first - 1);
+    const above = buffer.lineText(first - 1);
+    const change = replaceRange(buffer, aboveStart, blockEnd - aboveStart, `${blockText}\n${above}`);
+    return { selection: shiftSelection(selection, -(above.length + 1)), change };
+  }
+
+  const below = buffer.lineText(last + 1);
+  const belowEnd = buffer.lineStart(last + 1) + below.length;
+  const change = replaceRange(buffer, blockStart, belowEnd - blockStart, `${below}\n${blockText}`);
+  return { selection: shiftSelection(selection, below.length + 1), change };
+}
+
+/** Скопировать строку (или строки выделения) ниже себя, оставив выделение на копиях. */
+export function copyLinesDown(buffer: TextBuffer, selection: Selection): EditResult | null {
+  const first = buffer.lineAt(selectionStart(selection));
+  const last = buffer.lineAt(selectionEnd(selection));
+  const blockStart = buffer.lineStart(first);
+  const blockEnd = buffer.lineStart(last) + buffer.lineText(last).length;
+  const blockText = buffer.getText(blockStart, blockEnd);
+
+  const change = replaceRange(buffer, blockEnd, 0, `\n${blockText}`);
+  return { selection: shiftSelection(selection, blockText.length + 1), change };
+}
+
+/** Сдвинуть оба конца выделения на одно и то же — после переноса строки. */
+function shiftSelection(selection: Selection, delta: number): Selection {
+  return { anchor: selection.anchor + delta, active: selection.active + delta };
+}

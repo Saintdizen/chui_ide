@@ -43,6 +43,7 @@ import {
   EditorHost,
   type ChangeMarkerHit,
   type CursorState,
+  type EditorContextInfo,
   type RunMarkerHit,
   type TestMarkerHit,
 } from './editor-host';
@@ -95,6 +96,8 @@ export interface EditorWorkspaceOptions {
   relativePath?: (path: string) => string;
   /** Сообщить человеку, что мест не нашлось. */
   onNotice?: (text: string) => void;
+  /** Правый клик по тексту: приложение собирает меню (см. `EditorContextInfo`). */
+  contextMenu?: (info: EditorContextInfo, event: MouseEvent) => void;
   /**
    * Inline-подсказка «допиши за меня»: включение, задержка и запрос к модели. Не задана —
    * призрачного текста в панелях нет вовсе.
@@ -143,6 +146,8 @@ export class EditorWorkspace {
   private readonly relativePath: ((path: string) => string) | undefined;
   /** Сообщить, что мест не нашлось. */
   private readonly onNotice: ((text: string) => void) | undefined;
+  /** Правый клик по тексту: меню собирает приложение (у него реестр команд и буфер обмена). */
+  private readonly contextMenu: EditorWorkspaceOptions['contextMenu'];
   /** Inline-подсказка «допиши за меня». */
   private readonly inlineCompletion: EditorWorkspaceOptions['inlineCompletion'];
   /** Оценка выражения под курсором в остановленном файле; задаёт app (там контроллер отладки). */
@@ -195,6 +200,7 @@ export class EditorWorkspace {
     this.revealLocation = options.revealLocation;
     this.relativePath = options.relativePath;
     this.onNotice = options.onNotice;
+    this.contextMenu = options.contextMenu;
     this.inlineCompletion = options.inlineCompletion;
     // Переход по пометкам: список берём из своего хранилища, а переход отдаём наружу
     // (`revealLocation`), если приложение его дало: иначе файл может быть не открыт,
@@ -263,6 +269,7 @@ export class EditorWorkspace {
       revealLocation: this.revealLocation,
       relativePath: this.relativePath,
       onNotice: this.onNotice,
+      contextMenu: this.contextMenu,
       inlineCompletion: this.inlineCompletion,
       // Отладочная подсказка: слово и его строка → значение из кадра (см. `setDebugHover`).
       debugHover: (word, at) => this.debugHoverText(word, at),
@@ -451,6 +458,19 @@ export class EditorWorkspace {
   /** Вставка текста в курсор активной панели. */
   insertAtCursor(text: string): boolean {
     return this.pane.insertAtCursor(text);
+  }
+
+  /** Буфер обмена активной панели — для пунктов контекстного меню. */
+  copyToClipboard(): void {
+    this.pane.copyToClipboard();
+  }
+
+  cutToClipboard(): void {
+    this.pane.cutToClipboard();
+  }
+
+  pasteFromClipboard(): void {
+    this.pane.pasteFromClipboard();
   }
 
   /** Текст файла по буферу (`null` — файл нигде не открыт). */

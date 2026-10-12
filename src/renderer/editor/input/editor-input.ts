@@ -26,6 +26,7 @@
  */
 
 import { wordAt } from '../core/graphemes';
+import { lineCommentFor } from './comments';
 import { resolveKey, type EditCommand, type Motion } from './keymap';
 import type { EditorChange, EditorController } from './editor-controller';
 
@@ -56,6 +57,8 @@ export interface EditorInputOptions {
   onCommand?: (command: CommandName) => void;
   /** Перехватчики клавиш и наблюдатели изменений — попапы и подсказки. */
   interceptors?: readonly KeyInterceptor[];
+  /** Язык открытого файла: по нему ввод знает, чем комментировать строку (Ctrl+/). */
+  language?: () => string | null;
 }
 
 export class EditorInputBinding {
@@ -65,6 +68,7 @@ export class EditorInputBinding {
   private readonly viewport: HTMLElement | null;
   private readonly onCommand: ((command: CommandName) => void) | undefined;
   private readonly interceptors: readonly KeyInterceptor[];
+  private readonly language: (() => string | null) | undefined;
   private dragging = false;
   /** Идёт ли состав IME: пока он идёт, ввод не перехватываем — его завершит `compositionend`. */
   private composing = false;
@@ -75,6 +79,7 @@ export class EditorInputBinding {
     this.controller = controller;
     this.onCommand = options.onCommand;
     this.interceptors = options.interceptors ?? [];
+    this.language = options.language;
     this.input = document.createElement('textarea');
     this.input.className = 'own-editor-input';
     this.input.setAttribute('autocapitalize', 'off');
@@ -190,7 +195,8 @@ export class EditorInputBinding {
     const { inputType, data } = event;
     if (inputType === 'insertText' || inputType === 'insertReplacementText') {
       event.preventDefault();
-      if (data) this.controller.type(data);
+      // Набор с клавиши: за скобкой допишется пара, а закрывающая перешагнёт свою.
+      if (data) this.controller.typeWithPairs(data);
       return;
     }
     if (inputType === 'insertFromPaste') {
@@ -243,6 +249,11 @@ export class EditorInputBinding {
 
   private readonly onMouseDown = (event: MouseEvent): void => {
     if (event.button !== 0) return;
+    // Глушим default: иначе браузер сам переносит фокус на узел под курсором
+    // (у корня редактора есть tabindex), и вызов фокуса на скрытое поле теряется —
+    // после клика текст перестаёт печататься вовсе. Заодно отменяется нативное
+    // выделение: своё мы тянем сами в onMouseMove.
+    event.preventDefault();
     this.focus();
     const offset = this.view.offsetAt(event.clientX, event.clientY);
     if (event.shiftKey) {
@@ -382,6 +393,23 @@ export class EditorInputBinding {
         break;
       case 'gotoLine':
         this.onCommand?.('gotoLine');
+        break;
+      // Ctrl+/ — комментарий строки: знак зависит от языка, а он — знание хозяина,
+      // поэтому язык спрашиваем швом (см. `language` в опциях).
+      case 'toggleComment': {
+        const token = lineCommentFor(this.language?.() ?? null);
+        if (token) this.controller.toggleComment(token);
+        break;
+      }
+      // Alt+↑/↓ — перенос строки; Shift+Alt+↓ — её копия ниже.
+      case 'moveLineUp':
+        this.controller.moveLines(-1);
+        break;
+      case 'moveLineDown':
+        this.controller.moveLines(1);
+        break;
+      case 'copyLineDown':
+        this.controller.copyLinesDown();
         break;
       // F1 — палитра команд: её показывает вызывающий (в приложении — реестр команд).
       case 'palette':

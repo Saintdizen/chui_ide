@@ -123,6 +123,8 @@ export class EditorView {
   onStripContextMenu: ((line: number, event: MouseEvent) => void) | null = null;
   onGutterClick: ((line: number, event: MouseEvent) => void) | null = null;
   onGutterContextMenu: ((line: number, event: MouseEvent) => void) | null = null;
+  /** Правый клик по самому тексту: меню собирает хозяин, представление только сообщает. */
+  onContextMenu: ((event: MouseEvent) => void) | null = null;
 
   constructor(host: HTMLElement, buffer: TextBuffer, options: EditorViewOptions = {}) {
     this.host = host;
@@ -770,6 +772,13 @@ export class EditorView {
    */
   private bindAreaEvents(): void {
     const lineOf = (event: MouseEvent): number => this.lineAtPoint(event.clientY);
+
+    // Правый клик по полотну: показываем своё меню вместо системного. Меню собирает
+    // хозяин — представление лишь сообщает, что клик был.
+    this.viewport.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      this.onContextMenu?.(event);
+    });
 
     this.glyphMargin?.addEventListener('mousedown', (event) => {
       if (event.button !== 0) return;

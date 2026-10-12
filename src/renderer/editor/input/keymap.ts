@@ -67,6 +67,12 @@ export type EditCommand =
   | 'find'
   | 'replace'
   | 'gotoLine'
+  /** Ctrl+/ — закомментировать или расскомментировать строки. */
+  | 'toggleComment'
+  /** Alt+↑/↓ — перенести строку; Shift+Alt+↓ — скопировать её ниже. */
+  | 'moveLineUp'
+  | 'moveLineDown'
+  | 'copyLineDown'
   /** F1 — палитра команд (у Monaco её открывало его же действие). */
   | 'palette';
 
@@ -101,6 +107,12 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
 
   if (key === 'ArrowLeft') return motion(control ? 'wordLeft' : 'left', extend);
   if (key === 'ArrowRight') return motion(control ? 'wordRight' : 'right', extend);
+  // Alt со стрелками переносит и копирует строки — проверяем раньше обычного хода
+  // курсора, иначе Alt+↑ ничем не отличался бы от ↑.
+  if (chord.alt) {
+    if (key === 'ArrowUp') return { kind: 'edit', edit: 'moveLineUp' };
+    if (key === 'ArrowDown') return { kind: 'edit', edit: extend ? 'copyLineDown' : 'moveLineDown' };
+  }
   if (key === 'ArrowUp') return motion('up', extend);
   if (key === 'ArrowDown') return motion('down', extend);
   if (key === 'PageUp') return motion('pageUp', extend);
@@ -118,6 +130,8 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     if (lower === 'f') return { kind: 'edit', edit: 'find' };
     if (lower === 'h') return { kind: 'edit', edit: 'replace' };
     if (lower === 'g') return { kind: 'edit', edit: 'gotoLine' };
+    // Ctrl+/ — комментарий строки: буквенного имени у клавиши нет, проверяем сам знак.
+    if (key === '/') return { kind: 'edit', edit: 'toggleComment' };
     // Ctrl+Z — отмена; Ctrl+Shift+Z и Ctrl+Y — повтор (обе привычки поддержаны).
     if (lower === 'z') return { kind: 'edit', edit: extend ? 'redo' : 'undo' };
     if (lower === 'y') return { kind: 'edit', edit: 'redo' };

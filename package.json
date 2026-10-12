@@ -53,6 +53,7 @@
     "probe:settings": "npm run build && electron scripts/settings-search-probe.cjs",
     "probe:palette": "npm run build && electron scripts/palette-probe.cjs",
     "probe:editor": "electron scripts/own-editor-probe.cjs",
+    "probe:typing": "npm run build && electron scripts/type-probe.cjs",
     "probe:f1": "npm run build && electron scripts/f1-probe.cjs",
     "probe:lsp": "npm run build && electron scripts/lsp-pickup-probe.cjs",
     "probe:cursor": "npm run build && bash scripts/cursor-probe.sh",
