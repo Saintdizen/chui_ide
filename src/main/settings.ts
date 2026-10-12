@@ -8,6 +8,7 @@ import {
   type AppearanceSettings,
   type EditorSettings,
   type ExplorerSettings,
+  type GitSettings,
   type LayoutSettings,
   type LspSettings,
   type ReasoningEffort,
@@ -20,6 +21,10 @@ import { COMPACT_AT_TOKENS } from '../shared/context-fit';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
+import { normalizeRulers } from '../shared/rulers';
+import { normalizeWhitespaceMode } from '../shared/whitespace';
+import { normalizePullMode } from '../shared/git-pull';
+import { normalizeKeybindingOverrides, type KeybindingSettings } from '../shared/keybindings';
 import { sanitizeThemeFile, type ThemeFile } from '../shared/theme-file';
 import { sanitizeUiScale } from '../shared/ui-scale';
 import { isWebSearchProvider, type WebSearchProvider } from '../shared/web-search';
@@ -91,6 +96,8 @@ interface StoredSettings {
   workspace: WorkspaceSettings;
   layout: LayoutSettings;
   lsp: LspSettings;
+  git: GitSettings;
+  keybindings: KeybindingSettings;
 }
 
 const DEFAULT_SYSTEM_PROMPT = [
@@ -163,6 +170,17 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // которую человек не просил, — включается осознанно, как и форматирование.
     trimTrailingWhitespace: false,
     insertFinalNewline: false,
+    // Направляющие по умолчанию — привычные 80 и 120 столбцов: это ориентир длины
+    // строки, а не украшение; список пуст — черт нет.
+    rulers: [80, 120],
+    // Невидимые знаки по умолчанию скрыты: точки и стрелки в коде мешают читать.
+    renderWhitespace: 'none',
+    // Миникарта по умолчанию выключена: узкий файл она только заслоняет.
+    minimap: false,
+    // Перенос длинных строк выключен: по умолчанию строку не ломают, её тянут вбок.
+    wordWrap: false,
+    // Лигатуры выключены: не всякий шрифт их умеет, и не всем они нравятся.
+    fontLigatures: false,
     // Своих сниппетов по умолчанию нет: набор, что знает редактор, живёт в коде
     // (`shared/snippets.ts`), а здесь — только добавленное человеком.
     snippets: [],
@@ -177,6 +195,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     rowDensity: 'normal',
     gitDecorations: true,
     folderChangeDot: true,
+    // Игнорируемое приглушаем: это подсказка, а не запрет — файл остаётся виден.
+    dimIgnored: true,
     // Привычка из PyCharm: двойной клик открывает, одинарный — выделяет.
     openOnSingleClick: false,
     confirmDelete: true,
@@ -213,11 +233,20 @@ const DEFAULT_SETTINGS: StoredSettings = {
     dockVisible: false,
   },
   lsp: {
-    // По умолчанию выключено: языковой сервер — внешний процесс, который нужно
-    // установить и указать вручную. Никаких догадок про пути к бинарникам.
-    enabled: false,
+    // По умолчанию ВКЛЮЧЕНО: часть серверов едет вместе с IDE (см.
+    // `shared/lsp-bundled.ts`) и подставляется сама, поэтому подсказки и переходы
+    // работают сразу после установки. Ничего в обход настройки не запускается:
+    // выключение явным `false` уважаем, а PATH-серверы по-прежнему только
+    // подставляются, но не ставятся.
+    enabled: true,
     servers: [],
   },
+  // Git: по умолчанию не подсказываем режим pull — git ведёт себя как настроен.
+  // Навязывать слияние или перебазирование без спроса было бы навязчиво.
+  git: { pullMode: 'default' },
+  // Сочетаний по умолчанию тут нет: они живут в коде (`renderer/core/default-keybindings.ts`).
+  // Здесь — только то, что человек поменял сам.
+  keybindings: { overrides: [] },
 };
 
 const ENV_KEYS: Record<string, string> = {
@@ -320,6 +349,9 @@ export class SettingsStore {
         enabled: this.data.lsp.enabled,
         servers: this.data.lsp.servers.map((server) => ({ ...server, args: [...server.args] })),
       },
+      // Копия: снимок настроек не должен меняться вслед за правкой списка.
+      keybindings: { overrides: this.data.keybindings.overrides.map((item) => ({ ...item })) },
+      git: { pullMode: this.data.git.pullMode },
     };
   }
 
@@ -344,6 +376,13 @@ export class SettingsStore {
       const next = { ...this.data.editor, ...patch.editor };
       // Сниппеты — данные из файла: прогоняем их через ту же проверку, что при чтении.
       if (patch.editor.snippets !== undefined) next.snippets = normalizeSnippets(patch.editor.snippets);
+      // Направляющие из формы приходят строкой — приводим тем же разбором, что при чтении.
+      if (patch.editor.rulers !== undefined) next.rulers = normalizeRulers(patch.editor.rulers);
+      if (patch.editor.renderWhitespace !== undefined)
+        next.renderWhitespace = normalizeWhitespaceMode(patch.editor.renderWhitespace);
+      if (patch.editor.minimap !== undefined) next.minimap = patch.editor.minimap === true;
+      if (patch.editor.wordWrap !== undefined) next.wordWrap = patch.editor.wordWrap === true;
+      if (patch.editor.fontLigatures !== undefined) next.fontLigatures = patch.editor.fontLigatures === true;
       this.data.editor = next;
     }
     if (patch.explorer) {
@@ -369,6 +408,14 @@ export class SettingsStore {
     }
     if (patch.lsp) {
       this.data.lsp = sanitizeLsp({ ...this.data.lsp, ...patch.lsp });
+    }
+    if (patch.keybindings) {
+      this.data.keybindings = { overrides: normalizeKeybindingOverrides(patch.keybindings.overrides) };
+    }
+    if (patch.git) {
+      const next = { ...this.data.git, ...patch.git };
+      next.pullMode = normalizePullMode(next.pullMode);
+      this.data.git = next;
     }
     this.persist();
     return this.get();
@@ -633,6 +680,12 @@ function loadSettings(filePath: string): StoredSettings {
       // Сниппеты правит человек в файле, поэтому и триггер, и тело проверяются:
       // тело уходит в подсказку редактора разметкой Monaco.
       snippets: normalizeSnippets(parsed.editor?.snippets),
+      // Направляющие могли править руками — приводим к списку столбцов тем же разбором.
+      rulers: normalizeRulers(parsed.editor?.rulers),
+      renderWhitespace: normalizeWhitespaceMode(parsed.editor?.renderWhitespace),
+      minimap: parsed.editor?.minimap === true,
+      wordWrap: parsed.editor?.wordWrap === true,
+      fontLigatures: parsed.editor?.fontLigatures === true,
     },
     // Секции появились позже первых версий: старый settings.json их не знает,
     // поэтому неполный файл догружается значениями по умолчанию, а список
@@ -663,6 +716,10 @@ function loadSettings(filePath: string): StoredSettings {
         : [],
     },
     lsp: sanitizeLsp({ ...DEFAULT_SETTINGS.lsp, ...(parsed.lsp ?? {}) }),
+    // Файл могут править руками: сочетания приводим к известному виду.
+    keybindings: { overrides: normalizeKeybindingOverrides(parsed.keybindings?.overrides) },
+    // Режим pull могли записать чем угодно — держим только известные значения.
+    git: { pullMode: normalizePullMode(parsed.git?.pullMode) },
   };
 }
 
@@ -723,7 +780,27 @@ function sanitizeLsp(value: LspSettings): LspSettings {
           command: server.command,
           args: Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === 'string') : [],
           enabled: server.enabled !== false,
+          // Подпись и окружение необязательны: у серверов из PATH их нет, а у тех,
+          // что едут с IDE, они несут путь к Electron и режим Node.
+          ...(typeof server.label === 'string' && server.label ? { label: server.label } : {}),
+          ...(isStringRecord(server.env) ? { env: server.env } : {}),
+          ...(isPlainObject(server.initializationOptions)
+            ? { initializationOptions: server.initializationOptions }
+            : {}),
         }))
     : [];
-  return { enabled: value.enabled === true, servers };
+  // Выключено только явным `false`: отсутствие поля читаем как «включено» — серверы
+  // из поставки должны работать сразу после установки, без похода в настройки.
+  return { enabled: value.enabled !== false, servers };
+}
+
+/** Запись «строка → строка»: так приходит окружение сервера из файла настроек. */
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value as Record<string, unknown>).every((item) => typeof item === 'string');
+}
+
+/** Простой объект (не массив и не null): довод `initialize` у сервера из поставки. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }

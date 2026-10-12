@@ -11,6 +11,8 @@ export interface SearchView {
   element: HTMLElement;
   focus(): void;
   setScope(path: string | null): void;
+  /** Запустить готовый поиск: подставить запрос и искать (команды вроде «найти TODO»). */
+  search(text: string, options?: { isRegex?: boolean }): void;
 }
 
 export interface SearchDeps {
@@ -81,6 +83,8 @@ export function createSearchView(deps: SearchDeps): SearchView {
   let sequence = 0;
   let scope: string | null = null;
   let mode: SearchScope = 'project';
+  /** Запрос команды идёт регуляркой; ручной ввод это снимает. */
+  let regexOverride = false;
 
   scopeSelect.onChange((value) => {
     mode = value === 'editors' ? 'editors' : 'project';
@@ -185,7 +189,11 @@ export function createSearchView(deps: SearchDeps): SearchView {
       return;
     }
     try {
-      const result = await deps.rpc.request('workspace.search', { query, maxResults: 300 });
+      const result = await deps.rpc.request('workspace.search', {
+        query,
+        maxResults: 300,
+        ...(regexOverride ? { isRegex: true } : {}),
+      });
       if (current !== sequence) return;
       render(result, query);
     } catch (error) {
@@ -236,7 +244,10 @@ export function createSearchView(deps: SearchDeps): SearchView {
   });
 
   const schedule = debounce(() => void search(), 300);
-  input.addEventListener('input', () => schedule());
+  input.addEventListener('input', () => {
+    regexOverride = false;
+    schedule();
+  });
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') void search();
   });
@@ -246,6 +257,11 @@ export function createSearchView(deps: SearchDeps): SearchView {
     focus: () => {
       input.focus();
       input.select();
+    },
+    search: (text, options) => {
+      input.value = text;
+      regexOverride = options?.isRegex === true;
+      void search();
     },
     setScope(path) {
       scope = path;

@@ -120,32 +120,63 @@ export function resolvePatches(text: string, patches: readonly PatchHunk[]): Pat
 }
 
 /**
+ * Форма аргумента. Её называем прямо в ошибке: по подсказке модель чинит вызов за
+ * один шаг, а из «не задан path» не видно ни того, чего не хватает, ни того, что
+ * файл должен быть обёрткой вокруг правок.
+ */
+const SHAPE = 'нужен [{ path: "/абсолютный/путь/файл", patches: [{ oldText: "точный текст", newText: "замена" }] }]';
+
+/** Объект ли это (модель присылает что угодно: строки, массивы, null). */
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** Похоже ли на саму замену, а не на файл: есть oldText или newText. */
+function looksLikeHunk(raw: Record<string, unknown>): boolean {
+  return typeof raw.oldText === 'string' || typeof raw.newText === 'string';
+}
+
+/**
  * Разбор аргумента инструмента: модель — недоверенный источник, поэтому и
  * структура, и типы проверяются вручную. Проверка позиций не нужна — их здесь нет.
+ *
+ * Принимаем и одиночный файл без обёртки в массив: форма та же, а падать из-за
+ * лишних квадратных скобок незачем. Остальные промахи называем словами — что
+ * именно пришло и как должно быть.
  */
 export function parsePatchFiles(value: unknown): PatchFile[] {
-  if (!Array.isArray(value)) throw new Error('Аргумент «patches» должен быть массивом');
-  if (value.length === 0) throw new Error('Не передано ни одной правки');
+  const single = asObject(value);
+  const list: unknown = single && (typeof single.path === 'string' || Array.isArray(single.patches)) ? [single] : value;
 
-  return value.map((item, index) => {
-    if (typeof item !== 'object' || item === null || Array.isArray(item)) {
-      throw new Error(`patches[${index}]: ожидался объект`);
-    }
-    const raw = item as Record<string, unknown>;
+  if (!Array.isArray(list)) {
+    const hint = single && looksLikeHunk(single) ? ' Похоже, передана одна замена без файла.' : '';
+    throw new Error(`Аргумент «patches» должен быть массивом: ${SHAPE}.${hint}`);
+  }
+  if (list.length === 0) throw new Error('Не передано ни одной правки');
+
+  return list.map((item, index) => {
+    const raw = asObject(item);
+    if (!raw) throw new Error(`patches[${index}]: ожидался объект — ${SHAPE}`);
+
     const filePath = raw.path;
     if (typeof filePath !== 'string' || filePath.trim().length === 0) {
-      throw new Error(`patches[${index}]: не задан path`);
-    }
-    const list = raw.patches;
-    if (!Array.isArray(list) || list.length === 0) {
-      throw new Error(`patches[${index}].patches: нужен непустой массив правок`);
+      // Самая частая ошибка: в элемент положили сами замены, забыв файл-обёртку.
+      // Говорим об этом прямо — иначе модель снова пришлёт ту же форму.
+      const hint = looksLikeHunk(raw) ? ' В элементе лежат сами замены (oldText/newText), а не файл.' : '';
+      throw new Error(`patches[${index}]: не задан path.${hint} ${SHAPE}`);
     }
 
-    const patches = list.map((entry, patchIndex) => {
-      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-        throw new Error(`patches[${index}].patches[${patchIndex}]: ожидался объект`);
+    const hunks = raw.patches;
+    if (!Array.isArray(hunks) || hunks.length === 0) {
+      throw new Error(`patches[${index}].patches: нужен непустой массив правок. ${SHAPE}`);
+    }
+
+    const patches = hunks.map((entry, patchIndex) => {
+      const hunk = asObject(entry);
+      if (!hunk) {
+        throw new Error(`patches[${index}].patches[${patchIndex}]: ожидался объект { oldText, newText }`);
       }
-      const hunk = entry as Record<string, unknown>;
       if (typeof hunk.oldText !== 'string') {
         throw new Error(`patches[${index}].patches[${patchIndex}].oldText: нужна строка`);
       }

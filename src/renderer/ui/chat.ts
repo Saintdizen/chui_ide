@@ -818,7 +818,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
     // Список путей для `@` собираем заранее: подсказка должна открыться мгновенно.
     attachments.requestMentions();
-    deps.workspace.onDidChange((info) => {
+    deps.workspace.onDidChange(({ info }) => {
       applyRoot(info?.root ?? null);
       attachments.requestMentions();
     });

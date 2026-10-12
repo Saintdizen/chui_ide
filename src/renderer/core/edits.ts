@@ -25,7 +25,7 @@ export class EditService {
     if (existing) return existing;
 
     const file = await this.deps.rpc.request('workspace.readFile', { path });
-    const document = this.deps.documents.open(path, file.text);
+    const document = this.deps.documents.open(path, file.text, { readOnly: file.readOnly });
     document.markDisk(file.mtimeMs);
     return document;
   }
@@ -67,6 +67,9 @@ export class EditService {
     for (const file of fileEdits) {
       try {
         const document = await this.ensureDocument(file.path);
+        if (document.readOnly) {
+          throw new Error('файл открыт только для чтения: он слишком большой для правок');
+        }
         if (file.expectedVersion !== undefined && file.expectedVersion !== document.version) {
           throw new Error(`Версия документа устарела: ожидалась ${file.expectedVersion}, текущая ${document.version}`);
         }
@@ -108,7 +111,7 @@ export class EditService {
       return existing;
     }
 
-    const target = existing ?? this.deps.documents.open(path, file.text);
+    const target = existing ?? this.deps.documents.open(path, file.text, { readOnly: file.readOnly });
     target.setText(file.text, 'disk');
     // Перечитали — содержимое снова совпадает с диском, и мы знаем время файла.
     // Без `markSaved` документ считался бы правленым: следующее внешнее изменение

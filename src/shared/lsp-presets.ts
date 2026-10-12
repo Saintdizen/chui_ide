@@ -90,10 +90,17 @@ export function presetCommands(): string[] {
  * тогда фильтровать нечем, показываем всё и не угадываем.
  */
 export function lspLanguagesForKind(kind: string | null): readonly string[] | null {
-  if (kind === 'python') return ['python'];
-  if (kind === 'node' || kind === 'deno') return ['typescript', 'javascript'];
+  if (kind === 'python') return [...COMMON_LANGUAGES, 'python', 'ini'];
+  if (kind === 'node' || kind === 'deno') return [...COMMON_LANGUAGES, 'typescript', 'javascript'];
   return null;
 }
+
+/**
+ * Языки, полезные в проекте любого вида: конфиги и разметка попадаются везде.
+ * Без них у Node-проекта из раздела «Языки» пропали бы JSON, CSS и HTML — а серверы
+ * для них едут с IDE (см. `shared/lsp-bundled.ts`), и прятать их незачем.
+ */
+const COMMON_LANGUAGES: readonly string[] = ['json', 'yaml', 'css', 'scss', 'less', 'html', 'markdown'];
 
 /**
  * Подобрать конфигурацию по найденным в PATH командам. На каждый язык — один

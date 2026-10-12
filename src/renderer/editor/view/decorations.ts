@@ -62,6 +62,18 @@ export interface AfterDecoration {
 }
 
 /**
+ * Код-линза: кликабельная подпись у строки (от языкового сервера). Ставится ПОСЛЕ
+ * текста строки, до подписи blame: она не часть файла и в раскладку кода не входит.
+ * Клик по ней представление отдаёт хозяину — тот решает, что исполнить.
+ */
+export interface LensDecoration {
+  readonly line: number;
+  readonly content: string;
+  readonly className: string;
+  readonly tooltip?: string;
+}
+
+/**
  * Волнистое подчёркивание под участком строки. Столбцы — как у правок LSP: начало
  * включительно, конец исключительно, оба с единицы.
  */
@@ -91,6 +103,7 @@ export class FileDecorations {
   private strips = new Map<number, StripDecoration>();
   private backgrounds = new Map<number, LineBackgroundDecoration>();
   private afters = new Map<number, AfterDecoration>();
+  private lenses = new Map<number, LensDecoration>();
   private squiggles = new Map<number, SquigglyDecoration[]>();
 
   setGlyphs(items: readonly GlyphDecoration[]): void {
@@ -107,6 +120,10 @@ export class FileDecorations {
 
   setAfterContents(items: readonly AfterDecoration[]): void {
     this.afters = indexByLine(items);
+  }
+
+  setLenses(items: readonly LensDecoration[]): void {
+    this.lenses = indexByLine(items);
   }
 
   setSquiggles(items: readonly SquigglyDecoration[]): void {
@@ -135,6 +152,10 @@ export class FileDecorations {
     return this.afters.get(line);
   }
 
+  lensFor(line: number): LensDecoration | undefined {
+    return this.lenses.get(line);
+  }
+
   squigglesFor(line: number): readonly SquigglyDecoration[] {
     return this.squiggles.get(line) ?? EMPTY_SQUIGGLES;
   }
@@ -146,6 +167,7 @@ export class FileDecorations {
       this.strips.size === 0 &&
       this.backgrounds.size === 0 &&
       this.afters.size === 0 &&
+      this.lenses.size === 0 &&
       this.squiggles.size === 0
     );
   }

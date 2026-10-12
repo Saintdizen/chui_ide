@@ -104,6 +104,12 @@ export class EditorController {
   private readonly listeners = new Set<(change: EditorChange) => void>();
   private tabSize: number;
   /**
+   * Файл открыт только для чтения (большой файл, см. `shared/large-file.ts`). Курсор
+   * ходит, выделять и копировать можно, а всё, что меняет текст, отсекается здесь — в
+   * одном месте, поэтому ни ввод, ни команды, ни программные правки его не тронут.
+   */
+  private readOnly = false;
+  /**
    * Курсоры панели. Обычно он один, но их бывает и несколько (мультикурсор): последний
    * в списке — «главный», по нему идут IME, попапы и статус-бар.
    */
@@ -154,6 +160,15 @@ export class EditorController {
    */
   setTabSize(tabSize: number): void {
     this.tabSize = Math.max(1, Math.floor(tabSize));
+  }
+
+  /** Переключить режим «только чтение»: панель открывает файл, большой или обычный. */
+  setReadOnly(readOnly: boolean): void {
+    this.readOnly = readOnly;
+  }
+
+  get isReadOnly(): boolean {
+    return this.readOnly;
   }
 
   /** Подписаться на изменения. Возвращает функцию отписки. */
@@ -351,6 +366,7 @@ export class EditorController {
    * но и куда человек смотрел.
    */
   private commit(result: EditResult, kind: HistoryChangeKind): void {
+    if (this.readOnly) return;
     this.pushEntry([result.change], [this.selection], [result.selection], kind);
   }
 
@@ -361,6 +377,7 @@ export class EditorController {
    * одна правка не съезжает.
    */
   private editAll(compute: (selection: Selection) => EditResult | null, kind: HistoryChangeKind): void {
+    if (this.readOnly) return;
     const order = this.cursors
       .map((_, index) => index)
       .sort((a, b) => selectionStart(this.cursors[b]!.sel) - selectionStart(this.cursors[a]!.sel));
@@ -553,6 +570,7 @@ export class EditorController {
    * результат, — либо туда, куда попросил вызывающий.
    */
   applyEdit(edit: { start: number; removed: string; inserted: string }, selection?: Selection): void {
+    if (this.readOnly) return;
     if (edit.removed.length === 0 && edit.inserted.length === 0) return;
     const before = this.selection;
     this.buffer.replace(edit.start, edit.removed.length, edit.inserted);
@@ -581,6 +599,7 @@ export class EditorController {
    * набора: правки в нём лежат в порядке применения.
    */
   applyEdits(changes: readonly TextChange[], selection?: Selection): void {
+    if (this.readOnly) return;
     // Правка, которая ничего не меняет, шагом не считается: иначе в истории появился бы
     // пустой шаг, и первое Ctrl+Z выглядело бы как «ничего не произошло».
     const usable = changes.filter((change) => change.removed !== change.inserted);
@@ -676,6 +695,7 @@ export class EditorController {
    * строки — так же копируются несколько выделений. Пусто — ничего не выделено.
    */
   cutSelection(): string {
+    if (this.readOnly) return '';
     const text = this.selectedText();
     if (text === '') return '';
     this.editAll((selection) => (isEmpty(selection) ? null : deleteBackward(this.buffer, selection)), 'delete');
@@ -691,6 +711,7 @@ export class EditorController {
   }
 
   private run(result: EditResult | null, kind: HistoryChangeKind): void {
+    if (this.readOnly) return;
     if (!result) return;
     this.commit(result, kind);
   }
@@ -698,6 +719,7 @@ export class EditorController {
   // — отмена и повтор —
 
   undo(): void {
+    if (this.readOnly) return;
     const entry = this.history.undo();
     if (!entry) return;
     const changes = inverseChanges(entry);
@@ -707,6 +729,7 @@ export class EditorController {
   }
 
   redo(): void {
+    if (this.readOnly) return;
     const entry = this.history.redo();
     if (!entry) return;
     const changes = forwardChanges(entry);

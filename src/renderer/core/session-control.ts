@@ -1,4 +1,5 @@
-import type { BreakpointRecord, DebugLaunchOptions, SessionState } from '../../shared/api';
+import type { BreakpointRecord, DebugLaunchOptions, SessionState, WorkspaceInfo } from '../../shared/api';
+import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import type { DockView } from '../ui/dock';
 import type { DebugController } from './debug';
 import type { DocumentStore } from './document-store';
@@ -10,6 +11,16 @@ import type { RpcClient } from './rpc';
 export interface ExpandedTree {
   expandedPaths(): string[];
   restoreExpanded(paths: readonly string[]): void;
+}
+
+/**
+ * Рабочая область в той части, что нужна сессии: её корни. Несколько папок в одном
+ * окне — часть рабочего места, а не общий макет, поэтому помнит их сессия проекта.
+ */
+export interface WorkspaceRoots {
+  readonly roots: WorkspaceRoot[];
+  addRoot(root: string): Promise<WorkspaceInfo>;
+  setActiveRoot(root: string): Promise<WorkspaceInfo>;
 }
 
 /** Панель отладки в той части, что нужна сессии: наблюдаемые выражения. */
@@ -32,6 +43,7 @@ export interface SessionDeps {
   editors: EditorApi;
   debug: DebugController;
   explorer: ExpandedTree;
+  workspace: WorkspaceRoots;
   dock: DockView;
   debugPanel: WatchPanel;
   layout: LayoutVisibility;
@@ -63,7 +75,7 @@ const SAVE_DEBOUNCE_MS = 400;
  * восстановить место при открытии проекта и попросить сохранить при изменении.
  */
 export function createSessionControl(deps: SessionDeps): SessionControl {
-  const { rpc, documents, openEditors, editors, debug, explorer, dock, debugPanel, layout } = deps;
+  const { rpc, documents, openEditors, editors, debug, explorer, workspace, dock, debugPanel, layout } = deps;
 
   /** Какой проект сейчас восстановлен: ключ, по которому кладётся сессия. */
   let root: string | null = null;
@@ -117,7 +129,10 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     const exceptions = debug.exceptionFilters();
     const options = deps.getDebugOptions();
     const cursors = editors.cursorPositions();
+    const roots = workspace.roots.map((item) => item.root);
     return {
+      // Корни области — только когда папок больше одной: обычный проект дублировать незачем.
+      ...(roots.length > 1 ? { roots } : {}),
       tabs: [...openEditors.paths],
       ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
       expanded: explorer.expandedPaths(),
@@ -182,6 +197,13 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       }
 
       explorer.restoreExpanded(state.expanded);
+      // Корни области: открываем заново те, что были, и возвращаем активный. Сбой на
+      // одном (папку могли удалить) не отменяет остальные.
+      for (const extra of state.roots ?? []) {
+        if (extra === target) continue;
+        await workspace.addRoot(extra).catch(() => undefined);
+      }
+      await workspace.setActiveRoot(target).catch(() => undefined);
       // Параметры запуска, наблюдение и точки останова — из прошлой сессии проекта.
       deps.setDebugOptions(state.debugLaunch ?? {});
       debugPanel.setWatch(state.debugWatch ?? []);

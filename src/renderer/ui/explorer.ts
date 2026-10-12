@@ -1,5 +1,7 @@
-import type { DirEntry, ExplorerSettings, GitChange } from '../../shared/api';
-import { isInsidePath, joinPath, nameOf, parentOf, pathAfter, splitPath } from '../../shared/paths';
+import type { DirEntry, ExplorerSettings, GitChange, WorkspaceInfo } from '../../shared/api';
+import type { WorkspaceRoot } from '../../shared/workspace-roots';
+import { submoduleStateLabel, type GitSubmodule } from '../../shared/git-submodules';
+import { isInsidePath, joinPath, nameOf, parentOf, pathAfter, separatorOf, splitPath } from '../../shared/paths';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
 import type { GitInsideChange, GitModel } from '../core/git-model';
@@ -61,6 +63,7 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   rowDensity: 'normal',
   gitDecorations: true,
   folderChangeDot: true,
+  dimIgnored: true,
   openOnSingleClick: false,
   confirmDelete: true,
   exclude: [],
@@ -84,6 +87,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const element = h('div', { class: 'explorer' });
   const expanded = new Set<string>();
   const children = new Map<string, readonly DirEntry[]>();
+  /** Пути, про которые git уже сказал: игнорируемые (по ответу) и спрошенные. */
+  const ignored = new Set<string>();
+  const ignoreAsked = new Set<string>();
+  /** Пути, которые сейчас видны в дереве: про них и спрашиваем (для них и рисуем). */
+  let visibleNow: string[] = [];
+  /** Подмодули проекта по АБСОЛЮТНОМУ пути: их папки в дереве помечаются значком. */
+  let submodules = new Map<string, GitSubmodule>();
+  /** Корень, для которого собраны наборы игнорируемых: с новым проектом их надо сбросить. */
+  let ignoreRoot: string | null = null;
   /* Незавершённые чтения папок и те, что прочитать не удалось. */
   const pending = new Map<string, Promise<void>>();
   const failed = new Set<string>();
@@ -123,6 +135,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let selected: string | null = null;
   let root: string | null = null;
   let options: ExplorerSettings = FALLBACK_SETTINGS;
+  /** Свёрнутые КОРНИ рабочей области (только когда их несколько). */
+  const collapsedRoots = new Set<string>();
 
   /**
    * Что показывать из содержимого папки: скрытое и исключённое отсеиваем до
@@ -130,7 +144,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    * настройки должна применяться сразу.
    */
   const visible = (entries: readonly DirEntry[], dir: string): DirEntry[] => {
-    const prefix = root && dir.startsWith(root) ? dir.slice(root.length + 1) : '';
+    // С несколькими корнями «относительно текущего проекта» не годится: путь берём
+    // от того корня, которому папка принадлежит (файл из второй папки — к ней).
+    const owner = deps.workspace.ownerOf(dir);
+    const prefix = owner && dir !== owner.root ? pathAfter(owner.root, dir) : '';
     return sortEntries(
       entries.filter((entry) => {
         if (!options.showHidden && entry.name.startsWith('.')) return false;
@@ -398,6 +415,12 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       // и имя папки — весь путь к правке выделяется, а не только сам файл.
       const inside = isDirectory ? folderInside(entry.path) : null;
       if (inside) classes.push(`is-${inside.change}`);
+      // Игнорируемое git — приглушаем: файл видно и можно открыть, но он не мешает.
+      const isIgnored = options.dimIgnored && ignored.has(entry.path);
+      if (isIgnored) classes.push('is-ignored');
+      // Папка-подмодуль: это отдельный репозиторий, а не обычная папка проекта.
+      const submodule = isDirectory ? submodules.get(entry.path) : undefined;
+      if (submodule) classes.push('is-submodule');
       const insideTitle = inside ? `Правок внутри: ${inside.count}` : undefined;
 
       const row = h(
@@ -427,6 +450,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           ? h('span', { class: `tree-badge is-${gitChange}`, title: CHANGE_TITLE[gitChange] }, CHANGE_LETTER[gitChange])
           : null,
         unsaved && options.gitDecorations ? h('span', { class: 'tree-dot is-modified', title: 'не сохранён' }) : null,
+        submodule
+          ? h(
+              'span',
+              { class: `tree-badge is-submodule is-${submodule.state}`, title: submoduleStateLabel(submodule.state) },
+              'S',
+            )
+          : null,
         inside && options.folderChangeDot
           ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle })
           : null,
@@ -441,11 +471,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         refocusTreeOnce = true;
         // Папка раскрывается всегда одним кликом (так работает стрелка),
         // а файл — по настройке: PyCharm открывает двойным, VS Code — одинарным.
-        if (isDirectory || options.openOnSingleClick) void onClick(entry);
+        // Одиночный клик открывает файл «на посмотреть» (вкладку-предпросмотр):
+        // навигация по дереву не должна плодить вкладки. Двойной — «насовсем».
+        if (isDirectory || options.openOnSingleClick) void onClick(entry, !isDirectory && options.openOnSingleClick);
         else render();
       });
       row.addEventListener('dblclick', () => {
-        if (!isDirectory && !options.openOnSingleClick) void onClick(entry);
+        if (!isDirectory) void onClick(entry, false);
       });
       row.addEventListener('contextmenu', (event) => openMenu(entry, event));
       // Перетаскивание в чат: путь кладём в dataTransfer — панель ассистента его приложит.
@@ -455,6 +487,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
       });
       container.appendChild(row);
+      visibleNow.push(entry.path);
 
       if (isCreateTarget(inlineEdit, entry.path)) {
         const edit = inlineEdit;
@@ -471,9 +504,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
   };
 
-  const onClick = async (entry: DirEntry): Promise<void> => {
+  const onClick = async (entry: DirEntry, preview = false): Promise<void> => {
     if (entry.kind !== 'directory') {
-      await deps.commands.execute('file.open', entry.path);
+      await deps.commands.execute('file.open', entry.path, preview ? { preview: true } : {});
       return;
     }
     if (expanded.has(entry.path)) {
@@ -485,6 +518,142 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     if (!children.has(entry.path)) await load(entry.path);
     revealChildrenOf = entry.path;
     render();
+  };
+
+  /**
+   * Спросить у git, какие из видимых сейчас путей игнорируются. Спрашиваем только
+   * про те, о которых ещё не спрашивали: иначе каждая перерисовка слала бы запрос
+   * заново. Когда ответ приносит что-то новое — дерево перерисовывается, но
+   * повторного запроса не будет (пути уже отмечены спрошенными).
+   */
+  const askIgnored = async (): Promise<void> => {
+    if (!options.dimIgnored || !deps.git.isRepository) return;
+    const pending = visibleNow.filter((path) => !ignoreAsked.has(path));
+    if (pending.length === 0) return;
+    for (const path of pending) ignoreAsked.add(path);
+    let found: string[];
+    try {
+      found = await deps.git.checkIgnore(pending);
+    } catch {
+      // Git молчит — дерево просто остаётся без приглушения: это подсказка, а не суть.
+      return;
+    }
+    let changed = false;
+    for (const path of found) {
+      if (!ignored.has(path)) {
+        ignored.add(path);
+        changed = true;
+      }
+    }
+    if (changed) render();
+  };
+
+  /**
+   * Прочитать подмодули проекта. Их пути в git относительны корня, а дерево держит
+   * абсолютные — переводим сразу: сравнение по строке на каждой строке дешевле.
+   */
+  const loadSubmodules = async (root: string): Promise<void> => {
+    if (!deps.git.isRepository) return;
+    let list: GitSubmodule[];
+    try {
+      list = await deps.git.submodules();
+    } catch {
+      return;
+    }
+    const next = new Map<string, GitSubmodule>();
+    // Путь подмодуля git печатает через прямой слэш — переводим в разделитель системы.
+    for (const item of list) next.set(joinPath(root, item.path.split('/').join(separatorOf(root))), item);
+    submodules = next;
+    render();
+  };
+
+  /**
+   * Нарисовать дерево области. Один корень — просто его содержимое (как было).
+   * Несколько — каждый корень отдельной верхней строкой со своими детьми: так
+   * видно, что папки в окне разные, и понятно, из какой открыт файл.
+   */
+  const paintTree = (tree: HTMLElement, info: WorkspaceInfo): void => {
+    if (info.roots.length <= 1) {
+      const entries = children.get(info.root);
+      if (!entries) {
+        tree.appendChild(
+          h('div', { class: 'tree-loading' }, failed.has(info.root) ? 'Не удалось прочитать папку' : 'Читаю папку…'),
+        );
+        if (!failed.has(info.root)) void load(info.root).then(render);
+        return;
+      }
+      // Поле ввода для создания в корне проекта: строка корня в дереве не рисуется
+      // (рисуются только её дети), поэтому создание «в никуда» не показывало поля —
+      // со стороны это выглядело так, будто кнопка ничего не делает.
+      if (inlineEdit?.kind === 'create' && inlineEdit.parent === info.root) {
+        const edit = inlineEdit;
+        tree.appendChild(inlineInput(0, '', (value) => void commitCreate(edit, value)));
+      }
+      renderRows(tree, entries, 0, info.root);
+      return;
+    }
+
+    for (const item of info.roots) {
+      const isActive = item.root === info.root;
+      const collapsed = collapsedRoots.has(item.root);
+      tree.appendChild(rootRow(item, isActive, collapsed));
+      if (collapsed) continue;
+
+      const entries = children.get(item.root);
+      if (!entries) {
+        tree.appendChild(
+          h('div', { class: 'tree-loading' }, failed.has(item.root) ? 'Не удалось прочитать папку' : 'Читаю папку…'),
+        );
+        if (!failed.has(item.root)) void load(item.root).then(render);
+        continue;
+      }
+      if (inlineEdit?.kind === 'create' && inlineEdit.parent === item.root) {
+        const edit = inlineEdit;
+        tree.appendChild(inlineInput(1, '', (value) => void commitCreate(edit, value)));
+      }
+      renderRows(tree, entries, 1, item.root);
+    }
+  };
+
+  /** Верхняя строка корня: имя папки, признак активного и действия по правому клику. */
+  const rootRow = (item: WorkspaceRoot, isActive: boolean, collapsed: boolean): HTMLElement => {
+    const classes = ['tree-row', 'is-root'];
+    if (isActive) classes.push('is-active');
+    if (collapsed) classes.push('is-collapsed');
+    const arrow = svgIcon(collapsed ? 'chevron' : 'chevronDown', 12);
+    const row = h(
+      'div',
+      { class: classes.join(' '), title: item.root, style: { paddingLeft: `${4}px` } },
+      arrow,
+      folderIcon(item.name, !collapsed),
+      h('span', { class: 'tree-name' }, item.name),
+      isActive ? h('span', { class: 'tree-root-active', title: 'Активная папка области' }, '•') : null,
+    );
+    row.addEventListener('click', () => {
+      // Клик по корню: делает его активным (туда идут git и поиск) и сворачивает/раскрывает.
+      if (collapsed) collapsedRoots.delete(item.root);
+      else collapsedRoots.add(item.root);
+      if (!isActive) void deps.workspace.setActiveRoot(item.root).catch(() => undefined);
+      else render();
+    });
+    row.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showContextMenu(
+        [
+          { label: 'Сделать активной', onSelect: () => void deps.workspace.setActiveRoot(item.root) },
+          { separator: true as const },
+          {
+            label: 'Убрать из рабочей области',
+            danger: true,
+            onSelect: () => void deps.workspace.removeRoot(item.root),
+          },
+        ],
+        event.clientX,
+        event.clientY,
+      );
+    });
+    return row;
   };
 
   /**
@@ -501,9 +670,12 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   const paint = (): void => {
     clear(element);
+    visibleNow = [];
     const info = deps.workspace.current;
 
     if (!info) {
+      ignoreRoot = null;
+      submodules = new Map();
       element.appendChild(
         h(
           'div',
@@ -521,6 +693,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         ),
       );
       return;
+    }
+
+    // Другой проект — прежние ответы git к нему не относятся: начинаем с чистого листа.
+    if (info.root !== ignoreRoot) {
+      const rootChanged = ignoreRoot !== null;
+      ignoreRoot = info.root;
+      ignored.clear();
+      ignoreAsked.clear();
+      if (rootChanged || submodules.size === 0) void loadSubmodules(info.root);
     }
 
     element.appendChild(
@@ -542,6 +723,16 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             'button',
             { class: 'icon-btn', type: 'button', title: 'Новая папка', onClick: () => startCreate('directory') },
             svgIcon('folderPlus', 15),
+          ),
+          h(
+            'button',
+            {
+              class: 'icon-btn',
+              type: 'button',
+              title: 'Добавить папку в рабочую область',
+              onClick: () => void deps.commands.execute('workspace.addFolder'),
+            },
+            svgIcon('plus', 15),
           ),
           h(
             'button',
@@ -578,23 +769,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     tree.addEventListener('keydown', (event) => onTreeKey(event));
     element.appendChild(tree);
 
-    const entries = children.get(info.root);
-    if (!entries) {
-      tree.appendChild(
-        h('div', { class: 'tree-loading' }, failed.has(info.root) ? 'Не удалось прочитать папку' : 'Читаю папку…'),
-      );
-      if (!failed.has(info.root)) void load(info.root).then(render);
-      return;
-    }
-
-    // Поле ввода для создания в корне проекта: строка корня в дереве не рисуется
-    // (рисуются только её дети), поэтому создание «в никуда» не показывало поля —
-    // со стороны это выглядело так, будто кнопка ничего не делает.
-    if (inlineEdit?.kind === 'create' && inlineEdit.parent === info.root) {
-      const edit = inlineEdit;
-      tree.appendChild(inlineInput(0, '', (value) => void commitCreate(edit, value)));
-    }
-    renderRows(tree, entries, 0, info.root);
+    paintTree(tree, info);
     // Раскрытие отыграно: следующая перерисовка — уже без движения.
     revealChildrenOf = null;
 
@@ -605,6 +780,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       refocusTreeOnce = false;
       tree.focus();
     }
+
+    // Строки нарисованы — видимый набор известен, спрашиваем про игнорируемые.
+    void askIgnored();
   };
 
   /**
@@ -701,9 +879,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       render();
     },
     applySettings(next) {
+      const dimChanged = options.dimIgnored !== next.dimIgnored;
       options = next;
       // Плотность строк — атрибут-переключатель: CSS читает его и берёт свою высоту.
       element.dataset.rows = next.rowDensity;
+      // Приглушение включили обратно — про игнорируемые надо спросить заново.
+      if (dimChanged) {
+        ignored.clear();
+        ignoreAsked.clear();
+      }
       render();
     },
   };

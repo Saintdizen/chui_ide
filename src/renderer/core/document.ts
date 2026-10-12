@@ -36,6 +36,8 @@ export class TextDocument {
     readonly path: string,
     initialText: string,
     public languageId: string,
+    /** Файл открыт только для чтения: он слишком большой, чтобы его править. */
+    readonly readOnly: boolean = false,
   ) {
     this.uri = pathToUri(path);
     this.text = normalize(initialText);

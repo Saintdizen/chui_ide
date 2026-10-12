@@ -78,7 +78,12 @@ export class HoverWidget {
     this.root = document.createElement('div');
     this.root.className = 'own-editor-hover';
     this.root.hidden = true;
-    view.element.append(this.root);
+    // Попап живёт ВНЕ полотна редактора: у `.own-editor` стоит `contain: layout paint style`,
+    // а `contain` делает элемент точкой отсчёта для `position: fixed`. Внутри редактора
+    // подсказка уезжала бы на его смещение в окне: координаты мыши — оконные, а fixed
+    // считался бы от редактора. Соседние попапы по той же причине крепятся к контейнеру
+    // (см. `editor-host.ts`: подсказки, подпись, список мест).
+    (view.element.parentElement ?? view.element).append(this.root);
 
     const viewport = view.element.querySelector<HTMLElement>('.own-editor-viewport');
     viewport?.addEventListener('mousemove', this.onMouseMove);

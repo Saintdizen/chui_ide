@@ -10,9 +10,9 @@
 import type { Settings } from './api';
 
 /** Секции настроек, которые разрешено переопределять на уровне проекта. */
-export type ProjectSettings = Partial<Pick<Settings, 'editor' | 'explorer' | 'run' | 'lsp'>>;
+export type ProjectSettings = Partial<Pick<Settings, 'editor' | 'explorer' | 'run' | 'lsp' | 'git'>>;
 
-export const PROJECT_SETTINGS_SECTIONS = ['editor', 'explorer', 'run', 'lsp'] as const;
+export const PROJECT_SETTINGS_SECTIONS = ['editor', 'explorer', 'run', 'lsp', 'git'] as const;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

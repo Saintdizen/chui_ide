@@ -7,7 +7,7 @@
  *
  * Без аргумента проект не открывается вовсе.
  */
-const { app, BrowserWindow } = require('electron');
+const { app } = require('electron');
 const { promises: fs } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -36,7 +36,7 @@ app.on('web-contents-created', (_event, contents) => {
   contents.on('responsive', () => console.log(`${tag} снова отвечает`));
   contents.on('render-process-gone', (_e, details) => console.log(`${tag} renderer упал: ${details.reason}`));
   contents.on('preload-error', (_e, file, error) => console.log(`${tag} preload-error ${file}: ${error.message}`));
-  contents.on('console-message', (event, level, message) => {
+  contents.on('console-message', (event, _level, message) => {
     const text = typeof message === 'string' ? message : (event?.message ?? '');
     console.log(`${tag} консоль: ${text}`);
   });

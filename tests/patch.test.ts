@@ -170,3 +170,48 @@ describe('parsePatchFiles', () => {
     expect(() => parsePatchFiles([{ path: '/p', patches: [{ newText: 'b' }] }])).toThrow(/oldText/);
   });
 });
+
+describe('parsePatchFiles: форма вызова', () => {
+  // Причина: элемент массива в схеме инструмента был объявлен без полей, и модель
+  // присылала замены «плоско» — без файла-обёртки. Разбор падал на «не задан path»,
+  // и из текста ошибки не было видно ни формы, ни того, что файл забыт.
+  it('одиночный файл принимается и без обёртки в массив', () => {
+    const files = parsePatchFiles({ path: '/p/a.ts', patches: [{ oldText: 'a', newText: 'b' }] });
+    expect(files).toEqual([{ path: '/p/a.ts', patches: [{ oldText: 'a', newText: 'b' }] }]);
+  });
+
+  it('«плоские» замены без файла: ошибка называет форму и подсказывает про обёртку', () => {
+    let message = '';
+    try {
+      parsePatchFiles([{ oldText: 'a', newText: 'b' }]);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('не задан path');
+    // Именно эту подсказку модель и должна увидеть: замены — внутри patches, а не вместо них.
+    expect(message).toContain('сами замены');
+    expect(message).toContain('patches: [{ oldText');
+  });
+
+  it('одна замена вместо массива: говорим про массив и про забытый файл', () => {
+    let message = '';
+    try {
+      parsePatchFiles({ oldText: 'a', newText: 'b' });
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('должен быть массивом');
+    expect(message).toContain('одна замена без файла');
+  });
+
+  it('пустой список правок у файла: форма названа в ошибке', () => {
+    let message = '';
+    try {
+      parsePatchFiles([{ path: '/p/a.ts', patches: [] }]);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toContain('непустой массив');
+    expect(message).toContain('oldText');
+  });
+});

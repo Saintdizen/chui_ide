@@ -3,6 +3,8 @@ import { h, svgIcon } from './dom';
 export interface StatusState {
   file: string | null;
   dirty: boolean;
+  /** Файл открыт только для чтения (большой): показываем это словом. */
+  readOnly: boolean;
   line: number;
   column: number;
   language: string | null;
@@ -69,6 +71,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const state: StatusState = {
     file: null,
     dirty: false,
+    readOnly: false,
     line: 1,
     column: 1,
     language: null,
@@ -119,6 +122,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const encodingItem = h('span', { class: 'status-item' });
   const indentItem = h('span', { class: 'status-item' });
   const languageItem = h('span', { class: 'status-item' });
+  const readOnlyItem = h('span', { class: 'status-item status-readonly' });
   const toolItem = h('span', { class: 'status-item status-tool' });
   const versionItem = h('span', { class: 'status-item status-muted' });
   // Проблемы — значок и числа: цвет различает ошибку и предупреждение, а количество
@@ -163,6 +167,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       indentItem,
       envItem,
       toolItem,
+      readOnlyItem,
       languageItem,
     ),
   );
@@ -175,6 +180,9 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     encodingItem.textContent = state.encoding;
     indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} пробела`;
     languageItem.textContent = state.language ?? '—';
+    readOnlyItem.textContent = state.readOnly ? 'Только чтение' : '';
+    readOnlyItem.hidden = !state.readOnly;
+    readOnlyItem.title = state.readOnly ? 'Файл слишком большой для правки — открыт только для чтения' : '';
     envItem.textContent = state.env ?? '';
     envItem.hidden = !state.env;
     envItem.title = state.env

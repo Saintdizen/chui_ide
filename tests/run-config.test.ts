@@ -164,6 +164,12 @@ describe('pytestCoverageTarget', () => {
       './.venv/bin/python -m pytest --cov --cov-branch --cov-report=term-missing; echo "chui-test-result $?"',
     );
   });
+
+  it('с jsonPath просит ещё JSON-отчёт — по нему видно частично пройденные ветви', () => {
+    expect(pytestCoverageTarget(tools, 'tests/test_x.py', { jsonPath: '/tmp/cov.json' }).command).toBe(
+      './.venv/bin/python -m pytest --cov --cov-branch --cov-report=term-missing --cov-report=json:/tmp/cov.json -- tests/test_x.py',
+    );
+  });
 });
 
 describe('nodeInstallTarget', () => {

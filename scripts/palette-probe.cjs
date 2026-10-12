@@ -147,6 +147,68 @@ app.whenReady().then(async () => {
   );
   console.log(`[проба] запуск действия: ${JSON.stringify(runResult, null, 2)}`);
 
+  // «Сохранить как…» — не действие редактора, а команда приложения. Проверяем, что она
+  // доехала до палитры (то есть зарегистрирована в реестре команд). Меню «☰» проверяем
+  // отдельной пробой: оно двухуровневое и требует настоящего наведения мышью.
+  const saveAs = await ask(
+    ide,
+    `(async () => {
+      const paletteButton = [...document.querySelectorAll('.icon-btn')].find((item) =>
+        (item.getAttribute('title') ?? '').startsWith('Палитра команд'),
+      );
+      if (!paletteButton) return 'нет кнопки палитры';
+      paletteButton.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const input = document.querySelector('.palette-input');
+      if (!input) return 'нет поля ввода';
+      input.value = 'сохранить как';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      return [...document.querySelectorAll('.palette-item-title')].map((n) => n.textContent ?? '');
+    })()`,
+  );
+  console.log(`[проба] «Сохранить как…» в палитре: ${JSON.stringify(saveAs, null, 2)}`);
+
+  // «Сообщение коммита по diff»: команда должна быть в палитре, а кнопка — в панели
+  // изменений. Сам запрос к модели не запускаем: в пробе модель не настроена, и
+  // настоящий AI-прогон был бы проверкой другого (для него есть smoke:commitmsg).
+  const commitMessage = await ask(
+    ide,
+    `(async () => {
+      const openPalette = async (query) => {
+        const button = [...document.querySelectorAll('.icon-btn')].find((item) =>
+          (item.getAttribute('title') ?? '').startsWith('Палитра команд'),
+        );
+        button?.click();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const input = document.querySelector('.palette-input');
+        input.value = query;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 240));
+      };
+
+      await openPalette('сообщение коммита');
+      const titles = [...document.querySelectorAll('.palette-item-title')].map((n) => n.textContent ?? '');
+
+      // Панель изменений открываем её же командой — тем же путём, что человек.
+      await openPalette('показать изменения');
+      const item = [...document.querySelectorAll('.palette-item')].find((node) =>
+        (node.querySelector('.palette-item-title')?.textContent ?? '').includes('Показать изменения'),
+      );
+      item?.click();
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      const fromDiff = document.querySelector('.sc-from-diff');
+      return {
+        палитра: titles,
+        кнопка: Boolean(fromDiff),
+        подсказка: fromDiff?.getAttribute('title') ?? null,
+        естьПолеКоммита: Boolean(document.querySelector('.sc-message')),
+      };
+    })()`,
+  );
+  console.log(`[проба] сообщение коммита по diff: ${JSON.stringify(commitMessage, null, 2)}`);
+
   terminals.dispose();
   workspace.dispose();
   await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);

@@ -39,16 +39,20 @@ import type { HoverExternalInfo } from '../widgets/hover-widget';
 import type { CompletionItem } from '../complete/completions';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { FoldRange } from '../../../shared/fold-ranges';
+import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
+import type { InlayHint } from '../../../shared/lsp-inlay-hints';
 import type { DocumentRegistry } from './document-registry';
 import type { TranslatedEdits } from './document-edits';
 import {
   EditorHost,
   type ChangeMarkerHit,
+  type CoverageEntry,
   type CursorState,
   type EditorContextInfo,
   type RunMarkerHit,
   type TestMarkerHit,
 } from './editor-host';
+import type { WhitespaceMode } from '../view/whitespace';
 
 /** Значение выражения для подсказки отладчика: что показать и какого типа. */
 export interface DebugHoverValue {
@@ -67,6 +71,16 @@ export interface EditorWorkspaceOptions {
   tabSize?: number;
   /** Кегль текста в редакторе, px. */
   fontSize?: number;
+  /** Столбцы направляющих (ruler): вертикальные черты на этих столбцах. */
+  rulers?: readonly number[];
+  /** Показывать ли невидимые знаки: `none`, `trailing` или `all`. */
+  whitespace?: WhitespaceMode;
+  /** Показывать ли миникарту — сжатый вид всего файла справа. */
+  minimap?: boolean;
+  /** Переносить ли длинные строки (word wrap). */
+  wordWrap?: boolean;
+  /** Включать ли лигатуры шрифта. */
+  ligatures?: boolean;
   /** Схема оформления: цвета токенов и обвязки. */
   scheme?: Scheme;
   /** Сниппеты всех языков: их показывают подсказки по триггеру. */
@@ -77,6 +91,15 @@ export interface EditorWorkspaceOptions {
   codeActions?: (path: string, position: { line: number; column: number }) => void;
   /** Диапазоны свёртки файла: у сервера спрашивает приложение, а без — считает по отступам. */
   foldRanges?: (path: string, text: string) => Promise<readonly FoldRange[]>;
+  /**
+   * Код-линзы файла: подписи-действия у строк от языкового сервера (см.
+   * `shared/lsp-code-lens.ts`). Не задано — линз нет вовсе.
+   */
+  codeLenses?: (path: string) => Promise<readonly CodeLensEntry[]>;
+  /** Исполнить команду линзы: её выбирает сервер, а запускает приложение. */
+  lensCommand?: (path: string, command: CodeLensCommand) => void;
+  /** Подсказки-вставки файла: путь и текст → подсказки (см. `LspFeatures.inlayHints`). */
+  inlayHints?: (path: string, text: string) => Promise<readonly InlayHint[]>;
   /** Наведение от языкового сервера: путь и позиция → текст разметки. */
   hoverFromLanguage?: (path: string, position: { line: number; column: number }) => Promise<HoverExternalInfo | null>;
   /** Подсказки языкового сервера: путь и позиция → дополнения (см. `LspFeatures.completion`). */
@@ -135,6 +158,13 @@ export class EditorWorkspace {
   private scheme: Scheme;
   private readonly tabSize: number | undefined;
   private readonly fontSize: number | undefined;
+  /** Столбцы направляющих — панели равны, как отступы и кегль. */
+  private readonly rulers: readonly number[] | undefined;
+  /** Невидимые знаки: панели равны, как отступы и кегль. */
+  private readonly whitespace: WhitespaceMode | undefined;
+  private readonly minimap: boolean | undefined;
+  private readonly wordWrap: boolean | undefined;
+  private readonly ligatures: boolean | undefined;
   private readonly snippets: (() => readonly Snippet[]) | undefined;
   /** Шов к инструменту формата: его у редактора нет, о нём знает приложение. */
   private readonly formatCode: ((path: string) => void) | undefined;
@@ -156,6 +186,12 @@ export class EditorWorkspace {
   private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Диапазоны свёртки файла — тоже шов: у приложения и сервер, и подсчёт по отступам. */
   private readonly foldRanges: ((path: string, text: string) => Promise<readonly FoldRange[]>) | undefined;
+  /** Код-линзы файла — шов: у сервера спрашивает приложение. */
+  private readonly codeLenses: EditorWorkspaceOptions['codeLenses'];
+  /** Исполнить команду линзы — шов к приложению (у него сервер). */
+  private readonly lensCommand: EditorWorkspaceOptions['lensCommand'];
+  /** Подсказки-вставки — тот же шов: у сервера спрашивает приложение. */
+  private readonly inlayHints: EditorWorkspaceOptions['inlayHints'];
   /** Короткий путь для подписи места в списке. */
   private readonly relativePath: ((path: string) => string) | undefined;
   /** Сообщить, что мест не нашлось. */
@@ -189,6 +225,10 @@ export class EditorWorkspace {
   private readonly changeMarkerEmitter = new Emitter<ChangeMarkerHit>();
   readonly onChangeMarker = this.changeMarkerEmitter.event;
 
+  /** Правый клик по полоске изменения — меню блока (индексировать, убрать, откатить). */
+  private readonly changeStripMenuEmitter = new Emitter<ChangeMarkerHit>();
+  readonly onChangeStripMenu = this.changeStripMenuEmitter.event;
+
   /**
    * Пометки языка — один набор на все панели: источники (LSP, импорты) кладут их
    * по имени владельца, а в панели уезжает объединение. Так же было у Monaco, только
@@ -205,10 +245,18 @@ export class EditorWorkspace {
     this.scheme = options.scheme ?? 'dark';
     this.tabSize = options.tabSize;
     this.fontSize = options.fontSize;
+    this.rulers = options.rulers;
+    this.whitespace = options.whitespace;
+    this.minimap = options.minimap;
+    this.wordWrap = options.wordWrap;
+    this.ligatures = options.ligatures;
     this.snippets = options.snippets;
     this.formatCode = options.formatCode;
     this.codeActions = options.codeActions;
     this.foldRanges = options.foldRanges;
+    this.codeLenses = options.codeLenses;
+    this.lensCommand = options.lensCommand;
+    this.inlayHints = options.inlayHints;
     this.hoverFromLanguage = options.hoverFromLanguage;
     this.completionFromLanguage = options.completionFromLanguage;
     this.signatureFromLanguage = options.signatureFromLanguage;
@@ -278,6 +326,11 @@ export class EditorWorkspace {
     const pane = new EditorHost(host, this.registry, {
       tabSize: this.tabSize,
       fontSize: this.fontSize,
+      rulers: this.rulers,
+      whitespace: this.whitespace,
+      minimap: this.minimap,
+      wordWrap: this.wordWrap,
+      ligatures: this.ligatures,
       scheme: this.scheme,
       snippets: this.snippets,
       hoverFromLanguage: this.hoverFromLanguage,
@@ -286,6 +339,9 @@ export class EditorWorkspace {
       // Быстрые исправления — шов приложения: ему и сервер, и попап, и документная модель.
       codeActions: this.codeActions,
       foldRanges: this.foldRanges,
+      codeLenses: this.codeLenses ? (path) => this.codeLenses!(path) : undefined,
+      lensCommand: this.lensCommand,
+      inlayHints: this.inlayHints,
       symbols: this.symbols,
       revealLocation: this.revealLocation,
       relativePath: this.relativePath,
@@ -315,6 +371,7 @@ export class EditorWorkspace {
     pane.onBreakpointToggle((hit) => this.forward(index, this.breakpointEmitter, hit));
     pane.onBreakpointMenu((hit) => this.forward(index, this.breakpointMenuEmitter, hit));
     pane.onChangeMarker((hit) => this.forward(index, this.changeMarkerEmitter, hit));
+    pane.onChangeStripMenu((hit) => this.forward(index, this.changeStripMenuEmitter, hit));
 
     this.panes.push(pane);
     this.paneHosts.push(host);
@@ -553,8 +610,16 @@ export class EditorWorkspace {
     for (const pane of this.panes) pane.setScheme(scheme);
   }
 
-  /** Настройки вида: ширина отступа и кегль. Панели равны — применяем ко всем. */
-  applyOptions(options: { tabSize?: number; fontSize?: number }): void {
+  /** Настройки вида: ширина отступа, кегль и направляющие. Панели равны — применяем ко всем. */
+  applyOptions(options: {
+    tabSize?: number;
+    fontSize?: number;
+    rulers?: readonly number[];
+    whitespace?: WhitespaceMode;
+    minimap?: boolean;
+    wordWrap?: boolean;
+    ligatures?: boolean;
+  }): void {
     for (const pane of this.panes) pane.applyOptions(options);
   }
 
@@ -582,7 +647,7 @@ export class EditorWorkspace {
     for (const pane of this.panes) pane.setBreakpoints(path, breakpoints);
   }
 
-  setCoverage(files: Iterable<readonly [string, readonly number[]]>): void {
+  setCoverage(files: Iterable<CoverageEntry>): void {
     for (const pane of this.panes) pane.setCoverage(files);
   }
 
@@ -699,6 +764,7 @@ export class EditorWorkspace {
     this.breakpointEmitter.dispose();
     this.breakpointMenuEmitter.dispose();
     this.changeMarkerEmitter.dispose();
+    this.changeStripMenuEmitter.dispose();
     this.diagnostics.dispose();
   }
 }

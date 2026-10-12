@@ -27,6 +27,7 @@ import type { EditorController, EditorChange } from '../input/editor-controller'
 import type { EditorView } from '../view/editor-view';
 import { allCompletions, buildCompletions, DEFAULT_LIMIT, type CompletionItem } from './completions';
 import { expandSnippet } from './snippet';
+import { isSelfReceiver, memberAccessAt, selfMembers, type MemberAccess } from './member-access';
 import { prefixAt } from './prefix';
 import { WordIndex } from './word-index';
 import type { SuggestWidget } from '../widgets/suggest-widget';
@@ -134,16 +135,28 @@ export class CompletionAssistant {
     const caret = this.controller.caret;
     const line = this.buffer.lineAt(caret);
     const text = this.buffer.lineText(line);
-    const prefix = prefixAt(text, caret - this.buffer.lineStart(line));
-    if (prefix.length === 0) {
-      this.hideReasons += 1;
-      this.widget.hide();
-      return;
-    }
+    const column = caret - this.buffer.lineStart(line);
+
     // В строке или комментарии не подсказываем: там слова — это текст, а не код.
     const tokenType = this.view.tokenTypeAt(caret);
     this.lastToken = tokenType;
     if (tokenType === STRING || tokenType === COMMENT) {
+      this.hideReasons += 1;
+      this.widget.hide();
+      return;
+    }
+
+    // После точки подсказываем ЧЛЕНОВ объекта, а не слова файла: набрав `this.`,
+    // человек ждёт свои поля и методы. Показывается и на пустом наборе — сама точка
+    // уже говорит, что дальше идёт имя члена.
+    const member = memberAccessAt(text, column);
+    if (member) {
+      this.showMembers(member);
+      return;
+    }
+
+    const prefix = prefixAt(text, column);
+    if (prefix.length === 0) {
       this.hideReasons += 1;
       this.widget.hide();
       return;
@@ -167,6 +180,18 @@ export class CompletionAssistant {
 
   /** Показать всё без набранного начала — по Ctrl+Space. */
   private showAll(): void {
+    const caret = this.controller.caret;
+    const line = this.buffer.lineAt(caret);
+    const text = this.buffer.lineText(line);
+    const column = caret - this.buffer.lineStart(line);
+
+    // После точки Ctrl+Space значит «все члены этого объекта», а не «все слова файла».
+    const member = memberAccessAt(text, column);
+    if (member) {
+      this.showMembers(member);
+      return;
+    }
+
     this.fillIndex();
     const items = allCompletions(this.index, this.language, {
       limit: DEFAULT_LIMIT,
@@ -174,11 +199,40 @@ export class CompletionAssistant {
       snippets: snippetsForLanguage(this.snippets(), this.language),
     });
     // Заменяем слово под курсором, если оно есть: тогда подсказка встаёт вместо него.
-    const caret = this.controller.caret;
-    const line = this.buffer.lineAt(caret);
-    const prefix = prefixAt(this.buffer.lineText(line), caret - this.buffer.lineStart(line));
+    const prefix = prefixAt(text, column);
     this.widget.show(items, this.anchor(caret), prefix.length);
     this.askServer(prefix, caret);
+  }
+
+  /**
+   * Подсказки-члены объекта (`this.`, `order.`): имена, которые принадлежат ему.
+   *
+   * Два источника, и порядок тут важнее, чем кажется. Свои члены (разбор файла)
+   * показываем СРАЗУ — попап должен появляться на саму точку, без ожидания сети.
+   * Языковой сервер отвечает следом и встаёт впереди: только он знает типы, поэтому
+   * для `order.` он и есть настоящий ответ, а наши имена — подстраховка на случай,
+   * когда сервера нет или язык ему незнаком.
+   */
+  private showMembers(member: MemberAccess): void {
+    const caret = this.controller.caret;
+    const items: CompletionItem[] = [];
+    const taken = new Set<string>();
+    const lowered = member.prefix.toLowerCase();
+    const push = (label: string, kind: CompletionItem['kind'], detail: string): void => {
+      if (label.length === 0 || taken.has(label)) return;
+      if (lowered.length > 0 && !label.toLowerCase().startsWith(lowered)) return;
+      taken.add(label);
+      items.push({ label, kind, detail });
+    };
+
+    if (isSelfReceiver(member.receiver)) {
+      for (const entry of selfMembers(this.textAroundCaret())) {
+        push(entry.name, 'word', entry.kind === 'method' ? 'метод' : 'поле');
+      }
+    }
+
+    this.widget.show(items, this.anchor(caret), member.replaces);
+    this.askServer(member.prefix, caret);
   }
 
   /**
@@ -195,13 +249,18 @@ export class CompletionAssistant {
       .then((extra) => {
         // Курсор уехал или пришёл новый запрос — ответ про прежнее место не показываем.
         if (id !== this.lspRequestId || this.controller.caret !== caret) return;
-        if (extra.length === 0) return;
-        // Своё показываем поверх: сервер и словарь часто дают одно и то же имя.
+        // Набранное начало проверяем и у ответа сервера: часть серверов отдаёт список
+        // ЦЕЛИКОМ, полагаясь на отбор у клиента. Без этого после точки появлялся бы
+        // весь список вперемешку — ровно то, на что жаловались.
+        const lowered = prefix.toLowerCase();
         const local = this.widget.allItems;
-        const already = new Set(local.filter((item) => item.kind === 'external').map((item) => item.label));
-        const fresh = extra.filter((item) => !already.has(item.label));
-        const merged = [...fresh, ...local.filter((item) => item.kind !== 'external')];
-        this.widget.show(merged, this.anchor(caret), prefix.length);
+        const known = new Set(local.map((item) => item.label));
+        const fresh = extra.filter(
+          (item) => !known.has(item.label) && (lowered.length === 0 || item.label.toLowerCase().startsWith(lowered)),
+        );
+        if (fresh.length === 0) return; // подтвердить нечего — список остаётся прежним
+        // Сервер впереди: он знает типы, а словарь — только имена.
+        this.widget.show([...fresh, ...local], this.anchor(caret), prefix.length);
       })
       .catch(() => {
         // Сервера нет или он не ответил — остаются слова языка и документа.
@@ -219,6 +278,24 @@ export class CompletionAssistant {
     const start = caret - this.widget.replaces;
     this.widget.hide();
     const removed = this.buffer.getText(start, caret);
+
+    // Авто-импорт: у подсказки бывают дополнительные правки (обычно строка import).
+    // Применяем их ВМЕСТЕ со вставкой, одним шагом истории: иначе Ctrl+Z убирал бы их
+    // по отдельности, а смещения пришлось бы считать дважды.
+    const extra = this.additionalChanges(item);
+    if (extra.length > 0) {
+      const expanded = item.snippet !== undefined ? expandSnippet(item.snippet) : null;
+      const inserted = expanded ? expanded.text : (item.insert ?? item.label);
+      const changes = [...extra, { start, removed, inserted }].sort((l, r) => r.start - l.start);
+      // Правки выше вставки удлиняют текст перед ней — на столько же сдвинется курсор.
+      let shift = 0;
+      for (const change of changes) if (change.start < start) shift += change.inserted.length - change.removed.length;
+      const anchor = start + shift + (expanded ? expanded.caret : inserted.length);
+      const active = start + shift + (expanded ? expanded.selectionEnd : inserted.length);
+      this.controller.applyEdits(changes, { anchor, active });
+      return;
+    }
+
     // Сниппет раскрывается ПОСЛЕ вставки: разметка `${1:…}` в тексте не остаётся, а
     // курсор встаёт на первое место — так же ведёт себя Monaco (`InsertAsSnippet`).
     if (item.snippet !== undefined) {
@@ -235,6 +312,19 @@ export class CompletionAssistant {
     this.controller.applyEdit({ start, removed, inserted: item.insert ?? item.label });
   }
 
+  /** Дополнительные правки подсказки (авто-импорт) в смещениях текущего буфера. */
+  private additionalChanges(item: CompletionItem): { start: number; removed: string; inserted: string }[] {
+    const edits = item.additionalEdits;
+    if (!edits || edits.length === 0) return [];
+    const changes: { start: number; removed: string; inserted: string }[] = [];
+    for (const edit of edits) {
+      const from = this.buffer.offsetAt({ line: edit.startLine, column: edit.startColumn });
+      const to = this.buffer.offsetAt({ line: edit.endLine, column: edit.endColumn });
+      changes.push({ start: from, removed: this.buffer.getText(from, to), inserted: edit.newText });
+    }
+    return changes;
+  }
+
   /** Слова, уже стоящие в строке под курсором: предлагать их снова незачем. */
   private contextWords(prefix: string): ReadonlySet<string> {
     const found = new Set<string>([prefix]);
@@ -247,6 +337,20 @@ export class CompletionAssistant {
   private anchor(offset: number): { left: number; top: number; bottom: number } {
     const point = this.view.clientPoint(offset);
     return { left: point.left, top: point.top, bottom: point.bottom };
+  }
+
+  /**
+   * Текст вокруг курсора — для разбора членов класса. Берём окно, а не файл целиком:
+   * подсказка идёт на каждое нажатие после точки, и собирать ради неё весь текст
+   * большого файла незачем. Класс целиком в окно помещается с большим запасом.
+   */
+  private textAroundCaret(): string {
+    const line = this.buffer.lineAt(this.controller.caret);
+    const from = Math.max(1, line - WORDS_AROUND);
+    const to = Math.min(this.buffer.lineCount, line + WORDS_AROUND);
+    const lines: string[] = [];
+    for (let current = from; current <= to; current += 1) lines.push(this.buffer.lineText(current));
+    return lines.join('\n');
   }
 
   /** Добавить в словарь строки вокруг курсора, которых там ещё нет. */

@@ -69,6 +69,15 @@ export interface JsonSchemaProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   description: string;
   items?: JsonSchemaProperty;
+  /**
+   * Поля вложенного объекта. Нужны там, где элемент массива — объект со своими
+   * обязательными полями (`apply_patch`, `apply_edit`): без них схема обещает
+   * модели «объект неизвестной формы», а разбор аргументов ждёт конкретные поля —
+   * и вызов падает на «не задан path» у формы, которую сама схема и разрешала.
+   */
+  properties?: Record<string, JsonSchemaProperty>;
+  /** Обязательные поля вложенного объекта. */
+  required?: string[];
   enum?: string[];
 }
 
@@ -121,11 +130,15 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         path: { type: 'string', description: 'Абсолютный путь к файлу.' },
         startLine: {
           type: 'number',
-          description: 'Первая строка диапазона (1-based, включительно). Без него — с начала файла.',
+          description:
+            'Первая строка диапазона — целое число (1-based, включительно). Без него — с начала файла. ' +
+            'Строка за концом файла — отказ: сначала прочитай файл целиком или посмотри скелет.',
         },
         endLine: {
           type: 'number',
-          description: 'Последняя строка диапазона (включительно). Без него — до конца (с лимитом строк).',
+          description:
+            'Последняя строка диапазона — целое число (включительно). Без него — до конца (с лимитом строк); ' +
+            'значение за концом файла зажимается до последней строки.',
         },
         force: {
           type: 'boolean',
@@ -389,8 +402,28 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         patches: {
           type: 'array',
-          description: 'Массив объектов { path, patches: [{ oldText, newText }] }.',
-          items: { type: 'object', description: 'PatchFile' },
+          description: 'Правки по файлам: массив объектов { path, patches: [{ oldText, newText }] }.',
+          items: {
+            type: 'object',
+            description: 'Правки одного файла: path — абсолютный путь, patches — список замен.',
+            properties: {
+              path: { type: 'string', description: 'Абсолютный путь к файлу.' },
+              patches: {
+                type: 'array',
+                description: 'Что заменить в файле: список пар { oldText, newText }.',
+                items: {
+                  type: 'object',
+                  description: 'Одна замена: oldText — точный текст из файла, newText — чем заменить.',
+                  properties: {
+                    oldText: { type: 'string', description: 'Точный текст из файла; обязан быть единственным.' },
+                    newText: { type: 'string', description: 'Чем заменить. Пустая строка удаляет найденное.' },
+                  },
+                  required: ['oldText', 'newText'],
+                },
+              },
+            },
+            required: ['path', 'patches'],
+          },
         },
       },
       required: ['patches'],
@@ -410,8 +443,39 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         edits: {
           type: 'array',
-          description: 'Массив объектов { path, expectedVersion, edits: TextEdit[] }.',
-          items: { type: 'object', description: 'FileEdit' },
+          description: 'Правки по файлам: массив объектов { path, expectedVersion, edits: [{ ... }] }.',
+          items: {
+            type: 'object',
+            description: 'Правки одного файла: path — абсолютный путь, edits — список правок с позициями.',
+            properties: {
+              path: { type: 'string', description: 'Абсолютный путь к файлу.' },
+              expectedVersion: {
+                type: 'number',
+                description: 'Необязательно: версия документа, которую видел агент. Не совпала — правка отвергается.',
+              },
+              edits: {
+                type: 'array',
+                description: 'Список правок одного файла: позиции 1-based, конец диапазона — исключающий.',
+                items: {
+                  type: 'object',
+                  description: 'Одна правка: диапазон (startLine/startColumn/endLine/endColumn) и новый текст.',
+                  properties: {
+                    startLine: { type: 'number', description: 'Начальная строка (1-based).' },
+                    startColumn: { type: 'number', description: 'Начальный столбец (1-based).' },
+                    endLine: { type: 'number', description: 'Конечная строка (включительно).' },
+                    endColumn: { type: 'number', description: 'Конечный столбец (исключающий).' },
+                    newText: { type: 'string', description: 'Чем заменить диапазон. Пустая строка удаляет его.' },
+                    oldText: {
+                      type: 'string',
+                      description: 'Точный текст диапазона: документ сверит его перед правкой.',
+                    },
+                  },
+                  required: ['startLine', 'startColumn', 'endLine', 'endColumn', 'newText'],
+                },
+              },
+            },
+            required: ['path', 'edits'],
+          },
         },
       },
       required: ['edits'],

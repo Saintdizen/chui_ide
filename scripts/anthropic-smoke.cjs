@@ -7,7 +7,6 @@
  * блоками image, и режим расширенного мышления (thinking + отсутствие temperature).
  */
 const http = require('node:http');
-const assert = require('node:assert/strict');
 
 const { AnthropicProvider, toAnthropicMessages } = require('../dist/main/ai/anthropic.js');
 

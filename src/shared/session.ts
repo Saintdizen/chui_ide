@@ -8,6 +8,8 @@ import type { BreakpointRecord, CursorPosition, DebugExceptionFilters, DebugLaun
 
 /** Границы разумного: битый или огромный файл сессии не должен вредить запуску. */
 export const MAX_TABS = 40;
+/** Потолок корней рабочей области: десятка папок в одном окне хватает с запасом. */
+export const MAX_ROOTS = 10;
 export const MAX_EXPANDED = 400;
 export const MAX_ARGS = 100;
 export const MAX_WATCH = 50;
@@ -52,6 +54,11 @@ export function sanitizeSession(raw: unknown): SessionState {
     tabs,
     expanded,
   };
+
+  // Корни рабочей области: если их больше одного, область была из нескольких папок.
+  // Один корень не пишем — это обычный проект, и дублировать его в файле незачем.
+  const roots = stringList(value.roots, MAX_ROOTS);
+  if (roots.length > 1) state.roots = roots;
 
   if (typeof value.activeTab === 'string' && tabs.includes(value.activeTab)) {
     state.activeTab = value.activeTab;

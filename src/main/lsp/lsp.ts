@@ -1,9 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
 import { toWorkspaceFileEdits } from '../../shared/lsp-workspace-edit';
 import { languageInfoForPath } from '../../shared/languages';
+import { serverCandidates } from '../../shared/lsp-bundled';
 import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { toFileSymbols, toProjectSymbols, type FileSymbol, type ProjectSymbol } from '../../shared/lsp-symbols';
 import { mergeEnv } from '../project-env';
@@ -18,6 +20,31 @@ import { mergeEnv } from '../project-env';
  *
  * Повод вынести в main: сервер — внешний процесс, renderer к процессам доступа не имеет.
  */
+
+/**
+ * Сколько ждать ответа на `initialize`. Сервер, молчащий на `initialize` (например,
+ * `pylsp`, падающий в своём коде и не отвечающий вовсе), не должен вешать язык:
+ * по таймауту отдаём его цепочке как неудачный и пробуем следующего кандидата.
+ */
+const INITIALIZE_TIMEOUT_MS = 15_000;
+
+/** Промис с пределом ожидания: по истечении срока — ошибка с понятной причиной. */
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Таймаут: ${what}`)), ms);
+    (timer as { unref?: () => void }).unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
 
 /* ── JSON-RPC поверх stdio с фреймингом Content-Length ──────────────────── */
 
@@ -177,6 +204,12 @@ export class LspService {
      * что видит код при запуске.
      */
     private readonly env: () => Promise<Record<string, string>> = async () => ({}),
+    /**
+     * Запасные серверы для языка — на случай, когда названный в настройках не
+     * поднялся (сломан, без пакетов). Порядок — по приоритету источников
+     * (venv → поставка → PATH); пусто — запасных нет.
+     */
+    private readonly alternates: (language: string) => Promise<LspServerConfig[]> = async () => [],
   ) {}
 
   status(): { running: string[] } {
@@ -257,27 +290,59 @@ export class LspService {
   }
 
   private async startLanguage(language: string): Promise<ServerRuntime | null> {
-    const settings = this.settings();
-    if (!settings.enabled) return null;
-    const config = settings.servers.find(
-      (server) => server.language === language && server.enabled && server.command.trim(),
-    );
-    if (!config) return null;
+    if (!this.settings().enabled) return null;
 
-    // Пока поднимались, могли перезапустить серверы: тогда этот уже не нужен, и
-    // его процесс надо убить — иначе он остался бы жить вне учёта.
     const generation = this.generation;
-    try {
-      const runtime = await this.start(config);
-      if (generation !== this.generation) {
-        this.kill(runtime);
-        return null;
+    const tried = new Set<string>();
+    const key = (server: LspServerConfig): string => [server.command, ...server.args].join(' ');
+    const attempt = async (list: readonly LspServerConfig[]): Promise<ServerRuntime | null> => {
+      for (const config of list) {
+        if (tried.has(key(config))) continue;
+        tried.add(key(config));
+        const runtime = await this.tryStart(config, generation);
+        if (runtime) return runtime;
       }
-      this.runtimes.set(language, runtime);
-      return runtime;
+      return null;
+    };
+    // Сперва — названное в настройках. Альтернативы ищем только если оно не поднялось:
+    // их поиск недёшев (диск, PATH), а обычный случай — как раз первый сервер.
+    const chosen = await attempt(serverCandidates(this.settings().servers, [], language));
+    if (chosen) return chosen;
+    return attempt(serverCandidates([], await this.alternates(language), language));
+  }
+
+  /**
+   * Поднять сервер и дождаться `initialize`. Не поднявшийся процесс не оставляем
+   * жить вне учёта, а отдаём `null`: цепочка попробует следующего кандидата. Без
+   * этого сломанный сервер (или молчащий на `initialize`) оставил бы язык без
+   * подсказок, хотя рабочий сервер в системе есть.
+   */
+  private async tryStart(config: LspServerConfig, generation: number): Promise<ServerRuntime | null> {
+    let runtime: ServerRuntime;
+    try {
+      runtime = await this.start(config);
     } catch {
       return null; // сервера нет в PATH — это не повод падать IDE
     }
+    try {
+      await runtime.initialized;
+    } catch {
+      this.kill(runtime); // не ответил на initialize (ошибка/таймаут) — пробуем дальше
+      return null;
+    }
+    return this.adopt(runtime, generation);
+  }
+
+  /** Поставить поднявшийся сервер на учёт — или убить, если его успели перезапустить. */
+  private adopt(runtime: ServerRuntime, generation: number): ServerRuntime | null {
+    // Пока поднимались, могли перезапустить серверы: тогда этот уже не нужен, и
+    // его процесс надо убить — иначе он остался бы жить вне учёта.
+    if (generation !== this.generation) {
+      this.kill(runtime);
+      return null;
+    }
+    this.runtimes.set(runtime.config.language, runtime);
+    return runtime;
   }
 
   private kill(runtime: ServerRuntime): void {
@@ -292,7 +357,9 @@ export class LspService {
   private async start(config: LspServerConfig): Promise<ServerRuntime> {
     const cwd = this.root() ?? process.cwd();
     // Языковой сервер видит `.env` проекта — тем же путём, что терминал и запуск.
-    const env = mergeEnv(process.env, await this.env());
+    // Своё окружение конфига идёт последним: серверам из поставки нужен режим Node
+    // (`ELECTRON_RUN_AS_NODE`), и проектное `.env` его перебивать не должно.
+    const env = { ...mergeEnv(process.env, await this.env()), ...(config.env ?? {}) };
     const child = spawn(config.command, config.args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -329,25 +396,38 @@ export class LspService {
 
   private async initialize(runtime: ServerRuntime, cwd: string): Promise<void> {
     const python = this.pythonPath();
-    const result = (await runtime.connection.request('initialize', {
-      processId: process.pid,
-      rootUri: pathToFileURL(cwd).toString(),
-      clientInfo: { name: 'chui_iDE' },
-      capabilities: {
-        textDocument: {
-          synchronization: {},
-          completion: { completionItem: { snippetSupport: false } },
-          hover: { contentFormat: ['markdown', 'plaintext'] },
-          definition: {},
-          signatureHelp: {},
+    const rootUri = pathToFileURL(cwd).toString();
+    const result = (await withTimeout(
+      runtime.connection.request('initialize', {
+        processId: process.pid,
+        // Корень проекта называем ТРЕМЯ способами, и это не избыточность: разные
+        // серверы слушают разное поле. `workspaceFolders` — современный способ, но
+        // его игнорируют серверы постарше; `rootUri` и `rootPath` — старые, но их
+        // игнорирует Pyright (без них он считает корнем `/<default workspace root>`
+        // и не разрешает импорты вида `tests.v2.page`, оставляя подсказки пустыми).
+        rootUri,
+        rootPath: cwd,
+        workspaceFolders: [{ uri: rootUri, name: path.basename(cwd) }],
+        clientInfo: { name: 'chui_iDE' },
+        capabilities: {
+          textDocument: {
+            synchronization: {},
+            completion: { completionItem: { snippetSupport: false } },
+            hover: { contentFormat: ['markdown', 'plaintext'] },
+            definition: {},
+            signatureHelp: {},
+          },
+          // Серверы (pylsp, pyright) спрашивают настройки этим запросом.
+          workspace: { configuration: true },
         },
-        // Серверы (pylsp, pyright) спрашивают настройки этим запросом.
-        workspace: { configuration: true },
-      },
-      // Путь к питону передаём сразу: pyright берёт его отсюда, иначе не видит
-      // пакеты окружения и подсказки по импортам не поднимаются.
-      initializationOptions: python ? { pythonPath: python, settings: { python: { pythonPath: python } } } : undefined,
-    })) as { capabilities?: LspCapabilities } | null;
+        // Путь к питону передаём сразу: pyright берёт его отсюда, иначе не видит
+        // пакеты окружения и подсказки по импортам не поднимаются. Свои доводы
+        // сервера (например, путь к `tsserver.js`) идут следом и дополняют их.
+        initializationOptions: buildInitializationOptions(runtime, python),
+      }),
+      INITIALIZE_TIMEOUT_MS,
+      `initialize: ${runtime.config.command}`,
+    )) as { capabilities?: LspCapabilities } | null;
 
     // Возможности решают, что можно спрашивать: их отсутствие — не ошибка.
     runtime.capabilities = result?.capabilities ?? {};
@@ -608,4 +688,20 @@ function toDiagnostics(raw: unknown): LspDiagnostic[] {
     });
   }
   return out;
+}
+
+/**
+ * Доводы к `initialize`: путь к питону проекта плюс собственные доводы сервера.
+ *
+ * Питон нужен всем питоновским серверам (иначе они не видят пакеты окружения), а
+ * свои доводы приходят у серверов из поставки — например, путь к `tsserver.js`.
+ * Свои идут последними: если они о том же поле, пусть решает конфиг сервера.
+ */
+function buildInitializationOptions(
+  runtime: ServerRuntime,
+  python: string | null,
+): Record<string, unknown> | undefined {
+  const base = python ? { pythonPath: python, settings: { python: { pythonPath: python } } } : {};
+  const merged = { ...base, ...(runtime.config.initializationOptions ?? {}) };
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }

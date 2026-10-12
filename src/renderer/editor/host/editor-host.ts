@@ -25,7 +25,9 @@ import type { CursorPosition, LspDiagnostic } from '../../../shared/api';
 import type { TextEdit } from '../../../shared/edits';
 import type { FoldRange } from '../../../shared/fold-ranges';
 import type { GitLineChange } from '../../../shared/git-line-changes';
+import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
+import type { InlayHint } from '../../../shared/lsp-inlay-hints';
 import type { RunnableTest } from '../../../shared/python-tests';
 import type { Snippet } from '../../../shared/snippets';
 import type { TestOutcome } from '../../../shared/test-model';
@@ -44,8 +46,9 @@ import type { CaseStyle } from '../input/case-convert';
 import { blockCommentFor, lineCommentFor } from '../input/comments';
 import { InlineCompletions } from '../input/inline-completions';
 import { EditorView } from '../view/editor-view';
+import { normalizeWhitespaceMode, type WhitespaceMode } from '../view/whitespace';
 import { caret, isEmpty, type Selection } from '../view/selection';
-import { FileDecorations } from '../view/decorations';
+import { FileDecorations, type LensDecoration } from '../view/decorations';
 import { FindWidget } from '../widgets/find-widget';
 import { GotoLineWidget } from '../widgets/goto-widget';
 import { HoverWidget, type HoverExternalInfo } from '../widgets/hover-widget';
@@ -59,6 +62,12 @@ import { SymbolNavigation, type SymbolSource } from './symbol-navigation';
 
 /** Пауза перед пересчётом диапазонов свёртки: на каждое нажатие считать блоки незачем. */
 const FOLD_REFRESH_DELAY_MS = 300;
+
+/** Пауза перед перезапросом подсказок-вставок: типы и имена меняются не на каждую букву. */
+const INLAY_REFRESH_DELAY_MS = 500;
+
+/** Пауза перед перезапросом код-линз по правке: сервер спрашиваем не на каждую букву. */
+const LENS_REFRESH_DELAY_MS = 400;
 
 /** Нажали на значок запуска в жёлобе — этот файл и строку и просят выполнить. */
 export interface RunMarkerHit {
@@ -103,11 +112,32 @@ export interface CursorState {
   selections: number;
 }
 
+/**
+ * Запись покрытия одного файла: путь, непокрытые строки и (если отчёт их дал) строки
+ * с наполовину пройденной ветвью. Путь — абсолютный: редактор ключует файлы так.
+ */
+export type CoverageEntry = readonly [path: string, missing: readonly number[], partial?: readonly number[]];
+
 export interface EditorHostOptions {
   /** Сколько пробелов в шаге отступа (Tab). */
   tabSize?: number;
   /** Кегль текста в редакторе, px. */
   fontSize?: number;
+  /** Столбцы направляющих (ruler): вертикальные черты на этих столбцах. */
+  rulers?: readonly number[];
+  /** Показывать ли невидимые знаки: `none` (по умолчанию), `trailing` или `all`. */
+  whitespace?: WhitespaceMode;
+  /** Показывать ли миникарту — сжатый вид всего файла справа. */
+  minimap?: boolean;
+  /** Переносить ли длинные строки (word wrap). */
+  wordWrap?: boolean;
+  /** Включать ли лигатуры шрифта. */
+  ligatures?: boolean;
+  /**
+   * Подсказки-вставки файла (inlay hints) от языкового сервера: путь и текст → подсказки
+   * (см. `shared/lsp-inlay-hints.ts`). Не задано — подсказок в коде нет вовсе.
+   */
+  inlayHints?: (path: string, text: string) => Promise<readonly InlayHint[]>;
   /** Схема оформления: цвета токенов и обвязки. */
   scheme?: Scheme;
   /** Сниппеты всех языков: к текущему языку отберёт подсказка. */
@@ -168,6 +198,13 @@ export interface EditorHostOptions {
    */
   foldRanges?: (path: string, text: string) => Promise<readonly FoldRange[]>;
   /**
+   * Код-линзы файла от языкового сервера: путь и текст → подписи у строк (см.
+   * `shared/lsp-code-lens.ts`). Не задано — линз нет вовсе.
+   */
+  codeLenses?: (path: string, text: string) => Promise<readonly CodeLensEntry[]>;
+  /** Исполнить команду линзы: её выбирает сервер, а запускает приложение. */
+  lensCommand?: (path: string, command: CodeLensCommand) => void;
+  /**
    * Inline-подсказка «допиши за меня»: включение, задержка и запрос к модели. Не задана —
    * призрачного текста в панели нет вовсе (у Monaco это был его провайдер подсказок).
    */
@@ -220,11 +257,30 @@ export class EditorHost {
   private foldRequestId = 0;
   /** Пауза перед пересчётом свёртки по правке: на каждое нажатие считать незачем. */
   private foldTimer: number | null = null;
+
+  /** Подсказки-вставки (inlay hints) — источник от приложения; спрашиваем по файлу. */
+  private readonly inlayHintSource: ((path: string, text: string) => Promise<readonly InlayHint[]>) | undefined;
+  /** Номер запроса подсказок: ответ на прежний текст не показываем. */
+  private inlayRequestId = 0;
+  private inlayTimer: number | null = null;
+
+  /** Код-линзы — от приложения (языковой сервер): источник, исполнение и последний ответ. */
+  private readonly codeLensSource: ((path: string, text: string) => Promise<readonly CodeLensEntry[]>) | undefined;
+  private readonly lensCommand: ((path: string, command: CodeLensCommand) => void) | undefined;
+  /** Последний ответ по файлам: рисуем из него, а команду на клик ищем здесь же. */
+  private readonly codeLenses = new Map<string, readonly CodeLensEntry[]>();
+  private lensRequestId = 0;
+  private lensTimer: number | null = null;
+
   /** Поле прокрутки: на нём слушаем Ctrl+Click по слову (переход к определению). */
   private readonly viewport: HTMLElement | null;
 
   private scheme: Scheme;
   private path: string | null = null;
+  /** Открытый файл — только для чтения (большой файл): ввод и правки не проходят. */
+  private readOnly = false;
+  /** Значок «только чтение» над панелью: виден, когда файл большой. */
+  private readonly readOnlyBadge: HTMLElement;
   /** Куда стоял курсор в каждом файле — восстанавливается при возврате к файлу. */
   private readonly cursors = new Map<string, CursorPosition>();
   private readonly cursorEmitter = new Emitter<CursorState>();
@@ -252,6 +308,11 @@ export class EditorHost {
   private testOutcomes: ReadonlyMap<string, TestOutcome> = new Map();
   private readonly breakpoints = new Map<string, readonly BreakpointInput[]>();
   private readonly coverageLines = new Map<string, ReadonlySet<number>>();
+  /**
+   * Строки, где ветвь условия пройдена лишь наполовину: часть дуг исполнена, часть
+   * нет. Отдельно от непокрытых строк — это разная тяжесть, и видеть их надо по-разному.
+   */
+  private readonly coveragePartial = new Map<string, ReadonlySet<number>>();
   private blameLine: { path: string; line: number; text: string } | null = null;
   private readonly blameAll = new Map<string, readonly { line: number; text: string }[]>();
   private debugLine: { path: string; line: number } | null = null;
@@ -278,6 +339,10 @@ export class EditorHost {
   private readonly changeMarkerEmitter = new Emitter<ChangeMarkerHit>();
   readonly onChangeMarker = this.changeMarkerEmitter.event;
 
+  /** Правый клик по полоске изменения — меню блока: индексировать, убрать, откатить. */
+  private readonly changeStripMenuEmitter = new Emitter<ChangeMarkerHit>();
+  readonly onChangeStripMenu = this.changeStripMenuEmitter.event;
+
   constructor(container: HTMLElement, registry: DocumentRegistry, options: EditorHostOptions = {}) {
     this.registry = registry;
     this.scheme = options.scheme ?? 'dark';
@@ -285,13 +350,30 @@ export class EditorHost {
     this.contextMenu = options.contextMenu;
     this.codeActions = options.codeActions;
     this.foldRanges = options.foldRanges;
+    this.codeLensSource = options.codeLenses;
+    this.lensCommand = options.lensCommand;
+    this.inlayHintSource = options.inlayHints;
 
     // До первого `open` редактор держит пустой буфер: слои не терпят «нет документа», а
     // пустая вкладка — нормальное состояние панели, пока файл не открыт.
     const buffer = new TextBuffer('');
-    this.view = new EditorView(container, buffer, { scheme: this.scheme });
+    this.view = new EditorView(container, buffer, {
+      scheme: this.scheme,
+      whitespace: normalizeWhitespaceMode(options.whitespace),
+      minimap: options.minimap,
+      ligatures: options.ligatures,
+    });
+    this.view.setWordWrap(options.wordWrap === true);
     if (options.fontSize !== undefined) this.view.setFontSize(options.fontSize);
+    if (options.rulers) this.view.setRulers(options.rulers);
     this.viewport = this.view.element.querySelector<HTMLElement>('.own-editor-viewport');
+    // Значок «только чтение» — поверх панели: файл большой, правки в нём выключены.
+    this.readOnlyBadge = document.createElement('div');
+    this.readOnlyBadge.className = 'own-editor-readonly';
+    this.readOnlyBadge.textContent = 'Только чтение';
+    this.readOnlyBadge.title = 'Файл слишком большой для правки — открыт только для чтения';
+    this.readOnlyBadge.hidden = true;
+    container.append(this.readOnlyBadge);
     this.controller = new EditorController(buffer, { tabSize: options.tabSize });
     this.find = new FindWidget(this.view, this.controller, buffer);
     this.goto = new GotoLineWidget(this.view, this.controller, buffer);
@@ -441,12 +523,30 @@ export class EditorHost {
     this.inline?.setBuffer();
 
     this.path = document.path;
+    // Большой файл открывается только для чтения: значок говорит об этом человеку, а
+    // контроллер в таком файле не даёт править текст (см. `setReadOnly`).
+    this.readOnly = document.readOnly;
+    this.controller.setReadOnly(document.readOnly);
+    this.readOnlyBadge.hidden = !document.readOnly;
+    if (document.readOnly) {
+      // Такой файл в языковой сервер не отдаём (см. `core/lsp.ts`), поэтому серверные
+      // украшения для него не запрашиваем — и снимаем те, что остались от прошлого файла.
+      this.view.setFoldRanges([]);
+      this.view.setInlayHints([]);
+      this.codeLenses.delete(document.path);
+    }
     this.controller.setBuffer(buffer, selection);
     // Нарисовать украшения именно этого файла: у прежнего они свои (его полоски git,
     // его точки останова) и в новом показываться не должны.
     this.refreshDecorations(document.path);
-    // Свёртка — тоже про файл: диапазоны нового берём у сервера или считаем по отступам.
-    void this.refreshFolds();
+    if (!document.readOnly) {
+      // Свёртка — тоже про файл: диапазоны нового берём у сервера или считаем по отступам.
+      void this.refreshFolds();
+      // Код-линзы, как и свёртка, про конкретный файл: прежние к новому не относятся.
+      void this.refreshLenses();
+      // Подсказки-вставки — тоже про файл: у прежнего они свои.
+      void this.refreshInlayHints();
+    }
     this.input.focus();
     this.emitCursor();
   }
@@ -459,6 +559,8 @@ export class EditorHost {
    * файл за кадром — прямо в буфер и в документ: история нужна там, где человек печатает.
    */
   applyEdits(document: TextDocument, edits: readonly TextEdit[]): TranslatedEdits {
+    // Файл только для чтения правок не принимает — ни от ассистента, ни от сервера.
+    if (document.readOnly) return { changes: [], skipped: [] };
     const buffer = this.registry.resolve(document);
     const translated = translateEdits(buffer, edits);
     if (translated.changes.length === 0) return translated;
@@ -548,12 +650,25 @@ export class EditorHost {
   }
 
   /** Настройки редактора, влияющие на вид: ширина отступа (Tab) и кегль текста. */
-  applyOptions(options: { tabSize?: number; fontSize?: number }): void {
+  applyOptions(options: {
+    tabSize?: number;
+    fontSize?: number;
+    rulers?: readonly number[];
+    whitespace?: WhitespaceMode;
+    minimap?: boolean;
+    wordWrap?: boolean;
+    ligatures?: boolean;
+  }): void {
     if (options.tabSize !== undefined) {
       this.controller.setTabSize(options.tabSize);
       this.view.setTabSize(options.tabSize);
     }
     if (options.fontSize !== undefined) this.view.setFontSize(options.fontSize);
+    if (options.rulers !== undefined) this.view.setRulers(options.rulers);
+    if (options.whitespace !== undefined) this.view.setWhitespace(normalizeWhitespaceMode(options.whitespace));
+    if (options.minimap !== undefined) this.view.setMinimap(options.minimap);
+    if (options.wordWrap !== undefined) this.view.setWordWrap(options.wordWrap);
+    if (options.ligatures !== undefined) this.view.setLigatures(options.ligatures);
   }
 
   /** Текущий текст файла по буферу (`null` — файл в реестре не открыт). */
@@ -773,6 +888,7 @@ export class EditorHost {
     decorations.setGlyphs(this.buildGlyphs(path));
     decorations.setLineBackgrounds(this.buildBackgrounds(path));
     decorations.setAfterContents(this.buildAfters(path));
+    decorations.setLenses(this.buildLenses(path));
     decorations.setSquiggles(this.buildSquiggles(path));
 
     if (this.path === path) this.view.setDecorations(decorations);
@@ -821,7 +937,13 @@ export class EditorHost {
   /** Заливка строки: непокрытые тестами строки и строка, где стоит отладчик. */
   private buildBackgrounds(path: string) {
     const backgrounds: { line: number; className: string }[] = [];
-    for (const line of this.coverageLines.get(path) ?? []) backgrounds.push({ line, className: 'coverage-line' });
+    const missing = this.coverageLines.get(path) ?? new Set<number>();
+    for (const line of missing) backgrounds.push({ line, className: 'coverage-line' });
+    // Частичная ветвь слабее полного непокрытия: строку тесты исполняли, а вот одну
+    // из ветвей условия — нет. Полностью непокрытая строка важнее, её и оставляем.
+    for (const line of this.coveragePartial.get(path) ?? []) {
+      if (!missing.has(line)) backgrounds.push({ line, className: 'coverage-partial-line' });
+    }
     if (this.debugLine && this.debugLine.path === path) {
       backgrounds.push({ line: this.debugLine.line, className: 'debug-line' });
     }
@@ -887,14 +1009,19 @@ export class EditorHost {
     this.refreshDecorations(path);
   }
 
-  /** Непокрытые строки по файлам из отчёта покрытия. Набор заменяется целиком. */
-  setCoverage(files: Iterable<readonly [string, readonly number[]]>): void {
-    const affected = new Set(this.coverageLines.keys());
+  /**
+   * Строки покрытия по файлам из отчёта. Третий элемент записи (если есть) — строки
+   * с наполовину пройденной ветвью: они подсвечиваются слабее непокрытых. Наборы
+   * заменяются целиком.
+   */
+  setCoverage(files: Iterable<CoverageEntry>): void {
+    const affected = new Set([...this.coverageLines.keys(), ...this.coveragePartial.keys()]);
     this.coverageLines.clear();
-    for (const [path, lines] of files) {
-      if (lines.length === 0) continue;
-      this.coverageLines.set(path, new Set(lines));
-      affected.add(path);
+    this.coveragePartial.clear();
+    for (const [path, lines, partial] of files) {
+      if (lines.length > 0) this.coverageLines.set(path, new Set(lines));
+      if (partial && partial.length > 0) this.coveragePartial.set(path, new Set(partial));
+      if (lines.length > 0 || (partial && partial.length > 0)) affected.add(path);
     }
     for (const path of affected) this.refreshDecorations(path);
   }
@@ -941,6 +1068,9 @@ export class EditorHost {
     this.view.onGlyphClick = (line) => this.onGlyphClick(line);
     this.view.onGlyphContextMenu = (line) => this.onGlyphClick(line, true);
     this.view.onStripClick = (line) => this.onStripClick(line);
+    // Правый клик по полоске: меню блока (то, чего не сделать щелчком по тексту).
+    this.view.onStripContextMenu = (line) => this.onStripContextMenu(line);
+    this.view.onLensClick = (line) => this.onLensClick(line);
     this.view.onContextMenu = (event) => this.openContextMenu(event);
   }
 
@@ -1002,6 +1132,19 @@ export class EditorHost {
     }
   }
 
+  /**
+   * Правый клик по полоске: меню действий с блоком. Показываем его только там, где
+   * полоска есть, — иначе мешало бы обычному меню текста. Собирает меню приложение:
+   * у него и git, и подтверждения.
+   */
+  private onStripContextMenu(line: number): void {
+    const path = this.path;
+    if (!path) return;
+    if (this.lineChanges.get(path)?.some((change) => change.line === line)) {
+      this.changeStripMenuEmitter.fire({ path, line });
+    }
+  }
+
   dispose(): void {
     this.unsubscribe();
     this.unsubscribeBuffer();
@@ -1015,9 +1158,12 @@ export class EditorHost {
     this.locations?.dispose();
     this.inline?.dismiss();
     if (this.foldTimer !== null) window.clearTimeout(this.foldTimer);
+    if (this.lensTimer !== null) window.clearTimeout(this.lensTimer);
+    if (this.inlayTimer !== null) window.clearTimeout(this.inlayTimer);
     this.view.dispose();
     this.cursorEmitter.dispose();
     this.changeTextEmitter.dispose();
+    this.changeStripMenuEmitter.dispose();
   }
 
   /** Показать панель по команде ввода (`Ctrl+F`, `Ctrl+H`, `Ctrl+G`, `F1`). */
@@ -1041,6 +1187,10 @@ export class EditorHost {
         this.changeTextEmitter.fire();
         // Правка могла тронуть границы блоков: диапазоны свёртки пересчитываем с паузой.
         this.scheduleFolds();
+        // Линзы привязаны к местам в тексте — после правки их тоже перезапрашиваем.
+        this.scheduleLenses();
+        // Подсказки-вставки зависят от типов и имён — правка их меняет, перезапрашиваем.
+        this.scheduleInlayHints();
       }
       this.cursors.set(this.path, this.cursorPosition());
     }
@@ -1097,6 +1247,7 @@ export class EditorHost {
 
   /** Диапазоны свёртки текущего файла: спросить у приложения и отдать виду. */
   private async refreshFolds(): Promise<void> {
+    if (this.readOnly) return;
     const source = this.foldRanges;
     const path = this.path;
     if (!source || !path) return;
@@ -1116,6 +1267,89 @@ export class EditorHost {
       this.foldTimer = null;
       void this.refreshFolds();
     }, FOLD_REFRESH_DELAY_MS);
+  }
+
+  // — код-линзы —
+
+  /**
+   * Подписи-линзы у строк: короткие действия от языкового сервера («3 ссылки»,
+   * «Запустить тест»). Показываем только те, у которых уже есть готовая команда:
+   * без неё линза — пустая подпись, кликать не по чему.
+   */
+  private buildLenses(path: string): readonly LensDecoration[] {
+    const lenses: LensDecoration[] = [];
+    for (const entry of this.codeLenses.get(path) ?? []) {
+      const command = entry.command;
+      if (!command) continue;
+      lenses.push({
+        line: entry.range.start.line + 1,
+        content: `  ${command.title}`,
+        className: 'own-editor-lens',
+        tooltip: command.title,
+      });
+    }
+    return lenses;
+  }
+
+  /** Код-линзы файла: спросить у приложения и перерисовать украшения этого файла. */
+  private async refreshLenses(): Promise<void> {
+    if (this.readOnly) return;
+    const source = this.codeLensSource;
+    const path = this.path;
+    if (!source || !path) return;
+    const text = this.registry.get(path)?.text ?? '';
+    const id = (this.lensRequestId += 1);
+    const entries = await source(path, text).catch(() => []);
+    // Пока спрашивали, файл сменился или текст переписали — ответ уже не к месту.
+    if (id !== this.lensRequestId || this.path !== path) return;
+    if (entries.length === 0) this.codeLenses.delete(path);
+    else this.codeLenses.set(path, entries);
+    this.refreshDecorations(path);
+  }
+
+  /** Пересчитать линзы с паузой: на каждое нажатие дёргать сервер незачем. */
+  private scheduleLenses(): void {
+    if (!this.codeLensSource) return;
+    if (this.lensTimer !== null) window.clearTimeout(this.lensTimer);
+    this.lensTimer = window.setTimeout(() => {
+      this.lensTimer = null;
+      void this.refreshLenses();
+    }, LENS_REFRESH_DELAY_MS);
+  }
+
+  /**
+   * Подсказки-вставки текущего файла: спросить у приложения и отдать виду. Вид покажет их
+   * только у видимых строк, поэтому спрашиваем на весь файл — но при смене файла или
+   * текста ответ прошлого запроса уже не к месту (по номеру запроса).
+   */
+  private async refreshInlayHints(): Promise<void> {
+    if (this.readOnly) return;
+    const source = this.inlayHintSource;
+    const path = this.path;
+    if (!source || !path) return;
+    const text = this.registry.get(path)?.text ?? '';
+    const id = (this.inlayRequestId += 1);
+    const hints = await source(path, text).catch(() => []);
+    if (id !== this.inlayRequestId || this.path !== path) return;
+    this.view.setInlayHints(hints);
+  }
+
+  /** Пересчитать подсказки-вставки с паузой: на каждое нажатие дёргать сервер незачем. */
+  private scheduleInlayHints(): void {
+    if (!this.inlayHintSource) return;
+    if (this.inlayTimer !== null) window.clearTimeout(this.inlayTimer);
+    this.inlayTimer = window.setTimeout(() => {
+      this.inlayTimer = null;
+      void this.refreshInlayHints();
+    }, INLAY_REFRESH_DELAY_MS);
+  }
+
+  /** Клик по линзе строки: исполняем команду, которую положил в неё сервер. */
+  private onLensClick(line: number): void {
+    const path = this.path;
+    if (!path || !this.lensCommand) return;
+    const entry = (this.codeLenses.get(path) ?? []).find((item) => item.range.start.line + 1 === line);
+    if (entry?.command) this.lensCommand(path, entry.command);
   }
 
   /** Позиция курсора активного файла в понятиях «строка и столбец». */

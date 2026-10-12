@@ -12,6 +12,7 @@ import {
   type ChatRunTrace,
   type ChatStreamDone,
   type ChatUsage,
+  type CommitMessageResult,
   type DiagnosticsHostResult,
   type InlineCompletionRequest,
   type InlineCompletionResult,
@@ -40,6 +41,14 @@ import {
   INLINE_SYSTEM_PROMPT,
   renderInlinePrompt,
 } from '../../shared/inline-ai';
+import {
+  buildCommitPrompt,
+  cleanCommitMessage,
+  COMMIT_MAX_CHARS,
+  COMMIT_MAX_TOKENS,
+  COMMIT_SYSTEM_PROMPT,
+  type CommitPromptParts,
+} from '../../shared/commit-message';
 import { sandboxNote } from '../../shared/sandbox';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
 import { addUsage } from '../../shared/usage';
@@ -490,6 +499,43 @@ export class AiService {
     }
 
     return { text: cleanCompletion(text) };
+  }
+
+  /**
+   * Сообщение коммита по diff.
+   *
+   * Один запрос — один короткий ответ, как у inline-подсказок: ни истории, ни
+   * инструментов, ни карты проекта. Сообщение коммита — это не беседа, и платить
+   * за беседу здесь незачем. Модель берём активную (выбранную в панели AI):
+   * отдельной настройки для сообщений не заводим.
+   */
+  async commitMessage(request: CommitPromptParts, signal: AbortSignal): Promise<CommitMessageResult> {
+    const ai = this.settings.get().ai;
+    const providerId = ai.activeProviderId;
+    const model = ai.activeModel;
+    if (!providerId || !model) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана модель (панель AI)');
+    }
+    const provider = this.createProvider(providerId);
+
+    const messages: ChatMessage[] = [
+      { role: 'system', content: COMMIT_SYSTEM_PROMPT },
+      { role: 'user', content: buildCommitPrompt(request) },
+    ];
+
+    let text = '';
+    await provider.streamChat(
+      { model, messages, temperature: 0.2, maxTokens: COMMIT_MAX_TOKENS },
+      {
+        onDelta: (piece) => {
+          // Потолок по символам: `maxTokens` — просьба, а не гарантия.
+          if (text.length < COMMIT_MAX_CHARS) text += piece;
+        },
+      },
+      signal,
+    );
+
+    return { message: cleanCommitMessage(text) };
   }
 
   async chat(

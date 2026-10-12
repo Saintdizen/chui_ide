@@ -42,6 +42,20 @@ describe('sanitizeSession', () => {
     expect(state.expanded).toHaveLength(MAX_EXPANDED);
   });
 
+  it('несколько корней рабочей области сохраняются, один — нет', () => {
+    // Две папки в одном окне — это часть рабочего места, её и помним.
+    expect(sanitizeSession({ roots: ['/a', '/b'] }).roots).toEqual(['/a', '/b']);
+    // Один корень — обычный проект: дублировать его в файле незачем.
+    expect(sanitizeSession({ roots: ['/a'] }).roots).toBeUndefined();
+    expect(sanitizeSession({ roots: [] }).roots).toBeUndefined();
+    expect(sanitizeSession({}).roots).toBeUndefined();
+  });
+
+  it('битый список корней не ломает сессию', () => {
+    expect(sanitizeSession({ roots: [1, null, '', '/a', '/b'] }).roots).toEqual(['/a', '/b']);
+    expect(sanitizeSession({ roots: 'нет' }).roots).toBeUndefined();
+  });
+
   it('видимость панелей в сессию не попадает (это часть общего макета)', () => {
     const state = sanitizeSession({ sidebarVisible: false, rightVisible: false, dockVisible: true });
     expect('sidebarVisible' in state).toBe(false);

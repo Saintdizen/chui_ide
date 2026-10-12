@@ -36,6 +36,7 @@
     "smoke:folder": "npm run build && node scripts/folder-smoke.cjs",
     "smoke:git": "npm run build:main && electron scripts/git-smoke.cjs",
     "smoke:agent": "npm run build:main && electron scripts/agent-smoke.cjs",
+    "smoke:commitmsg": "npm run build:main && node scripts/commit-message-smoke.cjs",
     "smoke:browser": "npm run build:main && node scripts/browser-smoke.cjs",
     "smoke:sandbox": "npm run build:main && node scripts/sandbox-smoke.cjs",
     "smoke:map": "npm run build:main && electron scripts/project-map-smoke.cjs",
@@ -52,7 +53,10 @@
     "probe:python": "npm run build && electron scripts/python-ui-probe.cjs",
     "probe:settings": "npm run build && electron scripts/settings-search-probe.cjs",
     "probe:palette": "npm run build && electron scripts/palette-probe.cjs",
+    "probe:saveas": "npm run build && electron scripts/save-as-probe.cjs",
+    "probe:hunkmenu": "npm run build && electron scripts/hunk-menu-probe.cjs",
     "probe:editor": "electron scripts/own-editor-probe.cjs",
+    "probe:lspbundled": "npm run build:main && electron scripts/lsp-bundled-probe.cjs",
     "probe:typing": "npm run build && electron scripts/type-probe.cjs",
     "probe:f1": "npm run build && electron scripts/f1-probe.cjs",
     "probe:lsp": "npm run build && electron scripts/lsp-pickup-probe.cjs",
@@ -80,6 +84,11 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "pyright": "^1.1.414",
+    "typescript-bundled": "npm:typescript@^5.9.3",
+    "typescript-language-server": "^6.0.2",
+    "vscode-langservers-extracted": "^4.10.0",
+    "yaml-language-server": "^1.25.0"
   }
 }

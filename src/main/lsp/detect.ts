@@ -1,7 +1,10 @@
 import { constants } from 'node:fs';
 import { access } from 'node:fs/promises';
 import path from 'node:path';
-import { presetCommands } from '../../shared/lsp-presets';
+import type { LspServerConfig } from '../../shared/api';
+import { matchPresets, presetCommands } from '../../shared/lsp-presets';
+import { findEnvironments } from '../python/environments';
+import { detectBundledServers } from './bundled';
 
 /**
  * Поиск команд LSP в PATH. Отдельно от сервиса: это про систему, а не про
@@ -71,4 +74,21 @@ export async function detectVenvCommands(venvDir: string, platform: string): Pro
     }),
   );
   return checks.filter((command): command is string => command !== null);
+}
+
+/**
+ * Серверы по источникам, в порядке приоритета: окружение проекта → поставка → PATH.
+ *
+ * Отдаём списком списков, а не одним, потому что потребителей двое:
+ *   • `lsp.detect` схлопывает их по языку (`mergeByPriority`) — в настройках
+ *     у языка один сервер, иначе они спорили бы за документ;
+ *   • рантайму нужны ВСЕ кандидаты: названный сервер может не подняться, и его
+ *     место должен занять следующий по приоритету (см. `serverCandidates`).
+ */
+export async function detectLspSources(root: string | null, platform: string): Promise<LspServerConfig[][]> {
+  const [commands, bundled] = await Promise.all([detectAvailableCommands(), detectBundledServers()]);
+  const environments = root ? await findEnvironments(root, platform) : [];
+  const primary = environments.find((environment) => environment.primary);
+  const venvCommands = primary ? await detectVenvCommands(primary.path, platform) : [];
+  return [matchPresets(venvCommands), bundled, matchPresets(commands)];
 }

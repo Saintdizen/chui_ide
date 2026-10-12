@@ -31,6 +31,28 @@ describe('разбор подсказок LSP', () => {
     expect(toCompletions([{ label: 'foo', kind: 999 }])[0]!.detail).toBe('');
   });
 
+  it('additionalTextEdits (авто-импорт) переводятся в 1-based правки', () => {
+    const entry = toCompletions([
+      {
+        label: 'Path',
+        additionalTextEdits: [
+          {
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+            newText: 'from pathlib import Path\n',
+          },
+        ],
+      },
+    ])[0]!;
+    expect(entry.additionalEdits).toEqual([
+      { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1, newText: 'from pathlib import Path\n' },
+    ]);
+  });
+
+  it('битые additionalTextEdits отбрасываются, пусто — поля нет', () => {
+    expect(toCompletions([{ label: 'a', additionalTextEdits: [{}] }])[0]!.additionalEdits).toBeUndefined();
+    expect(toCompletions([{ label: 'a' }])[0]!.additionalEdits).toBeUndefined();
+  });
+
   it('insertTextFormat 2 даёт разметку сниппета', () => {
     const entry = toCompletions([{ label: 'for', insertText: 'for ${1:x} in ${2:xs}:', insertTextFormat: 2 }])[0]!;
     expect(entry.snippet).toBe('for ${1:x} in ${2:xs}:');

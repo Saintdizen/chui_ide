@@ -27,6 +27,8 @@ import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations'
 import { toCompletions } from '../../../shared/lsp-completions';
 import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
 import { toFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
+import { toInlayHints, type InlayHint } from '../../../shared/lsp-inlay-hints';
+import { commandFromLens, toCodeLenses, type CodeLensEntry } from '../../../shared/lsp-code-lens';
 import { toSignatureHelp, type SignatureHelp } from '../../../shared/lsp-signature';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import { toFileSymbols } from '../../../shared/lsp-symbols';
@@ -34,6 +36,9 @@ import { toWorkspaceFileEdits } from '../../../shared/lsp-workspace-edit';
 import { pathToUri, uriToPath } from '../../core/document';
 import type { RpcClient } from '../../core/rpc';
 import type { CompletionItem } from '../complete/completions';
+
+/** Потолок досчёта линз без команды: на каждую сервер зовём отдельно. */
+const MAX_LENS_RESOLVES = 100;
 
 /** Позиция в документе: строка и столбец, оба с единицы — как их видит человек. */
 export interface LspPosition {
@@ -126,6 +131,8 @@ export class LspFeatures {
       detail: entry.detail || 'сервер',
       insert: entry.insert,
       ...(entry.snippet !== undefined ? { snippet: entry.snippet } : {}),
+      // Авто-импорт: правки (обычно строка import) применяем вместе со вставкой.
+      ...(entry.additionalEdits ? { additionalEdits: entry.additionalEdits } : {}),
     }));
   }
 
@@ -163,11 +170,81 @@ export class LspFeatures {
   }
 
   /**
+   * Упорядочить импорты: просим у сервера действие `source.organizeImports` (он один
+   * знает, что лишнее, а чего не хватает). Диапазон — весь документ: своего текста у
+   * моста нет, конец передаёт вызывающий. Контекст сужен до этого вида действия, чтобы
+   * сервер не отвечал прочими правками.
+   */
+  async organizeImports(path: string, end: { line: number; column: number }): Promise<CodeActionItem[]> {
+    const result = await this.request(path, 'textDocument/codeAction', {
+      textDocument: { uri: pathToUri(path) },
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: Math.max(0, end.line - 1), character: Math.max(0, end.column - 1) },
+      },
+      context: { diagnostics: [], only: ['source.organizeImports'], triggerKind: 1 },
+    });
+    return toCodeActions(result, uriToPath);
+  }
+
+  /**
    * Выполнить команду сервера. Ответ бывает разным: чаще `null`, но бывают и правки
    * (`WorkspaceEdit`) — тогда их возвращаем, чтобы вызывающий применил их обычным путём.
    */
+  /**
+   * Подсказки-вставки: тип переменной, имя параметра. Серверу нужен диапазон — своего
+   * текста у моста нет, поэтому конец документа передаёт вызывающий. Пустой ответ —
+   * сервер не умеет или нечего подсказать; это не ошибка.
+   */
+  async inlayHints(path: string, end: { line: number; column: number }): Promise<InlayHint[]> {
+    const result = await this.request(path, 'textDocument/inlayHint', {
+      textDocument: { uri: pathToUri(path) },
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: Math.max(0, end.line - 1), character: Math.max(0, end.column - 1) },
+      },
+    });
+    return toInlayHints(result);
+  }
+
   async executeCommand(path: string, command: string, args: readonly unknown[]): Promise<unknown> {
     return this.request(path, 'workspace/executeCommand', { command, arguments: [...args] });
+  }
+
+  /**
+   * Код-линзы файла: подписи-действия у объявлений («3 ссылки», «Запустить тест»).
+   * Часть серверов отдаёт линзы без команды — её просят отдельно (`codeLens/resolve`),
+   * и без неё показывать нечего. Такие доводим до готовых, но с потолком: файл с сотнями
+   * линз не должен стоить сотни запросов, а недоделанная линза отсеивается.
+   */
+  async codeLenses(path: string): Promise<CodeLensEntry[]> {
+    const result = await this.request(path, 'textDocument/codeLens', {
+      textDocument: { uri: pathToUri(path) },
+    });
+    const entries = toCodeLenses(result);
+    const unresolved = entries.filter((entry) => !entry.command).slice(0, MAX_LENS_RESOLVES);
+    if (unresolved.length === 0) return entries;
+
+    const resolved = new Map<CodeLensEntry, CodeLensEntry>();
+    await Promise.all(
+      unresolved.map(async (entry) => {
+        const done = await this.resolveCodeLens(path, entry);
+        if (done) resolved.set(entry, done);
+      }),
+    );
+    // Линзу без команды (даже после resolve) не показываем: кликать по ней не по чему.
+    return entries.flatMap((entry) => {
+      const done = resolved.get(entry);
+      if (done) return [done];
+      return entry.command ? [entry] : [];
+    });
+  }
+
+  /** `codeLens/resolve`: сервер дописывает команду в линзу, которую отдал без неё. */
+  private async resolveCodeLens(path: string, entry: CodeLensEntry): Promise<CodeLensEntry | null> {
+    const result = await this.request(path, 'codeLens/resolve', entry.source);
+    const command = commandFromLens(result);
+    return command ? { ...entry, command } : null;
   }
 
   /**

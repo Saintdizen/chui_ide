@@ -46,7 +46,7 @@ function sampleDocument(): string {
     '\tтабуляция\tведёт\tк\tкратному\tстолбцу',
     'const wide = "日本語のテキスト" + "한국어";',
     'const emoji = "😀 👍🏽 👨‍👩‍👧";',
-    '// управляющие конструкции, вызовы и типы — тоже должны быть видны',
+    '// управляющие конструкции, вызовы и типы — тоже. TODO: дописать проверку',
     'if (value > 1) { handle(value); }',
     'const typed: string = "x";',
     `const long = "${'длинная-строка-'.repeat(24)}";`,
@@ -90,6 +90,22 @@ const suggest = new SuggestWidget(root);
 const assistant = new CompletionAssistant(view, controller, buffer, suggest, {
   language: 'typescript',
   snippets: () => DEFAULT_SNIPPETS,
+  // Подставной языковой сервер: одна подсказка с авто-импортом — так проба проверяет,
+  // что дополнительные правки (строка import) применяются вместе со вставкой.
+  lsp: async (prefix) =>
+    prefix === 'Path'
+      ? [
+          {
+            label: 'Path',
+            kind: 'external' as const,
+            detail: 'класс',
+            insert: 'Path',
+            additionalEdits: [
+              { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1, newText: 'from pathlib import Path\n' },
+            ],
+          },
+        ]
+      : [],
 });
 // Наведение с двумя источниками ПО ПРИОРИТЕТУ: отладочная подсказка (значение из
 // остановленного кадра) идёт раньше языковой. Переключатель `debugHoverControl.on`
@@ -201,8 +217,8 @@ const host = new EditorHost(hostRoot, registry, {
   // там запрос к серверу и список) — запоминаем, с какой позицией его позвали.
   codeActions: (path, position) => codeActionCalls.push({ path, position }),
 });
-const docA = store.open('/probe/a.ts', 'const a = 1;\nconst b = 2;\n', 'typescript');
-const docB = store.open('/probe/b.py', 'def f():\n    return 1\n', 'python');
+const docA = store.open('/probe/a.ts', 'const a = 1;\nconst b = 2;\n', { languageId: 'typescript' });
+const docB = store.open('/probe/b.py', 'def f():\n    return 1\n', { languageId: 'python' });
 host.open(docA);
 
 declare global {
@@ -230,8 +246,10 @@ document.body.append(workspaceRoot);
 const workspaceStore = new DocumentStore();
 const workspaceRegistry = new DocumentRegistry(workspaceStore);
 const workspace = new EditorWorkspace(workspaceRoot, workspaceRegistry, { scheme: 'dark' });
-const leftDoc = workspaceStore.open('/probe/left.ts', 'const left = 1;\nconst two = 2;\n', 'typescript');
-const rightDoc = workspaceStore.open('/probe/right.py', 'def right():\n    return 2\n', 'python');
+const leftDoc = workspaceStore.open('/probe/left.ts', 'const left = 1;\nconst two = 2;\n', {
+  languageId: 'typescript',
+});
+const rightDoc = workspaceStore.open('/probe/right.py', 'def right():\n    return 2\n', { languageId: 'python' });
 workspace.open(leftDoc);
 
 declare global {
@@ -295,7 +313,7 @@ const symbolsWorkspace = new EditorWorkspace(symbolsRoot, symbolsRegistry, {
   relativePath: (path) => path.replace('/probe/', ''),
   onNotice: (text) => symbolNotices.push(text),
 });
-const symbolsDoc = symbolsStore.open('/probe/sym.ts', 'const value = 1;\nuse(value);\n', 'typescript');
+const symbolsDoc = symbolsStore.open('/probe/sym.ts', 'const value = 1;\nuse(value);\n', { languageId: 'typescript' });
 symbolsWorkspace.open(symbolsDoc);
 // F1 открывает палитру: у рабочего места это свой обработчик (у Monaco было его действие),
 // а отладочная подсказка спрашивает значение слова — оба шва проверяем отсюда.
@@ -350,7 +368,7 @@ const inlineWorkspace = new EditorWorkspace(inlineRoot, inlineRegistry, {
     },
   },
 });
-const inlineDoc = inlineStore.open('/probe/inline.ts', 'const n = 1;\n', 'typescript');
+const inlineDoc = inlineStore.open('/probe/inline.ts', 'const n = 1;\n', { languageId: 'typescript' });
 inlineWorkspace.open(inlineDoc);
 
 declare global {
@@ -394,11 +412,9 @@ const problemsWorkspace = new EditorWorkspace(problemsRoot, problemsRegistry, {
   },
   onNotice: (text) => problemNotices.push(text),
 });
-const problemsDoc = problemsStore.open(
-  '/probe/problems.ts',
-  'const a = 1;\nconst b = 2;\nconst c = 3;\n',
-  'typescript',
-);
+const problemsDoc = problemsStore.open('/probe/problems.ts', 'const a = 1;\nconst b = 2;\nconst c = 3;\n', {
+  languageId: 'typescript',
+});
 problemsWorkspace.open(problemsDoc);
 
 // Три пометки: две в открытом файле, одна в другом — переход должен открыть и её.

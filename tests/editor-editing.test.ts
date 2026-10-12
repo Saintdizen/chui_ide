@@ -12,7 +12,7 @@ import {
 import { caret } from '../src/renderer/editor/view/selection';
 
 /** Применить результат правки и вернуть буфер с полученным выделением. */
-function apply(buffer: TextBuffer, result: ReturnType<typeof insertText>) {
+function apply(_buffer: TextBuffer, result: ReturnType<typeof insertText>) {
   expect(result).not.toBeNull();
   return result!;
 }

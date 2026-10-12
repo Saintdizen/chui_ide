@@ -258,13 +258,20 @@ const CHECKS = {
   // Событие `scroll` приходит асинхронно, поэтому после сдвига ждём кадр — иначе
   // прочтём ещё не перерисованный DOM и решим, что прокрутка не работает.
   scroll: `(async () => {
-    const viewport = document.querySelector('.own-editor-viewport');
-    const linesLayer = document.querySelector('.own-editor-lines');
+    // Всё ищем внутри редактора пробы: на странице есть и другие редакторы.
+    const scope = window.probe.view.element;
+    const viewport = scope.querySelector('.own-editor-viewport');
+    const linesLayer = scope.querySelector('.own-editor-lines');
     const frame = () => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 30)));
-    const numbers = () => [...document.querySelectorAll('.own-editor-gutter-row')].map((n) => Number(n.textContent));
+    const numbers = () => [...scope.querySelectorAll('.own-editor-gutter-row')].map((n) => Number(n.textContent));
     viewport.scrollTop = 4000;
     await frame();
     const вниз = { первая: numbers()[0], последняя: numbers().at(-1), прокрутка: viewport.scrollTop };
+    // Номера должны стоять напротив своих строк и ПОСЛЕ прокрутки: верх слоя номеров
+    // совпадает с верхом слоя строк. Иначе номера уезжают под край поля.
+    const textTop = scope.querySelector('.own-editor-line').getBoundingClientRect().top;
+    const gutterTop = scope.querySelector('.own-editor-gutter-row').getBoundingClientRect().top;
+    const номера_на_месте = Math.abs(textTop - gutterTop) <= 1;
     viewport.scrollTop = viewport.scrollHeight;
     await frame();
     const конец = { первая: numbers()[0], последняя: numbers().at(-1) };
@@ -279,9 +286,9 @@ const CHECKS = {
       сдвиг: viewport.scrollLeft,
       ожидалось: Math.round(expected),
       текст_сдвинулся: Math.abs(actual - expected) <= 1,
-      полотно: Math.round(document.querySelector('.own-editor-content').getBoundingClientRect().width),
+      полотно: Math.round(scope.querySelector('.own-editor-content').getBoundingClientRect().width),
     };
-    return { вниз, конец, вбок };
+    return { вниз, номера_на_месте, конец, вбок };
   })()`,
 
   // Сообщения об ошибках страницы: собираются обработчиком в модуле пробы.
@@ -616,6 +623,33 @@ async function assistCheck(win) {
   await key('Escape');
   const afterEscape = await suggestState();
 
+  // Подсказка после точки: в классе печатаем `this.` — попап обязан показать поля и
+  // методы ЭТОГО класса. Здесь нет языкового сервера (подставной молчит), поэтому
+  // работает запасной разбор файла — тот, что нужен, когда сервера нет вовсе.
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: 'class Widget {\\n  #size = 0;\\n  draw() {}\\n}\\n' }]);
+    const end = buffer.length;
+    controller.selectRange(end, end);
+    controller.type('this.');
+    window.probe.input.focus();
+    return true;
+  })()`);
+  await wait(150);
+  const memberState = await script(`(() => {
+    const panel = document.querySelector('.own-editor-suggest');
+    const rows = [...document.querySelectorAll('.own-editor-suggest-item')];
+    const labels = rows.map((row) => row.querySelector('.own-editor-suggest-label').textContent);
+    return {
+      видно: Boolean(panel) && !panel.hidden,
+      подписи: labels,
+      только_члены: labels.length > 0 && labels.every((label) => label === 'draw' || label.startsWith('#')),
+      строка: window.probe.buffer.lineText(window.probe.buffer.lineCount),
+    };
+  })()`);
+  const shotMembers = await shot(win, '09b-members');
+  await key('Escape');
+
   // Наведение: считаем пришедшие движения мыши, чтобы отличить «событие не дошло» от
   // «дошло, но подсказка решила не показываться».
   await script(`(() => {
@@ -641,10 +675,13 @@ async function assistCheck(win) {
   const hoverState = () =>
     script(`(() => {
       const panel = document.querySelector('.own-editor-hover');
+      const box = panel && !panel.hidden ? panel.getBoundingClientRect() : null;
       return {
         видно: Boolean(panel) && !panel.hidden,
         заголовок: panel?.querySelector('.own-editor-hover-title')?.textContent ?? null,
         строки: [...(panel?.querySelectorAll('.own-editor-hover-body div') ?? [])].map((n) => n.textContent),
+        // Рамка в системе окна: по ней видно, встал попап У КУРСОРА или где-то ещё.
+        рамка: box ? { left: Math.round(box.left), top: Math.round(box.top) } : null,
       };
     })()`);
   const afterHover = await hoverState();
@@ -659,12 +696,29 @@ async function assistCheck(win) {
 
   // Прямая проверка логики наведения: показываем то же место без мыши. Так видно, что
   // подсказка не зависит от доставки события — обрыв искали бы именно там.
-  await script(`(() => {
+  const directPoint = await script(`(() => {
     const point = window.probe.view.clientPoint(6);
     window.probe.hover.showAt(6, point.left, point.top);
-    return true;
+    return { x: Math.round(point.left), y: Math.round(point.top) };
   })()`);
   const afterDirect = await hoverState();
+  // Попап обязан стоять рядом с точкой наведения. Ловушка, ради которой проверка и
+  // заведена: у `.own-editor` стоит `contain: layout paint style`, и `position: fixed`
+  // ВНУТРИ редактора отсчитывался от него самого — подсказка уезжала от курсора на
+  // смещение редактора в окне. Поэтому попап крепится к контейнеру, а не к полотну.
+  // Попап ставится ВНИЗ-ВПРАВО от точки: смещение 12 по X и 18 по Y (см. `position`).
+  // Проверка односторонняя: если попап уедет на смещение редактора в окне, разница
+  // станет заметно больше и это сразу видно.
+  const hoverPlacement = {
+    точка: directPoint,
+    рамка: afterDirect.рамка,
+    рядом:
+      afterDirect.рамка !== null &&
+      afterDirect.рамка.left - directPoint.x >= 8 &&
+      afterDirect.рамка.left - directPoint.x <= 48 &&
+      afterDirect.рамка.top - directPoint.y >= 8 &&
+      afterDirect.рамка.top - directPoint.y <= 48,
+  };
 
   return {
     после_набора: afterTyping,
@@ -676,11 +730,14 @@ async function assistCheck(win) {
     после_Enter: afterAccept,
     после_Ctrl_Space: afterCtrlSpace,
     после_Escape: afterEscape,
+    после_точки: memberState,
+    снимок_членов: shotMembers,
     движений_мыши: moves,
     наведение_координаты: hoverProbe,
     наведение_диагностика: await script('window.probe.hover.diagnostics'),
     наведение: afterHover,
     наведение_напрямую: afterDirect,
+    наведение_место: hoverPlacement,
     снимок_наведения: shotHover,
   };
 }
@@ -927,6 +984,7 @@ async function decorationsCheck(win) {
       { line: 9, className: 'debug-line' },
     ]);
     decorations.setAfterContents([{ line: 1, content: '  Иван, 3 дня назад', className: 'blame-inline' }]);
+    decorations.setLenses([{ line: 2, content: '  3 ссылки', className: 'own-editor-lens', tooltip: '3 ссылки' }]);
     decorations.setSquiggles([{ line: 3, startColumn: 1, endColumn: 6, className: 'is-error' }]);
     view.setDecorations(decorations);
     return { пусто: decorations.isEmpty, строк: buffer.lineCount };
@@ -948,6 +1006,10 @@ async function decorationsCheck(win) {
     }));
     const squiggly = root.querySelector('.own-editor-squiggly-rect');
     const подписи = [...root.querySelectorAll('.blame-inline')].map((node) => node.textContent);
+    const линзы = [...root.querySelectorAll('.own-editor-lens')].map((node) => ({
+      текст: node.textContent.trim(),
+      класс: node.className,
+    }));
     const glyphs = document.querySelector('.own-editor-glyphs');
     const strip = document.querySelector('.own-editor-strip');
     return {
@@ -963,6 +1025,7 @@ async function decorationsCheck(win) {
           }
         : null,
       подписи,
+      линзы,
       ширина_значков: Math.round(glyphs.getBoundingClientRect().width),
       ширина_полосы: Math.round(strip.getBoundingClientRect().width),
     };
@@ -996,6 +1059,20 @@ async function decorationsCheck(win) {
   await click(targets.glyphX, targets.y8, 'right');
   const clicks = await script('window.probe.decorationClicks');
 
+  // Клик по код-линзе: подпись рисует представление, а что исполнить — решает хозяин.
+  // Здесь хозяина нет, поэтому проверяем сам шов: клик зовёт `onLensClick` с номером строки,
+  // а представление лишь сообщает — как у клика по полю значков и полосе изменений.
+  const lensClick = await script(`(async () => {
+    const root = document.querySelector('.own-editor');
+    const node = root.querySelector('.own-editor-lens');
+    const seen = [];
+    window.probe.view.onLensClick = (line) => seen.push(line);
+    node?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 20)));
+    window.probe.view.onLensClick = null;
+    return { есть: node !== null, строка: seen[0] ?? null };
+  })()`);
+
   const cleared = await script(`(() => {
     window.probe.view.setDecorations(null);
     const root = document.querySelector('.own-editor');
@@ -1005,10 +1082,19 @@ async function decorationsCheck(win) {
       фон: root.querySelectorAll('.own-editor-line-bg').length,
       подчёркивания: root.querySelectorAll('.own-editor-squiggly-rect').length,
       подписи: root.querySelectorAll('.blame-inline').length,
+      линзы: root.querySelectorAll('.own-editor-lens').length,
     };
   })()`);
 
-  return { набор: applied, рисунок: drawing, снимок: shotDeco, цели: targets, клики: clicks, после_снятия: cleared };
+  return {
+    набор: applied,
+    рисунок: drawing,
+    снимок: shotDeco,
+    цели: targets,
+    клики: clicks,
+    линза: lensClick,
+    после_снятия: cleared,
+  };
 }
 
 /**
@@ -1210,7 +1296,57 @@ async function diffCheck(win) {
     return { индекс: window.__hunk ?? -1 };
   })()`);
 
-  return { рисунок: drawing, снимок: shotDiff, встроенный_режим: inline, переходы: navigation, кнопка: clicking };
+  // Замечания ревью: метка у строки, переход к ней прокруткой и два клика по номеру —
+  // по номеру с замечанием открывают тред, по чистому номеру заводят новый.
+  const comments = await script(`(async () => {
+    const { diff, element } = window.probeDiff;
+    const events = [];
+    diff.setComments({
+      marks: [{ side: 'modified', line: 46, count: 2, resolved: false }],
+      selected: { side: 'modified', line: 46 },
+      onSelect: (side, line) => events.push(['select', side, line]),
+      onRequest: (side, line) => events.push(['request', side, line]),
+    });
+    const root = element.querySelector('.own-diff');
+    // Начинаем с начала сравнения: тогда видно, что переход к замечанию реально прокрутил.
+    const body = element.querySelector('.own-diff-body');
+    body.scrollTop = 0;
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 20)));
+    const before = body.scrollTop;
+    diff.revealComment('modified', 46);
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));
+    const marked = root.querySelector('.own-diff-side.has-comment');
+    const badge = root.querySelector('.own-diff-comment');
+    const active = root.querySelector('.own-diff-side.is-comment-active');
+    const clickable = [...root.querySelectorAll('.own-diff-num.is-clickable')];
+    const withMark = clickable.find((num) => num.parentElement?.classList.contains('has-comment'));
+    const clean = clickable.find((num) => !num.parentElement?.classList.contains('has-comment'));
+    withMark?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    clean?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    const markedRows = root.querySelectorAll('.own-diff-side.has-comment').length;
+    diff.setComments(null);
+    await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 20)));
+    const afterClear = root.querySelectorAll('.own-diff-side.has-comment').length;
+    return {
+      прокрутка_до: before,
+      прокрутка_после: body.scrollTop,
+      метка_есть: Boolean(marked),
+      числом_сообщений: badge ? badge.textContent || 'точка' : null,
+      подсвечен_активный: Boolean(active),
+      отметок_на_строке_видно: markedRows,
+      событий: events,
+      после_снятия_отметок: afterClear,
+    };
+  })()`);
+
+  return {
+    рисунок: drawing,
+    снимок: shotDiff,
+    встроенный_режим: inline,
+    переходы: navigation,
+    кнопка: clicking,
+    замечания: comments,
+  };
 }
 
 /**
@@ -1447,6 +1583,364 @@ async function foldCheck(win) {
   })()`);
 
   return { свёртка: applied, щелчок_по_значку: clicked, клавиша: byKey, всё: all };
+}
+
+/**
+ * Закреплённые заголовки (sticky scroll): пока верх экрана внутри блока, его заголовок
+ * остаётся виден «шапкой». Проверяем появление, вложенность (два заголовка), снятие вне
+ * блока и переход по клику — заголовок уводит экран к своей строке.
+ */
+async function stickyCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const frame = `await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));`;
+
+  // Диапазон есть, но верх экрана ВНЕ его — заголовков быть не должно.
+  const outside = await script(`(async () => {
+    const { view } = window.probe;
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    view.setFoldRanges([{ startLine: 100, endLine: 200 }]);
+    viewport.scrollTop = 0;
+    ${frame}
+    return { строк: view.element.querySelectorAll('.own-editor-sticky-row').length };
+  })()`);
+
+  // Верх экрана внутри внешнего и вложенного блоков — два заголовка, от внешнего к вложенному.
+  const inside = await script(`(async () => {
+    const { view, buffer } = window.probe;
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    view.setFoldRanges([{ startLine: 1, endLine: 2000 }, { startLine: 100, endLine: 1500 }]);
+    viewport.scrollTop = 6000;
+    ${frame}
+    const layer = view.element.querySelector('.own-editor-sticky');
+    const rows = [...view.element.querySelectorAll('.own-editor-sticky-row')];
+    return {
+      видно: layer ? !layer.hidden : false,
+      строк: rows.length,
+      тексты: rows.map((row) => row.textContent),
+      ожидались: [buffer.lineText(1).trimEnd(), buffer.lineText(100).trimEnd()],
+      верх_слоя: layer ? Math.round(layer.getBoundingClientRect().top) : null,
+    };
+  })()`);
+
+  // Клик по вложенному заголовку уводит экран к его строке (100).
+  const click = await script(`(async () => {
+    const { view } = window.probe;
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    const rows = [...view.element.querySelectorAll('.own-editor-sticky-row')];
+    const before = Math.round(viewport.scrollTop);
+    rows[rows.length - 1]?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    ${frame}
+    const layer = view.element.querySelector('.own-editor-sticky');
+    return { до: before, после: Math.round(viewport.scrollTop), скрыт_слоя: layer ? layer.hidden : true };
+  })()`);
+
+  // К началу файла: заголовок верхнего блока снова виден в самом тексте — слоя нет.
+  const atTop = await script(`(async () => {
+    const { view } = window.probe;
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    viewport.scrollTop = 0;
+    ${frame}
+    const layer = view.element.querySelector('.own-editor-sticky');
+    const result = { строк: view.element.querySelectorAll('.own-editor-sticky-row').length, скрыт: layer ? layer.hidden : true };
+    view.setFoldRanges([]);
+    return result;
+  })()`);
+
+  return { вне_блока: outside, внутри_блока: inside, клик: click, в_начале: atTop };
+}
+
+/**
+ * Радужные скобки: один уровень вложенности — один цвет. В тексте пробы есть строка
+ * `if (value > 1) { handle(value); }`: в ней есть и внешние скобки, и вложенные.
+ * Проверяем, что скобки раскрашены и цвета уровней различаются.
+ */
+async function rainbowCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const frame = `await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));`;
+
+  return await script(`(async () => {
+    const { view } = window.probe;
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    viewport.scrollTop = 0;
+    ${frame}
+    const root = view.element;
+    const nodes = [...root.querySelectorAll('.own-editor-bracket')];
+    const по_классам = {};
+    for (const node of nodes) {
+      for (const cls of node.classList) {
+        if (cls.startsWith('is-depth-')) по_классам[cls] = (по_классам[cls] ?? 0) + 1;
+      }
+    }
+    const цвета = {};
+    for (const cls of ['is-depth-0', 'is-depth-1', 'is-depth-2']) {
+      const sample = root.querySelector('.own-editor-bracket.' + cls);
+      цвета[cls] = sample ? getComputedStyle(sample).color : null;
+    }
+    return { всего: nodes.length, по_классам, цвета };
+  })()`);
+}
+
+/** Направляющие столбцов (ruler): черт столько же, сколько столбцов, и стоят они на «столбец x ширина клетки». */
+async function rulersCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  return await script(`(() => {
+    const { view } = window.probe;
+    const before = view.element.querySelectorAll('.own-editor-ruler').length;
+    view.setRulers([40, 80]);
+    const nodes = [...view.element.querySelectorAll('.own-editor-ruler')];
+    const width = parseFloat(getComputedStyle(view.element).getPropertyValue('--own-editor-char-width')) || 0;
+    const lefts = nodes.map((node) => Math.round(parseFloat(node.style.left)));
+    view.setRulers([]);
+    const after = view.element.querySelectorAll('.own-editor-ruler').length;
+    return {
+      до: before,
+      черт: nodes.length,
+      слева: lefts,
+      ожидалось: [Math.round(40 * width), Math.round(80 * width)],
+      ширина_клетки: width,
+      после_снятия: after,
+    };
+  })()`);
+}
+
+/** Авто-импорт: у подсказки есть доп. правка (строка import) — при выборе добавляются и она, и имя. */
+async function autoImportCheck(win) {
+  const send = (event) => win.webContents.sendInputEvent(event);
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  await script(`(() => {
+    const c = window.probe.controller, b = window.probe.buffer, end = b.length;
+    c.selectRange(end, end);
+    c.applyEdit({ start: end, removed: '', inserted: '\\n' });
+    window.probe.input.focus();
+    return true;
+  })()`);
+  await wait(120);
+  for (const char of 'Path') {
+    send({ type: 'char', keyCode: char });
+    await wait(60);
+  }
+  await wait(150);
+  const показано = await script(
+    `[...document.querySelectorAll('.own-editor-suggest-item')].some((r) => r.textContent.includes('Path'))`,
+  );
+  const до = await script('window.probe.buffer.lineText(1)');
+  send({ type: 'keyDown', keyCode: 'Return' });
+  send({ type: 'keyUp', keyCode: 'Return' });
+  await wait(150);
+  const после = await script(`(() => {
+    const b = window.probe.buffer, caret = window.probe.controller.caret;
+    return { первая: b.lineText(1), строка_курсора: b.lineText(b.lineAt(caret)).trim() };
+  })()`);
+  await script('window.probe.controller.undo()');
+  await wait(80);
+  const после_отмены = await script('window.probe.buffer.lineText(1)');
+  return { показано, до, после, после_отмены };
+}
+
+/** Подсветка пометок TODO/FIXME в строках: слова-пометки получают свой класс. */
+async function todoCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const frame = `await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));`;
+  return await script(`(async () => {
+    const { view } = window.probe;
+    view.element.querySelector('.own-editor-viewport').scrollTop = 0;
+    ${frame}
+    const nodes = [...view.element.querySelectorAll('.own-editor-todo')];
+    const node = nodes[0];
+    return {
+      штук: nodes.length,
+      тексты: nodes.map((n) => n.textContent),
+      фон: node ? getComputedStyle(node).backgroundColor : null,
+    };
+  })()`);
+}
+
+/** Подсказки-вставки (inlay hints): вставка рисуется в строке и сдвигает текст за собой. */
+async function inlayCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const frame = `await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));`;
+  return await script(`(async () => {
+    const { view } = window.probe;
+    view.element.querySelector('.own-editor-viewport').scrollTop = 0;
+    ${frame}
+    const leftOf = (selector) => {
+      const node = view.element.querySelector(selector);
+      return node ? Math.round(node.getBoundingClientRect().left) : null;
+    };
+    // Строку 3 («const ascii = "..."») вставка на столбце 12 сдвигает вправо: строка-
+    // литерал после неё должна уехать ровно на ширину вставки.
+    const stringBefore = leftOf('.own-editor-token-string');
+    view.setInlayHints([{ line: 3, column: 12, label: ': string', kind: 'type' }]);
+    ${frame}
+    const nodes = [...view.element.querySelectorAll('.own-editor-inlay')];
+    const node = nodes[0];
+    const result = {
+      штук: nodes.length,
+      тексты: nodes.map((n) => n.textContent),
+      класс: node ? node.className : null,
+      курсив: node ? getComputedStyle(node).fontStyle : null,
+      сдвиг_текста: stringBefore !== null ? leftOf('.own-editor-token-string') - stringBefore : null,
+      ширина_вставки: node ? Math.round(node.getBoundingClientRect().width) : null,
+    };
+    view.setInlayHints([]);
+    ${frame}
+    return { ...result, после_снятия: view.element.querySelectorAll('.own-editor-inlay').length };
+  })()`);
+}
+
+/**
+ * Невидимые знаки: пробелы точками, табуляции стрелкой. Проба включает режим и
+ * считает узлы; заодно проверяет, что точка нарисована фоном, а не знаком в тексте.
+ */
+async function whitespaceCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const frame = `await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));`;
+  return await script(`(async () => {
+    const { view } = window.probe;
+    view.element.querySelector('.own-editor-viewport').scrollTop = 0;
+    view.setWhitespace('all');
+    ${frame}
+    const spaces = [...view.element.querySelectorAll('.own-editor-ws.is-space')];
+    const tabs = [...view.element.querySelectorAll('.own-editor-ws.is-tab')];
+    const space = spaces[0];
+    const all = {
+      пробелов: spaces.length,
+      табуляций: tabs.length,
+      символ_пробела: space ? JSON.stringify(space.textContent) : null,
+      фон_пробела: space ? getComputedStyle(space).backgroundImage.slice(0, 7) : null,
+    };
+    view.setWhitespace('trailing');
+    ${frame}
+    const trailing = view.element.querySelectorAll('.own-editor-ws').length;
+    view.setWhitespace('none');
+    ${frame}
+    return {
+      режим_all: all,
+      хвостовых_узлов: trailing,
+      после_снятия: view.element.querySelectorAll('.own-editor-ws').length,
+    };
+  })()`);
+}
+
+/** Лигатуры: включаются классом на корне, ширину знаков не меняют. */
+async function ligaturesCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const frame = `await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));`;
+  return await script(`(async () => {
+    const { view } = window.probe;
+    const root = view.element;
+    const read = () => getComputedStyle(root).fontVariantLigatures;
+    const before = read();
+    view.setLigatures(true);
+    ${frame}
+    const on = { класс: root.classList.contains('is-ligatures'), лигатуры: read() };
+    view.setLigatures(false);
+    ${frame}
+    return { до: before, включено: on, после: read() };
+  })()`);
+}
+
+/** Миникарта: холст, ползунок видимой части и его сдвиг при прокрутке. */
+async function minimapCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const frame = `await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));`;
+  return await script(`(async () => {
+    const { view } = window.probe;
+    const minimap = view.element.querySelector('.own-editor-minimap');
+    const canvas = view.element.querySelector('.own-editor-minimap-canvas');
+    const slider = view.element.querySelector('.own-editor-minimap-slider');
+    const topOf = () => Math.round(slider.getBoundingClientRect().top - minimap.getBoundingClientRect().top);
+    const before = { скрыта: minimap.hidden };
+    view.setMinimap(true);
+    ${frame}
+    const shown = {
+      видна: !minimap.hidden,
+      ширина_холста: canvas.width,
+      высота_холста: canvas.height,
+      ползунок_виден: !slider.hidden,
+      ползунок_высота: Math.round(slider.getBoundingClientRect().height),
+      ползунок_верх: topOf(),
+    };
+    const vp = view.element.querySelector('.own-editor-viewport');
+    vp.scrollTop = vp.scrollHeight - vp.clientHeight;
+    ${frame}
+    const scrolled = { ползунок_верх: topOf(), прокрутка: vp.scrollTop };
+    vp.scrollTop = 0;
+    view.setMinimap(false);
+    ${frame}
+    return { до: before, показана: shown, после_прокрутки: scrolled, после_снятия_скрыта: minimap.hidden };
+  })()`);
+}
+
+/**
+ * Перенос длинных строк: самая длинная строка ломается на несколько рядов, каретка на
+ * её конце переезжает на нижний ряд, а выделение всей строки даёт несколько заливок.
+ * Число рядов полотна сверяем как высоту полотна, делённую на высоту строки.
+ */
+async function wordWrapCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const frame = `await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 40)));`;
+  return await script(`(async () => {
+    const { view, buffer } = window.probe;
+    const root = view.element;
+    const content = root.querySelector('.own-editor-content');
+    const viewport = root.querySelector('.own-editor-viewport');
+    // Самая длинная строка файла — её перенос и смотрим.
+    let target = 1;
+    let longest = 0;
+    for (let line = 1; line <= buffer.lineCount; line += 1) {
+      const length = buffer.lineText(line).length;
+      if (length > longest) { longest = length; target = line; }
+    }
+    const start = buffer.lineStart(target);
+    const end = start + longest;
+
+    view.setWordWrap(false);
+    ${frame}
+    const before = view.caretPoint(start);
+    const rowsOff = Math.round(Number.parseFloat(content.style.height) / before.height);
+
+    view.setWordWrap(true);
+    ${frame}
+    const on = view.caretPoint(start);
+    const onEnd = view.caretPoint(end);
+    const rowsOn = Math.round(Number.parseFloat(content.style.height) / on.height);
+    const width = viewport.clientWidth;
+
+    // Выделение всей длинной строки: перенос даёт по прямоугольнику на отрезок.
+    view.setSelection({ anchor: start, active: end });
+    ${frame}
+    const shade = root.querySelectorAll('.own-editor-selection-rect').length;
+    const carets = root.querySelectorAll('.own-editor-caret').length;
+
+    // Клик в середину длинной строки должен дать смещение внутри неё.
+    const probeOffset = start + Math.floor(longest / 2);
+    const point = view.clientPoint(probeOffset);
+    const back = view.offsetAt(point.left, point.top + point.height / 2);
+
+    view.setSelection({ anchor: 0, active: 0 });
+    view.setWordWrap(false);
+    ${frame}
+    const rowsAfter = Math.round(Number.parseFloat(content.style.height) / before.height);
+
+    return {
+      длинная_строка: target,
+      знаков_в_строке: longest,
+      ширина_поля: width,
+      ряды_без_переноса: rowsOff,
+      ряды_с_переносом: rowsOn,
+      конец_на_ряду: Math.round(onEnd.top / on.height),
+      перенос_есть: onEnd.top > on.top,
+      каретка_конца_x: Math.round(onEnd.left),
+      каретка_конца_в_ширине: onEnd.left <= width,
+      заливок_выделения: shade,
+      кареток: carets,
+      клик_середина_строки: probeOffset,
+      клик_дал_смещение: back,
+      ряды_после_снятия: rowsAfter,
+    };
+  })()`);
 }
 
 async function codeActionsCheck(win) {
@@ -2003,7 +2497,7 @@ async function main() {
   log('');
 
   const diff = await diffCheck(win);
-  log('## Сравнение версий');
+  log('## Сравнение версий и замечания ревью');
   log(JSON.stringify(diff, null, 2));
   log('');
 
@@ -2035,6 +2529,58 @@ async function main() {
   const fold = await foldCheck(win);
   log('## Свёртка блоков');
   log(JSON.stringify(fold, null, 2));
+  log('');
+
+  const rainbow = await rainbowCheck(win);
+  log('## Радужные скобки');
+  log(JSON.stringify(rainbow, null, 2));
+  log('');
+
+  const rulers = await rulersCheck(win);
+  log('## Направляющие столбцов (ruler)');
+  log(JSON.stringify(rulers, null, 2));
+  log('');
+
+  const autoImport = await autoImportCheck(win);
+  log('## Авто-импорт при подсказке');
+  log(JSON.stringify(autoImport, null, 2));
+  log('');
+
+  const todo = await todoCheck(win);
+  log('## Подсветка TODO/FIXME');
+  log(JSON.stringify(todo, null, 2));
+  log('');
+
+  const inlay = await inlayCheck(win);
+  log('## Подсказки-вставки (inlay hints)');
+  log(JSON.stringify(inlay, null, 2));
+  log('');
+
+  const sticky = await stickyCheck(win);
+  log('## Закреплённые заголовки (sticky scroll)');
+  log(JSON.stringify(sticky, null, 2));
+  log('');
+
+  const whitespace = await whitespaceCheck(win);
+  log('## Невидимые знаки (пробелы и табуляции)');
+  log(JSON.stringify(whitespace, null, 2));
+  log('');
+
+  const ligatures = await ligaturesCheck(win);
+  log('## Лигатуры шрифта');
+  log(JSON.stringify(ligatures, null, 2));
+  log('');
+
+  const minimap = await minimapCheck(win);
+  log('## Миникарта');
+  log(JSON.stringify(minimap, null, 2));
+  log(`снимок: ${await shot(win, '07-minimap')}`);
+  log('');
+
+  const wordWrap = await wordWrapCheck(win);
+  log('## Перенос длинных строк (word wrap)');
+  log(JSON.stringify(wordWrap, null, 2));
+  log(`снимок: ${await shot(win, '08-wordwrap')}`);
   log('');
 
   const codeActions = await codeActionsCheck(win);

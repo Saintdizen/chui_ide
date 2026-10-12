@@ -267,6 +267,12 @@ module.exports = [
       // Правки текста при сохранении: как в main — выключены по умолчанию.
       trimTrailingWhitespace: false,
       insertFinalNewline: false,
+      // Направляющие и показ невидимых знаков: как в main.
+      rulers: [80, 120],
+      renderWhitespace: 'none',
+      minimap: false,
+      wordWrap: false,
+      fontLigatures: false,
       // Свои сниппеты: как в main — по умолчанию пусто, набор знает редактор.
       snippets: [],
     },
@@ -280,6 +286,7 @@ module.exports = [
       rowDensity: 'normal',
       gitDecorations: true,
       folderChangeDot: true,
+      dimIgnored: true,
       openOnSingleClick: false,
       confirmDelete: true,
       exclude: [],
@@ -287,6 +294,10 @@ module.exports = [
     run: { pythonPath: '', packageManager: 'auto', saveBeforeRun: true, pythonByRoot: {} },
     // Языковые серверы: как main — секция есть всегда, по умолчанию выключена.
     lsp: { enabled: false, servers: [] },
+    // Git: режим pull по умолчанию — как в main (поведение самого git).
+    git: { pullMode: 'default' },
+    // Изменённые горячие клавиши: по умолчанию пусто — сочетания берутся из кода.
+    keybindings: { overrides: [] },
     // «Системная» — чтобы схему в проверке задавал Playwright (`emulateMedia`).
     appearance: { theme: 'system', uiScale: 1, customTheme: null },
     // Макет рабочей области: размеры и видимость панелей (общий для всех проектов).
@@ -353,7 +364,24 @@ module.exports = [
     'dialog.pickFolder': () => ({ path: ROOT }),
     // Подтверждение в проверке не мешает: мок соглашается сразу.
     'dialog.confirm': () => ({ confirmed: true }),
+    // Save As: пробник отвечает файлом с суффиксом рядом с исходным — так видно,
+    // что вкладка переехала на новый путь, а прежний файл остался.
+    'dialog.saveFile': (params) => ({ path: `${params.defaultPath ?? ROOT}.copy` }),
 
+    // Diff будущего коммита: для предпросмотра хватает правки одного файла.
+    // Блоки изменений файла: в моке один блок на строке 1 — по нему и открывается меню.
+    'git.fileHunks': () => ({
+      unstaged: [{ oldStart: 1, oldCount: 1, newStart: 1, newCount: 2 }],
+      staged: [],
+    }),
+    'git.discardHunk': () => gitChanged(),
+    'git.commitDiff': () => ({
+      diff: 'diff --git a/src/app.ts b/src/app.ts\n@@ -1 +1,2 @@\n const a = 1;\n+const b = 2;\n',
+      staged: true,
+      truncated: false,
+      files: 1,
+      untracked: [],
+    }),
     'git.status': () => gitStatus(),
     'git.init': () => gitChanged(),
     'git.stage': (params) => setStaged(params.paths, true),
@@ -511,10 +539,11 @@ module.exports = [
         .filter((full) => full.startsWith(`${ROOT}/`))
         .map((full) => full.slice(ROOT.length + 1))
         .sort(),
-    'workspace.readFile': (params) => ({
-      text: FILES.get(params.path) ?? '',
-      mtimeMs: Date.now(),
-    }),
+    'workspace.readFile': (params) => {
+      const text = FILES.get(params.path) ?? '';
+      // Как main: размер и признак «только чтение» — по ним редактор решает, править ли файл.
+      return { text, mtimeMs: Date.now(), size: text.length, readOnly: false };
+    },
     'workspace.writeFile': (params) => {
       FILES.set(params.path, params.text ?? '');
       // Как main: сохранение файла — это изменение в рабочей папке, о нём
@@ -800,6 +829,8 @@ module.exports = [
     },
     // Inline-автодополнение: мок молча отдаёт короткую подсказку.
     'ai.complete': async () => ({ text: '// подсказка от мока' }),
+    // Сообщение коммита: мок отвечает так, как это делает модель после очистки.
+    'ai.commitMessage': async () => ({ message: 'Панель изменений: сообщение коммита по diff' }),
     'ai.chat': async (params, id) => {
       cancelRequested = false;
 

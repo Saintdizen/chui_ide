@@ -50,7 +50,10 @@ const FILE: MenuNode = {
     { label: 'Новая папка', command: 'file.newFolder' },
     { separator: true },
     { label: 'Сохранить', accelerator: 'Ctrl+S', command: 'file.save' },
-    { label: 'Сохранить всё', accelerator: 'Ctrl+Shift+S', command: 'file.saveAll' },
+    // «Сохранить как…» на Ctrl+Shift+S — привычка из VS Code и PyCharm; поэтому
+    // «Сохранить всё» переехало на Ctrl+Alt+S: два пункта на одной клавише не жить.
+    { label: 'Сохранить как…', accelerator: 'Ctrl+Shift+S', command: 'file.saveAs' },
+    { label: 'Сохранить всё', accelerator: 'Ctrl+Alt+S', command: 'file.saveAll' },
     { label: 'Закрыть вкладку', accelerator: 'Ctrl+W', command: 'file.close' },
     { separator: true },
     { label: 'Обновить дерево', command: 'workspace.refresh' },
@@ -80,6 +83,7 @@ const VIEW: MenuNode = {
   children: [
     { label: 'Боковая панель', accelerator: 'Ctrl+B', command: 'view.toggleSidebar' },
     { label: 'Панель AI', accelerator: 'Ctrl+Shift+A', command: 'view.toggleRight' },
+    { label: 'Режим дзен', accelerator: 'Alt+Z', command: 'view.zen' },
     { separator: true },
     { label: 'Терминал', accelerator: 'Alt+F12', command: 'view.showTerminal' },
     { label: 'Структура файла', command: 'view.showOutline' },

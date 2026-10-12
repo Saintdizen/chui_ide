@@ -86,9 +86,19 @@ describe('coveredRequest', () => {
     expect(coveredRequest('read_file', '{"path":"/proj/b.ts","startLine":1,"endLine":5}', reads)).toBeUndefined();
   });
 
-  it('перевёрнутый диапазон схлопывается к одной строке', () => {
-    const hit = coveredRequest('read_file', '{"path":"/proj/a.ts","startLine":50,"endLine":10}', reads);
-    expect(hit).toEqual({ path: '/proj/a.ts', from: 50, to: 50 });
+  it('перевёрнутый диапазон не покрыт: отказ объяснит инструмент, а не «уже прочитано»', () => {
+    expect(coveredRequest('read_file', '{"path":"/proj/a.ts","startLine":50,"endLine":10}', reads)).toBeUndefined();
+  });
+
+  it('границы, пришедшие строками, читаются так же, как числа', () => {
+    // Модель шлёт «10»/«20» — диапазон от этого не перестаёт быть прочитанным.
+    const hit = coveredRequest('read_file', '{"path":"/proj/a.ts","startLine":"10","endLine":"20"}', reads);
+    expect(hit).toEqual({ path: '/proj/a.ts', from: 10, to: 20 });
+  });
+
+  it('force строкой «true» тоже просит перечитать', () => {
+    // Иначе флаг терялся бы, и вместо текста модель получила бы «уже прочитано».
+    expect(coveredRequest('read_file', '{"path":"/proj/a.ts","endLine":5,"force":"true"}', reads)).toBeUndefined();
   });
 });
 

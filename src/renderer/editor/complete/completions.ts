@@ -20,6 +20,7 @@
  * проверяется в тестах без окна.
  */
 
+import type { TextEdit } from '../../../shared/edits';
 import { CODE_GRAMMARS } from '../highlight/languages/code';
 import type { Snippet } from '../../../shared/snippets';
 import type { WordIndex } from './word-index';
@@ -41,6 +42,11 @@ export interface CompletionItem {
   readonly insert?: string;
   /** Тело сниппета (разметка `${1:…}`, `$0`), если это сниппет. */
   readonly snippet?: string;
+  /**
+   * Правки, которые надо применить ВМЕСТЕ со вставкой (авто-импорт от сервера):
+   * выбрав незнакомое имя, получаешь и строку `import`. Пусто — правок нет.
+   */
+  readonly additionalEdits?: readonly TextEdit[];
 }
 
 export interface CompletionOptions {

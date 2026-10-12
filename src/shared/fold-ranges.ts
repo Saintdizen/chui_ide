@@ -98,6 +98,19 @@ export function isFoldStart(ranges: readonly FoldRange[], line: number): boolean
   return foldStartingAt(ranges, line) !== null;
 }
 
+/**
+ * Блоки, в которые строка входит, но не начинает их, — от внешнего к вложенным.
+ *
+ * Это цепочка «где я сейчас» для закреплённых заголовков (sticky scroll): пока верх
+ * экрана внутри функции и вложенного в неё блока, обоих заголовка видно сверху. Блок,
+ * НАЧИНАЮЩИЙСЯ на этой строке, сюда не попадает: его заголовок и так виден в тексте.
+ */
+export function enclosingFoldRanges(ranges: readonly FoldRange[], line: number): FoldRange[] {
+  return ranges
+    .filter((range) => range.startLine < line && range.endLine >= line)
+    .sort((a, b) => a.startLine - b.startLine);
+}
+
 /** Порядок диапазонов: сверху вниз, при равном начале — от длинного к короткому. */
 function byStart(a: FoldRange, b: FoldRange): number {
   return a.startLine - b.startLine || b.endLine - a.endLine;

@@ -27,16 +27,33 @@ import type { GlyphMetrics } from './glyph-metrics';
 const TAB = 9;
 
 /**
+ * Вставка в строку — то, чего нет в тексте файла (подсказка-вставка inlay hint).
+ * `column` — смещение-граница, ПОСЛЕ которой идёт вставка; `width` — её ширина.
+ * Вставка сдвигает всё, что за ней: карéтка и выделение считаются по той же раскладке,
+ * поэтому текст под ними остаётся на месте.
+ */
+export interface InlayInsertion {
+  readonly column: number;
+  readonly width: number;
+}
+
+/**
  * x-координаты для каждого смещения строки. Длина — `text.length + 1`: граница есть
  * и перед первым знаком, и после последнего. Последнее значение — ширина строки.
+ *
+ * `inserts` — вставки-подсказки: они занимают место (у них своя ширина), поэтому
+ * табуляция после вставки прыгает с учётом неё — иначе столбцы разъехались бы.
  */
-export function layoutLine(text: string, metrics: GlyphMetrics): number[] {
+export function layoutLine(text: string, metrics: GlyphMetrics, inserts: readonly InlayInsertion[] = []): number[] {
+  const extra = inserts.length > 0 ? widthsByColumn(inserts) : null;
   const offsets = new Array<number>(text.length + 1);
   const tabStop = metrics.tabSize * metrics.charWidth;
   let x = 0;
   let index = 0;
   while (index < text.length) {
     offsets[index] = x;
+    // Вставки на этой границе идут ДО знака: так они стоят между знаками, как им и место.
+    x += extra?.get(index) ?? 0;
     const code = text.codePointAt(index) ?? 0;
     const units = code > 0xffff ? 2 : 1;
     if (code === TAB) {
@@ -50,7 +67,18 @@ export function layoutLine(text: string, metrics: GlyphMetrics): number[] {
     index += units;
   }
   offsets[text.length] = x;
+  // Вставки в самом конце строки — за последним знаком.
+  x += extra?.get(text.length) ?? 0;
+  // Правый край строки — уже с хвостовыми вставками: ширину полотна считаем по нему.
+  offsets[text.length] = x;
   return offsets;
+}
+
+/** Сумма ширин вставок по их столбцам: на одной границе их может быть несколько. */
+function widthsByColumn(inserts: readonly InlayInsertion[]): Map<number, number> {
+  const map = new Map<number, number>();
+  for (const insert of inserts) map.set(insert.column, (map.get(insert.column) ?? 0) + insert.width);
+  return map;
 }
 
 /** Сколько пикселей занимает строка — правый край последнего столбца. */

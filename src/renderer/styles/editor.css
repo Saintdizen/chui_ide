@@ -24,7 +24,19 @@
   background: var(--editor_background);
   /* Строки сами не переносятся и не тянутся — раскладка считает ширину заранее. */
   white-space: pre;
+  /* Лигатуры по умолчанию выключены: браузер включает их сам, а в коде `=>` и `!=`
+     тогда сливаются. Включает их класс `is-ligatures` (ниже) по настройке. */
+  font-variant-ligatures: none;
   contain: layout paint style;
+}
+
+/* Лигатуры: ширину знаков в моношрифте они не меняют, поэтому раскладка и каретка
+   остаются на месте — меняется только вид кода. */
+.own-editor.is-ligatures {
+  font-variant-ligatures: contextual;
+  font-feature-settings:
+    "liga" 1,
+    "calt" 1;
 }
 
 .own-editor:focus,
@@ -132,9 +144,89 @@
   height: var(--own-editor-line-height);
 }
 
-/* Когда панель поиска видна, поле прокрутки сдвигается вниз на её высоту: код под
-   панелью читать нельзя, а высоту сообщает сама панель переменной. */
-.own-editor-has-find .own-editor-viewport {
+/* Закреплённые заголовки блоков сверху (sticky scroll): «шапка» над кодом, которая не
+   едет при прокрутке. Лежит поверх поля прокрутки, но ниже панели поиска и попапов
+   (у них z-index больше), и не ловит клики мимо своих строк. */
+.own-editor-sticky {
+  position: absolute;
+  z-index: 3;
+  overflow: hidden;
+  background: var(--editor_background);
+  border-bottom: 1px solid var(--border_color);
+  box-shadow: var(--box_shadow_small);
+}
+
+.own-editor-sticky-row {
+  height: var(--own-editor-line-height);
+  line-height: var(--own-editor-line-height);
+  padding: 0 8px;
+  overflow: hidden;
+  white-space: pre;
+  text-overflow: ellipsis;
+  color: var(--text_color);
+  cursor: pointer;
+}
+
+.own-editor-sticky-row:hover {
+  background: var(--element_background_hover);
+}
+
+/* Значок «только чтение»: большой файл открыт на просмотр. Висит в правом верхнем углу
+   панели поверх кода; клики не ловит — это пометка, а не кнопка. */
+.own-editor-readonly {
+  position: absolute;
+  top: 6px;
+  right: 16px;
+  z-index: 4;
+  padding: 2px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: 10px;
+  background: var(--editor_background);
+  color: var(--text_color_tertiary);
+  font-size: 0.85em;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Миникарта: узкая колонка справа от кода. Холст со сжатыми строками и поверх него —
+   ползунок видимой части. Клик ведёт к строке, за ползунок тянут; поэтому курсор —
+   указатель, а сам текст не выделяется. Ширину колонки задаёт представление. */
+.own-editor-minimap {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  background: var(--editor_background);
+  border-left: 1px solid var(--border_color);
+  cursor: pointer;
+  user-select: none;
+}
+
+.own-editor-minimap-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.own-editor-minimap-slider {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: color-mix(in srgb, var(--text_color) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text_color) 28%, transparent);
+  border-radius: 2px;
+  cursor: grab;
+}
+
+.own-editor-minimap-slider:active {
+  cursor: grabbing;
+}
+
+/* Когда панель поиска видна, ВСЁ содержимое редактора сдвигается вниз на её высоту —
+   и код, и поля слева (номера, значки, полоски). Раньше отступ стоял только на поле
+   прокрутки, и левые поля разъезжались с кодом. Панель при этом остаётся у верхнего
+   края: абсолютный узел позиционируется от края поля отступов, а не от содержимого.
+   Высоту сообщает сама панель переменной (`find-widget.ts`). */
+.own-editor-has-find {
   padding-top: var(--own-editor-find-height, 0px);
 }
 
@@ -158,6 +250,24 @@
   position: absolute;
   inset: 0 auto auto 0;
   will-change: transform;
+}
+
+/* Вертикальные направляющие столбцов (ruler): тонкая черта через всю высоту полотна.
+   Лежит ниже всего — под текстом, поэтому не мешает читать код. Место по x задаёт
+   представление (столбец × ширина клетки), а тянется черта от края до края полотна. */
+.own-editor-rulers {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.own-editor-ruler {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border_color);
+  opacity: 0.7;
 }
 
 /* Заливка всей строки (покрытие, строка отладчика). Лежит ниже всего — под текстом и
@@ -572,7 +682,7 @@
 }
 
 .own-editor-suggest-detail.is-external {
-  color: var(--accent);
+  color: var(--link_color);
 }
 
 /* Карточка подсказки о параметрах вызова. Материал и место — как у попапа подсказок:
@@ -759,6 +869,67 @@
   color: var(--own-token-attribute);
 }
 
+/* ── Радужные скобки ──────────────────────────────────────────────────────
+   Цвет — по уровню вложенности (класс `is-depth-N`, N — уровень по модулю числа
+   цветов). Берём роли палитры: цвета те же, что у кода, но три различимых между
+   собой оттенка — по ним видно, какая скобка какую закрывает. */
+
+.own-editor-bracket.is-depth-0 {
+  color: var(--own-token-keyword);
+}
+
+.own-editor-bracket.is-depth-1 {
+  color: var(--own-token-string);
+}
+
+.own-editor-bracket.is-depth-2 {
+  color: var(--own-token-type);
+}
+
+/* Пометки TODO/FIXME в коде: подсвечиваем фоном, чтобы бросались в глаза. Цвет — тот же
+   приглушённый акцент темы, что у совпадений, поэтому читается и в светлой, и в тёмной. */
+.own-editor-todo {
+  background: var(--highlight_background);
+  border-radius: 2px;
+  font-weight: 600;
+}
+
+/* Невидимые знаки. Пробел рисуем точкой по центру клетки — фоном, повторяющимся
+   через ширину клетки: так одна точка приходится на каждый пробел, а ширину текста
+   это не меняет. Табуляцию показываем стрелкой слева: невидимый знак один, хоть
+   места он занимает до столбца табуляции. */
+.own-editor-ws.is-space {
+  background-image: radial-gradient(circle at center, var(--text_color_tertiary) 0 0.6px, transparent 1px);
+  background-repeat: repeat-x;
+  background-size: var(--own-editor-char-width) 100%;
+  background-position: left top;
+}
+
+.own-editor-ws.is-tab {
+  position: relative;
+}
+
+.own-editor-ws.is-tab::before {
+  content: "→";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--text_color_tertiary);
+  pointer-events: none;
+}
+
+/* Подсказки-вставки (inlay hints): то, чего нет в тексте файла, — тип переменной или
+   имя параметра. Приглушены и не перехватывают мышь: это подсказка, а не код. Курсив
+   у типа отличает его от имени параметра — так их не спутать в одной строке. */
+.own-editor-inlay {
+  color: var(--text_color_tertiary);
+  pointer-events: none;
+}
+
+.own-editor-inlay.is-type {
+  font-style: italic;
+}
+
 /* ── Сравнение версий ────────────────────────────────────────────────────
    Ряд выровненных строк: две половины — исходная и изменённая. Рядом — две
    колонки, одним столбцом — исходная половина скрыта. Фон строки и цвет номера
@@ -857,6 +1028,38 @@
 
 .own-diff-row.is-replace .own-diff-side.is-modified .own-diff-num {
   border-left: 3px solid var(--git_modified);
+}
+
+/* Замечания ревью: метка у номера строки в сравнении. Номер с замечанием
+   кликабелен — по нему открывают тред; сама метка — точка у номера. */
+.own-diff-num.is-clickable {
+  cursor: pointer;
+}
+
+.own-diff-side.has-comment .own-diff-num {
+  color: var(--link_color);
+}
+
+.own-diff-side.is-comment-resolved .own-diff-num {
+  color: var(--git_added);
+}
+
+.own-diff-side.is-comment-active {
+  background: color-mix(in srgb, var(--link_color) 14%, transparent);
+}
+
+.own-diff-comment {
+  flex: none;
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: var(--git_modified);
+}
+
+.own-diff-side.is-comment-resolved .own-diff-comment {
+  background: var(--git_added);
 }
 
 /* Кнопки у блоков: накрывают ряды, но пропускают события мимо себя. */

@@ -18,11 +18,23 @@ export class FoldModel {
   private ranges: readonly FoldRange[] = [];
   /** Начала схлопнутых блоков: только они и решают, что скрыто. */
   private readonly collapsed = new Set<number>();
+  /**
+   * Номер «состояния»: растёт на каждую смену диапазонов или схлопнутого набора.
+   * По нему представление понимает, что построенная таблица рядов устарела и её
+   * надо пересобрать (см. `RowMap` в `row-map.ts`).
+   */
+  private revisionCounter = 0;
+
+  /** Номер состояния — меняется при любой смене свёртки. */
+  get revision(): number {
+    return this.revisionCounter;
+  }
 
   /** Новый файл: диапазоны и схлопнутое состояние прошлого к нему не относятся. */
   reset(): void {
     this.ranges = [];
     this.collapsed.clear();
+    this.revisionCounter += 1;
   }
 
   /**
@@ -34,6 +46,7 @@ export class FoldModel {
     this.ranges = ranges;
     const starts = new Set(ranges.map((range) => range.startLine));
     for (const start of [...this.collapsed]) if (!starts.has(start)) this.collapsed.delete(start);
+    this.revisionCounter += 1;
   }
 
   get all(): readonly FoldRange[] {
@@ -47,6 +60,7 @@ export class FoldModel {
 
   /** Сложить или раскрыть блок. `true` — он теперь свёрнут. */
   toggle(startLine: number): boolean {
+    this.revisionCounter += 1;
     if (this.collapsed.has(startLine)) {
       this.collapsed.delete(startLine);
       return false;
@@ -58,11 +72,13 @@ export class FoldModel {
   /** Сложить всё, что можно. Вложенное складывать незачем: оно и так скрыто. */
   collapseAll(): void {
     for (const range of this.ranges) this.collapsed.add(range.startLine);
+    this.revisionCounter += 1;
   }
 
   /** Раскрыть всё. */
   expandAll(): void {
     this.collapsed.clear();
+    this.revisionCounter += 1;
   }
 
   /** Скрыта ли строка (она внутри свёрнутого блока, но не первая в нём). */

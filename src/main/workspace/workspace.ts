@@ -15,6 +15,7 @@ import {
   type WorkspaceChangedPayload,
   type WorkspaceInfo,
 } from '../../shared/api';
+import { nextActiveRoot, type WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
 import { ContentCache, type ContentCacheStats } from './content-cache';
 import { escapesRoot, isInsideRoot } from './path-guard';
@@ -22,6 +23,7 @@ import { globToRegExp } from '../../shared/glob';
 import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
 import { replaceAll } from '../../shared/replace';
+import { MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../../shared/large-file';
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 
@@ -56,18 +58,32 @@ const WATCH_RETRY_LIMIT = 5;
  * он видит только этот API, поэтому позже сюда можно подставить виртуальную,
  * удалённую или песочную файловую систему, не меняя UI.
  */
+/**
+ * Состояние одного корня рабочей области: сам путь, его realpath, правила исключения
+ * и наблюдатель. У каждого корня они свои — правила одного проекта не должны гасить
+ * обход другого, а наблюдатель нужен на каждый корень отдельно.
+ */
+interface RootState {
+  root: string;
+  /** Канонический путь (после симлинков) — по нему проверяем выход наружу. */
+  rootReal: string | null;
+  ignore: IgnoreRules;
+  watcher: FSWatcher | null;
+  watchRetry: NodeJS.Timeout | null;
+  watchRetries: number;
+}
+
 export class WorkspaceService {
-  private root: string | null = null;
-  private rootReal: string | null = null;
-  private watcher: FSWatcher | null = null;
+  /**
+   * Корни рабочей области: у обычного проекта он один, но их может быть несколько —
+   * тогда дерево показывает все, а операции без явного пути идут по активному.
+   */
+  private roots: RootState[] = [];
+  /** Активный корень: им отвечают git, поиск и запуск, когда файл не назван. */
+  private active: string | null = null;
+  /** Схлопывание потока изменений в одно уведомление — общее для всей области. */
   private watchTimer: NodeJS.Timeout | null = null;
   private pendingChange: string | null = null;
-  /** Отложенный перезапуск наблюдения после сбоя (см. `scheduleWatchRetry`). */
-  private watchRetry: NodeJS.Timeout | null = null;
-  /** Сдаёмся после стольких подряд неудачных попыток поднять наблюдение. */
-  private watchRetries = 0;
-  /** Правила исключения обхода: `.gitignore` и `.ai_ignore` из корня проекта. */
-  private ignore: IgnoreRules = IgnoreRules.empty();
   /**
    * Содержимое прочитанных файлов. Чтение — самая дорогая часть поиска (на дереве
    * в 7,5 тысяч файлов это 788 мс из 875), поэтому повторный поиск читает только
@@ -79,33 +95,104 @@ export class WorkspaceService {
 
   constructor(private readonly onChange: (topic: string, payload: unknown) => void) {}
 
+  /** Активный корень — им отвечают операции без явного пути. */
   rootPath(): string | null {
-    return this.root;
+    return this.active;
   }
 
+  /** Все корни рабочей области. */
+  rootList(): WorkspaceRoot[] {
+    return this.roots.map((state) => ({ root: state.root, name: path.basename(state.root) || state.root }));
+  }
+
+  /**
+   * Открыть папку КАК ПРОЕКТ: рабочая область заменяется этой одной папкой. Так
+   * работает открытие из стартового окна и `chui_iDE ~/проект` — там ожидается
+   * именно замена, а не добавление к прошлому.
+   */
   async open(rootPath: string): Promise<WorkspaceInfo> {
-    const root = path.resolve(rootPath);
-    const stat = await fs.stat(root).catch(() => null);
-    if (!stat?.isDirectory()) {
-      throw new RpcFailure(RpcErrorCode.NotFound, `Папка не найдена: ${root}`);
+    const state = await this.makeRoot(rootPath);
+    if (!state) throw new RpcFailure(RpcErrorCode.NotFound, `Папка не найдена: ${path.resolve(rootPath)}`);
+    this.closeAllRoots();
+    this.roots = [state];
+    this.active = state.root;
+    this.startWatcher(state);
+    return this.infoFor(state.root);
+  }
+
+  /**
+   * Добавить корень в рабочую область (несколько папок в одном окне). Он становится
+   * активным: человек только что его выбрал и, скорее всего, будет работать там.
+   */
+  async addRoot(rootPath: string): Promise<WorkspaceInfo> {
+    const state = await this.makeRoot(rootPath);
+    if (!state) throw new RpcFailure(RpcErrorCode.NotFound, `Папка не найдена: ${path.resolve(rootPath)}`);
+    if (this.roots.some((item) => item.root === state.root)) {
+      this.active = state.root;
+      return this.infoFor(state.root);
     }
+    this.roots = [...this.roots, state];
+    this.active = state.root;
+    this.startWatcher(state);
+    return this.infoFor(state.root);
+  }
 
-    this.stopWatcher();
-    this.root = root;
-    this.rootReal = await fs.realpath(root).catch(() => root);
-    this.ignore = await this.readIgnoreRules(root);
-    this.startWatcher(root);
+  /** Убрать корень из области. Активным становится первый оставшийся. */
+  async removeRoot(rootPath: string): Promise<WorkspaceInfo | null> {
+    const target = path.resolve(rootPath);
+    const state = this.roots.find((item) => item.root === target);
+    if (!state) return this.active ? this.infoFor(this.active) : null;
+    this.stopWatcher(state);
+    const next = nextActiveRoot(this.rootList(), target);
+    this.roots = this.roots.filter((item) => item.root !== target);
+    this.active = next;
+    // Содержимое убранного корня держать в памяти незачем — чистим кэш целиком.
+    this.contents.clear();
+    if (!this.active) return null;
+    return this.infoFor(this.active);
+  }
 
-    return { root, name: path.basename(root) || root, entries: await this.readDir(root) };
+  /** Сделать корень активным (клик по нему в дереве или переключение проекта). */
+  async setActiveRoot(rootPath: string): Promise<WorkspaceInfo> {
+    const target = path.resolve(rootPath);
+    if (!this.roots.some((item) => item.root === target)) {
+      throw new RpcFailure(RpcErrorCode.NotFound, `Папка не в рабочей области: ${target}`);
+    }
+    this.active = target;
+    return this.infoFor(target);
   }
 
   close(): void {
-    this.stopWatcher();
-    this.root = null;
-    this.rootReal = null;
-    this.ignore = IgnoreRules.empty();
+    this.closeAllRoots();
+    this.roots = [];
+    this.active = null;
     // Проект закрыт: держать чужое содержимое в памяти незачем.
     this.contents.clear();
+  }
+
+  /** Собрать состояние корня: путь, realpath, правила исключения. `null` — папки нет. */
+  private async makeRoot(rootPath: string): Promise<RootState | null> {
+    const root = path.resolve(rootPath);
+    const stat = await fs.stat(root).catch(() => null);
+    if (!stat?.isDirectory()) return null;
+    return {
+      root,
+      rootReal: await fs.realpath(root).catch(() => root),
+      ignore: await this.readIgnoreRules(root),
+      watcher: null,
+      watchRetry: null,
+      watchRetries: 0,
+    };
+  }
+
+  /** Сведения о корне для renderer: он сам, его записи и список всех корней области. */
+  private async infoFor(root: string): Promise<WorkspaceInfo> {
+    return {
+      root,
+      name: path.basename(root) || root,
+      entries: await this.readDir(root),
+      roots: this.rootList(),
+    };
   }
 
   /**
@@ -122,17 +209,29 @@ export class WorkspaceService {
     return files.length > 0 ? combineIgnoreFiles(files) : IgnoreRules.empty();
   }
 
-  /** Исключён ли путь по правилам проекта. Путь — относительно корня. */
+  /** Исключён ли путь по правилам ТОГО корня, которому он принадлежит. */
   private isIgnored(fullPath: string, isDir: boolean): boolean {
-    if (this.ignore.size === 0 || !this.root) return false;
-    const relative = path.relative(this.root, fullPath).split(path.sep).join('/');
+    const owner = this.ownerOf(fullPath);
+    if (!owner || owner.ignore.size === 0) return false;
+    const relative = path.relative(owner.root, fullPath).split(path.sep).join('/');
     // Пустой относительный путь — это сам корень: его правила не исключают.
-    return relative !== '' && this.ignore.ignores(relative, isDir);
+    return relative !== '' && owner.ignore.ignores(relative, isDir);
   }
 
-  /** Сколько правил исключения прочитано: по этому видно, действует ли файл. */
+  /** Корень области, вмещающий путь: самый глубокий из подходящих. */
+  private ownerOf(target: string): RootState | null {
+    const resolved = path.resolve(target);
+    let found: RootState | null = null;
+    for (const state of this.roots) {
+      if (!isInsideRoot(state.root, resolved)) continue;
+      if (!found || state.root.length > found.root.length) found = state;
+    }
+    return found;
+  }
+
+  /** Сколько правил исключения прочитано (по активному корню): видно, действует ли файл. */
   ignoreRuleCount(): number {
-    return this.ignore.size;
+    return this.ownerOf(this.active ?? '')?.ignore.size ?? 0;
   }
 
   /** Состояние кэша содержимого: попадания и занятая память. Нужно проверкам. */
@@ -144,10 +243,11 @@ export class WorkspaceService {
    * Перечитать правила исключения. Их правят во время работы — добавил строку в
    * `.ai_ignore`, и поиск должен перестать находить лишнее в том же сеансе.
    */
-  private async reloadIgnore(): Promise<void> {
-    if (!this.root) return;
-    this.ignore = await this.readIgnoreRules(this.root);
-    this.scheduleChange(this.root);
+  private async reloadIgnore(root: string): Promise<void> {
+    const state = this.roots.find((item) => item.root === root);
+    if (!state) return;
+    state.ignore = await this.readIgnoreRules(root);
+    this.scheduleChange(root);
   }
 
   async readDir(dirPath: string): Promise<DirEntry[]> {
@@ -186,17 +286,24 @@ export class WorkspaceService {
     const file = await this.safePath(filePath);
     const stat = await fs.stat(file).catch(() => null);
     if (!stat?.isFile()) throw new RpcFailure(RpcErrorCode.NotFound, `Файл не найден: ${file}`);
-    if (stat.size > MAX_FILE_BYTES) {
+    if (!withinOpenLimit(stat.size)) {
       throw new RpcFailure(
         RpcErrorCode.InvalidParams,
-        `Файл больше ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} МБ — открывать такое в редакторе пока нельзя`,
+        `Файл ${Math.round(stat.size / 1024 / 1024)} МБ больше предела ` +
+          `${Math.round(MAX_OPEN_BYTES / 1024 / 1024)} МБ — открывать такое в редакторе нельзя`,
       );
     }
 
     const buffer = await fs.readFile(file);
     // EOL нормализуем к \n: одна модель документа — один формат, иначе позиции правок расходятся
     // между документом, редактором и AI-ассистентом.
-    return { text: buffer.toString('utf8').replace(/\r\n/g, '\n'), mtimeMs: stat.mtimeMs };
+    // Большой файл всё же отдаём, но помечаем «только чтение»: посмотреть полезно, править — нет.
+    return {
+      text: buffer.toString('utf8').replace(/\r\n/g, '\n'),
+      mtimeMs: stat.mtimeMs,
+      size: stat.size,
+      readOnly: isReadOnlySize(stat.size),
+    };
   }
 
   async writeFile(filePath: string, text: string): Promise<{ mtimeMs: number }> {
@@ -559,12 +666,12 @@ export class WorkspaceService {
   }
 
   dispose(): void {
-    this.stopWatcher();
+    this.closeAllRoots();
   }
 
   private requireRoot(): string {
-    if (!this.root) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Рабочая папка не открыта');
-    return this.root;
+    if (!this.active) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Рабочая папка не открыта');
+    return this.active;
   }
 
   /**
@@ -581,15 +688,18 @@ export class WorkspaceService {
    * метаданных (см. `stat`): виртуальные окружения устроены именно так.
    */
   private async safePath(target: string, options: { allowOutsideSymlink?: boolean } = {}): Promise<string> {
-    const root = this.requireRoot();
+    this.requireRoot();
     const resolved = path.resolve(target);
-    if (!isInsideRoot(root, resolved)) {
+    const owner = this.ownerOf(resolved);
+    if (!owner) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Путь вне рабочей папки');
     }
 
     if (!options.allowOutsideSymlink) {
       const real = await fs.realpath(resolved).catch(() => null);
-      if (escapesRoot(this.rootReal, real)) {
+      // Симлинк обязан остаться внутри ХОТЯ БЫ ОДНОГО корня области.
+      const inside = this.roots.some((state) => !escapesRoot(state.rootReal, real));
+      if (!inside) {
         throw new RpcFailure(RpcErrorCode.InvalidParams, 'Путь вне рабочей папки (симлинк)');
       }
     }
@@ -605,10 +715,13 @@ export class WorkspaceService {
     if (this.watchTimer) return;
     this.watchTimer = setTimeout(() => {
       this.watchTimer = null;
-      const path = this.pendingChange ?? this.root;
+      const changed = this.pendingChange ?? this.active;
       this.pendingChange = null;
-      if (!this.root) return;
-      const payload: WorkspaceChangedPayload = { root: this.root, path: path ?? this.root };
+      if (!this.active) return;
+      // Уведомление несёт корень, к которому относится правка: дерево перечитывает
+      // именно его ветку, а не всю область.
+      const owner = changed ? this.ownerOf(changed) : null;
+      const payload: WorkspaceChangedPayload = { root: owner?.root ?? this.active, path: changed ?? this.active };
       this.onChange(PushTopic.WorkspaceChanged, payload);
     }, 120);
   }
@@ -621,33 +734,35 @@ export class WorkspaceService {
    * отвечает за чужие — правки внешним инструментом или в терминале.
    */
   private notifyChanged(target: string): void {
-    if (!this.root) return;
+    if (!this.active) return;
     this.scheduleChange(target);
   }
 
-  private startWatcher(root: string): void {
+  /** Наблюдатель за корнем: у каждого корня он свой — папки независимы. */
+  private startWatcher(state: RootState): void {
+    const root = state.root;
     try {
-      this.watcher = watch(root, { recursive: true }, (_eventType, filename) => {
+      state.watcher = watch(root, { recursive: true }, (_eventType, filename) => {
         const name = filename?.toString();
         // Правила исключения перечитываем сразу: иначе правка `.ai_ignore`
         // подействовала бы только при следующем открытии проекта.
-        if (name && IGNORE_FILES.some((file) => file === name)) void this.reloadIgnore();
+        if (name && IGNORE_FILES.some((file) => file === name)) void this.reloadIgnore(root);
         this.scheduleChange(name ? path.join(root, name) : root);
       });
-      this.watchRetries = 0;
+      state.watchRetries = 0;
       // Ошибку наблюдения (переполнение буфера inotify, сетевой диск) не роняем
       // в консоль: без наблюдения чужую правку не увидим, но свои изменения
       // продолжаем сообщать сами. Пробуем поднять наблюдение заново — иначе
       // после первой же ошибки дерево и git-пометки застыли бы до перезапуска IDE.
-      this.watcher.on('error', () => {
-        this.watcher?.close();
-        this.watcher = null;
-        this.scheduleWatchRetry();
+      state.watcher.on('error', () => {
+        state.watcher?.close();
+        state.watcher = null;
+        this.scheduleWatchRetry(state);
       });
     } catch {
       // не на всех платформах есть рекурсивный watch — пробуем ещё раз позже
-      this.watcher = null;
-      this.scheduleWatchRetry();
+      state.watcher = null;
+      this.scheduleWatchRetry(state);
     }
   }
 
@@ -657,28 +772,34 @@ export class WorkspaceService {
    * само. Если же платформа не умеет рекурсивный watch вовсе, после нескольких
    * попыток перестаём повторять, чтобы не крутить пустой таймер.
    */
-  private scheduleWatchRetry(): void {
-    if (this.watchRetry || !this.root || this.watchRetries >= WATCH_RETRY_LIMIT) return;
-    this.watchRetries += 1;
-    this.watchRetry = setTimeout(() => {
-      this.watchRetry = null;
-      if (this.root && !this.watcher) this.startWatcher(this.root);
+  private scheduleWatchRetry(state: RootState): void {
+    if (state.watchRetry || state.watchRetries >= WATCH_RETRY_LIMIT) return;
+    state.watchRetries += 1;
+    state.watchRetry = setTimeout(() => {
+      state.watchRetry = null;
+      if (this.roots.includes(state) && !state.watcher) this.startWatcher(state);
     }, WATCH_RETRY_MS);
   }
 
-  private stopWatcher(): void {
+  /** Снять наблюдение одного корня. */
+  private stopWatcher(state: RootState): void {
+    if (state.watchRetry) {
+      clearTimeout(state.watchRetry);
+      state.watchRetry = null;
+    }
+    state.watchRetries = 0;
+    state.watcher?.close();
+    state.watcher = null;
+  }
+
+  /** Снять наблюдение со всех корней и погасить отложенные уведомления. */
+  private closeAllRoots(): void {
     if (this.watchTimer) {
       clearTimeout(this.watchTimer);
       this.watchTimer = null;
     }
-    if (this.watchRetry) {
-      clearTimeout(this.watchRetry);
-      this.watchRetry = null;
-    }
-    this.watchRetries = 0;
     this.pendingChange = null;
-    this.watcher?.close();
-    this.watcher = null;
+    for (const state of this.roots) this.stopWatcher(state);
   }
 }
 

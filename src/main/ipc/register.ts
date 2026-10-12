@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, shell } from 'electron';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import {
   CloneEvent,
@@ -24,9 +25,10 @@ import type { LspService } from '../lsp/lsp';
 import type { McpService } from '../mcp/mcp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
-import { detectAvailableCommands, detectVenvCommands } from '../lsp/detect';
+import { detectLspSources } from '../lsp/detect';
 import { lintProject } from '../project/lint';
 import { scanProject } from '../project/scan';
+import { findPackages } from '../project/packages';
 import { testCommand } from '../project/tests';
 import { activateCommand, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
 import { missingPackages } from '../node/packages';
@@ -45,7 +47,8 @@ import { formatPython } from '../python/format';
 import { checkEnvironments } from '../python/health';
 import type { SessionStore } from '../session-store';
 import type { ProjectConfigStore } from '../project-config';
-import { matchPresets } from '../../shared/lsp-presets';
+import type { ReviewStore } from '../project/review-store';
+import { mergeByPriority } from '../../shared/lsp-bundled';
 import { parseThemeFile } from '../../shared/theme-file';
 import { unsavedClosePrompt } from '../../shared/unsaved';
 import type { TerminalService } from '../terminal/terminal';
@@ -75,6 +78,8 @@ export interface AppDependencies {
   sessions?: SessionStore;
   /** Настройки уровня проекта: `<root>/.chui_ide/` (см. ProjectConfigStore). */
   projectConfig?: ProjectConfigStore;
+  /** Замечания к коду (`.chui_ide/review.json`). Необязательно: пробникам не нужны. */
+  reviews?: ReviewStore;
 }
 
 /**
@@ -148,6 +153,18 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
       properties: ['openDirectory', 'createDirectory'],
     });
     return { path: result.canceled ? null : (result.filePaths[0] ?? null) };
+  });
+
+  // Сохранение ПОД ДРУГИМ ИМЕНЕМ (Save As): путь выбирает системный диалог, а не мы.
+  // Отдаём ему папку и имя текущего файла — диалог открывается там, где файл лежит,
+  // а имя можно править, а не набирать заново. Подтверждение перезаписи уже
+  // существующего файла диалог берёт на себя сам.
+  router.register('dialog.saveFile', async (params: ParamsOf<'dialog.saveFile'>, ctx) => {
+    const result = await dialog.showSaveDialog(senderWindow(ctx), {
+      title: params.title ?? 'Сохранить как',
+      defaultPath: params.defaultPath,
+    });
+    return { path: result.canceled ? null : (result.filePath ?? null) };
   });
 
   // Картинки читает main: renderer файловой системы не видит, и получать доступ
@@ -260,7 +277,29 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     return info;
   });
 
-  router.register('workspace.current', () => ({ root: deps.workspace.rootPath() }));
+  // Ещё один корень в рабочую область (несколько папок в одном окне) и переключение
+  // активного: активным отвечают git, поиск и запуск, когда файл не назван явно.
+  router.register('workspace.addRoot', async (params) => {
+    const info = await deps.workspace.addRoot(params.path);
+    deps.settings.rememberProject(info.root);
+    await deps.git.refresh();
+    return info;
+  });
+  router.register('workspace.removeRoot', async (params) => {
+    const info = await deps.workspace.removeRoot(params.path);
+    await deps.git.refresh();
+    return info;
+  });
+  router.register('workspace.setActiveRoot', async (params) => {
+    const info = await deps.workspace.setActiveRoot(params.path);
+    await deps.git.refresh();
+    return info;
+  });
+
+  router.register('workspace.current', () => ({
+    root: deps.workspace.rootPath(),
+    roots: deps.workspace.rootList(),
+  }));
 
   /** Корень проекта нужен методам, читающим файлы: без него им нечего сканировать. */
   const requireRoot = (): string => {
@@ -417,6 +456,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('app.openProject', (params) => openProjectFolder(deps, params.path));
 
   router.register('git.status', () => deps.git.status());
+  // Diff будущего коммита: по нему модель пишет сообщение (см. `ai.commitMessage`).
+  router.register('git.commitDiff', () => deps.git.commitDiff());
+  // Сводка по всем корням области: панель изменений видит правки и в неактивных папках.
+  router.register('git.summary', () => deps.git.summary(deps.workspace.rootList()));
   router.register('git.init', () => deps.git.init());
   router.register('git.stage', (params) => deps.git.stage(params.paths));
   router.register('git.unstage', (params) => deps.git.unstage(params.paths));
@@ -424,6 +467,9 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.commit', (params) => deps.git.commit(params.message, params.paths, params.amend));
   router.register('git.diff', (params) => deps.git.diff(params.path, params.staged, params.commit));
   router.register('git.stageHunk', (params) => deps.git.stageHunk(params.path, params.index));
+  // Блоки файла и откат одного блока — для действий прямо из жёлоба редактора.
+  router.register('git.fileHunks', (params) => deps.git.fileHunks(params.path));
+  router.register('git.discardHunk', (params) => deps.git.discardHunk(params.path, params.index));
   router.register('git.unstageHunk', (params) => deps.git.unstageHunk(params.path, params.index));
   router.register('git.blame', (params) =>
     deps.git.blame(params.path, { startLine: params.startLine, endLine: params.endLine }),
@@ -443,6 +489,18 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.cherryPick', (params) => deps.git.cherryPick(params.commit));
   router.register('git.revert', (params) => deps.git.revert(params.commit));
   router.register('git.reset', (params) => deps.git.reset(params.mode, params.commit));
+  // Интерактивный rebase: список шагов собирает renderer, git получает его своим
+  // редактором последовательности. Ответ говорит, завершился ли rebase и не ждёт ли он человека.
+  router.register('git.bisectState', () => deps.git.bisectState());
+  router.register('git.bisectStart', (params) => deps.git.bisectStart(params));
+  router.register('git.bisectMark', (params) => deps.git.bisectMark(params.mark));
+  router.register('git.bisectReset', () => deps.git.bisectReset());
+  router.register('git.compareRefs', (params) => deps.git.compareRefs(params.base, params.head));
+  router.register('git.diffRefs', (params) => deps.git.diffRefs(params.base, params.head, params.path));
+  router.register('git.rebase', (params) => deps.git.rebase(params.count, params.items));
+  router.register('git.rebaseContinue', () => deps.git.rebaseContinue());
+  router.register('git.rebaseAbort', () => deps.git.rebaseAbort());
+  router.register('git.rebaseSkip', () => deps.git.rebaseSkip());
   router.register('git.tags', () => deps.git.tags());
   router.register('git.createTag', (params) =>
     deps.git.createTag(params.name, { message: params.message, commit: params.commit }),
@@ -452,6 +510,15 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.deleteBranch', (params) => deps.git.deleteBranch(params.name, params.force));
   router.register('git.renameBranch', (params) => deps.git.renameBranch(params.from, params.to));
   router.register('git.ignore', (params) => deps.git.ignore(params.paths));
+  router.register('git.checkIgnore', (params) => deps.git.checkIgnore(params.paths));
+  router.register('git.submodules', () => deps.git.submodules());
+  router.register('git.submoduleUpdate', () => deps.git.submoduleUpdate());
+  router.register('git.worktrees', () => deps.git.worktrees());
+  router.register('git.worktreeAdd', (params) =>
+    deps.git.worktreeAdd(params.path, { branch: params.branch, newBranch: params.newBranch }),
+  );
+  router.register('git.worktreeRemove', (params) => deps.git.worktreeRemove(params.path, params.force));
+  router.register('git.worktreePrune', () => deps.git.worktreePrune());
   router.register('git.reflog', (params) => deps.git.reflog(params.limit));
   router.register('git.logGraph', (params) => deps.git.logGraph(params.limit));
   router.register('git.conflictParts', (params) => deps.git.conflictParts(params.path));
@@ -460,8 +527,21 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.checkout', (params) => deps.git.checkout(params.name, params.create));
   router.register('git.remotes', () => deps.git.remotes());
   router.register('git.fetch', () => deps.git.fetch());
-  router.register('git.pull', () => deps.git.pull());
+  router.register('git.pull', (params) => deps.git.pull(params.mode));
   router.register('git.push', (params) => deps.git.push(params));
+
+  router.register('git.forgeInfo', (params) => deps.git.forgeInfo(params.remote));
+  router.register('git.forgeCreate', (params) => deps.git.forgeCreate(params));
+  router.register('git.forgeCheckout', (params) => deps.git.forgeCheckout(params.number));
+
+  router.register('git.identity', () => deps.git.identity());
+  router.register('git.setIdentity', (params) => deps.git.setIdentity(params.values));
+  router.register('git.sshKeys', () => deps.git.sshKeys());
+  router.register('git.lfsInfo', () => deps.git.lfsInfo());
+  router.register('git.lfsTrack', (params) => deps.git.lfsTrack(params.pattern));
+  router.register('git.lfsUntrack', (params) => deps.git.lfsUntrack(params.pattern));
+  router.register('git.lfsPull', () => deps.git.lfsPull());
+  router.register('git.lfsInstall', () => deps.git.lfsInstall());
 
   router.register('git.clone', (params, ctx) =>
     deps.git.clone(params.url, params.directory, (line) => ctx.emit(CloneEvent.Progress, { line })),
@@ -503,6 +583,30 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('window.setBounds', (params: Partial<WindowBounds>, ctx) => applyBounds(senderWindow(ctx), params));
   router.register('menu.role', (params, ctx) => {
     performMenuRole(senderWindow(ctx).webContents, params.role);
+  });
+
+  router.register('project.packages', () => findPackages(requireRoot()));
+
+  // JSON-отчёт покрытия: пишем во временный каталог, а не в корень проекта. Имя
+  // выводим из пути проекта, чтобы прогоны разных папок не затирали друг друга.
+  router.register('project.coverageJsonPath', async () => {
+    const root = requireRoot();
+    const hash = createHash('sha1').update(path.resolve(root)).digest('hex').slice(0, 12);
+    const dir = path.join(app.getPath('temp'), 'chui-coverage');
+    await fs.mkdir(dir, { recursive: true });
+    return { path: path.join(dir, `${hash}.json`) };
+  });
+
+  router.register('review.load', () => deps.reviews?.load(requireRoot()) ?? []);
+  router.register('review.save', (params) => deps.reviews?.save(requireRoot(), params.threads) ?? params.threads);
+
+  // Открыть ссылку в браузере системы: адреса площадки живут вне окна IDE.
+  router.register('shell.openExternal', async (params) => {
+    const url = String(params.url ?? '');
+    // Только http(s): ссылка приходит из модели, но открывать произвольную схему незачем.
+    if (!/^https?:\/\//i.test(url)) return { ok: false };
+    await shell.openExternal(url).catch(() => undefined);
+    return { ok: true };
   });
 
   router.register('settings.get', () => deps.settings.get());
@@ -562,16 +666,19 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     requireDebug().setExpression(params.expression, params.value, params.frameId),
   );
 
-  // Кроме PATH смотрим окружение проекта: pylsp, ruff и прочие, поставленные в
-  // venv, видит только оно — системный питон чужие пакеты не видит. Окружение
-  // идёт первым: сервер из него и запускать предпочтительнее.
+  // Три источника серверов, и порядок между ними — это и есть приоритет:
+  //
+  //   1. окружение проекта (venv): pylsp и ruff видят пакеты проекта, а системный
+  //      питон — нет, поэтому сервер оттуда и запускать предпочтительнее;
+  //   2. поставка IDE: то, что едет вместе с нами (JS/TS, JSON, CSS, HTML, YAML,
+  //      Pyright) — работает без единой установки;
+  //   3. PATH: что человек поставил сам в систему.
+  //
+  // В рантайме ключ — язык, поэтому у языка должен остаться один сервер:
+  // сведение по приоритету делает `mergeByPriority`.
   router.register('lsp.detect', async () => {
-    const commands = await detectAvailableCommands();
-    const root = deps.workspace.rootPath();
-    const environments = root ? await findEnvironments(root, process.platform) : [];
-    const primary = environments.find((environment) => environment.primary);
-    const venvCommands = primary ? await detectVenvCommands(primary.path, process.platform) : [];
-    return matchPresets([...venvCommands, ...commands]);
+    const sources = await detectLspSources(deps.workspace.rootPath(), process.platform);
+    return mergeByPriority(sources);
   });
 
   /**
@@ -633,6 +740,12 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('ai.complete', (params, ctx) => {
     requireAiEnabled();
     return deps.ai.completeInline(params, ctx.signal);
+  });
+
+  // Сообщение коммита по diff: один запрос, без истории и инструментов — как у подсказок.
+  router.register('ai.commitMessage', (params, ctx) => {
+    requireAiEnabled();
+    return deps.ai.commitMessage(params, ctx.signal);
   });
 
   // История бесед: renderer её собирает, main только хранит. Каталог — рядом

@@ -12,9 +12,23 @@ import type { PatchFile } from './patch';
 import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
 import type { Snippet } from './snippets';
+import type { ReviewThread } from './review';
+import type { GitLfsInfo } from './git-lfs';
+import type { GitIdentity, GitSshKey } from './git-identity';
+import type { WorkspaceRoot } from './workspace-roots';
+import type { ProjectPackage } from './monorepo';
+import type { ForgeInfo } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
 import type { GitStashEntry } from './git-stash';
 import type { GitTag } from './git-tags';
+import type { RebaseTodoItem } from './git-rebase';
+import type { PullMode } from './git-pull';
+import type { GitRefDiff } from './git-ref-diff';
+import type { GitRootSummary } from './git-multiroot';
+import type { CommitPromptParts } from './commit-message';
+import type { GitBisectState } from './git-bisect';
+import type { GitSubmodule } from './git-submodules';
+import type { GitWorktree } from './git-worktrees';
 import type { ThemeFile } from './theme-file';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { NodeTestSuite } from './node-tests';
@@ -26,6 +40,8 @@ import type { ProjectSymbol } from './lsp-symbols';
 import type { McpServerConfig } from './mcp';
 import type { WebSearchProvider } from './web-search';
 import type { AiSandboxSettings } from './sandbox';
+import type { WhitespaceMode } from './whitespace';
+import type { KeybindingSettings } from './keybindings';
 
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
 
@@ -42,6 +58,7 @@ export const HOST_REPLY_CHANNEL = 'chui:host:reply';
 export const PushTopic = {
   WorkspaceChanged: 'workspace:changed',
   GitChanged: 'git:changed',
+  GitSummary: 'git:summary',
   SettingsChanged: 'settings:changed',
   MenuCommand: 'menu:command',
   TerminalData: 'terminal:data',
@@ -135,12 +152,20 @@ export interface FileStat {
 export interface FileContent {
   text: string;
   mtimeMs: number;
+  /** Размер файла в байтах: по нему редактор решает, открывать ли только для чтения. */
+  size: number;
+  /** Файл большой и открывается только для чтения (см. `shared/large-file.ts`). */
+  readOnly: boolean;
 }
 
 export interface WorkspaceInfo {
+  /** Активный корень области: им отвечают операции без явного пути. */
   root: string;
   name: string;
+  /** Записи активного корня. */
   entries: DirEntry[];
+  /** Все корни рабочей области: их может быть несколько (см. `shared/workspace-roots.ts`). */
+  roots: WorkspaceRoot[];
 }
 
 export interface SearchOptions {
@@ -237,6 +262,11 @@ export interface SessionState {
   activeTab?: string;
   /** Абсолютные пути раскрытых папок дерева. */
   expanded: string[];
+  /**
+   * Корни рабочей области (когда папок в окне несколько): первый — активный.
+   * Хранится, чтобы рабочая область из нескольких папок пережила перезапуск.
+   */
+  roots?: string[];
   /** Какая вкладка нижней панели открыта: `terminal`, `search`, `git`. */
   dockActive?: string;
   /** Параметры запуска отладки: аргументы, окружение и рабочий каталог. */
@@ -332,6 +362,44 @@ export interface GitBranch {
   remote: boolean;
 }
 
+/**
+ * Diff того, что попадёт в коммит: чем кормить модель для сообщения коммита.
+ * `diff` уже обрезан по размеру (потолок — в `shared/commit-message.ts`), `truncated`
+ * говорит, что картина неполная, а `untracked` — новые файлы: их содержимого в
+ * `git diff` нет, но названия о правке говорят.
+ */
+export interface GitCommitDiff {
+  diff: string;
+  /** Правки проиндексированы: diff — индекс против HEAD, иначе рабочее дерево против индекса. */
+  staged: boolean;
+  /** Обрезан ли diff по размеру. */
+  truncated: boolean;
+  /** Сколько файлов с правками попадает в коммит. */
+  files: number;
+  /** Новые файлы: в diff их нет, показываем именами. */
+  untracked: string[];
+}
+
+/** Ответ «сообщение коммита по diff»: текст, готовый лечь в поле сообщения. */
+export interface CommitMessageResult {
+  message: string;
+}
+
+/**
+ * Блоки изменений одного файла — для действий прямо из жёлоба редактора.
+ *
+ * Два набора, потому что строки, по которым щёлкают в редакторе, согласуются с
+ * рабочим деревом: правки, ещё не попавшие в индекс, ищутся в `unstaged` (рабочее
+ * дерево против индекса), уже проиндексированные — в `staged` (индекс против HEAD).
+ * Границы — как в `shared/git-hunks.ts`, номера блоков годятся для `git apply`.
+ */
+export interface GitFileHunks {
+  /** Блоки вне индекса: их можно проиндексировать или откатить. */
+  unstaged: GitDiffHunk[];
+  /** Блоки в индексе: их можно убрать из индекса. */
+  staged: GitDiffHunk[];
+}
+
 /** Границы блока изменений в сравнении: по строкам старой и новой версий. */
 export interface GitDiffHunk {
   oldStart: number;
@@ -356,6 +424,23 @@ export interface GitDiff {
 export interface GitCommitInfo {
   hash: string;
   summary: string;
+}
+
+/**
+ * Итог операции с историей (rebase). Rebase — не одна команда: он может
+ * остановиться на конфликте или на шаге `edit`. Поэтому ответ несёт не только
+ * «получилось», но и текст git, и признак того, что rebase ещё идёт и ждёт человека.
+ */
+export interface GitRebaseResult {
+  /** Завершился ли rebase целиком (без останова на конфликте или `edit`). */
+  ok: boolean;
+  /** Идёт ли rebase прямо сейчас: нужно остановиться, разрешить и продолжить. */
+  inProgress: boolean;
+  /** Есть ли неразрешённые конфликты: тогда правки надо свести руками. */
+  conflict: boolean;
+  /** Словами git: что он сделал или на чём споткнулся. */
+  message: string;
+  status: GitStatus;
 }
 
 /**
@@ -518,9 +603,9 @@ export interface AiInlineCompletionSettings {
 
 /**
  * Настройки редактора. Здесь только то, что читает своё ядро редактора
- * (`src/renderer/editor/`): вид движка (миникарта, перенос строк, липкий заголовок,
- * раскраска скобок, плавная прокрутка и прочее) у нас не реализован, поэтому и
- * настроек к нему нет — обещать переключателем нечего.
+ * (`src/renderer/editor/`). Липкий заголовок и раскраска скобок включены всегда и
+ * настройки не имеют — переключать их незачем; направляющие столбцов задаются
+ * списком.
  */
 export interface EditorSettings {
   tabSize: number;
@@ -535,6 +620,16 @@ export interface EditorSettings {
   trimTrailingWhitespace: boolean;
   /** Дописывать перевод строки в конце файла при сохранении. */
   insertFinalNewline: boolean;
+  /** Столбцы направляющих (ruler): вертикальные черты через всю высоту редактора. */
+  rulers: number[];
+  /** Показ невидимых знаков: ничего, только хвостовые пробелы или все. */
+  renderWhitespace: WhitespaceMode;
+  /** Миникарта справа: сжатый вид всего файла. */
+  minimap: boolean;
+  /** Перенос длинных строк: строка шире окна ломается на несколько рядов. */
+  wordWrap: boolean;
+  /** Лигатуры шрифта: `=>`, `!=`, `->` одним знаком (шрифт должен их уметь). */
+  fontLigatures: boolean;
   /** Свои сниппеты (шаблоны кода); к ним добавляется набор по умолчанию. */
   snippets: Snippet[];
 }
@@ -563,6 +658,8 @@ export interface ExplorerSettings {
   gitDecorations: boolean;
   /** Точка у свёрнутой папки, внутри которой есть правки. */
   folderChangeDot: boolean;
+  /** Приглушать игнорируемые git файлы и папки: их видно, но они не мешают. */
+  dimIgnored: boolean;
   /** Открывать файл одним кликом (иначе — двойным). */
   openOnSingleClick: boolean;
   /** Спрашивать подтверждение перед удалением. */
@@ -586,6 +683,12 @@ export interface RunSettings {
    * берётся общий `pythonPath`. Так два Python-проекта не мешают друг другу.
    */
   pythonByRoot: Record<string, string>;
+}
+
+/** Настройки работы с git. Портятся к проекту: у команд разные привычки. */
+export interface GitSettings {
+  /** Как вливать изменения при `pull`: слиянием, перебазированием, только перемоткой. */
+  pullMode: PullMode;
 }
 
 /** Схема приложения: светлая, тёмная или системная. */
@@ -687,6 +790,18 @@ export interface LspServerConfig {
   command: string;
   args: string[];
   enabled: boolean;
+  /**
+   * Подпись для интерфейса. Нужна серверам из поставки: у них `command` — путь к
+   * самому Electron (`ELECTRON_RUN_AS_NODE`), и показывать его человеку нечего.
+   */
+  label?: string;
+  /** Дополнительные переменные окружения процесса сервера (например, режим Node). */
+  env?: Record<string, string>;
+  /**
+   * Довод к `initialize`. Нужен серверам из поставки: TypeScript Language Server
+   * требует назвать путь к своему `tsserver.js` (см. `shared/lsp-bundled.ts`).
+   */
+  initializationOptions?: Record<string, unknown>;
 }
 
 export interface LspSettings {
@@ -854,6 +969,9 @@ export interface Settings {
   workspace: WorkspaceSettings;
   layout: LayoutSettings;
   lsp: LspSettings;
+  git: GitSettings;
+  /** Изменённые горячие клавиши: поверх сочетаний по умолчанию. */
+  keybindings: KeybindingSettings;
 }
 
 /** Провайдер, которого добавляют или меняют из интерфейса. Ключ задаётся отдельно. */
@@ -960,6 +1078,8 @@ export interface SettingsPatch {
   appearance?: Partial<AppearanceSettings>;
   layout?: Partial<LayoutSettings>;
   lsp?: Partial<LspSettings>;
+  git?: Partial<GitSettings>;
+  keybindings?: Partial<KeybindingSettings>;
 }
 
 /* ── AI ─────────────────────────────────────────────────────────────────── */
@@ -1322,6 +1442,11 @@ export interface ChuiMethods {
   'app.info': { params: void; result: AppInfo };
 
   'dialog.pickFolder': { params: { title?: string }; result: { path: string | null } };
+  /**
+   * Выбор пути для сохранения файла ПОД ДРУГИМ ИМЕНЕМ (Save As). `defaultPath` —
+   * папка и имя текущего файла: диалог открывается на них, а не на прошлом месте.
+   */
+  'dialog.saveFile': { params: { title?: string; defaultPath?: string }; result: { path: string | null } };
   'dialog.confirm': {
     params: { title: string; message: string; detail?: string; confirmLabel?: string };
     result: { confirmed: boolean };
@@ -1404,8 +1529,33 @@ export interface ChuiMethods {
    * не по чему (нет интерпретатора, не найден каталог пакетов).
    */
   'imports.missing': { params: { language: string; modules: string[] }; result: { missing: string[] } };
+  /**
+   * Пакеты проекта (монорепо): где лежат манифесты. Нужны панели изменений, чтобы
+   * разложить правки по пакетам, а не показывать один общий список файлов.
+   */
+  'project.packages': { params: void; result: ProjectPackage[] };
+  /**
+   * Куда прогон с покрытием пишет JSON-отчёт (`--cov-report=json:…`). Путь во временном
+   * каталоге: файл нужен IDE, а захламлять им корень проекта незачем.
+   */
+  'project.coverageJsonPath': { params: void; result: { path: string } };
 
   'git.status': { params: void; result: GitStatus };
+  /**
+   * Diff того, что попадёт в коммит: с индекса — индекс против HEAD, без него —
+   * рабочее дерево против индекса. Нужен для сообщения коммита по diff.
+   */
+  'git.commitDiff': { params: void; result: GitCommitDiff };
+  /** Блоки изменений файла: для действий прямо из жёлоба редактора. */
+  'git.fileHunks': { params: { path: string }; result: GitFileHunks };
+  /** Откатить ОДИН блок файла в рабочем дереве (обратный `git apply -R`). */
+  'git.discardHunk': { params: { path: string; index: number }; result: GitStatus };
+  /**
+   * Сводка по всем корням рабочей области: какие папки — репозитории git, какие
+   * в них ветки и сколько правок. Нужна панели изменений, чтобы видеть всю область
+   * сразу, а не только активную папку (`shared/git-multiroot.ts`).
+   */
+  'git.summary': { params: void; result: GitRootSummary[] };
   'git.init': { params: void; result: GitStatus };
   'git.stage': { params: { paths: string[] }; result: GitStatus };
   'git.unstage': { params: { paths: string[] }; result: GitStatus };
@@ -1440,6 +1590,18 @@ export interface ChuiMethods {
   'git.cherryPick': { params: { commit: string }; result: GitStatus };
   'git.revert': { params: { commit: string }; result: GitStatus };
   'git.reset': { params: { mode: 'soft' | 'mixed' | 'hard'; commit: string }; result: GitStatus };
+  /**
+   * Интерактивный rebase последних `count` коммитов: список шагов задаёт вызывающий
+   * (перестановка, склейка, переписывание сообщения, drop). Возвращает исход операции:
+   * rebase может завершиться, остановиться на конфликте или на шаге `edit`.
+   */
+  'git.rebase': { params: { count: number; items: RebaseTodoItem[] }; result: GitRebaseResult };
+  /** Продолжить остановленный rebase (после разрешённого конфликта или шага `edit`). */
+  'git.rebaseContinue': { params: void; result: GitRebaseResult };
+  /** Прервать rebase: ветка возвращается туда, где была до запуска. */
+  'git.rebaseAbort': { params: void; result: GitStatus };
+  /** Пропустить текущий коммит остановленного rebase. */
+  'git.rebaseSkip': { params: void; result: GitRebaseResult };
   'git.tags': { params: void; result: GitTag[] };
   'git.createTag': { params: { name: string; message?: string; commit?: string }; result: GitStatus };
   'git.deleteTag': { params: { name: string }; result: GitStatus };
@@ -1449,10 +1611,43 @@ export interface ChuiMethods {
   'git.deleteBranch': { params: { name: string; force?: boolean }; result: GitStatus };
   'git.renameBranch': { params: { from: string; to: string }; result: GitStatus };
   'git.ignore': { params: { paths: string[] }; result: GitStatus };
+  /** Подмодули репозитория: состояние нужно дереву, чтобы пометить папки. */
+  'git.submodules': { params: void; result: GitSubmodule[] };
+  /** Забрать код подмодулей (`update --init --recursive`). */
+  'git.submoduleUpdate': { params: void; result: GitStatus };
+  /* Дополнительные рабочие каталоги одного репозитория (worktree). */
+  'git.worktrees': { params: void; result: GitWorktree[] };
+  /** Добавить каталог: существующая ветка или новая; без них — отделённый указатель. */
+  'git.worktreeAdd': { params: { path: string; branch?: string; newBranch?: string }; result: GitWorktree[] };
+  /** Удалить каталог; `force` — когда в нём есть незакоммиченные правки. */
+  'git.worktreeRemove': { params: { path: string; force?: boolean }; result: GitWorktree[] };
+  /** Убрать записи о каталогах, которых уже нет на диске. */
+  'git.worktreePrune': { params: void; result: GitWorktree[] };
+  /**
+   * Какие из путей игнорируются git (`.gitignore`). Спрашиваем только про видимые
+   * в дереве пути: полный список игнорируемого читать незачем.
+   */
+  'git.checkIgnore': { params: { paths: string[] }; result: string[] };
   /** Журнал ссылок: чем можно откатить неудачный merge, rebase или reset. */
   'git.reflog': { params: { limit?: number }; result: GitReflogEntry[] };
   /** История в виде графа веток — текстом, как её рисует git. */
   'git.logGraph': { params: { limit?: number }; result: string };
+  /**
+   * Сравнение двух ссылок (веток, коммитов, тегов): список изменённых файлов
+   * со статусом и счётчиком строк. Для просмотра различий между ветками.
+   */
+  'git.compareRefs': { params: { base: string; head: string }; result: GitRefDiff };
+  /** Один файл между двумя ссылками: слева содержимое из `base`, справа из `head`. */
+  'git.diffRefs': { params: { base: string; head: string; path: string }; result: GitDiff };
+  /* Пошаговый поиск «багованного» коммита (bisect). */
+  /** Текущее состояние поиска: идёт ли он, где стоит и сколько осталось. */
+  'git.bisectState': { params: void; result: GitBisectState };
+  /** Начать поиск; `bad` и `good` — известные плохой и хороший коммиты. */
+  'git.bisectStart': { params: { bad?: string; good?: string }; result: GitBisectState };
+  /** Пометить проверяемый коммит хорошим, плохим или пропустить его. */
+  'git.bisectMark': { params: { mark: 'good' | 'bad' | 'skip' }; result: GitBisectState };
+  /** Закончить поиск: ветка возвращается туда, где была до него. */
+  'git.bisectReset': { params: void; result: GitStatus };
   /** Три версии конфликтного файла: общий предок и обе стороны. */
   'git.conflictParts': { params: { path: string }; result: GitConflictParts };
   /** Отметить конфликт решённым: содержимое файла уходит в индекс (`git add`). */
@@ -1461,9 +1656,49 @@ export interface ChuiMethods {
   'git.checkout': { params: { name: string; create?: boolean }; result: GitStatus };
   'git.remotes': { params: void; result: GitRemote[] };
   'git.fetch': { params: void; result: GitNetworkResult };
-  'git.pull': { params: void; result: GitNetworkResult };
+  /** `mode` — как вливать (`merge`/`rebase`/`ff-only`); не задан — как настроено в git. */
+  'git.pull': { params: { mode?: PullMode }; result: GitNetworkResult };
   'git.push': { params: { setUpstream?: boolean; force?: boolean }; result: GitNetworkResult };
   'git.clone': { params: { url: string; directory: string }; result: { path: string } };
+
+  /* Площадка хостинга: запросы на слияние (PR/MR) через `gh`/`glab`. */
+  /** Площадка репозитория, доступность клиента, вход и список запросов. */
+  'git.forgeInfo': { params: { remote?: string }; result: ForgeInfo };
+  /** Создать запрос на слияние из ветки. */
+  'git.forgeCreate': {
+    params: { title: string; body?: string; target?: string; source?: string; draft?: boolean };
+    result: ForgeInfo;
+  };
+  /** Забрать ветку запроса в рабочий каталог (клиент делает fetch и checkout). */
+  'git.forgeCheckout': { params: { number: number }; result: GitStatus };
+  /** Открыть ссылку в браузере системы (страницы площадки и запросов). */
+  'shell.openExternal': { params: { url: string }; result: { ok: boolean } };
+
+  /* Личность автора, подпись коммитов и ключи: настройки git, а не IDE. */
+  /** Действующие имя, почта, подпись и хранилище паролей. */
+  'git.identity': { params: void; result: GitIdentity };
+  /** Записать настройки в локальный конфиг репозитория. */
+  'git.setIdentity': { params: { values: Partial<GitIdentity> }; result: GitIdentity };
+  /** Открытые ключи из `~/.ssh`: тип, комментарий и отпечаток. */
+  'git.sshKeys': { params: void; result: GitSshKey[] };
+
+  /* Git LFS: большие файлы в отдельном хранилище. */
+  /** Что знает репозиторий: доступен ли git-lfs, шаблоны и файлы под LFS. */
+  'git.lfsInfo': { params: void; result: GitLfsInfo };
+  /** Взять шаблон под LFS (`git lfs track`) — строка уходит в `.gitattributes`. */
+  'git.lfsTrack': { params: { pattern: string }; result: GitLfsInfo };
+  /** Перестать вести шаблон через LFS (`git lfs untrack`). */
+  'git.lfsUntrack': { params: { pattern: string }; result: GitLfsInfo };
+  /** Подтянуть содержимое больших файлов (`git lfs pull`). */
+  'git.lfsPull': { params: void; result: GitLfsInfo };
+  /** Подготовить репозиторий к LFS: хуки `git lfs install --local`. */
+  'git.lfsInstall': { params: void; result: GitLfsInfo };
+
+  /* Замечания к коду (code review): хранятся в проекте, источник истины — renderer. */
+  /** Замечания текущего проекта. */
+  'review.load': { params: void; result: ReviewThread[] };
+  /** Записать список замечаний целиком; возвращает то, что легло на диск. */
+  'review.save': { params: { threads: ReviewThread[] }; result: ReviewThread[] };
 
   'terminal.create': { params: TerminalCreateOptions; result: TerminalSession };
   'terminal.write': { params: { id: string; data: string }; result: void };
@@ -1484,7 +1719,13 @@ export interface ChuiMethods {
   'app.openProject': { params: { path: string }; result: { root: string; name: string } };
   'app.forgetProject': { params: { path: string }; result: RecentProject[] };
   /** Корень, открытый в main: окно IDE забирает его при старте. */
-  'workspace.current': { params: void; result: { root: string | null } };
+  'workspace.current': { params: void; result: { root: string | null; roots: WorkspaceRoot[] } };
+  /** Добавить папку в рабочую область: в одном окне может быть несколько корней. */
+  'workspace.addRoot': { params: { path: string }; result: WorkspaceInfo };
+  /** Убрать корень; активным становится первый оставшийся (`null` — область пуста). */
+  'workspace.removeRoot': { params: { path: string }; result: WorkspaceInfo | null };
+  /** Сделать корень активным — им отвечают git, поиск и запуск без явного файла. */
+  'workspace.setActiveRoot': { params: { path: string }; result: WorkspaceInfo };
 
   'settings.get': { params: void; result: Settings };
   'settings.update': { params: SettingsPatch; result: Settings };
@@ -1582,6 +1823,11 @@ export interface ChuiMethods {
    * Отдельно от `ai.chat` — это короткий запрос без истории и инструментов.
    */
   'ai.complete': { params: InlineCompletionRequest; result: InlineCompletionResult };
+  /**
+   * Сообщение коммита по diff: один запрос к модели без истории и инструментов.
+   * Части промпта строит `shared/commit-message.ts` (обрезка diff, очистка ответа).
+   */
+  'ai.commitMessage': { params: CommitPromptParts; result: CommitMessageResult };
   /**
    * Права доступа агента (кнопка в композере). Меняются и во время ответа:
    * main перечитывает их перед каждым действием, а не только в начале прогона.

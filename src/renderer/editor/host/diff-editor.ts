@@ -38,10 +38,38 @@ export interface OwnDiffHunkAction {
   label: string;
 }
 
+/** Сторона сравнения, к которой привязано замечание ревью. */
+export type DiffSide = 'original' | 'modified';
+
+/** Метка замечаний у строки: сколько их и решён ли тред. */
+export interface OwnDiffCommentMark {
+  side: DiffSide;
+  /** Номер строки на этой стороне (с единицы). */
+  line: number;
+  /** Сколько сообщений в треде — показываем числом на метке. */
+  count: number;
+  resolved: boolean;
+}
+
+/** Что делать при работе с замечаниями: показать тред или завести новый. */
+export interface OwnDiffCommentHandlers {
+  marks: readonly OwnDiffCommentMark[];
+  /** Текущий открытый тред — его строку подсвечиваем. */
+  selected?: { side: DiffSide; line: number } | null;
+  /** Клик по метке у строки. */
+  onSelect: (side: DiffSide, line: number) => void;
+  /** Клик по номеру: завести замечание к этой строке. */
+  onRequest: (side: DiffSide, line: number) => void;
+}
+
 /** Граница сравнения — та же, что отдавал Monaco (`DiffEditorHandle`). */
 export interface OwnDiffHandle {
   set(input: { language: string; original: string; modified: string }): void;
   setHunkActions(actions: readonly OwnDiffHunkAction[] | null, onSelect: (index: number) => void): void;
+  /** Показать метки замечаний у строк; `null` — меток нет. */
+  setComments(handlers: OwnDiffCommentHandlers | null): void;
+  /** Прокрутить к строке с замечанием (клик по треду в списке). */
+  revealComment(side: DiffSide, line: number): void;
   setLayout(sideBySide: boolean): void;
   goToChange(direction: 1 | -1): void;
   dispose(): void;
@@ -71,6 +99,10 @@ export class OwnDiffEditor implements OwnDiffHandle {
 
   private actions: readonly OwnDiffHunkAction[] = [];
   private onSelect: ((index: number) => void) | null = null;
+
+  /** Замечания ревью: метки по ключу «сторона:строка» и что делать по клику. */
+  private commentHandlers: OwnDiffCommentHandlers | null = null;
+  private readonly commentMarks = new Map<string, OwnDiffCommentMark>();
   /** Текущий блок при переходах «вперёд/назад»: −1 — ещё не переходили. */
   private currentHunk = -1;
   /** Что нарисовано: границы видимых рядов — чтобы не пересобирать зря. */
@@ -136,6 +168,10 @@ export class OwnDiffEditor implements OwnDiffHandle {
     this.actions = [];
     this.onSelect = null;
     this.actionsLayer.replaceChildren();
+    // Метки замечаний ставит вызывающий следом (`setComments`): прежние к новому
+    // сравнению не относятся.
+    this.commentMarks.clear();
+    this.commentHandlers = null;
     this.body.scrollTop = 0;
     this.rendered = { first: -1, last: -1 };
     this.render();
@@ -145,6 +181,36 @@ export class OwnDiffEditor implements OwnDiffHandle {
     this.actions = actions ?? [];
     this.onSelect = onSelect;
     this.renderActions();
+  }
+
+  /**
+   * Показать замечания ревью: метку у каждой строки с тредом и что делать по клику.
+   * Метки живут в точках номера строки, поэтому достаточно пересобрать видимые ряды.
+   */
+  setComments(handlers: OwnDiffCommentHandlers | null): void {
+    this.commentHandlers = handlers;
+    this.commentMarks.clear();
+    for (const mark of handlers?.marks ?? []) this.commentMarks.set(commentKey(mark.side, mark.line), mark);
+    // Тот же набор рядов, но метки могли смениться — пересобираем принудительно.
+    this.rendered = { first: -1, last: -1 };
+    this.render();
+  }
+
+  /** Прокрутить к строке с замечанием: ряд ищем по номеру на нужной стороне. */
+  revealComment(side: DiffSide, line: number): void {
+    const rowIndex = this.rows.findIndex((row) =>
+      side === 'original' ? row.originalLine === line : row.modifiedLine === line,
+    );
+    if (rowIndex < 0) return;
+    const scrollTop = revealLine(
+      rowIndex,
+      this.body.scrollTop,
+      this.lineHeight,
+      this.body.clientHeight,
+      this.rows.length,
+    );
+    this.body.scrollTop = scrollTop;
+    this.render();
   }
 
   setLayout(sideBySide: boolean): void {
@@ -227,6 +293,36 @@ export class OwnDiffEditor implements OwnDiffHandle {
     number.textContent = line === null ? '' : String(line);
     node.append(number);
 
+    // Метка замечаний у строки: номер кликабелен (завести замечание), а сама метка —
+    // нет: по ней открывают уже существующий тред.
+    if (line !== null && this.commentHandlers) {
+      const sideName: DiffSide = isOriginal ? 'original' : 'modified';
+      const mark = this.commentMarks.get(commentKey(sideName, line));
+      number.classList.add('is-clickable');
+      number.title = mark ? 'Открыть замечания строки' : 'Оставить замечание к строке';
+      number.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        if (mark) this.commentHandlers?.onSelect(sideName, line);
+        else this.commentHandlers?.onRequest(sideName, line);
+      });
+      if (mark) {
+        node.classList.add('has-comment');
+        if (mark.resolved) node.classList.add('is-comment-resolved');
+        if (
+          this.commentHandlers.selected &&
+          this.commentHandlers.selected.side === sideName &&
+          this.commentHandlers.selected.line === line
+        ) {
+          node.classList.add('is-comment-active');
+        }
+        const badge = document.createElement('span');
+        badge.className = `${ROOT_CLASS}-comment`;
+        badge.textContent = mark.count > 1 ? String(mark.count) : '';
+        badge.title = mark.resolved ? 'Замечание решено' : 'Есть замечание';
+        node.append(badge);
+      }
+    }
+
     const content = document.createElement('span');
     content.className = `${ROOT_CLASS}-text`;
     // Пустая сторона у вставки/удаления — пробел, иначе строка схлопнется по высоте.
@@ -300,6 +396,11 @@ export class OwnDiffEditor implements OwnDiffHandle {
       this.root.style.setProperty(`--own-token-${role}`, color);
     }
   }
+}
+
+/** Ключ метки замечания: сторона и строка. */
+function commentKey(side: DiffSide, line: number): string {
+  return `${side}:${line}`;
 }
 
 /** Пустой текст — ноль строк, как и в модели: так «файла не было» ≠ «одна строка». */

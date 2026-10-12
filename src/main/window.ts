@@ -4,7 +4,7 @@ import { PushTopic, type WindowBounds, type WindowState } from '../shared/api';
 import { windowBackground } from '../shared/colors';
 import { pushToRenderers } from './ipc/push';
 import { APP_ORIGIN } from './protocol';
-import { isSafeExternalUrl } from '../shared/url';
+import { isSafeExternalUrl, isSameUrlOrigin } from '../shared/url';
 
 /**
  * Адрес dev-сервера прокидывает scripts/dev.mjs. Если переменной нет —
@@ -104,6 +104,14 @@ function createAppWindow(options: WindowOptions): BrowserWindow {
   window.on('enter-full-screen', notifyState);
   window.on('leave-full-screen', notifyState);
 
+  const base = (DEV_SERVER_URL ?? APP_ORIGIN).replace(/\/$/, '');
+
+  // Свой адрес (dev-сервер или собранный renderer `app://`) от чужого отличает
+  // `isSameUrlOrigin`: перезагрузку своей страницы пускаем, уход на сайт — наружу.
+  const isAppUrl = (target: string): boolean => isSameUrlOrigin(target, base);
+
+  // Ссылки из интерфейса отдаём системе, но только знакомые схемы: `file:` или
+  // своя схема в чужом обработчике — не то, чего человек ждёт от «открой ссылку».
   // Ссылки из интерфейса отдаём системе, но только знакомые схемы: `file:` или
   // своя схема в чужом обработчике — не то, чего человек ждёт от «открой ссылку».
   const openExternal = (url: string): void => {
@@ -111,19 +119,24 @@ function createAppWindow(options: WindowOptions): BrowserWindow {
   };
 
   window.webContents.setWindowOpenHandler(({ url }) => {
-    openExternal(url);
+    // Свою страницу наружу не отдаём: `window.open` на свой же адрес — это не «открой
+    // ссылку», а попытка второго окна, и системный браузер тут ни при чём.
+    if (!isAppUrl(url)) openExternal(url);
     // Новое окно не создаём: у IDE своя рамка, и второе окно без неё выглядит чужим.
     return { action: 'deny' };
   });
 
   // Навигацию самой страницы запрещаем: IDE — не браузер, и уход вкладки на сайт
   // оставил бы человека без редактора. Внешний адрес открываем в системном браузере.
+  // Но перезагрузку СВОЕЙ страницы пускаем: в разработке Vite шлёт full-reload, и без
+  // этой оговорки каждое обновление кода открывало бы системный браузер, а окно
+  // оставалось бы со старым кодом (навигацию мы бы отменили, уведя её наружу).
   window.webContents.on('will-navigate', (event, url) => {
+    if (isAppUrl(url)) return;
     event.preventDefault();
     openExternal(url);
   });
 
-  const base = (DEV_SERVER_URL ?? APP_ORIGIN).replace(/\/$/, '');
   void window.loadURL(`${base}/${options.page}`);
   if (DEV_SERVER_URL) window.webContents.openDevTools({ mode: 'detach' });
 

@@ -3,8 +3,6 @@
  * очистку ANSI, подтверждение ввода и остановку сессии. Настоящий pty покрыт
  * smoke:terminal, здесь важна логика самих инструментов.
  */
-const assert = require('node:assert/strict');
-
 const { runTool, isDangerousCommand } = require('../dist/main/ai/agent-tools.js');
 
 let failures = 0;

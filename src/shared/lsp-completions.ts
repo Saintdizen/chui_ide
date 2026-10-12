@@ -1,3 +1,4 @@
+import type { TextEdit } from './edits';
 /**
  * Подсказки языка из ответа LSP.
  *
@@ -25,6 +26,8 @@ export interface CompletionEntry {
   readonly detail: string;
   /** Разметка сниппета, если сервер просил вставить как сниппет (`insertTextFormat: 2`). */
   readonly snippet?: string;
+  /** Правки вместе со вставкой (авто-импорт). */
+  readonly additionalEdits?: TextEdit[];
 }
 
 /**
@@ -89,6 +92,7 @@ function toEntry(raw: unknown): CompletionEntry | null {
     textEdit?: { newText?: unknown };
     detail?: unknown;
     insertTextFormat?: unknown;
+    additionalTextEdits?: unknown;
   };
 
   const label = typeof value.label === 'string' ? value.label : null;
@@ -100,8 +104,35 @@ function toEntry(raw: unknown): CompletionEntry | null {
   const detail = typeof value.detail === 'string' && value.detail ? value.detail : kindLabel(value.kind);
   // `insertTextFormat: 2` — вставка как сниппет: разметку раскрывает редактор.
   const snippet = value.insertTextFormat === 2 ? insert : undefined;
+  const additionalEdits = toAdditionalEdits(value.additionalTextEdits);
+  const base = { label, insert, detail, ...(additionalEdits ? { additionalEdits } : {}) };
+  return snippet ? { ...base, snippet } : base;
+}
 
-  return snippet ? { label, insert, detail, snippet } : { label, insert, detail };
+/**
+ * Дополнительные правки подсказки из ответа LSP (авто-импорт). Позиции в них 0-based,
+ * как везде в LSP, — приводим к нашему 1-based виду. Битые записи пропускаем.
+ */
+function toAdditionalEdits(raw: unknown): TextEdit[] | null {
+  if (!Array.isArray(raw)) return null;
+  const edits: TextEdit[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const value = entry as { range?: { start?: unknown; end?: unknown }; newText?: unknown };
+    const start = value.range?.start as { line?: unknown; character?: unknown } | undefined;
+    const end = value.range?.end as { line?: unknown; character?: unknown } | undefined;
+    if (typeof value.newText !== 'string' || !start || !end) continue;
+    if (typeof start.line !== 'number' || typeof start.character !== 'number') continue;
+    if (typeof end.line !== 'number' || typeof end.character !== 'number') continue;
+    edits.push({
+      startLine: start.line + 1,
+      startColumn: start.character + 1,
+      endLine: end.line + 1,
+      endColumn: end.character + 1,
+      newText: value.newText,
+    });
+  }
+  return edits.length > 0 ? edits : null;
 }
 
 function kindLabel(kind: unknown): string {

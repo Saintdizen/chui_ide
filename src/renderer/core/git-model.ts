@@ -4,9 +4,12 @@ import {
   type GitCommit,
   type GitCommitInfo,
   type GitConflictParts,
+  type GitCommitDiff,
+  type GitFileHunks,
   type GitDiff,
   type GitFileStatus,
   type GitNetworkResult,
+  type GitRebaseResult,
   type GitRemote,
   type GitStatus,
 } from '../../shared/api';
@@ -14,6 +17,17 @@ import type { BlameLine } from '../../shared/git-blame';
 import type { GitReflogEntry } from '../../shared/git-reflog';
 import type { GitStashEntry } from '../../shared/git-stash';
 import type { GitTag } from '../../shared/git-tags';
+import type { RebaseTodoItem } from '../../shared/git-rebase';
+import type { PullMode } from '../../shared/git-pull';
+import type { GitRefDiff } from '../../shared/git-ref-diff';
+import type { GitBisectState } from '../../shared/git-bisect';
+import type { GitSubmodule } from '../../shared/git-submodules';
+import type { GitWorktree } from '../../shared/git-worktrees';
+import type { GitLfsInfo } from '../../shared/git-lfs';
+import type { GitIdentity, GitSshKey } from '../../shared/git-identity';
+import type { ProjectPackage } from '../../shared/monorepo';
+import type { ForgeInfo } from '../../shared/git-platform';
+import type { GitRootSummary } from '../../shared/git-multiroot';
 import { Emitter } from './events';
 import { separatorOf } from '../../shared/paths';
 import type { RpcClient } from './rpc';
@@ -85,15 +99,33 @@ export class GitModel {
   private readonly emitter = new Emitter<GitStatus>();
   readonly onDidChange = this.emitter.event;
 
+  /**
+   * Сводка по всем корням области: в многообласти их несколько, и правки могут
+   * быть в неактивной папке. Обновляется по push, а в обычном проекте пуста —
+   * там хватает статуса активного корня.
+   */
+  private summaries: GitRootSummary[] = [];
+  private readonly summaryEmitter = new Emitter<GitRootSummary[]>();
+  readonly onDidChangeSummary = this.summaryEmitter.event;
+
   constructor(
     private readonly rpc: RpcClient,
     workspace: WorkspaceModel,
   ) {
     rpc.onPush((message) => {
       if (message.topic === PushTopic.GitChanged) this.apply(message.payload as GitStatus);
+      else if (message.topic === PushTopic.GitSummary) this.applySummary(message.payload as GitRootSummary[]);
     });
     // Другая рабочая папка — другой репозиторий: прежние пометки к ней не относятся.
-    workspace.onDidChange(() => void this.refresh());
+    workspace.onDidChange(() => {
+      void this.refresh();
+      void this.refreshSummary();
+    });
+  }
+
+  /** Сводки по корням области (последний снимок от main). */
+  get rootSummaries(): readonly GitRootSummary[] {
+    return this.summaries;
   }
 
   get repository(): GitStatus['repository'] {
@@ -139,6 +171,26 @@ export class GitModel {
 
   async refresh(): Promise<GitStatus> {
     return this.apply(await this.rpc.request('git.status'));
+  }
+
+  /** Блоки изменений файла: действия прямо из жёлоба редактора (индексировать, убрать, откатить). */
+  fileHunks(path: string): Promise<GitFileHunks> {
+    return this.rpc.request('git.fileHunks', { path });
+  }
+
+  /** Откатить ОДИН блок файла в рабочем дереве. */
+  async discardHunk(path: string, index: number): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.discardHunk', { path, index }));
+  }
+
+  /** Diff будущего коммита: из него модель собирает сообщение (см. `git.generateCommitMessage`). */
+  commitDiff(): Promise<GitCommitDiff> {
+    return this.rpc.request('git.commitDiff');
+  }
+
+  /** Пересчитать сводку по всем корням области: неактивные папки она видит тоже. */
+  async refreshSummary(): Promise<GitRootSummary[]> {
+    return this.applySummary(await this.rpc.request('git.summary'));
   }
 
   async init(): Promise<GitStatus> {
@@ -231,6 +283,36 @@ export class GitModel {
     return this.apply(await this.rpc.request('git.reset', { mode, commit }));
   }
 
+  /**
+   * Интерактивный rebase последних `count` коммитов. Модель применяет пришедший
+   * статус, но НЕ считает операцию завершённой: rebase может остановиться на
+   * конфликте или на шаге `edit` — это видно по `inProgress` в ответе.
+   */
+  async rebase(count: number, items: readonly RebaseTodoItem[]): Promise<GitRebaseResult> {
+    const result = await this.rpc.request('git.rebase', { count, items: [...items] });
+    this.apply(result.status);
+    return result;
+  }
+
+  /** Продолжить остановленный rebase (конфликт разрешён или шаг `edit` закончен). */
+  async rebaseContinue(): Promise<GitRebaseResult> {
+    const result = await this.rpc.request('git.rebaseContinue');
+    this.apply(result.status);
+    return result;
+  }
+
+  /** Пропустить текущий коммит остановленного rebase. */
+  async rebaseSkip(): Promise<GitRebaseResult> {
+    const result = await this.rpc.request('git.rebaseSkip');
+    this.apply(result.status);
+    return result;
+  }
+
+  /** Прервать rebase: ветка возвращается туда, где была до запуска. */
+  async rebaseAbort(): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.rebaseAbort'));
+  }
+
   /** Список тегов репозитория. */
   tags(): Promise<GitTag[]> {
     return this.rpc.request('git.tags');
@@ -265,6 +347,42 @@ export class GitModel {
     return this.apply(await this.rpc.request('git.renameBranch', { from, to }));
   }
 
+  /** Подмодули репозитория: дерево помечает их папки значком. */
+  submodules(): Promise<GitSubmodule[]> {
+    return this.rpc.request('git.submodules');
+  }
+
+  /** Забрать код подмодулей: `update --init --recursive`. */
+  async submoduleUpdate(): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.submoduleUpdate'));
+  }
+
+  /** Список рабочих каталогов репозитория (главный и добавленные). */
+  worktrees(): Promise<GitWorktree[]> {
+    return this.rpc.request('git.worktrees');
+  }
+
+  /** Добавить рабочий каталог: существующая ветка, новая или отделённый указатель. */
+  worktreeAdd(path: string, options: { branch?: string; newBranch?: string } = {}): Promise<GitWorktree[]> {
+    return this.rpc.request('git.worktreeAdd', { path, ...options });
+  }
+
+  /** Удалить рабочий каталог. */
+  worktreeRemove(path: string, force = false): Promise<GitWorktree[]> {
+    return this.rpc.request('git.worktreeRemove', { path, force });
+  }
+
+  /** Убрать записи о каталогах, которых уже нет на диске. */
+  worktreePrune(): Promise<GitWorktree[]> {
+    return this.rpc.request('git.worktreePrune');
+  }
+
+  /** Какие из путей git считает игнорируемыми: их дерево показывает приглушённо. */
+  checkIgnore(paths: readonly string[]): Promise<string[]> {
+    if (paths.length === 0) return Promise.resolve([]);
+    return this.rpc.request('git.checkIgnore', { paths: [...paths] });
+  }
+
   /** Добавить пути в .gitignore корня репозитория. */
   async ignore(paths: string[]): Promise<GitStatus> {
     return this.apply(await this.rpc.request('git.ignore', { paths }));
@@ -273,6 +391,44 @@ export class GitModel {
   /** Журнал ссылок: откат неудачного merge/rebase/reset. */
   reflog(limit = 50): Promise<GitReflogEntry[]> {
     return this.rpc.request('git.reflog', { limit });
+  }
+
+  /* ── пошаговый поиск багованного коммита (bisect) ──────────────────────── */
+
+  /** Текущее состояние поиска: идёт ли он и сколько осталось проверить. */
+  bisectState(): Promise<GitBisectState> {
+    return this.rpc.request('git.bisectState');
+  }
+
+  /** Начать поиск; `bad` и `good` — известные плохой и хороший коммиты. */
+  async bisectStart(options: { bad?: string; good?: string } = {}): Promise<GitBisectState> {
+    return this.applyBisect(await this.rpc.request('git.bisectStart', options));
+  }
+
+  /** Пометить проверяемый коммит хорошим, плохим или пропустить его. */
+  async bisectMark(mark: 'good' | 'bad' | 'skip'): Promise<GitBisectState> {
+    return this.applyBisect(await this.rpc.request('git.bisectMark', { mark }));
+  }
+
+  /** Закончить поиск: ветка возвращается туда, где была до него. */
+  async bisectReset(): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.bisectReset'));
+  }
+
+  /** Поиск переставляет ветку — состояние рабочего дерева меняется вместе с ним. */
+  private async applyBisect(state: GitBisectState): Promise<GitBisectState> {
+    await this.refresh();
+    return state;
+  }
+
+  /** Сравнить две ссылки: список изменённых файлов со статусом и счётчиком строк. */
+  compareRefs(base: string, head: string): Promise<GitRefDiff> {
+    return this.rpc.request('git.compareRefs', { base, head });
+  }
+
+  /** Один файл между двумя ссылками: две версии текста. */
+  diffRefs(base: string, head: string, path: string): Promise<GitDiff> {
+    return this.rpc.request('git.diffRefs', { base, head, path });
   }
 
   /** История в виде графа веток — текстом, как её рисует git. */
@@ -286,6 +442,83 @@ export class GitModel {
   }
 
   /** Отметить конфликт решённым: текущее содержимое файла уходит в индекс. */
+  /** Пакеты проекта (монорепо) — панель изменений раскладывает по ним правки. */
+  projectPackages(): Promise<ProjectPackage[]> {
+    return this.rpc.request('project.packages');
+  }
+
+  /* Площадка хостинга: запросы на слияние (PR/MR). */
+
+  /** Площадка репозитория, клиент, вход и список запросов. */
+  forgeInfo(remote?: string): Promise<ForgeInfo> {
+    return this.rpc.request('git.forgeInfo', { remote });
+  }
+
+  /** Создать запрос на слияние из ветки. */
+  forgeCreate(options: {
+    title: string;
+    body?: string;
+    target?: string;
+    source?: string;
+    draft?: boolean;
+  }): Promise<ForgeInfo> {
+    return this.rpc.request('git.forgeCreate', options);
+  }
+
+  /** Забрать ветку запроса в рабочий каталог: клиент делает fetch и checkout. */
+  async forgeCheckout(number: number): Promise<GitStatus> {
+    return this.apply(await this.rpc.request('git.forgeCheckout', { number }));
+  }
+
+  /** Открыть ссылку в браузере системы. */
+  openExternal(url: string): Promise<{ ok: boolean }> {
+    return this.rpc.request('shell.openExternal', { url });
+  }
+
+  /* Личность, подпись и ключи: это настройки git, статус они не меняют. */
+
+  /** Действующие имя, почта, подпись и хранилище паролей. */
+  identity(): Promise<GitIdentity> {
+    return this.rpc.request('git.identity');
+  }
+
+  /** Записать настройки в локальный конфиг репозитория и вернуть новое состояние. */
+  setIdentity(values: Partial<GitIdentity>): Promise<GitIdentity> {
+    return this.rpc.request('git.setIdentity', { values });
+  }
+
+  /** Открытые ключи из `~/.ssh`. */
+  sshKeys(): Promise<GitSshKey[]> {
+    return this.rpc.request('git.sshKeys');
+  }
+
+  /* Git LFS: большие файлы. Операции не меняют индекс, поэтому статус не трогаем. */
+
+  /** Что знает репозиторий про LFS: доступность, шаблоны и файлы. */
+  lfsInfo(): Promise<GitLfsInfo> {
+    return this.rpc.request('git.lfsInfo');
+  }
+
+  /** Взять шаблон под LFS и вернуть свежее состояние. */
+  lfsTrack(pattern: string): Promise<GitLfsInfo> {
+    return this.rpc.request('git.lfsTrack', { pattern });
+  }
+
+  /** Перестать вести шаблон через LFS. */
+  lfsUntrack(pattern: string): Promise<GitLfsInfo> {
+    return this.rpc.request('git.lfsUntrack', { pattern });
+  }
+
+  /** Подтянуть содержимое больших файлов из хранилища. */
+  lfsPull(): Promise<GitLfsInfo> {
+    return this.rpc.request('git.lfsPull');
+  }
+
+  /** Поставить хуки LFS в этот репозиторий. */
+  lfsInstall(): Promise<GitLfsInfo> {
+    return this.rpc.request('git.lfsInstall');
+  }
+
   async markResolved(path: string): Promise<GitStatus> {
     return this.apply(await this.rpc.request('git.markResolved', { path }));
   }
@@ -317,8 +550,9 @@ export class GitModel {
     return this.network(await this.rpc.request('git.fetch'));
   }
 
-  async pull(): Promise<GitNetworkResult> {
-    return this.network(await this.rpc.request('git.pull'));
+  /** Влить изменения из удалённого репозитория (`mode` — слиянием, перебазированием или только перемоткой). */
+  async pull(mode: PullMode = 'default'): Promise<GitNetworkResult> {
+    return this.network(await this.rpc.request('git.pull', { mode }));
   }
 
   async push(options: { setUpstream?: boolean; force?: boolean } = {}): Promise<GitNetworkResult> {
@@ -329,6 +563,13 @@ export class GitModel {
   private network(result: GitNetworkResult): GitNetworkResult {
     this.apply(result.status);
     return result;
+  }
+
+  /** Принять свежую сводку по корням и сказать об этом подписчикам панели изменений. */
+  private applySummary(summaries: GitRootSummary[]): GitRootSummary[] {
+    this.summaries = Array.isArray(summaries) ? summaries : [];
+    this.summaryEmitter.fire(this.summaries);
+    return this.summaries;
   }
 
   private apply(status: GitStatus | undefined): GitStatus {

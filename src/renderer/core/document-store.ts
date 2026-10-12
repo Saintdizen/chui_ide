@@ -22,11 +22,16 @@ export class DocumentStore {
   readonly onDidClose = this.closeEmitter.event;
   readonly onDidChange = this.changeEmitter.event;
 
-  open(path: string, text: string, languageId: string = languageFromPath(path)): TextDocument {
+  open(path: string, text: string, options: { languageId?: string; readOnly?: boolean } = {}): TextDocument {
     const existing = this.documents.get(path);
     if (existing) return existing;
 
-    const document = new TextDocument(path, text, languageId);
+    const document = new TextDocument(
+      path,
+      text,
+      options.languageId ?? languageFromPath(path),
+      options.readOnly === true,
+    );
     document.onDidChange((change) => this.changeEmitter.fire({ document, change }));
     this.documents.set(path, document);
     this.openEmitter.fire(document);

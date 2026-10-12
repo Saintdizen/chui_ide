@@ -20,6 +20,32 @@ describe('cellsOf', () => {
   });
 });
 
+describe('вставки в строку (подсказки-вставки)', () => {
+  it('вставка сдвигает всё, что за ней, и не трогает то, что до', () => {
+    // Вставка шириной 50 на границе 1 (после «a») — знаки «bc» уезжают вправо.
+    const offsets = layoutLine('abc', metrics, [{ column: 1, width: 50 }]);
+    expect(offsets).toEqual([0, 10, 70, 80]);
+    expect(lineWidth(offsets)).toBe(80);
+  });
+
+  it('вставка в конце строки растягивает её правый край', () => {
+    const offsets = layoutLine('ab', metrics, [{ column: 2, width: 30 }]);
+    // Граница конца строки — уже с хвостовой вставкой (каретка в конце встанет за ней).
+    expect(offsets).toEqual([0, 10, 50]);
+    // Правый край — уже с хвостовой вставкой.
+    expect(lineWidth(offsets)).toBe(50);
+  });
+
+  it('табуляция после вставки прыгает с учётом её ширины', () => {
+    // «a», вставка 15 px, затем «\t»: прыжок идёт от x=10+15=25 к кратному 40 — к 40.
+    const offsets = layoutLine('a\tb', metrics, [{ column: 1, width: 15 }]);
+    // offsets[1] — граница после «a» (10), вставка идёт до знака «\t».
+    expect(offsets[1]).toBe(10);
+    // После табуляции (x=40) и «b» — 50; суммарный правый край.
+    expect(lineWidth(offsets)).toBe(50);
+  });
+});
+
 describe('layoutLine', () => {
   it('обычная строка: x растёт по клетке на знак, ширина — число знаков на клетку', () => {
     const offsets = layoutLine('abc', metrics);

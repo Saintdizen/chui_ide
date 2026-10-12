@@ -27,7 +27,7 @@ app.on('web-contents-created', (_event, contents) => {
   contents.on('unresponsive', () => console.log(`${tag} НЕ ОТВЕЧАЕТ`));
   contents.on('responsive', () => console.log(`${tag} снова отвечает`));
   contents.on('render-process-gone', (_e, details) => console.log(`${tag} renderer упал: ${details.reason}`));
-  contents.on('console-message', (event, level, message) => {
+  contents.on('console-message', (event, _level, message) => {
     const text = typeof message === 'string' ? message : (event?.message ?? '');
     console.log(`${tag} консоль: ${text}`);
   });

@@ -133,6 +133,30 @@ describe('apply_patch', () => {
     });
     expect(tool.description).toContain('якор');
   });
+
+  it('схема описывает поля элемента, а не только «объект вообще»', () => {
+    // Здесь и был баг: элемент массива объявлялся без полей, разбор же требовал
+    // внутри path и patches. Модель, доверясь схеме, присылала замены без файла —
+    // и вызов падал на «patches[0]: не задан path».
+    const patches = byName.get('apply_patch')!.inputSchema.properties.patches!;
+    const file = patches.items!;
+    expect(file.properties?.path?.type).toBe('string');
+    expect(file.properties?.patches?.type).toBe('array');
+    expect(file.required).toEqual(['path', 'patches']);
+    // Якорь — пара oldText/newText, обе обязательны.
+    expect(file.properties?.patches?.items?.required).toEqual(['oldText', 'newText']);
+    expect(file.properties?.patches?.items?.properties?.newText?.type).toBe('string');
+  });
+});
+
+describe('apply_edit', () => {
+  it('схема описывает и правку внутри файла — у них была та же дыра', () => {
+    const edits = byName.get('apply_edit')!.inputSchema.properties.edits!;
+    const file = edits.items!;
+    expect(file.required).toEqual(['path', 'edits']);
+    expect(file.properties?.edits?.items?.required).toContain('newText');
+    expect(file.properties?.edits?.items?.properties?.startLine?.type).toBe('number');
+  });
 });
 
 describe('create_file', () => {

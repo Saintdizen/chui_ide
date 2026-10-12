@@ -30,13 +30,20 @@ import { LineHighlighter } from '../highlight/highlighter';
 import { grammarFor } from '../highlight/registry';
 import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
 import { measureFont, monospaceMetrics, type GlyphMetrics } from './glyph-metrics';
-import { columnForX, layoutLine, lineWidth, xForColumn } from './line-layout';
-import { FileDecorations, squigglyRect } from './decorations';
+import { columnForX, layoutLine, xForColumn } from './line-layout';
+import { FileDecorations, squigglyRect, type LensDecoration } from './decorations';
 import { findBracketPair, findOccurrences, type BracketPair } from './context-highlight';
-import { caret, isEmpty, rangesRects, selectionRects, type Selection } from './selection';
+import { caret, isEmpty, rangesRects, selectionEnd, selectionStart, type Selection } from './selection';
 import { clamp, contentHeight, lineAtY, maxScrollLeft, maxScrollTop, revealLine, visibleLines } from './viewport';
 import { FoldModel } from './fold-model';
-import type { FoldRange } from '../../../shared/fold-ranges';
+import { RowMap } from './row-map';
+import { segmentIndexForColumn, wrapSegments, type WrapSegment } from './wrap-model';
+import { BracketDepth, RAINBOW_SIZE } from './bracket-rainbow';
+import { todoMarks } from '../../../shared/todo-comments';
+import type { InlayHint } from '../../../shared/lsp-inlay-hints';
+import { enclosingFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
+import { whitespaceMarks, type WhitespaceMode } from './whitespace';
+import { Minimap } from './minimap';
 
 /** Класс корня и его частей — за него цепляется оформление (`styles/editor.css`). */
 const ROOT_CLASS = 'own-editor';
@@ -54,10 +61,25 @@ export interface EditorViewOptions {
   scheme?: Scheme;
   /** Ширина поля значков (точек останова, запуска, тестов) в пикселях. */
   glyphWidth?: number;
+  /** Показывать ли невидимые знаки (пробелы точками, табуляции стрелкой). */
+  whitespace?: WhitespaceMode;
+  /** Показывать ли миникарту — сжатый вид всего файла у правого края. */
+  minimap?: boolean;
+  /** Включать ли лигатуры шрифта (`=>`, `!=`, `->` одним знаком). */
+  ligatures?: boolean;
 }
 
 /** Ширина полосы украшений (черта изменений git) — узкая, как в Monaco. */
 const STRIP_WIDTH = 3;
+
+/** Вставка строки: что показать, где и сколько места она занимает. */
+interface InlayItem {
+  /** Смещение-граница в строке (с нуля): после него идёт вставка. */
+  readonly column: number;
+  readonly text: string;
+  readonly width: number;
+  readonly className: string;
+}
 
 /** Строка, уже разложенная по x (кэш раскладки на видимых строк). */
 interface LineLayoutCache {
@@ -72,6 +94,8 @@ export class EditorView {
   private readonly viewport: HTMLElement;
   private readonly content: HTMLElement;
   private readonly linesLayer: HTMLElement;
+  /** Вертикальные направляющие столбцов (ruler) — тонкие черты через всю высоту. */
+  private readonly rulerLayer: HTMLElement;
   private readonly backgroundLayer: HTMLElement;
   private readonly selectionLayer: HTMLElement;
   private readonly searchLayer: HTMLElement;
@@ -81,6 +105,8 @@ export class EditorView {
   private readonly ghostLayer: HTMLElement;
   /** Слой кареток: у мультикурсора их несколько, поэтому каретка — узел внутри слоя. */
   private readonly caretLayer: HTMLElement;
+  /** Закреплённые заголовки блоков сверху (sticky scroll) — отдельный слой над полем прокрутки. */
+  private readonly stickyLayer: HTMLElement;
   private readonly gutter: HTMLElement | null;
   private readonly gutterLines: HTMLElement | null;
   private readonly glyphMargin: HTMLElement | null;
@@ -97,8 +123,20 @@ export class EditorView {
   private selections: Selection[] = [caret(0)];
   private scrollTop = 0;
   private disposed = false;
+  /**
+   * Перенос длинных строк. Пока выключен, одна строка занимает один ряд и вся
+   * арифметика рядов — прежняя; ради этого перевод «столбец → ряд» отделён
+   * (`wrap-model.ts`).
+   */
+  private wrapOn = false;
+  /** Таблица визуальных рядов с учётом переноса: строится, только когда перенос включён. */
+  private readonly rows = new RowMap();
+  /** Ключ, при котором построена таблица рядов (версия, ширина, табуляция, свёртка). */
+  private rowsKey = '';
   /** Подсветка видимых строк: кэш токенов по строкам (см. `highlight/highlighter.ts`). */
   private readonly highlighter: LineHighlighter;
+  /** Вложенность скобок по строкам — для радужных скобок (см. `bracket-rainbow.ts`). */
+  private readonly bracketDepth: BracketDepth;
   private scheme: Scheme;
   /** Сколько строк было в документе: по смене числа понимаем, сдвинулись ли строки. */
   private lineCount = 0;
@@ -112,7 +150,7 @@ export class EditorView {
   /** Самая широкая известная строка: ширину полотна узнаём по мере отрисовки. */
   private widest = 0;
   /** Что сейчас в DOM: версия буфера, границы видимых строк и версия украшений — чтобы не пересобирать зря. */
-  private rendered = { version: -1, first: -1, last: -1, decorations: -1 };
+  private rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
   private layoutCache: LineLayoutCache | null = null;
   /**
    * Свёрнутые строки. Пока ничего не свёрнуто, ряд совпадает со строкой и вся
@@ -124,6 +162,15 @@ export class EditorView {
   private decorations = new FileDecorations();
   /** Меняется на каждую смену набора украшений: по ней строки пересобираются. */
   private decorationsVersion = 0;
+  /** Столбцы направляющих (ruler): у каждого рисуется вертикальная черта. */
+  private rulers: readonly number[] = [];
+  /** Что из невидимых знаков показывать: ничего, хвостовые или все. */
+  private whitespace: WhitespaceMode = 'none';
+  /** Миникарта: холст со сжатыми строками и ползунком видимой части. */
+  private readonly minimap: Minimap;
+  private minimapVisible = false;
+  /** Подсказки-вставки по строкам (inlay hints): место, текст, ширина и класс. */
+  private inlayByLine = new Map<number, readonly InlayItem[]>();
   /** Призрачный текст подсказки «допиши за меня»: смещение и сам текст. */
   private ghost: { offset: number; text: string } | null = null;
 
@@ -139,6 +186,8 @@ export class EditorView {
   onStripContextMenu: ((line: number, event: MouseEvent) => void) | null = null;
   onGutterClick: ((line: number, event: MouseEvent) => void) | null = null;
   onGutterContextMenu: ((line: number, event: MouseEvent) => void) | null = null;
+  /** Клик по код-линзе строки: что исполнить — решает хозяин, а не представление. */
+  onLensClick: ((line: number) => void) | null = null;
   /** Правый клик по самому тексту: меню собирает хозяин, представление только сообщает. */
   onContextMenu: ((event: MouseEvent) => void) | null = null;
 
@@ -148,11 +197,18 @@ export class EditorView {
     this.overscan = options.overscan ?? 2;
     this.selections = [caret(0)];
     this.scheme = options.scheme ?? 'dark';
+    this.whitespace = options.whitespace ?? 'none';
     this.lineCount = buffer.lineCount;
     // Текст строки подсветка берёт сама — ей довольно функции: так её можно проверить
     // в тестах без модели текста (см. `highlight/highlighter.ts`).
     this.highlighter = new LineHighlighter(options.language ? grammarFor(options.language) : null, (line) =>
       this.buffer.lineText(line + 1),
+    );
+    // Радужные скобки берут текст и токены той же строки: разбор подсветки уже есть,
+    // второй раз строку не разбираем. Вложенность ведём по всему документу.
+    this.bracketDepth = new BracketDepth(
+      (line) => this.buffer.lineText(line + 1),
+      (line) => this.highlighter.tokensFor(line),
     );
 
     this.root = document.createElement('div');
@@ -167,11 +223,16 @@ export class EditorView {
     this.glyphLines = document.createElement('div');
     this.strip = document.createElement('div');
     this.stripLines = document.createElement('div');
+    // Слой закреплённых заголовков лежит рядом с полем прокрутки (не внутри него):
+    // заголовки не должны ехать при прокрутке, поэтому сдвигаем их вручную.
+    this.stickyLayer = document.createElement('div');
 
     this.viewport = document.createElement('div');
     this.viewport.className = `${ROOT_CLASS}-viewport`;
     this.content = document.createElement('div');
     this.content.className = `${ROOT_CLASS}-content`;
+    this.rulerLayer = document.createElement('div');
+    this.rulerLayer.className = `${ROOT_CLASS}-rulers`;
     this.backgroundLayer = document.createElement('div');
     this.backgroundLayer.className = `${ROOT_CLASS}-backgrounds`;
     this.selectionLayer = document.createElement('div');
@@ -195,6 +256,7 @@ export class EditorView {
     // закрывает буквы. Призрачная подсказка — над текстом (она дописывает за кареткой),
     // но под кареткой, чтобы та оставалась видна.
     this.content.append(
+      this.rulerLayer,
       this.backgroundLayer,
       this.searchLayer,
       this.highlightLayer,
@@ -224,7 +286,26 @@ export class EditorView {
     this.strip.style.width = `${STRIP_WIDTH}px`;
     this.stripLines.className = `${ROOT_CLASS}-strip-lines`;
     this.strip.append(this.stripLines);
-    this.root.append(this.strip, this.viewport);
+    this.stickyLayer.className = `${ROOT_CLASS}-sticky`;
+    this.stickyLayer.hidden = true;
+    this.root.append(this.strip, this.viewport, this.stickyLayer);
+    // Миникарта — узкая колонка справа от поля прокрутки. Живёт всегда, но по
+    // умолчанию скрыта: показать её дёшево, а показанная она читает текст каждый кадр.
+    this.minimap = new Minimap({
+      text: (line) => this.buffer.lineText(line),
+      rowCount: () => this.rowCount(),
+      lineHeight: () => this.metrics.lineHeight,
+      scrollTop: () => this.viewport.scrollTop,
+      viewportHeight: () => this.viewport.clientHeight,
+      color: () => window.getComputedStyle(this.root).color,
+      scrollToRow: (row) => {
+        this.viewport.scrollTop = row * this.metrics.lineHeight;
+      },
+    });
+    this.root.insertBefore(this.minimap.element, this.stickyLayer);
+    this.minimapVisible = options.minimap ?? false;
+    this.minimap.element.hidden = !this.minimapVisible;
+    this.setLigatures(options.ligatures ?? false);
     this.host.append(this.root);
 
     this.bindAreaEvents();
@@ -259,7 +340,7 @@ export class EditorView {
   remeasure(): void {
     this.metrics = measureFromHost(this.root);
     this.layoutCache = null;
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1 };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
     this.applyMetrics();
     this.render();
   }
@@ -337,11 +418,10 @@ export class EditorView {
       const line = this.buffer.lineAt(range.start) - 1;
       if (line < first || line > last) return;
       if (this.isHidden(line + 1)) return;
-      for (const rect of rangesRects(this.buffer, [range], this.metrics)) {
-        if (this.isHidden(rect.line)) continue;
+      for (const rect of this.rangeRects(range.start, range.end)) {
         const node = document.createElement('div');
         node.className = `${ROOT_CLASS}-highlight-rect ${className}`;
-        node.style.transform = `translate(${rect.left}px, ${this.yOfLine(rect.line)}px)`;
+        node.style.transform = `translate(${rect.left}px, ${this.yOfRow(rect.row)}px)`;
         node.style.width = `${rect.width}px`;
         node.style.height = `${rect.height}px`;
         fragment.append(node);
@@ -395,11 +475,15 @@ export class EditorView {
     const { offset, text } = this.ghost;
     const line = this.buffer.lineAt(offset);
     const column = offset - this.buffer.lineStart(line);
-    const left = xForColumn(this.offsetsFor(line), column);
+    const offsets = this.offsetsFor(line);
+    const segments = this.segmentsFor(line);
+    const segment = segmentIndexForColumn(segments, column);
+    const origin = offsets[segments[segment]?.startColumn ?? 0] ?? 0;
+    const left = (offsets[column] ?? origin) - origin;
 
     const container = document.createElement('div');
     container.className = `${ROOT_CLASS}-ghost`;
-    container.style.transform = `translate(${left}px, ${this.yOfLine(line)}px)`;
+    container.style.transform = `translate(${left}px, ${this.yOfRow(this.rowOf(line) + segment)}px)`;
 
     const rows = text.split('\n');
     for (let index = 0; index < rows.length; index += 1) {
@@ -432,12 +516,11 @@ export class EditorView {
       const line = this.buffer.lineAt(match.start) - 1;
       if (line < first || line > last) continue;
       if (this.isHidden(line + 1)) continue;
-      for (const rect of rangesRects(this.buffer, [match], this.metrics)) {
-        if (this.isHidden(rect.line)) continue;
+      for (const rect of this.rangeRects(match.start, match.end)) {
         const node = document.createElement('div');
         node.className =
           index === this.searchCurrent ? `${ROOT_CLASS}-search-rect is-current` : `${ROOT_CLASS}-search-rect`;
-        node.style.transform = `translate(${rect.left}px, ${this.yOfLine(rect.line)}px)`;
+        node.style.transform = `translate(${rect.left}px, ${this.yOfRow(rect.row)}px)`;
         node.style.width = `${rect.width}px`;
         node.style.height = `${rect.height}px`;
         fragment.append(node);
@@ -455,7 +538,13 @@ export class EditorView {
   /** Прокрутить так, чтобы смещение (каретка) попало в экран. */
   revealOffset(offset: number): void {
     const line = this.buffer.lineAt(offset);
-    this.revealLineInternal(line);
+    if (!this.wrapOn) {
+      this.revealLineInternal(line);
+      return;
+    }
+    // Со переносом ведём каретку на её собственный ряд, а не на первый ряд строки.
+    const column = offset - this.buffer.lineStart(line);
+    this.revealRowInternal(this.rowOf(line) + this.segmentOfColumn(line, column));
   }
 
   /**
@@ -466,9 +555,15 @@ export class EditorView {
     const rect = this.viewport.getBoundingClientRect();
     const x = clientX - rect.left + this.viewport.scrollLeft;
     const y = clientY - rect.top + this.viewport.scrollTop;
-    const line = this.lineOfRow(lineAtY(y, this.metrics.lineHeight, this.rowCount()));
-    const text = this.buffer.lineText(line);
-    const column = columnForX(layoutLine(text, this.metrics), x);
+    const { line, segment } = this.rowInfo(lineAtY(y, this.metrics.lineHeight, this.rowCount()));
+    const offsets = this.offsetsFor(line);
+    const segments = this.segmentsFor(line);
+    const span = segments[segment] ?? segments[0]!;
+    const origin = offsets[span.startColumn] ?? 0;
+    // Клик по ряду-продолжению: x отсчитывается от начала отрезка, а не строки.
+    let column = columnForX(offsets, x + origin);
+    if (column < span.startColumn) column = span.startColumn;
+    if (column > span.endColumn) column = span.endColumn;
     return this.buffer.lineStart(line) + column;
   }
 
@@ -485,8 +580,12 @@ export class EditorView {
   caretPoint(offset: number): { left: number; top: number; height: number } {
     const line = this.buffer.lineAt(offset);
     const column = offset - this.buffer.lineStart(line);
-    const left = xForColumn(this.offsetsFor(line), column);
-    return { left, top: this.yOfLine(line), height: this.metrics.lineHeight };
+    const offsets = this.offsetsFor(line);
+    const segments = this.segmentsFor(line);
+    const segment = segmentIndexForColumn(segments, column);
+    const origin = offsets[segments[segment]?.startColumn ?? 0] ?? 0;
+    const left = (offsets[column] ?? origin) - origin;
+    return { left, top: this.yOfRow(this.rowOf(line) + segment), height: this.metrics.lineHeight };
   }
 
   /**
@@ -530,6 +629,7 @@ export class EditorView {
       // Правка, изменившая число строк, сдвигает всё ниже: подсветке об этом надо сказать.
       const structural = this.buffer.lineCount !== this.lineCount;
       this.highlighter.invalidate(this.buffer.lineAt(fromOffset) - 1, structural);
+      this.bracketDepth.invalidate(this.buffer.lineAt(fromOffset) - 1, structural);
     }
     this.lineCount = this.buffer.lineCount;
     this.render();
@@ -538,6 +638,9 @@ export class EditorView {
   /** Сменить язык подсветки (открыли другой файл в этой же вкладке). */
   setLanguage(languageId: string): void {
     this.highlighter.setGrammar(grammarFor(languageId));
+    // Вложенность зависит от того, что подсветка считает строкой/комментарием, —
+    // со сменой языка пересчитываем с нуля.
+    this.bracketDepth.reset();
     this.rerender();
   }
 
@@ -573,7 +676,7 @@ export class EditorView {
   /** Заставить пересобрать строки: сменилась подсветка или схема, а версия текста та же. */
   private rerender(): void {
     this.widest = 0;
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1 };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
     this.render();
   }
 
@@ -584,10 +687,14 @@ export class EditorView {
     this.scrollTop = 0;
     this.widest = 0;
     this.layoutCache = null;
+    this.rowsKey = '';
     this.lineCount = buffer.lineCount;
     // Диапазоны свёртки и схлопнутое состояние — прошлого файла: начинаем с чистого листа.
     this.folds.reset();
     this.highlighter.reset();
+    this.bracketDepth.reset();
+    // Подсказки-вставки принадлежали прошлому файлу: их поставит хозяин для нового.
+    this.inlayByLine.clear();
     this.viewport.scrollTo({ top: 0, left: 0 });
     // Украшения принадлежали прошлому файлу (полоски git, точки останова): их
     // рисует хозяин уже для нового — до этого не должно остаться чужих значков.
@@ -596,7 +703,7 @@ export class EditorView {
     // Призрачная подсказка говорила о прошлом файле — к новому она не относится.
     this.ghost = null;
     this.ghostLayer.replaceChildren();
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1 };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
     this.render();
   }
 
@@ -663,24 +770,126 @@ export class EditorView {
     return { rows: this.rowCount(), collapsed: this.folds.collapsedStarts() };
   }
 
-  /** Сколько рядов занимает документ: строки минус скрытые. */
+  // — перенос строк —
+
+  /** Включить или выключить перенос длинных строк. */
+  setWordWrap(on: boolean): void {
+    if (this.wrapOn === on) return;
+    this.wrapOn = on;
+    // Таблица рядов построена для прежнего режима — начинаем с чистого листа.
+    this.rowsKey = '';
+    this.rerender();
+  }
+
+  /** Включён ли перенос строк. */
+  get wordWrap(): boolean {
+    return this.wrapOn;
+  }
+
+  /** Ширина, до которой переносим строки — ширина поля прокрутки в пикселях. */
+  private wrapWidth(): number {
+    return Math.max(1, Math.floor(this.viewport.clientWidth));
+  }
+
+  /**
+   * Построить таблицу визуальных рядов заново, если она устарела. Делается только при
+   * включённом переносе: без него ряды совпадают со строками и их считает свёртка
+   * (`FoldModel`) без массива на весь файл.
+   */
+  private ensureRows(): void {
+    if (!this.wrapOn) return;
+    const width = this.wrapWidth();
+    const key = `${this.buffer.version}|${width}|${this.metrics.tabSize}|${this.buffer.lineCount}|${this.folds.revision}`;
+    if (key === this.rowsKey) return;
+    const counts = new Array<number>(this.buffer.lineCount);
+    for (let index = 0; index < counts.length; index += 1) {
+      const line = index + 1;
+      // Скрытая строка рядов не занимает — следующий ряд начнётся сразу над ней.
+      if (this.folds.isHidden(line)) {
+        counts[index] = 0;
+        continue;
+      }
+      const text = this.buffer.lineText(line);
+      const offsets = layoutLine(text, this.metrics, this.insertsFor(line));
+      counts[index] = wrapSegments(text, offsets, width).length;
+    }
+    this.rows.rebuild(counts);
+    this.rowsKey = key;
+  }
+
+  /** Отрезки переноса строки: один на всю строку, когда перенос выключен. */
+  private segmentsFor(line: number): WrapSegment[] {
+    const offsets = this.offsetsFor(line);
+    if (!this.wrapOn) return [{ startColumn: 0, endColumn: offsets.length - 1 }];
+    return wrapSegments(this.buffer.lineText(line), offsets, this.wrapWidth());
+  }
+
+  /** Номер отрезка строки, которому принадлежит столбец. */
+  private segmentOfColumn(line: number, column: number): number {
+    if (!this.wrapOn) return 0;
+    return segmentIndexForColumn(this.segmentsFor(line), column);
+  }
+
+  /** Сколько визуальных рядов занимает строка (без переноса — один). */
+  private rowSpanOf(line: number): number {
+    if (!this.wrapOn) return 1;
+    return this.segmentsFor(line).length;
+  }
+
+  /** Сколько всего рядов занимает документ. */
   private rowCount(): number {
+    if (this.wrapOn) {
+      this.ensureRows();
+      return this.rows.rowTotal;
+    }
     return this.folds.rowCount(this.buffer.lineCount);
+  }
+
+  /** Первый ряд строки (с нуля). */
+  private rowOf(line: number): number {
+    if (this.wrapOn) {
+      this.ensureRows();
+      return this.rows.rowOf(line);
+    }
+    return this.folds.rowOf(line);
   }
 
   /** Верх строки в координатах полотна: по РЯДУ строки, а не по её номеру. */
   private yOfLine(line: number): number {
-    return this.folds.rowOf(line) * this.metrics.lineHeight;
+    return this.rowOf(line) * this.metrics.lineHeight;
+  }
+
+  /** Верх ряда в координатах полотна. */
+  private yOfRow(row: number): number {
+    return row * this.metrics.lineHeight;
   }
 
   /** Строка, которой принадлежит ряд (с нуля) — обратный перевод к `yOfLine`. */
   private lineOfRow(row: number): number {
+    if (this.wrapOn) {
+      this.ensureRows();
+      return this.rows.lineAtRow(row).line;
+    }
     return this.folds.lineAtRow(row);
+  }
+
+  /** Строка и её ряд по номеру ряда — для клика и перевода y → позиция. */
+  private rowInfo(row: number): { line: number; segment: number } {
+    if (this.wrapOn) {
+      this.ensureRows();
+      return this.rows.lineAtRow(row);
+    }
+    return { line: this.folds.lineAtRow(row), segment: 0 };
   }
 
   /** Скрыта ли строка свёрткой (её не рисуем и места она не занимает). */
   private isHidden(line: number): boolean {
     return this.folds.isHidden(line);
+  }
+
+  /** Ключ переноса: включён ли он и до какой ширины. Изменился — строки пересобрать. */
+  private wrapSignature(): string {
+    return this.wrapOn ? `on:${this.wrapWidth()}` : 'off';
   }
 
   // — отрисовка —
@@ -712,6 +921,9 @@ export class EditorView {
     this.renderLines(first, last);
     this.renderGutter(first, last);
     this.renderDecorations(first, last);
+    // Закреплённые заголовки — последними: они перекрывают текст сверху, поэтому
+    // должны знать о готовых размерах полей и о прокрутке.
+    this.renderSticky(width);
     this.sizeContent(width, height);
     // Совпадения поиска живут в тех же строках, что и текст: после прокрутки их
     // видимый набор изменился, поэтому перерисовываем вместе со строками.
@@ -721,6 +933,9 @@ export class EditorView {
     // Призрачный текст привязан к каретке: после смены метрик его надо переложить.
     this.renderGhost();
     this.updateCaretAndSelection();
+    // Миникарта рисуется по ВСЕМУ файлу и едет вместе с прокруткой: перерисовываем
+    // её тем же кадром, что и строки, — иначе ползунок отставал бы от прокрутки.
+    if (this.minimapVisible) this.minimap.render();
   }
 
   /** Размер полотна: высота — по числу строк, ширина — по самой широкой известной строке. */
@@ -740,7 +955,9 @@ export class EditorView {
       this.rendered.last === last &&
       // Подписи blame рисуются ВНУТРИ строки: сменились украшения — строки надо
       // пересобрать, даже если текст тот же.
-      this.rendered.decorations === this.decorationsVersion;
+      this.rendered.decorations === this.decorationsVersion &&
+      // Ширина переноса поменялась (окно растянули) — отрезки другие, надо пересобрать.
+      this.rendered.wrap === this.wrapSignature();
     if (same) return;
 
     const fragment = document.createDocumentFragment();
@@ -749,20 +966,23 @@ export class EditorView {
       // Скрытые строки в слое не рисуем: ряды идут подряд, без провалов.
       if (this.isHidden(line)) continue;
       const text = this.buffer.lineText(line);
-      const offsets = layoutLine(text, this.metrics);
-      const width = lineWidth(offsets);
-      if (width > this.widest) this.widest = width;
-
-      const row = document.createElement('div');
-      row.className = `${ROOT_CLASS}-line`;
-      this.fillLine(row, text, line);
-      fragment.append(row);
+      const offsets = layoutLine(text, this.metrics, this.insertsFor(line));
+      // Длинная строка при переносе разрезана на отрезки; каждый рисуется своим рядом.
+      const segments = this.wrapOn ? wrapSegments(text, offsets, this.wrapWidth()) : [wholeLine(offsets)];
+      for (const segment of segments) {
+        const width = (offsets[segment.endColumn] ?? 0) - (offsets[segment.startColumn] ?? 0);
+        if (width > this.widest) this.widest = width;
+        const row = document.createElement('div');
+        row.className = `${ROOT_CLASS}-line`;
+        this.fillLine(row, text, line, segment);
+        fragment.append(row);
+      }
     }
 
     this.linesLayer.replaceChildren(fragment);
     // Слой сдвигаем к первой видимой строке, а не пересоздаём на её месте.
     this.linesLayer.style.transform = `translateY(${this.yOfLine(first)}px)`;
-    this.rendered = { version, first, last, decorations: this.decorationsVersion };
+    this.rendered = { version, first, last, decorations: this.decorationsVersion, wrap: this.wrapSignature() };
   }
 
   /**
@@ -773,42 +993,141 @@ export class EditorView {
    * Подпись blame дописывается после содержимого строки отдельным куском: она не часть
    * файла и в раскладку кода не входит — как `after` у декораций Monaco.
    */
-  private fillLine(row: HTMLElement, text: string, line: number): void {
+  private fillLine(row: HTMLElement, text: string, line: number, segment: WrapSegment): void {
     const line0 = line - 1;
     const tokens = this.highlighter.tokensFor(line0);
     const after = this.decorations.afterFor(line);
+    // Рисуем только знаки своего отрезка; у неразрезанной строки он один — вся строка.
+    const from = segment.startColumn;
+    const to = segment.endColumn;
+    const last = to >= text.length;
     const fragment = document.createDocumentFragment();
 
-    if (tokens.length === 0) {
-      fragment.append(document.createTextNode(text));
-    } else {
-      let cursor = 0;
-      for (const token of tokens) {
-        if (token.start > cursor) fragment.append(document.createTextNode(text.slice(cursor, token.start)));
-        const role = roleOfToken(token.type);
-        const piece = text.slice(token.start, token.end);
-        if (role) {
+    // Отдельно выделенные знаки строки: скобка (радугой по вложенности) и слово-пометка
+    // (TODO/FIXME). Ключ — начало, значение — класс и конец: одна вставка на оба случая,
+    // чтобы не разводить похожие ветки в цикле ниже.
+    const marks = new Map<number, { className: string; end: number }>();
+    for (const mark of this.bracketDepth.marksFor(line0)) {
+      marks.set(mark.start, {
+        className: `${ROOT_CLASS}-bracket is-depth-${mark.depth % RAINBOW_SIZE}`,
+        end: mark.start + 1,
+      });
+    }
+    for (const todo of todoMarks(text)) {
+      marks.set(todo.start, { className: `${ROOT_CLASS}-todo`, end: todo.end });
+    }
+    // Невидимые знаки (пробелы точками, табуляции стрелкой) — по настройке. Даём их
+    // той же картой, что и пометки: в цикле ниже это просто ещё один «выделенный знак».
+    for (const ws of whitespaceMarks(text, this.whitespace)) {
+      marks.set(ws.start, { className: `${ROOT_CLASS}-ws is-${ws.kind}`, end: ws.end });
+    }
+
+    // Подсказки-вставки: их не заменяют знаки, а ВСТАВЛЯЮТ между ними — потому и
+    // отдельной картой. Место — граница (столбец с нуля); текст уже с ведущим пробелом.
+    const hintsAt = new Map<number, InlayItem[]>();
+    for (const item of this.inlayByLine.get(line) ?? []) {
+      const list = hintsAt.get(item.column);
+      if (list) list.push(item);
+      else hintsAt.set(item.column, [item]);
+    }
+
+    // Куски строки по токенам: пропуски между ними — обычный текст (роль не нашлась).
+    // Берём только тот отрезок, что рисует этот ряд, — токены за его краем в DOM не нужны.
+    const pieces: Array<{ start: number; end: number; role: string | null }> = [];
+    let cursor = from;
+    for (const token of tokens) {
+      if (token.end <= from) continue;
+      if (token.start >= to) break;
+      const start = Math.max(token.start, from);
+      if (start > cursor) pieces.push({ start: cursor, end: start, role: null });
+      const end = Math.min(token.end, to);
+      if (end > start) pieces.push({ start, end, role: roleOfToken(token.type) });
+      cursor = Math.max(cursor, end);
+    }
+    if (cursor < to) pieces.push({ start: cursor, end: to, role: null });
+    if (pieces.length === 0) pieces.push({ start: from, end: to, role: null });
+
+    for (const token of pieces) {
+      let at = token.start;
+      while (at < token.end) {
+        this.appendHints(fragment, hintsAt, at);
+        const mark = marks.get(at);
+        if (mark) {
+          const end = Math.min(mark.end, token.end);
+          const span = document.createElement('span');
+          span.className = mark.className;
+          span.textContent = text.slice(at, end);
+          fragment.append(span);
+          at = end;
+          continue;
+        }
+        // Тянем кусок без выделенных знаков и вставок до следующего такого или конца токена.
+        let next = at + 1;
+        while (next < token.end && !marks.has(next) && !hintsAt.has(next)) next += 1;
+        const piece = text.slice(at, next);
+        if (token.role) {
           const span = document.createElement('span');
           // Класс — роль палитры, а цвет берётся переменной с корня (`applyTheme`).
-          span.className = `${ROOT_CLASS}-token-${role}`;
+          span.className = `${ROOT_CLASS}-token-${token.role}`;
           span.textContent = piece;
           fragment.append(span);
         } else {
           fragment.append(document.createTextNode(piece));
         }
-        cursor = token.end;
+        at = next;
       }
-      if (cursor < text.length) fragment.append(document.createTextNode(text.slice(cursor)));
     }
 
-    if (after) {
-      const span = document.createElement('span');
-      span.className = after.className;
-      span.textContent = after.content;
-      fragment.append(span);
+    // Хвостовое дополнение строки — линза, подпись blame и вставка в самом конце —
+    // рисуется один раз, на ПОСЛЕДНЕМ отрезке (для неразрезанной строки он и один).
+    if (last) {
+      // Вставка в самом конце строки: цикл по ней не проходит — добавляем после.
+      this.appendHints(fragment, hintsAt, text.length);
+
+      // Код-линза и подпись blame — оба ПОСЛЕ текста, но в этом порядке: линза ближе
+      // к коду (клик по действию), а длинная подпись blame — в самом хвосте строки.
+      const lens = this.decorations.lensFor(line);
+      if (lens) fragment.append(this.buildLens(lens, line));
+
+      if (after) {
+        const span = document.createElement('span');
+        span.className = after.className;
+        span.textContent = after.content;
+        fragment.append(span);
+      }
     }
 
     row.replaceChildren(fragment);
+  }
+
+  /** Добавить вставки-подсказки, привязанные к этой границе строки (их может быть несколько). */
+  private appendHints(fragment: DocumentFragment, hintsAt: Map<number, InlayItem[]>, at: number): void {
+    const items = hintsAt.get(at);
+    if (!items) return;
+    for (const item of items) {
+      const span = document.createElement('span');
+      span.className = item.className;
+      span.textContent = item.text;
+      fragment.append(span);
+    }
+  }
+
+  /**
+   * Узел код-линзы. Клик гасим на `mousedown`, а не на `click`: иначе ввод успел бы
+   * поставить каретку в место подписи, прежде чем мы позовём действие. Курсор-рука —
+   * единственный знак, что подпись кликабельна.
+   */
+  private buildLens(lens: LensDecoration, line: number): HTMLElement {
+    const span = document.createElement('span');
+    span.className = lens.className;
+    span.textContent = lens.content;
+    if (lens.tooltip) span.title = lens.tooltip;
+    span.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.onLensClick?.(line);
+    });
+    return span;
   }
 
   /**
@@ -822,34 +1141,183 @@ export class EditorView {
     // `first`/`last` — видимые строки (с единицы): идём по ним самим, а не по first+1..last+1.
     for (let line = first; line <= last; line += 1) {
       if (this.isHidden(line)) continue;
-      const row = document.createElement('div');
-      row.className = `${ROOT_CLASS}-gutter-row`;
+      const span = this.rowSpanOf(line);
+      for (let index = 0; index < span; index += 1) {
+        const row = document.createElement('div');
+        row.className = `${ROOT_CLASS}-gutter-row`;
+        // Номер и значок — только на первом ряду строки; у продолжения ряда пустые,
+        // но место занимают: иначе номера разъехались бы с кодом.
+        if (index === 0) {
+          const marker = document.createElement('span');
+          marker.className = `${ROOT_CLASS}-fold`;
+          if (this.folds.all.some((range) => range.startLine === line)) {
+            const collapsed = this.folds.isCollapsed(line);
+            marker.classList.add('is-visible');
+            marker.textContent = collapsed ? '▸' : '▾';
+            marker.title = collapsed ? 'Развернуть' : 'Свернуть';
+            marker.addEventListener('mousedown', (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              this.toggleFold(line);
+            });
+          }
 
-      const marker = document.createElement('span');
-      marker.className = `${ROOT_CLASS}-fold`;
-      if (this.folds.all.some((range) => range.startLine === line)) {
-        const collapsed = this.folds.isCollapsed(line);
-        marker.classList.add('is-visible');
-        marker.textContent = collapsed ? '▸' : '▾';
-        marker.title = collapsed ? 'Развернуть' : 'Свернуть';
-        marker.addEventListener('mousedown', (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          this.toggleFold(line);
-        });
+          const number = document.createElement('span');
+          number.className = `${ROOT_CLASS}-gutter-number`;
+          number.textContent = String(line);
+          row.append(marker, number);
+        }
+        fragment.append(row);
       }
-
-      const number = document.createElement('span');
-      number.className = `${ROOT_CLASS}-gutter-number`;
-      number.textContent = String(line);
-      row.append(marker, number);
-      fragment.append(row);
     }
     this.gutterLines.replaceChildren(fragment);
-    this.gutterLines.style.transform = `translateY(${this.yOfLine(first)}px)`;
+    // Слой номеров лежит ВНЕ прокрутки, поэтому его сдвигаем не на абсолютную высоту
+    // первой строки, а на её положение в окне: иначе на прокрутке номера уедут под край.
+    this.gutterLines.style.transform = `translateY(${this.yOfLine(first) - this.scrollTop}px)`;
     // Ширина по числу разрядов последней строки плюс значок свёртки: цифры моноширинны.
     const digits = String(this.buffer.lineCount).length;
     this.gutter.style.width = `${digits * this.metrics.charWidth + 34}px`;
+  }
+
+  /**
+   * Закреплённые заголовки блоков сверху (sticky scroll): пока верх экрана внутри
+   * функции или класса, их объявление остаётся видно «шапкой» над кодом. Заголовки
+   * берём из свёртки — это те же диапазоны, что схлопывает значок в жёлобе.
+   *
+   * Слой лежит ВНЕ прокрутки: он не едет вместе с полотном, поэтому стоит у верхнего
+   * края поля сам. Пока заголовков нет, слоя не видно вовсе — и текст не перекрыт.
+   */
+  /**
+   * Сменить подсказки-вставки (inlay hints). Раскладку сбрасываем: вставки занимают
+   * место, а старая раскладка считалась без них — каретка и выделение разъехались бы.
+   *
+   * Подсказка приходит местом (строка, столбец), текст — тем, что показывает сервер.
+   * Ширину считаем сами по шрифту (он моноширинный): по ширине вставка двигает текст.
+   */
+  setInlayHints(hints: readonly InlayHint[]): void {
+    const byLine = new Map<number, InlayItem[]>();
+    for (const hint of hints) {
+      // Ведущий пробел отделяет подсказку от кода — и входит в её ширину.
+      const text = ` ${hint.label}`;
+      const item: InlayItem = {
+        column: Math.max(0, hint.column - 1),
+        text,
+        width: this.textWidth(text),
+        className: `${ROOT_CLASS}-inlay is-${hint.kind}`,
+      };
+      const list = byLine.get(hint.line);
+      if (list) list.push(item);
+      else byLine.set(hint.line, [item]);
+    }
+    this.inlayByLine = byLine;
+    this.layoutCache = null;
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
+    this.render();
+  }
+
+  /** Вставки строки в виде «граница и ширина» — для раскладки (`layoutLine`). */
+  private insertsFor(line: number): { column: number; width: number }[] {
+    const items = this.inlayByLine.get(line);
+    if (!items) return [];
+    return items.map((item) => ({ column: item.column, width: item.width }));
+  }
+
+  /** Ширина текста по метрикам шрифта: сумма клеток его знаков. */
+  private textWidth(text: string): number {
+    let width = 0;
+    for (const char of text) width += this.metrics.widthOf(char.codePointAt(0) ?? 0);
+    return width;
+  }
+
+  /** Сменить столбцы направляющих (ruler). Пустой список — направляющих нет. */
+  setRulers(columns: readonly number[]): void {
+    this.rulers = columns;
+    this.renderRulers();
+  }
+
+  /** Что из невидимых знаков показывать. Смена режима — пересборка видимых строк. */
+  setWhitespace(mode: WhitespaceMode): void {
+    if (this.whitespace === mode) return;
+    this.whitespace = mode;
+    this.rerender();
+  }
+
+  /** Показать или спрятать миникарту. */
+  setMinimap(on: boolean): void {
+    if (this.minimapVisible === on) return;
+    this.minimapVisible = on;
+    this.minimap.element.hidden = !on;
+    this.rerender();
+  }
+
+  /**
+   * Включить или выключить лигатуры шрифта. Это только класс на корне: ширину
+   * знаков лигатуры в моноширинном шрифте не меняют, поэтому раскладку (и каретку)
+   * пересчитывать не нужно — оформление делает CSS (`styles/editor.css`).
+   */
+  setLigatures(on: boolean): void {
+    this.root.classList.toggle('is-ligatures', on);
+  }
+
+  /** Перерисовать направляющие: тонкие черты на столбцах, через всю высоту полотна. */
+  private renderRulers(): void {
+    if (this.rulers.length === 0) {
+      if (this.rulerLayer.childElementCount > 0) this.rulerLayer.replaceChildren();
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const column of this.rulers) {
+      const line = document.createElement('div');
+      line.className = `${ROOT_CLASS}-ruler`;
+      // Столбец n — черта ПОСЛЕ n знаков: ширина клетки даёт пиксели.
+      line.style.left = `${column * this.metrics.charWidth}px`;
+      fragment.append(line);
+    }
+    this.rulerLayer.replaceChildren(fragment);
+  }
+
+  private renderSticky(viewportWidth: number): void {
+    // Верхняя ВИДИМАЯ строка — по самой прокрутке, а не по первому ряду слоя: тот
+    // сдвинут вверх на перескролл (и прижат к нулю у начала файла), и «верх экрана»
+    // вышел бы на пару строк ниже настоящего.
+    const topLine = this.lineOfRow(Math.floor(this.scrollTop / this.metrics.lineHeight));
+    // Строку внутри свёрнутого блока прикалывать нечего — её заголовок приколот.
+    const ranges = this.isHidden(topLine) ? [] : enclosingFoldRanges(this.folds.all, topLine);
+
+    if (ranges.length === 0) {
+      if (!this.stickyLayer.hidden) {
+        this.stickyLayer.hidden = true;
+        this.stickyLayer.replaceChildren();
+      }
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+    for (const range of ranges) {
+      const row = document.createElement('div');
+      row.className = `${ROOT_CLASS}-sticky-row`;
+      const text = document.createElement('span');
+      text.className = `${ROOT_CLASS}-sticky-text`;
+      text.textContent = this.buffer.lineText(range.startLine).trimEnd();
+      row.append(text);
+      row.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.revealLineInternal(range.startLine);
+      });
+      fragment.append(row);
+    }
+
+    this.stickyLayer.replaceChildren(fragment);
+    this.stickyLayer.hidden = false;
+    // Ставим слой над верхом поля прокрутки. Место считаем по прямоугольникам, а не
+    // через `offsetTop`: когда видна панель поиска, отступ получает сам корень, и
+    // разница координат сразу его учитывает — иначе заголовки уехали бы вверх.
+    const rootRect = this.root.getBoundingClientRect();
+    const viewportRect = this.viewport.getBoundingClientRect();
+    this.stickyLayer.style.left = `${viewportRect.left - rootRect.left}px`;
+    this.stickyLayer.style.top = `${viewportRect.top - rootRect.top}px`;
+    this.stickyLayer.style.width = `${viewportWidth}px`;
   }
 
   // — украшения —
@@ -879,19 +1347,24 @@ export class EditorView {
     // `first`/`last` — видимые строки (с единицы): идём по ним самим, а не по first+1..last+1.
     for (let line = first; line <= last; line += 1) {
       if (this.isHidden(line)) continue;
-      const row = document.createElement('div');
-      row.className = `${ROOT_CLASS}-glyph-row`;
+      const span = this.rowSpanOf(line);
       const glyph = this.decorations.glyphFor(line);
-      if (glyph) {
-        const node = document.createElement('div');
-        node.className = glyph.className;
-        if (glyph.tooltip) node.title = glyph.tooltip;
-        row.append(node);
+      for (let index = 0; index < span; index += 1) {
+        const row = document.createElement('div');
+        row.className = `${ROOT_CLASS}-glyph-row`;
+        // Значок — на первом ряду строки; у продолжения ряда пусто.
+        if (index === 0 && glyph) {
+          const node = document.createElement('div');
+          node.className = glyph.className;
+          if (glyph.tooltip) node.title = glyph.tooltip;
+          row.append(node);
+        }
+        fragment.append(row);
       }
-      fragment.append(row);
     }
     this.glyphLines.replaceChildren(fragment);
-    this.glyphLines.style.transform = `translateY(${this.yOfLine(first)}px)`;
+    // Поле значков тоже вне прокрутки — компенсируем прокрутку, как у номеров строк.
+    this.glyphLines.style.transform = `translateY(${this.yOfLine(first) - this.scrollTop}px)`;
   }
 
   /** Полоски изменений — узкая колонка справа от номеров. */
@@ -901,17 +1374,22 @@ export class EditorView {
     // `first`/`last` — видимые строки (с единицы): идём по ним самим, а не по first+1..last+1.
     for (let line = first; line <= last; line += 1) {
       if (this.isHidden(line)) continue;
-      const row = document.createElement('div');
-      row.className = `${ROOT_CLASS}-strip-row`;
+      const span = this.rowSpanOf(line);
       const strip = this.decorations.stripFor(line);
-      if (strip) {
-        for (const name of strip.className.split(' ')) if (name) row.classList.add(name);
-        if (strip.tooltip) row.title = strip.tooltip;
+      for (let index = 0; index < span; index += 1) {
+        const row = document.createElement('div');
+        row.className = `${ROOT_CLASS}-strip-row`;
+        // Полоска изменений помечает всю строку, поэтому тянется по всем её рядам.
+        if (strip) {
+          for (const name of strip.className.split(' ')) if (name) row.classList.add(name);
+          if (strip.tooltip) row.title = strip.tooltip;
+        }
+        fragment.append(row);
       }
-      fragment.append(row);
     }
     this.stripLines.replaceChildren(fragment);
-    this.stripLines.style.transform = `translateY(${this.yOfLine(first)}px)`;
+    // Полоса изменений тоже вне прокрутки — компенсируем прокрутку, как у номеров строк.
+    this.stripLines.style.transform = `translateY(${this.yOfLine(first) - this.scrollTop}px)`;
   }
 
   /** Заливка всей строки (покрытие, строка отладчика). Тянется на ширину полотна. */
@@ -922,11 +1400,15 @@ export class EditorView {
       if (this.isHidden(line)) continue;
       const background = this.decorations.backgroundFor(line);
       if (!background) continue;
-      const node = document.createElement('div');
-      node.className = `${ROOT_CLASS}-line-bg ${background.className}`;
-      node.style.transform = `translateY(${this.yOfLine(line)}px)`;
-      node.style.height = `${this.metrics.lineHeight}px`;
-      fragment.append(node);
+      const span = this.rowSpanOf(line);
+      const base = this.rowOf(line);
+      for (let index = 0; index < span; index += 1) {
+        const node = document.createElement('div');
+        node.className = `${ROOT_CLASS}-line-bg ${background.className}`;
+        node.style.transform = `translateY(${this.yOfRow(base + index)}px)`;
+        node.style.height = `${this.metrics.lineHeight}px`;
+        fragment.append(node);
+      }
     }
     this.backgroundLayer.replaceChildren(fragment);
   }
@@ -940,15 +1422,41 @@ export class EditorView {
       const squiggles = this.decorations.squigglesFor(line);
       if (squiggles.length === 0) continue;
       const offsets = this.offsetsFor(line);
+      if (!this.wrapOn) {
+        for (const squiggly of squiggles) {
+          const rect = squigglyRect(offsets, line, squiggly.startColumn, squiggly.endColumn, this.metrics);
+          if (rect.width <= 0) continue;
+          const node = document.createElement('div');
+          node.className = `${ROOT_CLASS}-squiggly-rect ${squiggly.className}`;
+          node.style.transform = `translate(${rect.left}px, ${this.yOfLine(line)}px)`;
+          node.style.width = `${rect.width}px`;
+          node.style.height = `${rect.height}px`;
+          fragment.append(node);
+        }
+        continue;
+      }
+      // Перенос: пометка может лежать на нескольких рядах — режем её по отрезкам.
+      const segments = this.segmentsFor(line);
+      const base = this.rowOf(line);
       for (const squiggly of squiggles) {
-        const rect = squigglyRect(offsets, line, squiggly.startColumn, squiggly.endColumn, this.metrics);
-        if (rect.width <= 0) continue;
-        const node = document.createElement('div');
-        node.className = `${ROOT_CLASS}-squiggly-rect ${squiggly.className}`;
-        node.style.transform = `translate(${rect.left}px, ${this.yOfLine(line)}px)`;
-        node.style.width = `${rect.width}px`;
-        node.style.height = `${rect.height}px`;
-        fragment.append(node);
+        const from = Math.max(0, squiggly.startColumn - 1);
+        const to = Math.max(from, squiggly.endColumn - 1);
+        for (let index = 0; index < segments.length; index += 1) {
+          const segment = segments[index]!;
+          const start = Math.max(from, segment.startColumn);
+          const end = Math.min(to, segment.endColumn);
+          if (end <= start) continue;
+          const origin = xForColumn(offsets, segment.startColumn);
+          const left = xForColumn(offsets, start) - origin;
+          const width = xForColumn(offsets, end) - origin - left;
+          if (width <= 0) continue;
+          const node = document.createElement('div');
+          node.className = `${ROOT_CLASS}-squiggly-rect ${squiggly.className}`;
+          node.style.transform = `translate(${left}px, ${this.yOfRow(base + index)}px)`;
+          node.style.width = `${width}px`;
+          node.style.height = `${this.metrics.lineHeight}px`;
+          fragment.append(node);
+        }
       }
     }
     this.squigglyLayer.replaceChildren(fragment);
@@ -1009,6 +1517,55 @@ export class EditorView {
     });
   }
 
+  /**
+   * Прямоугольники диапазона смещений с учётом переноса: длинная строка даёт по
+   * прямоугольнику на каждый задетый отрезок. `row` — абсолютный ряд полотна, его
+   * представление переводит в y. Без переноса берём прежний путь (`selection.ts`):
+   * там геометрия уже посчитана, а строки на экране совпадают с рядами.
+   */
+  private rangeRects(start: number, end: number): Array<{ row: number; left: number; width: number; height: number }> {
+    const height = this.metrics.lineHeight;
+    const rects: Array<{ row: number; left: number; width: number; height: number }> = [];
+    if (end <= start) return rects;
+    if (!this.wrapOn) {
+      for (const rect of rangesRects(this.buffer, [{ start, end }], this.metrics)) {
+        if (this.isHidden(rect.line)) continue;
+        rects.push({ row: this.rowOf(rect.line), left: rect.left, width: rect.width, height });
+      }
+      return rects;
+    }
+    const first = this.buffer.lineAt(start);
+    const last = this.buffer.lineAt(end);
+    for (let line = first; line <= last; line += 1) {
+      if (this.isHidden(line)) continue;
+      const lineStart = this.buffer.lineStart(line);
+      const text = this.buffer.lineText(line);
+      const lineEnd = lineStart + text.length;
+      const from = Math.max(start, lineStart) - lineStart;
+      const to = Math.min(end, lineEnd) - lineStart;
+      const offsets = this.offsetsFor(line);
+      const segments = this.segmentsFor(line);
+      const base = this.rowOf(line);
+      // Участок доходит до конца строки и продолжается дальше — на конце ряда рисуем
+      // полоску в знак: иначе выделение выглядело бы обрезанным ровно по последнему знаку.
+      const swallow = line < last;
+      for (let index = 0; index < segments.length; index += 1) {
+        const segment = segments[index]!;
+        const a = Math.max(from, segment.startColumn);
+        const b = Math.min(to, segment.endColumn);
+        if (b <= a) continue;
+        const origin = offsets[segment.startColumn] ?? 0;
+        const left = (offsets[a] ?? 0) - origin;
+        let right = (offsets[b] ?? 0) - origin;
+        if (swallow && b >= segment.endColumn && index === segments.length - 1) right += this.metrics.charWidth;
+        const width = right - left;
+        if (width <= 0) continue;
+        rects.push({ row: base + index, left, width, height });
+      }
+    }
+    return rects;
+  }
+
   /** Каретка — она же «активный» конец выделения — и прямоугольники заливки. */
   private updateCaretAndSelection(): void {
     const lineHeight = this.metrics.lineHeight;
@@ -1020,24 +1577,27 @@ export class EditorView {
     for (const selection of this.selections) {
       const line = this.buffer.lineAt(selection.active);
       const column = selection.active - this.buffer.lineStart(line);
-      const x = xForColumn(this.offsetsFor(line), column);
+      const offsets = this.offsetsFor(line);
+      const segments = this.segmentsFor(line);
+      const segment = segmentIndexForColumn(segments, column);
+      const origin = offsets[segments[segment]?.startColumn ?? 0] ?? 0;
+      const x = (offsets[column] ?? origin) - origin;
 
       const node = document.createElement('div');
       node.className = `${ROOT_CLASS}-caret`;
       // У неглавной каретки не мигаем: при десятке кареток мигание рябит, а главную
       // и так видно по миганию.
       if (selection !== primary) node.classList.add('is-idle');
-      node.style.transform = `translate(${x}px, ${this.yOfLine(line)}px)`;
+      node.style.transform = `translate(${x}px, ${this.yOfRow(this.rowOf(line) + segment)}px)`;
       node.style.height = `${lineHeight}px`;
       // При непустом выделении каретка не нужна — его конец и так виден заливкой.
       if (!isEmpty(selection)) node.style.display = 'none';
       carets.append(node);
 
-      for (const rect of selectionRects(this.buffer, selection, this.metrics)) {
-        if (this.isHidden(rect.line)) continue;
+      for (const rect of this.rangeRects(selectionStart(selection), selectionEnd(selection))) {
         const shade = document.createElement('div');
         shade.className = `${ROOT_CLASS}-selection-rect`;
-        shade.style.transform = `translate(${rect.left}px, ${this.yOfLine(rect.line)}px)`;
+        shade.style.transform = `translate(${rect.left}px, ${this.yOfRow(rect.row)}px)`;
         shade.style.width = `${rect.width}px`;
         shade.style.height = `${rect.height}px`;
         shades.append(shade);
@@ -1053,14 +1613,14 @@ export class EditorView {
     if (cache && cache.line === line && cache.version === this.buffer.version) {
       return cache.offsets;
     }
-    const offsets = layoutLine(this.buffer.lineText(line), this.metrics);
+    const offsets = layoutLine(this.buffer.lineText(line), this.metrics, this.insertsFor(line));
     this.layoutCache = { version: this.buffer.version, line, offsets };
     return offsets;
   }
 
-  private revealLineInternal(line: number): void {
+  private revealRowInternal(row: number): void {
     const scrollTop = revealLine(
-      this.folds.rowOf(line) - 1,
+      row,
       this.scrollTop,
       this.metrics.lineHeight,
       this.viewport.clientHeight,
@@ -1075,6 +1635,10 @@ export class EditorView {
     this.updateCaretAndSelection();
   }
 
+  private revealLineInternal(line: number): void {
+    this.revealRowInternal(this.rowOf(line) - 1);
+  }
+
   private readonly onScroll = (): void => {
     this.render();
   };
@@ -1085,6 +1649,8 @@ export class EditorView {
     this.root.style.setProperty('--own-editor-char-width', `${this.metrics.charWidth}px`);
     this.root.style.setProperty('--own-editor-tab-size', String(this.metrics.tabSize));
     this.gutter?.style.setProperty('--own-editor-line-height', `${this.metrics.lineHeight}px`);
+    // Направляющие зависят только от ширины клетки и столбцов: перекладываем вместе с метриками.
+    this.renderRulers();
   }
 
   /**
@@ -1099,6 +1665,11 @@ export class EditorView {
       this.root.style.setProperty(`--own-token-${role}`, color);
     }
   }
+}
+
+/** Отрезок, покрывающий всю строку (перенос выключен). */
+function wholeLine(offsets: readonly number[]): WrapSegment {
+  return { startColumn: 0, endColumn: offsets.length - 1 };
 }
 
 /**

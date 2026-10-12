@@ -214,15 +214,19 @@ export function pytestTarget(
 export function pytestCoverageTarget(
   tools: ProjectTools,
   selector: string | null,
-  options: { report?: boolean; platform?: string } = {},
+  options: { report?: boolean; platform?: string; jsonPath?: string } = {},
 ): RunTarget {
   // `term-missing` просим явно, хотя `--cov` и так печатает терминальный отчёт:
   // без него в отчёте нет колонки `Missing`, а по ней панель подсвечивает строки.
   // `--cov-branch` добавляет колонки `Branch`/`BrPart`: видно не только «строка
   // не исполнена», но и «ветвь условия пройдена лишь наполовину».
+  // JSON-отчёт (когда IDE знает путь) даёт ещё и построчные ветви: по нему видно,
+  // что ветвь условия пройдена наполовину. Пишем его во временный каталог — файл
+  // нужен IDE, а не человеку в репозитории.
+  const json = options.jsonPath ? ` --cov-report=json:${shellQuote(options.jsonPath)}` : '';
   const base = selector
-    ? `${tools.pythonCommand} -m pytest --cov --cov-branch --cov-report=term-missing -- ${shellQuote(selector)}`
-    : `${tools.pythonCommand} -m pytest --cov --cov-branch --cov-report=term-missing`;
+    ? `${tools.pythonCommand} -m pytest --cov --cov-branch --cov-report=term-missing${json} -- ${shellQuote(selector)}`
+    : `${tools.pythonCommand} -m pytest --cov --cov-branch --cov-report=term-missing${json}`;
   // Панель тестов и здесь просит отчёт: по маркеру она ставит исход, а строку
   // покрытия берёт из вывода pytest-cov, который печатается перед маркером.
   const command = options.report && options.platform ? `${base}${resultMarkerCommand(options.platform)}` : base;

@@ -149,6 +149,13 @@ textarea {
   display: none;
 }
 
+/* Режим дзен: кроме панелей (их скрывает `is-sidebar-hidden` и родня) прячем и
+   обвязку — шапку и строку состояния. Остаётся только редактор. */
+.app.is-zen .topbar,
+.app.is-zen .statusbar-host {
+  display: none;
+}
+
 .app.is-right-hidden {
   --right-width: 0px;
   --right-gap: 0px;
@@ -630,6 +637,18 @@ textarea {
   color: var(--text_color);
 }
 
+/* Предпросмотр — вкладка «на посмотреть»: её вытеснит следующая такая же, поэтому
+   подпись курсивом. Так вкладка-предпросмотр отличается от открытых насовсем. */
+.tab.is-preview .tab-label {
+  font-style: italic;
+}
+
+/* Закреплённая вкладка помечена булавкой: её не вытеснит предпросмотр, и в «закрыть
+   другие» она не попадёт. Значок — тем же акцентом, что активная полоса вкладки. */
+.tab.is-pinned svg {
+  color: var(--link_color);
+}
+
 .tab-label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -859,9 +878,29 @@ textarea {
   font-style: italic;
 }
 
+/* Код-линза: кликабельная подпись-действие после строки («3 ссылки», «Запустить тест»).
+   Тише кода, но заметнее подписи blame: это действие, а не справка, — и ведёт себя как
+   ссылка (курсор-рука, подсветка при наведении). */
+.own-editor-lens {
+  color: var(--text_color_tertiary);
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.own-editor-lens:hover {
+  color: var(--accent_fill);
+  text-decoration: underline;
+}
+
 /* Строки, не исполненные тестами: подсвечиваются после прогона с покрытием. */
 .coverage-line {
   background: var(--coverage_missing_background);
+}
+
+/* Строки, где ветвь условия пройдена лишь наполовину: тесты строку исполнили, но не
+   прошли одну из ветвей. Жёлтый тише красного — это мягче полного непокрытия. */
+.coverage-partial-line {
+  background: var(--coverage_partial_background);
 }
 
 /* Полоски изменений в жёлобе: узкая черта в полосе украшений справа от номеров
@@ -1452,6 +1491,17 @@ textarea {
   background: var(--element_background_hover);
 }
 
+/* Строка КОРНЯ рабочей области (когда папок несколько): имя папки жирным, а
+   активный корень помечен точкой — по нему работают git, поиск и запуск. */
+.tree-row.is-root {
+  font-weight: 600;
+}
+
+.tree-row.is-root .tree-root-active {
+  margin-left: 6px;
+  color: var(--link_color);
+}
+
 /* Раскрытие папки: строки-дети «выезжают» из-под родителя вниз, а не возникают на
    месте (движение идёт туда, откуда пришёл элемент).
    Старт выше финала — строка въезжает сверху вниз, продолжая жест раскрытия.
@@ -1488,6 +1538,16 @@ textarea {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* Игнорируемое git (`.gitignore`) — приглушаем: файл видно и можно открыть, но он
+   не отвлекает. Значок и стрелку тоже гасим, иначе цветной значок перетягивал бы
+   взгляд к тому, что обычно и не нужно. */
+.tree-row.is-ignored .tree-name,
+.tree-row.is-ignored .tree-twisty,
+.tree-row.is-ignored .file-icon,
+.tree-row.is-ignored .folder-icon {
+  opacity: 0.55;
 }
 
 .tree-input {
@@ -3764,6 +3824,14 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
+/* Файл открыт только для чтения (большой): заметная, но не кричащая пометка. */
+.status-readonly {
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--text_color_tertiary);
+  background: var(--element_background_hover);
+}
+
 /* Окружение Python — кнопка: клик открывает попап с подробностями. */
 .status-env {
   padding: 0 4px;
@@ -4857,6 +4925,27 @@ body > .overlay {
   padding-right: 2px;
 }
 
+/* Значок подмодуля: это отдельный репозиторий, а не папка проекта. Цвет — по
+   состоянию (не забран / другой коммит), поэтому смотрим не на `--change_color`,
+   а на своё состояние. */
+.tree-badge.is-submodule {
+  --change_color: var(--text_color_tertiary);
+}
+
+.tree-badge.is-submodule.is-missing,
+.tree-badge.is-submodule.is-conflict {
+  --change_color: var(--yellow_prime_background);
+}
+
+.tree-badge.is-submodule.is-modified {
+  --change_color: var(--git_modified);
+}
+
+/* Папка-подмодуль: значок папки гасим, чтобы её не путали с обычной. */
+.tree-row.is-submodule .folder-icon {
+  opacity: 0.75;
+}
+
 /* Папка с правками внутри: точка в цвете самой заметной из них. Именно точка,
    а не буква: сама папка не изменена, и «M» на ней читалась бы неправдой. */
 .tree-dot {
@@ -4911,6 +5000,64 @@ body > .overlay {
   margin-left: auto;
 }
 
+/* Сводка по корням рабочей области: строка на папку. Видна только в многообласти,
+   иначе статус активного корня и так показан целиком ниже. */
+.sc-roots {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.sc-root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: transparent;
+  color: var(--text_color_secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sc-root:hover {
+  background: var(--element_background_hover);
+}
+
+/* Активный корень: им отвечает git, поиск и запуск — выделяем заливкой. */
+.sc-root.is-active {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+.sc-root-name {
+  overflow: hidden;
+  color: var(--text_color);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sc-root-state {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sc-root-count {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+}
+
 .sc-commit-box {
   display: flex;
   flex: 0 0 auto;
@@ -4951,6 +5098,796 @@ body > .overlay {
 .sc-amend-box {
   accent-color: var(--blue_prime_background);
   margin: 0;
+}
+
+/* ── окно рабочих каталогов (worktree) ─────────────────────────────────── */
+
+.worktree-modal {
+  width: min(760px, 94vw);
+}
+
+.worktree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0;
+  max-height: 42vh;
+  overflow: auto;
+}
+
+/* Строка каталога: слева ветка и путь, справа действия. */
+.worktree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius_sm);
+}
+
+.worktree-row:hover {
+  background: var(--element_background_hover);
+}
+
+/* Текущий каталог отмечаем заливкой: видно, где мы работаем сейчас. */
+.worktree-row.is-current {
+  background: var(--selection_background);
+}
+
+.worktree-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.worktree-branch {
+  font-family: var(--font_mono);
+  color: var(--text_color);
+}
+
+.worktree-path {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.worktree-note {
+  color: var(--yellow_prime_background);
+  font-size: var(--font_small_size);
+}
+
+.worktree-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.worktree-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border_color);
+}
+
+.worktree-add-fields {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.worktree-add-fields .field-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.worktree-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+/* Монорепо: подгруппы пакетов внутри списка правок панели изменений. */
+.sc-package {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 8px 2px 14px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.sc-package-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── запросы на слияние (PR/MR) ─────────────────────────────────────────── */
+
+.forge-modal {
+  width: min(760px, 94vw);
+}
+
+.forge-head-actions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.forge-headline {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.forge-platform {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.forge-repo {
+  color: var(--text_color_tertiary);
+}
+
+.forge-repo-name {
+  font-family: var(--font_mono);
+}
+
+.forge-remote {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.forge-line {
+  margin: 2px 0 0;
+  color: var(--text_color_secondary);
+}
+
+.forge-note {
+  margin: 2px 0 0;
+  color: var(--yellow_prime_background);
+}
+
+.forge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 44vh;
+  overflow: auto;
+  margin: 6px 0;
+}
+
+.forge-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.forge-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.forge-row-title {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.forge-number {
+  flex: none;
+  color: var(--link_color);
+  font-family: var(--font_mono);
+}
+
+.forge-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color);
+}
+
+.forge-state {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--radius_sm);
+  font-size: var(--font_small_size);
+}
+
+.forge-state.is-open {
+  background: color-mix(in srgb, var(--git_added) 22%, transparent);
+  color: var(--git_added);
+}
+
+.forge-state.is-draft {
+  color: var(--text_color_tertiary);
+}
+
+.forge-state.is-merged {
+  color: var(--purple_prime_background);
+}
+
+.forge-state.is-closed {
+  color: var(--git_deleted);
+}
+
+.forge-row-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.forge-branches {
+  font-family: var(--font_mono);
+}
+
+.forge-labels {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.forge-label {
+  padding: 0 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background_hover);
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.forge-row-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.forge-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+.forge-create {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed var(--link_color);
+  border-radius: var(--radius_sm);
+}
+
+.forge-create[hidden] {
+  display: none;
+}
+
+.forge-create-head {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.forge-body {
+  font-family: var(--font_ui);
+}
+
+.forge-create-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.forge-draft {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.forge-create-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* ── личность автора и подпись коммитов ─────────────────────────────────── */
+
+.identity-modal {
+  width: min(680px, 94vw);
+}
+
+.identity-line {
+  margin: 0;
+  color: var(--text_color_secondary);
+}
+
+.identity-problem {
+  margin: 0;
+  color: var(--yellow_prime_background);
+  font-size: var(--font_small_size);
+}
+
+.identity-problems:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.identity-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 2px 0;
+  cursor: pointer;
+}
+
+.identity-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.identity-key {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.identity-key-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.identity-key-name,
+.identity-key-fp {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.identity-key-name {
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.identity-key-fp {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.identity-key-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.identity-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+/* Соавторы коммита: строки под полем сообщения. */
+.sc-commit-rows {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sc-coauthor {
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--text_color_secondary);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.sc-coauthor:hover {
+  border-color: var(--link_color);
+  color: var(--text_color);
+}
+
+/* «Сообщение по diff»: кнопка-иконка рядом с «Соавтор» — та же строка, тот же размер.
+   Иконка искры, а не текст: в строке уже есть слово, второе её раздувает. */
+.sc-from-diff {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  padding: 3px 6px;
+  background: transparent;
+  color: var(--text_color_secondary);
+  cursor: pointer;
+}
+
+.sc-from-diff:hover {
+  border-color: var(--link_color);
+  color: var(--text_color);
+}
+
+/* Пока модель думает, кнопку видно нажатой: запрос не мгновенный. */
+.sc-from-diff:active {
+  background: var(--element_background_hover);
+}
+
+.sc-coauthors {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0;
+}
+
+.sc-coauthor-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.sc-coauthor-remove {
+  padding: 0;
+  background: transparent;
+  color: var(--text_color_tertiary);
+}
+
+/* ── большие файлы (Git LFS) ────────────────────────────────────────────── */
+
+.lfs-modal {
+  width: min(680px, 94vw);
+}
+
+.lfs-status {
+  margin-bottom: 6px;
+}
+
+.lfs-line {
+  margin: 0;
+  color: var(--text_color_secondary);
+}
+
+.lfs-warn {
+  margin: 0 0 4px;
+  color: var(--yellow_prime_background);
+  font-weight: 600;
+}
+
+.lfs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  margin: 6px 0;
+}
+
+.lfs-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.lfs-row.is-missing .lfs-state {
+  color: var(--git_deleted);
+}
+
+.lfs-pattern {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font_mono);
+  color: var(--text_color);
+}
+
+.lfs-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.lfs-state {
+  flex: none;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.lfs-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+.lfs-add {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.lfs-add .field-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.lfs-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* ── окно поиска багованного коммита (bisect) ──────────────────────────── */
+
+.bisect-modal {
+  width: min(640px, 94vw);
+}
+
+.bisect-headline {
+  font-family: var(--font_mono);
+  font-size: var(--font_default_size);
+  margin-bottom: 4px;
+}
+
+.bisect-detail {
+  color: var(--text_color_secondary);
+  margin-bottom: 10px;
+}
+
+.bisect-start {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.bisect-start .field-input {
+  width: 180px;
+  font-family: var(--font_mono);
+}
+
+.bisect-sep {
+  color: var(--text_color_tertiary);
+}
+
+.bisect-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/* Слова git показываем как есть: по ним видно, что он делает и на чём споткнулся. */
+.bisect-message {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+}
+
+/* ── окно сравнения веток ──────────────────────────────────────────────── */
+
+.refdiff-modal {
+  width: min(720px, 94vw);
+}
+
+.refdiff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.refdiff-arrow {
+  color: var(--text_color_tertiary);
+}
+
+.refdiff-summary {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  font-variant-numeric: tabular-nums;
+}
+
+.refdiff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 54vh;
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+/* Строка файла: буква статуса, путь и счётчик строк. Клик открывает сравнение. */
+.refdiff-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius_sm);
+  cursor: pointer;
+}
+
+.refdiff-row:hover {
+  background: var(--element_background_hover);
+}
+
+.refdiff-status {
+  flex: 0 0 1em;
+  text-align: center;
+  font-weight: bold;
+}
+
+/* Буква статуса тем же цветом, что полоски изменений git: одно состояние читается
+   одинаково и в жёлобе, и здесь. */
+.refdiff-row.is-added .refdiff-status {
+  color: var(--git_added);
+}
+
+.refdiff-row.is-deleted .refdiff-status {
+  color: var(--git_deleted);
+}
+
+.refdiff-row.is-renamed .refdiff-status {
+  color: var(--git_modified);
+}
+
+.refdiff-row.is-modified .refdiff-status {
+  color: var(--link_color);
+}
+
+.refdiff-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.refdiff-counts {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.refdiff-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_ui);
+  font-size: var(--font_default_size);
+}
+
+/* ── окно интерактивного rebase ────────────────────────────────────────── */
+
+.rebase-modal {
+  width: min(760px, 94vw);
+}
+
+.rebase-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.rebase-depth {
+  width: 72px;
+}
+
+.rebase-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+/* Строка списка: слева перестановка, затем действие, хеш и тема коммита. */
+.rebase-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: var(--radius_sm);
+}
+
+.rebase-row:hover {
+  background: var(--element_background_hover);
+}
+
+.rebase-move-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 0 0 auto;
+}
+
+.rebase-move {
+  height: 14px;
+  padding: 0;
+}
+
+.rebase-action {
+  flex: 0 0 190px;
+}
+
+.rebase-hash {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.rebase-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Переписываемое сообщение помечаем: строка изменится не как остальные. */
+.rebase-subject.is-reword {
+  font-style: italic;
+  color: var(--link_color);
+}
+
+.rebase-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+.rebase-hint.is-error {
+  color: var(--text_color_error);
+}
+
+.rebase-note {
+  flex: 1;
+  min-width: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
 }
 
 /* ── окно отложенных изменений (stash) ─────────────────────────────────── */
@@ -5311,9 +6248,244 @@ body > .overlay {
   margin-left: 0;
 }
 
-.diff-body {
+/* Сравнение и лента замечаний — рядом: сравнение тянется, лента своей ширины. */
+.diff-main {
+  display: flex;
   flex: 1;
   min-height: 0;
+}
+
+.diff-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ── лента замечаний ревью ─────────────────────────────────────────────── */
+
+.diff-review {
+  display: flex;
+  flex: 0 0 300px;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--separator_color);
+  background: var(--element_background);
+}
+
+.diff-review[hidden] {
+  display: none;
+}
+
+.review-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_tertiary);
+}
+
+.review-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.review-summary {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.review-head-actions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.review-toggle {
+  border: none;
+  border-radius: var(--radius_sm);
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.review-toggle.is-active {
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+}
+
+.review-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.review-empty {
+  padding: 8px 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  line-height: 1.5;
+}
+
+.review-thread {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-left: 3px solid var(--git_modified);
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+}
+
+.review-thread.is-active {
+  border-color: var(--link_color);
+  border-left-color: var(--link_color);
+}
+
+.review-thread.is-resolved {
+  border-left-color: var(--git_added);
+  opacity: 0.75;
+}
+
+.review-thread-head {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.review-jump {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--link_color);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.review-thread .icon-btn {
+  padding: 1px;
+  background: transparent;
+  color: var(--text_color_tertiary);
+}
+
+.review-thread .icon-btn:hover {
+  color: var(--text_color);
+}
+
+.review-thread .icon-btn.is-active {
+  color: var(--git_added);
+}
+
+.review-comments {
+  margin: 4px 0;
+}
+
+.review-comment-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.review-author {
+  color: var(--text_color);
+  font-size: var(--font_small_size);
+  font-weight: 600;
+}
+
+.review-time {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.review-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text_color);
+  font-size: var(--font_small_size);
+  line-height: 1.45;
+}
+
+.review-input {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  padding: 4px 6px;
+  background: var(--element_background);
+  color: var(--text_color);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+}
+
+.review-reply,
+.review-draft {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.review-draft {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px dashed var(--link_color);
+  border-radius: var(--radius_sm);
+}
+
+.review-draft-head {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.review-draft-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.review-submit {
+  align-self: flex-end;
+  border: none;
+  border-radius: var(--radius_sm);
+  padding: 3px 10px;
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.review-submit:hover {
+  background: var(--blue_prime_background);
+}
+
+.review-cancel {
+  border: none;
+  border-radius: var(--radius_sm);
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.review-cancel:hover {
+  color: var(--text_color);
 }
 
 /* Кнопка у блока изменений: висит над его первой строкой в изменённой части. */

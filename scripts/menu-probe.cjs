@@ -29,7 +29,7 @@ registerAppScheme();
 app.setPath('userData', mkdtempSync(path.join(os.tmpdir(), 'chui-menu-profile-')));
 
 app.on('web-contents-created', (_event, contents) => {
-  contents.on('console-message', (event, level, message) => {
+  contents.on('console-message', (event, _level, message) => {
     const text = typeof message === 'string' ? message : (event?.message ?? '');
     if (String(text).trim()) console.log(`[меню][консоль] ${text}`);
   });
@@ -138,6 +138,44 @@ app.whenReady().then(async () => {
   }
 
   // Закрываем меню Esc: дальше идут проверки с чистого листа.
+  await ask(ide, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); 1`);
+  await wait(300);
+
+  // 2.1. Сохранение под другим именем: пункт должен быть в подменю «Файл» вместе с
+  //      клавишей. Сам диалог не открываем — он системный и ждёт человека.
+  await ask(ide, `document.querySelector('.topbar-left .icon-btn').click(); 'нажали'`);
+  await wait(500);
+  const saveAsPoint = await ask(
+    ide,
+    `(() => {
+      const item = [...document.querySelectorAll('.context-menu [role="menuitem"]')]
+        .find((node) => node.textContent.trim().startsWith('Файл'));
+      if (!item) return null;
+      const r = item.getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    })()`,
+  );
+  if (saveAsPoint && typeof saveAsPoint === 'object') {
+    for (const step of [0.5, 0.8, 1]) {
+      ide.webContents.sendInputEvent({
+        type: 'mouseMove',
+        x: Math.round(saveAsPoint.x * step),
+        y: Math.round(saveAsPoint.y * step),
+      });
+      await wait(60);
+    }
+    await wait(350);
+  }
+  console.log(
+    `[меню] пункты сохранения: ${JSON.stringify(
+      await ask(
+        ide,
+        `[...document.querySelectorAll('.context-menu [role="menuitem"]')]
+          .map((node) => node.textContent.trim())
+          .filter((text) => text.startsWith('Сохранить'))`,
+      ),
+    )}`,
+  );
   await ask(ide, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); 1`);
   await wait(300);
 

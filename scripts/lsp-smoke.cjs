@@ -147,6 +147,29 @@ async function main() {
     JSON.stringify(renameEdits),
   );
 
+  /* Откат на запасной сервер: названный в настройках не поднялся (процесс выходит
+     сразу), язык должен получить следующий по приоритету — иначе Python остаётся
+     без подсказок (живой случай: сломанный pylsp из venv). */
+  const broken = { language: 'python', command: process.execPath, args: ['-e', 'process.exit(1)'], enabled: true };
+  const working = { language: 'python', command: process.execPath, args: [fakeServer], enabled: true };
+  const fbEvents = [];
+  const fallback = new LspService(
+    () => root,
+    () => ({ enabled: true, servers: [broken] }),
+    (topic, payload) => fbEvents.push({ topic, payload }),
+    () => null,
+    async () => ({}),
+    async (language) => (language === 'python' ? [working] : []),
+  );
+  await fallback.open(sample, 'python', 'print(1)\n');
+  await wait(700);
+  ok('нерабочий сервер не оставил язык без сервера', fallback.status().running.includes('python'));
+  ok(
+    'запасной сервер отвечает (диагностика)',
+    fbEvents.some((event) => event.topic === LSP_DIAGNOSTICS && event.payload.diagnostics.length > 0),
+  );
+  fallback.dispose();
+
   const restarted = lsp.restart();
   ok('restart останавливает серверы', restarted.running.length === 0 && lsp.status().running.length === 0);
 

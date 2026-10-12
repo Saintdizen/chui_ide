@@ -26,6 +26,7 @@ import { isMcpToolName, type McpToolInfo } from '../../shared/mcp';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatProjectMap } from '../../shared/project-map';
 import { parseToolArguments } from '../../shared/tools';
+import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
 import type { WorkspaceService } from '../workspace/workspace';
 import { runShellCommand, type CommandResult, type RunOptions } from './run-command';
@@ -302,6 +303,10 @@ const MAX_EDITS_PER_FILE = 500;
 
 /** Команда длиннее — это уже не команда, а попытка спрятать скрипт. */
 const MAX_COMMAND_CHARS = 2000;
+
+/** Форма аргумента `apply_edit`: её называем в ошибках, чтобы вызов чинился за один шаг. */
+const EDITS_SHAPE =
+  'нужен [{ path: "/абсолютный/путь/файл", edits: [{ startLine, startColumn, endLine, endColumn, newText }] }]';
 
 /**
  * Необратимые команды — на них и срабатывает страховка полного доступа
@@ -622,8 +627,18 @@ async function readFile(workspace: WorkspaceService, args: Record<string, unknow
   const allLines = content.text.length === 0 ? [] : content.text.split('\n');
   const total = allLines.length;
 
-  const startLine = optionalInteger(args, 'startLine');
-  const endLine = optionalInteger(args, 'endLine');
+  // Границы диапазона. Число строки приходит и строкой («2» — модели шлют и так),
+  // и тогда его надо принять. А вот если значение ПРИШЛО и не разбирается (2.5, «abc»),
+  // молчать нельзя: отбрасывание аргумента читало бы весь файл вместо запрошенного
+  // куска — лишний расход контекста и ответ не про то, что просили.
+  const startLine = integerArg(args.startLine);
+  const endLine = integerArg(args.endLine);
+  if (startLine === undefined && !isAbsent(args.startLine)) {
+    throw new Error(`startLine: нужен целый номер строки, получено ${describeValue(args.startLine)}`);
+  }
+  if (endLine === undefined && !isAbsent(args.endLine)) {
+    throw new Error(`endLine: нужен целый номер строки, получено ${describeValue(args.endLine)}`);
+  }
 
   // Без диапазона поведение прежнее: файл целиком с обрезкой по символам.
   if (startLine === undefined && endLine === undefined) {
@@ -641,12 +656,25 @@ async function readFile(workspace: WorkspaceService, args: Record<string, unknow
   }
 
   const from = Math.max(1, startLine ?? 1);
+  // Конец за концом файла зажимаем: «3–99999» — это «от третьей строки до конца»,
+  // и отказывать тут незачем. А вот начало за концом — другое дело: значит, о файле
+  // думают неверно (он короче), и молча отдать пустоту было бы вредно.
   const to = Math.min(total, endLine ?? total);
-  if (from > total || to < from) {
+  if (from > total) {
     return {
       ok: false,
-      summary: `${rel}: диапазон ${from}–${to} вне файла`,
-      detail: `В файле ${total} строк. Запроси диапазон в пределах 1–${total}.`,
+      summary: `${rel}: начало диапазона ${from} за концом файла (в файле строк: ${total})`,
+      detail:
+        `Строки ${from} нет: файл короче, чем ожидалось (в нём ${total}). ` +
+        `Перечитай файл целиком (read_file без диапазона) или посмотри скелет (file_outline) ` +
+        `и возьми существующий диапазон в пределах 1–${total}.`,
+    };
+  }
+  if (to < from) {
+    return {
+      ok: false,
+      summary: `${rel}: конец диапазона ${to} раньше начала ${from}`,
+      detail: 'Поменяй границы местами: startLine — первая строка диапазона, endLine — последняя.',
     };
   }
 
@@ -1396,24 +1424,29 @@ async function applyEdit(ctx: ToolContext, args: Record<string, unknown>): Promi
  * попасть не должен.
  */
 function parseFileEdits(value: unknown): FileEdit[] {
-  if (!Array.isArray(value)) throw new Error('Аргумент «edits» должен быть массивом');
-  if (value.length === 0) throw new Error('Не передано ни одной правки');
-  if (value.length > MAX_EDITED_FILES) {
-    throw new Error(`Слишком много файлов за один вызов: ${value.length} (максимум ${MAX_EDITED_FILES})`);
+  // Одиночный файл без обёртки в массив — та же правка: ронять вызов из-за лишних
+  // квадратных скобок незачем (так же ведёт себя разбор `apply_patch`).
+  const single = typeof value === 'object' && value !== null && !Array.isArray(value);
+  const list: unknown = single ? [value] : value;
+  if (!Array.isArray(list)) throw new Error(`Аргумент «edits» должен быть массивом: ${EDITS_SHAPE}`);
+  if (list.length === 0) throw new Error('Не передано ни одной правки');
+  if (list.length > MAX_EDITED_FILES) {
+    throw new Error(`Слишком много файлов за один вызов: ${list.length} (максимум ${MAX_EDITED_FILES})`);
   }
 
-  return value.map((item, index) => parseFileEdit(item, index));
+  return list.map((item, index) => parseFileEdit(item, index));
 }
 
 function parseFileEdit(value: unknown, index: number): FileEdit {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`edits[${index}]: ожидался объект`);
+    throw new Error(`edits[${index}]: ожидался объект — ${EDITS_SHAPE}`);
   }
 
   const raw = value as Record<string, unknown>;
   const filePath = raw.path;
   if (typeof filePath !== 'string' || filePath.trim().length === 0) {
-    throw new Error(`edits[${index}]: не задан path`);
+    // Форму называем прямо: «не задан path» само по себе не говорит, куда его класть.
+    throw new Error(`edits[${index}]: не задан path. ${EDITS_SHAPE}`);
   }
   if (!path.isAbsolute(filePath)) {
     throw new Error(`edits[${index}].path: нужен абсолютный путь, получено «${filePath}»`);
@@ -1421,7 +1454,7 @@ function parseFileEdit(value: unknown, index: number): FileEdit {
 
   const edits = raw.edits;
   if (!Array.isArray(edits) || edits.length === 0) {
-    throw new Error(`edits[${index}].edits: нужен непустой массив правок`);
+    throw new Error(`edits[${index}].edits: нужен непустой массив правок. ${EDITS_SHAPE}`);
   }
   if (edits.length > MAX_EDITS_PER_FILE) {
     throw new Error(`edits[${index}].edits: слишком много правок (${edits.length}), максимум ${MAX_EDITS_PER_FILE}`);
@@ -2252,12 +2285,21 @@ function optionalString(args: Record<string, unknown>, key: string): string | un
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
+/**
+ * Необязательный флаг. `"true"` и `1` — тоже «да»: строкой флаг приходит не реже,
+ * чем числом (см. `shared/tool-args.ts`), а потерянный флаг меняет смысл вызова —
+ * `staged: "true"` без разбора читался бы как обычный diff рабочего дерева.
+ */
 function optionalBoolean(args: Record<string, unknown>, key: string): boolean | undefined {
-  const value = args[key];
-  return typeof value === 'boolean' ? value : undefined;
+  return booleanArg(args[key]);
 }
 
+/**
+ * Необязательное целое. Число может прийти строкой («2») — модели и провайдеры
+ * шлют и так, и терять из-за этого аргумент нельзя: без номера строки инструмент
+ * делает не то, что просили. Неразбираемое значение — `undefined`, и дальше
+ * каждый инструмент решает сам (там, где промах дорог, — отказывает с текстом).
+ */
 function optionalInteger(args: Record<string, unknown>, key: string): number | undefined {
-  const value = args[key];
-  return typeof value === 'number' && Number.isInteger(value) ? value : undefined;
+  return integerArg(args[key]);
 }

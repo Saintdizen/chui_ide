@@ -45,7 +45,7 @@ app.whenReady().then(async () => {
   process.env.GIT_COMMITTER_NAME = AUTHOR;
   process.env.GIT_COMMITTER_EMAIL = EMAIL;
 
-  let root = dir;
+  const root = dir;
   const published = [];
   const git = new GitService(
     () => root,

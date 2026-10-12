@@ -2,6 +2,10 @@ import type { GitBranch, GitChange, GitFileStatus } from '../../shared/api';
 import type { CommandRegistry } from '../core/commands';
 import type { GitModel } from '../core/git-model';
 import type { WorkspaceModel } from '../core/workspace-model';
+import { parseAuthorInput, parseCoAuthors, withCoAuthors } from '../../shared/git-identity';
+import { changesLabel, rootSummaryLabel } from '../../shared/git-multiroot';
+import { groupByPackage, NO_PACKAGE } from '../../shared/monorepo';
+import type { ProjectPackagesModel } from '../core/project-packages';
 import { showContextMenu } from './context-menu';
 import { clear, h, svgIcon, type IconName } from './dom';
 import { createSelect } from './select';
@@ -28,12 +32,26 @@ export interface SourceControlDeps {
   git: GitModel;
   workspace: WorkspaceModel;
   commands: CommandRegistry;
+  /** Спросить строку текста (диалог приложения): нужен для соавторов коммита. */
+  askText?(options: { title: string; label: string; value: string }): Promise<string | null>;
+  /** Сообщить о сбое рядом с панелью. */
+  notify?(message: string, kind?: 'info' | 'error'): void;
+  /**
+   * Пакеты проекта: в монорепо правки раскладываются по ним, а не идут одним списком.
+   * Нет модели — список остаётся плоским (обычный репозиторий).
+   */
+  packages?: ProjectPackagesModel;
 }
 
 export interface SourceControlView {
   element: HTMLElement;
   /** Поставить курсор в поле сообщения — этим панель «открывается». */
   focus(): void;
+  /**
+   * Подставить готовое сообщение в поле (сообщение коммита по diff). Именно
+   * подставить, а не отправить: человек его прочитает и поправит перед коммитом.
+   */
+  setMessage(text: string): void;
 }
 
 /**
@@ -72,6 +90,29 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
   // «Исправить последний коммит»: флажок вместо отдельной кнопки — режим виден
   // рядом с полем сообщения и снимается сам. Пустое сообщение при нём сохраняет
   // прежнее (см. `git.amendCommit`).
+  // Соавторы: строка `Co-authored-by` дописывается в сообщение коммита. Панель не
+  // придумывает людей сама — спрашивает имя и почту и дописывает их к тексту.
+  const coAuthorButton = h(
+    'button',
+    { class: 'sc-coauthor', type: 'button', title: 'Дописать соавтора в сообщение коммита' },
+    'Соавтор',
+  );
+  const coAuthorList = h('div', { class: 'sc-coauthors' });
+
+  // Сообщение коммита из diff: одна кнопка — модель прочитает правки и предложит текст.
+  // Кнопка шлёт команду, а не пишет сама: текст кладёт команда (у неё и AI-мост, и тосты),
+  // а панель только показывает поле и умеет его заполнить.
+  const messageFromDiffButton = h(
+    'button',
+    {
+      class: 'sc-from-diff',
+      type: 'button',
+      title: 'Сообщение коммита по diff (AI)',
+      onClick: () => void deps.commands.execute('git.generateCommitMessage'),
+    },
+    svgIcon('sparkle', 13),
+  );
+
   const amendBox = h('input', { class: 'sc-amend-box', type: 'checkbox' });
   const amendRow = h(
     'label',
@@ -130,6 +171,9 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     svgIcon('archive', 14),
   );
 
+  /** Сводка по корням рабочей области: видна, когда папок в окне несколько. */
+  const rootsList = h('div', { class: 'sc-roots', hidden: true });
+
   const element = h(
     'div',
     { class: 'source-control' },
@@ -161,16 +205,62 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       ),
     ),
     branchCreate,
+    rootsList,
     h(
       'div',
       { class: 'sc-commit-box' },
       message,
-      amendRow,
+      coAuthorList,
+      h('div', { class: 'sc-commit-rows' }, amendRow, coAuthorButton, messageFromDiffButton),
       h('div', { class: 'sc-commit-actions' }, hint, commitButton),
     ),
     h('div', { class: 'sc-list' }, stagedGroup, unstagedGroup, initButton),
   );
 
+  /** Показать уже упомянутых в сообщении соавторов — с кнопкой «убрать строку». */
+  const renderCoAuthors = (): void => {
+    const authors = parseCoAuthors(message.value);
+    clear(coAuthorList);
+    coAuthorList.hidden = authors.length === 0;
+    for (const author of authors) {
+      const remove = h('button', { class: 'icon-btn sc-coauthor-remove', type: 'button', title: 'Убрать соавтора' });
+      remove.append(svgIcon('close', 12));
+      remove.addEventListener('click', () => {
+        const line = `Co-authored-by: ${author.name} <${author.email}>`;
+        message.value = message.value
+          .split('\n')
+          .filter((row) => row.trim().toLowerCase() !== line.toLowerCase())
+          .join('\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .replace(/\n+$/, '');
+        renderCoAuthors();
+        syncCommitDisabled();
+      });
+      coAuthorList.append(
+        h('div', { class: 'sc-coauthor-row' }, h('span', {}, `${author.name} <${author.email}>`), remove),
+      );
+    }
+  };
+
+  coAuthorButton.addEventListener('click', async () => {
+    if (!deps.askText) return;
+    const answer = await deps.askText({
+      title: 'Соавтор коммита',
+      label: 'Имя <почта> — обратный порядок тоже годится',
+      value: '',
+    });
+    if (answer === null) return;
+    const author = parseAuthorInput(answer);
+    if (!author) {
+      deps.notify?.('Не разобрал почту соавтора — нужен адрес вида mail@example.com', 'error');
+      return;
+    }
+    message.value = withCoAuthors(message.value, [author]);
+    renderCoAuthors();
+    syncCommitDisabled();
+  });
+
+  message.addEventListener('input', renderCoAuthors);
   message.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
@@ -352,6 +442,28 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
         actions,
       ),
     );
+    // Монорепо: внутри группы своего состояния (индекс/рабочее дерево) ещё и пакеты —
+    // иначе правка в чужом пакете теряется среди десятка файлов.
+    if (deps.packages?.isMonorepo) {
+      for (const part of groupByPackage(
+        deps.packages.all,
+        files.map((file) => file.relative),
+      )) {
+        const partFiles = part.files
+          .map((relative) => files.find((file) => file.relative === relative))
+          .filter((file): file is GitFileStatus => file !== undefined);
+        host.append(
+          h(
+            'div',
+            { class: 'sc-package', title: part.path === NO_PACKAGE ? '' : part.path },
+            h('span', { class: 'sc-package-name' }, part.name),
+            h('span', { class: 'sc-group-count' }, String(partFiles.length)),
+          ),
+        );
+        for (const file of partFiles) host.appendChild(row(file, staged));
+      }
+      return;
+    }
     for (const file of files) host.appendChild(row(file, staged));
   };
 
@@ -395,7 +507,50 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     pushButton.hidden = !visible;
   };
 
+  /**
+   * Сводка по корням области. В обычном проекте корень один — блок скрыт: статус
+   * активной папки и так показан ниже. В многообласти перечисляем все папки: видно,
+   * где есть правки, а кликом можно переключить активный корень. Список приходит
+   * push-событием от main (`git.summary`) — поэтому видны и правки в неактивной папке.
+   */
+  const renderRoots = (): void => {
+    if (!deps.workspace.isMultiRoot) {
+      rootsList.hidden = true;
+      clear(rootsList);
+      return;
+    }
+    const activeRoot = deps.workspace.root;
+    clear(rootsList);
+    rootsList.hidden = false;
+    for (const summary of deps.git.rootSummaries) {
+      const isActive = summary.root === activeRoot;
+      rootsList.appendChild(
+        h(
+          'button',
+          {
+            class: `sc-root${isActive ? ' is-active' : ''}`,
+            type: 'button',
+            title: `${summary.root} — ${rootSummaryLabel(summary)}`,
+            onClick: () => {
+              if (!isActive) void deps.workspace.setActiveRoot(summary.root).catch(() => undefined);
+            },
+          },
+          svgIcon('branch', 12),
+          h('span', { class: 'sc-root-name' }, summary.name),
+          h('span', { class: 'sc-root-state' }, rootSummaryLabel(summary)),
+          h('span', { class: 'sc-root-count' }, changesLabel(summary.files)),
+        ),
+      );
+    }
+  };
+
+  // Пакеты нашли или сменили папку — список правок надо переложить по ним.
+  deps.packages?.onDidChange(() => render());
+
   const render = (): void => {
+    // Сводку по корням держим свежей: в многообласти папок несколько.
+    if (deps.workspace.isMultiRoot) void deps.git.refreshSummary();
+    renderRoots();
     const repository = deps.git.repository;
     const isRepo = repository !== null;
 
@@ -449,11 +604,18 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
   amendBox.addEventListener('change', () => syncCommitDisabled());
 
   deps.git.onDidChange(render);
+  deps.git.onDidChangeSummary(renderRoots);
   render();
 
   return {
     element,
     focus: () => message.focus(),
+    setMessage: (text) => {
+      message.value = text;
+      renderCoAuthors();
+      syncCommitDisabled();
+      message.focus();
+    },
   };
 }
 

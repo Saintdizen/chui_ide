@@ -12,6 +12,7 @@ import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
 import { openProjectFolder, registerIpc } from './ipc/register';
 import { LspService } from './lsp/lsp';
+import { detectLspSources } from './lsp/detect';
 import { McpService } from './mcp/mcp';
 import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
@@ -21,6 +22,7 @@ import { windowBackground } from '../shared/colors';
 import { activateCommand, findEnvironments, pythonInterpreterFor } from './python/environments';
 import { SessionStore } from './session-store';
 import { ProjectConfigStore } from './project-config';
+import { ReviewStore } from './project/review-store';
 import { SettingsStore } from './settings';
 import { TerminalService } from './terminal/terminal';
 import { WorkspaceService } from './workspace/workspace';
@@ -190,6 +192,14 @@ if (!app.requestSingleInstanceLock()) {
         timer = setTimeout(() => {
           timer = null;
           void git.refresh().catch(() => undefined);
+          // Сводка по всем корням области: правки в неактивной папке не меняют статус
+          // активной, но панель должна их видеть. Считаем только в многообласти.
+          if (workspace.rootList().length > 1) {
+            void git
+              .summary(workspace.rootList())
+              .then((list) => pushToRenderers(PushTopic.GitSummary, list))
+              .catch(() => undefined);
+          }
         }, 300);
       };
     }
@@ -206,6 +216,12 @@ if (!app.requestSingleInstanceLock()) {
       () => pythonInterpreterFor(workspace.rootPath(), settings.get().run.pythonPath),
       // Тот же `.env`, что у терминала и запуска: сервер видит то же окружение.
       () => projectEnv(workspace.rootPath()),
+      // Запасной сервер для языка: если названный в настройках не поднялся
+      // (сломан, без пакетов), берём следующий по приоритету источников.
+      async (language) => {
+        const sources = await detectLspSources(workspace.rootPath(), process.platform);
+        return sources.flat().filter((server) => server.language === language);
+      },
     );
     // Отладчик: сессия debugpy по DAP. Интерпретатор тот же, что у запуска и тестов,
     // а `.env` проекта — тот же, что у терминала и языкового сервера.
@@ -240,6 +256,7 @@ if (!app.requestSingleInstanceLock()) {
     // Сессия редактора: вкладки, раскрытые папки, видимость панелей — на каждый проект.
     const sessions = new SessionStore();
     const projectConfig = new ProjectConfigStore();
+    const reviews = new ReviewStore();
 
     const deps = {
       settings,
@@ -251,6 +268,7 @@ if (!app.requestSingleInstanceLock()) {
       debug,
       sessions,
       projectConfig,
+      reviews,
       mcp,
       host: new HostClient(),
     };

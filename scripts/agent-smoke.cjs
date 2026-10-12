@@ -352,7 +352,7 @@ app.whenReady().then(async () => {
       // Скелет файла: языковой сервер отвечает объявлениями, строки у него
       // нулевые — перевод в 1-based проверяем тут же (см. tests/file-outline).
       languageFor: (path) => (String(path).endsWith('.py') ? 'python' : null),
-      outline: async (path) => [
+      outline: async () => [
         {
           name: 'Parser',
           kind: 'класс',

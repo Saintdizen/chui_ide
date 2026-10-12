@@ -1,6 +1,7 @@
 import type {
   EditorSettings,
   ExplorerSettings,
+  GitSettings,
   LspServerConfig,
   ReasoningEffort,
   RecentProject,
@@ -13,10 +14,14 @@ import type { AiProviderPatch, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
 import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
 import { serializeThemeFile } from '../../shared/theme-file';
+import { normalizeRulers, rulersToText } from '../../shared/rulers';
+import { PULL_MODES, pullModeLabel } from '../../shared/git-pull';
 import { uiScaleOptions } from '../../shared/ui-scale';
 import type { WebSearchProvider } from '../../shared/web-search';
 import { PYTHON_LSP_PACKAGES, lspLanguagesForKind } from '../../shared/lsp-presets';
 import type { CommandRegistry } from '../core/commands';
+import { DEFAULT_KEYBINDINGS } from '../core/default-keybindings';
+import { comboFromEvent, isModifierKey } from '../core/keybindings';
 import type { RpcClient } from '../core/rpc';
 import type { ThemeService } from '../core/theme-service';
 import { themeTemplate } from '../core/theme';
@@ -52,17 +57,29 @@ export interface SettingsModalView {
   applySettings(settings: Settings): void;
 }
 
-export type SectionId = 'ai' | 'editor' | 'explorer' | 'run' | 'appearance' | 'project' | 'lsp' | 'mcp';
+export type SectionId =
+  | 'ai'
+  | 'editor'
+  | 'keybindings'
+  | 'explorer'
+  | 'run'
+  | 'git'
+  | 'appearance'
+  | 'project'
+  | 'lsp'
+  | 'mcp';
 
 const SECTIONS: ReadonlyArray<{
   id: SectionId;
   title: string;
-  icon: 'sparkle' | 'file' | 'sun' | 'panel' | 'folder' | 'play' | 'command';
+  icon: 'sparkle' | 'file' | 'sun' | 'panel' | 'folder' | 'play' | 'command' | 'branch';
 }> = [
   { id: 'ai', title: 'AI', icon: 'sparkle' },
   { id: 'editor', title: 'Редактор', icon: 'file' },
+  { id: 'keybindings', title: 'Сочетания клавиш', icon: 'command' },
   { id: 'explorer', title: 'Проводник', icon: 'folder' },
   { id: 'run', title: 'Запуск', icon: 'play' },
+  { id: 'git', title: 'Git', icon: 'branch' },
   { id: 'appearance', title: 'Внешний вид', icon: 'sun' },
   { id: 'lsp', title: 'Языки (LSP)', icon: 'command' },
   { id: 'mcp', title: 'Внешние инструменты (MCP)', icon: 'sparkle' },
@@ -856,6 +873,52 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
 
       h('div', { class: 'settings-divider' }),
+      h('div', { class: 'field-label' }, 'Направляющие'),
+      field(
+        'Столбцы через запятую',
+        textInput(rulersToText(editor.rulers), (value) => editable({ rulers: normalizeRulers(value) })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Вертикальные черты на этих столбцах — ориентир длины строки. Пустое поле убирает направляющие.',
+      ),
+
+      h('div', { class: 'settings-divider' }),
+      h('div', { class: 'field-label' }, 'Вид'),
+      field(
+        'Невидимые знаки',
+        selectInput(
+          [
+            { value: 'none', label: 'Скрыть' },
+            { value: 'trailing', label: 'Только в конце строки' },
+            { value: 'all', label: 'Все' },
+          ],
+          editor.renderWhitespace,
+          (value) => editable({ renderWhitespace: value as EditorSettings['renderWhitespace'] }),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Пробелы показываются точками по центру, табуляции — стрелкой. «Только в конце строки» ' +
+          'помогает увидеть хвосты, которые убирает сохранение.',
+      ),
+      switchRow('Миникарта', editor.minimap, (value) => editable({ minimap: value })),
+      switchRow('Перенос длинных строк', editor.wordWrap, (value) => editable({ wordWrap: value })),
+      switchRow('Лигатуры шрифта', editor.fontLigatures, (value) => editable({ fontLigatures: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Сжатый вид всего файла у правого края: по нему видно форму файла и куда перейти кликом.',
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Лигатуры рисуют `=>`, `!=`, `->` одним знаком. Нужен шрифт с лигатурами — иначе ничего не изменится.',
+      ),
+
+      h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Сохранение'),
       switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
       switchRow('Убирать пробелы в конце строк', editor.trimTrailingWhitespace, (value) =>
@@ -875,13 +938,110 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Свои сниппеты (шаблоны кода) задаются в settings.json — поле `editor.snippets`: ' +
           'массив из `{ prefix, body, description?, languages? }`. К ним добавляется небольшой набор по умолчанию.',
       ),
+      h('div', { class: 'field-hint' }, 'Перенос длинных строк у своего ядра пока не сделан — настройки к нему нет.'),
+    ];
+  }
+
+  /**
+   * Редактор горячих клавиш. Здесь только сочетания, которые перехватывает сам
+   * renderer (`core/default-keybindings.ts`): у пунктов меню клавиши держит Electron,
+   * и менять их отсюда нельзя. Сочетание набирается прямо в поле: клик по полю — и
+   * нажмите нужные клавиши. Backspace снимает сочетание, Esc — отмена набора.
+   */
+  function renderKeybindings(): Child[] {
+    const saved = new Map(settings!.keybindings.overrides.map((item) => [item.command, item.combo]));
+
+    const write = (command: string, combo: string): void => {
+      const next = new Map(saved);
+      const fallback = DEFAULT_KEYBINDINGS.find((binding) => binding.command === command)?.combo ?? '';
+      // Вернули исходное (или сняли вовсе) — не храним лишнего: переопределение только
+      // затем и нужно, чтобы отличаться от значения по умолчанию.
+      if (!combo || combo === fallback) next.delete(command);
+      else next.set(command, combo);
+      void patch({
+        keybindings: { overrides: [...next.entries()].map(([id, value]) => ({ command: id, combo: value })) },
+      });
+    };
+
+    // Что с чем столкнулось: одно сочетание у нескольких команд — почти всегда описка.
+    const used = new Map<string, string[]>();
+    for (const binding of DEFAULT_KEYBINDINGS) {
+      const combo = saved.get(binding.command) ?? binding.combo;
+      if (!combo) continue;
+      used.set(combo, [...(used.get(combo) ?? []), binding.command]);
+    }
+    const clashes = [...used.entries()].filter(([, commands]) => commands.length > 1);
+
+    const rows: Child[] = [];
+    let category = '';
+    for (const binding of DEFAULT_KEYBINDINGS) {
+      const descriptor = deps.commands.get(binding.command);
+      const next = descriptor?.category ?? 'Прочее';
+      if (next !== category) {
+        category = next;
+        rows.push(h('div', { class: 'settings-divider' }));
+        rows.push(h('div', { class: 'field-label' }, category));
+      }
+      const current = saved.get(binding.command) ?? binding.combo;
+      rows.push(
+        h(
+          'div',
+          { class: 'field field-between' },
+          h('span', {}, descriptor?.title ?? binding.command),
+          comboControl(current, (combo) => write(binding.command, combo)),
+        ),
+      );
+    }
+
+    const head: Child[] = [
       h(
         'div',
         { class: 'field-hint' },
-        'Вид движка (миникарта, перенос строк, липкий заголовок, раскраска скобок, ' +
-          'плавная прокрутка) своё ядро редактора пока не умеет — настроек к нему нет.',
+        'Кликните поле и нажмите сочетание. Backspace снимает сочетание, Esc — отмена набора. ' +
+          'Меняются только сочетания самого редактора: клавиши пунктов меню задаёт система.',
       ),
     ];
+    if (clashes.length > 0) {
+      head.push(
+        h(
+          'div',
+          { class: 'field-hint' },
+          `Одно сочетание у нескольких команд: ${clashes.map(([combo]) => combo).join(', ')}. Сработает первое, ` +
+            'остальным стоит задать другое.',
+        ),
+      );
+    }
+    return [...head, ...rows];
+  }
+
+  /** Поле сочетания: читает нажатую комбинацию и само ничего не печатает. */
+  function comboControl(value: string, onChange: (next: string) => void): HTMLInputElement {
+    const input = h('input', {
+      class: 'field-input',
+      type: 'text',
+      spellcheck: false,
+      readonly: true,
+      placeholder: 'Нажмите сочетание',
+    });
+    input.value = value;
+    input.addEventListener('keydown', (event) => {
+      event.preventDefault();
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        input.value = '';
+        onChange('');
+        return;
+      }
+      if (event.key === 'Escape') {
+        input.blur();
+        return;
+      }
+      // Одно нажатие модификатора сочетанием не считается — ждём ещё знак.
+      if (isModifierKey(event.key)) return;
+      const combo = comboFromEvent(event);
+      input.value = combo;
+      onChange(combo);
+    });
+    return input;
   }
 
   function renderExplorer(): Child[] {
@@ -958,6 +1118,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'field-hint' }, 'Выключено — как в PyCharm: одинарный клик выделяет, двойной открывает.'),
       switchRow('Пометки git у файлов', explorer.gitDecorations, (value) => apply({ gitDecorations: value })),
       switchRow('Точка у папок с правками', explorer.folderChangeDot, (value) => apply({ folderChangeDot: value })),
+      switchRow('Приглушать игнорируемые git', explorer.dimIgnored, (value) => apply({ dimIgnored: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Файлы из `.gitignore` (например, `node_modules`, `dist`) показываются приглушённо: ' +
+          'их видно и можно открыть, но они не отвлекают.',
+      ),
       switchRow('Спрашивать перед удалением', explorer.confirmDelete, (value) => apply({ confirmDelete: value })),
     ];
   }
@@ -1082,6 +1249,30 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'settings-divider' }),
       field('Тема из файла', actions),
       h('div', { class: 'field-hint' }, hint),
+    ];
+  }
+
+  function renderGit(): Child[] {
+    const git: GitSettings = settings!.git;
+    const apply = (values: Partial<GitSettings>): void => void patch({ git: values });
+    return [
+      h('div', { class: 'field-label' }, 'Вливание изменений (pull)'),
+      field(
+        'Режим',
+        selectInput(
+          PULL_MODES.map((mode) => ({ value: mode, label: pullModeLabel(mode) })),
+          git.pullMode,
+          (value) => apply({ pullMode: value as GitSettings['pullMode'] }),
+        ),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Слияние оставляет историю как есть, перебазирование переносит ваши коммиты на пришедшие ' +
+          '(история линейная), «только перемотка» отказывается вливать, если ветки разошлись. ' +
+          '«Как настроено в git» не подсказывает флагов — поведение задаёт ваш git. Разово влить ' +
+          'перебазированием можно командой «Влить изменения (pull) с перебазированием».',
+      ),
     ];
   }
 
@@ -1386,8 +1577,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   function sectionContent(id: SectionId): Child[] {
     if (id === 'ai') return renderAi();
     if (id === 'editor') return renderEditor();
+    if (id === 'keybindings') return renderKeybindings();
     if (id === 'explorer') return renderExplorer();
     if (id === 'run') return renderRun();
+    if (id === 'git') return renderGit();
     if (id === 'appearance') return renderAppearance();
     if (id === 'lsp') return renderLsp();
     if (id === 'mcp') return renderMcp();

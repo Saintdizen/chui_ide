@@ -16,3 +16,22 @@ export function isSafeExternalUrl(target: string): boolean {
     return false;
   }
 }
+
+/**
+ * Тот же адрес приложения, что и `base` — один узел по схеме и хозяину.
+ *
+ * Нужно, чтобы отличить перезагрузку СВОЕЙ страницы (dev-сервер или собранный
+ * renderer `app://`) от ухода на чужой сайт: первое мы пускаем в окне, второе
+ * отдаём системному браузеру. Сравниваем схему и хозяина, а не весь URL: путь
+ * роли не играет, а у нестандартной схемы (`app:`) браузерный `origin` пуст
+ * («null») и на сравнение не годится.
+ */
+export function isSameUrlOrigin(target: string, base: string): boolean {
+  try {
+    const own = new URL(base);
+    const dest = new URL(target);
+    return dest.protocol === own.protocol && dest.host === own.host;
+  } catch {
+    return false;
+  }
+}

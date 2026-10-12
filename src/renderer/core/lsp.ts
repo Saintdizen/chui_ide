@@ -20,13 +20,22 @@ export class LspClient {
 
   attach(): void {
     // Уже открытые на момент старта файлы сервер тоже должен увидеть.
-    for (const document of this.documents.all()) this.sendOpen(document.path, document.languageId, document.value);
+    for (const document of this.documents.all()) {
+      if (document.readOnly) continue;
+      this.sendOpen(document.path, document.languageId, document.value);
+    }
 
-    this.documents.onDidOpen((document) => this.sendOpen(document.path, document.languageId, document.value));
+    this.documents.onDidOpen((document) => {
+      if (document.readOnly) return;
+      this.sendOpen(document.path, document.languageId, document.value);
+    });
 
     // Полная синхронизация: правки любого источника уходят целиком, сервер сам
     // пересчитывает состояние. Так не нужно повторять логику диапазонов редактора.
+    // Файл только для чтения (большой) серверу не отдаём: гнать его целиком по IPC
+    // дорого, а правок в нём всё равно не будет.
     this.documents.onDidChange(({ document }) => {
+      if (document.readOnly) return;
       void this.rpc.request('lsp.change', { path: document.path, text: document.value }).catch(() => undefined);
     });
 

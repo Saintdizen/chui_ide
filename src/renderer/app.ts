@@ -2,13 +2,14 @@ import {
   PushTopic,
   type DebugLaunchOptions,
   type LayoutSettings,
+  type LspServerConfig,
   type Settings,
   type SettingsPatch,
   type WorkspaceChangedPayload,
 } from '../shared/api';
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
-import { mergeLspServers } from '../shared/lsp-presets';
+import { lspLanguagesForKind, mergeLspServers } from '../shared/lsp-presets';
 import { DEFAULT_SNIPPETS } from '../shared/snippets';
 import { createBlameController } from './core/blame';
 import { createChangeGutterController } from './core/change-gutter';
@@ -22,8 +23,12 @@ import { EditorWorkspace } from './editor/host/editor-workspace';
 import { DocumentRegistry } from './editor/host/document-registry';
 import { LspFeatures } from './editor/host/lsp-features';
 import { GitModel } from './core/git-model';
+import { ReviewModel } from './core/review-model';
+import { ProjectPackagesModel } from './core/project-packages';
+import { parseCoverageJson } from '../shared/coverage-json';
 import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
+import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
 import { languageLabel, languageIndent } from './core/languages';
 import { ImportChecker } from './core/import-check';
 import { LspClient } from './core/lsp';
@@ -55,6 +60,9 @@ import { indentFoldRanges } from '../shared/fold-ranges';
 import { packageForModule } from '../shared/python-packages';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
+import { decideSaveAs } from '../shared/save-as';
+import { isEmptyCommitMessage } from '../shared/commit-message';
+import { hunkAtLine } from '../shared/hunk-lines';
 import { joinPath, separatorOf, splitPath } from '../shared/paths';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
@@ -87,6 +95,13 @@ import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
 import { createSourceControl } from './ui/source-control';
 import { createStashModal } from './ui/stash-modal';
+import { createRebaseModal } from './ui/rebase-modal';
+import { createRefDiffModal } from './ui/ref-diff-modal';
+import { createBisectModal } from './ui/bisect-modal';
+import { createWorktreeModal } from './ui/worktree-modal';
+import { createLfsModal } from './ui/lfs-modal';
+import { createIdentityModal } from './ui/identity-modal';
+import { createForgeModal } from './ui/forge-modal';
 import { createTextModal } from './ui/text-modal';
 import { createStatusBar } from './ui/statusbar';
 import { createSettingsModal } from './ui/settings-modal';
@@ -110,6 +125,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Состояние репозитория — отдельная модель: она подписана на push-события main,
   // поэтому UI не переспрашивает статус после каждой своей операции.
   const git = new GitModel(rpc, workspace);
+  // Замечания к коду (code review): их показывает и правит экран сравнения.
+  const reviews = new ReviewModel(rpc, workspace);
+  // Пакеты проекта (монорепо): по ним панель изменений раскладывает правки.
+  const packages = new ProjectPackagesModel(rpc, workspace);
 
   const layout = createLayout(mount, { onChange: () => void persistLayout() });
   // Адаптив панелей по ширине окна: мнение о размере отдельно от желания человека,
@@ -246,6 +265,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     scheme: theme.resolved,
     tabSize: settings.editor.tabSize,
     fontSize: settings.editor.fontSize,
+    rulers: settings.editor.rulers,
+    whitespace: settings.editor.renderWhitespace,
+    minimap: settings.editor.minimap,
+    wordWrap: settings.editor.wordWrap,
+    ligatures: settings.editor.fontLigatures,
     snippets: () => [...settings.editor.snippets, ...DEFAULT_SNIPPETS],
     // Наведение от сервера: текст разметки в карточку.
     hoverFromLanguage: async (path, position) => {
@@ -306,6 +330,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       const fromServer = await lsp.foldingRanges(path);
       return fromServer.length > 0 ? fromServer : indentFoldRanges(text, settings.editor.tabSize);
     },
+    // Код-линзы: подписи-действия у объявлений («3 ссылки», «Запустить тест»). Клик
+    // исполняет команду сервера, а его правки (если вернёт) применяем обычным путём.
+    codeLenses: (path) => lsp.codeLenses(path),
+    lensCommand: (path, command) => void runLensCommand(path, command),
+    // Подсказки-вставки: тип переменной, имя параметра — прямо в коде. Серверу нужен
+    // диапазон, а своего текста у него нет: конец документа считаем по тексту файла.
+    inlayHints: (path, text) => lsp.inlayHints(path, endOfText(text)),
     // Правый клик по тексту: меню собираем здесь, а не в панели, — пункты это команды
     // приложения (отмена, буфер обмена, поиск, переходы), и реестр команд у него.
     contextMenu: (info, event) => {
@@ -410,8 +441,35 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
     }
     if (!action.command) return;
-    const answer = await lsp.executeCommand(path, action.command.command, action.command.arguments);
-    // Часть серверов возвращает из команды правки — применяем их тем же путём.
+    await runLensCommand(path, action.command);
+  };
+
+  /**
+   * Упорядочить импорты файла: сервер один знает, что лишнее и чего не хватает, —
+   * просим действие `source.organizeImports` и применяем его правки обычным путём.
+   */
+  const runOrganizeImports = async (path: string): Promise<void> => {
+    const document = documents.get(path);
+    if (!document) return;
+    const actions = await lsp.organizeImports(path, { line: document.lineCount, column: 1 });
+    const action = actions.find((item) => item.edits);
+    if (!action) {
+      showToast('Упорядочить импорты сервер не предложил');
+      return;
+    }
+    await applyCodeAction(path, action);
+  };
+
+  /**
+   * Исполнить команду сервера (быстрого исправления или клика по линзе): ответ бывает
+   * `null`, но бывает и правками (`WorkspaceEdit`) — тогда применяем их тем же путём,
+   * что и остальные файловые правки: с undo и общим показом отказа.
+   */
+  const runLensCommand = async (
+    path: string,
+    command: { command: string; arguments: readonly unknown[] },
+  ): Promise<void> => {
+    const answer = await lsp.executeCommand(path, command.command, command.arguments);
     const fileEdits = toWorkspaceFileEdits(answer, uriToPath);
     if (fileEdits) {
       const result = await edits.applyFileEdits(fileEdits);
@@ -486,7 +544,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const explorer = createExplorer({ workspace, rpc, commands, openEditors, git, documents });
   layout.sidebarBody.appendChild(explorer.element);
 
-  const sourceControl = createSourceControl({ git, workspace, commands });
+  const sourceControl = createSourceControl({
+    git,
+    workspace,
+    commands,
+    // Соавторов спрашиваем тем же диалогом, что имя ветки и сообщение коммита.
+    askText: (options) => promptValue(options),
+    notify: (message, kind) => showToast(message, kind),
+    packages,
+  });
 
   /**
    * Менеджер git в поповере: тот же самописный менеджер, что и панель изменений,
@@ -610,6 +676,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const diffView = createDiffView({
     createDiff: (container) => editors.createDiff(container),
     git,
+    reviews,
     notify: (message) => showToast(message, 'error'),
   });
   layout.editorHost.appendChild(diffView.element);
@@ -670,6 +737,28 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     return pytestTarget(tools.get(), selector, { ...options, platform: info.platform });
   };
 
+  /**
+   * Куда прогон с покрытием пишет JSON-отчёт. Путь — во временном каталоге (даёт main):
+   * файл нужен IDE, а не человеку, и захламлять корень проекта незачем.
+   */
+  let coverageJsonPath: string | null = null;
+
+  /**
+   * Уточнить покрытие по JSON-отчёту: терминальный даёт только непокрытые строки, а
+   * здесь есть ещё и наполовину пройденные ветви. Нет файла или он битый — молча
+   * остаёмся при том, что пришло из вывода pytest.
+   */
+  const applyCoverageJson = async (absolute: (path: string) => string): Promise<void> => {
+    if (!coverageJsonPath) return;
+    const file = await rpc.request('workspace.readFile', { path: coverageJsonPath }).catch(() => null);
+    if (!file) return;
+    const json = parseCoverageJson(file.text);
+    if (json.files.length === 0) return;
+    editors.setCoverage(
+      json.files.map((entry) => [absolute(entry.path), entry.missingLines, entry.partialLines] as const),
+    );
+  };
+
   // Панель тестов: список собирается при показе — правки в коде меняют его.
   // Про раннер панель не знает: сбор и запуск выбираются здесь по виду проекта.
   const testPanel = createTestPanel({
@@ -688,8 +777,21 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     onRun: (selector, options) => void runTarget(testTargetFor(selector, options)),
     // Покрытие пока умеет только pytest: у Node своего отчёта нет, и кнопка
     // «С покрытием» в его проектах не показывается вовсе.
-    onCoverage: (selector) =>
-      void runTarget(pytestCoverageTarget(tools.get(), selector, { report: true, platform: info.platform })),
+    onCoverage: (selector) => {
+      void (async () => {
+        coverageJsonPath = await rpc
+          .request('project.coverageJsonPath')
+          .then((result) => result.path)
+          .catch(() => null);
+        void runTarget(
+          pytestCoverageTarget(tools.get(), selector, {
+            report: true,
+            platform: info.platform,
+            jsonPath: coverageJsonPath ?? undefined,
+          }),
+        );
+      })();
+    },
     canCoverage: () => isPythonProject(),
     // Отчёт покрытия → подсветка непокрытых строк в редакторе. Отчёт даёт пути от
     // корня проекта; редактор ключует файлы абсолютными — собираем их здесь.
@@ -697,10 +799,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       const root = workspace.root;
       if (!root) return;
       const separator = separatorOf(root);
-      const entries = report.files
-        .filter((file) => file.missingLines.length > 0)
-        .map((file) => [joinPath(root, splitPath(file.path).join(separator)), file.missingLines] as const);
-      editors.setCoverage(entries);
+      const absolute = (filePath: string): string => joinPath(root, splitPath(filePath).join(separator));
+      editors.setCoverage(
+        report.files
+          .filter((file) => file.missingLines.length > 0)
+          .map((file) => [absolute(file.path), file.missingLines] as const),
+      );
+      void applyCoverageJson(absolute);
     },
     // Пересобирать список по правке стоит только когда панель тестов на виду.
     isVisible: () => dock.visible && dock.activeId === 'tests',
@@ -913,6 +1018,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   let runMarkerSignature = '';
   /** Про выключенные подсказки говорим один раз за сеанс — иначе это стал бы шум. */
   let lspHintShown = false;
+  /** Подсказку «сервера для языка проекта нет» показываем один раз за сеанс. */
+  let lspMissingHintShown = false;
 
   /** Перечитать карту проекта: дёшево — обход имён без чтения содержимого. */
   async function refreshScan(): Promise<void> {
@@ -939,6 +1046,29 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * Возвращает признак «список пополнился»: после этого серверы нужно
    * перезапустить, иначе новый так и не поднимется.
    */
+  /**
+   * Сервера для языка проекта нет — сказать об этом и предложить настройку.
+   * Один раз за сеанс: на каждое обновление окружения это стало бы шумом.
+   *
+   * Молчать тут нельзя: без сервера не работают подсказки, переход к определению
+   * и подсветка пометок, а человек считает, что «IDE не умеет» вместо «нет сервера».
+   */
+  function suggestLspIfMissing(found: LspServerConfig[]): void {
+    if (lspMissingHintShown) return;
+    const kind = projectScan?.kind.id ?? null;
+    const languages = lspLanguagesForKind(kind);
+    if (!languages) return;
+    if (found.some((server) => languages.includes(server.language))) return;
+    lspMissingHintShown = true;
+    showToast(
+      kind === 'python'
+        ? 'Языковой сервер для Python не найден: переходы и подсказки работать не будут'
+        : 'Языковой сервер для JS/TS не найден: переходы и подсказки работать не будут',
+      'info',
+      { action: { label: 'Поставить', run: () => settingsModal.open('lsp') } },
+    );
+  }
+
   async function ensureLspServers(): Promise<boolean> {
     // Мастер-тумблер — решение человека: в обход него серверы не подставляем и не
     // запускаем. Но если серверы в проекте есть, а подсказки выключены, сказать об
@@ -958,6 +1088,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     }
 
     const found = await rpc.request('lsp.detect').catch(() => []);
+    suggestLspIfMissing(found);
     const configured = settings.lsp.servers;
     const merged = mergeLspServers(configured, found);
     if (merged.length === configured.length) return false;
@@ -1231,9 +1362,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── вспомогательные действия ──────────────────────────────────────────── */
 
-  const openPath = async (path: string): Promise<void> => {
+  const openPath = async (path: string, options: { preview?: boolean } = {}): Promise<void> => {
     const document = await edits.ensureDocument(path);
-    openEditors.open(document);
+    openEditors.open(document, options);
     editors.open(document);
     explorer.reveal(path);
     // Открыли файл — на экране он, вкладка чата ждёт в полосе.
@@ -1281,6 +1412,76 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const launchOptions = createLaunchOptionsModal();
   document.body.appendChild(launchOptions.element);
 
+  // Интерактивный rebase: список шагов собирает окно, а `reword` просит новое
+  // сообщение тем же диалогом строки, что и прочие вводы в приложении.
+  const rebaseModal = createRebaseModal({
+    git,
+    askMessage: (subject) => promptValue({ title: 'Новое сообщение коммита', label: 'Сообщение', value: subject }),
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(rebaseModal.element);
+
+  // Сравнение веток: своё окно со списком различий. Клик по файлу открывает его
+  // в экране сравнения (слева первая ссылка, справа вторая) — режим просмотра.
+  const refDiffModal = createRefDiffModal({
+    git,
+    openFile: (base, head, path) => void diffView.openRefs(base, head, path),
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(refDiffModal.element);
+
+  // Поиск багованного коммита: окно ведёт диалог с git (хороший/плохой), а найденный
+  // коммит открывается тем же экраном сравнения, что и коммит строки под курсором.
+  const bisectModal = createBisectModal({
+    git,
+    openCommit: (commit) => {
+      const path = editors.currentPath;
+      if (path) void diffView.open(path, false, commit);
+    },
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(bisectModal.element);
+
+  // Рабочие каталоги (worktree): список, открытие каталога как проекта, добавление
+  // и удаление. Проект открываем тем же путём, что папку из стартового окна.
+  const worktreeModal = createWorktreeModal({
+    git,
+    currentRoot: () => workspace.root,
+    openProject: async (path) => {
+      await workspace.open(path);
+      showToast(`Открыт рабочий каталог ${basename(path)}`);
+    },
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(worktreeModal.element);
+
+  // Git LFS: большие файлы в отдельном хранилище. Окно показывает шаблоны и файлы,
+  // даёт взять шаблон под LFS, отказаться от него и подтянуть содержимое.
+  const lfsModal = createLfsModal({
+    git,
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(lfsModal.element);
+
+  // Личность автора и подпись коммитов: настройки самого git, но правятся из IDE —
+  // в ЛОКАЛЬНОМ конфиге репозитория (глобальные настройки человека не трогаем).
+  const identityModal = createIdentityModal({
+    git,
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(identityModal.element);
+
+  // Запросы на слияние (PR/MR): своя обёртка над клиентами `gh`/`glab`. Токены и вход
+  // берёт клиент, IDE показывает список и зовёт его же на «создать» и «забрать ветку».
+  const forgeModal = createForgeModal({
+    git,
+    currentBranch: () => git.branch,
+    notify: (message, kind) => showToast(message, kind),
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+  });
+  document.body.appendChild(forgeModal.element);
+
   // Поиск символа по проекту (Ctrl+T): файл открываем тем же путём, что и дерево,
   // а затем встаём на строку объявления.
   const symbolPicker = createSymbolPicker({
@@ -1318,6 +1519,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     editors,
     debug,
     explorer,
+    workspace,
     dock,
     debugPanel,
     layout,
@@ -1336,6 +1538,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * Спрашиваем и перезаписываем только с согласия. `false` — человек отменил.
    */
   const saveDocument = async (document: TextDocument): Promise<boolean> => {
+    // Файл только для чтения (большой) сохранять нечего: правок в нём быть не может.
+    if (document.readOnly) {
+      showToast('Файл открыт только для чтения — сохранять нечего', 'error');
+      return false;
+    }
     // Правки текста при сохранении: подрезать хвосты и поставить перевод строки.
     // Проводим через документ — тогда и на экране, и на диске одно и то же.
     const prepared = applySaveEdits(document.value, {
@@ -1360,6 +1567,64 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       await edits.saveDocument(document, { force: true });
     }
     showToast(`Сохранено: ${basename(document.path)}`);
+    return true;
+  };
+
+  /**
+   * Сохранить документ ПОД ДРУГИМ ИМЕНЕМ (Save As). Путь выбирает человек системным
+   * диалогом, поэтому в отличие от Ctrl+S запись идёт не по пути документа, а по
+   * выбранному. Прежний файл на диске остаётся как был — это копия, и терять его
+   * правкой «сохранить как» неправильно.
+   *
+   * Вкладка переезжает на новый файл: несохранённые правки уезжают вместе с ней,
+   * поэтому закрытие прежней вкладки ничего не теряет. Правки при сохранении
+   * (хвосты, перевод строки, формат) — те же, что у Ctrl+S: иначе текст на диске
+   * зависел бы от того, каким путём его сохранили.
+   */
+  const saveDocumentAs = async (document: TextDocument): Promise<boolean> => {
+    if (document.readOnly) {
+      showToast('Файл открыт только для чтения — сохранить как нельзя', 'error');
+      return false;
+    }
+    const picked = await rpc
+      .request('dialog.saveFile', { title: 'Сохранить как', defaultPath: document.path })
+      .catch(() => null);
+
+    // Что делать с выбранным путём — решает чистая функция: отмена, тот же путь
+    // (обычное сохранение) или путь вне рабочей области. Здесь остаётся запись.
+    const decision = decideSaveAs(document.path, picked?.path ?? null, workspace.roots);
+    if (decision.kind === 'cancel') return false;
+    if (decision.kind === 'same-path') return saveDocument(document);
+    if (decision.kind === 'outside') {
+      showToast(decision.message, 'error');
+      return false;
+    }
+    const target = decision.target;
+
+    const prepared = applySaveEdits(document.value, {
+      trimTrailingWhitespace: settings.editor.trimTrailingWhitespace,
+      insertFinalNewline: settings.editor.insertFinalNewline,
+    });
+    if (prepared !== document.value) document.setText(prepared, 'programmatic');
+    if (settings.editor.formatOnSave) await formatDocument(document);
+
+    try {
+      await rpc.request('workspace.writeFile', { path: target, text: document.value });
+    } catch (error) {
+      showToast(
+        `Не удалось сохранить как ${basename(target)}: ${error instanceof Error ? error.message : String(error)}`,
+        'error',
+      );
+      return false;
+    }
+
+    // Вкладка переходит на новый файл. Прежнюю закрываем: два документа с одним
+    // текстом на экране только путают, а правки уже записаны в новый файл.
+    const previous = document.path;
+    openEditors.close(previous);
+    await openPath(target);
+    explorer.scheduleRefresh();
+    showToast(`Сохранено как ${basename(target)}`);
     return true;
   };
 
@@ -1406,7 +1671,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /* ── Инструменты проекта: формат и установка ───────────────────────────── */
 
   /** Что вышло из попытки форматирования. */
-  type FormatOutcome = 'changed' | 'unchanged' | 'unavailable';
+  type FormatOutcome = 'changed' | 'unchanged' | 'unavailable' | 'readonly';
 
   /**
    * Отформатировать документ инструментом проекта. Правку проводим через документ:
@@ -1416,6 +1681,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * быть, и сказать об этом надо честно, а не молчанием.
    */
   const formatDocument = async (document: TextDocument): Promise<FormatOutcome> => {
+    if (document.readOnly) return 'readonly';
     const engine = formatEngine(document.languageId);
     if (!engine) return 'unavailable';
     const result =
@@ -1432,6 +1698,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const formatOutcomeMessage = (engine: FormatEngine, outcome: FormatOutcome): string => {
     if (outcome === 'changed') return 'Файл отформатирован';
     if (outcome === 'unchanged') return 'Менять нечего';
+    if (outcome === 'readonly') return 'Файл открыт только для чтения — форматировать нечего';
     return `Нечем форматировать: ${formatToolNames(engine).join(' и ')} в проекте нет`;
   };
 
@@ -1536,6 +1803,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast(`Открыт проект ${basename(path)}`);
   });
 
+  // Добавить папку в рабочую область: несколько папок в одном окне (см. workspace-model).
+  // Активной становится только что добавленная — туда идут git и поиск.
+  define({ id: 'workspace.addFolder', title: 'Добавить папку в рабочую область', category: 'Файл' }, async () => {
+    if (!workspace.current) {
+      showToast('Сначала откройте папку проекта', 'error');
+      return;
+    }
+    const result = await rpc.request('dialog.pickFolder', { title: 'Добавить папку в рабочую область' });
+    if (!result.path) return;
+    await workspace.addRoot(result.path);
+    explorer.render();
+    showToast(`В рабочую область добавлена папка ${basename(result.path)}`);
+  });
+
   define({ id: 'workspace.refresh', title: 'Обновить дерево', category: 'Файл' }, async () => {
     await workspace.refresh();
     explorer.render();
@@ -1545,8 +1826,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (typeof path === 'string') explorer.reveal(path);
   });
 
-  define({ id: 'file.open', title: 'Открыть файл', category: 'Файл' }, async (path) => {
-    if (typeof path === 'string') await openPath(path);
+  define({ id: 'file.open', title: 'Открыть файл', category: 'Файл' }, async (path, options) => {
+    if (typeof path !== 'string') return;
+    const preview = (options as { preview?: boolean } | undefined)?.preview === true;
+    await openPath(path, { preview });
   });
 
   define({ id: 'file.activate', title: 'Активировать вкладку', category: 'Файл' }, (path) => {
@@ -1576,6 +1859,28 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
+  // Закрепление вкладки: закреплённую не вытесняет предпросмотр, и её не трогает
+  // «закрыть другие». Тумблер — одна команда и в меню вкладки, и в палитре.
+  define({ id: 'file.togglePin', title: 'Закрепить/открепить вкладку', category: 'Файл' }, (path) => {
+    const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
+    if (!target) return;
+    if (openEditors.isPinned(target)) openEditors.unpin(target);
+    else openEditors.pin(target);
+  });
+
+  define(
+    {
+      id: 'file.closeOthers',
+      title: 'Закрыть другие вкладки',
+      category: 'Файл',
+      enabled: () => openEditors.paths.length > 1,
+    },
+    (path) => {
+      const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
+      if (target) openEditors.closeOthers(target);
+    },
+  );
+
   define(
     {
       id: 'file.save',
@@ -1596,10 +1901,32 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define(
     {
+      id: 'file.saveAs',
+      title: 'Сохранить как…',
+      category: 'Файл',
+      keybinding: 'Ctrl+Shift+S',
+      enabled: () => openEditors.active !== null,
+    },
+    // Путь приходит из меню вкладки: сохраняем тот файл, по которому кликнули,
+    // а не активный. Без аргумента — активный (палитра, горячая клавиша).
+    async (path) => {
+      const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
+      const document = target ? (documents.get(target) ?? null) : null;
+      if (!document) {
+        showToast('Нет открытого файла');
+        return;
+      }
+      await saveDocumentAs(document);
+    },
+  );
+
+  define(
+    {
       id: 'file.saveAll',
       title: 'Сохранить всё',
       category: 'Файл',
-      keybinding: 'Ctrl+Shift+S',
+      // Ctrl+Shift+S отдано «Сохранить как…» — привычке из VS Code и PyCharm.
+      keybinding: 'Ctrl+Alt+S',
       enabled: () => documents.dirty().length > 0,
     },
     async () => {
@@ -2010,6 +2337,49 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   /**
+   * Сообщение коммита по diff: модель читает правки и предлагает текст.
+   *
+   * Это не агент и не беседа — один запрос, короткий ответ (`ai.commitMessage`).
+   * Текст кладём В ПОЛЕ, а не коммитим сразу: сообщение правят и дополняют, а
+   * кнопка «Закоммитить» рядом. Diff собирает main (`git.commitDiff`): в renderer
+   * рабочего дерева нет, а обрезать и склеить правки — работа для того, у кого git.
+   */
+  define({ id: 'git.generateCommitMessage', title: 'Сообщение коммита по diff (AI)', category: 'Git' }, async () => {
+    if (!git.isRepository) {
+      showToast('Рабочая папка не в репозитории git', 'error');
+      return;
+    }
+    if (!aiEnabled()) {
+      warnAiDisabled();
+      return;
+    }
+
+    const context = await git.commitDiff();
+    if (!context.diff.trim() && context.untracked.length === 0) {
+      showToast('Правок нет — сообщение писать не по чему', 'error');
+      return;
+    }
+
+    try {
+      const { message } = await rpc.request('ai.commitMessage', {
+        diff: context.diff,
+        staged: context.staged,
+        branch: git.branch,
+        untracked: context.untracked,
+      });
+      if (isEmptyCommitMessage(message)) {
+        showToast('Модель вернула пустое сообщение — попробуйте ещё раз', 'error');
+        return;
+      }
+      sourceControl.setMessage(message);
+      // Диф обрезан — предупреждаем: модель видела не всю правку, тему стоит проверить.
+      showToast(context.truncated ? 'Сообщение готово (diff был обрезан — проверьте)' : 'Сообщение готово');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  });
+
+  /**
    * Исправить последний коммит (amend). Пустое сообщение — оставить прежнее:
    * так можно просто добавить в него дозревшие правки.
    */
@@ -2030,6 +2400,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   define({ id: 'git.showDiff', title: 'Показать различия файла', category: 'Git' }, async (path, staged) => {
     const target = asPath(path);
     if (target) await diffView.open(target, staged === true);
+  });
+
+  /** Замечания к коду: сравнение файла и лента замечаний сбоку. */
+  define({ id: 'git.reviewComments', title: 'Замечания к коду в сравнении', category: 'Git' }, async () => {
+    const path = editors.currentPath;
+    if (!path) {
+      showToast('Откройте файл, чтобы оставить замечание', 'error');
+      return;
+    }
+    const staged = git.statusOf(path)?.staged === true;
+    if (!diffView.isOpen) await diffView.open(path, staged);
+    diffView.showComments();
   });
 
   /** Показать или скрыть автора строки у курсора (blame). */
@@ -2091,6 +2473,193 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       return;
     }
     await stashModal.open();
+  });
+
+  /**
+   * Итог операции с историей одним сообщением. Rebase может не закончиться: он
+   * останавливается на конфликте или на шаге правки — об этом говорим отдельно,
+   * а не показываем текст git как ошибку.
+   */
+  const reportRebase = (result: { ok: boolean; inProgress: boolean; conflict: boolean; message: string }): void => {
+    if (result.conflict) showToast('Есть конфликты — разрешите их и продолжите rebase', 'error');
+    else if (result.inProgress) showToast('Rebase идёт: исправьте коммит и продолжите', 'info');
+    else if (result.ok) showToast('Rebase завершён');
+    else showToast(result.message, 'error');
+  };
+
+  /** Пошаговый поиск багованного коммита (bisect). */
+  define(
+    {
+      id: 'git.bisect',
+      title: 'Найти багованный коммит (bisect)',
+      category: 'Git',
+      keywords: ['bisect', 'бисект', 'плохой коммит', 'поиск'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await bisectModal.open();
+    },
+  );
+
+  /** Дополнительные рабочие каталоги одного репозитория (worktree). */
+  define(
+    {
+      id: 'git.worktrees',
+      title: 'Рабочие каталоги (worktree)',
+      category: 'Git',
+      keywords: ['worktree', 'каталог', 'ветка', 'ворктри'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await worktreeModal.open();
+    },
+  );
+
+  /** Запросы на слияние площадки (PR/MR) через `gh`/`glab`. */
+  define(
+    {
+      id: 'git.pullRequests',
+      title: 'Запросы на слияние (PR/MR)',
+      category: 'Git',
+      keywords: ['pr', 'mr', 'pull request', 'merge request', 'github', 'gitlab', 'запрос', 'слияние'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await forgeModal.open();
+    },
+  );
+
+  /** Личность и подпись: имя, почта, GPG/SSH-подпись коммитов и тегов, ключи. */
+  define(
+    {
+      id: 'git.identity',
+      title: 'Личность и подпись коммитов',
+      category: 'Git',
+      keywords: ['подпись', 'gpg', 'ssh', 'signing', 'key', 'author', 'имя', 'почта', 'co-authored-by'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await identityModal.open();
+    },
+  );
+
+  /** Большие файлы (Git LFS): шаблоны, файлы под хранилищем и их подтягивание. */
+  define(
+    {
+      id: 'git.lfs',
+      title: 'Большие файлы (Git LFS)',
+      category: 'Git',
+      keywords: ['lfs', 'большие файлы', 'хранилище', 'gitattributes'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await lfsModal.open();
+    },
+  );
+
+  /** Подмодули: в дереве помечены значком, а забрать их код можно этой командой. */
+  define(
+    {
+      id: 'git.submoduleUpdate',
+      title: 'Обновить подмодули',
+      category: 'Git',
+      keywords: ['submodule', 'подмодуль', 'init', 'update'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      showToast('Забираю подмодули…');
+      try {
+        await git.submoduleUpdate();
+        showToast('Подмодули обновлены');
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+      }
+    },
+  );
+
+  /** Сравнение веток: список различий и просмотр отдельного файла. */
+  define(
+    {
+      id: 'git.compareBranches',
+      title: 'Сравнить ветки',
+      category: 'Git',
+      keywords: ['diff', 'ветки', 'сравнить', 'различия'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await refDiffModal.open();
+    },
+  );
+
+  /** Интерактивный rebase: список коммитов собирает своё окно. */
+  define(
+    {
+      id: 'git.rebase',
+      title: 'Перестроить историю (interactive rebase)',
+      category: 'Git',
+      keywords: ['rebase', 'squash', 'fixup', 'склеить', 'переставить'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await rebaseModal.open();
+    },
+  );
+
+  define({ id: 'git.rebaseContinue', title: 'Rebase: продолжить', category: 'Git' }, async () => {
+    try {
+      reportRebase(await git.rebaseContinue());
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  });
+
+  define({ id: 'git.rebaseSkip', title: 'Rebase: пропустить коммит', category: 'Git' }, async () => {
+    try {
+      reportRebase(await git.rebaseSkip());
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  });
+
+  define({ id: 'git.rebaseAbort', title: 'Rebase: прервать', category: 'Git' }, async () => {
+    try {
+      await git.rebaseAbort();
+      showToast('Rebase прерван, ветка на прежнем месте');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
   });
 
   /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
@@ -2505,11 +3074,28 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
+  // Режим pull берём из настроек (проектных): у команд разные привычки — кому слияние,
+  // кому перебазирование. `default` не подсказывает флагов, и git ведёт себя как настроен.
   define(
     { id: 'git.pull', title: 'Влить изменения (pull)', category: 'Git', enabled: () => git.isRepository },
     async () => {
-      const result = await git.pull();
+      const result = await git.pull(settings.git.pullMode);
       showToast(`pull: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
+    },
+  );
+
+  // То же слиянием или перебазированием — разово, поверх настройки: иногда нужно
+  // именно так, не меняя поведение по умолчанию.
+  define(
+    {
+      id: 'git.pullRebase',
+      title: 'Влить изменения (pull) с перебазированием',
+      category: 'Git',
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      const result = await git.pull('rebase');
+      showToast(`pull --rebase: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
     },
   );
 
@@ -2582,8 +3168,49 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncViewButtons();
   });
 
+  // Режим дзен: прячем всю обвязку — панели, нижний док, строку состояния и шапку — и
+  // оставляем только редактор. Что было видно, ЗАПОМИНАЕМ и возвращаем на выходе;
+  // спрятанный макет сохранять нельзя, поэтому прячем внутри `withoutPersist`.
+  let zenSaved: { sidebar: boolean; right: boolean; dock: boolean } | null = null;
+  define({ id: 'view.zen', title: 'Режим дзен', category: 'Вид', keywords: ['zen', 'фокус'] }, () => {
+    if (zenSaved) {
+      const saved = zenSaved;
+      zenSaved = null;
+      withoutPersist(() => {
+        layout.setSidebarVisible(saved.sidebar);
+        layout.setRightVisible(saved.right);
+        layout.setDockVisible(saved.dock);
+      });
+      layout.root.classList.remove('is-zen');
+    } else {
+      zenSaved = { sidebar: layout.sidebarVisible, right: layout.rightVisible, dock: layout.dockVisible };
+      withoutPersist(() => {
+        layout.setSidebarVisible(false);
+        layout.setRightVisible(false);
+        layout.setDockVisible(false);
+      });
+      layout.root.classList.add('is-zen');
+    }
+    syncViewButtons();
+  });
+
   define({ id: 'search.project', title: 'Поиск по проекту', category: 'Поиск', keybinding: 'Ctrl+Shift+F' }, () =>
     dock.show('search'),
+  );
+
+  // TODO/FIXME — тот же поиск по проекту, только запрос готовый: регулярка ловит
+  // пометки одним проходом, а результаты открываются как обычно — панелью поиска.
+  define(
+    {
+      id: 'search.todo',
+      title: 'Найти TODO и FIXME',
+      category: 'Поиск',
+      keywords: ['todo', 'fixme', 'hack', 'пометки'],
+    },
+    () => {
+      dock.show('search');
+      searchView.search('\\b(TODO|FIXME|HACK|XXX)\\b', { isRegex: true });
+    },
   );
 
   define({ id: 'view.showTerminal', title: 'Терминал', category: 'Вид', keybinding: 'Alt+F12' }, () => {
@@ -2700,12 +3327,35 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         showToast('Нет открытого файла');
         return;
       }
+      if (document.readOnly) {
+        showToast('Файл открыт только для чтения — форматировать нечего');
+        return;
+      }
       const engine = formatEngine(document.languageId);
       if (!engine) {
         showToast(`Не форматирую ${languageLabel(document.languageId)}: для него инструмента нет`);
         return;
       }
       showToast(formatOutcomeMessage(engine, await formatDocument(document)));
+    },
+  );
+
+  // Упорядочить импорты делает языковой сервер: у него просим действие `source.organizeImports`.
+  define(
+    {
+      id: 'editor.organizeImports',
+      title: 'Упорядочить импорты',
+      category: 'Редактор',
+      keybinding: 'Shift+Alt+O',
+      keywords: ['imports', 'import', 'импорт', 'organize'],
+    },
+    () => {
+      const path = editors.currentPath;
+      if (!path) {
+        showToast('Нет открытого файла');
+        return;
+      }
+      void runOrganizeImports(path);
     },
   );
 
@@ -2782,6 +3432,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     statusBar.update({
       file: active ? workspace.relative(active.path) : null,
       dirty: active?.dirty ?? false,
+      readOnly: active?.readOnly ?? false,
       language: language ? languageLabel(language) : null,
       version: active?.version ?? 0,
       ai: rpc.isStreaming ? 'генерация…' : 'готов',
@@ -2816,7 +3467,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const applySettings = (next: Settings): void => {
     settings = next;
     applyUiScale(next.appearance.uiScale);
-    editors.applyOptions(next.editor);
+    editors.applyOptions({
+      tabSize: next.editor.tabSize,
+      fontSize: next.editor.fontSize,
+      rulers: next.editor.rulers,
+      whitespace: next.editor.renderWhitespace,
+      minimap: next.editor.minimap,
+      wordWrap: next.editor.wordWrap,
+      ligatures: next.editor.fontLigatures,
+    });
     explorer.applySettings(next.explorer);
     chat.applySettings(next);
     settingsModal.applySettings(next);
@@ -3010,6 +3669,78 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Правый клик на жёлобе: координаты берём из последнего события мыши — у самого
   // события контекстного меню нет координат окна, а меню ставится по месту нажатия.
   const lastPointer = { x: 0, y: 0 };
+
+  /**
+   * Правый клик по полоске изменения: меню одного БЛОКА правок.
+   *
+   * Работаем по строке, а строки у полосок и у diff согласуются только с рабочим
+   * деревом: полоски считаются по тексту редактора, а git про буфер не знает. Чтобы
+   * они не разъехались, сперва сохраняем файл — иначе `git apply` приложил бы блок
+   * к другой версии файла. Не сохранилось (отказ от перезаписи) — меню не показываем.
+   *
+   * Блоков два набора: неиндексированные (`unstaged`) можно проиндексировать или
+   * откатить, проиндексированные (`staged`) — убрать из индекса. Что под строкой,
+   * решает `hunkAtLine` (общая граница блоков с `git-hunks`).
+   */
+  const openChangeStripMenu = async ({ path, line }: { path: string; line: number }): Promise<void> => {
+    const document = documents.get(path) ?? null;
+    if (document?.dirty) {
+      if (!(await saveDocument(document))) return;
+    }
+
+    const hunks = await git.fileHunks(path).catch(() => ({ unstaged: [], staged: [] }));
+    const unstagedIndex = hunkAtLine(hunks.unstaged, line);
+    const stagedIndex = hunkAtLine(hunks.staged, line);
+
+    if (unstagedIndex === null && stagedIndex === null) {
+      showToast('Правок в этой строке нет', 'info');
+      return;
+    }
+
+    /** После правки блока: полоски пересчитать, файл (если менялся на диске) перечитать. */
+    const after = (reload: boolean): void => {
+      changeGutter.refreshContent();
+      if (reload) void reloadIfOpen(path);
+      explorer.scheduleRefresh();
+    };
+
+    const items: PopupMenuItem[] = [];
+    if (unstagedIndex !== null) {
+      items.push({
+        label: 'Проиндексировать это изменение',
+        onSelect: () => void git.stageHunk(path, unstagedIndex).then(() => after(false)),
+      });
+    }
+    if (stagedIndex !== null) {
+      items.push({
+        label: 'Убрать это изменение из индекса',
+        onSelect: () => void git.unstageHunk(path, stagedIndex).then(() => after(false)),
+      });
+    }
+    if (unstagedIndex !== null) {
+      // Откат теряет правки безвозвратно — спрашиваем системным диалогом, как и у отката файла.
+      items.push({ separator: true });
+      items.push({
+        label: 'Откатить это изменение',
+        danger: true,
+        onSelect: () => {
+          void (async () => {
+            const { confirmed } = await rpc.request('dialog.confirm', {
+              title: 'Откатить изменение',
+              message: `Вернуть строку к состоянию индекса?`,
+              detail: `${workspace.relative(path)} — блок изменений у строки ${line}. Правки в этом блоке будут потеряны.`,
+              confirmLabel: 'Откатить',
+            });
+            if (!confirmed) return;
+            await git.discardHunk(path, unstagedIndex);
+            after(true);
+          })();
+        },
+      });
+    }
+
+    showPopupMenu(items, lastPointer.x, lastPointer.y);
+  };
   document.addEventListener(
     'mousedown',
     (event) => {
@@ -3019,6 +3750,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     true,
   );
   editors.onBreakpointMenu(openBreakpointMenu);
+  // Правый клик по полоске изменения: меню блока (индексировать, убрать, откатить).
+  editors.onChangeStripMenu((hit) => void openChangeStripMenu(hit));
 
   // Останов: подсвечиваем строку и показываем панель. Пока программа идёт или
   // отладка не запущена — подсветки нет.
@@ -3048,10 +3781,26 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncRunControl();
     refreshStatus();
   });
-  workspace.onDidChange((info) => {
+  workspace.onDidChange(({ info, reason }) => {
     refreshStatus();
     syncEmptyState();
-    // Окружение нового проекта греем сразу: попап открывается без ожидания.
+
+    // Другая рабочая папка в ТОЙ ЖЕ области (добавили, убрали или переключили):
+    // проект тот же, вкладки закрывать нельзя. Обновляем то, что считается по
+    // активному корню, — окружение, структуру и запуск.
+    if (reason === 'roots') {
+      void (async () => {
+        await tools.refresh(workspace.root);
+        syncRunControl();
+        await refreshScan();
+        preloadEnvironment();
+      })();
+      void ensureLspServers();
+      explorer.render();
+      return;
+    }
+
+    // Сменился ПРОЕКТ: окружение нового греем сразу (попап открывается без ожидания).
     void (async () => {
       await tools.refresh(workspace.root);
       syncRunControl();
@@ -3105,36 +3854,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Полоски изменений для уже открытых файлов — если при старте что-то открыто.
   changeGutter.refresh();
 
-  new KeybindingService(commands, [
-    { combo: 'Alt+1', command: 'view.showExplorer' },
-    { combo: 'Alt+2', command: 'search.project' },
-    // Палитра команд (Ctrl+Shift+P) и быстрое открытие (Ctrl+Shift+O) здесь не
-    // продублированы: их держат акселераторы меню, а те приходят раньше keydown.
-    // Символ по проекту — привычка из VS Code и PyCharm.
-    { combo: 'Ctrl+T', command: 'navigate.symbol' },
-    { combo: 'Ctrl+,', command: 'settings.open' },
-    { combo: 'Ctrl+Shift+G', command: 'view.showChanges' },
-    { combo: 'Ctrl+`', command: 'view.showTerminal' },
-    { combo: 'Ctrl+Alt+E', command: 'ai.openInEditor' },
-    // Запуск — как в PyCharm (Shift+F10) и VS Code (Ctrl+F5): обе привычки живут рядом.
-    { combo: 'Ctrl+F5', command: 'run.file' },
-    { combo: 'Shift+F10', command: 'run.choose' },
-    // Тесты — рядом с запуском: Ctrl+Shift+F5, как принято в IDE.
-    { combo: 'Ctrl+Shift+F5', command: 'run.tests' },
-    // Форматирование — как в VS Code и PyCharm: Shift+Alt+F. Инструмент выбирается
-    // по языку: у Python это ruff/black окружения, у JS/TS — prettier/biome проекта.
-    { combo: 'Shift+Alt+F', command: 'format.document' },
-    // Отладка — привычные из VS Code: F5 пуск/продолжить, Shift+F5 стоп,
-    // F9 точка останова, F10/F11 шаги.
-    { combo: 'F5', command: 'debug.continue' },
-    { combo: 'Shift+F5', command: 'debug.stop' },
-    { combo: 'F9', command: 'debug.toggleBreakpoint' },
-    { combo: 'F10', command: 'debug.stepOver' },
-    { combo: 'F11', command: 'debug.stepInto' },
-    { combo: 'Shift+F11', command: 'debug.stepOut' },
-    // Меню — как в приложениях KDE: Alt+F10 открывает его с клавиатуры.
-    { combo: 'Alt+F10', command: 'app.showMenu' },
-  ]).attach(window);
+  new KeybindingService(commands, DEFAULT_KEYBINDINGS, () => settings.keybindings.overrides).attach(window);
 
   // Проект мог быть открыт ещё в стартовом окне: main помнит корень, и окно IDE
   // забирает его себе, чтобы не спрашивать папку второй раз. Делаем это после
@@ -3188,6 +3908,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
  * Python сюда не попадает: у него отдельный виджет окружения с попапом — вторая
  * строчка про интерпретатор только повторяла бы его теми же словами.
  */
+/**
+ * Конец текста в понятиях «строка и столбец» (оба с единицы) — для диапазона запросов,
+ * которым серверу нужен весь документ (подсказки-вставки). Строк n, столбец — за
+ * последним знаком последней строки.
+ */
+function endOfText(text: string): { line: number; column: number } {
+  const lines = text.split('\n');
+  return { line: lines.length, column: (lines[lines.length - 1]?.length ?? 0) + 1 };
+}
+
 function toolLabel(language: string | null, project: ProjectTools): string | null {
   if (!language || !project.root) return null;
   if (language === 'python') return null;

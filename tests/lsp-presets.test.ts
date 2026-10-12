@@ -157,13 +157,24 @@ describe('mergeLspServers', () => {
 });
 
 describe('lspLanguagesForKind', () => {
-  it('Python-проекту — только python', () => {
-    expect(lspLanguagesForKind('python')).toEqual(['python']);
+  // Общие языки (JSON, YAML, CSS, HTML, Markdown) показываем в проекте любого вида:
+  // конфиги и разметка есть везде, а серверы для них едут с IDE. Язык самого проекта
+  // идёт вдобавок к ним.
+  it('Python-проекту — python и общие языки', () => {
+    const languages = lspLanguagesForKind('python')!;
+    expect(languages).toContain('python');
+    expect(languages).toContain('json');
+    expect(languages).not.toContain('typescript');
   });
 
-  it('Node и Deno — js/ts', () => {
-    expect(lspLanguagesForKind('node')).toEqual(['typescript', 'javascript']);
-    expect(lspLanguagesForKind('deno')).toEqual(['typescript', 'javascript']);
+  it('Node и Deno — js/ts и общие языки', () => {
+    for (const kind of ['node', 'deno']) {
+      const languages = lspLanguagesForKind(kind)!;
+      expect(languages).toContain('typescript');
+      expect(languages).toContain('javascript');
+      expect(languages).toContain('json');
+      expect(languages).not.toContain('python');
+    }
   });
 
   it('неизвестный вид не фильтруется', () => {

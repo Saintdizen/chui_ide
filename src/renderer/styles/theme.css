@@ -314,6 +314,10 @@
   /* Покрытие: строки, не исполненные тестами. Красноватый и приглушённый, чтобы
      не спутать с подсветкой останова (синей) и не мешать чтению кода. */
   --coverage_missing_background: rgba(255, 66, 69, 0.16);
+
+  /* Покрытие ветвей: строка исполнена, но не все ветви условия пройдены. Жёлтый —
+     тише красного: код работает, не хватает лишь одной ветви в тестах. */
+  --coverage_partial_background: rgba(210, 153, 34, 0.14);
 }
 
 @media (prefers-color-scheme: light) {
@@ -426,6 +430,7 @@
     --run_accent: #2f7d32;
     --debug_line_background: rgba(0, 136, 255, 0.16);
     --coverage_missing_background: rgba(255, 56, 60, 0.14);
+    --coverage_partial_background: rgba(180, 130, 20, 0.14);
     --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 32%, transparent);
   }
 }

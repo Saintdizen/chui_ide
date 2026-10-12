@@ -1,6 +1,7 @@
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
 import type { OpenEditors } from '../core/open-editors';
+import { showContextMenu } from './context-menu';
 import { basename, clear, h, svgIcon } from './dom';
 
 /**
@@ -45,18 +46,27 @@ export function createTabs(deps: TabsDeps): Tabs {
     // Пока активна вкладка-спутник, ни один файл не выглядит открытым.
     const active = auxActive ? null : (deps.openEditors.active?.path ?? null);
 
-    for (const path of deps.openEditors.paths) {
+    // Закреплённые — левее прочих: их место не «съедает» предпросмотр, и так видно,
+    // что они не уедут. Порядок внутри группы прежний (сортировка устойчива).
+    const paths = [...deps.openEditors.paths].sort(
+      (a, b) => Number(deps.openEditors.isPinned(b)) - Number(deps.openEditors.isPinned(a)),
+    );
+    for (const path of paths) {
       const document = deps.documents.get(path);
+      const pinned = deps.openEditors.isPinned(path);
       const classes = ['tab'];
       if (path === active) classes.push('is-active');
       // У изменённой вкладки крестик остаётся видимым: иначе точка правки
       // пряталась бы вместе с кнопкой закрытия.
       if (document?.dirty) classes.push('is-dirty');
+      // Закреплённая — значок булавки вместо листа; предпросмотр — курсивом.
+      if (pinned) classes.push('is-pinned');
+      if (deps.openEditors.isPreview(path)) classes.push('is-preview');
 
       const tab = h(
         'div',
         { class: classes.join(' '), title: path },
-        svgIcon('file', 13),
+        pinned ? svgIcon('pin', 13) : svgIcon('file', 13),
         h('span', { class: 'tab-label' }, basename(path)),
         h(
           'button',
@@ -77,6 +87,32 @@ export function createTabs(deps: TabsDeps): Tabs {
       tab.addEventListener('click', () => void deps.commands.execute('file.activate', path));
       tab.addEventListener('auxclick', (event) => {
         if (event.button === 1) void deps.commands.execute('file.close', path);
+      });
+      // Правый клик — то, чего не сделать перетаскиванием: закрепить вкладку или
+      // закрыть соседей. Само действие — команда: одно и то же из меню и палитры.
+      tab.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        showContextMenu(
+          [
+            {
+              label: pinned ? 'Открепить вкладку' : 'Закрепить вкладку',
+              onSelect: () => void deps.commands.execute('file.togglePin', path),
+            },
+            { separator: true },
+            // Сохранение под другим именем — из меню самой вкладки: файл уже открыт,
+            // искать его команду в палитре незачем.
+            {
+              label: 'Сохранить как…',
+              hint: 'Ctrl+Shift+S',
+              onSelect: () => void deps.commands.execute('file.saveAs', path),
+            },
+            { separator: true },
+            { label: 'Закрыть', hint: 'Ctrl+W', onSelect: () => void deps.commands.execute('file.close', path) },
+            { label: 'Закрыть другие', onSelect: () => void deps.commands.execute('file.closeOthers', path) },
+          ],
+          event.clientX,
+          event.clientY,
+        );
       });
 
       element.appendChild(tab);

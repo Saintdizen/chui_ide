@@ -94,4 +94,24 @@ describe('меню приложения', () => {
     });
     for (const id of Object.values(MENU_TOGGLES)) expect(commands.has(id)).toBe(true);
   });
+
+  // Причина проверки: «Сохранить как…» и «Сохранить всё» однажды оказались на одной
+  // клавише (Ctrl+Shift+S). Два пункта с одним ускорителем — это тот, который молча
+  // не срабатывает или срабатывает не тот.
+  it('у пунктов меню нет двух одинаковых сочетаний', () => {
+    const used = new Map<string, string[]>();
+    walk(APP_MENU, (node) => {
+      if (!node.accelerator) return;
+      used.set(node.accelerator, [...(used.get(node.accelerator) ?? []), node.label ?? '?']);
+    });
+    const clashes = [...used.entries()].filter(([, labels]) => labels.length > 1);
+    expect(clashes).toEqual([]);
+  });
+
+  it('«Сохранить как…» есть в меню и стоит на Ctrl+Shift+S', () => {
+    const items: MenuNode[] = [];
+    walk(APP_MENU, (node) => items.push(node));
+    const saveAs = items.find((node) => node.command === 'file.saveAs');
+    expect(saveAs?.accelerator).toBe('Ctrl+Shift+S');
+  });
 });

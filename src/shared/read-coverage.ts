@@ -1,4 +1,5 @@
 import { parseToolArguments } from './tools';
+import { booleanArg, integerArg } from './tool-args';
 
 /**
  * Учёт уже прочитанных диапазонов файлов в агентном цикле.
@@ -27,14 +28,18 @@ export function coveredRequest(
   if (name !== 'read_file') return undefined;
   const parsed = parseToolArguments(rawArguments);
   if (!parsed.ok) return undefined;
-  // force: явный запрос перечитать — контент мог выпасть из контекста.
-  if (parsed.value.force === true) return undefined;
+  // force: явный запрос перечитать — контент мог выпасть из контекста. Флаг бывает
+  // и строкой «true»: не разобрав его, мы бы отдали «уже прочитано» вместо текста.
+  if (booleanArg(parsed.value.force) === true) return undefined;
   const target = parsed.value.path;
-  const endLine = parsed.value.endLine;
-  if (typeof target !== 'string' || typeof endLine !== 'number' || !Number.isInteger(endLine)) return undefined;
-  const startLine = parsed.value.startLine;
-  const from = typeof startLine === 'number' && Number.isInteger(startLine) ? Math.max(1, startLine) : 1;
-  const to = Math.max(from, endLine);
+  const endLine = integerArg(parsed.value.endLine);
+  if (typeof target !== 'string' || endLine === undefined) return undefined;
+  const from = Math.max(1, integerArg(parsed.value.startLine) ?? 1);
+  // Перевёрнутый диапазон (конец раньше начала) — не наш случай: такому запросу
+  // инструмент ответит своим отказом с объяснением, и подменять его вестью
+  // «уже прочитано» значило бы прятать ошибку в аргументах.
+  if (endLine < from) return undefined;
+  const to = endLine;
   const ranges = reads.get(target);
   if (!ranges || !isCovered(ranges, from, to)) return undefined;
   return { path: target, from, to };

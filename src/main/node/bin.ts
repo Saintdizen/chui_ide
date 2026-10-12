@@ -12,6 +12,18 @@ import path from 'node:path';
  * null — пакета нет, он не установлен или `bin` не назвал такой команды: во всех
  * случаях это «инструмента нет», а не ошибка.
  */
+export async function resolvePackageFile(
+  root: string,
+  packageName: string,
+  relativePath: string,
+): Promise<string | null> {
+  const file = path.resolve(path.join(root, 'node_modules', packageName), relativePath);
+  return fs
+    .stat(file)
+    .then((stat) => (stat.isFile() ? file : null))
+    .catch(() => null);
+}
+
 export async function resolvePackageBin(root: string, packageName: string, binName: string): Promise<string | null> {
   const dir = path.join(root, 'node_modules', packageName);
   const text = await fs.readFile(path.join(dir, 'package.json'), 'utf8').catch(() => null);

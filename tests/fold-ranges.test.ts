@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  enclosingFoldRanges,
   foldStartingAt,
   indentFoldRanges,
   isFoldStart,
@@ -78,6 +79,41 @@ describe('порядок и поиск диапазона', () => {
     expect(foldStartingAt(ranges, 1)).toEqual({ startLine: 1, endLine: 9 });
     expect(foldStartingAt(ranges, 2)).toBeNull();
     expect(isFoldStart(ranges, 3)).toBe(true);
+  });
+});
+
+/**
+ * Цепочка вмещающих блоков — по ней sticky scroll решает, какие заголовки приколоть.
+ * Порядок важен: от внешнего к вложенному — так заголовки и идут сверху вниз.
+ */
+describe('вмещающие блоки (для закреплённых заголовков)', () => {
+  const ranges = mergeFoldRanges([
+    { startLine: 1, endLine: 20 },
+    { startLine: 5, endLine: 15 },
+    { startLine: 8, endLine: 12 },
+  ]);
+
+  it('от внешнего к вложенному', () => {
+    expect(enclosingFoldRanges(ranges, 10)).toEqual([
+      { startLine: 1, endLine: 20 },
+      { startLine: 5, endLine: 15 },
+      { startLine: 8, endLine: 12 },
+    ]);
+  });
+
+  it('блок, начинающийся на этой строке, не прикалывается (его заголовок и так виден)', () => {
+    expect(enclosingFoldRanges(ranges, 5)).toEqual([{ startLine: 1, endLine: 20 }]);
+  });
+
+  it('вне блоков — пусто; на последней строке блока — только он и внешние', () => {
+    expect(enclosingFoldRanges(ranges, 25)).toEqual([]);
+    expect(enclosingFoldRanges(ranges, 12)).toEqual([
+      { startLine: 1, endLine: 20 },
+      { startLine: 5, endLine: 15 },
+      { startLine: 8, endLine: 12 },
+    ]);
+    // Строка после конца вложенного, но внутри внешнего.
+    expect(enclosingFoldRanges(ranges, 16)).toEqual([{ startLine: 1, endLine: 20 }]);
   });
 });
 

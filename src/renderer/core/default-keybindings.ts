@@ -1,0 +1,44 @@
+import type { Keybinding } from './keybindings';
+
+/**
+ * Сочетания клавиш, которые перехватывает САМ renderer.
+ *
+ * Основные сочетания идут через акселераторы меню Electron (оно шлёт команды push-
+ * событием) — их здесь нет: меню уже даёт им клавиши, и повтор сбивал бы. Здесь
+ * только то, чего в меню нет. Список вынесен из `app.ts` отдельным модулем, потому
+ * что его читают двое: служба перехвата (`KeybindingService`) и редактор сочетаний в
+ * настройках — оба должны видеть один и тот же набор и одни и те же значения.
+ *
+ * Сочетание из этого списка человек может изменить в настройках; изменённое
+ * накладывается сверху (`KeybindingService.effective`).
+ */
+export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
+  { combo: 'Alt+1', command: 'view.showExplorer' },
+  { combo: 'Alt+2', command: 'search.project' },
+  // Символ по проекту — привычка из VS Code и PyCharm.
+  { combo: 'Ctrl+T', command: 'navigate.symbol' },
+  { combo: 'Ctrl+,', command: 'settings.open' },
+  { combo: 'Ctrl+Shift+G', command: 'view.showChanges' },
+  { combo: 'Ctrl+`', command: 'view.showTerminal' },
+  { combo: 'Ctrl+Alt+E', command: 'ai.openInEditor' },
+  // Запуск — как в PyCharm (Shift+F10) и VS Code (Ctrl+F5): обе привычки живут рядом.
+  { combo: 'Ctrl+F5', command: 'run.file' },
+  { combo: 'Shift+F10', command: 'run.choose' },
+  // Тесты — рядом с запуском: Ctrl+Shift+F5, как принято в IDE.
+  { combo: 'Ctrl+Shift+F5', command: 'run.tests' },
+  // Форматирование — как в VS Code и PyCharm: Shift+Alt+F. Инструмент выбирается
+  // по языку: у Python это ruff/black окружения, у JS/TS — prettier/biome проекта.
+  { combo: 'Shift+Alt+F', command: 'format.document' },
+  // Упорядочить импорты — как в VS Code: Shift+Alt+O.
+  { combo: 'Shift+Alt+O', command: 'editor.organizeImports' },
+  // Отладка — привычные из VS Code: F5 пуск/продолжить, Shift+F5 стоп,
+  // F9 точка останова, F10/F11 шаги.
+  { combo: 'F5', command: 'debug.continue' },
+  { combo: 'Shift+F5', command: 'debug.stop' },
+  { combo: 'F9', command: 'debug.toggleBreakpoint' },
+  { combo: 'F10', command: 'debug.stepOver' },
+  { combo: 'F11', command: 'debug.stepInto' },
+  { combo: 'Shift+F11', command: 'debug.stepOut' },
+  // Меню — как в приложениях KDE: Alt+F10 открывает его с клавиатуры.
+  { combo: 'Alt+F10', command: 'app.showMenu' },
+];

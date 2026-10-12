@@ -91,6 +91,12 @@ export class ImportChecker {
 
     const document = this.documents.get(path);
     if (!document) return;
+    // Файл только для чтения (большой) не разбираем: подчёркивать в нём нечего, а разбор
+    // мегабайтов текста — ровно та работа, ради которой его и открыли без правки.
+    if (document.readOnly) {
+      this.editors.setExternalMarkers(path, OWNER, []);
+      return;
+    }
 
     const rule = ruleFor(document.languageId);
     if (!rule) {
