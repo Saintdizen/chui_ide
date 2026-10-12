@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { removeTemp } from './temp';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -15,7 +16,7 @@ import type { RebaseTodoItem } from '../src/shared/git-rebase';
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await removeTemp(roots);
 });
 
 function git(cwd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {

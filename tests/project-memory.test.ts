@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { removeTemp } from './temp';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +17,7 @@ import type { WorkspaceService } from '../src/main/workspace/workspace';
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await removeTemp(roots);
 });
 
 async function tempDir(): Promise<string> {

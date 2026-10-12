@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { removeTemp } from './temp';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,7 +17,7 @@ import { formatNode } from '../src/main/node/format';
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await removeTemp(roots);
 });
 
 /** Заглушка инструмента: печатает свои аргументы и текст из stdin в верхнем регистре. */

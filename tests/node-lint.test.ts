@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { removeTemp } from './temp';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,7 +18,7 @@ import { lintProject } from '../src/main/project/lint';
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await removeTemp(roots);
 });
 
 /** Заглушка biome: печатает свой JSON-ответ и ничего больше не делает. */

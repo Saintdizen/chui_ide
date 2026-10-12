@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { removeTemp } from './temp';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -14,7 +15,7 @@ import { testCommand } from '../src/main/project/tests';
 const roots: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await removeTemp(roots);
 });
 
 async function makeTemp(): Promise<string> {

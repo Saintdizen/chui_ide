@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
+import { removeTemp } from './temp';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -17,11 +18,7 @@ import { lineChanges } from '../src/shared/git-line-changes';
 const roots: string[] = [];
 
 afterEach(async () => {
-  // Windows держит удалённый каталог занятым (индексатор, антивирус): `EBUSY` при
-  // rmdir — обычное дело, и повтор спасает. Без этого падала бы уборка, а не тест.
-  await Promise.all(
-    roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })),
-  );
+  await removeTemp(roots);
 });
 
 /** Запустить git и дождаться выхода. Ошибку возвращаем, а не бросаем: так виднее тест. */
@@ -258,7 +255,7 @@ describe('GitService: удалённые и сеть', () => {
     expect((await git(work, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(headBefore);
     const after = await service.bisectState();
     expect(after.active).toBe(false);
-  }, 30_000);
+  });
 
   it('bisectState() без поиска говорит, что он не идёт', async () => {
     if (!gitAvailable) return;
@@ -342,7 +339,7 @@ describe('GitService: удалённые и сеть', () => {
     const restored = await service.submodules();
     expect(restored[0]?.state).toBe('ok');
     await expect(fs.access(path.join(work, 'mods', 'inner', 'a.txt'))).resolves.toBeUndefined();
-  }, 30_000);
+  });
 
   it('lfsInfo(): шаблоны читаются всегда, а без git-lfs честно говорит «недоступен»', async () => {
     if (!gitAvailable) return;
