@@ -42,14 +42,20 @@ export function parseBisectProgress(text: string): { remaining: number | null; s
   return { remaining: Number(match[1]), steps: Number(match[2]) };
 }
 
-/** «abc1234 is the first bad commit» — поиск завершился и назвал виновника. */
+/**
+ * «abc1234 is the first bad commit» — поиск завершился и назвал виновника.
+ *
+ * Сперва смотрим журнал bisect: в нём хеш полный и всегда в скобках. Строка
+ * формулируется по-разному в зависимости от версии git: до 2.5x — `first bad commit`,
+ * с 2.5x термин печатается в кавычках (`first 'bad' commit`); сам термин к тому же
+ * можно перенастроить (`git bisect start --term-old/--term-new`). Поэтому между
+ * «first» и «commit» допускаем любой текст, а не ровно слово «bad»: иначе на новой
+ * версии git поиск «не заканчивается» и виновник теряется.
+ */
 export function parseBisectFirstBad(text: string): string | null {
-  // Сперва журнал bisect: в нём хеш полный и всегда в скобках. Сообщение
-  // «X is the first bad commit» git может отправить в другой поток или сократить
-  // хеш — тогда в разбор оно не попадёт (и виновник потеряется).
-  const logged = /#\s*first bad commit:\s*\[([0-9a-f]{7,40})\]/i.exec(text);
+  const logged = /#\s*first[^:]*commit:\s*\[([0-9a-f]{7,40})\]/i.exec(text);
   if (logged) return logged[1]!;
-  const match = /([0-9a-f]{7,40})\s+is the first bad commit/i.exec(text);
+  const match = /([0-9a-f]{7,40})\s+is\s+the\s+first[^\n]*?commit/i.exec(text);
   return match ? match[1]! : null;
 }
 

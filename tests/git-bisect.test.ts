@@ -43,6 +43,20 @@ describe('parseBisectFirstBad', () => {
     const text = '# first bad commit: [4f2a1b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a] bad';
     expect(parseBisectFirstBad(text)).toBe('4f2a1b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a');
   });
+
+  it('термин в кавычках (git 2.5x) тоже понимает', () => {
+    // С 2.5x git печатает термин в кавычках: было «first bad commit», стало
+    // «first 'bad' commit». На этом ломались и разбор, и тест: виновник не находился.
+    expect(parseBisectFirstBad("0982da7 is the first 'bad' commit")).toBe('0982da7');
+    expect(parseBisectFirstBad("# first 'bad' commit: [0982da733fe79011fb4eb55d9d4903485f27a2e0] after")).toBe(
+      '0982da733fe79011fb4eb55d9d4903485f27a2e0',
+    );
+  });
+
+  it('свой термин поиска тоже понимает', () => {
+    // `git bisect start --term-new=сломано --term-old=цело` меняет слова в строке.
+    expect(parseBisectFirstBad("abc1234 is the first 'сломано' commit")).toBe('abc1234');
+  });
 });
 
 describe('parseBisectState', () => {
