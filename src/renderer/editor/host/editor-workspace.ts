@@ -455,8 +455,17 @@ export class EditorWorkspace {
       outdent: () => this.pane.outdent(),
       // Правки строк: те же действия, что по клавишам, — теперь и в палитре.
       toggleComment: () => this.pane.toggleComment(),
+      toggleBlockComment: () => this.pane.toggleBlockComment(),
       moveLines: (direction) => this.pane.moveLines(direction),
       copyLinesDown: () => this.pane.copyLinesDown(),
+      sortLines: (options) => this.pane.sortLines(options),
+      joinLines: () => this.pane.joinLines(),
+      deleteLines: () => this.pane.deleteLines(),
+      duplicateSelection: () => this.pane.duplicateSelection(),
+      insertLineBelow: () => this.pane.insertLineBelow(),
+      insertLineAbove: () => this.pane.insertLineAbove(),
+      transpose: () => this.pane.transpose(),
+      convertCase: (style) => this.pane.convertCase(style),
       // Свёртка — состояние самой панели: она знает и диапазоны, и что сложено.
       fold: () => this.pane.foldAtCursor(),
       unfold: () => this.pane.unfoldAtCursor(),

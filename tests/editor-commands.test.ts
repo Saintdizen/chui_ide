@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { CASE_LABEL } from '../src/renderer/editor/input/case-convert';
 import {
   availableCommands,
   EDITOR_COMMANDS,
@@ -20,8 +21,18 @@ function fakeContext(extra: Partial<EditorCommandContext> = {}): EditorCommandCo
     indent: () => calls.push('indent'),
     outdent: () => calls.push('outdent'),
     toggleComment: () => calls.push('toggleComment'),
+    toggleBlockComment: () => calls.push('toggleBlockComment'),
     moveLines: (direction) => calls.push(`moveLines:${direction}`),
     copyLinesDown: () => calls.push('copyLinesDown'),
+    sortLines: (options) =>
+      calls.push(`sortLines:${options?.reverse ? 'reverse' : options?.unique ? 'unique' : 'asc'}`),
+    joinLines: () => calls.push('joinLines'),
+    deleteLines: () => calls.push('deleteLines'),
+    duplicateSelection: () => calls.push('duplicateSelection'),
+    insertLineBelow: () => calls.push('insertLineBelow'),
+    insertLineAbove: () => calls.push('insertLineAbove'),
+    transpose: () => calls.push('transpose'),
+    convertCase: (style) => calls.push(`convertCase:${style}`),
     ...extra,
   };
   return context;
@@ -50,6 +61,12 @@ describe('каталог команд редактора', () => {
   it('сочетание клавиш отдаётся для справки', () => {
     expect(keybindingForCommand('editor.find')).toBe('Ctrl+F');
     expect(keybindingForCommand('editor.нетакой')).toBeNull();
+  });
+
+  it('на каждый стиль регистра есть команда', () => {
+    for (const style of Object.keys(CASE_LABEL)) {
+      expect(findEditorCommand(`editor.case.${style}`)).toBeDefined();
+    }
   });
 });
 
@@ -108,6 +125,18 @@ describe('выполнение команд', () => {
       ['editor.moveLineUp', 'moveLines:-1'],
       ['editor.moveLineDown', 'moveLines:1'],
       ['editor.copyLineDown', 'copyLinesDown'],
+      ['editor.toggleBlockComment', 'toggleBlockComment'],
+      ['editor.deleteLine', 'deleteLines'],
+      ['editor.joinLines', 'joinLines'],
+      ['editor.sortLines', 'sortLines:asc'],
+      ['editor.sortLinesReverse', 'sortLines:reverse'],
+      ['editor.sortLinesUnique', 'sortLines:unique'],
+      ['editor.duplicateSelection', 'duplicateSelection'],
+      ['editor.insertLineBelow', 'insertLineBelow'],
+      ['editor.insertLineAbove', 'insertLineAbove'],
+      ['editor.transpose', 'transpose'],
+      ['editor.case.camel', 'convertCase:camel'],
+      ['editor.case.snake', 'convertCase:snake'],
     ];
     for (const [id, expected] of cases) {
       const context = fakeContext();

@@ -40,7 +40,8 @@ import { wordAt } from '../core/graphemes';
 import type { Scheme } from '../highlight/style';
 import { type EditorChange, EditorController } from '../input/editor-controller';
 import { type CommandName, EditorInputBinding, type KeyInterceptor } from '../input/editor-input';
-import { lineCommentFor } from '../input/comments';
+import type { CaseStyle } from '../input/case-convert';
+import { blockCommentFor, lineCommentFor } from '../input/comments';
 import { InlineCompletions } from '../input/inline-completions';
 import { EditorView } from '../view/editor-view';
 import { caret, isEmpty, type Selection } from '../view/selection';
@@ -637,6 +638,52 @@ export class EditorHost {
   /** Shift+Alt+↓ — скопировать строку или строки выделения ниже. */
   copyLinesDown(): void {
     this.controller.copyLinesDown();
+  }
+
+  /** Shift+Alt+A — обернуть выделение блочным комментарием языка (или снять его). */
+  toggleBlockComment(): void {
+    const marks = blockCommentFor(this.languageId);
+    if (marks) this.controller.toggleBlockComment(marks[0], marks[1]);
+  }
+
+  /** Сортировать строки выделения: `reverse` — по убыванию, `unique` — без повторов. */
+  sortLines(options: { reverse?: boolean; unique?: boolean } = {}): void {
+    this.controller.sortLines(options);
+  }
+
+  /** Соединить строки выделения в одну. */
+  joinLines(): void {
+    this.controller.joinLines();
+  }
+
+  /** Ctrl+Shift+K — удалить строки выделения целиком. */
+  deleteLines(): void {
+    this.controller.deleteLines();
+  }
+
+  /** Дублировать выделение (пусто — строку под кареткой). */
+  duplicateSelection(): void {
+    this.controller.duplicateSelection();
+  }
+
+  /** Ctrl+Enter — вставить пустую строку ниже текущей. */
+  insertLineBelow(): void {
+    this.controller.insertLineBelow();
+  }
+
+  /** Ctrl+Shift+Enter — вставить пустую строку выше текущей. */
+  insertLineAbove(): void {
+    this.controller.insertLineAbove();
+  }
+
+  /** Переставить два знака вокруг каретки (по графемам). */
+  transpose(): void {
+    this.controller.transpose();
+  }
+
+  /** Сменить стиль имени у выделения или слова под кареткой. */
+  convertCase(style: CaseStyle): void {
+    this.controller.convertCase(style);
   }
 
   /** Открыть панель поиска или поиска с заменой. */

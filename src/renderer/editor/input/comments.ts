@@ -47,9 +47,46 @@ const LINE_COMMENT: Readonly<Record<string, string>> = {
   // Markdown, HTML и XML комментируются только блоком — построчного знака у них нет.
 };
 
+/**
+ * Знаки БЛОЧНОГО комментария по языкам: `[открывающий, закрывающий]`. Нужны для
+ * `Shift+Alt+A` — язык без записи здесь блочно не комментируется (у него такого
+ * комментария нет вовсе).
+ */
+const BLOCK_COMMENT: Readonly<Record<string, readonly [string, string]>> = {
+  typescript: ['/*', '*/'],
+  javascript: ['/*', '*/'],
+  json: ['/*', '*/'],
+  java: ['/*', '*/'],
+  kotlin: ['/*', '*/'],
+  swift: ['/*', '*/'],
+  c: ['/*', '*/'],
+  cpp: ['/*', '*/'],
+  csharp: ['/*', '*/'],
+  go: ['/*', '*/'],
+  rust: ['/*', '*/'],
+  dart: ['/*', '*/'],
+  scala: ['/*', '*/'],
+  groovy: ['/*', '*/'],
+  php: ['/*', '*/'],
+  css: ['/*', '*/'],
+  scss: ['/*', '*/'],
+  less: ['/*', '*/'],
+  sql: ['/*', '*/'],
+  python: ['"""', '"""'],
+  html: ['<!--', '-->'],
+  xml: ['<!--', '-->'],
+  markdown: ['<!--', '-->'],
+  lua: ['--[[', ']]'],
+};
+
 /** Знак строчного комментария для языка (`null` — у языка его нет). */
 export function lineCommentFor(languageId: string | null | undefined): string | null {
   return languageId ? (LINE_COMMENT[languageId] ?? null) : null;
+}
+
+/** Знаки блочного комментария для языка (`null` — у языка его нет). */
+export function blockCommentFor(languageId: string | null | undefined): readonly [string, string] | null {
+  return languageId ? (BLOCK_COMMENT[languageId] ?? null) : null;
 }
 
 /** Что даёт переключение: правки (в порядке применения) и новое выделение. */
@@ -105,4 +142,48 @@ export function toggleLineComment(buffer: TextBuffer, selection: Selection, toke
 
   changes.sort((a, b) => b.start - a.start);
   return { changes, selection };
+}
+
+/**
+ * Переключить БЛОЧНЫЙ комментарий вокруг выделения (Shift+Alt+A). Пустое выделение —
+ * берём строку целиком.
+ *
+ * Правило простое: если выделенное и так в обёртке `open…close` — снимаем её, иначе
+ * оборачиваем. В отличие от строчного, здесь каждое действие — ПАРА вставок, и
+ * смещения считаем от исходного текста, а правки отдаём в порядке применения
+ * (с конца), чтобы закрывающая вставка не сдвинула открывающую.
+ */
+export function toggleBlockComment(
+  buffer: TextBuffer,
+  selection: Selection,
+  open: string,
+  close: string,
+): CommentToggle | null {
+  let start = selectionStart(selection);
+  let end = selectionEnd(selection);
+  if (start === end) {
+    const line = buffer.lineAt(start);
+    start = buffer.lineStart(line);
+    end = start + buffer.lineText(line).length;
+  }
+
+  const selected = buffer.getText(start, end);
+  const wrapped =
+    selected.length >= open.length + close.length && selected.startsWith(open) && selected.endsWith(close);
+
+  if (wrapped) {
+    const inner = selected.slice(open.length, selected.length - close.length);
+    // Снимаем: сначала закрывающий (правее), потом открывающий — иначе смещение второго съедет.
+    const changes: TextChange[] = [
+      { start: end - close.length, removed: close, inserted: '' },
+      { start, removed: open, inserted: '' },
+    ];
+    return { changes, selection: { anchor: start, active: start + inner.length } };
+  }
+
+  const changes: TextChange[] = [
+    { start: end, removed: '', inserted: close },
+    { start, removed: '', inserted: open },
+  ];
+  return { changes, selection: { anchor: start, active: end + open.length + close.length } };
 }

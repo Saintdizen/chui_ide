@@ -73,6 +73,13 @@ export type EditCommand =
   | 'moveLineUp'
   | 'moveLineDown'
   | 'copyLineDown'
+  /** Shift+Alt+A — блочный комментарий; Ctrl+Shift+K — удалить строку целиком. */
+  | 'toggleBlockComment'
+  | 'deleteLine'
+  /** Ctrl+Shift+J — соединить строки; Ctrl+Enter и Ctrl+Shift+Enter — вставить строку ниже/выше. */
+  | 'joinLines'
+  | 'insertLineBelow'
+  | 'insertLineAbove'
   /** F1 — палитра команд (у Monaco её открывало его же действие). */
   | 'palette'
   /** Ctrl+. — быстрые исправления под курсором (список показывает приложение). */
@@ -102,7 +109,10 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
 
   // Разделители строк: разные раскладки и системы дают разные имена.
   if (key === 'Enter' || key === '\r' || key === '\n') {
-    return chord.alt ? null : { kind: 'edit', edit: 'newline' };
+    if (chord.alt) return null;
+    // Ctrl+Enter вставляет строку НИЖЕ, Ctrl+Shift+Enter — ВЫШЕ. Без Ctrl — обычный перевод.
+    if (control) return { kind: 'edit', edit: extend ? 'insertLineAbove' : 'insertLineBelow' };
+    return { kind: 'edit', edit: 'newline' };
   }
   if (key === 'Backspace') {
     return { kind: 'edit', edit: control ? 'deleteWordBackward' : 'backspace' };
@@ -133,6 +143,8 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   if (chord.alt) {
     if (key === 'ArrowUp') return { kind: 'edit', edit: 'moveLineUp' };
     if (key === 'ArrowDown') return { kind: 'edit', edit: extend ? 'copyLineDown' : 'moveLineDown' };
+    // Shift+Alt+A — блочный комментарий: знак пары берётся по языку на стороне ввода.
+    if (extend && key.toLowerCase() === 'a') return { kind: 'edit', edit: 'toggleBlockComment' };
   }
   if (key === 'ArrowUp') return motion('up', extend);
   if (key === 'ArrowDown') return motion('down', extend);
@@ -154,6 +166,9 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     // Ctrl+D — следующее вхождение слова, Ctrl+Shift+L — все вхождения сразу.
     if (lower === 'd') return { kind: 'edit', edit: 'selectNextOccurrence' };
     if (lower === 'l' && extend) return { kind: 'edit', edit: 'selectAllOccurrences' };
+    // Ctrl+Shift+K — удалить строку; Ctrl+Shift+J — соединить строки в одну.
+    if (lower === 'k' && extend) return { kind: 'edit', edit: 'deleteLine' };
+    if (lower === 'j' && extend) return { kind: 'edit', edit: 'joinLines' };
     // Ctrl+/ — комментарий строки: буквенного имени у клавиши нет, проверяем сам знак.
     if (key === '/') return { kind: 'edit', edit: 'toggleComment' };
     // Ctrl+. — быстрые исправления: как в других редакторах, на той же клавише.

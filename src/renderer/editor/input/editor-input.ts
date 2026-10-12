@@ -26,7 +26,7 @@
  */
 
 import { wordAt } from '../core/graphemes';
-import { lineCommentFor } from './comments';
+import { blockCommentFor, lineCommentFor } from './comments';
 import { resolveKey, type EditCommand, type Motion } from './keymap';
 import type { EditorChange, EditorController } from './editor-controller';
 
@@ -419,6 +419,25 @@ export class EditorInputBinding {
         if (token) this.controller.toggleComment(token);
         break;
       }
+      // Shift+Alt+A — блочный комментарий: пара знаков тоже приходит от языка.
+      case 'toggleBlockComment': {
+        const marks = blockCommentFor(this.language?.() ?? null);
+        if (marks) this.controller.toggleBlockComment(marks[0], marks[1]);
+        break;
+      }
+      // Строки: удалить (Ctrl+Shift+K), соединить (Ctrl+Shift+J) или вставить рядом.
+      case 'deleteLine':
+        this.controller.deleteLines();
+        break;
+      case 'joinLines':
+        this.controller.joinLines();
+        break;
+      case 'insertLineBelow':
+        this.controller.insertLineBelow();
+        break;
+      case 'insertLineAbove':
+        this.controller.insertLineAbove();
+        break;
       // Alt+↑/↓ — перенос строки; Shift+Alt+↓ — её копия ниже.
       case 'moveLineUp':
         this.controller.moveLines(-1);

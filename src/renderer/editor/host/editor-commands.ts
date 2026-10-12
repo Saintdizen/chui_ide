@@ -23,6 +23,8 @@
  * контекст. Поэтому его видно в тестах без окна.
  */
 
+import { CASE_LABEL, type CaseStyle } from '../input/case-convert';
+
 /**
  * Чем распоряжается команда. Синхронные действия есть у любого редактора; необязательные
  * (LSP и форматирование) появляются, только если хозяин их умеет.
@@ -39,6 +41,24 @@ export interface EditorCommandContext {
   outdent(): void;
   /** Закомментировать или расскомментировать строки выделения (знак — по языку файла). */
   toggleComment(): void;
+  /** Обернуть выделение блочным комментарием языка (или снять его). */
+  toggleBlockComment(): void;
+  /** Сортировать строки выделения: `reverse` — по убыванию, `unique` — без повторов. */
+  sortLines(options?: { reverse?: boolean; unique?: boolean }): void;
+  /** Соединить строки выделения в одну. */
+  joinLines(): void;
+  /** Удалить строки выделения целиком. */
+  deleteLines(): void;
+  /** Дублировать выделение (пусто — строку под кареткой). */
+  duplicateSelection(): void;
+  /** Вставить строку ниже текущей. */
+  insertLineBelow(): void;
+  /** Вставить строку выше текущей. */
+  insertLineAbove(): void;
+  /** Переставить два знака вокруг каретки. */
+  transpose(): void;
+  /** Сменить стиль имени (camelCase, snake_case, …) у выделения или слова под кареткой. */
+  convertCase(style: CaseStyle): void;
   /** Перенести строку или строки выделения выше (-1) или ниже (1). */
   moveLines(direction: -1 | 1): void;
   /** Скопировать строку или строки выделения ниже. */
@@ -99,6 +119,20 @@ export interface EditorCommand {
 
 /** Общая категория — по ней команды редактора стоят в палитре одной группой. */
 const CATEGORY = 'Редактор';
+/** Категория для смены регистра: пунктов много (по стилю на каждый). */
+const CASE_CATEGORY = 'Регистр имён';
+
+/**
+ * Команды смены регистра — по одной на стиль (`CASE_LABEL`). Генерируем из таблицы,
+ * а не пишем руками: добавили стиль в `case-convert.ts` — пункт в палитре появился сам.
+ */
+const CASE_COMMANDS: readonly EditorCommand[] = (Object.keys(CASE_LABEL) as CaseStyle[]).map((style) => ({
+  id: `editor.case.${style}`,
+  label: `Сменить регистр: ${CASE_LABEL[style]}`,
+  alias: `convert case ${style}`,
+  category: CASE_CATEGORY,
+  run: (context) => context.convertCase(style),
+}));
 
 /**
  * Набор команд редактора. Он и есть ответ на «что умеет свой редактор»: список короткий,
@@ -201,6 +235,82 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: CATEGORY,
     run: (context) => context.copyLinesDown(),
   },
+  {
+    id: 'editor.toggleBlockComment',
+    label: 'Закомментировать блоком',
+    alias: 'toggleBlockComment',
+    keybinding: 'Shift+Alt+A',
+    category: CATEGORY,
+    run: (context) => context.toggleBlockComment(),
+  },
+  {
+    id: 'editor.deleteLine',
+    label: 'Удалить строку',
+    alias: 'deleteLines',
+    keybinding: 'Ctrl+Shift+K',
+    category: CATEGORY,
+    run: (context) => context.deleteLines(),
+  },
+  {
+    id: 'editor.joinLines',
+    label: 'Соединить строки',
+    alias: 'joinLines',
+    keybinding: 'Ctrl+Shift+J',
+    category: CATEGORY,
+    run: (context) => context.joinLines(),
+  },
+  {
+    id: 'editor.sortLines',
+    label: 'Сортировать строки',
+    alias: 'sort lines',
+    category: CATEGORY,
+    run: (context) => context.sortLines(),
+  },
+  {
+    id: 'editor.sortLinesReverse',
+    label: 'Сортировать строки по убыванию',
+    alias: 'sort lines descending',
+    category: CATEGORY,
+    run: (context) => context.sortLines({ reverse: true }),
+  },
+  {
+    id: 'editor.sortLinesUnique',
+    label: 'Сортировать строки без повторов',
+    alias: 'sort lines unique',
+    category: CATEGORY,
+    run: (context) => context.sortLines({ unique: true }),
+  },
+  {
+    id: 'editor.duplicateSelection',
+    label: 'Дублировать выделение',
+    alias: 'duplicateSelection',
+    category: CATEGORY,
+    run: (context) => context.duplicateSelection(),
+  },
+  {
+    id: 'editor.insertLineBelow',
+    label: 'Вставить строку ниже',
+    alias: 'insertLineBelow',
+    keybinding: 'Ctrl+Enter',
+    category: CATEGORY,
+    run: (context) => context.insertLineBelow(),
+  },
+  {
+    id: 'editor.insertLineAbove',
+    label: 'Вставить строку выше',
+    alias: 'insertLineAbove',
+    keybinding: 'Ctrl+Shift+Enter',
+    category: CATEGORY,
+    run: (context) => context.insertLineAbove(),
+  },
+  {
+    id: 'editor.transpose',
+    label: 'Переставить знаки',
+    alias: 'transpose',
+    category: CATEGORY,
+    run: (context) => context.transpose(),
+  },
+  ...CASE_COMMANDS,
   {
     id: 'editor.goToDefinition',
     label: 'Перейти к определению',

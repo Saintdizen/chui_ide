@@ -43,7 +43,19 @@ import {
   skipClosing,
   type EditResult,
 } from './editing';
-import { toggleLineComment } from './comments';
+import { toggleBlockComment, toggleLineComment } from './comments';
+import type { CaseStyle } from './case-convert';
+import {
+  convertSelectionCase,
+  deleteLines,
+  duplicateSelection,
+  insertLineAbove,
+  insertLineBelow,
+  joinLines,
+  sortLines,
+  transposeAtCaret,
+  type SortOptions,
+} from './line-ops';
 import {
   columnAt,
   moveDocEnd,
@@ -483,6 +495,52 @@ export class EditorController {
   /** Shift+Alt+↓ — скопировать строку (или строки выделения) ниже. */
   copyLinesDown(): void {
     this.run(copyLinesDown(this.buffer, this.selection), 'other');
+  }
+
+  /** Shift+Alt+A — переключить блочный комментарий вокруг выделения (пусто — строки). */
+  toggleBlockComment(open: string, close: string): void {
+    const result = toggleBlockComment(this.buffer, this.selection, open, close);
+    if (result) this.applyEdits(result.changes, result.selection);
+  }
+
+  /** Сортировать строки выделения (по возрастанию; параметры — регистр, порядок, повторы). */
+  sortLines(options: SortOptions = {}): void {
+    this.run(sortLines(this.buffer, this.selection, options), 'other');
+  }
+
+  /** Соединить строки выделения в одну. */
+  joinLines(): void {
+    this.run(joinLines(this.buffer, this.selection), 'other');
+  }
+
+  /** Ctrl+Shift+K — удалить строки выделения целиком (вместе с переводом). */
+  deleteLines(): void {
+    this.run(deleteLines(this.buffer, this.selection), 'delete');
+  }
+
+  /** Дублировать выделение, а если пусто — строку под кареткой. */
+  duplicateSelection(): void {
+    this.run(duplicateSelection(this.buffer, this.selection), 'other');
+  }
+
+  /** Ctrl+Enter — пустая строка ниже текущей, с тем же отступом. */
+  insertLineBelow(): void {
+    this.commit(insertLineBelow(this.buffer, this.selection), 'other');
+  }
+
+  /** Ctrl+Shift+Enter — пустая строка выше текущей. */
+  insertLineAbove(): void {
+    this.commit(insertLineAbove(this.buffer, this.selection), 'other');
+  }
+
+  /** Переставить два знака вокруг каретки (по графемам — эмодзи не разорвётся). */
+  transpose(): void {
+    this.run(transposeAtCaret(this.buffer, this.selection), 'other');
+  }
+
+  /** Сменить стиль имени у выделения (пусто — слово под кареткой). */
+  convertCase(style: CaseStyle): void {
+    this.run(convertSelectionCase(this.buffer, this.selection, style), 'other');
   }
 
   /**
