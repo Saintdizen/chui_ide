@@ -48,6 +48,7 @@ import { isNodeTestFile, isPythonTestFile, type ProjectScan } from '../shared/pr
 import { findRunnableTests } from '../shared/python-tests';
 import { detectNodeTestRunner, findRunnableNodeTests, type NodeTestRunner } from '../shared/node-tests';
 import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
+import { applySaveEdits } from '../shared/save-edits';
 import { joinPath, separatorOf, splitPath } from '../shared/paths';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
@@ -1227,6 +1228,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * Спрашиваем и перезаписываем только с согласия. `false` — человек отменил.
    */
   const saveDocument = async (document: TextDocument): Promise<boolean> => {
+    // Правки текста при сохранении: подрезать хвосты и поставить перевод строки.
+    // Проводим через документ — тогда и на экране, и на диске одно и то же.
+    const prepared = applySaveEdits(document.value, {
+      trimTrailingWhitespace: settings.editor.trimTrailingWhitespace,
+      insertFinalNewline: settings.editor.insertFinalNewline,
+    });
+    if (prepared !== document.value) document.setText(prepared, 'programmatic');
     // Форматирование при сохранении: правку проводит документ, поэтому на экране
     // и на диске оказывается одно и то же.
     if (settings.editor.formatOnSave) await formatDocument(document);

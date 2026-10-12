@@ -858,6 +858,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Сохранение'),
       switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
+      switchRow('Убирать пробелы в конце строк', editor.trimTrailingWhitespace, (value) =>
+        editable({ trimTrailingWhitespace: value }),
+      ),
+      switchRow('Перевод строки в конце файла', editor.insertFinalNewline, (value) =>
+        editable({ insertFinalNewline: value }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Подрезка хвостов и завершающий перевод применяются при сохранении файла — и сразу видны в редакторе.',
+      ),
       h(
         'div',
         { class: 'field-hint' },

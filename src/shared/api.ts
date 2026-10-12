@@ -531,6 +531,10 @@ export interface EditorSettings {
   languageIndent: boolean;
   /** Форматировать документ при сохранении (ruff или black из окружения). */
   formatOnSave: boolean;
+  /** Убирать пробелы в конце строк при сохранении. */
+  trimTrailingWhitespace: boolean;
+  /** Дописывать перевод строки в конце файла при сохранении. */
+  insertFinalNewline: boolean;
   /** Свои сниппеты (шаблоны кода); к ним добавляется набор по умолчанию. */
   snippets: Snippet[];
 }

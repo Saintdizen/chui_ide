@@ -264,6 +264,9 @@ module.exports = [
       insertSpaces: true,
       languageIndent: true,
       formatOnSave: false,
+      // Правки текста при сохранении: как в main — выключены по умолчанию.
+      trimTrailingWhitespace: false,
+      insertFinalNewline: false,
       // Свои сниппеты: как в main — по умолчанию пусто, набор знает редактор.
       snippets: [],
     },
