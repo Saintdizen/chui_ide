@@ -1216,6 +1216,55 @@ async function languageHoverCheck(win) {
  * место решает, что с ними делать. Проверяем все три случая: одно место — прыжок сразу,
  * несколько — список, ни одного — весть без списка.
  */
+async function signatureCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const send = (event) => win.webContents.sendInputEvent(event);
+
+  // Файл и курсор: ввод должен попасть в панель хозяина, а не в видимый редактор пробы.
+  await script(`(() => {
+    const { host, docA } = window.probeHost;
+    host.open(docA);
+    host.reveal(docA.path, 1, 1);
+    return true;
+  })()`);
+
+  // Печатаем живую клавишу `(` — карточка должна взяться из ответа «сервера».
+  send({ type: 'char', keyCode: '(' });
+  await wait(80);
+  const opened = await script(`(() => {
+    const card = document.querySelector('#probe-host .own-editor-signature');
+    return {
+      видно: card ? card.hidden === false : null,
+      подпись: card?.querySelector('.own-editor-signature-label')?.textContent ?? null,
+      активный: card?.querySelector('.own-editor-signature-label .is-active')?.textContent ?? null,
+      счётчик: card?.querySelector('.own-editor-signature-count')?.textContent ?? null,
+      документация: card?.querySelector('.own-editor-signature-doc')?.textContent ?? null,
+    };
+  })()`);
+
+  // Стрелка вниз — следующая перегрузка: клавишу забирает попап, курсор не двигается.
+  send({ type: 'keyDown', keyCode: 'Down' });
+  send({ type: 'keyUp', keyCode: 'Down' });
+  await wait(60);
+  const turned = await script(`(() => {
+    const card = document.querySelector('#probe-host .own-editor-signature');
+    return {
+      подпись: card?.querySelector('.own-editor-signature-label')?.textContent ?? null,
+      счётчик: card?.querySelector('.own-editor-signature-count')?.textContent ?? null,
+      строка_курсора: window.probeHost.host.cursorState.line,
+    };
+  })()`);
+
+  send({ type: 'char', keyCode: ')' });
+  await wait(60);
+  const closed = await script(`(() => {
+    const card = document.querySelector('#probe-host .own-editor-signature');
+    return { видно: card ? card.hidden === false : null };
+  })()`);
+
+  return { после_скобки: opened, после_стрелки: turned, после_закрытия: closed };
+}
+
 async function symbolsCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
 
@@ -1643,6 +1692,11 @@ async function main() {
   const symbols = await symbolsCheck(win);
   log('## Переход к определению и ссылки');
   log(JSON.stringify(symbols, null, 2));
+  log('');
+
+  const signature = await signatureCheck(win);
+  log('## Подсказка о параметрах вызова');
+  log(JSON.stringify(signature, null, 2));
   log('');
 
   const inline = await inlineCheck(win);

@@ -24,6 +24,7 @@
 import type { CursorPosition, LspDiagnostic } from '../../../shared/api';
 import type { TextEdit } from '../../../shared/edits';
 import type { GitLineChange } from '../../../shared/git-line-changes';
+import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { RunnableTest } from '../../../shared/python-tests';
 import type { Snippet } from '../../../shared/snippets';
 import type { TestOutcome } from '../../../shared/test-model';
@@ -32,6 +33,7 @@ import type { TextDocument } from '../../core/document';
 import { Emitter } from '../../core/events';
 import { CompletionAssistant } from '../complete/assistant';
 import type { CompletionItem } from '../complete/completions';
+import { SignatureAssistant } from '../complete/signature';
 import { TextBuffer } from '../core/text-buffer';
 import { wordAt } from '../core/graphemes';
 import type { Scheme } from '../highlight/style';
@@ -45,6 +47,7 @@ import { FindWidget } from '../widgets/find-widget';
 import { GotoLineWidget } from '../widgets/goto-widget';
 import { HoverWidget, type HoverExternalInfo } from '../widgets/hover-widget';
 import { LocationsWidget } from '../widgets/locations-widget';
+import { SignatureWidget } from '../widgets/signature-widget';
 import { SuggestWidget } from '../widgets/suggest-widget';
 import type { DocumentRegistry } from './document-registry';
 import { translateEdits, type TranslatedEdits } from './document-edits';
@@ -117,6 +120,11 @@ export interface EditorHostOptions {
     position: { line: number; column: number },
   ) => Promise<readonly CompletionItem[]>;
   /**
+   * Подсказка о параметрах вызова от языкового сервера: путь и позиция (1-based) → разбор
+   * (см. `shared/lsp-signature.ts`). Не задано — карточки о параметрах нет вовсе.
+   */
+  signatureFromLanguage?: (path: string, position: { line: number; column: number }) => Promise<SignatureHelp | null>;
+  /**
    * Источник мест символа — языковой сервер (см. `LspFeatures`). Не задан — перехода к
    * определению и ссылок у панели не будет вовсе: показывать нечего и открывать некуда.
    */
@@ -171,6 +179,8 @@ export class EditorHost {
   private readonly hover: HoverWidget;
   private readonly assistant: CompletionAssistant;
   private readonly suggest: SuggestWidget;
+  /** Подсказка о параметрах вызова. `null` — источника нет, карточки не будет. */
+  private readonly signature: SignatureAssistant | null;
   /** Список мест (определения, ссылки). `null` — источника нет, показывать нечего. */
   private readonly locations: LocationsWidget | null;
   /** Связка «сервер → решение → попап». `null` вместе с источником. */
@@ -288,6 +298,15 @@ export class EditorHost {
       ],
     });
 
+    // Подсказка о параметрах вызова: карточка у каретки. Есть только когда дан источник —
+    // сигнатуру своей грамматикой не вывести (см. `complete/signature.ts`).
+    this.signature = options.signatureFromLanguage
+      ? new SignatureAssistant(this.view, this.controller, buffer, new SignatureWidget(container), {
+          source: (path, position) => options.signatureFromLanguage!(path, position),
+          path: () => this.activePath,
+        })
+      : null;
+
     // Список мест (определения, ссылки). Есть только когда дан источник: без языкового
     // сервера переходить некуда, и попап не нужен.
     this.locations = options.symbols ? new LocationsWidget(container) : null;
@@ -322,6 +341,7 @@ export class EditorHost {
     // список мест, призрачный текст). Подсказки идут первыми: их список обычно открыт
     // во время набора, а призрачный текст — после паузы, когда списка уже нет.
     const interceptors: KeyInterceptor[] = [this.assistant];
+    if (this.signature) interceptors.push(this.signature);
     if (this.navigation) interceptors.push(this.navigation);
     if (this.inline) interceptors.push(this.inline);
     this.input = new EditorInputBinding(this.view, this.controller, {
@@ -385,6 +405,7 @@ export class EditorHost {
     this.goto.setBuffer(buffer);
     this.hover.setBuffer(buffer);
     this.assistant.setBuffer(buffer);
+    this.signature?.setBuffer(buffer);
     // Подсветку и слова подсказок берём по языку документа: один реестр языков на всё.
     // Языка без грамматики это не смущает — текст покажется простым (см. registry.ts).
     this.view.setLanguage(document.languageId);
@@ -891,6 +912,7 @@ export class EditorHost {
     this.find.dispose();
     this.goto.dispose();
     this.hover.dispose();
+    this.signature?.dispose();
     this.suggest.dispose();
     this.locations?.dispose();
     this.inline?.dismiss();

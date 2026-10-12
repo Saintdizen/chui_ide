@@ -246,6 +246,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     // Подсказки от сервера подмешиваются к словам языка и документа.
     completionFromLanguage: (path, position) => lsp.completion(path, position),
+    // Подсказка о параметрах вызова: карточка у каретки по набранной `(` или `,`.
+    signatureFromLanguage: (path, position) => lsp.signatureHelp(path, position),
     // Определение и ссылки — списком мест, как и прочие переходы.
     symbols: {
       definition: (path, position) => lsp.definition(path, position),

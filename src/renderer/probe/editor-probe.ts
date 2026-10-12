@@ -174,7 +174,26 @@ document.body.append(hostRoot);
 
 const store = new DocumentStore();
 const registry = new DocumentRegistry(store);
-const host = new EditorHost(hostRoot, registry, { scheme: 'dark' });
+const host = new EditorHost(hostRoot, registry, {
+  scheme: 'dark',
+  // Подсказка о параметрах вызова: подставной источник — пробе важно не «откуда сигнатура»,
+  // а что карточка показывается, подсвечивает активный довод и листает перегрузки.
+  signatureFromLanguage: async () => ({
+    signatures: [
+      {
+        label: 'f(a, b)',
+        documentation: 'проба: подпись вызова',
+        parameters: [
+          { text: 'a', start: 2, end: 3 },
+          { text: 'b', start: 5, end: 6 },
+        ],
+      },
+      { label: 'f(a, b, c)', documentation: null, parameters: [] },
+    ],
+    activeSignature: 0,
+    activeParameter: 1,
+  }),
+});
 const docA = store.open('/probe/a.ts', 'const a = 1;\nconst b = 2;\n', 'typescript');
 const docB = store.open('/probe/b.py', 'def f():\n    return 1\n', 'python');
 host.open(docA);

@@ -24,6 +24,7 @@
 import type { FileEdit } from '../../../shared/edits';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
 import { toCompletions } from '../../../shared/lsp-completions';
+import { toSignatureHelp, type SignatureHelp } from '../../../shared/lsp-signature';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import { toFileSymbols } from '../../../shared/lsp-symbols';
 import { toWorkspaceFileEdits } from '../../../shared/lsp-workspace-edit';
@@ -123,6 +124,19 @@ export class LspFeatures {
       insert: entry.insert,
       ...(entry.snippet !== undefined ? { snippet: entry.snippet } : {}),
     }));
+  }
+
+  /**
+   * Подсказка о параметрах вызова в позиции курсора. Разбор — в `shared/lsp-signature.ts`:
+   * оттуда приходят подписи, активный довод и границы параметров для подсветки.
+   * `null` — сервер молчит или подсказать нечего; показ пропускаем, это не ошибка.
+   */
+  async signatureHelp(path: string, position: LspPosition): Promise<SignatureHelp | null> {
+    const result = await this.request(path, 'textDocument/signatureHelp', {
+      textDocument: { uri: pathToUri(path) },
+      position: toLspPosition(position),
+    });
+    return toSignatureHelp(result);
   }
 }
 

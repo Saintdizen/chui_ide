@@ -37,6 +37,7 @@ import { ProblemNavigation } from './problem-navigation';
 import type { SymbolSource } from './symbol-navigation';
 import type { HoverExternalInfo } from '../widgets/hover-widget';
 import type { CompletionItem } from '../complete/completions';
+import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { DocumentRegistry } from './document-registry';
 import type { TranslatedEdits } from './document-edits';
 import {
@@ -78,6 +79,8 @@ export interface EditorWorkspaceOptions {
     path: string,
     position: { line: number; column: number },
   ) => Promise<readonly CompletionItem[]>;
+  /** Подсказка о параметрах вызова: путь и позиция → разбор (см. `LspFeatures.signatureHelp`). */
+  signatureFromLanguage?: (path: string, position: { line: number; column: number }) => Promise<SignatureHelp | null>;
   /**
    * Источник мест символа — языковой сервер (`LspFeatures`). Он же включает переход к
    * определению и поиск ссылок: без него эти команды не предлагаются, потому что
@@ -136,6 +139,8 @@ export class EditorWorkspace {
     | undefined;
   /** Подсказки языкового сервера — тот же шов, но для дополнений. */
   private readonly completionFromLanguage: EditorWorkspaceOptions['completionFromLanguage'];
+  /** Подсказка о параметрах вызова — тот же шов, но для сигнатур. */
+  private readonly signatureFromLanguage: EditorWorkspaceOptions['signatureFromLanguage'];
   /** Источник мест символа: переход к определению и поиск ссылок. */
   private readonly symbols: SymbolSource | undefined;
   /** Переименование символа: шов к приложению (диалог имени и применение правок). */
@@ -195,6 +200,7 @@ export class EditorWorkspace {
     this.formatCode = options.formatCode;
     this.hoverFromLanguage = options.hoverFromLanguage;
     this.completionFromLanguage = options.completionFromLanguage;
+    this.signatureFromLanguage = options.signatureFromLanguage;
     this.symbols = options.symbols;
     this.renameSymbol = options.renameSymbol;
     this.revealLocation = options.revealLocation;
@@ -265,6 +271,7 @@ export class EditorWorkspace {
       snippets: this.snippets,
       hoverFromLanguage: this.hoverFromLanguage,
       completionFromLanguage: this.completionFromLanguage,
+      signatureFromLanguage: this.signatureFromLanguage,
       symbols: this.symbols,
       revealLocation: this.revealLocation,
       relativePath: this.relativePath,

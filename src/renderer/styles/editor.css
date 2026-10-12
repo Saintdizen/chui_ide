@@ -533,6 +533,48 @@
   color: var(--accent);
 }
 
+/* Карточка подсказки о параметрах вызова. Материал и место — как у попапа подсказок:
+   та же поверхность, рамка и тень, чтобы читались как одно семейство. */
+.own-editor-signature {
+  position: fixed;
+  z-index: 40;
+  max-width: 520px;
+  padding: 6px 10px;
+  background: var(--popup_background);
+  border: 1px solid var(--border_color);
+  border-radius: 8px;
+  box-shadow: var(--box_shadow_small);
+  font-family: var(--font_mono);
+  font-size: var(--font_labels_size);
+  color: var(--text_color);
+}
+
+.own-editor-signature-label {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Активный довод — то же, что выделение в тексте: он же подсвечен и в исходнике. */
+.own-editor-signature-label .is-active {
+  background: var(--selection_background);
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+.own-editor-signature-doc {
+  margin-top: 4px;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+}
+
+.own-editor-signature-count {
+  margin-top: 4px;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+}
+
 /* Список мест: определения и ссылки. Материал и место — как у попапа подсказок, но со
    заголовком: у перехода и ссылок разный смысл, и его надо назвать. */
 .own-editor-locations {
