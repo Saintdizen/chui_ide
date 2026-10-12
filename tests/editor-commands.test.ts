@@ -19,6 +19,9 @@ function fakeContext(extra: Partial<EditorCommandContext> = {}): EditorCommandCo
     openGoto: () => calls.push('goto'),
     indent: () => calls.push('indent'),
     outdent: () => calls.push('outdent'),
+    toggleComment: () => calls.push('toggleComment'),
+    moveLines: (direction) => calls.push(`moveLines:${direction}`),
+    copyLinesDown: () => calls.push('copyLinesDown'),
     ...extra,
   };
   return context;
@@ -54,6 +57,11 @@ describe('доступность команд по контексту', () => {
   it('без швов необязательные команды не предлагаются', () => {
     const ids = availableCommands(fakeContext()).map((command) => command.id);
     expect(ids).toContain('editor.undo');
+    // Правки строк нужны всем и швов не требуют — они в палитре всегда.
+    expect(ids).toContain('editor.toggleComment');
+    expect(ids).toContain('editor.moveLineUp');
+    expect(ids).toContain('editor.moveLineDown');
+    expect(ids).toContain('editor.copyLineDown');
     expect(ids).not.toContain('editor.goToDefinition');
     expect(ids).not.toContain('editor.references');
     expect(ids).not.toContain('editor.format');
@@ -96,6 +104,10 @@ describe('выполнение команд', () => {
       ['editor.gotoLine', 'goto'],
       ['editor.indent', 'indent'],
       ['editor.outdent', 'outdent'],
+      ['editor.toggleComment', 'toggleComment'],
+      ['editor.moveLineUp', 'moveLines:-1'],
+      ['editor.moveLineDown', 'moveLines:1'],
+      ['editor.copyLineDown', 'copyLinesDown'],
     ];
     for (const [id, expected] of cases) {
       const context = fakeContext();

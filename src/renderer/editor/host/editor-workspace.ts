@@ -453,6 +453,10 @@ export class EditorWorkspace {
       openGoto: () => this.pane.openGoto(),
       indent: () => this.pane.indent(),
       outdent: () => this.pane.outdent(),
+      // Правки строк: те же действия, что по клавишам, — теперь и в палитре.
+      toggleComment: () => this.pane.toggleComment(),
+      moveLines: (direction) => this.pane.moveLines(direction),
+      copyLinesDown: () => this.pane.copyLinesDown(),
       // Свёртка — состояние самой панели: она знает и диапазоны, и что сложено.
       fold: () => this.pane.foldAtCursor(),
       unfold: () => this.pane.unfoldAtCursor(),

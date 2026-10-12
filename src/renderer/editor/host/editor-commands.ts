@@ -37,6 +37,12 @@ export interface EditorCommandContext {
   openGoto(): void;
   indent(): void;
   outdent(): void;
+  /** Закомментировать или расскомментировать строки выделения (знак — по языку файла). */
+  toggleComment(): void;
+  /** Перенести строку или строки выделения выше (-1) или ниже (1). */
+  moveLines(direction: -1 | 1): void;
+  /** Скопировать строку или строки выделения ниже. */
+  copyLinesDown(): void;
   /** Перейти к определению символа под курсором (нужен языковой сервер). */
   goToDefinition?(): void;
   /** Показать ссылки на символ под курсором (нужен языковой сервер). */
@@ -162,6 +168,38 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     keybinding: 'Shift+Tab',
     category: CATEGORY,
     run: (context) => context.outdent(),
+  },
+  {
+    id: 'editor.toggleComment',
+    label: 'Закомментировать строку',
+    alias: 'toggleComment',
+    keybinding: 'Ctrl+/',
+    category: CATEGORY,
+    run: (context) => context.toggleComment(),
+  },
+  {
+    id: 'editor.moveLineUp',
+    label: 'Перенести строку выше',
+    alias: 'moveLineUp',
+    keybinding: 'Alt+↑',
+    category: CATEGORY,
+    run: (context) => context.moveLines(-1),
+  },
+  {
+    id: 'editor.moveLineDown',
+    label: 'Перенести строку ниже',
+    alias: 'moveLineDown',
+    keybinding: 'Alt+↓',
+    category: CATEGORY,
+    run: (context) => context.moveLines(1),
+  },
+  {
+    id: 'editor.copyLineDown',
+    label: 'Скопировать строку ниже',
+    alias: 'copyLinesDown',
+    keybinding: 'Shift+Alt+↓',
+    category: CATEGORY,
+    run: (context) => context.copyLinesDown(),
   },
   {
     id: 'editor.goToDefinition',

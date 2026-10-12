@@ -40,6 +40,7 @@ import { wordAt } from '../core/graphemes';
 import type { Scheme } from '../highlight/style';
 import { type EditorChange, EditorController } from '../input/editor-controller';
 import { type CommandName, EditorInputBinding, type KeyInterceptor } from '../input/editor-input';
+import { lineCommentFor } from '../input/comments';
 import { InlineCompletions } from '../input/inline-completions';
 import { EditorView } from '../view/editor-view';
 import { caret, isEmpty, type Selection } from '../view/selection';
@@ -620,6 +621,22 @@ export class EditorHost {
 
   outdent(): void {
     this.controller.outdent();
+  }
+
+  /** Ctrl+/ — закомментировать или расскомментировать строки. Знак — по языку файла. */
+  toggleComment(): void {
+    const token = lineCommentFor(this.languageId);
+    if (token) this.controller.toggleComment(token);
+  }
+
+  /** Alt+↑/↓ — перенести строку или строки выделения выше или ниже. */
+  moveLines(direction: -1 | 1): void {
+    this.controller.moveLines(direction);
+  }
+
+  /** Shift+Alt+↓ — скопировать строку или строки выделения ниже. */
+  copyLinesDown(): void {
+    this.controller.copyLinesDown();
   }
 
   /** Открыть панель поиска или поиска с заменой. */
