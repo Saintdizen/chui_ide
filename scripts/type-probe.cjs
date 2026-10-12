@@ -142,6 +142,24 @@ app.whenReady().then(async () => {
   await wait(300);
   console.log('ALT+DOWN', JSON.stringify(await readText()));
 
+  // Подсветка контекста: вхождения слова под кареткой и парная скобка.
+  const readHighlight = () =>
+    ask(
+      ide,
+      `(() => ({
+      вхождения: document.querySelectorAll('.own-editor-highlight-rect.is-occurrence').length,
+      скобки: document.querySelectorAll('.own-editor-highlight-rect.is-bracket').length,
+    }))()`,
+    );
+  ide.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Home', modifiers: ['control'] });
+  ide.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Home', modifiers: ['control'] });
+  for (let i = 0; i < 6; i += 1) {
+    ide.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Right' });
+    ide.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Right' });
+  }
+  await wait(300);
+  console.log('ПОДСВЕТКА СЛОВА', JSON.stringify(await readHighlight()));
+
   await wait(500);
   const errors = await ask(ide, `window.__errors ?? 'нет окна ошибок'`).catch(() => []);
   console.log('ОШИБКИ СТРАНИЦЫ', JSON.stringify(errors, null, 2));

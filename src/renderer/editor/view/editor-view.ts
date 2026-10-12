@@ -32,6 +32,7 @@ import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
 import { measureFont, monospaceMetrics, type GlyphMetrics } from './glyph-metrics';
 import { columnForX, layoutLine, lineWidth, xForColumn } from './line-layout';
 import { FileDecorations, squigglyRect } from './decorations';
+import { findBracketPair, findOccurrences, type BracketPair } from './context-highlight';
 import { caret, isEmpty, rangesRects, selectionRects, type Selection } from './selection';
 import { clamp, contentHeight, lineAtY, maxScrollLeft, maxScrollTop, revealLine, visibleLines } from './viewport';
 
@@ -72,6 +73,8 @@ export class EditorView {
   private readonly backgroundLayer: HTMLElement;
   private readonly selectionLayer: HTMLElement;
   private readonly searchLayer: HTMLElement;
+  /** Вхождения слова под курсором и подсветка парной скобки — фоном под текстом. */
+  private readonly highlightLayer: HTMLElement;
   private readonly squigglyLayer: HTMLElement;
   private readonly ghostLayer: HTMLElement;
   private readonly caret: HTMLElement;
@@ -98,6 +101,10 @@ export class EditorView {
   /** Совпадения поиска и номер текущего: перерисовываются вместе со строками. */
   private searchMatches: readonly { start: number; end: number }[] = [];
   private searchCurrent = -1;
+  /** Вхождения слова под курсором: пересчитываются только когда меняется само слово. */
+  private occurrences: readonly { start: number; end: number }[] = [];
+  /** Парная скобка у курсора и её состояние (есть пара или нет). */
+  private brackets: BracketPair | null = null;
   /** Самая широкая известная строка: ширину полотна узнаём по мере отрисовки. */
   private widest = 0;
   /** Что сейчас в DOM: версия буфера, границы видимых строк и версия украшений — чтобы не пересобирать зря. */
@@ -162,6 +169,8 @@ export class EditorView {
     this.selectionLayer.className = `${ROOT_CLASS}-selection`;
     this.searchLayer = document.createElement('div');
     this.searchLayer.className = `${ROOT_CLASS}-search`;
+    this.highlightLayer = document.createElement('div');
+    this.highlightLayer.className = `${ROOT_CLASS}-highlight`;
     this.squigglyLayer = document.createElement('div');
     this.squigglyLayer.className = `${ROOT_CLASS}-squiggly`;
     this.ghostLayer = document.createElement('div');
@@ -179,6 +188,7 @@ export class EditorView {
     this.content.append(
       this.backgroundLayer,
       this.searchLayer,
+      this.highlightLayer,
       this.selectionLayer,
       this.squigglyLayer,
       this.linesLayer,
@@ -258,6 +268,7 @@ export class EditorView {
   setSelection(selection: Selection): void {
     this.selection = selection;
     this.updateCaretAndSelection();
+    this.updateContextHighlights();
   }
 
   /**
@@ -282,6 +293,47 @@ export class EditorView {
   }
 
   /**
+   * Пересчитать и нарисовать подсветку контекста: вхождения слова под кареткой и пара
+   * скобок. Зовётся при каждом переезде курсора.
+   */
+  private updateContextHighlights(): void {
+    this.occurrences = findOccurrences(this.buffer, this.selection);
+    this.brackets = findBracketPair(this.buffer, this.selection.active);
+    this.renderHighlight();
+  }
+
+  /** Слой подсветки контекста: прямоугольники вхождений и подсветка скобок. */
+  private renderHighlight(): void {
+    if (this.occurrences.length === 0 && this.brackets === null) {
+      this.highlightLayer.replaceChildren();
+      return;
+    }
+    const { first, last } = this.renderedLines();
+    const fragment = document.createDocumentFragment();
+
+    const paint = (range: { start: number; end: number }, className: string): void => {
+      const line = this.buffer.lineAt(range.start) - 1;
+      if (line < first || line > last) return;
+      for (const rect of rangesRects(this.buffer, [range], this.metrics)) {
+        const node = document.createElement('div');
+        node.className = `${ROOT_CLASS}-highlight-rect ${className}`;
+        node.style.transform = `translate(${rect.left}px, ${rect.top}px)`;
+        node.style.width = `${rect.width}px`;
+        node.style.height = `${rect.height}px`;
+        fragment.append(node);
+      }
+    };
+
+    for (const range of this.occurrences) paint(range, 'is-occurrence');
+    if (this.brackets) {
+      const kind = this.brackets.unmatched ? 'is-bracket is-bracket-bad' : 'is-bracket';
+      paint(this.brackets.open, kind);
+      if (!this.brackets.unmatched) paint(this.brackets.close, kind);
+    }
+    this.highlightLayer.replaceChildren(fragment);
+  }
+
+  /**
    * Показать призрачный текст подсказки «допиши за меня»: серый текст, будто уже
    * набранный, сразу за кареткой. Это только вид — решает, когда его поставить и
    * когда принять, отдельный слой (`input/inline-completions.ts`).
@@ -300,6 +352,10 @@ export class EditorView {
     if (!this.ghost) return;
     this.ghost = null;
     this.ghostLayer.replaceChildren();
+    // Вхождения слова и пара скобок были о прошлом файле — начинаем с чистого листа.
+    this.occurrences = [];
+    this.brackets = null;
+    this.highlightLayer.replaceChildren();
   }
 
   /**
@@ -555,6 +611,8 @@ export class EditorView {
     // Совпадения поиска живут в тех же строках, что и текст: после прокрутки их
     // видимый набор изменился, поэтому перерисовываем вместе со строками.
     this.renderSearch();
+    // Подсветка контекста живёт в тех же строках — после прокрутки её набор изменился.
+    this.renderHighlight();
     // Призрачный текст привязан к каретке: после смены метрик его надо переложить.
     this.renderGhost();
     this.updateCaretAndSelection();

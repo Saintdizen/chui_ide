@@ -279,6 +279,39 @@
   z-index: 3;
 }
 
+/* Подсветка контекста: вхождения слова под кареткой и пара скобок. Лежит под
+   выделением и под поиском — это фон, а не акцент; у вхождений тихая заливка, у
+   скобок видна рамка, чтобы их было видно и на светлом, и на тёмном. */
+.own-editor-highlight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.own-editor-highlight-rect {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 2px;
+  will-change: transform;
+}
+
+.own-editor-highlight-rect.is-occurrence {
+  background: color-mix(in srgb, var(--text_color) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text_color) 16%, transparent);
+}
+
+.own-editor-highlight-rect.is-bracket {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text_color) 45%, transparent);
+  background: color-mix(in srgb, var(--text_color) 12%, transparent);
+}
+
+/* Скобка без пары — предупреждение, а не нейтральная подсветка. */
+.own-editor-highlight-rect.is-bracket-bad {
+  background: color-mix(in srgb, var(--yellow_prime_background) 22%, transparent);
+  box-shadow: inset 0 0 0 1px var(--yellow_prime_background);
+}
+
 /* Слой совпадений поиска. Рисуется прямоугольниками ПОД выделением, потому что при
    переходе к совпадению оно же и выделяется — заливка выделения важнее. Текущее
    совпадение отличается сильнее: его ищут глазами после каждого нажатия Enter. */
