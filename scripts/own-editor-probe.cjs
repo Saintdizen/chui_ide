@@ -149,11 +149,15 @@ const CHECKS = {
   })()`,
 
   // 2. Виртуализация и содержимое: строк в DOM мало, тексты совпадают с моделью.
+  // Ищем ТОЛЬКО внутри редактора пробы: на странице живут и другие редакторы
+  // (хозяин, рабочее место, сравнение), и общий `querySelectorAll` собрал бы их
+  // строки вместе — тогда индексы строк и номеров разъехались бы.
   virtual: `(() => {
     const view = window.probe.view;
     const buffer = window.probe.buffer;
-    const rows = [...document.querySelectorAll('.own-editor-line')];
-    const numbers = [...document.querySelectorAll('.own-editor-gutter-row')].map((n) => Number(n.textContent));
+    const scope = view.element;
+    const rows = [...scope.querySelectorAll('.own-editor-line')];
+    const numbers = [...scope.querySelectorAll('.own-editor-gutter-row')].map((n) => Number(n.textContent));
     return {
       всего_в_документе: buffer.lineCount,
       строк_в_DOM: rows.length,
@@ -358,7 +362,12 @@ async function typingCheck(win) {
   const target = await script(`(() => {
     const view = window.probe.view;
     const buffer = window.probe.buffer;
-    const viewport = document.querySelector('.own-editor-viewport');
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    // Другие редакторы на странице пробы (хозяин, рабочее место, сравнение) могли
+    // оставить свои попапы подсказок открытыми — они висят поверх и перехватывают
+    // клик. Прячем их: проверяем клик именно по своему редактору. В приложении
+    // редактор один, и такой помехи нет.
+    for (const popup of document.querySelectorAll('.own-editor-suggest')) popup.hidden = true;
     viewport.scrollTop = 0; viewport.scrollLeft = 0;
     const rect = viewport.getBoundingClientRect();
     const offset = buffer.lineStart(3) + 2;
