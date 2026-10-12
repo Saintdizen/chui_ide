@@ -3164,11 +3164,11 @@ textarea {
   /* Вверх поле растёт само: в стопке ему отдана свободная высота, а не фиксированные
      строки — под панелью остаётся минимум места для ленты. */
   flex: 1 1 auto;
-  min-height: 84px;
+  min-height: 50px;
   max-height: 40vh;
   /* Поле лежит внутри карточки: свою рамку и подложку оно не несёт — границу
-     носит карточка, и фокус подсвечивает её целиком (см. :focus-within). */
-  padding: 2px 4px;
+     носит карточка. */
+  padding: 5px;
   border: none;
   border-radius: 0;
   background: transparent;
@@ -3180,9 +3180,9 @@ textarea {
 .composer-box {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
-  padding: 8px 8px 7px;
+  padding: 5px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--sunken_background);
@@ -3632,11 +3632,12 @@ textarea {
 }
 
 /* Кнопка отправки — круглая и залитая акцентом: главное действие композера
-   видно сразу. Форму задаём с весом селектора не ниже ряда иконок, иначе
-   правило `.icon-btn { 24px }` срежет круг до квадрата. */
+   видно сразу. Круг держим высотой строки (24px, как ряд иконок). Форму задаём
+   селектором с весом не ниже ряда иконок — иначе `.icon-btn { 24px }` перебьёт
+   скругление. */
 .chat-footer .composer-toolbar .composer-action {
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
 }
 
