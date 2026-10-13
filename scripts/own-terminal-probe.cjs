@@ -226,6 +226,41 @@ async function main() {
   report.снимок_поиска = await shot(win, 'search');
   await evaluate(win, `(() => { window.probeTerm.clearFind(); return true; })()`);
 
+  // ── reflow: сжимаем полотно и повторяем то, что делает панель при resize ──
+  report.reflow = await evaluate(
+    win,
+    `(() => {
+      const view = window.probeTerm.view;
+      const term = window.probeTerm.term;
+      const snapshot = () => {
+        let letters = 0;
+        for (let row = 0; row < view.bufferRows(); row += 1) {
+          letters += view.lineText(row).split(' ').join('').length;
+        }
+        return { letters, cols: term.cols };
+      };
+      const before = snapshot();
+      const host = document.querySelector('.own-term').parentElement;
+      host.style.width = '260px';
+      const size = view.fit();
+      if (size) term.resize(size.cols, size.rows);
+      view.render();
+      const after = snapshot();
+      host.style.width = '100%';
+      const back = view.fit();
+      if (back) term.resize(back.cols, back.rows);
+      view.render();
+      return {
+        ширина_до: before.cols,
+        ширина_после: after.cols,
+        знаков_до: before.letters,
+        знаков_после: after.letters,
+        содержимое_сбережено: before.letters === after.letters,
+      };
+    })()`,
+  );
+  report.снимок_reflow = await shot(win, 'reflow');
+
   // ── мышь для программы: событие должно уйти наружу ────────────────────────────
   report.мышь_программе = await evaluate(
     win,

@@ -85,6 +85,87 @@ function blankLine(cols: number, attr: Attr): Line {
   return { cells, wrapped: false };
 }
 
+/**
+ * Последняя СОДЕРЖАТЕЛЬНАЯ строка доски (-1 — пусто). Хвостовые пустые строки — это
+ * распорка до размера экрана, а не содержимое; при переносе их надо отбросить.
+ */
+function trailingBlankStart(lines: readonly Line[]): number {
+  for (let row = lines.length - 1; row >= 0; row -= 1) {
+    const line = lines[row];
+    if (!line) continue;
+    if (line.wrapped || line.cells.some((cell) => cell.chars !== '' && cell.chars !== ' ')) return row;
+  }
+  return -1;
+}
+
+/** Срезать хвостовые пробелы: при расширении они дали бы лишние пустые ряды. */
+function trimTrailingBlank(cells: Cell[]): void {
+  while (cells.length > 0) {
+    const last = cells[cells.length - 1];
+    if (last && last.chars === ' ' && last.width === 1) cells.pop();
+    else break;
+  }
+}
+
+interface WrappedCells {
+  readonly rows: Line[];
+  /** Номер ряда в `rows`, куда попала отслеживаемая клетка, и её столбец в нём. */
+  readonly trackRow: number;
+  readonly trackCol: number;
+}
+
+/**
+ * Разложить плоский список клеток по строкам шириной `cols`.
+ *
+ * Широкий знак не разрывается: если в строке осталась одна клетка, знак целиком уходит
+ * на следующую (в конце предыдущей остаётся пробел). Каждая строка кроме последней
+ * помечается `wrapped` — по этой пометке следующий reflow соберёт строки обратно.
+ *
+ * `trackCell` — индекс клетки, за которой следить (обычно позиция курсора): её новое
+ * место вернётся в `trackRow`/`trackCol`. Пересчитать столбец курсора делением нельзя:
+ * из-за неразрывных широких знаков строки не всегда полны.
+ */
+function wrapCells(cells: readonly Cell[], cols: number, trackCell: number | null): WrappedCells {
+  const rows: Line[] = [];
+  let current = blankLine(cols, DEFAULT_ATTR);
+  let col = 0;
+  let trackRow = 0;
+  let trackCol = 0;
+  let lastCol = 0;
+
+  const flush = (wrapped: boolean): void => {
+    current.wrapped = wrapped;
+    lastCol = col;
+    rows.push(current);
+    current = blankLine(cols, DEFAULT_ATTR);
+    col = 0;
+  };
+
+  for (let index = 0; index < cells.length; index += 1) {
+    const cell = cells[index];
+    if (!cell || cell.width === 0) continue; // вторую клетку широкого ставим вместе с базой
+    // Широкому знаку нужно две клетки — переносим его целиком, если места нет.
+    const width = cell.width === 2 && cols >= 2 ? 2 : 1;
+    if (col + width > cols && col > 0) flush(true);
+    current.cells[col] = cell;
+    if (width === 2 && col + 1 < cols) current.cells[col + 1] = { chars: '', width: 0, attr: cell.attr };
+    if (trackCell === index) {
+      trackRow = rows.length;
+      trackCol = col;
+    }
+    col += width;
+  }
+  flush(false);
+
+  // Клетка за концом содержимого (курсор на срезанных пробелах): ставим в конец строки.
+  if (trackCell !== null && trackCell >= cells.length) {
+    trackRow = Math.max(0, rows.length - 1);
+    trackCol = Math.max(0, Math.min(lastCol, cols - 1));
+  }
+
+  return { rows, trackRow, trackCol };
+}
+
 function defaultModes(): Modes {
   return {
     wraparound: true,
@@ -234,11 +315,13 @@ export class Terminal {
       }
       if (this.wrapPending) {
         this.wrapPending = false;
+        this.markWrapped();
         this.lineFeed();
         this.active.cx = 0;
       }
       if (this.active.cx + width > this.colsCount) {
         if (this.modes.wraparound) {
+          this.markWrapped();
           this.lineFeed();
           this.active.cx = 0;
         } else {
@@ -247,6 +330,15 @@ export class Terminal {
       }
       this.putCell(ch, width);
     }
+  }
+
+  /**
+   * Пометить строку продолженной: она заполнена и следующий знак уйдёт на новую строку
+   * без перевода. По этой пометке `resize` собирает обратно логическую строку (reflow).
+   */
+  private markWrapped(): void {
+    const line = this.active.lines[this.active.cy];
+    if (line) line.wrapped = true;
   }
 
   private putCell(ch: string, width: number): void {
@@ -708,29 +800,22 @@ export class Terminal {
   }
 
   /**
-   * Сменить размер окна. Столбцы дополняются и обрезаются, строки — добавляются снизу
-   * и убираются снизу. Перенос содержимого при сжатии (reflow) — отдельный шаг: он
-   * сложен и нужен только при перетаскивании края окна, а не при обычном выводе.
+   * Сменить размер окна. Столбцы меняются — содержимое ПЕРЕНОСИТСЯ (reflow): строки,
+   * заполненные и продолженные (пометка `wrapped`), собираются в логические и снова
+   * раскладываются по новой ширине. Иначе при сжатии длинная строка теряла бы хвост, а
+   * при расширении оставалась разбитой там, где места уже хватает.
+   *
+   * Альтернативная доска через reflow не проходит: её содержимое рисует полноэкранная
+   * программа, и она сама перерисует его по новому размеру (так делает и xterm).
    */
   resize(cols: number, rows: number): void {
     const nextCols = Math.max(1, cols);
     const nextRows = Math.max(1, rows);
     if (nextCols === this.colsCount && nextRows === this.rowsCount) return;
 
-    for (const buffer of [this.primary, this.alt]) {
-      if (!buffer) continue;
-      for (const line of buffer.lines) {
-        if (nextCols > line.cells.length) {
-          while (line.cells.length < nextCols) line.cells.push(blankAttrCell(DEFAULT_ATTR));
-        } else if (nextCols < line.cells.length) {
-          line.cells.length = nextCols;
-        }
-      }
-      while (buffer.lines.length < nextRows) buffer.lines.push(blankLine(nextCols, DEFAULT_ATTR));
-      if (buffer.lines.length > nextRows) buffer.lines.length = nextRows;
-      buffer.cy = Math.min(buffer.cy, nextRows - 1);
-      buffer.cx = Math.min(buffer.cx, nextCols - 1);
-    }
+    if (nextCols !== this.colsCount) this.reflowPrimary(nextCols, nextRows);
+    else this.resizeSimple(this.primary, nextCols, nextRows);
+    if (this.alt) this.resizeSimple(this.alt, nextCols, nextRows);
 
     this.colsCount = nextCols;
     this.rowsCount = nextRows;
@@ -738,5 +823,101 @@ export class Terminal {
     this.scrollBottom = nextRows - 1;
     this.tabs = this.freshTabs(nextCols);
     this.wrapPending = false;
+  }
+
+  /** Простой размер без переноса: клетки обрезаются и дополняются, строки тоже. */
+  private resizeSimple(buffer: BufferState, cols: number, rows: number): void {
+    for (const line of buffer.lines) {
+      if (cols > line.cells.length) {
+        while (line.cells.length < cols) line.cells.push(blankAttrCell(DEFAULT_ATTR));
+      } else if (cols < line.cells.length) {
+        line.cells.length = cols;
+      }
+    }
+    while (buffer.lines.length < rows) buffer.lines.push(blankLine(cols, DEFAULT_ATTR));
+    if (buffer.lines.length > rows) buffer.lines.length = rows;
+    buffer.cy = Math.min(buffer.cy, rows - 1);
+    buffer.cx = Math.min(buffer.cx, cols - 1);
+  }
+
+  /**
+   * Пере-перенос основной доски на новую ширину.
+   *
+   * История и экран сливаются в один список строк: логическая строка может начинаться
+   * в истории и продолжаться на экране, и разрезать её по этой границе нельзя. Дальше:
+   * строки, помеченные `wrapped`, собираются в логические; из каждой берётся плоский
+   * список клеток (хвостовые пробелы срезаны — иначе при расширении они дали бы пустые
+   * ряды); клетки раскладываются заново по `cols` (широкий знак не разрывается), а по
+   * ходу раскладки видим, где оказался курсор (`trackCell`). Готовый список делится:
+   * хвост в `rows` строк — экран, остальное — история: что не влезло на экран, уходит
+   * в историю, а не пропадает.
+   */
+  private reflowPrimary(cols: number, rows: number): void {
+    const primaryEnd = trailingBlankStart(this.primary.lines);
+    const kept = this.primary.lines.slice(0, Math.max(primaryEnd, this.primary.cy) + 1);
+    const all = [...this.scrollback, ...kept];
+    const history = this.scrollback.length;
+    const cursorAbs = history + this.primary.cy;
+    let cursorCol = this.primary.cx;
+    // Строка полна и ждала переноса (`wrapPending`): курсор стоит на последней клетке,
+    // но после переноса перенос уже не нужен, и по смыслу курсор ЗА строкой.
+    if (this.wrapPending && cursorCol === this.colsCount - 1) cursorCol = this.colsCount;
+    // Курсор на второй половине широкого знака — считаем его позицией самого знака.
+    const cursorLine = this.primary.lines[this.primary.cy];
+    if (cursorLine && cursorLine.cells[cursorCol]?.width === 0 && cursorCol > 0) cursorCol -= 1;
+
+    const out: Line[] = [];
+    let cursorOutRow = 0;
+    let cursorOutCol = cursorCol;
+    let index = 0;
+
+    while (index < all.length) {
+      let end = index;
+      while (end + 1 < all.length && all[end]?.wrapped) end += 1;
+
+      const cells: Cell[] = [];
+      for (let row = index; row <= end; row += 1) {
+        const line = all[row];
+        if (line) cells.push(...line.cells);
+      }
+      trimTrailingBlank(cells);
+
+      const inGroup = cursorAbs >= index && cursorAbs <= end;
+      let track: number | null = null;
+      if (inGroup) {
+        track = (cursorAbs - index) * this.colsCount + cursorCol;
+        // Позиция ЗА последним знаком — тоже допустима: оставляем её за концом строки.
+        track = Math.max(0, Math.min(track, cells.length));
+        // Попали на вторую половину широкого знака — сдвигаемся к его началу.
+        while (track > 0 && cells[track]?.width === 0) track -= 1;
+      }
+
+      const wrapped = wrapCells(cells, cols, track);
+      if (track !== null) {
+        cursorOutRow = out.length + wrapped.trackRow;
+        cursorOutCol = wrapped.trackCol;
+      }
+      out.push(...wrapped.rows);
+      index = end + 1;
+    }
+
+    if (out.length <= rows) {
+      while (out.length < rows) out.push(blankLine(cols, DEFAULT_ATTR));
+      this.scrollback = [];
+      this.primary.lines = out;
+      this.primary.cy = Math.min(cursorOutRow, rows - 1);
+    } else {
+      const start = out.length - rows;
+      this.scrollback = out.slice(0, start);
+      if (this.scrollback.length > SCROLLBACK_LIMIT) {
+        this.scrollback.splice(0, this.scrollback.length - SCROLLBACK_LIMIT);
+      }
+      this.primary.lines = out.slice(start);
+      this.primary.cy = Math.max(0, Math.min(cursorOutRow - start, rows - 1));
+    }
+
+    this.primary.cx = Math.max(0, Math.min(cursorOutCol, cols - 1));
+    this.primary.savedX = Math.min(this.primary.savedX, cols - 1);
+    this.primary.savedY = Math.min(this.primary.savedY, rows - 1);
   }
 }
