@@ -1659,7 +1659,7 @@ renderer и запускает smoke правок с не-ASCII. Те же пр�
 Версия живёт в одном месте — `version` в `package.json` (та же строка в `package-lock.json`):
 её отдаёт `app.info` (`app.getVersion()` в `main/ipc/register.ts`), она же попадает в имя файла
 дистрибутива (`artifactName` в `electron-builder.yml`). В интерфейсе её пока не видно, поэтому
-при старте она печатается в консоль (`v0.0.11 · Electron … · Chromium … · Node … · платформа`) —
+при старте она печатается в консоль (`v0.1.0 · Electron … · Chromium … · Node … · платформа`) —
 версию можно спросить у человека, не заглядывая в `package.json`.
 
 Отдельного `CHANGELOG.md` нет намеренно: примечания к релизу GitHub собирает из коммитов
@@ -1668,13 +1668,13 @@ renderer и запускает smoke правок с не-ASCII. Те же пр�
 Выпуск версии — коммит с номером и тег на нём (так вышли `0.0.9` и `0.0.10`):
 
 ```bash
-npm version 0.0.11 --no-git-tag-version   # правит version и в package.json, и в замке
+npm version 0.1.0 --no-git-tag-version   # правит version и в package.json, и в замке
 npm run check && npm run test:coverage    # тег ставится только на зелёном прогоне
-git commit -am "0.0.11" && git tag v0.0.11
+git commit -am "0.1.0" && git tag v0.1.0
 ```
 
 По тегу `v*` сборку запускает `release.yml`, а релиз на GitHub создаётся черновиком.
-Пока проект до 1.0, номер растёт третьей цифрой.
+До 1.0 номер растёт так: вторая цифра — на заметной вехе, третья — на мелких выпусках.
 
 ## Как это устроено
 
