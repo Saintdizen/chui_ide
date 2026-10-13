@@ -1,7 +1,35 @@
-import type { ITheme } from '@xterm/xterm';
 import { TOKEN_KEYS, type ChromeKey, type ThemeFile, type TokenKey } from '../../shared/theme-file';
 
 export type Scheme = 'dark' | 'light';
+
+/**
+ * Палитра консоли: цвета ANSI и служебные цвета полотна. Раньше этот тип давал xterm;
+ * теперь он живёт здесь, вместе с данными палитры: терминал у нас свой, а консольная
+ * схема — часть общей темы.
+ */
+export interface TerminalTheme {
+  background: string;
+  foreground: string;
+  cursor: string;
+  cursorAccent: string;
+  selectionBackground: string;
+  black: string;
+  red: string;
+  green: string;
+  yellow: string;
+  blue: string;
+  magenta: string;
+  cyan: string;
+  white: string;
+  brightBlack: string;
+  brightRed: string;
+  brightGreen: string;
+  brightYellow: string;
+  brightBlue: string;
+  brightMagenta: string;
+  brightCyan: string;
+  brightWhite: string;
+}
 
 /**
  * Переопределения активной темы из файла. Значения — HEX без `#` (как в самой
@@ -493,7 +521,7 @@ export function themeTemplate(scheme: Scheme): ThemeFile {
 }
 
 /** Палитра консоли VS Code; фон тот же, что у редактора, поэтому панели не спорят. */
-export const TERMINAL_THEMES: Record<Scheme, ITheme> = {
+export const TERMINAL_THEMES: Record<Scheme, TerminalTheme> = {
   dark: {
     background: '#1e1e1e',
     foreground: '#d4d4d4',

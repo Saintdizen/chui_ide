@@ -748,7 +748,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Замена пишет файлы на диске: открытые вкладки перечитываем сразу.
     reloadFile: (path) => reloadIfOpen(path),
   });
-  const terminalPanel = createTerminalPanel({ rpc, cwd: () => workspace.root, scheme: theme.resolved });
+  const terminalPanel = createTerminalPanel({
+    rpc,
+    cwd: () => workspace.root,
+    scheme: theme.resolved,
+    // Лигатуры консоли — те же, что у кода: единый вид обоих полотен.
+    ligatures: () => settings.editor.fontLigatures,
+  });
 
   /** Карта проекта: из неё берём тесты и точку входа. Пусто, пока проект не открыт. */
   let projectScan: ProjectScan | null = null;
@@ -3831,6 +3837,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       ligatures: next.editor.fontLigatures,
     });
     explorer.applySettings(next.explorer);
+    // Лигатуры консоли следуют за лигатурами кода: вид обоих полотен остаётся единым.
+    terminalPanel.setLigatures(next.editor.fontLigatures);
     chat.applySettings(next);
     settingsModal.applySettings(next);
     // Макет мог измениться (например, размеры панелей) — применяем без повторной записи.

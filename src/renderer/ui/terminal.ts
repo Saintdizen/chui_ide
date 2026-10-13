@@ -1,9 +1,22 @@
-import { FitAddon } from '@xterm/addon-fit';
-import { Terminal } from '@xterm/xterm';
-import '@xterm/xterm/css/xterm.css';
+/**
+ * Панель терминала: вкладки, сессии и связь с pty.
+ *
+ * Отрисовку и разбор вывода делает свой движок (`terminal/core`, `terminal/view`), а не
+ * xterm: шрифт, лигатуры и ширина клетки у него общие с редактором, поэтому консоль и код
+ * выглядят одинаково. Здесь остаётся то, что окружает движок: вкладки, создание сессии
+ * через RPC, пересылка набранного в pty и вывод обратно.
+ *
+ * Модель экрана (`Terminal`) и вид (`TermView`) связаны односторонне: вывод pty идёт в
+ * модель, модель перерисовывается видом; клавиши с вида кодируются в байты (`input/keys`)
+ * и уходят в pty. Про RPC знает только эта панель — движок от него не зависит.
+ */
+
 import { PushTopic, type TerminalDataPayload, type TerminalExitPayload, type TerminalSession } from '../../shared/api';
 import type { RpcClient } from '../core/rpc';
-import { TERMINAL_THEMES, type Scheme } from '../core/theme';
+import type { Scheme } from '../core/theme';
+import { Terminal } from '../terminal/core/screen';
+import { encodeKey, encodeMouse, encodePaste } from '../terminal/input/keys';
+import { TermView } from '../terminal/view/term-view';
 import { h, svgIcon } from './dom';
 import { showToast } from './toast';
 
@@ -28,22 +41,30 @@ export interface TerminalPanelView {
   fit(): void;
   /** Сменить палитру консоли вместе с темой приложения. */
   setScheme(scheme: Scheme): void;
+  /** Включить или выключить лигатуры — по общей настройке редактора. */
+  setLigatures(on: boolean): void;
 }
 
 interface SessionView {
   session: TerminalSession;
-  terminal: Terminal;
-  fit: FitAddon;
+  term: Terminal;
+  view: TermView;
   container: HTMLElement;
   tab: HTMLButtonElement;
   exited: boolean;
 }
 
-/** Цвета консоли берём из темы: фон совпадает с полотном редактора. */
+/** Размер по умолчанию, пока контейнер не разложен (панель скрыта): обычные 80×24. */
+const DEFAULT_COLS = 80;
+const DEFAULT_ROWS = 24;
+
+/** Панель консоли: вкладки, тело и связь сессий с pty. */
 export function createTerminalPanel(deps: {
   rpc: RpcClient;
   cwd: () => string | null;
   scheme: Scheme;
+  /** Включать ли лигатуры шрифта — то же значение, что у редактора кода. */
+  ligatures: () => boolean;
 }): TerminalPanelView {
   let scheme = deps.scheme;
 
@@ -95,9 +116,11 @@ export function createTerminalPanel(deps: {
   deps.rpc.onPush((message) => {
     if (message.topic === PushTopic.TerminalData) {
       const payload = message.payload as TerminalDataPayload;
-      const view = sessions.get(payload.id);
-      if (view) view.terminal.write(payload.data);
-      else {
+      const entry = sessions.get(payload.id);
+      if (entry) {
+        entry.term.write(payload.data);
+        entry.view.render();
+      } else {
         const buffer = orphanData.get(payload.id) ?? [];
         buffer.push(payload.data);
         orphanData.set(payload.id, buffer);
@@ -107,11 +130,14 @@ export function createTerminalPanel(deps: {
 
     if (message.topic === PushTopic.TerminalExit) {
       const payload = message.payload as TerminalExitPayload;
-      const view = sessions.get(payload.id);
-      if (!view) return;
-      view.exited = true;
-      view.tab.classList.add('is-exited');
-      view.terminal.write(`\r\n\x1b[90m[процесс завершён, код ${payload.exitCode}]\x1b[0m\r\n`);
+      const entry = sessions.get(payload.id);
+      if (!entry) return;
+      entry.exited = true;
+      entry.tab.classList.add('is-exited');
+      // Строку о завершении пишем в модель: она переживёт закрытие процесса.
+      entry.term.write(`\r\n\x1b[90m[процесс завершён, код ${payload.exitCode}]\x1b[0m\r\n`);
+      entry.view.render();
+      entry.view.stickToBottom();
     }
   });
 
@@ -129,25 +155,41 @@ export function createTerminalPanel(deps: {
     const container = h('div', { class: 'term-instance' });
     body.appendChild(container);
 
-    const terminal = new Terminal({
-      fontFamily: '"JetBrains Mono", "Fira Code", Menlo, Consolas, monospace',
-      fontSize: 13,
-      lineHeight: 1.25,
-      cursorBlink: true,
-      scrollback: 5000,
-      theme: TERMINAL_THEMES[scheme],
+    // Модель заводим на размере по умолчанию: настоящий размер узнаем после раскладки.
+    const term = new Terminal(DEFAULT_COLS, DEFAULT_ROWS);
+    // Идентификатор сессии появится после ответа main — до тех пор мышь молчит.
+    let sessionId: string | null = null;
+    const view = new TermView(container, term, {
+      scheme,
+      ligatures: deps.ligatures(),
+      // Мышь: координаты отдаём в SGR-формате, если программа о нём просила.
+      onMouse: (event) => {
+        if (!sessionId) return;
+        void deps.rpc
+          .request('terminal.write', { id: sessionId, data: encodeMouse(event, term.mouseSgr) })
+          .catch(() => undefined);
+      },
+      // Выделение появилось — копируем сразу, как в терминалах Linux с primary selection.
+      onSelectionChange: (text) => {
+        if (text) void navigator.clipboard.writeText(text).catch(() => undefined);
+      },
     });
-    const fit = new FitAddon();
-    terminal.loadAddon(fit);
-    terminal.open(container);
-    fit.fit();
+
+    // Подгоняем сетку под контейнер и только потом просим pty: оболочка должна родиться
+    // с тем же размером, иначе первая же строка перенесётся не там, где надо.
+    const size = view.fit();
+    if (size) {
+      term.resize(size.cols, size.rows);
+      view.render();
+    }
 
     try {
       const session = await deps.rpc.request('terminal.create', {
-        cols: Math.max(terminal.cols, 20),
-        rows: Math.max(terminal.rows, 5),
+        cols: size?.cols ?? DEFAULT_COLS,
+        rows: size?.rows ?? DEFAULT_ROWS,
         cwd: cwd ?? deps.cwd() ?? undefined,
       });
+      sessionId = session.id;
 
       const tab = h(
         'button',
@@ -159,42 +201,69 @@ export function createTerminalPanel(deps: {
         if (event.button === 1) void closeSession(session.id);
       });
 
-      const view: SessionView = { session, terminal, fit, container, tab, exited: false };
-      sessions.set(session.id, view);
+      const entry: SessionView = { session, term, view, container, tab, exited: false };
+      sessions.set(session.id, entry);
       tabsHost.appendChild(tab);
 
-      terminal.onData((data) => {
-        void deps.rpc.request('terminal.write', { id: session.id, data }).catch(() => undefined);
-      });
-      terminal.onResize(({ cols, rows }) => {
-        void deps.rpc.request('terminal.resize', { id: session.id, cols, rows }).catch(() => undefined);
-      });
+      bindInput(entry);
 
-      // Пока JetBrains Mono не загрузился, xterm измерил клетку по запасному
-      // шрифту. Пересчитываем сетку, когда шрифт есть: иначе размеры терминала
-      // в символах не совпадают с настоящими.
-      void document.fonts.load('13px "JetBrains Mono"').then(() => {
-        fit.fit();
-        terminal.refresh(0, Math.max(terminal.rows - 1, 0));
-      });
-
-      for (const chunk of orphanData.get(session.id) ?? []) terminal.write(chunk);
+      for (const chunk of orphanData.get(session.id) ?? []) term.write(chunk);
       orphanData.delete(session.id);
+      view.render();
 
       activate(session.id);
-      terminal.focus();
+      view.focus();
       return session.id;
     } catch (error) {
       container.remove();
-      terminal.dispose();
+      view.dispose();
       showToast(error instanceof Error ? error.message : String(error), 'error');
       return null;
     }
   }
 
+  /** Клавиатура и вставка: событие с вида кодируется в байты и уходит в pty. */
+  function bindInput(entry: SessionView): void {
+    entry.view.element.addEventListener('keydown', (event) => {
+      // Ctrl+Shift+C — копировать выделение (в терминале `Ctrl+C` — сигнал, а не копия).
+      if (event.ctrlKey && event.shiftKey && (event.key === 'C' || event.key === 'c')) {
+        const text = entry.view.selectedText();
+        if (text) {
+          void navigator.clipboard.writeText(text).catch(() => undefined);
+          entry.view.clearSelection();
+          event.preventDefault();
+        }
+        return;
+      }
+      const data = encodeKey(
+        {
+          key: event.key,
+          ctrlKey: event.ctrlKey,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+          shiftKey: event.shiftKey,
+        },
+        { applicationCursorKeys: entry.term.applicationCursorKeys },
+      );
+      if (data === null) return;
+      // Не даём браузеру обработать клавишу: `Tab`, `Ctrl+C` и стрелки в терминале —
+      // не навигация по интерфейсу, а ввод в консоль.
+      event.preventDefault();
+      void deps.rpc.request('terminal.write', { id: entry.session.id, data }).catch(() => undefined);
+    });
+
+    entry.view.element.addEventListener('paste', (event) => {
+      const text = event.clipboardData?.getData('text');
+      if (!text) return;
+      event.preventDefault();
+      const data = encodePaste(text, entry.term.bracketedPaste);
+      void deps.rpc.request('terminal.write', { id: entry.session.id, data }).catch(() => undefined);
+    });
+  }
+
   function activate(id: string): void {
-    const view = sessions.get(id);
-    if (!view) return;
+    const entry = sessions.get(id);
+    if (!entry) return;
     activeId = id;
 
     for (const [key, item] of sessions) {
@@ -202,18 +271,19 @@ export function createTerminalPanel(deps: {
       item.tab.classList.toggle('is-active', key === id);
     }
 
-    fitSession(view);
-    view.terminal.focus();
+    fitSession(entry);
+    entry.view.focus();
+    entry.view.scrollToBottom();
   }
 
   async function closeSession(id: string): Promise<void> {
-    const view = sessions.get(id);
-    if (!view) return;
+    const entry = sessions.get(id);
+    if (!entry) return;
 
     sessions.delete(id);
-    view.tab.remove();
-    view.terminal.dispose();
-    view.container.remove();
+    entry.tab.remove();
+    entry.view.dispose();
+    entry.container.remove();
     orphanData.delete(id);
 
     if (activeId === id) {
@@ -225,14 +295,20 @@ export function createTerminalPanel(deps: {
     await deps.rpc.request('terminal.kill', { id }).catch(() => undefined);
   }
 
-  function fitSession(view: SessionView): void {
-    // xterm не умеет измерять скрытый контейнер — размеры будут нулевыми.
-    if (view.container.offsetWidth === 0 || view.container.offsetHeight === 0) return;
-    try {
-      view.fit.fit();
-    } catch {
-      // контейнер ещё не разложен — пересчитаем при следующем показе
-    }
+  /**
+   * Подогнать сетку под контейнер. Если размер изменился — сообщаем об этом модели и pty:
+   * полноэкранные программы узнают о новом размере только так.
+   */
+  function fitSession(entry: SessionView): void {
+    const size = entry.view.fit();
+    if (!size) return;
+    if (size.cols === entry.term.cols && size.rows === entry.term.rows) return;
+
+    entry.term.resize(size.cols, size.rows);
+    entry.view.render();
+    void deps.rpc
+      .request('terminal.resize', { id: entry.session.id, cols: size.cols, rows: size.rows })
+      .catch(() => undefined);
   }
 
   function active(): SessionView | null {
@@ -240,7 +316,12 @@ export function createTerminalPanel(deps: {
   }
 
   function clearActive(): void {
-    active()?.terminal.clear();
+    const entry = active();
+    if (!entry) return;
+    // Очистка экрана — это ED 2 (весь экран), ED 3 (история) и возврат курсора домой:
+    // так же это делает сама оболочка по `clear`.
+    entry.term.write('\x1b[2J\x1b[3J\x1b[H');
+    entry.view.render();
   }
 
   async function killActive(): Promise<void> {
@@ -248,8 +329,8 @@ export function createTerminalPanel(deps: {
   }
 
   const resizeObserver = new ResizeObserver(() => {
-    const view = active();
-    if (view && !view.exited) fitSession(view);
+    const entry = active();
+    if (entry && !entry.exited) fitSession(entry);
   });
   resizeObserver.observe(body);
 
@@ -258,8 +339,8 @@ export function createTerminalPanel(deps: {
     async open(cwd) {
       if (sessions.size === 0) await createSession(cwd);
       else {
-        const view = active();
-        if (view) fitSession(view);
+        const entry = active();
+        if (entry) fitSession(entry);
       }
     },
     newSession: async (cwd) => {
@@ -273,27 +354,30 @@ export function createTerminalPanel(deps: {
       const id = current && !current.exited ? current.session.id : await createSession();
       if (!id) return;
 
-      const view = sessions.get(id);
-      if (view && title) {
+      const entry = sessions.get(id);
+      if (entry && title) {
         // Имя вкладки — по запуску, как в PyCharm: видно, что это запуск, а не
         // свободная оболочка. Подсказка хранит саму команду, если она отличается
         // от имени (у задачи из package.json они совпадают).
-        view.tab.textContent = title;
-        view.tab.title = title === command ? title : `${title} · ${command}`;
+        entry.tab.textContent = title;
+        entry.tab.title = title === command ? title : `${title} · ${command}`;
         activate(id);
       }
       await deps.rpc.request('terminal.write', { id, data: `${command}\r` }).catch(() => undefined);
-      view?.terminal.focus();
+      entry?.view.focus();
     },
     clearActive,
     killActive,
     fit() {
-      const view = active();
-      if (view) fitSession(view);
+      const entry = active();
+      if (entry) fitSession(entry);
     },
     setScheme(next: Scheme) {
       scheme = next;
-      for (const view of sessions.values()) view.terminal.options.theme = TERMINAL_THEMES[next];
+      for (const entry of sessions.values()) entry.view.setScheme(next);
+    },
+    setLigatures(on: boolean) {
+      for (const entry of sessions.values()) entry.view.setLigatures(on);
     },
   };
 }

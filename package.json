@@ -65,6 +65,7 @@
     "probe:lspbundled": "npm run build:main && electron scripts/lsp-bundled-probe.cjs",
     "probe:gitwatch": "npm run build:main && electron scripts/git-watch-probe.cjs",
     "probe:toolstate": "electron scripts/tool-state-probe.cjs",
+    "probe:own-terminal": "electron scripts/own-terminal-probe.cjs",
     "probe:typing": "npm run build && electron scripts/type-probe.cjs",
     "probe:lsp": "npm run build && electron scripts/lsp-pickup-probe.cjs",
     "probe:cursor": "npm run build && bash scripts/cursor-probe.sh",
@@ -89,8 +90,6 @@
     "vitest": "^5.0.3"
   },
   "dependencies": {
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
     "node-pty": "^1.1.0",
     "pyright": "^1.1.414",
     "typescript-bundled": "npm:typescript@^5.9.3",

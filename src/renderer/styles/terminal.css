@@ -1,0 +1,149 @@
+/*
+ * Оформление своего терминала (`src/renderer/terminal/view/term-view.ts`).
+ *
+ * Свои имена классов (`own-term*`) — префикс закрывает столкновения с остальной
+ * разметкой, как у редактора (`own-editor*`). Раскладка держится на двух переменных,
+ * которые задаёт представление из метрик шрифта: `--own-term-line-height` (высота
+ * строки) и `--own-term-char-width` (ширина клетки). Геометрия целиком приходит из JS.
+ *
+ * Шрифт, кегль и лигатуры — те же, что у кода: единый вид с редактором. Строка консоли
+ * набрана ровно тем же шрифтом и с той же шириной клетки, поэтому столбцы совпадают.
+ */
+
+.own-term {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  font-family: var(--font_mono);
+  font-size: var(--font_default_size);
+  line-height: 1.4;
+  color: var(--own-term-fg);
+  background: var(--own-term-bg);
+  /* Знаки не переносятся: сетка задана столбцами, ширину считает представление. */
+  white-space: pre;
+  font-variant-ligatures: none;
+  contain: layout paint style;
+}
+
+/* Лигатуры включаются классом по общей настройке (`editor.fontLigatures`): ширину
+   клетки в моношрифте они не меняют, поэтому сетка и курсор остаются на месте. */
+.own-term.is-ligatures {
+  font-variant-ligatures: contextual;
+  font-feature-settings:
+    "liga" 1,
+    "calt" 1;
+}
+
+.own-term:focus,
+.own-term:focus-visible {
+  outline: none;
+}
+
+.own-term-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.own-term-content {
+  position: relative;
+  min-height: 100%;
+}
+
+.own-term-rows {
+  position: absolute;
+  inset: 0 0 auto 0;
+}
+
+.own-term-row {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: var(--own-term-line-height);
+  line-height: var(--own-term-line-height);
+  will-change: transform;
+}
+
+.own-term-row span {
+  white-space: pre;
+}
+
+/* Начертания: жирный берём настоящим начертанием шрифта, остальное — оформлением. */
+.own-term-row .is-bold {
+  font-weight: 700;
+}
+
+.own-term-row .is-dim {
+  opacity: 0.6;
+}
+
+.own-term-row .is-italic {
+  font-style: italic;
+}
+
+.own-term-row .is-underline {
+  text-decoration: underline;
+}
+
+.own-term-row .is-strike {
+  text-decoration: line-through;
+}
+
+.own-term-row .is-underline.is-strike {
+  text-decoration: underline line-through;
+}
+
+.own-term-row .is-blink {
+  animation: own-term-blink 1s step-end infinite;
+}
+
+.own-term-row .is-invisible {
+  visibility: hidden;
+}
+
+@keyframes own-term-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.own-term-selection {
+  position: absolute;
+  inset: 0 0 auto 0;
+  pointer-events: none;
+}
+
+/* Заливка выделения лежит под текстом, поэтому буквы остаются читаемыми. */
+.own-term-selection-rect {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--own-term-selection);
+}
+
+/* Курсор: заливка цветом темы, позицию задаёт представление сдвигом. */
+.own-term-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--own-term-cursor);
+  mix-blend-mode: difference;
+}
+
+.own-term-cursor.is-hidden {
+  display: none;
+}
+
+.own-term:focus .own-term-cursor {
+  animation: own-term-cursor-blink 1.1s step-end infinite;
+}
+
+@keyframes own-term-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
