@@ -170,7 +170,7 @@ export class EditorView {
   /** Самая широкая известная строка: ширину полотна узнаём по мере отрисовки. */
   private widest = 0;
   /** Что сейчас в DOM: версия буфера, границы видимых строк и версия украшений — чтобы не пересобирать зря. */
-  private rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
+  private rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
   /** Версия семантической подсветки: она меняет цвета строк, минуя правку текста. */
   private semanticVersion = 0;
   private layoutCache: LineLayoutCache | null = null;
@@ -374,7 +374,7 @@ export class EditorView {
   remeasure(): void {
     this.metrics = measureFromHost(this.root);
     this.layoutCache = null;
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.applyMetrics();
     this.render();
   }
@@ -765,7 +765,7 @@ export class EditorView {
   /** Заставить пересобрать строки: сменилась подсветка или схема, а версия текста та же. */
   private rerender(): void {
     this.widest = 0;
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.render();
   }
 
@@ -797,7 +797,7 @@ export class EditorView {
     // Призрачная подсказка говорила о прошлом файле — к новому она не относится.
     this.ghost = null;
     this.ghostLayer.replaceChildren();
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.render();
   }
 
@@ -1054,7 +1054,11 @@ export class EditorView {
       // Ширина переноса поменялась (окно растянули) — отрезки другие, надо пересобрать.
       this.rendered.wrap === this.wrapSignature() &&
       // Семантическая подсветка сменилась — цвета строк другие, надо пересобрать.
-      this.rendered.semantic === this.semanticVersion;
+      this.rendered.semantic === this.semanticVersion &&
+      // Свёртку сложили или раскрыли — строки надо скрыть или вернуть. Без этого знак
+      // «свернуть» состояние менял, а строки оставались на месте: у небольшого файла
+      // видимый отрезок тот же, и пересборка слоя пропускалась.
+      this.rendered.folds === this.folds.revision;
     if (same) return;
 
     const fragment = document.createDocumentFragment();
@@ -1086,6 +1090,7 @@ export class EditorView {
       decorations: this.decorationsVersion,
       wrap: this.wrapSignature(),
       semantic: this.semanticVersion,
+      folds: this.folds.revision,
     };
   }
 
@@ -1319,7 +1324,7 @@ export class EditorView {
     }
     this.inlayByLine = byLine;
     this.layoutCache = null;
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.render();
   }
 
@@ -1344,7 +1349,7 @@ export class EditorView {
     }
     this.inlineValueByLine = byLine;
     this.layoutCache = null;
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.render();
   }
 

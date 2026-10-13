@@ -92,8 +92,26 @@ export function makeCodeGrammar(id: string, config: CodeConfig): Grammar {
       return null;
     }
     if (state === ST_TEMPLATE) {
-      const { end, closed } = scanQuoted(text, 0, '`');
-      push(tokens, 0, end, STRING);
+      // Мы УЖЕ внутри шаблона, поэтому закрывающая кавычка ищется с нулевой позиции:
+      // `scanQuoted` пропускает первый знак как открывающий, и строка, которая
+      // начинается самой кавычкой (`\`;`), закрытой бы не считалась — шаблон
+      // тянулся бы дальше, съедая весь следующий код.
+      let index = 0;
+      let closed = false;
+      while (index < text.length) {
+        const char = text[index];
+        if (char === '\\') {
+          index += 2;
+          continue;
+        }
+        if (char === '`') {
+          closed = true;
+          index += 1;
+          break;
+        }
+        index += 1;
+      }
+      push(tokens, 0, closed ? index : text.length, STRING);
       return closed ? null : { tokens, state: ST_TEMPLATE };
     }
     if (state === ST_TRIPLE_DOUBLE || state === ST_TRIPLE_SINGLE) {

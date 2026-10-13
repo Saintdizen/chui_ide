@@ -35,7 +35,7 @@ import { parseCoverageJson } from '../shared/coverage-json';
 import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
 import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
-import { languageLabel, languageIndent } from './core/languages';
+import { languageFromPath, languageLabel, languageIndent } from './core/languages';
 import { ImportChecker } from './core/import-check';
 import { LspClient } from './core/lsp';
 import { fetchCallHierarchy, type CallDirection } from './core/call-hierarchy';
@@ -64,7 +64,8 @@ import { detectNodeTestRunner, findRunnableNodeTests, type NodeTestRunner } from
 import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
 import { codeActionKindLabel, type CodeActionItem } from '../shared/lsp-code-actions';
 import { installSuggestions } from '../shared/import-install';
-import { indentFoldRanges } from '../shared/fold-ranges';
+import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
+import { semanticFoldRanges } from './editor/highlight/folds';
 import { packageForModule } from '../shared/python-packages';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
@@ -413,9 +414,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // и языковой сервер, и документная модель для правок.
     codeActions: (path, position) => void runCodeActions(path, position),
     // Свёртка: диапазоны берём у сервера, а если он их не умеет — считаем по отступам.
+    // Свёртка: сперва сервер (он видит блоки смыслово). Нет сервера — считаем сами:
+    // по грамматике (скобки, блочные комментарии, длинные строки) и по отступам.
+    // Два своих источника складываем: скобки накрывают C-подобный код, отступы —
+    // то, что блоками не описано (Python, YAML, тексты).
     foldRanges: async (path, text) => {
       const fromServer = await lsp.foldingRanges(path);
-      return fromServer.length > 0 ? fromServer : indentFoldRanges(text, settings.editor.tabSize);
+      if (fromServer.length > 0) return fromServer;
+      const grammar = semanticFoldRanges(text, languageFromPath(path));
+      const indent = indentFoldRanges(text, settings.editor.tabSize);
+      return mergeFoldRanges([...grammar, ...indent]);
     },
     // Код-линзы: подписи-действия у объявлений («3 ссылки», «Запустить тест»). Клик
     // исполняет команду сервера, а его правки (если вернёт) применяем обычным путём.

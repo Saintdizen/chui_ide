@@ -2525,6 +2525,58 @@ async function emmetCheck(win) {
  * строкой внутри, счётчиком мест и кнопкой «Открыть». Проверяем и ход по местам:
  * у двух мест стрелка вперёд активна, у последнего — выключена.
  */
+/**
+ * Свёртка без языкового сервера: рабочее место само считает диапазоны — по грамматике
+ * (скобки) и по отступам. Файл пробы свёрнут не по отступам (строки тела с нулевым
+ * отступом), а по скобкам: значит, дошли именно грамматические диапазоны. Сворачиваем
+ * всё и смотрим, что строк в разметке стало меньше.
+ */
+/**
+ * Свёртка без языкового сервера: рабочее место само считает диапазоны — по грамматике
+ * (скобки) и по отступам. Файл пробы свёрнут НЕ по отступам: строки тела с нулевым
+ * отступом, как и строка со скобкой, — значит, дошли именно грамматические диапазоны.
+ *
+ * Проверяем обе стороны: щелчок по значку скрывает строки блока, повторный — возвращает
+ * их. Второе важнее, чем кажется: одно время состояние менялось (значок ▾ → ▸), а строки
+ * оставались на месте — у небольшого файла видимый отрезок тот же, и слой строк не
+ * пересобирался (см. `rendered.folds` в `editor-view.ts`).
+ */
+async function semanticFoldCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  await wait(200);
+
+  const read = (expression) =>
+    script(`(() => {
+    const root = document.querySelector('#probe-folds .own-editor');
+    if (!root) return { ошибка: 'нет редактора' };
+    return {
+      значки: [...root.querySelectorAll('.own-editor-fold.is-visible')].map((node) => node.textContent),
+      строк_в_dom: root.querySelectorAll('.own-editor-line').length,
+      тексты: [...root.querySelectorAll('.own-editor-line')].map((row) => row.textContent),
+    };
+  })()${expression}`);
+
+  const before = await read('');
+
+  const click = () =>
+    script(`(() => {
+    const root = document.querySelector('#probe-folds .own-editor');
+    root.querySelector('.own-editor-fold.is-visible')
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    return true;
+  })()`);
+
+  await click();
+  await wait(120);
+  const collapsed = await read('');
+
+  await click();
+  await wait(120);
+  const expanded = await read('');
+
+  return { до: before, сложено: collapsed, раскрыто: expanded };
+}
+
 async function peekCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
 
@@ -2962,6 +3014,11 @@ async function main() {
   const peek = await peekCheck(win);
   log('## Заглянуть в определение');
   log(JSON.stringify(peek, null, 2));
+  log('');
+
+  const semanticFold = await semanticFoldCheck(win);
+  log('## Свёртка по грамматике (без сервера)');
+  log(JSON.stringify(semanticFold, null, 2));
   log('');
 
   log('## Подсказки языкового сервера');

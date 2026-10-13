@@ -30,6 +30,8 @@ import { OwnDiffEditor } from '../editor/host/diff-editor';
 import { createProblemPanel } from '../ui/problem-panel';
 import type { DiagnosticItem } from '../../shared/api';
 import type { SymbolLocation } from '../../shared/lsp-locations';
+import { indentFoldRanges, mergeFoldRanges } from '../../shared/fold-ranges';
+import { semanticFoldRanges } from '../editor/highlight/folds';
 
 /**
  * Документ для пробы. Собран так, чтобы задеть всё, что есть в раскладке:
@@ -371,6 +373,37 @@ declare global {
     };
   }
 }
+
+// Свёртка без языкового сервера: диапазоны считает рабочее место само — по грамматике
+// (скобки) и по отступам, как в приложении (см. `foldRanges` в `app.ts`). Файл собран
+// так, что по ОТСТУПАМ блок не виден (все строки с нулевым отступом), а по СКОБКАМ —
+// виден: так проверка отличает грамматическую свёртку от отступной.
+const foldsRoot = document.createElement('div');
+foldsRoot.id = 'probe-folds';
+foldsRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(foldsRoot);
+
+const foldsStore = new DocumentStore();
+const foldsRegistry = new DocumentRegistry(foldsStore);
+const foldsWorkspace = new EditorWorkspace(foldsRoot, foldsRegistry, {
+  scheme: 'dark',
+  foldRanges: async (_path, text) =>
+    mergeFoldRanges([...semanticFoldRanges(text, 'typescript'), ...indentFoldRanges(text, 4)]),
+});
+const foldsDoc = foldsStore.open(
+  '/probe/folds.ts',
+  ['function main() {', "console.log('hi');", 'return 0;', '}', '// хвост файла'].join('\n'),
+  { languageId: 'typescript' },
+);
+foldsWorkspace.open(foldsDoc);
+
+declare global {
+  interface Window {
+    probeFolds: { workspace: EditorWorkspace; store: DocumentStore; doc: TextDocument };
+  }
+}
+
+window.probeFolds = { workspace: foldsWorkspace, store: foldsStore, doc: foldsDoc };
 
 // Заглянуть в определение: подставной сервер отдаёт ДВА места в другом файле, а текст
 // того файла — шов чтения (`readText`). Проверяем показ копии, счётчик мест, ход по

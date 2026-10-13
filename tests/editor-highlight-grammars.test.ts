@@ -138,6 +138,18 @@ describe('JavaScript и TypeScript', () => {
     // После закрывающей кавычки точка с запятой уже вне строки.
     expect(typeAt(closed!, lines[1]!.indexOf('`') + 1)).toBeNull();
   });
+
+  // Причина проверки: закрывающая кавычка в НАЧАЛЕ строки (`\`;`) раньше не
+  // распознавалась — строка считалась незакрытой, и весь следующий код «затягивало»
+  // в строку. Воспроизводится, когда шаблон закрывают с новой строки.
+  it('шаблон закрывается, даже если кавычка первая в строке', () => {
+    const lines = ['const html = `', '  <div>', '`;', 'const after = 1;'];
+    const [, , closed, after] = run(grammarOf('typescript'), lines);
+    expect(typeAt(closed!, 0)).toBe(STRING);
+    // Кавычка закрылась на третьей строке — дальше обычный код.
+    expect(typeAt(closed!, 2)).toBeNull();
+    expect(typeOfWord(lines[3]!, 'const', after!)).toBe(KEYWORD);
+  });
 });
 
 describe('Python', () => {
