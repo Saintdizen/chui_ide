@@ -201,6 +201,10 @@ const DEFAULT_SETTINGS: StoredSettings = {
     openOnSingleClick: false,
     confirmDelete: true,
     exclude: [],
+    // Вложение выключено по умолчанию: это заметно меняет вид дерева, и включать
+    // его стоит осознанно. Своих правил нет — возьмутся из `core/file-nesting.ts`.
+    fileNesting: false,
+    nestingRules: [],
   },
   run: {
     // Пусто: сначала ищем окружение проекта, потом `python3` из PATH.
@@ -695,6 +699,9 @@ function loadSettings(filePath: string): StoredSettings {
       ...(parsed.explorer ?? {}),
       exclude: Array.isArray(parsed.explorer?.exclude)
         ? parsed.explorer.exclude.filter((item): item is string => typeof item === 'string')
+        : [],
+      nestingRules: Array.isArray(parsed.explorer?.nestingRules)
+        ? parsed.explorer.nestingRules.filter((item): item is string => typeof item === 'string')
         : [],
     },
     run: sanitizeRun({ ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) }),

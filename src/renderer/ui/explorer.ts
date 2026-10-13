@@ -9,6 +9,7 @@ import type { OpenEditors } from '../core/open-editors';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { pairFromSelection } from '../core/file-compare';
+import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
 import { movePlan } from '../core/tree-move';
 import {
   clickSelection,
@@ -76,6 +77,8 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   openOnSingleClick: false,
   confirmDelete: true,
   exclude: [],
+  fileNesting: false,
+  nestingRules: [],
 };
 
 export interface ExplorerDeps {
@@ -442,153 +445,177 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     render();
   }
 
+  const renderRow = (container: HTMLElement, entry: DirEntry, depth: number, dir: string): HTMLElement | null => {
+    const isDirectory = entry.kind === 'directory';
+    const isExpanded = expanded.has(entry.path);
+    const isActive = deps.openEditors.active?.path === entry.path;
+    const isSelected = selection.paths.includes(entry.path);
+
+    if (inlineEdit?.kind === 'rename' && inlineEdit.path === entry.path) {
+      container.appendChild(
+        inlineInput(depth, inlineEdit.currentName, (value) => void commitRename(entry.path, value)),
+      );
+      return null;
+    }
+
+    const classes = ['tree-row'];
+    if (isActive) classes.push('is-active');
+    if (isSelected) classes.push('is-selected');
+    // Дети только что раскрытой папки въезжают вниз, из-под родителя.
+    if (dir === revealChildrenOf) classes.push('is-entering');
+
+    // Пометка git из дерева не ходит в репозиторий: модель уже разложила статус по путям.
+    const gitChange = deps.git.statusOf(entry.path)?.change;
+    // Несохранённый документ git ещё не видит, но правка уже есть.
+    const unsaved = !isDirectory && gitChange === undefined && isDirty(entry.path);
+    const change = gitChange ?? (unsaved ? 'modified' : undefined);
+    if (change) classes.push(`is-${change}`);
+
+    // У папки правок быть не может, но внутри — сколько угодно: без пометки
+    // свёрнутая папка выглядит чистой, хотя это не так. Класс на строке красит
+    // и имя папки — весь путь к правке выделяется, а не только сам файл.
+    const inside = isDirectory ? folderInside(entry.path) : null;
+    if (inside) classes.push(`is-${inside.change}`);
+    // Игнорируемое git — приглушаем: файл видно и можно открыть, но он не мешает.
+    const isIgnored = options.dimIgnored && ignored.has(entry.path);
+    if (isIgnored) classes.push('is-ignored');
+    // Папка-подмодуль: это отдельный репозиторий, а не обычная папка проекта.
+    const submodule = isDirectory ? submodules.get(entry.path) : undefined;
+    if (submodule) classes.push('is-submodule');
+    const insideTitle = inside ? `Правок внутри: ${inside.count}` : undefined;
+
+    const row = h(
+      'button',
+      {
+        class: classes.join(' '),
+        type: 'button',
+        draggable: 'true',
+        title: change
+          ? `${entry.path} — ${unsaved ? 'не сохранён' : CHANGE_TITLE[change]}`
+          : insideTitle
+            ? `${entry.path} — ${insideTitle}`
+            : entry.path,
+        dataset: { path: entry.path },
+        style: { paddingLeft: `${8 + depth * options.indent}px` },
+      },
+      h('span', { class: `tree-twisty${isExpanded ? ' is-open' : ''}` }, isDirectory ? svgIcon('chevron', 12) : null),
+      // Значок — по виду файла; с выключенной настройкой остаётся привычный
+      // монохромный лист, чтобы дерево не пёстрило цветом.
+      options.icons
+        ? isDirectory
+          ? folderIcon(entry.name, isExpanded)
+          : fileIcon(entry.name)
+        : svgIcon(isDirectory ? 'folder' : 'file', 15),
+      h('span', { class: 'tree-name' }, entry.name),
+      gitChange && options.gitDecorations
+        ? h('span', { class: `tree-badge is-${gitChange}`, title: CHANGE_TITLE[gitChange] }, CHANGE_LETTER[gitChange])
+        : null,
+      unsaved && options.gitDecorations ? h('span', { class: 'tree-dot is-modified', title: 'не сохранён' }) : null,
+      submodule
+        ? h(
+            'span',
+            { class: `tree-badge is-submodule is-${submodule.state}`, title: submoduleStateLabel(submodule.state) },
+            'S',
+          )
+        : null,
+      inside && options.folderChangeDot
+        ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle })
+        : null,
+    );
+
+    row.addEventListener('click', (event) => {
+      // Ctrl/Cmd — точечно (добавить или снять), Shift — диапазон от якоря,
+      // обычный клик — одна строка. Порядок строк — тот, что сейчас на экране.
+      const mode: TreeClickMode = event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single';
+      selection = clickSelection(selection, visibleNow, entry.path, mode);
+      selected = selection.anchor;
+      // Перерисовка ниже уничтожит строку вместе с фокусом, а он нужен, чтобы
+      // работали F2 и Del. Просим вернуть фокус дереву ровно один раз — на
+      // ближайшей отрисовке, а не на каждой (иначе фокус выдёргивался бы из
+      // редактора при любом обновлении дерева).
+      refocusTreeOnce = true;
+      // Папка раскрывается всегда одним кликом (так работает стрелка),
+      // а файл — по настройке: PyCharm открывает двойным, VS Code — одинарным.
+      // Одиночный клик открывает файл «на посмотреть» (вкладку-предпросмотр):
+      // навигация по дереву не должна плодить вкладки. Двойной — «насовсем».
+      if (isDirectory || options.openOnSingleClick) void onClick(entry, !isDirectory && options.openOnSingleClick);
+      else render();
+    });
+    row.addEventListener('dblclick', () => {
+      if (!isDirectory) void onClick(entry, false);
+    });
+    row.addEventListener('contextmenu', (event) => openMenu(entry, event));
+    // Перетаскивание: путь уходит и в буфер (панель ассистента приложит его
+    // к вопросу), и во внутренний список — им дерево переносит файлы в папку.
+    row.addEventListener('dragstart', (event) => {
+      dragging = isSelected ? [...selection.paths] : [entry.path];
+      event.dataTransfer?.setData('text/plain', entry.path);
+      event.dataTransfer?.setData('application/x-chui-path', entry.path);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copyMove';
+    });
+    row.addEventListener('dragend', () => {
+      dragging = [];
+      row.classList.remove('is-drop-target');
+    });
+    // Куда встанет перенос: на папку — внутрь неё, на файл — рядом с ним.
+    const dropDir = isDirectory ? entry.path : parentOf(entry.path);
+    row.addEventListener('dragover', (event) => {
+      if (dragging.length === 0 || movePlan(dragging, dropDir).length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = copyDrag(event) ? 'copy' : 'move';
+      row.classList.add('is-drop-target');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      row.classList.remove('is-drop-target');
+      const moving = dragging;
+      dragging = [];
+      if (moving.length === 0) return;
+      void deps.commands.execute(copyDrag(event) ? 'file.copyInto' : 'file.moveInto', moving, dropDir);
+    });
+    container.appendChild(row);
+    visibleNow.push(entry.path);
+
+    if (isCreateTarget(inlineEdit, entry.path)) {
+      const edit = inlineEdit;
+      container.appendChild(inlineInput(depth + 1, '', (value) => void commitCreate(edit, value)));
+    }
+
+    if (isDirectory && isExpanded) {
+      const nested = children.get(entry.path);
+      if (nested) renderRows(container, nested, depth + 1, entry.path);
+      // Неудачное чтение само по себе не повторяем: иначе каждый проход
+      // отрисовки заново просит ту же папку и дерево крутится без остановки.
+      else if (!failed.has(entry.path)) void load(entry.path).then(render);
+    }
+    return row;
+  };
+
+  /**
+   * Строки одной папки. С включённым вложением спутники рисуются сразу под
+   * родителем (`Button.test.tsx` под `Button.tsx`) и своей строки не получают.
+   * Имена считаем по видимым записям — скрытое настройками в расклад не идёт.
+   */
   const renderRows = (container: HTMLElement, rawEntries: readonly DirEntry[], depth: number, dir: string): void => {
     const entries = visible(rawEntries, dir);
+    const nest = options.fileNesting
+      ? nestEntries(
+          entries.map((item) => item.name),
+          effectiveNestingRules(options.nestingRules),
+        )
+      : null;
+
     for (const entry of entries) {
-      const isDirectory = entry.kind === 'directory';
-      const isExpanded = expanded.has(entry.path);
-      const isActive = deps.openEditors.active?.path === entry.path;
-      const isSelected = selection.paths.includes(entry.path);
-
-      if (inlineEdit?.kind === 'rename' && inlineEdit.path === entry.path) {
-        container.appendChild(
-          inlineInput(depth, inlineEdit.currentName, (value) => void commitRename(entry.path, value)),
-        );
-        continue;
-      }
-
-      const classes = ['tree-row'];
-      if (isActive) classes.push('is-active');
-      if (isSelected) classes.push('is-selected');
-      // Дети только что раскрытой папки въезжают вниз, из-под родителя.
-      if (dir === revealChildrenOf) classes.push('is-entering');
-
-      // Пометка git из дерева не ходит в репозиторий: модель уже разложила статус по путям.
-      const gitChange = deps.git.statusOf(entry.path)?.change;
-      // Несохранённый документ git ещё не видит, но правка уже есть.
-      const unsaved = !isDirectory && gitChange === undefined && isDirty(entry.path);
-      const change = gitChange ?? (unsaved ? 'modified' : undefined);
-      if (change) classes.push(`is-${change}`);
-
-      // У папки правок быть не может, но внутри — сколько угодно: без пометки
-      // свёрнутая папка выглядит чистой, хотя это не так. Класс на строке красит
-      // и имя папки — весь путь к правке выделяется, а не только сам файл.
-      const inside = isDirectory ? folderInside(entry.path) : null;
-      if (inside) classes.push(`is-${inside.change}`);
-      // Игнорируемое git — приглушаем: файл видно и можно открыть, но он не мешает.
-      const isIgnored = options.dimIgnored && ignored.has(entry.path);
-      if (isIgnored) classes.push('is-ignored');
-      // Папка-подмодуль: это отдельный репозиторий, а не обычная папка проекта.
-      const submodule = isDirectory ? submodules.get(entry.path) : undefined;
-      if (submodule) classes.push('is-submodule');
-      const insideTitle = inside ? `Правок внутри: ${inside.count}` : undefined;
-
-      const row = h(
-        'button',
-        {
-          class: classes.join(' '),
-          type: 'button',
-          draggable: 'true',
-          title: change
-            ? `${entry.path} — ${unsaved ? 'не сохранён' : CHANGE_TITLE[change]}`
-            : insideTitle
-              ? `${entry.path} — ${insideTitle}`
-              : entry.path,
-          dataset: { path: entry.path },
-          style: { paddingLeft: `${8 + depth * options.indent}px` },
-        },
-        h('span', { class: `tree-twisty${isExpanded ? ' is-open' : ''}` }, isDirectory ? svgIcon('chevron', 12) : null),
-        // Значок — по виду файла; с выключенной настройкой остаётся привычный
-        // монохромный лист, чтобы дерево не пёстрило цветом.
-        options.icons
-          ? isDirectory
-            ? folderIcon(entry.name, isExpanded)
-            : fileIcon(entry.name)
-          : svgIcon(isDirectory ? 'folder' : 'file', 15),
-        h('span', { class: 'tree-name' }, entry.name),
-        gitChange && options.gitDecorations
-          ? h('span', { class: `tree-badge is-${gitChange}`, title: CHANGE_TITLE[gitChange] }, CHANGE_LETTER[gitChange])
-          : null,
-        unsaved && options.gitDecorations ? h('span', { class: 'tree-dot is-modified', title: 'не сохранён' }) : null,
-        submodule
-          ? h(
-              'span',
-              { class: `tree-badge is-submodule is-${submodule.state}`, title: submoduleStateLabel(submodule.state) },
-              'S',
-            )
-          : null,
-        inside && options.folderChangeDot
-          ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle })
-          : null,
-      );
-
-      row.addEventListener('click', (event) => {
-        // Ctrl/Cmd — точечно (добавить или снять), Shift — диапазон от якоря,
-        // обычный клик — одна строка. Порядок строк — тот, что сейчас на экране.
-        const mode: TreeClickMode = event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single';
-        selection = clickSelection(selection, visibleNow, entry.path, mode);
-        selected = selection.anchor;
-        // Перерисовка ниже уничтожит строку вместе с фокусом, а он нужен, чтобы
-        // работали F2 и Del. Просим вернуть фокус дереву ровно один раз — на
-        // ближайшей отрисовке, а не на каждой (иначе фокус выдёргивался бы из
-        // редактора при любом обновлении дерева).
-        refocusTreeOnce = true;
-        // Папка раскрывается всегда одним кликом (так работает стрелка),
-        // а файл — по настройке: PyCharm открывает двойным, VS Code — одинарным.
-        // Одиночный клик открывает файл «на посмотреть» (вкладку-предпросмотр):
-        // навигация по дереву не должна плодить вкладки. Двойной — «насовсем».
-        if (isDirectory || options.openOnSingleClick) void onClick(entry, !isDirectory && options.openOnSingleClick);
-        else render();
-      });
-      row.addEventListener('dblclick', () => {
-        if (!isDirectory) void onClick(entry, false);
-      });
-      row.addEventListener('contextmenu', (event) => openMenu(entry, event));
-      // Перетаскивание: путь уходит и в буфер (панель ассистента приложит его
-      // к вопросу), и во внутренний список — им дерево переносит файлы в папку.
-      row.addEventListener('dragstart', (event) => {
-        dragging = isSelected ? [...selection.paths] : [entry.path];
-        event.dataTransfer?.setData('text/plain', entry.path);
-        event.dataTransfer?.setData('application/x-chui-path', entry.path);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copyMove';
-      });
-      row.addEventListener('dragend', () => {
-        dragging = [];
-        row.classList.remove('is-drop-target');
-      });
-      // Куда встанет перенос: на папку — внутрь неё, на файл — рядом с ним.
-      const dropDir = isDirectory ? entry.path : parentOf(entry.path);
-      row.addEventListener('dragover', (event) => {
-        if (dragging.length === 0 || movePlan(dragging, dropDir).length === 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = copyDrag(event) ? 'copy' : 'move';
-        row.classList.add('is-drop-target');
-      });
-      row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
-      row.addEventListener('drop', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        row.classList.remove('is-drop-target');
-        const moving = dragging;
-        dragging = [];
-        if (moving.length === 0) return;
-        void deps.commands.execute(copyDrag(event) ? 'file.copyInto' : 'file.moveInto', moving, dropDir);
-      });
-      container.appendChild(row);
-      visibleNow.push(entry.path);
-
-      if (isCreateTarget(inlineEdit, entry.path)) {
-        const edit = inlineEdit;
-        container.appendChild(inlineInput(depth + 1, '', (value) => void commitCreate(edit, value)));
-      }
-
-      if (isDirectory && isExpanded) {
-        const nested = children.get(entry.path);
-        if (nested) renderRows(container, nested, depth + 1, entry.path);
-        // Неудачное чтение само по себе не повторяем: иначе каждый проход
-        // отрисовки заново просит ту же папку и дерево крутится без остановки.
-        else if (!failed.has(entry.path)) void load(entry.path).then(render);
+      if (nest?.hidden.has(entry.name)) continue;
+      renderRow(container, entry, depth, dir);
+      for (const name of nest?.children.get(entry.name) ?? []) {
+        const child = entries.find((item) => item.name === name);
+        // Класс `is-nested` — метка спутника: по ней видно вложение и на него
+        // смотрит проба (строка есть в дереве, но отдельной не считается).
+        if (child) renderRow(container, child, depth + 1, dir)?.classList.add('is-nested');
       }
     }
   };

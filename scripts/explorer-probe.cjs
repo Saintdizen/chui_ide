@@ -46,9 +46,15 @@ app.whenReady().then(async () => {
   await fs.writeFile(path.join(project, 'README.md'), '# demo\n', 'utf8');
   await fs.writeFile(path.join(project, 'note.txt'), 'перенос\n', 'utf8');
   await fs.writeFile(path.join(project, 'src', 'a.ts'), 'const a = 1;\n', 'utf8');
+  // Файлы для проверки вложения: спутники рядом с родителем.
+  await fs.mkdir(path.join(project, 'ui'), { recursive: true });
+  await fs.writeFile(path.join(project, 'ui', 'Button.tsx'), 'export const Button = () => null;\n', 'utf8');
+  await fs.writeFile(path.join(project, 'ui', 'Button.module.css'), '.btn {}\n', 'utf8');
 
   serveRenderer();
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
+  // Вложение включаем до открытия окна: дерево читает настройки на старте.
+  settings.update({ explorer: { fileNesting: true } });
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
   const gitService = new GitService(
     () => workspace.rootPath(),
@@ -265,6 +271,32 @@ app.whenReady().then(async () => {
   console.log(
     `[explorer] a.ts скопирован в lib: ${await exists(path.join(project, 'lib', 'a.ts'))}; ` +
       `остался в src: ${await exists(path.join(project, 'src', 'a.ts'))}`,
+  );
+
+  // Вложение: Button.module.css спрятан под Button.tsx (класс is-nested).
+  await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'ui',
+      );
+      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      return Boolean(row);
+    })()`,
+  );
+  await wait(800);
+  console.log(
+    `[explorer] вложение: ${JSON.stringify(
+      await ask(
+        ide,
+        `[...document.querySelectorAll('.tree-row')]
+          .filter((row) => ['Button.tsx', 'Button.module.css'].includes(row.querySelector('.tree-name')?.textContent ?? ''))
+          .map((row) => ({
+            имя: row.querySelector('.tree-name').textContent,
+            вложен: row.classList.contains('is-nested'),
+          }))`,
+      ),
+    )}`,
   );
 
   const finalTree = await ask(

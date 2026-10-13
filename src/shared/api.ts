@@ -666,6 +666,13 @@ export interface ExplorerSettings {
   confirmDelete: boolean;
   /** Шаблоны имён, которые не показываем в дереве (`*.min.js`, `coverage`). */
   exclude: string[];
+  /** Сворачивать связанные файлы под родителя (`Button.tsx` ← `Button.test.tsx`). */
+  fileNesting: boolean;
+  /**
+   * Свои правила вложения: строка на родителя, `*.tsx: *.test.tsx, *.module.css`.
+   * Пусто — берутся правила по умолчанию (см. `core/file-nesting.ts`).
+   */
+  nestingRules: string[];
 }
 
 export type PackageManagerChoice = 'auto' | 'npm' | 'pnpm' | 'yarn' | 'bun';

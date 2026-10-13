@@ -1063,6 +1063,21 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       apply({ exclude: patterns });
     });
 
+    const nesting = h('textarea', {
+      class: 'field-input',
+      rows: 3,
+      spellcheck: false,
+      placeholder: '*.tsx: *.test.tsx, *.module.css',
+    });
+    nesting.value = explorer.nestingRules.join('\n');
+    nesting.addEventListener('change', () => {
+      const lines = nesting.value
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      apply({ nestingRules: lines });
+    });
+
     return [
       h('div', { class: 'field-label' }, 'Вид дерева'),
       switchRow('Значки по виду файла', explorer.icons, (value) => apply({ icons: value })),
@@ -1109,6 +1124,14 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         { class: 'field-hint' },
         'По строке на шаблон: `*.min.js`, `coverage`, `dist`. Поддерживаются `*`, `?` и `**`.',
       ),
+      switchRow('Свёртывать связанные файлы', explorer.fileNesting, (value) => apply({ fileNesting: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Спутники (`Button.module.css`, `Button.test.tsx`) прячутся под родителя ' +
+          '(`Button.tsx`). Со своими правилами вроде `*.py: test_*.py`.',
+      ),
+      field('Правила вложения', nesting),
 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Поведение'),
