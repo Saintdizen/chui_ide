@@ -64,6 +64,7 @@ import { decideSaveAs } from '../shared/save-as';
 import { isEmptyCommitMessage } from '../shared/commit-message';
 import { hunkAtLine } from '../shared/hunk-lines';
 import { joinPath, separatorOf, splitPath } from '../shared/paths';
+import { movePlan } from './core/tree-move';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
@@ -2025,6 +2026,95 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     await rpc.request('workspace.trash', { path });
     explorer.scheduleRefresh();
     showToast(`В корзине: ${basename(path)}`);
+  });
+
+  /** Слово к числу: 1 объект, 2 объекта, 5 объектов. */
+  const objectsWord = (count: number): string => {
+    const tail = count % 100;
+    if (tail >= 11 && tail <= 14) return 'объектов';
+    const last = count % 10;
+    if (last === 1) return 'объект';
+    if (last >= 2 && last <= 4) return 'объекта';
+    return 'объектов';
+  };
+
+  define({ id: 'file.deleteMany', title: 'Удалить выделенное в корзину', category: 'Файл' }, async (paths) => {
+    if (!Array.isArray(paths)) return;
+    const list = paths.filter((item): item is string => typeof item === 'string');
+    if (list.length === 0) return;
+
+    // Вопрос один на всю пачку: спрашивать по разу на файл — то самое раздражение,
+    // ради ухода от которого и делают групповое выделение.
+    if (settings.explorer.confirmDelete) {
+      const { confirmed } = await rpc.request('dialog.confirm', {
+        title: 'Удалить в корзину',
+        message: `Переместить в корзину ${list.length} ${objectsWord(list.length)}?`,
+        detail: 'Файлы и папки можно вернуть из корзины системы.',
+        confirmLabel: 'Удалить',
+      });
+      if (!confirmed) return;
+    }
+
+    let removed = 0;
+    for (const path of list) {
+      try {
+        if (openEditors.has(path)) openEditors.close(path);
+        await rpc.request('workspace.trash', { path });
+        removed += 1;
+      } catch {
+        // Одного неудачного объекта мало, чтобы отменить удаление остальных.
+      }
+    }
+    explorer.scheduleRefresh();
+    showToast(`В корзине: ${removed} ${objectsWord(removed)}`);
+  });
+
+  define({ id: 'file.moveInto', title: 'Переместить в папку', category: 'Файл' }, async (paths, targetDir) => {
+    if (!Array.isArray(paths) || typeof targetDir !== 'string') return;
+    const list = paths.filter((item): item is string => typeof item === 'string');
+    const steps = movePlan(list, targetDir);
+    if (steps.length === 0) return;
+
+    // Открытые вкладки переезжают вместе с файлом: закрываем и открываем по новому
+    // пути. Активную возвращаем на экран — иначе перенос выглядел бы как закрытие.
+    const moved: Array<{ from: string; to: string; active: boolean }> = [];
+    for (const step of steps) {
+      const wasActive = openEditors.active?.path === step.from;
+      try {
+        if (openEditors.has(step.from)) openEditors.close(step.from);
+        await rpc.request('workspace.rename', { from: step.from, to: step.to });
+        moved.push({ ...step, active: wasActive });
+      } catch {
+        // Имя в целевой папке занято — этот объект пропускаем, остальные переносим.
+      }
+    }
+
+    explorer.scheduleRefresh();
+    if (moved.length === 0) {
+      showToast('Перенести не удалось: в целевой папке уже есть такое имя', 'error');
+      return;
+    }
+    for (const step of moved) if (step.active) await openPath(step.to);
+
+    showToast(
+      moved.length === 1
+        ? `Перенесено: ${basename(moved[0]!.to)}`
+        : `Перенесено: ${moved.length} ${objectsWord(moved.length)}`,
+      'info',
+      {
+        action: {
+          label: 'Отменить',
+          run: async () => {
+            for (const step of moved) {
+              if (openEditors.has(step.to)) openEditors.close(step.to);
+              await rpc.request('workspace.rename', { from: step.to, to: step.from }).catch(() => undefined);
+            }
+            for (const step of moved) if (step.active) await openPath(step.from);
+            explorer.scheduleRefresh();
+          },
+        },
+      },
+    );
   });
 
   define({ id: 'file.revealAt', title: 'Перейти к позиции', category: 'Навигация' }, async (path, line, column) => {

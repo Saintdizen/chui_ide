@@ -1491,6 +1491,18 @@ textarea {
   background: var(--element_background_hover);
 }
 
+/* Куда встанет перенос при перетаскивании: рамка акцента по краю строки. */
+.tree-row.is-drop-target {
+  background: var(--element_background_hover);
+  box-shadow: inset 0 0 0 2px var(--focus_ring_color);
+}
+
+/* Куда встанет перенос при перетаскивании: рамка акцента по краю строки. */
+.tree-row.is-drop-target {
+  background: var(--element_background_hover);
+  box-shadow: inset 0 0 0 2px var(--focus_ring_color);
+}
+
 /* Строка КОРНЯ рабочей области (когда папок несколько): имя папки жирным, а
    активный корень помечен точкой — по нему работают git, поиск и запуск. */
 .tree-row.is-root {

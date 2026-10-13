@@ -8,6 +8,14 @@ import type { GitInsideChange, GitModel } from '../core/git-model';
 import type { OpenEditors } from '../core/open-editors';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
+import { movePlan } from '../core/tree-move';
+import {
+  clickSelection,
+  EMPTY_SELECTION,
+  normalizeSelection,
+  type TreeClickMode,
+  type TreeSelection,
+} from '../core/tree-selection';
 import { showContextMenu } from './context-menu';
 import { clear, debounce, h, svgIcon } from './dom';
 import { fileIcon, folderIcon } from './file-icons';
@@ -129,14 +137,24 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
     if (event.key === 'Delete') {
       event.preventDefault();
-      void deps.commands.execute('file.delete', selected);
+      deleteTargets(selection.paths.length > 0 ? selection.paths : [selected]);
     }
   };
   let selected: string | null = null;
+  /** Выделенные строки (Ctrl/Shift) и якорь диапазона; порядок — как в дереве. */
+  let selection: TreeSelection = EMPTY_SELECTION;
+  /** Пути текущего перетаскивания: их и переносим при сбросе на папку. */
+  let dragging: string[] = [];
   let root: string | null = null;
   let options: ExplorerSettings = FALLBACK_SETTINGS;
   /** Свёрнутые КОРНИ рабочей области (только когда их несколько). */
   const collapsedRoots = new Set<string>();
+
+  /** Удаление в корзину: одну строку — обычной командой, группу — пачкой с одним вопросом. */
+  const deleteTargets = (paths: readonly string[]): void => {
+    if (paths.length === 1) void deps.commands.execute('file.delete', paths[0]);
+    else if (paths.length > 1) void deps.commands.execute('file.deleteMany', [...paths]);
+  };
 
   /**
    * Что показывать из содержимого папки: скрытое и исключённое отсеиваем до
@@ -266,7 +284,12 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const openMenu = (entry: DirEntry | null, event: MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
-    selected = entry?.path ?? null;
+    // Правый клик по уже выделенной строке сохраняет всю группу, по другой —
+    // выделяет только её: иначе «удалить выделенное» тронуло бы не то.
+    if (!entry || !selection.paths.includes(entry.path)) {
+      selection = entry ? { paths: [entry.path], anchor: entry.path } : EMPTY_SELECTION;
+      selected = entry?.path ?? null;
+    }
     render();
 
     const parent = entry
@@ -274,6 +297,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         ? entry.path
         : parentOf(entry.path)
       : (deps.workspace.root ?? '');
+    // Операции над группой идут по всему выделению, а не по одной строке под курсором.
+    const effective = selection.paths.length > 0 ? [...selection.paths] : entry ? [entry.path] : [];
     const items = entry
       ? [
           { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },
@@ -281,16 +306,16 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           { separator: true as const },
           { label: 'Переименовать…', hint: 'F2', onSelect: () => startRename(entry.path) },
           {
-            label: 'Удалить',
+            label: effective.length > 1 ? `Удалить (${effective.length})` : 'Удалить',
             hint: 'Del',
             danger: true,
-            onSelect: () => void deps.commands.execute('file.delete', entry.path),
+            onSelect: () => deleteTargets(effective),
           },
           { separator: true as const },
           {
-            label: 'Копировать путь',
+            label: effective.length > 1 ? `Копировать ${effective.length} путей` : 'Копировать путь',
             onSelect: () => {
-              void navigator.clipboard.writeText(entry.path).catch(() => undefined);
+              void navigator.clipboard.writeText(effective.join('\n')).catch(() => undefined);
             },
           },
           {
@@ -388,7 +413,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const isDirectory = entry.kind === 'directory';
       const isExpanded = expanded.has(entry.path);
       const isActive = deps.openEditors.active?.path === entry.path;
-      const isSelected = selected === entry.path;
+      const isSelected = selection.paths.includes(entry.path);
 
       if (inlineEdit?.kind === 'rename' && inlineEdit.path === entry.path) {
         container.appendChild(
@@ -462,8 +487,12 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           : null,
       );
 
-      row.addEventListener('click', () => {
-        selected = entry.path;
+      row.addEventListener('click', (event) => {
+        // Ctrl/Cmd — точечно (добавить или снять), Shift — диапазон от якоря,
+        // обычный клик — одна строка. Порядок строк — тот, что сейчас на экране.
+        const mode: TreeClickMode = event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'single';
+        selection = clickSelection(selection, visibleNow, entry.path, mode);
+        selected = selection.anchor;
         // Перерисовка ниже уничтожит строку вместе с фокусом, а он нужен, чтобы
         // работали F2 и Del. Просим вернуть фокус дереву ровно один раз — на
         // ближайшей отрисовке, а не на каждой (иначе фокус выдёргивался бы из
@@ -480,11 +509,35 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         if (!isDirectory) void onClick(entry, false);
       });
       row.addEventListener('contextmenu', (event) => openMenu(entry, event));
-      // Перетаскивание в чат: путь кладём в dataTransfer — панель ассистента его приложит.
+      // Перетаскивание: путь уходит и в буфер (панель ассистента приложит его
+      // к вопросу), и во внутренний список — им дерево переносит файлы в папку.
       row.addEventListener('dragstart', (event) => {
+        dragging = isSelected ? [...selection.paths] : [entry.path];
         event.dataTransfer?.setData('text/plain', entry.path);
         event.dataTransfer?.setData('application/x-chui-path', entry.path);
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copy';
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copyMove';
+      });
+      row.addEventListener('dragend', () => {
+        dragging = [];
+        row.classList.remove('is-drop-target');
+      });
+      // Куда встанет перенос: на папку — внутрь неё, на файл — рядом с ним.
+      const dropDir = isDirectory ? entry.path : parentOf(entry.path);
+      row.addEventListener('dragover', (event) => {
+        if (dragging.length === 0 || movePlan(dragging, dropDir).length === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        row.classList.add('is-drop-target');
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+      row.addEventListener('drop', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        row.classList.remove('is-drop-target');
+        const moving = dragging;
+        dragging = [];
+        if (moving.length > 0) void deps.commands.execute('file.moveInto', moving, dropDir);
       });
       container.appendChild(row);
       visibleNow.push(entry.path);
@@ -767,6 +820,24 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const tree = h('div', { class: 'tree', tabindex: '-1' });
     tree.addEventListener('contextmenu', (event) => openMenu(null, event));
     tree.addEventListener('keydown', (event) => onTreeKey(event));
+    // Сброс мимо строк — в корень области: так файл уезжает «наверх», к проекту.
+    tree.addEventListener('dragover', (event) => {
+      const root = deps.workspace.root;
+      if (!root || dragging.length === 0 || event.target !== tree) return;
+      if (movePlan(dragging, root).length === 0) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    });
+    tree.addEventListener('drop', (event) => {
+      const root = deps.workspace.root;
+      if (!root || event.target !== tree) return;
+      event.preventDefault();
+      const moving = dragging;
+      dragging = [];
+      if (moving.length > 0 && movePlan(moving, root).length > 0) {
+        void deps.commands.execute('file.moveInto', moving, root);
+      }
+    });
     element.appendChild(tree);
 
     paintTree(tree, info);
@@ -796,6 +867,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     children.clear();
     failed.clear();
     for (const dir of dirs) await load(dir);
+    // Часть выделенных путей могла исчезнуть (удаление извне) — чистим, чтобы
+    // следующая операция не споткнулась о пропавший путь. Пути вне
+    // перечитанных папок не трогаем: про них мы сейчас ничего не знаем.
+    const reread = new Set(dirs);
+    const known = new Set(selection.paths.filter((path) => !reread.has(parentOf(path))));
+    for (const entries of children.values()) for (const entry of entries) known.add(entry.path);
+    selection = normalizeSelection(selection, known);
+    selected = selection.anchor;
     render();
   };
 
@@ -816,6 +895,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       if (!children.has(current)) void load(current).then(render);
     }
     selected = target;
+    selection = { paths: [target], anchor: target };
     render();
     element.querySelector<HTMLElement>(`[data-path="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'nearest' });
   };
@@ -834,6 +914,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     pending.clear();
     failed.clear();
     selected = null;
+    selection = EMPTY_SELECTION;
     inlineEdit = null;
     render();
   });

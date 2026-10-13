@@ -55,6 +55,8 @@
     "probe:palette": "npm run build && electron scripts/palette-probe.cjs",
     "probe:saveas": "npm run build && electron scripts/save-as-probe.cjs",
     "probe:hunkmenu": "npm run build && electron scripts/hunk-menu-probe.cjs",
+    "probe:explorer": "npm run build && electron scripts/explorer-probe.cjs",
+    "probe:explorer": "npm run build && electron scripts/explorer-probe.cjs",
     "probe:editor": "electron scripts/own-editor-probe.cjs",
     "probe:lspbundled": "npm run build:main && electron scripts/lsp-bundled-probe.cjs",
     "probe:gitwatch": "npm run build:main && electron scripts/git-watch-probe.cjs",
