@@ -22,6 +22,7 @@ import { escapesRoot, isInsideRoot } from './path-guard';
 import { globToRegExp } from '../../shared/glob';
 import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
+import { importStyleOf, rewriteImports } from '../../shared/import-rewrite';
 import { replaceAll } from '../../shared/replace';
 import { MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../../shared/large-file';
 import { buildFolderDiff, splitFolderLists, type FolderCompareResult } from '../../shared/folder-compare';
@@ -789,6 +790,56 @@ export class WorkspaceService {
     }
 
     return { files: changed, replaced };
+  }
+
+  /**
+   * После переименования файла или папки переписать импорты, ведущие на прежний
+   * путь. Переименовать сам файл мало: на него ссылаются по имени, и без этой
+   * правки код проекта перестаёт собираться.
+   *
+   * Смотрим файлы, где, вообще говоря, бывают импорты (расширение знает язык), и
+   * в них — относительные спецификаторы, которые указывают на прежний путь или
+   * внутрь него. Правила разбора — чистые и живут в `shared/import-rewrite.ts`;
+   * здесь только обход и запись. Файлы внутри самой переименованной папки не
+   * трогаем: их собственные относительные пути от переезда не изменились.
+   */
+  async updateImports(oldPath: string, newPath: string): Promise<{ files: string[] }> {
+    const root = this.requireRoot();
+    const oldTarget = path.relative(root, path.resolve(oldPath)).split(path.sep).join('/');
+    const newTarget = path.relative(root, path.resolve(newPath)).split(path.sep).join('/');
+    const changed: string[] = [];
+    if (!oldTarget || oldTarget.startsWith('..')) return { files: changed };
+
+    for (const file of await this.collectFiles()) {
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      // Внутри переехавшего объекта импорты не сдвинулись: соседи те же, а путь
+      // между ними не изменился (папка уехала целиком).
+      if (relative === newTarget || relative.startsWith(`${newTarget}/`)) continue;
+      const style = importStyleOf(relative);
+      if (!style) continue;
+
+      const stat = await fs.stat(file).catch(() => null);
+      if (!stat || stat.size > MAX_FILE_BYTES) continue;
+      const buffer = await fs.readFile(file).catch(() => null);
+      if (!buffer) continue;
+
+      const result = rewriteImports(buffer.toString('utf8').replace(/\r\n/g, '\n'), {
+        file: relative,
+        oldTarget,
+        newTarget,
+        style,
+      });
+      if (result.count === 0) continue;
+
+      // Прежнее содержимое — в локальную историю, как при любой перезаписи.
+      await this.onBeforeChange?.(file, 'save');
+      await fs.writeFile(file, result.text, 'utf8');
+      this.contents.invalidate(file);
+      this.notifyChanged(file);
+      changed.push(file);
+    }
+
+    return { files: changed };
   }
 
   dispose(): void {

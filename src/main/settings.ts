@@ -205,6 +205,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // его стоит осознанно. Своих правил нет — возьмутся из `core/file-nesting.ts`.
     fileNesting: false,
     nestingRules: [],
+    // Импорты правим при переименовании по умолчанию: без этого код перестаёт
+    // собираться, а правку видно и её можно отменить.
+    updateImportsOnRename: true,
   },
   run: {
     // Пусто: сначала ищем окружение проекта, потом `python3` из PATH.
@@ -703,6 +706,8 @@ function loadSettings(filePath: string): StoredSettings {
       nestingRules: Array.isArray(parsed.explorer?.nestingRules)
         ? parsed.explorer.nestingRules.filter((item): item is string => typeof item === 'string')
         : [],
+      // Выключить можно явным `false`; любое другое значение — включено.
+      updateImportsOnRename: parsed.explorer?.updateImportsOnRename !== false,
     },
     run: sanitizeRun({ ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) }),
     appearance: {

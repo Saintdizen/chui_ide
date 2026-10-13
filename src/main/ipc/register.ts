@@ -271,6 +271,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('workspace.rename', async (params) => ({
     path: await deps.workspace.rename(params.from, params.to),
   }));
+  router.register('workspace.updateImports', (params) => deps.workspace.updateImports(params.oldPath, params.newPath));
   router.register('workspace.copy', async (params) => ({ path: await deps.workspace.copy(params.from, params.to) }));
   router.register('workspace.trash', (params) => deps.workspace.trash(params.path));
 

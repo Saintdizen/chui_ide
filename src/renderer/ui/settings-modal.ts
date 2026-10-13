@@ -1151,6 +1151,15 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'их видно и можно открыть, но они не отвлекают.',
       ),
       switchRow('Спрашивать перед удалением', explorer.confirmDelete, (value) => apply({ confirmDelete: value })),
+      switchRow('Править импорты при переименовании', explorer.updateImportsOnRename, (value) =>
+        apply({ updateImportsOnRename: value }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Переименовали файл или папку — относительные пути на него в коде проекта переводятся на новое имя. ' +
+          'Работает для JS/TS, CSS и Python; выключено — файл переименуется, а ссылки останутся прежними.',
+      ),
     ];
   }
 

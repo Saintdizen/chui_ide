@@ -675,6 +675,11 @@ export interface ExplorerSettings {
   /** Сворачивать связанные файлы под родителя (`Button.tsx` ← `Button.test.tsx`). */
   fileNesting: boolean;
   /**
+   * При переименовании файла или папки править импорты, ведущие на прежний путь.
+   * Без этого переименование ломает сборку: на файл ссылаются по имени.
+   */
+  updateImportsOnRename: boolean;
+  /**
    * Свои правила вложения: строка на родителя, `*.tsx: *.test.tsx, *.module.css`.
    * Пусто — берутся правила по умолчанию (см. `core/file-nesting.ts`).
    */
@@ -1495,6 +1500,11 @@ export interface ChuiMethods {
   'workspace.createFile': { params: { path: string }; result: { path: string } };
   'workspace.createDir': { params: { path: string }; result: { path: string } };
   'workspace.rename': { params: { from: string; to: string }; result: { path: string } };
+  /**
+   * Переписать импорты, ведущие на переименованный файл (или в переименованную
+   * папку): относительные спецификаторы в файлах проекта переводятся на новый путь.
+   */
+  'workspace.updateImports': { params: { oldPath: string; newPath: string }; result: { files: string[] } };
   /** Копия файла или папки: существующий объект в цели не перетирается. */
   'workspace.copy': { params: { from: string; to: string }; result: { path: string } };
   'workspace.trash': { params: { path: string }; result: void };

@@ -2026,20 +2026,43 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (openEditors.has(from)) openEditors.close(from);
 
     const renamed = await rpc.request('workspace.rename', { from, to });
+    // Переименование ломает ссылки на файл — правим их сразу, пока человек ещё
+    // ждёт ответа. Настройкой это можно выключить: тогда останется только то, что
+    // путь в проекте придётся поправить руками.
+    const touched = settings.explorer.updateImportsOnRename
+      ? (
+          await rpc
+            .request('workspace.updateImports', { oldPath: from, newPath: renamed.path })
+            .catch(() => ({ files: [] }))
+        ).files.length
+      : 0;
     if (wasActive) await openPath(renamed.path);
     explorer.scheduleRefresh();
-    showToast(`Переименовано: ${basename(renamed.path)}`, 'info', {
-      action: {
-        label: 'Отменить',
-        run: async () => {
-          // Возвращаем прежнее имя и, если файл был открыт, открываем его там же.
-          await commands.execute('file.close', renamed.path);
-          await rpc.request('workspace.rename', { from: renamed.path, to: from });
-          if (wasActive) await openPath(from);
-          explorer.scheduleRefresh();
+    showToast(
+      touched > 0
+        ? `Переименовано: ${basename(renamed.path)} · обновлено ссылок: ${touched}`
+        : `Переименовано: ${basename(renamed.path)}`,
+      'info',
+      {
+        action: {
+          label: 'Отменить',
+          run: async () => {
+            // Возвращаем прежнее имя и, если файл был открыт, открываем его там же.
+            await commands.execute('file.close', renamed.path);
+            await rpc.request('workspace.rename', { from: renamed.path, to: from });
+            // Ссылки возвращаются к прежнему имени тем же путём — иначе отмена
+            // переименования оставила бы в проекте ссылки на исчезнувший путь.
+            if (touched > 0) {
+              await rpc
+                .request('workspace.updateImports', { oldPath: renamed.path, newPath: from })
+                .catch(() => undefined);
+            }
+            if (wasActive) await openPath(from);
+            explorer.scheduleRefresh();
+          },
         },
       },
-    });
+    );
     return renamed.path;
   });
 

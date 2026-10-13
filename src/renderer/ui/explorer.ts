@@ -87,6 +87,7 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   exclude: [],
   fileNesting: false,
   nestingRules: [],
+  updateImportsOnRename: true,
 };
 
 export interface ExplorerDeps {
