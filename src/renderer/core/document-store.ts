@@ -17,10 +17,17 @@ export class DocumentStore {
   private readonly openEmitter = new Emitter<TextDocument>();
   private readonly closeEmitter = new Emitter<TextDocument>();
   private readonly changeEmitter = new Emitter<DocumentChangeEvent>();
+  private readonly savedEmitter = new Emitter<TextDocument>();
 
   readonly onDidOpen = this.openEmitter.event;
   readonly onDidClose = this.closeEmitter.event;
   readonly onDidChange = this.changeEmitter.event;
+  /**
+   * «Не сохранён» появился или снят. Отдельно от `onDidChange`: при сохранении
+   * текст тот же, а пометка в интерфейсе (вкладка, точка в дереве) обязана
+   * погаснуть сразу, а не по событию наблюдателя за файлом.
+   */
+  readonly onDidChangeDirty = this.savedEmitter.event;
 
   open(path: string, text: string, options: { languageId?: string; readOnly?: boolean } = {}): TextDocument {
     const existing = this.documents.get(path);
@@ -33,6 +40,7 @@ export class DocumentStore {
       options.readOnly === true,
     );
     document.onDidChange((change) => this.changeEmitter.fire({ document, change }));
+    document.onDidChangeSaved(() => this.savedEmitter.fire(document));
     this.documents.set(path, document);
     this.openEmitter.fire(document);
     return document;

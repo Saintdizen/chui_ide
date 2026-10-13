@@ -106,6 +106,18 @@ export function createTabs(deps: TabsDeps): Tabs {
               hint: 'Ctrl+Shift+S',
               onSelect: () => void deps.commands.execute('file.saveAs', path),
             },
+            // Буфер мог разойтись с файлом — его переписал другой инструмент. Возврат
+            // к версии на диске рядом: искать эту команду в палитре незачем.
+            {
+              label: 'Перечитать с диска',
+              onSelect: () => void deps.commands.execute('file.revertFromDisk', path),
+            },
+            // Буфер мог разойтись с файлом — его переписал другой инструмент. Возврат
+            // к версии на диске рядом: искать эту команду в палитре незачем.
+            {
+              label: 'Перечитать с диска',
+              onSelect: () => void deps.commands.execute('file.revertFromDisk', path),
+            },
             { separator: true },
             { label: 'Закрыть', hint: 'Ctrl+W', onSelect: () => void deps.commands.execute('file.close', path) },
             { label: 'Закрыть другие', onSelect: () => void deps.commands.execute('file.closeOthers', path) },
@@ -213,6 +225,9 @@ export function createTabs(deps: TabsDeps): Tabs {
 
   deps.openEditors.onDidChange(render);
   deps.documents.onDidChange(render);
+  // Сохранение не меняет текст, но снимает пометку правки: точка на вкладке
+  // обязана погаснуть сразу, а не по событию наблюдателя за файлом.
+  deps.documents.onDidChangeDirty(render);
   render();
 
   return { element, refresh: render };

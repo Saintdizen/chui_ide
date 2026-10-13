@@ -25,7 +25,14 @@ export class TextDocument {
   readonly uri: string;
 
   private readonly changes = new Emitter<DocumentChange>();
+  /**
+   * Смена «грязности» без смены текста: файл записан или возвращён к версии с
+   * диска. Отдельное событие потому, что текст при этом не меняется, а UI о
+   * пометке «не сохранён» знает именно по ней.
+   */
+  private readonly saved = new Emitter<DocumentChange>();
   private readonly _onDidChange: (listener: (change: DocumentChange) => void) => Disposable;
+  private readonly _onDidChangeSaved: (listener: () => void) => Disposable;
 
   private text: string;
   private currentVersion = 1;
@@ -42,10 +49,20 @@ export class TextDocument {
     this.uri = pathToUri(path);
     this.text = normalize(initialText);
     this._onDidChange = this.changes.event;
+    this._onDidChangeSaved = this.saved.event;
   }
 
   get onDidChange(): (listener: (change: DocumentChange) => void) => Disposable {
     return this._onDidChange;
+  }
+
+  /**
+   * Буфер снова совпал с диском: «не сохранён» снят. Слушают те, кто эту пометку
+   * рисует (полоса вкладок, дерево) — без подписки она гасла бы только на слух
+   * наблюдателя за файлом, а на сети или ФС без событий не гасла бы вовсе.
+   */
+  get onDidChangeSaved(): (listener: () => void) => Disposable {
+    return this._onDidChangeSaved;
   }
 
   get value(): string {
@@ -102,8 +119,12 @@ export class TextDocument {
 
   /** Отмечает, что содержимое совпадает с диском. `mtimeMs` — время той записи. */
   markSaved(mtimeMs: number = this.diskMtimeMs): void {
+    const wasDirty = this.dirty;
     this.savedVersion = this.currentVersion;
     this.diskMtimeMs = mtimeMs;
+    // Событие — только когда пометка действительно снята: `markSaved` зовут и на
+    // каждом перечитывании чистого документа, дёргать интерфейс там незачем.
+    if (wasDirty) this.saved.fire({ source: 'disk', version: this.currentVersion });
   }
 
   /** Запомнить состояние диска без сброса «грязности» — при чтении файла. */

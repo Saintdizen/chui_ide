@@ -1744,6 +1744,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       await persistPaths(result.reports.map((report) => report.path));
     }
 
+    // Что осталось только в буфере: без полного доступа файл пишет человек, а при
+    // конфликте запись не проходит вовсе. Об этом говорим наружу — main читает файлы
+    // с диска, и агент без этой оговорки счёл бы старый текст уже применённым.
+    const unwritten = result.reports
+      .map((report) => report.path)
+      .filter((target) => deps.documents.get(target)?.dirty === true);
+
     for (const report of result.reports) {
       const { added, removed } = countLines(selected, report.path);
       const seen = session.touched.get(report.path);
@@ -1757,7 +1764,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
     renderChanges();
 
-    return { rejected: false, result };
+    return { rejected: false, result, ...(unwritten.length > 0 ? { unwritten } : {}) };
   }
 
   /**

@@ -59,6 +59,8 @@
     "probe:tree": "npm run build && electron scripts/tree-virtual-probe.cjs",
     "probe:changes": "npm run build && electron scripts/changes-probe.cjs",
     "probe:folders": "npm run build && electron scripts/folders-probe.cjs",
+    "probe:revert": "npm run build && electron scripts/revert-probe.cjs",
+    "probe:revert": "npm run build && electron scripts/revert-probe.cjs",
     "probe:sort": "npm run build && electron scripts/sort-probe.cjs",
     "probe:extterminal": "npm run build && electron scripts/ext-terminal-probe.cjs",
     "probe:editor": "electron scripts/own-editor-probe.cjs",

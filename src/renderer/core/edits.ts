@@ -119,4 +119,25 @@ export class EditService {
     target.markSaved(file.mtimeMs);
     return target;
   }
+
+  /**
+   * Вернуть документ к версии файла на диске, правки в буфере — отбросить.
+   *
+   * Отличие от `reloadFromDisk`: та буфер бережёт (несохранённые правки человека —
+   * его работа), а эта им распоряжается и потому зовётся только по явной просьбе.
+   * Жить без неё нельзя: там, где буфер разошёлся с диском и правки в нём уже не
+   * нужны (файл переписал другой инструмент, правки легли мимо), документ
+   * оставался «не сохранён» до самого закрытия вкладки — и каждый раз при закрытии
+   * окна человек видел вопрос о файле, который и так равен диску.
+   */
+  async revertToDisk(path: string): Promise<TextDocument> {
+    const file = await this.deps.rpc.request('workspace.readFile', { path });
+    const existing = this.deps.documents.get(path);
+    const target = existing ?? this.deps.documents.open(path, file.text, { readOnly: file.readOnly });
+    // Замена идёт через документ: правку на экран доведёт подписка редактора на смену
+    // буфера, а undo получит свой шаг — возврат к версии с диска тоже можно отменить.
+    target.setText(file.text, 'disk');
+    target.markSaved(file.mtimeMs);
+    return target;
+  }
 }

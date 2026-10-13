@@ -17,7 +17,7 @@ import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '..
 import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import type { MemoryNote, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
-import type { FileEdit, TextEdit } from '../../shared/edits';
+import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
 import { parsePatchFiles, type PatchFile } from '../../shared/patch';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
 import { formatLocations, type SymbolLocation } from '../../shared/lsp-locations';
@@ -1211,17 +1211,12 @@ async function renameSymbol(ctx: ToolContext, args: Record<string, unknown>): Pr
     };
   }
 
-  const applied = decision.result?.reports ?? [];
-  const failed = decision.result?.failed ?? [];
-  const lines = [
-    ...applied.map((report) => `ok ${relative(report.path, root)}: правок — ${report.applied}`),
-    ...failed.map((failure) => `ошибка ${relative(failure.path, root)}: ${failure.message}`),
-  ];
+  const outcome = readEditsOutcome(decision, (file) => relative(file, root));
 
   return {
-    ok: failed.length === 0,
-    summary: `${name} → ${newName}: файлов ${applied.length}${failed.length ? `, с ошибками ${failed.length}` : ''}`,
-    detail: lines.join('\n') || 'Правки не применены',
+    ok: outcome.ok,
+    summary: `${name} → ${newName}: файлов ${outcome.applied.length}${outcome.failed.length ? `, с ошибками ${outcome.failed.length}` : ''}${outcome.tail}`,
+    detail: outcome.detail,
   };
 }
 
@@ -1386,6 +1381,37 @@ function formatDiagnostic(item: DiagnosticItem, root: string | null): string {
 }
 
 /* ── правки документов ──────────────────────────────────────────────────── */
+
+/**
+ * Разбор ответа renderer о правках: что применилось, что не удалось и что осталось
+ * только в буфере редактора.
+ *
+ * Последнее важно называть вслух: main читает файлы с диска, и без оговорки агент
+ * счёл бы незаписанный текст уже применённым — а ошибку нашёл бы не в правке,
+ * а в следующем чтении («текст не тот, что я написал»).
+ */
+function readEditsOutcome(
+  decision: ApplyEditsHostResult,
+  label: (file: string) => string,
+): { applied: ApplyReport[]; failed: ApplyFailure[]; tail: string; detail: string; ok: boolean } {
+  const applied = decision.result?.reports ?? [];
+  const failed = decision.result?.failed ?? [];
+  const unwritten = decision.unwritten ?? [];
+  const lines = [
+    ...applied.map((report) => `ok ${label(report.path)}: применено правок — ${report.applied}`),
+    ...failed.map((failure) => `ошибка ${label(failure.path)}: ${failure.message}`),
+    // Буфер и диск разошлись: правка видна в редакторе, а в файле её нет.
+    ...unwritten.map((file) => `буфер ${label(file)}: на диск не записано — правку сохранит человек`),
+  ];
+  return {
+    applied,
+    failed,
+    tail: unwritten.length > 0 ? `, не записано на диск: ${unwritten.length}` : '',
+    detail: lines.join('\n') || 'Правки не применены',
+    ok: failed.length === 0,
+  };
+}
+
 /** `apply_edit` едет в renderer: там документная модель, undo и ревью. */
 async function applyEdit(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.applyEdits) {
@@ -1404,17 +1430,12 @@ async function applyEdit(ctx: ToolContext, args: Record<string, unknown>): Promi
     };
   }
 
-  const applied = decision.result?.reports ?? [];
-  const failed = decision.result?.failed ?? [];
-  const lines = [
-    ...applied.map((report) => `ok ${path.basename(report.path)}: применено правок — ${report.applied}`),
-    ...failed.map((failure) => `ошибка ${path.basename(failure.path)}: ${failure.message}`),
-  ];
+  const outcome = readEditsOutcome(decision, (file) => path.basename(file));
 
   return {
-    ok: failed.length === 0,
-    summary: `применено файлов: ${applied.length}${failed.length ? `, с ошибками: ${failed.length}` : ''}`,
-    detail: lines.join('\n') || 'Правки не применены',
+    ok: outcome.ok,
+    summary: `применено файлов: ${outcome.applied.length}${outcome.failed.length ? `, с ошибками: ${outcome.failed.length}` : ''}${outcome.tail}`,
+    detail: outcome.detail,
   };
 }
 
@@ -1527,17 +1548,12 @@ async function applyPatch(ctx: ToolContext, args: Record<string, unknown>): Prom
     };
   }
 
-  const applied = decision.result?.reports ?? [];
-  const failed = decision.result?.failed ?? [];
-  const lines = [
-    ...applied.map((report) => `ok ${path.basename(report.path)}: применено правок — ${report.applied}`),
-    ...failed.map((failure) => `ошибка ${path.basename(failure.path)}: ${failure.message}`),
-  ];
+  const outcome = readEditsOutcome(decision, (file) => path.basename(file));
 
   return {
-    ok: failed.length === 0,
-    summary: `применено файлов: ${applied.length}${failed.length ? `, с ошибками: ${failed.length}` : ''}`,
-    detail: lines.join('\n') || 'Правки не применены',
+    ok: outcome.ok,
+    summary: `применено файлов: ${outcome.applied.length}${outcome.failed.length ? `, с ошибками: ${outcome.failed.length}` : ''}${outcome.tail}`,
+    detail: outcome.detail,
   };
 }
 

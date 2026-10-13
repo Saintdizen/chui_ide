@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { unsavedClosePrompt } from '../src/shared/unsaved';
+import { revertPrompt, unsavedClosePrompt } from '../src/shared/unsaved';
 
 /**
  * Текст диалога при закрытии окна с несохранёнными файлами. Проверяем три вещи:
@@ -37,6 +37,74 @@ describe('unsavedClosePrompt', () => {
   it('пустой список — не падаем', () => {
     const prompt = unsavedClosePrompt([]);
     expect(prompt.message).toBe('Нет несохранённых файлов');
+    expect(prompt.detail).toBe('');
+  });
+});
+
+/**
+ * Текст подтверждения перед возвратом к версии на диске. Правки в буфере при
+ * этом теряются, поэтому в подробностях обязано быть сказано, что именно
+ * потеряется — иначе подтверждение читается как «просто перечитать».
+ */
+describe('revertPrompt', () => {
+  it('один файл — спрашиваем об его правках', () => {
+    const prompt = revertPrompt(['/proj/src/app.ts']);
+    expect(prompt.message).toBe('Отменить правки в буфере?');
+    expect(prompt.detail).toBe('app.ts. Файлы будут перечитаны с диска, правки в них потеряются.');
+  });
+
+  it('несколько файлов — с числом', () => {
+    const prompt = revertPrompt(['/proj/a.py', '/proj/b.py']);
+    expect(prompt.message).toBe('Отменить правки в буфере: файлов 2');
+    expect(prompt.detail).toBe('a.py, b.py. Файлы будут перечитаны с диска, правки в них потеряются.');
+  });
+
+  it('длинный список сворачивается, как в диалоге закрытия', () => {
+    const files = Array.from({ length: 10 }, (_, index) => `/proj/f${index}.ts`);
+    const prompt = revertPrompt(files);
+    expect(prompt.message).toBe('Отменить правки в буфере: файлов 10');
+    expect(prompt.detail).toBe(
+      'f0.ts, f1.ts, f2.ts, f3.ts, f4.ts, f5.ts, f6.ts, f7.ts и ещё 2. Файлы будут перечитаны с диска, правки в них потеряются.',
+    );
+  });
+
+  it('пустой список — не падаем', () => {
+    const prompt = revertPrompt([]);
+    expect(prompt.message).toBe('Правок в буфере нет');
+    expect(prompt.detail).toBe('');
+  });
+});
+
+/**
+ * Текст подтверждения перед возвратом к версии на диске. Правки в буфере при
+ * этом теряются, поэтому в подробностях обязано быть сказано, что именно
+ * потеряется — иначе подтверждение читается как «просто перечитать».
+ */
+describe('revertPrompt', () => {
+  it('один файл — спрашиваем об его правках', () => {
+    const prompt = revertPrompt(['/proj/src/app.ts']);
+    expect(prompt.message).toBe('Отменить правки в буфере?');
+    expect(prompt.detail).toBe('app.ts. Файлы будут перечитаны с диска, правки в них потеряются.');
+  });
+
+  it('несколько файлов — с числом', () => {
+    const prompt = revertPrompt(['/proj/a.py', '/proj/b.py']);
+    expect(prompt.message).toBe('Отменить правки в буфере: файлов 2');
+    expect(prompt.detail).toBe('a.py, b.py. Файлы будут перечитаны с диска, правки в них потеряются.');
+  });
+
+  it('длинный список сворачивается, как в диалоге закрытия', () => {
+    const files = Array.from({ length: 10 }, (_, index) => `/proj/f${index}.ts`);
+    const prompt = revertPrompt(files);
+    expect(prompt.message).toBe('Отменить правки в буфере: файлов 10');
+    expect(prompt.detail).toBe(
+      'f0.ts, f1.ts, f2.ts, f3.ts, f4.ts, f5.ts, f6.ts, f7.ts и ещё 2. Файлы будут перечитаны с диска, правки в них потеряются.',
+    );
+  });
+
+  it('пустой список — не падаем', () => {
+    const prompt = revertPrompt([]);
+    expect(prompt.message).toBe('Правок в буфере нет');
     expect(prompt.detail).toBe('');
   });
 });

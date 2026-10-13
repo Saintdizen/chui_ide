@@ -152,3 +152,83 @@ describe('EditService.reloadFromDisk', () => {
     expect(document.diskMtime).toBe(2000);
   });
 });
+
+/**
+ * Возврат к версии на диске. В отличие от перечитывания, здесь буфер именно
+ * отбрасывается — это единственный путь снять «не сохранён» с файла, чей буфер
+ * разошёлся с диском и правки в котором уже не нужны (их записал другой
+ * инструмент). Без него такой файл закрывался бы только вместе с вкладкой.
+ */
+describe('EditService.revertToDisk', () => {
+  it('правки в буфере заменяются версией с диска, «грязность» снимается', async () => {
+    const { service, documents } = makeService(2000, 5000, 'версия с диска');
+    const document = editedDocument(documents, 1000);
+
+    const result = await service.revertToDisk('/p/a.ts');
+
+    expect(result).toBe(document);
+    expect(document.value).toBe('версия с диска');
+    expect(document.dirty).toBe(false);
+    expect(document.diskMtime).toBe(2000);
+  });
+
+  it('совпавший буфер тоже очищается', async () => {
+    const { service, documents } = makeService(2000, 5000, 'правка в редакторе');
+    const document = editedDocument(documents, 1000);
+
+    await service.revertToDisk('/p/a.ts');
+
+    expect(document.value).toBe('правка в редакторе');
+    expect(document.dirty).toBe(false);
+  });
+
+  it('файл не открыт — открывается и сразу считается чистым', async () => {
+    const { service, documents } = makeService(2000, 5000, 'текст с диска');
+
+    const document = await service.revertToDisk('/p/a.ts');
+
+    expect(documents.get('/p/a.ts')).toBe(document);
+    expect(document.value).toBe('текст с диска');
+    expect(document.dirty).toBe(false);
+  });
+});
+
+/**
+ * Возврат к версии на диске. В отличие от перечитывания, здесь буфер именно
+ * отбрасывается — это единственный путь снять «не сохранён» с файла, чей буфер
+ * разошёлся с диском и правки в котором уже не нужны (их записал другой
+ * инструмент). Без него такой файл закрывался бы только вместе с вкладкой.
+ */
+describe('EditService.revertToDisk', () => {
+  it('правки в буфере заменяются версией с диска, «грязность» снимается', async () => {
+    const { service, documents } = makeService(2000, 5000, 'версия с диска');
+    const document = editedDocument(documents, 1000);
+
+    const result = await service.revertToDisk('/p/a.ts');
+
+    expect(result).toBe(document);
+    expect(document.value).toBe('версия с диска');
+    expect(document.dirty).toBe(false);
+    expect(document.diskMtime).toBe(2000);
+  });
+
+  it('совпавший буфер тоже очищается', async () => {
+    const { service, documents } = makeService(2000, 5000, 'правка в редакторе');
+    const document = editedDocument(documents, 1000);
+
+    await service.revertToDisk('/p/a.ts');
+
+    expect(document.value).toBe('правка в редакторе');
+    expect(document.dirty).toBe(false);
+  });
+
+  it('файл не открыт — открывается и сразу считается чистым', async () => {
+    const { service, documents } = makeService(2000, 5000, 'текст с диска');
+
+    const document = await service.revertToDisk('/p/a.ts');
+
+    expect(documents.get('/p/a.ts')).toBe(document);
+    expect(document.value).toBe('текст с диска');
+    expect(document.dirty).toBe(false);
+  });
+});

@@ -11,6 +11,7 @@ import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../s
 import { menuChecks } from '../shared/app-menu';
 import { lspLanguagesForKind, mergeLspServers } from '../shared/lsp-presets';
 import { DEFAULT_SNIPPETS } from '../shared/snippets';
+import { revertPrompt } from '../shared/unsaved';
 import { createBlameController } from './core/blame';
 import { createChangeGutterController } from './core/change-gutter';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
@@ -2049,6 +2050,37 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
+  // Возврат к версии на диске. Нужен там, где буфер разошёлся с файлом: правки
+  // записал другой инструмент или они легли мимо. Без этой команды такой документ
+  // оставался бы «не сохранён» до самого закрытия вкладки.
+  define(
+    {
+      id: 'file.revertFromDisk',
+      title: 'Перечитать с диска (отменить правки в буфере)',
+      category: 'Файл',
+      // Доступна, пока есть хоть один правленый буфер: команда умеет и путь в аргументе
+      // (правый клик по вкладке), и активный файл — гасить её по одному файлу незачем.
+      enabled: () => documents.dirty().length > 0,
+    },
+    (pathArg) => {
+      const target = typeof pathArg === 'string' ? pathArg : (openEditors.active?.path ?? null);
+      if (!target) return;
+      return revertFilesToDisk([target]);
+    },
+  );
+
+  // То же для всех разом: файлов в буфере бывает несколько, и закрывать окно,
+  // отвечая по одному, — лишняя работа.
+  define(
+    {
+      id: 'file.revertAllFromDisk',
+      title: 'Перечитать все файлы с диска',
+      category: 'Файл',
+      enabled: () => documents.dirty().length > 0,
+    },
+    () => revertFilesToDisk(documents.dirty().map((document) => document.path)),
+  );
+
   define({ id: 'file.createFile', title: 'Создать файл', category: 'Файл' }, async (path) => {
     if (typeof path !== 'string') return undefined;
     const created = await rpc.request('workspace.createFile', { path });
@@ -3891,6 +3923,44 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const reloadIfOpen = async (path: string): Promise<void> => {
     if (!documents.get(path)) return;
     await edits.reloadFromDisk(path).catch(() => undefined);
+  };
+
+  /**
+   * Вернуть файлы к версии на диске: перечитать и отбросить правки в буфере.
+   *
+   * Спрашиваем всегда: правки в буфере — работа человека, терять их без спроса
+   * нельзя. Файл, который и так равен диску, в список не идёт — там терять нечего.
+   */
+  const revertFilesToDisk = async (targets: readonly string[]): Promise<void> => {
+    const dirty = targets.filter((target) => documents.get(target)?.dirty === true);
+    if (dirty.length === 0) {
+      showToast('Правок в буфере нет', 'info');
+      return;
+    }
+
+    const prompt = revertPrompt(dirty);
+    const { confirmed } = await rpc.request('dialog.confirm', {
+      title: 'Перечитать с диска',
+      message: prompt.message,
+      detail: prompt.detail,
+      confirmLabel: 'Отменить правки',
+    });
+    if (!confirmed) return;
+
+    let done = 0;
+    for (const target of dirty) {
+      try {
+        await edits.revertToDisk(target);
+        done += 1;
+      } catch {
+        showToast(`Не удалось прочитать файл: ${basename(target)}`, 'error');
+      }
+    }
+    if (done === 0) return;
+    // Файл мог измениться и за пределами буфера (его переписал другой инструмент) —
+    // поэтому вместе с документами обновляем и дерево.
+    explorer.scheduleRefresh();
+    showToast(done === 1 ? `Перечитано с диска: ${basename(dirty[0] ?? '')}` : `Перечитано с диска: файлов ${done}`);
   };
 
   rpc.onPush((message) => {

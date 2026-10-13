@@ -1232,6 +1232,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   // Первая правка делает файл «грязным», откат и сохранение — снова чистым:
   // дерево должно показывать это без ручного обновления.
   deps.documents.onDidChange(syncDirty);
+  deps.documents.onDidChangeDirty(syncDirty);
   deps.documents.onDidClose(syncDirty);
 
   render();
