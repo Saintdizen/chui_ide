@@ -52,6 +52,9 @@ function handle(message) {
           // Подсказки: триггер по точке и доведение элемента (resolve) — оба пути
           // проверяет смоук (см. scripts/lsp-smoke.cjs).
           completionProvider: { triggerCharacters: ['.'], resolveProvider: true },
+          // Рефакторинги: сервер заявляет виды, которые умеет, — по ним редактор и
+          // показывает «Извлечь…» и «Развернуть (inline)…».
+          codeActionProvider: { codeActionKinds: ['refactor.extract', 'refactor.inline'] },
         },
       },
     });
@@ -126,6 +129,32 @@ function handle(message) {
           // Правка заменяет участок на строку с двумя пробелами отступа: заметно и узнаваемо.
           newText: '  formatted',
         },
+      ],
+    });
+    return;
+  }
+
+  // Действия языка (`textDocument/codeAction`): отдаём ДВА рефакторинга разного вида —
+  // по ним видно, что «извлечение» и «разворачивание» (свои команды редактора) отбираются
+  // по виду действия, а не по заголовку. Извлечение несёт правки, разворачивание — нет.
+  if (message.method === 'textDocument/codeAction') {
+    const uri = message.params.textDocument.uri;
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [
+        {
+          title: 'Извлечь в константу',
+          kind: 'refactor.extract.constant',
+          edit: {
+            changes: {
+              [uri]: [
+                { range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } }, newText: 'VALUE' },
+              ],
+            },
+          },
+        },
+        { title: 'Развернуть', kind: 'refactor.inline' },
       ],
     });
     return;

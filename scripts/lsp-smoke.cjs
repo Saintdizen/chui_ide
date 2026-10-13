@@ -172,6 +172,27 @@ async function main() {
     JSON.stringify(rangeEdits),
   );
 
+  /* Действия языка (`textDocument/codeAction`): раздел `refactor` просим разом, а
+     «извлечение» и «разворачивание» — свои команды редактора — отбираются по виду
+     действия (`shared/lsp-refactor.ts`). Сервер отдаёт оба вида; проверяем разбор. */
+  const refactorActions = await lsp.request(sample, 'textDocument/codeAction', {
+    textDocument: { uri: `file://${sample}` },
+    range: { start: { line: 1, character: 0 }, end: { line: 1, character: 3 } },
+    context: { diagnostics: [], only: ['refactor'], triggerKind: 1 },
+  });
+  ok(
+    'действия рефакторинга получены',
+    Array.isArray(refactorActions) && refactorActions.length === 2,
+    JSON.stringify(refactorActions?.map((item) => item.kind)),
+  );
+  ok(
+    'извлечение несёт правки, разворачивание — вид без правок',
+    refactorActions?.[0]?.kind === 'refactor.extract.constant' &&
+      refactorActions[0].edit?.changes?.[`file://${sample}`]?.[0]?.newText === 'VALUE' &&
+      refactorActions?.[1]?.kind === 'refactor.inline',
+    JSON.stringify(refactorActions),
+  );
+
   // Изменение документа: сервер гасит пометки, а мы их публикуем пустыми.
   events.length = 0;
   lsp.change(sample, 'print(2)\n');

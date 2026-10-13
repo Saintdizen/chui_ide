@@ -26,6 +26,7 @@ import type { FileEdit, TextEdit } from '../../../shared/edits';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
 import { toCompletions, toResolvedCompletion, type ResolvedCompletion } from '../../../shared/lsp-completions';
 import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
+import { pickRefactors, type RefactorAction } from '../../../shared/lsp-refactor';
 import { toFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
 import { targetFromResolvedLink, toDocumentLinks, type DocumentLinkEntry } from '../../../shared/lsp-document-links';
 import { toLinkedRanges, type LinkedRange } from '../../../shared/lsp-linked-editing';
@@ -233,6 +234,32 @@ export class LspFeatures {
       context: { diagnostics: [], only: ['source.organizeImports'], triggerKind: 1 },
     });
     return toCodeActions(result, uriToPath);
+  }
+
+  /**
+   * Рефакторинг выделения или символа под кареткой: извлечение («вынести в переменную»)
+   * или разворачивание (inline). Сам рефакторинг делает сервер — мы лишь называем
+   * раздел действий (`refactor`), а нужный подвид отбираем из его ответа
+   * (`shared/lsp-refactor.ts`). Пусто — сервера нет или он такого не предложил.
+   */
+  async refactor(
+    path: string,
+    range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
+    action: RefactorAction,
+  ): Promise<CodeActionItem[]> {
+    const result = await this.request(path, 'textDocument/codeAction', {
+      textDocument: { uri: pathToUri(path) },
+      // Диапазон — как у выделения: извлечение работает по участку, разворачивание —
+      // по символу под кареткой (у выделения там нулевая ширина).
+      range: {
+        start: { line: Math.max(0, range.startLine - 1), character: Math.max(0, range.startColumn - 1) },
+        end: { line: Math.max(0, range.endLine - 1), character: Math.max(0, range.endColumn - 1) },
+      },
+      // Просим весь раздел `refactor` разом, а подвид отбираем сами: серверы сверяют вид
+      // по-разному, и строгий ответ на `refactor.extract.function` был бы пустым.
+      context: { diagnostics: [], only: ['refactor'], triggerKind: 1 },
+    });
+    return pickRefactors(toCodeActions(result, uriToPath), action);
   }
 
   /**

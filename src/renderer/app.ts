@@ -63,6 +63,7 @@ import { findRunnableTests } from '../shared/python-tests';
 import { detectNodeTestRunner, findRunnableNodeTests, type NodeTestRunner } from '../shared/node-tests';
 import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
 import { codeActionKindLabel, type CodeActionItem } from '../shared/lsp-code-actions';
+import { refactorLabel, type RefactorAction } from '../shared/lsp-refactor';
 import { installSuggestions } from '../shared/import-install';
 import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
 import { surroundOptions } from './editor/input/surround';
@@ -477,6 +478,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           { label: 'Найти все ссылки', onSelect: () => editors.runAction('editor.references') },
           { label: 'Переименовать символ', onSelect: () => editors.runAction('editor.renameSymbol') },
         );
+        // Рефакторинги тоже делает сервер. Извлечение — только по выделению: пункт есть,
+        // когда есть что выносить.
+        const refactorPath = info.path;
+        if (refactorPath) {
+          if (info.hasSelection) {
+            items.push({ label: 'Извлечь…', onSelect: () => void runRefactor(refactorPath, 'extract') });
+          }
+          items.push({ label: 'Развернуть (inline)…', onSelect: () => void runRefactor(refactorPath, 'inline') });
+        }
       }
       // Закладка ставится на конкретную строку, поэтому и пункт есть только у файла.
       const bookmarkPath = info.path;
@@ -584,6 +594,48 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       return;
     }
     await applyCodeAction(path, action);
+  };
+
+  /**
+   * Извлечение и «разворачивание» (inline) — рефакторинги, которые умеет только языковой
+   * сервер. Просим у него действие нужного вида и применяем выбранное: извлечение — по
+   * выделению, разворачивание — по символу под кареткой.
+   */
+  const runRefactor = async (path: string, action: RefactorAction): Promise<void> => {
+    const document = documents.get(path);
+    if (!document) return;
+    if (document.readOnly) {
+      showToast('Файл открыт только для чтения — рефакторинг не применить');
+      return;
+    }
+    const range = editors.selectionRange();
+    // Извлечению нужен участок: по пустому выделению выносить нечего.
+    const empty = range.startLine === range.endLine && range.startColumn === range.endColumn;
+    if (action === 'extract' && empty) {
+      showToast('Выделите выражение, которое надо извлечь');
+      return;
+    }
+    const actions = await lsp.refactor(path, range, action);
+    if (actions.length === 0) {
+      showToast(`Сервер ${refactorLabel(action)} не предложил`);
+      return;
+    }
+    // Одно действие — применяем сразу; несколько (в переменную и в функцию) — выбираем.
+    const [first] = actions;
+    if (actions.length === 1 && first) {
+      await applyCodeAction(path, first);
+      return;
+    }
+    const point = editors.caretPoint();
+    showPopupMenu(
+      actions.map((entry) => ({
+        label: entry.title,
+        hint: codeActionKindLabel(entry.kind),
+        onSelect: () => void applyCodeAction(path, entry),
+      })),
+      point?.left ?? 0,
+      (point?.bottom ?? 0) + 2,
+    );
   };
 
   /**
@@ -4145,6 +4197,43 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         return;
       }
       void runOrganizeImports(path);
+    },
+  );
+
+  // Извлечение в переменную или функцию — рефакторинг от сервера: у нас только запрос,
+  // список предложенного и применение. Выделение задаёт, что именно выносить.
+  define(
+    {
+      id: 'editor.extractSymbol',
+      title: 'Извлечь в переменную или функцию',
+      category: 'Редактор',
+      keywords: ['refactor', 'extract', 'извлечь', 'переменная', 'функция'],
+    },
+    () => {
+      const path = editors.currentPath;
+      if (!path) {
+        showToast('Нет открытого файла');
+        return;
+      }
+      void runRefactor(path, 'extract');
+    },
+  );
+
+  // «Разворачивание» (inline) — обратный рефакторинг: тело символа встаёт на место вызова.
+  define(
+    {
+      id: 'editor.inlineSymbol',
+      title: 'Развернуть (inline)',
+      category: 'Редактор',
+      keywords: ['refactor', 'inline', 'развернуть', 'встроить'],
+    },
+    () => {
+      const path = editors.currentPath;
+      if (!path) {
+        showToast('Нет открытого файла');
+        return;
+      }
+      void runRefactor(path, 'inline');
     },
   );
 
