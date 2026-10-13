@@ -47,6 +47,21 @@ export interface CompletionItem {
    * выбрав незнакомое имя, получаешь и строку `import`. Пусто — правок нет.
    */
   readonly additionalEdits?: readonly TextEdit[];
+  /** По чему сопоставлять набранное (от сервера): у CamelCase оно не равно подписи. */
+  readonly filterText?: string;
+  /** Ключ сортировки сервера: по нему он ставит нужное выше. */
+  readonly sortText?: string;
+  /** Сервер советует выделить сразу. */
+  readonly preselect?: boolean;
+  /** Подсказка помечена как устаревшая. */
+  readonly deprecated?: boolean;
+  /** Описание символа (из `completionItem/resolve`): показывается под подписью. */
+  readonly documentation?: string;
+  /**
+   * Исходный элемент сервера — его отправляем назад на `completionItem/resolve`,
+   * когда список выделил эту строку. Есть только у подсказок сервера.
+   */
+  readonly resolve?: unknown;
 }
 
 export interface CompletionOptions {

@@ -114,6 +114,13 @@ export class EditorController {
    * в списке — «главный», по нему идут IME, попапы и статус-бар.
    */
   private cursors: Cursor[] = [{ sel: { anchor: 0, active: 0 }, goal: 0 }];
+  /**
+   * Связанные участки (linkedEditing): имена парных тегов, которые правятся вместе.
+   * Смещения в тексте документа, по возрастанию. Пока они заданы и каретка одна, любую
+   * правку внутри участка повторяем и в остальных — так открывающий и закрывающий тег
+   * держатся одинаковыми. `null` — связи нет.
+   */
+  private linked: { start: number; end: number }[] | null = null;
 
   constructor(buffer: TextBuffer, options: EditorControllerOptions = {}) {
     this.buffer = buffer;
@@ -285,6 +292,7 @@ export class EditorController {
    */
   setBuffer(buffer: TextBuffer, selection: Selection = { anchor: 0, active: 0 }): void {
     this.buffer = buffer;
+    this.linked = null;
     this.restoreCursors([selection]);
     this.history.clear();
     this.emit('selection', this.caret);
@@ -414,7 +422,73 @@ export class EditorController {
       const shift = shiftFor(selectionStart(cursor.sel));
       return { anchor: target.anchor + shift, active: target.active + shift };
     });
+
+    // Связанные участки: правку внутри одного повторяем и в остальных. Только для одной
+    // каретки (при мультикурсоре связи нет) и для набора/удаления — на них связь и рассчитана.
+    if ((kind === 'typing' || kind === 'delete') && this.linked && this.cursors.length === 1) {
+      const primary = applied.get(order[0]!);
+      const mirror = primary ? this.linkedMirrors(primary.change) : null;
+      if (mirror) {
+        // Откатываем правку (compute уже применил её к буферу) и применяем всё вместе
+        // справа налево: тогда смещения у каждой правки — исходные, и история верна.
+        const change = primary!.change;
+        this.buffer.replace(change.start, change.inserted.length, change.removed);
+        const all = [change, ...mirror].sort((left, right) => right.start - left.start);
+        for (const item of all) this.buffer.replace(item.start, item.removed.length, item.inserted);
+        this.linked = shiftLinked(this.linked, all);
+        this.pushEntry(all, before, after, kind);
+        return;
+      }
+    }
+
     this.pushEntry(changes, before, after, kind);
+  }
+
+  /**
+   * Поставить связанные участки (смещения в тексте). Пусто или один участок — связи нет:
+   * повторять правку не с чем. Пересекающиеся участки отбрасываем — их правят как один.
+   */
+  setLinkedRanges(ranges: readonly { start: number; end: number }[] | null): void {
+    if (!ranges || ranges.length < 2) {
+      this.linked = null;
+      return;
+    }
+    const sorted = [...ranges].filter((r) => r.end > r.start).sort((a, b) => a.start - b.start);
+    const merged: { start: number; end: number }[] = [];
+    for (const range of sorted) {
+      const last = merged[merged.length - 1];
+      if (last && range.start <= last.end) continue; // перекрытие — не отдельный участок
+      merged.push({ start: range.start, end: range.end });
+    }
+    this.linked = merged.length >= 2 ? merged : null;
+  }
+
+  /** Есть ли сейчас связанные участки — для тестов и представления. */
+  get linkedRanges(): readonly { start: number; end: number }[] | null {
+    return this.linked;
+  }
+
+  /**
+   * Повторы правки на каждое связанное место. Правка должна целиком лежать в одном
+   * участке (иначе это не про связь), а переносы строк не повторяем: имя тега — одна
+   * строка. В каждом другом участке правим тот же относительный столбец.
+   */
+  private linkedMirrors(change: TextChange): TextChange[] | null {
+    const linked = this.linked;
+    if (!linked) return null;
+    if (change.inserted.includes('\n') || change.removed.includes('\n')) return null;
+    const source = linked.find(
+      (range) => change.start >= range.start && change.start + change.removed.length <= range.end,
+    );
+    if (!source) return null;
+    const at = change.start - source.start;
+    const mirrors: TextChange[] = [];
+    for (const range of linked) {
+      if (range === source) continue;
+      if (at + change.removed.length > range.end - range.start) continue;
+      mirrors.push({ start: range.start + at, removed: change.removed, inserted: change.inserted });
+    }
+    return mirrors.length > 0 ? mirrors : null;
   }
 
   /** Записать шаг истории и поставить курсоры, которые из него вышли. */
@@ -744,6 +818,24 @@ export class EditorController {
       this.buffer.replace(change.start, change.removed.length, change.inserted);
     }
   }
+}
+
+/**
+ * Сдвинуть связанные участки на правки: каждый участок смещается тем, что стоит левее
+ * его границ. Правка внутри участка (набор в имени тега) двигает только его конец.
+ */
+function shiftLinked(
+  linked: readonly { start: number; end: number }[],
+  changes: readonly TextChange[],
+): { start: number; end: number }[] {
+  const shiftAt = (offset: number): number => {
+    let shift = 0;
+    for (const change of changes) {
+      if (change.start + change.removed.length <= offset) shift += change.inserted.length - change.removed.length;
+    }
+    return shift;
+  };
+  return linked.map((range) => ({ start: range.start + shiftAt(range.start), end: range.end + shiftAt(range.end) }));
 }
 
 /** На сколько правка меняет длину текста: плюс — вставка, минус — удаление. */

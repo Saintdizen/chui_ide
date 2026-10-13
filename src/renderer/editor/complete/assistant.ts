@@ -35,6 +35,12 @@ import type { SuggestWidget } from '../widgets/suggest-widget';
 /** Сколько строк вокруг курсора заглядывать в словарь при каждом показе. */
 const WORDS_AROUND = 400;
 
+/**
+ * Пауза перед повтором запроса, если сервер ответил пусто. Первый ответ при старте
+ * бывает пустым: сервер (tsserver, pyright) ещё разбирает проект, а не молчит.
+ */
+const LSP_RETRY_MS = 300;
+
 export interface CompletionAssistantOptions {
   /** Идентификатор языка: по нему берутся слова языка для подсказок. */
   language?: string;
@@ -48,6 +54,12 @@ export interface CompletionAssistantOptions {
    * Не задано — подсказки только из слов и сниппетов.
    */
   lsp?: (prefix: string, position: { line: number; column: number }) => Promise<readonly CompletionItem[]>;
+  /**
+   * Довести подсказку опозданием (`completionItem/resolve`): на входе — исходный
+   * элемент сервера из `CompletionItem.resolve`, на выходе — описание и уточнение.
+   * Не задано — список показывает только то, что пришло в первом ответе.
+   */
+  resolve?: (item: unknown) => Promise<{ detail?: string; documentation?: string } | null>;
 }
 
 export class CompletionAssistant {
@@ -59,9 +71,16 @@ export class CompletionAssistant {
   private readonly external: () => readonly string[];
   private readonly snippets: () => readonly Snippet[];
   private readonly lsp: CompletionAssistantOptions['lsp'];
+  private readonly resolve: CompletionAssistantOptions['resolve'];
+  /** Подписи, для которых уже спрашивали resolve: не повторяем на каждое движение стрелок. */
+  private readonly resolveRequested = new Set<string>();
   private language: string;
   /** Номер запроса к серверу: показ ответа — только если он ещё про текущее место. */
   private lspRequestId = 0;
+  /** Знаки, по которым сервер сам готов открывать подсказки (`.` в TS, `@` в CSS). */
+  private triggers = new Set<string>();
+  /** Отложенный повтор запроса к серверу — снимаем, если место/файл сменились. */
+  private lspRetry: number | null = null;
 
   constructor(
     view: EditorView,
@@ -78,22 +97,37 @@ export class CompletionAssistant {
     this.external = options.external ?? (() => []);
     this.snippets = options.snippets ?? (() => []);
     this.lsp = options.lsp;
+    this.resolve = options.resolve;
     widget.onAccept = () => this.accept();
+    // Список выделил строку — доводим её до полного вида (описание, подробность).
+    widget.onSelect = (item) => void this.resolveItem(item);
   }
 
   /** Сменить язык (открыли другой файл). */
   setLanguage(languageId: string): void {
     this.language = languageId;
     this.index.reset();
+    this.resolveRequested.clear();
     this.lspRequestId += 1;
+    this.clearRetry();
     this.widget.hide();
+  }
+
+  /**
+   * Знаки, по которым сервер готов открывать подсказки (из его `initialize`).
+   * Приходят асинхронно при открытии файла: до ответа работает наш путь (точка и буквы).
+   */
+  setTriggerCharacters(characters: readonly string[]): void {
+    this.triggers = new Set(characters);
   }
 
   /** Новый документ: слова прежнего к нему не относятся, и сам буфер уже другой. */
   setBuffer(buffer: TextBuffer): void {
     this.buffer = buffer;
     this.index.reset();
+    this.resolveRequested.clear();
     this.lspRequestId += 1;
+    this.clearRetry();
     this.widget.hide();
   }
 
@@ -157,6 +191,14 @@ export class CompletionAssistant {
 
     const prefix = prefixAt(text, column);
     if (prefix.length === 0) {
+      // Знак-триггер сервера (`@` в CSS, `:` в JSON): сервер сам знает, что предложить
+      // в этом месте, — спрашиваем, даже если набранного начала нет. Свой путь выше
+      // (по буквам) этого не умеет: там имя уже есть, а здесь его ещё нет.
+      if (this.triggers.has(charBefore(this.buffer, caret))) {
+        this.widget.hide();
+        this.askServer(prefix, caret);
+        return;
+      }
       this.hideReasons += 1;
       this.widget.hide();
       return;
@@ -240,7 +282,8 @@ export class CompletionAssistant {
    * когда ответят. Свои слова никуда не уходят: ответ сервера идёт впереди, но при
    * неудаче список остаётся прежним — молчание сервера не должно гасить подсказки.
    */
-  private askServer(prefix: string, caret: number): void {
+  private askServer(prefix: string, caret: number, attempt = 0): void {
+    this.clearRetry();
     const lsp = this.lsp;
     if (!lsp) return;
     const id = ++this.lspRequestId;
@@ -255,16 +298,51 @@ export class CompletionAssistant {
         const lowered = prefix.toLowerCase();
         const local = this.widget.allItems;
         const known = new Set(local.map((item) => item.label));
-        const fresh = extra.filter(
-          (item) => !known.has(item.label) && (lowered.length === 0 || item.label.toLowerCase().startsWith(lowered)),
-        );
-        if (fresh.length === 0) return; // подтвердить нечего — список остаётся прежним
+        const fresh = extra.filter((item) => {
+          if (known.has(item.label)) return false;
+          if (lowered.length === 0) return true;
+          // Сопоставляем по `filterText`, если он есть: у CamelCase-серверов он не
+          // равен подписи, и фильтр по подписи терял бы верные ответы.
+          return (item.filterText ?? item.label).toLowerCase().startsWith(lowered);
+        });
+        if (fresh.length === 0) {
+          // Пусто — сервер ещё греется. Повторяем один раз, если курсор не уехал.
+          if (attempt === 0) this.lspRetry = window.setTimeout(() => this.askServer(prefix, caret, 1), LSP_RETRY_MS);
+          return; // подтвердить нечего — список остаётся прежним
+        }
         // Сервер впереди: он знает типы, а словарь — только имена.
         this.widget.show([...fresh, ...local], this.anchor(caret), prefix.length);
       })
       .catch(() => {
         // Сервера нет или он не ответил — остаются слова языка и документа.
       });
+  }
+
+  /** Снять отложенный повтор: место или файл сменились — старый запрос уже не к месту. */
+  private clearRetry(): void {
+    if (this.lspRetry !== null) {
+      window.clearTimeout(this.lspRetry);
+      this.lspRetry = null;
+    }
+  }
+
+  /**
+   * Довести выделенную строку: спросить у сервера описание и подробность. Спрашиваем
+   * по одному элементу и только раз на подпись — список открывается на каждый набор,
+   * и тянуть описания сразу для всех строк значило бы заваливать сервер запросами.
+   */
+  private async resolveItem(item: CompletionItem): Promise<void> {
+    const resolve = this.resolve;
+    if (!resolve || item.resolve === undefined) return;
+    if (this.resolveRequested.has(item.label)) return;
+    this.resolveRequested.add(item.label);
+    const done = await resolve(item.resolve).catch(() => null);
+    if (!done) return;
+    // Список мог смениться, пока ждали ответ: `patch` сам не найдёт строку — это не ошибка.
+    this.widget.patch(item, {
+      ...(done.detail ? { detail: done.detail } : {}),
+      ...(done.documentation ? { documentation: done.documentation } : {}),
+    });
   }
 
   /** Принять выбранную подсказку: заменить набранное начало словом или раскрыть сниппет. */
@@ -397,4 +475,9 @@ export class CompletionAssistant {
 function isTypedChar(event: KeyboardEvent): boolean {
   if (event.ctrlKey || event.metaKey || event.altKey) return false;
   return event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete';
+}
+
+/** Знак перед кареткой: им узнаём набранный знак-триггер сервера (`@`, `:`). */
+function charBefore(buffer: TextBuffer, caret: number): string {
+  return caret > 0 ? buffer.getText(caret - 1, caret) : '';
 }

@@ -28,6 +28,23 @@ export interface CompletionEntry {
   readonly snippet?: string;
   /** Правки вместе со вставкой (авто-импорт). */
   readonly additionalEdits?: TextEdit[];
+  /**
+   * По чему сервер советует СОПОСТАВЛЯТЬ набранное: у CamelCase-серверов `filterText`
+   * часто не равен подписи. Фильтровать по подписи значило бы терять верные ответы.
+   */
+  readonly filterText?: string;
+  /** Ключ сортировки сервера (`sortText`): меньше — выше. Пусто — сортируем по подписи. */
+  readonly sortText?: string;
+  /** Сервер советует выделить эту подсказку сразу (обычно единственно верную). */
+  readonly preselect?: boolean;
+  /** Подсказка помечена как устаревшая (`tags: [Deprecated]` или `deprecated`). */
+  readonly deprecated?: boolean;
+  /**
+   * Исходный элемент сервера: его отправляем назад в `completionItem/resolve`, когда
+   * человек выделил строку. Серверы, умеющие доводить элемент, в первом ответе часто
+   * опускают описание и подробность — именно поэтому без resolve попап выглядит голым.
+   */
+  readonly source?: unknown;
 }
 
 /**
@@ -80,7 +97,15 @@ export function toCompletions(raw: unknown): CompletionEntry[] {
     seen.add(entry.label);
     out.push(entry);
   }
-  return out;
+  return sortByServer(out);
+}
+
+/**
+ * Порядок подсказок задаёт сервер (`sortText`, иначе — подпись): переупорядочивать его
+ * выдачу значило бы отодвинуть то, что он считает самым нужным. Своей сортировки нет.
+ */
+function sortByServer(entries: CompletionEntry[]): CompletionEntry[] {
+  return entries.sort((a, b) => (a.sortText ?? a.label).localeCompare(b.sortText ?? b.label));
 }
 
 function toEntry(raw: unknown): CompletionEntry | null {
@@ -93,6 +118,11 @@ function toEntry(raw: unknown): CompletionEntry | null {
     detail?: unknown;
     insertTextFormat?: unknown;
     additionalTextEdits?: unknown;
+    filterText?: unknown;
+    sortText?: unknown;
+    preselect?: unknown;
+    deprecated?: unknown;
+    tags?: unknown;
   };
 
   const label = typeof value.label === 'string' ? value.label : null;
@@ -105,8 +135,26 @@ function toEntry(raw: unknown): CompletionEntry | null {
   // `insertTextFormat: 2` — вставка как сниппет: разметку раскрывает редактор.
   const snippet = value.insertTextFormat === 2 ? insert : undefined;
   const additionalEdits = toAdditionalEdits(value.additionalTextEdits);
-  const base = { label, insert, detail, ...(additionalEdits ? { additionalEdits } : {}) };
+  const base = {
+    label,
+    insert,
+    detail,
+    // Исходный элемент — для `completionItem/resolve` (см. `CompletionEntry.source`).
+    source: raw,
+    ...(additionalEdits ? { additionalEdits } : {}),
+    ...(typeof value.filterText === 'string' ? { filterText: value.filterText } : {}),
+    ...(typeof value.sortText === 'string' ? { sortText: value.sortText } : {}),
+    ...(value.preselect === true ? { preselect: true } : {}),
+    // «Устарело» в новой форме — `tags: [1]`, в старой — флаг `deprecated`.
+    ...(isDeprecated(value) ? { deprecated: true } : {}),
+  };
   return snippet ? { ...base, snippet } : base;
+}
+
+/** Пометка «устарело»: `tags` содержит `1` (Deprecated) или выставлен старый флаг. */
+function isDeprecated(value: { deprecated?: unknown; tags?: unknown }): boolean {
+  if (value.deprecated === true) return true;
+  return Array.isArray(value.tags) && value.tags.includes(1);
 }
 
 /**
@@ -137,4 +185,43 @@ function toAdditionalEdits(raw: unknown): TextEdit[] | null {
 
 function kindLabel(kind: unknown): string {
   return typeof kind === 'number' ? (KIND_LABELS[kind] ?? '') : '';
+}
+
+/** Что дал `completionItem/resolve`: описание и уточнённое пояснение. */
+export interface ResolvedCompletion {
+  /** Уточнённое пояснение (если сервер его дал). Пусто — оставляем прежнее. */
+  readonly detail?: string;
+  /** Описание символа: строкой или разметкой сервера. */
+  readonly documentation?: string;
+}
+
+/**
+ * Разбор ответа `completionItem/resolve`. Сервер возвращает тот же элемент с дописанными
+ * полями; нам нужны `detail` и `documentation`. Описание бывает строкой, `MarkupContent`
+ * (`{kind, value}`) или их массивом — сводим к одному тексту (пустые части отбрасываем).
+ * Ничего нет — `null`: показывать пустое описание хуже, чем не трогать строку списка.
+ */
+export function toResolvedCompletion(raw: unknown): ResolvedCompletion | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as { detail?: unknown; documentation?: unknown };
+  const detail = typeof value.detail === 'string' && value.detail.trim() ? value.detail : undefined;
+  const documentation = documentationText(value.documentation);
+  if (detail === undefined && documentation === undefined) return null;
+  return { ...(detail !== undefined ? { detail } : {}), ...(documentation !== undefined ? { documentation } : {}) };
+}
+
+/** Текст описания из любой формы, в которой его шлёт сервер (строка/маркировка/массив). */
+function documentationText(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw.trim() ? raw : undefined;
+  if (Array.isArray(raw)) {
+    const parts = raw
+      .map((part) => (typeof part === 'string' ? part : documentationText(part)))
+      .filter((part): part is string => typeof part === 'string' && part.length > 0);
+    return parts.length > 0 ? parts.join('\n\n') : undefined;
+  }
+  if (raw && typeof raw === 'object') {
+    const value = (raw as { value?: unknown }).value;
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return undefined;
 }

@@ -85,6 +85,19 @@ export interface SquigglyDecoration {
   readonly className: string;
 }
 
+/**
+ * Ссылка в тексте (`documentLink`): подчёркнутый участок, по которому можно перейти.
+ * Столбцы — так же, с единицы. Клик по участку представление отдаёт хозяину
+ * (тот решает: открыть файл или адрес) — по номеру в списке ссылок файла.
+ */
+export interface LinkDecoration {
+  readonly line: number;
+  readonly startColumn: number;
+  readonly endColumn: number;
+  /** Подпись при наведении (адрес или пояснение сервера). */
+  readonly tooltip?: string;
+}
+
 /** Прямоугольник украшения в координатах полотна: слева и сверху — от начала документа. */
 export interface DecorationRect {
   readonly left: number;
@@ -105,6 +118,7 @@ export class FileDecorations {
   private afters = new Map<number, AfterDecoration>();
   private lenses = new Map<number, LensDecoration>();
   private squiggles = new Map<number, SquigglyDecoration[]>();
+  private links = new Map<number, LinkDecoration[]>();
 
   setGlyphs(items: readonly GlyphDecoration[]): void {
     this.glyphs = indexByLine(items);
@@ -136,6 +150,16 @@ export class FileDecorations {
     this.squiggles = grouped;
   }
 
+  setLinks(items: readonly LinkDecoration[]): void {
+    const grouped = new Map<number, LinkDecoration[]>();
+    for (const item of items) {
+      const list = grouped.get(item.line);
+      if (list) list.push(item);
+      else grouped.set(item.line, [item]);
+    }
+    this.links = grouped;
+  }
+
   glyphFor(line: number): GlyphDecoration | undefined {
     return this.glyphs.get(line);
   }
@@ -160,6 +184,10 @@ export class FileDecorations {
     return this.squiggles.get(line) ?? EMPTY_SQUIGGLES;
   }
 
+  linksFor(line: number): readonly LinkDecoration[] {
+    return this.links.get(line) ?? EMPTY_SQUIGGLES;
+  }
+
   /** Есть ли хоть что-то: пустые украшения представление рисует не заходя в слои. */
   get isEmpty(): boolean {
     return (
@@ -168,7 +196,8 @@ export class FileDecorations {
       this.backgrounds.size === 0 &&
       this.afters.size === 0 &&
       this.lenses.size === 0 &&
-      this.squiggles.size === 0
+      this.squiggles.size === 0 &&
+      this.links.size === 0
     );
   }
 }

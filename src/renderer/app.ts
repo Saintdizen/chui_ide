@@ -10,6 +10,9 @@ import {
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
 import { lspLanguagesForKind, mergeLspServers } from '../shared/lsp-presets';
+import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
+import type { FileOperation } from '../shared/lsp-workspace-edit';
+import { progressLabel, type LspProgress, type WorkProgress } from '../shared/lsp-progress';
 import { DEFAULT_SNIPPETS } from '../shared/snippets';
 import { revertPrompt } from '../shared/unsaved';
 import { createBlameController } from './core/blame';
@@ -35,11 +38,13 @@ import { languageLabel, languageIndent } from './core/languages';
 import { ImportChecker } from './core/import-check';
 import { LspClient } from './core/lsp';
 import { fetchCallHierarchy, type CallDirection } from './core/call-hierarchy';
+import { fetchTypeHierarchy, type TypeDirection } from './core/type-hierarchy';
 import { OpenEditors } from './core/open-editors';
 import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { envWidgetLabel } from './core/env-widget';
 import { DebugController, frameForHover } from './core/debug';
+import { resolveInlineValues } from './core/inline-values';
 import { RpcClient } from './core/rpc';
 import { createSessionControl } from './core/session-control';
 import {
@@ -83,6 +88,7 @@ import { createEmptyState } from './ui/empty-state';
 import { createExplorer } from './ui/explorer';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
+import { createLspPopover, type LspPopoverView } from './ui/lsp-popover';
 import { logoMark } from './ui/logo';
 import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-popover';
 import { createOutline } from './ui/outline';
@@ -146,6 +152,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     openPythonEnv: (anchor) => openPythonEnv(anchor),
     openNodeEnv: (anchor) => openNodeEnv(anchor),
     openProblems: () => editors.revealNextProblem(),
+    openLsp: (anchor) => openLsp(anchor),
   });
   layout.statusBarHost.appendChild(statusBar.element);
 
@@ -285,6 +292,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     minimap: settings.editor.minimap,
     wordWrap: settings.editor.wordWrap,
     ligatures: settings.editor.fontLigatures,
+    // Живой геттер: настройку меняют в окне без пересоздания редактора.
+    emmetEnabled: () => settings.editor.emmet,
     snippets: () => [...settings.editor.snippets, ...DEFAULT_SNIPPETS],
     // Наведение от сервера: текст разметки в карточку.
     hoverFromLanguage: async (path, position) => {
@@ -293,6 +302,28 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     // Подсказки от сервера подмешиваются к словам языка и документа.
     completionFromLanguage: (path, position) => lsp.completion(path, position),
+    // Ссылки в коде: сервер помечает участки (пути в import, адреса) — их показываем
+    // подчёркнутыми, а клик открывает адрес или файл (см. `openDocumentLink`).
+    documentLinks: async (path) => {
+      const links = await lsp.documentLinks(path);
+      // Часть серверов адрес отдаёт только в `resolve` — доводим те, у кого его нет.
+      return Promise.all(
+        links.map(async (link) => {
+          if (link.target) return link;
+          const target = await lsp.resolveDocumentLink(path, link.source).catch(() => null);
+          return target ? { ...link, target } : link;
+        }),
+      );
+    },
+    openLink: (target, path) => void openDocumentLink(target, path),
+    // Связанные участки: имена парных тегов (открывающий и закрывающий) правятся вместе.
+    linkedEditing: (path, position) => lsp.linkedEditingRanges(path, position),
+    // Семантическая подсветка: точные роли от сервера поверх своей грамматики.
+    semanticTokens: (path) => lsp.semanticTokens(path),
+    // Знаки-триггеры сервера (`@` в CSS, `:` в JSON): попап открывается сразу по ним.
+    completionTriggers: (path) => lsp.completionTriggers(path),
+    // Дотягивание подсказки: описание символа подтягивается при выделении строки.
+    resolveCompletionItem: (path, item) => lsp.resolveCompletion(path, item),
     // Подсказка о параметрах вызова: карточка у каретки по набранной `(` или `,`.
     signatureFromLanguage: (path, position) => lsp.signatureHelp(path, position),
     // Определение и ссылки — списком мест, как и прочие переходы.
@@ -309,13 +340,22 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       void (async () => {
         const newName = await promptValue({ title: 'Переименовать символ', label: 'Новое имя', value: '' });
         if (!newName) return;
-        const fileEdits = await lsp.rename(path, position, newName);
-        if (!fileEdits) {
+        const edit = await lsp.workspaceEdit(path, position, newName);
+        if (!edit || (edit.files.length === 0 && edit.operations.length === 0)) {
           showToast('Сервер не смог переименовать этот символ', 'error');
           return;
         }
-        const result = await edits.applyFileEdits(fileEdits);
-        if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
+        // Операции с файлами — до правок содержимого: сервер вправе переименовать файл,
+        // а правки затем придут уже по новым путям (см. `shared/lsp-workspace-edit.ts`).
+        const failure = await applyFileOperations(edit.operations);
+        if (failure) {
+          showToast(failure, 'error');
+          return;
+        }
+        if (edit.files.length > 0) {
+          const result = await edits.applyFileEdits(edit.files);
+          if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
+        }
       })();
     },
     // Inline-подсказка «допиши за меня»: запрос к модели уходит в main через RPC.
@@ -538,6 +578,41 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const result = await debug.hover(expression, frame?.id);
     return result ? { value: result.value, type: result.type } : null;
   });
+  /**
+   * Значения переменных в строках остановленного файла (`textDocument/inlineValue`):
+   * справа от имени появляется `x = 42`. Участки помечает языковой сервер, значения берём
+   * у отладчика. Обновляем при останове и шаге, при смене вкладки и правке текста — пока
+   * программа стоит, значения могли измениться.
+   */
+  const refreshDebugInlineValues = async (): Promise<void> => {
+    const state = debug.get();
+    const path = editors.currentPath;
+    // Кадр берём тот, что в текущем файле: значения видны и в вызывающих кадрах стека.
+    const frame = state.phase === 'stopped' ? state.frames.find((item) => item.path === path) : undefined;
+    const document = path ? documents.get(path) : null;
+    if (!frame || !path || !document) {
+      editors.setDebugInlineValues(null, []);
+      return;
+    }
+    const text = document.value;
+    const lineCount = text.split('\n').length;
+    const items = await lsp
+      .inlineValues(
+        path,
+        { start: { line: 1, column: 1 }, end: { line: lineCount, column: 1 } },
+        { frameId: frame.id, line: frame.line, column: frame.column },
+      )
+      .catch(() => []);
+    if (items.length === 0) {
+      editors.setDebugInlineValues(path, []);
+      return;
+    }
+    const values = await resolveInlineValues(items, text, async (expression) => {
+      const result = await debug.evaluate(expression, frame.id);
+      return { value: result.value };
+    });
+    editors.setDebugInlineValues(path, values);
+  };
   // Приёмник обратных вызовов из main: правки агента приходят сюда.
   const host = new HostService();
   // Языковые серверы: держим документы синхронными и кладём их пометки в редактор.
@@ -687,6 +762,37 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   function openNodeEnv(anchor: HTMLElement): void {
     void ensureNodeEnv().refresh();
     nodeEnvPopover?.toggle(anchor);
+  }
+
+  /**
+   * Попап языковых серверов по клику на чип в статусбаре: какой сервер обслуживает
+   * язык, откуда он взят и что не поднялось. Так «почему нет подсказок» видно сразу.
+   */
+  let lspPopover: PopoverView | null = null;
+  let lspPopoverView: LspPopoverView | null = null;
+
+  function ensureLspPopover(): LspPopoverView {
+    if (!lspPopover || !lspPopoverView) {
+      lspPopoverView = createLspPopover({
+        rpc,
+        onRestart: () => {
+          lspPopover?.close();
+          void commands.execute('lsp.restart');
+        },
+        onOpenSettings: () => {
+          lspPopover?.close();
+          settingsModal.open('lsp');
+        },
+      });
+      lspPopover = createPopover(lspPopoverView.element, { width: 340, align: 'end' });
+      lspPopover.element.classList.add('popover-lsp-status');
+    }
+    return lspPopoverView;
+  }
+
+  function openLsp(anchor: HTMLElement): void {
+    void ensureLspPopover().refresh();
+    lspPopover?.toggle(anchor);
   }
 
   /**
@@ -1176,7 +1282,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (!settings.lsp.enabled) return;
     void rpc
       .request('lsp.restart')
-      .then(() => {
+      .then((status) => {
+        // Перезапуск снял и «не поднялось» — обновляем чип сразу ответом, а серверы
+        // поднимутся следом, когда уйдут `lsp.open` (тогда переспросим ещё раз).
+        applyLspStatus(status);
         for (const document of documents.all()) {
           void rpc.request('lsp.open', {
             path: document.path,
@@ -1184,6 +1293,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
             text: document.value,
           });
         }
+        window.setTimeout(() => void refreshLspStatus(), 1500);
       })
       .catch(() => undefined);
   }
@@ -1427,6 +1537,49 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     explorer.reveal(path);
     // Открыли файл — на экране он, вкладка чата ждёт в полосе.
     hideChatTab();
+  };
+
+  /**
+   * Клик по ссылке в коде. Адрес ведёт наружу (системным обработчиком), файл — в редактор;
+   * относительный путь считаем от папки файла, где стоит ссылка.
+   */
+  /**
+   * Применить операции с файлами из `WorkspaceEdit` сервера (создать, переименовать,
+   * удалить) — по порядку. Возвращает текст ошибки или null. «Пропустить молча» уважаем:
+   * сервер этим говорит, что отсутствие файла/существование цели — не беда.
+   */
+  const applyFileOperations = async (operations: readonly FileOperation[]): Promise<string | null> => {
+    for (const operation of operations) {
+      try {
+        if (operation.kind === 'create') {
+          await rpc.request('workspace.createFile', { path: operation.path });
+        } else if (operation.kind === 'rename') {
+          await rpc.request('workspace.rename', { from: operation.from, to: operation.to });
+        } else {
+          await rpc.request('workspace.trash', { path: operation.path });
+        }
+      } catch (error) {
+        if (operation.kind === 'create' && operation.ignoreIfExists) continue;
+        if (operation.kind === 'delete' && operation.ignoreIfNotExists) continue;
+        const what = operation.kind === 'rename' ? `${operation.from} → ${operation.to}` : operation.path;
+        return `Не удалось выполнить операцию с файлом ${what}: ${String(error)}`;
+      }
+    }
+    return null;
+  };
+
+  const openDocumentLink = async (target: string, fromPath: string): Promise<void> => {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target)) {
+      if (target.startsWith('file:')) {
+        await openPath(uriToPath(target));
+        return;
+      }
+      await rpc.request('shell.openExternal', { url: target }).catch(() => undefined);
+      return;
+    }
+    // Внешней схемы нет — считаем путём относительно файла.
+    const base = fromPath.slice(0, Math.max(fromPath.lastIndexOf('/'), fromPath.lastIndexOf('\\')));
+    await openPath(`${base}/${target}`);
   };
 
   // Быстрый открыватель файлов (Ctrl+Shift+O): отдельный вход, тот же `openPath`,
@@ -3447,6 +3600,91 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     () => void openCallHierarchy('outgoing'),
   );
 
+  /**
+   * Иерархия типов символа: от кого наследует и кто наследует от него. Показываем
+   * тем же списком, что вызовы: своего дерева у нас нет, а список читается и так.
+   */
+  const openTypeHierarchy = async (direction: TypeDirection): Promise<void> => {
+    const path = editors.currentPath;
+    if (!path) {
+      showToast('Откройте файл', 'error');
+      return;
+    }
+    const position = editors.cursor();
+    const result = await fetchTypeHierarchy(rpc, path, position, direction).catch(() => null);
+    if (!result) {
+      showToast('Сервер символов не отвечает: нужен языковой сервер для этого языка', 'error');
+      return;
+    }
+    if (result.types.length === 0) {
+      showToast(
+        direction === 'supertypes'
+          ? `У ${result.symbol.name} нет надтипов`
+          : `От ${result.symbol.name} никто не наследует`,
+      );
+      return;
+    }
+
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(
+      result.types.map((target) => ({
+        label: target.name,
+        hint: target.detail ?? `${workspace.relative(target.path)}:${target.line}`,
+        onSelect: () => void openPath(target.path).then(() => editors.reveal(target.path, target.line, target.column)),
+      })),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+    const heading = direction === 'supertypes' ? `Надтипы ${result.symbol.name}` : `Подтипы ${result.symbol.name}`;
+    showToast(`${heading}: ${result.types.length}`);
+  };
+
+  define(
+    { id: 'editor.supertypes', title: 'Иерархия типов: надтипы', category: 'Навигация' },
+    () => void openTypeHierarchy('supertypes'),
+  );
+  define(
+    { id: 'editor.subtypes', title: 'Иерархия типов: подтипы', category: 'Навигация' },
+    () => void openTypeHierarchy('subtypes'),
+  );
+
+  /**
+   * Моникер символа под курсором: устойчивое имя, по которому символ связывается с тем же
+   * символом в других инструментах. Показываем список (схем бывает несколько), а первый
+   * сразу копируем в буфер — чаще всего его и нужно вставить в другой инструмент.
+   */
+  const showMoniker = async (): Promise<void> => {
+    const path = editors.currentPath;
+    if (!path) {
+      showToast('Откройте файл', 'error');
+      return;
+    }
+    const monikers = await lsp.monikers(path, editors.cursor()).catch(() => []);
+    if (monikers.length === 0) {
+      showToast('Моникер не найден: сервер этого не умеет или символа под курсором нет');
+      return;
+    }
+    const copy = (identifier: string): void => {
+      void navigator.clipboard.writeText(identifier).catch(() => undefined);
+      showToast('Моникер скопирован');
+    };
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(
+      monikers.map((item) => ({
+        label: item.identifier,
+        hint: `${item.scheme}${item.unique ? ' · уникальный' : ''}`,
+        onSelect: () => copy(item.identifier),
+      })),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+    copy(monikers[0]!.identifier);
+  };
+
+  define({ id: 'editor.moniker', title: 'Моникер символа', category: 'Навигация' }, () => void showMoniker());
+
   /** Разрешить конфликт слияния: экран с обеими сторонами и выбором по блокам. */
   define({ id: 'git.resolveConflicts', title: 'Разрешить конфликт слияния', category: 'Git' }, async (path) => {
     const target = asPath(path) ?? editors.currentPath;
@@ -3783,7 +4021,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'lsp.restart', title: 'Языковые серверы: перезапустить', category: 'Языки' }, async () => {
     const result = await rpc.request('lsp.restart');
-    showToast(result.running.length > 0 ? `Серверы: ${result.running.join(', ')}` : 'Языковые серверы остановлены');
+    // Состояние после перезапуска — оно же и сняло «не поднялось»: показываем чип сразу.
+    applyLspStatus(result);
+    showToast(
+      result.running.length > 0
+        ? `Серверы: ${result.servers.map((server) => server.label).join(', ')}`
+        : 'Языковые серверы остановлены',
+    );
+    // Серверы поднимаются лениво, при открытии файлов: перепроверим, когда поднимутся.
+    window.setTimeout(() => void refreshLspStatus(), 1500);
   });
 
   // Диагностика нужна, когда приходит «в чате не подсвечивается код»:
@@ -3829,6 +4075,46 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── реакция на события ────────────────────────────────────────────────── */
 
+  /**
+   * Состояние языковых серверов: чип в статусбаре и попап читают его отсюда. Свежесть
+   * не критична (сервер поднимается лениво, при открытии файлов), поэтому спрашиваем не
+   * на каждое движение курсора, а при старте, смене проекта, перезапуске и смене языка.
+   */
+  let lspStatus: LspStatus = NO_LSP_STATUS;
+  /** Язык, для которого состояние уже спрашивали: не дёргаем main дважды на тот же файл. */
+  let lspChipLanguage: string | null = null;
+
+  /** Показать чип по уже известному состоянию — без нового запроса. */
+  function applyLspStatus(status: LspStatus): void {
+    lspStatus = status;
+    statusBar.update({
+      lsp: settings.lsp.enabled ? lspChipFor(openEditors.active?.languageId ?? null, lspStatus) : null,
+    });
+  }
+
+  async function refreshLspStatus(): Promise<void> {
+    const status = await rpc.request('lsp.status').catch(() => null);
+    if (status) applyLspStatus(status);
+  }
+
+  /**
+   * Чем занят языковой сервер: состояния по токенам. Сервер шлёт `begin`/`report`/`end`
+   * (`$/progress`); показываем последнее начатое занятие, при `end` убираем. Токенов бывает
+   * несколько сразу (индексация и поиск параллельно), поэтому их и держим списком.
+   */
+  const lspProgress = new Map<string, WorkProgress>();
+
+  function applyLspProgress(progress: LspProgress): void {
+    if (progress.kind !== 'work') return;
+    const key = String(progress.token);
+    if (progress.phase === 'end') lspProgress.delete(key);
+    else lspProgress.set(key, progress);
+    const active = [...lspProgress.values()].at(-1) ?? null;
+    statusBar.update({
+      progress: active ? { label: progressLabel(active), percentage: active.percentage ?? null } : null,
+    });
+  }
+
   const refreshStatus = (): void => {
     const active = openEditors.active;
     const projectTools = tools.get();
@@ -3836,9 +4122,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // поэтому в статусбаре видно ФАКТИЧЕСКОЕ значение, а не общее из настроек.
     const language = active?.languageId ?? null;
     const indent = settings.editor.languageIndent && language ? languageIndent(language) : null;
+    // Язык сменился — перечитываем состав серверов: сервер поднимается при первом
+    // открытии файла языка, и до этого про него ничего не известно.
+    if (settings.lsp.enabled && language && language !== lspChipLanguage) {
+      lspChipLanguage = language;
+      void refreshLspStatus();
+    }
     statusBar.update({
       readOnly: active?.readOnly ?? false,
       language: language ? languageLabel(language) : null,
+      lsp: settings.lsp.enabled ? lspChipFor(language, lspStatus) : null,
       version: active?.version ?? 0,
       tabSize: indent?.tabSize ?? settings.editor.tabSize,
       useTabs: indent ? !indent.insertSpaces : !settings.editor.insertSpaces,
@@ -3981,6 +4274,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         baseSettings = message.payload as Settings;
         applySettings(rebuildSettings());
         break;
+      case PushTopic.LspProgress:
+        applyLspProgress(message.payload as LspProgress);
+        break;
       default:
         break;
     }
@@ -3995,6 +4291,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Точки останова контроллер помнит по файлам, а редактор о них не знает:
     // при открытии вкладки отдаём ему набор — значки (с условиями) появятся сразу.
     for (const path of openEditors.paths) editors.setBreakpoints(path, debug.breakpointsOf(path));
+    // Другая вкладка может быть другим кадром стека — значения в ней свои.
+    void refreshDebugInlineValues();
   });
   // Счётчик правок и ветка в статусбаре живут по тому же снимку, что и дерево.
   git.onDidChange(refreshStatus);
@@ -4219,6 +4517,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       void openPath(frame.path).then(() => editors.revealDebugFrame(frame.path!, frame.line, frame.column));
     }
     if (state.phase === 'idle') revealedFrameId = null;
+    // Значения переменных в строках: на новом останове и шаге они пересчитываются.
+    void refreshDebugInlineValues();
   });
   tools.onDidChange(() => {
     syncRunControl();
@@ -4307,6 +4607,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   await tools.refresh(workspace.root);
   await refreshScan();
   await ensureLspServers();
+  // Состав серверов читаем сразу: чип в статусбаре покажет, что поднято и откуда.
+  void refreshLspStatus();
   syncRunControl();
   // Окружение читаем тут же: к первому клику по чипу попап уже наполнен.
   preloadEnvironment();

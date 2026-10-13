@@ -50,10 +50,13 @@ async function main() {
     // Спрашиваем то, ради чего всё и делается, — объявления символов. Позиция тут
     // не нужна, поэтому ответ «0» значит «сервер не понял язык», а не «мимо курсора».
     const symbols = await lsp.projectSymbols('config');
+    // Семантическая подсветка: у части серверов её нет — тогда 0 токенов, и это не сбой.
+    const semantic = await lsp.semanticTokens(file);
     const status = lsp.status().running;
     console.log(
       `${server.language.padEnd(14)} поднялся: ${status.includes(server.language) ? 'да' : 'НЕТ'}` +
-        `, объявлений по запросу «config»: ${symbols.length}`,
+        `, объявлений по запросу «config»: ${symbols.length}` +
+        `, семантических токенов: ${semantic.length}`,
     );
   }
   lsp.dispose();

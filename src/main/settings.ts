@@ -184,6 +184,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Своих сниппетов по умолчанию нет: набор, что знает редактор, живёт в коде
     // (`shared/snippets.ts`), а здесь — только добавленное человеком.
     snippets: [],
+    // Emmet включён: это привычное поведение для правки разметки и стилей (так и в
+    // других редакторах), а выключить его можно всегда.
+    emmet: true,
   },
   explorer: {
     icons: true,
@@ -246,6 +249,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // выключение явным `false` уважаем, а PATH-серверы по-прежнему только
     // подставляются, но не ставятся.
     enabled: true,
+    // Журнал обмена — по умолчанию выключен: он писал бы файл на каждый запрос.
+    trace: false,
     servers: [],
   },
   // Git: по умолчанию не подсказываем режим pull — git ведёт себя как настроен.
@@ -354,6 +359,7 @@ export class SettingsStore {
       layout: { ...this.data.layout },
       lsp: {
         enabled: this.data.lsp.enabled,
+        trace: this.data.lsp.trace,
         servers: this.data.lsp.servers.map((server) => ({ ...server, args: [...server.args] })),
       },
       // Копия: снимок настроек не должен меняться вслед за правкой списка.
@@ -390,6 +396,7 @@ export class SettingsStore {
       if (patch.editor.minimap !== undefined) next.minimap = patch.editor.minimap === true;
       if (patch.editor.wordWrap !== undefined) next.wordWrap = patch.editor.wordWrap === true;
       if (patch.editor.fontLigatures !== undefined) next.fontLigatures = patch.editor.fontLigatures === true;
+      if (patch.editor.emmet !== undefined) next.emmet = patch.editor.emmet === true;
       this.data.editor = next;
     }
     if (patch.explorer) {
@@ -693,6 +700,7 @@ function loadSettings(filePath: string): StoredSettings {
       minimap: parsed.editor?.minimap === true,
       wordWrap: parsed.editor?.wordWrap === true,
       fontLigatures: parsed.editor?.fontLigatures === true,
+      emmet: parsed.editor?.emmet !== false,
     },
     // Секции появились позже первых версий: старый settings.json их не знает,
     // поэтому неполный файл догружается значениями по умолчанию, а список
@@ -803,7 +811,7 @@ function sanitizeLsp(value: LspSettings): LspSettings {
     : [];
   // Выключено только явным `false`: отсутствие поля читаем как «включено» — серверы
   // из поставки должны работать сразу после установки, без похода в настройки.
-  return { enabled: value.enabled !== false, servers };
+  return { enabled: value.enabled !== false, trace: value.trace === true, servers };
 }
 
 /** Запись «строка → строка»: так приходит окружение сервера из файла настроек. */

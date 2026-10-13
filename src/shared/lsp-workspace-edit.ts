@@ -1,23 +1,72 @@
 /**
- * Правки от языкового сервера (переименование): разбор `WorkspaceEdit`.
+ * Правки от языкового сервера: разбор `WorkspaceEdit`.
  *
- * Сервер отвечает на `textDocument/rename` одним из двух видов: `changes` (карта
- * uri → правки) или `documentChanges` (список документов с правками; изредка там
- * же — операции с файлами). Оба сводим к нашей форме `FileEdit[]`, которую умеет
- * применять документная модель renderer: так правка от сервера идёт тем же путём,
- * что и `apply_edit`, — с undo и ревью.
+ * Сервер отвечает на `textDocument/rename` (и на другие правящие действия) одним из двух
+ * видов: `changes` (карта uri → правки) или `documentChanges` (список документов с правками;
+ * там же бывают ОПЕРАЦИИ С ФАЙЛАМИ — создать, переименовать, удалить). Правки содержимого
+ * сводим к нашей форме `FileEdit[]`, которую умеет применять документная модель renderer;
+ * файловые операции отдаём отдельным списком — их применяет приложение (у него файловая
+ * система). Порядок операций сохраняем: сервер выстраивает их не случайно.
  *
- * Модуль чистый: про `file://` не знает, путь из ссылки делает main (у него есть
- * утилиты Node), сюда его передают функцией. Поэтому проверяется без Electron.
+ * Модуль чистый: про `file://` не знает, путь из ссылки делает main (у него есть утилиты
+ * Node), сюда его передают функцией. Поэтому проверяется без Electron.
  */
 
 import type { FileEdit, TextEdit } from './edits';
 
-/** Правки, сгруппированные по файлам, — форма `apply_edit`. */
+/** Создать файл. `overwrite` — перетирать существующий, `ignoreIfExists` — молча пропустить. */
+export interface CreateFileOperation {
+  readonly kind: 'create';
+  readonly path: string;
+  readonly overwrite: boolean;
+  readonly ignoreIfExists: boolean;
+}
+
+/** Переименовать/переместить файл. */
+export interface RenameFileOperation {
+  readonly kind: 'rename';
+  readonly from: string;
+  readonly to: string;
+  readonly overwrite: boolean;
+  readonly ignoreIfExists: boolean;
+}
+
+/** Удалить файл. `recursive` — вместе с папкой, `ignoreIfNotExists` — молча пропустить. */
+export interface DeleteFileOperation {
+  readonly kind: 'delete';
+  readonly path: string;
+  readonly recursive: boolean;
+  readonly ignoreIfNotExists: boolean;
+}
+
+export type FileOperation = CreateFileOperation | RenameFileOperation | DeleteFileOperation;
+
+/** Полный разбор `WorkspaceEdit`: правки содержимого и операции с файлами. */
+export interface WorkspaceEdits {
+  readonly files: FileEdit[];
+  readonly operations: FileOperation[];
+}
+
+/** Правки, сгруппированные по файлам, — форма `apply_edit`. `null` — правок нет. */
 export function toWorkspaceFileEdits(raw: unknown, toPath: (uri: string) => string): FileEdit[] | null {
+  const parsed = parse(raw, toPath);
+  if (!parsed || parsed.files.length === 0) return null;
+  return parsed.files;
+}
+
+/**
+ * Разобрать всё: и правки, и операции с файлами. `null` — не WorkspaceEdit вовсе
+ * (пусто/чужая форма): это разные подсказки вызывающему, а не «ничего не делать».
+ */
+export function toWorkspaceEdits(raw: unknown, toPath: (uri: string) => string): WorkspaceEdits | null {
+  return parse(raw, toPath);
+}
+
+function parse(raw: unknown, toPath: (uri: string) => string): WorkspaceEdits | null {
   if (!raw || typeof raw !== 'object') return null;
 
   const byPath = new Map<string, TextEdit[]>();
+  const operations: FileOperation[] = [];
   const add = (uri: unknown, items: unknown): void => {
     if (typeof uri !== 'string' || !Array.isArray(items)) return;
     const path = safePath(uri, toPath);
@@ -36,24 +85,73 @@ export function toWorkspaceFileEdits(raw: unknown, toPath: (uri: string) => stri
     for (const [uri, items] of Object.entries(changes as Record<string, unknown>)) add(uri, items);
   }
 
-  // `documentChanges`: список документов; операции с файлами (create/rename/delete)
-  // пропускаем — переименование символа их не порождает, а обрабатывать их здесь
-  // значило бы тащить в инструмент работу с файловой системой.
+  // `documentChanges`: документы с правками и операции с файлами — вперемешку, по порядку.
   const documentChanges = (raw as { documentChanges?: unknown }).documentChanges;
   if (Array.isArray(documentChanges)) {
     for (const change of documentChanges) {
+      const operation = toFileOperation(change, toPath);
+      if (operation) {
+        operations.push(operation);
+        continue;
+      }
       const value = change as { textDocument?: { uri?: unknown }; edits?: unknown };
       add(value.textDocument?.uri, value.edits);
     }
   }
 
-  // Не WorkspaceEdit вовсе (пусто/чужая форма) — `null` вместо пустого списка:
-  // агенту это разные подсказки (см. `rename_symbol`).
-  if (byPath.size === 0) return null;
+  if (byPath.size === 0 && operations.length === 0) return null;
 
-  return [...byPath.entries()]
+  const files = [...byPath.entries()]
     .map(([path, edits]) => ({ path, edits: sortEdits(edits) }))
     .sort((a, b) => a.path.localeCompare(b.path));
+  return { files, operations };
+}
+
+/** Операция с файлом из элемента `documentChanges`. Не операция — `null`. */
+function toFileOperation(raw: unknown, toPath: (uri: string) => string): FileOperation | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as {
+    kind?: unknown;
+    uri?: unknown;
+    oldUri?: unknown;
+    newUri?: unknown;
+    options?: { overwrite?: unknown; ignoreIfExists?: unknown; recursive?: unknown; ignoreIfNotExists?: unknown };
+  };
+  const options = value.options ?? {};
+
+  if (value.kind === 'create') {
+    const path = typeof value.uri === 'string' ? safePath(value.uri, toPath) : null;
+    if (!path) return null;
+    return {
+      kind: 'create',
+      path,
+      overwrite: options.overwrite === true,
+      ignoreIfExists: options.ignoreIfExists === true,
+    };
+  }
+  if (value.kind === 'rename') {
+    const from = typeof value.oldUri === 'string' ? safePath(value.oldUri, toPath) : null;
+    const to = typeof value.newUri === 'string' ? safePath(value.newUri, toPath) : null;
+    if (!from || !to) return null;
+    return {
+      kind: 'rename',
+      from,
+      to,
+      overwrite: options.overwrite === true,
+      ignoreIfExists: options.ignoreIfExists === true,
+    };
+  }
+  if (value.kind === 'delete') {
+    const path = typeof value.uri === 'string' ? safePath(value.uri, toPath) : null;
+    if (!path) return null;
+    return {
+      kind: 'delete',
+      path,
+      recursive: options.recursive === true,
+      ignoreIfNotExists: options.ignoreIfNotExists === true,
+    };
+  }
+  return null;
 }
 
 /** Правки внутри файла — по позиции: порядок применения задаёт документ, но список стабилен. */

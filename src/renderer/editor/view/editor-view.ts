@@ -29,9 +29,11 @@ import type { TextBuffer } from '../core/text-buffer';
 import { LineHighlighter } from '../highlight/highlighter';
 import { grammarFor } from '../highlight/registry';
 import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
+import { overlayRanges, type RoleRange } from '../highlight/overlay';
+import { semanticTokenRole, type SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import { measureFont, monospaceMetrics, type GlyphMetrics } from './glyph-metrics';
 import { columnForX, layoutLine, xForColumn } from './line-layout';
-import { FileDecorations, squigglyRect, type LensDecoration } from './decorations';
+import { FileDecorations, squigglyRect, type LensDecoration, type LinkDecoration } from './decorations';
 import { findBracketPair, findOccurrences, type BracketPair } from './context-highlight';
 import { caret, isEmpty, rangesRects, selectionEnd, selectionStart, type Selection } from './selection';
 import { clamp, contentHeight, lineAtY, maxScrollLeft, maxScrollTop, revealLine, visibleLines } from './viewport';
@@ -73,6 +75,13 @@ export interface EditorViewOptions {
 const STRIP_WIDTH = 3;
 
 /** Вставка строки: что показать, где и сколько места она занимает. */
+/** Значение отладчика для показа в строке: место (строка и столбец с нуля) и подпись. */
+export interface DebugInlineValue {
+  readonly line: number;
+  readonly column: number;
+  readonly label: string;
+}
+
 interface InlayItem {
   /** Смещение-граница в строке (с нуля): после него идёт вставка. */
   readonly column: number;
@@ -102,6 +111,8 @@ export class EditorView {
   /** Вхождения слова под курсором и подсветка парной скобки — фоном под текстом. */
   private readonly highlightLayer: HTMLElement;
   private readonly squigglyLayer: HTMLElement;
+  /** Слой ссылок в тексте (`documentLink`): подчёркнутые и кликабельные участки. */
+  private readonly linkLayer: HTMLElement;
   private readonly ghostLayer: HTMLElement;
   /** Слой кареток: у мультикурсора их несколько, поэтому каретка — узел внутри слоя. */
   private readonly caretLayer: HTMLElement;
@@ -145,12 +156,22 @@ export class EditorView {
   private searchCurrent = -1;
   /** Вхождения слова под курсором: пересчитываются только когда меняется само слово. */
   private occurrences: readonly { start: number; end: number }[] = [];
+  /** Связанные участки (linkedEditing): имена парных тегов, подсвечены все сразу. */
+  private linked: readonly { start: number; end: number }[] = [];
+  /**
+   * Семантические токены сервера по строкам (ключ — строка с нуля, столбцы с нуля).
+   * Накладываются поверх грамматики: где сервер высказался, его роль важнее (см.
+   * `highlight/overlay.ts`).
+   */
+  private semantic = new Map<number, RoleRange[]>();
   /** Парная скобка у курсора и её состояние (есть пара или нет). */
   private brackets: BracketPair | null = null;
   /** Самая широкая известная строка: ширину полотна узнаём по мере отрисовки. */
   private widest = 0;
   /** Что сейчас в DOM: версия буфера, границы видимых строк и версия украшений — чтобы не пересобирать зря. */
-  private rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
+  private rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
+  /** Версия семантической подсветки: она меняет цвета строк, минуя правку текста. */
+  private semanticVersion = 0;
   private layoutCache: LineLayoutCache | null = null;
   /**
    * Свёрнутые строки. Пока ничего не свёрнуто, ряд совпадает со строкой и вся
@@ -171,6 +192,12 @@ export class EditorView {
   private minimapVisible = false;
   /** Подсказки-вставки по строкам (inlay hints): место, текст, ширина и класс. */
   private inlayByLine = new Map<number, readonly InlayItem[]>();
+  /**
+   * Значения переменных во время отладки: `x = 42` после имени. Показываются как вставки,
+   * но живут отдельно от подсказок языка: те приходят с сервера, эти — от отладчика, и
+   * обновление одних не должно затирать другие.
+   */
+  private inlineValueByLine = new Map<number, readonly InlayItem[]>();
   /** Призрачный текст подсказки «допиши за меня»: смещение и сам текст. */
   private ghost: { offset: number; text: string } | null = null;
 
@@ -188,6 +215,8 @@ export class EditorView {
   onGutterContextMenu: ((line: number, event: MouseEvent) => void) | null = null;
   /** Клик по код-линзе строки: что исполнить — решает хозяин, а не представление. */
   onLensClick: ((line: number) => void) | null = null;
+  /** Клик по ссылке в тексте: номер в списке ссылок файла — что делать, решает хозяин. */
+  onLinkClick: ((line: number, column: number) => void) | null = null;
   /** Правый клик по самому тексту: меню собирает хозяин, представление только сообщает. */
   onContextMenu: ((event: MouseEvent) => void) | null = null;
 
@@ -243,6 +272,9 @@ export class EditorView {
     this.highlightLayer.className = `${ROOT_CLASS}-highlight`;
     this.squigglyLayer = document.createElement('div');
     this.squigglyLayer.className = `${ROOT_CLASS}-squiggly`;
+    this.linkLayer = document.createElement('div');
+    this.linkLayer.className = `${ROOT_CLASS}-links`;
+    this.linkLayer.addEventListener('click', this.onLinkLayerClick);
     this.ghostLayer = document.createElement('div');
     this.ghostLayer.className = `${ROOT_CLASS}-ghost-layer`;
     this.linesLayer = document.createElement('div');
@@ -263,6 +295,7 @@ export class EditorView {
       this.selectionLayer,
       this.squigglyLayer,
       this.linesLayer,
+      this.linkLayer,
       this.ghostLayer,
       this.caretLayer,
     );
@@ -340,7 +373,7 @@ export class EditorView {
   remeasure(): void {
     this.metrics = measureFromHost(this.root);
     this.layoutCache = null;
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
     this.applyMetrics();
     this.render();
   }
@@ -407,7 +440,7 @@ export class EditorView {
 
   /** Слой подсветки контекста: прямоугольники вхождений и подсветка скобок. */
   private renderHighlight(): void {
-    if (this.occurrences.length === 0 && this.brackets === null) {
+    if (this.occurrences.length === 0 && this.brackets === null && this.linked.length === 0) {
       this.highlightLayer.replaceChildren();
       return;
     }
@@ -415,9 +448,10 @@ export class EditorView {
     const fragment = document.createDocumentFragment();
 
     const paint = (range: { start: number; end: number }, className: string): void => {
-      const line = this.buffer.lineAt(range.start) - 1;
+      // Строка с единицы — как first/last из renderedLines и как ждут renderLines/renderLinks.
+      const line = this.buffer.lineAt(range.start);
       if (line < first || line > last) return;
-      if (this.isHidden(line + 1)) return;
+      if (this.isHidden(line)) return;
       for (const rect of this.rangeRects(range.start, range.end)) {
         const node = document.createElement('div');
         node.className = `${ROOT_CLASS}-highlight-rect ${className}`;
@@ -428,6 +462,7 @@ export class EditorView {
       }
     };
 
+    for (const range of this.linked) paint(range, 'is-linked');
     for (const range of this.occurrences) paint(range, 'is-occurrence');
     if (this.brackets) {
       const kind = this.brackets.unmatched ? 'is-bracket is-bracket-bad' : 'is-bracket';
@@ -435,6 +470,46 @@ export class EditorView {
       if (!this.brackets.unmatched) paint(this.brackets.close, kind);
     }
     this.highlightLayer.replaceChildren(fragment);
+  }
+
+  /**
+   * Поставить семантические токены сервера: точные роли поверх грамматики. Пусто снимает
+   * наложение — остаётся своя подсветка. Строки и столбцы переводим в нулевые (как их
+   * считает отрисовка) и группируем по строкам: в строке их ищут по номеру.
+   */
+  setSemanticTokens(tokens: readonly SemanticToken[]): void {
+    const grouped = new Map<number, RoleRange[]>();
+    for (const token of tokens) {
+      const line = token.line - 1;
+      const range: RoleRange = {
+        start: token.startColumn - 1,
+        end: token.endColumn - 1,
+        role: semanticTokenRole(token.type),
+      };
+      if (range.end <= range.start) continue;
+      const list = grouped.get(line);
+      if (list) list.push(range);
+      else grouped.set(line, [range]);
+    }
+    if (sameSemantic(this.semantic, grouped)) return;
+    this.semantic = grouped;
+    // Наложение меняет цвета строк, но не их текст: без смены версии кадр счёл бы
+    // строки прежними и не пересобрал бы их.
+    this.semanticVersion += 1;
+    this.render();
+  }
+
+  /**
+   * Поставить связанные участки (linkedEditing) для подсветки. Смещения в тексте;
+   * пусто снимает подсветку. Саму правку в них повторяет контроллер — здесь только вид.
+   */
+  setLinkedRanges(ranges: readonly { start: number; end: number }[]): void {
+    const same =
+      this.linked.length === ranges.length &&
+      this.linked.every((range, index) => range.start === ranges[index]!.start && range.end === ranges[index]!.end);
+    if (same) return;
+    this.linked = ranges;
+    this.renderHighlight();
   }
 
   /**
@@ -676,7 +751,7 @@ export class EditorView {
   /** Заставить пересобрать строки: сменилась подсветка или схема, а версия текста та же. */
   private rerender(): void {
     this.widest = 0;
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
     this.render();
   }
 
@@ -684,6 +759,10 @@ export class EditorView {
   setBuffer(buffer: TextBuffer): void {
     this.buffer = buffer;
     this.selections = [caret(0)];
+    // Связанные участки принадлежали прошлому файлу — хозяин задаст их для нового.
+    this.linked = [];
+    // Семантические токены — тоже про прошлый файл: их пришлёт хозяин для нового.
+    this.semantic = new Map();
     this.scrollTop = 0;
     this.widest = 0;
     this.layoutCache = null;
@@ -695,6 +774,7 @@ export class EditorView {
     this.bracketDepth.reset();
     // Подсказки-вставки принадлежали прошлому файлу: их поставит хозяин для нового.
     this.inlayByLine.clear();
+    this.inlineValueByLine.clear();
     this.viewport.scrollTo({ top: 0, left: 0 });
     // Украшения принадлежали прошлому файлу (полоски git, точки останова): их
     // рисует хозяин уже для нового — до этого не должно остаться чужих значков.
@@ -703,7 +783,7 @@ export class EditorView {
     // Призрачная подсказка говорила о прошлом файле — к новому она не относится.
     this.ghost = null;
     this.ghostLayer.replaceChildren();
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
     this.render();
   }
 
@@ -714,6 +794,7 @@ export class EditorView {
   dispose(): void {
     this.disposed = true;
     this.viewport.removeEventListener('scroll', this.onScroll);
+    this.linkLayer.removeEventListener('click', this.onLinkLayerClick);
     this.resizeObserver?.disconnect();
     this.root.remove();
   }
@@ -957,7 +1038,9 @@ export class EditorView {
       // пересобрать, даже если текст тот же.
       this.rendered.decorations === this.decorationsVersion &&
       // Ширина переноса поменялась (окно растянули) — отрезки другие, надо пересобрать.
-      this.rendered.wrap === this.wrapSignature();
+      this.rendered.wrap === this.wrapSignature() &&
+      // Семантическая подсветка сменилась — цвета строк другие, надо пересобрать.
+      this.rendered.semantic === this.semanticVersion;
     if (same) return;
 
     const fragment = document.createDocumentFragment();
@@ -982,7 +1065,14 @@ export class EditorView {
     this.linesLayer.replaceChildren(fragment);
     // Слой сдвигаем к первой видимой строке, а не пересоздаём на её месте.
     this.linesLayer.style.transform = `translateY(${this.yOfLine(first)}px)`;
-    this.rendered = { version, first, last, decorations: this.decorationsVersion, wrap: this.wrapSignature() };
+    this.rendered = {
+      version,
+      first,
+      last,
+      decorations: this.decorationsVersion,
+      wrap: this.wrapSignature(),
+      semantic: this.semanticVersion,
+    };
   }
 
   /**
@@ -1025,7 +1115,7 @@ export class EditorView {
     // Подсказки-вставки: их не заменяют знаки, а ВСТАВЛЯЮТ между ними — потому и
     // отдельной картой. Место — граница (столбец с нуля); текст уже с ведущим пробелом.
     const hintsAt = new Map<number, InlayItem[]>();
-    for (const item of this.inlayByLine.get(line) ?? []) {
+    for (const item of [...(this.inlayByLine.get(line) ?? []), ...(this.inlineValueByLine.get(line) ?? [])]) {
       const list = hintsAt.get(item.column);
       if (list) list.push(item);
       else hintsAt.set(item.column, [item]);
@@ -1033,7 +1123,7 @@ export class EditorView {
 
     // Куски строки по токенам: пропуски между ними — обычный текст (роль не нашлась).
     // Берём только тот отрезок, что рисует этот ряд, — токены за его краем в DOM не нужны.
-    const pieces: Array<{ start: number; end: number; role: string | null }> = [];
+    const pieces: RoleRange[] = [];
     let cursor = from;
     for (const token of tokens) {
       if (token.end <= from) continue;
@@ -1047,7 +1137,11 @@ export class EditorView {
     if (cursor < to) pieces.push({ start: cursor, end: to, role: null });
     if (pieces.length === 0) pieces.push({ start: from, end: to, role: null });
 
-    for (const token of pieces) {
+    // Семантические токены сервера — поверх грамматики: где он высказался, его роль важнее.
+    const semantic = this.semantic.get(line0);
+    const finalPieces = semantic ? overlayRanges(pieces, semantic) : pieces;
+
+    for (const token of finalPieces) {
       let at = token.start;
       while (at < token.end) {
         this.appendHints(fragment, hintsAt, at);
@@ -1211,15 +1305,41 @@ export class EditorView {
     }
     this.inlayByLine = byLine;
     this.layoutCache = null;
-    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '' };
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
+    this.render();
+  }
+
+  /**
+   * Значения переменных во время отладки: `x = 42` после имени. Место — столбец с нуля
+   * (значение встаёт ПОСЛЕ имени, поэтому столбец — конец участка). Класс свой: значения
+   * отладчика отличаются от подсказок языка и цветом, и происхождением.
+   */
+  setInlineValues(values: readonly DebugInlineValue[]): void {
+    const byLine = new Map<number, InlayItem[]>();
+    for (const value of values) {
+      const text = ` ${value.label}`;
+      const item: InlayItem = {
+        column: Math.max(0, value.column),
+        text,
+        width: this.textWidth(text),
+        className: `${ROOT_CLASS}-inline-value`,
+      };
+      const list = byLine.get(value.line);
+      if (list) list.push(item);
+      else byLine.set(value.line, [item]);
+    }
+    this.inlineValueByLine = byLine;
+    this.layoutCache = null;
+    this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1 };
     this.render();
   }
 
   /** Вставки строки в виде «граница и ширина» — для раскладки (`layoutLine`). */
   private insertsFor(line: number): { column: number; width: number }[] {
-    const items = this.inlayByLine.get(line);
-    if (!items) return [];
-    return items.map((item) => ({ column: item.column, width: item.width }));
+    return [...(this.inlayByLine.get(line) ?? []), ...(this.inlineValueByLine.get(line) ?? [])].map((item) => ({
+      column: item.column,
+      width: item.width,
+    }));
   }
 
   /** Ширина текста по метрикам шрифта: сумма клеток его знаков. */
@@ -1338,6 +1458,7 @@ export class EditorView {
     this.renderStrip(first, last);
     this.renderBackgrounds(first, last);
     this.renderSquiggles(first, last);
+    this.renderLinks(first, last);
   }
 
   /** Значки на поле слева: строки поля, в каждой — значок или пусто. */
@@ -1461,6 +1582,72 @@ export class EditorView {
     }
     this.squigglyLayer.replaceChildren(fragment);
   }
+
+  /**
+   * Ссылки в тексте: подчёркнутые и кликабельные участки. Строение — как у
+   * волнистых подчёркиваний, но элемент ловит клик: у него есть `data-line` и
+   * `data-column` — по ним хозяин находит свою ссылку (и адрес, куда вести).
+   */
+  private renderLinks(first: number, last: number): void {
+    const fragment = document.createDocumentFragment();
+    for (let line = first; line <= last; line += 1) {
+      if (this.isHidden(line)) continue;
+      const links = this.decorations.linksFor(line);
+      if (links.length === 0) continue;
+      const offsets = this.offsetsFor(line);
+      if (!this.wrapOn) {
+        for (const link of links) {
+          const rect = squigglyRect(offsets, line, link.startColumn, link.endColumn, this.metrics);
+          if (rect.width <= 0) continue;
+          fragment.append(this.linkNode(link, rect.left, this.yOfLine(line), rect.width));
+        }
+        continue;
+      }
+      // Перенос: ссылка может лежать на нескольких рядах — режем по отрезкам.
+      const segments = this.segmentsFor(line);
+      const base = this.rowOf(line);
+      for (const link of links) {
+        const from = Math.max(0, link.startColumn - 1);
+        const to = Math.max(from, link.endColumn - 1);
+        for (let index = 0; index < segments.length; index += 1) {
+          const segment = segments[index]!;
+          const start = Math.max(from, segment.startColumn);
+          const end = Math.min(to, segment.endColumn);
+          if (end <= start) continue;
+          const origin = xForColumn(offsets, segment.startColumn);
+          const left = xForColumn(offsets, start) - origin;
+          const width = xForColumn(offsets, end) - origin - left;
+          if (width <= 0) continue;
+          fragment.append(this.linkNode(link, left, this.yOfRow(base + index), width));
+        }
+      }
+    }
+    this.linkLayer.replaceChildren(fragment);
+  }
+
+  /** Узел ссылки: прямоугольник с данными для клика и подписью наведения. */
+  private linkNode(link: LinkDecoration, left: number, top: number, width: number): HTMLElement {
+    const node = document.createElement('div');
+    node.className = `${ROOT_CLASS}-link`;
+    node.dataset.line = String(link.line);
+    node.dataset.column = String(link.startColumn);
+    if (link.tooltip) node.title = link.tooltip;
+    node.style.transform = `translate(${left}px, ${top}px)`;
+    node.style.width = `${width}px`;
+    node.style.height = `${this.metrics.lineHeight}px`;
+    return node;
+  }
+
+  /** Клик по слою ссылок: если попали в саму ссылку — отдаём хозяину. */
+  private readonly onLinkLayerClick = (event: MouseEvent): void => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const node = target.closest<HTMLElement>(`.${ROOT_CLASS}-link`);
+    if (!node) return;
+    const line = Number(node.dataset.line ?? '0');
+    const column = Number(node.dataset.column ?? '0');
+    if (line > 0 && column > 0) this.onLinkClick?.(line, column);
+  };
 
   /**
    * Номер строки под точкой экрана (с единицы). Нужно кликам по местам украшений:
@@ -1686,4 +1873,23 @@ function measureFromHost(host: HTMLElement): GlyphMetrics {
   // строками: `translateY(19.6px)` от кадра к кадру ложится по-разному.
   const lineHeight = Math.round(declared || fontSize * 1.4);
   return measureFont(host, fontSize, lineHeight, 4);
+}
+
+/** Совпадают ли два набора семантических токенов: лишний кадр на тот же ответ не нужен. */
+function sameSemantic(left: Map<number, RoleRange[]>, right: Map<number, RoleRange[]>): boolean {
+  if (left.size !== right.size) return false;
+  for (const [line, ranges] of left) {
+    const other = right.get(line);
+    if (!other || other.length !== ranges.length) return false;
+    for (let index = 0; index < ranges.length; index += 1) {
+      if (
+        ranges[index]!.start !== other[index]!.start ||
+        ranges[index]!.end !== other[index]!.end ||
+        ranges[index]!.role !== other[index]!.role
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
 }

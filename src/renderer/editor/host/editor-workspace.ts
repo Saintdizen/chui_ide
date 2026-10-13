@@ -37,10 +37,15 @@ import { ProblemNavigation } from './problem-navigation';
 import type { SymbolSource } from './symbol-navigation';
 import type { HoverExternalInfo } from '../widgets/hover-widget';
 import type { CompletionItem } from '../complete/completions';
+import type { CompletionTriggers } from './lsp-features';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { FoldRange } from '../../../shared/fold-ranges';
 import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
+import type { DocumentLinkEntry } from '../../../shared/lsp-document-links';
+import type { LinkedRange } from '../../../shared/lsp-linked-editing';
+import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
+import type { DebugInlineValue } from '../view/editor-view';
 import type { DocumentRegistry } from './document-registry';
 import type { TranslatedEdits } from './document-edits';
 import {
@@ -81,6 +86,8 @@ export interface EditorWorkspaceOptions {
   wordWrap?: boolean;
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
+  /** Emmet: раскрытие сокращений по Tab в разметке и стилях (см. `input/emmet.ts`). */
+  emmetEnabled?: () => boolean;
   /** Схема оформления: цвета токенов и обвязки. */
   scheme?: Scheme;
   /** Сниппеты всех языков: их показывают подсказки по триггеру. */
@@ -96,6 +103,17 @@ export interface EditorWorkspaceOptions {
    * `shared/lsp-code-lens.ts`). Не задано — линз нет вовсе.
    */
   codeLenses?: (path: string) => Promise<readonly CodeLensEntry[]>;
+  /** Ссылки в коде от сервера (`documentLink`): `LspFeatures.documentLinks`. */
+  documentLinks?: (path: string) => Promise<readonly DocumentLinkEntry[]>;
+  /** Клик по ссылке: что открыть — решает приложение (адрес или файл). */
+  openLink?: (target: string, path: string) => void;
+  /**
+   * Связанные участки от сервера (`linkedEditingRange`): имена парных тегов, которые
+   * правятся вместе (см. `LspFeatures.linkedEditingRanges`).
+   */
+  linkedEditing?: (path: string, position: { line: number; column: number }) => Promise<readonly LinkedRange[]>;
+  /** Семантическая подсветка от сервера: `LspFeatures.semanticTokens`. */
+  semanticTokens?: (path: string) => Promise<readonly SemanticToken[]>;
   /** Исполнить команду линзы: её выбирает сервер, а запускает приложение. */
   lensCommand?: (path: string, command: CodeLensCommand) => void;
   /** Подсказки-вставки файла: путь и текст → подсказки (см. `LspFeatures.inlayHints`). */
@@ -107,6 +125,10 @@ export interface EditorWorkspaceOptions {
     path: string,
     position: { line: number; column: number },
   ) => Promise<readonly CompletionItem[]>;
+  /** Знаки-триггеры сервера для файла: по ним попап открывается сразу после знака. */
+  completionTriggers?: (path: string) => Promise<CompletionTriggers>;
+  /** Дотягивание подсказки (см. `LspFeatures.resolveCompletion`). */
+  resolveCompletionItem?: (path: string, item: unknown) => Promise<{ detail?: string; documentation?: string } | null>;
   /** Подсказка о параметрах вызова: путь и позиция → разбор (см. `LspFeatures.signatureHelp`). */
   signatureFromLanguage?: (path: string, position: { line: number; column: number }) => Promise<SignatureHelp | null>;
   /**
@@ -164,6 +186,8 @@ export class EditorWorkspace {
   private readonly whitespace: WhitespaceMode | undefined;
   private readonly minimap: boolean | undefined;
   private readonly wordWrap: boolean | undefined;
+  /** Включён ли Emmet — живой геттер: его меняют в настройках без пересоздания панели. */
+  private readonly emmetEnabled: (() => boolean) | undefined;
   private readonly ligatures: boolean | undefined;
   private readonly snippets: (() => readonly Snippet[]) | undefined;
   /** Шов к инструменту формата: его у редактора нет, о нём знает приложение. */
@@ -174,6 +198,10 @@ export class EditorWorkspace {
     | undefined;
   /** Подсказки языкового сервера — тот же шов, но для дополнений. */
   private readonly completionFromLanguage: EditorWorkspaceOptions['completionFromLanguage'];
+  /** Знаки-триггеры сервера — тот же шов: попап открывается по ним. */
+  private readonly completionTriggers: EditorWorkspaceOptions['completionTriggers'];
+  /** Дотягивание подсказки — тот же шов. */
+  private readonly resolveCompletionItem: EditorWorkspaceOptions['resolveCompletionItem'];
   /** Подсказка о параметрах вызова — тот же шов, но для сигнатур. */
   private readonly signatureFromLanguage: EditorWorkspaceOptions['signatureFromLanguage'];
   /** Источник мест символа: переход к определению и поиск ссылок. */
@@ -192,6 +220,14 @@ export class EditorWorkspace {
   private readonly lensCommand: EditorWorkspaceOptions['lensCommand'];
   /** Подсказки-вставки — тот же шов: у сервера спрашивает приложение. */
   private readonly inlayHints: EditorWorkspaceOptions['inlayHints'];
+  /** Ссылки в коде — тот же шов. */
+  private readonly documentLinks: EditorWorkspaceOptions['documentLinks'];
+  /** Клик по ссылке — тот же шов. */
+  private readonly openLink: EditorWorkspaceOptions['openLink'];
+  /** Связанные участки — тот же шов. */
+  private readonly linkedEditing: EditorWorkspaceOptions['linkedEditing'];
+  /** Семантическая подсветка — тот же шов. */
+  private readonly semanticTokens: EditorWorkspaceOptions['semanticTokens'];
   /** Короткий путь для подписи места в списке. */
   private readonly relativePath: ((path: string) => string) | undefined;
   /** Сообщить, что мест не нашлось. */
@@ -251,6 +287,7 @@ export class EditorWorkspace {
     this.whitespace = options.whitespace;
     this.minimap = options.minimap;
     this.wordWrap = options.wordWrap;
+    this.emmetEnabled = options.emmetEnabled;
     this.ligatures = options.ligatures;
     this.snippets = options.snippets;
     this.formatCode = options.formatCode;
@@ -259,8 +296,14 @@ export class EditorWorkspace {
     this.codeLenses = options.codeLenses;
     this.lensCommand = options.lensCommand;
     this.inlayHints = options.inlayHints;
+    this.documentLinks = options.documentLinks;
+    this.openLink = options.openLink;
+    this.linkedEditing = options.linkedEditing;
+    this.semanticTokens = options.semanticTokens;
     this.hoverFromLanguage = options.hoverFromLanguage;
     this.completionFromLanguage = options.completionFromLanguage;
+    this.completionTriggers = options.completionTriggers;
+    this.resolveCompletionItem = options.resolveCompletionItem;
     this.signatureFromLanguage = options.signatureFromLanguage;
     this.symbols = options.symbols;
     this.renameSymbol = options.renameSymbol;
@@ -332,11 +375,14 @@ export class EditorWorkspace {
       whitespace: this.whitespace,
       minimap: this.minimap,
       wordWrap: this.wordWrap,
+      emmetEnabled: this.emmetEnabled,
       ligatures: this.ligatures,
       scheme: this.scheme,
       snippets: this.snippets,
       hoverFromLanguage: this.hoverFromLanguage,
       completionFromLanguage: this.completionFromLanguage,
+      completionTriggers: this.completionTriggers,
+      resolveCompletionItem: this.resolveCompletionItem,
       signatureFromLanguage: this.signatureFromLanguage,
       // Быстрые исправления — шов приложения: ему и сервер, и попап, и документная модель.
       codeActions: this.codeActions,
@@ -344,6 +390,10 @@ export class EditorWorkspace {
       codeLenses: this.codeLenses ? (path) => this.codeLenses!(path) : undefined,
       lensCommand: this.lensCommand,
       inlayHints: this.inlayHints,
+      documentLinks: this.documentLinks,
+      openLink: this.openLink,
+      linkedEditing: this.linkedEditing,
+      semanticTokens: this.semanticTokens,
       symbols: this.symbols,
       revealLocation: this.revealLocation,
       relativePath: this.relativePath,
@@ -660,6 +710,11 @@ export class EditorWorkspace {
 
   setDebugLine(path: string | null, line: number | null): void {
     for (const pane of this.panes) pane.setDebugLine(path, line);
+  }
+
+  /** Показать значения отладчика в строках файла (во время останова). Пусто — снять. */
+  setDebugInlineValues(path: string | null, values: readonly DebugInlineValue[]): void {
+    for (const pane of this.panes) pane.setDebugInlineValues(path, values);
   }
 
   setBlame(annotation: { path: string; line: number; text: string } | null): void {

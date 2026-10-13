@@ -2326,6 +2326,196 @@ async function borderCheck(win) {
  * Подсказки языкового сервера: подставной источник отдаёт элемент, которого в файле
  * нет ('valuableThing'). Если он появился в списке, ответ сервера доехал и подмешался.
  */
+/**
+ * Ссылки в коде (`documentLink`): подставной источник даёт одну ссылку —
+ * проверяем, что участок нарисован и клик по нём доходит до приложения.
+ */
+async function documentLinksCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  const shown = await script(`(() => {
+    const node = document.querySelector('#probe-symbols .own-editor-link');
+    if (!node) return { найдена: false };
+    return {
+      найдена: true,
+      строка: node.dataset.line,
+      столбец: node.dataset.column,
+      подпись: node.title,
+      ширина: Math.round(node.getBoundingClientRect().width) > 0,
+    };
+  })()`);
+
+  const clicked = await script(`(() => {
+    const node = document.querySelector('#probe-symbols .own-editor-link');
+    if (!node) return null;
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    return window.probeSymbols.linkOpens.at(-1) ?? null;
+  })()`);
+
+  return { показ: shown, клик: clicked };
+}
+
+/**
+ * Связанные участки (linkedEditing): подсветка участков (вид) и повтор правки (контроллер).
+ * Подсветку смотрим на основном редакторе пробы (у него живой ввод), поставив на время
+ * известный текст и вернув прежний; повтор правки — на отдельном редакторе с парными
+ * тегами, чей подставной сервер считает связанными оба «div».
+ */
+async function linkedEditingCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  await script(`(() => {
+    const { view, controller, buffer } = window.probe;
+    window.__probeSavedText = buffer.getText();
+    controller.applyEdits([{ start: 0, removed: window.__probeSavedText, inserted: '<div></div>\\n' }]);
+    view.revealOffset(1);
+    return true;
+  })()`);
+  // Вид рисует асинхронно: даём кадру пройти, иначе подсветка посчитается по старым строкам.
+  await wait(80);
+
+  const paint = await script(`(() => {
+    const { view, controller } = window.probe;
+    // Каретка — внутрь первого имени: подсветятся и вхождения слова, и связанные участки.
+    controller.setSelection({ anchor: 1, active: 1 });
+    view.setLinkedRanges([{ start: 1, end: 4 }, { start: 6, end: 9 }]);
+    const rects = [...view.element.querySelectorAll('.own-editor-highlight-rect')];
+    const result = {
+      связано: rects.filter((node) => node.classList.contains('is-linked')).length,
+      вхождений: rects.filter((node) => node.classList.contains('is-occurrence')).length,
+    };
+    view.setLinkedRanges([]);
+    return result;
+  })()`);
+
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: window.__probeSavedText }]);
+    return true;
+  })()`);
+
+  const before = await script(`window.probeLinked.doc.value`);
+  const after = await script(`(() => {
+    const { workspace, doc } = window.probeLinked;
+    workspace.reveal(doc.path, 1, 2);
+    workspace.insertAtCursor('x');
+    return workspace.currentText(doc.path);
+  })()`);
+
+  return {
+    подсветка: paint,
+    было: before,
+    стало: after,
+    изменилось: (after.match(/xdiv/g) ?? []).length,
+  };
+}
+
+/**
+ * Семантическая подсветка (semanticTokens): роли от сервера перекрывают грамматику.
+ * Ставим на основной редактор текст и семантические токены, где имя функции сервер
+ * назвал типом, — тогда по классу спана видно, что семантика победила грамматику.
+ */
+async function semanticCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  await script(`(() => {
+    const { view, controller, buffer } = window.probe;
+    window.__probeSavedText = buffer.getText();
+    controller.applyEdits([{ start: 0, removed: window.__probeSavedText, inserted: 'def f(): return 1\\n' }]);
+    view.revealOffset(0);
+    return true;
+  })()`);
+  await wait(80);
+
+  const painted = await script(`(() => {
+    const { view } = window.probe;
+    // Грамматика красит «f» как функцию; сервер говорит, что это тип — его слово важнее.
+    view.setSemanticTokens([
+      { line: 1, startColumn: 1, endColumn: 4, type: 'keyword', modifiers: [] },
+      { line: 1, startColumn: 5, endColumn: 6, type: 'type', modifiers: [] },
+    ]);
+    const texts = (role) => [...view.element.querySelectorAll('.own-editor-token-' + role)].map((n) => n.textContent);
+    return { type: texts('type'), function: texts('function'), keyword: texts('keyword'), строка: view.element.querySelector('.own-editor-line')?.textContent ?? null };
+  })()`);
+
+  await script(`(() => {
+    const { view, controller, buffer } = window.probe;
+    view.setSemanticTokens([]);
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: window.__probeSavedText }]);
+    return true;
+  })()`);
+
+  return painted;
+}
+
+/**
+ * Значения отладчика в строках (`setInlineValues`): `x = 42` справа от имени. Проверяем,
+ * что вставка появилась, стоит после имени и не сдвинула сам текст файла.
+ */
+async function inlineValuesCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  await script(`(() => {
+    const { view, controller, buffer } = window.probe;
+    window.__probeSavedText = buffer.getText();
+    controller.applyEdits([{ start: 0, removed: window.__probeSavedText, inserted: 'count = 41\\ncount = 42\\n' }]);
+    view.revealOffset(0);
+    return true;
+  })()`);
+  await wait(80);
+
+  const shown = await script(`(() => {
+    const { view } = window.probe;
+    view.setInlineValues([{ line: 1, column: 5, label: 'count = 41' }]);
+    const node = view.element.querySelector('.own-editor-inline-value');
+    const row = view.element.querySelector('.own-editor-line');
+    return {
+      есть: Boolean(node),
+      подпись: node ? node.textContent : null,
+      строка: row ? row.textContent : null,
+    };
+  })()`);
+
+  await script(`(() => {
+    const { view, controller, buffer } = window.probe;
+    view.setInlineValues([]);
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: window.__probeSavedText }]);
+    return true;
+  })()`);
+
+  return shown;
+}
+
+/**
+ * Emmet: Tab раскрывает сокращение перед кареткой. Пишем сокращение в редактор разметки,
+ * жмём Tab настоящим событием клавиатуры — и смотрим, что получилось в тексте.
+ */
+async function emmetCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  const after = await script(`(() => {
+    const { workspace, doc } = window.probeEmmet;
+    workspace.reveal(doc.path, 1, 1);
+    workspace.insertAtCursor('ul>li*2');
+    const input = document.querySelector('#probe-emmet .own-editor-input');
+    input.focus();
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    return workspace.currentText(doc.path);
+  })()`);
+
+  // Повтор: Emmet не вмешивается в чужой язык (в этом редакторе язык разметки, но текст
+  // уже без сокращения — Tab должен вести себя как обычный отступ).
+  const plain = await script(`(() => {
+    const { workspace, doc } = window.probeEmmet;
+    document.querySelector('#probe-emmet .own-editor-input').dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }),
+    );
+    return workspace.currentText(doc.path);
+  })()`);
+
+  return { после_Tab: after, после_второго_Tab: plain };
+}
+
 async function lspCompletionCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
 
@@ -2335,7 +2525,8 @@ async function lspCompletionCheck(win) {
     workspace.insertAtCursor('val');
     return true;
   })()`);
-  await wait(120);
+  // Дотягивание описания уходит отдельным запросом — даём ему дойти до строки списка.
+  await wait(200);
 
   const panel = await script(`(() => {
     const root = document.querySelector('#probe-symbols .own-editor-suggest');
@@ -2344,7 +2535,9 @@ async function lspCompletionCheck(win) {
       строки: root ? [...root.querySelectorAll('.own-editor-suggest-item')].map((row) => ({
         подпись: row.querySelector('.own-editor-suggest-label')?.textContent ?? '',
         вид: (row.querySelector('.own-editor-suggest-detail')?.className ?? '').split(' ').pop() ?? '',
+        описание: row.querySelector('.own-editor-suggest-doc')?.textContent ?? '',
       })) : [],
+      спрошено_описаний: window.probeSymbols.resolvedCompletions.length,
     };
   })()`);
 
@@ -2604,6 +2797,31 @@ async function main() {
   log('');
 
   const lspCompletion = await lspCompletionCheck(win);
+  const documentLinks = await documentLinksCheck(win);
+  log('## Ссылки в коде (documentLink)');
+  log(JSON.stringify(documentLinks, null, 2));
+  log('');
+
+  const linkedEditing = await linkedEditingCheck(win);
+  log('## Связанные участки (linkedEditing)');
+  log(JSON.stringify(linkedEditing, null, 2));
+  log('');
+
+  const semantic = await semanticCheck(win);
+  log('## Семантическая подсветка (semanticTokens)');
+  log(JSON.stringify(semantic, null, 2));
+  log('');
+
+  const inlineValues = await inlineValuesCheck(win);
+  log('## Значения отладчика в строках (inlineValue)');
+  log(JSON.stringify(inlineValues, null, 2));
+  log('');
+
+  const emmet = await emmetCheck(win);
+  log('## Emmet по Tab');
+  log(JSON.stringify(emmet, null, 2));
+  log('');
+
   log('## Подсказки языкового сервера');
   log(JSON.stringify(lspCompletion, null, 2));
   log('');

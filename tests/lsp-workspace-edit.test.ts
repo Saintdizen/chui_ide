@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toWorkspaceFileEdits } from '../src/shared/lsp-workspace-edit';
+import { toWorkspaceEdits, toWorkspaceFileEdits } from '../src/shared/lsp-workspace-edit';
 
 /**
  * Разбор ответа `textDocument/rename` (WorkspaceEdit) в форму `FileEdit[]`.
@@ -81,5 +81,54 @@ describe('toWorkspaceFileEdits', () => {
     expect(toWorkspaceFileEdits({}, toPath)).toBeNull();
     expect(toWorkspaceFileEdits({ changes: {} }, toPath)).toBeNull();
     expect(toWorkspaceFileEdits({ documentChanges: [] }, toPath)).toBeNull();
+  });
+});
+
+describe('операции с файлами (documentChanges)', () => {
+  it('создать, переименовать, удалить — с опциями', () => {
+    const raw = {
+      documentChanges: [
+        { kind: 'create', uri: 'file:///proj/new.ts', options: { overwrite: true } },
+        { kind: 'rename', oldUri: 'file:///proj/a.ts', newUri: 'file:///proj/b.ts' },
+        { kind: 'delete', uri: 'file:///proj/old.ts', options: { recursive: true, ignoreIfNotExists: true } },
+      ],
+    };
+    const result = toWorkspaceEdits(raw, toPath)!;
+
+    expect(result.files).toEqual([]);
+    expect(result.operations).toEqual([
+      { kind: 'create', path: '/proj/new.ts', overwrite: true, ignoreIfExists: false },
+      { kind: 'rename', from: '/proj/a.ts', to: '/proj/b.ts', overwrite: false, ignoreIfExists: false },
+      { kind: 'delete', path: '/proj/old.ts', recursive: true, ignoreIfNotExists: true },
+    ]);
+  });
+
+  it('операции и правки идут вперемешку — порядок сохраняется', () => {
+    const raw = {
+      documentChanges: [
+        { kind: 'create', uri: 'file:///proj/new.ts' },
+        {
+          textDocument: { uri: 'file:///proj/new.ts' },
+          edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, newText: 'x' }],
+        },
+      ],
+    };
+    const result = toWorkspaceEdits(raw, toPath)!;
+
+    expect(result.operations.map((op) => op.kind)).toEqual(['create']);
+    expect(result.files.map((file) => file.path)).toEqual(['/proj/new.ts']);
+  });
+
+  it('битая операция пропускается, разбор не падает', () => {
+    const raw = { documentChanges: [{ kind: 'rename', oldUri: 'file:///proj/a.ts' }, { kind: 'create' }] };
+
+    expect(toWorkspaceEdits(raw, toPath)).toBeNull();
+  });
+
+  it('toWorkspaceFileEdits операции не отдаёт — только правки', () => {
+    const raw = { documentChanges: [{ kind: 'delete', uri: 'file:///proj/old.ts' }] };
+
+    expect(toWorkspaceFileEdits(raw, toPath)).toBeNull();
+    expect(toWorkspaceEdits(raw, toPath)!.operations).toHaveLength(1);
   });
 });

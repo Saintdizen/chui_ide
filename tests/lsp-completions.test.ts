@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { toCompletions } from '../src/shared/lsp-completions';
+import { toCompletions, toResolvedCompletion } from '../src/shared/lsp-completions';
 
 describe('разбор подсказок LSP', () => {
   it('принимает и список, и обёртку CompletionList', () => {
     const items = [{ label: 'foo' }];
-    expect(toCompletions(items)).toEqual([{ label: 'foo', insert: 'foo', detail: '' }]);
-    expect(toCompletions({ items })).toEqual([{ label: 'foo', insert: 'foo', detail: '' }]);
+    // Исходный элемент тоже переносится (`source`) — сверяем главные поля.
+    expect(toCompletions(items)[0]).toMatchObject({ label: 'foo', insert: 'foo', detail: '' });
+    expect(toCompletions({ items })[0]).toMatchObject({ label: 'foo', insert: 'foo', detail: '' });
     expect(toCompletions({ isIncomplete: true, items })).toHaveLength(1);
   });
 
@@ -72,10 +73,59 @@ describe('разбор подсказок LSP', () => {
     expect(toCompletions(items).map((entry) => entry.label)).toEqual(['a', 'b']);
   });
 
+  it('переносит filterText, sortText, preselect и пометку «устарело»', () => {
+    const entry = toCompletions([
+      { label: 'UserName', filterText: 'user', sortText: '2', preselect: true, tags: [1] },
+    ])[0]!;
+    expect(entry.filterText).toBe('user');
+    expect(entry.sortText).toBe('2');
+    expect(entry.preselect).toBe(true);
+    expect(entry.deprecated).toBe(true);
+    // Старая форма пометки — флаг `deprecated`.
+    expect(toCompletions([{ label: 'old', deprecated: true }])[0]!.deprecated).toBe(true);
+  });
+
+  it('порядок задаёт сервер по sortText, без него — по подписи', () => {
+    const labels = toCompletions([{ label: 'b', sortText: '1' }, { label: 'a', sortText: '2' }, { label: 'c' }]).map(
+      (entry) => entry.label,
+    );
+    expect(labels).toEqual(['b', 'a', 'c']);
+  });
+
+  it('исходный элемент сохраняется для resolve', () => {
+    const raw = { label: 'print', data: { id: 'print' } };
+    expect(toCompletions([raw])[0]!.source).toBe(raw);
+  });
+
   it('пустой и неожиданный ответ — пустой список', () => {
     expect(toCompletions(null)).toEqual([]);
     expect(toCompletions(undefined)).toEqual([]);
     expect(toCompletions({})).toEqual([]);
     expect(toCompletions('строка')).toEqual([]);
+  });
+});
+
+describe('доведение подсказки (completionItem/resolve)', () => {
+  it('берёт detail и описание-строку', () => {
+    expect(toResolvedCompletion({ detail: 'print(*args)', documentation: 'печатает' })).toEqual({
+      detail: 'print(*args)',
+      documentation: 'печатает',
+    });
+  });
+
+  it('описание из MarkupContent и массива сводится к тексту', () => {
+    expect(toResolvedCompletion({ documentation: { kind: 'markdown', value: 'Жирный' } })).toEqual({
+      documentation: 'Жирный',
+    });
+    expect(toResolvedCompletion({ documentation: ['раз', { value: 'два' }] })).toEqual({
+      documentation: 'раз\n\nдва',
+    });
+  });
+
+  it('пустые поля и мусор дают null: строку списка не трогаем', () => {
+    expect(toResolvedCompletion({})).toBeNull();
+    expect(toResolvedCompletion({ detail: '   ' })).toBeNull();
+    expect(toResolvedCompletion(null)).toBeNull();
+    expect(toResolvedCompletion('строка')).toBeNull();
   });
 });

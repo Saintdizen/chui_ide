@@ -23,6 +23,32 @@ function handle(message) {
           referencesProvider: true,
           definitionProvider: true,
           renameProvider: true,
+          foldingRangeProvider: true,
+          typeHierarchyProvider: true,
+          documentLinkProvider: { resolveProvider: true },
+          linkedEditingRangeProvider: true,
+          monikerProvider: true,
+          inlineValueProvider: true,
+          semanticTokensProvider: {
+            legend: {
+              tokenTypes: [
+                'namespace',
+                'type',
+                'class',
+                'function',
+                'variable',
+                'keyword',
+                'comment',
+                'string',
+                'number',
+              ],
+              tokenModifiers: ['declaration', 'readonly', 'static'],
+            },
+            full: true,
+          },
+          // Подсказки: триггер по точке и доведение элемента (resolve) — оба пути
+          // проверяет смоук (см. scripts/lsp-smoke.cjs).
+          completionProvider: { triggerCharacters: ['.'], resolveProvider: true },
         },
       },
     });
@@ -30,7 +56,17 @@ function handle(message) {
     send({ jsonrpc: '2.0', id: 'srv-1', method: 'window/workDoneProgress/create', params: { token: 'x' } });
     return;
   }
-  if (message.method === 'initialized') return;
+  if (message.method === 'initialized') {
+    // Динамическую регистрацию мы не заявляли, значит сервер вправе её не слать; но если
+    // пришлёт — клиент обязан ответить MethodNotFound, а не «успехом» (см. `onRequest`).
+    send({
+      jsonrpc: '2.0',
+      id: 'srv-2',
+      method: 'client/registerCapability',
+      params: { registrations: [{ id: 'r1', method: 'textDocument/hover' }] },
+    });
+    return;
+  }
 
   if (message.method === 'textDocument/didOpen') {
     send({
@@ -100,6 +136,40 @@ function handle(message) {
   // координат (сервер шлёт 0-based, клиент отдаёт 1-based).
   if (message.method === 'textDocument/references') {
     const uri = message.params.textDocument.uri;
+    // Заодно проверяем прогресс и частичные результаты: сервер просит создать индикатор
+    // (work done progress), шлёт begin/report, а часть ссылок отдаёт куском (partial).
+    send({ jsonrpc: '2.0', id: 'wd-refs', method: 'window/workDoneProgress/create', params: { token: 'refs' } });
+    send({
+      jsonrpc: '2.0',
+      method: '$/progress',
+      params: { token: 'refs', value: { kind: 'begin', title: 'Ищу ссылки' } },
+    });
+    send({
+      jsonrpc: '2.0',
+      method: '$/progress',
+      params: { token: 'refs', value: { kind: 'report', message: 'половина', percentage: 50 } },
+    });
+    send({ jsonrpc: '2.0', method: '$/progress', params: { token: 'refs', value: { kind: 'end' } } });
+    // Частичный результат: часть ссылок отдаём куском по токену из запроса — клиент
+    // обязан склеить их с остальным ответом.
+    const partialToken = message.params.partialResultToken;
+    if (partialToken !== undefined) {
+      send({
+        jsonrpc: '2.0',
+        method: '$/progress',
+        params: {
+          token: partialToken,
+          value: {
+            items: [
+              {
+                uri: `file://${process.cwd()}/scripts/first.py`,
+                range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+              },
+            ],
+          },
+        },
+      });
+    }
     send({
       jsonrpc: '2.0',
       id: message.id,
@@ -137,20 +207,176 @@ function handle(message) {
       jsonrpc: '2.0',
       id: message.id,
       result: {
-        changes: {
-          [uri]: [
-            {
-              range: { start: { line: 2, character: 6 }, end: { line: 2, character: 12 } },
-              newText: message.params.newName,
-            },
-          ],
-          [`file://${process.cwd()}/scripts/other.py`]: [
-            {
-              range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
-              newText: message.params.newName,
-            },
-          ],
+        documentChanges: [
+          // Операция с файлами вперемешку с правками: разбор обязан её не потерять и не
+          // спутать с правкой (см. `shared/lsp-workspace-edit.ts`).
+          { kind: 'create', uri: `file://${process.cwd()}/scripts/new-file.py` },
+          {
+            textDocument: { uri },
+            edits: [
+              {
+                range: { start: { line: 2, character: 6 }, end: { line: 2, character: 12 } },
+                newText: message.params.newName,
+              },
+            ],
+          },
+          {
+            textDocument: { uri: `file://${process.cwd()}/scripts/other.py` },
+            edits: [
+              {
+                range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+                newText: message.params.newName,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    return;
+  }
+
+  // Подсказки: отвечаем с ЗАДЕРЖКОЙ — так проверяется отмена устаревшего запроса
+  // (клиент шлёт $/cancelRequest и не ждёт ответа). Описание в первом ответе НЕ даём:
+  // его должен добыть `completionItem/resolve`, как делают настоящие серверы.
+  if (message.method === 'textDocument/completion') {
+    const items = [
+      { label: 'print', kind: 3, insertText: 'print', data: { id: 'print' } },
+      { label: 'property', kind: 10, insertText: 'property', data: { id: 'property' } },
+    ];
+    setTimeout(() => send({ jsonrpc: '2.0', id: message.id, result: { isIncomplete: false, items } }), 250);
+    return;
+  }
+
+  // Доведение подсказки: к тому же элементу дописываем описание и подробность.
+  if (message.method === 'completionItem/resolve') {
+    const item = message.params ?? {};
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: {
+        ...item,
+        detail: 'print(*args)',
+        documentation: { kind: 'markdown', value: 'Печатает объекты в поток вывода.' },
+      },
+    });
+    return;
+  }
+
+  // Иерархия типов: prepare даёт символ, supertypes — его надтип.
+  if (message.method === 'textDocument/prepareTypeHierarchy') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [
+        {
+          name: 'Derived',
+          kind: 5,
+          uri: message.params.textDocument.uri,
+          range: { start: { line: 1, character: 0 }, end: { line: 5, character: 0 } },
+          selectionRange: { start: { line: 1, character: 6 }, end: { line: 1, character: 13 } },
+          data: { id: 'derived' },
         },
+      ],
+    });
+    return;
+  }
+
+  if (message.method === 'typeHierarchy/supertypes') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [
+        {
+          name: 'Base',
+          kind: 5,
+          uri: message.params.item.uri,
+          range: { start: { line: 8, character: 0 }, end: { line: 10, character: 0 } },
+          selectionRange: { start: { line: 8, character: 6 }, end: { line: 8, character: 10 } },
+        },
+      ],
+    });
+    return;
+  }
+
+  if (message.method === 'typeHierarchy/subtypes') {
+    send({ jsonrpc: '2.0', id: message.id, result: [] });
+    return;
+  }
+
+  // Ссылки в коде: одна БЕЗ адреса — его добывает resolve.
+  if (message.method === 'textDocument/documentLink') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } }, data: { id: 'l1' } }],
+    });
+    return;
+  }
+
+  if (message.method === 'documentLink/resolve') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { ...message.params, target: 'https://example.com/', tooltip: 'Открыть пример' },
+    });
+    return;
+  }
+
+  // Inline-значения: сервер помечает участок и просит найти переменную у отладчика.
+  if (message.method === 'textDocument/inlineValue') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [
+        { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, caseSensitiveLookup: false },
+      ],
+    });
+    return;
+  }
+
+  if (message.method === 'textDocument/moniker') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [{ scheme: 'fake', identifier: 'fake:/sample.py:fn', unique: 'project' }],
+    });
+    return;
+  }
+
+  // Семантические токены: первая строка — «def» как ключевое слово и «f» как функция.
+  // Формат — сдвиги (deltaLine, deltaStartChar, length, тип, модификаторы).
+  if (message.method === 'textDocument/semanticTokens/full') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: {
+        data: [
+          0,
+          0,
+          3,
+          5,
+          0, // «def» — keyword (индекс 5)
+          0,
+          4,
+          1,
+          3,
+          0, // «f» — function (индекс 3)
+        ],
+      },
+    });
+    return;
+  }
+
+  // Связанные участки: два диапазона в первой строке — имена парного тега.
+  if (message.method === 'textDocument/linkedEditingRange') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: {
+        ranges: [
+          { start: { line: 0, character: 1 }, end: { line: 0, character: 4 } },
+          { start: { line: 0, character: 7 }, end: { line: 0, character: 10 } },
+        ],
       },
     });
     return;

@@ -52,6 +52,7 @@ import type { ProjectConfigStore } from '../project-config';
 import type { ReviewStore } from '../project/review-store';
 import type { HistoryStore } from '../project/history-store';
 import { mergeByPriority } from '../../shared/lsp-bundled';
+import { NO_LSP_STATUS } from '../../shared/lsp-status';
 import { parseThemeFile } from '../../shared/theme-file';
 import { unsavedClosePrompt } from '../../shared/unsaved';
 import type { TerminalService } from '../terminal/terminal';
@@ -696,13 +697,27 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('lsp.close', (params) => {
     deps.lsp?.close(params.path);
   });
-  router.register('lsp.restart', () => deps.lsp?.restart() ?? { running: [] });
-  router.register('lsp.status', () => deps.lsp?.status() ?? { running: [] });
+  router.register('lsp.restart', () => deps.lsp?.restart() ?? NO_LSP_STATUS);
+  router.register('lsp.status', () => deps.lsp?.status() ?? NO_LSP_STATUS);
   // Прокси к серверу: подсказки, наведение, переход к определению. Сервера нет —
   // возвращаем null, и редактор просто не покажет подсказку.
   router.register('lsp.request', (params) => deps.lsp?.request(params.path, params.method, params.params) ?? null);
+  // Чем сервер готов открывать подсказки: знаки-триггеры. Renderer открывает попап
+  // по ним, а не только по точке: без этого `@` в CSS и `:` в JSON молчали.
+  router.register(
+    'lsp.capabilities',
+    (params) =>
+      deps.lsp?.completionTriggers(params.path) ?? {
+        triggerCharacters: [],
+        allCommitCharacters: [],
+        resolveProvider: false,
+      },
+  );
   // Символы проекта: сервер ищет по всему проекту, а не по открытому файлу.
   router.register('lsp.symbols', (params) => deps.lsp?.projectSymbols(params.query) ?? []);
+  // Семантическая подсветка: точные роли от сервера. Ответ разобран в main (там легенда),
+  // renderer получает готовые участки и накладывает их поверх своей грамматики.
+  router.register('lsp.semanticTokens', (params) => deps.lsp?.semanticTokens(params.path) ?? []);
 
   /* ── Отладчик (DAP) ────────────────────────────────────────────────────── */
 

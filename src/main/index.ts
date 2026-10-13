@@ -237,6 +237,8 @@ if (!app.requestSingleInstanceLock()) {
         const sources = await detectLspSources(workspace.rootPath(), process.platform);
         return sources.flat().filter((server) => server.language === language);
       },
+      // Журнал обмена с серверами (настройка `lsp.trace`) — в пользовательских данных.
+      () => path.join(app.getPath('userData'), 'lsp-trace.log'),
     );
     // Отладчик: сессия debugpy по DAP. Интерпретатор тот же, что у запуска и тестов,
     // а `.env` проекта — тот же, что у терминала и языкового сервера.

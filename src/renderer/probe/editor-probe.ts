@@ -297,6 +297,25 @@ const symbolAnswers: { definition: SymbolLocation[]; references: SymbolLocation[
   definition: [],
   references: [],
 };
+/** Запросы дотягивания подсказок: по ним видно, спрашивали ли описание (см. `resolveCompletionItem`). */
+const resolvedCompletions: unknown[] = [];
+/** Клики по ссылкам в коде: по ним видно, дошёл ли клик до приложения. */
+const linkOpens: Array<{ target: string; path: string }> = [];
+/** Вхождения слова «div» — подставной сервер отдаёт их как связанные участки (парные теги). */
+function linkedRangesIn(text: string): { line: number; startColumn: number; endColumn: number }[] {
+  const word = 'div';
+  const out: { line: number; startColumn: number; endColumn: number }[] = [];
+  text.split('\n').forEach((line, index) => {
+    for (let from = 0; ; ) {
+      const at = line.indexOf(word, from);
+      if (at < 0) break;
+      out.push({ line: index + 1, startColumn: at + 1, endColumn: at + 1 + word.length });
+      from = at + word.length;
+    }
+  });
+  return out.length >= 2 ? out : [];
+}
+
 const symbolsWorkspace = new EditorWorkspace(symbolsRoot, symbolsRegistry, {
   scheme: 'dark',
   symbols: {
@@ -306,9 +325,24 @@ const symbolsWorkspace = new EditorWorkspace(symbolsRoot, symbolsRegistry, {
   // Подсказки сервера: подставной источник отдаёт готовые элементы — проверяем, что
   // они подмешиваются в список впереди своих слов и вставляются по Enter.
   completionFromLanguage: async () => [
-    { label: 'value', kind: 'external' as const, detail: 'переменная', insert: 'value' },
-    { label: 'valuableThing', kind: 'external' as const, detail: 'функция', insert: 'valuableThing()' },
+    { label: 'value', kind: 'external' as const, detail: 'переменная', insert: 'value', resolve: { label: 'value' } },
+    {
+      label: 'valuableThing',
+      kind: 'external' as const,
+      detail: 'функция',
+      insert: 'valuableThing()',
+      resolve: { label: 'valuableThing' },
+    },
   ],
+  // Дотягивание подсказки: описание приходит отдельным запросом — проверяем, что
+  // строка списка его дописывает (проверка `own-editor-probe.cjs`).
+  resolveCompletionItem: async (_path, item) => {
+    resolvedCompletions.push(item);
+    return { documentation: 'Документация: valuableThing делает важное.' };
+  },
+  // Ссылки в коде: подставной источник даёт одну ссылку — проверяем показ и клик.
+  documentLinks: async () => [{ line: 1, startColumn: 1, endColumn: 4, target: 'https://example.com/' }],
+  openLink: (target, path) => linkOpens.push({ target, path }),
   revealLocation: (path, line, column) => revealedSpots.push({ path, line, column }),
   relativePath: (path) => path.replace('/probe/', ''),
   onNotice: (text) => symbolNotices.push(text),
@@ -331,6 +365,8 @@ declare global {
       revealed: Array<{ path: string; line: number; column: number }>;
       notices: string[];
       paletteOpens: string[];
+      resolvedCompletions: unknown[];
+      linkOpens: Array<{ target: string; path: string }>;
     };
   }
 }
@@ -343,6 +379,8 @@ window.probeSymbols = {
   revealed: revealedSpots,
   notices: symbolNotices,
   paletteOpens,
+  resolvedCompletions,
+  linkOpens,
 };
 
 // Inline-подсказка «допиши за меня»: подставной «модель» возвращает готовый текст, а
@@ -390,6 +428,55 @@ window.probeInline = {
   calls: inlineCalls,
   control: inlineControl,
 };
+
+// Связанные участки (linkedEditing): отдельный редактор с парными «тегами», чтобы проверка
+// не зависела от правок других проб. Подставной сервер отдаёт вхождения слова «value» как
+// связанные; проверяем подсветку и то, что правка в одном повторяется в остальных.
+const linkedRoot = document.createElement('div');
+linkedRoot.id = 'probe-linked';
+linkedRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(linkedRoot);
+
+const linkedStore = new DocumentStore();
+const linkedRegistry = new DocumentRegistry(linkedStore);
+const linkedWorkspace = new EditorWorkspace(linkedRoot, linkedRegistry, {
+  scheme: 'dark',
+  linkedEditing: async () => linkedRangesIn(linkedDoc.value),
+});
+const linkedDoc = linkedStore.open('/probe/linked.html', '<div></div>\n', { languageId: 'html' });
+linkedWorkspace.open(linkedDoc);
+
+declare global {
+  interface Window {
+    probeLinked: { workspace: EditorWorkspace; store: DocumentStore; doc: TextDocument };
+  }
+}
+
+window.probeLinked = { workspace: linkedWorkspace, store: linkedStore, doc: linkedDoc };
+
+// Emmet: отдельный редактор с языком разметки. Проверяем, что Tab раскрывает сокращение
+// перед кареткой в настоящем окне (см. `emmetCheck` в пробе).
+const emmetRoot = document.createElement('div');
+emmetRoot.id = 'probe-emmet';
+emmetRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(emmetRoot);
+
+const emmetStore = new DocumentStore();
+const emmetRegistry = new DocumentRegistry(emmetStore);
+const emmetWorkspace = new EditorWorkspace(emmetRoot, emmetRegistry, {
+  scheme: 'dark',
+  emmetEnabled: () => true,
+});
+const emmetDoc = emmetStore.open('/probe/index.html', '', { languageId: 'html' });
+emmetWorkspace.open(emmetDoc);
+
+declare global {
+  interface Window {
+    probeEmmet: { workspace: EditorWorkspace; store: DocumentStore; doc: TextDocument };
+  }
+}
+
+window.probeEmmet = { workspace: emmetWorkspace, store: emmetStore, doc: emmetDoc };
 
 // Переход по пометкам (F8): пометки кладём в рабочее место через тот же шов, что и LSP
 // (`setExternalMarkers`), а переходы записываем — по ним видно, куда повела команда.

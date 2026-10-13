@@ -907,6 +907,12 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       switchRow('Миникарта', editor.minimap, (value) => editable({ minimap: value })),
       switchRow('Перенос длинных строк', editor.wordWrap, (value) => editable({ wordWrap: value })),
       switchRow('Лигатуры шрифта', editor.fontLigatures, (value) => editable({ fontLigatures: value })),
+      switchRow('Emmet (раскрытие сокращений по Tab)', editor.emmet, (value) => editable({ emmet: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'В разметке и стилях Tab раскрывает сокращение: `ul>li*3` → список, `m10` → `margin: 10px;`.',
+      ),
       h(
         'div',
         { class: 'field-hint' },
@@ -1511,6 +1517,20 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
       h('div', { class: 'field-hint' }, statusText),
       field('Перезапустить', restartButton),
+      switchRow('Журнал обмена с серверами (отладка)', lsp.trace, (value) => void patch({ lsp: { trace: value } })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Пишет все сообщения обмена с серверами в файл lsp-trace.log в папке пользовательских данных. ' +
+          'Помогает понять, почему сервер молчит или отвечает пусто. Работает сразу, перезапуск не нужен.',
+      ),
+      switchRow('Журнал обмена с серверами (отладка)', lsp.trace, (value) => void patch({ lsp: { trace: value } })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Пишет все сообщения обмена с серверами в файл lsp-trace.log в папке пользовательских данных. ' +
+          'Помогает понять, почему сервер молчит или отвечает пусто. Работает сразу, перезапуск не нужен.',
+      ),
       field('Серверы (JSON)', servers),
       languages
         ? h(

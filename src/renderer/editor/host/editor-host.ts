@@ -28,6 +28,9 @@ import type { GitLineChange } from '../../../shared/git-line-changes';
 import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-lens';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
+import type { DocumentLinkEntry } from '../../../shared/lsp-document-links';
+import type { LinkedRange } from '../../../shared/lsp-linked-editing';
+import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import type { RunnableTest } from '../../../shared/python-tests';
 import type { Snippet } from '../../../shared/snippets';
 import type { TestOutcome } from '../../../shared/test-model';
@@ -45,10 +48,12 @@ import { type CommandName, EditorInputBinding, type KeyInterceptor } from '../in
 import type { CaseStyle } from '../input/case-convert';
 import { blockCommentFor, lineCommentFor } from '../input/comments';
 import { InlineCompletions } from '../input/inline-completions';
-import { EditorView } from '../view/editor-view';
+import { EmmetExpander } from '../input/emmet';
+import type { CompletionTriggers } from './lsp-features';
+import { EditorView, type DebugInlineValue } from '../view/editor-view';
 import { normalizeWhitespaceMode, type WhitespaceMode } from '../view/whitespace';
 import { caret, isEmpty, type Selection } from '../view/selection';
-import { FileDecorations, type LensDecoration } from '../view/decorations';
+import { FileDecorations, type LensDecoration, type LinkDecoration } from '../view/decorations';
 import { FindWidget } from '../widgets/find-widget';
 import { GotoLineWidget } from '../widgets/goto-widget';
 import { HoverWidget, type HoverExternalInfo } from '../widgets/hover-widget';
@@ -68,6 +73,12 @@ const INLAY_REFRESH_DELAY_MS = 500;
 
 /** Пауза перед перезапросом код-линз по правке: сервер спрашиваем не на каждую букву. */
 const LENS_REFRESH_DELAY_MS = 400;
+
+/** Пауза перед перезапросом связанных участков: связь ищем по движению курсора. */
+const LINKED_REFRESH_DELAY_MS = 150;
+
+/** Пауза перед перезапросом семантической подсветки: сервер разбирает файл целиком. */
+const SEMANTIC_REFRESH_DELAY_MS = 300;
 
 /** Нажали на значок запуска в жёлобе — этот файл и строку и просят выполнить. */
 export interface RunMarkerHit {
@@ -156,6 +167,17 @@ export interface EditorHostOptions {
     position: { line: number; column: number },
   ) => Promise<readonly CompletionItem[]>;
   /**
+   * Знаки-триггеры языкового сервера для файла (`@` в CSS, `:` в JSON, `.` в TS):
+   * по ним попап открывается сразу после знака, а не только по набранным буквам.
+   * Не задано — работает только наш путь (точка и буквы).
+   */
+  completionTriggers?: (path: string) => Promise<CompletionTriggers>;
+  /**
+   * Довести подсказку опозданием (`completionItem/resolve`): путь и исходный элемент
+   * сервера → описание и уточнение. Не задано — список довольствуется первым ответом.
+   */
+  resolveCompletionItem?: (path: string, item: unknown) => Promise<{ detail?: string; documentation?: string } | null>;
+  /**
    * Подсказка о параметрах вызова от языкового сервера: путь и позиция (1-based) → разбор
    * (см. `shared/lsp-signature.ts`). Не задано — карточки о параметрах нет вовсе.
    */
@@ -198,6 +220,26 @@ export interface EditorHostOptions {
    */
   foldRanges?: (path: string, text: string) => Promise<readonly FoldRange[]>;
   /**
+   * Ссылки внутри кода от языкового сервера (`textDocument/documentLink`): пути в
+   * `import`, адреса в комментариях. Не задано — подчёркнутых ссылок нет вовсе.
+   */
+  documentLinks?: (path: string) => Promise<readonly DocumentLinkEntry[]>;
+  /**
+   * Клик по ссылке в тексте: что открыть (адрес или файл) решает приложение — у него
+   * и системный обработчик ссылок, и открытие файлов.
+   */
+  openLink?: (target: string, path: string) => void;
+  /**
+   * Связанные участки (`linkedEditingRange`) в позиции курсора: имена парных тегов,
+   * которые правятся вместе (см. `shared/lsp-linked-editing.ts`). Не задано — связи нет.
+   */
+  linkedEditing?: (path: string, position: { line: number; column: number }) => Promise<readonly LinkedRange[]>;
+  /**
+   * Семантическая подсветка файла от сервера (`semanticTokens/full`): точные роли поверх
+   * своей грамматики (см. `shared/lsp-semantic-tokens.ts`). Не задано — только грамматика.
+   */
+  semanticTokens?: (path: string) => Promise<readonly SemanticToken[]>;
+  /**
    * Код-линзы файла от языкового сервера: путь и текст → подписи у строк (см.
    * `shared/lsp-code-lens.ts`). Не задано — линз нет вовсе.
    */
@@ -214,6 +256,12 @@ export interface EditorHostOptions {
     /** Контекст вокруг курсора → готовый текст. `null`/пусто — подсказки нет. */
     complete(request: { path: string; language: string; prefix: string; suffix: string }): Promise<string | null>;
   };
+  /**
+   * Включён ли Emmet: раскрытие сокращений разметки и стилей по Tab (`ul>li*3` → список).
+   * Не задано — считаем выключенным: раскрытие меняет текст по Tab, и включать его без
+   * ведома человека невежливо (см. `input/emmet.ts`).
+   */
+  emmetEnabled?: () => boolean;
 }
 
 /**
@@ -231,6 +279,12 @@ export class EditorHost {
   private readonly goto: GotoLineWidget;
   private readonly hover: HoverWidget;
   private readonly assistant: CompletionAssistant;
+  /** Знаки-триггеры сервера для активного файла — отсюда их берёт попап подсказок. */
+  /** Отступ одной ступени: им пользуется Emmet при раскрытии вложенных элементов. */
+  private indentSize = 4;
+  private readonly completionTriggersSource: ((path: string) => Promise<CompletionTriggers>) | undefined;
+  /** Номер запроса триггеров: ответ на прежний файл не применяем. */
+  private triggersRequestId = 0;
   private readonly suggest: SuggestWidget;
   /** Подсказка о параметрах вызова. `null` — источника нет, карточки не будет. */
   private readonly signature: SignatureAssistant | null;
@@ -264,6 +318,23 @@ export class EditorHost {
   private inlayRequestId = 0;
   private inlayTimer: number | null = null;
 
+  /** Ссылки в коде — от приложения (языковой сервер): источник, ответ и открытие. */
+  private readonly documentLinkSource: ((path: string) => Promise<readonly DocumentLinkEntry[]>) | undefined;
+  private readonly openLink: ((target: string, path: string) => void) | undefined;
+  /** Связанные участки — от приложения (языковой сервер): источник и номер запроса. */
+  private readonly linkedSource:
+    | ((path: string, position: { line: number; column: number }) => Promise<readonly LinkedRange[]>)
+    | undefined;
+  private linkedRequestId = 0;
+  private linkedTimer: number | null = null;
+  /** Семантическая подсветка — от приложения (языковой сервер): источник и номер запроса. */
+  private readonly semanticSource: ((path: string) => Promise<readonly SemanticToken[]>) | undefined;
+  private semanticRequestId = 0;
+  private semanticTimer: number | null = null;
+  /** Последний ответ по файлам: рисуем из него, клик ищет здесь же. */
+  private readonly documentLinks = new Map<string, readonly DocumentLinkEntry[]>();
+  private linkRequestId = 0;
+  private linkTimer: number | null = null;
   /** Код-линзы — от приложения (языковой сервер): источник, исполнение и последний ответ. */
   private readonly codeLensSource: ((path: string, text: string) => Promise<readonly CodeLensEntry[]>) | undefined;
   private readonly lensCommand: ((path: string, command: CodeLensCommand) => void) | undefined;
@@ -318,6 +389,11 @@ export class EditorHost {
   private blameLine: { path: string; line: number; text: string } | null = null;
   private readonly blameAll = new Map<string, readonly { line: number; text: string }[]>();
   private debugLine: { path: string; line: number } | null = null;
+  /**
+   * Значения отладчика для показа в строках: `x = 42`. Живут, пока программа стоит;
+   * при смене файла не переносятся — их пришлёт приложение для нового (см. `setDebugInlineValues`).
+   */
+  private debugInlineValues: { path: string; values: readonly DebugInlineValue[] } | null = null;
   /** Пометки языкового сервера по файлам: рисуем волнистым подчёркиванием. */
   private readonly externalMarkers = new Map<string, readonly LspDiagnostic[]>();
 
@@ -359,6 +435,11 @@ export class EditorHost {
     this.codeLensSource = options.codeLenses;
     this.lensCommand = options.lensCommand;
     this.inlayHintSource = options.inlayHints;
+    this.documentLinkSource = options.documentLinks;
+    this.openLink = options.openLink;
+    this.linkedSource = options.linkedEditing;
+    this.semanticSource = options.semanticTokens;
+    this.completionTriggersSource = options.completionTriggers;
 
     // До первого `open` редактор держит пустой буфер: слои не терпят «нет документа», а
     // пустая вкладка — нормальное состояние панели, пока файл не открыт.
@@ -380,6 +461,7 @@ export class EditorHost {
     this.readOnlyBadge.title = 'Файл слишком большой для правки — открыт только для чтения';
     this.readOnlyBadge.hidden = true;
     container.append(this.readOnlyBadge);
+    this.indentSize = options.tabSize ?? 4;
     this.controller = new EditorController(buffer, { tabSize: options.tabSize });
     this.find = new FindWidget(this.view, this.controller, buffer);
     this.goto = new GotoLineWidget(this.view, this.controller, buffer);
@@ -391,6 +473,13 @@ export class EditorHost {
         ? (_prefix, position) => {
             const path = this.activePath;
             return path ? options.completionFromLanguage!(path, position) : Promise.resolve([]);
+          }
+        : undefined,
+      // Дотягивание подсказки: путь берём активный — панель о нём знает, ассистент нет.
+      resolve: options.resolveCompletionItem
+        ? (item) => {
+            const path = this.activePath;
+            return path ? options.resolveCompletionItem!(path, item) : Promise.resolve(null);
           }
         : undefined,
     });
@@ -457,6 +546,18 @@ export class EditorHost {
     const interceptors: KeyInterceptor[] = [this.assistant];
     if (this.signature) interceptors.push(this.signature);
     if (this.navigation) interceptors.push(this.navigation);
+    // Emmet — после попапов: видимый список подсказок забирает Tab себе, а уже потом
+    // Tab раскрывает сокращение (см. `input/emmet.ts`).
+    if (options.emmetEnabled) {
+      interceptors.push(
+        new EmmetExpander({
+          controller: this.controller,
+          language: () => this.languageId,
+          indent: () => ' '.repeat(this.indentSize),
+          enabled: options.emmetEnabled,
+        }),
+      );
+    }
     if (this.inline) interceptors.push(this.inline);
     this.input = new EditorInputBinding(this.view, this.controller, {
       onCommand: (command) => this.runCommand(command),
@@ -552,6 +653,14 @@ export class EditorHost {
       void this.refreshLenses();
       // Подсказки-вставки — тоже про файл: у прежнего они свои.
       void this.refreshInlayHints();
+      // Знаки-триггеры сервера — про язык файла: по ним попап открывается после знака.
+      void this.refreshTriggerCharacters(document.path);
+      // Ссылки в коде — про файл: у прежнего они свои.
+      void this.refreshDocumentLinks();
+      // Семантическая подсветка — про файл: у прежнего роли свои.
+      void this.refreshSemanticTokens();
+      // Значения отладчика принадлежат остановленному файлу: у нового их нет.
+      this.view.setInlineValues(this.debugInlineValues?.path === document.path ? this.debugInlineValues.values : []);
     }
     this.input.focus();
     this.emitCursor();
@@ -666,6 +775,7 @@ export class EditorHost {
     ligatures?: boolean;
   }): void {
     if (options.tabSize !== undefined) {
+      this.indentSize = options.tabSize;
       this.controller.setTabSize(options.tabSize);
       this.view.setTabSize(options.tabSize);
     }
@@ -896,6 +1006,7 @@ export class EditorHost {
     decorations.setAfterContents(this.buildAfters(path));
     decorations.setLenses(this.buildLenses(path));
     decorations.setSquiggles(this.buildSquiggles(path));
+    decorations.setLinks(this.buildLinks(path));
 
     if (this.path === path) this.view.setDecorations(decorations);
   }
@@ -1045,6 +1156,23 @@ export class EditorHost {
   }
 
   /** Красная строка на строке отладчика. `null` — подсветку убрать. */
+  /**
+   * Показать значения переменных в строках файла (во время останова отладки). Значения
+   * считает приложение (у него и языковой сервер, и отладчик); сюда они приходят готовыми.
+   * Пустой список или `null` — снять показ.
+   */
+  setDebugInlineValues(path: string | null, values: readonly DebugInlineValue[]): void {
+    if (!path || values.length === 0) {
+      if (this.debugInlineValues && (path === null || this.debugInlineValues.path === path)) {
+        this.debugInlineValues = null;
+        this.view.setInlineValues([]);
+      }
+      return;
+    }
+    this.debugInlineValues = { path, values };
+    this.view.setInlineValues(this.path === path ? values : []);
+  }
+
   setDebugLine(path: string | null, line: number | null): void {
     const affected = new Set<string>();
     if (this.debugLine) affected.add(this.debugLine.path);
@@ -1089,6 +1217,7 @@ export class EditorHost {
     // Правый клик по полоске: меню блока (то, чего не сделать щелчком по тексту).
     this.view.onStripContextMenu = (line) => this.onStripContextMenu(line);
     this.view.onLensClick = (line) => this.onLensClick(line);
+    this.view.onLinkClick = (line, column) => this.onLinkClick(line, column);
     this.view.onContextMenu = (event) => this.openContextMenu(event);
   }
 
@@ -1185,6 +1314,9 @@ export class EditorHost {
     if (this.foldTimer !== null) window.clearTimeout(this.foldTimer);
     if (this.lensTimer !== null) window.clearTimeout(this.lensTimer);
     if (this.inlayTimer !== null) window.clearTimeout(this.inlayTimer);
+    if (this.linkTimer !== null) window.clearTimeout(this.linkTimer);
+    if (this.linkedTimer !== null) window.clearTimeout(this.linkedTimer);
+    if (this.semanticTimer !== null) window.clearTimeout(this.semanticTimer);
     this.view.dispose();
     this.cursorEmitter.dispose();
     this.changeTextEmitter.dispose();
@@ -1216,10 +1348,133 @@ export class EditorHost {
         this.scheduleLenses();
         // Подсказки-вставки зависят от типов и имён — правка их меняет, перезапрашиваем.
         this.scheduleInlayHints();
+        // Ссылки в коде привязаны к тексту — после правки перезапрашиваем.
+        this.scheduleDocumentLinks();
+        // Связанные участки держит контроллер; виду отдаём их смещения сразу, а у
+        // сервера переспросим с паузой (см. scheduleLinkedEditing).
+        this.view.setLinkedRanges(this.controller.linkedRanges ?? []);
+        // Семантические роли привязаны к тексту — после правки переспрашиваем с паузой.
+        this.scheduleSemanticTokens();
       }
       this.cursors.set(this.path, this.cursorPosition());
     }
+    this.scheduleLinkedEditing();
     this.emitCursor();
+  }
+
+  // — ссылки в коде —
+
+  /** Ссылки файла в виде украшений: участок и подпись наведения. */
+  private buildLinks(path: string): readonly LinkDecoration[] {
+    return (this.documentLinks.get(path) ?? []).map((link) => ({
+      line: link.line,
+      startColumn: link.startColumn,
+      endColumn: link.endColumn,
+      ...((link.target ?? link.tooltip) ? { tooltip: link.target ?? link.tooltip } : {}),
+    }));
+  }
+
+  /** Ссылки файла: спросить у приложения и перерисовать украшения. */
+  private async refreshDocumentLinks(): Promise<void> {
+    if (this.readOnly) return;
+    const source = this.documentLinkSource;
+    const path = this.path;
+    if (!source || !path) return;
+    const id = (this.linkRequestId += 1);
+    const links = await source(path).catch(() => []);
+    // Пока спрашивали, файл сменился — ответ уже не к месту.
+    if (id !== this.linkRequestId || this.path !== path) return;
+    if (links.length === 0) this.documentLinks.delete(path);
+    else this.documentLinks.set(path, links);
+    this.refreshDecorations(path);
+  }
+
+  /** Пересчитать ссылки с паузой: на каждое нажатие дёргать сервер незачем. */
+  private scheduleDocumentLinks(): void {
+    if (!this.documentLinkSource) return;
+    if (this.linkTimer !== null) window.clearTimeout(this.linkTimer);
+    this.linkTimer = window.setTimeout(() => {
+      this.linkTimer = null;
+      void this.refreshDocumentLinks();
+    }, LENS_REFRESH_DELAY_MS);
+  }
+
+  /** Клик по ссылке: находим свою по строке и столбцу — и отдаём адрес приложению. */
+  private onLinkClick(line: number, column: number): void {
+    const path = this.path;
+    if (!path || !this.openLink) return;
+    const link = (this.documentLinks.get(path) ?? []).find(
+      (item) => item.line === line && column >= item.startColumn && column < item.endColumn,
+    );
+    if (link?.target) this.openLink(link.target, path);
+  }
+
+  // — связанные участки (linkedEditing) —
+
+  /** Связанные участки с паузой: по движению курсора дёргать сервер незачем. */
+  private scheduleLinkedEditing(): void {
+    if (!this.linkedSource) return;
+    if (this.linkedTimer !== null) window.clearTimeout(this.linkedTimer);
+    this.linkedTimer = window.setTimeout(() => {
+      this.linkedTimer = null;
+      void this.refreshLinkedEditing();
+    }, LINKED_REFRESH_DELAY_MS);
+  }
+
+  /**
+   * Спросить у сервера связанные участки под курсором и поставить их контроллеру и виду.
+   * Связь — только для одной каретки без выделения: при выделении «править вместе» нечего,
+   * и подсветка была бы непонятной. Пустой ответ (или несколько кареток) снимает связь.
+   */
+  private async refreshLinkedEditing(): Promise<void> {
+    const source = this.linkedSource;
+    const path = this.path;
+    const single = this.controller.selections.length === 1 && isEmpty(this.controller.selection);
+    if (!source || !path || this.readOnly || !single) {
+      this.clearLinked();
+      return;
+    }
+    const id = (this.linkedRequestId += 1);
+    const buffer = this.controller.bufferRef;
+    const ranges = await source(path, this.cursorPosition()).catch(() => []);
+    if (id !== this.linkedRequestId || this.path !== path) return;
+    const offsets = ranges.map((range) => ({
+      start: buffer.offsetAt({ line: range.line, column: range.startColumn }),
+      end: buffer.offsetAt({ line: range.line, column: range.endColumn }),
+    }));
+    this.controller.setLinkedRanges(offsets);
+    this.view.setLinkedRanges(this.controller.linkedRanges ?? []);
+  }
+
+  /** Снять связь: её больше не держат ни сервер, ни контроллер, ни вид. */
+  private clearLinked(): void {
+    this.controller.setLinkedRanges(null);
+    this.view.setLinkedRanges([]);
+  }
+
+  // — семантическая подсветка —
+
+  /** Семантические токены с паузой: сервер разбирает файл целиком — не на каждую букву. */
+  private scheduleSemanticTokens(): void {
+    if (!this.semanticSource) return;
+    if (this.semanticTimer !== null) window.clearTimeout(this.semanticTimer);
+    this.semanticTimer = window.setTimeout(() => {
+      this.semanticTimer = null;
+      void this.refreshSemanticTokens();
+    }, SEMANTIC_REFRESH_DELAY_MS);
+  }
+
+  /** Спросить у сервера семантическую подсветку файла и отдать её виду. */
+  private async refreshSemanticTokens(): Promise<void> {
+    if (this.readOnly) return;
+    const source = this.semanticSource;
+    const path = this.path;
+    if (!source || !path) return;
+    const id = (this.semanticRequestId += 1);
+    const tokens = await source(path).catch(() => []);
+    // Пока спрашивали, файл сменился — ответ уже не к месту.
+    if (id !== this.semanticRequestId || this.path !== path) return;
+    this.view.setSemanticTokens(tokens);
   }
 
   // — свёртка —
@@ -1367,6 +1622,28 @@ export class EditorHost {
       this.inlayTimer = null;
       void this.refreshInlayHints();
     }, INLAY_REFRESH_DELAY_MS);
+  }
+
+  /**
+   * Знаки-триггеры сервера для открытого файла. Запоминаем их в попапе подсказок:
+   * по ним список открывается сразу после знака (`@`, `:`), а не только по точке.
+   */
+  private async refreshTriggerCharacters(path: string, attempt = 0): Promise<void> {
+    const source = this.completionTriggersSource;
+    if (!source) return;
+    const id = (this.triggersRequestId += 1);
+    const triggers = await source(path).catch(() => null);
+    // Пока спрашивали, файл сменился — знаки прошлого к этому не относятся.
+    if (id !== this.triggersRequestId || this.path !== path) return;
+    const characters = triggers?.triggerCharacters ?? [];
+    this.assistant.setTriggerCharacters(characters);
+    // Пусто — сервер мог ещё не подняться (его стартует main при открытии файла):
+    // один повтор, когда он наверняка готов; за это время файл мог смениться.
+    if (characters.length === 0 && attempt === 0) {
+      window.setTimeout(() => {
+        if (this.path === path) void this.refreshTriggerCharacters(path, 1);
+      }, 800);
+    }
   }
 
   /** Клик по линзе строки: исполняем команду, которую положил в неё сервер. */

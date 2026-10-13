@@ -41,6 +41,11 @@ export class SuggestWidget {
 
   /** Что делать при выборе мышью. Задаёт тот, кто виджет создал. */
   onAccept: (() => void) | null = null;
+  /**
+   * Выделилась другая строка — сюда приходит она. Так список доводит подсказку
+   * опозданием (`completionItem/resolve`), а не тянет описания сразу для всех.
+   */
+  onSelect: ((item: CompletionItem) => void) | null = null;
 
   constructor(host: HTMLElement) {
     this.root = document.createElement('div');
@@ -97,6 +102,7 @@ export class SuggestWidget {
     this.root.hidden = false;
     this.render();
     this.position(anchor);
+    this.notifySelect();
   }
 
   hide(): void {
@@ -113,6 +119,29 @@ export class SuggestWidget {
     this.selected = next;
     this.highlight();
     this.ensureVisible();
+    this.notifySelect();
+  }
+
+  /** Сообщить, что выделена другая строка (для дотягивания описания). */
+  private notifySelect(): void {
+    const item = this.items[this.selected];
+    if (item) this.onSelect?.(item);
+  }
+
+  /**
+   * Дописать строке списка пояснение и описание, не пересобирая список. Так приходит
+   * ответ `completionItem/resolve`: список и выделение остаются на месте.
+   */
+  patch(item: CompletionItem, update: { detail?: string; documentation?: string }): void {
+    const index = this.items.indexOf(item);
+    if (index < 0) return;
+    const next = { ...item, ...update };
+    this.items[index] = next;
+    const row = this.list.children[index] as HTMLElement | undefined;
+    if (!row) return;
+    const detail = row.querySelector('.own-editor-suggest-detail');
+    if (detail instanceof HTMLElement && next.detail) detail.textContent = next.detail;
+    renderDoc(row, next);
   }
 
   /**
@@ -168,7 +197,12 @@ export class SuggestWidget {
     detail.className = `own-editor-suggest-detail is-${item.kind}`;
     detail.textContent = item.detail;
 
-    node.append(label, detail);
+    // Описание символа — своей строкой под подписью: появляется после resolve.
+    const doc = document.createElement('span');
+    doc.className = 'own-editor-suggest-doc';
+
+    node.append(label, detail, doc);
+    renderDoc(node, item);
     return node;
   }
 
@@ -213,6 +247,7 @@ export class SuggestWidget {
     if (index < 0 || index === this.selected) return;
     this.selected = index;
     this.highlight();
+    this.notifySelect();
   };
 
   private readonly onMouseDown = (event: MouseEvent): void => {
@@ -237,4 +272,22 @@ export class SuggestWidget {
     this.list.removeEventListener('mousedown', this.onMouseDown);
     this.root.remove();
   }
+}
+
+/**
+ * Описание символа под подписью: одна строка в списке, полный текст — в подсказке.
+ * Появляется только после `completionItem/resolve` — до него описания ещё нет.
+ */
+function renderDoc(row: HTMLElement, item: CompletionItem): void {
+  const doc = row.querySelector('.own-editor-suggest-doc');
+  if (!(doc instanceof HTMLElement)) return;
+  const full = item.documentation ?? '';
+  const first =
+    full
+      .split('\n')
+      .find((part) => part.trim().length > 0)
+      ?.trim() ?? '';
+  doc.textContent = first;
+  doc.hidden = first.length === 0;
+  if (first) doc.title = full;
 }

@@ -3878,6 +3878,27 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
+/* Прогресс языкового сервера: вертушка и подпись. Крутится, пока сервер занят, —
+   так долгая индексация или поиск видно, и работа не выглядит зависанием. */
+.status-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  color: var(--text_color_tertiary);
+}
+
+.status-progress svg {
+  animation: tool-spin 0.9s linear infinite;
+}
+
+.status-progress-label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Файл открыт только для чтения (большой): заметная, но не кричащая пометка. */
 .status-readonly {
   padding: 0 6px;
@@ -3899,6 +3920,232 @@ textarea {
 .status-env:hover {
   background: var(--element_background_hover);
   color: var(--text_color);
+}
+
+/* Языковой сервер — кнопка: клик открывает попап со списком серверов. */
+.status-lsp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text_color_tertiary);
+  cursor: pointer;
+}
+
+.status-lsp:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Сервер не поднялся — это и есть ответ «почему нет подсказок»: не молчим. */
+.status-lsp.is-failed {
+  color: var(--red_prime_background);
+}
+
+/* Попап языковых серверов: список того, что запущено и что не поднялось. */
+.popover-lsp-status {
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+
+.lsp-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lsp-status-title {
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.lsp-status-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lsp-status-heading {
+  margin-top: 2px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.lsp-status-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--font_labels_size);
+}
+
+.lsp-status-name {
+  min-width: 0;
+  color: var(--text_color);
+  overflow-wrap: anywhere;
+}
+
+.lsp-status-row.is-failed .lsp-status-name {
+  color: var(--red_prime_background);
+}
+
+.lsp-status-lang {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.lsp-status-origin {
+  margin-left: auto;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+}
+
+.lsp-status-empty,
+.lsp-status-hint {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.lsp-status-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.lsp-status-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+.lsp-status-action:hover {
+  border-color: var(--blue_prime_background);
+}
+
+/* Языковой сервер — кнопка: клик открывает попап со списком серверов. */
+.status-lsp {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text_color_tertiary);
+  cursor: pointer;
+}
+
+.status-lsp:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Сервер не поднялся — это и есть ответ «почему нет подсказок»: не молчим. */
+.status-lsp.is-failed {
+  color: var(--red_prime_background);
+}
+
+/* Попап языковых серверов: список того, что запущено и что не поднялось. */
+.popover-lsp-status {
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+
+.lsp-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lsp-status-title {
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.lsp-status-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.lsp-status-heading {
+  margin-top: 2px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.lsp-status-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--font_labels_size);
+}
+
+.lsp-status-name {
+  min-width: 0;
+  color: var(--text_color);
+  overflow-wrap: anywhere;
+}
+
+.lsp-status-row.is-failed .lsp-status-name {
+  color: var(--red_prime_background);
+}
+
+.lsp-status-lang {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.lsp-status-origin {
+  margin-left: auto;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+}
+
+.lsp-status-empty,
+.lsp-status-hint {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.lsp-status-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.lsp-status-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+.lsp-status-action:hover {
+  border-color: var(--blue_prime_background);
 }
 
 /* Искра состояния ассистента внутри кнопки «Информация о сессии»: цвет —

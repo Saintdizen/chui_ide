@@ -1,3 +1,5 @@
+import type { LspChip } from '../../shared/lsp-status';
+import { lspOriginLabel } from '../../shared/lsp-status';
 import { h, svgIcon } from './dom';
 
 export interface StatusState {
@@ -22,6 +24,16 @@ export interface StatusState {
   problems: { errors: number; warnings: number };
   /** Выбранное Python-окружение (`.venv`, `python3`); null — виджет скрыт. */
   env: string | null;
+  /**
+   * Языковой сервер активного файла: какой, откуда и не поднялся ли. `null` — языка
+   * нет или про него ничего не известно (молчать честнее, чем висеть пустым чипом).
+   */
+  lsp: LspChip | null;
+  /**
+   * Чем занят языковой сервер (индексация, поиск ссылок): подпись и процент. `null` —
+   * сервер молчит, и виджета нет (`$/progress`, см. `shared/lsp-progress.ts`).
+   */
+  progress: { label: string; percentage: number | null } | null;
 }
 
 export interface StatusBarView {
@@ -50,6 +62,8 @@ export interface StatusBarDeps {
   openNodeEnv(anchor: HTMLElement): void;
   /** Клик по счётчику проблем — переход к первой пометке. */
   openProblems(anchor: HTMLElement): void;
+  /** Клик по чипу языкового сервера — попап со списком серверов и действиями. */
+  openLsp(anchor: HTMLElement): void;
 }
 
 /** Русское склонение по числу: 1 ошибка, 2 ошибки, 5 ошибок. */
@@ -81,6 +95,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     changes: 0,
     projectKindId: null,
     env: null,
+    lsp: null,
+    progress: null,
     problems: { errors: 0, warnings: 0 },
   };
 
@@ -114,6 +130,29 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const encodingItem = h('span', { class: 'status-item' });
   const indentItem = h('span', { class: 'status-item' });
   const languageItem = h('span', { class: 'status-item' });
+  // Языковой сервер: какой обслуживает открытый язык и откуда он взят. Упавший сервер
+  // показываем тоже — это и есть ответ на вопрос «почему тут нет подсказок».
+  const lspItem = h(
+    'button',
+    {
+      class: 'status-item status-lsp',
+      type: 'button',
+      title: 'Языковой сервер',
+      onClick: (event: Event) => deps.openLsp(event.currentTarget as HTMLElement),
+    },
+    svgIcon('server', 12),
+  );
+  const lspLabel = h('span', {});
+  lspItem.appendChild(lspLabel);
+  // Прогресс языкового сервера: значок-вертушка и подпись. Крутится, пока сервер занят, —
+  // так долгая работа видна и не выглядит зависанием (см. `$/progress`).
+  const progressItem = h(
+    'span',
+    { class: 'status-item status-progress' },
+    svgIcon('spinner', 12),
+    h('span', { class: 'status-progress-label' }),
+  );
+  const progressLabel = progressItem.querySelector<HTMLElement>('.status-progress-label')!;
   const readOnlyItem = h('span', { class: 'status-item status-readonly' });
   const versionItem = h('span', { class: 'status-item status-muted' });
   // Проблемы — значок и числа: цвет различает ошибку и предупреждение, а количество
@@ -141,6 +180,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h(
       'div',
       { class: 'status-group' },
+      progressItem,
       problemsItem,
       versionItem,
       positionItem,
@@ -149,6 +189,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       indentItem,
       readOnlyItem,
       languageItem,
+      lspItem,
       // Окружение — прямо перед кнопкой «Информация о сессии»: так она стоит
       // крайней справа, а чип интерпретатора — слева от неё.
       envItem,
@@ -162,6 +203,24 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     encodingItem.textContent = state.encoding;
     indentItem.textContent = state.useTabs ? `таб ${state.tabSize}` : `${state.tabSize} пробела`;
     languageItem.textContent = state.language ?? '—';
+    const lsp = state.lsp;
+    lspItem.hidden = lsp === null;
+    lspItem.classList.toggle('is-failed', Boolean(lsp?.failed));
+    if (lsp) {
+      lspLabel.textContent = lsp.failed ? `${lsp.label}: нет сервера` : lsp.label;
+      lspItem.title = lsp.failed
+        ? `Языковой сервер для «${lsp.language}» не поднялся: ${lsp.failed}`
+        : `Языковой сервер: ${lsp.label} (${lsp.origin ? lspOriginLabel(lsp.origin) : 'источник неизвестен'})`;
+    }
+    const progress = state.progress;
+    progressItem.hidden = progress === null;
+    progressLabel.textContent =
+      progress === null
+        ? ''
+        : progress.percentage === null
+          ? progress.label
+          : `${progress.label} ${Math.round(progress.percentage)}%`;
+    progressItem.title = progress ? `Языковой сервер: ${progress.label}` : '';
     readOnlyItem.textContent = state.readOnly ? 'Только чтение' : '';
     readOnlyItem.hidden = !state.readOnly;
     readOnlyItem.title = state.readOnly ? 'Файл слишком большой для правки — открыт только для чтения' : '';

@@ -745,8 +745,12 @@ module.exports = [
     'lsp.open': () => undefined,
     'lsp.change': () => undefined,
     'lsp.close': () => undefined,
-    'lsp.restart': () => ({ running: [] }),
-    'lsp.status': () => ({ running: [] }),
+    'lsp.restart': () => ({ running: [], servers: [], failed: [] }),
+    'lsp.status': () => ({
+      running: ['python'],
+      servers: [{ language: 'python', label: 'Pyright', origin: 'bundled' }],
+      failed: [],
+    }),
     // Подсказок в моке нет: пустой ответ — как у сервера без таких возможностей.
     // Исключение — структура файла: мок отдаёт силуэт, чтобы панель Outline показывалась.
     'lsp.request': (params) => {
@@ -777,6 +781,9 @@ module.exports = [
       return null;
     },
     'lsp.symbols': () => [],
+    // Ссылок и иерархии типов в моке нет: пустые ответы — как у сервера без них.
+    // Триггеров у мока нет: попап в нём открывается только по своим словам.
+    'lsp.capabilities': () => ({ triggerCharacters: [], allCommitCharacters: [], resolveProvider: false }),
     // Как main: «нашлись» только pylsp и typescript-language-server.
     'lsp.detect': () => [
       { language: 'python', command: 'pylsp', args: [], enabled: true },

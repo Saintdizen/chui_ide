@@ -18,6 +18,8 @@ import type { BookmarkRecord } from './bookmarks';
 import type { GitLfsInfo } from './git-lfs';
 import type { GitIdentity, GitSshKey } from './git-identity';
 import type { WorkspaceRoot } from './workspace-roots';
+import type { LspStatus } from './lsp-status';
+import type { SemanticToken } from './lsp-semantic-tokens';
 import type { FolderCompareResult } from './folder-compare';
 import type { ProjectPackage } from './monorepo';
 import type { ForgeInfo } from './git-platform';
@@ -69,6 +71,7 @@ export const PushTopic = {
   ThemeChanged: 'theme:changed',
   WindowStateChanged: 'window:state',
   LspDiagnostics: 'lsp:diagnostics',
+  LspProgress: 'lsp:progress',
   DebugState: 'debug:state',
   DebugStopped: 'debug:stopped',
   DebugOutput: 'debug:output',
@@ -641,6 +644,8 @@ export interface EditorSettings {
   fontLigatures: boolean;
   /** Свои сниппеты (шаблоны кода); к ним добавляется набор по умолчанию. */
   snippets: Snippet[];
+  /** Emmet: раскрытие сокращений разметки и стилей по Tab (`ul>li*3` → список). */
+  emmet: boolean;
 }
 
 /** Плотность строк дерева проекта. */
@@ -828,6 +833,11 @@ export interface LspServerConfig {
 export interface LspSettings {
   /** Общий выключатель: без него серверы не запускаются. */
   enabled: boolean;
+  /**
+   * Журнал обмена с серверами: все сообщения обоих направлений пишутся в файл
+   * (путь говорит main). Нужен для отладки: без него «сервер молчит» — догадка.
+   */
+  trace: boolean;
   servers: LspServerConfig[];
 }
 
@@ -1791,8 +1801,8 @@ export interface ChuiMethods {
   'lsp.open': { params: { path: string; languageId: string; text: string }; result: void };
   'lsp.change': { params: { path: string; text: string }; result: void };
   'lsp.close': { params: { path: string }; result: void };
-  'lsp.restart': { params: void; result: { running: string[] } };
-  'lsp.status': { params: void; result: { running: string[] } };
+  'lsp.restart': { params: void; result: LspStatus };
+  'lsp.status': { params: void; result: LspStatus };
   /** Символы проекта по запросу: классы, функции, переменные — «перейти к символу». */
   'lsp.symbols': { params: { query: string }; result: ProjectSymbol[] };
   /** Найти в PATH известные языковые серверы и вернуть готовые конфигурации. */
@@ -1802,6 +1812,20 @@ export interface ChuiMethods {
    * переход к определению. Форму params/result задаёт LSP, детали — в renderer.
    */
   'lsp.request': { params: { path: string; method: string; params: unknown }; result: unknown };
+  /**
+   * Чем сервер готов открывать подсказки: знаки-триггеры, знаки «принять» и умение
+   * доводить элемент отдельным запросом (см. `LspService.completionTriggers`). Renderer
+   * открывает попап по знакам сервера, а не только по точке.
+   */
+  'lsp.capabilities': {
+    params: { path: string };
+    result: { triggerCharacters: string[]; allCommitCharacters: string[]; resolveProvider: boolean };
+  };
+  /**
+   * Семантическая подсветка файла: точные роли от сервера (см. `LspService.semanticTokens`).
+   * Ответ уже разобран в main (там легенда сервера) — renderer получает готовые участки.
+   */
+  'lsp.semanticTokens': { params: { path: string }; result: SemanticToken[] };
 
   /* Отладчик: сессия debugpy по протоколу DAP. */
   /** Начать отладку файла интерпретатором окружения. */

@@ -316,6 +316,31 @@
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5' fill='none' stroke='%235c9bd6' stroke-width='1'/%3E%3C/svg%3E");
 }
 
+/* Ссылки в тексте (documentLink): подчёркнутые участки, по которым
+   можно перейти. Слой прозрачен для пролистывания текста, сами участки — живые. */
+.own-editor-links {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.own-editor-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: var(--link_color);
+  cursor: pointer;
+  pointer-events: auto;
+  text-decoration: underline;
+  text-decoration-color: var(--link_color);
+  text-underline-offset: 2px;
+  will-change: transform;
+}
+
+.own-editor-link:hover {
+  text-decoration-thickness: 2px;
+}
+
 .own-editor-line {
   height: var(--own-editor-line-height);
   line-height: var(--own-editor-line-height);
@@ -451,6 +476,12 @@
 .own-editor-highlight-rect.is-occurrence {
   background: color-mix(in srgb, var(--text_color) 10%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text_color) 16%, transparent);
+}
+
+/* Связанные участки (linkedEditing): рамка акцентом — видно, что эти места правятся вместе. */
+.own-editor-highlight-rect.is-linked {
+  background: color-mix(in srgb, var(--blue_prime_background) 16%, transparent);
+  box-shadow: inset 0 0 0 1px var(--blue_prime_background);
 }
 
 .own-editor-highlight-rect.is-bracket {
@@ -651,6 +682,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 2px 6px;
   max-height: 20px;
@@ -683,6 +715,17 @@
 
 .own-editor-suggest-detail.is-external {
   color: var(--link_color);
+}
+
+/* Описание символа под подписью: приходит от `completionItem/resolve`, поэтому
+   появляется позже и своей строкой — знаки в списке остаются на своих местах. */
+.own-editor-suggest-doc {
+  flex-basis: 100%;
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Карточка подсказки о параметрах вызова. Материал и место — как у попапа подсказок:
@@ -928,6 +971,14 @@
 
 .own-editor-inlay.is-type {
   font-style: italic;
+}
+
+/* Значения отладчика в строках (`x = 42`): приглушённо-жёлтый, как принято в отладчиках,
+   и не перехватывают мышь — это подсказка о состоянии, а не код. Отличаются от подсказок
+   языка и цветом, и происхождением: их приносит отладчик, а не сервер. */
+.own-editor-inline-value {
+  color: var(--yellow_prime_background, #d7ba7d);
+  pointer-events: none;
 }
 
 /* ── Сравнение версий ────────────────────────────────────────────────────

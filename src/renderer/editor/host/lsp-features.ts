@@ -24,21 +24,36 @@
 import type { LspDiagnostic } from '../../../shared/api';
 import type { FileEdit } from '../../../shared/edits';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
-import { toCompletions } from '../../../shared/lsp-completions';
+import { toCompletions, toResolvedCompletion, type ResolvedCompletion } from '../../../shared/lsp-completions';
 import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
 import { toFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
+import { targetFromResolvedLink, toDocumentLinks, type DocumentLinkEntry } from '../../../shared/lsp-document-links';
+import { toLinkedRanges, type LinkedRange } from '../../../shared/lsp-linked-editing';
+import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
+import { toMonikers, type MonikerEntry } from '../../../shared/lsp-moniker';
+import { toInlineValues, type InlineValue } from '../../../shared/lsp-inline-value';
 import { toInlayHints, type InlayHint } from '../../../shared/lsp-inlay-hints';
 import { commandFromLens, toCodeLenses, type CodeLensEntry } from '../../../shared/lsp-code-lens';
 import { toSignatureHelp, type SignatureHelp } from '../../../shared/lsp-signature';
 import type { FileSymbol } from '../../../shared/lsp-symbols';
 import { toFileSymbols } from '../../../shared/lsp-symbols';
-import { toWorkspaceFileEdits } from '../../../shared/lsp-workspace-edit';
+import { toWorkspaceEdits, toWorkspaceFileEdits, type WorkspaceEdits } from '../../../shared/lsp-workspace-edit';
 import { pathToUri, uriToPath } from '../../core/document';
 import type { RpcClient } from '../../core/rpc';
 import type { CompletionItem } from '../complete/completions';
 
 /** Потолок досчёта линз без команды: на каждую сервер зовём отдельно. */
 const MAX_LENS_RESOLVES = 100;
+
+/** Что сервер готов открывать подсказками: его знаки-триггеры и знаки «принять». */
+export interface CompletionTriggers {
+  triggerCharacters: string[];
+  allCommitCharacters: string[];
+  resolveProvider: boolean;
+}
+
+/** Сервера нет или он ещё не ответил — триггеров не знаем. */
+const NO_TRIGGERS: CompletionTriggers = { triggerCharacters: [], allCommitCharacters: [], resolveProvider: false };
 
 /** Позиция в документе: строка и столбец, оба с единицы — как их видит человек. */
 export interface LspPosition {
@@ -116,6 +131,22 @@ export class LspFeatures {
   }
 
   /**
+   * Знаки-триггеры сервера для файла: попап открывается по НИМ (`@` в CSS, `:` в JSON,
+   * `.` в TS), а не только по нашему правилу про точку. Сервера нет — пустой ответ.
+   */
+  async completionTriggers(path: string): Promise<CompletionTriggers> {
+    const result = (await this.rpc
+      .request('lsp.capabilities', { path })
+      .catch(() => null)) as Partial<CompletionTriggers> | null;
+    if (!result) return NO_TRIGGERS;
+    return {
+      triggerCharacters: Array.isArray(result.triggerCharacters) ? result.triggerCharacters : [],
+      allCommitCharacters: Array.isArray(result.allCommitCharacters) ? result.allCommitCharacters : [],
+      resolveProvider: result.resolveProvider === true,
+    };
+  }
+
+  /**
    * Подсказки языка в позиции курсора. Отдаём в том же виде, что и слова документа
    * (`CompletionItem`), поэтому вид списка не знает, откуда пришло: от сервера это
    * или из нашего словаря. `insert` сервера важнее подписи — им и вставляем.
@@ -133,7 +164,24 @@ export class LspFeatures {
       ...(entry.snippet !== undefined ? { snippet: entry.snippet } : {}),
       // Авто-импорт: правки (обычно строка import) применяем вместе со вставкой.
       ...(entry.additionalEdits ? { additionalEdits: entry.additionalEdits } : {}),
+      // Сервер сортирует и сопоставляет сам — эти поля переносим как есть.
+      ...(entry.filterText !== undefined ? { filterText: entry.filterText } : {}),
+      ...(entry.sortText !== undefined ? { sortText: entry.sortText } : {}),
+      ...(entry.preselect ? { preselect: true } : {}),
+      ...(entry.deprecated ? { deprecated: true } : {}),
+      // Исходный элемент — по нему список доводит строку через `completionItem/resolve`.
+      ...(entry.source !== undefined ? { resolve: entry.source } : {}),
     }));
+  }
+
+  /**
+   * Довести подсказку: `completionItem/resolve`. Серверы, умеющие это, в первом ответе
+   * часто опускают описание и подробность — без дотягивания список выглядит голым.
+   * `item` — исходный элемент от сервера (лежит в `CompletionItem.resolve`).
+   */
+  async resolveCompletion(path: string, item: unknown): Promise<ResolvedCompletion | null> {
+    const result = await this.request(path, 'completionItem/resolve', item);
+    return toResolvedCompletion(result);
   }
 
   /**
@@ -256,6 +304,105 @@ export class LspFeatures {
       textDocument: { uri: pathToUri(path) },
     });
     return toFoldRanges(result);
+  }
+
+  /**
+   * Ссылки внутри файла (`textDocument/documentLink`). Часть серверов адрес отдаёт
+   * не сразу, а в `resolve` — тогда у ссылки нет `target`, и вызывающий доводит её
+   * `resolveDocumentLink`. Без адреса ссылку не показываем: подчёркивать некуда ведущий участок незачем.
+   */
+  async documentLinks(path: string): Promise<DocumentLinkEntry[]> {
+    const result = await this.request(path, 'textDocument/documentLink', {
+      textDocument: { uri: pathToUri(path) },
+    });
+    return toDocumentLinks(result);
+  }
+
+  /** Довести ссылку до адреса: `documentLink/resolve` (тот же элемент назад). */
+  async resolveDocumentLink(path: string, item: unknown): Promise<string | null> {
+    const result = await this.request(path, 'documentLink/resolve', item);
+    return targetFromResolvedLink(result);
+  }
+
+  /**
+   * Связанные участки в позиции курсора (`textDocument/linkedEditingRange`): имена
+   * парных тегов HTML/XML, которые надо править вместе. Пустой ответ — сервер не умеет
+   * или связывать под курсором нечего; это не ошибка, подсветки просто не будет.
+   */
+  async linkedEditingRanges(path: string, position: LspPosition): Promise<LinkedRange[]> {
+    const result = await this.request(path, 'textDocument/linkedEditingRange', {
+      textDocument: { uri: pathToUri(path) },
+      position: toLspPosition(position),
+    });
+    return toLinkedRanges(result);
+  }
+
+  /**
+   * Переименование целиком: `WorkspaceEdit` от сервера может нести и правки содержимого,
+   * и операции с файлами (создать/переименовать/удалить). Правки применяет документная
+   * модель, операции — приложение (у него файловая система). См. `shared/lsp-workspace-edit.ts`.
+   */
+  async workspaceEdit(path: string, position: LspPosition, newName: string): Promise<WorkspaceEdits | null> {
+    const result = await this.request(path, 'textDocument/rename', {
+      textDocument: { uri: pathToUri(path) },
+      position: toLspPosition(position),
+      newName,
+    });
+    return toWorkspaceEdits(result, uriToPath);
+  }
+
+  /**
+   * Семантическая подсветка файла: точные роли от сервера поверх нашей грамматики
+   * (см. `LspService.semanticTokens`). Ответ разобран в main — там легенда сервера, —
+   * сюда приходят готовые участки. Пусто — сервер не умеет или файл ему неизвестен.
+   */
+  async semanticTokens(path: string): Promise<SemanticToken[]> {
+    const result = await this.rpc.request('lsp.semanticTokens', { path }).catch(() => null);
+    return Array.isArray(result) ? (result as SemanticToken[]) : [];
+  }
+
+  /**
+   * Значения переменных в коде при отладке (`textDocument/inlineValue`). Сервер помечает
+   * участки, где стоит показать значение, а сами значения берём у отладчика — поэтому
+   * отдаём не готовый текст, а то, ЧТО запросить (см. `shared/lsp-inline-value.ts`).
+   * `frameId` — кадр отладчика; сервер по нему решает, что видно в этой точке.
+   */
+  async inlineValues(
+    path: string,
+    range: { start: LspPosition; end: LspPosition },
+    frame: { frameId: number; line: number; column: number },
+  ): Promise<InlineValue[]> {
+    const uri = pathToUri(path);
+    const result = await this.request(path, 'textDocument/inlineValue', {
+      textDocument: { uri },
+      range: { start: toLspPosition(range.start), end: toLspPosition(range.end) },
+      // Контекст останова: кадр и место, где программа стоит. Без него сервер не знает,
+      // какие переменные «живые» на этой строке.
+      context: {
+        frameId: frame.frameId,
+        stoppedLocation: {
+          uri,
+          range: {
+            start: { line: Math.max(0, frame.line - 1), character: Math.max(0, frame.column - 1) },
+            end: { line: Math.max(0, frame.line - 1), character: Math.max(0, frame.column - 1) },
+          },
+        },
+      },
+    });
+    return toInlineValues(result);
+  }
+
+  /**
+   * Устойчивое имя символа под позицией (`textDocument/moniker`): по нему символ
+   * связывается с тем же символом в других инструментах. Пусто — сервер не умеет
+   * или у символа нет моникера; это не ошибка.
+   */
+  async monikers(path: string, position: LspPosition): Promise<MonikerEntry[]> {
+    const result = await this.request(path, 'textDocument/moniker', {
+      textDocument: { uri: pathToUri(path) },
+      position: toLspPosition(position),
+    });
+    return toMonikers(result);
   }
 }
 

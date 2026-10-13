@@ -1,12 +1,23 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
+import type { LspServerOrigin, LspStatus } from '../../shared/lsp-status';
 import type { FileEdit } from '../../shared/edits';
 import { toWorkspaceFileEdits } from '../../shared/lsp-workspace-edit';
 import { languageInfoForPath } from '../../shared/languages';
 import { serverCandidates } from '../../shared/lsp-bundled';
 import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
+import { parseProgress } from '../../shared/lsp-progress';
+import {
+  STANDARD_TOKEN_MODIFIERS,
+  STANDARD_TOKEN_TYPES,
+  decodeSemanticTokens,
+  type SemanticLegend,
+  type SemanticToken,
+} from '../../shared/lsp-semantic-tokens';
 import { toFileSymbols, toProjectSymbols, type FileSymbol, type ProjectSymbol } from '../../shared/lsp-symbols';
 import { mergeEnv } from '../project-env';
 
@@ -27,6 +38,42 @@ import { mergeEnv } from '../project-env';
  * по таймауту отдаём его цепочке как неудачный и пробуем следующего кандидата.
  */
 const INITIALIZE_TIMEOUT_MS = 15_000;
+
+/**
+ * Запросы к документу, у которых свежий запрос вытесняет устаревший. Набор идёт быстрее,
+ * чем отвечает сервер, и досказывать то, что уже не нужно, — трата сил сервера. Прочие
+ * запросы (initialize, rename, форматирование) не отменяем: у них результат нужен.
+ */
+const CANCELLABLE_METHODS: ReadonlySet<string> = new Set([
+  'textDocument/completion',
+  'completionItem/resolve',
+  'textDocument/hover',
+  'textDocument/signatureHelp',
+  'textDocument/codeAction',
+  'textDocument/codeLens',
+  'textDocument/inlayHint',
+  'textDocument/foldingRange',
+  'textDocument/documentSymbol',
+  'textDocument/semanticTokens/full',
+]);
+
+/**
+ * Легенда сервера: по ней читаются индексы в ответе. Сервер объявляет её при initialize;
+ * нет легенды (или она не той формы) — разбирать нечем, и токены не берём.
+ */
+function semanticLegend(
+  provider: { legend?: { tokenTypes?: unknown; tokenModifiers?: unknown } } | undefined,
+): SemanticLegend | null {
+  const types = provider?.legend?.tokenTypes;
+  if (!Array.isArray(types)) return null;
+  const modifiers = provider?.legend?.tokenModifiers;
+  return {
+    tokenTypes: types.filter((item): item is string => typeof item === 'string'),
+    tokenModifiers: Array.isArray(modifiers)
+      ? modifiers.filter((item): item is string => typeof item === 'string')
+      : [],
+  };
+}
 
 /** Промис с пределом ожидания: по истечении срока — ошибка с понятной причиной. */
 function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
@@ -59,15 +106,43 @@ interface JsonRpcMessage {
 type NotificationHandler = (method: string, params: unknown) => void;
 type RequestHandler = (method: string, params: unknown) => unknown | Promise<unknown>;
 
+/**
+ * Ошибка запроса сервера к клиенту с кодом JSON-RPC. Нужна там, где ответить «успехом»
+ * нельзя: на незнакомый запрос спецификация велит отвечать `MethodNotFound`, а не пустым
+ * результатом — иначе сервер решит, что клиент это умеет (например, что регистрация
+ * возможности удалась), и будет ждать поведения, которого нет.
+ */
+class RpcRequestError extends Error {
+  constructor(
+    readonly code: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'RpcRequestError';
+  }
+}
+
 class JsonRpcConnection {
   private buffer = Buffer.alloc(0);
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+  private readonly pending = new Map<
+    number,
+    { resolve: (value: unknown) => void; reject: (error: Error) => void; partial?: string }
+  >();
+  /** Номер запроса по ключу «вид запроса»: по нему отменяем устаревшие (см. `request`). */
+  private readonly pendingByKey = new Map<string, number>();
+  /**
+   * Частичные результаты по токену: сервер отдаёт длинный ответ кусками (`$/progress`),
+   * чтобы не ждать конца поиска. Копим их здесь и склеиваем с основным ответом.
+   */
+  private readonly partials = new Map<string, unknown[]>();
 
   constructor(
     private readonly child: ChildProcessWithoutNullStreams,
     private readonly onNotification: NotificationHandler,
     private readonly onRequest: RequestHandler,
+    /** Куда отдавать весь обмен (для журнала трассировки). Не задано — журнал выключен. */
+    private readonly onTraffic?: (direction: 'client' | 'server', message: unknown) => void,
   ) {
     child.stdout.on('data', (chunk: Buffer) => this.feed(chunk));
   }
@@ -76,18 +151,71 @@ class JsonRpcConnection {
     this.send({ jsonrpc: '2.0', method, params });
   }
 
-  request(method: string, params: unknown): Promise<unknown> {
+  request(method: string, params: unknown, cancelKey?: string, options: { partial?: boolean } = {}): Promise<unknown> {
+    // Новый запрос того же вида по тому же файлу отменяет прежде начатый: набор идёт
+    // быстрее, чем отвечает сервер, и досказывать то, что уже не нужно, незачем.
+    if (cancelKey) {
+      const previous = this.pendingByKey.get(cancelKey);
+      if (previous !== undefined) this.cancel(previous);
+    }
     const id = this.nextId;
     this.nextId += 1;
+    if (cancelKey) this.pendingByKey.set(cancelKey, id);
+
+    // Частичные результаты: даём серверу свой токен в запросе и копим то, что он пришлёт
+    // кусками (см. `dispatch`). Длинный поиск ссылок так начинается раньше конца.
+    let partial: string | undefined;
+    let outParams = params;
+    if (options.partial && params && typeof params === 'object') {
+      partial = `partial-${id}`;
+      outParams = { ...(params as Record<string, unknown>), partialResultToken: partial };
+      this.partials.set(partial, []);
+    }
+
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.send({ jsonrpc: '2.0', id, method, params });
+      this.pending.set(id, { resolve, reject, ...(partial ? { partial } : {}) });
+      this.send({ jsonrpc: '2.0', id, method, params: outParams });
     });
+  }
+
+  /**
+   * Отменить запрос: уведомление `$/cancelRequest` (как говорит спецификация) и сразу
+   * отказ по своему обещанию — иначе отменённый запрос висел бы до ответа сервера.
+   */
+  cancel(id: number): void {
+    const pending = this.pending.get(id);
+    if (!pending) return;
+    this.pending.delete(id);
+    if (pending.partial) this.partials.delete(pending.partial);
+    this.forgetKey(id);
+    this.send({ jsonrpc: '2.0', method: '$/cancelRequest', params: { id } });
+    pending.reject(new Error('Запрос отменён'));
+  }
+
+  /**
+   * Забрать кусок частичного результата, если токен наш. `true` — уведомление наше и
+   * обрабатывать его дальше (публиковать как прогресс) не нужно.
+   */
+  private collectPartial(params: unknown): boolean {
+    if (this.partials.size === 0 || !params || typeof params !== 'object') return false;
+    const { token, value } = params as { token?: unknown; value?: unknown };
+    const key = typeof token === 'string' || typeof token === 'number' ? String(token) : null;
+    if (key === null || !this.partials.has(key)) return false;
+    const items = Array.isArray(value) ? value : ((value as { items?: unknown } | null)?.items ?? null);
+    if (Array.isArray(items)) this.partials.get(key)!.push(...items);
+    return true;
+  }
+
+  /** Снять ключ отмены, если он указывает на этот номер запроса. */
+  private forgetKey(id: number): void {
+    for (const [key, value] of this.pendingByKey) if (value === id) this.pendingByKey.delete(key);
   }
 
   dispose(): void {
     for (const pending of this.pending.values()) pending.reject(new Error('Соединение закрыто'));
     this.pending.clear();
+    this.pendingByKey.clear();
+    this.partials.clear();
   }
 
   /** Разбор потока: заголовок `Content-Length: N` + тело из N байт. */
@@ -122,13 +250,30 @@ class JsonRpcConnection {
   }
 
   private dispatch(message: JsonRpcMessage): void {
+    this.onTraffic?.('server', message);
+    // Частичный результат: пришёл уведомлением по нашему токену — копим и дальше не отдаём.
+    if (message.method === '$/progress' && this.collectPartial(message.params)) return;
+
     // Ответ на наш запрос: id есть, method нет.
     if (message.id !== undefined && message.method === undefined) {
       const pending = typeof message.id === 'number' ? this.pending.get(message.id) : undefined;
       if (!pending) return;
       this.pending.delete(message.id as number);
-      if (message.error) pending.reject(new Error(message.error.message));
-      else pending.resolve(message.result);
+      if (typeof message.id === 'number') this.forgetKey(message.id);
+      if (message.error) {
+        if (pending.partial) this.partials.delete(pending.partial);
+        pending.reject(new Error(message.error.message));
+        return;
+      }
+      // Частичные куски важнее конца: склеиваем их с основным ответом (он — массив).
+      let result = message.result;
+      if (pending.partial) {
+        const collected = this.partials.get(pending.partial) ?? [];
+        this.partials.delete(pending.partial);
+        if (collected.length > 0 && Array.isArray(result)) result = [...collected, ...result];
+        else if (collected.length > 0 && result === undefined) result = collected;
+      }
+      pending.resolve(result);
       return;
     }
 
@@ -137,9 +282,11 @@ class JsonRpcConnection {
       Promise.resolve()
         .then(() => this.onRequest(message.method!, message.params))
         .then((result) => this.send({ jsonrpc: '2.0', id: message.id, result: result ?? null }))
-        .catch((error) =>
-          this.send({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: String(error) } }),
-        );
+        .catch((error) => {
+          // Наш код ошибки уважаем (MethodNotFound), прочее — внутренняя ошибка.
+          const code = error instanceof RpcRequestError ? error.code : -32603;
+          this.send({ jsonrpc: '2.0', id: message.id, error: { code, message: String(error?.message ?? error) } });
+        });
       return;
     }
 
@@ -147,6 +294,7 @@ class JsonRpcConnection {
   }
 
   private send(message: unknown): void {
+    this.onTraffic?.('client', message);
     const body = Buffer.from(JSON.stringify(message), 'utf8');
     this.child.stdin.write(`Content-Length: ${body.length}\r\n\r\n`);
     this.child.stdin.write(body);
@@ -167,7 +315,14 @@ interface ServerRuntime {
 
 /** Подмножество возможностей сервера, по которым решаем, что у него просить. */
 interface LspCapabilities {
-  completionProvider?: { triggerCharacters?: string[] };
+  completionProvider?: {
+    /** По каким знакам сервер сам готов открывать список подсказок (`.` в TS, `@` в CSS, `:` в JSON Schema). */
+    triggerCharacters?: string[];
+    /** Знаки, которые сервер считает «принять подсказку» (Enter, Tab и подобные). */
+    allCommitCharacters?: string[];
+    /** Умеет ли сервер доводить элемент отдельным запросом (`completionItem/resolve`). */
+    resolveProvider?: boolean;
+  };
   hoverProvider?: boolean;
   definitionProvider?: boolean;
   signatureHelpProvider?: { triggerCharacters?: string[] };
@@ -179,6 +334,8 @@ interface LspCapabilities {
   referencesProvider?: boolean;
   /** Переименование символа с учётом семантики — «переименовать» в редакторе. */
   renameProvider?: unknown;
+  /** Точная семантическая подсветка: по ней разбираем ответ (легенду объявляет сервер). */
+  semanticTokensProvider?: { legend?: { tokenTypes?: unknown; tokenModifiers?: unknown } };
 }
 
 export class LspService {
@@ -188,6 +345,14 @@ export class LspService {
   /** Номер поколения серверов: растёт при перезапуске, отсекает устаревшие подъёмы. */
   private generation = 0;
   private readonly languageOfPath = new Map<string, string>();
+  /**
+   * Языки, сервер которых поднять не удалось: язык → причина. Без кэша каждый файл
+   * такого языка заново искал бы сервер (диск, PATH, окружения) — на пустом ответе
+   * это дорого и ничего не меняет. Снимается перезапуском (`restart`).
+   */
+  private readonly failed = new Map<string, string>();
+  /** Ответ на «лежит ли команда в окружении проекта»: по команде, с проверкой диска. */
+  private readonly environmentCommands = new Map<string, boolean>();
 
   constructor(
     private readonly root: () => string | null,
@@ -210,17 +375,61 @@ export class LspService {
      * (venv → поставка → PATH); пусто — запасных нет.
      */
     private readonly alternates: (language: string) => Promise<LspServerConfig[]> = async () => [],
+    /**
+     * Куда писать журнал обмена с серверами (включается настройкой `lsp.trace`).
+     * Не задано — журнала нет: писать некуда.
+     */
+    private readonly tracePath: () => string | null = () => null,
   ) {}
 
-  status(): { running: string[] } {
-    return { running: [...this.runtimes.keys()] };
+  /**
+   * Состояние серверов: какие языки запущены, ЧТО за сервер и откуда он взят, и что
+   * поднять не удалось. Без этого «почему тут нет подсказок» ищут наугад — а причина
+   * обычно видна сразу: сервер не найден или не ответил на `initialize`.
+   */
+  status(): LspStatus {
+    const servers = [...this.runtimes.values()].map((runtime) => ({
+      language: runtime.config.language,
+      label: runtime.config.label?.trim() || baseName(runtime.config.command),
+      origin: this.originOf(runtime.config),
+    }));
+    return {
+      running: [...this.runtimes.keys()],
+      servers,
+      failed: [...this.failed.entries()].map(([language, reason]) => ({ language, reason })),
+    };
   }
 
-  restart(): { running: string[] } {
+  /**
+   * Перезапуск: это же и единственный способ снять «не поднялось». Негативный кэш
+   * (`failed`) держим, чтобы не искать заново несуществующий сервер на каждом файле;
+   * сбрасывается он здесь — то есть по команде человека или при смене окружения.
+   */
+  restart(): LspStatus {
     // Подъёмы, начатые до перезапуска, станут ненужными: счётчик версий их отсечёт.
     this.generation += 1;
+    this.failed.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
-    return { running: [] };
+    return this.status();
+  }
+
+  /**
+   * Чем сервер готов открывать подсказки: знаки-триггеры, знаки «принять» и умеет ли
+   * он доводить элемент отдельным запросом. Renderer берёт это отсюда, чтобы попап
+   * появлялся по знакам САМОГО сервера (`@` в CSS, `:` в JSON, `.` в TS), а не только
+   * по нашему правилу про точку. Сервера для пути нет — пустой ответ.
+   */
+  completionTriggers(path: string): {
+    triggerCharacters: string[];
+    allCommitCharacters: string[];
+    resolveProvider: boolean;
+  } {
+    const provider = this.runtimeForPath(path)?.capabilities.completionProvider;
+    return {
+      triggerCharacters: provider?.triggerCharacters ?? [],
+      allCommitCharacters: provider?.allCommitCharacters ?? [],
+      resolveProvider: provider?.resolveProvider ?? false,
+    };
   }
 
   /** Открыть документ в подходящем сервере. Нет сервера для языка — тихо ничего не делаем. */
@@ -261,6 +470,7 @@ export class LspService {
 
   dispose(): void {
     this.generation += 1;
+    this.failed.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
   }
 
@@ -280,6 +490,11 @@ export class LspService {
   private async runtimeFor(language: string): Promise<ServerRuntime | null> {
     const existing = this.runtimes.get(language);
     if (existing) return existing;
+
+    // Уже пробовали и не смогли: повторять поиск сервера (диск, PATH) на каждый файл
+    // незачем — иначе «почему нет подсказок» станет вечным шумом. Снять можно
+    // перезапуском (он же — кнопка в попапе языковых серверов).
+    if (this.failed.has(language)) return null;
 
     const inFlight = this.starting.get(language);
     if (inFlight) return inFlight;
@@ -306,9 +521,24 @@ export class LspService {
     };
     // Сперва — названное в настройках. Альтернативы ищем только если оно не поднялось:
     // их поиск недёшев (диск, PATH), а обычный случай — как раз первый сервер.
-    const chosen = await attempt(serverCandidates(this.settings().servers, [], language));
-    if (chosen) return chosen;
-    return attempt(serverCandidates([], await this.alternates(language), language));
+    const configured = serverCandidates(this.settings().servers, [], language);
+    const chosen = await attempt(configured);
+    if (chosen) {
+      this.failed.delete(language);
+      return chosen;
+    }
+    const alternates = serverCandidates([], await this.alternates(language), language);
+    const fallback = await attempt(alternates);
+    if (fallback) {
+      this.failed.delete(language);
+      return fallback;
+    }
+    // Ничего не вышло — запоминаем причину, чтобы человек видел её, а не искал наугад.
+    this.failed.set(
+      language,
+      configured.length === 0 && alternates.length === 0 ? 'сервер не найден' : 'сервер не поднялся',
+    );
+    return null;
   }
 
   /**
@@ -371,6 +601,9 @@ export class LspService {
       child,
       (method, params) => this.onNotification(method, params),
       (method, params) => this.onRequest(method, params),
+      // Журнал обмена: пишем только когда человек включил трассировку. Проверку делаем
+      // на каждом сообщении — тумблер можно переключить и посреди работы.
+      (direction, message) => this.trace(direction, message),
     );
 
     // Сервер упал или завершился — забываем про него, при следующем файле поднимем снова.
@@ -409,16 +642,108 @@ export class LspService {
         rootPath: cwd,
         workspaceFolders: [{ uri: rootUri, name: path.basename(cwd) }],
         clientInfo: { name: 'chui_iDE' },
+        // Возможности клиента — это РАЗРЕШЕНИЕ серверу отдать больше. Чего здесь нет,
+        // того сервер прислать не вправе: без `documentationFormat` не будет описаний,
+        // без `tagSupport` — пометки «устарело», без `snippetSupport` — заготовок.
+        // Поэтому список полный — но ровно из того, что мы умеем показать: объявлять
+        // `resolveSupport` и при этом не звать `completionItem/resolve` значило бы
+        // попросить сервер прислать голый `label` — то самое «пусто после точки».
         capabilities: {
           textDocument: {
             synchronization: {},
-            completion: { completionItem: { snippetSupport: false } },
+            completion: {
+              completionItem: {
+                // Заготовки: разметку `${1:…}` раскрывает наш редактор (expandSnippet).
+                snippetSupport: true,
+                // Знаки «принять» от сервера (Enter, Tab, у части серверов — `.`).
+                commitCharactersSupport: true,
+                documentationFormat: ['markdown', 'plaintext'],
+                deprecatedSupport: true,
+                preselectSupport: true,
+                // Пометка «устарело» в новой форме (`tags: [Deprecated]`).
+                tagSupport: { valueSet: [1] },
+                insertReplaceSupport: true,
+                labelDetailsSupport: true,
+                // Объявляем ТОЛЬКО то, что действительно доводим: список зовёт
+                // `completionItem/resolve` и берёт оттуда `documentation` и `detail`.
+                // `additionalTextEdits` тут НАМЕРЕННО нет: авто-импорт мы применяем
+                // из первого ответа, а заявив его здесь, потеряли бы его у тех
+                // серверов, что перенесли правки в resolve.
+                resolveSupport: { properties: ['documentation', 'detail'] },
+              },
+            },
             hover: { contentFormat: ['markdown', 'plaintext'] },
-            definition: {},
-            signatureHelp: {},
+            signatureHelp: {
+              signatureInformation: {
+                documentationFormat: ['markdown', 'plaintext'],
+                parameterInformation: { labelOffsetSupport: true },
+              },
+            },
+            definition: { linkSupport: true },
+            // Дерево символов файла: у объявления появляются дети — так и показываем.
+            documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+            rename: { prepareSupport: true },
+            foldingRange: { lineFoldingOnly: true },
+            codeLens: { dynamicRegistration: false },
+            codeAction: {
+              isPreferredSupport: true,
+              codeActionLiteralSupport: {
+                codeActionKind: {
+                  valueSet: [
+                    '',
+                    'quickfix',
+                    'refactor',
+                    'refactor.extract',
+                    'refactor.inline',
+                    'refactor.rewrite',
+                    'source',
+                    'source.organizeImports',
+                    'source.fixAll',
+                  ],
+                },
+              },
+            },
+            callHierarchy: {},
+            // Иерархия типов: надтипы и подтипы (команды «Иерархия типов» в палитре).
+            typeHierarchy: {},
+            // Ссылки в коде: подчёркнутые кликабельные участки (пути в import, адреса).
+            // tooltipSupport — сервер вправе дать подпись наведения к ссылке.
+            documentLink: { tooltipSupport: true },
+            // Связанные участки: имена парных тегов правятся вместе (открывающий и
+            // закрывающий тег). Правим все участки сразу — своей правкой на каждый.
+            linkedEditingRange: {},
+            // Моникеры: устойчивое имя символа — связать его с тем же символом в других
+            // инструментах. Показываем по команде (см. `LspFeatures.monikers`).
+            moniker: {},
+            // Значения переменных в коде при отладке: сервер помечает участки, а значения
+            // берём у отладчика (см. `LspFeatures.inlineValues`). Объявляем без динамической
+            // регистрации — её мы не поддерживаем.
+            inlineValue: {},
+            // Семантическая подсветка: точные роли поверх своей грамматики. Берём только
+            // полный запрос документа — частичный (range) не просим и не заявляем. Типы и
+            // модификаторы объявляем стандартные: сервер вернёт их индексами в легенде,
+            // а мы сопоставим с ролями палитры.
+            semanticTokens: {
+              requests: { full: true },
+              tokenTypes: [...STANDARD_TOKEN_TYPES],
+              tokenModifiers: [...STANDARD_TOKEN_MODIFIERS],
+            },
           },
-          // Серверы (pylsp, pyright) спрашивают настройки этим запросом.
-          workspace: { configuration: true },
+          window: {
+            // Сервер вправе сообщать, чем занят, и просить создать свой индикатор: без
+            // этой возможности долгая индексация шла бы «молча» (см. `$/progress`).
+            workDoneProgress: true,
+          },
+          workspace: {
+            // Серверы (pylsp, pyright) спрашивают настройки этим запросом.
+            configuration: true,
+            workspaceFolders: true,
+            symbol: {},
+            // Правки сервера (переименование) приходят с `documentChanges` — разбираем.
+            // Заодно умеем операции с файлами: создать, переименовать, удалить (их применяет
+            // приложение). Без этого объявления сервер их не пришлёт (см. capabilities).
+            workspaceEdit: { documentChanges: true, resourceOperations: ['create', 'rename', 'delete'] },
+          },
         },
         // Путь к питону передаём сразу: pyright берёт его отсюда, иначе не видит
         // пакеты окружения и подсказки по импортам не поднимаются. Свои доводы
@@ -432,6 +757,21 @@ export class LspService {
     // Возможности решают, что можно спрашивать: их отсутствие — не ошибка.
     runtime.capabilities = result?.capabilities ?? {};
     runtime.connection.notify('initialized', {});
+    // Трассировка — уведомление КЛИЕНТА серверу: включаем, если человек просил.
+    if (this.settings().trace) runtime.connection.notify('$/setTrace', { value: 'verbose' });
+  }
+
+  /**
+   * Записать сообщение обмена в журнал — если трассировка включена и файл есть.
+   * Пишем построчно (`JSON.stringify`), дописываем в конец: журнал читается хвостом.
+   */
+  private trace(direction: 'client' | 'server', message: unknown): void {
+    if (!this.settings().trace) return;
+    const file = this.tracePath();
+    if (!file) return;
+    const line = `${JSON.stringify({ at: new Date().toISOString(), direction, message })}\n`;
+    // Пишем не дожидаясь: журнал не должен задерживать сам обмен.
+    void appendFile(file, line, 'utf8').catch(() => undefined);
   }
 
   /**
@@ -443,10 +783,36 @@ export class LspService {
     const runtime = this.runtimeForPath(path);
     if (!runtime) return null;
     await runtime.initialized.catch(() => undefined);
+    // Ключ отмены — «этот файл, этот вид запроса»: свежий вытесняет устаревший.
+    const cancelKey = CANCELLABLE_METHODS.has(method) ? `${path}\u0000${method}` : undefined;
     try {
-      return await runtime.connection.request(method, params);
+      return await runtime.connection.request(method, params, cancelKey);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Семантическая подсветка файла: точные роли от сервера поверх нашей грамматики.
+   * Ответ сервер шлёт числами-сдвигами, а тип — индексом в СВОЕЙ легенде, поэтому
+   * разбираем здесь, где легенда под рукой: renderer получает готовые участки.
+   * Сервера нет, легенды нет или ответ пуст — пустой список: подсветка останется своя.
+   */
+  async semanticTokens(path: string): Promise<SemanticToken[]> {
+    const runtime = this.runtimeForPath(path);
+    if (!runtime) return [];
+    await runtime.initialized.catch(() => undefined);
+    const legend = semanticLegend(runtime.capabilities.semanticTokensProvider);
+    if (!legend) return [];
+    try {
+      const result = await runtime.connection.request(
+        'textDocument/semanticTokens/full',
+        { textDocument: { uri: pathToFileURL(path).toString() } },
+        `${path}\u0000textDocument/semanticTokens/full`,
+      );
+      return decodeSemanticTokens(result, legend);
+    } catch {
+      return [];
     }
   }
 
@@ -517,11 +883,18 @@ export class LspService {
 
     return this.withDocument(runtime, path, languageId, text, (uri) =>
       runtime.connection
-        .request('textDocument/references', {
-          textDocument: { uri },
-          position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
-          context: { includeDeclaration },
-        })
+        .request(
+          'textDocument/references',
+          {
+            textDocument: { uri },
+            position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
+            context: { includeDeclaration },
+          },
+          undefined,
+          // Ссылок бывает много: просим сервер отдавать их кусками — так первые места
+          // видны, не дожидаясь конца поиска (см. `JsonRpcConnection.request`).
+          { partial: true },
+        )
         .then((raw) => toLocations(raw, fileURLToPath))
         .catch(() => [] as SymbolLocation[]),
     );
@@ -588,6 +961,38 @@ export class LspService {
   }
 
   /**
+   * Откуда взят сервер — по виду его конфига. Точнее не скажешь: к сервису список
+   * приходит уже сведённым, и «исходный источник» в нём не сохраняется. Признаки
+   * надёжны ровно настолько, насколько задаёт их тот, кто сервер собрал:
+   *   • `ELECTRON_RUN_AS_NODE` ставит только поставка (`main/lsp/bundled.ts`);
+   *   • путь внутри окружения Python (venv) отдаёт окружение проекта;
+   *   • другой абсолютный путь — свой (человек или пресет);
+   *   • голая команда разрешается через PATH.
+   */
+  private originOf(config: LspServerConfig): LspServerOrigin {
+    if (config.env?.ELECTRON_RUN_AS_NODE) return 'bundled';
+    const command = config.command;
+    const withPath = path.isAbsolute(command) || command.includes(path.sep);
+    if (!withPath) return 'path';
+    return this.isEnvironmentCommand(command) ? 'python' : 'settings';
+  }
+
+  /**
+   * Сервер из окружения проекта: рядом с его корнем лежит `pyvenv.cfg` (venv) или
+   * `conda-meta` (окружение conda). Имя каталога тут не подсказка — `/usr/bin` тоже
+   * называется `bin`, и по имени мы бы звали системный сервер «окружением проекта».
+   * Ответ помним по команде: `status` спрашивают часто, а диск — не бесплатный.
+   */
+  private isEnvironmentCommand(command: string): boolean {
+    const cached = this.environmentCommands.get(command);
+    if (cached !== undefined) return cached;
+    const root = path.dirname(path.dirname(command));
+    const result = existsSync(path.join(root, 'pyvenv.cfg')) || existsSync(path.join(root, 'conda-meta'));
+    this.environmentCommands.set(command, result);
+    return result;
+  }
+
+  /**
    * Выполнить запрос к документу, открыв его серверу при необходимости и закрыв
    * после — если открывали мы. Общий уговор у скелета, ссылок и перехода: текст
    * приходит снаружи (файловой системы у сервиса нет), а открытие/закрытие не
@@ -622,6 +1027,13 @@ export class LspService {
   }
 
   private onNotification(method: string, params: unknown): void {
+    // Прогресс: сервер говорит, чем занят, и как далеко зашёл. Отдаём в окно, чтобы
+    // долгая работа (индексация, поиск) была видна, а не выглядела зависанием.
+    if (method === '$/progress') {
+      const progress = parseProgress(params);
+      if (progress) this.publish(PushTopic.LspProgress, progress);
+      return;
+    }
     if (method !== 'textDocument/publishDiagnostics') return;
     const payload = params as { uri?: string; diagnostics?: unknown[] };
     if (typeof payload.uri !== 'string') return;
@@ -635,14 +1047,24 @@ export class LspService {
     this.publish(PushTopic.LspDiagnostics, { path, diagnostics: toDiagnostics(payload.diagnostics) });
   }
 
-  /** Запросы сервера к клиенту: отвечаем мягко, лишь бы не подвешивать его. */
+  /**
+   * Запросы сервера к клиенту. Отвечаем только на то, что действительно умеем.
+   *
+   * Динамическую регистрацию (client/registerCapability) НЕ поддерживаем: мы не заявляем
+   * `dynamicRegistration` ни в одной возможности, поэтому сервер не вправе её просить.
+   * Если попросит — честно отвечаем `MethodNotFound`: согласиться значило бы пообещать
+   * работу, которой нет (см. правило «объявлять лишь то, что доводим»).
+   */
   private onRequest(method: string, params: unknown): unknown {
+    // Сервер просит создать индикатор прогресса — разрешаем: сам индикатор рисуем мы,
+    // уведомления придут тем же `$/progress` (см. `onNotification`).
+    if (method === 'window/workDoneProgress/create') return null;
     if (method === 'workspace/configuration') {
       const items = (params as { items?: Array<{ section?: string }> }).items ?? [];
       const python = this.pythonPath();
       return items.map((item) => (item.section === 'python' && python ? { pythonPath: python } : null));
     }
-    return null;
+    throw new RpcRequestError(-32601, `Метод не поддерживается: ${method}`);
   }
 
   private stop(language: string): void {
@@ -704,4 +1126,13 @@ function buildInitializationOptions(
   const base = python ? { pythonPath: python, settings: { python: { pythonPath: python } } } : {};
   const merged = { ...base, ...(runtime.config.initializationOptions ?? {}) };
   return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+/**
+ * Подпись сервера в состоянии: у серверов поставки есть своя (`label`), у прочих её
+ * нет — показываем имя команды без пути.
+ */
+function baseName(command: string): string {
+  const index = Math.max(command.lastIndexOf('/'), command.lastIndexOf('\\'));
+  return index < 0 ? command : command.slice(index + 1);
 }

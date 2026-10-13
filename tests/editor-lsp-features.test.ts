@@ -89,7 +89,10 @@ describe('LspFeatures', () => {
     const { rpc, calls } = fakeRpc({ items: [{ label: 'print', kind: 3, insertText: 'print()' }] });
     const features = new LspFeatures(rpc);
     const items = await features.completion('/p/a.py', { line: 2, column: 3 });
-    expect(items).toEqual([{ label: 'print', kind: 'external', detail: 'функция', insert: 'print()' }]);
+    // Кроме полей для показа переносится исходный элемент (`resolve`) —
+    // по нему список доводит строку через `completionItem/resolve`.
+    expect(items[0]).toMatchObject({ label: 'print', kind: 'external', detail: 'функция', insert: 'print()' });
+    expect(items[0]!.resolve).toMatchObject({ label: 'print' });
     const params = calls[0]!.params as { method: string; params: { position: unknown } };
     expect(params.method).toBe('textDocument/completion');
     expect(params.params.position).toEqual({ line: 1, character: 2 });
@@ -136,5 +139,46 @@ describe('LspFeatures', () => {
     await expect(features.documentSymbols('/p/a.py')).resolves.toEqual([]);
     await expect(features.completion('/p/a.py', { line: 1, column: 1 })).resolves.toEqual([]);
     await expect(features.rename('/p/a.py', { line: 1, column: 1 }, 'bar')).resolves.toBeNull();
+    await expect(features.semanticTokens('/p/a.py')).resolves.toEqual([]);
+    await expect(
+      features.inlineValues(
+        '/p/a.py',
+        { start: { line: 1, column: 1 }, end: { line: 2, column: 1 } },
+        { frameId: 1, line: 1, column: 1 },
+      ),
+    ).resolves.toEqual([]);
+  });
+
+  it('inline-значения спрашивает с контекстом останова', async () => {
+    const { rpc, calls } = fakeRpc([
+      { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, caseSensitiveLookup: false },
+    ]);
+    const features = new LspFeatures(rpc);
+
+    const values = await features.inlineValues(
+      '/p/a.py',
+      { start: { line: 1, column: 1 }, end: { line: 5, column: 1 } },
+      { frameId: 7, line: 2, column: 3 },
+    );
+    expect(values).toHaveLength(1);
+    const params = calls[0]!.params as {
+      method: string;
+      params: {
+        context: { frameId: number; stoppedLocation: { range: { start: { line: number; character: number } } } };
+      };
+    };
+    expect(params.method).toBe('textDocument/inlineValue');
+    expect(params.params.context.frameId).toBe(7);
+    expect(params.params.context.stoppedLocation.range.start).toEqual({ line: 1, character: 2 });
+  });
+
+  it('семантические токены спрашивает отдельным методом и отдаёт как есть', async () => {
+    const token = { line: 1, startColumn: 1, endColumn: 4, type: 'keyword', modifiers: [] };
+    const { rpc, calls } = fakeRpc([token]);
+    const features = new LspFeatures(rpc);
+
+    await expect(features.semanticTokens('/p/a.py')).resolves.toEqual([token]);
+    expect(calls[0]!.method).toBe('lsp.semanticTokens');
+    expect(calls[0]!.params).toEqual({ path: '/p/a.py' });
   });
 });
