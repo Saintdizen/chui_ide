@@ -105,6 +105,7 @@ npm run probe:settings                                 # поиск по нас�
 npm run probe:mcp                                      # раздел внешних инструментов и проверка серверов
 npm run probe:palette                                  # команды своего редактора в нашей палитре
 npm run probe:editor                                   # свой редактор: верстка, прокрутка, каретка, выделение
+npm run probe:own-terminal                             # свой терминал: сетка, цвета, лигатуры, выделение, поиск, мышь, ссылки
 npm run probe:lspbundled                                # языковые серверы из поставки: что нашлось и кто отвечает
 npm run probe:typing                                   # ввод в настоящем окне: клик, пары скобок, Ctrl+/, Alt+↓, контекстное меню
 npm run probe:saveas                                   # «Сохранить как…»: диалог подменён, копия на диске, переезд вкладки
@@ -1761,7 +1762,7 @@ src/
 └── renderer/
     ├── app.ts         композиционный корень: сервисы + команды + подписки
     ├── styles/        theme.css (палитра, две схемы), main.css (раскладка и компоненты),
-    │                  editor.css (свой редактор)
+    │                  editor.css (свой редактор), terminal.css (свой терминал)
     ├── core/          document, document-store, editor-api (граница редактора), edits,
     │                  commands, keybindings, open-editors, workspace-model, rpc, host,
     │                  languages (реестр из shared), project-tools (интерпретатор и
@@ -1777,6 +1778,9 @@ src/
     ├── editor/        своё ядро редактора: core (текст), view (изображение и свёртка), input,
     │                  find, widgets (попапы), complete (подсказки), hover, highlight
     │                  (подсветка), host (хозяин и рабочее место)
+    ├── terminal/      свой терминал: core (vt-parse — разбор последовательностей, attrs —
+    │                  SGR, screen — сетка, режимы и OSC, selection, search), view
+    │                  (term-view — DOM-слоями, palette), input (keys — клавиши, мышь, вставка)
     └── ui/            layout (острова), dock, terminal, explorer, file-icons,
                        tabs, breadcrumbs, run-button, search, chat, chat-text,
                        chat-markdown, chat-tools, chat-approvals, chat-composer-menu,
