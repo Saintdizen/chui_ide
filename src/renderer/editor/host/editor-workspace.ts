@@ -47,6 +47,7 @@ import type { LinkedRange } from '../../../shared/lsp-linked-editing';
 import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import type { DebugInlineValue } from '../view/editor-view';
 import type { DocumentRegistry } from './document-registry';
+import type { SpellCheck } from '../../core/spellcheck';
 import type { TranslatedEdits } from './document-edits';
 import {
   EditorHost,
@@ -88,6 +89,13 @@ export interface EditorWorkspaceOptions {
   ligatures?: boolean;
   /** Emmet: раскрытие сокращений по Tab в разметке и стилях (см. `input/emmet.ts`). */
   emmetEnabled?: () => boolean;
+  /**
+   * Проверка орфографии: общий на приложение словарь и живая настройка (см.
+   * `core/spellcheck.ts`). Не задано — проверки нет. `spellSaveWord` запоминает слово.
+   */
+  spellcheck?: SpellCheck;
+  spellcheckEnabled?: () => boolean;
+  spellSaveWord?: (word: string) => void;
   /** Схема оформления: цвета токенов и обвязки. */
   scheme?: Scheme;
   /** Сниппеты всех языков: их показывают подсказки по триггеру. */
@@ -188,6 +196,10 @@ export class EditorWorkspace {
   private readonly wordWrap: boolean | undefined;
   /** Включён ли Emmet — живой геттер: его меняют в настройках без пересоздания панели. */
   private readonly emmetEnabled: (() => boolean) | undefined;
+  /** Проверка орфографии: словарь и настройка — одни на все панели. */
+  private readonly spell: SpellCheck | undefined;
+  private readonly spellEnabled: (() => boolean) | undefined;
+  private readonly spellSaveWord: ((word: string) => void) | undefined;
   private readonly ligatures: boolean | undefined;
   private readonly snippets: (() => readonly Snippet[]) | undefined;
   /** Шов к инструменту формата: его у редактора нет, о нём знает приложение. */
@@ -288,6 +300,9 @@ export class EditorWorkspace {
     this.minimap = options.minimap;
     this.wordWrap = options.wordWrap;
     this.emmetEnabled = options.emmetEnabled;
+    this.spell = options.spellcheck;
+    this.spellEnabled = options.spellcheckEnabled;
+    this.spellSaveWord = options.spellSaveWord;
     this.ligatures = options.ligatures;
     this.snippets = options.snippets;
     this.formatCode = options.formatCode;
@@ -376,6 +391,9 @@ export class EditorWorkspace {
       minimap: this.minimap,
       wordWrap: this.wordWrap,
       emmetEnabled: this.emmetEnabled,
+      spellcheck: this.spell,
+      spellcheckEnabled: this.spellEnabled,
+      spellSaveWord: this.spellSaveWord,
       ligatures: this.ligatures,
       scheme: this.scheme,
       snippets: this.snippets,
@@ -663,6 +681,26 @@ export class EditorWorkspace {
     for (const pane of this.panes) pane.setScheme(scheme);
   }
 
+  /** Пересчитать проверку орфографии во всех панелях (её включили или выключили). */
+  refreshSpellcheck(): void {
+    for (const pane of this.panes) pane.refreshSpellcheck();
+  }
+
+  /** Слово под курсором активной панели, если оно отмечено как ошибка орфографии. */
+  spellingWordAtCursor(): string | null {
+    return this.pane.spellingWordAtCursor();
+  }
+
+  /** Добавить слово под курсором в словарь человека. `false` — под курсором не ошибка. */
+  addSpellingWordToDictionary(): boolean {
+    return this.pane.addSpellingWordToDictionary();
+  }
+
+  /** Пропустить слово под курсором на этот сеанс. `false` — под курсором не ошибка. */
+  ignoreSpellingWord(): boolean {
+    return this.pane.ignoreSpellingWord();
+  }
+
   /** Настройки вида: ширина отступа, кегль и направляющие. Панели равны — применяем ко всем. */
   applyOptions(options: {
     tabSize?: number;
@@ -672,6 +710,7 @@ export class EditorWorkspace {
     minimap?: boolean;
     wordWrap?: boolean;
     ligatures?: boolean;
+    spellcheck?: boolean;
   }): void {
     for (const pane of this.panes) pane.applyOptions(options);
   }

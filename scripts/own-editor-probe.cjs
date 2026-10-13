@@ -2516,6 +2516,35 @@ async function emmetCheck(win) {
   return { после_Tab: after, после_второго_Tab: plain };
 }
 
+/**
+ * Проверка орфографии: слово не из словаря подчёркнуто зелёной волной в комментарии,
+ * а «Добавить в словарь» под курсором снимает отметку.
+ */
+async function spellcheckCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  await wait(60);
+
+  const before = await script(`(() => {
+    const { workspace, doc } = window.probeSpell;
+    const root = document.querySelector('#probe-spell .own-editor');
+    workspace.reveal(doc.path, 1, 4);
+    return {
+      слов_с_ошибками: root.querySelectorAll('.own-editor-squiggly-rect.is-spelling').length,
+      слово_под_курсором: workspace.spellingWordAtCursor(),
+    };
+  })()`);
+
+  const added = await script(`(() => window.probeSpell.workspace.addSpellingWordToDictionary())()`);
+  await wait(60);
+
+  const after = await script(`(() => {
+    const root = document.querySelector('#probe-spell .own-editor');
+    return { слов_с_ошибками: root.querySelectorAll('.own-editor-squiggly-rect.is-spelling').length };
+  })()`);
+
+  return { до: before, добавили: added, после: after };
+}
+
 async function lspCompletionCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
 
@@ -2820,6 +2849,11 @@ async function main() {
   const emmet = await emmetCheck(win);
   log('## Emmet по Tab');
   log(JSON.stringify(emmet, null, 2));
+  log('');
+
+  const spell = await spellcheckCheck(win);
+  log('## Проверка орфографии');
+  log(JSON.stringify(spell, null, 2));
   log('');
 
   log('## Подсказки языкового сервера');

@@ -34,14 +34,17 @@ import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import type { RunnableTest } from '../../../shared/python-tests';
 import type { Snippet } from '../../../shared/snippets';
 import type { TestOutcome } from '../../../shared/test-model';
+import { spellProblemsInLine, type CharRange, type SpellProblem } from '../../../shared/spellcheck';
 import type { BreakpointInput } from '../../core/debug';
 import type { TextDocument } from '../../core/document';
 import { Emitter } from '../../core/events';
+import type { SpellCheck } from '../../core/spellcheck';
 import { CompletionAssistant } from '../complete/assistant';
 import type { CompletionItem } from '../complete/completions';
 import { SignatureAssistant } from '../complete/signature';
 import { TextBuffer } from '../core/text-buffer';
 import { wordAt } from '../core/graphemes';
+import { COMMENT, STRING } from '../highlight/tokens';
 import type { Scheme } from '../highlight/style';
 import { type EditorChange, EditorController } from '../input/editor-controller';
 import { type CommandName, EditorInputBinding, type KeyInterceptor } from '../input/editor-input';
@@ -79,6 +82,15 @@ const LINKED_REFRESH_DELAY_MS = 150;
 
 /** Пауза перед перезапросом семантической подсветки: сервер разбирает файл целиком. */
 const SEMANTIC_REFRESH_DELAY_MS = 300;
+
+/** Пауза перед пересчётом орфографии: на каждую букву проверять файл незачем. */
+const SPELL_REFRESH_DELAY_MS = 250;
+
+/** Выше этого числа строк орфографию не проверяем: подчёркивания всего файла долги. */
+const MAX_SPELL_LINES = 20000;
+
+/** Языки, где текст — сама проза: проверяем всю строку, а не только комментарии. */
+const PROSE_LANGUAGES = new Set(['markdown', 'plaintext', 'txt', 'log', 'csv', 'restructuredtext']);
 
 /** Нажали на значок запуска в жёлобе — этот файл и строку и просят выполнить. */
 export interface RunMarkerHit {
@@ -262,6 +274,14 @@ export interface EditorHostOptions {
    * ведома человека невежливо (см. `input/emmet.ts`).
    */
   emmetEnabled?: () => boolean;
+  /**
+   * Проверка орфографии: словарь системы, слова человека и пропущенные слова (см.
+   * `core/spellcheck.ts`). Не задано — проверки нет вовсе. `spellSaveWord` — приложение
+   * запоминает слово в настройках, чтобы в следующий раз оно не было ошибкой.
+   */
+  spellcheck?: SpellCheck;
+  spellcheckEnabled?: () => boolean;
+  spellSaveWord?: (word: string) => void;
 }
 
 /**
@@ -396,6 +416,14 @@ export class EditorHost {
   private debugInlineValues: { path: string; values: readonly DebugInlineValue[] } | null = null;
   /** Пометки языкового сервера по файлам: рисуем волнистым подчёркиванием. */
   private readonly externalMarkers = new Map<string, readonly LspDiagnostic[]>();
+  /** Проверка орфографии: словарь и живая настройка. `undefined` — проверки нет. */
+  private readonly spell: SpellCheck | undefined;
+  private readonly spellEnabled: (() => boolean) | undefined;
+  private readonly spellSaveWord: ((word: string) => void) | undefined;
+  /** Ошибки орфографии по файлам: рисуем волнистым подчёркиванием (как пометки языка). */
+  private readonly spellProblems = new Map<string, SpellProblem[]>();
+  private spellTimer: number | null = null;
+  private unsubscribeSpell: () => void = () => undefined;
 
   /** Просьба запустить файл со значка в поле значков. */
   private readonly runMarkerEmitter = new Emitter<RunMarkerHit>();
@@ -440,6 +468,9 @@ export class EditorHost {
     this.linkedSource = options.linkedEditing;
     this.semanticSource = options.semanticTokens;
     this.completionTriggersSource = options.completionTriggers;
+    this.spell = options.spellcheck;
+    this.spellEnabled = options.spellcheckEnabled;
+    this.spellSaveWord = options.spellSaveWord;
 
     // До первого `open` редактор держит пустой буфер: слои не терпят «нет документа», а
     // пустая вкладка — нормальное состояние панели, пока файл не открыт.
@@ -577,6 +608,9 @@ export class EditorHost {
     // текст на экране устарел, и о ней надо перерисовать самим.
     const bufferSubscription = this.registry.onDidChangeBuffer((path) => this.onExternalBufferChange(path));
     this.unsubscribeBuffer = () => bufferSubscription.dispose();
+    // Словарь пополнился словом — прежние отметки могли устареть, перепроверяем.
+    const spellSubscription = this.spell?.onDidChange(() => this.refreshSpell());
+    this.unsubscribeSpell = () => spellSubscription?.dispose();
     this.bindDecorationClicks();
     this.emitCursor();
   }
@@ -646,6 +680,8 @@ export class EditorHost {
     // Нарисовать украшения именно этого файла: у прежнего они свои (его полоски git,
     // его точки останова) и в новом показываться не должны.
     this.refreshDecorations(document.path);
+    // Орфография у файла своя: проверяем заново по языку и тексту нового документа.
+    this.refreshSpell();
     if (!document.readOnly) {
       // Свёртка — тоже про файл: диапазоны нового берём у сервера или считаем по отступам.
       void this.refreshFolds();
@@ -773,6 +809,7 @@ export class EditorHost {
     minimap?: boolean;
     wordWrap?: boolean;
     ligatures?: boolean;
+    spellcheck?: boolean;
   }): void {
     if (options.tabSize !== undefined) {
       this.indentSize = options.tabSize;
@@ -785,6 +822,8 @@ export class EditorHost {
     if (options.minimap !== undefined) this.view.setMinimap(options.minimap);
     if (options.wordWrap !== undefined) this.view.setWordWrap(options.wordWrap);
     if (options.ligatures !== undefined) this.view.setLigatures(options.ligatures);
+    // Проверку включили или выключили: отметки пересчитываем или снимаем.
+    if (options.spellcheck !== undefined) this.refreshSpell();
   }
 
   /** Текущий текст файла по буферу (`null` — файл в реестре не открыт). */
@@ -1086,15 +1125,127 @@ export class EditorHost {
     return afters;
   }
 
-  /** Волнистые подчёркивания пометок языка: серьёзность — класс. */
+  /**
+   * Волнистые подчёркивания: пометки языка (серьёзность — класс) и ошибки орфографии
+   * (класс `is-spelling`). Оба вида рисуются одинаково, поэтому идят одним списком.
+   */
   private buildSquiggles(path: string) {
-    return (this.externalMarkers.get(path) ?? []).map((item) => ({
+    const items = (this.externalMarkers.get(path) ?? []).map((item) => ({
       line: item.line,
       startColumn: item.column,
       // Многострочная пометка подчёркивается до конца своей первой строки — как в Monaco.
       endColumn: item.endLine === item.line ? Math.max(item.endColumn, item.column + 1) : Number.MAX_SAFE_INTEGER,
       className: severityClass(item.severity),
     }));
+    for (const problem of this.spellProblems.get(path) ?? []) {
+      items.push({
+        line: problem.line,
+        startColumn: problem.startColumn,
+        endColumn: problem.endColumn,
+        className: 'is-spelling',
+      });
+    }
+    return items;
+  }
+
+  // — проверка орфографии —
+
+  /**
+   * Пересчитать ошибки орфографии активного файла и показать их волнистым
+   * подчёркиванием. Проверяем только открытый файл: у прочих нет ни буфера под рукой,
+   * ни языка. Файл только для чтения не проверяем — как и всё прочее для него.
+   */
+  private refreshSpell(): void {
+    const path = this.path;
+    if (!path) return;
+    const enabled = this.spell !== undefined && this.spellEnabled?.() === true && !this.readOnly;
+    if (!enabled) {
+      if (this.spellProblems.delete(path)) this.refreshDecorations(path);
+      return;
+    }
+    const buffer = this.registry.get(path);
+    if (!buffer) return;
+    const problems = this.computeSpellProblems(buffer);
+    if (problems.length === 0) this.spellProblems.delete(path);
+    else this.spellProblems.set(path, problems);
+    this.refreshDecorations(path);
+  }
+
+  /** Пересчитать с паузой: на каждую букву проверять целый файл незачем. */
+  private scheduleSpell(): void {
+    if (!this.spell || this.spellEnabled?.() !== true) return;
+    if (this.spellTimer !== null) window.clearTimeout(this.spellTimer);
+    this.spellTimer = window.setTimeout(() => {
+      this.spellTimer = null;
+      this.refreshSpell();
+    }, SPELL_REFRESH_DELAY_MS);
+  }
+
+  /** Все ошибки буфера: по строкам, в участках, которые для этого языка — проза. */
+  private computeSpellProblems(buffer: TextBuffer): SpellProblem[] {
+    const lexicon = this.spell;
+    if (!lexicon) return [];
+    const problems: SpellProblem[] = [];
+    const lines = Math.min(buffer.lineCount, MAX_SPELL_LINES);
+    for (let line = 1; line <= lines; line += 1) {
+      const text = buffer.lineText(line);
+      if (!text) continue;
+      const ranges = this.spellScopesFor(line);
+      for (const problem of spellProblemsInLine(line, text, (word) => lexicon.knows(word), ranges)) {
+        problems.push(problem);
+      }
+    }
+    return problems;
+  }
+
+  /**
+   * Где в строке искать слова. В коде — только в комментариях и строках: имена и
+   * ключевые слова там не проза, проверять их значило бы шуметь. Текст без грамматики
+   * и «прозаические» языки (markdown, простой текст) проверяем целиком.
+   */
+  private spellScopesFor(line: number): readonly CharRange[] | undefined {
+    if (PROSE_LANGUAGES.has(this.languageId) || !this.view.hasHighlighting()) return undefined;
+    const ranges: CharRange[] = [];
+    for (const token of this.view.tokensFor(line)) {
+      if (token.type === COMMENT || token.type === STRING) ranges.push({ start: token.start, end: token.end });
+    }
+    return ranges;
+  }
+
+  /** Слово под курсором, если оно отмечено как ошибка орфографии (`null` — нет). */
+  spellingWordAtCursor(): string | null {
+    const path = this.path;
+    if (!path) return null;
+    const problems = this.spellProblems.get(path);
+    if (!problems || problems.length === 0) return null;
+    const position = this.cursorPosition();
+    for (const problem of problems) {
+      if (problem.line !== position.line) continue;
+      if (position.column >= problem.startColumn && position.column <= problem.endColumn) return problem.word;
+    }
+    return null;
+  }
+
+  /** Добавить слово под курсором в словарь человека. `false` — под курсором не ошибка. */
+  addSpellingWordToDictionary(): boolean {
+    const word = this.spellingWordAtCursor();
+    if (!word) return false;
+    this.spellSaveWord?.(word);
+    this.spell?.addUserWord(word);
+    return true;
+  }
+
+  /** Пропустить слово под курсором на этот сеанс. `false` — под курсором не ошибка. */
+  ignoreSpellingWord(): boolean {
+    const word = this.spellingWordAtCursor();
+    if (!word) return false;
+    this.spell?.ignore(word);
+    return true;
+  }
+
+  /** Пересчитать проверку (настройку включили/выключили или словарь подгрузился). */
+  refreshSpellcheck(): void {
+    this.refreshSpell();
   }
 
   /**
@@ -1317,6 +1468,8 @@ export class EditorHost {
     if (this.linkTimer !== null) window.clearTimeout(this.linkTimer);
     if (this.linkedTimer !== null) window.clearTimeout(this.linkedTimer);
     if (this.semanticTimer !== null) window.clearTimeout(this.semanticTimer);
+    if (this.spellTimer !== null) window.clearTimeout(this.spellTimer);
+    this.unsubscribeSpell();
     this.view.dispose();
     this.cursorEmitter.dispose();
     this.changeTextEmitter.dispose();
@@ -1355,6 +1508,8 @@ export class EditorHost {
         this.view.setLinkedRanges(this.controller.linkedRanges ?? []);
         // Семантические роли привязаны к тексту — после правки переспрашиваем с паузой.
         this.scheduleSemanticTokens();
+        // Орфография — своя, локальная: пересчитываем по тексту с паузой.
+        this.scheduleSpell();
       }
       this.cursors.set(this.path, this.cursorPosition());
     }

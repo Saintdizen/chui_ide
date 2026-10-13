@@ -28,6 +28,7 @@
 import type { TextBuffer } from '../core/text-buffer';
 import { LineHighlighter } from '../highlight/highlighter';
 import { grammarFor } from '../highlight/registry';
+import type { Token } from '../highlight/tokens';
 import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
 import { overlayRanges, type RoleRange } from '../highlight/overlay';
 import { semanticTokenRole, type SemanticToken } from '../../../shared/lsp-semantic-tokens';
@@ -688,6 +689,19 @@ export class EditorView {
       if (column >= token.start && column < token.end) return token.type;
     }
     return null;
+  }
+
+  /**
+   * Токены подсветки строки (номер с единицы). По ним проверка орфографии решает,
+   * что проверять: в коде слова берём только из комментариев и строк.
+   */
+  tokensFor(line: number): readonly Token[] {
+    return this.highlighter.tokensFor(line - 1);
+  }
+
+  /** Есть ли для языка грамматика: без неё текст показывается простым. */
+  hasHighlighting(): boolean {
+    return this.highlighter.active;
   }
 
   /**

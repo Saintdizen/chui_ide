@@ -27,6 +27,7 @@ import type { McpService } from '../mcp/mcp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
 import { detectLspSources, isOnPath } from '../lsp/detect';
+import { loadSpellDictionary } from '../spell/dictionary';
 import { knownLinuxTerminals, pickExternalTerminal } from '../../shared/external-terminal';
 import { lintProject } from '../project/lint';
 import { scanProject } from '../project/scan';
@@ -718,6 +719,12 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Семантическая подсветка: точные роли от сервера. Ответ разобран в main (там легенда),
   // renderer получает готовые участки и накладывает их поверх своей грамматики.
   router.register('lsp.semanticTokens', (params) => deps.lsp?.semanticTokens(params.path) ?? []);
+
+  /* ── Проверка орфографии ───────────────────────────────────────────────── */
+
+  // Словарь ищем в системе (aspell, hunspell, LibreOffice): renderer в песочнице
+  // файлы читать не умеет. Пустой список — словаря нет, проверка промолчит.
+  router.register('spell.dictionary', () => loadSpellDictionary());
 
   /* ── Отладчик (DAP) ────────────────────────────────────────────────────── */
 

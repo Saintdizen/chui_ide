@@ -24,6 +24,7 @@ import type { TextDocument } from '../core/document';
 import { EditorHost } from '../editor/host/editor-host';
 import { EditorWorkspace } from '../editor/host/editor-workspace';
 import { DocumentRegistry } from '../editor/host/document-registry';
+import { SpellCheck } from '../core/spellcheck';
 import { FileDecorations } from '../editor/view/decorations';
 import { OwnDiffEditor } from '../editor/host/diff-editor';
 import { createProblemPanel } from '../ui/problem-panel';
@@ -477,6 +478,39 @@ declare global {
 }
 
 window.probeEmmet = { workspace: emmetWorkspace, store: emmetStore, doc: emmetDoc };
+
+// Проверка орфографии: слово не из словаря подчёркивается в комментарии зелёной волной.
+const spellRoot = document.createElement('div');
+spellRoot.id = 'probe-spell';
+spellRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(spellRoot);
+
+const spellStore = new DocumentStore();
+const spellRegistry = new DocumentRegistry(spellStore);
+const spellLexicon = new SpellCheck();
+spellLexicon.setDictionary(['const', 'value', 'world', 'the', 'is']);
+const spellWorkspace = new EditorWorkspace(spellRoot, spellRegistry, {
+  scheme: 'dark',
+  spellcheck: spellLexicon,
+  spellcheckEnabled: () => true,
+});
+const spellDoc = spellStore.open('/probe/spell.ts', '// helo world\nconst value = 1; // mispel\n', {
+  languageId: 'typescript',
+});
+spellWorkspace.open(spellDoc);
+
+declare global {
+  interface Window {
+    probeSpell: {
+      workspace: EditorWorkspace;
+      store: DocumentStore;
+      doc: TextDocument;
+      lexicon: SpellCheck;
+    };
+  }
+}
+
+window.probeSpell = { workspace: spellWorkspace, store: spellStore, doc: spellDoc, lexicon: spellLexicon };
 
 // Переход по пометкам (F8): пометки кладём в рабочее место через тот же шов, что и LSP
 // (`setExternalMarkers`), а переходы записываем — по ним видно, куда повела команда.

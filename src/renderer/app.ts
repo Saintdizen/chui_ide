@@ -29,6 +29,7 @@ import { LspFeatures } from './editor/host/lsp-features';
 import { GitModel } from './core/git-model';
 import { ReviewModel } from './core/review-model';
 import { BookmarkModel } from './core/bookmarks';
+import { SpellCheck } from './core/spellcheck';
 import { ProjectPackagesModel } from './core/project-packages';
 import { parseCoverageJson } from '../shared/coverage-json';
 import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
@@ -279,6 +280,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const bookmarks = new BookmarkModel();
 
   /**
+   * Проверка орфографии: словарь системы приходит из main (в песочнице renderer файлов
+   * не читает), слова человека — из настроек. Одна модель на всё приложение: словарь
+   * у всех панелей общий, и слово, добавленное где-то, снимает отметку везде.
+   */
+  const spell = new SpellCheck();
+  spell.setUserWords(settings.editor.spellWords);
+  void rpc
+    .request('spell.dictionary')
+    .then((dictionary) => spell.setDictionary(dictionary.words))
+    .catch(() => undefined);
+
+  /**
    * Редактор — своё ядро (`src/renderer/editor/`), без Monaco. Всё, что раньше навешивалось
    * на движок (подсказки LSP, inline-AI, сниппеты, Ctrl+Click), приходит сюда опциями:
    * у рабочего места для каждого из них есть шов.
@@ -294,6 +307,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     ligatures: settings.editor.fontLigatures,
     // Живой геттер: настройку меняют в окне без пересоздания редактора.
     emmetEnabled: () => settings.editor.emmet,
+    // Проверка орфографии: словарь общий, настройка — живой геттер.
+    spellcheck: spell,
+    spellcheckEnabled: () => settings.editor.spellcheck,
+    // Слово, добавленное в словарь, запоминаем в настройках — тем же путём, что
+    // и прочие правки: секция `editor` уходит в .chui_ide (или в userData без проекта).
+    spellSaveWord: (word) => {
+      void saveSettingsPatch({ editor: { spellWords: [...settings.editor.spellWords, word] } }).catch(() => undefined);
+    },
     snippets: () => [...settings.editor.snippets, ...DEFAULT_SNIPPETS],
     // Наведение от сервера: текст разметки в карточку.
     hoverFromLanguage: async (path, position) => {
@@ -439,6 +460,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
             onSelect: () => bookmarks.toggle(bookmarkPath, info.line),
           },
           { label: 'Закладки…', hint: 'Ctrl+Alt+B', onSelect: () => bookmarksModal.open() },
+        );
+      }
+      // Орфография: пункты есть, только когда под курсором слово с ошибкой.
+      if (editors.spellingWordAtCursor()) {
+        items.push(
+          { separator: true },
+          { label: 'Добавить в словарь', onSelect: () => editors.addSpellingWordToDictionary() },
+          { label: 'Пропустить слово', onSelect: () => editors.ignoreSpellingWord() },
         );
       }
       // Быстрые исправления: пункт есть там, где он что-то даст — с языковым сервером.
@@ -4004,6 +4033,43 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
+  // Орфография: добавить слово под курсором в словарь или пропустить его на сеанс.
+  define(
+    {
+      id: 'editor.addToDictionary',
+      title: 'Орфография: добавить слово в словарь',
+      category: 'Редактор',
+      keywords: ['spell', 'dictionary', 'орфография', 'словарь'],
+    },
+    () => {
+      if (!editors.addSpellingWordToDictionary()) showToast('Под курсором нет слова с ошибкой');
+    },
+  );
+
+  define(
+    {
+      id: 'editor.ignoreSpelling',
+      title: 'Орфография: пропустить слово',
+      category: 'Редактор',
+      keywords: ['spell', 'ignore', 'орфография', 'пропустить'],
+    },
+    () => {
+      if (!editors.ignoreSpellingWord()) showToast('Под курсором нет слова с ошибкой');
+    },
+  );
+
+  define(
+    {
+      id: 'editor.toggleSpellcheck',
+      title: 'Орфография: включить или выключить проверку',
+      category: 'Редактор',
+      keywords: ['spell', 'spellcheck', 'орфография'],
+    },
+    () => {
+      void saveSettingsPatch({ editor: { spellcheck: !settings.editor.spellcheck } });
+    },
+  );
+
   define(
     {
       id: 'python.installRequirements',
@@ -4161,6 +4227,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const syncEmptyState = (): void => emptyState.update(openEditors.paths.length > 0);
 
   const applySettings = (next: Settings): void => {
+    const previous = settings;
     settings = next;
     applyUiScale(next.appearance.uiScale);
     editors.applyOptions({
@@ -4171,7 +4238,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       minimap: next.editor.minimap,
       wordWrap: next.editor.wordWrap,
       ligatures: next.editor.fontLigatures,
+      spellcheck: next.editor.spellcheck,
     });
+    // Словарь человека изменили — пересобираем модель (она сама перепроверит текст).
+    if (previous.editor.spellWords !== next.editor.spellWords) spell.setUserWords(next.editor.spellWords);
     explorer.applySettings(next.explorer);
     // Лигатуры консоли следуют за лигатурами кода: вид обоих полотен остаётся единым.
     terminalPanel.setLigatures(next.editor.fontLigatures);

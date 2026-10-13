@@ -844,6 +844,20 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   function renderEditor(): Child[] {
     const editor: EditorSettings = settings!.editor;
     const editable = (values: Partial<EditorSettings>): void => void patch({ editor: values });
+    const words = h('textarea', {
+      class: 'field-input',
+      rows: 4,
+      spellcheck: false,
+      placeholder: 'проектный\nтермин',
+    });
+    words.value = editor.spellWords.join('\n');
+    words.addEventListener('change', () => {
+      const list = words.value
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      editable({ spellWords: list });
+    });
     return [
       h('div', { class: 'field-label' }, 'Шрифт'),
       field(
@@ -925,6 +939,23 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
 
       h('div', { class: 'settings-divider' }),
+      h('div', { class: 'field-label' }, 'Орфография'),
+      switchRow('Проверка орфографии', editor.spellcheck, (value) => editable({ spellcheck: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Под словами не из словаря появляется зелёная волна. Словарь берётся из системы ' +
+          '(aspell, hunspell, LibreOffice); путь можно задать переменной окружения CHUI_DICTIONARY.',
+      ),
+      field('Свои слова', words),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Слова по одному в строке — их прибавка к системному словарю. Быстрее всего добавить ' +
+          'слово правым кликом по нему: «Добавить в словарь».',
+      ),
+
+      h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Сохранение'),
       switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
       switchRow('Убирать пробелы в конце строк', editor.trimTrailingWhitespace, (value) =>
@@ -944,7 +975,6 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Свои сниппеты (шаблоны кода) задаются в settings.json — поле `editor.snippets`: ' +
           'массив из `{ prefix, body, description?, languages? }`. К ним добавляется небольшой набор по умолчанию.',
       ),
-      h('div', { class: 'field-hint' }, 'Перенос длинных строк у своего ядра пока не сделан — настройки к нему нет.'),
     ];
   }
 

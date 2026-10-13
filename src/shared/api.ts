@@ -646,6 +646,10 @@ export interface EditorSettings {
   snippets: Snippet[];
   /** Emmet: раскрытие сокращений разметки и стилей по Tab (`ul>li*3` → список). */
   emmet: boolean;
+  /** Проверка орфографии: волнистые подчёркивания под словами не из словаря. */
+  spellcheck: boolean;
+  /** Слова человека, добавленные в словарь поверх системного. Переживают перезапуск. */
+  spellWords: string[];
 }
 
 /** Плотность строк дерева проекта. */
@@ -1826,6 +1830,12 @@ export interface ChuiMethods {
    * Ответ уже разобран в main (там легенда сервера) — renderer получает готовые участки.
    */
   'lsp.semanticTokens': { params: { path: string }; result: SemanticToken[] };
+
+  /**
+   * Словарь орфографии: слова из файла, найденного в системе (aspell, hunspell,
+   * LibreOffice), и путь к нему. Пустой список и `null` — словаря в системе нет.
+   */
+  'spell.dictionary': { params: void; result: { words: string[]; source: string | null } };
 
   /* Отладчик: сессия debugpy по протоколу DAP. */
   /** Начать отладку файла интерпретатором окружения. */

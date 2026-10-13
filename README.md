@@ -1475,7 +1475,11 @@ Shell, HTML/XML, CSS/SCSS/Less, Markdown, SQL, Makefile и Dockerfile. C-под�
 ◐ TODO/FIXME — подсветка в тексте и поиск, отдельной панели нет. ✓ Семантическая подсветка:
 своя грамматика плюс точные роли от сервера (`semanticTokens/full`) — они накладываются
 поверх грамматики (`shared/lsp-semantic-tokens.ts`, `highlight/overlay.ts`).
-✗ Проверка орфографии.
+✓ Проверка орфографии: слова не из словаря подчёркиваются зелёной волной
+(`shared/spellcheck.ts`, `core/spellcheck.ts`). Словарь берётся из системы (aspell,
+hunspell, LibreOffice) или из `CHUI_DICTIONARY`; правый клик по слову — «Добавить
+в словарь»/«Пропустить», свои слова — в `editor.spellWords`, включатель —
+`editor.spellcheck`. В коде проверяются только комментарии и строки.
 
 **Уровень 5 — diff и версии.** ✓ Различие строки против HEAD, сравнение рядом и одним
 столбцом (`host/diff-editor.ts`), разрешение конфликтов кнопками (`ui/conflict-view.ts`),

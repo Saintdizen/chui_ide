@@ -23,6 +23,7 @@ import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../sha
 import { normalizeSnippets } from '../shared/snippets';
 import { normalizeRulers } from '../shared/rulers';
 import { normalizeWhitespaceMode } from '../shared/whitespace';
+import { normalizeSpellWords } from '../shared/spellcheck';
 import { normalizePullMode } from '../shared/git-pull';
 import { normalizeKeybindingOverrides, type KeybindingSettings } from '../shared/keybindings';
 import { sanitizeThemeFile, type ThemeFile } from '../shared/theme-file';
@@ -187,6 +188,11 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Emmet включён: это привычное поведение для правки разметки и стилей (так и в
     // других редакторах), а выключить его можно всегда.
     emmet: true,
+    // Проверка орфографии выключена: она пачкает текст волнистыми подчёркиваниями,
+    // а словарь нужен из системы — включается осознанно.
+    spellcheck: false,
+    // Своих слов у человека нет: словарь берётся из системы (см. `spell.dictionary`).
+    spellWords: [],
   },
   explorer: {
     icons: true,
@@ -346,7 +352,11 @@ export class SettingsStore {
         inlineCompletion: { ...ai.inlineCompletion },
       },
       // Копии вложенных списков: снимок настроек не должен меняться вслед за правкой.
-      editor: { ...editor, snippets: editor.snippets.map((snippet) => ({ ...snippet })) },
+      editor: {
+        ...editor,
+        snippets: editor.snippets.map((snippet) => ({ ...snippet })),
+        spellWords: [...editor.spellWords],
+      },
       explorer: { ...explorer, exclude: [...explorer.exclude] },
       run: { ...run },
       // Тема из файла — вложенный объект: отдаём копию, чтобы правка снимка не
@@ -397,6 +407,8 @@ export class SettingsStore {
       if (patch.editor.wordWrap !== undefined) next.wordWrap = patch.editor.wordWrap === true;
       if (patch.editor.fontLigatures !== undefined) next.fontLigatures = patch.editor.fontLigatures === true;
       if (patch.editor.emmet !== undefined) next.emmet = patch.editor.emmet === true;
+      if (patch.editor.spellcheck !== undefined) next.spellcheck = patch.editor.spellcheck === true;
+      if (patch.editor.spellWords !== undefined) next.spellWords = normalizeSpellWords(patch.editor.spellWords);
       this.data.editor = next;
     }
     if (patch.explorer) {
@@ -701,6 +713,9 @@ function loadSettings(filePath: string): StoredSettings {
       wordWrap: parsed.editor?.wordWrap === true,
       fontLigatures: parsed.editor?.fontLigatures === true,
       emmet: parsed.editor?.emmet !== false,
+      // Орфография включена только явным `true`: старый settings.json её не знает.
+      spellcheck: parsed.editor?.spellcheck === true,
+      spellWords: normalizeSpellWords(parsed.editor?.spellWords),
     },
     // Секции появились позже первых версий: старый settings.json их не знает,
     // поэтому неполный файл догружается значениями по умолчанию, а список

@@ -316,6 +316,11 @@
   background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5' fill='none' stroke='%235c9bd6' stroke-width='1'/%3E%3C/svg%3E");
 }
 
+/* Орфография: своя волна (зелёная), чтобы её не путали с пометками языка. */
+.own-editor-squiggly-rect.is-spelling {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='3'%3E%3Cpath d='M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5' fill='none' stroke='%233fb950' stroke-width='1'/%3E%3C/svg%3E");
+}
+
 /* Ссылки в тексте (documentLink): подчёркнутые участки, по которым
    можно перейти. Слой прозрачен для пролистывания текста, сами участки — живые. */
 .own-editor-links {
