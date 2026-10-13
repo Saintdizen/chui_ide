@@ -66,7 +66,6 @@
     "probe:gitwatch": "npm run build:main && electron scripts/git-watch-probe.cjs",
     "probe:toolstate": "electron scripts/tool-state-probe.cjs",
     "probe:typing": "npm run build && electron scripts/type-probe.cjs",
-    "probe:f1": "npm run build && electron scripts/f1-probe.cjs",
     "probe:lsp": "npm run build && electron scripts/lsp-pickup-probe.cjs",
     "probe:cursor": "npm run build && bash scripts/cursor-probe.sh",
     "icon": "npm run build:main && node scripts/make-icon.mjs",
