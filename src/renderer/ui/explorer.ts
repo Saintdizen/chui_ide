@@ -11,6 +11,7 @@ import type { WorkspaceModel } from '../core/workspace-model';
 import { pairFromSelection } from '../core/file-compare';
 import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
 import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
+import { sortTree } from '../core/tree-sort';
 import { computeWindow } from '../core/tree-window';
 import { movePlan } from '../core/tree-move';
 import {
@@ -254,18 +255,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     );
   };
 
-  const sortEntries = (entries: readonly DirEntry[]): DirEntry[] => {
-    const kindRank = (entry: DirEntry): number => (options.foldersFirst ? (entry.kind === 'directory' ? 0 : 1) : 0);
-    return [...entries].sort((a, b) => {
-      const byKind = kindRank(a) - kindRank(b);
-      if (byKind !== 0) return byKind;
-      if (options.sort === 'type') {
-        const byType = extensionOf(a.name).localeCompare(extensionOf(b.name));
-        if (byType !== 0) return byType;
-      }
-      return a.name.localeCompare(b.name, 'ru');
+  const sortEntries = (entries: readonly DirEntry[]): DirEntry[] =>
+    // Порядок считает чистый модуль (`core/tree-sort.ts`): режимов четыре, и
+    // проверяются они тестами, а не глазом на дереве.
+    sortTree(entries, {
+      foldersFirst: options.foldersFirst,
+      sort: options.sort,
+      changeOf: (path) => deps.git.statusOf(path)?.change,
     });
-  };
 
   const readDir = async (dir: string): Promise<void> => {
     try {
@@ -771,7 +768,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       for (const gone of deps.git.deletedIn(dir)) {
         rows.push({
           kind: 'entry',
-          entry: { name: nameOf(gone.path), path: gone.path, kind: 'file', size: 0 },
+          entry: { name: nameOf(gone.path), path: gone.path, kind: 'file', size: 0, mtimeMs: 0 },
           depth,
           dir,
           nested: false,
@@ -1270,12 +1267,6 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       render();
     },
   };
-}
-
-/** Расширение без точки: по нему сортируем дерево «по типу». */
-function extensionOf(name: string): string {
-  const dot = name.lastIndexOf('.');
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
 }
 
 /**

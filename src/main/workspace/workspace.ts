@@ -267,12 +267,15 @@ export class WorkspaceService {
 
         const full = path.join(dir, dirent.name);
         let size = 0;
+        let mtimeMs = 0;
         try {
-          size = (await fs.stat(full)).size;
+          const stat = await fs.stat(full);
+          size = stat.size;
+          mtimeMs = stat.mtimeMs;
         } catch {
-          // битый симлинк — размер просто неизвестен
+          // битый симлинк — размер и время неизвестны
         }
-        return { name: dirent.name, path: full, kind, size };
+        return { name: dirent.name, path: full, kind, size, mtimeMs };
       }),
     );
 

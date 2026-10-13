@@ -141,6 +141,8 @@ export interface DirEntry {
   path: string;
   kind: EntryKind;
   size: number;
+  /** Время последней правки, мс. Нужно сортировке «по времени изменения». */
+  mtimeMs: number;
 }
 
 export interface FileStat {
@@ -640,7 +642,7 @@ export interface EditorSettings {
 /** Плотность строк дерева проекта. */
 export type TreeRowDensity = 'compact' | 'normal' | 'cozy';
 /** Порядок детей в дереве. */
-export type TreeSort = 'name' | 'type';
+export type TreeSort = 'name' | 'type' | 'modified' | 'git';
 
 /**
  * Настройки проводника. Дерево — главный способ ходить по проекту, поэтому

@@ -1113,6 +1113,8 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           [
             { value: 'name', label: 'По имени' },
             { value: 'type', label: 'По типу файла' },
+            { value: 'modified', label: 'По времени изменения' },
+            { value: 'git', label: 'По пометкам git' },
           ],
           explorer.sort,
           (value) => apply({ sort: value as ExplorerSettings['sort'] }),

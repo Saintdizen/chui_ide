@@ -108,7 +108,7 @@ module.exports = [
     (DIRS.get(path) ?? []).map((name) => {
       const child = `${path === '/' ? '' : path}/${name}`;
       const size = FILES.get(child)?.length ?? 0;
-      return { name, path: child, kind: kindOf(child), size };
+      return { name, path: child, kind: kindOf(child), size, mtimeMs: 0 };
     });
 
   /* ── изменение дерева: создание, переименование и удаление ──────────────
