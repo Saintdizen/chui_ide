@@ -139,13 +139,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h('span', { class: 'status-problems-counts' }),
   );
   const problemsCounts = problemsItem.querySelector<HTMLElement>('.status-problems-counts')!;
-  const aiItem = h(
-    'span',
-    { class: 'status-item status-ai' },
-    svgIcon('sparkle', 12),
-    h('span', { class: 'status-ai-label' }),
-  );
-  const aiLabel = aiItem.querySelector<HTMLElement>('.status-ai-label')!;
+  const aiItem = h('span', { class: 'status-item status-ai' }, svgIcon('sparkle', 12));
 
   // Статус ассистента (режим и заполнение контекста) приходит из чата и встаёт
   // первым в правой группе — рядом с состоянием AI, а не отдельной полосой.
@@ -194,9 +188,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     toolItem.hidden = !state.tool;
     toolItem.title = state.tool ? `Запуск: ${state.tool}` : '';
     versionItem.textContent = state.version ? `v${state.version}` : '';
-    // Состояние AI — слово и значок, а не только цвет: при `is-busy` меняется оттенок,
-    // но текст читается и без него (цвет — подсказка, а не единственный носитель смысла).
-    aiLabel.textContent = state.ai;
+    // Значок один, без слова: состояние читается по подсказке и цвету (`is-busy`),
+    // а надпись «готов» иначе висела бы в полосе всегда.
     aiItem.title = `AI: ${state.ai}`;
     aiItem.classList.toggle('is-busy', state.ai !== 'готов');
     const { errors, warnings } = state.problems;

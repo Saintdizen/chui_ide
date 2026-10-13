@@ -67,7 +67,7 @@ function split(data: SessionInfoData): Part[] {
   ];
 }
 
-/** Кольцо с процентом заполнения — кнопка «Информация о сессии» в углу композера. */
+/** Кольцо заполнения контекста — кнопка «Информация о сессии» в полосе статуса. */
 export interface UsageRing {
   element: HTMLButtonElement;
   set(usage: ContextUsage): void;
@@ -102,20 +102,13 @@ export function createUsageRing(onClick: () => void): UsageRing {
   value.setAttribute('transform', 'rotate(-90 9 9)');
   svg.append(track, value);
 
-  const percent = h('span', { class: 'ring-percent' }, '0%');
-  const element = h(
-    'button',
-    { class: 'context-ring', type: 'button', title: 'Информация о сессии', onClick },
-    svg,
-    percent,
-  );
+  const element = h('button', { class: 'context-ring', type: 'button', title: 'Информация о сессии', onClick }, svg);
 
   return {
     element,
     set(usage) {
       value.setAttribute('stroke-dashoffset', String(RING_LENGTH * (1 - usage.percent / 100)));
-      percent.textContent = `${usage.percent}%`;
-      // Цвет говорит о запасе лучше числа: синий — запас есть, жёлтый — тесно, красный — предел.
+      // Цвет говорит о запасе лучше любых цифр: синий — запас есть, жёлтый — тесно, красный — предел.
       element.classList.toggle('is-tight', usage.percent >= 75 && usage.percent < 90);
       element.classList.toggle('is-full', usage.percent >= 90);
       element.title =

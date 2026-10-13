@@ -2218,11 +2218,6 @@ textarea {
   stroke: var(--red_prime_background);
 }
 
-.ring-percent {
-  font-family: var(--font_mono);
-  font-size: 10.5px;
-}
-
 /* ── лента беседы и её сводка после сжатия ─────────────────────────────── */
 
 .chat-body {
@@ -3962,7 +3957,7 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
-/* Цвет — только подсказка: слово «генерация…» рядом читается без него. */
+/* Цвет — подсказка о состоянии: синий — идёт генерация, обычный — покой. */
 .status-ai.is-busy {
   color: var(--blue_prime_background);
 }
