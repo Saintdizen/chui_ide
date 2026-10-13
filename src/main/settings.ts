@@ -188,6 +188,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Emmet включён: это привычное поведение для правки разметки и стилей (так и в
     // других редакторах), а выключить его можно всегда.
     emmet: true,
+    // Форматирование при вставке выключено: это правка вставленного текста, и включать
+    // её стоит осознанно — не всякий сервер умеет, а вид кода меняется заметно.
+    formatOnPaste: false,
     // Проверка орфографии выключена: она пачкает текст волнистыми подчёркиваниями,
     // а словарь нужен из системы — включается осознанно.
     spellcheck: false,
@@ -411,6 +414,7 @@ export class SettingsStore {
       if (patch.editor.wordWrap !== undefined) next.wordWrap = patch.editor.wordWrap === true;
       if (patch.editor.fontLigatures !== undefined) next.fontLigatures = patch.editor.fontLigatures === true;
       if (patch.editor.emmet !== undefined) next.emmet = patch.editor.emmet === true;
+      if (patch.editor.formatOnPaste !== undefined) next.formatOnPaste = patch.editor.formatOnPaste === true;
       if (patch.editor.spellcheck !== undefined) next.spellcheck = patch.editor.spellcheck === true;
       if (patch.editor.spellWords !== undefined) next.spellWords = normalizeSpellWords(patch.editor.spellWords);
       this.data.editor = next;
@@ -722,6 +726,8 @@ function loadSettings(filePath: string): StoredSettings {
       wordWrap: parsed.editor?.wordWrap === true,
       fontLigatures: parsed.editor?.fontLigatures === true,
       emmet: parsed.editor?.emmet !== false,
+      // Форматирование при вставке включено только явным `true`: старый файл его не знает.
+      formatOnPaste: parsed.editor?.formatOnPaste === true,
       // Орфография включена только явным `true`: старый settings.json её не знает.
       spellcheck: parsed.editor?.spellcheck === true,
       spellWords: normalizeSpellWords(parsed.editor?.spellWords),

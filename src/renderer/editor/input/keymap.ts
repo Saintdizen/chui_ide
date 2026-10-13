@@ -104,7 +104,9 @@ export type EditCommand =
   | 'references'
   | 'peekDefinition'
   /** Ctrl+Shift+T — выбрать обёртку для выделения («surround with»). */
-  | 'surroundWith';
+  | 'surroundWith'
+  /** Ctrl+K Ctrl+F — форматировать выделение (участок, а не файл целиком). */
+  | 'formatSelection';
 
 /**
  * Во что превращается нажатие.
@@ -208,6 +210,40 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   }
 
   return null;
+}
+
+/**
+ * Сочетание из нажатия строкой — тем же порядком, что у `comboFromEvent` в реестре
+ * команд: `Ctrl+Shift+K`. Нужно сочетаниям-приставкам, где клавиша разбирается дважды.
+ */
+export function chordName(chord: KeyChord): string {
+  const parts: string[] = [];
+  if (chord.ctrl === true || chord.meta === true) parts.push('Ctrl');
+  if (chord.alt === true) parts.push('Alt');
+  if (chord.shift === true) parts.push('Shift');
+  parts.push(chord.key.length === 1 ? chord.key.toUpperCase() : chord.key);
+  return parts.join('+');
+}
+
+/**
+ * Сочетания-приставки: клавиша нажимается НЕ одна, а перед второй (как `Ctrl+K Ctrl+F`
+ * в VS Code). Таблица — данные: по ней же видно, какие пары вообще есть.
+ */
+const CHORD_TABLE: Readonly<Record<string, Readonly<Record<string, EditCommand>>>> = {
+  'Ctrl+K': { 'Ctrl+F': 'formatSelection' },
+};
+
+/** Начинает ли это сочетание пару (его надо ждать, а не выполнять). */
+export function isChordPrefix(name: string): boolean {
+  return name in CHORD_TABLE;
+}
+
+/**
+ * Что делает вторая часть пары. `null` — такой пары нет: приставка была не к месту,
+ * и клавишу надо разобрать как обычную (а не гасить).
+ */
+export function chordCommand(prefix: string, second: string): EditCommand | null {
+  return CHORD_TABLE[prefix]?.[second] ?? null;
 }
 
 function motion(kind: Motion, extend: boolean): KeyAction {

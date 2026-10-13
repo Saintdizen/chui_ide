@@ -2602,6 +2602,90 @@ async function surroundCheck(win) {
   return { выделено_перед: selected, запросы: requests, обёрнуто: wrapped, пустое: empty };
 }
 
+/**
+ * Форматирование участка: команда «Форматировать выделение» и форматирование на вставке.
+ * Вставку делаем настоящим событием `paste` — так проверяется и то, что диапазон считан
+ * по каретке до и после, а не подставлен.
+ */
+/**
+ * Форматирование участка: команда «Форматировать выделение» и форматирование на вставке.
+ *
+ * Сочетание Ctrl+K Ctrl+F — ПАРА нажатий: проверяем и её, и то, что диапазон приходит
+ * в шов 1-based. Выделение набираем настоящими Shift+стрелками, вставку делаем настоящим
+ * событием `paste` — так видно, что диапазон считается по каретке до и после, а не подставлен.
+ */
+async function formatRangeCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const send = (event) => win.webContents.sendInputEvent(event);
+
+  await script(`(() => {
+    const { workspace } = window.probeFormat;
+    // Вторая строка: там стоит объявление слова other — выделим его.
+    workspace.reveal(window.probeFormat.doc.path, 2, 1);
+    document.querySelector('#probe-format .own-editor-input').focus();
+    return true;
+  })()`);
+  await wait(60);
+
+  for (let step = 0; step < 5; step += 1) {
+    send({ type: 'keyDown', keyCode: 'Right', modifiers: ['shift'] });
+    send({ type: 'keyUp', keyCode: 'Right', modifiers: ['shift'] });
+  }
+  await wait(80);
+
+  const selected = await script(`(() => ({
+    выделение: window.probeFormat.workspace.selectedText(),
+  }))()`);
+
+  // Ctrl+K Ctrl+F: первая клавиша ничего не делает, вторая зовёт форматирование участка.
+  send({ type: 'keyDown', keyCode: 'K', modifiers: ['control'] });
+  send({ type: 'keyUp', keyCode: 'K', modifiers: ['control'] });
+  await wait(40);
+  const afterPrefix = await script(`(() => window.probeFormat.requests.length)()`);
+  send({ type: 'keyDown', keyCode: 'F', modifiers: ['control'] });
+  send({ type: 'keyUp', keyCode: 'F', modifiers: ['control'] });
+  await wait(80);
+
+  const afterChord = await script(`(() => window.probeFormat.requests.slice())()`);
+
+  // Вставка при включённой настройке: диапазон вставки должен попасть в шов.
+  const paste = `(() => {
+    const input = document.querySelector('#probe-format .own-editor-input');
+    input.focus();
+    const event = new ClipboardEvent('paste', {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: new DataTransfer(),
+    });
+    event.clipboardData.setData('text/plain', 'XYZ');
+    input.dispatchEvent(event);
+    return window.probeFormat.requests.length;
+  })()`;
+  const afterPaste = await script(`(() => {
+    const { workspace, doc } = window.probeFormat;
+    workspace.reveal(doc.path, 1, 1);
+    return true;
+  })()`);
+  void afterPaste;
+  await wait(60);
+  const pasteCount = await script(paste);
+  await wait(80);
+  const pasteRequests = await script(`(() => window.probeFormat.requests.slice(-1))()`);
+
+  // Настройку выключили — вставка больше не зовёт форматирование.
+  await script(`(() => { window.probeFormat.control.onPaste = false; return true; })()`);
+  const offCount = await script(paste);
+
+  return {
+    выделено_перед: selected,
+    после_приставки: afterPrefix,
+    после_пары: afterChord,
+    вставка_запросов: pasteCount,
+    вставка_диапазон: pasteRequests,
+    выключено_запросов: offCount,
+  };
+}
+
 async function semanticFoldCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
   await wait(200);
@@ -3075,6 +3159,11 @@ async function main() {
   const peek = await peekCheck(win);
   log('## Заглянуть в определение');
   log(JSON.stringify(peek, null, 2));
+  log('');
+
+  const formatRange = await formatRangeCheck(win);
+  log('## Форматирование участка (выделение и вставка)');
+  log(JSON.stringify(formatRange, null, 2));
   log('');
 
   const semanticFold = await semanticFoldCheck(win);

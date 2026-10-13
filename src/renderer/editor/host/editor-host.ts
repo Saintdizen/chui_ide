@@ -215,6 +215,20 @@ export interface EditorHostOptions {
    * список вариантов и модалка — дело вызывающего (см. `ui/surround-modal.ts`).
    */
   surroundWith?: () => void;
+  /**
+   * Отформатировать участок файла (`textDocument/rangeFormatting`): выделение или только
+   * что вставленный кусок. Дело приложения — у него языковой сервер. Не задано —
+   * форматирования участка нет вовсе.
+   */
+  formatRange?: (
+    path: string,
+    range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
+  ) => void;
+  /**
+   * Форматировать ли вставленный кусок. Живой геттер: настройку меняют в окне. Не задано —
+   * не форматируем: правка чужого текста после вставки должна быть осознанной.
+   */
+  formatOnPaste?: () => boolean;
   /** Короткий путь для подписи места в списке (в приложении — относительный). */
   relativePath?: (path: string) => string;
   /**
@@ -435,6 +449,10 @@ export class EditorHost {
   private readonly externalMarkers = new Map<string, readonly LspDiagnostic[]>();
   /** Шов выбора обёртки: список показывает вызывающий (см. `ui/surround-modal.ts`). */
   private readonly surroundWithHandler: (() => void) | undefined;
+  /** Шов форматирования участка: сервер и применение правок — на стороне приложения. */
+  private readonly formatRangeHandler: EditorHostOptions['formatRange'];
+  /** Включено ли форматирование вставленного куска — живой геттер настройки. */
+  private readonly formatOnPaste: (() => boolean) | undefined;
   /** Проверка орфографии: словарь и живая настройка. `undefined` — проверки нет. */
   private readonly spell: SpellCheck | undefined;
   private readonly spellEnabled: (() => boolean) | undefined;
@@ -491,6 +509,8 @@ export class EditorHost {
     this.spellEnabled = options.spellcheckEnabled;
     this.spellSaveWord = options.spellSaveWord;
     this.surroundWithHandler = options.surroundWith;
+    this.formatRangeHandler = options.formatRange;
+    this.formatOnPaste = options.formatOnPaste;
 
     // До первого `open` редактор держит пустой буфер: слои не терпят «нет документа», а
     // пустая вкладка — нормальное состояние панели, пока файл не открыт.
@@ -636,6 +656,9 @@ export class EditorHost {
       interceptors,
       // Язык: по нему ввод выбирает знак комментария для Ctrl+/.
       language: () => this.languageId,
+      // Вставили кусок — говорим приложению, где он лёг: оно решает, форматировать ли
+      // (настройка `editor.formatOnPaste`) и умеет ли это сервер для языка файла.
+      onPasted: (range) => this.afterPaste(range),
     });
     // После закрытия панели фокус возвращается в текст: работа продолжается там.
     this.find.onClose = () => this.input.focus();
@@ -1025,6 +1048,25 @@ export class EditorHost {
     return true;
   }
 
+  /**
+   * Вставка легла в буфер. Превращаем смещения в 1-based диапазон и отдаём приложению,
+   * если оно умеет форматировать участок: сам редактор о настройках не знает.
+   */
+  private afterPaste(range: { start: number; end: number }): void {
+    if (!this.formatRangeHandler || !this.path) return;
+    // Форматирование на вставке — настройка: без неё вставка текста остаётся как была.
+    if (this.formatOnPaste?.() !== true) return;
+    const buffer = this.controller.bufferRef;
+    const from = buffer.positionAt(range.start);
+    const to = buffer.positionAt(range.end);
+    this.formatRangeHandler(this.path, {
+      startLine: from.line,
+      startColumn: from.column,
+      endLine: to.line,
+      endColumn: to.column,
+    });
+  }
+
   /** Обернуть выделение парой знаков. `false` — оборачивать нечем (нет буфера). */
   surroundSelection(option: SurroundOption): boolean {
     if (!this.path) return false;
@@ -1037,9 +1079,43 @@ export class EditorHost {
     return !isEmpty(this.controller.selection);
   }
 
+  /**
+   * Диапазон выделения в 1-based виде — таким его ждёт форматирование участка
+   * (`textDocument/rangeFormatting`). Пустое выделение даёт нулевую ширину.
+   */
+  selectionRange(): { startLine: number; startColumn: number; endLine: number; endColumn: number } {
+    const selection = this.controller.selection;
+    const buffer = this.controller.bufferRef;
+    const start = Math.min(selection.anchor, selection.active);
+    const end = Math.max(selection.anchor, selection.active);
+    const from = buffer.positionAt(start);
+    const to = buffer.positionAt(end);
+    return { startLine: from.line, startColumn: from.column, endLine: to.line, endColumn: to.column };
+  }
+
   /** Язык открытого файла: по нему выбираются доступные обёртки. */
   get documentLanguage(): string {
     return this.languageId;
+  }
+
+  /**
+   * Отформатировать выделение (или строку под кареткой, если ничего не выделено).
+   * `false` — форматировать участок нечем: нет шва или открытого файла.
+   */
+  formatSelection(): boolean {
+    if (!this.formatRangeHandler || !this.path) return false;
+    // Выделения нет — берём строку под кареткой: форматировать «ничего» бессмысленно,
+    // а форматировать весь файл — это другая команда (`format.document`).
+    const range = this.selectionRange();
+    const buffer = this.controller.bufferRef;
+    const line = buffer.lineAt(this.controller.caret);
+    const text = buffer.lineText(line);
+    const effective =
+      range.startLine === range.endLine && range.startColumn === range.endColumn
+        ? { startLine: line, startColumn: 1, endLine: line, endColumn: text.length + 1 }
+        : range;
+    this.formatRangeHandler(this.path, effective);
+    return true;
   }
 
   /** Заглянуть в определение, не уходя из файла. `false` — заглядывать нечем. */
@@ -1562,6 +1638,7 @@ export class EditorHost {
     else if (command === 'references') this.findReferences();
     else if (command === 'peekDefinition') this.peekDefinition();
     else if (command === 'surroundWith') this.surroundWithHandler?.();
+    else if (command === 'formatSelection') this.formatSelection();
     else this.find.show(command === 'replace' ? 'replace' : 'find');
   }
 

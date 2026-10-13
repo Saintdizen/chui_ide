@@ -71,6 +71,12 @@ export interface EditorCommandContext {
   peekDefinition?(): void;
   /** Обернуть выделение парой знаков; какую пару — спрашивает вызывающий (`surroundWith`). */
   surroundWith?(): void;
+  /**
+   * Отформатировать выделение (пусто — строку под кареткой) языковым сервером. Своей
+   * командой, а не действием сервера: сервер отдаёт правки участка (`rangeFormatting`),
+   * а не готовое «действие» — его и зовём.
+   */
+  formatSelection?(): void;
   /** Переименовать символ под курсором (нужен языковой сервер и ввод имени — дело вызывающего). */
   renameSymbol?(): void;
   /** Перейти к следующей пометке языка (ошибке или предупреждению). */
@@ -99,6 +105,7 @@ export type EditorCommandRequirement =
   | 'goToDefinition'
   | 'findReferences'
   | 'surroundWith'
+  | 'formatSelection'
   | 'peekDefinition'
   | 'renameSymbol'
   | 'formatCode'
@@ -334,6 +341,15 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: 'Навигация',
     requires: 'findReferences',
     run: (context) => context.findReferences?.(),
+  },
+  {
+    id: 'editor.formatSelection',
+    label: 'Форматировать выделение',
+    alias: 'formatSelection',
+    keybinding: 'Ctrl+K Ctrl+F',
+    category: 'Рефакторинг',
+    requires: 'formatSelection',
+    run: (context) => context.formatSelection?.(),
   },
   {
     id: 'editor.surroundWith',

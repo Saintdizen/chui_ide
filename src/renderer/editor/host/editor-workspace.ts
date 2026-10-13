@@ -165,6 +165,16 @@ export interface EditorWorkspaceOptions {
    * вариантов (и то, из чего выбирать по языку) — дело приложения (см. `ui/surround-modal.ts`).
    */
   surroundWith?: () => void;
+  /**
+   * Отформатировать участок файла (`rangeFormatting`): сервер и применение правок —
+   * на стороне приложения. Не задано — форматирования участка нет (ни команды, ни на вставке).
+   */
+  formatRange?: (
+    path: string,
+    range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
+  ) => void;
+  /** Форматировать ли вставленный кусок (настройка `editor.formatOnPaste`). */
+  formatOnPaste?: () => boolean;
   /** Короткий путь для подписи места в списке. */
   relativePath?: (path: string) => string;
   /** Сообщить человеку, что мест не нашлось. */
@@ -238,6 +248,10 @@ export class EditorWorkspace {
   private readonly readText: ((path: string) => Promise<string | null>) | undefined;
   /** Шов выбора обёртки: список вариантов показывает приложение. */
   private readonly surroundWith: (() => void) | undefined;
+  /** Шов форматирования участка — сервер и правки на стороне приложения. */
+  private readonly formatRange: EditorWorkspaceOptions['formatRange'];
+  /** Живой геттер настройки «форматировать при вставке». */
+  private readonly formatOnPaste: (() => boolean) | undefined;
   /** Быстрые исправления: шов к приложению (сервер, список, применение правок). */
   private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Диапазоны свёртки файла — тоже шов: у приложения и сервер, и подсчёт по отступам. */
@@ -341,6 +355,8 @@ export class EditorWorkspace {
     this.revealLocation = options.revealLocation;
     this.readText = options.readText;
     this.surroundWith = options.surroundWith;
+    this.formatRange = options.formatRange;
+    this.formatOnPaste = options.formatOnPaste;
     this.relativePath = options.relativePath;
     this.onNotice = options.onNotice;
     this.contextMenu = options.contextMenu;
@@ -434,6 +450,8 @@ export class EditorWorkspace {
       revealLocation: this.revealLocation,
       readText: this.readText,
       surroundWith: this.surroundWith,
+      formatRange: this.formatRange,
+      formatOnPaste: this.formatOnPaste,
       relativePath: this.relativePath,
       onNotice: this.onNotice,
       contextMenu: this.contextMenu,
@@ -645,6 +663,8 @@ export class EditorWorkspace {
     if (codeActions) context.codeActions = () => path && codeActions(path, this.pane.cursor());
     // Обёртка выделения — шов приложения: ему и список вариантов, и их смысл для языка.
     if (this.surroundWith) context.surroundWith = () => this.surroundWith?.();
+    // Форматирование выделения: сервер переписывает только участок, а не файл целиком.
+    if (this.formatRange) context.formatSelection = () => void this.pane.formatSelection();
     // Переход по пометкам есть всегда: хранилище пометок — у самого рабочего места.
     context.nextProblem = () => this.problems.next();
     context.previousProblem = () => this.problems.previous();
@@ -719,6 +739,11 @@ export class EditorWorkspace {
   /** Есть ли в активной панели непустое выделение. */
   hasSelection(): boolean {
     return this.pane.hasSelection();
+  }
+
+  /** Диапазон выделения активной панели (1-based) — для форматирования участка. */
+  selectionRange(): { startLine: number; startColumn: number; endLine: number; endColumn: number } {
+    return this.pane.selectionRange();
   }
 
   /** Язык файла активной панели — по нему выбираются доступные обёртки. */

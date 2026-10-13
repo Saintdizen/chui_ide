@@ -27,7 +27,7 @@
 
 import { wordAt } from '../core/graphemes';
 import { blockCommentFor, lineCommentFor } from './comments';
-import { resolveKey, type EditCommand, type Motion } from './keymap';
+import { chordCommand, chordName, isChordPrefix, resolveKey, type EditCommand, type Motion } from './keymap';
 import type { EditorChange, EditorController } from './editor-controller';
 
 import type { EditorView } from '../view/editor-view';
@@ -48,7 +48,9 @@ export type CommandName =
   | 'references'
   | 'peekDefinition'
   /** Обернуть выделение парой знаков; пару выбирает вызывающий. */
-  | 'surroundWith';
+  | 'surroundWith'
+  /** Отформатировать выделение участком (Ctrl+K Ctrl+F); сервер спрашивает вызывающий. */
+  | 'formatSelection';
 
 /**
  * Кто может забрать клавишу себе раньше редактора. Так устроены попапы: при видимом
@@ -70,6 +72,11 @@ export interface EditorInputOptions {
   interceptors?: readonly KeyInterceptor[];
   /** Язык открытого файла: по нему ввод знает, чем комментировать строку (Ctrl+/). */
   language?: () => string | null;
+  /**
+   * Вставка из буфера прошла: где она легла (смещения буфера). Нужно тому, кто форматирует
+   * вставленный кусок отдельно — сам ввод о форматировании не знает и знать не должен.
+   */
+  onPasted?: (range: { start: number; end: number }) => void;
 }
 
 export class EditorInputBinding {
@@ -80,6 +87,10 @@ export class EditorInputBinding {
   private readonly onCommand: ((command: CommandName) => void) | undefined;
   private readonly interceptors: readonly KeyInterceptor[];
   private readonly language: (() => string | null) | undefined;
+  /** Начатая приставка сочетания (`Ctrl+K`), ждущая вторую клавишу. `null` — не начата. */
+  private pendingChord: string | null = null;
+  /** Вставка прошла: сообщаем тому, кто форматирует вставленный кусок (см. опции). */
+  private readonly onPasted: ((range: { start: number; end: number }) => void) | undefined;
   private dragging = false;
   /** Начало блочного выделения (Alt+протяжка): столбец берётся от этого места. */
   private boxAnchor: number | null = null;
@@ -93,6 +104,7 @@ export class EditorInputBinding {
     this.onCommand = options.onCommand;
     this.interceptors = options.interceptors ?? [];
     this.language = options.language;
+    this.onPasted = options.onPasted;
     this.input = document.createElement('textarea');
     this.input.className = 'own-editor-input';
     this.input.setAttribute('autocapitalize', 'off');
@@ -172,13 +184,34 @@ export class EditorInputBinding {
       if (interceptor.handleKey(event)) return;
     }
 
-    const action = resolveKey({
+    const chord = {
       key: event.key,
       shift: event.shiftKey,
       ctrl: event.ctrlKey,
       meta: event.metaKey,
       alt: event.altKey,
-    });
+    };
+
+    // Сочетания-приставки (`Ctrl+K Ctrl+F`): первая клавиша пары ничего не делает, а
+    // только ждёт вторую. Нажали что-то другое — пары не было, клавиша идёт обычным путём.
+    const name = chordName(chord);
+    if (this.pendingChord !== null) {
+      const prefix = this.pendingChord;
+      this.pendingChord = null;
+      const command = chordCommand(prefix, name);
+      if (command) {
+        event.preventDefault();
+        this.runEdit(command);
+        return;
+      }
+    }
+    if (isChordPrefix(name)) {
+      event.preventDefault();
+      this.pendingChord = name;
+      return;
+    }
+
+    const action = resolveKey(chord);
     if (!action) return;
 
     if (action.kind === 'swallow') {
@@ -255,8 +288,17 @@ export class EditorInputBinding {
     const text = event.clipboardData?.getData('text/plain') ?? '';
     if (!text) return;
     event.preventDefault();
-    this.controller.paste(text);
+    this.paste(text);
   };
+
+  /** Вставить текст и сказать, куда он лёг: каретка до и после вставки. */
+  private paste(text: string): void {
+    const before = this.controller.caret;
+    this.controller.paste(text);
+    const after = this.controller.caret;
+    if (!this.onPasted || before === after) return;
+    this.onPasted({ start: Math.min(before, after), end: Math.max(before, after) });
+  }
 
   // — мышь —
 
@@ -480,6 +522,9 @@ export class EditorInputBinding {
         break;
       case 'surroundWith':
         this.onCommand?.('surroundWith');
+        break;
+      case 'formatSelection':
+        this.onCommand?.('formatSelection');
         break;
       // Мультикурсор: вхождения слова, каретки по столбцу и сброс к главной.
       case 'selectNextOccurrence':

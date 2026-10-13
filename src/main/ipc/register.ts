@@ -719,6 +719,17 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Семантическая подсветка: точные роли от сервера. Ответ разобран в main (там легенда),
   // renderer получает готовые участки и накладывает их поверх своей грамматики.
   router.register('lsp.semanticTokens', (params) => deps.lsp?.semanticTokens(params.path) ?? []);
+  // Форматирование участка: сервер переписывает только выделение или вставленный кусок.
+  router.register(
+    'lsp.formatRange',
+    (params) =>
+      deps.lsp?.formatRange(params.path, {
+        startLine: params.startLine,
+        startColumn: params.startColumn,
+        endLine: params.endLine,
+        endColumn: params.endColumn,
+      }) ?? [],
+  );
 
   /* ── Проверка орфографии ───────────────────────────────────────────────── */
 

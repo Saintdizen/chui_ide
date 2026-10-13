@@ -966,6 +966,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Сохранение'),
       switchRow('Форматировать при сохранении', editor.formatOnSave, (value) => editable({ formatOnSave: value })),
+      switchRow('Форматировать при вставке', editor.formatOnPaste, (value) => editable({ formatOnPaste: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Вставленный кусок приводит в порядок языковой сервер — он правит только вставленное, ' +
+          'а не файл целиком. Инструмент проекта так не умеет, поэтому без сервера настройка молчит.',
+      ),
       switchRow('Убирать пробелы в конце строк', editor.trimTrailingWhitespace, (value) =>
         editable({ trimTrailingWhitespace: value }),
       ),

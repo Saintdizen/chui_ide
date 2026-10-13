@@ -70,6 +70,7 @@ import { semanticFoldRanges } from './editor/highlight/folds';
 import { packageForModule } from '../shared/python-packages';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
+import { applyTextEdits } from '../shared/edits';
 import { decideSaveAs } from '../shared/save-as';
 import { isEmptyCommitMessage } from '../shared/commit-message';
 import { pairFromSelection } from './core/file-compare';
@@ -360,6 +361,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Выбор обёртки показывает приложение: у редактора нет ни модалок, ни списка
     // вариантов. Сам список зависит от языка файла — его знает редактор.
     surroundWith: () => surroundModal.open(),
+    // Форматирование участка сервером: правки приходят готовыми — применяем обычным путём.
+    formatRange: (path, range) => void formatRangeWithServer(path, range),
+    formatOnPaste: () => settings.editor.formatOnPaste,
     // Текст целевого файла для «заглядывания»: открытый берём из документа (в нём
     // и несохранённые правки), прочий — с диска. Не прочитали — копию не покажем.
     readText: async (path) => {
@@ -2000,6 +2004,47 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /** Что вышло из попытки форматирования. */
   type FormatOutcome = 'changed' | 'unchanged' | 'unavailable' | 'readonly';
+
+  /**
+   * Отформатировать УЧАСТОК файла языковым сервером (`rangeFormatting`). Так форматируют
+   * выделение и вставленный кусок: инструмент проекта (ruff, prettier) переписывает файл
+   * целиком и на участок не годится. Сервер отдаёт правки — применяем их обычным путём,
+   * поэтому и отмена у правки одна.
+   *
+   * Молча ничего не делаем, когда звали из-за вставки: там ошибку показывать не о чем.
+   * Из команды (`format.selection`) `false` — это «сервер не умеет»: о нём говорим.
+   */
+  const formatRangeWithServer = async (
+    path: string,
+    range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
+    options: { silent?: boolean } = {},
+  ): Promise<boolean> => {
+    const document = documents.get(path);
+    if (!document || document.readOnly) return false;
+    const serverEdits = await lsp.formatRange(path, range).catch(() => []);
+    if (serverEdits.length === 0) {
+      if (!options.silent) showToast('Нечем форматировать участок: языковой сервер этого не умеет');
+      return false;
+    }
+    // Правки могли ничего не изменить (сервер вернул тот же текст) — это не ошибка.
+    let after: string;
+    try {
+      after = applyTextEdits(document.value, serverEdits);
+    } catch {
+      if (!options.silent) showToast('Форматирование вернуло несогласованные правки', 'error');
+      return false;
+    }
+    if (after === document.value) {
+      if (!options.silent) showToast('Менять нечего');
+      return true;
+    }
+    const result = await edits.applyFileEdits([{ path, edits: serverEdits }]);
+    if (result.failed.length > 0) {
+      if (!options.silent) showToast(result.failed[0]!.message, 'error');
+      return false;
+    }
+    return true;
+  };
 
   /**
    * Отформатировать документ инструментом проекта. Правку проводим через документ:
@@ -4046,6 +4091,41 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         return;
       }
       showToast(formatOutcomeMessage(engine, await formatDocument(document)));
+    },
+  );
+
+  // Форматирование ВЫДЕЛЕНИЯ: сервер переписывает только участок, файл целиком не трогает.
+  // Инструмент проекта так не умеет — он всегда форматирует весь файл.
+  define(
+    {
+      id: 'format.selection',
+      title: 'Форматировать выделение',
+      category: 'Файл',
+      keybinding: 'Ctrl+K Ctrl+F',
+      keywords: ['format', 'selection', 'выделение', 'формат'],
+    },
+    async () => {
+      const document = openEditors.active;
+      if (!document) {
+        showToast('Нет открытого файла');
+        return;
+      }
+      if (document.readOnly) {
+        showToast('Файл открыт только для чтения — форматировать нечего');
+        return;
+      }
+      // Выделения нет — форматируем весь файл: как в VS Code, где команда участка без
+      // выделения берёт документ целиком. Иначе команда молчала бы о «нечего делать».
+      if (!editors.hasSelection()) {
+        const engine = formatEngine(document.languageId);
+        if (!engine) {
+          showToast(`Не форматирую ${languageLabel(document.languageId)}: для него инструмента нет`);
+          return;
+        }
+        showToast(formatOutcomeMessage(engine, await formatDocument(document)));
+        return;
+      }
+      await formatRangeWithServer(document.path, editors.selectionRange());
     },
   );
 

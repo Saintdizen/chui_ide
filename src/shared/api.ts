@@ -6,7 +6,7 @@
  */
 
 import type { MenuRole } from './app-menu';
-import type { ApplyResult, FileEdit } from './edits';
+import type { ApplyResult, FileEdit, TextEdit } from './edits';
 import type { BlameLine } from './git-blame';
 import type { PatchFile } from './patch';
 import type { ProjectScan } from './project-scan';
@@ -646,6 +646,11 @@ export interface EditorSettings {
   snippets: Snippet[];
   /** Emmet: раскрытие сокращений разметки и стилей по Tab (`ul>li*3` → список). */
   emmet: boolean;
+  /**
+   * Форматировать вставленный кусок сразу после вставки. Делает это языковой сервер
+   * (`rangeFormatting`) — инструмент проекта так не умеет, он переписывает файл целиком.
+   */
+  formatOnPaste: boolean;
   /** Проверка орфографии: волнистые подчёркивания под словами не из словаря. */
   spellcheck: boolean;
   /** Слова человека, добавленные в словарь поверх системного. Переживают перезапуск. */
@@ -1837,6 +1842,15 @@ export interface ChuiMethods {
    * Ответ уже разобран в main (там легенда сервера) — renderer получает готовые участки.
    */
   'lsp.semanticTokens': { params: { path: string }; result: SemanticToken[] };
+  /**
+   * Отформатировать УЧАСТОК файла (`textDocument/rangeFormatting`): выделение или только
+   * что вставленный кусок. Правки с позициями 1-based; пусто — сервер не умеет или менять
+   * нечего. Инструмент проекта (ruff, prettier) так не умеет — он форматирует файл целиком.
+   */
+  'lsp.formatRange': {
+    params: { path: string; startLine: number; startColumn: number; endLine: number; endColumn: number };
+    result: TextEdit[];
+  };
 
   /**
    * Словарь орфографии: слова из файла, найденного в системе (aspell, hunspell,

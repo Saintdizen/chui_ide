@@ -151,6 +151,27 @@ async function main() {
   });
   ok('связанные участки получены', Array.isArray(linked?.ranges) && linked.ranges.length === 2, JSON.stringify(linked));
 
+  /* Форматирование УЧАСТКА (`textDocument/rangeFormatting`): сервер правит только
+     запрошенный диапазон, а не файл целиком. Именно этим «форматировать выделение»
+     и «форматировать при вставке» отличаются от инструмента проекта (ruff, prettier),
+     который всегда переписывает весь файл. */
+  const rangeEdits = await lsp.formatRange(sample, {
+    startLine: 2,
+    startColumn: 1,
+    endLine: 2,
+    endColumn: 6,
+  });
+  ok(
+    'участок отформатирован: правки в 1-based',
+    Array.isArray(rangeEdits) &&
+      rangeEdits.length === 1 &&
+      rangeEdits[0].startLine === 2 &&
+      rangeEdits[0].startColumn === 1 &&
+      rangeEdits[0].endLine === 2 &&
+      rangeEdits[0].endColumn === 6,
+    JSON.stringify(rangeEdits),
+  );
+
   // Изменение документа: сервер гасит пометки, а мы их публикуем пустыми.
   events.length = 0;
   lsp.change(sample, 'print(2)\n');

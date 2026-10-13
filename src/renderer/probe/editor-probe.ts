@@ -441,6 +441,54 @@ declare global {
 
 window.probeFolds = { workspace: foldsWorkspace, store: foldsStore, doc: foldsDoc };
 
+// Форматирование участка: швы `formatRange` (сервер правит выделенный кусок) и
+// `formatOnPaste` (правка вставленного). Записываем запросы — по ним видно, что
+// команда и вставка доходят до приложения с 1-based диапазоном.
+const formatRoot = document.createElement('div');
+formatRoot.id = 'probe-format';
+formatRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(formatRoot);
+
+const formatStore = new DocumentStore();
+const formatRegistry = new DocumentRegistry(formatStore);
+const formatRequests: Array<{
+  path: string;
+  startLine: number;
+  startColumn: number;
+  endLine: number;
+  endColumn: number;
+}> = [];
+const formatControl = { onPaste: true };
+const formatWorkspace = new EditorWorkspace(formatRoot, formatRegistry, {
+  scheme: 'dark',
+  formatRange: (path, range) => formatRequests.push({ path, ...range }),
+  formatOnPaste: () => formatControl.onPaste,
+});
+const formatDoc = formatStore.open('/probe/format.ts', 'const value = 1;\nconst other = 2;\n', {
+  languageId: 'typescript',
+});
+formatWorkspace.open(formatDoc);
+
+declare global {
+  interface Window {
+    probeFormat: {
+      workspace: EditorWorkspace;
+      store: DocumentStore;
+      doc: TextDocument;
+      requests: Array<{ path: string; startLine: number; startColumn: number; endLine: number; endColumn: number }>;
+      control: { onPaste: boolean };
+    };
+  }
+}
+
+window.probeFormat = {
+  workspace: formatWorkspace,
+  store: formatStore,
+  doc: formatDoc,
+  requests: formatRequests,
+  control: formatControl,
+};
+
 // Заглянуть в определение: подставной сервер отдаёт ДВА места в другом файле, а текст
 // того файла — шов чтения (`readText`). Проверяем показ копии, счётчик мест, ход по
 // местам и «Открыть» (переход насовсем). Отдельный редактор — чтобы проверка не

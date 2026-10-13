@@ -19,6 +19,8 @@ import {
   type SemanticToken,
 } from '../../shared/lsp-semantic-tokens';
 import { toFileSymbols, toProjectSymbols, type FileSymbol, type ProjectSymbol } from '../../shared/lsp-symbols';
+import { toFormatEdits } from '../../shared/lsp-formatting';
+import type { TextEdit } from '../../shared/edits';
 import { mergeEnv } from '../project-env';
 
 /**
@@ -334,6 +336,11 @@ interface LspCapabilities {
   referencesProvider?: boolean;
   /** Переименование символа с учётом семантики — «переименовать» в редакторе. */
   renameProvider?: unknown;
+  /**
+   * Форматирование участка (`rangeFormatting`). Есть — можем отформатировать выделение
+   * и только что вставленный кусок, не переписывая файл целиком инструментом проекта.
+   */
+  documentRangeFormattingProvider?: unknown;
   /** Точная семантическая подсветка: по ней разбираем ответ (легенду объявляет сервер). */
   semanticTokensProvider?: { legend?: { tokenTypes?: unknown; tokenModifiers?: unknown } };
 }
@@ -789,6 +796,35 @@ export class LspService {
       return await runtime.connection.request(method, params, cancelKey);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Отформатировать участок (`textDocument/rangeFormatting`). Пустой ответ — сервер
+   * не умеет или менять нечего; для вызывающего это одно и то же. Форматирует именно
+   * УЧАСТОК, а не файл целиком: этим и отличается от инструмента проекта (ruff, prettier),
+   * который всегда переписывает файл.
+   */
+  async formatRange(
+    path: string,
+    range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
+  ): Promise<TextEdit[]> {
+    const runtime = this.runtimeForPath(path);
+    if (!runtime?.capabilities.documentRangeFormattingProvider) return [];
+    await runtime.initialized.catch(() => undefined);
+    const uri = pathToFileURL(path).toString();
+    try {
+      const result = await runtime.connection.request('textDocument/rangeFormatting', {
+        textDocument: { uri },
+        range: {
+          start: { line: Math.max(0, range.startLine - 1), character: Math.max(0, range.startColumn - 1) },
+          end: { line: Math.max(0, range.endLine - 1), character: Math.max(0, range.endColumn - 1) },
+        },
+        options: { tabSize: 4, insertSpaces: true },
+      });
+      return toFormatEdits(result);
+    } catch {
+      return [];
     }
   }
 

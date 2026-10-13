@@ -22,7 +22,7 @@
  */
 
 import type { LspDiagnostic } from '../../../shared/api';
-import type { FileEdit } from '../../../shared/edits';
+import type { FileEdit, TextEdit } from '../../../shared/edits';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
 import { toCompletions, toResolvedCompletion, type ResolvedCompletion } from '../../../shared/lsp-completions';
 import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
@@ -293,6 +293,17 @@ export class LspFeatures {
     const result = await this.request(path, 'codeLens/resolve', entry.source);
     const command = commandFromLens(result);
     return command ? { ...entry, command } : null;
+  }
+
+  /**
+   * Отформатировать участок (`textDocument/rangeFormatting`) — выделение или вставленный
+   * кусок. Пусто — сервер не умеет или менять нечего. Позиции 1-based, как везде у нас.
+   */
+  async formatRange(
+    path: string,
+    range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
+  ): Promise<TextEdit[]> {
+    return this.rpc.request('lsp.formatRange', { path, ...range }).catch(() => []);
   }
 
   /**

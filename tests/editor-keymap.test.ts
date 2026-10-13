@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveKey } from '../src/renderer/editor/input/keymap';
+import { chordCommand, chordName, isChordPrefix, resolveKey } from '../src/renderer/editor/input/keymap';
 
 describe('движения', () => {
   it('стрелки без модификаторов', () => {
@@ -65,6 +65,28 @@ describe('правки', () => {
     expect(resolveKey({ key: 'c', ctrl: true })).toEqual({ kind: 'edit', edit: 'copy' });
     expect(resolveKey({ key: 'x', ctrl: true })).toEqual({ kind: 'edit', edit: 'cut' });
     expect(resolveKey({ key: 'v', ctrl: true })).toEqual({ kind: 'edit', edit: 'paste' });
+  });
+});
+
+describe('сочетания-приставки (Ctrl+K Ctrl+F)', () => {
+  it('имя сочетания собирается в привычном порядке', () => {
+    expect(chordName({ key: 'k', ctrl: true })).toBe('Ctrl+K');
+    expect(chordName({ key: 'f', ctrl: true, shift: true })).toBe('Ctrl+Shift+F');
+    expect(chordName({ key: 'F12' })).toBe('F12');
+  });
+
+  it('Ctrl+K — приставка: сама ничего не делает, ждёт вторую клавишу', () => {
+    expect(isChordPrefix('Ctrl+K')).toBe(true);
+    expect(isChordPrefix('Ctrl+F')).toBe(false);
+  });
+
+  it('вторая часть пары даёт команду', () => {
+    expect(chordCommand('Ctrl+K', 'Ctrl+F')).toBe('formatSelection');
+  });
+
+  it('незнакомая пара — null: клавишу разбираем как обычную', () => {
+    expect(chordCommand('Ctrl+K', 'Ctrl+Z')).toBeNull();
+    expect(chordCommand('Ctrl+J', 'Ctrl+F')).toBeNull();
   });
 });
 

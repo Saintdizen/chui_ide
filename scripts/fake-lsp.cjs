@@ -24,6 +24,9 @@ function handle(message) {
           definitionProvider: true,
           renameProvider: true,
           foldingRangeProvider: true,
+          // Форматирование участка: по нему проверяем и «форматировать выделение», и
+          // форматирование на вставке (см. scripts/lsp-smoke.cjs).
+          documentRangeFormattingProvider: true,
           typeHierarchyProvider: true,
           documentLinkProvider: { resolveProvider: true },
           linkedEditingRangeProvider: true,
@@ -106,6 +109,24 @@ function handle(message) {
       jsonrpc: '2.0',
       method: 'textDocument/publishDiagnostics',
       params: { uri: message.params.textDocument.uri, diagnostics: [] },
+    });
+    return;
+  }
+
+  // Форматирование участка: сервер отдаёт правки только для запрошенного диапазона и
+  // приводит его к «как надо» — на этом видно, что мы просим именно участок, а не файл.
+  if (message.method === 'textDocument/rangeFormatting') {
+    const range = message.params.range;
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [
+        {
+          range,
+          // Правка заменяет участок на строку с двумя пробелами отступа: заметно и узнаваемо.
+          newText: '  formatted',
+        },
+      ],
     });
     return;
   }
