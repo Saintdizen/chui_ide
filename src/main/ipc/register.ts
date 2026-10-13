@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, shell } from 'electron';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import {
@@ -25,7 +26,8 @@ import type { LspService } from '../lsp/lsp';
 import type { McpService } from '../mcp/mcp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
-import { detectLspSources } from '../lsp/detect';
+import { detectLspSources, isOnPath } from '../lsp/detect';
+import { knownLinuxTerminals, pickExternalTerminal } from '../../shared/external-terminal';
 import { lintProject } from '../project/lint';
 import { scanProject } from '../project/scan';
 import { findPackages } from '../project/packages';
@@ -624,6 +626,40 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     if (!target) return { ok: false };
     // openPath отвечает строкой ошибки: пусто — файл открылся.
     return { ok: (await shell.openPath(target).catch(() => 'ошибка')) === '' };
+  });
+
+  // Терминал системы в папке проекта: привычный человеку терминал — за окном IDE.
+  // Рабочий каталог ставим процессу: не всякий терминал умеет «откройся здесь» доводом.
+  router.register('shell.openTerminal', async (params) => {
+    const target = String(params.path ?? '');
+    if (!target) return { ok: false };
+    // Границу рабочей области проверяет `stat`: терминал открываем только внутри проекта.
+    const entry = await deps.workspace.stat(target);
+    const dir = entry.kind === 'directory' ? entry.path : path.dirname(entry.path);
+
+    // Доступные команды ищем в PATH. Свой выбор человека (`$TERMINAL`) идёт первым.
+    const commands = new Set<string>();
+    for (const command of [process.env.TERMINAL, ...knownLinuxTerminals(), 'open', process.env.ComSpec ?? 'cmd.exe']) {
+      if (!command) continue;
+      if (await isOnPath(command)) commands.add(command);
+    }
+
+    const launch = pickExternalTerminal(
+      process.platform as 'linux' | 'darwin' | 'win32',
+      dir,
+      (command) => commands.has(command),
+      { preferred: process.env.TERMINAL, comspec: process.env.ComSpec },
+    );
+    if (!launch) return { ok: false };
+
+    try {
+      // Отдельный процесс: IDE его не ждёт и не убьёт вместе с собой при закрытии.
+      const child = spawn(launch.command, [...launch.args], { cwd: dir, detached: true, stdio: 'ignore' });
+      child.unref();
+      return { ok: true, command: launch.command };
+    } catch {
+      return { ok: false };
+    }
   });
 
   router.register('settings.get', () => deps.settings.get());

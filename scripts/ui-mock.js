@@ -645,6 +645,7 @@ module.exports = [
       push('terminal:exit', { id: params.id, exitCode: 0 });
     },
     'shell.revealInOS': () => ({ ok: true }),
+    'shell.openTerminal': () => ({ ok: true, command: 'gnome-terminal' }),
     'shell.openPath': () => ({ ok: true }),
     'window.getState': () => ({ maximized: false, fullScreen: false, platform: 'linux', customControls: true }),
     'window.minimize': () => undefined,

@@ -2208,6 +2208,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     );
   });
 
+  // Терминал системы в папке: открывается ВНЕ окна IDE, привычный человеку.
+  // Не путать с `terminal.openIn` — тот поднимает встроенную панель.
+  define({ id: 'terminal.openExternal', title: 'Терминал системы в папке', category: 'Терминал' }, async (target) => {
+    const path = typeof target === 'string' && target !== '' ? target : workspace.root;
+    if (!path) return;
+    const { ok } = await rpc.request('shell.openTerminal', { path });
+    if (!ok) showToast('Не нашёл терминал: задайте свой в настройке `TERMINAL`', 'error');
+  });
+
   // Закреплённое сверху дерева: то же, что пункт меню, но по текущему файлу.
   define({ id: 'explorer.togglePin', title: 'Закрепить файл в дереве', category: 'Файл' }, async (path) => {
     const target = typeof path === 'string' ? path : editors.currentPath;

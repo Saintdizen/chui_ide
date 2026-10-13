@@ -1693,6 +1693,8 @@ export interface ChuiMethods {
   'shell.revealInOS': { params: { path: string }; result: { ok: boolean } };
   /** Открыть файл программой системы: внешний редактор, просмотрщик, что настроено. */
   'shell.openPath': { params: { path: string }; result: { ok: boolean } };
+  /** Открыть терминал системы в папке. `ok: false` — подходящего терминала нет. */
+  'shell.openTerminal': { params: { path: string }; result: { ok: boolean; command?: string } };
 
   /* Личность автора, подпись коммитов и ключи: настройки git, а не IDE. */
   /** Действующие имя, почта, подпись и хранилище паролей. */

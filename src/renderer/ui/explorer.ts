@@ -443,6 +443,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             label: 'Открыть терминал в папке',
             onSelect: () => void deps.commands.execute('terminal.openIn', parent),
           },
+          {
+            label: 'Открыть терминал системы',
+            onSelect: () => void deps.commands.execute('terminal.openExternal', parent),
+          },
           { separator: true as const },
           {
             label: 'Добавить в .gitignore',

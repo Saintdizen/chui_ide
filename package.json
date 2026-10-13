@@ -60,6 +60,7 @@
     "probe:changes": "npm run build && electron scripts/changes-probe.cjs",
     "probe:folders": "npm run build && electron scripts/folders-probe.cjs",
     "probe:sort": "npm run build && electron scripts/sort-probe.cjs",
+    "probe:extterminal": "npm run build && electron scripts/ext-terminal-probe.cjs",
     "probe:editor": "electron scripts/own-editor-probe.cjs",
     "probe:lspbundled": "npm run build:main && electron scripts/lsp-bundled-probe.cjs",
     "probe:gitwatch": "npm run build:main && electron scripts/git-watch-probe.cjs",
