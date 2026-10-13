@@ -53,6 +53,10 @@ interface SessionView {
   container: HTMLElement;
   tab: HTMLButtonElement;
   exited: boolean;
+  /** Подпись, заданная запуском (`run`). Есть — заголовок от программы её не перебивает. */
+  renamed: string | null;
+  /** Последнее применённое имя окна: чтобы не трогать DOM на каждом кадре вывода. */
+  title: string;
 }
 
 /** Размер по умолчанию, пока контейнер не разложен (панель скрыта): обычные 80×24. */
@@ -167,6 +171,8 @@ export function createTerminalPanel(deps: {
       if (entry) {
         entry.term.write(payload.data);
         entry.view.render();
+        // Программа могла назвать окно (OSC 0/2) — показываем это во вкладке.
+        applyTitle(entry);
       } else {
         const buffer = orphanData.get(payload.id) ?? [];
         buffer.push(payload.data);
@@ -220,6 +226,10 @@ export function createTerminalPanel(deps: {
       onSelectionChange: (text) => {
         if (text) void navigator.clipboard.writeText(text).catch(() => undefined);
       },
+      // Гиперссылка (OSC 8): адрес уходит системе. Разрешение схемы — забота main.
+      onLink: (url) => {
+        void deps.rpc.request('shell.openExternal', { url }).catch(() => undefined);
+      },
     });
 
     // Подгоняем сетку под контейнер и только потом просим pty: оболочка должна родиться
@@ -248,7 +258,7 @@ export function createTerminalPanel(deps: {
         if (event.button === 1) void closeSession(session.id);
       });
 
-      const entry: SessionView = { session, term, view, container, tab, exited: false };
+      const entry: SessionView = { session, term, view, container, tab, exited: false, renamed: null, title: '' };
       sessions.set(session.id, entry);
       tabsHost.appendChild(tab);
 
@@ -267,6 +277,18 @@ export function createTerminalPanel(deps: {
       showToast(error instanceof Error ? error.message : String(error), 'error');
       return null;
     }
+  }
+
+  /**
+   * Показать имя окна, запрошенное программой (OSC 0/2). Подпись запуска (`run`) не
+   * перебиваем: там имя задачи, и оно важнее для человека. Когда программа снимает имя
+   * (пустая строка), возвращаемся к подписи сессии.
+   */
+  function applyTitle(entry: SessionView): void {
+    const wanted = entry.term.title;
+    if (wanted === entry.title) return;
+    entry.title = wanted;
+    entry.tab.textContent = entry.renamed ?? (wanted === '' ? entry.session.title : wanted);
   }
 
   /** Клавиатура и вставка: событие с вида кодируется в байты и уходит в pty. */
@@ -473,6 +495,8 @@ export function createTerminalPanel(deps: {
         // от имени (у задачи из package.json они совпадают).
         entry.tab.textContent = title;
         entry.tab.title = title === command ? title : `${title} · ${command}`;
+        // Подпись задачи закрепляем за вкладкой: заголовок от программы её не заменит.
+        entry.renamed = title;
         activate(id);
       }
       await deps.rpc.request('terminal.write', { id, data: `${command}\r` }).catch(() => undefined);

@@ -261,6 +261,23 @@ async function main() {
   );
   report.снимок_reflow = await shot(win, 'reflow');
 
+  // ── OSC: гиперссылка (OSC 8) и имя окна (OSC 2) ───────────────────────────────
+  report.osc = await evaluate(
+    win,
+    `(() => {
+      window.probeTerm.showLinks();
+      const link = document.querySelector('.own-term-row [data-url]');
+      const box = link ? link.getBoundingClientRect() : null;
+      return {
+        адрес: link ? link.dataset.url : null,
+        подчёркнута: link ? link.classList.contains('is-link') : false,
+        ширина: box ? Math.round(box.width) : null,
+        имя_окна: window.probeTerm.term.title,
+      };
+    })()`,
+  );
+  report.снимок_ссылок = await shot(win, 'links');
+
   // ── мышь для программы: событие должно уйти наружу ────────────────────────────
   report.мышь_программе = await evaluate(
     win,

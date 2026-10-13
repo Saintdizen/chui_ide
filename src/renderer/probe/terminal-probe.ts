@@ -26,6 +26,8 @@ declare global {
       /** Шаг к следующему (+1) или предыдущему (−1) совпадению. */
       findStep(step: number): number;
       clearFind(): void;
+      /** Показать образец с гиперссылками (OSC 8) — проба смотрит на них. */
+      showLinks(): void;
       setScheme(scheme: Scheme): void;
       setLigatures(on: boolean): void;
     };
@@ -91,6 +93,15 @@ function findStep(step: number): number {
   return currentIndex;
 }
 
+/** Образец с гиперссылкой (OSC 8) и именем окна (OSC 2) — для пробы. */
+function showLinks(): void {
+  term.write('\x1b]2;пример ссылок\x07');
+  term.write('\x1b[2J\x1b[H');
+  term.write('ссылка: \x1b]8;;https://example.com\x07example.com\x1b]8;;\x07 конец\r\n');
+  view.render();
+  view.stickToBottom();
+}
+
 window.probeTerm = {
   term,
   view,
@@ -99,6 +110,7 @@ window.probeTerm = {
   find,
   findStep,
   clearFind: () => view.clearSearch(),
+  showLinks,
   setScheme: (scheme) => view.setScheme(scheme),
   setLigatures: (on) => view.setLigatures(on),
 };

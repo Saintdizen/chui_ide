@@ -49,6 +49,8 @@ export interface TermViewOptions {
   onMouse?: (event: MouseEventData) => void;
   /** Сменилось выделение: наружу уходит текст (или null, если выделения нет). */
   onSelectionChange?: (text: string | null) => void;
+  /** Клик по гиперссылке (OSC 8): адрес открывает вызывающая сторона. */
+  onLink?: (url: string) => void;
 }
 
 /**
@@ -74,6 +76,8 @@ export class TermView {
   private selection: SelectionRange | null = null;
   /** Идёт протяжка мышью от нажатия. */
   private selecting = false;
+  /** За протяжку выделили текст: клик по ссылке тогда не открываем. */
+  private dragged = false;
   /** Найденные поиском совпадения и номер текущего (-1 — ни одного). */
   private searchMatches: readonly TermMatch[] = [];
   private searchCurrent = -1;
@@ -127,6 +131,7 @@ export class TermView {
       this.renderCursor();
     });
     this.root.addEventListener('mousedown', (event) => this.onMouseDown(event));
+    this.root.addEventListener('click', (event) => this.onClick(event));
     this.viewport.addEventListener('scroll', () => this.render());
     // Протяжку ведём на корне (а не на полотне): за краем текста выделение продолжается.
     this.root.addEventListener('mousemove', (event) => this.onMouseMove(event));
@@ -303,6 +308,7 @@ export class TermView {
     if (event.button !== 0) return;
     const point = this.cellAt(event);
     this.selecting = true;
+    this.dragged = false;
     this.selection = normalizeSelection(point, point);
     this.renderSelection();
     event.preventDefault();
@@ -312,6 +318,7 @@ export class TermView {
     if (this.selecting && !this.reportsToProgram(event)) {
       const point = this.cellAt(event);
       const anchor = this.selection?.start ?? point;
+      if (point.row !== anchor.row || point.col !== anchor.col) this.dragged = true;
       // Точку протяжки держим отдельно от якоря: нормализация сводит их в отрезок.
       this.selection = normalizeSelection(anchor, point);
       this.renderSelection();
@@ -332,6 +339,19 @@ export class TermView {
       this.selecting = false;
       this.options.onSelectionChange?.(this.selectedText());
     }
+  }
+
+  /**
+   * Клик по гиперссылке. Открываем только когда текст НЕ выделяли протяжкой: тянуть
+   * по ссылке — это обычное выделение, а не «открой её».
+   */
+  private onClick(event: MouseEvent): void {
+    if (this.dragged) return;
+    const target = event.target as HTMLElement | null;
+    const url = target?.closest<HTMLElement>('[data-url]')?.dataset.url;
+    if (!url) return;
+    event.preventDefault();
+    this.options.onLink?.(url);
   }
 
   private onWheel(event: WheelEvent): void {
@@ -455,21 +475,24 @@ export class TermView {
     element.className = `${ROOT_CLASS}-row`;
     element.style.transform = `translateY(${row * this.metrics.lineHeight}px)`;
 
-    // Ячейки одной строки собираем в «прогоны» с одинаковым атрибутом: цвет и
-    // начертание задаются на группу, а не на каждую букву — узлов в разметке меньше.
+    // Ячейки одной строки собираем в «прогоны» с одинаковым атрибутом и ссылкой: цвет,
+    // начертание и адрес задаются на группу, а не на каждую букву — узлов меньше.
     let runAttr: Attr | null = null;
+    let runLink: string | undefined;
     let runText = '';
     const flush = (): void => {
       if (runAttr === null || runText === '') return;
-      element.append(this.renderRun(runText, runAttr));
+      element.append(this.renderRun(runText, runAttr, runLink));
       runAttr = null;
+      runLink = undefined;
       runText = '';
     };
     for (const cell of line.cells) {
       if (cell.width === 0) continue; // вторая половина широкого знака — без своего текста
-      if (runAttr === null || !sameAttr(runAttr, cell.attr)) {
+      if (runAttr === null || !sameAttr(runAttr, cell.attr) || runLink !== cell.link) {
         flush();
         runAttr = cell.attr;
+        runLink = cell.link;
       }
       runText += cell.chars;
     }
@@ -477,9 +500,15 @@ export class TermView {
     return element;
   }
 
-  private renderRun(text: string, attr: Attr): HTMLElement {
+  private renderRun(text: string, attr: Attr, link?: string): HTMLElement {
     const span = document.createElement('span');
     span.textContent = text;
+    // Гиперссылка (OSC 8): адрес кладём в данные, а вид у клика берёт его оттуда.
+    // Схему не проверяем — это делает main (shell.openExternal пускает только http/https).
+    if (link) {
+      span.dataset.url = link;
+      span.classList.add('is-link');
+    }
 
     let fg = colorToCss(attr.fg);
     let bg = colorToCss(attr.bg);

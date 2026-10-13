@@ -31,6 +31,8 @@ export interface Cell {
   readonly chars: string;
   readonly width: number;
   readonly attr: Attr;
+  /** Адрес гиперссылки (OSC 8), если знак её открывает. Нет — знак никуда не ведёт. */
+  readonly link?: string;
 }
 
 /** Строка экрана. `wrapped` — строка продолжилась на следующей без перевода (для копирования/переноса). */
@@ -197,6 +199,10 @@ export class Terminal {
   private tabs: boolean[];
   /** Курсор стоит у правого края и перенесёт следующий знак на новую строку. */
   private wrapPending = false;
+  /** Гиперссылка для следующих напечатанных знаков (OSC 8). null — обычный текст. */
+  private link: string | null = null;
+  /** Имя окна, запрошенное программой: OSC 0 или OSC 2. */
+  private windowTitle = '';
   private readonly parser = new VtParser();
 
   constructor(
@@ -255,6 +261,11 @@ export class Terminal {
     return this.modes.mouseSgr;
   }
 
+  /** Имя окна, запрошенное программой (OSC 0 и OSC 2). Пусто — его не меняли. */
+  get title(): string {
+    return this.windowTitle;
+  }
+
   /** Строка доски для отрисовки. */
   line(row: number): Line | undefined {
     return this.active.lines[row];
@@ -297,8 +308,31 @@ export class Terminal {
         this.csi(event);
         return;
       case 'osc':
-        // Заголовок окна и гиперссылки OSC-8 — следующим шагом; пока не мешают выводу.
+        this.osc(event.data);
         return;
+    }
+  }
+
+  /**
+   * Управляющая строка OSC: `код ; данные`. Нам важны две:
+   *   • `0` и `2` — имя окна, его показывает вкладка терминала;
+   *   • `8` — гиперссылка: `8 ; параметры ; адрес`. Пустой адрес снимает ссылку, и
+   *     следующие знаки снова обычный текст.
+   * Прочее (цвета палитры, буфер обмена, прогресс) пропускаем: на сетку они не влияют.
+   */
+  private osc(data: string): void {
+    const sep = data.indexOf(';');
+    const code = sep < 0 ? data : data.slice(0, sep);
+    const rest = sep < 0 ? '' : data.slice(sep + 1);
+
+    if (code === '0' || code === '2') {
+      this.windowTitle = rest;
+      return;
+    }
+    if (code === '8') {
+      const params = rest.indexOf(';');
+      const uri = params < 0 ? '' : rest.slice(params + 1);
+      this.link = uri === '' ? null : uri;
     }
   }
 
@@ -350,9 +384,11 @@ export class Terminal {
     this.clearWideAt(line, x);
     if (width === 2 && x + 1 < this.colsCount) this.clearWideAt(line, x + 1);
 
-    line.cells[x] = { chars: ch, width, attr: this.pen };
+    // Ссылку (OSC 8) получают только непробельные знаки: пробел — заливка фона, а не текст.
+    const link = ch === ' ' || this.link === null ? undefined : this.link;
+    line.cells[x] = { chars: ch, width, attr: this.pen, link };
     // Вторая клетка широкого знака — продолжение без своего знака.
-    if (width === 2 && x + 1 < this.colsCount) line.cells[x + 1] = { chars: '', width: 0, attr: this.pen };
+    if (width === 2 && x + 1 < this.colsCount) line.cells[x + 1] = { chars: '', width: 0, attr: this.pen, link };
 
     this.active.cx += width;
     if (this.active.cx >= this.colsCount) {
@@ -797,6 +833,9 @@ export class Terminal {
     this.alt = null;
     this.active = this.primary;
     this.wrapPending = false;
+    // Полный сброс (RIS) снимает и ссылку, и имя окна: программа начинает с чистого листа.
+    this.link = null;
+    this.windowTitle = '';
   }
 
   /**

@@ -103,6 +103,16 @@
   visibility: hidden;
 }
 
+/* Гиперссылка (OSC 8): видно, что знак ведёт наружу, и понятно, что по нему кликают. */
+.own-term-row .is-link {
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.own-term-row .is-link:hover {
+  background: var(--own-term-selection);
+}
+
 @keyframes own-term-blink {
   50% {
     opacity: 0;
