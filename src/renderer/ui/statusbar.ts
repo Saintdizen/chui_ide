@@ -150,9 +150,11 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       eolItem,
       encodingItem,
       indentItem,
-      envItem,
       readOnlyItem,
       languageItem,
+      // Окружение — прямо перед кнопкой «Информация о сессии»: так она стоит
+      // крайней справа, а чип интерпретатора — слева от неё.
+      envItem,
       chatSlot,
     ),
   );
