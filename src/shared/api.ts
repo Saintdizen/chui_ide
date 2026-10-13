@@ -16,6 +16,7 @@ import type { ReviewThread } from './review';
 import type { GitLfsInfo } from './git-lfs';
 import type { GitIdentity, GitSshKey } from './git-identity';
 import type { WorkspaceRoot } from './workspace-roots';
+import type { FolderCompareResult } from './folder-compare';
 import type { ProjectPackage } from './monorepo';
 import type { ForgeInfo } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
@@ -1482,6 +1483,8 @@ export interface ChuiMethods {
   'workspace.search': { params: SearchOptions; result: SearchResult };
   /** Относительные (POSIX) пути всех файлов проекта — для быстрого открывателя. */
   'workspace.listFiles': { params: void; result: string[] };
+  /** Сравнить две папки рабочей области: какие файлы различаются. */
+  'workspace.compareFolders': { params: { left: string; right: string }; result: FolderCompareResult };
   /** Сессия проекта: восстановление при открытии и сохранение изменений. */
   'session.load': { params: { root: string }; result: SessionState };
   'session.save': { params: { root: string; state: SessionState }; result: void };

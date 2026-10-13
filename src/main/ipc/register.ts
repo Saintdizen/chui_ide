@@ -259,6 +259,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('workspace.stat', (params) => deps.workspace.stat(params.path));
   router.register('workspace.search', (params) => deps.workspace.search(params));
   router.register('workspace.listFiles', () => deps.workspace.listFiles());
+  router.register('workspace.compareFolders', (params) => deps.workspace.compareFolders(params.left, params.right));
   router.register('workspace.replace', (params) => deps.workspace.replace(params));
   router.register('workspace.createFile', async (params) => ({ path: await deps.workspace.createFile(params.path) }));
   router.register('workspace.createDir', async (params) => ({ path: await deps.workspace.createDir(params.path) }));

@@ -99,6 +99,7 @@ import { createSourceControl } from './ui/source-control';
 import { createStashModal } from './ui/stash-modal';
 import { createRebaseModal } from './ui/rebase-modal';
 import { createRefDiffModal } from './ui/ref-diff-modal';
+import { createFolderCompareModal } from './ui/folder-compare-modal';
 import { createBisectModal } from './ui/bisect-modal';
 import { createWorktreeModal } from './ui/worktree-modal';
 import { createLfsModal } from './ui/lfs-modal';
@@ -1443,6 +1444,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   document.body.appendChild(refDiffModal.element);
 
+  // Сравнение двух папок: список различающихся файлов, клик — их сравнение.
+  const folderCompareModal = createFolderCompareModal({
+    rpc,
+    openFile: (left, right) => void diffView.openFiles(left, right),
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(folderCompareModal.element);
+
   // Поиск багованного коммита: окно ведёт диалог с git (хороший/плохой), а найденный
   // коммит открывается тем же экраном сравнения, что и коммит строки под курсором.
   const bisectModal = createBisectModal({
@@ -2127,6 +2136,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         },
       },
     );
+  });
+
+  // Сравнение двух папок: список различий, клик по файлу открывает его сравнение.
+  define({ id: 'folder.compare', title: 'Сравнить папки', category: 'Навигация' }, async (left, right) => {
+    if (typeof left !== 'string' || typeof right !== 'string') return;
+    await folderCompareModal.open(left, right);
   });
 
   // Сравнение двух файлов — из дерева, тем же экраном, что показывает git-различия.

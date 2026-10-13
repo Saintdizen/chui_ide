@@ -24,6 +24,7 @@ import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
 import { replaceAll } from '../../shared/replace';
 import { MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../../shared/large-file';
+import { buildFolderDiff, splitFolderLists, type FolderCompareResult } from '../../shared/folder-compare';
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 
@@ -44,6 +45,9 @@ const MAX_SEARCH_RESULTS = 2000;
 const MAX_SEARCH_CONTEXT = 5;
 /** Потолок длины строки в выводе поиска: и у совпадения, и у соседних строк. */
 const MAX_HIT_LINE_CHARS = 400;
+/** Потолок файлов, которые сравниваем по содержимому: остальные сверяем по размеру. */
+const MAX_COMPARE_READS = 1000;
+
 /** Сколько файлов читаем параллельно: больше — уже перегрузка диска, меньше — простой. */
 const SEARCH_CONCURRENCY = 8;
 /** Предохранитель от обхода гигантских деревьев без совпадений. */
@@ -621,6 +625,93 @@ export class WorkspaceService {
     return files
       .map((full) => path.relative(root, full).split(path.sep).join('/'))
       .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+  }
+
+  /**
+   * Сравнить две папки рабочей области: какие файлы различаются.
+   *
+   * Пути берём относительные: файл только слева — удалён, только справа — добавлен,
+   * в обеих — сверяем содержимое. Читаем только те общие файлы, у которых совпал
+   * размер, и лишь пока не упёрлись в потолок: сравнение папок не должно тянуть в
+   * память весь проект. Общие файлы крупнее порога и хвост сверх потолка считаются
+   * совпавшими по размеру — об этом честно говорит флаг `truncated`.
+   */
+  async compareFolders(left: string, right: string): Promise<FolderCompareResult> {
+    const leftDir = await this.safePath(left);
+    const rightDir = await this.safePath(right);
+    const [leftStat, rightStat] = await Promise.all([
+      fs.stat(leftDir).catch(() => null),
+      fs.stat(rightDir).catch(() => null),
+    ]);
+    if (!leftStat?.isDirectory()) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Слева не папка');
+    if (!rightStat?.isDirectory()) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Справа не папка');
+
+    const leftList = await this.collectIn(leftDir);
+    const rightList = await this.collectIn(rightDir);
+    const lists = splitFolderLists(leftList.files, rightList.files);
+
+    const differing = new Set<string>();
+    let reads = 0;
+    let truncated = leftList.truncated || rightList.truncated;
+    for (const relative of lists.common) {
+      const leftFile = path.join(leftDir, ...relative.split('/'));
+      const rightFile = path.join(rightDir, ...relative.split('/'));
+      const [a, b] = await Promise.all([fs.stat(leftFile).catch(() => null), fs.stat(rightFile).catch(() => null)]);
+      if (!a || !b) {
+        differing.add(relative);
+        continue;
+      }
+      if (a.size !== b.size) {
+        differing.add(relative);
+        continue;
+      }
+      // Размер совпал — сравниваем содержимое, но не для огромных и не сверх потолка.
+      if (a.size > MAX_FILE_BYTES) continue;
+      if (reads >= MAX_COMPARE_READS) {
+        truncated = true;
+        continue;
+      }
+      reads += 1;
+      const [leftText, rightText] = await Promise.all([
+        fs.readFile(leftFile, 'utf8').catch(() => null),
+        fs.readFile(rightFile, 'utf8').catch(() => null),
+      ]);
+      if (leftText === null || rightText === null || leftText !== rightText) differing.add(relative);
+    }
+
+    const { files, identical } = buildFolderDiff(lists, (relative) => differing.has(relative));
+    return { left: leftDir, right: rightDir, files, identical, truncated };
+  }
+
+  /**
+   * Файлы папки относительными POSIX-путями. Обход свой, а не общий (`collectFiles`):
+   * там точкой отсчёта служит корень проекта, а здесь — любая папка области. Служебные
+   * каталоги (`node_modules`, `.git`) пропускаем: в сравнении они только мешают.
+   */
+  private async collectIn(dir: string): Promise<{ files: string[]; truncated: boolean }> {
+    const files: string[] = [];
+    let truncated = false;
+    const collect = async (current: string): Promise<void> => {
+      if (files.length >= MAX_SCAN_FILES) {
+        truncated = true;
+        return;
+      }
+      const dirents = await fs.readdir(current, { withFileTypes: true }).catch(() => []);
+      for (const dirent of dirents) {
+        if (files.length >= MAX_SCAN_FILES) {
+          truncated = true;
+          return;
+        }
+        const full = path.join(current, dirent.name);
+        if (dirent.isDirectory()) {
+          if (!IGNORED_DIRS.has(dirent.name)) await collect(full);
+          continue;
+        }
+        if (dirent.isFile()) files.push(path.relative(dir, full).split(path.sep).join('/'));
+      }
+    };
+    await collect(dir);
+    return { files, truncated };
   }
 
   /**

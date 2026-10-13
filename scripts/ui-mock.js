@@ -577,6 +577,13 @@ module.exports = [
       }
       return { hits, truncated: false, scanned: FILES.size };
     },
+    'workspace.compareFolders': (params) => ({
+      left: params.left,
+      right: params.right,
+      files: [{ path: 'diff.ts', change: 'modified' }],
+      identical: 0,
+      truncated: false,
+    }),
     'workspace.createFile': (params) => {
       FILES.set(params.path, '');
       addChild(params.path);

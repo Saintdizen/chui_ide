@@ -380,6 +380,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // Сравнить можно только файлы: папки экран различий не показывает.
     const files = effective.filter((path) => findEntry(path)?.kind === 'file');
     const pair = pairFromSelection(files);
+    // Две папки сравниваются своим экраном — списком различий.
+    const dirs = effective.filter((path) => findEntry(path)?.kind === 'directory');
+    const dirPair = pairFromSelection(dirs);
     const items = entry
       ? [
           { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },
@@ -407,12 +410,23 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
                 },
                 { separator: true as const },
               ]
-            : entry.kind === 'file'
+            : dirPair
               ? [
-                  { label: 'Сравнить с…', onSelect: () => void deps.commands.execute('file.compareWith', entry.path) },
+                  {
+                    label: `Сравнить папки: ${nameOf(dirPair.left)} ↔ ${nameOf(dirPair.right)}`,
+                    onSelect: () => void deps.commands.execute('folder.compare', dirPair.left, dirPair.right),
+                  },
                   { separator: true as const },
                 ]
-              : []),
+              : entry.kind === 'file'
+                ? [
+                    {
+                      label: 'Сравнить с…',
+                      onSelect: () => void deps.commands.execute('file.compareWith', entry.path),
+                    },
+                    { separator: true as const },
+                  ]
+                : []),
           {
             label: isPinned(pinned, entry.path) ? 'Открепить' : 'Закрепить сверху',
             onSelect: () => setPinned(entry.path),
