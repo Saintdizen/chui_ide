@@ -62,34 +62,48 @@ textarea {
   outline-offset: var(--focus_outline_offset);
 }
 
-/* Скроллбары-оверлеи: в спокойном виде ползунка не видно — полоса не грузит
-   полотно и не спорит с кодом. Проявляется, когда курсор над областью прокрутки. */
+/* Скроллбары-оверлеи: полоса не занимает места в раскладке и не грузит полотно.
+   В спокойном виде ползунка не видно — он проявляется, когда курсор над областью
+   прокрутки. Стрелки и угол не рисуем: на стыке полос оставался серый квадрат со
+   стрелкой, а сами стрелки — из другой эпохи. */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 14px;
+  height: 14px;
 }
 
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  width: 0;
+  height: 0;
 }
 
 ::-webkit-scrollbar-thumb {
   background: transparent;
-  border: 3px solid transparent;
+  /* Ползунок тоньше полосы: прозрачная рамка с `content-box` даёт «плавающий»
+     пилл внутри области прокрутки, а не полосу во всю её ширину. */
+  border: 4px solid transparent;
   background-clip: content-box;
   border-radius: var(--radius_pill);
   transition: background-color var(--motion_base) var(--motion_ease);
 }
 
-/* Курсор над областью прокрутки (или прямо по ползунку) — полоса проявляется. */
-:hover::-webkit-scrollbar-thumb,
-::-webkit-scrollbar-thumb:hover {
+/* Курсор над областью прокрутки — полоса проявляется. */
+:hover::-webkit-scrollbar-thumb {
   background: var(--scrollbar_thumb);
 }
 
-/* Пока элемент активно тянут (в т.ч. ползунок) — держим его видимым. */
+/* Курсор прямо по ползунку — он заметнее: видно, что за него можно тянуть. */
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar_thumb_hover);
+}
+
+/* Пока элемент тянут (в т.ч. за ползунок) — держим его видимым и самым ярким. */
 :active::-webkit-scrollbar-thumb {
-  background: var(--scrollbar_thumb);
+  background: var(--scrollbar_thumb_active);
 }
 
 /* Все всплывающие слои лежат НАД содержимым: тот же материал (полупрозрачная

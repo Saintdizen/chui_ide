@@ -498,6 +498,8 @@ export function themeCssVariables(scheme: Scheme): Record<string, string> {
     '--git_modified': cssHex(chrome.modified),
     '--git_deleted': cssHex(chrome.deleted),
     '--scrollbar_thumb': cssHex(chrome.scrollbar),
+    '--scrollbar_thumb_hover': cssHex(chrome.scrollbarHover),
+    '--scrollbar_thumb_active': cssHex(chrome.scrollbarActive),
   };
 }
 

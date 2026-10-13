@@ -44,7 +44,6 @@
   position: absolute;
   inset: 0;
   overflow: auto;
-  scrollbar-width: thin;
 }
 
 .own-term-content {
