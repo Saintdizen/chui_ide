@@ -3990,7 +3990,7 @@ textarea {
 .popover {
   position: fixed;
   z-index: var(--layer_popup);
-  padding: 5px;
+  padding: 10px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--popup_material);
