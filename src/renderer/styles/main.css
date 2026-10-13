@@ -829,10 +829,6 @@ textarea {
   opacity: 0.5;
 }
 
-.status-tool {
-  color: var(--run_accent);
-}
-
 /* Точка останова на поле номеров строк: красный кружок вместо значка запуска. */
 .breakpoint-glyph {
   position: relative;

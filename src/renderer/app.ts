@@ -36,7 +36,7 @@ import { LspClient } from './core/lsp';
 import { fetchCallHierarchy, type CallDirection } from './core/call-hierarchy';
 import { OpenEditors } from './core/open-editors';
 import { AutoPanelLayout } from './core/panel-layout';
-import { ProjectToolsModel, type ProjectTools } from './core/project-tools';
+import { ProjectToolsModel } from './core/project-tools';
 import { envWidgetLabel } from './core/env-widget';
 import { DebugController, frameForHover } from './core/debug';
 import { RpcClient } from './core/rpc';
@@ -3797,7 +3797,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       version: active?.version ?? 0,
       tabSize: indent?.tabSize ?? settings.editor.tabSize,
       useTabs: indent ? !indent.insertSpaces : !settings.editor.insertSpaces,
-      tool: active ? toolLabel(language, projectTools) : null,
       branch: git.branch,
       changes: git.changeCount,
       projectKindId: projectScan && projectScan.kind.source !== 'none' ? projectScan.kind.id : null,
@@ -4261,14 +4260,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 }
 
 /**
- * Чем запустится активный файл. В статусбаре важно именно «чем», а не «каким
- * языком»: системный python3 и интерпретатор окружения проекта выглядят
- * одинаково, пока не увидишь путь.
- *
- * Python сюда не попадает: у него отдельный виджет окружения с попапом — вторая
- * строчка про интерпретатор только повторяла бы его теми же словами.
- */
-/**
  * Конец текста в понятиях «строка и столбец» (оба с единицы) — для диапазона запросов,
  * которым серверу нужен весь документ (подсказки-вставки). Строк n, столбец — за
  * последним знаком последней строки.
@@ -4276,13 +4267,4 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 function endOfText(text: string): { line: number; column: number } {
   const lines = text.split('\n');
   return { line: lines.length, column: (lines[lines.length - 1]?.length ?? 0) + 1 };
-}
-
-function toolLabel(language: string | null, project: ProjectTools): string | null {
-  if (!language || !project.root) return null;
-  if (language === 'python') return null;
-  if (language === 'javascript' || language === 'typescript') {
-    return project.hasPackageJson ? `${project.packageManager}` : 'node';
-  }
-  return null;
 }

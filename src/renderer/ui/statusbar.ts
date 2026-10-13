@@ -12,8 +12,6 @@ export interface StatusState {
   tabSize: number;
   /** Отступ символом табуляции — так у языков вроде Makefile. */
   useTabs: boolean;
-  /** Чем запускается активный файл (`python3`, `.venv/bin/python`, `npm`). */
-  tool: string | null;
   eol: string;
   encoding: string;
   /** Ветка или null, если репозитория нет. */
@@ -77,7 +75,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     version: 0,
     tabSize: 2,
     useTabs: false,
-    tool: null,
     eol: 'LF',
     encoding: 'UTF-8',
     branch: null,
@@ -121,7 +118,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const indentItem = h('span', { class: 'status-item' });
   const languageItem = h('span', { class: 'status-item' });
   const readOnlyItem = h('span', { class: 'status-item status-readonly' });
-  const toolItem = h('span', { class: 'status-item status-tool' });
   const versionItem = h('span', { class: 'status-item status-muted' });
   // Проблемы — значок и числа: цвет различает ошибку и предупреждение, а количество
   // читается и без него. Пусто — виджет скрыт (нет проблем, нет и шума).
@@ -155,7 +151,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       encodingItem,
       indentItem,
       envItem,
-      toolItem,
       readOnlyItem,
       languageItem,
       chatSlot,
@@ -180,9 +175,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
         ? `Node-окружение: ${state.env}`
         : `Python-окружение: ${state.env}`
       : '';
-    toolItem.textContent = state.tool ?? '';
-    toolItem.hidden = !state.tool;
-    toolItem.title = state.tool ? `Запуск: ${state.tool}` : '';
     versionItem.textContent = state.version ? `v${state.version}` : '';
     const { errors, warnings } = state.problems;
     problemsItem.hidden = errors === 0 && warnings === 0;
