@@ -836,8 +836,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   const contextRing = createUsageRing(() => toggleSessionInfo());
   const aiSparkle = h('span', { class: 'status-ai', title: 'AI: готов' }, svgIcon('sparkle', 12));
-  contextRing.element.prepend(modeBadge);
-  contextRing.element.append(aiSparkle);
+  // Значок режима и искра генерации — рядом в начале кнопки, за ними кольцо.
+  contextRing.element.prepend(modeBadge, aiSparkle);
 
   /**
    * Статус ассистента живёт в общей полосе окна (статус-баре), а не в композере:
