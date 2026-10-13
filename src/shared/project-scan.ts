@@ -86,29 +86,34 @@ function fileName(target: string): string {
 
 /* ── тесты ──────────────────────────────────────────────────────────────── */
 
-/** `test_foo.py`, `foo_test.py`, `tests/*.py` — соглашения pytest и unittest. */
+/** `test_foo.py`, `foo_test.py` — соглашения pytest и unittest (по умолчанию pytest берёт по имени). */
 const PY_TEST = /^(?:test_.*|.*_test)\.py$/;
 /** `foo.test.ts`, `foo.spec.tsx` — соглашения jest и vitest. */
 const JS_TEST = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 /** Файл, который исполняется Node: `.js`, `.mjs`, `.cjs`, `.ts`, `.tsx` и родственные. */
 const JS_FILE = /\.[cm]?[jt]sx?$/;
-/** Каталог с тестами: сам факт того, что файл лежит в `tests/`, уже признак. */
+/** Каталог с тестами: признак для Node (встроенный раннер берёт из `test/` всё подряд). */
 const TEST_DIR = /(?:^|\/)(?:tests?|__tests__|spec)(?:\/|$)/;
 
 /**
- * Тестовый файл ли это. Смотрим и имя, и каталог: в pytest тест может называться
- * как угодно, если лежит под `tests/` и собирается правилом из конфига, — но
- * без разбора конфига безопаснее узнавать по имени и по папке тестов.
+ * Тестовый файл ли это. У Python решает имя, у Node к имени добавляется каталог:
+ * правила у раннеров разные, и одно общее правило ошибалось бы в обе стороны.
  */
 export function isTestFile(relativePath: string): boolean {
   return isPythonTestFile(relativePath) || isNodeTestFile(relativePath);
 }
 
-/** Тестовый файл Python: по имени (`test_foo.py`) или по каталогу тестов. */
+/**
+ * Тестовый файл Python — только по имени (`test_foo.py`, `foo_test.py`).
+ *
+ * Каталог признаком не считаем: pytest по умолчанию собирает по имени, а в
+ * `tests/` рядом с тестами лежат `conftest.py`, хелперы и фикстуры. Пометив их
+ * тестами, мы обещали бы список, которого pytest не даёт: в меню запуска
+ * появился бы `tests/helpers.py` (и прогон по нему собрал бы ноль тестов), а
+ * ассистент увидел бы в карте проекта тесты, которых нет.
+ */
 export function isPythonTestFile(relativePath: string): boolean {
-  const name = fileName(relativePath);
-  if (!name.endsWith('.py')) return false;
-  return PY_TEST.test(name) || TEST_DIR.test(relativePath);
+  return PY_TEST.test(fileName(relativePath));
 }
 
 /**

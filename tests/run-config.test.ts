@@ -95,9 +95,11 @@ describe('pytestRunTargets', () => {
   });
 
   it('путь с пробелом экранируется в команде', () => {
-    const scan = scanOf(['pyproject.toml', 'tests/test a.py']);
-    const target = pytestRunTargets(tools, scan, null).find((item) => item.id === 'pytest:tests/test a.py');
-    expect(target?.command).toBe("./.venv/bin/python -m pytest 'tests/test a.py'");
+    // Пробел — в каталоге: имя файла остаётся тестовым. Файл `test a.py` pytest
+    // по умолчанию не собирает, и проверяли бы мы не экранирование, а его отсутствие.
+    const scan = scanOf(['pyproject.toml', 'my tests/test_one.py']);
+    const target = pytestRunTargets(tools, scan, null).find((item) => item.id === 'pytest:my tests/test_one.py');
+    expect(target?.command).toBe("./.venv/bin/python -m pytest 'my tests/test_one.py'");
   });
 });
 

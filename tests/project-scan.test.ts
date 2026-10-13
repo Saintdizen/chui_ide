@@ -42,8 +42,11 @@ describe('isTestFile', () => {
     expect(isTestFile('src/chat.ts')).toBe(false);
   });
 
-  it('каталог тестов — уже признак', () => {
-    expect(isTestFile('tests/helper.py')).toBe(true);
+  it('каталог тестов — признак для Node, но не для Python', () => {
+    // pytest собирает по имени, а в `tests/` рядом лежат `conftest.py` и хелперы:
+    // пометив их тестами, меню запуска предложило бы файл, где тестов нет.
+    expect(isTestFile('tests/helper.py')).toBe(false);
+    expect(isTestFile('tests/test_main.py')).toBe(true);
     expect(isTestFile('src/__tests__/util.js')).toBe(true);
     expect(isTestFile('src/helper.py')).toBe(false);
   });
