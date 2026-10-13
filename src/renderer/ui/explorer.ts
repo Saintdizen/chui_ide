@@ -522,8 +522,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     render();
   }
 
-  const renderRow = (entry: DirEntry, depth: number, dir: string): HTMLElement | null => {
+  const renderRow = (
+    entry: DirEntry,
+    depth: number,
+    dir: string,
+    flags: { nested: boolean; deleted: boolean } = { nested: false, deleted: false },
+  ): HTMLElement | null => {
     const isDirectory = entry.kind === 'directory';
+    const isDeleted = flags.deleted;
     const isExpanded = expanded.has(entry.path);
     const isActive = deps.openEditors.active?.path === entry.path;
     const isSelected = selection.paths.includes(entry.path);
@@ -535,11 +541,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const classes = ['tree-row'];
     if (isActive) classes.push('is-active');
     if (isSelected) classes.push('is-selected');
+    if (flags.nested) classes.push('is-nested');
+    // Удалённый файл: строки на диске нет, но правка есть — помечаем зачёркнутым.
+    if (isDeleted) classes.push('is-deleted');
     // Дети только что раскрытой папки въезжают вниз, из-под родителя.
     if (dir === revealChildrenOf) classes.push('is-entering');
 
     // Пометка git из дерева не ходит в репозиторий: модель уже разложила статус по путям.
-    const gitChange = deps.git.statusOf(entry.path)?.change;
+    const gitChange = isDeleted ? ('deleted' as GitChange) : deps.git.statusOf(entry.path)?.change;
     // Несохранённый документ git ещё не видит, но правка уже есть.
     const unsaved = !isDirectory && gitChange === undefined && isDirty(entry.path);
     const change = gitChange ?? (unsaved ? 'modified' : undefined);
@@ -548,13 +557,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // У папки правок быть не может, но внутри — сколько угодно: без пометки
     // свёрнутая папка выглядит чистой, хотя это не так. Класс на строке красит
     // и имя папки — весь путь к правке выделяется, а не только сам файл.
-    const inside = isDirectory ? folderInside(entry.path) : null;
+    const inside = !isDeleted && isDirectory ? folderInside(entry.path) : null;
     if (inside) classes.push(`is-${inside.change}`);
     // Игнорируемое git — приглушаем: файл видно и можно открыть, но он не мешает.
-    const isIgnored = options.dimIgnored && ignored.has(entry.path);
+    const isIgnored = !isDeleted && options.dimIgnored && ignored.has(entry.path);
     if (isIgnored) classes.push('is-ignored');
     // Папка-подмодуль: это отдельный репозиторий, а не обычная папка проекта.
-    const submodule = isDirectory ? submodules.get(entry.path) : undefined;
+    const submodule = !isDeleted && isDirectory ? submodules.get(entry.path) : undefined;
     if (submodule) classes.push('is-submodule');
     const insideTitle = inside ? `Правок внутри: ${inside.count}` : undefined;
 
@@ -564,11 +573,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         class: classes.join(' '),
         type: 'button',
         draggable: 'true',
-        title: change
-          ? `${entry.path} — ${unsaved ? 'не сохранён' : CHANGE_TITLE[change]}`
-          : insideTitle
-            ? `${entry.path} — ${insideTitle}`
-            : entry.path,
+        title: isDeleted
+          ? `${entry.path} — удалён, но ещё не закоммичен`
+          : change
+            ? `${entry.path} — ${unsaved ? 'не сохранён' : CHANGE_TITLE[change]}`
+            : insideTitle
+              ? `${entry.path} — ${insideTitle}`
+              : entry.path,
         dataset: { path: entry.path },
         style: { paddingLeft: `${8 + depth * options.indent}px` },
       },
@@ -581,7 +592,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           : fileIcon(entry.name)
         : svgIcon(isDirectory ? 'folder' : 'file', 15),
       h('span', { class: 'tree-name' }, entry.name),
-      gitChange && options.gitDecorations
+      gitChange && (isDeleted || options.gitDecorations)
         ? h('span', { class: `tree-badge is-${gitChange}`, title: CHANGE_TITLE[gitChange] }, CHANGE_LETTER[gitChange])
         : null,
       unsaved && options.gitDecorations ? h('span', { class: 'tree-dot is-modified', title: 'не сохранён' }) : null,
@@ -596,6 +607,34 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle })
         : null,
     );
+
+    if (isDeleted) {
+      // Удалённый файл только показываем: на диске его нет, и операции над ним
+      // (открыть, перенести, удалить) бессмысленны. Мышь ведёт к различию —
+      // там и видно, что именно исчезло.
+      row.addEventListener('click', () => void deps.commands.execute('git.showDiff', entry.path, false));
+      row.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showContextMenu(
+          [
+            {
+              label: 'Показать различия',
+              onSelect: () => void deps.commands.execute('git.showDiff', entry.path, false),
+            },
+            {
+              label: 'Копировать путь',
+              onSelect: () => {
+                void navigator.clipboard.writeText(entry.path).catch(() => undefined);
+              },
+            },
+          ],
+          event.clientX,
+          event.clientY,
+        );
+      });
+      return row;
+    }
 
     row.addEventListener('click', (event) => {
       // Ctrl/Cmd — точечно (добавить или снять), Shift — диапазон от якоря,
@@ -659,7 +698,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    * по нему считаем окно (виртуализация) и работает выделение диапазоном.
    */
   type FlatRow =
-    | { kind: 'entry'; entry: DirEntry; depth: number; dir: string; nested: boolean }
+    | { kind: 'entry'; entry: DirEntry; depth: number; dir: string; nested: boolean; deleted: boolean }
     | { kind: 'root'; root: WorkspaceRoot; active: boolean; collapsed: boolean }
     | { kind: 'create'; parent: string; depth: number }
     | { kind: 'loading'; dir: string };
@@ -703,14 +742,27 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
       for (const entry of list) {
         if (nest?.hidden.has(entry.name)) continue;
-        rows.push({ kind: 'entry', entry, depth, dir, nested: false });
+        rows.push({ kind: 'entry', entry, depth, dir, nested: false, deleted: false });
         for (const name of nest?.children.get(entry.name) ?? []) {
           const child = list.find((item) => item.name === name);
           // Класс `is-nested` — метка спутника: по ней видно вложение, и на неё
           // смотрит проба (строка в дереве есть, но отдельной не считается).
-          if (child) rows.push({ kind: 'entry', entry: child, depth: depth + 1, dir, nested: true });
+          if (child) rows.push({ kind: 'entry', entry: child, depth: depth + 1, dir, nested: true, deleted: false });
         }
         if (entry.kind === 'directory' && expanded.has(entry.path)) pushDir(entry.path, depth + 1);
+      }
+
+      // Удалённые, но не закоммиченные файлы: на диске их нет, поэтому в списке
+      // папки они не придут — собираем строку сами, чтобы правка была видна.
+      for (const gone of deps.git.deletedIn(dir)) {
+        rows.push({
+          kind: 'entry',
+          entry: { name: nameOf(gone.path), path: gone.path, kind: 'file', size: 0 },
+          depth,
+          dir,
+          nested: false,
+          deleted: true,
+        });
       }
     };
 
@@ -738,9 +790,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       if (edit?.kind !== 'create') return null;
       return inlineInput(row.depth, '', (value) => void commitCreate(edit, value));
     }
-    const element = renderRow(row.entry, row.depth, row.dir);
-    if (element && row.nested) element.classList.add('is-nested');
-    return element;
+    return renderRow(row.entry, row.depth, row.dir, { nested: row.nested, deleted: row.deleted });
   };
 
   /** Распорка высотой скрытых строк: она и держит честную длину прокрутки. */
@@ -1040,7 +1090,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // Плоский список видимых строк: по нему считаем окно и обходим выделение.
     flatRows = buildFlat(info);
     visibleNow = [];
-    for (const row of flatRows) if (row.kind === 'entry') visibleNow.push(row.entry.path);
+    // Удалённые строки в порядок выделения не берём: файла на диске нет, и массовая
+    // операция над ним (Shift-диапазон) споткнулась бы о несуществующий путь.
+    for (const row of flatRows) if (row.kind === 'entry' && !row.deleted) visibleNow.push(row.entry.path);
     renderWindow();
     // Прокрутку возвращаем ПОСЛЕ раскладки распорок: до неё высота списка нулевая,
     // и браузер обрезал бы `scrollTop` до нуля. Затем рисуем окно уже на месте.

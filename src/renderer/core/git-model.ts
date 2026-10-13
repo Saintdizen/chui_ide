@@ -30,6 +30,7 @@ import type { ForgeInfo } from '../../shared/git-platform';
 import type { GitRootSummary } from '../../shared/git-multiroot';
 import { Emitter } from './events';
 import { separatorOf } from '../../shared/paths';
+import { deletedInFolder } from '../../shared/git-deleted';
 import type { RpcClient } from './rpc';
 import type { WorkspaceModel } from './workspace-model';
 
@@ -156,6 +157,15 @@ export class GitModel {
 
   statusOf(path: string): GitFileStatus | undefined {
     return this.byPath.get(path);
+  }
+
+  /**
+   * Удалённые, но ещё не закоммиченные файлы, лежащие прямо в папке. В дереве их
+   * иначе не видно: оно читает диск, а файла там уже нет — хотя правка (удаление)
+   * есть, и о ней стоит знать. Пути здесь абсолютные, как и везде в дереве.
+   */
+  deletedIn(dir: string): GitFileStatus[] {
+    return deletedInFolder(this.snapshot.files, dir);
   }
 
   /**
