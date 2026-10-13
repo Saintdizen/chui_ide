@@ -265,6 +265,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('workspace.rename', async (params) => ({
     path: await deps.workspace.rename(params.from, params.to),
   }));
+  router.register('workspace.copy', async (params) => ({ path: await deps.workspace.copy(params.from, params.to) }));
   router.register('workspace.trash', (params) => deps.workspace.trash(params.path));
 
   // Открытие рабочей папки меняет состояние репозитория целиком, поэтому
@@ -607,6 +608,21 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     if (!/^https?:\/\//i.test(url)) return { ok: false };
     await shell.openExternal(url).catch(() => undefined);
     return { ok: true };
+  });
+
+  // Показать объект в проводнике системы и открыть файл программой по умолчанию:
+  // работа с файлами продолжается и за пределами окна IDE.
+  router.register('shell.revealInOS', (params) => {
+    const target = String(params.path ?? '');
+    if (!target) return { ok: false };
+    shell.showItemInFolder(target);
+    return { ok: true };
+  });
+  router.register('shell.openPath', async (params) => {
+    const target = String(params.path ?? '');
+    if (!target) return { ok: false };
+    // openPath отвечает строкой ошибки: пусто — файл открылся.
+    return { ok: (await shell.openPath(target).catch(() => 'ошибка')) === '' };
   });
 
   router.register('settings.get', () => deps.settings.get());

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { movePlan } from '../src/renderer/core/tree-move';
+import { copyPlan, movePlan } from '../src/renderer/core/tree-move';
 
 /**
  * План переноса в целевую папку. Разбор путей — на разделителе системы, поэтому
@@ -42,5 +42,21 @@ describe('movePlan', () => {
       { from: '/p/src', to: '/p/lib/src' },
       { from: '/p/src2', to: '/p/lib/src2' },
     ]);
+  });
+});
+
+/**
+ * Копирование считает шаги теми же правилами: копия в ту же папку или внутрь себя
+ * так же бессмысленна, а вложенный путь не копируется отдельно от предка —
+ * иначе он попал бы в цель дважды.
+ */
+describe('copyPlan', () => {
+  it('даёт те же шаги, что перенос', () => {
+    expect(copyPlan(['/p/src/a.ts', '/p/b.ts'], '/p/lib')).toEqual(movePlan(['/p/src/a.ts', '/p/b.ts'], '/p/lib'));
+  });
+
+  it('не копирует файл в его же папку и папку внутрь себя', () => {
+    expect(copyPlan(['/p/lib/a.ts'], '/p/lib')).toEqual([]);
+    expect(copyPlan(['/p/src'], '/p/src')).toEqual([]);
   });
 });

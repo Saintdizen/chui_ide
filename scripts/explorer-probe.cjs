@@ -94,6 +94,42 @@ app.whenReady().then(async () => {
   await wait(300);
   console.log(`[explorer] выделено после снятия: ${JSON.stringify(await selected())}`);
 
+  // Открытие вне IDE: меню предлагает системный проводник, внешнюю программу и
+  // терминал в папке. Терминал проверяем по рабочему каталогу созданной сессии.
+  await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'src',
+      );
+      if (!row) return 'нет строки src';
+      const rect = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + 40, clientY: rect.top + 8 }));
+      return 'ok';
+    })()`,
+  );
+  await wait(600);
+  const menu = await ask(
+    ide,
+    `[...document.querySelectorAll('.context-menu .context-item')].map((node) => node.textContent.trim())`,
+  );
+  console.log(`[explorer] пункты меню: ${JSON.stringify(menu)}`);
+
+  await ask(
+    ide,
+    `(async () => {
+      const item = [...document.querySelectorAll('.context-menu .context-item')].find((node) =>
+        (node.textContent ?? '').includes('Открыть терминал в папке'),
+      );
+      if (!item) return 'пункта нет';
+      item.click();
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return 'нажато';
+    })()`,
+  );
+  await wait(1800);
+  console.log(`[explorer] сессии терминала: ${JSON.stringify(terminals.list().map((item) => item.cwd))}`);
+
   // Перенос: тащим `note.txt` (уже выделен) на папку `src`.
   const dragged = await ask(
     ide,
@@ -134,6 +170,39 @@ app.whenReady().then(async () => {
   );
   await wait(1500);
   console.log(`[explorer] README.md в lib: ${await exists(path.join(project, 'lib', 'README.md'))}`);
+
+  // Ctrl-протяжка — копирование: файл появляется в цели И остаётся на месте.
+  // Папку src сперва раскрываем: её файл не нарисован, пока она свёрнута.
+  await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'src',
+      );
+      row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      return Boolean(row);
+    })()`,
+  );
+  await wait(900);
+  await ask(
+    ide,
+    `(() => {
+      const rows = [...document.querySelectorAll('.tree-row')];
+      const from = rows.find((item) => item.querySelector('.tree-name')?.textContent === 'a.ts');
+      const to = rows.find((item) => item.querySelector('.tree-name')?.textContent === 'lib');
+      if (!from || !to) return 'нет строк';
+      from.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      from.dispatchEvent(new DragEvent('dragstart', { bubbles: true }));
+      to.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, ctrlKey: true }));
+      to.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, ctrlKey: true }));
+      return 'ok';
+    })()`,
+  );
+  await wait(1500);
+  console.log(
+    `[explorer] a.ts скопирован в lib: ${await exists(path.join(project, 'lib', 'a.ts'))}; ` +
+      `остался в src: ${await exists(path.join(project, 'src', 'a.ts'))}`,
+  );
 
   const finalTree = await ask(
     ide,

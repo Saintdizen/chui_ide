@@ -145,6 +145,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let selection: TreeSelection = EMPTY_SELECTION;
   /** Пути текущего перетаскивания: их и переносим при сбросе на папку. */
   let dragging: string[] = [];
+  /** Ctrl (на macOS — Alt) во время протяжки: не перенос, а копирование. */
+  const copyDrag = (event: DragEvent): boolean => event.ctrlKey || event.altKey;
   let root: string | null = null;
   let options: ExplorerSettings = FALLBACK_SETTINGS;
   /** Свёрнутые КОРНИ рабочей области (только когда их несколько). */
@@ -318,6 +320,22 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
               void navigator.clipboard.writeText(effective.join('\n')).catch(() => undefined);
             },
           },
+          { separator: true as const },
+          // Открытие вне IDE: файл — программой системы, папка — в системном
+          // проводнике, а терминал поднимается в той папке, где лежит выбранное.
+          {
+            label: 'Открыть в системном проводнике',
+            onSelect: () => void deps.commands.execute('file.revealInOS', entry.path),
+          },
+          {
+            label: entry.kind === 'directory' ? 'Открыть папку внешней программой' : 'Открыть внешней программой',
+            onSelect: () => void deps.commands.execute('file.openExternal', entry.path),
+          },
+          {
+            label: 'Открыть терминал в папке',
+            onSelect: () => void deps.commands.execute('terminal.openIn', parent),
+          },
+          { separator: true as const },
           {
             label: 'Добавить в .gitignore',
             onSelect: () => void deps.commands.execute('git.ignore', entry.path),
@@ -527,7 +545,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         if (dragging.length === 0 || movePlan(dragging, dropDir).length === 0) return;
         event.preventDefault();
         event.stopPropagation();
-        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        if (event.dataTransfer) event.dataTransfer.dropEffect = copyDrag(event) ? 'copy' : 'move';
         row.classList.add('is-drop-target');
       });
       row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
@@ -537,7 +555,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         row.classList.remove('is-drop-target');
         const moving = dragging;
         dragging = [];
-        if (moving.length > 0) void deps.commands.execute('file.moveInto', moving, dropDir);
+        if (moving.length === 0) return;
+        void deps.commands.execute(copyDrag(event) ? 'file.copyInto' : 'file.moveInto', moving, dropDir);
       });
       container.appendChild(row);
       visibleNow.push(entry.path);
@@ -826,7 +845,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       if (!root || dragging.length === 0 || event.target !== tree) return;
       if (movePlan(dragging, root).length === 0) return;
       event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      if (event.dataTransfer) event.dataTransfer.dropEffect = copyDrag(event) ? 'copy' : 'move';
     });
     tree.addEventListener('drop', (event) => {
       const root = deps.workspace.root;
@@ -835,7 +854,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       const moving = dragging;
       dragging = [];
       if (moving.length > 0 && movePlan(moving, root).length > 0) {
-        void deps.commands.execute('file.moveInto', moving, root);
+        void deps.commands.execute(copyDrag(event) ? 'file.copyInto' : 'file.moveInto', moving, root);
       }
     });
     element.appendChild(tree);

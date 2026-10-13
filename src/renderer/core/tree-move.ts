@@ -24,6 +24,18 @@ export interface MoveStep {
  *     отдельный шаг споткнулся бы о уже несуществующий старый путь.
  */
 export function movePlan(paths: readonly string[], targetDir: string): MoveStep[] {
+  return planInto(paths, targetDir);
+}
+
+/**
+ * План копирования: шаги те же, что у переноса, — отсеиваются те же бессмысленные
+ * случаи (в ту же папку, внутрь себя, вложенное при едущем предке).
+ */
+export function copyPlan(paths: readonly string[], targetDir: string): MoveStep[] {
+  return planInto(paths, targetDir);
+}
+
+function planInto(paths: readonly string[], targetDir: string): MoveStep[] {
   const steps: MoveStep[] = [];
   for (const from of paths) {
     const to = joinPath(targetDir, nameOf(from));

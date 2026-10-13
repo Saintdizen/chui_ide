@@ -9,9 +9,13 @@ import { showToast } from './toast';
 
 export interface TerminalPanelView {
   element: HTMLElement;
-  /** Открыть панель: создаёт сессию, если её ещё нет. */
-  open(): Promise<void>;
-  newSession(): Promise<void>;
+  /**
+   * Открыть панель. `cwd` — папка новой сессии; без неё берётся корень области.
+   * Уже открытая панель вторую сессию не плодит: `cwd` относится к созданию.
+   */
+  open(cwd?: string): Promise<void>;
+  /** Новая сессия, при желании — в названной папке. */
+  newSession(cwd?: string): Promise<void>;
   /**
    * Выполнить готовую команду в новой сессии.
    * Команда набирается в терминале, а не запускается «в фоне»: человек должен
@@ -112,16 +116,16 @@ export function createTerminalPanel(deps: {
   });
 
   /** Создать сессию и вернуть её id — он нужен, чтобы сразу отправить команду. */
-  function createSession(): Promise<string | null> {
+  function createSession(cwd?: string): Promise<string | null> {
     if (creating) return creating;
-    const task = openSession().finally(() => {
+    const task = openSession(cwd).finally(() => {
       creating = null;
     });
     creating = task;
     return task;
   }
 
-  async function openSession(): Promise<string | null> {
+  async function openSession(cwd?: string): Promise<string | null> {
     const container = h('div', { class: 'term-instance' });
     body.appendChild(container);
 
@@ -142,7 +146,7 @@ export function createTerminalPanel(deps: {
       const session = await deps.rpc.request('terminal.create', {
         cols: Math.max(terminal.cols, 20),
         rows: Math.max(terminal.rows, 5),
-        cwd: deps.cwd() ?? undefined,
+        cwd: cwd ?? deps.cwd() ?? undefined,
       });
 
       const tab = h(
@@ -251,15 +255,15 @@ export function createTerminalPanel(deps: {
 
   return {
     element,
-    async open() {
-      if (sessions.size === 0) await createSession();
+    async open(cwd) {
+      if (sessions.size === 0) await createSession(cwd);
       else {
         const view = active();
         if (view) fitSession(view);
       }
     },
-    newSession: async () => {
-      await createSession();
+    newSession: async (cwd) => {
+      await createSession(cwd);
     },
     async run(command, title) {
       // Команда идёт в уже открытую оболочку, а не в новую вкладку: вкладка

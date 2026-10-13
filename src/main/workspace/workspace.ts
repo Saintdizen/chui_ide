@@ -373,6 +373,26 @@ export class WorkspaceService {
     return target;
   }
 
+  /**
+   * Копия файла или папки в новое место. Существующий объект не перетираем — как и
+   * при переименовании: молча затереть чужой файл дороже, чем показать отказ.
+   */
+  async copy(from: string, to: string): Promise<string> {
+    const source = await this.safePath(from);
+    const target = await this.safePath(to);
+    const existing = await fs.stat(target).catch(() => null);
+    if (existing) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `Уже существует: ${path.basename(target)}`);
+    }
+    // `force: false` и `errorOnExist` гасят перезапись: копия не должна стирать то,
+    // что уже лежит в целевой папке.
+    await fs.cp(source, target, { recursive: true, force: false, errorOnExist: true });
+    this.contents.invalidate(target);
+    this.notifyChanged(target);
+    this.notifyChanged(path.dirname(target));
+    return target;
+  }
+
   /** Удаление только в корзину: безвозвратное rm из IDE — слишком дорогая ошибка. */
   async trash(target: string): Promise<void> {
     const resolved = await this.safePath(target);

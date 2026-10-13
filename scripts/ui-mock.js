@@ -598,6 +598,12 @@ module.exports = [
       addChild(params.to);
       return { path: params.to };
     },
+    'workspace.copy': (params) => {
+      const text = FILES.get(params.from);
+      if (text !== undefined) FILES.set(params.to, text);
+      addChild(params.to);
+      return { path: params.to };
+    },
     'workspace.trash': (params) => {
       FILES.delete(params.path);
       for (const key of [...DIRS.keys()]) {
@@ -631,6 +637,8 @@ module.exports = [
       sessions.delete(params.id);
       push('terminal:exit', { id: params.id, exitCode: 0 });
     },
+    'shell.revealInOS': () => ({ ok: true }),
+    'shell.openPath': () => ({ ok: true }),
     'window.getState': () => ({ maximized: false, fullScreen: false, platform: 'linux', customControls: true }),
     'window.minimize': () => undefined,
     'window.toggleMaximize': () => {

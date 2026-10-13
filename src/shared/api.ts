@@ -1480,6 +1480,8 @@ export interface ChuiMethods {
   'workspace.createFile': { params: { path: string }; result: { path: string } };
   'workspace.createDir': { params: { path: string }; result: { path: string } };
   'workspace.rename': { params: { from: string; to: string }; result: { path: string } };
+  /** Копия файла или папки: существующий объект в цели не перетирается. */
+  'workspace.copy': { params: { from: string; to: string }; result: { path: string } };
   'workspace.trash': { params: { path: string }; result: void };
   /**
    * Карта проекта: языки, манифесты, тесты и точки входа. Собирается обходом
@@ -1673,6 +1675,10 @@ export interface ChuiMethods {
   'git.forgeCheckout': { params: { number: number }; result: GitStatus };
   /** Открыть ссылку в браузере системы (страницы площадки и запросов). */
   'shell.openExternal': { params: { url: string }; result: { ok: boolean } };
+  /** Показать файл или папку в проводнике системы (выделить объект). */
+  'shell.revealInOS': { params: { path: string }; result: { ok: boolean } };
+  /** Открыть файл программой системы: внешний редактор, просмотрщик, что настроено. */
+  'shell.openPath': { params: { path: string }; result: { ok: boolean } };
 
   /* Личность автора, подпись коммитов и ключи: настройки git, а не IDE. */
   /** Действующие имя, почта, подпись и хранилище паролей. */

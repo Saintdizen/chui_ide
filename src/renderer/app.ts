@@ -64,7 +64,7 @@ import { decideSaveAs } from '../shared/save-as';
 import { isEmptyCommitMessage } from '../shared/commit-message';
 import { hunkAtLine } from '../shared/hunk-lines';
 import { joinPath, separatorOf, splitPath } from '../shared/paths';
-import { movePlan } from './core/tree-move';
+import { copyPlan, movePlan } from './core/tree-move';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
@@ -2115,6 +2115,67 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         },
       },
     );
+  });
+
+  define({ id: 'file.copyInto', title: 'Скопировать в папку', category: 'Файл' }, async (paths, targetDir) => {
+    if (!Array.isArray(paths) || typeof targetDir !== 'string') return;
+    const list = paths.filter((item): item is string => typeof item === 'string');
+    const steps = copyPlan(list, targetDir);
+    if (steps.length === 0) return;
+
+    const copied: string[] = [];
+    for (const step of steps) {
+      try {
+        const result = await rpc.request('workspace.copy', { from: step.from, to: step.to });
+        copied.push(result.path);
+      } catch {
+        // Имя в целевой папке занято — копию пропускаем, остальные делаем.
+      }
+    }
+
+    explorer.scheduleRefresh();
+    if (copied.length === 0) {
+      showToast('Скопировать не удалось: в целевой папке уже есть такое имя', 'error');
+      return;
+    }
+    showToast(
+      copied.length === 1
+        ? `Скопировано: ${basename(copied[0]!)}`
+        : `Скопировано: ${copied.length} ${objectsWord(copied.length)}`,
+      'info',
+      {
+        action: {
+          label: 'Отменить',
+          run: async () => {
+            // Отмена копии — вернуть её в корзину: исходный объект мы не трогали.
+            for (const path of copied) await rpc.request('workspace.trash', { path }).catch(() => undefined);
+            explorer.scheduleRefresh();
+          },
+        },
+      },
+    );
+  });
+
+  define({ id: 'file.revealInOS', title: 'Показать в системном проводнике', category: 'Файл' }, async (path) => {
+    if (typeof path !== 'string') return;
+    const { ok } = await rpc.request('shell.revealInOS', { path });
+    if (!ok) showToast('Не удалось показать в проводнике системы', 'error');
+  });
+
+  define({ id: 'file.openExternal', title: 'Открыть внешней программой', category: 'Файл' }, async (path) => {
+    if (typeof path !== 'string') return;
+    const { ok } = await rpc.request('shell.openPath', { path });
+    if (!ok) showToast('Система не нашла, чем открыть файл', 'error');
+  });
+
+  // Терминал поднимается в нужной папке: у открытого файла — рядом с ним, у папки —
+  // в ней самой. Сессию создаём ДО показа дока: показ сам открывает терминал, и та
+  // сессия ушла бы в корень области — наш каталог потерялся бы (гонка `creating`).
+  define({ id: 'terminal.openIn', title: 'Терминал в папке', category: 'Терминал' }, async (target) => {
+    const path = typeof target === 'string' && target !== '' ? target : workspace.root;
+    if (!path) return;
+    await terminalPanel.newSession(path);
+    dock.show('terminal');
   });
 
   define({ id: 'file.revealAt', title: 'Перейти к позиции', category: 'Навигация' }, async (path, line, column) => {
