@@ -251,7 +251,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Макет восстановлен из userData ещё до открытия проекта: панели сразу на месте.
   applyLayoutSettings(baseSettings.layout);
   const info = await rpc.request('app.info');
-  console.info(`[chui] Electron ${info.electron} · Chromium ${info.chrome} · Node ${info.node} · ${info.platform}`);
+  // Версию приложения печатаем при старте: по ней видно, на чём воспроизводят проблему.
+  console.info(
+    `[chui] v${info.appVersion} · Electron ${info.electron} · Chromium ${info.chrome}`,
+    `· Node ${info.node} · ${info.platform}`,
+  );
 
   // Тема: main — источник истины, сервис знает и выбор пользователя, и фактическую схему.
   const theme = new ThemeService(rpc, settings.appearance.theme, settings.appearance.customTheme ?? null);

@@ -1648,11 +1648,33 @@ renderer и запускает smoke правок с не-ASCII. Те же пр�
 
 Автоматическая сборка — `.github/workflows/release.yml`. Матрица из трёх платформ,
 каждая собирается на своей системе (кросс-сборки Electron нет): `ubuntu-latest` — AppImage и deb,
-`windows-latest` — NSIS, `macos-latest` — dmg. Шаги: `npm ci` → `npm run typecheck` → `npm run build`
+`windows-latest` — NSIS, `macos-latest` — dmg. Шаги: `npm ci` → `npm run check` (типы, формат, линт, тесты) → `npm run build`
 → `electron-rebuild -w node-pty` → `electron-builder <цель> --publish never` → выгрузка артефактов.
 Запуск — по тегу `v*` или вручную; публикация в релиз идёт отдельной задачей только для тега,
 релиз создаётся черновиком. macOS-сборка не подписывается (`identity: null`): для подписи
 нужны сертификат и секреты репозитория, и это осознанно оставлено на стороне проекта.
+
+### Версии и релизы
+
+Версия живёт в одном месте — `version` в `package.json` (та же строка в `package-lock.json`):
+её отдаёт `app.info` (`app.getVersion()` в `main/ipc/register.ts`), она же попадает в имя файла
+дистрибутива (`artifactName` в `electron-builder.yml`). В интерфейсе её пока не видно, поэтому
+при старте она печатается в консоль (`v0.0.11 · Electron … · Chromium … · Node … · платформа`) —
+версию можно спросить у человека, не заглядывая в `package.json`.
+
+Отдельного `CHANGELOG.md` нет намеренно: примечания к релизу GitHub собирает из коммитов
+(`generate_release_notes`), а второй список изменений рядом с историей git разошёлся бы с ней.
+
+Выпуск версии — коммит с номером и тег на нём (так вышли `0.0.9` и `0.0.10`):
+
+```bash
+npm version 0.0.11 --no-git-tag-version   # правит version и в package.json, и в замке
+npm run check && npm run test:coverage    # тег ставится только на зелёном прогоне
+git commit -am "0.0.11" && git tag v0.0.11
+```
+
+По тегу `v*` сборку запускает `release.yml`, а релиз на GitHub создаётся черновиком.
+Пока проект до 1.0, номер растёт третьей цифрой.
 
 ## Как это устроено
 
@@ -2098,4 +2120,5 @@ __chui.theme.set('light');            // 'dark' | 'light' | 'system'
 __chui.edits.applyFileEdits([...]);   // тот же путь, которым будет пользоваться ассистент
 __chui.terminalPanel;                 // панель терминала
 __chui.rpc.request('workspace.search', { query: 'TODO' });
+__chui.rpc.request('app.info');       // версия приложения, Electron, Chromium, Node, платформа
 ```
