@@ -11,6 +11,7 @@ export const MAX_TABS = 40;
 /** Потолок корней рабочей области: десятка папок в одном окне хватает с запасом. */
 export const MAX_ROOTS = 10;
 export const MAX_EXPANDED = 400;
+export const MAX_PINNED = 40;
 export const MAX_ARGS = 100;
 export const MAX_WATCH = 50;
 export const MAX_BREAKPOINTS = 500;
@@ -48,12 +49,15 @@ export function sanitizeSession(raw: unknown): SessionState {
 
   const tabs = stringList(value.tabs, MAX_TABS);
   const expanded = stringList(value.expanded, MAX_EXPANDED);
+  const pinned = stringList(value.pinned, MAX_PINNED);
   // Видимость панелей в сессию не входит: это часть общего макета (userData),
   // одного на все проекты, а не рабочего места конкретной папки.
   const state: SessionState = {
     tabs,
     expanded,
   };
+  // Закрепление не пишем пустым: поля-пустышки в файле незачем.
+  if (pinned.length > 0) state.pinned = pinned;
 
   // Корни рабочей области: если их больше одного, область была из нескольких папок.
   // Один корень не пишем — это обычный проект, и дублировать его в файле незачем.

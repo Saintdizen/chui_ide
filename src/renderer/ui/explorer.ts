@@ -10,6 +10,7 @@ import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { pairFromSelection } from '../core/file-compare';
 import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
+import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
 import { movePlan } from '../core/tree-move';
 import {
   clickSelection,
@@ -58,6 +59,11 @@ export interface ExplorerView {
   restoreExpanded(paths: readonly string[]): void;
   /** Вид и поведение дерева: значки, сортировка, фильтры, клик. */
   applySettings(settings: ExplorerSettings): void;
+  /** Закреплённые файлы и папки — блоком сверху; хранятся в сессии проекта. */
+  pinnedPaths(): string[];
+  restorePinned(paths: readonly string[]): void;
+  /** Закрепить или открепить путь (пункт меню дерева). */
+  togglePin(path: string): void;
 }
 
 /**
@@ -89,6 +95,8 @@ export interface ExplorerDeps {
   git: GitModel;
   /** Документы: по ним видно несохранённые правки — git их ещё не знает. */
   documents: DocumentStore;
+  /** Закрепление изменилось — рабочее место стоит сохранить (см. сессию). */
+  onPinsChange?: () => void;
 }
 
 /**
@@ -145,6 +153,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
   };
   let selected: string | null = null;
+  /** Закреплённые пути (блок «Закреплённые» сверху); порядок закрепления сохраняем. */
+  let pinned: string[] = [];
   /** Выделенные строки (Ctrl/Shift) и якорь диапазона; порядок — как в дереве. */
   let selection: TreeSelection = EMPTY_SELECTION;
   /** Пути текущего перетаскивания: их и переносим при сбросе на папку. */
@@ -155,6 +165,67 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let options: ExplorerSettings = FALLBACK_SETTINGS;
   /** Свёрнутые КОРНИ рабочей области (только когда их несколько). */
   const collapsedRoots = new Set<string>();
+
+  /** Закрепить или открепить путь и попросить сохранить рабочее место. */
+  const setPinned = (path: string): void => {
+    pinned = togglePin(pinned, path);
+    deps.onPinsChange?.();
+    render();
+  };
+
+  /**
+   * Блок закреплённых сверху. Путь может лежать глубоко и его папка быть свёрнутой —
+   * поэтому строка рисуется прямо по пути, без похода в дерево. Удалённый файл не
+   * выкидываем молча: клик по нему скажет, что файла нет.
+   */
+  const pinnedBlock = (): HTMLElement => {
+    const header = h('div', { class: 'tree-pins-head' }, svgIcon('pin', 12), h('span', {}, 'Закреплённые'));
+    const rows = pinned.map((path) => {
+      const entry = findEntry(path);
+      const isDirectory = entry?.kind === 'directory';
+      const row = h(
+        'div',
+        { class: 'tree-row is-pinned', title: path, dataset: { path } },
+        h('span', { class: 'tree-twisty' }),
+        options.icons ? (isDirectory ? folderIcon(nameOf(path), true) : fileIcon(nameOf(path))) : svgIcon('file', 15),
+        h('span', { class: 'tree-name' }, nameOf(path)),
+        h(
+          'button',
+          {
+            class: 'icon-btn tree-unpin',
+            type: 'button',
+            title: 'Открепить',
+            onClick: (event: Event) => {
+              event.stopPropagation();
+              setPinned(path);
+            },
+          },
+          svgIcon('close', 12),
+        ),
+      );
+      row.addEventListener('click', () => {
+        if (isDirectory) reveal(path);
+        else void deps.commands.execute('file.open', path);
+      });
+      row.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showContextMenu(
+          [
+            { label: 'Открепить', onSelect: () => setPinned(path) },
+            {
+              label: isDirectory ? 'Показать в дереве' : 'Открыть',
+              onSelect: () => (isDirectory ? reveal(path) : void deps.commands.execute('file.open', path)),
+            },
+          ],
+          event.clientX,
+          event.clientY,
+        );
+      });
+      return row;
+    });
+    return h('div', { class: 'tree-pins' }, header, ...rows);
+  };
 
   /** Удаление в корзину: одну строку — обычной командой, группу — пачкой с одним вопросом. */
   const deleteTargets = (paths: readonly string[]): void => {
@@ -341,6 +412,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
                   { separator: true as const },
                 ]
               : []),
+          {
+            label: isPinned(pinned, entry.path) ? 'Открепить' : 'Закрепить сверху',
+            onSelect: () => setPinned(entry.path),
+          },
+          { separator: true as const },
           // Открытие вне IDE: файл — программой системы, папка — в системном
           // проводнике, а терминал поднимается в той папке, где лежит выбранное.
           {
@@ -881,6 +957,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // табом оно не попадает). Фокус нужен, чтобы F2 и Del относились к дереву,
     // а не к редактору: глобальная привязка Delete удаляла бы файл при наборе.
     const tree = h('div', { class: 'tree', tabindex: '-1' });
+    if (pinned.length > 0) tree.appendChild(pinnedBlock());
     tree.addEventListener('contextmenu', (event) => openMenu(null, event));
     tree.addEventListener('keydown', (event) => onTreeKey(event));
     // Сброс мимо строк — в корень области: так файл уезжает «наверх», к проекту.
@@ -1022,6 +1099,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       // Отрисовка сама подтянет корень и раскрытые уровни (см. `paint`).
       render();
     },
+    pinnedPaths: () => [...pinned],
+    restorePinned(paths) {
+      // Чужие пути (из другого проекта) отбрасываем: открывать по ним нечего.
+      pinned = normalizePins(paths, deps.workspace.root);
+      render();
+    },
+    togglePin: setPinned,
     applySettings(next) {
       const dimChanged = options.dimIgnored !== next.dimIgnored;
       options = next;

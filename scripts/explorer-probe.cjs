@@ -100,6 +100,50 @@ app.whenReady().then(async () => {
   await wait(300);
   console.log(`[explorer] выделено после снятия: ${JSON.stringify(await selected())}`);
 
+  // Закрепление: правый клик по файлу → «Закрепить сверху»; строка появляется
+  // в отдельном блоке над деревом, а повторное действие её убирает.
+  await click('README.md', {});
+  await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'README.md',
+      );
+      if (!row) return 'нет строки';
+      const rect = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + 40, clientY: rect.top + 8 }));
+      return 'ok';
+    })()`,
+  );
+  await wait(500);
+  await ask(
+    ide,
+    `(async () => {
+      const item = [...document.querySelectorAll('.context-menu .context-item')].find((node) =>
+        (node.textContent ?? '').includes('Закрепить сверху'),
+      );
+      if (!item) return 'пункта нет';
+      item.click();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return 'нажато';
+    })()`,
+  );
+  await wait(600);
+  console.log(
+    `[explorer] закреплено: ${JSON.stringify(
+      await ask(
+        ide,
+        `[...document.querySelectorAll('.tree-pins .tree-row.is-pinned')].map((row) =>
+          row.querySelector('.tree-name')?.textContent ?? '')`,
+      ),
+    )}`,
+  );
+  await ask(ide, `document.querySelector('.tree-pins .tree-unpin')?.click()`);
+  await wait(600);
+  console.log(
+    `[explorer] после открепления блоков: ${await ask(ide, `document.querySelectorAll('.tree-pins').length`)}`,
+  );
+
   // Сравнение двух файлов: выделяем два файла и смотрим, что экран различий
   // открылся с обоими текстами. Блоки без кнопок — это просмотр, а не git.
   await click('note.txt', {});

@@ -7,10 +7,13 @@ import type { EditorApi } from './editor-api';
 import type { OpenEditors } from './open-editors';
 import type { RpcClient } from './rpc';
 
-/** Проводник в той части, что нужна сессии: какие папки раскрыты. */
+/** Проводник в той части, что нужна сессии: какие папки раскрыты и что закреплено. */
 export interface ExpandedTree {
   expandedPaths(): string[];
   restoreExpanded(paths: readonly string[]): void;
+  /** Закреплённые файлы и папки дерева — их рабочее место тоже помнит. */
+  pinnedPaths(): string[];
+  restorePinned(paths: readonly string[]): void;
 }
 
 /**
@@ -136,6 +139,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       tabs: [...openEditors.paths],
       ...(openEditors.active ? { activeTab: openEditors.active.path } : {}),
       expanded: explorer.expandedPaths(),
+      pinned: explorer.pinnedPaths(),
       ...(dock.activeId ? { dockActive: dock.activeId } : {}),
       // Видимость панелей сюда не входит: это общий макет (settings), а не
       // свойство проекта. Рабочее место конкретной папки — вкладки и папки.
@@ -197,6 +201,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       }
 
       explorer.restoreExpanded(state.expanded);
+      explorer.restorePinned(state.pinned ?? []);
       // Корни области: открываем заново те, что были, и возвращаем активный. Сбой на
       // одном (папку могли удалить) не отменяет остальные.
       for (const extra of state.roots ?? []) {

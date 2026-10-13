@@ -543,7 +543,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── панели ────────────────────────────────────────────────────────────── */
 
-  const explorer = createExplorer({ workspace, rpc, commands, openEditors, git, documents });
+  const explorer = createExplorer({
+    workspace,
+    rpc,
+    commands,
+    openEditors,
+    git,
+    documents,
+    // Закрепление — часть рабочего места: сохраняем при изменении (сессия ниже).
+    onPinsChange: () => session.scheduleSave(),
+  });
   layout.sidebarBody.appendChild(explorer.element);
 
   const sourceControl = createSourceControl({
@@ -2182,6 +2191,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         },
       },
     );
+  });
+
+  // Закреплённое сверху дерева: то же, что пункт меню, но по текущему файлу.
+  define({ id: 'explorer.togglePin', title: 'Закрепить файл в дереве', category: 'Файл' }, async (path) => {
+    const target = typeof path === 'string' ? path : editors.currentPath;
+    if (!target) return;
+    const wasPinned = explorer.pinnedPaths().includes(target);
+    explorer.togglePin(target);
+    showToast(wasPinned ? 'Откреплено сверху дерева' : 'Закреплено сверху дерева');
   });
 
   define({ id: 'file.revealInOS', title: 'Показать в системном проводнике', category: 'Файл' }, async (path) => {

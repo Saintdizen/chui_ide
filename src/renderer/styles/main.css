@@ -1491,6 +1491,34 @@ textarea {
   background: var(--element_background_hover);
 }
 
+/* Блок закреплённых сверху дерева: свой заголовок и строки по абсолютным путям. */
+.tree-pins {
+  border-bottom: 1px solid var(--separator_color);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+}
+
+.tree-pins-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tree-row.is-pinned .tree-unpin {
+  margin-left: auto;
+  opacity: 0;
+}
+
+.tree-row.is-pinned:hover .tree-unpin,
+.tree-row.is-pinned:focus-within .tree-unpin {
+  opacity: 1;
+}
+
 /* Спутник, свёрнутый под родителя (file nesting): имя чуть тише — оно
    второстепенно, а отступ уже показывает связь с родителем. */
 .tree-row.is-nested .tree-name {
