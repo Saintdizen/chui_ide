@@ -1275,6 +1275,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'field-hint' }, 'Выключено — как в PyCharm: одинарный клик выделяет, двойной открывает.'),
       switchRow('Пометки git у файлов', explorer.gitDecorations, (value) => apply({ gitDecorations: value })),
       switchRow('Точка у папок с правками', explorer.folderChangeDot, (value) => apply({ folderChangeDot: value })),
+      switchRow('Отмечать недавно изменённые', explorer.recentChanges, (value) => apply({ recentChanges: value })),
+      field(
+        'Окно свежести, ч',
+        numberInput(explorer.recentWindowHours, 1, 720, 1, (value) => apply({ recentWindowHours: value })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Файл, тронутый в пределах окна, получает точку свежести. Это про время правки, ' +
+          'а не про состояние git: незакоммиченный файл недельной давности помечен им же.',
+      ),
       switchRow('Приглушать игнорируемые git', explorer.dimIgnored, (value) => apply({ dimIgnored: value })),
       h(
         'div',

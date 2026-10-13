@@ -81,6 +81,8 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   rowDensity: 'normal',
   gitDecorations: true,
   folderChangeDot: true,
+  recentChanges: true,
+  recentWindowHours: 24,
   dimIgnored: true,
   openOnSingleClick: false,
   confirmDelete: true,
@@ -89,6 +91,8 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   nestingRules: [],
   updateImportsOnRename: true,
 };
+
+import { isRecentlyModified, recentLabel } from '../core/tree-recent';
 
 export interface ExplorerDeps {
   workspace: WorkspaceModel;
@@ -586,6 +590,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // Игнорируемое git — приглушаем: файл видно и можно открыть, но он не мешает.
     const isIgnored = !isDeleted && options.dimIgnored && ignored.has(entry.path);
     if (isIgnored) classes.push('is-ignored');
+    // Свежесть правки: git-пометка говорит «изменён с коммита», а это — «тронут только
+    // что». Свежими бывают и файлы без правок git (сохранённый только что), поэтому
+    // отметка ставится независимо от пометки. Удалённому она ни к чему — его нет.
+    const recent =
+      !isDeleted &&
+      options.recentChanges &&
+      isRecentlyModified(entry.mtimeMs, Date.now(), options.recentWindowHours * 60 * 60 * 1000);
+    if (recent) classes.push('is-recent');
     // Папка-подмодуль: это отдельный репозиторий, а не обычная папка проекта.
     const submodule = !isDeleted && isDirectory ? submodules.get(entry.path) : undefined;
     if (submodule) classes.push('is-submodule');
@@ -603,7 +615,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             ? `${entry.path} — ${unsaved ? 'не сохранён' : CHANGE_TITLE[change]}`
             : insideTitle
               ? `${entry.path} — ${insideTitle}`
-              : entry.path,
+              : recent
+                ? `${entry.path} — тронут ${recentLabel(entry.mtimeMs, Date.now())}`
+                : entry.path,
         dataset: { path: entry.path },
         style: { paddingLeft: `${8 + depth * options.indent}px` },
       },
@@ -629,6 +643,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         : null,
       inside && options.folderChangeDot
         ? h('span', { class: `tree-dot is-${inside.change}`, title: insideTitle })
+        : null,
+      // Точка свежести — тонкая и справа: она не про состояние git, а про время.
+      recent
+        ? h('span', { class: 'tree-dot is-recent', title: `Тронут ${recentLabel(entry.mtimeMs, Date.now())}` })
         : null,
     );
 

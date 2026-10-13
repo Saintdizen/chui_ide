@@ -5264,6 +5264,16 @@ body > .overlay {
   background: var(--change_color);
 }
 
+/* Свежесть правки: точка того же размера, но своего цвета и отдельно от пометки
+   папки — они означают разное («внутри есть правки» и «тронут недавно»). Цвет
+   приглушённый: это подсказка о времени, а не состояние репозитория. */
+.tree-dot.is-recent {
+  margin-left: 4px;
+  width: 5px;
+  height: 5px;
+  background: var(--text_color_tertiary);
+}
+
 .sc-badge {
   margin-left: auto;
 }

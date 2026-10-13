@@ -204,6 +204,10 @@ const DEFAULT_SETTINGS: StoredSettings = {
     rowDensity: 'normal',
     gitDecorations: true,
     folderChangeDot: true,
+    // Свежесть правки показываем: это подсказка, куда вернуться, и она тихая.
+    recentChanges: true,
+    // Окно — сутки: за это время успеваешь и отвлечься, и вернуться.
+    recentWindowHours: 24,
     // Игнорируемое приглушаем: это подсказка, а не запрет — файл остаётся виден.
     dimIgnored: true,
     // Привычка из PyCharm: двойной клик открывает, одинарный — выделяет.
@@ -412,7 +416,12 @@ export class SettingsStore {
       this.data.editor = next;
     }
     if (patch.explorer) {
-      this.data.explorer = { ...this.data.explorer, ...patch.explorer };
+      const next = { ...this.data.explorer, ...patch.explorer };
+      // Окно свежести — число из формы: поджимаем, как при чтении файла.
+      if (patch.explorer.recentWindowHours !== undefined) {
+        next.recentWindowHours = clampRecentHours(patch.explorer.recentWindowHours);
+      }
+      this.data.explorer = next;
     }
     if (patch.run) {
       this.data.run = { ...this.data.run, ...patch.run };
@@ -731,6 +740,9 @@ function loadSettings(filePath: string): StoredSettings {
         : [],
       // Выключить можно явным `false`; любое другое значение — включено.
       updateImportsOnRename: parsed.explorer?.updateImportsOnRename !== false,
+      // Свежесть: включаем, если не выключили явно; окно — разумное число часов.
+      recentChanges: parsed.explorer?.recentChanges !== false,
+      recentWindowHours: clampRecentHours(parsed.explorer?.recentWindowHours),
     },
     run: sanitizeRun({ ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) }),
     appearance: {
@@ -772,6 +784,13 @@ function clampSteps(value: unknown, fallback: number): number {
 }
 
 /** Макет рабочей области: размеры — положительные числа, видимость — строгие boolean. */
+/** Окно свежести в часах: целое в разумных рамках, иначе — значение по умолчанию. */
+function clampRecentHours(value: unknown): number {
+  const hours = Math.round(Number(value));
+  if (!Number.isFinite(hours) || hours < 1 || hours > 24 * 30) return DEFAULT_SETTINGS.explorer.recentWindowHours;
+  return hours;
+}
+
 function sanitizeLayout(value: LayoutSettings): LayoutSettings {
   const size = (raw: unknown, fallback: number): number => {
     const rounded = Math.round(Number(raw));

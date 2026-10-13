@@ -343,6 +343,30 @@ app.whenReady().then(async () => {
     )}`,
   );
 
+  // Свежесть правки: только что записанный файл помечен точкой `is-recent`, а файл
+  // со временем недельной давности (ставим utimes) — нет. Так проверка отличает
+  // отметку о ВРЕМЕНИ от git-пометки о правках с коммита.
+  await fs.writeFile(path.join(project, 'fresh.txt'), 'только что\n', 'utf8');
+  await fs.writeFile(path.join(project, 'old.txt'), 'давно\n', 'utf8');
+  const longAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+  await fs.utimes(path.join(project, 'old.txt'), longAgo, longAgo);
+  await wait(1500);
+
+  console.log(
+    `[explorer] свежесть правки: ${JSON.stringify(
+      await ask(
+        ide,
+        `[...document.querySelectorAll('.tree-row')]
+          .filter((row) => ['fresh.txt', 'old.txt'].includes(row.querySelector('.tree-name')?.textContent ?? ''))
+          .map((row) => ({
+            имя: row.querySelector('.tree-name').textContent,
+            свежий: row.classList.contains('is-recent'),
+            точка: Boolean(row.querySelector('.tree-dot.is-recent')),
+          }))`,
+      ),
+    )}`,
+  );
+
   const finalTree = await ask(
     ide,
     `[...document.querySelectorAll('.tree-row .tree-name')].map((node) => node.textContent)`,
