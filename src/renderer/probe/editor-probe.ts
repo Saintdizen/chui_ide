@@ -374,6 +374,42 @@ declare global {
   }
 }
 
+// Обёртка выделения: шов `surroundWith` показывает список вариантов (в приложении — модалка),
+// а применяет выбранную пару редактор. Здесь шов подставной: хотят проверить, что сочетание
+// клавиш доходит до вызывающего и что обёртка ложится вокруг выделения.
+const surroundRoot = document.createElement('div');
+surroundRoot.id = 'probe-surround';
+surroundRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(surroundRoot);
+
+const surroundStore = new DocumentStore();
+const surroundRegistry = new DocumentRegistry(surroundStore);
+const surroundRequests: string[] = [];
+const surroundWorkspace = new EditorWorkspace(surroundRoot, surroundRegistry, {
+  scheme: 'dark',
+  surroundWith: () => surroundRequests.push(surroundWorkspace.activeLanguage()),
+});
+const surroundDoc = surroundStore.open('/probe/surround.ts', 'const total = a + b;\n', { languageId: 'typescript' });
+surroundWorkspace.open(surroundDoc);
+
+declare global {
+  interface Window {
+    probeSurround: {
+      workspace: EditorWorkspace;
+      store: DocumentStore;
+      doc: TextDocument;
+      requests: string[];
+    };
+  }
+}
+
+window.probeSurround = {
+  workspace: surroundWorkspace,
+  store: surroundStore,
+  doc: surroundDoc,
+  requests: surroundRequests,
+};
+
 // Свёртка без языкового сервера: диапазоны считает рабочее место само — по грамматике
 // (скобки) и по отступам, как в приложении (см. `foldRanges` в `app.ts`). Файл собран
 // так, что по ОТСТУПАМ блок не виден (все строки с нулевым отступом), а по СКОБКАМ —

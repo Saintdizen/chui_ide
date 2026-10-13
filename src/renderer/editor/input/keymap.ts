@@ -102,7 +102,9 @@ export type EditCommand =
    */
   | 'goToDefinition'
   | 'references'
-  | 'peekDefinition';
+  | 'peekDefinition'
+  /** Ctrl+Shift+T — выбрать обёртку для выделения («surround with»). */
+  | 'surroundWith';
 
 /**
  * Во что превращается нажатие.
@@ -135,6 +137,8 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   // F1 — палитра команд: у Monaco её открывало его же действие, своему редактору
   // нужна своя обработка. Сочетания клавиш у неё нет — это клавиша панели.
   if (key === 'F1') return { kind: 'edit', edit: 'palette' };
+  // Ctrl+Shift+T — обернуть выделение: список вариантов показывает вызывающий.
+  if (control && extend && key.toLowerCase() === 't') return { kind: 'edit', edit: 'surroundWith' };
   // Навигация по символу: F12 — определение, Shift+F12 — ссылки, Ctrl+Shift+F12 —
   // заглянуть (определение на месте). Привычные клавиши из VS Code и PyCharm.
   if (key === 'F12') {

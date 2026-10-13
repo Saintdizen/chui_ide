@@ -6105,6 +6105,53 @@ body > .overlay {
   font-size: var(--font_default_size);
 }
 
+/* ── обёртка выделения («surround with») ───────────────────────────────── */
+
+.surround-modal {
+  width: min(420px, 92vw);
+}
+
+.surround-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.surround-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Выделенную строку подсвечиваем тем же цветом, что и строку попапа подсказок:
+   это того же рода выбор — «сюда придёт действие по Enter». */
+.surround-row.is-active {
+  background: var(--selection_background);
+}
+
+/* Знаки обёртки — моношрифтом: `(` и `{` должны быть видны, а не «сливаться». */
+.surround-signs {
+  flex: none;
+  min-width: 48px;
+  font-family: var(--font_mono);
+  color: var(--link_color);
+}
+
+.surround-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── окно закладок ─────────────────────────────────────────────────────── */
 
 .bookmarks-modal {

@@ -48,6 +48,7 @@ import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import type { DebugInlineValue } from '../view/editor-view';
 import type { DocumentRegistry } from './document-registry';
 import type { SpellCheck } from '../../core/spellcheck';
+import type { SurroundOption } from '../input/surround';
 import type { TranslatedEdits } from './document-edits';
 import {
   EditorHost,
@@ -159,6 +160,11 @@ export interface EditorWorkspaceOptions {
    * заглядывания нет: показать текст негде.
    */
   readText?: (path: string) => Promise<string | null>;
+  /**
+   * «Обернуть выделение»: показать выбор обёртки. Не задано — команды нет: список
+   * вариантов (и то, из чего выбирать по языку) — дело приложения (см. `ui/surround-modal.ts`).
+   */
+  surroundWith?: () => void;
   /** Короткий путь для подписи места в списке. */
   relativePath?: (path: string) => string;
   /** Сообщить человеку, что мест не нашлось. */
@@ -230,6 +236,8 @@ export class EditorWorkspace {
   private readonly revealLocation: ((path: string, line: number, column: number) => void) | undefined;
   /** Чтение текста файла: нужно «заглядыванию» в определение (см. `peek-controller.ts`). */
   private readonly readText: ((path: string) => Promise<string | null>) | undefined;
+  /** Шов выбора обёртки: список вариантов показывает приложение. */
+  private readonly surroundWith: (() => void) | undefined;
   /** Быстрые исправления: шов к приложению (сервер, список, применение правок). */
   private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Диапазоны свёртки файла — тоже шов: у приложения и сервер, и подсчёт по отступам. */
@@ -332,6 +340,7 @@ export class EditorWorkspace {
     this.renameSymbol = options.renameSymbol;
     this.revealLocation = options.revealLocation;
     this.readText = options.readText;
+    this.surroundWith = options.surroundWith;
     this.relativePath = options.relativePath;
     this.onNotice = options.onNotice;
     this.contextMenu = options.contextMenu;
@@ -424,6 +433,7 @@ export class EditorWorkspace {
       symbols: this.symbols,
       revealLocation: this.revealLocation,
       readText: this.readText,
+      surroundWith: this.surroundWith,
       relativePath: this.relativePath,
       onNotice: this.onNotice,
       contextMenu: this.contextMenu,
@@ -633,6 +643,8 @@ export class EditorWorkspace {
     // Быстрые исправления — тот же порядок: список показывает приложение.
     const codeActions = this.codeActions;
     if (codeActions) context.codeActions = () => path && codeActions(path, this.pane.cursor());
+    // Обёртка выделения — шов приложения: ему и список вариантов, и их смысл для языка.
+    if (this.surroundWith) context.surroundWith = () => this.surroundWith?.();
     // Переход по пометкам есть всегда: хранилище пометок — у самого рабочего места.
     context.nextProblem = () => this.problems.next();
     context.previousProblem = () => this.problems.previous();
@@ -697,6 +709,21 @@ export class EditorWorkspace {
   /** Пересчитать проверку орфографии во всех панелях (её включили или выключили). */
   refreshSpellcheck(): void {
     for (const pane of this.panes) pane.refreshSpellcheck();
+  }
+
+  /** Обернуть выделение активной панели парой знаков (выбор делает приложение). */
+  surroundSelection(option: SurroundOption): boolean {
+    return this.pane.surroundSelection(option);
+  }
+
+  /** Есть ли в активной панели непустое выделение. */
+  hasSelection(): boolean {
+    return this.pane.hasSelection();
+  }
+
+  /** Язык файла активной панели — по нему выбираются доступные обёртки. */
+  activeLanguage(): string {
+    return this.pane.documentLanguage;
   }
 
   /** Слово под курсором активной панели, если оно отмечено как ошибка орфографии. */

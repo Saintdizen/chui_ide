@@ -46,7 +46,9 @@ export type CommandName =
   /** Навигация по символу: перейти к определению, ссылки, заглянуть в определение. */
   | 'goToDefinition'
   | 'references'
-  | 'peekDefinition';
+  | 'peekDefinition'
+  /** Обернуть выделение парой знаков; пару выбирает вызывающий. */
+  | 'surroundWith';
 
 /**
  * Кто может забрать клавишу себе раньше редактора. Так устроены попапы: при видимом
@@ -475,6 +477,9 @@ export class EditorInputBinding {
         break;
       case 'peekDefinition':
         this.onCommand?.('peekDefinition');
+        break;
+      case 'surroundWith':
+        this.onCommand?.('surroundWith');
         break;
       // Мультикурсор: вхождения слова, каретки по столбцу и сброс к главной.
       case 'selectNextOccurrence':

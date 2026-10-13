@@ -44,6 +44,7 @@ import {
   type EditResult,
 } from './editing';
 import { toggleBlockComment, toggleLineComment } from './comments';
+import { wrapSelection, type SurroundOption } from './surround';
 import type { CaseStyle } from './case-convert';
 import {
   convertSelectionCase,
@@ -592,6 +593,11 @@ export class EditorController {
   toggleBlockComment(open: string, close: string): void {
     const result = toggleBlockComment(this.buffer, this.selection, open, close);
     if (result) this.applyEdits(result.changes, result.selection);
+  }
+
+  /** Обернуть выделение парой знаков («surround with»). */
+  surroundSelection(option: SurroundOption): void {
+    this.run(wrapSelection(this.buffer, this.selection, option), 'other');
   }
 
   /** Сортировать строки выделения (по возрастанию; параметры — регистр, порядок, повторы). */

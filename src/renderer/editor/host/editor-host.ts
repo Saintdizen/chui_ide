@@ -52,6 +52,7 @@ import type { CaseStyle } from '../input/case-convert';
 import { blockCommentFor, lineCommentFor } from '../input/comments';
 import { InlineCompletions } from '../input/inline-completions';
 import { EmmetExpander } from '../input/emmet';
+import type { SurroundOption } from '../input/surround';
 import type { CompletionTriggers } from './lsp-features';
 import { EditorView, type DebugInlineValue } from '../view/editor-view';
 import { normalizeWhitespaceMode, type WhitespaceMode } from '../view/whitespace';
@@ -209,6 +210,11 @@ export interface EditorHostOptions {
    * заглядывания нет вовсе: показать нечего.
    */
   readText?: (path: string) => Promise<string | null>;
+  /**
+   * Показать выбор обёртки выделения («surround with»). Не задано — сочетание молчит:
+   * список вариантов и модалка — дело вызывающего (см. `ui/surround-modal.ts`).
+   */
+  surroundWith?: () => void;
   /** Короткий путь для подписи места в списке (в приложении — относительный). */
   relativePath?: (path: string) => string;
   /**
@@ -427,6 +433,8 @@ export class EditorHost {
   private debugInlineValues: { path: string; values: readonly DebugInlineValue[] } | null = null;
   /** Пометки языкового сервера по файлам: рисуем волнистым подчёркиванием. */
   private readonly externalMarkers = new Map<string, readonly LspDiagnostic[]>();
+  /** Шов выбора обёртки: список показывает вызывающий (см. `ui/surround-modal.ts`). */
+  private readonly surroundWithHandler: (() => void) | undefined;
   /** Проверка орфографии: словарь и живая настройка. `undefined` — проверки нет. */
   private readonly spell: SpellCheck | undefined;
   private readonly spellEnabled: (() => boolean) | undefined;
@@ -482,6 +490,7 @@ export class EditorHost {
     this.spell = options.spellcheck;
     this.spellEnabled = options.spellcheckEnabled;
     this.spellSaveWord = options.spellSaveWord;
+    this.surroundWithHandler = options.surroundWith;
 
     // До первого `open` редактор держит пустой буфер: слои не терпят «нет документа», а
     // пустая вкладка — нормальное состояние панели, пока файл не открыт.
@@ -1016,6 +1025,23 @@ export class EditorHost {
     return true;
   }
 
+  /** Обернуть выделение парой знаков. `false` — оборачивать нечем (нет буфера). */
+  surroundSelection(option: SurroundOption): boolean {
+    if (!this.path) return false;
+    this.controller.surroundSelection(option);
+    return true;
+  }
+
+  /** Есть ли сейчас непустое выделение — по нему решают, оборачивать или вставлять. */
+  hasSelection(): boolean {
+    return !isEmpty(this.controller.selection);
+  }
+
+  /** Язык открытого файла: по нему выбираются доступные обёртки. */
+  get documentLanguage(): string {
+    return this.languageId;
+  }
+
   /** Заглянуть в определение, не уходя из файла. `false` — заглядывать нечем. */
   peekDefinition(): boolean {
     if (!this.peek) return false;
@@ -1535,6 +1561,7 @@ export class EditorHost {
     } else if (command === 'goToDefinition') this.goToDefinition();
     else if (command === 'references') this.findReferences();
     else if (command === 'peekDefinition') this.peekDefinition();
+    else if (command === 'surroundWith') this.surroundWithHandler?.();
     else this.find.show(command === 'replace' ? 'replace' : 'find');
   }
 

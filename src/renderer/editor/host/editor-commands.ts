@@ -69,6 +69,8 @@ export interface EditorCommandContext {
   findReferences?(): void;
   /** Заглянуть в определение на месте, не уходя из файла (нужен языковой сервер). */
   peekDefinition?(): void;
+  /** Обернуть выделение парой знаков; какую пару — спрашивает вызывающий (`surroundWith`). */
+  surroundWith?(): void;
   /** Переименовать символ под курсором (нужен языковой сервер и ввод имени — дело вызывающего). */
   renameSymbol?(): void;
   /** Перейти к следующей пометке языка (ошибке или предупреждению). */
@@ -96,6 +98,7 @@ export interface EditorCommandContext {
 export type EditorCommandRequirement =
   | 'goToDefinition'
   | 'findReferences'
+  | 'surroundWith'
   | 'peekDefinition'
   | 'renameSymbol'
   | 'formatCode'
@@ -331,6 +334,15 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: 'Навигация',
     requires: 'findReferences',
     run: (context) => context.findReferences?.(),
+  },
+  {
+    id: 'editor.surroundWith',
+    label: 'Обернуть выделение…',
+    alias: 'surroundWith',
+    keybinding: 'Ctrl+Shift+T',
+    category: 'Рефакторинг',
+    requires: 'surroundWith',
+    run: (context) => context.surroundWith?.(),
   },
   {
     id: 'editor.peekDefinition',

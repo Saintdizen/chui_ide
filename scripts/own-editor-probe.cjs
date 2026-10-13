@@ -2541,6 +2541,67 @@ async function emmetCheck(win) {
  * оставались на месте — у небольшого файла видимый отрезок тот же, и слой строк не
  * пересобирался (см. `rendered.folds` в `editor-view.ts`).
  */
+/**
+ * Обёртка выделения: Ctrl+Shift+T доходит до вызывающего (там список вариантов), а
+ * выбранная пара ложится вокруг выделения. Проверяем и пустое выделение — тогда пара
+ * вставляется с кареткой между знаками.
+ */
+/**
+ * Обёртка выделения: сочетание Ctrl+Shift+T доходит до вызывающего (в приложении там
+ * список вариантов), а выбранная пара ложится вокруг выделения. Выделение набираем
+ * НАСТОЯЩИМИ клавишами (Shift+стрелка), а не подстановкой в модель: так проверяется и
+ * то, что сочетание не перехвачено вводом.
+ */
+async function surroundCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const send = (event) => win.webContents.sendInputEvent(event);
+
+  await script(`(() => {
+    const { workspace, doc } = window.probeSurround;
+    // Встаём перед сложением — дальше выделяем стрелками.
+    workspace.reveal(doc.path, 1, doc.value.indexOf('a + b') + 1);
+    document.querySelector('#probe-surround .own-editor-input').focus();
+    return true;
+  })()`);
+  await wait(60);
+
+  // Shift+стрелка вправо пять раз: `a + b` — ровно пять знаков.
+  for (let step = 0; step < 5; step += 1) {
+    send({ type: 'keyDown', keyCode: 'Right', modifiers: ['shift'] });
+    send({ type: 'keyUp', keyCode: 'Right', modifiers: ['shift'] });
+  }
+  await wait(80);
+
+  const selected = await script(`(() => ({
+    выделение: window.probeSurround.workspace.selectedText(),
+    выделено: window.probeSurround.workspace.hasSelection(),
+  }))()`);
+
+  // Ctrl+Shift+T — обёртка: редактор зовёт вызывающего, тот показывает список.
+  send({ type: 'keyDown', keyCode: 'T', modifiers: ['control', 'shift'] });
+  send({ type: 'keyUp', keyCode: 'T', modifiers: ['control', 'shift'] });
+  await wait(80);
+
+  const requests = await script(`(() => window.probeSurround.requests.slice())()`);
+
+  // Применяем выбранную пару тем же путём, что и модалка.
+  const wrapped = await script(`(() => {
+    const { workspace, doc } = window.probeSurround;
+    workspace.surroundSelection({ id: 'paren', label: 'Круглые скобки', open: '(', close: ')' });
+    return { текст: doc.value, выделено: workspace.hasSelection(), выделение: workspace.selectedText() };
+  })()`);
+
+  // Пустое выделение: пара вставляется, каретка встаёт между знаками.
+  const empty = await script(`(() => {
+    const { workspace, doc } = window.probeSurround;
+    workspace.reveal(doc.path, 1, 1);
+    workspace.surroundSelection({ id: 'brace', label: 'Фигурные скобки', open: '{', close: '}' });
+    return { текст: doc.value, выделено: workspace.hasSelection() };
+  })()`);
+
+  return { выделено_перед: selected, запросы: requests, обёрнуто: wrapped, пустое: empty };
+}
+
 async function semanticFoldCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
   await wait(200);
@@ -3019,6 +3080,11 @@ async function main() {
   const semanticFold = await semanticFoldCheck(win);
   log('## Свёртка по грамматике (без сервера)');
   log(JSON.stringify(semanticFold, null, 2));
+  log('');
+
+  const surround = await surroundCheck(win);
+  log('## Обёртка выделения (surround with)');
+  log(JSON.stringify(surround, null, 2));
   log('');
 
   log('## Подсказки языкового сервера');

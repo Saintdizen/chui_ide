@@ -54,6 +54,12 @@ describe('правки', () => {
     expect(resolveKey({ key: 'F12', ctrl: true, shift: true })).toEqual({ kind: 'edit', edit: 'peekDefinition' });
   });
 
+  it('Ctrl+Shift+T — обернуть выделение (surround with)', () => {
+    expect(resolveKey({ key: 'T', ctrl: true, shift: true })).toEqual({ kind: 'edit', edit: 'surroundWith' });
+    // Без Shift это не наша клавиша — там обычный разбор.
+    expect(resolveKey({ key: 't', ctrl: true })).toEqual({ kind: 'swallow' });
+  });
+
   it('Ctrl+A, C, X, V — выделить, копировать, вырезать, вставить', () => {
     expect(resolveKey({ key: 'a', ctrl: true })).toEqual({ kind: 'edit', edit: 'selectAll' });
     expect(resolveKey({ key: 'c', ctrl: true })).toEqual({ kind: 'edit', edit: 'copy' });

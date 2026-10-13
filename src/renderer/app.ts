@@ -65,6 +65,7 @@ import { formatEngine, formatToolNames, type FormatEngine } from '../shared/form
 import { codeActionKindLabel, type CodeActionItem } from '../shared/lsp-code-actions';
 import { installSuggestions } from '../shared/import-install';
 import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
+import { surroundOptions } from './editor/input/surround';
 import { semanticFoldRanges } from './editor/highlight/folds';
 import { packageForModule } from '../shared/python-packages';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
@@ -115,6 +116,7 @@ import { createWorktreeModal } from './ui/worktree-modal';
 import { createLfsModal } from './ui/lfs-modal';
 import { createHistoryModal } from './ui/history-modal';
 import { createBookmarksModal } from './ui/bookmarks-modal';
+import { createSurroundModal } from './ui/surround-modal';
 import { createIdentityModal } from './ui/identity-modal';
 import { createForgeModal } from './ui/forge-modal';
 import { createTextModal } from './ui/text-modal';
@@ -355,6 +357,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     // Переход к месту: открыть файл (это умеет приложение) и встать на строку.
     revealLocation: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
+    // Выбор обёртки показывает приложение: у редактора нет ни модалок, ни списка
+    // вариантов. Сам список зависит от языка файла — его знает редактор.
+    surroundWith: () => surroundModal.open(),
     // Текст целевого файла для «заглядывания»: открытый берём из документа (в нём
     // и несохранённые правки), прочий — с диска. Не прочитали — копию не покажем.
     readText: async (path) => {
@@ -1821,6 +1826,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   // Закладки: список ведёт модель, редактор по нему рисует значки, сессия хранит его.
   // Одна подписка на изменение — значков и сохранения хватает одного источника.
+  // Обёртка выделения: варианты зависят от языка открытого файла (блочный комментарий,
+  // теги), а применяет их редактор. Пустое выделение тоже годится — будет пара знаков.
+  const surroundModal = createSurroundModal({
+    options: () => surroundOptions(editors.activeLanguage()),
+    apply: (option) => {
+      if (!editors.surroundSelection(option)) showToast('Нет открытого файла');
+    },
+  });
+  document.body.appendChild(surroundModal.element);
+
   const bookmarksModal = createBookmarksModal({
     bookmarks,
     root: () => workspace.root,
