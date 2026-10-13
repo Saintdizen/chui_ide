@@ -1,6 +1,6 @@
 {
   "name": "chui-ide",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "MIT",
   "author": {
@@ -59,7 +59,6 @@
     "probe:tree": "npm run build && electron scripts/tree-virtual-probe.cjs",
     "probe:changes": "npm run build && electron scripts/changes-probe.cjs",
     "probe:folders": "npm run build && electron scripts/folders-probe.cjs",
-    "probe:revert": "npm run build && electron scripts/revert-probe.cjs",
     "probe:revert": "npm run build && electron scripts/revert-probe.cjs",
     "probe:sort": "npm run build && electron scripts/sort-probe.cjs",
     "probe:extterminal": "npm run build && electron scripts/ext-terminal-probe.cjs",
