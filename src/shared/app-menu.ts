@@ -163,3 +163,34 @@ export function menuChecks(state: MenuState): Record<string, boolean> {
     [MENU_TOGGLES.themeSystem]: state.theme === 'system',
   };
 }
+
+/**
+ * Клавиши пунктов меню по командам: `команда → акселератор`. Без переопределений это
+ * встроенные клавиши шаблона; с ними — те, что человек задал под ключом `menu:<команда>`.
+ * Нужно двоим: редактору сочетаний (показать и поменять) и сборке системного меню в
+ * main (`main/menu.ts`).
+ *
+ * Пункты-роли (масштаб, буфер обмена) команды не имеют, поэтому в карту не попадают:
+ * их клавиши и не меняются — Electron обрабатывает роли сам.
+ *
+ * Переопределение с пустой строкой убирает клавишу у пункта: `menu:file.save` = `''`
+ * значит «Ctrl+S больше не наш». Команда, у которой клавиши не было, но переопределение
+ * появилось, тоже попадёт в карту — так клавишу можно назначить и новому пункту.
+ */
+export function menuAccelerators(overrides?: ReadonlyMap<string, string>): Map<string, string> {
+  const map = new Map<string, string>();
+  const walk = (nodes: readonly MenuNode[]): void => {
+    for (const node of nodes) {
+      if (node.children) walk(node.children);
+      if (!node.command) continue;
+      if (overrides?.has(node.command)) {
+        const combo = overrides.get(node.command)!;
+        if (combo) map.set(node.command, combo);
+      } else if (node.accelerator) {
+        map.set(node.command, node.accelerator);
+      }
+    }
+  };
+  walk(APP_MENU);
+  return map;
+}

@@ -4406,6 +4406,12 @@ textarea {
   gap: 12px;
 }
 
+/* Вторая строка одной команды (клавиша меню под сочетанием редактора): слабее
+   цветом — это уточнение к строке, а не ещё одна настройка на том же уровне. */
+.field-sub {
+  color: var(--text_color_tertiary);
+}
+
 .field-label {
   color: var(--text_color);
   font-size: var(--font_labels_size);

@@ -1,5 +1,6 @@
 import { BrowserWindow, Menu, type MenuItemConstructorOptions, type WebContents } from 'electron';
-import { APP_MENU, type MenuNode, type MenuRole } from '../shared/app-menu';
+import { APP_MENU, menuAccelerators, type MenuNode, type MenuRole } from '../shared/app-menu';
+import { menuComboOverrides, type KeybindingOverride } from '../shared/keybindings';
 import { PushTopic } from '../shared/api';
 import { pushToRenderers } from './ipc/push';
 
@@ -10,14 +11,20 @@ import { pushToRenderers } from './ipc/push';
  * как масштаб и инструменты разработчика, renderer не увидел бы вовсе.
  *
  * Пользователь видит другое меню: кнопка «☰» открывает наш попап.
+ *
+ * Клавиши пунктов можно поменять в настройках (`keybindings.overrides` под ключом
+ * `menu:<команда>`): здесь они накладываются на шаблон. Меню пересобирается заново
+ * при каждом изменении настроек — Electron умеет менять акселераторы только так.
  */
-export function createApplicationMenu(): void {
+export function createApplicationMenu(overrides: readonly KeybindingOverride[] = []): void {
+  // Шаблон + переопределения: где человек поменял клавишу пункта, там и новая.
+  const combos = menuAccelerators(menuComboOverrides(overrides));
   const template: MenuItemConstructorOptions[] = [];
 
   // На macOS первая группа — про само приложение: так устроена системная полоса.
   if (process.platform === 'darwin') template.push({ role: 'appMenu' });
 
-  template.push(...APP_MENU.map(toNativeItem));
+  template.push(...APP_MENU.map((node) => toNativeItem(node, combos)));
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
@@ -38,11 +45,14 @@ const ROLE_NAMES: Record<MenuRole, MenuItemConstructorOptions['role']> = {
   quit: 'quit',
 };
 
-function toNativeItem(node: MenuNode): MenuItemConstructorOptions {
+function toNativeItem(node: MenuNode, combos: ReadonlyMap<string, string>): MenuItemConstructorOptions {
   if (node.separator) return { type: 'separator' };
 
-  const item: MenuItemConstructorOptions = { label: node.label, accelerator: node.accelerator };
-  if (node.children) item.submenu = node.children.map(toNativeItem);
+  // Клавиша пункта: из карты (шаблон с переопределениями) для команд и прямо из
+  // шаблона для ролей (масштаб, буфер обмена) — те команды не имеют и не меняются.
+  const accelerator = node.command ? combos.get(node.command) : node.accelerator;
+  const item: MenuItemConstructorOptions = { label: node.label, accelerator };
+  if (node.children) item.submenu = node.children.map((child) => toNativeItem(child, combos));
   else if (node.role) item.role = ROLE_NAMES[node.role];
   else if (node.command) item.click = sendCommand(node.command);
   return item;

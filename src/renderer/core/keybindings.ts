@@ -1,4 +1,5 @@
 import type { KeybindingOverride } from '../../shared/keybindings';
+import { rendererOverrides } from '../../shared/keybindings';
 import type { CommandRegistry } from './commands';
 
 export interface Keybinding {
@@ -43,15 +44,27 @@ export class KeybindingService {
   }
 
   /**
-   * Действующие сочетания: по умолчанию, с наложенными переопределениями.
+   * Действующие сочетания: по умолчанию, с наложенными переопределениями renderer.
    * Команда с пустым сочетанием из списка выпадает — её сочетание снято.
+   *
+   * Переопределения клавиш МЕНЮ (`menu:...`) здесь не участвуют: их держит Electron,
+   * и нажатие до renderer не доходит — иначе команда сработала бы дважды.
+   *
+   * Переопределение команды, которой в списке по умолчанию НЕ было, добавляет ей
+   * сочетание: так человек назначает клавишу любой команде, а не только той, у которой
+   * она уже была.
    */
   effective(): Keybinding[] {
-    const overrides = new Map(this.overrides().map((item) => [item.command, item.combo]));
+    const overrides = new Map(rendererOverrides(this.overrides()).map((item) => [item.command, item.combo]));
     const result: Keybinding[] = [];
     for (const binding of this.defaults) {
       const combo = overrides.has(binding.command) ? overrides.get(binding.command)! : binding.combo;
       if (combo) result.push({ ...binding, combo });
+      overrides.delete(binding.command);
+    }
+    // Что осталось — команды без сочетания по умолчанию: даём сочетание им.
+    for (const [command, combo] of overrides) {
+      if (combo) result.push({ combo, command });
     }
     return result;
   }

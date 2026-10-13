@@ -85,7 +85,20 @@ describe('KeybindingService.effective', () => {
     expect(service([{ command: 'a', combo: '' }]).effective()).toEqual([{ combo: 'Ctrl+J', command: 'b' }]);
   });
 
-  it('переопределение чужой команды ничего не меняет', () => {
-    expect(service([{ command: 'zzz', combo: 'Ctrl+0' }]).effective()).toEqual([...defaults]);
+  it('переопределение команды без сочетания по умолчанию назначает ей клавишу', () => {
+    // Так человек вешает сочетание на любую команду реестра, а не только на ту,
+    // у которой оно уже было.
+    expect(service([{ command: 'zzz', combo: 'Ctrl+0' }]).effective()).toEqual([
+      ...defaults,
+      { combo: 'Ctrl+0', command: 'zzz' },
+    ]);
+  });
+
+  it('переопределение с пустым сочетанием новую клавишу не выдаёт', () => {
+    expect(service([{ command: 'zzz', combo: '' }]).effective()).toEqual([...defaults]);
+  });
+
+  it('клавиши меню (menu:) сервис не берёт — их держит Electron', () => {
+    expect(service([{ command: 'menu:file.save', combo: 'Ctrl+9' }]).effective()).toEqual([...defaults]);
   });
 });

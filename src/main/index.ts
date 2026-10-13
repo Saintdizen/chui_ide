@@ -302,7 +302,12 @@ if (!app.requestSingleInstanceLock()) {
     };
     registerIpc(deps);
     serveRenderer();
-    createApplicationMenu();
+    // Меню пересобираем при каждой смене настроек: клавиши пунктов человек может
+    // менять в редакторе сочетаний (`menu:<команда>`), а Electron меняет акселераторы
+    // только вместе с меню. Дёшево: набор пунктов невелик.
+    const rebuildMenu = (): void => createApplicationMenu(settings.get().keybindings.overrides);
+    settings.onDidChange(rebuildMenu);
+    rebuildMenu();
 
     // Проект можно задать снаружи — путём в командной строке или открытием папки
     // из системы. Тогда сразу открываем IDE; иначе начинаем со списка проектов:

@@ -157,7 +157,7 @@ app.whenReady().then(async () => {
     })()`,
   );
   check('ссылка открывает раздел целиком', jumped.выдача === 0 && jumped.запрос === '', jumped);
-  check('в разделе видны группы настроек', (jumped.метки ?? []).includes('Отступы и строки'), jumped.метки);
+  check('в разделе видны группы настроек', (jumped.метки ?? []).includes('Отступы'), jumped.метки);
 
   /* Пустой ответ назван словами. */
   await ask(ide, typeQuery('щщщ'));
@@ -168,11 +168,64 @@ app.whenReady().then(async () => {
       return {
         текст: (pane ? pane.textContent : '').trim(),
         приглушено: document.querySelectorAll('.modal-nav-item.is-dimmed').length,
+        разделов: document.querySelectorAll('.modal-nav-item').length,
       };
     })()`,
   );
   check('пустой ответ объяснён', (empty.текст ?? '').includes('Ничего не найдено'), empty.текст);
-  check('при пустом ответе приглушены все разделы', empty.приглушено === 8, empty.приглушено);
+  check('при пустом ответе приглушены все разделы', empty.приглушено === empty.разделов && empty.разделов > 0, empty);
+
+  /* Раздел сочетаний клавиш: список команд, строка «клавиша меню» и фильтр на месте. */
+  const keys = await ask(
+    ide,
+    `(async () => {
+      const nav = [...document.querySelectorAll('.modal-nav-item')].find((node) =>
+        (node.textContent || '').includes('Сочетания клавиш'),
+      );
+      if (!nav) return 'пункта nav нет';
+      nav.click();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const pane = document.querySelector('.modal-pane');
+      const rows = [...pane.querySelectorAll('.field.field-between')];
+      return {
+        строк: rows.length,
+        видимых: rows.filter((row) => !row.hidden).length,
+        клавиш_меню: rows.filter((row) => (row.textContent || '').includes('клавиша меню')).length,
+        фильтр: Boolean(pane.querySelector('input[type="search"]')),
+      };
+    })()`,
+  );
+  check('раздел сочетаний показывает команды', (keys.строк ?? 0) > 20, keys);
+  check(
+    'по умолчанию видны только команды с клавишей (меньше всех строк)',
+    keys.видимых > 20 && keys.видимых < keys.строк,
+    keys,
+  );
+  check('строки «клавиша меню» есть', (keys.клавиш_меню ?? 0) > 0, keys.клавиш_меню);
+  check('фильтр на месте', keys.фильтр === true, keys.фильтр);
+
+  const filtered = await ask(
+    ide,
+    `(async () => {
+      const pane = document.querySelector('.modal-pane');
+      const filter = pane.querySelector('input[type="search"]');
+      if (!filter) return 'фильтра нет';
+      filter.value = 'структура файла';
+      filter.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const visible = [...pane.querySelectorAll('.field.field-between')].filter((row) => !row.hidden);
+      return {
+        видимых: visible.length,
+        тексты: visible.map((row) => (row.textContent || '').trim()),
+      };
+    })()`,
+  );
+  check('поиск сужает список', (filtered.видимых ?? 0) >= 1 && filtered.видимых < keys.строк, filtered.видимых);
+  check(
+    'найден пункт без встроенной клавиши — ему можно задать сочетание',
+    (filtered.тексты ?? []).some((text) => text.includes('Структура файла')),
+    filtered.тексты,
+  );
 
   workspace.dispose();
   terminals.dispose();

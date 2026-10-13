@@ -20,6 +20,14 @@ import { uiScaleOptions } from '../../shared/ui-scale';
 import type { WebSearchProvider } from '../../shared/web-search';
 import { PYTHON_LSP_PACKAGES, lspLanguagesForKind } from '../../shared/lsp-presets';
 import type { CommandRegistry } from '../core/commands';
+import { menuAccelerators } from '../../shared/app-menu';
+import {
+  bindingConflicts,
+  isMenuBinding,
+  menuBindingId,
+  menuCommandOf,
+  type BindingLike,
+} from '../../shared/keybindings';
 import { DEFAULT_KEYBINDINGS } from '../core/default-keybindings';
 import { comboFromEvent, isModifierKey } from '../core/keybindings';
 import type { RpcClient } from '../core/rpc';
@@ -979,62 +987,150 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   }
 
   /**
-   * Редактор горячих клавиш. Здесь только сочетания, которые перехватывает сам
-   * renderer (`core/default-keybindings.ts`): у пунктов меню клавиши держит Electron,
-   * и менять их отсюда нельзя. Сочетание набирается прямо в поле: клик по полю — и
-   * нажмите нужные клавиши. Backspace снимает сочетание, Esc — отмена набора.
+   * Редактор горячих клавиш. В одном списке два рода сочетаний: свои у команд,
+   * которые перехватывает renderer (`core/default-keybindings.ts`), и клавиши
+   * пунктов меню (их держит Electron — строка «клавиша меню», хранится с приставкой
+   * `menu:` и перестраивает меню в main). Сочетание набирается прямо в поле: клик по
+   * полю — и нажмите нужные клавиши. Backspace снимает сочетание, Esc — отмена набора.
+   * Поиск прячет строки на месте, не перерисовывая раздел.
    */
   function renderKeybindings(): Child[] {
+    // Два рода клавиш в одном списке: `command` — сочетание renderer, `menu:command` —
+    // клавиша пункта меню (её держит Electron). Оба хранятся в одних переопределениях.
     const saved = new Map(settings!.keybindings.overrides.map((item) => [item.command, item.combo]));
+    const menuKeys = menuAccelerators();
+    const rendererDefaults = new Map(DEFAULT_KEYBINDINGS.map((binding) => [binding.command, binding.combo]));
+    // Клавиши меню, заданные заново: их команда может и не иметь встроенной клавиши.
+    const menuOverrides = new Set(
+      [...saved.keys()].filter((key) => isMenuBinding(key)).map((key) => menuCommandOf(key)),
+    );
 
-    const write = (command: string, combo: string): void => {
+    const write = (key: string, combo: string, fallback: string): void => {
       const next = new Map(saved);
-      const fallback = DEFAULT_KEYBINDINGS.find((binding) => binding.command === command)?.combo ?? '';
       // Вернули исходное (или сняли вовсе) — не храним лишнего: переопределение только
       // затем и нужно, чтобы отличаться от значения по умолчанию.
-      if (!combo || combo === fallback) next.delete(command);
-      else next.set(command, combo);
+      if (!combo || combo === fallback) next.delete(key);
+      else next.set(key, combo);
       void patch({
         keybindings: { overrides: [...next.entries()].map(([id, value]) => ({ command: id, combo: value })) },
       });
     };
 
-    // Что с чем столкнулось: одно сочетание у нескольких команд — почти всегда описка.
-    const used = new Map<string, string[]>();
-    for (const binding of DEFAULT_KEYBINDINGS) {
-      const combo = saved.get(binding.command) ?? binding.combo;
-      if (!combo) continue;
-      used.set(combo, [...(used.get(combo) ?? []), binding.command]);
+    // Кандидаты — все команды реестра: так сочетание можно задать и той команде, у
+    // которой его прежде не было. Плюс те, что встречаются в переопределениях (команду
+    // могли убрать из реестра, а настройка осталась — её надо показать и снять).
+    const commands = new Map<string, { category: string; title: string; keywords: string }>();
+    for (const descriptor of deps.commands.list()) {
+      commands.set(descriptor.id, {
+        category: descriptor.category || 'Прочее',
+        title: descriptor.title || descriptor.id,
+        keywords: (descriptor.keywords ?? []).join(' '),
+      });
     }
-    const clashes = [...used.entries()].filter(([, commands]) => commands.length > 1);
+    for (const key of saved.keys()) {
+      const command = menuCommandOf(key);
+      if (!commands.has(command)) commands.set(command, { category: 'Прочее', title: command, keywords: '' });
+    }
 
-    const rows: Child[] = [];
+    const entries: Array<{ element: HTMLElement; search: string; header: boolean; hasKey: boolean }> = [];
+    const bindings: BindingLike[] = [];
     let category = '';
-    for (const binding of DEFAULT_KEYBINDINGS) {
-      const descriptor = deps.commands.get(binding.command);
-      const next = descriptor?.category ?? 'Прочее';
-      if (next !== category) {
-        category = next;
-        rows.push(h('div', { class: 'settings-divider' }));
-        rows.push(h('div', { class: 'field-label' }, category));
+    // Порядок — по категории, затем по названию: так заголовок группы стоит один раз,
+    // а внутри группы пункты идут по алфавиту, а не вперемешку с чужими.
+    const ordered = [...commands.entries()].sort(
+      ([idA, a], [idB, b]) =>
+        a.category.localeCompare(b.category, 'ru') || a.title.localeCompare(b.title, 'ru') || idA.localeCompare(idB),
+    );
+
+    for (const [command, info] of ordered) {
+      if (info.category !== category) {
+        category = info.category;
+        entries.push({
+          element: h('div', { class: 'field-label' }, category),
+          search: '',
+          header: true,
+          hasKey: false,
+        });
       }
-      const current = saved.get(binding.command) ?? binding.combo;
-      rows.push(
-        h(
+      const searchText = `${command} ${info.title} ${info.category} ${info.keywords}`.toLowerCase();
+      // Сочетание renderer: есть у команд с сочетанием по умолчанию либо там, где
+      // человек его задал сам. У прочих поле пустое — покажется, если команду искать.
+      const rendererKey = rendererDefaults.has(command) || saved.has(command);
+      {
+        const fallback = rendererDefaults.get(command) ?? '';
+        const current = saved.has(command) ? saved.get(command)! : fallback;
+        if (current) bindings.push({ combo: current, command });
+        const row = h(
           'div',
           { class: 'field field-between' },
-          h('span', {}, descriptor?.title ?? binding.command),
-          comboControl(current, (combo) => write(binding.command, combo)),
-        ),
-      );
+          h('span', {}, info.title),
+          comboControl(current, (combo) => write(command, combo, fallback)),
+        );
+        entries.push({ element: row, search: searchText, header: false, hasKey: rendererKey });
+      }
+      // Клавиша пункта меню: отдельной строкой, потому что её держит система. Строка
+      // есть и у пункта без встроенной клавиши — если человек задал её сам.
+      if (menuKeys.has(command) || menuOverrides.has(command)) {
+        const key = menuBindingId(command);
+        const fallback = menuKeys.get(command) ?? '';
+        const current = saved.has(key) ? saved.get(key)! : fallback;
+        bindings.push({ combo: current, command: key });
+        const row = h(
+          'div',
+          { class: 'field field-between' },
+          h('span', { class: 'field-sub' }, `${info.title} — клавиша меню`),
+          comboControl(current, (combo) => write(key, combo, fallback)),
+        );
+        entries.push({ element: row, search: `${searchText} клавиша меню`, header: false, hasKey: true });
+      }
     }
 
+    const filter = h('input', {
+      class: 'field-input',
+      type: 'search',
+      spellcheck: false,
+      placeholder: 'Найти команду…',
+    });
+    // Фильтр — не перерисовка: прячем строки на месте, иначе поле теряло бы фокус на
+    // каждой букве. По умолчанию видны команды с клавишами; поиск открывает и прочие,
+    // чтобы можно было назначить сочетание там, где его не было.
+    const applyFilter = (): void => {
+      const needle = filter.value.trim().toLowerCase();
+      const visible = entries.map((entry) => {
+        if (entry.header) return false;
+        const match = !needle || entry.search.includes(needle);
+        return match && (entry.hasKey || needle.length > 0);
+      });
+      // Заголовок группы виден, пока виден хоть один её пункт.
+      for (let index = 0; index < entries.length; index += 1) {
+        if (!entries[index]!.header) continue;
+        let any = false;
+        for (let next = index + 1; next < entries.length && !entries[next]!.header; next += 1) {
+          if (visible[next]) {
+            any = true;
+            break;
+          }
+        }
+        visible[index] = any;
+      }
+      entries.forEach((entry, index) => {
+        entry.element.hidden = !visible[index];
+      });
+    };
+    filter.addEventListener('input', applyFilter);
+    applyFilter();
+
+    // Что с чем столкнулось: одно сочетание у нескольких команд — почти всегда описка.
+    const clashes = bindingConflicts(bindings);
+
     const head: Child[] = [
+      filter,
       h(
         'div',
         { class: 'field-hint' },
         'Кликните поле и нажмите сочетание. Backspace снимает сочетание, Esc — отмена набора. ' +
-          'Меняются только сочетания самого редактора: клавиши пунктов меню задаёт система.',
+          'Строка команды — сочетание самого редактора, строка «клавиша меню» — клавиша пункта меню ' +
+          '(её меняет система). Поиск открывает и команды без сочетания — им можно задать новое.',
       ),
     ];
     if (clashes.length > 0) {
@@ -1042,12 +1138,12 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         h(
           'div',
           { class: 'field-hint' },
-          `Одно сочетание у нескольких команд: ${clashes.map(([combo]) => combo).join(', ')}. Сработает первое, ` +
-            'остальным стоит задать другое.',
+          `Одно сочетание у нескольких команд: ${clashes.map((item) => item.combo).join(', ')}. ` +
+            'Сработает первое, остальным стоит задать другое.',
         ),
       );
     }
-    return [...head, ...rows];
+    return [...head, ...entries.map((entry) => entry.element)];
   }
 
   /** Поле сочетания: читает нажатую комбинацию и само ничего не печатает. */
