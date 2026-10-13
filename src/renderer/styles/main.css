@@ -867,6 +867,24 @@ textarea {
   background: var(--run_accent);
 }
 
+/* Закладка на строке: ленточка в поле значков. Значок самый слабый — точка
+   останова, запуск и тест его перекрывают (см. buildGlyphs в редакторе). */
+.bookmark-glyph {
+  position: relative;
+  cursor: pointer;
+}
+
+.bookmark-glyph::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 9px;
+  height: 12px;
+  background: var(--blue_prime_background);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 74%, 0 100%);
+}
+
 /* Строка, где стоит отладчик: подсвечиваем всю строку, а не только жёлоб. */
 .debug-line {
   background: var(--debug_line_background);
@@ -5855,6 +5873,85 @@ body > .overlay {
   color: var(--text_color_tertiary);
   font-family: var(--font_ui);
   font-size: var(--font_default_size);
+}
+
+/* ── окно закладок ─────────────────────────────────────────────────────── */
+
+.bookmarks-modal {
+  width: min(560px, 94vw);
+}
+
+.bookmarks-toolbar {
+  margin-bottom: 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.bookmarks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 54vh;
+  overflow: auto;
+}
+
+.bookmarks-file {
+  margin-top: 6px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--separator_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  color: var(--text_color_tertiary);
+}
+
+.bookmarks-item {
+  display: flex;
+}
+
+.bookmarks-row {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bookmarks-row:hover {
+  background: var(--element_background_hover);
+}
+
+.bookmarks-line {
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  font-variant-numeric: tabular-nums;
+}
+
+.bookmarks-remove {
+  flex: none;
+  opacity: 0;
+}
+
+.bookmarks-item:hover .bookmarks-remove {
+  opacity: 1;
+}
+
+.bookmarks-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.bookmarks-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 
 /* ── окно локальной истории файла ──────────────────────────────────────── */

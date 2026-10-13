@@ -143,6 +143,27 @@ describe('sanitizeSession', () => {
     expect(sanitizeSession({ breakpoints: 'нет' }).breakpoints).toBeUndefined();
   });
 
+  it('закладки читаются и приводятся к каноническому порядку', () => {
+    const state = sanitizeSession({
+      bookmarks: [
+        { path: '/p/b.ts', line: 9 },
+        { path: '/p/a.ts', line: 4 },
+        { path: '/p/a.ts', line: 4 },
+        { path: '/p/a.ts', line: 0 },
+      ],
+    });
+    expect(state.bookmarks).toEqual([
+      { path: '/p/a.ts', line: 4 },
+      { path: '/p/b.ts', line: 9 },
+    ]);
+  });
+
+  it('пустые и битые закладки в сессию не пишутся', () => {
+    expect(sanitizeSession({ bookmarks: [] }).bookmarks).toBeUndefined();
+    expect(sanitizeSession({ bookmarks: 'нет' }).bookmarks).toBeUndefined();
+    expect(sanitizeSession({ bookmarks: [{ path: '/p/a.ts', line: 0 }] }).bookmarks).toBeUndefined();
+  });
+
   it('позиции курсоров читаются для открытых файлов', () => {
     const state = sanitizeSession({
       tabs: ['/p/a.ts', '/p/b.ts'],

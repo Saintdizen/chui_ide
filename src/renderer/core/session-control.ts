@@ -1,4 +1,5 @@
 import type { BreakpointRecord, DebugLaunchOptions, SessionState, WorkspaceInfo } from '../../shared/api';
+import type { BookmarkRecord } from '../../shared/bookmarks';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import type { DockView } from '../ui/dock';
 import type { DebugController } from './debug';
@@ -32,6 +33,12 @@ export interface WatchPanel {
   setWatch(expressions: readonly string[]): void;
 }
 
+/** Закладки в той части, что нужна сессии: отдать список и принять его обратно. */
+export interface BookmarkSource {
+  records(): BookmarkRecord[];
+  restore(records: unknown): void;
+}
+
 /** Макет в той части, что нужна сессии: видимость правой и нижней панелей. */
 export interface LayoutVisibility {
   readonly rightVisible: boolean;
@@ -49,6 +56,7 @@ export interface SessionDeps {
   workspace: WorkspaceRoots;
   dock: DockView;
   debugPanel: WatchPanel;
+  bookmarks: BookmarkSource;
   layout: LayoutVisibility;
   /** Показан ли ассистент: место правой панели занимается только под него. */
   aiEnabled: () => boolean;
@@ -128,6 +136,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
   /** Текущее рабочее место: что открыто, что раскрыто, какие панели видны. */
   const capture = (): SessionState => {
     const breakpoints = captureBreakpoints();
+    const bookmarks = deps.bookmarks.records();
     const watch = debugPanel.getWatch();
     const exceptions = debug.exceptionFilters();
     const options = deps.getDebugOptions();
@@ -149,6 +158,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       ...(watch.length > 0 ? { debugWatch: watch } : {}),
       ...(exceptions.uncaught || exceptions.caught ? { debugExceptions: exceptions } : {}),
       ...(breakpoints.length > 0 ? { breakpoints } : {}),
+      // Закладки — тоже рабочее место: пустые не пишем, чтобы файл не пух полями-пустышками.
+      ...(bookmarks.length > 0 ? { bookmarks } : {}),
       // Место работы в каждом файле — часть рабочего места: без него после
       // перезапуска вкладки те же, а курсор в начале файла.
       ...(Object.keys(cursors).length > 0 ? { cursors } : {}),
@@ -214,6 +225,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       debugPanel.setWatch(state.debugWatch ?? []);
       if (state.debugExceptions) void debug.setExceptionFilters(state.debugExceptions);
       restoreBreakpoints(state.breakpoints ?? []);
+      // Закладки: список восстанавливает модель, а редактор рисует значки по её событию.
+      deps.bookmarks.restore(state.bookmarks ?? []);
       // Видимость панелей — из общего макета (settings), а не из сессии проекта.
       // Из сессии берём только то, какая вкладка нижней панели была открыта.
       deps.withoutPersist(() => {

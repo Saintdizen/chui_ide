@@ -24,6 +24,7 @@ import { DocumentRegistry } from './editor/host/document-registry';
 import { LspFeatures } from './editor/host/lsp-features';
 import { GitModel } from './core/git-model';
 import { ReviewModel } from './core/review-model';
+import { BookmarkModel } from './core/bookmarks';
 import { ProjectPackagesModel } from './core/project-packages';
 import { parseCoverageJson } from '../shared/coverage-json';
 import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
@@ -104,6 +105,7 @@ import { createBisectModal } from './ui/bisect-modal';
 import { createWorktreeModal } from './ui/worktree-modal';
 import { createLfsModal } from './ui/lfs-modal';
 import { createHistoryModal } from './ui/history-modal';
+import { createBookmarksModal } from './ui/bookmarks-modal';
 import { createIdentityModal } from './ui/identity-modal';
 import { createForgeModal } from './ui/forge-modal';
 import { createTextModal } from './ui/text-modal';
@@ -261,6 +263,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const lsp = new LspFeatures(rpc);
 
   /**
+   * Закладки: строки файлов, к которым хочется вернуться. Список — рабочее место
+   * проекта, поэтому его хранит сессия (см. ниже), а редактор только рисует значки.
+   */
+  const bookmarks = new BookmarkModel();
+
+  /**
    * Редактор — своё ядро (`src/renderer/editor/`), без Monaco. Всё, что раньше навешивалось
    * на движок (подсказки LSP, inline-AI, сниппеты, Ctrl+Click), приходит сюда опциями:
    * у рабочего места для каждого из них есть шов.
@@ -375,6 +383,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           { label: 'Перейти к определению', onSelect: () => editors.runAction('editor.goToDefinition') },
           { label: 'Найти все ссылки', onSelect: () => editors.runAction('editor.references') },
           { label: 'Переименовать символ', onSelect: () => editors.runAction('editor.renameSymbol') },
+        );
+      }
+      // Закладка ставится на конкретную строку, поэтому и пункт есть только у файла.
+      const bookmarkPath = info.path;
+      if (bookmarkPath) {
+        const bookmarked = bookmarks.isBookmarked(bookmarkPath, info.line);
+        items.push(
+          { separator: true },
+          {
+            label: bookmarked ? 'Убрать закладку' : 'Поставить закладку',
+            onSelect: () => bookmarks.toggle(bookmarkPath, info.line),
+          },
+          { label: 'Закладки…', hint: 'Ctrl+Alt+B', onSelect: () => bookmarksModal.open() },
         );
       }
       // Быстрые исправления: пункт есть там, где он что-то даст — с языковым сервером.
@@ -1559,6 +1580,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     workspace,
     dock,
     debugPanel,
+    bookmarks: {
+      records: () => bookmarks.records(),
+      restore: (records) => bookmarks.restore(records),
+    },
     layout,
     aiEnabled,
     openPath,
@@ -1569,6 +1594,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       debugOptions = options;
     },
   });
+
+  // Закладки: список ведёт модель, редактор по нему рисует значки, сессия хранит его.
+  // Одна подписка на изменение — значков и сохранения хватает одного источника.
+  const bookmarksModal = createBookmarksModal({
+    bookmarks,
+    root: () => workspace.root,
+    reveal: (path, line) => void openPath(path).then(() => editors.reveal(path, line, 1)),
+  });
+  document.body.appendChild(bookmarksModal.element);
+
+  /** Файлы, у которых значки закладок уже розданы: с них же и снимаем их. */
+  const paintedBookmarks = new Set<string>();
+  const paintBookmarks = (): void => {
+    const files = new Set(bookmarks.files());
+    for (const path of paintedBookmarks) {
+      if (!files.has(path)) editors.setBookmarks(path, []);
+    }
+    for (const path of files) editors.setBookmarks(path, bookmarks.linesOf(path));
+    paintedBookmarks.clear();
+    for (const path of files) paintedBookmarks.add(path);
+  };
+  bookmarks.onDidChange(() => {
+    paintBookmarks();
+    session.scheduleSave();
+  });
+  // Клик по значку закладки в поле слева снимает её: состоянием владеет модель.
+  editors.onBookmarkToggle(({ path, line }) => bookmarks.remove(path, line));
   /**
    * Сохранить документ на диск. Если файл изменился снаружи после нашего чтения,
    * молча писать нельзя — перетрём чужую правку (ассистента, из терминала).
@@ -2489,6 +2541,36 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       editors.setBreakpoints(active.path, await debug.toggleBreakpoint(active.path, editors.cursor().line));
     },
   );
+
+  // Закладки: поставить на строку курсора, ходить между ними, показать списком.
+  // Уборка закладок файла клавиши не получает: это редкое дело, а не жест.
+  define({ id: 'editor.toggleBookmark', title: 'Закладки: поставить или снять', category: 'Навигация' }, () => {
+    const path = editors.currentPath;
+    if (path) bookmarks.toggle(path, editors.cursor().line);
+  });
+
+  /** Перейти к соседней закладке: файл может быть другим — сначала открываем его. */
+  const goToBookmark = (direction: 1 | -1): void => {
+    const path = editors.currentPath;
+    const target = path
+      ? bookmarks.next({ path, line: editors.cursor().line }, direction)
+      : ((direction === 1 ? bookmarks.all[0] : bookmarks.all[bookmarks.all.length - 1]) ?? null);
+    if (!target) {
+      showToast('Закладок нет');
+      return;
+    }
+    void openPath(target.path).then(() => editors.reveal(target.path, target.line, 1));
+  };
+
+  define({ id: 'editor.nextBookmark', title: 'Закладки: следующая', category: 'Навигация' }, () => goToBookmark(1));
+  define({ id: 'editor.previousBookmark', title: 'Закладки: предыдущая', category: 'Навигация' }, () =>
+    goToBookmark(-1),
+  );
+  define({ id: 'editor.bookmarksList', title: 'Закладки: список', category: 'Навигация' }, () => bookmarksModal.open());
+  define({ id: 'editor.clearBookmarksInFile', title: 'Закладки: убрать в файле', category: 'Навигация' }, () => {
+    const path = editors.currentPath;
+    if (path) bookmarks.clearFile(path);
+  });
 
   define(
     {

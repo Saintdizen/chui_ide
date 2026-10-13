@@ -1,4 +1,5 @@
 import type { BreakpointRecord, CursorPosition, DebugExceptionFilters, DebugLaunchOptions, SessionState } from './api';
+import { sanitizeBookmarks } from './bookmarks';
 
 /**
  * Проверка и границы сессии — в `shared`, а не в main: это чистая логика без
@@ -79,6 +80,9 @@ export function sanitizeSession(raw: unknown): SessionState {
   if (exceptions) state.debugExceptions = exceptions;
   const breakpoints = breakpointRecords(value.breakpoints);
   if (breakpoints.length > 0) state.breakpoints = breakpoints;
+  // Закладки — часть рабочего места проекта: строки, к которым человек возвращается.
+  const bookmarks = sanitizeBookmarks(value.bookmarks);
+  if (bookmarks.length > 0) state.bookmarks = bookmarks;
   // Позиции курсоров — только для открытых файлов: у закрытого она мертва.
   const cursors = cursorPositions(value.cursors, tabs);
   if (Object.keys(cursors).length > 0) state.cursors = cursors;

@@ -14,6 +14,7 @@ import type { ProjectSettings } from './project-config';
 import type { Snippet } from './snippets';
 import type { ReviewThread } from './review';
 import type { HistoryEntry } from './file-history';
+import type { BookmarkRecord } from './bookmarks';
 import type { GitLfsInfo } from './git-lfs';
 import type { GitIdentity, GitSshKey } from './git-identity';
 import type { WorkspaceRoot } from './workspace-roots';
@@ -283,6 +284,8 @@ export interface SessionState {
   debugExceptions?: DebugExceptionFilters;
   /** Точки останова отладки по файлам — их рабочее место помнит для проекта. */
   breakpoints?: BreakpointRecord[];
+  /** Закладки: строки файлов, к которым человек возвращается. */
+  bookmarks?: BookmarkRecord[];
   /** Где стоял курсор в каждом открытом файле (1-based). */
   cursors?: Record<string, CursorPosition>;
 }

@@ -44,4 +44,6 @@ export interface EditorApi {
   caretPoint(): { left: number; top: number; bottom: number } | null;
   /** Точки останова файла: строка и, если задано, условие останова. */
   setBreakpoints(path: string, breakpoints: readonly BreakpointInput[]): void;
+  /** Строки закладок файла: их рисует поле значков (список ведёт приложение). */
+  setBookmarks(path: string, lines: readonly number[]): void;
 }

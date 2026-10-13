@@ -222,6 +222,8 @@ export class EditorWorkspace {
   readonly onBreakpointToggle = this.breakpointEmitter.event;
   private readonly breakpointMenuEmitter = new Emitter<RunMarkerHit>();
   readonly onBreakpointMenu = this.breakpointMenuEmitter.event;
+  private readonly bookmarkEmitter = new Emitter<RunMarkerHit>();
+  readonly onBookmarkToggle = this.bookmarkEmitter.event;
   private readonly changeMarkerEmitter = new Emitter<ChangeMarkerHit>();
   readonly onChangeMarker = this.changeMarkerEmitter.event;
 
@@ -370,6 +372,7 @@ export class EditorWorkspace {
     pane.onTestMarker((hit) => this.forward(index, this.testMarkerEmitter, hit));
     pane.onBreakpointToggle((hit) => this.forward(index, this.breakpointEmitter, hit));
     pane.onBreakpointMenu((hit) => this.forward(index, this.breakpointMenuEmitter, hit));
+    pane.onBookmarkToggle((hit) => this.forward(index, this.bookmarkEmitter, hit));
     pane.onChangeMarker((hit) => this.forward(index, this.changeMarkerEmitter, hit));
     pane.onChangeStripMenu((hit) => this.forward(index, this.changeStripMenuEmitter, hit));
 
@@ -645,6 +648,10 @@ export class EditorWorkspace {
 
   setBreakpoints(path: string, breakpoints: readonly BreakpointInput[]): void {
     for (const pane of this.panes) pane.setBreakpoints(path, breakpoints);
+  }
+
+  setBookmarks(path: string, lines: readonly number[]): void {
+    for (const pane of this.panes) pane.setBookmarks(path, lines);
   }
 
   setCoverage(files: Iterable<CoverageEntry>): void {

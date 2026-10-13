@@ -307,6 +307,8 @@ export class EditorHost {
   private readonly testMarkers = new Map<string, readonly RunnableTest[]>();
   private testOutcomes: ReadonlyMap<string, TestOutcome> = new Map();
   private readonly breakpoints = new Map<string, readonly BreakpointInput[]>();
+  /** Строки закладок по файлам: список ведёт приложение, редактор только рисует значки. */
+  private readonly bookmarks = new Map<string, readonly number[]>();
   private readonly coverageLines = new Map<string, ReadonlySet<number>>();
   /**
    * Строки, где ветвь условия пройдена лишь наполовину: часть дуг исполнена, часть
@@ -330,6 +332,10 @@ export class EditorHost {
   /** Правый клик по значку точки останова: меню (условие, удаление). */
   private readonly breakpointMenuEmitter = new Emitter<RunMarkerHit>();
   readonly onBreakpointMenu = this.breakpointMenuEmitter.event;
+
+  /** Левый клик по значку закладки (когда на строке нет ничего важнее): снять её. */
+  private readonly bookmarkEmitter = new Emitter<RunMarkerHit>();
+  readonly onBookmarkToggle = this.bookmarkEmitter.event;
 
   /** Клик по значку у объявления теста — запустить именно этот тест. */
   private readonly testMarkerEmitter = new Emitter<TestMarkerHit>();
@@ -911,6 +917,11 @@ export class EditorHost {
   private buildGlyphs(path: string) {
     const glyphs = new Map<number, { line: number; className: string; tooltip?: string }>();
 
+    // Закладка — самый слабый значок: точка останова, запуск и тест её перекрывают
+    // (ниже они кладутся в ту же карту и затирают запись по строке).
+    for (const line of this.bookmarks.get(path) ?? []) {
+      glyphs.set(line, { line, className: 'bookmark-glyph', tooltip: 'Закладка' });
+    }
     for (const item of this.breakpoints.get(path) ?? []) {
       glyphs.set(item.line, {
         line: item.line,
@@ -1006,6 +1017,13 @@ export class EditorHost {
   setBreakpoints(path: string, breakpoints: readonly BreakpointInput[]): void {
     if (breakpoints.length === 0) this.breakpoints.delete(path);
     else this.breakpoints.set(path, breakpoints);
+    this.refreshDecorations(path);
+  }
+
+  /** Строки закладок файла: пустой набор — значков закладок у файла нет. */
+  setBookmarks(path: string, lines: readonly number[]): void {
+    if (lines.length === 0) this.bookmarks.delete(path);
+    else this.bookmarks.set(path, lines);
     this.refreshDecorations(path);
   }
 
@@ -1116,8 +1134,15 @@ export class EditorHost {
       this.testMarkerEmitter.fire({ path, line, selector: test.selector, name: test.name });
       return;
     }
-    if (menu && this.breakpoints.get(path)?.some((item) => item.line === line)) {
+    const hasBreakpoint = this.breakpoints.get(path)?.some((item) => item.line === line) === true;
+    if (menu && hasBreakpoint) {
       this.breakpointMenuEmitter.fire({ path, line });
+      return;
+    }
+    // Левый клик по закладке, где больше ничего нет, снимает её: значок под
+    // курсором — то, что человек и рассчитывает убрать.
+    if (!menu && !hasBreakpoint && this.bookmarks.get(path)?.includes(line)) {
+      this.bookmarkEmitter.fire({ path, line });
       return;
     }
     this.breakpointEmitter.fire({ path, line });

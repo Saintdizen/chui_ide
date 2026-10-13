@@ -39,6 +39,11 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { combo: 'F10', command: 'debug.stepOver' },
   { combo: 'F11', command: 'debug.stepInto' },
   { combo: 'Shift+F11', command: 'debug.stepOut' },
+  // Закладки — как в расширении Bookmarks для VS Code: K — поставить, L/J — переходы.
+  { combo: 'Ctrl+Alt+K', command: 'editor.toggleBookmark' },
+  { combo: 'Ctrl+Alt+L', command: 'editor.nextBookmark' },
+  { combo: 'Ctrl+Alt+J', command: 'editor.previousBookmark' },
+  { combo: 'Ctrl+Alt+B', command: 'editor.bookmarksList' },
   // Меню — как в приложениях KDE: Alt+F10 открывает его с клавиатуры.
   { combo: 'Alt+F10', command: 'app.showMenu' },
 ];
