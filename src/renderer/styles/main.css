@@ -2218,6 +2218,11 @@ textarea {
   stroke: var(--red_prime_background);
 }
 
+.ring-percent {
+  font-family: var(--font_mono);
+  font-size: 10.5px;
+}
+
 /* ── лента беседы и её сводка после сжатия ─────────────────────────────── */
 
 .chat-body {

@@ -339,8 +339,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /** Значок статуса — тот же, что у режима в селекте: картинка и подпись совпадают. */
   const modeIcon = h('span', { class: 'composer-status-icon' }, svgIcon('bubble', 12));
-  const modeName = h('span', {}, '');
-  const modeBadge = h('span', { class: 'composer-status-item' }, modeIcon, modeName);
+  // Режим — только значком: слово («Инструменты выключены» и т. п.) висело в полосе
+  // всегда и дублировало селект режима. Смысл остаётся в значке и в подсказке.
+  const modeBadge = h('span', { class: 'composer-status-item' }, modeIcon);
 
   /**
    * Права доступа — отдельный тумблер, а не часть режима: включён — команды и правки
@@ -1052,7 +1053,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const badgeIcon = mode === 'plan' ? 'checklist' : mode === 'agent' ? 'wrench' : 'bubble';
     clear(modeIcon);
     modeIcon.appendChild(svgIcon(badgeIcon, 12));
-    modeName.textContent =
+    modeBadge.title =
       mode === 'plan'
         ? 'План: только чтение, без изменений'
         : mode === 'agent'
