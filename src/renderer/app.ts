@@ -144,8 +144,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     openGitManager: (anchor) => openGitManager(anchor),
     openPythonEnv: (anchor) => openPythonEnv(anchor),
     openNodeEnv: (anchor) => openNodeEnv(anchor),
-    // Через команду, а не напрямую: палитра создаётся ниже, а команда уже есть.
-    openFilePicker: () => void commands.execute('file.quickOpen'),
     openProblems: () => editors.revealNextProblem(),
   });
   layout.statusBarHost.appendChild(statusBar.element);
@@ -1045,8 +1043,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   layout.tabsHost.appendChild(tabs.element);
 
+  // Путь к файлу живёт в строке состояния: крошки рисуют его сегментами и
+  // заменяют прежнюю ссылку на файл — одно дублировало другое.
   const breadcrumbs = createBreadcrumbs({ openEditors, documents, workspace, commands });
-  layout.breadcrumbsHost.appendChild(breadcrumbs);
+  statusBar.fileSlot.appendChild(breadcrumbs);
 
   const runControl = createRunButton((target) => void runTarget(target));
   // Имя открытого файла в центре шапки: показывается, когда кнопки запуска нет.
@@ -1219,11 +1219,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
     // Запускать нечего — кнопка прячется, но центр шапки не пустует: там имя файла.
     topBarName.hidden = !runControl.element.hidden;
-
-    // Полоса под вкладками нужна ровно тогда, когда в ней есть что показать:
-    // путь из одного сегмента крошек не рисует, и без них оставалась бы пустая
-    // полоска с линией на всю ширину.
-    layout.breadcrumbsHost.hidden = breadcrumbs.hidden;
 
     if (!active) return;
     const line = entryLine(active.languageId, active.value);
@@ -3790,8 +3785,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const language = active?.languageId ?? null;
     const indent = settings.editor.languageIndent && language ? languageIndent(language) : null;
     statusBar.update({
-      file: active ? workspace.relative(active.path) : null,
-      dirty: active?.dirty ?? false,
       readOnly: active?.readOnly ?? false,
       language: language ? languageLabel(language) : null,
       version: active?.version ?? 0,

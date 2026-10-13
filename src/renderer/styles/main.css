@@ -666,25 +666,14 @@ textarea {
 
 /* ── хлебные крошки ─────────────────────────────────────────────────────── */
 
-.breadcrumbs-host {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  height: 26px;
-  padding-right: 6px;
-  /* Линия принадлежит всей полосе: крошки могут быть скрыты (файл в корне),
-     а кнопка запуска в этой же строке — нет, и разрыв линии был бы виден. */
-  border-bottom: 1px solid var(--separator_color);
-}
-
+/* Путь к открытому файлу живёт в строке состояния (см. `ui/statusbar.ts`):
+   раньше крошки шли отдельной полосой под вкладками, а тот же путь повторялся
+   ссылкой в полосе — теперь он один. */
 .breadcrumbs {
   display: flex;
   align-items: center;
-  flex: 1 1 auto;
   min-width: 0;
   gap: 1px;
-  height: 100%;
-  padding: 0 8px;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -693,8 +682,8 @@ textarea {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 1px 4px;
+  border-radius: var(--radius_sm);
   color: var(--text_color_tertiary);
   font-size: var(--font_labels_size);
 }
@@ -3881,21 +3870,13 @@ textarea {
   white-space: nowrap;
 }
 
-/* Путь файла — кнопка: клик открывает быстрый переход к другому файлу. */
-.status-file {
+/* Слот крошек в полосе: путь бывает длинным — обрезаем его, а не растягиваем
+   полосу. Кнопки-сегменты рисует `ui/breadcrumbs.ts`. */
+.status-breadcrumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
   overflow: hidden;
-  padding: 0 4px;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: var(--text_color);
-  font: inherit;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-
-.status-file:hover {
-  background: var(--element_background_hover);
 }
 
 .status-muted {
@@ -6450,7 +6431,6 @@ body > .overlay {
   display: none;
 }
 
-.editor-island.is-chat .breadcrumbs-host,
 .editor-island.is-chat .editor-host > :not(.chat-editor) {
   display: none;
 }

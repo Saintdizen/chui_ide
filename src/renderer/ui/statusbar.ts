@@ -1,8 +1,6 @@
 import { h, svgIcon } from './dom';
 
 export interface StatusState {
-  file: string | null;
-  dirty: boolean;
   /** Файл открыт только для чтения (большой): показываем это словом. */
   readOnly: boolean;
   line: number;
@@ -34,6 +32,12 @@ export interface StatusBarView {
    * а не занимала высоту панели чата.
    */
   chatSlot: HTMLElement;
+  /**
+   * Куда встают хлебные крошки — путь к открытому файлу. Раньше путь рисовала
+   * сама полоса ссылкой на файл, но те же сегменты показывали крошки под
+   * вкладками: одно дублировало другое. Теперь крошки одни и живут здесь.
+   */
+  fileSlot: HTMLElement;
   update(patch: Partial<StatusState>): void;
 }
 
@@ -44,8 +48,6 @@ export interface StatusBarDeps {
   openPythonEnv(anchor: HTMLElement): void;
   /** Открыть попап Node-окружения у кнопки окружения. */
   openNodeEnv(anchor: HTMLElement): void;
-  /** Клик по пути файла — быстрый переход к другому файлу. */
-  openFilePicker(): void;
   /** Клик по счётчику проблем — переход к первой пометке. */
   openProblems(anchor: HTMLElement): void;
 }
@@ -66,8 +68,6 @@ function plural(count: number, one: string, few: string, many: string): string {
  */
 export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const state: StatusState = {
-    file: null,
-    dirty: false,
     readOnly: false,
     line: 1,
     column: 1,
@@ -94,12 +94,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       else deps.openPythonEnv(anchor);
     },
   });
-  const fileItem = h('button', {
-    class: 'status-item status-file',
-    type: 'button',
-    title: 'Быстрый переход к файлу',
-    onClick: () => deps.openFilePicker(),
-  });
+  /** Слот под крошки: путь к файлу рисует `ui/breadcrumbs.ts`. */
+  const fileSlot = h('div', { class: 'status-breadcrumbs' });
   const gitItem = h(
     'button',
     {
@@ -140,7 +136,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const element = h(
     'div',
     { class: 'statusbar' },
-    h('div', { class: 'status-group' }, gitItem, fileItem),
+    h('div', { class: 'status-group' }, gitItem, fileSlot),
     h(
       'div',
       { class: 'status-group' },
@@ -160,8 +156,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   );
 
   const render = (): void => {
-    fileItem.textContent = state.file ? `${state.dirty ? '● ' : ''}${state.file}` : '';
-    fileItem.hidden = !state.file;
     positionItem.textContent = `${state.line}:${state.column}`;
     eolItem.textContent = state.eol;
     encodingItem.textContent = state.encoding;
@@ -204,6 +198,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   return {
     element,
     chatSlot,
+    fileSlot,
     update(patch) {
       Object.assign(state, patch);
       render();

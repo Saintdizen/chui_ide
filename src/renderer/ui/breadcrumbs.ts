@@ -13,8 +13,9 @@ export interface BreadcrumbsDeps {
 }
 
 /**
- * Хлебные крошки под вкладками, как в PyCharm: путь от корня проекта до файла.
- * Клик по сегменту-папке раскрывает её в проводнике.
+ * Хлебные крошки, как в PyCharm: путь от корня проекта до файла с сегментами-
+ * кнопками. Живут в строке состояния (см. `statusbar.ts`): путь и раньше был
+ * виден там ссылкой на файл, и одно дублировало другое.
  */
 export function createBreadcrumbs(deps: BreadcrumbsDeps): HTMLElement {
   const element = h('div', { class: 'breadcrumbs' });
@@ -30,9 +31,9 @@ export function createBreadcrumbs(deps: BreadcrumbsDeps): HTMLElement {
     // Пути приходят в родных разделителях (на Windows — обратные), поэтому режем по обоим.
     const segments = local ? splitPath(local) : [];
 
-    // Крошки нужны, только когда есть куда идти: для файла в корне проекта путь — одно имя,
-    // и оно уже есть во вкладке и в статусбаре.
-    element.hidden = segments.length < 2;
+    // Нет пути — нечего рисовать: файл вне проекта или ничего не открыто.
+    // Путь из одного сегмента (файл в корне проекта) показываем: это его имя.
+    element.hidden = segments.length === 0;
     if (element.hidden) return;
 
     let walking = root ?? '';

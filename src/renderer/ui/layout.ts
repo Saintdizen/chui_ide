@@ -13,7 +13,6 @@ export interface Layout {
   sidebar: HTMLElement;
   sidebarBody: HTMLElement;
   tabsHost: HTMLElement;
-  breadcrumbsHost: HTMLElement;
   editorHost: HTMLElement;
   /** Остров редактора: на нём переключаются режимы (например, чат вместо файлов). */
   editorIsland: HTMLElement;
@@ -46,9 +45,8 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
   const sidebarSplitter = h('div', { class: 'splitter splitter-left' });
 
   const tabsHost = h('div', { class: 'tabs-host' });
-  const breadcrumbsHost = h('div', { class: 'breadcrumbs-host' });
   const editorHost = h('div', { class: 'editor-host' });
-  const editorIsland = h('section', { class: 'island editor-island' }, tabsHost, breadcrumbsHost, editorHost);
+  const editorIsland = h('section', { class: 'island editor-island' }, tabsHost, editorHost);
 
   const dockSplitter = h('div', { class: 'splitter splitter-dock' });
   const dockHost = h('div', { class: 'dock-host' });
@@ -128,7 +126,6 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     sidebar,
     sidebarBody,
     tabsHost,
-    breadcrumbsHost,
     editorHost,
     editorIsland,
     dockHost,
