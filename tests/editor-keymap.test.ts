@@ -48,6 +48,12 @@ describe('правки', () => {
     expect(resolveKey({ key: 'F1' })).toEqual({ kind: 'edit', edit: 'palette' });
   });
 
+  it('F12, Shift+F12, Ctrl+Shift+F12 — навигация по символу', () => {
+    expect(resolveKey({ key: 'F12' })).toEqual({ kind: 'edit', edit: 'goToDefinition' });
+    expect(resolveKey({ key: 'F12', shift: true })).toEqual({ kind: 'edit', edit: 'references' });
+    expect(resolveKey({ key: 'F12', ctrl: true, shift: true })).toEqual({ kind: 'edit', edit: 'peekDefinition' });
+  });
+
   it('Ctrl+A, C, X, V — выделить, копировать, вырезать, вставить', () => {
     expect(resolveKey({ key: 'a', ctrl: true })).toEqual({ kind: 'edit', edit: 'selectAll' });
     expect(resolveKey({ key: 'c', ctrl: true })).toEqual({ kind: 'edit', edit: 'copy' });

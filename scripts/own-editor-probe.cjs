@@ -2520,6 +2520,109 @@ async function emmetCheck(win) {
  * Проверка орфографии: слово не из словаря подчёркнуто зелёной волной в комментарии,
  * а «Добавить в словарь» под курсором снимает отметку.
  */
+/**
+ * Заглянуть в определение: копия кода другого файла показывается на месте, с нужной
+ * строкой внутри, счётчиком мест и кнопкой «Открыть». Проверяем и ход по местам:
+ * у двух мест стрелка вперёд активна, у последнего — выключена.
+ */
+async function peekCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  // Готовим ответ сервера: два места в одном файле — видно и счётчик, и ход.
+  await script(`(() => {
+    const { answers, files } = window.probePeek;
+    const lines = [];
+    for (let i = 1; i <= 40; i += 1) lines.push(i === 3 ? 'export const value = 1;' : '// строка ' + i);
+    files['/probe/def.ts'] = lines.join('\\n');
+    answers.definition = [
+      { path: '/probe/def.ts', line: 3, column: 14 },
+      { path: '/probe/def.ts', line: 30, column: 1 },
+    ];
+    return true;
+  })()`);
+
+  await script(`(() => {
+    window.probePeek.workspace.runAction('editor.peekDefinition');
+    return true;
+  })()`);
+  await wait(150);
+
+  const first = await script(`(() => {
+    const root = document.querySelector('#probe-peek .own-editor-peek');
+    if (!root || root.hidden) return { видна: false };
+    const target = root.querySelector('.own-editor-peek-row.is-target');
+    return {
+      видна: true,
+      заголовок: root.querySelector('.own-editor-peek-title')?.textContent ?? null,
+      счётчик: root.querySelector('.own-editor-peek-counter')?.textContent ?? null,
+      строк: root.querySelectorAll('.own-editor-peek-row').length,
+      цель: target ? target.textContent : null,
+      назад_выключена: root.querySelector('.own-editor-peek-btn.own-editor-peek-step')
+        ? root.querySelectorAll('.own-editor-peek-step')[0].disabled
+        : null,
+      вперёд_активна: root.querySelectorAll('.own-editor-peek-step')[1]
+        ? !root.querySelectorAll('.own-editor-peek-step')[1].disabled
+        : null,
+    };
+  })()`);
+
+  // Шаг вперёд: второе место — и стрелка вперёд гаснет (конец списка виден).
+  const stepped = await script(`(() => {
+    const { workspace } = window.probePeek;
+    const root = document.querySelector('#probe-peek .own-editor-peek');
+    root.querySelectorAll('.own-editor-peek-step')[1].click();
+    return true;
+  })()`);
+  void stepped;
+  await wait(150);
+
+  const second = await script(`(() => {
+    const root = document.querySelector('#probe-peek .own-editor-peek');
+    if (!root || root.hidden) return { видна: false };
+    const steps = root.querySelectorAll('.own-editor-peek-step');
+    const target = root.querySelector('.own-editor-peek-row.is-target');
+    return {
+      видна: true,
+      счётчик: root.querySelector('.own-editor-peek-counter')?.textContent ?? null,
+      цель: target ? target.textContent : null,
+      вперёд_выключена: steps[1] ? steps[1].disabled : null,
+      назад_активна: steps[0] ? !steps[0].disabled : null,
+    };
+  })()`);
+
+  // «Открыть» уводит насовсем: копия закрывается, вызывающий получает место.
+  await script(`(() => {
+    document.querySelector('#probe-peek .own-editor-peek-open').click();
+    return true;
+  })()`);
+  await wait(100);
+
+  const opened = await script(`(() => ({
+    видна: !document.querySelector('#probe-peek .own-editor-peek').hidden,
+    переходы: window.probePeek.revealed,
+    чтения: window.probePeek.reads.length,
+  }))()`);
+
+  // Курсор сдвинулся — копия про прежнее место больше не нужна.
+  await script(`(() => {
+    const { workspace, doc } = window.probePeek;
+    workspace.runAction('editor.peekDefinition');
+    return true;
+  })()`);
+  await wait(150);
+  await script(`(() => {
+    const { workspace, doc } = window.probePeek;
+    workspace.reveal(doc.path, 2, 1);
+    return true;
+  })()`);
+  await wait(120);
+  const afterMove = await script(
+    `(() => ({ видна: !document.querySelector('#probe-peek .own-editor-peek').hidden }))()`,
+  );
+
+  return { первое_место: first, второе_место: second, после_открытия: opened, после_сдвига: afterMove };
+}
+
 async function spellcheckCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
   await wait(60);
@@ -2854,6 +2957,11 @@ async function main() {
   const spell = await spellcheckCheck(win);
   log('## Проверка орфографии');
   log(JSON.stringify(spell, null, 2));
+  log('');
+
+  const peek = await peekCheck(win);
+  log('## Заглянуть в определение');
+  log(JSON.stringify(peek, null, 2));
   log('');
 
   log('## Подсказки языкового сервера');

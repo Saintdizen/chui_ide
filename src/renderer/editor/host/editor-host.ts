@@ -61,6 +61,8 @@ import { FindWidget } from '../widgets/find-widget';
 import { GotoLineWidget } from '../widgets/goto-widget';
 import { HoverWidget, type HoverExternalInfo } from '../widgets/hover-widget';
 import { LocationsWidget } from '../widgets/locations-widget';
+import { PeekWidget } from '../widgets/peek-widget';
+import { PeekController } from './peek-controller';
 import { SignatureWidget } from '../widgets/signature-widget';
 import { SuggestWidget } from '../widgets/suggest-widget';
 import type { DocumentRegistry } from './document-registry';
@@ -201,6 +203,12 @@ export interface EditorHostOptions {
   symbols?: SymbolSource;
   /** Перейти к месту: открыть файл и поставить курсор. Дело приложения, не панели. */
   revealLocation?: (path: string, line: number, column: number) => void;
+  /**
+   * Прочитать текст файла по пути: у открытого он уже есть, у прочего — с диска.
+   * Нужно «заглядыванию» в определение (см. `peek-controller.ts`). Не задано —
+   * заглядывания нет вовсе: показать нечего.
+   */
+  readText?: (path: string) => Promise<string | null>;
   /** Короткий путь для подписи места в списке (в приложении — относительный). */
   relativePath?: (path: string) => string;
   /**
@@ -310,6 +318,9 @@ export class EditorHost {
   private readonly signature: SignatureAssistant | null;
   /** Список мест (определения, ссылки). `null` — источника нет, показывать нечего. */
   private readonly locations: LocationsWidget | null;
+  /** Копия кода «на месте» (заглянуть в определение). `null` — показывать нечего. */
+  private readonly peekWidget: PeekWidget | null;
+  private readonly peek: PeekController | null;
   /** Связка «сервер → решение → попап». `null` вместе с источником. */
   private readonly navigation: SymbolNavigation | null;
   /** Подсказка «допиши за меня». `null` — источника нет, призрачного текста не будет. */
@@ -544,6 +555,24 @@ export class EditorHost {
     // Список мест (определения, ссылки). Есть только когда дан источник: без языкового
     // сервера переходить некуда, и попап не нужен.
     this.locations = options.symbols ? new LocationsWidget(container) : null;
+    // Заглядывание в определение: нужны и места (сервер), и текст файла (чтение).
+    this.peekWidget = options.symbols && options.readText ? new PeekWidget(container, this.scheme) : null;
+    this.peek =
+      options.symbols && options.readText && this.peekWidget
+        ? new PeekController({
+            definition: (path, position) => options.symbols!.definition(path, position),
+            readText: (path) => options.readText!(path),
+            widget: this.peekWidget,
+            anchor: () => this.caretAnchor(),
+            label: (target) => (options.relativePath ?? ((path: string) => path))(target.path),
+            reveal: (target) => options.revealLocation?.(target.path, target.line, target.column),
+            notice: (text) => options.onNotice?.(text),
+            position: () => {
+              const position = this.cursorPosition();
+              return { path: this.path, line: position.line, column: position.column };
+            },
+          })
+        : null;
     this.navigation = options.symbols
       ? new SymbolNavigation({
           source: options.symbols,
@@ -577,6 +606,9 @@ export class EditorHost {
     const interceptors: KeyInterceptor[] = [this.assistant];
     if (this.signature) interceptors.push(this.signature);
     if (this.navigation) interceptors.push(this.navigation);
+    // Заглядывание идёт после списка мест: видимый список забирает клавишу первым,
+    // а копия — уже когда списка нет (при заглядывании он и не показывается).
+    if (this.peek) interceptors.push(this.peek);
     // Emmet — после попапов: видимый список подсказок забирает Tab себе, а уже потом
     // Tab раскрывает сокращение (см. `input/emmet.ts`).
     if (options.emmetEnabled) {
@@ -662,6 +694,8 @@ export class EditorHost {
     this.languageId = document.languageId;
     // Призрачная подсказка говорила о прошлом файле — к новому она не относится.
     this.inline?.setBuffer();
+    // Копия «заглянуть» относилась к прежнему файлу — прячем её вместе с ним.
+    this.peek?.hide();
 
     this.path = document.path;
     // Большой файл открывается только для чтения: значок говорит об этом человеку, а
@@ -835,6 +869,8 @@ export class EditorHost {
   setScheme(scheme: Scheme): void {
     this.scheme = scheme;
     this.view.setScheme(scheme);
+    // Копия красится той же палитрой — переставляем и её цвета.
+    this.peekWidget?.setScheme(scheme);
   }
 
   /** Поставить фокус в редактор — после команд палитры и переходов. */
@@ -977,6 +1013,15 @@ export class EditorHost {
   findReferences(): boolean {
     if (!this.navigation) return false;
     this.navigation.findReferences();
+    return true;
+  }
+
+  /** Заглянуть в определение, не уходя из файла. `false` — заглядывать нечем. */
+  peekDefinition(): boolean {
+    if (!this.peek) return false;
+    // Список мест — другой способ показать то же самое: два попапа разом не нужны.
+    this.navigation?.hide();
+    this.peek.peekDefinition();
     return true;
   }
 
@@ -1461,6 +1506,7 @@ export class EditorHost {
     this.signature?.dispose();
     this.suggest.dispose();
     this.locations?.dispose();
+    this.peekWidget?.dispose();
     this.inline?.dismiss();
     if (this.foldTimer !== null) window.clearTimeout(this.foldTimer);
     if (this.lensTimer !== null) window.clearTimeout(this.lensTimer);
@@ -1476,14 +1522,20 @@ export class EditorHost {
     this.changeStripMenuEmitter.dispose();
   }
 
-  /** Показать панель по команде ввода (`Ctrl+F`, `Ctrl+H`, `Ctrl+G`, `F1`). */
+  /**
+   * Показать панель или пойти по символу по команде ввода (`Ctrl+F`, `Ctrl+G`, `F1`,
+   * `F12`, `Shift+F12`, `Ctrl+Shift+F12`).
+   */
   private runCommand(command: CommandName): void {
     if (command === 'gotoLine') this.goto.show();
     else if (command === 'palette') this.openPalette?.();
     else if (command === 'codeActions') {
       // Быстрые исправления — дело приложения: ему и сервер, и список, и правки.
       if (this.path) this.codeActions?.(this.path, this.cursorPosition());
-    } else this.find.show(command === 'replace' ? 'replace' : 'find');
+    } else if (command === 'goToDefinition') this.goToDefinition();
+    else if (command === 'references') this.findReferences();
+    else if (command === 'peekDefinition') this.peekDefinition();
+    else this.find.show(command === 'replace' ? 'replace' : 'find');
   }
 
   /**

@@ -354,6 +354,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     // Переход к месту: открыть файл (это умеет приложение) и встать на строку.
     revealLocation: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
+    // Текст целевого файла для «заглядывания»: открытый берём из документа (в нём
+    // и несохранённые правки), прочий — с диска. Не прочитали — копию не покажем.
+    readText: async (path) => {
+      const open = documents.get(path);
+      if (open) return open.value;
+      try {
+        return (await rpc.request('workspace.readFile', { path })).text;
+      } catch {
+        return null;
+      }
+    },
     relativePath: (path) => workspace.relative(path),
     onNotice: (text) => showToast(text),
     // Переименование: имя спрашиваем диалогом, правки применяет документная модель.
@@ -445,6 +456,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         items.push(
           { separator: true },
           { label: 'Перейти к определению', onSelect: () => editors.runAction('editor.goToDefinition') },
+          { label: 'Заглянуть в определение', onSelect: () => editors.runAction('editor.peekDefinition') },
           { label: 'Найти все ссылки', onSelect: () => editors.runAction('editor.references') },
           { label: 'Переименовать символ', onSelect: () => editors.runAction('editor.renameSymbol') },
         );

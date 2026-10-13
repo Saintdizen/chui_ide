@@ -153,6 +153,12 @@ export interface EditorWorkspaceOptions {
   renameSymbol?: (path: string, position: { line: number; column: number }) => void;
   /** Перейти к месту: открыть файл и поставить курсор. Дело приложения (оно знает, как открыть). */
   revealLocation?: (path: string, line: number, column: number) => void;
+  /**
+   * Прочитать текст файла по пути (открытый — из документа, прочий — с диска).
+   * Нужно «заглядыванию» в определение (`widgets/peek-widget.ts`). Не задано —
+   * заглядывания нет: показать текст негде.
+   */
+  readText?: (path: string) => Promise<string | null>;
   /** Короткий путь для подписи места в списке. */
   relativePath?: (path: string) => string;
   /** Сообщить человеку, что мест не нашлось. */
@@ -222,6 +228,8 @@ export class EditorWorkspace {
   private readonly renameSymbol: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Перейти к месту — открыть файл и поставить курсор. */
   private readonly revealLocation: ((path: string, line: number, column: number) => void) | undefined;
+  /** Чтение текста файла: нужно «заглядыванию» в определение (см. `peek-controller.ts`). */
+  private readonly readText: ((path: string) => Promise<string | null>) | undefined;
   /** Быстрые исправления: шов к приложению (сервер, список, применение правок). */
   private readonly codeActions: ((path: string, position: { line: number; column: number }) => void) | undefined;
   /** Диапазоны свёртки файла — тоже шов: у приложения и сервер, и подсчёт по отступам. */
@@ -323,6 +331,7 @@ export class EditorWorkspace {
     this.symbols = options.symbols;
     this.renameSymbol = options.renameSymbol;
     this.revealLocation = options.revealLocation;
+    this.readText = options.readText;
     this.relativePath = options.relativePath;
     this.onNotice = options.onNotice;
     this.contextMenu = options.contextMenu;
@@ -414,6 +423,7 @@ export class EditorWorkspace {
       semanticTokens: this.semanticTokens,
       symbols: this.symbols,
       revealLocation: this.revealLocation,
+      readText: this.readText,
       relativePath: this.relativePath,
       onNotice: this.onNotice,
       contextMenu: this.contextMenu,
@@ -613,6 +623,9 @@ export class EditorWorkspace {
     if (this.symbols) {
       context.goToDefinition = () => void this.pane.goToDefinition();
       context.findReferences = () => void this.pane.findReferences();
+      // Заглянуть можно, лишь когда есть чем показать: места — от сервера, текст —
+      // от чтения. Без чтения команда не предлагается (в палитре нет пустого пункта).
+      if (this.readText) context.peekDefinition = () => void this.pane.peekDefinition();
     }
     // Переименование — шов приложения: ему нужен диалог имени и документная модель.
     const renameSymbol = this.renameSymbol;

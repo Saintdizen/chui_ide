@@ -94,7 +94,15 @@ export type EditCommand =
   | 'collapseSelections'
   /** Ctrl+Shift+[ и Ctrl+Shift+] — свернуть и развернуть блок у курсора. */
   | 'fold'
-  | 'unfold';
+  | 'unfold'
+  /**
+   * Навигация по символу: F12 — перейти к определению, Shift+F12 — ссылки,
+   * Ctrl+Shift+F12 — заглянуть в определение, не уходя из файла. Показывает их
+   * вызывающий (у него и языковой сервер, и открытие файлов).
+   */
+  | 'goToDefinition'
+  | 'references'
+  | 'peekDefinition';
 
 /**
  * Во что превращается нажатие.
@@ -127,6 +135,12 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   // F1 — палитра команд: у Monaco её открывало его же действие, своему редактору
   // нужна своя обработка. Сочетания клавиш у неё нет — это клавиша панели.
   if (key === 'F1') return { kind: 'edit', edit: 'palette' };
+  // Навигация по символу: F12 — определение, Shift+F12 — ссылки, Ctrl+Shift+F12 —
+  // заглянуть (определение на месте). Привычные клавиши из VS Code и PyCharm.
+  if (key === 'F12') {
+    if (control && extend) return { kind: 'edit', edit: 'peekDefinition' };
+    return { kind: 'edit', edit: extend ? 'references' : 'goToDefinition' };
+  }
   // Escape после мультикурсора оставляет одну каретку — как в других редакторах.
   if (key === 'Escape') return { kind: 'edit', edit: 'collapseSelections' };
 

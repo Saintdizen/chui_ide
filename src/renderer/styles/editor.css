@@ -838,6 +838,117 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Копия кода «на месте» (заглянуть в определение): окно в системе окна, у строки,
+   откуда заглянули. Тело — как маленький редактор: номера строк и код моношрифтом,
+   цвета токенов приходят переменными `--own-token-*` с корня копии (их ставит виджет). */
+.own-editor-peek {
+  position: fixed;
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  background: var(--popup_background);
+  border: 1px solid var(--border_color);
+  border-radius: 8px;
+  box-shadow: var(--box_shadow_small);
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  color: var(--text_color);
+  overflow: hidden;
+}
+
+.own-editor-peek-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 6px 0 4px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.own-editor-peek-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.own-editor-peek-counter {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  font-variant-numeric: tabular-nums;
+}
+
+.own-editor-peek-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.own-editor-peek-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.own-editor-peek-btn {
+  height: 20px;
+  min-width: 20px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--text_color);
+  font: inherit;
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.own-editor-peek-btn:hover:not(:disabled) {
+  background: var(--button_background);
+  border-color: var(--border_color);
+}
+
+.own-editor-peek-btn:disabled {
+  color: var(--text_color_tertiary);
+  cursor: default;
+}
+
+.own-editor-peek-body {
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: var(--font_default_size);
+  line-height: 19px;
+}
+
+.own-editor-peek-row {
+  display: flex;
+  white-space: pre;
+}
+
+/* Строка, на которую указало определение: подсвечена, чтобы её было видно сразу. */
+.own-editor-peek-row.is-target {
+  background: var(--selection_background);
+}
+
+.own-editor-peek-number {
+  flex: none;
+  width: 44px;
+  padding-right: 8px;
+  color: var(--text_color_tertiary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.own-editor-peek-text {
+  padding-right: 12px;
+}
+
 /* Подсказка при наведении: тоже в системе окна — её ставят у курсора мыши. */
 .own-editor-hover {
   position: fixed;

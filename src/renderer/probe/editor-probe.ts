@@ -372,6 +372,67 @@ declare global {
   }
 }
 
+// Заглянуть в определение: подставной сервер отдаёт ДВА места в другом файле, а текст
+// того файла — шов чтения (`readText`). Проверяем показ копии, счётчик мест, ход по
+// местам и «Открыть» (переход насовсем). Отдельный редактор — чтобы проверка не
+// зависела от правок соседних проб.
+const peekRoot = document.createElement('div');
+peekRoot.id = 'probe-peek';
+peekRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(peekRoot);
+
+const peekStore = new DocumentStore();
+const peekRegistry = new DocumentRegistry(peekStore);
+const peekRevealed: Array<{ path: string; line: number; column: number }> = [];
+const peekNotices: string[] = [];
+/** Тексты «других файлов»: их отдаёт шов чтения (в приложении — диск). */
+const peekFiles: Record<string, string> = {};
+const peekAnswers: { definition: SymbolLocation[] } = { definition: [] };
+const peekReads: string[] = [];
+
+const peekWorkspace = new EditorWorkspace(peekRoot, peekRegistry, {
+  scheme: 'dark',
+  symbols: {
+    definition: async () => peekAnswers.definition,
+    references: async () => [],
+  },
+  readText: async (path) => {
+    peekReads.push(path);
+    return peekFiles[path] ?? null;
+  },
+  relativePath: (path) => path.replace('/probe/', ''),
+  revealLocation: (path, line, column) => peekRevealed.push({ path, line, column }),
+  onNotice: (text) => peekNotices.push(text),
+});
+const peekDoc = peekStore.open('/probe/peek-main.ts', 'use(value);\n', { languageId: 'typescript' });
+peekWorkspace.open(peekDoc);
+
+declare global {
+  interface Window {
+    probePeek: {
+      workspace: EditorWorkspace;
+      store: DocumentStore;
+      doc: TextDocument;
+      answers: { definition: SymbolLocation[] };
+      files: Record<string, string>;
+      reads: string[];
+      revealed: Array<{ path: string; line: number; column: number }>;
+      notices: string[];
+    };
+  }
+}
+
+window.probePeek = {
+  workspace: peekWorkspace,
+  store: peekStore,
+  doc: peekDoc,
+  answers: peekAnswers,
+  files: peekFiles,
+  reads: peekReads,
+  revealed: peekRevealed,
+  notices: peekNotices,
+};
+
 window.probeSymbols = {
   workspace: symbolsWorkspace,
   store: symbolsStore,

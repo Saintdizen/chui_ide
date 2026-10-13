@@ -67,6 +67,8 @@ export interface EditorCommandContext {
   goToDefinition?(): void;
   /** Показать ссылки на символ под курсором (нужен языковой сервер). */
   findReferences?(): void;
+  /** Заглянуть в определение на месте, не уходя из файла (нужен языковой сервер). */
+  peekDefinition?(): void;
   /** Переименовать символ под курсором (нужен языковой сервер и ввод имени — дело вызывающего). */
   renameSymbol?(): void;
   /** Перейти к следующей пометке языка (ошибке или предупреждению). */
@@ -94,6 +96,7 @@ export interface EditorCommandContext {
 export type EditorCommandRequirement =
   | 'goToDefinition'
   | 'findReferences'
+  | 'peekDefinition'
   | 'renameSymbol'
   | 'formatCode'
   | 'nextProblem'
@@ -328,6 +331,15 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: 'Навигация',
     requires: 'findReferences',
     run: (context) => context.findReferences?.(),
+  },
+  {
+    id: 'editor.peekDefinition',
+    label: 'Заглянуть в определение',
+    alias: 'peekDefinition',
+    keybinding: 'Ctrl+Shift+F12',
+    category: 'Навигация',
+    requires: 'peekDefinition',
+    run: (context) => context.peekDefinition?.(),
   },
   {
     id: 'editor.renameSymbol',

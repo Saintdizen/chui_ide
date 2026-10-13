@@ -37,7 +37,16 @@ import { columnSelections, type Selection } from '../view/selection';
 const CLIPBOARD_COMMANDS: ReadonlySet<EditCommand> = new Set(['copy', 'cut', 'paste']);
 
 /** Команды, которые ввод не выполняет сам, а передаёт наружу. */
-export type CommandName = 'find' | 'replace' | 'gotoLine' | 'palette' | 'codeActions';
+export type CommandName =
+  | 'find'
+  | 'replace'
+  | 'gotoLine'
+  | 'palette'
+  | 'codeActions'
+  /** Навигация по символу: перейти к определению, ссылки, заглянуть в определение. */
+  | 'goToDefinition'
+  | 'references'
+  | 'peekDefinition';
 
 /**
  * Кто может забрать клавишу себе раньше редактора. Так устроены попапы: при видимом
@@ -455,6 +464,17 @@ export class EditorInputBinding {
       // Ctrl+. — быстрые исправления: список действий языка показывает вызывающий.
       case 'codeActions':
         this.onCommand?.('codeActions');
+        break;
+      // F12, Shift+F12, Ctrl+Shift+F12 — навигация по символу: дело вызывающего
+      // (у него языковой сервер, чтение файлов и открытие вкладок).
+      case 'goToDefinition':
+        this.onCommand?.('goToDefinition');
+        break;
+      case 'references':
+        this.onCommand?.('references');
+        break;
+      case 'peekDefinition':
+        this.onCommand?.('peekDefinition');
         break;
       // Мультикурсор: вхождения слова, каретки по столбцу и сброс к главной.
       case 'selectNextOccurrence':
