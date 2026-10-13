@@ -179,7 +179,7 @@
   --element_background_2: var(--surface_content);
 
   /* Полотно редактора и консоли. Эти два значения продублированы в `core/theme.ts`
-     (Monaco и xterm красят себя сами) — менять нужно в обоих местах. */
+     (редактор и терминал красят себя сами) — менять нужно в обоих местах. */
   --editor_background: #1e1e1e;
   --editor_terminal_background: #1e1e1e;
 

@@ -684,7 +684,7 @@ module.exports = [
         settings.ai.providers = settings.ai.providers.filter((item) => item.id !== removeProviderId);
       }
 
-      // Схему main сообщает push-событием: от неё зависят Monaco, xterm и
+      // Схему main сообщает push-событием: от неё зависят редактор, терминал и
       // подсветка кода в чате, поэтому мок обязан её отдавать так же.
       if (params.appearance?.theme) {
         const chosen = settings.appearance.theme;

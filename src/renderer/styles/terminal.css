@@ -147,3 +147,41 @@
     opacity: 0;
   }
 }
+
+/* Слой поиска: над выделением, под текстом. */
+.own-term-search {
+  position: absolute;
+  inset: 0 0 auto 0;
+  pointer-events: none;
+}
+
+.own-term-search-rect {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--own-term-search);
+}
+
+/* Текущее совпадение отличается от прочих: его видно среди подсвеченных. */
+.own-term-search-rect.is-current {
+  background: var(--own-term-search-current);
+}
+
+/* Слой поиска: над выделением, под текстом. */
+.own-term-search {
+  position: absolute;
+  inset: 0 0 auto 0;
+  pointer-events: none;
+}
+
+.own-term-search-rect {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--own-term-search);
+}
+
+/* Текущее совпадение отличается от прочих: его видно среди подсвеченных. */
+.own-term-search-rect.is-current {
+  background: var(--own-term-search-current);
+}

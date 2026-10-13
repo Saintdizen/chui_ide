@@ -15,6 +15,7 @@ import { PushTopic, type TerminalDataPayload, type TerminalExitPayload, type Ter
 import type { RpcClient } from '../core/rpc';
 import type { Scheme } from '../core/theme';
 import { Terminal } from '../terminal/core/screen';
+import { searchBuffer, stepMatch } from '../terminal/core/search';
 import { encodeKey, encodeMouse, encodePaste } from '../terminal/input/keys';
 import { TermView } from '../terminal/view/term-view';
 import { h, svgIcon } from './dom';
@@ -101,6 +102,52 @@ export function createTerminalPanel(deps: {
     ),
     body,
   );
+
+  // Панель поиска: висит поверх полотна справа сверху, место у вывода не отнимает.
+  const findInput = h('input', {
+    class: 'term-find-input',
+    type: 'text',
+    placeholder: 'Найти в терминале',
+    spellcheck: 'false',
+  });
+  const findCount = h('span', { class: 'term-find-count' });
+  const findPrev = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Предыдущее совпадение', onClick: () => findRun(false, -1) },
+    svgIcon('chevronUp', 14),
+  );
+  const findNext = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Следующее совпадение', onClick: () => findRun(false, 1) },
+    svgIcon('chevronDown', 14),
+  );
+  const findClose = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Закрыть поиск', onClick: () => closeFind() },
+    svgIcon('close', 14),
+  );
+  const findBar = h('div', { class: 'term-find' }, findInput, findCount, findPrev, findNext, findClose);
+  findBar.hidden = true;
+  body.append(findBar);
+
+  // Номер текущего совпадения: -1 — совпадение не выбрано (новый запрос или ничего не нашлось).
+  let findCurrent = -1;
+
+  findInput.addEventListener('input', () => {
+    findCurrent = -1;
+    findRun(true, 1);
+  });
+  findInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      findRun(false, event.shiftKey ? -1 : 1);
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeFind();
+    }
+  });
 
   const sessions = new Map<string, SessionView>();
   /** Вывод, пришедший раньше, чем мы успели зарегистрировать сессию. */
@@ -225,6 +272,12 @@ export function createTerminalPanel(deps: {
   /** Клавиатура и вставка: событие с вида кодируется в байты и уходит в pty. */
   function bindInput(entry: SessionView): void {
     entry.view.element.addEventListener('keydown', (event) => {
+      // Ctrl+F — поиск в консоли (как в редакторе).
+      if (event.ctrlKey && !event.shiftKey && (event.key === 'f' || event.key === 'F')) {
+        event.preventDefault();
+        openFind();
+        return;
+      }
       // Ctrl+Shift+C — копировать выделение (в терминале `Ctrl+C` — сигнал, а не копия).
       if (event.ctrlKey && event.shiftKey && (event.key === 'C' || event.key === 'c')) {
         const text = entry.view.selectedText();
@@ -265,6 +318,10 @@ export function createTerminalPanel(deps: {
     const entry = sessions.get(id);
     if (!entry) return;
     activeId = id;
+    // Поиск привязан к сессии: у другой вкладки свой вывод.
+    if (!findBar.hidden) closeFind();
+    // Поиск привязан к сессии: у другой вкладки свой вывод.
+    if (!findBar.hidden) closeFind();
 
     for (const [key, item] of sessions) {
       item.container.hidden = key !== id;
@@ -311,6 +368,61 @@ export function createTerminalPanel(deps: {
       .catch(() => undefined);
   }
 
+  /** Открыть панель поиска и встать на первое совпадение. */
+  function openFind(): void {
+    const entry = active();
+    if (!entry) return;
+    findBar.hidden = false;
+    findInput.focus();
+    findInput.select();
+    if (findInput.value.length > 0) {
+      findCurrent = -1;
+      findRun(true, 1);
+    }
+  }
+
+  /** Закрыть поиск: спрятать панель и снять подсветку. */
+  function closeFind(): void {
+    findBar.hidden = true;
+    findInput.value = '';
+    findCount.textContent = '';
+    findCurrent = -1;
+    const entry = active();
+    if (entry) {
+      entry.view.clearSearch();
+      entry.view.focus();
+    }
+  }
+
+  /**
+   * Прогнать поиск по активной сессии. `reset` — начать с первого совпадения
+   * (новый запрос), иначе шаг от текущего. Ходим по кругу, как в редакторе.
+   */
+  function findRun(reset: boolean, step: number): void {
+    const entry = active();
+    if (!entry) return;
+    const query = findInput.value;
+    if (query.length === 0) {
+      entry.view.clearSearch();
+      findCount.textContent = '';
+      return;
+    }
+    const result = searchBuffer((row) => entry.view.lineText(row), entry.view.bufferRows(), query);
+    if (result.error) {
+      entry.view.clearSearch();
+      findCount.textContent = 'ошибка';
+      return;
+    }
+    if (result.matches.length === 0) {
+      entry.view.clearSearch();
+      findCount.textContent = 'нет';
+      return;
+    }
+    if (reset) findCurrent = -1;
+    findCurrent = stepMatch(findCurrent, result.matches.length, step);
+    entry.view.showSearch(result.matches, findCurrent);
+    findCount.textContent = `${findCurrent + 1}/${result.matches.length}`;
+  }
   function active(): SessionView | null {
     return activeId ? (sessions.get(activeId) ?? null) : null;
   }

@@ -1,13 +1,15 @@
 /**
  * Страница пробы своего терминала: рисуем настоящий движок (`terminal/core` +
- * `terminal/view`) и даём пробе рассмотреть сетку, цвета, широкие знаки и лигатуры.
+ * `terminal/view`) и даём пробе рассмотреть сетку, цвета, широкие знаки, лигатуры,
+ * выделение, мышь и поиск.
  *
  * Движок здесь боевой, а не копия разметки: иначе проба стерегла бы выдуманный вид,
  * а не тот, что видит человек. Проба приносит свой размер контейнера, движок подгоняет
  * под него сетку — ровно как в панели (`ui/terminal.ts`).
  */
-import { Terminal } from '../terminal/core/screen';
 import type { Scheme } from '../core/theme';
+import { Terminal } from '../terminal/core/screen';
+import { searchBuffer, stepMatch } from '../terminal/core/search';
 import { TermView } from '../terminal/view/term-view';
 
 declare global {
@@ -19,6 +21,11 @@ declare global {
       container: HTMLElement;
       /** События мыши, которые вид отдал наружу (как их отправил бы панель в pty). */
       mouseEvents: unknown[];
+      /** Поиск по ленте: количество найденного и причина ошибки запроса. */
+      find(query: string): { count: number; error: string | null };
+      /** Шаг к следующему (+1) или предыдущему (−1) совпадению. */
+      findStep(step: number): number;
+      clearFind(): void;
       setScheme(scheme: Scheme): void;
       setLigatures(on: boolean): void;
     };
@@ -60,14 +67,38 @@ view.render();
 view.stickToBottom();
 // Фокус — часть вида: без него курсор скрыт (`renderCursor`). Пробе он нужен видимым.
 view.focus();
-// Фокус — часть вида: без него курсор скрыт (`renderCursor`). Пробе он нужен видимым.
-view.focus();
+
+// Запрос и номер текущего совпадения помним: панель поиска держит их так же.
+let lastQuery = '';
+let currentIndex = 0;
+
+/** Прогнать поиск по ленте: тот же путь, что у панели поиска. */
+function find(query: string): { count: number; error: string | null } {
+  lastQuery = query;
+  currentIndex = 0;
+  const result = searchBuffer((row) => view.lineText(row), view.bufferRows(), query);
+  if (result.matches.length > 0) view.showSearch(result.matches, 0);
+  else view.clearSearch();
+  return { count: result.matches.length, error: result.error };
+}
+
+/** Шаг к следующему совпадению — как Enter в панели поиска. */
+function findStep(step: number): number {
+  const result = searchBuffer((row) => view.lineText(row), view.bufferRows(), lastQuery);
+  if (result.matches.length === 0) return -1;
+  currentIndex = stepMatch(currentIndex, result.matches.length, step);
+  view.showSearch(result.matches, currentIndex);
+  return currentIndex;
+}
 
 window.probeTerm = {
   term,
   view,
   container,
   mouseEvents,
+  find,
+  findStep,
+  clearFind: () => view.clearSearch(),
   setScheme: (scheme) => view.setScheme(scheme),
   setLigatures: (on) => view.setLigatures(on),
 };

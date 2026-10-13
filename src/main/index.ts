@@ -128,7 +128,7 @@ if (!app.requestSingleInstanceLock()) {
 
     // Схему выбирает main: после смены themeSource Chromium сам присылает renderer'у
     // новое значение prefers-color-scheme, и CSS переключается без правок в DOM.
-    // А для того, что CSS не описать (Monaco, xterm), main шлёт resolved-схему
+    // А для того, что CSS не описать (редактор, терминал), main шлёт resolved-схему
     // отдельным событием — полагаться на событие matchMedia в renderer нельзя.
     const pushTheme = (): void => {
       const { appearance } = settings.get();

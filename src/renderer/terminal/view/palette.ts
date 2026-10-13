@@ -20,6 +20,9 @@ export interface TerminalPalette {
   readonly foreground: string;
   readonly cursor: string;
   readonly selection: string;
+  /** Подсветка совпадений поиска: обычных и текущего. */
+  readonly search: string;
+  readonly searchCurrent: string;
 }
 
 /** Уровни серого куба 6×6×6 у 256-цветной палитры: 0, 95, 135, 175, 215, 255. */

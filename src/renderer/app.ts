@@ -3860,7 +3860,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     });
     // Сменили интерпретатор — перепроверяем импорты в открытых файлах.
     importChecker.refresh();
-    // Схема могла прийти извне — догоняем Monaco и xterm.
+    // Схема могла прийти извне — догоняем редактор и терминал.
     theme.apply();
     refreshStatus();
   };

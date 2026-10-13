@@ -1,21 +1,22 @@
 /**
- * Проба своего терминала: сетка, цвета, широкие знаки, лигатуры и курсор.
+ * Проба своего терминала: сетка, цвета, широкие знаки, лигатуры, курсор, выделение,
+ * мышь и поиск.
  *
  *   npm run probe:own-terminal
  *
  * Проба гоняет НАСТОЯЩИЙ движок (`src/renderer/terminal`) в настоящем окне и меряет то,
  * чего не видно в юнит-тестах: что строки нарисованы, что цвет попал на знак, что
- * широкий знак занял две клетки, что курсор стоит в клетке курсора, а лигатуры
- * включаются классом на корне. Заодно снимает PNG — вид есть чем посмотреть глазами.
+ * широкий знак занял две клетки, что курсор стоит в клетке курсора, что подсветка
+ * выделения и поиска появляется, а события мыши уходят наружу. Заодно снимает PNG —
+ * вид есть чем посмотреть глазами.
  *
  * Отчёт — `.chui_ide/probe-own-terminal.txt`, снимки — `.chui_ide/probe-shots/`.
  */
-const { BrowserWindow } = require('electron');
+const { BrowserWindow, app } = require('electron');
 const { promises: fs, readFileSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const { app } = require('electron');
 const { build } = require('rolldown');
 
 const PROJECT = path.join(__dirname, '..');
@@ -90,6 +91,11 @@ async function shot(win, name) {
   return file;
 }
 
+/** Прогнать в окне выражение и вернуть его результат. */
+function evaluate(win, expression) {
+  return win.webContents.executeJavaScript(expression);
+}
+
 app.whenReady().then(async () => {
   try {
     await main();
@@ -110,142 +116,133 @@ async function main() {
   // Курсор виден только при фокусе (`renderCursor`) — фокус переносим на полотно.
   win.focus();
   win.webContents.focus();
-  await win.webContents.executeJavaScript(`(() => { document.querySelector('.own-term')?.focus(); return true; })()`);
-  await wait(80);
-  // Курсор виден только при фокусе (`renderCursor`) — фокус переносим на полотно.
-  win.focus();
-  win.webContents.focus();
-  await win.webContents.executeJavaScript(`(() => { document.querySelector('.own-term')?.focus(); return true; })()`);
+  await evaluate(win, `(() => { document.querySelector('.own-term')?.focus(); return true; })()`);
   await wait(80);
 
-  const report = await win.webContents.executeJavaScript(`(() => {
-    const root = document.querySelector('.own-term');
-    const rows = [...document.querySelectorAll('.own-term-row')];
-    // Текст строк в порядке сверху вниз: их сдвиг по Y задаёт позицию.
-      const ordered = rows
-        .map((node) => ({ text: node.textContent, top: parseFloat(getComputedStyle(node).transform.split(',')[5]) || 0 }))
-        .sort((a, b) => a.top - b.top)
-        .map((item) => item.text);
+  const report = {};
 
-    const firstRow = rows[0];
-    const spans = firstRow ? [...firstRow.querySelectorAll('span')] : [];
-    const colored = spans.find((span) => getComputedStyle(span).color && span.textContent.trim().length > 0);
-    const bold = spans.find((span) => span.classList.contains('is-bold'));
-    const underline = document.querySelector('.own-term-row .is-underline');
-    const colorVar1 = getComputedStyle(root).getPropertyValue('--own-term-c1').trim();
-    const colorVarBg = getComputedStyle(root).getPropertyValue('--own-term-bg').trim();
-    const charWidth = parseFloat(getComputedStyle(root).getPropertyValue('--own-term-char-width'));
-    const lineHeight = parseFloat(getComputedStyle(root).getPropertyValue('--own-term-line-height'));
+  // ── сетка, цвета, метрики, курсор ─────────────────────────────────────────────
+  Object.assign(
+    report,
+    await evaluate(
+      win,
+      `(() => {
+        const root = document.querySelector('.own-term');
+        const rows = [...document.querySelectorAll('.own-term-row')];
+        const ordered = rows
+          .map((node) => ({ text: node.textContent, top: parseFloat(getComputedStyle(node).transform.split(',')[5]) || 0 }))
+          .sort((a, b) => a.top - b.top)
+          .map((item) => item.text);
 
-    // Курсор: должен стоять в клетке курсора модели (колонка × ширина, строка × высота).
-    const cursor = document.querySelector('.own-term-cursor');
-    const cursorBox = cursor ? cursor.getBoundingClientRect() : null;
-    const rootBox = root ? root.getBoundingClientRect() : null;
-    const model = window.probeTerm.term;
-    const cursorVisible = cursor ? getComputedStyle(cursor).display !== 'none' : false;
+        const firstRow = rows[0];
+        const spans = firstRow ? [...firstRow.querySelectorAll('span')] : [];
+        const colored = spans.find((span) => getComputedStyle(span).color && span.textContent.trim().length > 0);
+        const bold = spans.find((span) => span.classList.contains('is-bold'));
+        const underline = document.querySelector('.own-term-row .is-underline');
+        const colorVar1 = getComputedStyle(root).getPropertyValue('--own-term-c1').trim();
+        const colorVarBg = getComputedStyle(root).getPropertyValue('--own-term-bg').trim();
+        const charWidth = parseFloat(getComputedStyle(root).getPropertyValue('--own-term-char-width'));
+        const lineHeight = parseFloat(getComputedStyle(root).getPropertyValue('--own-term-line-height'));
 
-    return {
-      строк_нарисовано: rows.length,
-      строки: ordered.filter((text) => text.trim().length > 0),
-      ширина_клетки: charWidth,
-      высота_строки: lineHeight,
-      цвет_знака: colored ? getComputedStyle(colored).color : null,
-      есть_жирный: Boolean(bold),
-      есть_подчёркивание: Boolean(underline),
-      var_c1: colorVar1,
-      var_bg: colorVarBg,
-      фон_полотна: getComputedStyle(root).backgroundColor,
-      модель_курсор: model.cursor,
-      курсор_виден: cursorVisible,
-      курсор_сдвиг_x: cursorBox && rootBox ? Math.round(cursorBox.left - rootBox.left) : null,
-      курсор_сдвиг_y: cursorBox && rootBox ? Math.round(cursorBox.top - rootBox.top) : null,
-      // Ожидаемая позиция курсора по модели: колонка × ширина клетки, строка × высота.
-      курсор_ожидание_x: Math.round(model.cursor.x * charWidth),
-      курсор_ожидание_y: Math.round(model.cursor.y * lineHeight),
-      лигатуры_включены: root.classList.contains('is-ligatures'),
-    };
-  })()`);
+        const cursor = document.querySelector('.own-term-cursor');
+        const cursorBox = cursor ? cursor.getBoundingClientRect() : null;
+        const rootBox = root ? root.getBoundingClientRect() : null;
+        const model = window.probeTerm.term;
+        const cursorVisible = cursor ? getComputedStyle(cursor).display !== 'none' : false;
+
+        return {
+          строк_нарисовано: rows.length,
+          строки: ordered.filter((text) => text.trim().length > 0),
+          ширина_клетки: charWidth,
+          высота_строки: lineHeight,
+          цвет_знака: colored ? getComputedStyle(colored).color : null,
+          есть_жирный: Boolean(bold),
+          есть_подчёркивание: Boolean(underline),
+          var_c1: colorVar1,
+          var_bg: colorVarBg,
+          фон_полотна: getComputedStyle(root).backgroundColor,
+          модель_курсор: model.cursor,
+          курсор_виден: cursorVisible,
+          курсор_сдвиг_x: cursorBox && rootBox ? Math.round(cursorBox.left - rootBox.left) : null,
+          курсор_сдвиг_y: cursorBox && rootBox ? Math.round(cursorBox.top - rootBox.top) : null,
+          курсор_ожидание_x: Math.round(model.cursor.x * charWidth),
+          курсор_ожидание_y: Math.round(model.cursor.y * lineHeight),
+          лигатуры_включены: root.classList.contains('is-ligatures'),
+        };
+      })()`,
+    ),
+  );
 
   report.снимок = await shot(win, 'grid');
 
-  // Включаем лигатуры — класс на корне должен появиться, а сетка остаться на месте.
-  await win.webContents.executeJavaScript(`(() => { window.probeTerm.setLigatures(true); return true; })()`);
+  // ── лигатуры ──────────────────────────────────────────────────────────────────
+  await evaluate(win, `(() => { window.probeTerm.setLigatures(true); return true; })()`);
   await wait(80);
-  report.лигатуры_после_включения = await win.webContents.executeJavaScript(
+  report.лигатуры_после_включения = await evaluate(
+    win,
     `document.querySelector('.own-term').classList.contains('is-ligatures')`,
   );
   report.снимок_лигатур = await shot(win, 'ligatures');
 
-  // Светлая схема: переменные палитры и фон должны смениться.
-  await win.webContents.executeJavaScript(`(() => { window.probeTerm.setScheme('light'); return true; })()`);
+  // ── светлая схема ─────────────────────────────────────────────────────────────
+  await evaluate(win, `(() => { window.probeTerm.setScheme('light'); return true; })()`);
   await wait(80);
-  report.светлая_схема_фон = await win.webContents.executeJavaScript(
+  report.светлая_схема_фон = await evaluate(
+    win,
     `getComputedStyle(document.querySelector('.own-term')).backgroundColor`,
   );
+  await evaluate(win, `(() => { window.probeTerm.setScheme('dark'); return true; })()`);
 
-  // Выделение: настоящей протяжкой мыши — проверяем, что заливка появилась и текст собрался.
-  report.выделение = await win.webContents.executeJavaScript(`(() => {
-    const root = document.querySelector('.own-term');
-    const box = root.getBoundingClientRect();
-    const fire = (type, cx, cy) => {
-      const buttons = type === 'mouseup' ? 0 : 1;
-      root.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: cx, clientY: cy, button: 0, buttons }));
-    };
-    // Тянем от начала первой строки вниз и вправо — через несколько строк.
-    fire('mousedown', box.left + 2, box.top + 2);
-    fire('mousemove', box.left + 60, box.top + 42);
-    fire('mouseup', box.left + 60, box.top + 42);
-    const rects = document.querySelectorAll('.own-term-selection-rect').length;
-    return { прямоугольников: rects, текст: window.probeTerm.view.selectedText() };
-  })()`);
+  // ── выделение: настоящая протяжка мышью ───────────────────────────────────────
+  report.выделение = await evaluate(
+    win,
+    `(() => {
+      const root = document.querySelector('.own-term');
+      const box = root.getBoundingClientRect();
+      const fire = (type, cx, cy) => {
+        const buttons = type === 'mouseup' ? 0 : 1;
+        root.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: cx, clientY: cy, button: 0, buttons }));
+      };
+      fire('mousedown', box.left + 2, box.top + 2);
+      fire('mousemove', box.left + 60, box.top + 42);
+      fire('mouseup', box.left + 60, box.top + 42);
+      const rects = document.querySelectorAll('.own-term-selection-rect').length;
+      return { прямоугольников: rects, текст: window.probeTerm.view.selectedText() };
+    })()`,
+  );
   report.снимок_выделения = await shot(win, 'selection');
 
-  // Мышь для программы: включаем режим и шлём нажатие — вид должен отдать событие наружу.
-  report.мышь_программе = await win.webContents.executeJavaScript(`(() => {
-    const term = window.probeTerm.term;
-    term.write('\\x1b[?1000h\\x1b[?1006h');
-    const root = document.querySelector('.own-term');
-    const box = root.getBoundingClientRect();
-    root.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: box.left + 30, clientY: box.top + 30, button: 0, buttons: 1 }));
-    return {
-      режим: term.mouseTracking,
-      sgr: term.mouseSgr,
-      событий: window.probeTerm.mouseEvents.length,
-      последнее: window.probeTerm.mouseEvents.at(-1),
-    };
-  })()`);
+  // ── поиск: подсветка совпадений и шаг по ним ──────────────────────────────────
+  report.поиск = await evaluate(
+    win,
+    `(() => {
+      const found = window.probeTerm.find('готово');
+      const rects = document.querySelectorAll('.own-term-search-rect').length;
+      const current = document.querySelectorAll('.own-term-search-rect.is-current').length;
+      const step = window.probeTerm.findStep(1);
+      return { найдено: found.count, прямоугольников: rects, текущий: current, шаг: step };
+    })()`,
+  );
+  report.снимок_поиска = await shot(win, 'search');
+  await evaluate(win, `(() => { window.probeTerm.clearFind(); return true; })()`);
 
-  // Выделение: настоящей протяжкой мыши — проверяем, что заливка появилась и текст собрался.
-  report.выделение = await win.webContents.executeJavaScript(`(() => {
-    const root = document.querySelector('.own-term');
-    const box = root.getBoundingClientRect();
-    const fire = (type, cx, cy) => {
-      const buttons = type === 'mouseup' ? 0 : 1;
-      root.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: cx, clientY: cy, button: 0, buttons }));
-    };
-    // Тянем от начала первой строки вниз и вправо — через несколько строк.
-    fire('mousedown', box.left + 2, box.top + 2);
-    fire('mousemove', box.left + 60, box.top + 42);
-    fire('mouseup', box.left + 60, box.top + 42);
-    const rects = document.querySelectorAll('.own-term-selection-rect').length;
-    return { прямоугольников: rects, текст: window.probeTerm.view.selectedText() };
-  })()`);
-  report.снимок_выделения = await shot(win, 'selection');
-
-  // Мышь для программы: включаем режим и шлём нажатие — вид должен отдать событие наружу.
-  report.мышь_программе = await win.webContents.executeJavaScript(`(() => {
-    const term = window.probeTerm.term;
-    term.write('\\x1b[?1000h\\x1b[?1006h');
-    const root = document.querySelector('.own-term');
-    const box = root.getBoundingClientRect();
-    root.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: box.left + 30, clientY: box.top + 30, button: 0, buttons: 1 }));
-    return {
-      режим: term.mouseTracking,
-      sgr: term.mouseSgr,
-      событий: window.probeTerm.mouseEvents.length,
-      последнее: window.probeTerm.mouseEvents.at(-1),
-    };
-  })()`);
+  // ── мышь для программы: событие должно уйти наружу ────────────────────────────
+  report.мышь_программе = await evaluate(
+    win,
+    `(() => {
+      const term = window.probeTerm.term;
+      term.write('\\x1b[?1000h\\x1b[?1006h');
+      const root = document.querySelector('.own-term');
+      const box = root.getBoundingClientRect();
+      root.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: box.left + 30, clientY: box.top + 30, button: 0, buttons: 1 }));
+      return {
+        режим: term.mouseTracking,
+        sgr: term.mouseSgr,
+        событий: window.probeTerm.mouseEvents.length,
+        последнее: window.probeTerm.mouseEvents.at(-1),
+      };
+    })()`,
+  );
 
   await fs.writeFile(REPORT, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   console.log(JSON.stringify(report, null, 2));

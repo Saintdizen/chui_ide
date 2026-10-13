@@ -29,6 +29,7 @@ import {
   type SelectionRange,
 } from '../core/selection';
 import type { MouseAction, MouseButton, MouseEventData } from '../input/keys';
+import { cellRange, type TermMatch } from '../core/search';
 import { colorToCss, type TerminalPalette } from './palette';
 
 /** Класс корня и его частей — за него цепляется оформление (`styles/terminal.css`). */
@@ -62,6 +63,7 @@ export class TermView {
   private readonly content: HTMLElement;
   private readonly rowsLayer: HTMLElement;
   private readonly selectionLayer: HTMLElement;
+  private readonly searchLayer: HTMLElement;
   private readonly cursor: HTMLElement;
   private metrics: GlyphMetrics;
   private scheme: Scheme;
@@ -72,6 +74,9 @@ export class TermView {
   private selection: SelectionRange | null = null;
   /** Идёт протяжка мышью от нажатия. */
   private selecting = false;
+  /** Найденные поиском совпадения и номер текущего (-1 — ни одного). */
+  private searchMatches: readonly TermMatch[] = [];
+  private searchCurrent = -1;
 
   constructor(
     host: HTMLElement,
@@ -92,14 +97,15 @@ export class TermView {
     this.content.className = `${ROOT_CLASS}-content`;
     this.rowsLayer = document.createElement('div');
     this.rowsLayer.className = `${ROOT_CLASS}-rows`;
-    this.content.append(this.rowsLayer);
-    // Слой выделения лежит под текстом: заливка не должна закрывать буквы.
     this.selectionLayer = document.createElement('div');
     this.selectionLayer.className = `${ROOT_CLASS}-selection`;
-    this.content.append(this.selectionLayer);
+    this.searchLayer = document.createElement('div');
+    this.searchLayer.className = `${ROOT_CLASS}-search`;
     this.cursor = document.createElement('div');
     this.cursor.className = `${ROOT_CLASS}-cursor`;
-    this.content.append(this.cursor);
+    // Порядок, снизу вверх: подсветка поиска, выделение, текст, курсор. Текст читается
+    // поверх заливок (как в редакторе), а курсор лежит выше всех.
+    this.content.append(this.searchLayer, this.selectionLayer, this.rowsLayer, this.cursor);
     this.viewport.append(this.content);
     this.root.append(this.viewport);
     host.append(this.root);
@@ -162,6 +168,7 @@ export class TermView {
     this.rowsLayer.replaceChildren(fragment);
     this.renderCursor();
     this.renderSelection();
+    this.renderSearch();
   }
 
   /** Спуститься к последней строке: обычное состояние, пока человек не отмотал вверх. */
@@ -225,6 +232,49 @@ export class TermView {
     this.selection = null;
     this.renderSelection();
     this.options.onSelectionChange?.(null);
+  }
+
+  /** Число строк ленты (история + экран): по ним идёт поиск. */
+  bufferRows(): number {
+    return this.totalRows();
+  }
+
+  /** Текст строки ленты — то, по чему ищет поиск (`core/search`). */
+  lineText(row: number): string {
+    return this.columnsAt(row)?.join('') ?? '';
+  }
+
+  /** Показать совпадения поиска. `current` — номер текущего, по нему прокручиваем. */
+  showSearch(matches: readonly TermMatch[], current: number): void {
+    this.searchMatches = matches;
+    this.searchCurrent = current;
+    this.scrollToMatch();
+    this.renderSearch();
+    this.renderCursor();
+  }
+
+  /** Снять подсветку поиска вместе с закрытием панели поиска. */
+  clearSearch(): void {
+    if (this.searchMatches.length === 0 && this.searchCurrent < 0) return;
+    this.searchMatches = [];
+    this.searchCurrent = -1;
+    this.renderSearch();
+  }
+
+  /** Прокрутить к текущему совпадению — с запасом, чтобы строка не липла к краю. */
+  private scrollToMatch(): void {
+    const match = this.searchMatches[this.searchCurrent];
+    if (!match) return;
+    const top = match.row * this.metrics.lineHeight;
+    const height = this.viewport.clientHeight;
+    const margin = this.metrics.lineHeight;
+    const visible =
+      top >= this.viewport.scrollTop + margin &&
+      top + this.metrics.lineHeight <= this.viewport.scrollTop + height - margin;
+    if (!visible) {
+      // Ставим строку в середину: так видно и строки до, и после совпадения.
+      this.viewport.scrollTop = Math.max(0, top - height / 2 + this.metrics.lineHeight / 2);
+    }
   }
 
   focus(): void {
@@ -365,6 +415,39 @@ export class TermView {
     this.selectionLayer.replaceChildren(fragment);
   }
 
+  /** Подсветка совпадений поиска: прямоугольники на видимых строках. */
+  private renderSearch(): void {
+    if (this.searchMatches.length === 0) {
+      if (this.searchLayer.childElementCount > 0) this.searchLayer.replaceChildren();
+      return;
+    }
+    const lineHeight = this.metrics.lineHeight;
+    const charWidth = this.metrics.charWidth;
+    const total = this.totalRows();
+    const { first, last } = visibleLines(
+      this.viewport.scrollTop,
+      lineHeight,
+      this.viewport.clientHeight,
+      total,
+      OVERSCAN,
+    );
+    const fragment = document.createDocumentFragment();
+    for (let index = 0; index < this.searchMatches.length; index += 1) {
+      const match = this.searchMatches[index]!;
+      if (match.row < first || match.row > last) continue;
+      const chars = this.columnsAt(match.row);
+      if (!chars) continue;
+      const range = cellRange(chars, match.start, match.end);
+      const rect = document.createElement('div');
+      rect.className = `${ROOT_CLASS}-search-rect${index === this.searchCurrent ? ' is-current' : ''}`;
+      rect.style.transform = `translate(${range.from * charWidth}px, ${match.row * lineHeight}px)`;
+      rect.style.width = `${(range.to - range.from + 1) * charWidth}px`;
+      rect.style.height = `${lineHeight}px`;
+      fragment.append(rect);
+    }
+    this.searchLayer.replaceChildren(fragment);
+  }
+
   // ── построение DOM ──────────────────────────────────────────────────────────
 
   private renderRow(line: Line, row: number): HTMLElement {
@@ -466,9 +549,9 @@ export class TermView {
   }
 
   /**
-   * Цвета консоли — переменными на корне. Базовые шестнадцать цветов берём из общей
-   * палитры (`core/theme.ts`), той же, что у запасного xterm: пока идут оба движка,
-   * они должны совпадать по цвету. Фон совпадает с полотном редактора.
+   * Цвета консоли — переменными на корне. Базовые шестнадцать цветов берём из палитры
+   * темы (`core/theme.ts`) — единый источник цвета консоли. Фон совпадает с полотном
+   * редактора.
    */
   private applyScheme(scheme: Scheme): void {
     const palette = paletteFor(scheme);
@@ -479,6 +562,8 @@ export class TermView {
     this.root.style.setProperty('--own-term-bg', palette.background);
     this.root.style.setProperty('--own-term-cursor', palette.cursor);
     this.root.style.setProperty('--own-term-selection', palette.selection);
+    this.root.style.setProperty('--own-term-search', palette.search);
+    this.root.style.setProperty('--own-term-search-current', palette.searchCurrent);
   }
 }
 
@@ -508,12 +593,11 @@ function sameAttr(a: Attr, b: Attr): boolean {
 }
 
 /**
- * Палитра для схемы. Пока существует запасной xterm, источник общий — `TERMINAL_THEMES`.
- * Когда движок останется один, палитру можно будет вести прямо здесь.
+ * Палитра для схемы: источник — `TERMINAL_THEMES` (`core/theme.ts`). Цвета приходят
+ * типом `TerminalTheme` со всеми обязательными полями, но подстановки ниже оставлены
+ * как страховка: вид не должен остаться без значения переменной.
  */
 export function paletteFor(scheme: Scheme): TerminalPalette {
-  // Поля палитры xterm необязательные — на всякий случай подставляем цвет по умолчанию,
-  // чтобы представление никогда не осталось без значения переменной.
   const theme = TERMINAL_THEMES[scheme];
   const white = theme.white ?? '#ffffff';
   return {
@@ -539,5 +623,9 @@ export function paletteFor(scheme: Scheme): TerminalPalette {
     foreground: theme.foreground ?? '#d4d4d4',
     cursor: theme.cursor ?? '#d4d4d4',
     selection: theme.selectionBackground ?? '#264f78',
+    // Подсветка поиска одинакова в обеих схемах: она должна бросаться в глаза, но не
+    // закрывать буквы — это полупрозрачные плашки над текстом.
+    search: 'rgba(255, 205, 60, 0.35)',
+    searchCurrent: 'rgba(255, 140, 0, 0.65)',
   };
 }
