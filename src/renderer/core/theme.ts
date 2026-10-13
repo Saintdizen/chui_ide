@@ -370,8 +370,10 @@ const DARK_CHROME: Chrome = {
   // блюр наших попапов сюда не переносятся — виджет редактора лежит над живым кодом, и
   // размытие пришлось бы пересчитывать на каждой правке (см. README о попапах Monaco).
   popover: '2c2c2e',
-  border: '313134',
-  separator: '545458a6',
+  // Границы — полупрозрачный тон текста: те же значения, что `--border_color`
+  // и `--separator_color` в `styles/theme.css` (менять нужно в обоих местах).
+  border: 'ffffff0f',
+  separator: '54545866',
   sunken: '00000033',
   tint: '78788052',
   tintHover: '7878805c',
@@ -416,8 +418,9 @@ const LIGHT_CHROME: Chrome = {
 
   // Карточка интерфейса — та же поверхность, что у наших попапов: без прозрачности.
   popover: 'ffffff',
-  border: 'dfdfe3',
-  separator: '3c3c4349',
+  // Те же роли, что `--border_color` и `--separator_color` светлой схемы.
+  border: '00000014',
+  separator: '3c3c432e',
   sunken: '0000000d',
   tint: '78788029',
   tintHover: '7878803d',
