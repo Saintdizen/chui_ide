@@ -139,7 +139,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
   const problemsCounts = problemsItem.querySelector<HTMLElement>('.status-problems-counts')!;
 
   // Статус ассистента (одна кнопка «Информация о сессии»: значок режима, кольцо
-  // контекста, искра) приходит из чата и встаёт первым в правой группе.
+  // контекста, искра) приходит из чата и встаёт последним — в правом углу полосы.
   const chatSlot = h('div', { class: 'status-chat' });
   const element = h(
     'div',
@@ -148,7 +148,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h(
       'div',
       { class: 'status-group' },
-      chatSlot,
       problemsItem,
       versionItem,
       positionItem,
@@ -159,6 +158,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       toolItem,
       readOnlyItem,
       languageItem,
+      chatSlot,
     ),
   );
 
