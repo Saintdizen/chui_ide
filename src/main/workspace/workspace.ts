@@ -99,6 +99,13 @@ export class WorkspaceService {
 
   constructor(private readonly onChange: (topic: string, payload: unknown) => void) {}
 
+  /**
+   * Снимок файла перед перезаписью (`save`) или удалением (`delete`) — для
+   * локальной истории. Ставится из `main/index.ts`. Сбой записи снимка не должен
+   * мешать самой правке файла, поэтому ошибку здесь глотает вызывающий.
+   */
+  onBeforeChange: ((file: string, reason: 'save' | 'delete') => Promise<void> | void) | null = null;
+
   /** Активный корень — им отвечают операции без явного пути. */
   rootPath(): string | null {
     return this.active;
@@ -316,6 +323,8 @@ export class WorkspaceService {
   async writeFile(filePath: string, text: string): Promise<{ mtimeMs: number }> {
     const file = await this.safePath(filePath);
     await fs.mkdir(path.dirname(file), { recursive: true });
+    // Прежнее содержимое откладываем в локальную историю, пока оно ещё на диске.
+    await this.onBeforeChange?.(file, 'save');
     await fs.writeFile(file, text, 'utf8');
     // Свою правку забываем сразу: ждать, пока `mtime` перестанет совпадать,
     // нельзя — у быстрой записи он может остаться тем же, и поиск нашёл бы
@@ -407,6 +416,8 @@ export class WorkspaceService {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Корень проекта удалить нельзя');
     }
     try {
+      // Файл сейчас уйдёт в корзину: его содержимое — последний шанс что-то вернуть.
+      await this.onBeforeChange?.(resolved, 'delete');
       await shell.trashItem(resolved);
     } catch (error) {
       throw new RpcFailure(
@@ -769,6 +780,7 @@ export class WorkspaceService {
       });
       if (result.count === 0) continue;
 
+      await this.onBeforeChange?.(file, 'save');
       await fs.writeFile(file, result.text, 'utf8');
       this.contents.invalidate(file);
       this.notifyChanged(file);

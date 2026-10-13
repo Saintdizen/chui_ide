@@ -5857,6 +5857,112 @@ body > .overlay {
   font-size: var(--font_default_size);
 }
 
+/* ── окно локальной истории файла ──────────────────────────────────────── */
+
+.history-modal {
+  width: min(820px, 94vw);
+}
+
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text_color_tertiary);
+}
+
+.history-summary {
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.history-body {
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+}
+
+.history-list {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 54vh;
+  overflow: auto;
+}
+
+.history-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-row:hover {
+  background: var(--element_background_hover);
+}
+
+.history-row.is-active {
+  background: var(--selection_background);
+}
+
+.history-row-name {
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  color: var(--text_color);
+}
+
+.history-row-label {
+  font-size: var(--font_small_size);
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.history-preview {
+  flex: 1;
+  min-width: 0;
+  max-height: 54vh;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  color: var(--text_color_secondary);
+  white-space: pre;
+}
+
+.history-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.history-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 /* ── окно интерактивного rebase ────────────────────────────────────────── */
 
 .rebase-modal {

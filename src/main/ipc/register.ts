@@ -50,6 +50,7 @@ import { checkEnvironments } from '../python/health';
 import type { SessionStore } from '../session-store';
 import type { ProjectConfigStore } from '../project-config';
 import type { ReviewStore } from '../project/review-store';
+import type { HistoryStore } from '../project/history-store';
 import { mergeByPriority } from '../../shared/lsp-bundled';
 import { parseThemeFile } from '../../shared/theme-file';
 import { unsavedClosePrompt } from '../../shared/unsaved';
@@ -82,6 +83,8 @@ export interface AppDependencies {
   projectConfig?: ProjectConfigStore;
   /** Замечания к коду (`.chui_ide/review.json`). Необязательно: пробникам не нужны. */
   reviews?: ReviewStore;
+  /** Локальная история файла (снимки в userData). Необязательно: пробникам не нужна. */
+  history?: HistoryStore;
 }
 
 /**
@@ -603,6 +606,18 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
 
   router.register('review.load', () => deps.reviews?.load(requireRoot()) ?? []);
   router.register('review.save', (params) => deps.reviews?.save(requireRoot(), params.threads) ?? params.threads);
+
+  // Локальная история: снимки пишутся при перезаписи файла (см. onBeforeChange в
+  // WorkspaceService), а отсюда их читают и убирают.
+  router.register('history.list', (params) => deps.history?.list(requireRoot(), params.path) ?? []);
+  router.register('history.read', async (params) => {
+    const text = await deps.history?.read(requireRoot(), params.path, params.id);
+    if (text === null || text === undefined) throw new RpcFailure(RpcErrorCode.NotFound, 'Снимок не найден');
+    return { text };
+  });
+  router.register('history.clear', async (params) => {
+    await deps.history?.clear(requireRoot(), params.path);
+  });
 
   // Открыть ссылку в браузере системы: адреса площадки живут вне окна IDE.
   router.register('shell.openExternal', async (params) => {

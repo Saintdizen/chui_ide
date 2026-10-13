@@ -424,6 +424,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
                     { separator: true as const },
                   ]
                 : []),
+          ...(entry.kind === 'file'
+            ? [
+                {
+                  label: 'Локальная история',
+                  onSelect: () => void deps.commands.execute('file.history', entry.path),
+                },
+              ]
+            : []),
           {
             label: isPinned(pinned, entry.path) ? 'Открепить' : 'Закрепить сверху',
             onSelect: () => setPinned(entry.path),

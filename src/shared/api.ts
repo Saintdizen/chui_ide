@@ -13,6 +13,7 @@ import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
 import type { Snippet } from './snippets';
 import type { ReviewThread } from './review';
+import type { HistoryEntry } from './file-history';
 import type { GitLfsInfo } from './git-lfs';
 import type { GitIdentity, GitSshKey } from './git-identity';
 import type { WorkspaceRoot } from './workspace-roots';
@@ -1721,6 +1722,14 @@ export interface ChuiMethods {
   'review.load': { params: void; result: ReviewThread[] };
   /** Записать список замечаний целиком; возвращает то, что легло на диск. */
   'review.save': { params: { threads: ReviewThread[] }; result: ReviewThread[] };
+
+  /* Локальная история файла: снимки содержимого, снятые при сохранении. */
+  /** Снимки файла, новые в начале. */
+  'history.list': { params: { path: string }; result: HistoryEntry[] };
+  /** Содержимое одного снимка; ошибка, если снимка уже нет. */
+  'history.read': { params: { path: string; id: string }; result: { text: string } };
+  /** Убрать историю файла целиком. */
+  'history.clear': { params: { path: string }; result: void };
 
   'terminal.create': { params: TerminalCreateOptions; result: TerminalSession };
   'terminal.write': { params: { id: string; data: string }; result: void };

@@ -103,6 +103,7 @@ import { createFolderCompareModal } from './ui/folder-compare-modal';
 import { createBisectModal } from './ui/bisect-modal';
 import { createWorktreeModal } from './ui/worktree-modal';
 import { createLfsModal } from './ui/lfs-modal';
+import { createHistoryModal } from './ui/history-modal';
 import { createIdentityModal } from './ui/identity-modal';
 import { createForgeModal } from './ui/forge-modal';
 import { createTextModal } from './ui/text-modal';
@@ -1486,6 +1487,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   document.body.appendChild(lfsModal.element);
 
+  // Локальная история файла: снимки содержимого, снятые при сохранении. Возврат идёт
+  // тем же путём, что и любая правка документа: текст кладётся в документ и файл
+  // сохраняется — так возврат попадает в undo и сам становится снимком.
+  const historyModal = createHistoryModal({
+    rpc,
+    restore: async (path, text) => {
+      const document = await edits.ensureDocument(path);
+      document.setText(text, 'programmatic');
+      await edits.saveDocument(document, { force: true });
+    },
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(historyModal.element);
+
   // Личность автора и подпись коммитов: настройки самого git, но правятся из IDE —
   // в ЛОКАЛЬНОМ конфиге репозитория (глобальные настройки человека не трогаем).
   const identityModal = createIdentityModal({
@@ -2231,6 +2246,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const { ok } = await rpc.request('shell.revealInOS', { path });
     if (!ok) showToast('Не удалось показать в проводнике системы', 'error');
   });
+
+  define(
+    {
+      id: 'file.history',
+      title: 'Локальная история файла',
+      category: 'Файл',
+      keywords: ['история', 'снимки', 'локальная', 'timeline', 'восстановить версию'],
+    },
+    (path) => {
+      if (typeof path !== 'string') return;
+      void historyModal.open(path);
+    },
+  );
 
   define({ id: 'file.openExternal', title: 'Открыть внешней программой', category: 'Файл' }, async (path) => {
     if (typeof path !== 'string') return;

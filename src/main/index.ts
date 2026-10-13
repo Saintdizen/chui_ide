@@ -23,6 +23,7 @@ import { activateCommand, findEnvironments, pythonInterpreterFor } from './pytho
 import { SessionStore } from './session-store';
 import { ProjectConfigStore } from './project-config';
 import { ReviewStore } from './project/review-store';
+import { HistoryStore } from './project/history-store';
 import { SettingsStore } from './settings';
 import { TerminalService } from './terminal/terminal';
 import { WorkspaceService } from './workspace/workspace';
@@ -260,6 +261,16 @@ if (!app.requestSingleInstanceLock()) {
     const sessions = new SessionStore();
     const projectConfig = new ProjectConfigStore();
     const reviews = new ReviewStore();
+    const history = new HistoryStore(path.join(app.getPath('userData'), 'history'));
+    // Снимок прежнего содержимого перед каждой перезаписью — источник локальной
+    // истории. Ошибку снимка не поднимаем: история вспомогательная, файл важнее.
+    workspace.onBeforeChange = (file, reason) => {
+      const root = workspace.rootPath();
+      if (!root) return;
+      // Возвращаем обещание, чтобы WorkspaceService дождался снимка: иначе запись
+      // могла бы обогнать чтение и в историю попал бы уже новый текст.
+      return history.capture(root, file, reason).catch(() => undefined);
+    };
 
     const deps = {
       settings,
@@ -272,6 +283,7 @@ if (!app.requestSingleInstanceLock()) {
       sessions,
       projectConfig,
       reviews,
+      history,
       mcp,
       host: new HostClient(),
     };
