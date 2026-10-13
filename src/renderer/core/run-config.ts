@@ -6,6 +6,7 @@ import {
   type NodeTestRunner,
 } from '../../shared/node-tests';
 import { isNodeTestFile, type ProjectScan } from '../../shared/project-scan';
+import { pluginBlockArgs } from '../../shared/python-tests';
 import { resultMarkerCommand } from '../../shared/test-model';
 import type { ProjectTools } from './project-tools';
 import { shellQuote } from './project-tools';
@@ -128,6 +129,18 @@ export function scriptRunTargets(tools: ProjectTools): RunTarget[] {
 const MAX_TEST_TARGETS = 15;
 
 /**
+ * Ключи, отключающие плагины pytest, которые не загрузились у окружения проекта.
+ *
+ * Их находит сбор (`disabledPlugins` в сводке): плагин, роняющий загрузку pytest,
+ * уронил бы и прогон — тесты в терминале не запустились бы вовсе. Пусто — обычная
+ * команда, без лишних ключей.
+ */
+function pytestPluginFlags(disabled: readonly string[] | undefined): string {
+  const args = pluginBlockArgs(disabled ?? []);
+  return args.length > 0 ? ` ${args.join(' ')}` : '';
+}
+
+/**
  * Цели pytest по карте проекта. «Запустить все тесты» есть всегда у Python-проекта
  * с тестами; отдельной целью становится ещё и активный файл, если это тест —
  * тогда не нужно искать его руками.
@@ -136,6 +149,7 @@ export function pytestRunTargets(
   tools: ProjectTools,
   scan: ProjectScan | null,
   activeRelative: string | null,
+  disabledPlugins: readonly string[] = [],
 ): RunTarget[] {
   if (!scan) return [];
   // Тесты pytest есть только у Python-проекта: вид проекта — один вердикт,
@@ -145,12 +159,13 @@ export function pytestRunTargets(
   const tests = scan.testFiles.filter((file) => file.endsWith('.py'));
   if (tests.length === 0) return [];
 
+  const flags = pytestPluginFlags(disabledPlugins);
   const targets: RunTarget[] = [
     {
       id: 'pytest:all',
       label: 'Запустить тесты (pytest)',
       detail: `${tools.pythonLabel} · pytest`,
-      command: `${tools.pythonCommand} -m pytest`,
+      command: `${tools.pythonCommand} -m pytest${flags}`,
       source: 'test',
     },
     // Покрытие — отдельной целью: видно, что прогон отличается, и его не спутать
@@ -169,7 +184,7 @@ export function pytestRunTargets(
       id: `pytest:${file}`,
       label: `Тесты: ${basename(file)}`,
       detail: file,
-      command: `${tools.pythonCommand} -m pytest ${shellQuote(file)}`,
+      command: `${tools.pythonCommand} -m pytest${flags} ${shellQuote(file)}`,
       source: 'test',
     });
   }
@@ -186,11 +201,14 @@ export function pytestRunTargets(
 export function pytestTarget(
   tools: ProjectTools,
   selector: string | null,
-  options: { report?: boolean; platform?: string } = {},
+  options: { report?: boolean; platform?: string; disabledPlugins?: readonly string[] } = {},
 ): RunTarget {
+  // Плагины, уронившие сбор, отключаем и здесь: иначе кнопка ▶ в панели упала бы
+  // ровно на том же месте, где падал сбор, и тесты не запустились бы вовсе.
+  const flags = pytestPluginFlags(options.disabledPlugins);
   const base = selector
-    ? `${tools.pythonCommand} -m pytest ${shellQuote(selector)}`
-    : `${tools.pythonCommand} -m pytest`;
+    ? `${tools.pythonCommand} -m pytest${flags} ${shellQuote(selector)}`
+    : `${tools.pythonCommand} -m pytest${flags}`;
   // Отчёт: панель тестов дописывает печать кода выхода, чтобы узнать исход прогона.
   const command = options.report && options.platform ? `${base}${resultMarkerCommand(options.platform)}` : base;
   return {
@@ -350,13 +368,14 @@ export function collectRunTargets(
   tools: ProjectTools,
   scan: ProjectScan | null = null,
   nodeRunner: NodeTestRunner | null = null,
+  pytestDisabledPlugins: readonly string[] = [],
 ): RunTarget[] {
   const targets: RunTarget[] = [];
   if (file) {
     const target = fileRunTarget(file, tools);
     if (target) targets.push(target);
   }
-  targets.push(...pytestRunTargets(tools, scan, file?.relative ?? null));
+  targets.push(...pytestRunTargets(tools, scan, file?.relative ?? null, pytestDisabledPlugins));
   targets.push(...nodeTestsRunTargets(tools, scan, nodeRunner, file?.relative ?? null));
   targets.push(...scriptRunTargets(tools));
   return targets;

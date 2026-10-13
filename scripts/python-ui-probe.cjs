@@ -85,6 +85,14 @@ app.whenReady().then(async () => {
       errorLines: [...document.querySelectorAll('.tests-error-line')].map((node) => node.textContent).slice(0, 2),
       files: [...document.querySelectorAll('.tests-file .tests-label')].map((node) => node.textContent),
       tests: [...document.querySelectorAll('.tests-test .tests-label')].map((node) => node.textContent),
+      // Плагины окружения, отключённые при сборе, и доступность покрытия.
+      note: document.querySelector('.tests-note')?.textContent ?? null,
+      coverageHidden: (() => {
+        const button = [...document.querySelectorAll('.tests-toolbar button')].find(
+          (node) => node.textContent === 'С покрытием',
+        );
+        return button ? button.hidden : null;
+      })(),
     })`,
     20000,
   );

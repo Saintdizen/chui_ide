@@ -760,6 +760,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Вид проекта: от него зависит, чем собирать и запускать тесты (pytest или Node). */
   const isPythonProject = (): boolean => projectScan?.kind.id === 'python';
 
+  /**
+   * Плагины pytest, которые не загрузились у окружения проекта (см. сбор в main).
+   * Их отключаем и при прогоне: те же ключи, что ушли в сбор, — иначе кнопка ▶
+   * упала бы там же, где падал сбор. Пусто — окружение в порядке.
+   */
+  let pytestDisabledPlugins: string[] = [];
+
   /** Язык, который исполняется Node: у него свои тесты и свои инструменты. */
   const isNodeLanguage = (languageId: string): boolean => languageId === 'javascript' || languageId === 'typescript';
 
@@ -774,7 +781,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const testTargetFor = (selector: string | null, options: { report?: boolean } = {}): RunTarget => {
     const node = nodeRunner();
     if (node) return nodeTestsTarget(tools.get(), node, selector, { ...options, platform: info.platform });
-    return pytestTarget(tools.get(), selector, { ...options, platform: info.platform });
+    return pytestTarget(tools.get(), selector, {
+      ...options,
+      platform: info.platform,
+      disabledPlugins: pytestDisabledPlugins,
+    });
   };
 
   /**
@@ -808,8 +819,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       // Python-проект собирает pytest, Node — свой раннер (vitest, jest или `node --test`).
       if (isPythonProject()) {
         const suite = await rpc.request('python.tests');
+        // Запоминаем отключённые плагины: те же ключи нужны прогону из панели.
+        pytestDisabledPlugins = suite.disabledPlugins ?? [];
         return { runner: 'pytest', ...suite };
       }
+      pytestDisabledPlugins = [];
       return rpc.request('node.tests');
     },
     // Панель просит отчёт — команда уносит в терминал и печать кода выхода,
@@ -832,7 +846,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         );
       })();
     },
-    canCoverage: () => isPythonProject(),
+    // Покрытие считает плагин pytest-cov: если он не загрузился, кнопка только
+    // обещала бы отчёт, которого не будет (`--cov` без плагина — ошибка запуска).
+    canCoverage: () => isPythonProject() && !pytestDisabledPlugins.includes('pytest_cov'),
     // Отчёт покрытия → подсветка непокрытых строк в редакторе. Отчёт даёт пути от
     // корня проекта; редактор ключует файлы абсолютными — собираем их здесь.
     onCoverageReport: (report) => {
@@ -1202,7 +1218,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   };
 
   function targetsFor(document: TextDocument | null): RunTarget[] {
-    return collectRunTargets(runnableFileOf(document), tools.get(), projectScan, nodeRunner());
+    return collectRunTargets(runnableFileOf(document), tools.get(), projectScan, nodeRunner(), pytestDisabledPlugins);
   }
 
   /**
@@ -3940,7 +3956,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void runTarget(
       node
         ? nodeTestsTarget(tools.get(), node, selector, { platform: info.platform })
-        : pytestTarget(tools.get(), selector),
+        : pytestTarget(tools.get(), selector, { disabledPlugins: pytestDisabledPlugins }),
     );
     showToast(`Запускаю тест ${name}`);
   });

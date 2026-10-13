@@ -7375,6 +7375,16 @@ body > .overlay {
   text-align: center;
 }
 
+/* Плагины окружения, отключённые при сборе: не ошибка проекта, но сказать надо. */
+.tests-note {
+  margin: 6px 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
 .tests-errors {
   margin: 6px 10px;
   padding: 8px 10px;

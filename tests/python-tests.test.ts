@@ -3,6 +3,8 @@ import {
   buildTestTree,
   collectFailure,
   describeTest,
+  failedPluginNames,
+  pluginBlockArgs,
   parseCoverage,
   parseCoverageReport,
   parseMissingLines,
@@ -271,6 +273,56 @@ describe('parseCoverage', () => {
 
   it('слово TOTAL не в строке отчёта не считается', () => {
     expect(parseCoverage('TOTAL: покрытие не собрано')).toBeNull();
+  });
+});
+
+describe('failedPluginNames', () => {
+  // Настоящий трейсбек: pytest 6 и pytest-cov 6 — плагин зовёт хук с параметром,
+  // которого в старой версии нет, и падает при загрузке. Это роняет запуск целиком.
+  const CRASH = [
+    'Traceback (most recent call last):',
+    '  File "/usr/lib/python3.9/runpy.py", line 197, in _run_module_as_main',
+    '    return _run_code(code, main_globals, None,',
+    '  File "/p/.venv/lib/python3.9/site-packages/_pytest/config/__init__.py", line 143, in main',
+    '    config = _prepareconfig(args, plugins)',
+    '  File "/p/.venv/lib/python3.9/site-packages/pytest_cov/plugin.py", line 318, in CovPlugin',
+    '    @pytest.hookimpl(wrapper=True)',
+    "TypeError: __call__() got an unexpected keyword argument 'wrapper'",
+  ].join('\n');
+
+  it('виновника находим по последнему кадру трейсбека', () => {
+    expect(failedPluginNames(CRASH)).toEqual(['pytest_cov']);
+  });
+
+  it('модуль-файл плагина тоже узнаётся', () => {
+    expect(failedPluginNames('  File "/p/.venv/lib/python3.9/site-packages/pytest_cov.py", line 1, in x')).toEqual([
+      'pytest_cov',
+    ]);
+  });
+
+  it('падение в самом pytest или в коде проекта плагином не считается', () => {
+    // Иначе мы бы «отключали» машинерию pytest или чужой conftest — и сломали бы сбор.
+    expect(
+      failedPluginNames('  File "/p/.venv/lib/python3.9/site-packages/_pytest/config/__init__.py", line 143, in main'),
+    ).toEqual([]);
+    expect(failedPluginNames('  File "/p/proj/tests/conftest.py", line 3, in <module>')).toEqual([]);
+    expect(failedPluginNames('TypeError: что-то не то')).toEqual([]);
+  });
+});
+
+describe('pluginBlockArgs', () => {
+  it('имя пакета и его короткий вариант: pytest-cov грузится как pytest_cov', () => {
+    // Токенами: в main аргументы уходят списком в `execFile`, и склеенная строка
+    // `-p no:x` дошла бы до pytest как одно значение флага.
+    expect(pluginBlockArgs(['pytest_cov'])).toEqual(['-p', 'no:pytest_cov', '-p', 'no:cov']);
+  });
+
+  it('у pytest-asyncio короткое имя — asyncio', () => {
+    expect(pluginBlockArgs(['pytest_asyncio'])).toEqual(['-p', 'no:pytest_asyncio', '-p', 'no:asyncio']);
+  });
+
+  it('без упавших плагинов ключей нет', () => {
+    expect(pluginBlockArgs([])).toEqual([]);
   });
 });
 

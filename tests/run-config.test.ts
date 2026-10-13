@@ -94,6 +94,20 @@ describe('pytestRunTargets', () => {
     expect(pytestRunTargets(tools, null, null)).toEqual([]);
   });
 
+  it('упавший плагин отключается и в прогоне: иначе он уронил бы и его', () => {
+    const scan = scanOf(['pyproject.toml', 'tests/test_main.py']);
+    const targets = pytestRunTargets(tools, scan, null, ['pytest_cov']);
+    expect(targets[0]?.command).toBe('./.venv/bin/python -m pytest -p no:pytest_cov -p no:cov');
+    expect(targets.find((item) => item.id === 'pytest:tests/test_main.py')?.command).toBe(
+      './.venv/bin/python -m pytest -p no:pytest_cov -p no:cov tests/test_main.py',
+    );
+  });
+
+  it('без упавших плагинов ключей в команде нет', () => {
+    const scan = scanOf(['pyproject.toml', 'tests/test_main.py']);
+    expect(pytestRunTargets(tools, scan, null)[0]?.command).toBe('./.venv/bin/python -m pytest');
+  });
+
   it('путь с пробелом экранируется в команде', () => {
     // Пробел — в каталоге: имя файла остаётся тестовым. Файл `test a.py` pytest
     // по умолчанию не собирает, и проверяли бы мы не экранирование, а его отсутствие.
@@ -132,6 +146,12 @@ describe('pytestTarget', () => {
     const target = pytestTarget(tools, 'tests/test_x.py::TestY::test_z[1-2]');
     expect(target.command).toBe("./.venv/bin/python -m pytest 'tests/test_x.py::TestY::test_z[1-2]'");
     expect(target.id).toBe('pytest:tests/test_x.py::TestY::test_z[1-2]');
+  });
+
+  it('отключённый плагин идёт в команду до селектора', () => {
+    expect(pytestTarget(tools, 'tests/test_x.py', { disabledPlugins: ['pytest_cov'] }).command).toBe(
+      './.venv/bin/python -m pytest -p no:pytest_cov -p no:cov tests/test_x.py',
+    );
   });
 
   it('с report дописывает печать кода выхода — панель по ней узнаёт исход', () => {

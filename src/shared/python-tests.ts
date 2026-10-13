@@ -79,6 +79,70 @@ export function collectFailure(output: string, limit = 3): string[] {
   return lines.slice(start, index + 1);
 }
 
+/* ── плагины, уронившие запуск ──────────────────────────────────────────── */
+
+/**
+ * Модули, которые грузит сам pytest: их блокировать нельзя — это его машинерия,
+ * а не чужой плагин. Кадр трейсбека в них значит, что упало что-то другое.
+ */
+const PYTEST_INTERNAL = new Set([
+  '_pytest',
+  'pluggy',
+  'py',
+  'runpy',
+  'importlib',
+  'site',
+  'pkg_resources',
+  'iniconfig',
+  'packaging',
+]);
+
+/** Пакет или модуль из пути кадра: `…/site-packages/pytest_cov/plugin.py` → `pytest_cov`. */
+function packageOfFrame(file: string): string | null {
+  const parts = file.split(/[/\\]/);
+  const at = parts.findIndex((part) => part === 'site-packages' || part === 'dist-packages');
+  const segment = at >= 0 ? parts[at + 1] : undefined;
+  if (!segment || segment === '__init__.py') return null;
+  return segment.endsWith('.py') ? segment.slice(0, -3) : segment;
+}
+
+/**
+ * Плагины, из-за которых pytest не запустился, — по трейсбеку его загрузки.
+ *
+ * Чужой плагин, несовместимый с версией pytest, роняет запуск целиком: тесты в
+ * проекте есть, а собрать их нельзя. Виновника видно по последнему кадру
+ * трейсбека — там, где исключение и случилось. Пустой список — падение не в
+ * плагине (в коде проекта или в самом pytest): тогда отключать нечего.
+ */
+export function failedPluginNames(output: string): string[] {
+  const frames = [...output.matchAll(/^\s*File ["']([^"']+)["'],\s*line \d+/gm)].map((match) => match[1]!);
+  const crashed = frames[frames.length - 1];
+  const name = crashed ? packageOfFrame(crashed) : null;
+  if (!name || name.startsWith('_') || PYTEST_INTERNAL.has(name)) return [];
+  return [name];
+}
+
+/**
+ * Аргументы, отключающие плагины: `-p no:pytest_cov`.
+ *
+ * Имя в `-p no:` — не всегда имя пакета: pytest-cov грузится как `pytest_cov`, а
+ * pytest-asyncio — как `asyncio`. Поэтому к имени пакета добавляем его вариант
+ * без приставки `pytest-`. Лишнее имя безвредно: незнакомое `-p no:` pytest
+ * просто запоминает как заблокированное и не ругается.
+ */
+export function pluginBlockArgs(names: readonly string[]): string[] {
+  const blocked = new Set<string>();
+  for (const name of names) {
+    blocked.add(name);
+    const short = name.replace(/^pytest[-_]/, '');
+    if (short) blocked.add(short);
+  }
+  // Токены, а не готовая строка: в main аргументы уходят в `execFile` списком, и
+  // `-p no:x` одним элементом pytest принял бы за значение `-p` с лишним пробелом
+  // — то есть не заблокировал бы ничего. Для командной строки токены склеивают.
+  return [...blocked].flatMap((name) => ['-p', `no:${name}`]);
+}
+
 /** Покрытие одного файла из отчёта `pytest --cov`. */
 export interface CoverageRow {
   /** Путь файла, как его назвал отчёт (обычно относительный). */

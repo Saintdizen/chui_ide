@@ -251,6 +251,21 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
     return h('div', { class: 'tests-node' }, head, children);
   }
 
+  /**
+   * Сказать, что часть окружения отключена. Молчать нельзя: человек не поймёт,
+   * почему в команде прогона появился `-p no:…` и почему нет кнопки покрытия.
+   */
+  function renderDisabledPlugins(names: readonly string[]): void {
+    body.appendChild(
+      h(
+        'div',
+        { class: 'tests-note' },
+        `Плагины pytest не загрузились и отключены: ${names.join(', ')}. ` +
+          'Без этого сбор падал целиком. Покрытие с ними не считается.',
+      ),
+    );
+  }
+
   function renderErrors(errors: readonly string[]): void {
     const box = h('div', { class: 'tests-errors' }, h('div', { class: 'tests-error-title' }, 'Сбор не удался'));
     for (const line of errors) box.appendChild(h('div', { class: 'tests-error-line' }, line));
@@ -275,6 +290,8 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
       body.appendChild(h('div', { class: 'tests-empty' }, 'Проект не открыт.'));
       return;
     }
+
+    if (suite.disabledPlugins && suite.disabledPlugins.length > 0) renderDisabledPlugins(suite.disabledPlugins);
 
     if (suite.tests.length === 0) {
       summary.textContent = 'Тестов не найдено';
