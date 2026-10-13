@@ -106,7 +106,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     },
     svgIcon('branch', 12),
   );
-  const gitLabel = h('span', { class: 'status-git-label' });
+  // Подпись ветки — обычным текстом полосы: своего шрифта у неё нет.
+  const gitLabel = h('span', {});
   gitItem.appendChild(gitLabel);
   const positionItem = h('span', { class: 'status-item' });
   const eolItem = h('span', { class: 'status-item' });

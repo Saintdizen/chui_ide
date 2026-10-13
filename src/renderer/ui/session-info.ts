@@ -106,7 +106,8 @@ export function createUsageRing(onClick: () => void): UsageRing {
   value.setAttribute('transform', 'rotate(-90 9 9)');
   svg.append(track, value);
 
-  const percent = h('span', { class: 'ring-percent' }, '0%');
+  // Процент — обычным текстом полосы: своего шрифта и кегля у него нет.
+  const percent = h('span', {}, '0%');
   const element = h(
     'button',
     { class: 'context-ring', type: 'button', title: 'Информация о сессии', onClick },

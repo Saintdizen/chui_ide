@@ -2178,12 +2178,6 @@ textarea {
   stroke: var(--red_prime_background);
 }
 
-/* Процент заполнения кольца — тем же кеглем, что и остальная полоса: размер
-   берём из неё, а не задаём свой. Моноширинный — чтобы цифры не «прыгали». */
-.ring-percent {
-  font-family: var(--font_mono);
-}
-
 /* ── лента беседы и её сводка после сжатия ─────────────────────────────── */
 
 .chat-body {
@@ -3899,7 +3893,6 @@ textarea {
   border-radius: 4px;
   background: none;
   color: var(--text_color_tertiary);
-  font-family: var(--font_mono);
   cursor: pointer;
 }
 
@@ -6876,10 +6869,6 @@ body > .overlay {
 .status-git:hover {
   background: var(--element_background_hover);
   color: var(--text_color);
-}
-
-.status-git-label {
-  font-family: var(--font_mono);
 }
 
 /* ── панель тестов ─────────────────────────────────────────────────────── */
