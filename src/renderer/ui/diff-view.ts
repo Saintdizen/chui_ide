@@ -4,6 +4,7 @@ import type { GitModel } from '../core/git-model';
 import type { ReviewModel } from '../core/review-model';
 import type { ReviewThread } from '../../shared/review';
 import { REVIEW_LOCAL_AUTHOR, reviewSummary } from '../../shared/review';
+import { compareLabel } from '../core/file-compare';
 import { languageFromPath } from '../core/languages';
 import { h, svgIcon } from './dom';
 
@@ -11,6 +12,8 @@ export interface DiffViewDeps {
   /** Фабрика сравнения: движок приходит извне, здесь только тексты. */
   createDiff: (container: HTMLElement) => OwnDiffHandle;
   git: GitModel;
+  /** Прочитать файл для сравнения двух произвольных файлов (не из git). */
+  readText: (path: string) => Promise<string>;
   /** Замечания к коду текущего проекта: их показывает и правит экран сравнения. */
   reviews: ReviewModel;
   /** Сообщить о сбое операции с блоком (например, патч не приложился). */
@@ -29,6 +32,11 @@ export interface DiffView {
    * `head`. Это просмотр — части правки индексировать нечего, кнопок у блоков нет.
    */
   openRefs(base: string, head: string, path: string): Promise<void>;
+  /**
+   * Показать различие двух файлов из дерева. Это просмотр: файлы не из git,
+   * индексировать нечего, поэтому блоки без кнопок.
+   */
+  openFiles(left: string, right: string): Promise<void>;
   /** Показать ленту замечаний (кнопка в шапке и команда палитры). */
   showComments(): void;
   close(): void;
@@ -43,6 +51,8 @@ interface DiffTarget {
   commit?: string;
   /** Сравнение двух ссылок: слева `refs.base`, справа `refs.head`. */
   refs?: { base: string; head: string };
+  /** Сравнение двух файлов из дерева: слева `filePair.left`, справа `filePair.right`. */
+  filePair?: { left: string; right: string };
 }
 
 /** Новое замечание, которое человек ещё набирает. */
@@ -259,8 +269,8 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
    */
   const drawHunks = (target: DiffTarget, hunks: readonly GitDiffHunk[]): void => {
     if (!handle) return;
-    // Сравнение ссылок и просмотр коммита — это просмотр: индексировать нечего.
-    if (target.commit || target.refs) {
+    // Сравнение ссылок, файлов и просмотр коммита — это просмотр: индексировать нечего.
+    if (target.commit || target.refs || target.filePair) {
       handle.setHunkActions(null, () => undefined);
       return;
     }
@@ -496,10 +506,16 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
   });
 
   const render = async (target: DiffTarget): Promise<void> => {
-    const { path, staged, commit, refs } = target;
+    const { path, staged, commit, refs, filePair } = target;
     let diff: GitDiff;
     try {
-      diff = refs ? await deps.git.diffRefs(refs.base, refs.head, path) : await deps.git.diff(path, staged, commit);
+      if (filePair) {
+        // Два файла читаем сразу: сравнение — это их тексты, без git.
+        const [original, modified] = await Promise.all([deps.readText(filePair.left), deps.readText(filePair.right)]);
+        diff = { original, modified, hunks: [] };
+      } else {
+        diff = refs ? await deps.git.diffRefs(refs.base, refs.head, path) : await deps.git.diff(path, staged, commit);
+      }
     } catch {
       // Правок больше нет — например, проиндексировали последний блок. Скажем это
       // прямо: пустое сравнение выглядело бы как сбой.
@@ -514,7 +530,12 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
 
     title.textContent = path.split('/').pop() ?? path;
     title.title = path;
-    if (refs) {
+    if (filePair) {
+      // Обе стороны называем: сравнение идёт между двумя файлами, а не с историей.
+      title.textContent = compareLabel(filePair);
+      subtitle.textContent = 'сравнение двух файлов';
+      subtitle.title = `Слева: ${filePair.left}\nСправа: ${filePair.right}`;
+    } else if (refs) {
       subtitle.textContent = `${refs.base} → ${refs.head}`;
       subtitle.title = 'Слева содержимое из первой ссылки, справа — из второй';
     } else if (commit) {
@@ -550,6 +571,14 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
     close,
     async open(path, staged, commit) {
       current = { path, staged, commit };
+      open = true;
+      element.hidden = false;
+      activeThread = null;
+      draft = null;
+      await render(current);
+    },
+    async openFiles(left, right) {
+      current = { path: right, staged: false, filePair: { left, right } };
       open = true;
       element.hidden = false;
       activeThread = null;

@@ -62,6 +62,7 @@ import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
 import { decideSaveAs } from '../shared/save-as';
 import { isEmptyCommitMessage } from '../shared/commit-message';
+import { pairFromSelection } from './core/file-compare';
 import { hunkAtLine } from '../shared/hunk-lines';
 import { joinPath, separatorOf, splitPath } from '../shared/paths';
 import { copyPlan, movePlan } from './core/tree-move';
@@ -677,6 +678,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const diffView = createDiffView({
     createDiff: (container) => editors.createDiff(container),
     git,
+    // Тот же вход, что у разрешения конфликтов: несохранённый документ важнее диска.
+    readText: async (path) => documents.get(path)?.value ?? (await rpc.request('workspace.readFile', { path })).text,
     reviews,
     notify: (message) => showToast(message, 'error'),
   });
@@ -2115,6 +2118,31 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         },
       },
     );
+  });
+
+  // Сравнение двух файлов — из дерева, тем же экраном, что показывает git-различия.
+  // Это просмотр: блоки без кнопок индексации (см. `openFiles`).
+  define({ id: 'diff.compareFiles', title: 'Сравнить два файла', category: 'Навигация' }, async (left, right) => {
+    if (typeof left !== 'string' || typeof right !== 'string') return;
+    await diffView.openFiles(left, right);
+  });
+
+  // «Сравнить с…»: выбранный файл и подобранный быстрым открывателем. Так сравнивают
+  // с файлом из другой папки, не раскрывая дерево до него.
+  define({ id: 'file.compareWith', title: 'Сравнить с…', category: 'Файл' }, async (path) => {
+    if (typeof path !== 'string') return;
+    const other = await quickOpen.pick('С чем сравнить?');
+    if (!other || other === path) return;
+    await diffView.openFiles(path, other);
+  });
+
+  // Ровно два файла в выделении — сравниваем их между собой без вопросов.
+  define({ id: 'file.compareSelection', title: 'Сравнить выделенные файлы', category: 'Файл' }, async (paths) => {
+    if (!Array.isArray(paths)) return;
+    const list = paths.filter((item): item is string => typeof item === 'string');
+    const pair = pairFromSelection(list);
+    if (!pair) return;
+    await diffView.openFiles(pair.left, pair.right);
   });
 
   define({ id: 'file.copyInto', title: 'Скопировать в папку', category: 'Файл' }, async (paths, targetDir) => {

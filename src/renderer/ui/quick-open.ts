@@ -12,6 +12,11 @@ export interface QuickOpenView {
    * сразу показать файлы рядом, а не весь проект.
    */
   open(initialQuery?: string): Promise<void>;
+  /**
+   * Выбрать файл, не открывая его: тем же списком и тем же отбором. Обещание
+   * разрешается абсолютным путём или `null`, если выбор отменили (Escape).
+   */
+  pick(title: string): Promise<string | null>;
   close(): void;
 }
 
@@ -41,6 +46,8 @@ export function createQuickOpen(deps: {
   let loading = false;
   let matches: string[] = [];
   let cursor = 0;
+  /** Режим выбора: пока задан, `run` возвращает путь сюда, а не открывает файл. */
+  let picking: ((path: string | null) => void) | null = null;
 
   async function loadFiles(): Promise<void> {
     const current = deps.workspace.root;
@@ -62,7 +69,15 @@ export function createQuickOpen(deps: {
     close();
     const base = deps.workspace.root;
     if (!base) return;
-    void deps.openFile(`${base}/${relative}`);
+    const absolute = `${base}/${relative}`;
+    // Режим выбора: путь уходит вызывающему, файл в редакторе не открываем.
+    if (picking) {
+      const resolve = picking;
+      picking = null;
+      resolve(absolute);
+      return;
+    }
+    void deps.openFile(absolute);
   }
 
   function renderList(): void {
@@ -134,6 +149,12 @@ export function createQuickOpen(deps: {
 
   function close(): void {
     overlay.hidden = true;
+    // Отмена выбора: обещание надо разрешить, иначе вызывающий ждёт вечно.
+    if (picking) {
+      const resolve = picking;
+      picking = null;
+      resolve(null);
+    }
   }
 
   return {
@@ -148,6 +169,16 @@ export function createQuickOpen(deps: {
       input.focus();
       // Курсор ставим в конец: набранный отбор остаётся, но его видно целиком.
       input.setSelectionRange(initialQuery.length, initialQuery.length);
+    },
+    pick(title) {
+      return new Promise<string | null>((resolve) => {
+        picking = resolve;
+        input.placeholder = title;
+        void this.open('').then(() => {
+          // Заголовок ставим после `open`: он тоже пишет placeholder.
+          input.placeholder = title;
+        });
+      });
     },
     close,
   };

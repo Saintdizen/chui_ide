@@ -8,6 +8,7 @@ import type { GitInsideChange, GitModel } from '../core/git-model';
 import type { OpenEditors } from '../core/open-editors';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
+import { pairFromSelection } from '../core/file-compare';
 import { movePlan } from '../core/tree-move';
 import {
   clickSelection,
@@ -301,6 +302,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       : (deps.workspace.root ?? '');
     // Операции над группой идут по всему выделению, а не по одной строке под курсором.
     const effective = selection.paths.length > 0 ? [...selection.paths] : entry ? [entry.path] : [];
+    // Сравнить можно только файлы: папки экран различий не показывает.
+    const files = effective.filter((path) => findEntry(path)?.kind === 'file');
+    const pair = pairFromSelection(files);
     const items = entry
       ? [
           { label: 'Новый файл…', onSelect: () => startCreateIn(parent, 'file') },
@@ -320,7 +324,20 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
               void navigator.clipboard.writeText(effective.join('\n')).catch(() => undefined);
             },
           },
-          { separator: true as const },
+          ...(pair
+            ? [
+                {
+                  label: `Сравнить: ${nameOf(pair.left)} ↔ ${nameOf(pair.right)}`,
+                  onSelect: () => void deps.commands.execute('diff.compareFiles', pair.left, pair.right),
+                },
+                { separator: true as const },
+              ]
+            : entry.kind === 'file'
+              ? [
+                  { label: 'Сравнить с…', onSelect: () => void deps.commands.execute('file.compareWith', entry.path) },
+                  { separator: true as const },
+                ]
+              : []),
           // Открытие вне IDE: файл — программой системы, папка — в системном
           // проводнике, а терминал поднимается в той папке, где лежит выбранное.
           {

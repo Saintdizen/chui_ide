@@ -94,6 +94,69 @@ app.whenReady().then(async () => {
   await wait(300);
   console.log(`[explorer] выделено после снятия: ${JSON.stringify(await selected())}`);
 
+  // Сравнение двух файлов: выделяем два файла и смотрим, что экран различий
+  // открылся с обоими текстами. Блоки без кнопок — это просмотр, а не git.
+  await click('note.txt', {});
+  await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'README.md',
+      );
+      row?.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true }));
+      return Boolean(row);
+    })()`,
+  );
+  await wait(400);
+  await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'README.md',
+      );
+      if (!row) return 'нет строки';
+      const rect = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + 40, clientY: rect.top + 8 }));
+      return 'ok';
+    })()`,
+  );
+  await wait(600);
+  console.log(
+    `[explorer] меню для двух файлов: ${JSON.stringify(
+      await ask(ide, `[...document.querySelectorAll('.context-menu .context-item')].map((n) => n.textContent.trim())`),
+    )}`,
+  );
+  await ask(
+    ide,
+    `(async () => {
+      const item = [...document.querySelectorAll('.context-menu .context-item')].find((node) =>
+        (node.textContent ?? '').startsWith('Сравнить:'),
+      );
+      if (!item) return 'пункта нет';
+      item.click();
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      return 'нажато';
+    })()`,
+  );
+  await wait(1200);
+  console.log(
+    `[explorer] сравнение: ${JSON.stringify(
+      await ask(
+        ide,
+        `(() => {
+          const view = document.querySelector('.diff-view');
+          return {
+            открыто: view ? !view.hidden : false,
+            заголовок: document.querySelector('.diff-title')?.textContent ?? null,
+            подпись: document.querySelector('.diff-subtitle')?.textContent ?? null,
+          };
+        })()`,
+      ),
+    )}`,
+  );
+  await ask(ide, `document.querySelector('.diff-view .icon-btn')?.click()`);
+  await wait(500);
+
   // Открытие вне IDE: меню предлагает системный проводник, внешнюю программу и
   // терминал в папке. Терминал проверяем по рабочему каталогу созданной сессии.
   await ask(
