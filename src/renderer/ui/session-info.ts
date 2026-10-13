@@ -67,7 +67,11 @@ function split(data: SessionInfoData): Part[] {
   ];
 }
 
-/** Кольцо с процентом заполнения — кнопка «Информация о сессии» в полосе статуса. */
+/**
+ * Кольцо заполнения контекста — кнопка «Информация о сессии» в полосе статуса.
+ * В неё же встают значок режима и искра состояния ассистента (см. `chat.ts`),
+ * поэтому это единственный виджет AI в полосе.
+ */
 export interface UsageRing {
   element: HTMLButtonElement;
   set(usage: ContextUsage): void;
@@ -119,7 +123,7 @@ export function createUsageRing(onClick: () => void): UsageRing {
       element.classList.toggle('is-tight', usage.percent >= 75 && usage.percent < 90);
       element.classList.toggle('is-full', usage.percent >= 90);
       element.title =
-        `Контекст: ${usage.exact ? '' : '≈ '}${formatTokens(usage.used)} из ${formatTokens(usage.limit)} токенов` +
+        `Информация о сессии\nКонтекст: ${usage.exact ? '' : '≈ '}${formatTokens(usage.used)} из ${formatTokens(usage.limit)} токенов` +
         '\nНажмите, чтобы посмотреть состав и сжать беседу';
     },
   };

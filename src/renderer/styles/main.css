@@ -2182,12 +2182,12 @@ textarea {
   gap: 6px;
 }
 
-/* ── кольцо заполнения контекста — кнопка в правом нижнем углу ────────── */
+/* ── кнопка «Информация о сессии»: кольцо контекста и виджеты AI ────────── */
 
 .context-ring {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   margin-left: auto;
   padding: 1px 4px;
   border-radius: var(--radius_sm);
@@ -3852,8 +3852,8 @@ textarea {
   opacity: 0.5;
 }
 
-/* Кольцо контекста в полосе стоит сразу за подписью режима: в углу композера
-   его отжимало вправо, здесь это лишнее. */
+/* Кнопка «Информация о сессии» — единственный виджет AI в полосе: в неё входят
+   значок режима, кольцо и искра, поэтому отступки слева ей не надо. */
 .chat-status .context-ring {
   margin-left: 0;
 }
@@ -3955,6 +3955,8 @@ textarea {
   color: var(--text_color);
 }
 
+/* Искра состояния ассистента внутри кнопки «Информация о сессии»: цвет —
+   подсказка, синий во время генерации. */
 .status-ai {
   display: inline-flex;
   align-items: center;
@@ -3962,7 +3964,6 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
-/* Цвет — подсказка о состоянии: синий — идёт генерация, обычный — покой. */
 .status-ai.is-busy {
   color: var(--blue_prime_background);
 }

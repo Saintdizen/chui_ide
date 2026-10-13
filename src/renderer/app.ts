@@ -3795,7 +3795,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       readOnly: active?.readOnly ?? false,
       language: language ? languageLabel(language) : null,
       version: active?.version ?? 0,
-      ai: rpc.isStreaming ? 'генерация…' : 'готов',
       tabSize: indent?.tabSize ?? settings.editor.tabSize,
       useTabs: indent ? !indent.insertSpaces : !settings.editor.insertSpaces,
       tool: active ? toolLabel(language, projectTools) : null,
@@ -4196,7 +4195,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Во второй панели может оказаться другой файл — его полоски тоже нужны.
     changeGutter.refresh();
   });
-  rpc.onDidChangeStreaming((streaming) => statusBar.update({ ai: streaming ? 'генерация…' : 'готов' }));
   // Счётчик проблем: пометки приходят из нескольких источников (LSP,
   // проверка импортов), поэтому слушаем одно событие сервиса и пересчитываем всё.
   editors.onDidChangeMarkers(() => {

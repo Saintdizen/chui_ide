@@ -9,7 +9,6 @@ export interface StatusState {
   column: number;
   language: string | null;
   version: number;
-  ai: string;
   tabSize: number;
   /** Отступ символом табуляции — так у языков вроде Makefile. */
   useTabs: boolean;
@@ -76,7 +75,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     column: 1,
     language: null,
     version: 0,
-    ai: 'готов',
     tabSize: 2,
     useTabs: false,
     tool: null,
@@ -139,10 +137,9 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h('span', { class: 'status-problems-counts' }),
   );
   const problemsCounts = problemsItem.querySelector<HTMLElement>('.status-problems-counts')!;
-  const aiItem = h('span', { class: 'status-item status-ai' }, svgIcon('sparkle', 12));
 
-  // Статус ассистента (режим и заполнение контекста) приходит из чата и встаёт
-  // первым в правой группе — рядом с состоянием AI, а не отдельной полосой.
+  // Статус ассистента (одна кнопка «Информация о сессии»: значок режима, кольцо
+  // контекста, искра) приходит из чата и встаёт первым в правой группе.
   const chatSlot = h('div', { class: 'status-chat' });
   const element = h(
     'div',
@@ -152,7 +149,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       'div',
       { class: 'status-group' },
       chatSlot,
-      aiItem,
       problemsItem,
       versionItem,
       positionItem,
@@ -188,10 +184,6 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     toolItem.hidden = !state.tool;
     toolItem.title = state.tool ? `Запуск: ${state.tool}` : '';
     versionItem.textContent = state.version ? `v${state.version}` : '';
-    // Значок один, без слова: состояние читается по подсказке и цвету (`is-busy`),
-    // а надпись «готов» иначе висела бы в полосе всегда.
-    aiItem.title = `AI: ${state.ai}`;
-    aiItem.classList.toggle('is-busy', state.ai !== 'готов');
     const { errors, warnings } = state.problems;
     problemsItem.hidden = errors === 0 && warnings === 0;
     problemsItem.classList.toggle('has-errors', errors > 0);

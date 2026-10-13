@@ -828,16 +828,23 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   /* ── информация о сессии ───────────────────────────────────────────────── */
 
   const sessionInfo = createSessionInfo({ onCompact: () => void compactActive() });
-  /** Кольцо показывает то же число, что и окно информации. */
-  const contextRing = createUsageRing(() => toggleSessionInfo());
 
   /**
-   * Статус ассистента — режим и заполнение контекста — живёт в общей полосе окна
-   * (статус-баре), а не в композере: там он не занимает высоту панели. Композер
-   * отдаёт готовую строку наружу (`statusElement`), а окно «Информация о сессии»
-   * раскрывается вверх от неё же — как и раньше от строки в композере.
+   * Все виджеты про AI в полосе — одна кнопка «Информация о сессии» (кольцо
+   * контекста): в неё же встают значок режима и искра состояния ассистента.
+   * Порознь они занимали полосу тремя блоками, а вели к одному и тому же окну.
    */
-  const statusElement = h('div', { class: 'chat-status' }, modeBadge, contextRing.element, sessionInfo.element);
+  const contextRing = createUsageRing(() => toggleSessionInfo());
+  const aiSparkle = h('span', { class: 'status-ai', title: 'AI: готов' }, svgIcon('sparkle', 12));
+  contextRing.element.prepend(modeBadge);
+  contextRing.element.append(aiSparkle);
+
+  /**
+   * Статус ассистента живёт в общей полосе окна (статус-баре), а не в композере:
+   * там он не занимает высоту панели. Композер отдаёт готовую строку наружу
+   * (`statusElement`), а окно «Информация о сессии» раскрывается вверх от неё же.
+   */
+  const statusElement = h('div', { class: 'chat-status' }, contextRing.element, sessionInfo.element);
 
   function sessionInfoData(session: ChatSession = active(), pending = ''): SessionInfoData {
     return {
@@ -1586,6 +1593,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   function setBusy(value: boolean, _session: ChatSession = active()): void {
     busy = value;
+    // Искра в кнопке «Информация о сессии»: цвет говорит, что ассистент работает.
+    aiSparkle.classList.toggle('is-busy', busy);
+    aiSparkle.title = busy ? 'AI: генерация…' : 'AI: готов';
     // Поле ввода гасит прогон, а он в окне один (см. `rpc.ts`: активный стрим —
     // один). Поэтому блокируем поле разом для всех вкладок, а не только для
     // стримящей: иначе, переключившись во время генерации в другую беседу,
