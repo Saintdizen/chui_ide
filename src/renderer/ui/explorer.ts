@@ -11,6 +11,7 @@ import type { WorkspaceModel } from '../core/workspace-model';
 import { pairFromSelection } from '../core/file-compare';
 import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
 import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
+import { computeWindow } from '../core/tree-window';
 import { movePlan } from '../core/tree-move';
 import {
   clickSelection,
@@ -521,17 +522,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     render();
   }
 
-  const renderRow = (container: HTMLElement, entry: DirEntry, depth: number, dir: string): HTMLElement | null => {
+  const renderRow = (entry: DirEntry, depth: number, dir: string): HTMLElement | null => {
     const isDirectory = entry.kind === 'directory';
     const isExpanded = expanded.has(entry.path);
     const isActive = deps.openEditors.active?.path === entry.path;
     const isSelected = selection.paths.includes(entry.path);
 
     if (inlineEdit?.kind === 'rename' && inlineEdit.path === entry.path) {
-      container.appendChild(
-        inlineInput(depth, inlineEdit.currentName, (value) => void commitRename(entry.path, value)),
-      );
-      return null;
+      return inlineInput(depth, inlineEdit.currentName, (value) => void commitRename(entry.path, value));
     }
 
     const classes = ['tree-row'];
@@ -652,48 +650,145 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       if (moving.length === 0) return;
       void deps.commands.execute(copyDrag(event) ? 'file.copyInto' : 'file.moveInto', moving, dropDir);
     });
-    container.appendChild(row);
-    visibleNow.push(entry.path);
-
-    if (isCreateTarget(inlineEdit, entry.path)) {
-      const edit = inlineEdit;
-      container.appendChild(inlineInput(depth + 1, '', (value) => void commitCreate(edit, value)));
-    }
-
-    if (isDirectory && isExpanded) {
-      const nested = children.get(entry.path);
-      if (nested) renderRows(container, nested, depth + 1, entry.path);
-      // Неудачное чтение само по себе не повторяем: иначе каждый проход
-      // отрисовки заново просит ту же папку и дерево крутится без остановки.
-      else if (!failed.has(entry.path)) void load(entry.path).then(render);
-    }
     return row;
   };
 
   /**
-   * Строки одной папки. С включённым вложением спутники рисуются сразу под
-   * родителем (`Button.test.tsx` под `Button.tsx`) и своей строки не получают.
-   * Имена считаем по видимым записям — скрытое настройками в расклад не идёт.
+   * Строка дерева в визуальном порядке: запись, строка корня области, поле ввода
+   * имени или сообщение о чтении папки. Список плоский, а не рекурсивная отрисовка:
+   * по нему считаем окно (виртуализация) и работает выделение диапазоном.
    */
-  const renderRows = (container: HTMLElement, rawEntries: readonly DirEntry[], depth: number, dir: string): void => {
-    const entries = visible(rawEntries, dir);
-    const nest = options.fileNesting
-      ? nestEntries(
-          entries.map((item) => item.name),
-          effectiveNestingRules(options.nestingRules),
-        )
-      : null;
+  type FlatRow =
+    | { kind: 'entry'; entry: DirEntry; depth: number; dir: string; nested: boolean }
+    | { kind: 'root'; root: WorkspaceRoot; active: boolean; collapsed: boolean }
+    | { kind: 'create'; parent: string; depth: number }
+    | { kind: 'loading'; dir: string };
 
-    for (const entry of entries) {
-      if (nest?.hidden.has(entry.name)) continue;
-      renderRow(container, entry, depth, dir);
-      for (const name of nest?.children.get(entry.name) ?? []) {
-        const child = entries.find((item) => item.name === name);
-        // Класс `is-nested` — метка спутника: по ней видно вложение и на него
-        // смотрит проба (строка есть в дереве, но отдельной не считается).
-        if (child) renderRow(container, child, depth + 1, dir)?.classList.add('is-nested');
+  /** Сам список, его хозяин и высота строки: нужны окну отрисовки. */
+  let treeEl: HTMLElement | null = null;
+  let rowsHost: HTMLElement | null = null;
+  let flatRows: FlatRow[] = [];
+  /** Высота строки в пикселях: меряется по отрисованной строке (зависит от плотности). */
+  let rowStride = 0;
+  /** Прокрутка: сохраняется между перерисовками — дерево пересобирается целиком. */
+  let savedScroll = 0;
+  /** Путь, к которому просили прокрутить: строка может появиться позже (папка читается). */
+  let revealTarget: string | null = null;
+
+  /**
+   * Видимые строки дерева в порядке отображения: раскрытые папки, их дети и
+   * свёрнутые спутники. Порядок тот же, что узлов на экране, — по нему работает
+   * выделение диапазоном (`Shift`) и прокрутка к строке.
+   */
+  const buildFlat = (info: WorkspaceInfo): FlatRow[] => {
+    const rows: FlatRow[] = [];
+
+    const pushDir = (dir: string, depth: number): void => {
+      const entries = children.get(dir);
+      if (!entries) {
+        // Читаем папку и перерисуем, когда ответ придёт; пока показываем сообщение.
+        if (!failed.has(dir)) void load(dir).then(render);
+        rows.push({ kind: 'loading', dir });
+        return;
       }
+      const list = visible(entries, dir);
+      const nest = options.fileNesting
+        ? nestEntries(
+            list.map((item) => item.name),
+            effectiveNestingRules(options.nestingRules),
+          )
+        : null;
+      // Поле создания имени — первым ребёнком папки: строка «появляется» под ней.
+      if (isCreateTarget(inlineEdit, dir)) rows.push({ kind: 'create', parent: dir, depth });
+
+      for (const entry of list) {
+        if (nest?.hidden.has(entry.name)) continue;
+        rows.push({ kind: 'entry', entry, depth, dir, nested: false });
+        for (const name of nest?.children.get(entry.name) ?? []) {
+          const child = list.find((item) => item.name === name);
+          // Класс `is-nested` — метка спутника: по ней видно вложение, и на неё
+          // смотрит проба (строка в дереве есть, но отдельной не считается).
+          if (child) rows.push({ kind: 'entry', entry: child, depth: depth + 1, dir, nested: true });
+        }
+        if (entry.kind === 'directory' && expanded.has(entry.path)) pushDir(entry.path, depth + 1);
+      }
+    };
+
+    if (info.roots.length <= 1) {
+      pushDir(info.root, 0);
+      return rows;
     }
+    for (const item of info.roots) {
+      const active = item.root === info.root;
+      const collapsed = collapsedRoots.has(item.root);
+      rows.push({ kind: 'root', root: item, active, collapsed });
+      if (!collapsed) pushDir(item.root, 1);
+    }
+    return rows;
+  };
+
+  /** Собрать узел строки. `null` — строка себя не показывает (её рисует поле ввода). */
+  const buildRow = (row: FlatRow): HTMLElement | null => {
+    if (row.kind === 'root') return rootRow(row.root, row.active, row.collapsed);
+    if (row.kind === 'loading') {
+      return h('div', { class: 'tree-loading' }, failed.has(row.dir) ? 'Не удалось прочитать папку' : 'Читаю папку…');
+    }
+    if (row.kind === 'create') {
+      const edit = inlineEdit;
+      if (edit?.kind !== 'create') return null;
+      return inlineInput(row.depth, '', (value) => void commitCreate(edit, value));
+    }
+    const element = renderRow(row.entry, row.depth, row.dir);
+    if (element && row.nested) element.classList.add('is-nested');
+    return element;
+  };
+
+  /** Распорка высотой скрытых строк: она и держит честную длину прокрутки. */
+  const gap = (height: number): HTMLElement =>
+    h('div', { class: 'tree-gap', style: { height: `${Math.max(0, Math.round(height))}px` } });
+
+  /**
+   * Нарисовать окно строк вокруг видимой части. Строки вне окна не создаются —
+   * ради этого виртуализация и нужна: в монорепо в одной папке бывают десятки
+   * тысяч файлов, и держать все узлы в DOM нельзя. Сверху и снизу — распорки на
+   * высоту скрытых строк, чтобы полоса прокрутки и прокрутка остались честными.
+   */
+  const renderWindow = (): void => {
+    const host = rowsHost;
+    const scroller = treeEl;
+    if (!host || !scroller) return;
+
+    const total = flatRows.length;
+    const viewport = scroller.clientHeight;
+
+    const paintRange = (first: number, last: number, stride: number): void => {
+      const fragment = document.createDocumentFragment();
+      if (stride > 0 && first > 0) fragment.appendChild(gap(first * stride));
+      for (let index = first; index < last; index += 1) {
+        const node = buildRow(flatRows[index]!);
+        if (node) fragment.appendChild(node);
+      }
+      if (stride > 0 && last < total) fragment.appendChild(gap((total - last) * stride));
+      host.replaceChildren(fragment);
+    };
+
+    // Высоту строки меряем по отрисованным: она зависит от плотности (настройки)
+    // и масштаба интерфейса, а в пикселях её нигде не хранят.
+    if (rowStride <= 0) {
+      const guess = computeWindow(total, 0, viewport, 24);
+      paintRange(0, Math.max(guess.last, 1), 0);
+      const samples = host.querySelectorAll('.tree-row');
+      const head = samples[0] as HTMLElement | undefined;
+      const next = samples[1] as HTMLElement | undefined;
+      if (head && next) rowStride = next.getBoundingClientRect().top - head.getBoundingClientRect().top;
+      else if (head) rowStride = head.getBoundingClientRect().height;
+    }
+
+    const stride = rowStride > 0 ? rowStride : 24;
+    // Начало списка внутри прокрутки: над ним — отступ дерева и закреплённые строки.
+    const scrolled = Math.max(0, scroller.scrollTop - host.offsetTop);
+    const window = computeWindow(total, scrolled, viewport, stride);
+    paintRange(window.first, window.last, stride);
   };
 
   const onClick = async (entry: DirEntry, preview = false): Promise<void> => {
@@ -757,54 +852,6 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     for (const item of list) next.set(joinPath(root, item.path.split('/').join(separatorOf(root))), item);
     submodules = next;
     render();
-  };
-
-  /**
-   * Нарисовать дерево области. Один корень — просто его содержимое (как было).
-   * Несколько — каждый корень отдельной верхней строкой со своими детьми: так
-   * видно, что папки в окне разные, и понятно, из какой открыт файл.
-   */
-  const paintTree = (tree: HTMLElement, info: WorkspaceInfo): void => {
-    if (info.roots.length <= 1) {
-      const entries = children.get(info.root);
-      if (!entries) {
-        tree.appendChild(
-          h('div', { class: 'tree-loading' }, failed.has(info.root) ? 'Не удалось прочитать папку' : 'Читаю папку…'),
-        );
-        if (!failed.has(info.root)) void load(info.root).then(render);
-        return;
-      }
-      // Поле ввода для создания в корне проекта: строка корня в дереве не рисуется
-      // (рисуются только её дети), поэтому создание «в никуда» не показывало поля —
-      // со стороны это выглядело так, будто кнопка ничего не делает.
-      if (inlineEdit?.kind === 'create' && inlineEdit.parent === info.root) {
-        const edit = inlineEdit;
-        tree.appendChild(inlineInput(0, '', (value) => void commitCreate(edit, value)));
-      }
-      renderRows(tree, entries, 0, info.root);
-      return;
-    }
-
-    for (const item of info.roots) {
-      const isActive = item.root === info.root;
-      const collapsed = collapsedRoots.has(item.root);
-      tree.appendChild(rootRow(item, isActive, collapsed));
-      if (collapsed) continue;
-
-      const entries = children.get(item.root);
-      if (!entries) {
-        tree.appendChild(
-          h('div', { class: 'tree-loading' }, failed.has(item.root) ? 'Не удалось прочитать папку' : 'Читаю папку…'),
-        );
-        if (!failed.has(item.root)) void load(item.root).then(render);
-        continue;
-      }
-      if (inlineEdit?.kind === 'create' && inlineEdit.parent === item.root) {
-        const edit = inlineEdit;
-        tree.appendChild(inlineInput(1, '', (value) => void commitCreate(edit, value)));
-      }
-      renderRows(tree, entries, 1, item.root);
-    }
   };
 
   /** Верхняя строка корня: имя папки, признак активного и действия по правому клику. */
@@ -957,9 +1004,19 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // табом оно не попадает). Фокус нужен, чтобы F2 и Del относились к дереву,
     // а не к редактору: глобальная привязка Delete удаляла бы файл при наборе.
     const tree = h('div', { class: 'tree', tabindex: '-1' });
+    treeEl = tree;
+    const host = h('div', { class: 'tree-rows' });
+    rowsHost = host;
     if (pinned.length > 0) tree.appendChild(pinnedBlock());
+    tree.appendChild(host);
     tree.addEventListener('contextmenu', (event) => openMenu(null, event));
     tree.addEventListener('keydown', (event) => onTreeKey(event));
+    // Прокрутили — рисуем другое окно строк. Полную перерисовку не делаем: иначе
+    // на каждой прокрутке пересобирались бы заголовок панели и закреплённые строки.
+    tree.addEventListener('scroll', () => {
+      savedScroll = tree.scrollTop;
+      renderWindow();
+    });
     // Сброс мимо строк — в корень области: так файл уезжает «наверх», к проекту.
     tree.addEventListener('dragover', (event) => {
       const root = deps.workspace.root;
@@ -980,7 +1037,28 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     });
     element.appendChild(tree);
 
-    paintTree(tree, info);
+    // Плоский список видимых строк: по нему считаем окно и обходим выделение.
+    flatRows = buildFlat(info);
+    visibleNow = [];
+    for (const row of flatRows) if (row.kind === 'entry') visibleNow.push(row.entry.path);
+    renderWindow();
+    // Прокрутку возвращаем ПОСЛЕ раскладки распорок: до неё высота списка нулевая,
+    // и браузер обрезал бы `scrollTop` до нуля. Затем рисуем окно уже на месте.
+    if (savedScroll > 0) {
+      tree.scrollTop = savedScroll;
+      renderWindow();
+    }
+    // Прокрутка к строке по её номеру: сама строка может быть вне окна, и в DOM
+    // её нет — искать `[data-path]` нечего. Просьба живёт до первой удачной прокрутки.
+    if (revealTarget) {
+      const index = flatRows.findIndex((row) => row.kind === 'entry' && row.entry.path === revealTarget);
+      if (index >= 0 && rowStride > 0) {
+        tree.scrollTop = Math.max(0, host.offsetTop + index * rowStride - 40);
+        savedScroll = tree.scrollTop;
+        renderWindow();
+        revealTarget = null;
+      }
+    }
     // Раскрытие отыграно: следующая перерисовка — уже без движения.
     revealChildrenOf = null;
 
@@ -1036,6 +1114,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
     selected = target;
     selection = { paths: [target], anchor: target };
+    // Прокрутку заказываем номером строки: если она вне окна, в DOM её ещё нет.
+    revealTarget = target;
     render();
     element.querySelector<HTMLElement>(`[data-path="${CSS.escape(target)}"]`)?.scrollIntoView({ block: 'nearest' });
   };
@@ -1055,6 +1135,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     failed.clear();
     selected = null;
     selection = EMPTY_SELECTION;
+    // Другой проект — дерево начинается сверху, прежняя прокрутка к нему не относится.
+    savedScroll = 0;
+    revealTarget = null;
     inlineEdit = null;
     render();
   });
@@ -1108,6 +1191,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     togglePin: setPinned,
     applySettings(next) {
       const dimChanged = options.dimIgnored !== next.dimIgnored;
+      // Плотность строк меняет их высоту — перемерим её на следующей отрисовке.
+      if (options.rowDensity !== next.rowDensity) rowStride = 0;
       options = next;
       // Плотность строк — атрибут-переключатель: CSS читает его и берёт свою высоту.
       element.dataset.rows = next.rowDensity;
