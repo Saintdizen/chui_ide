@@ -41,6 +41,17 @@ registerAppScheme();
 // а не после `whenReady`.
 app.commandLine.appendSwitch('force-color-profile', 'srgb');
 
+// Скроллбары-оверлеи: полоса всплывает поверх содержимого и не занимает ширину
+// области прокрутки, как в системной настройке «полосы только при прокрутке».
+// Флаг читает Chromium до старта рендерера, поэтому ставить его нужно здесь.
+// Значение дописываем к уже переданному из командной строки, а не заменяем.
+// Важно: любая кастомизация `::-webkit-scrollbar` в CSS отключает оверлей —
+// своих правил полос в стилях быть не должно (см. `styles/main.css`).
+{
+  const passed = app.commandLine.getSwitchValue('enable-features');
+  app.commandLine.appendSwitch('enable-features', passed === '' ? 'OverlayScrollbar' : `${passed},OverlayScrollbar`);
+}
+
 // Это не то же самое, что профиль дисплея: на Wayland Chromium ведёт окно через
 // протокол цветоуправления `wp_color_manager_v1`, и тёмные тона уезжают вверх —
 // токен `#1e1e1e` на экране даёт `#242424` (сдвиг +6), при этом чёрный и белый

@@ -269,10 +269,6 @@
   --box_shadow_drop: 0 2px 8px rgb(0 0 0 / 14%), 0 16px 44px rgb(0 0 0 / 24%);
   --box_shadow_modal: 0 4px 16px rgb(0 0 0 / 16%), 0 30px 80px rgb(0 0 0 / 30%);
 
-  --scrollbar_thumb: rgba(255, 255, 255, 0.35);
-  --scrollbar_thumb_hover: rgba(255, 255, 255, 0.5);
-  --scrollbar_thumb_active: rgba(255, 255, 255, 0.62);
-
   /* Подсветка найденного: жёлтый, как в системном поиске. */
   --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 24%, transparent);
 
@@ -403,10 +399,6 @@
     --box_shadow_small: 0 1px 2px rgb(0 0 0 / 6%), 0 6px 14px rgb(0 0 0 / 7%);
     --box_shadow_drop: 0 2px 8px rgb(0 0 0 / 4%), 0 16px 44px rgb(0 0 0 / 8%);
     --box_shadow_modal: 0 4px 16px rgb(0 0 0 / 5%), 0 30px 80px rgb(0 0 0 / 11%);
-
-    --scrollbar_thumb: rgba(0, 0, 0, 0.3);
-    --scrollbar_thumb_hover: rgba(0, 0, 0, 0.45);
-    --scrollbar_thumb_active: rgba(0, 0, 0, 0.58);
 
     /* Значки файлов: те же роли, но темнее — на белом светлые тона бледны. */
     --file_text: #6c6c70; /* gray */

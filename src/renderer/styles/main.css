@@ -62,52 +62,10 @@ textarea {
   outline-offset: var(--focus_outline_offset);
 }
 
-/* Скроллбары-оверлеи: полоса не рисует ни дорожки, ни фона — полотно остаётся
-   чистым, а ползунок всплывает поверх содержимого. Стрелки и угол не рисуем: от
-   них оставался серый квадрат со стрелкой, а сами стрелки — из другой эпохи. */
-::-webkit-scrollbar {
-  width: 14px;
-  height: 14px;
-  /* Фон самой полосы: без этого Chromium красит её светло-серым, и тонкая
-     полоска читается как дорожка. Поэтому прозрачным — и у полосы, и у частей. */
-  background: transparent;
-}
-
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-track-piece,
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
-::-webkit-scrollbar-button {
-  width: 0;
-  height: 0;
-}
-
-::-webkit-scrollbar-thumb {
-  background: transparent;
-  /* Ползунок тоньше полосы: прозрачная рамка с `content-box` даёт «плавающий»
-     пилл внутри области прокрутки, а не полосу во всю её ширину. */
-  border: 4px solid transparent;
-  background-clip: content-box;
-  border-radius: var(--radius_pill);
-  transition: background-color var(--motion_base) var(--motion_ease);
-}
-
-/* Курсор над областью прокрутки — полоса проявляется. */
-:hover::-webkit-scrollbar-thumb {
-  background: var(--scrollbar_thumb);
-}
-
-/* Курсор прямо по ползунку — он заметнее: видно, что за него можно тянуть. */
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar_thumb_hover);
-}
-
-/* Пока элемент тянут (в т.ч. за ползунок) — держим его видимым и самым ярким. */
-:active::-webkit-scrollbar-thumb {
-  background: var(--scrollbar_thumb_active);
-}
+/* Скроллбары — системные оверлеи Chromium (флаг `OverlayScrollbar`, см.
+   `main/index.ts`): полоса всплывает поверх содержимого и не занимает ширину.
+   Своих правил `::-webkit-scrollbar` здесь быть НЕ должно: любая такая
+   кастомизация отключает оверлей и возвращает занимающую место полосу. */
 
 /* Все всплывающие слои лежат НАД содержимым: тот же материал (полупрозрачная
    подложка + блюр фона) читается как «стекло» над интерфейсом и задаёт глубину
