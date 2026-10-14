@@ -195,7 +195,8 @@ export class EditorInputBinding {
     const target: MacroTarget = {
       move: (motion, extend) => this.runMotion(motion, extend),
       edit: (command) => this.runEdit(command),
-      insert: (text) => this.controller.type(text),
+      // Вставку повторяем тем же путём, что и ввод: тогда отступ блока выравнивается так же.
+      insert: (text) => this.controller.paste(text),
     };
     return runMacro(steps, target);
   }

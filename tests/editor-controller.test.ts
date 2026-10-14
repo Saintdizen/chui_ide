@@ -102,6 +102,40 @@ describe('правки и история', () => {
   });
 });
 
+describe('вставка из буфера', () => {
+  it('блок из нескольких строк выравнивается по отступу строки', () => {
+    const { controller, buffer } = make('    if (x) {\n    }\n');
+    // Каретка в конце первой строки: вставка идёт в её середину, первая строка блока остаётся как есть.
+    const at = buffer.text.indexOf('\n');
+    controller.setSelection({ anchor: at, active: at }, false);
+    controller.paste('    a\n        b');
+    expect(buffer.text).toBe('    if (x) {    a\n        b\n    }\n');
+  });
+
+  it('первая строка не сдвигается при вставке в середину строки', () => {
+    const { controller, buffer } = make('  foo();\n');
+    controller.setSelection({ anchor: 8, active: 8 }, false);
+    controller.paste('  a\n    b');
+    expect(buffer.text).toBe('  foo();  a\n    b\n');
+  });
+
+  it('однострочная вставка отступа не меняет', () => {
+    const { controller, buffer } = make('  x\n');
+    controller.setSelection({ anchor: 0, active: 0 }, false);
+    controller.paste('  a');
+    expect(buffer.text).toBe('  a  x\n');
+  });
+
+  it('вставка в пустую строку ложится ровно, отмена возвращает всё', () => {
+    const { controller, buffer } = make('\n');
+    controller.setSelection({ anchor: 0, active: 0 }, false);
+    controller.paste('    a\n        b');
+    expect(buffer.text).toBe('a\n    b\n');
+    controller.undo();
+    expect(buffer.text).toBe('\n');
+  });
+});
+
 describe('вертикальное движение держит столбец', () => {
   it('проезд через короткую строку не теряет столбец', () => {
     const { controller } = make('longer line\nshort\nlonger again');

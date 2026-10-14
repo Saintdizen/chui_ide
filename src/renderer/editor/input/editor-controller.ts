@@ -45,6 +45,7 @@ import {
   type EditResult,
 } from './editing';
 import { toggleBlockComment, toggleLineComment } from './comments';
+import { reindentPasted } from './reindent';
 import { wrapSelection, type SurroundOption } from './surround';
 import type { CaseStyle } from './case-convert';
 import {
@@ -792,9 +793,32 @@ export class EditorController {
     }, 'other');
   }
 
-  /** Сдвинуть текст из буфера обмена: замена выделенного. Отдельно от `type` — иной шаг истории. */
+  /**
+   * Сдвинуть текст из буфера обмена: замена выделенного. Кусок из нескольких строк
+   * выравнивается по отступу строки, куда он ложится (`input/reindent.ts`) — иначе чужой
+   * отступ остаётся чужим. Однострочной вставке отступ не меняем: она ложится в середину
+   * строки, и прибавка отступа уехала бы по тексту.
+   */
   paste(text: string): void {
-    this.type(text);
+    if (!text.includes('\n')) {
+      this.type(text);
+      return;
+    }
+    this.editAll((selection) => insertText(this.buffer, selection, this.reindentFor(selection, text)), 'typing');
+  }
+
+  /** Отступы вставки по строке каретки: общий отступ блока и место, куда он ложится. */
+  private reindentFor(selection: Selection, text: string): string {
+    const at = selectionStart(selection);
+    const line = this.buffer.lineAt(at);
+    const lineText = this.buffer.lineText(line);
+    return reindentPasted(text, {
+      baseIndent: /^[\t ]*/.exec(lineText)?.[0] ?? '',
+      tabSize: this.tabSize,
+      // Каретка в ведущих пробелах — блок начинается с отступа строки; посреди текста —
+      // первая строка его продолжает, и отступ встал бы в середину.
+      shiftFirstLine: lineText.slice(0, at - this.buffer.lineStart(line)).trim() === '',
+    });
   }
 
   /**
