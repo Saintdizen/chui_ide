@@ -7405,6 +7405,247 @@ body > .overlay {
   padding: 10px 12px 16px;
 }
 
+/* ── отладчик регулярных выражений ─────────────────────────────────────── */
+
+/* Окно шире диалога одного поля: слева поля, справа ответ — но не на весь экран. */
+.regex-modal {
+  width: min(900px, 100%);
+  height: min(620px, 100%);
+}
+
+.regex-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+/* Левая колонка: шаблон, флаги, текст и замена. */
+.regex-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  border-right: 1px solid var(--separator_color);
+}
+
+.regex-form .field-label {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Шаблон в обрамлении косых — как литерал `/…/gi`. */
+.regex-pattern-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.regex-slash {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+}
+
+.regex-pattern {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font_mono);
+}
+
+.regex-flags {
+  flex: 0 0 auto;
+  width: 64px;
+  font-family: var(--font_mono);
+}
+
+/* Чипы флагов: включённый подсвечен — как выбранный пункт. */
+.regex-flag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.regex-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_pill);
+  background: var(--sunken_background);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.regex-flag:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.regex-flag.is-on {
+  border-color: var(--focus_ring_color);
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+.regex-flag-char {
+  font-family: var(--font_mono);
+  font-weight: 600;
+}
+
+.regex-flag.is-on .regex-flag-char {
+  color: var(--blue_prime_background);
+}
+
+/* Текст тянется по высоте, замена — одна строка. */
+.regex-text {
+  flex: 1 1 auto;
+  min-height: 120px;
+  padding: 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.5;
+  resize: none;
+}
+
+.regex-text:focus,
+.regex-pattern:focus,
+.regex-flags:focus,
+.regex-replacement:focus {
+  outline: none;
+  border-color: var(--focus_ring_color);
+}
+
+.regex-replacement {
+  font-family: var(--font_mono);
+}
+
+/* Правая колонка: ответ. Прокручивается целиком — совпадений бывает много. */
+.regex-output {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
+
+.regex-status {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.regex-status.is-error {
+  color: var(--red_prime_background);
+}
+
+/* Текст с подсвеченными совпадениями: моно, перенос по словам. */
+.regex-preview {
+  flex: 0 0 auto;
+  max-height: 160px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+
+.regex-hit {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--highlight_background);
+  color: var(--text_color);
+}
+
+/* Соседние совпадения красим в другой оттенок — видно, где кончается одно. */
+.regex-hit.is-alt {
+  background: color-mix(in srgb, var(--blue_prime_background) 30%, transparent);
+}
+
+/* Пустое (нулевой ширины) совпадение — тонкая метка: текст она не занимает. */
+.regex-hit.is-empty {
+  display: inline-block;
+  width: 2px;
+}
+
+.regex-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.regex-match {
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.regex-match-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.regex-match-no,
+.regex-match-range {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+  font-variant-numeric: tabular-nums;
+}
+
+.regex-match-text,
+.regex-group-text {
+  overflow-wrap: anywhere;
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.regex-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 3px;
+  padding-left: 10px;
+}
+
+.regex-group-name {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.regex-replaced {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.regex-replaced-text {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+
 .outline-toolbar {
   display: flex;
   align-items: center;

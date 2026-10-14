@@ -122,6 +122,7 @@ import { createLfsModal } from './ui/lfs-modal';
 import { createHistoryModal } from './ui/history-modal';
 import { createBookmarksModal } from './ui/bookmarks-modal';
 import { createSurroundModal } from './ui/surround-modal';
+import { createRegexTester } from './ui/regex-tester';
 import { createIdentityModal } from './ui/identity-modal';
 import { createForgeModal } from './ui/forge-modal';
 import { createTextModal } from './ui/text-modal';
@@ -1959,6 +1960,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   });
   document.body.appendChild(surroundModal.element);
+
+  // Отладчик регулярных выражений: окно поверх редактора. Текст для поля подставляем из
+  // выделения — чаще всего шаблон приходят проверять именно на выделенном куске.
+  const regexTester = createRegexTester({ initialText: () => editors.selectedText() });
+  document.body.appendChild(regexTester.element);
 
   const bookmarksModal = createBookmarksModal({
     bookmarks,
@@ -4112,6 +4118,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'view.showMarkdownPreview', title: 'Предпросмотр Markdown', category: 'Вид' }, () => {
     dock.toggle('preview');
+  });
+
+  define({ id: 'view.regexTester', title: 'Отладчик регулярных выражений', category: 'Вид' }, () => {
+    regexTester.open();
   });
 
   define({ id: 'view.showProblems', title: 'Проблемы', category: 'Вид', keywords: ['ошибки', 'warning'] }, () => {
