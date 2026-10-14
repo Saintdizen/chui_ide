@@ -478,8 +478,12 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
 ✓ Группировка по пакетам монорепо в дереве (`explorer.groupByPackage`): пакеты
 верхнего уровня идут строками с путём от корня, а промежуточный каталог (`packages`)
 скрыт (`shared/monorepo.ts`: `topLevelPackages`/`packageAncestorDirs`); та же разбивка
-есть и в панели «Изменения». ✗ Разреженные деревья
-и sparse checkout. ✗ Удалённые файловые системы (SSH, WSL, devcontainer). ✗ Сторонние значки
+есть и в панели «Изменения». ✓ Разреженный рабочий каталог
+(sparse checkout): команда `git.sparse` показывает, какие папки выложены на диск, и даёт
+добавить каталог, убрать его или выключить режим целиком; режим `cone` — надстройка над
+`git sparse-checkout` (`shared/git-sparse.ts`, `ui/sparse-modal.ts`, проверки —
+`tests/git-sparse.test.ts` и `tests/git-sparse-service.test.ts`). ✗ Удалённые файловые
+системы (SSH, WSL, devcontainer). ✗ Сторонние значки
 поверх дерева (есть только git, подмодули и приглушение игнорируемых). ✓ Поиск по
 структуре: поиск символа по всему проекту есть (`Ctrl+T`, `ui/symbol-picker.ts`,
 `workspace/symbol` — имя класса, функции, переменной), и есть «Где экспортируется»
@@ -540,6 +544,10 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
   (`git lfs track`/`untrack`), подтянуть содержимое (`git lfs pull`) и поставить хуки
   репозитория (`git lfs install --local`). Без установленного `git-lfs` окно не молчит —
   объясняет, чего не хватает: `shared/git-lfs.ts` (разбор), `ui/lfs-modal.ts` (окно).
+- Разреженный рабочий каталог (sparse checkout, команда `git.sparse`): какие папки
+  выложены на диск, добавление и удаление каталогов, выключение режима. Режим `cone` —
+  набор каталогов поверх `git sparse-checkout set --cone` (`shared/git-sparse.ts`,
+  `ui/sparse-modal.ts`).
 - Личность автора и подпись (команда `git.identity`): имя и почта автора, подпись коммитов и
   тегов (`commit.gpgsign`/`tag.gpgsign`), формат подписи GPG (`openpgp`) или SSH-ключом, ключ
   (`user.signingkey`), хранилище паролей HTTPS (`credential.helper`) и список открытых ключей из

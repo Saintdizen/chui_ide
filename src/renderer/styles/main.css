@@ -6145,6 +6145,74 @@ body > .overlay {
   margin-top: 8px;
 }
 
+/* ── разреженный рабочий каталог (sparse checkout) ─────────────────────── */
+
+.sparse-modal {
+  width: min(620px, 94vw);
+}
+
+.sparse-status {
+  margin-bottom: 6px;
+}
+
+.sparse-line {
+  margin: 0;
+  color: var(--text_color_secondary);
+}
+
+.sparse-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  margin: 6px 0;
+}
+
+.sparse-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.sparse-dir,
+.sparse-pattern {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font_mono);
+  color: var(--text_color);
+}
+
+.sparse-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+.sparse-add {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.sparse-add .field-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.sparse-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
 /* ── окно поиска багованного коммита (bisect) ──────────────────────────── */
 
 .bisect-modal {

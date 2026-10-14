@@ -24,6 +24,7 @@ import type { GitBisectState } from '../../shared/git-bisect';
 import type { GitSubmodule } from '../../shared/git-submodules';
 import type { GitWorktree } from '../../shared/git-worktrees';
 import type { GitLfsInfo } from '../../shared/git-lfs';
+import type { GitSparseInfo } from '../../shared/git-sparse';
 import type { GitIdentity, GitSshKey } from '../../shared/git-identity';
 import type { ProjectPackage } from '../../shared/monorepo';
 import type { ForgeInfo } from '../../shared/git-platform';
@@ -527,6 +528,26 @@ export class GitModel {
   /** Поставить хуки LFS в этот репозиторий. */
   lfsInstall(): Promise<GitLfsInfo> {
     return this.rpc.request('git.lfsInstall');
+  }
+
+  /** Разреженный рабочий каталог: включён ли режим и какие каталоги выбраны. */
+  sparseInfo(): Promise<GitSparseInfo> {
+    return this.rpc.request('git.sparseInfo');
+  }
+
+  /** Задать набор каталогов целиком. */
+  sparseSet(directories: readonly string[]): Promise<GitSparseInfo> {
+    return this.rpc.request('git.sparseSet', { directories: [...directories] });
+  }
+
+  /** Добавить каталог к текущему набору. */
+  sparseAdd(directory: string): Promise<GitSparseInfo> {
+    return this.rpc.request('git.sparseAdd', { directory });
+  }
+
+  /** Выключить разреженный режим — вернуть на диск весь репозиторий. */
+  sparseDisable(): Promise<GitSparseInfo> {
+    return this.rpc.request('git.sparseDisable');
   }
 
   async markResolved(path: string): Promise<GitStatus> {

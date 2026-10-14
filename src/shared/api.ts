@@ -18,6 +18,7 @@ import type { HistoryEntry } from './file-history';
 import type { BookmarkRecord } from './bookmarks';
 import type { FileLabelRecord } from './file-labels';
 import type { GitLfsInfo } from './git-lfs';
+import type { GitSparseInfo } from './git-sparse';
 import type { GitIdentity, GitSshKey } from './git-identity';
 import type { WorkspaceRoot } from './workspace-roots';
 import type { LspStatus } from './lsp-status';
@@ -1885,6 +1886,16 @@ export interface ChuiMethods {
   'git.lfsPull': { params: void; result: GitLfsInfo };
   /** Подготовить репозиторий к LFS: хуки `git lfs install --local`. */
   'git.lfsInstall': { params: void; result: GitLfsInfo };
+
+  /* Разреженный рабочий каталог (sparse checkout): что из репозитория выложено на диск. */
+  /** Включён ли режим и какие каталоги выбраны. */
+  'git.sparseInfo': { params: void; result: GitSparseInfo };
+  /** Задать набор каталогов целиком (`git sparse-checkout set --cone`). */
+  'git.sparseSet': { params: { directories: string[] }; result: GitSparseInfo };
+  /** Добавить каталог к текущему набору (`git sparse-checkout add`). */
+  'git.sparseAdd': { params: { directory: string }; result: GitSparseInfo };
+  /** Выключить разреженный режим: на диск возвращается весь репозиторий. */
+  'git.sparseDisable': { params: void; result: GitSparseInfo };
 
   /* Замечания к коду (code review): хранятся в проекте, источник истины — renderer. */
   /** Замечания текущего проекта. */

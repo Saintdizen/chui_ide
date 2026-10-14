@@ -123,6 +123,7 @@ import { createFolderCompareModal } from './ui/folder-compare-modal';
 import { createBisectModal } from './ui/bisect-modal';
 import { createWorktreeModal } from './ui/worktree-modal';
 import { createLfsModal } from './ui/lfs-modal';
+import { createSparseModal } from './ui/sparse-modal';
 import { createHistoryModal } from './ui/history-modal';
 import { createBookmarksModal } from './ui/bookmarks-modal';
 import { createSurroundModal } from './ui/surround-modal';
@@ -1923,6 +1924,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   document.body.appendChild(lfsModal.element);
 
+  // Разреженный рабочий каталог: какие папки выложены на диск. Рядом с LFS — обе про
+  // то, что происходит с репозиторием в большом проекте.
+  const sparseModal = createSparseModal({
+    git,
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(sparseModal.element);
+
   // Локальная история файла: снимки содержимого, снятые при сохранении. Возврат идёт
   // тем же путём, что и любая правка документа: текст кладётся в документ и файл
   // сохраняется — так возврат попадает в undo и сам становится снимком.
@@ -3492,6 +3501,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         return;
       }
       await lfsModal.open();
+    },
+  );
+
+  /** Разреженный рабочий каталог (sparse checkout): какие папки выложены на диск. */
+  define(
+    {
+      id: 'git.sparse',
+      title: 'Разреженный рабочий каталог…',
+      category: 'Git',
+      keywords: ['sparse', 'разреженный', 'sparse-checkout', 'монорепо', 'папки'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await sparseModal.open();
     },
   );
 

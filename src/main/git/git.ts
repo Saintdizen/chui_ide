@@ -48,6 +48,13 @@ import {
   type GitSshKey,
 } from '../../shared/git-identity';
 import { cliFor, forgeRepo, parseGhRequests, parseGlabRequests, type ForgeInfo } from '../../shared/git-platform';
+import {
+  isConePatterns,
+  normalizeSparseDirectory,
+  parseSparseFlag,
+  parseSparseList,
+  type GitSparseInfo,
+} from '../../shared/git-sparse';
 import { summarizeRoot, type GitRootFetch, type GitRootSummary } from '../../shared/git-multiroot';
 import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
@@ -1491,6 +1498,72 @@ export class GitService {
         },
       );
     });
+  }
+
+  /* ── разреженный рабочий каталог (sparse checkout) ─────────────── */
+
+  /**
+   * Что выложено на диск: включён ли разреженный режим и какие каталоги выбраны.
+   * Читаем из конфига и `git sparse-checkout list`; своё состояние не держим — репозиторий
+   * могли настроить и мимо IDE (в терминале).
+   */
+  async sparseInfo(): Promise<GitSparseInfo> {
+    const repoRoot = await this.repositoryRoot();
+    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    const enabledRaw = await this.exec(['config', '--get', 'core.sparseCheckout'], repoRoot, { allowFailure: true });
+    const enabled = enabledRaw.ok && parseSparseFlag(enabledRaw.stdout);
+    if (!enabled) return { enabled: false, cone: false, patterns: [] };
+
+    const coneRaw = await this.exec(['config', '--get', 'core.sparseCheckoutCone'], repoRoot, { allowFailure: true });
+    // Современный git по умолчанию работает в cone-режиме: нет значения — считаем cone,
+    // явное `false` — режим шаблонов.
+    const cone = !coneRaw.ok || coneRaw.stdout.trim() === '' || parseSparseFlag(coneRaw.stdout);
+
+    const list = await this.exec(['sparse-checkout', 'list'], repoRoot, { allowFailure: true });
+    const patterns = list.ok ? parseSparseList(list.stdout) : [];
+    return { enabled: true, cone: cone || isConePatterns(patterns), patterns };
+  }
+
+  /**
+   * Задать набор каталогов (cone-режим). Заменяет прежний набор целиком:
+   * `git sparse-checkout set` выкладывает только перечисленное и корень.
+   * Пустой набор — ошибка: выключение режима отдельная операция (`sparseDisable`),
+   * а не вероятно забытый аргумент.
+   */
+  async sparseSet(directories: readonly string[]): Promise<GitSparseInfo> {
+    const repoRoot = await this.requireRoot();
+    const dirs = this.cleanDirectories(directories);
+    if (dirs.length === 0) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбран ни один каталог');
+    await this.exec(['sparse-checkout', 'set', '--cone', '--', ...dirs], repoRoot);
+    return this.sparseInfo();
+  }
+
+  /** Добавить каталог к текущему набору (`git sparse-checkout add`). */
+  async sparseAdd(directory: string): Promise<GitSparseInfo> {
+    const repoRoot = await this.requireRoot();
+    const clean = normalizeSparseDirectory(directory);
+    if (clean === null) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Негодный путь каталога');
+    await this.exec(['sparse-checkout', 'add', '--', clean], repoRoot);
+    return this.sparseInfo();
+  }
+
+  /** Выключить разреженный режим: на диск возвращается весь репозиторий. */
+  async sparseDisable(): Promise<GitSparseInfo> {
+    const repoRoot = await this.requireRoot();
+    await this.exec(['sparse-checkout', 'disable'], repoRoot);
+    return this.sparseInfo();
+  }
+
+  /** Привести список каталогов к виду git: без повторов и мусора. */
+  private cleanDirectories(directories: readonly string[]): string[] {
+    const out: string[] = [];
+    for (const item of directories) {
+      const clean = normalizeSparseDirectory(item);
+      if (clean === null || out.includes(clean)) continue;
+      out.push(clean);
+    }
+    return out;
   }
 
   /* ── Git LFS (хранение больших файлов) ─────────────────────────────────── */

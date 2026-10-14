@@ -575,6 +575,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.lfsUntrack', (params) => deps.git.lfsUntrack(params.pattern));
   router.register('git.lfsPull', () => deps.git.lfsPull());
   router.register('git.lfsInstall', () => deps.git.lfsInstall());
+  router.register('git.sparseInfo', () => deps.git.sparseInfo());
+  router.register('git.sparseSet', (params) => deps.git.sparseSet(params.directories));
+  router.register('git.sparseAdd', (params) => deps.git.sparseAdd(params.directory));
+  router.register('git.sparseDisable', () => deps.git.sparseDisable());
 
   router.register('git.clone', (params, ctx) =>
     deps.git.clone(params.url, params.directory, (line) => ctx.emit(CloneEvent.Progress, { line })),
