@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   expandStructural,
+  hashCommentsForPath,
   literalTemplate,
   parseTemplate,
   structuralFind,
@@ -164,5 +165,25 @@ describe('structuralReplaceEdit: одна правка на весь диапа�
 
   it('нечего менять — правки нет', () => {
     expect(structuralReplaceEdit('foo(a)', template('baz($x)'), 'x')).toBeNull();
+  });
+});
+
+describe('hashCommentsForPath: где `#` — не комментарий', () => {
+  it('в коде и разметке `#` — комментарий', () => {
+    expect(hashCommentsForPath('src/app.ts')).toBe(true);
+    expect(hashCommentsForPath('script.py')).toBe(true);
+    expect(hashCommentsForPath('setup.sh')).toBe(true);
+  });
+
+  it('в CSS, JSON, markdown и YAML `#` не комментарий', () => {
+    expect(hashCommentsForPath('styles/main.css')).toBe(false);
+    expect(hashCommentsForPath('package.json')).toBe(false);
+    expect(hashCommentsForPath('README.md')).toBe(false);
+    expect(hashCommentsForPath('config.yml')).toBe(false);
+  });
+
+  it('имя без расширения не путает', () => {
+    expect(hashCommentsForPath('Makefile')).toBe(true);
+    expect(hashCommentsForPath('MAIN.CSS')).toBe(false);
   });
 });

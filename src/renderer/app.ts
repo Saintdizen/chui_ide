@@ -2028,6 +2028,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       }
       return true;
     },
+    activePath: () => editors.currentPath,
+    // Охват по проекту — тем же образцом: слой main обходит файлы и пишет изменённые,
+    // а открытые вкладки перечитываем, иначе редактор покажет текст до замены.
+    searchProject: (options) => rpc.request('workspace.structuralSearch', options),
+    replaceProject: (options) => rpc.request('workspace.structuralReplace', options),
+    reloadFile: (path) => reloadIfOpen(path),
+    openFile: (path) => openPath(path).then(() => undefined),
   });
   document.body.appendChild(structuralSearch.element);
 

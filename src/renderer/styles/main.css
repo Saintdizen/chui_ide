@@ -8032,6 +8032,69 @@ body > .overlay {
   font-size: var(--font_micro_size);
 }
 
+/* Область поиска: в файле или по всему проекту — переключатель из двух кнопок. */
+.structural-scope {
+  display: inline-flex;
+  gap: 0;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--border_color);
+  border-radius: 7px;
+  background: var(--sunken_background);
+}
+
+.structural-scope .seg-btn {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text_color_secondary);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+.structural-scope .seg-btn.is-active {
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+/* Найденное по проекту: строкой файл с числом мест, под ним — сами места. */
+.structural-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.structural-file-name {
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--blue_prime_background);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.structural-file-count {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--element_background);
+  color: var(--text_color_secondary);
+  font-size: var(--font_micro_size);
+}
+
+/* Место внутри файла — с отступом, как вложенная строка в списке проблем. */
+.structural-match.is-nested,
+.structural-more.is-nested {
+  margin-left: 14px;
+}
+
 .regex-modal {
   width: min(900px, 100%);
   height: min(620px, 100%);

@@ -26,6 +26,15 @@ import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
 import { importStyleOf, rewriteImports } from '../../shared/import-rewrite';
 import { replaceAll } from '../../shared/replace';
+import {
+  hashCommentsForPath,
+  parseTemplate,
+  structuralFind,
+  structuralReplace,
+  type StructuralFileMatches,
+  type StructuralProjectMatches,
+  type StructuralProjectOptions,
+} from '../../shared/structural-search';
 import { MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../../shared/large-file';
 import { buildFolderDiff, splitFolderLists, type FolderCompareResult } from '../../shared/folder-compare';
 
@@ -43,6 +52,8 @@ const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '
  */
 const IGNORE_FILES = ['.gitignore', '.ai_ignore'] as const;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+/** Сколько мест одного файла отдаём в предпросмотр (полное число — в `count`). */
+const MAX_STRUCTURAL_MATCHES_PER_FILE = 20;
 const MAX_SEARCH_RESULTS = 2000;
 /** Потолок контекста вокруг совпадения: `-C 5` уже показывает блок целиком. */
 const MAX_SEARCH_CONTEXT = 5;
@@ -791,6 +802,90 @@ export class WorkspaceService {
       const result = replaceAll(text, options.query, options.replacement, {
         isRegex: options.isRegex,
         caseSensitive: options.caseSensitive,
+      });
+      if (result.count === 0) continue;
+
+      await this.onBeforeChange?.(file, 'save');
+      await fs.writeFile(file, result.text, 'utf8');
+      this.contents.invalidate(file);
+      this.notifyChanged(file);
+      changed.push(file);
+      replaced += result.count;
+    }
+
+    return { files: changed, replaced };
+  }
+
+  /**
+   * Поиск по структуре по всему проекту — ПРЕДПРОСМОТР, без правок. Те же файлы, что
+   * обходит замена (`collectFiles`): служебные папки пропущены, большие файлы не читаем.
+   *
+   * Возвращаем по файлу полное число совпадений и несколько первых мест для показа:
+   * отдавать весь список не нужно, а человек видит, куда замена попадёт.
+   */
+  async findByStructure(options: StructuralProjectOptions): Promise<StructuralProjectMatches> {
+    const root = this.requireRoot();
+    const template = parseTemplate(options.pattern);
+    if (template.error) throw new RpcFailure(RpcErrorCode.InvalidParams, template.error);
+
+    const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
+    const files: StructuralFileMatches[] = [];
+    let total = 0;
+    let scanned = 0;
+
+    for (const file of await this.collectFiles()) {
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      if (matcher && !matcher.test(relative)) continue;
+      const stat = await fs.stat(file).catch(() => null);
+      if (!stat || stat.size > MAX_FILE_BYTES) continue;
+      const buffer = await fs.readFile(file).catch(() => null);
+      if (!buffer) continue;
+      scanned += 1;
+
+      const text = buffer.toString('utf8').replace(/\r\n/g, '\n');
+      const matches = structuralFind(text, template, { hashComments: hashCommentsForPath(relative) });
+      if (matches.length === 0) continue;
+
+      total += matches.length;
+      files.push({
+        path: file,
+        count: matches.length,
+        matches: matches.slice(0, MAX_STRUCTURAL_MATCHES_PER_FILE),
+      });
+    }
+
+    return { files, total, scanned };
+  }
+
+  /**
+   * Замена по структуре по всему проекту: идём теми же файлами, пишем только те, где
+   * что-то реально изменилось. Возвращаем изменённые пути — renderer по ним перечитывает
+   * открытые вкладки.
+   *
+   * Читает ли `#` как комментарий, решает расширение: в CSS или markdown `#` — не
+   * комментарий, и читать такие файлы общим правилом значило бы править не то.
+   * Большие файлы пропускаем: держать их целиком в памяти ради замены не стоит.
+   */
+  async replaceByStructure(options: StructuralProjectOptions): Promise<{ files: string[]; replaced: number }> {
+    const root = this.requireRoot();
+    const template = parseTemplate(options.pattern);
+    if (template.error) throw new RpcFailure(RpcErrorCode.InvalidParams, template.error);
+
+    const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
+    const changed: string[] = [];
+    let replaced = 0;
+
+    for (const file of await this.collectFiles()) {
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      if (matcher && !matcher.test(relative)) continue;
+      const stat = await fs.stat(file).catch(() => null);
+      if (!stat || stat.size > MAX_FILE_BYTES) continue;
+      const buffer = await fs.readFile(file).catch(() => null);
+      if (!buffer) continue;
+
+      const text = buffer.toString('utf8').replace(/\r\n/g, '\n');
+      const result = structuralReplace(text, template, options.replacement, {
+        hashComments: hashCommentsForPath(relative),
       });
       if (result.count === 0) continue;
 

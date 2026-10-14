@@ -24,6 +24,7 @@ import type { LspStatus } from './lsp-status';
 import type { LineProfile } from './line-profile';
 import type { SemanticToken } from './lsp-semantic-tokens';
 import type { FolderCompareResult } from './folder-compare';
+import type { StructuralProjectMatches, StructuralProjectOptions } from './structural-search';
 import type { ProjectPackage } from './monorepo';
 import type { ForgeInfo } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
@@ -1623,6 +1624,13 @@ export interface ChuiMethods {
   'session.load': { params: { root: string }; result: SessionState };
   'session.save': { params: { root: string; state: SessionState }; result: void };
   'workspace.replace': { params: ReplaceFilesOptions; result: ReplaceFilesResult };
+  /**
+   * Поиск по структуре кода по всему проекту — предпросмотр, без правок. Возвращает
+   * файлы с местами и общим числом вхождений (по тому же образцу, что и в файле).
+   */
+  'workspace.structuralSearch': { params: StructuralProjectOptions; result: StructuralProjectMatches };
+  /** Замена по структуре по всему проекту: изменённые пути и число замен. */
+  'workspace.structuralReplace': { params: StructuralProjectOptions; result: ReplaceFilesResult };
   'workspace.createFile': { params: { path: string }; result: { path: string } };
   'workspace.createDir': { params: { path: string }; result: { path: string } };
   'workspace.rename': { params: { from: string; to: string }; result: { path: string } };

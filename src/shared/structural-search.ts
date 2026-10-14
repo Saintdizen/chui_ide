@@ -478,3 +478,58 @@ export function structuralReplaceEdit(
 
   return { start, end, removed: text.slice(start, end), inserted, count: matches.length };
 }
+
+// ── поиск по проекту ─────────────────────────────────────────────────────────
+
+/** Один файл проекта с найденными местами: `count` — всего, `matches` — для показа. */
+export interface StructuralFileMatches {
+  path: string;
+  count: number;
+  matches: StructuralMatch[];
+}
+
+/** Что нашлось по проекту: файлы с местами, общее число и сколько файлов прочитано. */
+export interface StructuralProjectMatches {
+  files: StructuralFileMatches[];
+  total: number;
+  scanned: number;
+}
+
+/** Параметры замены по структуре по проекту. */
+export interface StructuralProjectOptions {
+  pattern: string;
+  replacement: string;
+  /** Маска пути: правим только подходящие файлы (`**` — любая глубина). */
+  glob?: string;
+}
+
+/**
+ * Расширения, в которых `#` — НЕ начало комментария: в CSS это цвет, в markdown —
+ * заголовок, в JSON и YAML — просто знак. Читать такие файлы с `hashComments` значило бы
+ * выбросить из структуры кусок строки и найти или заменить не то.
+ */
+const NO_HASH_COMMENTS = new Set([
+  'css',
+  'scss',
+  'less',
+  'json',
+  'jsonc',
+  'md',
+  'markdown',
+  'yaml',
+  'yml',
+  'svg',
+  'html',
+  'htm',
+  'xml',
+  'txt',
+  'log',
+]);
+
+/** Считать ли `#` комментарием в файле — по его расширению. */
+export function hashCommentsForPath(target: string): boolean {
+  const name = target.toLowerCase();
+  const dot = name.lastIndexOf('.');
+  const ext = dot < 0 ? '' : name.slice(dot + 1);
+  return !NO_HASH_COMMENTS.has(ext);
+}

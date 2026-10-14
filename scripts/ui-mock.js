@@ -342,6 +342,120 @@ module.exports = [
   };
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, FAST ? Math.min(ms, 4) : ms));
 
+  /**
+   * Приблизительная замена структурного поиска: образец переводим в регулярку —
+   * `$имя` это один кусок, `$имя...` — последовательность, пробелы ничего не значат.
+   * Это мок для взгляда на интерфейс, а не повторение настоящего разбора
+   * (`src/shared/structural-search.ts`): точность здесь не нужна.
+   */
+  const structuralRegex = (pattern) => {
+    const names = [];
+    let source = '';
+    let i = 0;
+    while (i < pattern.length) {
+      const ch = pattern[i];
+      if (ch === '$' && pattern[i + 1] === '$') {
+        source += '\\$';
+        i += 2;
+        continue;
+      }
+      if (ch === '$') {
+        let j = i + 1;
+        while (j < pattern.length && /[A-Za-z0-9_]/.test(pattern[j])) j += 1;
+        const name = pattern.slice(i + 1, j);
+        if (!name) {
+          source += '\\$';
+          i += 1;
+          continue;
+        }
+        const seq = pattern.startsWith('...', j);
+        source += seq ? '([\\s\\S]*?)' : '([\\w.]+)';
+        names.push(name);
+        i = seq ? j + 3 : j;
+        continue;
+      }
+      if (/\s/.test(ch)) {
+        source += '\\s*';
+        while (i < pattern.length && /\s/.test(pattern[i])) i += 1;
+        continue;
+      }
+      source += /[.*+?^${}()|[\]\\]/.test(ch) ? `\\${ch}` : ch;
+      i += 1;
+    }
+    return { source, names };
+  };
+
+  const structuralMatches = (text, pattern) => {
+    const { source, names } = structuralRegex(pattern);
+    if (!source) return [];
+    let regex;
+    try {
+      regex = new RegExp(source, 'g');
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const match of text.matchAll(regex)) {
+      const captures = {};
+      names.forEach((name, index) => {
+        captures[name] = match[index + 1] ?? '';
+      });
+      const start = match.index ?? 0;
+      out.push({ start, end: start + match[0].length, text: match[0], captures });
+    }
+    return out;
+  };
+
+  const expandReplacement = (replacement, captures) => {
+    let out = '';
+    let i = 0;
+    while (i < replacement.length) {
+      const ch = replacement[i];
+      if (ch !== '$') {
+        out += ch;
+        i += 1;
+        continue;
+      }
+      if (replacement[i + 1] === '$') {
+        out += '$';
+        i += 2;
+        continue;
+      }
+      let j = i + 1;
+      while (j < replacement.length && /[A-Za-z0-9_]/.test(replacement[j])) j += 1;
+      const name = replacement.slice(i + 1, j);
+      if (name && Object.hasOwn(captures, name)) {
+        out += captures[name];
+        i = j;
+        continue;
+      }
+      out += ch;
+      i += 1;
+    }
+    return out;
+  };
+
+  const replaceStructural = (text, pattern, replacement) => {
+    const { source, names } = structuralRegex(pattern);
+    if (!source) return { text, count: 0 };
+    let regex;
+    try {
+      regex = new RegExp(source, 'g');
+    } catch {
+      return { text, count: 0 };
+    }
+    let count = 0;
+    const next = text.replace(regex, (...args) => {
+      count += 1;
+      const captures = {};
+      names.forEach((name, index) => {
+        captures[name] = args[index + 1] ?? '';
+      });
+      return expandReplacement(replacement, captures);
+    });
+    return { text: next, count };
+  };
+
   /* ── методы ───────────────────────────────────────────────────────────── */
 
   const sessions = new Map();
@@ -532,6 +646,36 @@ module.exports = [
         push('workspace:changed', { root: currentRoot, path: full });
       }
       return { files, replaced };
+    },
+    // Как main: поиск по структуре кода по всему проекту — предпросмотр, без правок.
+    'workspace.structuralSearch': (params) => {
+      const files = [];
+      let total = 0;
+      let scanned = 0;
+      for (const [full, text] of FILES) {
+        if (!full.startsWith(`${ROOT}/`)) continue;
+        scanned += 1;
+        const matches = structuralMatches(text, params.pattern);
+        if (matches.length === 0) continue;
+        total += matches.length;
+        files.push({ path: full, count: matches.length, matches: matches.slice(0, 20) });
+      }
+      return { files, total, scanned };
+    },
+    // Как main: замена по структуре по всему проекту, возвращает изменённые пути.
+    'workspace.structuralReplace': (params) => {
+      const changed = [];
+      let replaced = 0;
+      for (const [full, text] of FILES) {
+        if (!full.startsWith(`${ROOT}/`)) continue;
+        const result = replaceStructural(text, params.pattern, params.replacement);
+        if (result.count === 0) continue;
+        FILES.set(full, result.text);
+        changed.push(full);
+        replaced += result.count;
+        push('workspace:changed', { root: currentRoot, path: full });
+      }
+      return { files: changed, replaced };
     },
     // Как main: относительные (POSIX) пути всех файлов — для быстрого открывателя.
     'workspace.listFiles': () =>
