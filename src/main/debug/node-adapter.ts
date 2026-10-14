@@ -156,6 +156,16 @@ export class NodeAdapter {
   private readonly pendingSources = new Set<string>();
   /** Что просил клиент: набор нужен, чтобы повторить попытку позже. */
   private readonly wantedBreakpoints = new Map<string, SourceBreakpoint[]>();
+  /**
+   * Отпечаток и ответ последней постановки по файлу. Повтор постановки (когда
+   * скрипт загрузился уже после настройки сессии) сверяется с ним: совпал — не
+   * трогаем точки. Иначе снятие и возврат точки открывали бы окно, в которое
+   * короткая программа успевает проскочить место, и точка не сработала бы вовсе.
+   */
+  private readonly placedBreakpoints = new Map<
+    string,
+    { signature: string; result: Array<{ verified: boolean; line: number }> }
+  >();
   /** Постановка точек — по очереди: набор заменяется целиком, а скрипты идут пачкой. */
   private breakpointQueue: Promise<unknown> = Promise.resolve();
 
@@ -525,6 +535,14 @@ export class NodeAdapter {
     const cdp = this.cdp;
     if (!cdp) return wanted.map((item) => ({ verified: false, line: item.line }));
 
+    // Повтор постановки не должен снимать и ставить точки заново, если места и
+    // настройки не изменились: между снятием и возвратом точка не сработает, а
+    // короткая программа за этот промежуток успевает пройти мимо неё. Сверяем
+    // отпечаток — и, если он тот же, отдаём прежний ответ, ничего не трогая.
+    const signature = this.breakpointSignature(file, wanted);
+    const placed = this.placedBreakpoints.get(file);
+    if (placed && placed.signature === signature) return placed.result;
+
     await this.removeBreakpoints(file);
 
     const result: Array<{ verified: boolean; line: number }> = [];
@@ -575,7 +593,25 @@ export class NodeAdapter {
     // отложенных, чтобы добавить перевод, когда карта появится.
     if (this.isKnownFile(file)) this.pendingSources.delete(file);
     else this.pendingSources.add(file);
+    this.placedBreakpoints.set(file, { signature, result });
     return result;
+  }
+
+  /**
+   * Отпечаток постановки: где встанут точки (с учётом загруженных скриптов и карт)
+   * и с какими настройками. По нему видно, изменится ли постановка, — и стоит ли
+   * её повторять.
+   */
+  private breakpointSignature(file: string, wanted: SourceBreakpoint[]): string {
+    return JSON.stringify(
+      wanted.map((item) => ({
+        line: item.line,
+        condition: item.condition ?? '',
+        hitCondition: item.hitCondition ?? '',
+        logMessage: item.logMessage ?? '',
+        targets: this.targetsFor(file, item.line).map((target) => `${target.url}#${target.line}:${target.column}`),
+      })),
+    );
   }
 
   /** Снять точки файла, поставленные нами, и забыть их настройки. */
@@ -777,6 +813,10 @@ export class NodeAdapter {
         continue;
       }
       void this.queueBreakpoints(() => this.applyBreakpoints(file, wanted));
+      // Файл уже знаком: ждать больше нечего, даже если постановка не изменилась.
+      this.pendingSources.delete(file);
+      // Файл уже знаком: ждать больше нечего, даже если постановка не изменилась.
+      this.pendingSources.delete(file);
     }
   }
 
