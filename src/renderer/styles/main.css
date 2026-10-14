@@ -7365,6 +7365,46 @@ body > .overlay {
   min-height: 0;
 }
 
+/* Предпросмотр Markdown: собранная разметка активного файла. Панель — как у
+   «Структуры»: шапка с путём и прокручиваемое тело с разметкой. Сама разметка
+   стилизуется теми же классами `md-*`, что и лента чата. */
+.md-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.md-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.md-preview-title {
+  font-weight: 600;
+}
+
+.md-preview-path {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.md-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 16px;
+}
+
 .outline-toolbar {
   display: flex;
   align-items: center;

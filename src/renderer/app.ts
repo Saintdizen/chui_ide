@@ -95,6 +95,7 @@ import { createExplorer } from './ui/explorer';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
 import { createLspPopover, type LspPopoverView } from './ui/lsp-popover';
+import { createMarkdownPreview } from './ui/markdown-preview';
 import { logoMark } from './ui/logo';
 import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-popover';
 import { createOutline } from './ui/outline';
@@ -1147,6 +1148,21 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
     label: (path) => workspace.relative(path),
     hasWorkspace: () => workspace.root !== null,
+  });
+  // Предпросмотр Markdown: разметка активного файла. Рисует её тот же разборщик,
+  // что ленту чата, — безопасно (без `innerHTML`) и с той же подсветкой кода.
+  const markdownPreview = createMarkdownPreview({
+    openEditors,
+    documents,
+    insertCode: (code) => editors.insertAtCursor(code),
+    relativePath: (path) => workspace.relative(path),
+    isVisible: () => dock.activeId === 'preview',
+  });
+  dock.register({
+    id: 'preview',
+    title: 'Markdown',
+    element: markdownPreview.element,
+    onShow: () => markdownPreview.refresh(),
   });
   dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });
   dock.register({ id: 'tests', title: 'Тесты', element: testPanel.element, onShow: () => void testPanel.refresh() });
@@ -4092,6 +4108,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'view.showOutline', title: 'Структура файла', category: 'Вид' }, () => {
     dock.toggle('outline');
+  });
+
+  define({ id: 'view.showMarkdownPreview', title: 'Предпросмотр Markdown', category: 'Вид' }, () => {
+    dock.toggle('preview');
   });
 
   define({ id: 'view.showProblems', title: 'Проблемы', category: 'Вид', keywords: ['ошибки', 'warning'] }, () => {

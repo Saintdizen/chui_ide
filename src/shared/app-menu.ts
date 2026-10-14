@@ -96,6 +96,7 @@ const VIEW: MenuNode = {
     { separator: true },
     { label: 'Терминал', accelerator: 'Alt+F12', command: 'view.showTerminal' },
     { label: 'Структура файла', command: 'view.showOutline' },
+    { label: 'Предпросмотр Markdown', command: 'view.showMarkdownPreview' },
     { label: 'Задачи (TODO/FIXME)', command: 'view.showTodos' },
     { separator: true },
     { label: 'Палитра команд…', accelerator: 'Ctrl+Shift+P', command: 'palette.open' },
