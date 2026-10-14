@@ -1391,12 +1391,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // сеанс: на каждое окружение это стало бы шумом.
     if (!settings.lsp.enabled) {
       if (!lspHintShown) {
+        // Флаг занимаем ДО await: два вызова накладываются (загрузка и смена проекта),
+        // и если ставить его после ответа, оба успеют показать по уведомлению.
+        lspHintShown = true;
         const available = await rpc.request('lsp.detect').catch(() => []);
         if (available.length > 0) {
-          lspHintShown = true;
           showToast('Языковые серверы установлены, но выключены в настройках', 'info', {
             action: { label: 'Открыть', run: () => settingsModal.open('lsp') },
           });
+        } else {
+          // Серверов нет — уведомления не было; пусть скажем позже, когда появятся.
+          lspHintShown = false;
         }
       }
       return false;
