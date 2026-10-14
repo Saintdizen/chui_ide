@@ -75,6 +75,11 @@ const EDIT: MenuNode = {
     { label: 'Выделить всё', accelerator: 'Ctrl+A', role: 'selectAll' },
     { separator: true },
     { label: 'Поиск по проекту', accelerator: 'Ctrl+Shift+F', command: 'search.project' },
+    { separator: true },
+    // Макросы: редкий жест, но найти их должно быть можно — потому и в меню, без клавиш.
+    { label: 'Макрос: начать или остановить запись', command: 'editor.macroRecord' },
+    { label: 'Макрос: выполнить', command: 'editor.macroPlay' },
+    { label: 'Макрос: выполнить несколько раз…', command: 'editor.macroPlayCount' },
   ],
 };
 
@@ -87,6 +92,7 @@ const VIEW: MenuNode = {
     { separator: true },
     { label: 'Терминал', accelerator: 'Alt+F12', command: 'view.showTerminal' },
     { label: 'Структура файла', command: 'view.showOutline' },
+    { label: 'Задачи (TODO/FIXME)', command: 'view.showTodos' },
     { separator: true },
     { label: 'Палитра команд…', accelerator: 'Ctrl+Shift+P', command: 'palette.open' },
     { separator: true },
