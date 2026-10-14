@@ -311,6 +311,8 @@ export interface SessionState {
   bookmarks?: BookmarkRecord[];
   /** Где стоял курсор в каждом открытом файле (1-based). */
   cursors?: Record<string, CursorPosition>;
+  /** Записанный макрос: шаги записывает и разбирает редактор (`shared/macro.ts`). */
+  macro?: unknown[];
   /**
    * Несохранённые правки: текст буферов, которые человек не успел сохранить
    * («hot exit»). При следующем открытии проекта они возвращаются как есть —

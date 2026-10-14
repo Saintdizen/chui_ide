@@ -34,6 +34,11 @@ export interface StatusState {
    * сервер молчит, и виджета нет (`$/progress`, см. `shared/lsp-progress.ts`).
    */
   progress: { label: string; percentage: number | null } | null;
+  /**
+   * Идёт запись макроса: сколько действий уже записано. `null` — записи нет.
+   * Показываем точкой и числом: забыть про идущую запись легко.
+   */
+  macro: { steps: number } | null;
 }
 
 export interface StatusBarView {
@@ -97,6 +102,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     env: null,
     lsp: null,
     progress: null,
+    macro: null,
     problems: { errors: 0, warnings: 0 },
   };
 
@@ -153,6 +159,14 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h('span', { class: 'status-progress-label' }),
   );
   const progressLabel = progressItem.querySelector<HTMLElement>('.status-progress-label')!;
+  // Идёт запись макроса: точка и число действий. Молчит, когда записи нет.
+  const macroItem = h(
+    'span',
+    { class: 'status-item status-macro', title: 'Идёт запись макроса' },
+    h('span', { class: 'status-macro-dot' }),
+    h('span', { class: 'status-macro-count' }),
+  );
+  const macroCount = macroItem.querySelector<HTMLElement>('.status-macro-count')!;
   const readOnlyItem = h('span', { class: 'status-item status-readonly' });
   const versionItem = h('span', { class: 'status-item status-muted' });
   // Проблемы — значок и числа: цвет различает ошибку и предупреждение, а количество
@@ -181,6 +195,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       'div',
       { class: 'status-group' },
       progressItem,
+      macroItem,
       problemsItem,
       versionItem,
       positionItem,
@@ -221,6 +236,10 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
           ? progress.label
           : `${progress.label} ${Math.round(progress.percentage)}%`;
     progressItem.title = progress ? `Языковой сервер: ${progress.label}` : '';
+    const macro = state.macro;
+    macroItem.hidden = macro === null;
+    macroCount.textContent = macro ? `МАКРО ${macro.steps}` : '';
+    macroItem.title = macro ? `Идёт запись макроса: действий ${macro.steps}` : '';
     readOnlyItem.textContent = state.readOnly ? 'Только чтение' : '';
     readOnlyItem.hidden = !state.readOnly;
     readOnlyItem.title = state.readOnly ? 'Файл слишком большой для правки — открыт только для чтения' : '';

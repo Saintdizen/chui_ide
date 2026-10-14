@@ -14,6 +14,7 @@
 
 import type { CursorPosition, DiagnosticItem, LspDiagnostic } from '../../shared/api';
 import type { TextEdit } from '../../shared/edits';
+import type { MacroStep } from '../editor/input/macro';
 import type { BreakpointInput } from './debug';
 import type { TextDocument } from './document';
 
@@ -46,4 +47,12 @@ export interface EditorApi {
   setBreakpoints(path: string, breakpoints: readonly BreakpointInput[]): void;
   /** Строки закладок файла: их рисует поле значков (список ведёт приложение). */
   setBookmarks(path: string, lines: readonly number[]): void;
+  /** Идёт ли запись макроса — по этому приложение показывает это в строке состояния. */
+  isRecordingMacro(): boolean;
+  /** Записанные шаги макроса: сколько действий повторит «выполнить макрос». */
+  macroSteps(): readonly MacroStep[];
+  startMacro(): void;
+  stopMacro(): readonly MacroStep[];
+  playMacro(steps?: readonly MacroStep[]): number;
+  restoreMacro(steps: readonly MacroStep[]): void;
 }

@@ -5,6 +5,7 @@ import type {
   UnsavedBuffer,
   WorkspaceInfo,
 } from '../../shared/api';
+import { sanitizeMacroSteps } from '../editor/input/macro';
 import { selectUnsavedBuffers } from '../../shared/session';
 import type { BookmarkRecord } from '../../shared/bookmarks';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
@@ -188,6 +189,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     const unsaved = selectUnsavedBuffers(
       documents.dirty().map((document) => ({ path: document.path, text: document.value })),
     );
+    // Записанный макрос — тоже часть рабочего места: его повторяют и после перезапуска.
+    const macro = editors.macroSteps();
     const roots = workspace.roots.map((item) => item.root);
     return {
       // Корни области — только когда папок больше одной: обычный проект дублировать незачем.
@@ -211,6 +214,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       // перезапуска вкладки те же, а курсор в начале файла.
       ...(Object.keys(cursors).length > 0 ? { cursors } : {}),
       ...(unsaved.length > 0 ? { unsaved } : {}),
+      ...(macro.length > 0 ? { macro: [...macro] } : {}),
     };
   };
 
@@ -255,6 +259,9 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     try {
       openEditors.closeAll();
       const state = await rpc.request('session.load', { root: target });
+
+      // Макрос из прошлой сессии: повтор доступен сразу, без новой записи.
+      editors.restoreMacro(sanitizeMacroSteps(state.macro));
 
       // Несохранённые правки возвращаем ДО открытия вкладок: `open` подхватит готовый
       // текст из документа, и на экране сразу будет то, что человек не успел сохранить.

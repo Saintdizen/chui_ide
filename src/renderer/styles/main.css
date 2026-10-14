@@ -3907,6 +3907,37 @@ textarea {
   background: var(--element_background_hover);
 }
 
+/* Идёт запись макроса: пульсирующая точка и число действий. Точка мигает — запись
+   идёт невидимо, и про неё легко забыть (а она собирает всё, что человек нажимает). */
+.status-macro {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--text_color_error);
+  background: var(--element_background_hover);
+}
+
+.status-macro-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text_color_error);
+  animation: macro-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes macro-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.35;
+  }
+}
+
 /* Окружение Python — кнопка: клик открывает попап с подробностями. */
 .status-env {
   padding: 0 4px;

@@ -28,6 +28,7 @@
 import { wordAt } from '../core/graphemes';
 import { blockCommentFor, lineCommentFor } from './comments';
 import { chordCommand, chordName, isChordPrefix, resolveKey, type EditCommand, type Motion } from './keymap';
+import { MacroRecorder, recordsCommand, runMacro, type MacroStep, type MacroTarget } from './macro';
 import type { EditorChange, EditorController } from './editor-controller';
 
 import type { EditorView } from '../view/editor-view';
@@ -96,6 +97,8 @@ export class EditorInputBinding {
   private boxAnchor: number | null = null;
   /** Идёт ли состав IME: пока он идёт, ввод не перехватываем — его завершит `compositionend`. */
   private composing = false;
+  /** Запись макроса: копит действия, пока включена. */
+  private readonly macro = new MacroRecorder();
   private readonly unsubscribe: () => void;
 
   constructor(view: EditorView, controller: EditorController, options: EditorInputOptions = {}) {
@@ -130,6 +133,50 @@ export class EditorInputBinding {
 
     this.unsubscribe = controller.onChange((change) => this.sync(change));
     this.sync({ kind: 'selection', from: controller.selection.active });
+  }
+
+  /** Идёт ли запись макроса (приложение показывает это в строке состояния). */
+  isRecordingMacro(): boolean {
+    return this.macro.isRecording;
+  }
+
+  /** Сколько действий уже записано. */
+  macroLength(): number {
+    return this.macro.length;
+  }
+
+  /** Начать запись макроса: прежний забывается. */
+  startMacro(): void {
+    this.macro.start();
+  }
+
+  /** Закончить запись и отдать записанное. */
+  stopMacro(): readonly MacroStep[] {
+    return this.macro.stop();
+  }
+
+  /** Записанный макрос (его сохраняет приложение, чтобы пережить закрытие окна). */
+  macroSteps(): readonly MacroStep[] {
+    return this.macro.taken();
+  }
+
+  /** Взять макрос из сессии: повтор доступен сразу после перезапуска. */
+  restoreMacro(steps: readonly MacroStep[]): void {
+    this.macro.set(steps);
+  }
+
+  /**
+   * Выполнить макрос. Шаги идут тем же путём, что и нажатия: движение — через
+   * движение, правка — через правку, текст — вставкой. Поэтому повтор ведёт себя
+   * ровно так же, как если бы человек нажал те же клавиши.
+   */
+  playMacro(steps: readonly MacroStep[] = this.macro.taken()): number {
+    const target: MacroTarget = {
+      move: (motion, extend) => this.runMotion(motion, extend),
+      edit: (command) => this.runEdit(command),
+      insert: (text) => this.controller.type(text),
+    };
+    return runMacro(steps, target);
   }
 
   /** Поставить фокус в редактор — ввод идёт в скрытое поле. */
@@ -225,6 +272,7 @@ export class EditorInputBinding {
     }
     if (action.kind === 'move') {
       event.preventDefault();
+      this.macro.push({ kind: 'move', motion: action.motion, extend: action.extend });
       this.runMotion(action.motion, action.extend);
       return;
     }
@@ -232,6 +280,7 @@ export class EditorInputBinding {
     if (CLIPBOARD_COMMANDS.has(action.edit)) return;
 
     event.preventDefault();
+    if (recordsCommand(action.edit)) this.macro.push({ kind: 'edit', command: action.edit });
     this.runEdit(action.edit);
   };
 
@@ -242,13 +291,17 @@ export class EditorInputBinding {
     if (inputType === 'insertText' || inputType === 'insertReplacementText') {
       event.preventDefault();
       // Набор с клавиши: за скобкой допишется пара, а закрывающая перешагнёт свою.
-      if (data) this.controller.typeWithPairs(data);
+      if (data) {
+        this.macro.push({ kind: 'insert', text: data });
+        this.controller.typeWithPairs(data);
+      }
       return;
     }
     if (inputType === 'insertFromPaste') {
       // Если пришли готовые данные — вставляем сразу; иначе сработает событие `paste`.
       if (data) {
         event.preventDefault();
+        this.macro.push({ kind: 'insert', text: data });
         this.controller.paste(data);
       }
       return;
@@ -267,7 +320,10 @@ export class EditorInputBinding {
     // За время состава браузер написал текст в поле — берем итог и очищаем поле.
     const text = event.data ?? this.input.value;
     this.input.value = '';
-    if (text) this.controller.type(text);
+    if (text) {
+      this.macro.push({ kind: 'insert', text });
+      this.controller.type(text);
+    }
   };
 
   private readonly onCopy = (event: ClipboardEvent): void => {

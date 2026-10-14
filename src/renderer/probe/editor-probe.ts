@@ -89,6 +89,10 @@ const scrollBuffer = new TextBuffer(
   Array.from({ length: 2000 }, (_, index) => `const line${index} = ${index};`).join('\n'),
 );
 const scrollView = new EditorView(scrollRoot, scrollBuffer, { language: 'typescript', scheme: 'dark' });
+// Ввод на этом же полотне: макросы проверяются живыми клавишами, а текст тут
+// предсказуемый (2000 одинаковых строк) — видно, что макрос повторил то же действие.
+const scrollController = new EditorController(scrollBuffer);
+const scrollInput = new EditorInputBinding(scrollView, scrollController, {});
 
 const buffer = new TextBuffer(sampleDocument());
 // Язык и схема заданы — значит, строки собираются из токенов с цветами темы.
@@ -152,7 +156,12 @@ input.focus();
 
 declare global {
   interface Window {
-    probeScroll: { view: EditorView; buffer: TextBuffer };
+    probeScroll: {
+      view: EditorView;
+      buffer: TextBuffer;
+      controller: EditorController;
+      input: EditorInputBinding;
+    };
     probe: {
       view: EditorView;
       buffer: TextBuffer;
@@ -183,7 +192,7 @@ view.onGlyphClick = (line) => decorationClicks.glyph.push(line);
 view.onGlyphContextMenu = (line) => decorationClicks.glyphMenu.push(line);
 view.onStripClick = (line) => decorationClicks.strip.push(line);
 
-window.probeScroll = { view: scrollView, buffer: scrollBuffer };
+window.probeScroll = { view: scrollView, buffer: scrollBuffer, controller: scrollController, input: scrollInput };
 
 window.probe = {
   view,

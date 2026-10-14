@@ -56,6 +56,7 @@ import type { SurroundOption } from '../input/surround';
 import type { CompletionTriggers } from './lsp-features';
 import { EditorView, type DebugInlineValue } from '../view/editor-view';
 import type { CursorStyle } from '../../../shared/cursor-style';
+import type { MacroStep } from '../input/macro';
 import { normalizeWhitespaceMode, type WhitespaceMode } from '../view/whitespace';
 import { caret, isEmpty, type Selection } from '../view/selection';
 import { FileDecorations, type LensDecoration, type LinkDecoration } from '../view/decorations';
@@ -877,6 +878,36 @@ export class EditorHost {
     const caret = Math.min(this.controller.caret, buffer.length);
     this.controller.setSelection({ anchor: caret, active: caret }, false);
     this.view.setSelection(this.controller.selection);
+  }
+
+  /** Запись макроса идёт? Об этом приложению говорит ввод — он её и ведёт. */
+  isRecordingMacro(): boolean {
+    return this.input.isRecordingMacro();
+  }
+
+  /** Записанные шаги макроса: столько действий повторит «выполнить макрос». */
+  macroSteps(): readonly MacroStep[] {
+    return this.input.macroSteps();
+  }
+
+  /** Начать запись макроса. */
+  startMacro(): void {
+    this.input.startMacro();
+  }
+
+  /** Закончить запись и отдать записанное. */
+  stopMacro(): readonly MacroStep[] {
+    return this.input.stopMacro();
+  }
+
+  /** Выполнить макрос (без аргумента — записанный). Возврат — сколько шагов выполнено. */
+  playMacro(steps?: readonly MacroStep[]): number {
+    return this.input.playMacro(steps);
+  }
+
+  /** Взять макрос из сессии проекта: повтор доступен сразу после перезапуска. */
+  restoreMacro(steps: readonly MacroStep[]): void {
+    this.input.restoreMacro(steps);
   }
 
   /** Настройки редактора, влияющие на вид: отступ (Tab), кегль, высота строки и каретка. */

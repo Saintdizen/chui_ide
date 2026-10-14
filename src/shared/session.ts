@@ -7,6 +7,7 @@ import type {
   UnsavedBuffer,
 } from './api';
 import { sanitizeBookmarks } from './bookmarks';
+import { rawMacroSteps } from './macro';
 
 /**
  * Проверка и границы сессии — в `shared`, а не в main: это чистая логика без
@@ -102,6 +103,9 @@ export function sanitizeSession(raw: unknown): SessionState {
   // Несохранённые правки («hot exit»): их возвращает редактор при следующем открытии.
   const unsaved = unsavedBuffers(value.unsaved);
   if (unsaved.length > 0) state.unsaved = unsaved;
+  // Записанный макрос: форму шагов проверяет редактор, здесь — границы списка.
+  const macro = rawMacroSteps(value.macro);
+  if (macro.length > 0) state.macro = macro;
 
   return state;
 }

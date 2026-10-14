@@ -4278,6 +4278,64 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
+  /**
+   * Макросы: запись действий и повтор. Макрос копит не клавиши, а действия (движение,
+   * правку, вставленный текст), поэтому повтор не зависит от раскладки и от того, где
+   * стоит курсор. Запись идёт вводом активной панели — ключей у команд нет: это редкий
+   * жест, и вешать его на клавишу, которую кто-то уже занял, значит мешать чаще, чем
+   * помогать. Вызываются из палитры команд.
+   */
+  define({ id: 'editor.macroRecord', title: 'Макрос: начать или остановить запись', category: 'Редактор' }, () => {
+    if (!editors.currentPath && !editors.isRecordingMacro()) {
+      showToast('Нет открытого файла');
+      return;
+    }
+    if (editors.isRecordingMacro()) {
+      const steps = editors.stopMacro();
+      showToast(steps.length > 0 ? `Макрос записан: действий ${steps.length}` : 'Макрос пуст: ни одного действия');
+      refreshStatus();
+      return;
+    }
+    editors.startMacro();
+    showToast('Запись макроса началась: остановить — той же командой');
+    refreshStatus();
+  });
+
+  const playMacro = (times: number): void => {
+    const steps = editors.macroSteps();
+    if (steps.length === 0) {
+      showToast('Макрос не записан');
+      return;
+    }
+    if (!editors.currentPath) {
+      showToast('Откройте файл: макрос выполняется в редакторе');
+      return;
+    }
+    let done = 0;
+    for (let i = 0; i < times; i += 1) done += editors.playMacro(steps);
+    showToast(times > 1 ? `Макрос выполнен ${times} раз (шагов: ${done})` : `Макрос выполнен: шагов ${done}`);
+  };
+
+  define({ id: 'editor.macroPlay', title: 'Макрос: выполнить', category: 'Редактор' }, () => playMacro(1));
+
+  define(
+    { id: 'editor.macroPlayCount', title: 'Макрос: выполнить несколько раз…', category: 'Редактор' },
+    async () => {
+      const answer = await promptValue({
+        title: 'Сколько раз выполнить макрос?',
+        label: 'Число повторов',
+        value: '5',
+      });
+      if (answer === null) return;
+      const times = Number(answer.trim());
+      if (!Number.isInteger(times) || times < 1 || times > 1000) {
+        showToast('Число повторов — целое от 1 до 1000', 'error');
+        return;
+      }
+      playMacro(times);
+    },
+  );
+
   // Орфография: добавить слово под курсором в словарь или пропустить его на сеанс.
   define(
     {
@@ -4450,6 +4508,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       changes: git.changeCount,
       projectKindId: projectScan && projectScan.kind.source !== 'none' ? projectScan.kind.id : null,
       problems: editors.problemCounts(),
+      // Идёт запись макроса — точка и число действий: забыть про запись легко.
+      macro: editors.isRecordingMacro() ? { steps: editors.macroSteps().length } : null,
       // Виджет окружения говорит на языке проекта: у Node — версия и менеджер,
       // у Python — интерпретатор. Раньше в Node-проекте тут висел Python.
       env: envWidgetLabel(projectScan?.kind.id ?? null, projectTools, settings.run.pythonPath),

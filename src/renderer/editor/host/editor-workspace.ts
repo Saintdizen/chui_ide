@@ -60,6 +60,7 @@ import {
   type TestMarkerHit,
 } from './editor-host';
 import type { CursorStyle } from '../../../shared/cursor-style';
+import type { MacroStep } from '../input/macro';
 import type { WhitespaceMode } from '../view/whitespace';
 
 /** Значение выражения для подсказки отладчика: что показать и какого типа. */
@@ -785,6 +786,39 @@ export class EditorWorkspace {
   /** Пропустить слово под курсором на этот сеанс. `false` — под курсором не ошибка. */
   ignoreSpellingWord(): boolean {
     return this.pane.ignoreSpellingWord();
+  }
+
+  /* ── макросы ──────────────────────────────────────────────────────────
+   * Макрос ведёт ВВОД конкретной панели: запись идёт с той, где стоит фокус, поэтому
+   * всё идёт в активную панель, а не во все разом (иначе действие записалось бы
+   * столько раз, сколько панелей).
+   */
+
+  /** Идёт ли запись макроса в активной панели. */
+  isRecordingMacro(): boolean {
+    return this.pane.isRecordingMacro();
+  }
+
+  /** Записанные шаги макроса активной панели. */
+  macroSteps(): readonly MacroStep[] {
+    return this.pane.macroSteps();
+  }
+
+  startMacro(): void {
+    this.pane.startMacro();
+  }
+
+  stopMacro(): readonly MacroStep[] {
+    return this.pane.stopMacro();
+  }
+
+  playMacro(steps?: readonly MacroStep[]): number {
+    return this.pane.playMacro(steps);
+  }
+
+  /** Раздать макрос всем панелям: повтор доступен в любой из них. */
+  restoreMacro(steps: readonly MacroStep[]): void {
+    for (const pane of this.panes) pane.restoreMacro(steps);
   }
 
   /** Настройки вида: ширина отступа, кегль и направляющие. Панели равны — применяем ко всем. */

@@ -3117,6 +3117,69 @@ async function caretMotionCheck(win) {
   })()`);
 }
 
+
+/**
+ * Макросы: запись действий и повтор тем же путём.
+ *
+ * Пишем настоящими клавишами в длинный документ: видно, что записались ДЕЙСТВИЯ
+ * (движение, текст), что после остановки записи они не копятся, и что повтор на
+ * другой строке делает с ней то же самое — макрос не привязан к месту записи.
+ */
+async function macroCheck(win) {
+  const send = (event) => win.webContents.sendInputEvent(event);
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  await script('(() => { window.probeScroll.input.focus(); return true; })()');
+  win.focus();
+  await wait(200);
+
+  // Запись: встаём в начало первой строки, печатаем «XY», идём вниз и стираем символ.
+  await script(`(() => {
+    const { controller } = window.probeScroll;
+    controller.setSelection({ anchor: 0, active: 0 });
+    window.probeScroll.input.startMacro();
+    return true;
+  })()`);
+  await wait(150);
+  for (const char of ['X', 'Y']) {
+    send({ type: 'char', keyCode: char });
+    await wait(40);
+  }
+  for (const keyCode of ['Down', 'Backspace']) {
+    send({ type: 'keyDown', keyCode });
+    send({ type: 'keyUp', keyCode });
+    await wait(60);
+  }
+  const recorded = await script(`(() => {
+    const { input, buffer, controller } = window.probeScroll;
+    const steps = input.stopMacro();
+    return {
+      действий: steps.length,
+      виды: steps.map((step) => step.kind),
+      запись_идёт: input.isRecordingMacro(),
+      первая_строка: buffer.lineText(1).slice(0, 12),
+      каретка_после_записи: controller.caret,
+    };
+  })()`);
+
+  // Повтор на третьей строке: то же действие сдвигает и её текст.
+  const replayed = await script(`(() => {
+    const { input, buffer, controller } = window.probeScroll;
+    const start = buffer.lineStart(3);
+    controller.setSelection({ anchor: start, active: start });
+    const before = buffer.lineText(3);
+    const applied = input.playMacro();
+    return {
+      шагов_выполнено: applied,
+      было: before.slice(0, 12),
+      стало: buffer.lineText(3).slice(0, 12),
+      изменилась: buffer.lineText(3) !== before,
+    };
+  })()`);
+
+  return { запись: recorded, повтор: replayed };
+}
+
 async function main() {
   const lines = [];
   const log = (text) => {
@@ -3394,6 +3457,11 @@ async function main() {
   const ctrlClick = await ctrlClickCheck(win);
   log('## Ctrl+Click по слову');
   log(JSON.stringify(ctrlClick, null, 2));
+  log('');
+
+  const macro = await macroCheck(win);
+  log('## Макросы: запись и повтор');
+  log(JSON.stringify(macro, null, 2));
   log('');
 
   const smooth = await smoothScrollCheck(win);
