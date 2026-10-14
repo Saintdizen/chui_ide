@@ -37,14 +37,16 @@ export function dictionaryCandidates(platform: string, env: NodeJS.ProcessEnv): 
   // Windows своих словарей в известном месте не держит: остаётся явный путь.
   if (platform === 'win32') return candidates;
 
+  // Пути всегда Unix-стиля, поэтому склеиваем posix-джойнером: на Windows-раннере
+  // (там тоже вызывают с platform='linux') обычный path.join дал бы обратные слэши.
   for (const share of ['/usr/share', '/usr/local/share']) {
-    candidates.push(path.join(share, 'dict', 'words'));
-    candidates.push(path.join(share, 'dict', 'american-english'));
-    candidates.push(path.join(share, 'dict', 'british-english'));
-    candidates.push(path.join(share, 'hunspell', 'en_US.dic'));
-    candidates.push(path.join(share, 'hunspell', 'en_GB.dic'));
-    candidates.push(path.join(share, 'myspell', 'dicts', 'en_US.dic'));
-    candidates.push(path.join(share, 'myspell', 'en_US.dic'));
+    candidates.push(path.posix.join(share, 'dict', 'words'));
+    candidates.push(path.posix.join(share, 'dict', 'american-english'));
+    candidates.push(path.posix.join(share, 'dict', 'british-english'));
+    candidates.push(path.posix.join(share, 'hunspell', 'en_US.dic'));
+    candidates.push(path.posix.join(share, 'hunspell', 'en_GB.dic'));
+    candidates.push(path.posix.join(share, 'myspell', 'dicts', 'en_US.dic'));
+    candidates.push(path.posix.join(share, 'myspell', 'en_US.dic'));
   }
   return candidates;
 }
