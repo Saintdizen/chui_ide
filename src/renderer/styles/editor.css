@@ -411,6 +411,9 @@
   left: 0;
   width: 2px;
   animation: own-editor-caret-blink 1s step-end infinite;
+  /* Движение каретки видно: узел не пересоздаётся, а переезжает (см. `caretNodes`
+     в `editor-view.ts`). Переход короткий — он читается, но не тормозит набор. */
+  transition: transform 70ms linear;
   will-change: transform;
 }
 
@@ -465,6 +468,7 @@
 @media (prefers-reduced-motion: reduce) {
   .own-editor-caret {
     animation: none;
+    transition: none;
   }
 }
 

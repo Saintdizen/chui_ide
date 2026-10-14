@@ -138,6 +138,12 @@ export class EditorView {
   private scrollTop = 0;
   /** Плавная прокрутка включена настройкой (и не отменена системой). */
   private smooth = false;
+  /**
+   * Узлы кареток: их переиспользуем, а не пересоздаём. Новый узел появляется сразу
+   * на месте (переходу нечего анимировать), а тот же самый — переезжает: движение
+   * каретки читается глазом (см. `.own-editor-caret` в оформлении).
+   */
+  private caretNodes: HTMLElement[] = [];
   /** Идущая анимация прокрутки (`null` — не идёт). */
   private scrollAnimation: { from: number; to: number; startedAt: number; frame: number; last: number } | null = null;
   private disposed = false;
@@ -1856,10 +1862,11 @@ export class EditorView {
     const lineHeight = this.metrics.lineHeight;
 
     const primary = this.primarySelection;
-    const carets = document.createDocumentFragment();
+    // Лишние узлы прошлого кадра убираем: каретки стало меньше (сняли мультикурсор).
+    while (this.caretNodes.length > this.selections.length) this.caretNodes.pop()?.remove();
     const shades = document.createDocumentFragment();
 
-    for (const selection of this.selections) {
+    for (const [index, selection] of this.selections.entries()) {
       const line = this.buffer.lineAt(selection.active);
       const column = selection.active - this.buffer.lineStart(line);
       const offsets = this.offsetsFor(line);
@@ -1868,16 +1875,25 @@ export class EditorView {
       const origin = offsets[segments[segment]?.startColumn ?? 0] ?? 0;
       const x = (offsets[column] ?? origin) - origin;
 
-      const node = document.createElement('div');
-      node.className = `${ROOT_CLASS}-caret`;
+      // Узел берём прежний, если он есть: только тогда CSS-переход двигает каретку, а
+      // не появляется она на новом месте молча.
+      let node = this.caretNodes[index];
+      const fresh = node === undefined;
+      if (!node) {
+        node = document.createElement('div');
+        node.className = `${ROOT_CLASS}-caret`;
+        this.caretNodes[index] = node;
+      }
       // У неглавной каретки не мигаем: при десятке кареток мигание рябит, а главную
       // и так видно по миганию.
-      if (selection !== primary) node.classList.add('is-idle');
-      node.style.transform = `translate(${x}px, ${this.yOfRow(this.rowOf(line) + segment)}px)`;
+      node.classList.toggle('is-idle', selection !== primary);
       node.style.height = `${lineHeight}px`;
       // При непустом выделении каретка не нужна — его конец и так виден заливкой.
-      if (!isEmpty(selection)) node.style.display = 'none';
-      carets.append(node);
+      node.style.display = isEmpty(selection) ? '' : 'none';
+      node.style.transform = `translate(${x}px, ${this.yOfRow(this.rowOf(line) + segment)}px)`;
+      // Ставим узел в слой ТОЛЬКО после стилей: иначе первый кадр он провёл бы в углу
+      // полотна и «приехал» оттуда.
+      if (fresh) this.caretLayer.append(node);
 
       for (const rect of this.rangeRects(selectionStart(selection), selectionEnd(selection))) {
         const shade = document.createElement('div');
@@ -1888,7 +1904,6 @@ export class EditorView {
         shades.append(shade);
       }
     }
-    this.caretLayer.replaceChildren(carets);
     this.selectionLayer.replaceChildren(shades);
   }
 

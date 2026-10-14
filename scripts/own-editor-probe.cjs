@@ -3080,6 +3080,43 @@ async function smoothScrollCheck(win) {
   })()`);
 }
 
+
+/**
+ * Анимация каретки: узел не пересоздаётся, а переезжает.
+ *
+ * Проверяем механику, от которой зависит движение: тот же самый узел остался на месте
+ * после сдвига курсора (новый узел появился бы сразу в новом месте — переходу нечего
+ * было бы анимировать), и у него есть CSS-переход по `transform`.
+ */
+async function caretMotionCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  return script(`(async () => {
+    const { view, controller, input } = window.probe;
+    const root = view.element;
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    input.focus();
+
+    controller.moveDocStart();
+    await frame();
+    const node = root.querySelector('.own-editor-caret');
+    if (!node) return 'каретки нет';
+    const before = node.style.transform;
+    controller.moveRight();
+    controller.moveRight();
+    controller.moveRight();
+    await frame();
+    const after = root.querySelector('.own-editor-caret');
+    const style = after ? getComputedStyle(after) : null;
+    return {
+      'тот_же_узел': after === node,
+      'кареток_в_виде': root.querySelectorAll('.own-editor-caret').length,
+      'переехала': after ? after.style.transform !== before : false,
+      'переход': style ? style.transitionProperty : null,
+      'длительность': style ? style.transitionDuration : null,
+    };
+  })()`);
+}
+
 async function main() {
   const lines = [];
   const log = (text) => {
@@ -3362,6 +3399,11 @@ async function main() {
   const smooth = await smoothScrollCheck(win);
   log('## Плавная прокрутка');
   log(JSON.stringify(smooth, null, 2));
+  log('');
+
+  const caretMotion = await caretMotionCheck(win);
+  log('## Анимация каретки: узел переезжает');
+  log(JSON.stringify(caretMotion, null, 2));
   log('');
 
   const caret = await caretCheck(win);
