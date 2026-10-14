@@ -1292,11 +1292,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         { class: 'field-hint' },
         'Файлы собираются под полками «Тесты», «Стили», «Документация» и другими; папки остаются сверху.',
       ),
-      switchRow('Группировать файлы по назначению', explorer.groupByType, (value) => apply({ groupByType: value })),
+      switchRow('Пакеты монорепо отдельными строками', explorer.groupByPackage, (value) =>
+        apply({ groupByPackage: value }),
+      ),
       h(
         'div',
         { class: 'field-hint' },
-        'Файлы собираются под полками «Тесты», «Стили», «Документация» и другими; папки остаются сверху.',
+        'В монорепо видно пакеты верхнего уровня; промежуточный каталог `packages` скрыт.',
       ),
       field(
         'Сортировка',

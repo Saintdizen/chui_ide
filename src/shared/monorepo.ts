@@ -190,3 +190,35 @@ export function packagesLabel(packages: readonly ProjectPackage[]): string {
     mod100 >= 11 && mod100 <= 14 ? 'пакетов' : mod10 === 1 ? 'пакет' : mod10 >= 2 && mod10 <= 4 ? 'пакета' : 'пакетов';
   return `${count} ${word}`;
 }
+
+/**
+ * Пакеты, которые видны в дереве на верхнем уровне: те, что не лежат внутри другого
+ * пакета. Вложенные показывать отдельно незачем — они и так видны при раскрытии
+ * родителя, а отдельная строка на каждый дублировала бы дерево.
+ */
+export function topLevelPackages(packages: readonly ProjectPackage[]): ProjectPackage[] {
+  const real = packages.filter((item) => item.path !== '');
+  return real
+    .filter((item) => !real.some((other) => other.path !== item.path && isInside(other.path, item.path)))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/**
+ * Промежуточные каталоги, в которых лежат пакеты (`packages` для `packages/api`).
+ * Их строки в дереве лишние: пакеты и так видны под своими именами — а сам каталог
+ * «packages» — это просто место на диске, а не проект.
+ */
+export function packageAncestorDirs(packages: readonly ProjectPackage[]): string[] {
+  const dirs = new Set<string>();
+  for (const item of packages) {
+    if (item.path === '') continue;
+    const segments = item.path.split('/');
+    segments.pop();
+    let acc = '';
+    for (const segment of segments) {
+      acc = acc === '' ? segment : `${acc}/${segment}`;
+      dirs.add(acc);
+    }
+  }
+  return [...dirs];
+}

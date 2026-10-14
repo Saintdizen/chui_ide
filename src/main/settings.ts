@@ -241,6 +241,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Группировка по назначению выключена: она сильно меняет вид дерева,
     // и включать её стоит осознанно (как и вложение).
     groupByType: false,
+    // Пакеты монорепо выключены: в обычном проекте группировать нечего, а в монорепо
+    // это осознанный выбор (как и прочие режимы вида дерева).
+    groupByPackage: false,
   },
   run: {
     // Пусто: сначала ищем окружение проекта, потом `python3` из PATH.
@@ -783,6 +786,8 @@ function loadSettings(filePath: string): StoredSettings {
       updateImportsOnRename: parsed.explorer?.updateImportsOnRename !== false,
       // Группировка по назначению: включаем, только если попросили явно.
       groupByType: parsed.explorer?.groupByType === true,
+      // Пакеты монорепо: тоже только по явной просьбе.
+      groupByPackage: parsed.explorer?.groupByPackage === true,
       // Свежесть: включаем, если не выключили явно; окно — разумное число часов.
       recentChanges: parsed.explorer?.recentChanges !== false,
       recentWindowHours: clampRecentHours(parsed.explorer?.recentWindowHours),

@@ -1386,6 +1386,22 @@ textarea {
   font-variant-numeric: tabular-nums;
 }
 
+/* Строка пакета монорепо: имя проекта и путь от корня. Промежуточные каталоги
+   (`packages`) скрыты, поэтому место на диске видно подписью справа. */
+.tree-package-path {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_micro_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tree-row.is-package .tree-name {
+  font-weight: 600;
+}
+
 /* ── значки файлов и папок ──────────────────────────────────────────────
    Значок — часть строки, а не украшение поверх неё: он держит свою ширину,
    не сжимается в узкой панели и не перекрашивается вместе с текстом строки.

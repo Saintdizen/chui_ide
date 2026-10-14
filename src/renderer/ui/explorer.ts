@@ -12,6 +12,8 @@ import { entryIsDirectory, entryIsFile, entryIsSymlink, symlinkLabel } from '../
 import { pairFromSelection } from '../core/file-compare';
 import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
 import { groupByKind } from '../core/tree-group';
+import { packageAncestorDirs, topLevelPackages } from '../../shared/monorepo';
+import type { ProjectPackagesModel } from '../core/project-packages';
 import {
   FILE_LABEL_IDS,
   fileLabelName,
@@ -107,6 +109,7 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   nestingRules: [],
   updateImportsOnRename: true,
   groupByType: false,
+  groupByPackage: false,
 };
 
 import { isRecentlyModified, recentLabel } from '../core/tree-recent';
@@ -135,6 +138,8 @@ export interface ExplorerDeps {
   onPinsChange?: () => void;
   /** Метка файла изменилась — рабочее место стоит сохранить (см. сессию). */
   onLabelsChange?: () => void;
+  /** Пакеты проекта: по ним дерево в монорепо показывает проекты строками. */
+  packages?: ProjectPackagesModel;
   /**
    * Просмотр файлов без открытия (peek): пути и точка, у которой показать копию.
    * Не задано — пункта «Просмотр» в меню и клавиши «пробел» нет.
@@ -873,6 +878,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   type FlatRow =
     | { kind: 'entry'; entry: DirEntry; depth: number; dir: string; nested: boolean; deleted: boolean }
     | { kind: 'group'; label: string; count: number; depth: number }
+    | { kind: 'package'; name: string; dir: string; relative: string; depth: number }
     | { kind: 'root'; root: WorkspaceRoot; active: boolean; collapsed: boolean }
     | { kind: 'create'; parent: string; depth: number }
     | { kind: 'loading'; dir: string };
@@ -896,7 +902,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const buildFlat = (info: WorkspaceInfo): FlatRow[] => {
     const rows: FlatRow[] = [];
 
-    const pushDir = (dir: string, depth: number): void => {
+    const pushDir = (dir: string, depth: number, skip?: ReadonlySet<string>): void => {
       const entries = children.get(dir);
       if (!entries) {
         // Читаем папку и перерисуем, когда ответ придёт; пока показываем сообщение.
@@ -943,7 +949,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         if (section.label && shown.length > 0) {
           rows.push({ kind: 'group', label: section.label, count: shown.length, depth });
         }
-        for (const entry of shown) pushEntry(entry);
+        for (const entry of shown) {
+          // Каталог, который заменяет строка пакета (сам пакет или звено к нему), не рисуем.
+          if (skip && entryIsDirectory(entry) && skip.has(entry.path)) continue;
+          pushEntry(entry);
+        }
       }
 
       // Удалённые, но не закоммиченные файлы: на диске их нет, поэтому в списке
@@ -960,7 +970,22 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       }
     };
 
+    // Монорепо: пакеты идут строками верхнего уровня, а промежуточные каталоги
+    // (`packages`) скрыты — пакет это проект, а каталог лишь место на диске.
+    const monorepo = options.groupByPackage && info.roots.length <= 1 && deps.packages?.isMonorepo === true;
     if (info.roots.length <= 1) {
+      if (monorepo) {
+        const packages = topLevelPackages(deps.packages?.all ?? []);
+        const skip = new Set([...packageAncestorDirs(deps.packages?.all ?? []), ...packages.map((item) => item.path)]);
+        const absolute = new Set([...skip].map((relative) => joinPath(info.root, relative)));
+        for (const item of packages) {
+          const dir = joinPath(info.root, item.path);
+          rows.push({ kind: 'package', name: item.name, dir, relative: item.path, depth: 0 });
+          if (expanded.has(dir)) pushDir(dir, 1);
+        }
+        pushDir(info.root, 0, absolute);
+        return rows;
+      }
       pushDir(info.root, 0);
       return rows;
     }
@@ -977,6 +1002,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const buildRow = (row: FlatRow): HTMLElement | null => {
     if (row.kind === 'root') return rootRow(row.root, row.active, row.collapsed);
     if (row.kind === 'group') return groupRow(row.label, row.count, row.depth);
+    if (row.kind === 'package') return packageRow(row.name, row.dir, row.relative);
     if (row.kind === 'loading') {
       return h('div', { class: 'tree-loading' }, failed.has(row.dir) ? 'Не удалось прочитать папку' : 'Читаю папку…');
     }
@@ -1034,6 +1060,18 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const scrolled = Math.max(0, scroller.scrollTop - host.offsetTop);
     const window = computeWindow(total, scrolled, viewport, stride);
     paintRange(window.first, window.last, stride);
+  };
+
+  /** Раскрыть или свернуть каталог строкой пакета (как обычной папкой дерева). */
+  const toggleDir = (dir: string): void => {
+    if (expanded.has(dir)) {
+      expanded.delete(dir);
+      render();
+      return;
+    }
+    expanded.add(dir);
+    if (!children.has(dir)) void load(dir).then(render);
+    render();
   };
 
   const onClick = async (entry: DirEntry, preview = false): Promise<void> => {
@@ -1115,6 +1153,34 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       h('span', { class: 'tree-group-count' }, String(count)),
     );
     row.setAttribute('aria-hidden', 'true');
+    return row;
+  };
+
+  /**
+   * Строка пакета монорепо: имя проекта, путь от корня и раскрытие. Место на диске
+   * показано подписью — из строки не видно, где пакет лежит (промежуточный каталог скрыт).
+   */
+  const packageRow = (name: string, dir: string, relative: string): HTMLElement => {
+    const isOpen = expanded.has(dir);
+    const row = h(
+      'button',
+      {
+        class: `tree-row is-package${isOpen ? ' is-open' : ''}`,
+        type: 'button',
+        title: `${relative} — пакет проекта`,
+        dataset: { path: dir },
+      },
+      h('span', { class: `tree-twisty${isOpen ? ' is-open' : ''}` }, svgIcon('chevron', 12)),
+      options.icons ? folderIcon(name, isOpen) : svgIcon('folder', 15),
+      h('span', { class: 'tree-name' }, name),
+      h('span', { class: 'tree-package-path' }, relative),
+    );
+    row.addEventListener('click', () => toggleDir(dir));
+    row.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showContextMenu([{ label: 'Показать в дереве', onSelect: () => reveal(dir) }], event.clientX, event.clientY);
+    });
     return row;
   };
 
@@ -1409,6 +1475,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   });
 
   deps.openEditors.onDidChange(render);
+  // Список пакетов перечитали (появился манифест) — строки пакетов могли измениться.
+  deps.packages?.onDidChange(render);
   // Пометки git меняются и без правок в дереве — например после коммита.
   // Сохранение меняет и набор несохранённых, поэтому подпись обновляем тихо.
   deps.git.onDidChange(() => {
