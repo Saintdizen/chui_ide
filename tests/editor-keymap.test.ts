@@ -66,6 +66,24 @@ describe('правки', () => {
     expect(resolveKey({ key: 'x', ctrl: true })).toEqual({ kind: 'edit', edit: 'cut' });
     expect(resolveKey({ key: 'v', ctrl: true })).toEqual({ kind: 'edit', edit: 'paste' });
   });
+
+  it('сочетания меню редактор не забирает: Ctrl+Shift+A/F/G и Alt+F12', () => {
+    // Нажатие акселератора доходит и сюда — здесь оно не должно ничего делать.
+    expect(resolveKey({ key: 'A', ctrl: true, shift: true })).toEqual({ kind: 'swallow' });
+    expect(resolveKey({ key: 'F', ctrl: true, shift: true })).toEqual({ kind: 'swallow' });
+    expect(resolveKey({ key: 'G', ctrl: true, shift: true })).toEqual({ kind: 'swallow' });
+    // Alt+F12 — терминал, а не переход к определению (его слушает приложение).
+    expect(resolveKey({ key: 'F12', alt: true })).toBeNull();
+  });
+
+  it('сочетания меню редактор не забирает: Ctrl+Shift+A/F/G и Alt+F12', () => {
+    // Нажатие акселератора доходит и сюда — здесь оно не должно ничего делать.
+    expect(resolveKey({ key: 'A', ctrl: true, shift: true })).toEqual({ kind: 'swallow' });
+    expect(resolveKey({ key: 'F', ctrl: true, shift: true })).toEqual({ kind: 'swallow' });
+    expect(resolveKey({ key: 'G', ctrl: true, shift: true })).toEqual({ kind: 'swallow' });
+    // Alt+F12 — терминал, а не переход к определению (его слушает приложение).
+    expect(resolveKey({ key: 'F12', alt: true })).toBeNull();
+  });
 });
 
 describe('сочетания-приставки (Ctrl+K Ctrl+F)', () => {

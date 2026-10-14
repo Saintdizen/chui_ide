@@ -143,7 +143,9 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   if (control && extend && key.toLowerCase() === 't') return { kind: 'edit', edit: 'surroundWith' };
   // Навигация по символу: F12 — определение, Shift+F12 — ссылки, Ctrl+Shift+F12 —
   // заглянуть (определение на месте). Привычные клавиши из VS Code и PyCharm.
-  if (key === 'F12') {
+  // Без Alt: Alt+F12 — это терминал (акселератор меню), и его нажатие доходит и сюда.
+  // Иначе открытие терминала заодно искало бы определение (и слало бы «не найдено»).
+  if (key === 'F12' && !chord.alt) {
     if (control && extend) return { kind: 'edit', edit: 'peekDefinition' };
     return { kind: 'edit', edit: extend ? 'references' : 'goToDefinition' };
   }
@@ -176,13 +178,17 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
 
   if (control) {
     const lower = key.toLowerCase();
-    if (lower === 'a') return { kind: 'edit', edit: 'selectAll' };
+    // Без Shift: Ctrl+Shift+A — это панель AI (акселератор меню), её нажатие
+    // доходит и сюда; иначе оно заодно выделяло бы весь текст.
+    if (lower === 'a' && !extend) return { kind: 'edit', edit: 'selectAll' };
     if (lower === 'c') return { kind: 'edit', edit: 'copy' };
     if (lower === 'x') return { kind: 'edit', edit: 'cut' };
     if (lower === 'v') return { kind: 'edit', edit: 'paste' };
-    if (lower === 'f') return { kind: 'edit', edit: 'find' };
+    // Без Shift: Ctrl+Shift+F — поиск по проекту (акселератор меню), не поиск в файле.
+    if (lower === 'f' && !extend) return { kind: 'edit', edit: 'find' };
     if (lower === 'h') return { kind: 'edit', edit: 'replace' };
-    if (lower === 'g') return { kind: 'edit', edit: 'gotoLine' };
+    // Без Shift: Ctrl+Shift+G — панель «Изменения» (сочетание renderer), не переход к строке.
+    if (lower === 'g' && !extend) return { kind: 'edit', edit: 'gotoLine' };
     // Ctrl+D — следующее вхождение слова, Ctrl+Shift+L — все вхождения сразу.
     if (lower === 'd') return { kind: 'edit', edit: 'selectNextOccurrence' };
     if (lower === 'l' && extend) return { kind: 'edit', edit: 'selectAllOccurrences' };
