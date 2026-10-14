@@ -11,6 +11,7 @@ import type { WorkspaceModel } from '../core/workspace-model';
 import { entryIsDirectory, entryIsFile, entryIsSymlink, symlinkLabel } from '../../shared/entry-kind';
 import { pairFromSelection } from '../core/file-compare';
 import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
+import { groupByKind } from '../core/tree-group';
 import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
 import { sortTree } from '../core/tree-sort';
 import { computeWindow } from '../core/tree-window';
@@ -91,6 +92,7 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   fileNesting: false,
   nestingRules: [],
   updateImportsOnRename: true,
+  groupByType: false,
 };
 
 import { isRecentlyModified, recentLabel } from '../core/tree-recent';
@@ -820,6 +822,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
    */
   type FlatRow =
     | { kind: 'entry'; entry: DirEntry; depth: number; dir: string; nested: boolean; deleted: boolean }
+    | { kind: 'group'; label: string; count: number; depth: number }
     | { kind: 'root'; root: WorkspaceRoot; active: boolean; collapsed: boolean }
     | { kind: 'create'; parent: string; depth: number }
     | { kind: 'loading'; dir: string };
@@ -861,8 +864,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       // Поле создания имени — первым ребёнком папки: строка «появляется» под ней.
       if (isCreateTarget(inlineEdit, dir)) rows.push({ kind: 'create', parent: dir, depth });
 
-      for (const entry of list) {
-        if (nest?.hidden.has(entry.name)) continue;
+      // Одна запись и её спутники (вложенные строки идут сразу под родителем).
+      const pushEntry = (entry: DirEntry): void => {
         rows.push({ kind: 'entry', entry, depth, dir, nested: false, deleted: false });
         for (const name of nest?.children.get(entry.name) ?? []) {
           const child = list.find((item) => item.name === name);
@@ -871,6 +874,26 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           if (child) rows.push({ kind: 'entry', entry: child, depth: depth + 1, dir, nested: true, deleted: false });
         }
         if (entryIsDirectory(entry) && expanded.has(entry.path)) pushDir(entry.path, depth + 1);
+      };
+
+      // Обычно содержимое папки — один список. С группировкой файлы разбиваются
+      // по назначению под подписями, а папки остаются сверху (группировка — про файлы).
+      const sections: Array<{ label: string | null; list: DirEntry[] }> = options.groupByType
+        ? [
+            { label: null, list: list.filter((entry) => entryIsDirectory(entry)) },
+            ...groupByKind(
+              list.filter((entry) => !entryIsDirectory(entry)),
+              (entry) => entry.name,
+            ).map((group) => ({ label: group.label, list: group.entries })),
+          ]
+        : [{ label: null, list }];
+
+      for (const section of sections) {
+        const shown = section.list.filter((entry) => !nest?.hidden.has(entry.name));
+        if (section.label && shown.length > 0) {
+          rows.push({ kind: 'group', label: section.label, count: shown.length, depth });
+        }
+        for (const entry of shown) pushEntry(entry);
       }
 
       // Удалённые, но не закоммиченные файлы: на диске их нет, поэтому в списке
@@ -903,6 +926,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   /** Собрать узел строки. `null` — строка себя не показывает (её рисует поле ввода). */
   const buildRow = (row: FlatRow): HTMLElement | null => {
     if (row.kind === 'root') return rootRow(row.root, row.active, row.collapsed);
+    if (row.kind === 'group') return groupRow(row.label, row.count, row.depth);
     if (row.kind === 'loading') {
       return h('div', { class: 'tree-loading' }, failed.has(row.dir) ? 'Не удалось прочитать папку' : 'Читаю папку…');
     }
@@ -1026,6 +1050,22 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     for (const item of list) next.set(joinPath(root, item.path.split('/').join(separatorOf(root))), item);
     submodules = next;
     render();
+  };
+
+  /**
+   * Заголовок полки при группировке по назначению («Тесты», «Стили»). Только подпись
+   * и число: строка не выбирается, не перетаскивается и в порядок выделения не идёт.
+   * Высоту держит ту же, что у строки, — иначе поехало бы окно виртуализации.
+   */
+  const groupRow = (label: string, count: number, depth: number): HTMLElement => {
+    const row = h(
+      'div',
+      { class: 'tree-group', style: { paddingLeft: `${8 + depth * options.indent}px` } },
+      h('span', { class: 'tree-group-label' }, label),
+      h('span', { class: 'tree-group-count' }, String(count)),
+    );
+    row.setAttribute('aria-hidden', 'true');
+    return row;
   };
 
   /** Верхняя строка корня: имя папки, признак активного и действия по правому клику. */

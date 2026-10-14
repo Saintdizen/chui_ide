@@ -1357,6 +1357,35 @@ textarea {
   text-align: left;
 }
 
+/* Полка группировки по назначению: подпись и число файлов. Высоту держит ту же,
+   что и строка: по ней считается окно виртуализации, и другая высота сдвинула бы
+   прокрутку. Строка без действий — её не выбирают и не тащат. */
+.tree-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 8px);
+  height: calc(var(--tree_row_height) * var(--density));
+  margin: 0 4px;
+  padding-right: 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.tree-group-label {
+  white-space: nowrap;
+}
+
+.tree-group-count {
+  margin-left: auto;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── значки файлов и папок ──────────────────────────────────────────────
    Значок — часть строки, а не украшение поверх неё: он держит свою ширину,
    не сжимается в узкой панели и не перекрашивается вместе с текстом строки.

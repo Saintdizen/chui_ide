@@ -759,6 +759,11 @@ export interface ExplorerSettings {
    */
   updateImportsOnRename: boolean;
   /**
+   * Собирать файлы папки по назначению (тесты, стили, документация…) под подписанные
+   * полки. Папки остаются сверху — группировка только про файлы.
+   */
+  groupByType: boolean;
+  /**
    * Свои правила вложения: строка на родителя, `*.tsx: *.test.tsx, *.module.css`.
    * Пусто — берутся правила по умолчанию (см. `core/file-nesting.ts`).
    */

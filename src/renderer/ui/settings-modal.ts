@@ -1286,6 +1286,18 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h('div', { class: 'field-label' }, 'Содержимое'),
       switchRow('Показывать скрытые файлы', explorer.showHidden, (value) => apply({ showHidden: value })),
       switchRow('Папки выше файлов', explorer.foldersFirst, (value) => apply({ foldersFirst: value })),
+      switchRow('Группировать файлы по назначению', explorer.groupByType, (value) => apply({ groupByType: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Файлы собираются под полками «Тесты», «Стили», «Документация» и другими; папки остаются сверху.',
+      ),
+      switchRow('Группировать файлы по назначению', explorer.groupByType, (value) => apply({ groupByType: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Файлы собираются под полками «Тесты», «Стили», «Документация» и другими; папки остаются сверху.',
+      ),
       field(
         'Сортировка',
         selectInput(
