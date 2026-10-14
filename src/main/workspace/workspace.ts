@@ -35,6 +35,14 @@ import {
   type StructuralProjectMatches,
   type StructuralProjectOptions,
 } from '../../shared/structural-search';
+import {
+  exportedNames,
+  supportsExports,
+  type ExportsQuery,
+  type ExportsResult,
+  type ExportFileHits,
+} from '../../shared/symbol-exports';
+import { languageFromPath } from '../../shared/languages';
 import { MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../../shared/large-file';
 import { buildFolderDiff, splitFolderLists, type FolderCompareResult } from '../../shared/folder-compare';
 
@@ -898,6 +906,46 @@ export class WorkspaceService {
     }
 
     return { files: changed, replaced };
+  }
+
+  /**
+   * Где имя объявлено ЭКСПОРТОМ. Обходим те же файлы, что замена по структуре, и в каждом
+   * разбираем экспорты по языку (JS/TS и Python). Это не запрос к серверу: в LSP такого
+   * запроса нет, а видно экспорт по самому тексту — `export`, `__all__`, `def`/`class`.
+   *
+   * Прочие языки пропускаем: там экспорт мы не разбираем, и притворяться, что «нашлось
+   * ничего», нечестно — поэтому список просмотренных файлов идёт наружу (`scanned`).
+   */
+  async findExports(options: ExportsQuery): Promise<ExportsResult> {
+    const name = options.name.trim();
+    if (name === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задано имя символа');
+
+    const root = this.requireRoot();
+    const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
+    const files: ExportFileHits[] = [];
+    let total = 0;
+    let scanned = 0;
+
+    for (const file of await this.collectFiles()) {
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      if (matcher && !matcher.test(relative)) continue;
+      const language = languageFromPath(relative);
+      if (!supportsExports(language)) continue;
+      const stat = await fs.stat(file).catch(() => null);
+      if (!stat || stat.size > MAX_FILE_BYTES) continue;
+      const buffer = await fs.readFile(file).catch(() => null);
+      if (!buffer) continue;
+      scanned += 1;
+
+      const text = buffer.toString('utf8').replace(/\r\n/g, '\n');
+      const found = exportedNames(text, language).filter((entry) => entry.name === name);
+      if (found.length === 0) continue;
+
+      total += found.length;
+      files.push({ path: file, entries: found });
+    }
+
+    return { name, files, total, scanned };
   }
 
   /**

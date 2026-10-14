@@ -435,6 +435,47 @@ module.exports = [
     return out;
   };
 
+  /**
+   * Приблизительный разбор экспортов для мока: JS/TS — по строкам с `export`, Python —
+   * `__all__` и объявления верхнего уровня. Это мок для взгляда на интерфейс, а не
+   * повторение настоящего разбора (`src/shared/symbol-exports.ts`).
+   */
+  const mockExportedNames = (text) => {
+    const found = [];
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i];
+      const lineNo = i + 1;
+      const trimmed = line.trim();
+      const decl =
+        /^export\s+(?:declare\s+)?(?:abstract\s+)?(?:async\s+)?(?:function|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/.exec(
+          trimmed,
+        );
+      if (decl) {
+        found.push({ name: decl[1], line: lineNo, kind: 'declaration' });
+        continue;
+      }
+      if (/^export\s+default\b/.test(trimmed)) {
+        found.push({ name: 'default', line: lineNo, kind: 'default' });
+        continue;
+      }
+      const braces = /^export\s*(?:type\s*)?\{([^}]*)\}/.exec(trimmed);
+      if (braces) {
+        for (const spec of braces[1].split(',')) {
+          const m = /^\s*([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?\s*$/.exec(spec);
+          if (m) found.push({ name: m[2] ?? m[1], line: lineNo, kind: 'named' });
+        }
+        continue;
+      }
+      if (/^\s/.test(line)) continue;
+      const py = /^(?:async\s+)?def\s+([A-Za-z_]\w*)|^class\s+([A-Za-z_]\w*)/.exec(trimmed);
+      if (py && !String(py[1] ?? py[2]).startsWith('_')) {
+        found.push({ name: py[1] ?? py[2], line: lineNo, kind: 'declaration' });
+      }
+    }
+    return found;
+  };
+
   const replaceStructural = (text, pattern, replacement) => {
     const { source, names } = structuralRegex(pattern);
     if (!source) return { text, count: 0 };
@@ -676,6 +717,23 @@ module.exports = [
         push('workspace:changed', { root: currentRoot, path: full });
       }
       return { files: changed, replaced };
+    },
+    // Как main: где имя объявлено экспортом — по строкам, без дерева разбора.
+    'workspace.findExports': (params) => {
+      const name = String(params.name ?? '').trim();
+      const files = [];
+      let total = 0;
+      let scanned = 0;
+      for (const [full, text] of FILES) {
+        if (!full.startsWith(`${ROOT}/`)) continue;
+        if (!/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|py)$/.test(full)) continue;
+        scanned += 1;
+        const entries = mockExportedNames(text).filter((entry) => entry.name === name);
+        if (entries.length === 0) continue;
+        total += entries.length;
+        files.push({ path: full, entries });
+      }
+      return { name, files, total, scanned };
     },
     // Как main: относительные (POSIX) пути всех файлов — для быстрого открывателя.
     'workspace.listFiles': () =>

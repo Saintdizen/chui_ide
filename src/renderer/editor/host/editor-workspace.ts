@@ -829,6 +829,11 @@ export class EditorWorkspace {
     return this.pane.documentLanguage;
   }
 
+  /** Слово под кареткой активной панели (`null` — не слово). */
+  wordAtCursor(): string | null {
+    return this.pane.wordAtCursor();
+  }
+
   /** Слово под курсором активной панели, если оно отмечено как ошибка орфографии. */
   spellingWordAtCursor(): string | null {
     return this.pane.spellingWordAtCursor();

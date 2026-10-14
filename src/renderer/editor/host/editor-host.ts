@@ -66,6 +66,7 @@ import { FindWidget } from '../widgets/find-widget';
 import { GotoLineWidget } from '../widgets/goto-widget';
 import { HoverWidget, type HoverExternalInfo, type HoverProblem } from '../widgets/hover-widget';
 import { problemsAt } from '../hover/problem-at';
+import { wordInfoAt } from '../hover/word-info';
 import { LocationsWidget } from '../widgets/locations-widget';
 import { PeekWidget, type PeekAnchor } from '../widgets/peek-widget';
 import { PeekController } from './peek-controller';
@@ -1493,6 +1494,15 @@ export class EditorHost {
       if (token.type === COMMENT || token.type === STRING) ranges.push({ start: token.start, end: token.end });
     }
     return ranges;
+  }
+
+  /**
+   * Слово под кареткой (`null` — под ней не слово). Нужно команде «где экспортируется»:
+   * имя берётся оттуда, где стоит человек, а не из отдельного поля ввода.
+   */
+  wordAtCursor(): string | null {
+    const info = wordInfoAt(this.controller.bufferRef, this.controller.caret);
+    return info ? info.word : null;
   }
 
   /** Слово под курсором, если оно отмечено как ошибка орфографии (`null` — нет). */

@@ -25,6 +25,7 @@ import type { LineProfile } from './line-profile';
 import type { SemanticToken } from './lsp-semantic-tokens';
 import type { FolderCompareResult } from './folder-compare';
 import type { StructuralProjectMatches, StructuralProjectOptions } from './structural-search';
+import type { ExportsQuery, ExportsResult } from './symbol-exports';
 import type { ProjectPackage } from './monorepo';
 import type { ForgeInfo } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
@@ -1631,6 +1632,11 @@ export interface ChuiMethods {
   'workspace.structuralSearch': { params: StructuralProjectOptions; result: StructuralProjectMatches };
   /** Замена по структуре по всему проекту: изменённые пути и число замен. */
   'workspace.structuralReplace': { params: StructuralProjectOptions; result: ReplaceFilesResult };
+  /**
+   * Где имя объявлено ЭКСПОРТОМ: разбор по языку (JS/TS и Python) без языкового сервера —
+   * такого запроса в LSP нет. Возвращает файлы с местами (строка, вид экспорта).
+   */
+  'workspace.findExports': { params: ExportsQuery; result: ExportsResult };
   'workspace.createFile': { params: { path: string }; result: { path: string } };
   'workspace.createDir': { params: { path: string }; result: { path: string } };
   'workspace.rename': { params: { from: string; to: string }; result: { path: string } };

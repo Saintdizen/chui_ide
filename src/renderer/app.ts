@@ -3957,6 +3957,56 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   );
 
   /**
+   * Где имя экспортируется: по имени под кареткой обходим проект и показываем файлы, где
+   * оно объявлено экспортом. Список — тем же попапом, что и ссылки: у нас нет ни языкового
+   * сервера в этом месте (в LSP такого запроса нет), ни дерева разбора — только разбор
+   * строк по языку (`shared/symbol-exports.ts`).
+   */
+  const openFindExports = async (): Promise<void> => {
+    const path = editors.currentPath;
+    if (!path) {
+      showToast('Откройте файл', 'error');
+      return;
+    }
+    // Имя — из выделения, а если выделения нет, из слова под кареткой.
+    const name = editors.selectedText().trim() || editors.wordAtCursor() || '';
+    if (!name) {
+      showToast('Поставьте курсор на имя', 'info');
+      return;
+    }
+
+    const result = await rpc.request('workspace.findExports', { name }).catch(() => null);
+    if (!result) {
+      showToast('Не удалось искать по проекту', 'error');
+      return;
+    }
+    if (result.total === 0) {
+      showToast(`${name}: экспортов не найдено`);
+      return;
+    }
+
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(
+      result.files.flatMap((file) =>
+        file.entries.map((entry) => ({
+          label: `${workspace.relative(file.path)}:${entry.line}`,
+          hint: exportKindLabel(entry.kind),
+          onSelect: () => void openPath(file.path).then(() => editors.reveal(file.path, entry.line, 1)),
+        })),
+      ),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+    showToast(`Экспортов ${name}: ${result.total}`);
+  };
+
+  define(
+    { id: 'search.findExports', title: 'Где экспортируется', category: 'Поиск', keywords: ['export', 'экспорт'] },
+    () => void openFindExports(),
+  );
+
+  /**
    * Моникер символа под курсором: устойчивое имя, по которому символ связывается с тем же
    * символом в других инструментах. Показываем список (схем бывает несколько), а первый
    * сразу копируем в буфер — чаще всего его и нужно вставить в другой инструмент.
@@ -5256,4 +5306,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 function endOfText(text: string): { line: number; column: number } {
   const lines = text.split('\n');
   return { line: lines.length, column: (lines[lines.length - 1]?.length ?? 0) + 1 };
+}
+
+/** Подпись вида экспорта для списка мест: коротко и по-русски. */
+function exportKindLabel(kind: string): string {
+  if (kind === 'default') return 'по умолчанию';
+  if (kind === 'star') return 'звёздочкой';
+  if (kind === 'named') return 'списком';
+  return 'объявлением';
 }
