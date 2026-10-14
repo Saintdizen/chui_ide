@@ -44,6 +44,15 @@ describe('правки', () => {
     expect(resolveKey({ key: 'y', ctrl: true })).toEqual({ kind: 'edit', edit: 'redo' });
   });
 
+  it('Ctrl+Alt+Z и Ctrl+Alt+Shift+Z — независимая отмена и повтор для каретки', () => {
+    expect(resolveKey({ key: 'z', ctrl: true, alt: true })).toEqual({ kind: 'edit', edit: 'undoAtCursor' });
+    expect(resolveKey({ key: 'z', ctrl: true, alt: true, shift: true })).toEqual({
+      kind: 'edit',
+      edit: 'redoAtCursor',
+    });
+    expect(resolveKey({ key: 'y', ctrl: true, alt: true })).toEqual({ kind: 'edit', edit: 'redoAtCursor' });
+  });
+
   it('F1 открывает палитру команд (у Monaco — его действие)', () => {
     expect(resolveKey({ key: 'F1' })).toEqual({ kind: 'edit', edit: 'palette' });
   });

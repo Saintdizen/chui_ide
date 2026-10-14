@@ -1036,6 +1036,16 @@ export class EditorHost {
     this.controller.undo();
   }
 
+  /** Независимая отмена: убирает правку только главной каретки. */
+  undoAtCursor(): void {
+    this.controller.undoAtCursor();
+  }
+
+  /** Независимый повтор для главной каретки. */
+  redoAtCursor(): void {
+    this.controller.redoAtCursor();
+  }
+
   redo(): void {
     this.controller.redo();
   }

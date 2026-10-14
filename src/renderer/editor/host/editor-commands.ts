@@ -32,6 +32,10 @@ import { CASE_LABEL, type CaseStyle } from '../input/case-convert';
 export interface EditorCommandContext {
   undo(): void;
   redo(): void;
+  /** Отменить правку ТОЛЬКО главной каретки. */
+  undoAtCursor(): void;
+  /** Вернуть правку, убранную независимой отменой. */
+  redoAtCursor(): void;
   selectAll(): void;
   /** Открыть панель поиска или поиска с заменой. */
   openFind(mode: 'find' | 'replace'): void;
@@ -177,6 +181,22 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     keybinding: 'Ctrl+Y',
     category: CATEGORY,
     run: (context) => context.redo(),
+  },
+  {
+    id: 'editor.undoAtCursor',
+    label: 'Отменить правку каретки',
+    alias: 'undoAtCursor',
+    keybinding: 'Ctrl+Alt+Z',
+    category: CATEGORY,
+    run: (context) => context.undoAtCursor(),
+  },
+  {
+    id: 'editor.redoAtCursor',
+    label: 'Повторить правку каретки',
+    alias: 'redoAtCursor',
+    keybinding: 'Ctrl+Alt+Shift+Z',
+    category: CATEGORY,
+    run: (context) => context.redoAtCursor(),
   },
   {
     id: 'editor.selectAll',

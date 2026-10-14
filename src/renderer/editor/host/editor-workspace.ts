@@ -664,6 +664,8 @@ export class EditorWorkspace {
     const context: EditorCommandContext = {
       undo: () => this.pane.undo(),
       redo: () => this.pane.redo(),
+      undoAtCursor: () => this.pane.undoAtCursor(),
+      redoAtCursor: () => this.pane.redoAtCursor(),
       selectAll: () => this.pane.selectAll(),
       openFind: (mode) => this.pane.openFind(mode),
       openGoto: () => this.pane.openGoto(),

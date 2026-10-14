@@ -60,6 +60,9 @@ export type EditCommand =
   | 'outdent'
   | 'undo'
   | 'redo'
+  /** Ctrl+Alt+Z / Ctrl+Alt+Shift+Z — независимая отмена и повтор для главной каретки. */
+  | 'undoAtCursor'
+  | 'redoAtCursor'
   | 'selectAll'
   | 'copy'
   | 'cut'
@@ -169,6 +172,12 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   if (control && chord.alt) {
     if (key === 'ArrowUp') return { kind: 'edit', edit: 'addCursorAbove' };
     if (key === 'ArrowDown') return { kind: 'edit', edit: 'addCursorBelow' };
+    // Ctrl+Alt+Z — отменить правку ТОЛЬКО главной каретки (независимая отмена),
+    // Ctrl+Alt+Shift+Z и Ctrl+Alt+Y — вернуть её. Сочетание с Alt выбрано потому,
+    // что обычные Ctrl+Z/Ctrl+Y заняты общей отменой и повтором.
+    const lower = key.toLowerCase();
+    if (lower === 'z') return { kind: 'edit', edit: extend ? 'redoAtCursor' : 'undoAtCursor' };
+    if (lower === 'y') return { kind: 'edit', edit: 'redoAtCursor' };
   }
   // Alt со стрелками переносит и копирует строки — проверяем раньше обычного хода
   // курсора, иначе Alt+↑ ничем не отличался бы от ↑.

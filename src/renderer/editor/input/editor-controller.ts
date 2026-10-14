@@ -24,6 +24,7 @@ import {
   type HistoryEntry,
   type TextChange,
 } from '../core/history';
+import { CursorLedger } from '../core/cursor-ledger';
 import type { TextBuffer } from '../core/text-buffer';
 import { findOccurrences } from '../view/context-highlight';
 import { isEmpty, selectionEnd, selectionStart, type Selection } from '../view/selection';
@@ -97,6 +98,11 @@ export interface EditorControllerOptions {
 interface Cursor {
   sel: Selection;
   goal: number;
+  /**
+   * Устойчивый номер каретки: по нему независимая отмена помнит, чья это правка.
+   * Он переживает движение и правки, а сбрасывается только вместе с курсорами.
+   */
+  id: number;
 }
 
 export class EditorController {
@@ -114,7 +120,11 @@ export class EditorController {
    * Курсоры панели. Обычно он один, но их бывает и несколько (мультикурсор): последний
    * в списке — «главный», по нему идут IME, попапы и статус-бар.
    */
-  private cursors: Cursor[] = [{ sel: { anchor: 0, active: 0 }, goal: 0 }];
+  private cursors: Cursor[] = [{ sel: { anchor: 0, active: 0 }, goal: 0, id: 1 }];
+  /** Счётчик номеров кареток — растёт, чтобы номера не повторялись. */
+  private cursorSeq = 2;
+  /** Учёт правок по кареткам — для независимой отмены (`core/cursor-ledger.ts`). */
+  private readonly ledger = new CursorLedger();
   /**
    * Связанные участки (linkedEditing): имена парных тегов, которые правятся вместе.
    * Смещения в тексте документа, по возрастанию. Пока они заданы и каретка одна, любую
@@ -296,6 +306,7 @@ export class EditorController {
     this.linked = null;
     this.restoreCursors([selection]);
     this.history.clear();
+    this.ledger.clear();
     this.emit('selection', this.caret);
   }
 
@@ -316,7 +327,7 @@ export class EditorController {
         ? { anchor: cursor.sel.anchor, active: position }
         : { anchor: position, active: position };
       const goal = horizontal ? columnAt(this.buffer, position) : cursor.goal;
-      return { sel, goal };
+      return { sel, goal, id: cursor.id };
     });
     this.commitCursors(next);
   }
@@ -376,6 +387,7 @@ export class EditorController {
    */
   private commit(result: EditResult, kind: HistoryChangeKind): void {
     if (this.readOnly) return;
+    this.noteEdit(this.primary.id, result.change, kind);
     this.pushEntry([result.change], [this.selection], [result.selection], kind);
   }
 
@@ -437,11 +449,16 @@ export class EditorController {
         const all = [change, ...mirror].sort((left, right) => right.start - left.start);
         for (const item of all) this.buffer.replace(item.start, item.removed.length, item.inserted);
         this.linked = shiftLinked(this.linked, all);
+        for (const item of all) this.noteEdit(this.primary.id, item, kind);
         this.pushEntry(all, before, after, kind);
         return;
       }
     }
 
+    for (const index of order) {
+      const result = applied.get(index);
+      if (result) this.noteEdit(this.cursors[index]!.id, result.change, kind);
+    }
     this.pushEntry(changes, before, after, kind);
   }
 
@@ -502,14 +519,26 @@ export class EditorController {
     const entry: HistoryEntry = { changes, before: [...before], after: [...after], kind, time: Date.now() };
     // Набор и удаление подряд схлопываются в один шаг отмены (см. `core/history.ts`).
     this.history.push(entry, { merge: kind === 'typing' || kind === 'delete' });
-    this.cursors = this.normalizeCursors(after.map((sel) => ({ sel, goal: columnAt(this.buffer, sel.active) })));
+    this.cursors = this.normalizeCursors(this.cursorsFromSelections(after));
     this.emit('text', earliestStart(changes));
   }
 
   /** Поставить курсоры из готового списка (отмена, смена документа, программный выбор). */
   private restoreCursors(selections: readonly Selection[]): void {
     const list = selections.length > 0 ? selections : [{ anchor: 0, active: 0 }];
-    this.cursors = this.normalizeCursors(list.map((sel) => ({ sel, goal: columnAt(this.buffer, sel.active) })));
+    // Номер каретки сохраняем, если её выделение не менялось: тогда независимая
+    // отмена продолжает помнить правки той же каретки (перестановка кареток — нет).
+    const previous = this.cursors;
+    const used = new Set<number>();
+    const next = list.map((sel) => {
+      const match = previous.find(
+        (cursor) => !used.has(cursor.id) && cursor.sel.anchor === sel.anchor && cursor.sel.active === sel.active,
+      );
+      const id = match ? match.id : this.nextCursorId();
+      used.add(id);
+      return { sel, goal: columnAt(this.buffer, sel.active), id };
+    });
+    this.cursors = this.normalizeCursors(next);
   }
 
   /** Применить движение: курсоры переставляются и не дают слипнуться в один. */
@@ -544,7 +573,7 @@ export class EditorController {
       const [primary] = merged.splice(primaryAt, 1);
       merged.push(primary!);
     }
-    return merged.map(({ sel, goal }) => ({ sel, goal }));
+    return merged.map(({ sel, goal, id }) => ({ sel, goal, id }));
   }
 
   /** Ввести текст на каждой каретке (набор, вставка из буфера, ответ IME). */
@@ -654,6 +683,7 @@ export class EditorController {
     if (edit.removed.length === 0 && edit.inserted.length === 0) return;
     const before = this.selection;
     this.buffer.replace(edit.start, edit.removed.length, edit.inserted);
+    this.ledger.shift({ start: edit.start, removed: edit.removed, inserted: edit.inserted });
     const end = edit.start + edit.inserted.length;
     const after: Selection = selection ?? { anchor: end, active: end };
     const entry: HistoryEntry = {
@@ -687,6 +717,7 @@ export class EditorController {
 
     const before = this.selection;
     for (const change of usable) this.buffer.replace(change.start, change.removed.length, change.inserted);
+    for (const change of usable) this.ledger.shift(change);
 
     // Курсор — в конец верхней правки: после неё текст виден целиком, и это то место,
     // куда смотрит человек, когда правка пришла «сверху вниз».
@@ -796,10 +827,83 @@ export class EditorController {
     this.commit(result, kind);
   }
 
+  /**
+   * Записать правку каретки в независимый учёт. Бертём тем же порядком, в каком правки
+   * применялись к буферу, поэтому места записей остаются верными.
+   */
+  private noteEdit(id: number, change: TextChange, kind: HistoryChangeKind): void {
+    // Порядок важен: сперва запись (схлопывание смотрит на прежнюю геометрию), а уже
+    // потом сдвиг прочих записей — саму новую не двигаем, её место и так верное.
+    const edit = this.ledger.record(id, change, kind, Date.now());
+    this.ledger.shift(change, edit);
+  }
+
+  /** Следующий номер каретки: уникальный внутри сессии документа. */
+  private nextCursorId(): number {
+    return this.cursorSeq++;
+  }
+
+  /** Раздать номера кареткам из выделений, сохранив прежние по порядку. */
+  private cursorsFromSelections(selections: readonly Selection[]): Cursor[] {
+    const previous = this.cursors;
+    const used = new Set<number>();
+    return selections.map((sel, index) => {
+      const prev = previous[index];
+      const id = prev && !used.has(prev.id) ? prev.id : this.nextCursorId();
+      used.add(id);
+      return { sel, goal: columnAt(this.buffer, sel.active), id };
+    });
+  }
+
+  /** Есть ли у главной каретки что независимо отменить. */
+  get canUndoAtCursor(): boolean {
+    return this.ledger.canUndo(this.primary.id);
+  }
+
+  /** Есть ли у главной каретки что независимо повторить. */
+  get canRedoAtCursor(): boolean {
+    return this.ledger.canRedo(this.primary.id);
+  }
+
+  /**
+   * Независимая отмена: убирает последнюю правку ТОЛЬКО главной каретки, не трогая то,
+   * что сделали другие. Обычная отмена (`undo`) возвращает шаг целиком; эта — про случай
+   * «набрал в нескольких местах и хочу отменить одно». Правка идёт обычным путём, поэтому
+   * ложится в общую историю одним шагом и отменяется обычным `Ctrl+Z` тоже.
+   */
+  undoAtCursor(): void {
+    if (this.readOnly) return;
+    const inverse = this.ledger.takeUndo(this.primary.id);
+    if (!inverse) return;
+    this.buffer.replace(inverse.start, inverse.removed.length, inverse.inserted);
+    const caret = inverse.start + inverse.inserted.length;
+    this.pushEntry([inverse], this.selections, this.primaryAt(caret), 'other');
+  }
+
+  /** Независимый повтор: вернуть то, что убрала `undoAtCursor` у главной каретки. */
+  redoAtCursor(): void {
+    if (this.readOnly) return;
+    const forward = this.ledger.takeRedo(this.primary.id);
+    if (!forward) return;
+    this.buffer.replace(forward.start, forward.removed.length, forward.inserted);
+    const caret = forward.start + forward.inserted.length;
+    this.pushEntry([forward], this.selections, this.primaryAt(caret), 'other');
+  }
+
+  /** Ту же пачку выделений, но главная каретка — в позиции `caret`. */
+  private primaryAt(caret: number): Selection[] {
+    const next = [...this.selections];
+    next[next.length - 1] = { anchor: caret, active: caret };
+    return next;
+  }
+
   // — отмена и повтор —
 
   undo(): void {
     if (this.readOnly) return;
+    // Общая отмена возвращает всё разом: предположения независимого учёта о тексте
+    // больше не держатся, поэтому его списки забываем.
+    this.ledger.clear();
     const entry = this.history.undo();
     if (!entry) return;
     const changes = inverseChanges(entry);
@@ -810,6 +914,7 @@ export class EditorController {
 
   redo(): void {
     if (this.readOnly) return;
+    this.ledger.clear();
     const entry = this.history.redo();
     if (!entry) return;
     const changes = forwardChanges(entry);

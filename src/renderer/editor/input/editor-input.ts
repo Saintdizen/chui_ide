@@ -568,6 +568,13 @@ export class EditorInputBinding {
       case 'redo':
         this.controller.redo();
         break;
+      // Независимая отмена и повтор: только правка главной каретки.
+      case 'undoAtCursor':
+        this.controller.undoAtCursor();
+        break;
+      case 'redoAtCursor':
+        this.controller.redoAtCursor();
+        break;
       case 'selectAll':
         this.controller.selectAll();
         break;
