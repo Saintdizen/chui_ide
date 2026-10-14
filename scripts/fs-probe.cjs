@@ -168,7 +168,7 @@ app.whenReady().then(async () => {
   const point = await ask(
     ide,
     `(() => {
-    const rect = document.querySelector('.monaco-editor')?.getBoundingClientRect();
+    const rect = document.querySelector('.own-editor')?.getBoundingClientRect();
     return rect ? { x: Math.round(rect.x + 60), y: Math.round(rect.y + 40) } : null;
   })()`,
   );
@@ -179,8 +179,21 @@ app.whenReady().then(async () => {
     ide.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
     ide.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
     await wait(300);
-    ide.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'right', clickCount: 1 });
-    ide.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'right', clickCount: 1 });
+    // Правый клик по тексту — синтетическим `contextmenu` на полотне: `sendInputEvent`
+    // его не рождает, а представление слушает именно это событие (как в пробе hunk-menu).
+    await ask(
+      ide,
+      `(() => {
+      const canvas = document.querySelector('.own-editor-viewport');
+      if (!canvas) return false;
+      const rect = canvas.getBoundingClientRect();
+      const x = Math.round(rect.left + 60);
+      const y = Math.round(rect.top + 40);
+      canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: x, clientY: y }));
+      canvas.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: x, clientY: y }));
+      return true;
+    })()`,
+    );
     await wait(800);
     console.log(
       '[проба] меню редактора:',
@@ -188,10 +201,9 @@ app.whenReady().then(async () => {
         await ask(
           ide,
           `(() => {
-      const root = document.querySelector('.shadow-root-host')?.shadowRoot;
-      const menu = root?.querySelector('.monaco-menu');
+      const menu = document.querySelector('.context-menu');
       if (!menu) return 'меню не открылось';
-      const item = root.querySelector('.action-menu-item');
+      const item = menu.querySelector('.context-item');
       return {
         bg: getComputedStyle(menu).backgroundColor,
         radius: getComputedStyle(menu).borderRadius,
