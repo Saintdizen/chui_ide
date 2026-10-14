@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DirEntry, SymlinkInfo } from '../src/shared/api';
-import {
-  compareEntries,
-  entryIsDirectory,
-  entryIsFile,
-  entryIsSymlink,
-  symlinkLabel,
-} from '../src/shared/entry-kind';
+import { compareEntries, entryIsDirectory, entryIsFile, entryIsSymlink, symlinkLabel } from '../src/shared/entry-kind';
 
 const file = (name: string): DirEntry => ({ name, path: `/p/${name}`, kind: 'file', size: 0, mtimeMs: 0 });
 const dir = (name: string): DirEntry => ({ name, path: `/p/${name}`, kind: 'directory', size: 0, mtimeMs: 0 });
@@ -76,13 +70,7 @@ describe('порядок записей папки', () => {
   const names = (entries: readonly DirEntry[]): string[] => [...entries].sort(compareEntries).map((item) => item.name);
 
   it('сначала папки (в том числе ссылки на них), потом файлы, внутри — по имени', () => {
-    const entries = [
-      file('b.ts'),
-      link('z-link-dir', toDir),
-      file('a.ts'),
-      dir('a-dir'),
-      link('y-link-file', toFile),
-    ];
+    const entries = [file('b.ts'), link('z-link-dir', toDir), file('a.ts'), dir('a-dir'), link('y-link-file', toFile)];
     expect(names(entries)).toEqual(['a-dir', 'z-link-dir', 'a.ts', 'b.ts', 'y-link-file']);
   });
 });

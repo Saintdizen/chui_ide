@@ -140,6 +140,8 @@ describe('шаги из сессии', () => {
   });
 
   it('пустое расширение шага движения читается как «без выделения»', () => {
-    expect(sanitizeMacroSteps([{ kind: 'move', motion: 'up' }])).toEqual([{ kind: 'move', motion: 'up', extend: false }]);
+    expect(sanitizeMacroSteps([{ kind: 'move', motion: 'up' }])).toEqual([
+      { kind: 'move', motion: 'up', extend: false },
+    ]);
   });
 });

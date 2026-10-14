@@ -143,8 +143,11 @@ app.whenReady().then(async () => {
     console.log(
       `[hot-exit] в сессии: ${JSON.stringify({
         вкладки: saved.tabs.map((item) => path.basename(item)),
-        несохранённых: (saved.unsaved ?? []).map((item) => ({ файл: path.basename(item.path), строки: item.text.split('\n').length })),
-        'правка_в_сессии': (saved.unsaved ?? []).some((item) => item.text.includes(UNSAVED_LINE)),
+        несохранённых: (saved.unsaved ?? []).map((item) => ({
+          файл: path.basename(item.path),
+          строки: item.text.split('\n').length,
+        })),
+        правка_в_сессии: (saved.unsaved ?? []).some((item) => item.text.includes(UNSAVED_LINE)),
       })}`,
     );
     const onDisk = await fs.readFile(file, 'utf8');
@@ -156,7 +159,7 @@ app.whenReady().then(async () => {
       `[hot-exit] редактор после перезапуска: ${JSON.stringify({
         вкладка: state.вкладка,
         не_сохранён: state.не_сохранён,
-        'правка_на_экране': state.строки.some((line) => line.includes(UNSAVED_LINE)),
+        правка_на_экране: state.строки.some((line) => line.includes(UNSAVED_LINE)),
       })}`,
     );
     const onDisk = await fs.readFile(file, 'utf8');

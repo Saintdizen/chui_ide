@@ -4318,23 +4318,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'editor.macroPlay', title: 'Макрос: выполнить', category: 'Редактор' }, () => playMacro(1));
 
-  define(
-    { id: 'editor.macroPlayCount', title: 'Макрос: выполнить несколько раз…', category: 'Редактор' },
-    async () => {
-      const answer = await promptValue({
-        title: 'Сколько раз выполнить макрос?',
-        label: 'Число повторов',
-        value: '5',
-      });
-      if (answer === null) return;
-      const times = Number(answer.trim());
-      if (!Number.isInteger(times) || times < 1 || times > 1000) {
-        showToast('Число повторов — целое от 1 до 1000', 'error');
-        return;
-      }
-      playMacro(times);
-    },
-  );
+  define({ id: 'editor.macroPlayCount', title: 'Макрос: выполнить несколько раз…', category: 'Редактор' }, async () => {
+    const answer = await promptValue({
+      title: 'Сколько раз выполнить макрос?',
+      label: 'Число повторов',
+      value: '5',
+    });
+    if (answer === null) return;
+    const times = Number(answer.trim());
+    if (!Number.isInteger(times) || times < 1 || times > 1000) {
+      showToast('Число повторов — целое от 1 до 1000', 'error');
+      return;
+    }
+    playMacro(times);
+  });
 
   // Орфография: добавить слово под курсором в словарь или пропустить его на сеанс.
   define(

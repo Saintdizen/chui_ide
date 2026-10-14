@@ -373,11 +373,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
     render();
 
-    const parent = entry
-      ? entryIsDirectory(entry)
-        ? entry.path
-        : parentOf(entry.path)
-      : (deps.workspace.root ?? '');
+    const parent = entry ? (entryIsDirectory(entry) ? entry.path : parentOf(entry.path)) : (deps.workspace.root ?? '');
     // Операции над группой идут по всему выделению, а не по одной строке под курсором.
     const effective = selection.paths.length > 0 ? [...selection.paths] : entry ? [entry.path] : [];
     // Сравнить можно только файлы: папки экран различий не показывает.
@@ -625,13 +621,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           ? `${entry.path} — удалён, но ещё не закоммичен`
           : linkLabel
             ? `${entry.path} — ${linkLabel}`
-          : change
-            ? `${entry.path} — ${unsaved ? 'не сохранён' : CHANGE_TITLE[change]}`
-            : insideTitle
-              ? `${entry.path} — ${insideTitle}`
-              : recent
-                ? `${entry.path} — тронут ${recentLabel(entry.mtimeMs, Date.now())}`
-                : entry.path,
+            : change
+              ? `${entry.path} — ${unsaved ? 'не сохранён' : CHANGE_TITLE[change]}`
+              : insideTitle
+                ? `${entry.path} — ${insideTitle}`
+                : recent
+                  ? `${entry.path} — тронут ${recentLabel(entry.mtimeMs, Date.now())}`
+                  : entry.path,
         dataset: { path: entry.path },
         style: { paddingLeft: `${8 + depth * options.indent}px` },
       },

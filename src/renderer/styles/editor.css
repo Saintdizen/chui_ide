@@ -418,25 +418,25 @@
 }
 
 .own-editor-caret::after {
-  content: '';
+  content: "";
   position: absolute;
   inset: 0;
   background: var(--accent_fill);
 }
 
 /* Блок и подчёркивание — на всю клетку знака. */
-.own-editor[data-cursor='block'] .own-editor-caret,
-.own-editor[data-cursor='underline'] .own-editor-caret {
+.own-editor[data-cursor="block"] .own-editor-caret,
+.own-editor[data-cursor="underline"] .own-editor-caret {
   width: var(--own-editor-char-width);
 }
 
 /* Блок — полупрозрачный: знак под кареткой должен читаться, а не пропадать. */
-.own-editor[data-cursor='block'] .own-editor-caret::after {
+.own-editor[data-cursor="block"] .own-editor-caret::after {
   opacity: 0.5;
 }
 
 /* Подчёркивание — тонкая черта внизу клетки. */
-.own-editor[data-cursor='underline'] .own-editor-caret::after {
+.own-editor[data-cursor="underline"] .own-editor-caret::after {
   top: auto;
   bottom: 0;
   height: 2px;
@@ -449,7 +449,7 @@
 }
 
 /* Мигание выключено настройкой: каретка просто стоит. */
-.own-editor[data-cursor-blink='off'] .own-editor-caret {
+.own-editor[data-cursor-blink="off"] .own-editor-caret {
   animation: none;
   opacity: 1;
 }

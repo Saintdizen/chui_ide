@@ -30,12 +30,7 @@ export function scrollFinished(elapsedMs: number, durationMs: number = SMOOTH_SC
  * Положение прокрутки через `elapsedMs` после начала. Конец всегда равен цели —
  * поэтому последний кадр не «почти доехал», а встаёт ровно.
  */
-export function scrollStep(
-  from: number,
-  to: number,
-  elapsedMs: number,
-  durationMs: number = SMOOTH_SCROLL_MS,
-): number {
+export function scrollStep(from: number, to: number, elapsedMs: number, durationMs: number = SMOOTH_SCROLL_MS): number {
   if (scrollFinished(elapsedMs, durationMs)) return to;
   return from + (to - from) * easeOutCubic(elapsedMs / durationMs);
 }

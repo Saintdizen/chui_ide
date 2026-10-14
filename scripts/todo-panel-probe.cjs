@@ -30,7 +30,10 @@ registerAppScheme();
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const ask = (window, expression, timeoutMs = 20000) =>
-  Promise.race([window.webContents.executeJavaScript(expression).catch((e) => `ошибка: ${e.message}`), wait(timeoutMs).then(() => 'нет ответа')]);
+  Promise.race([
+    window.webContents.executeJavaScript(expression).catch((e) => `ошибка: ${e.message}`),
+    wait(timeoutMs).then(() => 'нет ответа'),
+  ]);
 
 const SOURCE = [
   'const value = 1; // TODO: переписать на класс',

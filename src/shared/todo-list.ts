@@ -99,11 +99,7 @@ export interface TodoGroup {
  * Сгруппировать по файлам, сохранив порядок списка (пути уже отсортированы). Файлы
  * без подходящих пометок в результат не попадают вовсе: пустые заголовки — шум.
  */
-export function groupTodos(
-  items: readonly TodoItem[],
-  query: string,
-  label: (path: string) => string,
-): TodoGroup[] {
+export function groupTodos(items: readonly TodoItem[], query: string, label: (path: string) => string): TodoGroup[] {
   const groups = new Map<string, TodoGroup>();
   for (const item of filterTodos(items, query)) {
     let group = groups.get(item.path);
