@@ -903,3 +903,61 @@ declare global {
 }
 
 window.probeMath = { host: mathHost };
+
+// Диаграммы Mermaid: тот же разборщик markdown, что у предпросмотра и ленты чата.
+// Рисуем по одному образцу каждого вида (блок-схема, последовательность, круговая)
+// и отдельно — неподдержанный вид: он должен остаться кодом, а не пропасть.
+const mermaidRoot = document.createElement('div');
+mermaidRoot.id = 'probe-mermaid';
+mermaidRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(mermaidRoot);
+
+const mermaidHost = document.createElement('div');
+mermaidRoot.append(mermaidHost);
+const mermaidRenderer = createMarkdownRenderer({ insertCode: () => false });
+mermaidRenderer.renderInto(
+  mermaidHost,
+  [
+    'Блок-схема:',
+    '',
+    '```mermaid',
+    'graph LR',
+    'A[Начало] --> B{Выбор}',
+    'B -->|да| C((Готово))',
+    'B -.->|нет| D[Ждать]',
+    '```',
+    '',
+    'Последовательность:',
+    '',
+    '```mermaid',
+    'sequenceDiagram',
+    'participant User',
+    'participant Sys as Сервер',
+    'User->>Sys: вход',
+    'Sys-->>User: токен',
+    '```',
+    '',
+    'Круговая:',
+    '',
+    '```mermaid',
+    'pie title Доли',
+    '"А" : 3',
+    '"Б" : 1',
+    '```',
+    '',
+    'Неподдержанный вид остаётся кодом:',
+    '',
+    '```mermaid',
+    'classDiagram',
+    'class A',
+    '```',
+  ].join('\n'),
+);
+
+declare global {
+  interface Window {
+    probeMermaid: { host: HTMLElement };
+  }
+}
+
+window.probeMermaid = { host: mermaidHost };

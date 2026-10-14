@@ -1,5 +1,6 @@
 import { highlightInto } from '../core/highlight';
 import { renderDisplayMath, renderInlineMath } from './math-view';
+import { renderMermaid } from './mermaid-view';
 import { type Child, clear, h } from './dom';
 import { showToast } from './toast';
 
@@ -80,6 +81,15 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
         // чтобы исходник не потерялся.
         if (isMathLanguage(language)) {
           const rendered = renderDisplayMath(fence);
+          if (rendered) {
+            nodes.push(rendered);
+            continue;
+          }
+        }
+        // Диаграмму Mermaid рисуем своим слоем: язык `mermaid`. Не разобралась —
+        // показываем кодом, чтобы исходник не потерялся.
+        if (isMermaidLanguage(language)) {
+          const rendered = renderMermaid(fence);
           if (rendered) {
             nodes.push(rendered);
             continue;
@@ -355,6 +365,12 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
   /** Язык забора, которым пишут формулу, а не код. */
   function isMathLanguage(language: string): boolean {
     return ['latex', 'tex', 'math'].includes(language.trim().toLowerCase());
+  }
+
+  /** Язык забора, которым пишут диаграмму Mermaid. */
+  function isMermaidLanguage(language: string): boolean {
+    const name = language.trim().toLowerCase();
+    return name === 'mermaid' || name === 'mmd';
   }
 
   return { renderInto };

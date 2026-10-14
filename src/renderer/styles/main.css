@@ -7610,6 +7610,163 @@ body > .overlay {
   color: var(--red_prime_background);
 }
 
+/* ── диаграммы Mermaid ─────────────────────────────────────────────────── */
+
+.md-mermaid {
+  margin: 10px 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.md-mermaid .mm-svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Общее для подписей: цвет из темы, шрифт интерфейса. */
+.mm-node-text,
+.mm-edge-label,
+.mm-participant-text,
+.mm-message-label,
+.mm-note-text,
+.mm-slice-label,
+.mm-pie-title {
+  fill: var(--text_color);
+  font-family: var(--font_ui);
+  font-size: 13px;
+  text-anchor: middle;
+}
+
+.mm-node-shape {
+  fill: var(--popup_background);
+  stroke: var(--text_color_tertiary);
+  stroke-width: 1.2;
+}
+
+.mm-subgraph {
+  fill: color-mix(in srgb, var(--popup_background) 55%, transparent);
+  stroke: var(--border_color);
+  stroke-width: 1;
+}
+
+.mm-subgraph-title,
+.mm-frame-label {
+  fill: var(--text_color_secondary);
+  text-anchor: start;
+  font-size: 12px;
+}
+
+.mm-subgraph-title {
+  font-weight: 600;
+}
+
+.mm-edge-line {
+  fill: none;
+  stroke: var(--text_color_secondary);
+  stroke-width: 1.4;
+}
+
+.mm-edge.is-dashed .mm-edge-line {
+  stroke-dasharray: 5 4;
+}
+
+.mm-edge.is-thick .mm-edge-line {
+  stroke-width: 2.6;
+}
+
+.mm-arrow {
+  fill: var(--text_color_secondary);
+}
+
+.mm-edge-label {
+  fill: var(--text_color_secondary);
+}
+
+.mm-edge-label-bg {
+  fill: var(--main_background);
+}
+
+/* Диаграмма последовательностей. */
+.mm-lifeline {
+  stroke: var(--border_color);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.mm-participant {
+  fill: var(--popup_background);
+  stroke: var(--text_color_tertiary);
+  stroke-width: 1.2;
+}
+
+.mm-participant.is-actor {
+  stroke: var(--blue_prime_background);
+}
+
+.mm-message-line {
+  fill: none;
+  stroke: var(--text_color_secondary);
+  stroke-width: 1.4;
+}
+
+.mm-message.is-dashed .mm-message-line {
+  stroke-dasharray: 5 4;
+}
+
+.mm-note {
+  fill: color-mix(in srgb, var(--yellow_prime_background) 16%, var(--popup_background));
+  stroke: var(--yellow_prime_background);
+  stroke-width: 1;
+}
+
+.mm-frame {
+  fill: none;
+  stroke: var(--border_color);
+  stroke-width: 1;
+}
+
+.mm-frame-tab {
+  fill: var(--element_background);
+}
+
+/* Круговая диаграмма: доли — основными тонами темы и их соседями. */
+.mm-slice {
+  stroke: var(--main_background);
+  stroke-width: 1.5;
+}
+
+.mm-slice.is-0 {
+  fill: var(--blue_prime_background);
+}
+
+.mm-slice.is-1 {
+  fill: var(--yellow_prime_background);
+}
+
+.mm-slice.is-2 {
+  fill: var(--red_prime_background);
+}
+
+.mm-slice.is-3 {
+  fill: var(--green_prime_background);
+}
+
+.mm-slice.is-4 {
+  fill: var(--purple_prime_background);
+}
+
+.mm-slice.is-5 {
+  fill: color-mix(in srgb, var(--blue_prime_background) 55%, var(--green_prime_background));
+}
+
+.mm-slice-label {
+  font-size: 12px;
+}
+
+.mm-pie-title {
+  font-weight: 600;
+}
+
 .notebook {
   display: flex;
   flex-direction: column;

@@ -2439,6 +2439,29 @@ async function mathCheck(win) {
   })()`);
 }
 
+/**
+ * Диаграммы Mermaid: в отчёте видно, что три вида нарисованы (узлы, связи,
+ * участники, сообщения, доли), а неподдержанный вид остался кодом.
+ */
+async function mermaidCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  return script(`(() => {
+    const host = window.probeMermaid.host;
+    const count = (selector) => host.querySelectorAll(selector).length;
+    const raw = [...host.querySelectorAll('.code-lang')].filter((node) => node.textContent.trim() === 'mermaid').length;
+    return {
+      диаграмм: count('.md-mermaid'),
+      узлов: count('.mm-node'),
+      рёбер: count('.mm-edge'),
+      стрелок: count('.mm-arrow'),
+      участников: count('.mm-participant'),
+      сообщений: count('.mm-message'),
+      долей: count('.mm-slice'),
+      осталось_кодом: raw,
+    };
+  })()`);
+}
+
 async function selectionRangeCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
 
@@ -3625,6 +3648,11 @@ async function main() {
   const math = await mathCheck(win);
   log('## Формулы LaTeX');
   log(JSON.stringify(math, null, 2));
+  log('');
+
+  const mermaid = await mermaidCheck(win);
+  log('## Диаграммы Mermaid');
+  log(JSON.stringify(mermaid, null, 2));
   log('');
   log(JSON.stringify(surround, null, 2));
   log('');
