@@ -273,7 +273,9 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('workspace.structuralReplace', (params) => deps.workspace.replaceByStructure(params));
   router.register('workspace.findExports', (params) => deps.workspace.findExports(params));
   router.register('workspace.findInheritance', (params) => deps.workspace.findInheritance(params));
-  router.register('workspace.createFile', async (params) => ({ path: await deps.workspace.createFile(params.path) }));
+  router.register('workspace.createFile', async (params) => ({
+    path: await deps.workspace.createFile(params.path, params.contents ?? ''),
+  }));
   router.register('workspace.createDir', async (params) => ({ path: await deps.workspace.createDir(params.path) }));
   router.register('workspace.rename', async (params) => ({
     path: await deps.workspace.rename(params.from, params.to),
@@ -869,6 +871,12 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('ai.commitMessage', (params, ctx) => {
     requireAiEnabled();
     return deps.ai.commitMessage(params, ctx.signal);
+  });
+
+  // Тест к выделенному коду: тоже один запрос без истории и инструментов.
+  router.register('ai.generateTest', (params, ctx) => {
+    requireAiEnabled();
+    return deps.ai.generateTest(params, ctx.signal);
   });
 
   // История бесед: renderer её собирает, main только хранит. Каталог — рядом

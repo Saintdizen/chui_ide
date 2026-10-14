@@ -867,7 +867,7 @@ module.exports = [
       truncated: false,
     }),
     'workspace.createFile': (params) => {
-      FILES.set(params.path, '');
+      FILES.set(params.path, params.contents ?? '');
       addChild(params.path);
       return { path: params.path };
     },
@@ -1136,6 +1136,10 @@ module.exports = [
     'ai.complete': async () => ({ text: '// подсказка от мока' }),
     // Сообщение коммита: мок отвечает так, как это делает модель после очистки.
     'ai.commitMessage': async () => ({ message: 'Панель изменений: сообщение коммита по diff' }),
+    // Тест к коду: мок отвечает так, как это делает модель после очистки.
+    'ai.generateTest': async () => ({
+      code: "describe('мок', () => {\n  it('работает', () => {\n    expect(true).toBe(true);\n  });\n});\n",
+    }),
     'ai.chat': async (params, id) => {
       cancelRequested = false;
 

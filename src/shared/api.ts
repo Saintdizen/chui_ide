@@ -37,6 +37,7 @@ import type { PullMode } from './git-pull';
 import type { GitRefDiff } from './git-ref-diff';
 import type { GitRootFetch, GitRootSummary } from './git-multiroot';
 import type { CommitPromptParts } from './commit-message';
+import type { TestPromptParts } from './test-generation';
 import type { GitBisectState } from './git-bisect';
 import type { GitSubmodule } from './git-submodules';
 import type { GitWorktree } from './git-worktrees';
@@ -436,6 +437,11 @@ export interface GitCommitDiff {
 /** Ответ «сообщение коммита по diff»: текст, готовый лечь в поле сообщения. */
 export interface CommitMessageResult {
   message: string;
+}
+
+/** Ответ «тест к выделенному коду»: код теста, готовый лечь в файл. */
+export interface TestGenerationResult {
+  code: string;
 }
 
 /**
@@ -1643,7 +1649,7 @@ export interface ChuiMethods {
    * (`supertypes`). Свой разбор строк (JS/TS и Python), без языкового сервера.
    */
   'workspace.findInheritance': { params: InheritanceQuery; result: InheritanceResult };
-  'workspace.createFile': { params: { path: string }; result: { path: string } };
+  'workspace.createFile': { params: { path: string; contents?: string }; result: { path: string } };
   'workspace.createDir': { params: { path: string }; result: { path: string } };
   'workspace.rename': { params: { from: string; to: string }; result: { path: string } };
   /**
@@ -2051,6 +2057,11 @@ export interface ChuiMethods {
    * Части промпта строит `shared/commit-message.ts` (обрезка diff, очистка ответа).
    */
   'ai.commitMessage': { params: CommitPromptParts; result: CommitMessageResult };
+  /**
+   * Тест к выделенному коду: один запрос без истории и инструментов, как сообщение
+   * коммита. Промпт и очистка ответа — в `shared/test-generation.ts`.
+   */
+  'ai.generateTest': { params: TestPromptParts; result: TestGenerationResult };
   /**
    * Права доступа агента (кнопка в композере). Меняются и во время ответа:
    * main перечитывает их перед каждым действием, а не только в начале прогона.

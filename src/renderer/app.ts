@@ -109,6 +109,7 @@ import { createPopover, type PopoverView } from './ui/popover';
 import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-env-popover';
 import { createQuickOpen } from './ui/quick-open';
 import { createSymbolPicker } from './ui/symbol-picker';
+import { isEmptyTest, suggestTestPath, truncateTestCode } from '../shared/test-generation';
 import { closePopupMenu, isPopupOpen, showPopupMenu, type PopupMenuItem } from './ui/popup-menu';
 import { createPromptModal } from './ui/prompt-modal';
 import { createRunButton } from './ui/run-button';
@@ -4758,6 +4759,77 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     revealChat();
     await chat.askAboutSelection('fix');
   });
+
+  /**
+   * Тест к выделенному коду — мимо чата: один запрос, как у сообщения коммита. Код берём
+   * из выделения, а если его нет — из активного файла; тест получаем кодом и кладём в
+   * НОВЫЙ файл по предложенному пути (`shared/test-generation.ts`), чтобы человек его
+   * посмотрел и поправил, как обычный код.
+   */
+  define(
+    { id: 'ai.generateTest', title: 'Сгенерировать тест к коду', category: 'AI', keywords: ['тест', 'test'] },
+    async () => {
+      if (!aiEnabled()) {
+        warnAiDisabled();
+        return;
+      }
+      const path = editors.currentPath;
+      if (!path) {
+        showToast('Откройте файл', 'error');
+        return;
+      }
+      const document = documents.get(path);
+      const code = editors.selectedText().trim() || document?.value.trim() || '';
+      if (!code) {
+        showToast('Нечего тестировать: пустой файл', 'info');
+        return;
+      }
+
+      const relative = workspace.relative(path);
+      const testRelative = suggestTestPath(relative);
+      if (!testRelative) {
+        showToast('Это уже тест: файл теста к тесту не создаём', 'info');
+        return;
+      }
+      const root = workspace.ownerOf(path)?.root ?? workspace.root;
+      if (!root) {
+        showToast('Сначала откройте папку проекта', 'error');
+        return;
+      }
+
+      const truncated = truncateTestCode(code);
+      showToast('Пишу тест…', 'info');
+      let result: { code: string };
+      try {
+        result = await rpc.request('ai.generateTest', {
+          language: editors.activeLanguage(),
+          relativePath: relative,
+          code: truncated.text,
+          testPath: testRelative,
+        });
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+        return;
+      }
+      if (isEmptyTest(result.code)) {
+        showToast('Модель не предложила тест', 'info');
+        return;
+      }
+
+      const target = joinPath(root, testRelative);
+      try {
+        await rpc.request('workspace.createFile', { path: target, contents: `${result.code}\n` });
+      } catch (error) {
+        // Файл уже есть — не перетираем чужой тест, а честно об этом говорим.
+        showToast(error instanceof Error ? error.message : String(error), 'error');
+        return;
+      }
+
+      explorer.scheduleRefresh();
+      await openPath(target);
+      showToast(`Тест создан: ${testRelative}`);
+    },
+  );
 
   define({ id: 'view.toggleTheme', title: 'Переключить тему', category: 'Вид' }, async () => {
     await theme.toggle();

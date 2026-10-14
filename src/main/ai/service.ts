@@ -19,6 +19,7 @@ import {
   type PlanStep,
   type PlanStepStatus,
   type ReasoningEffort,
+  type TestGenerationResult,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
 import type { PatchFile } from '../../shared/patch';
@@ -49,6 +50,14 @@ import {
   COMMIT_SYSTEM_PROMPT,
   type CommitPromptParts,
 } from '../../shared/commit-message';
+import {
+  buildTestPrompt,
+  cleanTestCode,
+  TEST_MAX_CHARS,
+  TEST_MAX_TOKENS,
+  TEST_SYSTEM_PROMPT,
+  type TestPromptParts,
+} from '../../shared/test-generation';
 import { sandboxNote } from '../../shared/sandbox';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
 import { addUsage } from '../../shared/usage';
@@ -536,6 +545,42 @@ export class AiService {
     );
 
     return { message: cleanCommitMessage(text) };
+  }
+
+  /**
+   * Тест к выделенному коду.
+   *
+   * Один запрос — один ответ, как у inline-подсказок и сообщения коммита: ни истории,
+   * ни инструментов, ни карты проекта — платить за беседу тут незачем. Модель берём
+   * активную (выбранную в панели AI).
+   */
+  async generateTest(request: TestPromptParts, signal: AbortSignal): Promise<TestGenerationResult> {
+    const ai = this.settings.get().ai;
+    const providerId = ai.activeProviderId;
+    const model = ai.activeModel;
+    if (!providerId || !model) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана модель (панель AI)');
+    }
+    const provider = this.createProvider(providerId);
+
+    const messages: ChatMessage[] = [
+      { role: 'system', content: TEST_SYSTEM_PROMPT },
+      { role: 'user', content: buildTestPrompt(request) },
+    ];
+
+    let text = '';
+    await provider.streamChat(
+      { model, messages, temperature: 0.2, maxTokens: TEST_MAX_TOKENS },
+      {
+        onDelta: (piece) => {
+          // Потолок по символам: `maxTokens` — просьба, а не гарантия.
+          if (text.length < TEST_MAX_CHARS) text += piece;
+        },
+      },
+      signal,
+    );
+
+    return { code: cleanTestCode(text) };
   }
 
   async chat(
