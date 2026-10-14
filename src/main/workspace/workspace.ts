@@ -52,6 +52,14 @@ import {
 } from '../../shared/type-inheritance';
 import { MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../../shared/large-file';
 import { buildFolderDiff, splitFolderLists, type FolderCompareResult } from '../../shared/folder-compare';
+import {
+  isDocPath,
+  rankDocChunks,
+  splitDocChunks,
+  type DocChunk,
+  type DocsQuery,
+  type DocsResult,
+} from '../../shared/docs-index';
 
 const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 
@@ -67,6 +75,8 @@ const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '
  */
 const IGNORE_FILES = ['.gitignore', '.ai_ignore'] as const;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+/** Потолок документации: README в сотни килобайт — уже не документ, а свалка. */
+const MAX_DOC_BYTES = 512 * 1024;
 /** Сколько мест одного файла отдаём в предпросмотр (полное число — в `count`). */
 const MAX_STRUCTURAL_MATCHES_PER_FILE = 20;
 const MAX_SEARCH_RESULTS = 2000;
@@ -994,6 +1004,40 @@ export class WorkspaceService {
     }
 
     return { name, direction, files, total, scanned };
+  }
+
+  /**
+   * Ответы по документации проекта: обходим файлы, берём только документы
+   * (`isDocPath`), режем их на разделы и ранжируем по словам запроса.
+   *
+   * Это не запрос к внешнему сервису и не векторная база: отбор лексический и
+   * целиком свой (`shared/docs-index.ts`). В ответ едут путь, заголовок и строка
+   * раздела — тот же путь и строку агент передаёт в `read_file`, чтобы дочитать
+   * раздел целиком.
+   */
+  async searchDocs(options: DocsQuery): Promise<DocsResult> {
+    const query = options.query.trim();
+    if (query === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задан запрос');
+    const limit = Math.min(Math.max(options.limit ?? 6, 1), 20);
+
+    const root = this.requireRoot();
+    const chunks: DocChunk[] = [];
+    let files = 0;
+
+    for (const file of await this.collectFiles()) {
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      if (!isDocPath(relative)) continue;
+      const stat = await fs.stat(file).catch(() => null);
+      if (!stat || stat.size > MAX_DOC_BYTES) continue;
+      const buffer = await fs.readFile(file).catch(() => null);
+      if (!buffer) continue;
+      files += 1;
+
+      const text = buffer.toString('utf8');
+      for (const chunk of splitDocChunks(file, text)) chunks.push(chunk);
+    }
+
+    return { query, hits: rankDocChunks(chunks, query, limit), files, chunks: chunks.length };
   }
 
   /**

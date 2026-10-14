@@ -14,6 +14,7 @@ import type {
 } from '../../shared/api';
 import { formatBrowserSnapshot, type BrowserSnapshot } from '../../shared/browser';
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
+import { formatDocsAnswer } from '../../shared/docs-index';
 import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import type { MemoryNote, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
@@ -291,6 +292,8 @@ export interface ToolContext {
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
 const MAX_OUTPUT_CHARS = 60_000;
 const MAX_SEARCH_HITS = 200;
+/** Сколько разделов документации отдаём на один запрос `search_docs`. */
+const MAX_DOC_RESULTS = 12;
 /** Потолок для режима «только файлы»: там на файл одна строка, поэтому можно больше. */
 const MAX_FIND_FILES = 2000;
 const MAX_DIR_ENTRIES = 500;
@@ -368,6 +371,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await search(ctx, parsed.value);
       case 'codebase_search':
         return await codebaseSearch(ctx, parsed.value);
+      case 'search_docs':
+        return await searchDocs(ctx, parsed.value);
       case 'find_references':
         return await findReferences(ctx, parsed.value);
       case 'go_to_definition':
@@ -985,6 +990,21 @@ async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): 
   });
 
   return { ok: true, summary: shaped.summary, detail: shaped.detail };
+}
+
+/**
+ * Ответы по документации проекта: ищем в ней, а не в коде. Источник — README,
+ * `docs/` и прочие документы; отбор и нарезка на разделы — в main (`searchDocs`),
+ * потому что читать файлы можно только там. Модели отдаём путь, заголовок и строку
+ * раздела: тот же путь и та же строка годятся в `read_file`, чтобы дочитать раздел.
+ */
+async function searchDocs(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const query = requireString(args, 'query');
+  const limit = Math.min(Math.max(optionalInteger(args, 'limit') ?? MAX_DOC_RESULTS, 1), MAX_DOC_RESULTS);
+  const result = await ctx.workspace.searchDocs({ query, limit });
+  const root = ctx.workspace.rootPath();
+  const { summary, detail } = formatDocsAnswer(result, (target) => relativePath(target, root));
+  return { ok: true, summary, detail };
 }
 
 /* ── ссылки и переход к определению (языковой сервер) ───────────────────── */

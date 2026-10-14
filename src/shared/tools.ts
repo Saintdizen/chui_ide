@@ -19,6 +19,7 @@ export type AgentToolName =
   | 'read_files'
   | 'search'
   | 'codebase_search'
+  | 'search_docs'
   | 'find_references'
   | 'go_to_definition'
   | 'rename_symbol'
@@ -194,6 +195,24 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         query: { type: 'string', description: 'Имя символа или слова из него, например `readFile`.' },
         limit: { type: 'number', description: 'Сколько объявлений вернуть (по умолчанию 40).' },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'search_docs',
+    side: 'main',
+    description:
+      'Ответы по документации проекта: ищет в README, docs/ и других документах (*.md, *.rst) ' +
+      'разделы, подходящие под запрос, и возвращает путь, заголовок и строку раздела с выдержкой. ' +
+      'Запрос можно писать словами — «как установить зависимости» найдёт раздел «Установка». ' +
+      'Используй, когда вопрос о том, как проект устроен или как что-то сделать. Раздел ' +
+      'целиком дочитай через read_file с его startLine.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Вопрос или ключевые слова, например «как собрать проект».' },
+        limit: { type: 'number', description: 'Сколько разделов вернуть (по умолчанию 6, максимум 20).' },
       },
       required: ['query'],
     },

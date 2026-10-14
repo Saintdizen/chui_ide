@@ -127,6 +127,8 @@ app.whenReady().then(async () => {
   // и инструмент должен честно сказать об этом (проверяется ниже).
   const script = path.join(dir, 'parser.py');
   await fs.writeFile(script, 'class Parser:\n    def parse(self):\n        pass\n', 'utf8');
+  // Документация проекта — источник ответов инструмента `search_docs` (проверяется ниже).
+  await fs.writeFile(path.join(dir, 'README.md'), '# Проект\n\n## Установка\n\nЗапусти npm install\n', 'utf8');
 
   const server = http.createServer(async (req, res) => {
     // «Проверить подключение» — обычный GET /models.
@@ -334,6 +336,16 @@ app.whenReady().then(async () => {
       run.results.map((item) => item.summary),
     );
     check('без моста apply_edit не предлагается', !run.toolNames.includes('apply_edit'), run.toolNames);
+
+    /* 1г. search_docs: ответ ищется в документации проекта (README), а не в коде. */
+    check('search_docs предложен модели', run.toolNames.includes('search_docs'), run.toolNames);
+    requested = { name: 'search_docs', args: { query: 'установка' } };
+    run = await chat(undefined);
+    check(
+      'search_docs нашёл раздел документации',
+      run.results[0]?.ok === true && String(run.results[0]?.detail ?? '').includes('Установка'),
+      run.results.map((item) => item.detail),
+    );
 
     /* 1в. codebase_search: сперва объявления символов, затем текстовые совпадения.
        Символы приходят от языкового сервера — в проверке его роль играет заглушка. */
