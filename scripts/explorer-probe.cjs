@@ -42,6 +42,18 @@ app.whenReady().then(async () => {
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-explorer-probe-')));
   const project = path.join(dir, 'demo');
   await fs.mkdir(path.join(project, 'src'), { recursive: true });
+  // Символические ссылки трёх родов: на папку, на файл и битая. Создаём до открытия
+  // окна — дерево читает папку на старте. На Windows ссылка может не создаться без
+  // прав: тогда раздел пропускаем, но пробу не роняем.
+  let linksOk = true;
+  try {
+    await fs.symlink('src', path.join(project, 'link-src'), 'dir');
+    await fs.symlink('note.txt', path.join(project, 'link-note'), 'file');
+    await fs.symlink('нет-такого', path.join(project, 'link-dead'));
+  } catch (error) {
+    linksOk = false;
+    console.log(`[explorer] ссылки не создались: ${error.message}`);
+  }
   await fs.mkdir(path.join(project, 'lib'), { recursive: true });
   await fs.writeFile(path.join(project, 'README.md'), '# demo\n', 'utf8');
   await fs.writeFile(path.join(project, 'note.txt'), 'перенос\n', 'utf8');
@@ -99,6 +111,93 @@ app.whenReady().then(async () => {
   console.log(`[explorer] Ctrl+клик по тому же — снять: ${JSON.stringify(await click('note.txt', { ctrlKey: true }))}`);
   await wait(300);
   console.log(`[explorer] выделено после снятия: ${JSON.stringify(await selected())}`);
+
+  if (linksOk) {
+    // Как выглядят ссылки: класс, значок-стрелка и подсказка с целью.
+    console.log(
+      `[explorer] ссылки: ${JSON.stringify(
+        await ask(
+          ide,
+          `[...document.querySelectorAll('.tree-row')]
+            .filter((row) => (row.querySelector('.tree-name')?.textContent ?? '').startsWith('link-'))
+            .map((row) => ({
+              имя: row.querySelector('.tree-name').textContent,
+              ссылка: row.classList.contains('is-symlink'),
+              битая: row.classList.contains('is-broken-link'),
+              значок: row.querySelector('.tree-badge.is-symlink')?.textContent ?? null,
+              подсказка: row.getAttribute('title'),
+            }))`,
+        ),
+      )}`,
+    );
+
+    // Ссылка на папку раскрывается: под ней появляется файл из цели.
+    console.log(
+      `[explorer] раскрытие ссылки на папку: ${JSON.stringify(
+        await ask(
+          ide,
+          `(async () => {
+            const row = [...document.querySelectorAll('.tree-row')].find(
+              (item) => item.querySelector('.tree-name')?.textContent === 'link-src',
+            );
+            if (!row) return 'нет строки link-src';
+            row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            await new Promise((resolve) => setTimeout(resolve, 900));
+            const names = [...document.querySelectorAll('.tree-row .tree-name')].map((node) => node.textContent);
+            // Строку перерисовали: берём её заново, чтобы прочитать раскрытый жёлоб.
+            const again = [...document.querySelectorAll('.tree-row')].find(
+              (item) => item.querySelector('.tree-name')?.textContent === 'link-src',
+            );
+            return {
+              раскрыта: again?.querySelector('.tree-twisty')?.classList.contains('is-open') ?? false,
+              дочерний: names.includes('a.ts'),
+            };
+          })()`,
+        ),
+      )}`,
+    );
+
+    // Ссылка на файл открывается двойным кликом — как обычный файл.
+    console.log(
+      `[explorer] открытие ссылки на файл: ${JSON.stringify(
+        await ask(
+          ide,
+          `(async () => {
+            const row = [...document.querySelectorAll('.tree-row')].find(
+              (item) => item.querySelector('.tree-name')?.textContent === 'link-note',
+            );
+            if (!row) return 'нет строки link-note';
+            row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+            await new Promise((resolve) => setTimeout(resolve, 900));
+            return { вкладка: document.querySelector('.tab.is-active .tab-label')?.textContent ?? null };
+          })()`,
+        ),
+      )}`,
+    );
+
+    // Битая ссылка: клик ничего не открывает — вкладка остаётся прежней.
+    console.log(
+      `[explorer] битая ссылка: ${JSON.stringify(
+        await ask(
+          ide,
+          `(async () => {
+            const before = document.querySelector('.tab.is-active .tab-label')?.textContent ?? null;
+            const row = [...document.querySelectorAll('.tree-row')].find(
+              (item) => item.querySelector('.tree-name')?.textContent === 'link-dead',
+            );
+            if (!row) return 'нет строки link-dead';
+            row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+            await new Promise((resolve) => setTimeout(resolve, 700));
+            return {
+              битая_в_разметке: row.classList.contains('is-broken-link'),
+              было: before,
+              стало: document.querySelector('.tab.is-active .tab-label')?.textContent ?? null,
+            };
+          })()`,
+        ),
+      )}`,
+    );
+  }
 
   // Закрепление: правый клик по файлу → «Закрепить сверху»; строка появляется
   // в отдельном блоке над деревом, а повторное действие её убирает.

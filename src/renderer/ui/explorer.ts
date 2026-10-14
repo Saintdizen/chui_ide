@@ -8,6 +8,7 @@ import type { GitInsideChange, GitModel } from '../core/git-model';
 import type { OpenEditors } from '../core/open-editors';
 import type { RpcClient } from '../core/rpc';
 import type { WorkspaceModel } from '../core/workspace-model';
+import { entryIsDirectory, entryIsFile, entryIsSymlink, symlinkLabel } from '../../shared/entry-kind';
 import { pairFromSelection } from '../core/file-compare';
 import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
 import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
@@ -189,7 +190,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const header = h('div', { class: 'tree-pins-head' }, svgIcon('pin', 12), h('span', {}, 'Закреплённые'));
     const rows = pinned.map((path) => {
       const entry = findEntry(path);
-      const isDirectory = entry?.kind === 'directory';
+      const isDirectory = entry ? entryIsDirectory(entry) : false;
       const row = h(
         'div',
         { class: 'tree-row is-pinned', title: path, dataset: { path } },
@@ -373,17 +374,23 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     render();
 
     const parent = entry
-      ? entry.kind === 'directory'
+      ? entryIsDirectory(entry)
         ? entry.path
         : parentOf(entry.path)
       : (deps.workspace.root ?? '');
     // Операции над группой идут по всему выделению, а не по одной строке под курсором.
     const effective = selection.paths.length > 0 ? [...selection.paths] : entry ? [entry.path] : [];
     // Сравнить можно только файлы: папки экран различий не показывает.
-    const files = effective.filter((path) => findEntry(path)?.kind === 'file');
+    const files = effective.filter((path) => {
+      const found = findEntry(path);
+      return found !== undefined && entryIsFile(found);
+    });
     const pair = pairFromSelection(files);
     // Две папки сравниваются своим экраном — списком различий.
-    const dirs = effective.filter((path) => findEntry(path)?.kind === 'directory');
+    const dirs = effective.filter((path) => {
+      const found = findEntry(path);
+      return found !== undefined && entryIsDirectory(found);
+    });
     const dirPair = pairFromSelection(dirs);
     const items = entry
       ? [
@@ -420,7 +427,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
                   },
                   { separator: true as const },
                 ]
-              : entry.kind === 'file'
+              : entryIsFile(entry)
                 ? [
                     {
                       label: 'Сравнить с…',
@@ -429,7 +436,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
                     { separator: true as const },
                   ]
                 : []),
-          ...(entry.kind === 'file'
+          ...(entryIsFile(entry)
             ? [
                 {
                   label: 'Локальная история',
@@ -449,7 +456,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             onSelect: () => void deps.commands.execute('file.revealInOS', entry.path),
           },
           {
-            label: entry.kind === 'directory' ? 'Открыть папку внешней программой' : 'Открыть внешней программой',
+            label: entryIsDirectory(entry) ? 'Открыть папку внешней программой' : 'Открыть внешней программой',
             onSelect: () => void deps.commands.execute('file.openExternal', entry.path),
           },
           {
@@ -490,7 +497,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     if (!root) return;
     if (selected) {
       const entry = findEntry(selected);
-      const parent = entry?.kind === 'directory' ? entry.path : parentOf(selected);
+      const parent = entry !== undefined && entryIsDirectory(entry) ? entry.path : parentOf(selected);
       startCreateIn(parent, entryKind);
       return;
     }
@@ -556,7 +563,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     dir: string,
     flags: { nested: boolean; deleted: boolean } = { nested: false, deleted: false },
   ): HTMLElement | null => {
-    const isDirectory = entry.kind === 'directory';
+    const isDirectory = entryIsDirectory(entry);
+    const isLink = entryIsSymlink(entry);
+    const linkLabel = symlinkLabel(entry);
     const isDeleted = flags.deleted;
     const isExpanded = expanded.has(entry.path);
     const isActive = deps.openEditors.active?.path === entry.path;
@@ -574,6 +583,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     if (isDeleted) classes.push('is-deleted');
     // Дети только что раскрытой папки въезжают вниз, из-под родителя.
     if (dir === revealChildrenOf) classes.push('is-entering');
+    // Символическая ссылка: значок-стрелка и приглушение битой (её читать нечем).
+    if (isLink) classes.push('is-symlink');
+    if (entry.symlink?.broken) classes.push('is-broken-link');
 
     // Пометка git из дерева не ходит в репозиторий: модель уже разложила статус по путям.
     const gitChange = isDeleted ? ('deleted' as GitChange) : deps.git.statusOf(entry.path)?.change;
@@ -611,6 +623,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         draggable: 'true',
         title: isDeleted
           ? `${entry.path} — удалён, но ещё не закоммичен`
+          : linkLabel
+            ? `${entry.path} — ${linkLabel}`
           : change
             ? `${entry.path} — ${unsaved ? 'не сохранён' : CHANGE_TITLE[change]}`
             : insideTitle
@@ -630,6 +644,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           : fileIcon(entry.name)
         : svgIcon(isDirectory ? 'folder' : 'file', 15),
       h('span', { class: 'tree-name' }, entry.name),
+      isLink
+        ? h(
+            'span',
+            { class: `tree-badge is-symlink${entry.symlink?.broken ? ' is-broken' : ''}`, title: linkLabel ?? '' },
+            '↗',
+          )
+        : null,
       gitChange && (isDeleted || options.gitDecorations)
         ? h('span', { class: `tree-badge is-${gitChange}`, title: CHANGE_TITLE[gitChange] }, CHANGE_LETTER[gitChange])
         : null,
@@ -791,7 +812,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           // смотрит проба (строка в дереве есть, но отдельной не считается).
           if (child) rows.push({ kind: 'entry', entry: child, depth: depth + 1, dir, nested: true, deleted: false });
         }
-        if (entry.kind === 'directory' && expanded.has(entry.path)) pushDir(entry.path, depth + 1);
+        if (entryIsDirectory(entry) && expanded.has(entry.path)) pushDir(entry.path, depth + 1);
       }
 
       // Удалённые, но не закоммиченные файлы: на диске их нет, поэтому в списке
@@ -884,19 +905,22 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   };
 
   const onClick = async (entry: DirEntry, preview = false): Promise<void> => {
-    if (entry.kind !== 'directory') {
-      await deps.commands.execute('file.open', entry.path, preview ? { preview: true } : {});
-      return;
-    }
-    if (expanded.has(entry.path)) {
-      expanded.delete(entry.path);
+    // Ссылка ведёт себя как то, на что указывает: на папку — раскрывается, на файл —
+    // открывается. Битую ссылку не читаем: цель не найдена, открывать нечего.
+    if (entryIsDirectory(entry)) {
+      if (expanded.has(entry.path)) {
+        expanded.delete(entry.path);
+        render();
+        return;
+      }
+      expanded.add(entry.path);
+      if (!children.has(entry.path)) await load(entry.path);
+      revealChildrenOf = entry.path;
       render();
       return;
     }
-    expanded.add(entry.path);
-    if (!children.has(entry.path)) await load(entry.path);
-    revealChildrenOf = entry.path;
-    render();
+    if (entryIsSymlink(entry) && (entry.symlink === undefined || entry.symlink.broken)) return;
+    await deps.commands.execute('file.open', entry.path, preview ? { preview: true } : {});
   };
 
   /**

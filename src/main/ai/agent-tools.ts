@@ -2231,7 +2231,10 @@ function terminalStop(ctx: ToolContext, args: Record<string, unknown>): ToolOutc
 function describe(entry: DirEntry, root: string | null): string {
   const suffix = entry.kind === 'directory' ? '/' : '';
   const size = entry.kind === 'file' ? ` (${entry.size} Б)` : '';
-  return `${relativePath(entry.path, root)}${suffix}${size}`;
+  // Ссылку видно отдельно: агент должен знать, что путь — не обычная запись, а
+  // ссылка (и куда ведёт). Битую помечаем словом: по ней ничего не прочитать.
+  const link = entry.symlink ? ` → ${entry.symlink.target}${entry.symlink.broken ? ' (битая)' : ''}` : '';
+  return `${relativePath(entry.path, root)}${suffix}${size}${link}`;
 }
 
 function relative(target: string, root: string | null): string {

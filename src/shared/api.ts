@@ -141,6 +141,19 @@ export interface AppInfo {
 
 export type EntryKind = 'file' | 'directory' | 'symlink';
 
+/** Вид, на который указывает символическая ссылка: файл это или папка. */
+export type SymlinkTarget = 'file' | 'directory';
+
+/** Куда ведёт символическая ссылка и что там лежит. Есть только при `kind === 'symlink'`. */
+export interface SymlinkInfo {
+  /** Цель ссылки: путь, куда она ведёт (у битой — сам текст ссылки). */
+  target: string;
+  /** Что лежит по цели: папка или файл. */
+  kind: SymlinkTarget;
+  /** Цель не найдена — ссылка «битая». */
+  broken: boolean;
+}
+
 export interface DirEntry {
   name: string;
   path: string;
@@ -148,6 +161,12 @@ export interface DirEntry {
   size: number;
   /** Время последней правки, мс. Нужно сортировке «по времени изменения». */
   mtimeMs: number;
+  /**
+   * Куда ведёт символическая ссылка и что там лежит. Задано только при
+   * `kind === 'symlink'`: по этому видно, раскрывать запись как папку, открывать как
+   * файл или не трогать вовсе (битая ссылка). Смысл полей — в `shared/entry-kind.ts`.
+   */
+  symlink?: SymlinkInfo;
 }
 
 export interface FileStat {

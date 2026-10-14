@@ -23,6 +23,15 @@ describe('sortTree: по имени', () => {
     expect(names(sortTree(entries, { foldersFirst: true, sort: 'name' }))).toEqual(['a', 'a.ts', 'b.ts']);
   });
 
+  it('ссылка на папку — среди папок, а не среди файлов', () => {
+    const entries = [
+      entry('a.ts', 'file'),
+      entry('link-dir', 'symlink', { symlink: { target: '/p/dir', kind: 'directory', broken: false } }),
+      entry('dir', 'directory'),
+    ];
+    expect(names(sortTree(entries, { foldersFirst: true, sort: 'name' }))).toEqual(['dir', 'link-dir', 'a.ts']);
+  });
+
   it('без «папки выше» сортирует всё вместе по имени', () => {
     const entries = [entry('b.ts', 'file'), entry('a', 'directory')];
     expect(names(sortTree(entries, { foldersFirst: false, sort: 'name' }))).toEqual(['a', 'b.ts']);

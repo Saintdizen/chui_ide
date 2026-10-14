@@ -5,6 +5,7 @@ import {
   MAX_IMAGE_BYTES,
   type PickedImage,
 } from '../../shared/api';
+import { entryIsDirectory } from '../../shared/entry-kind';
 import type { DocumentStore } from '../core/document-store';
 import type { EditorApi } from '../core/editor-api';
 import { languageFromPath } from '../core/languages';
@@ -263,7 +264,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     try {
       if (kind === 'dir') {
         const entries = await deps.workspace.readDir(target);
-        const list = entries.map((entry) => `${entry.name}${entry.kind === 'directory' ? '/' : ''}`).join('\n');
+        const list = entries.map((entry) => `${entry.name}${entryIsDirectory(entry) ? '/' : ''}`).join('\n');
         return {
           kind: 'note',
           label: `${basename(target)}/`,
@@ -328,7 +329,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
       for (const entry of entries) {
         if (result.length >= MAX_MENTIONS) return;
         const rel = relativePath(root, entry.path);
-        if (entry.kind === 'directory') {
+        if (entryIsDirectory(entry)) {
           if (MENTION_SKIP.has(entry.name)) continue;
           result.push(`${rel}/`);
           await walk(entry.path, depth + 1);

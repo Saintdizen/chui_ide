@@ -5253,6 +5253,22 @@ body > .overlay {
   opacity: 0.75;
 }
 
+/* Символическая ссылка: стрелка вместо буквы состояния. Битая ссылка — красная,
+   а имя зачёркнуто: по ней ничего не открыть, и это видно без клика. */
+.tree-badge.is-symlink {
+  --change_color: var(--text_color_tertiary);
+}
+
+.tree-badge.is-symlink.is-broken {
+  --change_color: var(--text_color_error);
+}
+
+.tree-row.is-broken-link .tree-name {
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+
+
 /* Папка с правками внутри: точка в цвете самой заметной из них. Именно точка,
    а не буква: сама папка не изменена, и «M» на ней читалась бы неправдой. */
 .tree-dot {

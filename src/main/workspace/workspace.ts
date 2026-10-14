@@ -12,9 +12,11 @@ import {
   type SearchHit,
   type SearchOptions,
   type SearchResult,
+  type SymlinkInfo,
   type WorkspaceChangedPayload,
   type WorkspaceInfo,
 } from '../../shared/api';
+import { compareEntries } from '../../shared/entry-kind';
 import { nextActiveRoot, type WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
 import { ContentCache, type ContentCacheStats } from './content-cache';
@@ -270,26 +272,37 @@ export class WorkspaceService {
 
     const entries = await Promise.all(
       dirents.map(async (dirent): Promise<DirEntry | null> => {
-        const kind = dirent.isDirectory() ? 'directory' : dirent.isSymbolicLink() ? 'symlink' : 'file';
+        const isSymlink = dirent.isSymbolicLink();
+        const kind = dirent.isDirectory() ? 'directory' : isSymlink ? 'symlink' : 'file';
         if (kind === 'directory' && IGNORED_DIRS.has(dirent.name)) return null;
 
         const full = path.join(dir, dirent.name);
         let size = 0;
         let mtimeMs = 0;
+        let symlink: SymlinkInfo | undefined;
         try {
+          // `stat` идёт ПО ссылке: для ссылки так видно, что лежит на самом деле —
+          // папка или файл. Дереву это нужно, чтобы знать, раскрывать запись или открывать.
           const stat = await fs.stat(full);
           size = stat.size;
           mtimeMs = stat.mtimeMs;
+          if (isSymlink) {
+            const target = await fs.realpath(full).catch(() => full);
+            symlink = { target, kind: stat.isDirectory() ? 'directory' : 'file', broken: false };
+          }
         } catch {
-          // битый симлинк — размер и время неизвестны
+          // Битая ссылка — размера и времени нет, цель не найдена: запись только
+          // показываем, читать её нельзя (попытка упадёт «Файл не найден»).
+          if (isSymlink) {
+            const target = await fs.readlink(full).catch(() => full);
+            symlink = { target, kind: 'file', broken: true };
+          }
         }
-        return { name: dirent.name, path: full, kind, size, mtimeMs };
+        return { name: dirent.name, path: full, kind, size, mtimeMs, ...(symlink ? { symlink } : {}) };
       }),
     );
 
-    return entries
-      .filter((entry): entry is DirEntry => entry !== null)
-      .sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'directory' ? -1 : 1));
+    return entries.filter((entry): entry is DirEntry => entry !== null).sort(compareEntries);
   }
 
   /**

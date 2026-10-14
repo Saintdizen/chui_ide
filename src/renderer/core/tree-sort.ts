@@ -11,6 +11,7 @@
  */
 
 import type { DirEntry, GitChange, TreeSort } from '../../shared/api';
+import { entryIsDirectory } from '../../shared/entry-kind';
 
 export interface SortOptions {
   /** Папки выше файлов. */
@@ -34,7 +35,8 @@ const byName = (a: DirEntry, b: DirEntry): number => a.name.localeCompare(b.name
  * идёт от диска, и портить его нельзя — по нему строится следующая отрисовка.
  */
 export function sortTree(entries: readonly DirEntry[], options: SortOptions): DirEntry[] {
-  const kindRank = (entry: DirEntry): number => (options.foldersFirst && entry.kind === 'directory' ? 0 : 1);
+  // Ссылка на папку — тоже папка: она раскрывается, и в списке ей место среди папок.
+  const kindRank = (entry: DirEntry): number => (options.foldersFirst && entryIsDirectory(entry) ? 0 : 1);
   const changeOf = options.changeOf ?? ((): undefined => undefined);
 
   return [...entries].sort((a, b) => {
