@@ -72,7 +72,7 @@ import { packageForModule } from '../shared/python-packages';
 import { fetchResultsSummary } from '../shared/git-multiroot';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
-import { applyTextEdits } from '../shared/edits';
+import { applyTextEdits, fromOffset } from '../shared/edits';
 import { decideSaveAs } from '../shared/save-as';
 import { isEmptyCommitMessage } from '../shared/commit-message';
 import { pairFromSelection } from './core/file-compare';
@@ -123,6 +123,7 @@ import { createHistoryModal } from './ui/history-modal';
 import { createBookmarksModal } from './ui/bookmarks-modal';
 import { createSurroundModal } from './ui/surround-modal';
 import { createRegexTester } from './ui/regex-tester';
+import { createStructuralSearch } from './ui/structural-search';
 import { createIdentityModal } from './ui/identity-modal';
 import { createForgeModal } from './ui/forge-modal';
 import { createTextModal } from './ui/text-modal';
@@ -1968,6 +1969,49 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // выделения — чаще всего шаблон приходят проверять именно на выделенном куске.
   const regexTester = createRegexTester({ initialText: () => editors.selectedText() });
   document.body.appendChild(regexTester.element);
+
+  // Замена по структуре: образец и замена вводятся в окне, а правку применяет
+  // приложение — ей нужен документ, тогда правка идёт обычным путём (undo и сохранение).
+  const structuralSearch = createStructuralSearch({
+    activeText: () => {
+      const path = editors.currentPath;
+      return path ? (documents.get(path)?.value ?? null) : null;
+    },
+    selectionText: () => editors.selectedText(),
+    apply: async ({ start, end, inserted }) => {
+      const path = editors.currentPath;
+      if (!path) return false;
+      const document = documents.get(path);
+      if (!document || document.readOnly) {
+        showToast('Файл открыт только для чтения', 'error');
+        return false;
+      }
+      // Одной правкой на весь участок — так она ложится в историю одним шагом.
+      const from = fromOffset(document.value, start);
+      const to = fromOffset(document.value, end);
+      const result = await edits.applyFileEdits([
+        {
+          path,
+          edits: [
+            {
+              startLine: from.line,
+              startColumn: from.column,
+              endLine: to.line,
+              endColumn: to.column,
+              newText: inserted,
+              oldText: document.value.slice(start, end),
+            },
+          ],
+        },
+      ]);
+      if (result.failed.length > 0) {
+        showToast(result.failed[0]!.message, 'error');
+        return false;
+      }
+      return true;
+    },
+  });
+  document.body.appendChild(structuralSearch.element);
 
   const bookmarksModal = createBookmarksModal({
     bookmarks,
@@ -4125,6 +4169,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'view.regexTester', title: 'Отладчик регулярных выражений', category: 'Вид' }, () => {
     regexTester.open();
+  });
+
+  define({ id: 'editor.structuralReplace', title: 'Заменить по структуре', category: 'Рефакторинг' }, () => {
+    structuralSearch.open();
   });
 
   define({ id: 'view.showProblems', title: 'Проблемы', category: 'Вид', keywords: ['ошибки', 'warning'] }, () => {

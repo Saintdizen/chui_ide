@@ -7408,6 +7408,104 @@ body > .overlay {
 /* ── отладчик регулярных выражений ─────────────────────────────────────── */
 
 /* Окно шире диалога одного поля: слева поля, справа ответ — но не на весь экран. */
+/* ── замена по структуре кода ───────────────────────────────────────────── */
+
+/* Слева образец и замена, справа найденное — как у отладчика регэкспов. */
+.structural-modal {
+  width: min(760px, 100%);
+  height: min(560px, 100%);
+}
+
+.structural-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.structural-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  border-right: 1px solid var(--separator_color);
+}
+
+.structural-form .field-label {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Образец и замена — код: моноширинный, как в редакторе. */
+.structural-pattern,
+.structural-replacement {
+  font-family: var(--font_mono);
+}
+
+.structural-replace-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.structural-replace-row .structural-replacement {
+  flex: 1;
+  min-width: 0;
+}
+
+.structural-output {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
+
+.structural-status {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.structural-status.is-error {
+  color: var(--red_prime_background);
+}
+
+.structural-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.structural-match {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.structural-match-text {
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  overflow-wrap: anywhere;
+}
+
+.structural-match-captures {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_micro_size);
+  overflow-wrap: anywhere;
+}
+
+.structural-more {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+}
+
 .regex-modal {
   width: min(900px, 100%);
   height: min(620px, 100%);

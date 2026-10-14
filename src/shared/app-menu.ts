@@ -75,6 +75,7 @@ const EDIT: MenuNode = {
     { label: 'Выделить всё', accelerator: 'Ctrl+A', role: 'selectAll' },
     { separator: true },
     { label: 'Поиск по проекту', accelerator: 'Ctrl+Shift+F', command: 'search.project' },
+    { label: 'Заменить по структуре…', command: 'editor.structuralReplace' },
     { separator: true },
     // Макросы: редкий жест, но найти их должно быть можно — потому и в меню, без клавиш.
     { label: 'Макрос: начать или остановить запись', command: 'editor.macroRecord' },
