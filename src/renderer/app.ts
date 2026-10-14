@@ -107,6 +107,7 @@ import { TODO_QUERY, toTodoItems } from '../shared/todo-list';
 import { createPalette } from './ui/palette';
 import { createPopover, type PopoverView } from './ui/popover';
 import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-env-popover';
+import { createMeaningSearch } from './ui/meaning-search';
 import { createQuickOpen } from './ui/quick-open';
 import { createSymbolPicker } from './ui/symbol-picker';
 import { isEmptyTest, suggestTestPath, truncateTestCode } from '../shared/test-generation';
@@ -1926,6 +1927,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   });
   document.body.appendChild(symbolPicker.element);
+
+  // Поиск по смыслу: запрос словами, а не точной строкой. Источники те же, что у
+  // поиска агента — имена символов и текстовые строки, — но список собирается тут,
+  // в редакторе. Открываем результат тем же путём, что и переход к символу.
+  const meaningSearch = createMeaningSearch({
+    rpc,
+    relative: (path) => workspace.relative(path),
+    openHit: (hit) => {
+      void openPath(hit.path).then(() => editors.reveal(hit.path, hit.line, hit.column));
+    },
+  });
+  document.body.appendChild(meaningSearch.element);
 
   // Панель отладки в нижнем доке: управление сессией, стек и переменные.
   const debugPanel = createDebugPanel({
@@ -4005,6 +4018,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   define(
     { id: 'search.findExports', title: 'Где экспортируется', category: 'Поиск', keywords: ['export', 'экспорт'] },
     () => void openFindExports(),
+  );
+
+  define(
+    {
+      id: 'search.meaning',
+      title: 'Поиск по смыслу',
+      category: 'Поиск',
+      keybinding: 'Ctrl+Shift+M',
+      keywords: ['смысл', 'словами', 'meaning', 'semantic'],
+    },
+    () => meaningSearch.open(),
   );
 
   /**
