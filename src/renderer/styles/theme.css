@@ -318,6 +318,11 @@
   /* Покрытие ветвей: строка исполнена, но не все ветви условия пройдены. Жёлтый —
      тише красного: код работает, не хватает лишь одной ветви в тестах. */
   --coverage_partial_background: rgba(210, 153, 34, 0.14);
+  /* Профиль строк: «жар» от тёплой строки к горячей — три ступени одной роли.
+     Одна краска с разной плотностью: так видно градацию, а не три разных цвета. */
+  --profile_cool_background: rgba(255, 145, 60, 0.1);
+  --profile_warm_background: rgba(255, 145, 60, 0.2);
+  --profile_hot_background: rgba(255, 120, 60, 0.34);
 }
 
 @media (prefers-color-scheme: light) {
@@ -429,6 +434,9 @@
     --debug_line_background: rgba(0, 136, 255, 0.16);
     --coverage_missing_background: rgba(255, 56, 60, 0.14);
     --coverage_partial_background: rgba(180, 130, 20, 0.14);
+    --profile_cool_background: rgba(224, 122, 30, 0.1);
+    --profile_warm_background: rgba(224, 122, 30, 0.2);
+    --profile_hot_background: rgba(214, 96, 20, 0.32);
     --highlight_background: color-mix(in srgb, var(--yellow_prime_background) 32%, transparent);
   }
 }

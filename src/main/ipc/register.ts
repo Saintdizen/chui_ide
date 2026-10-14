@@ -47,6 +47,7 @@ import { findInterpreters } from '../python/interpreters';
 import { installPackages, installedPackages } from '../python/pip';
 import { collectTests } from '../python/tests';
 import { formatPython } from '../python/format';
+import { runLineProfile } from '../python/line-profile';
 import { checkEnvironments } from '../python/health';
 import type { SessionStore } from '../session-store';
 import type { ProjectConfigStore } from '../project-config';
@@ -401,6 +402,20 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('python.format', (params) => {
     const root = requireRoot();
     return formatPython(root, resolvePython(root), params.path, params.text);
+  });
+
+  // Профиль строк: свой профилировщик на stdlib исполняет скрипт и отдаёт время по
+  // строкам. Интерпретатор — тот же, что у форматирования и проверок: профиль должен
+  // быть про то окружение, в котором человек работает.
+  router.register('python.profileLines', (params) => {
+    const root = requireRoot();
+    return runLineProfile({
+      root,
+      python: resolvePython(root),
+      path: params.path,
+      tempDir: app.getPath('temp'),
+      ...(params.args ? { args: params.args } : {}),
+    });
   });
 
   /* ── Node: окружение проекта ───────────────────────────────────────────── */

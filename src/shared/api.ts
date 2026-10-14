@@ -21,6 +21,7 @@ import type { GitLfsInfo } from './git-lfs';
 import type { GitIdentity, GitSshKey } from './git-identity';
 import type { WorkspaceRoot } from './workspace-roots';
 import type { LspStatus } from './lsp-status';
+import type { LineProfile } from './line-profile';
 import type { SemanticToken } from './lsp-semantic-tokens';
 import type { FolderCompareResult } from './folder-compare';
 import type { ProjectPackage } from './monorepo';
@@ -891,6 +892,21 @@ export interface PythonFormatResult {
  */
 export type NodeFormatResult = PythonFormatResult;
 
+/**
+ * Профиль строк файла от своего профилировщика (`main/python/line-profile.ts`):
+ * строки с временем и «жаром», плюс что программа напечатала и как завершилась.
+ */
+export interface PythonLineProfileResult {
+  profile: LineProfile;
+  /** Хвост вывода программы — показать его целиком незачем. */
+  stdout: string;
+  stderr: string;
+  /** Прогон не состоялся: интерпретатор не запустился, истёк таймаут. */
+  failed: boolean;
+  /** Пояснение к неудаче для интерфейса; `null` — всё в порядке. */
+  message: string | null;
+}
+
 /* ── LSP ───────────────────────────────────────────────────────────────── */
 
 /** Один языковой сервер: язык, команда запуска и включён ли он. */
@@ -1649,6 +1665,11 @@ export interface ChuiMethods {
   'python.envHealth': { params: void; result: EnvironmentHealth[] };
   /** Отформатировать текст файла инструментом окружения (ruff или black). */
   'python.format': { params: { path: string; text: string }; result: PythonFormatResult };
+  /**
+   * Профиль строк файла: свой профилировщик на стандартной библиотеке исполняет
+   * скрипт и возвращает, сколько времени прошло на каждой строке.
+   */
+  'python.profileLines': { params: { path: string; args?: string[] }; result: PythonLineProfileResult };
 
   /** Окружение Node: версия Node и менеджер пакетов проекта. */
   'node.info': { params: void; result: NodeInfo };

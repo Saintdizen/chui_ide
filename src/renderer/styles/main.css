@@ -881,6 +881,20 @@ textarea {
   background: var(--coverage_partial_background);
 }
 
+/* Горячие строки профиля: чем больше времени строка съела, тем плотнее заливка.
+   Ступеней три — градация видна, а пестроты нет; мелочь не красится вовсе. */
+.profile-line.is-hot-1 {
+  background: var(--profile_cool_background);
+}
+
+.profile-line.is-hot-2 {
+  background: var(--profile_warm_background);
+}
+
+.profile-line.is-hot-3 {
+  background: var(--profile_hot_background);
+}
+
 /* Полоски изменений в жёлобе: узкая черта в полосе украшений справа от номеров
    строк — добавлено (зелёная), изменено (жёлтая), удалено (красная). Цвета — те
    же роли git, что у пометок в дереве и в панели изменений. */

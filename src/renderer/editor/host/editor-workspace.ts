@@ -56,6 +56,7 @@ import {
   EditorHost,
   type ChangeMarkerHit,
   type CoverageEntry,
+  type ProfileLineEntry,
   type CursorState,
   type EditorContextInfo,
   type RunMarkerHit,
@@ -941,6 +942,12 @@ export class EditorWorkspace {
 
   setCoverage(files: Iterable<CoverageEntry>): void {
     for (const pane of this.panes) pane.setCoverage(files);
+  }
+
+  /** Горячие строки профиля на всех панелях (уровень «жара» считает приложение). */
+  setLineProfile(files: Iterable<ProfileLineEntry>): void {
+    const list = [...files];
+    for (const pane of this.panes) pane.setLineProfile(list);
   }
 
   setDebugLine(path: string | null, line: number | null): void {

@@ -137,6 +137,8 @@ const PYTHON: MenuNode = {
   label: 'Python',
   children: [
     { label: 'Виртуальные окружения…', command: 'python.environments' },
+    { label: 'Профиль строк (узкое место)', command: 'python.profileLines' },
+    { label: 'Убрать подсветку профиля', command: 'python.clearProfileLines' },
     { separator: true },
     { label: 'Перезапустить языковые серверы', command: 'lsp.restart' },
   ],

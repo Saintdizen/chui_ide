@@ -148,6 +148,9 @@ export interface CursorState {
  * с наполовину пройденной ветвью. Путь — абсолютный: редактор ключует файлы так.
  */
 export type CoverageEntry = readonly [path: string, missing: readonly number[], partial?: readonly number[]];
+// Профиль строк: путь и строки с уровнем «жара» (1..3). Уровень считает приложение
+// (`shared/line-profile.ts`): редактор только красит, пороги в нём не живут.
+export type ProfileLineEntry = readonly [path: string, rows: readonly { line: number; level: 1 | 2 | 3 }[]];
 
 export interface EditorHostOptions {
   /** Сколько пробелов в шаге отступа (Tab). */
@@ -467,6 +470,8 @@ export class EditorHost {
    * нет. Отдельно от непокрытых строк — это разная тяжесть, и видеть их надо по-разному.
    */
   private readonly coveragePartial = new Map<string, ReadonlySet<number>>();
+  /** Горячие строки профиля: строка → уровень (1..3), для заливки. */
+  private readonly profileLines = new Map<string, readonly { line: number; level: 1 | 2 | 3 }[]>();
   private blameLine: { path: string; line: number; text: string } | null = null;
   private readonly blameAll = new Map<string, readonly { line: number; text: string }[]>();
   private debugLine: { path: string; line: number } | null = null;
@@ -1380,6 +1385,9 @@ export class EditorHost {
     for (const line of this.coveragePartial.get(path) ?? []) {
       if (!missing.has(line)) backgrounds.push({ line, className: 'coverage-partial-line' });
     }
+    for (const item of this.profileLines.get(path) ?? []) {
+      backgrounds.push({ line: item.line, className: `profile-line is-hot-${item.level}` });
+    }
     if (this.debugLine && this.debugLine.path === path) {
       backgrounds.push({ line: this.debugLine.line, className: 'debug-line' });
     }
@@ -1577,6 +1585,21 @@ export class EditorHost {
       if (lines.length > 0) this.coverageLines.set(path, new Set(lines));
       if (partial && partial.length > 0) this.coveragePartial.set(path, new Set(partial));
       if (lines.length > 0 || (partial && partial.length > 0)) affected.add(path);
+    }
+    for (const path of affected) this.refreshDecorations(path);
+  }
+
+  /**
+   * Горячие строки профиля: наборы по файлам, целиком. Пусто — подсветку снять.
+   * Уровень «жара» считает приложение: тут он уже готов, редактор только красит.
+   */
+  setLineProfile(files: Iterable<ProfileLineEntry>): void {
+    const affected = new Set(this.profileLines.keys());
+    this.profileLines.clear();
+    for (const [path, rows] of files) {
+      if (rows.length === 0) continue;
+      this.profileLines.set(path, rows);
+      affected.add(path);
     }
     for (const path of affected) this.refreshDecorations(path);
   }
