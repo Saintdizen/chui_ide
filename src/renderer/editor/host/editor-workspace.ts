@@ -61,6 +61,7 @@ import {
 } from './editor-host';
 import type { CursorStyle } from '../../../shared/cursor-style';
 import type { MacroStep } from '../input/macro';
+import type { VimMode } from '../input/vim';
 import type { WhitespaceMode } from '../view/whitespace';
 
 /** Значение выражения для подсказки отладчика: что показать и какого типа. */
@@ -96,6 +97,10 @@ export interface EditorWorkspaceOptions {
   wordWrap?: boolean;
   /** Плавная прокрутка: прыжок курсора ведёт текст разгоном. */
   smoothScroll?: boolean;
+  /** Vim-режим: модальное управление клавишами (настройка `editor.vimMode`). */
+  vimMode?: boolean;
+  /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
+  onVimModeChange?: (mode: VimMode) => void;
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
   /** Emmet: раскрытие сокращений по Tab в разметке и стилях (см. `input/emmet.ts`). */
@@ -230,6 +235,8 @@ export class EditorWorkspace {
   private readonly minimap: boolean | undefined;
   private readonly wordWrap: boolean | undefined;
   private readonly smoothScroll: boolean | undefined;
+  private readonly vimModeInitial: boolean | undefined;
+  private readonly vimModeChange: ((mode: VimMode) => void) | undefined;
   /** Включён ли Emmet — живой геттер: его меняют в настройках без пересоздания панели. */
   private readonly emmetEnabled: (() => boolean) | undefined;
   /** Проверка орфографии: словарь и настройка — одни на все панели. */
@@ -347,6 +354,8 @@ export class EditorWorkspace {
     this.minimap = options.minimap;
     this.wordWrap = options.wordWrap;
     this.smoothScroll = options.smoothScroll;
+    this.vimModeInitial = options.vimMode;
+    this.vimModeChange = options.onVimModeChange;
     this.emmetEnabled = options.emmetEnabled;
     this.spell = options.spellcheck;
     this.spellEnabled = options.spellcheckEnabled;
@@ -446,6 +455,8 @@ export class EditorWorkspace {
       minimap: this.minimap,
       wordWrap: this.wordWrap,
       smoothScroll: this.smoothScroll,
+      vimMode: this.vimModeInitial,
+      onVimModeChange: this.vimModeChange,
       emmetEnabled: this.emmetEnabled,
       spellcheck: this.spell,
       spellcheckEnabled: this.spellEnabled,
@@ -816,6 +827,16 @@ export class EditorWorkspace {
     return this.pane.playMacro(steps);
   }
 
+  /** Текущий режим Vim активной панели (при выключенном — «вставка»). */
+  vimMode(): VimMode {
+    return this.pane.vimMode();
+  }
+
+  /** Включить или выключить Vim-режим во всех панелях. */
+  setVimMode(on: boolean): void {
+    for (const pane of this.panes) pane.setVimMode(on);
+  }
+
   /** Раздать макрос всем панелям: повтор доступен в любой из них. */
   restoreMacro(steps: readonly MacroStep[]): void {
     for (const pane of this.panes) pane.restoreMacro(steps);
@@ -833,6 +854,7 @@ export class EditorWorkspace {
     minimap?: boolean;
     wordWrap?: boolean;
     smoothScroll?: boolean;
+    vimMode?: boolean;
     ligatures?: boolean;
     spellcheck?: boolean;
   }): void {

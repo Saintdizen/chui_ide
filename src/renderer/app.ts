@@ -315,6 +315,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     minimap: settings.editor.minimap,
     wordWrap: settings.editor.wordWrap,
     smoothScroll: settings.editor.smoothScroll,
+    vimMode: settings.editor.vimMode,
+    // Смена режима Vim обновляет значок в строке состояния.
+    onVimModeChange: () => refreshStatus(),
     ligatures: settings.editor.fontLigatures,
     // Живой геттер: настройку меняют в окне без пересоздания редактора.
     emmetEnabled: () => settings.editor.emmet,
@@ -4333,6 +4336,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     playMacro(times);
   });
 
+  /**
+   * Vim-режим: модальное управление клавишами. Настройка переживает перезапуск, а
+   * состояние (текущий режим) живёт в вводе редактора. Переключение применяется сразу,
+   * не дожидаясь повторного чтения настроек.
+   */
+  define({ id: 'editor.toggleVim', title: 'Vim-режим: включить или выключить', category: 'Редактор' }, () => {
+    const next = !settings.editor.vimMode;
+    settings = { ...settings, editor: { ...settings.editor, vimMode: next } };
+    editors.setVimMode(next);
+    refreshStatus();
+    showToast(next ? 'Vim-режим включён' : 'Vim-режим выключен');
+    void saveSettingsPatch({ editor: { vimMode: next } }).catch(() => undefined);
+  });
+
   // Орфография: добавить слово под курсором в словарь или пропустить его на сеанс.
   define(
     {
@@ -4505,6 +4522,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       changes: git.changeCount,
       projectKindId: projectScan && projectScan.kind.source !== 'none' ? projectScan.kind.id : null,
       problems: editors.problemCounts(),
+      // Vim-режим: значок в строке состояния, когда режим включён.
+      vim: settings.editor.vimMode ? editors.vimMode() : null,
       // Идёт запись макроса — точка и число действий: забыть про запись легко.
       macro: editors.isRecordingMacro() ? { steps: editors.macroSteps().length } : null,
       // Виджет окружения говорит на языке проекта: у Node — версия и менеджер,
@@ -4543,6 +4562,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       minimap: next.editor.minimap,
       wordWrap: next.editor.wordWrap,
       smoothScroll: next.editor.smoothScroll,
+      vimMode: next.editor.vimMode,
       ligatures: next.editor.fontLigatures,
       spellcheck: next.editor.spellcheck,
     });

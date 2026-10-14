@@ -934,6 +934,18 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       switchRow('Миникарта', editor.minimap, (value) => editable({ minimap: value })),
       switchRow('Перенос длинных строк', editor.wordWrap, (value) => editable({ wordWrap: value })),
       switchRow('Плавная прокрутка', editor.smoothScroll, (value) => editable({ smoothScroll: value })),
+      switchRow('Vim-режим', editor.vimMode, (value) => editable({ vimMode: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Модальное управление клавишами, как в Vim: нормальный и визуальный режимы, операторы (d/c/y), счётчики. Выход из вставки — Escape.',
+      ),
+      switchRow('Vim-режим', editor.vimMode, (value) => editable({ vimMode: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Модальное управление клавишами, как в Vim: нормальный и визуальный режимы, операторы (d/c/y), счётчики. Выход из вставки — Escape.',
+      ),
       h(
         'div',
         { class: 'field-hint' },

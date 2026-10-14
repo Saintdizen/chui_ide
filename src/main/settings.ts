@@ -190,6 +190,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Плавная прокрутка включена: дальний прыжок так читается, а быстрый набор она не
     // задевает (плавными едут только прыжки, а не каждое движение курсора).
     smoothScroll: true,
+    // Vim-режим выключен: это выбор человека, а не поведение по умолчанию.
+    vimMode: false,
     // Лигатуры выключены: не всякий шрифт их умеет, и не всем они нравятся.
     fontLigatures: false,
     // Своих сниппетов по умолчанию нет: набор, что знает редактор, живёт в коде
@@ -423,6 +425,7 @@ export class SettingsStore {
       if (patch.editor.minimap !== undefined) next.minimap = patch.editor.minimap === true;
       if (patch.editor.wordWrap !== undefined) next.wordWrap = patch.editor.wordWrap === true;
       if (patch.editor.smoothScroll !== undefined) next.smoothScroll = patch.editor.smoothScroll === true;
+      if (patch.editor.vimMode !== undefined) next.vimMode = patch.editor.vimMode === true;
       if (patch.editor.fontLigatures !== undefined) next.fontLigatures = patch.editor.fontLigatures === true;
       if (patch.editor.emmet !== undefined) next.emmet = patch.editor.emmet === true;
       if (patch.editor.formatOnPaste !== undefined) next.formatOnPaste = patch.editor.formatOnPaste === true;
@@ -741,6 +744,8 @@ function loadSettings(filePath: string): StoredSettings {
       wordWrap: parsed.editor?.wordWrap === true,
       // Плавная прокрутка выключена только явным `false`: старый settings.json её не знает.
       smoothScroll: parsed.editor?.smoothScroll !== false,
+      // Vim-режим включён только явным `true`: старый settings.json его не знает.
+      vimMode: parsed.editor?.vimMode === true,
       fontLigatures: parsed.editor?.fontLigatures === true,
       emmet: parsed.editor?.emmet !== false,
       // Форматирование при вставке включено только явным `true`: старый файл его не знает.

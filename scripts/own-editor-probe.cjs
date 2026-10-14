@@ -3176,6 +3176,68 @@ async function macroCheck(win) {
   return { запись: recorded, повтор: replayed };
 }
 
+/**
+ * Vim-режим: включаем его на вводе и жмём НАСТОЯЩИЕ клавиши. Видно, что в нормальном
+ * режиме буквы командуют (dw удаляет слово), что i входит во вставку, а Escape выходит,
+ * и что dd удаляет строку целиком. В конце режим выключаем — другим проверкам он не мешает.
+ */
+async function vimCheck(win) {
+  const send = (event) => win.webContents.sendInputEvent(event);
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  await script(
+    '(() => { window.probeScroll.input.setVimMode(true); window.probeScroll.input.focus(); return true; })()',
+  );
+  win.focus();
+  await wait(200);
+
+  const press = async (keyCode) => {
+    send({ type: 'keyDown', keyCode });
+    send({ type: 'keyUp', keyCode });
+    await wait(50);
+  };
+
+  // Нормальный режим: dw удаляет слово вместе с пробелом после него.
+  const before = await script(`(() => {
+    const { buffer, controller } = window.probeScroll;
+    controller.setSelection({ anchor: 0, active: 0 });
+    return { строка: buffer.lineText(1), режим: window.probeScroll.input.vimMode() };
+  })()`);
+  await press('d');
+  await press('w');
+  const afterDelete = await script('window.probeScroll.buffer.lineText(1)');
+
+  // Вставка: i включает, печатная буква идёт обычным путём, Escape возвращает в нормальный.
+  await press('i');
+  const insertMode = await script('window.probeScroll.input.vimMode()');
+  send({ type: 'char', keyCode: 'X' });
+  await wait(60);
+  await press('Escape');
+  const afterInsert = await script(`(() => ({
+    режим: window.probeScroll.input.vimMode(),
+    строка: window.probeScroll.buffer.lineText(1),
+  }))()`);
+
+  // dd удаляет строку целиком.
+  const linesBefore = await script('window.probeScroll.buffer.lineCount');
+  await press('d');
+  await press('d');
+  const linesAfter = await script('window.probeScroll.buffer.lineCount');
+
+  await script('(() => { window.probeScroll.input.setVimMode(false); return true; })()');
+
+  return {
+    режим_в_покое: before.режим,
+    было: before.строка.slice(0, 18),
+    после_dw: afterDelete.slice(0, 18),
+    режим_вставки: insertMode,
+    режим_после_escape: afterInsert.режим,
+    строка_с_буквой: afterInsert.строка.slice(0, 18),
+    строк_было: linesBefore,
+    строк_стало: linesAfter,
+  };
+}
+
 async function main() {
   const lines = [];
   const log = (text) => {
@@ -3458,6 +3520,11 @@ async function main() {
   const macro = await macroCheck(win);
   log('## Макросы: запись и повтор');
   log(JSON.stringify(macro, null, 2));
+  log('');
+
+  const vim = await vimCheck(win);
+  log('## Vim-режим');
+  log(JSON.stringify(vim, null, 2));
   log('');
 
   const smooth = await smoothScrollCheck(win);

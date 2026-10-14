@@ -1,6 +1,23 @@
 import type { LspChip } from '../../shared/lsp-status';
 import { lspOriginLabel } from '../../shared/lsp-status';
 import { h, svgIcon } from './dom';
+import type { VimMode } from '../editor/input/vim';
+
+/** Короткое слово режима Vim для строки состояния. */
+const VIM_LABEL: Record<VimMode, string> = {
+  normal: 'НОРМ',
+  insert: 'ВСТАВКА',
+  visual: 'ВИЗУАЛ',
+  'visual-line': 'ВСТРОЧНО',
+};
+
+/** Подпись режима Vim для всплывающей подсказки. */
+const VIM_TITLE: Record<VimMode, string> = {
+  normal: 'нормальный режим',
+  insert: 'режим вставки',
+  visual: 'визуальный режим',
+  'visual-line': 'визуально-строчный режим',
+};
 
 export interface StatusState {
   /** Файл открыт только для чтения (большой): показываем это словом. */
@@ -39,6 +56,11 @@ export interface StatusState {
    * Показываем точкой и числом: забыть про идущую запись легко.
    */
   macro: { steps: number } | null;
+  /**
+   * Режим Vim (`editor.vimMode`). `null` — режим выключен. В режиме вставки чип показываем
+   * тоже: он говорит, что модальность включена и что дальше можно набирать текст.
+   */
+  vim: VimMode | null;
 }
 
 export interface StatusBarView {
@@ -103,6 +125,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     lsp: null,
     progress: null,
     macro: null,
+    vim: null,
     problems: { errors: 0, warnings: 0 },
   };
 
@@ -167,6 +190,8 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h('span', { class: 'status-macro-count' }),
   );
   const macroCount = macroItem.querySelector<HTMLElement>('.status-macro-count')!;
+  // Режим Vim: короткое слово (НОРМ, ВСТАВКА, ВИЗУАЛ) в левой части полосы.
+  const vimItem = h('span', { class: 'status-item status-vim' });
   const readOnlyItem = h('span', { class: 'status-item status-readonly' });
   const versionItem = h('span', { class: 'status-item status-muted' });
   // Проблемы — значок и числа: цвет различает ошибку и предупреждение, а количество
@@ -194,6 +219,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h(
       'div',
       { class: 'status-group' },
+      vimItem,
       progressItem,
       macroItem,
       problemsItem,
@@ -240,6 +266,11 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     macroItem.hidden = macro === null;
     macroCount.textContent = macro ? `МАКРО ${macro.steps}` : '';
     macroItem.title = macro ? `Идёт запись макроса: действий ${macro.steps}` : '';
+    // Режим Vim: короткое слово. Показывается, когда режим включён.
+    const vim = state.vim;
+    vimItem.hidden = vim === null;
+    vimItem.textContent = vim ? VIM_LABEL[vim] : '';
+    vimItem.title = vim ? `Vim: ${VIM_TITLE[vim]}` : '';
     readOnlyItem.textContent = state.readOnly ? 'Только чтение' : '';
     readOnlyItem.hidden = !state.readOnly;
     readOnlyItem.title = state.readOnly ? 'Файл слишком большой для правки — открыт только для чтения' : '';

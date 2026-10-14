@@ -53,6 +53,7 @@ import { blockCommentFor, lineCommentFor } from '../input/comments';
 import { InlineCompletions } from '../input/inline-completions';
 import { EmmetExpander } from '../input/emmet';
 import type { SurroundOption } from '../input/surround';
+import type { VimMode } from '../input/vim';
 import type { CompletionTriggers } from './lsp-features';
 import { EditorView, type DebugInlineValue } from '../view/editor-view';
 import type { CursorStyle } from '../../../shared/cursor-style';
@@ -167,6 +168,10 @@ export interface EditorHostOptions {
   wordWrap?: boolean;
   /** Плавная прокрутка: прыжок курсора ведёт текст разгоном. */
   smoothScroll?: boolean;
+  /** Vim-режим: модальное управление клавишами (настройка `editor.vimMode`). */
+  vimMode?: boolean;
+  /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
+  onVimModeChange?: (mode: VimMode) => void;
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
   /**
@@ -673,6 +678,9 @@ export class EditorHost {
       // Вставили кусок — говорим приложению, где он лёг: оно решает, форматировать ли
       // (настройка `editor.formatOnPaste`) и умеет ли это сервер для языка файла.
       onPasted: (range) => this.afterPaste(range),
+      // Vim-режим: модальный разбор клавиш снаружи обычной раскладки.
+      vimMode: options.vimMode,
+      onVimModeChange: options.onVimModeChange,
     });
     // После закрытия панели фокус возвращается в текст: работа продолжается там.
     this.find.onClose = () => this.input.focus();
@@ -910,6 +918,16 @@ export class EditorHost {
     this.input.restoreMacro(steps);
   }
 
+  /** Текущий режим Vim панели (при выключенном — «вставка»). */
+  vimMode(): VimMode {
+    return this.input.vimMode();
+  }
+
+  /** Включить или выключить Vim-режим (настройка `editor.vimMode`). */
+  setVimMode(on: boolean): void {
+    this.input.setVimMode(on);
+  }
+
   /** Настройки редактора, влияющие на вид: отступ (Tab), кегль, высота строки и каретка. */
   applyOptions(options: {
     tabSize?: number;
@@ -922,6 +940,7 @@ export class EditorHost {
     minimap?: boolean;
     wordWrap?: boolean;
     smoothScroll?: boolean;
+    vimMode?: boolean;
     ligatures?: boolean;
     spellcheck?: boolean;
   }): void {
@@ -939,6 +958,7 @@ export class EditorHost {
     if (options.minimap !== undefined) this.view.setMinimap(options.minimap);
     if (options.wordWrap !== undefined) this.view.setWordWrap(options.wordWrap);
     if (options.smoothScroll !== undefined) this.view.setSmoothScroll(options.smoothScroll);
+    if (options.vimMode !== undefined) this.input.setVimMode(options.vimMode);
     if (options.ligatures !== undefined) this.view.setLigatures(options.ligatures);
     // Проверку включили или выключили: отметки пересчитываем или снимаем.
     if (options.spellcheck !== undefined) this.refreshSpell();

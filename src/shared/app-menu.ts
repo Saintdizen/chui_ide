@@ -80,6 +80,12 @@ const EDIT: MenuNode = {
     { label: 'Макрос: начать или остановить запись', command: 'editor.macroRecord' },
     { label: 'Макрос: выполнить', command: 'editor.macroPlay' },
     { label: 'Макрос: выполнить несколько раз…', command: 'editor.macroPlayCount' },
+    { separator: true },
+    // Vim-режим: редкий выбор, потому и в меню, без клавиш (настройка editor.vimMode).
+    { label: 'Vim-режим: включить или выключить', command: 'editor.toggleVim' },
+    { separator: true },
+    // Vim-режим: редкий выбор, потому и в меню, без клавиш (настройка editor.vimMode).
+    { label: 'Vim-режим: включить или выключить', command: 'editor.toggleVim' },
   ],
 };
 

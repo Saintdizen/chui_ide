@@ -3938,6 +3938,17 @@ textarea {
   }
 }
 
+/* Режим Vim: короткое слово режима (НОРМ, ВСТАВКА, ВИЗУАЛ). В нормальном и
+   визуальном режимах клавиши не печатают, а командуют — знать о них надо всегда. */
+.status-vim {
+  padding: 0 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text_color_secondary);
+  background: var(--element_background_hover);
+}
+
 /* Окружение Python — кнопка: клик открывает попап с подробностями. */
 .status-env {
   padding: 0 4px;

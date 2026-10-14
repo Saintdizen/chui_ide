@@ -29,6 +29,8 @@ import { wordAt } from '../core/graphemes';
 import { blockCommentFor, lineCommentFor } from './comments';
 import { chordCommand, chordName, isChordPrefix, resolveKey, type EditCommand, type Motion } from './keymap';
 import { MacroRecorder, recordsCommand, runMacro, type MacroStep, type MacroTarget } from './macro';
+import { VimBinding } from './vim-binding';
+import type { VimMode } from './vim';
 import type { EditorChange, EditorController } from './editor-controller';
 
 import type { EditorView } from '../view/editor-view';
@@ -78,6 +80,10 @@ export interface EditorInputOptions {
    * вставленный кусок отдельно — сам ввод о форматировании не знает и знать не должен.
    */
   onPasted?: (range: { start: number; end: number }) => void;
+  /** Vim-режим включён при создании (настройка `editor.vimMode`). */
+  vimMode?: boolean;
+  /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
+  onVimModeChange?: (mode: VimMode) => void;
 }
 
 export class EditorInputBinding {
@@ -99,6 +105,8 @@ export class EditorInputBinding {
   private composing = false;
   /** Запись макроса: копит действия, пока включена. */
   private readonly macro = new MacroRecorder();
+  /** Модальный Vim-режим: разбор клавиш и применение команд. */
+  private readonly vim: VimBinding;
   private readonly unsubscribe: () => void;
 
   constructor(view: EditorView, controller: EditorController, options: EditorInputOptions = {}) {
@@ -108,6 +116,9 @@ export class EditorInputBinding {
     this.interceptors = options.interceptors ?? [];
     this.language = options.language;
     this.onPasted = options.onPasted;
+    // Vim: начальное состояние ставим молча — слушателя режима на этом этапе ещё нет.
+    this.vim = new VimBinding(controller, options.onVimModeChange);
+    this.vim.setEnabled(options.vimMode === true, false);
     this.input = document.createElement('textarea');
     this.input.className = 'own-editor-input';
     this.input.setAttribute('autocapitalize', 'off');
@@ -179,6 +190,21 @@ export class EditorInputBinding {
     return runMacro(steps, target);
   }
 
+  /** Vim-режим включён? */
+  vimEnabled(): boolean {
+    return this.vim.enabled;
+  }
+
+  /** Текущий режим Vim (при выключенном — «вставка»). */
+  vimMode(): VimMode {
+    return this.vim.mode;
+  }
+
+  /** Включить или выключить Vim-режим (настройка `editor.vimMode`). */
+  setVimMode(on: boolean): void {
+    this.vim.setEnabled(on);
+  }
+
   /** Поставить фокус в редактор — ввод идёт в скрытое поле. */
   focus(): void {
     this.input.focus();
@@ -225,12 +251,6 @@ export class EditorInputBinding {
   }
 
   private readonly onKeyDown = (event: KeyboardEvent): void => {
-    // Сначала попапы: при видимом списке подсказок стрелки и Enter принадлежат ему,
-    // а не движению курсора. Кто ответил «моя» — забирает клавишу целиком.
-    for (const interceptor of this.interceptors) {
-      if (interceptor.handleKey(event)) return;
-    }
-
     const chord = {
       key: event.key,
       shift: event.shiftKey,
@@ -238,6 +258,19 @@ export class EditorInputBinding {
       meta: event.metaKey,
       alt: event.altKey,
     };
+
+    // Сначала попапы: при видимом списке подсказок стрелки и Enter принадлежат ему,
+    // а не движению курсора. Кто ответил «моя» — забирает клавишу целиком.
+    for (const interceptor of this.interceptors) {
+      if (interceptor.handleKey(event)) return;
+    }
+
+    // Затем — Vim-режим. В нормальном и визуальном режимах он забирает клавишу целиком,
+    // а в режиме вставки пропускает всё, кроме выхода из него (Escape).
+    if (this.vim.handleKey(chord)) {
+      event.preventDefault();
+      return;
+    }
 
     // Сочетания-приставки (`Ctrl+K Ctrl+F`): первая клавиша пары ничего не делает, а
     // только ждёт вторую. Нажали что-то другое — пары не было, клавиша идёт обычным путём.
@@ -285,6 +318,11 @@ export class EditorInputBinding {
   };
 
   private readonly onBeforeInput = (event: InputEvent): void => {
+    // Vim-режим вне вставки: клавиши там — команды, и текста в поле быть не должно.
+    if (this.vim.enabled && this.vim.mode !== 'insert') {
+      event.preventDefault();
+      return;
+    }
     // Пока идёт состав, ввод не трогаем: итог придёт по `compositionend`.
     if (this.composing) return;
     const { inputType, data } = event;
