@@ -31,7 +31,7 @@ import type { GitTag } from './git-tags';
 import type { RebaseTodoItem } from './git-rebase';
 import type { PullMode } from './git-pull';
 import type { GitRefDiff } from './git-ref-diff';
-import type { GitRootSummary } from './git-multiroot';
+import type { GitRootFetch, GitRootSummary } from './git-multiroot';
 import type { CommitPromptParts } from './commit-message';
 import type { GitBisectState } from './git-bisect';
 import type { GitSubmodule } from './git-submodules';
@@ -1793,6 +1793,8 @@ export interface ChuiMethods {
   'git.checkout': { params: { name: string; create?: boolean }; result: GitStatus };
   'git.remotes': { params: void; result: GitRemote[] };
   'git.fetch': { params: void; result: GitNetworkResult };
+  /** `fetch` во всех корнях области: итог по каждой папке (`shared/git-multiroot.ts`). */
+  'git.fetchRoots': { params: void; result: GitRootFetch[] };
   /** `mode` — как вливать (`merge`/`rebase`/`ff-only`); не задан — как настроено в git. */
   'git.pull': { params: { mode?: PullMode }; result: GitNetworkResult };
   'git.push': { params: { setUpstream?: boolean; force?: boolean }; result: GitNetworkResult };

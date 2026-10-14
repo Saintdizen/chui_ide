@@ -537,6 +537,8 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.checkout', (params) => deps.git.checkout(params.name, params.create));
   router.register('git.remotes', () => deps.git.remotes());
   router.register('git.fetch', () => deps.git.fetch());
+  // Во всех корнях области: у каждой папки свой репозиторий (см. `fetchRoots`).
+  router.register('git.fetchRoots', () => deps.git.fetchRoots(deps.workspace.rootList()));
   router.register('git.pull', (params) => deps.git.pull(params.mode));
   router.register('git.push', (params) => deps.git.push(params));
 

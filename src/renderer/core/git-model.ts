@@ -27,7 +27,7 @@ import type { GitLfsInfo } from '../../shared/git-lfs';
 import type { GitIdentity, GitSshKey } from '../../shared/git-identity';
 import type { ProjectPackage } from '../../shared/monorepo';
 import type { ForgeInfo } from '../../shared/git-platform';
-import type { GitRootSummary } from '../../shared/git-multiroot';
+import type { GitRootFetch, GitRootSummary } from '../../shared/git-multiroot';
 import { Emitter } from './events';
 import { separatorOf } from '../../shared/paths';
 import { deletedInFolder } from '../../shared/git-deleted';
@@ -558,6 +558,11 @@ export class GitModel {
   /** Забрать изменения из удалённого репозитория, не трогая рабочее дерево. */
   async fetch(): Promise<GitNetworkResult> {
     return this.network(await this.rpc.request('git.fetch'));
+  }
+
+  /** Забрать изменения во всех корнях области: у каждой папки может быть свой репозиторий. */
+  fetchRoots(): Promise<GitRootFetch[]> {
+    return this.rpc.request('git.fetchRoots');
   }
 
   /** Влить изменения из удалённого репозитория (`mode` — слиянием, перебазированием или только перемоткой). */

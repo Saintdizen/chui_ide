@@ -173,6 +173,27 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
 
   /** Сводка по корням рабочей области: видна, когда папок в окне несколько. */
   const rootsList = h('div', { class: 'sc-roots', hidden: true });
+  // Обновить все папки области разом: кнопка рядом с заголовком списка корней.
+  const rootsBox = h(
+    'div',
+    { class: 'sc-roots-box', hidden: true },
+    h(
+      'div',
+      { class: 'sc-roots-head' },
+      h('span', {}, 'Папки области'),
+      h(
+        'button',
+        {
+          class: 'icon-btn',
+          type: 'button',
+          title: 'Забрать изменения во всех папках (fetch)',
+          onClick: () => void deps.commands.execute('git.fetchRoots'),
+        },
+        svgIcon('refresh', 13),
+      ),
+    ),
+    rootsList,
+  );
 
   const element = h(
     'div',
@@ -205,7 +226,7 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       ),
     ),
     branchCreate,
-    rootsList,
+    rootsBox,
     h(
       'div',
       { class: 'sc-commit-box' },
@@ -515,12 +536,13 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
    */
   const renderRoots = (): void => {
     if (!deps.workspace.isMultiRoot) {
-      rootsList.hidden = true;
+      rootsBox.hidden = true;
       clear(rootsList);
       return;
     }
     const activeRoot = deps.workspace.root;
     clear(rootsList);
+    rootsBox.hidden = false;
     rootsList.hidden = false;
     for (const summary of deps.git.rootSummaries) {
       const isActive = summary.root === activeRoot;

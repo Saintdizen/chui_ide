@@ -69,6 +69,7 @@ import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
 import { surroundOptions } from './editor/input/surround';
 import { semanticFoldRanges } from './editor/highlight/folds';
 import { packageForModule } from '../shared/python-packages';
+import { fetchResultsSummary } from '../shared/git-multiroot';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
 import { applyTextEdits } from '../shared/edits';
@@ -3928,6 +3929,21 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     async () => {
       const result = await git.fetch();
       showToast(`fetch: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
+    },
+  );
+
+  // Многообласть: папок несколько, у каждой свой репозиторий — обновляем все разом.
+  define(
+    {
+      id: 'git.fetchRoots',
+      title: 'Забрать изменения во всех папках (fetch)',
+      category: 'Git',
+      enabled: () => workspace.isMultiRoot,
+    },
+    async () => {
+      const results = await git.fetchRoots();
+      const summary = fetchResultsSummary(results);
+      showToast(summary.text, summary.ok ? 'info' : 'error');
     },
   );
 

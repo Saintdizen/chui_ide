@@ -80,3 +80,25 @@ export function totalChanges(summaries: readonly GitRootSummary[]): number {
 export function repositoryCount(summaries: readonly GitRootSummary[]): number {
   return summaries.reduce((count, item) => count + (item.repository ? 1 : 0), 0);
 }
+
+/** Итог сетевой операции по одному корню области (например `fetch`). */
+export interface GitRootFetch {
+  root: string;
+  name: string;
+  ok: boolean;
+  message: string;
+}
+
+/**
+ * Сводка по итогам операции в нескольких папках: одной строкой о целом и списком
+ * подробностей. Папка без репозитория — тоже результат: 「пропущена」, а не ошибка
+ * всей операции, иначе одна чужая папка гасила бы отчёт по остальным.
+ */
+export function fetchResultsSummary(results: readonly GitRootFetch[]): { ok: boolean; text: string } {
+  if (results.length === 0) return { ok: false, text: 'В области нет ни одной папки' };
+  const failed = results.filter((item) => !item.ok);
+  const done = results.length - failed.length;
+  const head = `fetch: обновлено папок — ${done} из ${results.length}`;
+  const details = results.map((item) => `${item.name}: ${item.ok ? 'ок' : item.message}`);
+  return { ok: failed.length === 0, text: [head, ...details].join('\n') };
+}

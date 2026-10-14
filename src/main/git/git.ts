@@ -48,7 +48,7 @@ import {
   type GitSshKey,
 } from '../../shared/git-identity';
 import { cliFor, forgeRepo, parseGhRequests, parseGlabRequests, type ForgeInfo } from '../../shared/git-platform';
-import { summarizeRoot, type GitRootSummary } from '../../shared/git-multiroot';
+import { summarizeRoot, type GitRootFetch, type GitRootSummary } from '../../shared/git-multiroot';
 import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
@@ -758,6 +758,32 @@ export class GitService {
   /** Забрать изменения из удалённого репозитория, не трогая рабочее дерево. */
   async fetch(): Promise<GitNetworkResult> {
     return this.network(['fetch', '--all', '--prune']);
+  }
+
+  /**
+   * Забрать изменения во ВСЕХ корнях области, а не только в активном. В многообласти
+   * папки — разные репозитории, и «обновить всё» одним нажатием удобнее, чем
+   * переключать корень на каждую. Папка без репозитория или с недоступным remote
+   * не губит остальные: по каждой отдаём свой итог.
+   */
+  async fetchRoots(roots: readonly WorkspaceRoot[]): Promise<GitRootFetch[]> {
+    const results = await Promise.all(
+      roots.map(async (item): Promise<GitRootFetch> => {
+        const repoRoot = await this.repositoryRoot(item.root);
+        if (!repoRoot) {
+          return { root: item.root, name: item.name, ok: false, message: 'не репозиторий git' };
+        }
+        const result = await this.exec(['fetch', '--all', '--prune'], repoRoot, {
+          allowFailure: true,
+          timeout: NETWORK_TIMEOUT_MS,
+        });
+        const text = (result.stderr.trim() || result.stdout.trim()).trim();
+        return { root: item.root, name: item.name, ok: result.ok, message: text || 'обновлено' };
+      }),
+    );
+    // Активную папку пересчитываем: её статус виден в панели и в строке состояния.
+    await this.refresh().catch(() => undefined);
+    return results;
   }
 
   /**

@@ -5464,14 +5464,34 @@ body > .overlay {
 }
 
 /* Сводка по корням рабочей области: строка на папку. Видна только в многообласти,
-   иначе статус активного корня и так показан целиком ниже. */
+   иначе статус активного корня и так показан целиком ниже. Заголовок блока держит
+   кнопку «обновить всё»: папок несколько, и по каждой свой репозиторий. */
+.sc-roots-box {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.sc-roots-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sc-roots-head .icon-btn {
+  margin-left: auto;
+}
+
 .sc-roots {
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
   gap: 1px;
   padding: 4px 6px;
-  border-bottom: 1px solid var(--separator_color);
 }
 
 .sc-root {
