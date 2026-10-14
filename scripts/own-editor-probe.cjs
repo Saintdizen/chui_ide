@@ -60,8 +60,11 @@ function pageHtml(styles) {
     />
     <style>${styles}</style>
     <style>
-      html, body { margin: 0; height: 100%; background: var(--surface_window); }
-      #probe-root { height: 100%; }
+      html, body { margin: 0; height: 100vh; overflow: hidden; background: var(--surface_window); }
+      /* Высота корня жёстко равна окну: иначе редактор растягивается по содержимому,
+         поле прокрутки получает высоту всего файла и виртуализация отключается —
+         в DOM попадают ВСЕ строки, и проба (в том числе замер кадра) врёт. */
+      #probe-root { height: 100vh; overflow: hidden; }
     </style>
   </head>
   <body>
@@ -1228,7 +1231,7 @@ async function diffCheck(win) {
     ...Array.from({ length: 40 }, (_, i) => `const v${i} = ${i};`),
     'const x = sum(1, 2);',
     'console.log(x);',
-  ].join('\n');
+  ].join('\\n');
   const modified = [
     'function sum(a, b) {',
     '  // складываем',
@@ -1239,7 +1242,7 @@ async function diffCheck(win) {
     'const x = sum(2, 3);',
     'console.log(x);',
     'console.log("готово");',
-  ].join('\n');
+  ].join('\\n');
 
   await script(`(() => {
     const { diff } = window.probeDiff;
@@ -1498,6 +1501,17 @@ async function foldCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
   const send = (event) => win.webContents.sendInputEvent(event);
 
+  // Документу пробы нужно быть не короче диапазонов свёртки (строки 8/12/15):
+  // на коротком тексте значков в жёлобе нет, и щелчок по значку падает на undefined.
+  // Ставим длинный текст на время проверки и возвращаем прежний в конце.
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    window.__foldSavedText = buffer.getText();
+    const text = Array.from({ length: 20 }, (_, i) => 'const line' + (i + 1) + ' = ' + (i + 1) + ';').join('\\n');
+    controller.applyEdits([{ start: 0, removed: window.__foldSavedText, inserted: text }]);
+    return true;
+  })()`);
+
   // Диапазоны задаём прямо виду: в пробах страницы сервера и отступов нет.
   const applied = await script(`(() => {
     try {
@@ -1580,6 +1594,13 @@ async function foldCheck(win) {
     } catch (error) {
       return { ошибка: String(error) };
     }
+  })()`);
+
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: window.__foldSavedText }]);
+    window.__foldSavedText = undefined;
+    return true;
   })()`);
 
   return { свёртка: applied, щелчок_по_значку: clicked, клавиша: byKey, всё: all };
@@ -2283,8 +2304,8 @@ async function problemsCheck(win) {
 }
 
 /**
- * Два шва на границе своего рабочего места: F1 открывает палитру (у Monaco это делало
- * его действие), и отладочная подсказка идёт раньше языковой.
+ * Два шва на границе своего рабочего места: F1 открывает палитру (раньше это делало
+ * действие чужого движка), и отладочная подсказка идёт раньше языковой.
  */
 async function borderCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
@@ -2968,8 +2989,8 @@ async function lspCompletionCheck(win) {
 }
 
 /**
- * Ctrl+Click по слову: жест переходит к определению (у Monaco это делал его обработчик
- * открытия). Проверяем, что переход состоялся.
+ * Ctrl+Click по слову: жест переходит к определению (раньше это делал обработчик
+ * открытия чужого движка). Проверяем, что переход состоялся.
  */
 async function ctrlClickCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
@@ -3377,6 +3398,144 @@ async function emacsCheck(win) {
   };
 }
 
+
+/**
+ * Замер стоимости отрисовки: сколько времени занимает кадр. Смысл — решить фактами,
+ * нужна ли отрисовка на GPU. Меряем три случая: кадр без изменения текста (слои
+ * пересчитаны, строки переиспользованы), кадр с ПЕРЕСБОРКОЙ строк (так стоит набор
+ * символа: версия буфера выросла, видимые строки собираются заново) и то же с
+ * выделением во всю видимую зону и с декорациями (git-полоски, проблемы, семантика).
+ * Плюс — вес DOM видимой зоны и время разбора строки подсветкой.
+ */
+async function renderPerfCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  return await script(`(async () => {
+    try {
+    const { view, buffer, controller, decorations } = window.probe;
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    // Предыдущие проверки оставили в пробе крошечный файл — на семи строках мерить
+    // нечего. Грузим свой большой документ, прежний вернём в конце.
+    const saved = buffer.getText();
+    const big = Array.from({ length: 5000 }, (_, i) => 'const line' + i + ' = ' + i + ';').join('\\n');
+    controller.applyEdits([{ start: 0, removed: saved, inserted: big }]);
+    // В приложении высоту редактору задаёт панель; в пробе он в свободном корне и
+    // растягивается по содержимому — тогда виртуализация не работает и мерить нечего.
+    // Ставим высоту на время замера, в конце снимаем.
+    view.element.style.height = (window.innerHeight - 40) + 'px';
+    viewport.scrollTop = 0; viewport.scrollLeft = 0;
+
+    const time = (fn, iterations) => {
+      for (let warm = 0; warm < 5; warm += 1) fn();
+      const start = performance.now();
+      for (let i = 0; i < iterations; i += 1) fn();
+      return (performance.now() - start) / iterations;
+    };
+
+    // Кадр без изменения текста: строки переиспользуются, остальные слои пересчитаны.
+    const bare = time(() => view.refresh(), 200);
+
+    // Кадр с ПЕРЕСБОРКОЙ видимых строк: правим один знак (текст той же длины), версия
+    // буфера растёт, и слой строк собирается заново — так стоит каждая набранная буква.
+    const one = buffer.getText(0, 1);
+    const rebuild = time(() => { buffer.replace(0, 1, one); view.refresh(0); }, 150);
+
+    // Выделение во всю видимую зону (60 строк): много прямоугольников заливки.
+    const visible = view.element.querySelectorAll('.own-editor-line').length;
+    const limit = Math.max(1, visible);
+    const from = buffer.lineStart(1);
+    const to = buffer.lineStart(limit) + buffer.lineText(limit).length;
+    view.setSelections([{ anchor: from, active: to }]);
+    const selected = time(() => { buffer.replace(0, 1, one); view.refresh(0); }, 150);
+    view.setSelections([{ anchor: 0, active: 0 }]);
+
+    // Семантика + git-полоски + проблемы на всю видимую зону: как в реальном файле.
+    const semantic = [];
+    for (let line = 1; line <= limit; line += 1) {
+      semantic.push({ line, startColumn: 1, endColumn: 6, type: 'keyword', modifiers: [] });
+    }
+    view.setSemanticTokens(semantic);
+    decorations.setStrips(
+      Array.from({ length: limit }, (_, i) => ({ line: i + 1, className: 'change-gutter is-added' })),
+    );
+    decorations.setSquiggles(
+      Array.from({ length: limit }, (_, i) => ({ line: i + 1, startColumn: 1, endColumn: 6, className: 'is-error' })),
+    );
+    view.setDecorations(decorations);
+    const decorated = time(() => { buffer.replace(0, 1, one); view.refresh(0); }, 150);
+
+    // Разбор одной строки подсветкой — цена без рендера: видно, где именно тратится время.
+    const highlight = time(() => view.tokensFor(30), 1000);
+
+    const domLines = view.element.querySelectorAll('.own-editor-line').length;
+    const domNodes = view.element.querySelectorAll('*').length;
+
+    // Чистим за собой: снимаем декорации/семантику и возвращаем прежний документ —
+    // дальше по пробе идут ещё проверки по тому же редактору.
+    view.setSemanticTokens([]);
+    decorations.setStrips([]);
+    decorations.setSquiggles([]);
+    view.setDecorations(decorations);
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: saved }]);
+    view.element.style.height = '';
+
+    return {
+      'строк_в_документе': 5000,
+      'строк_в_видимой_зоне': domLines,
+      'узлов_в_видимой_зоне': domNodes,
+      'диаг_окно': window.innerHeight,
+      'диаг_корень_высота': Math.round(view.element.getBoundingClientRect().height),
+      'диаг_поле_высота': viewport.clientHeight,
+      'диаг_родитель': view.element.parentElement ? view.element.parentElement.id : null,
+      'диаг_корень_css': getComputedStyle(document.getElementById('probe-root')).height,
+      'диаг_body_css': getComputedStyle(document.body).height,
+      'диаг_корень_display': getComputedStyle(document.getElementById('probe-root')).display,
+      'диаг_редактор_css': getComputedStyle(view.element).height,
+      'диаг_редактор_display': getComputedStyle(view.element).display,
+      'диаг_редактор_класс': view.element.className,
+      'диаг_редактор_поз': getComputedStyle(view.element).position,
+      'диаг_первые_правила': (() => {
+        const out = [];
+        [...document.styleSheets].forEach((sheet, si) => {
+          let rules = [];
+          try { rules = Array.from(sheet.cssRules); } catch { return; }
+          const sample = rules.slice(0, 4).map((r) => (r.selectorText || r.cssText.slice(0, 24))).join(' ~ ');
+          out.push(si + ': ' + rules.length + ' [' + sample + ']');
+        });
+        return out.join(' || ');
+      })(),
+      'диаг_базовое_правило': (() => {
+        const found = [];
+        for (const sheet of document.styleSheets) {
+          let rules = [];
+          try { rules = Array.from(sheet.cssRules); } catch { continue; }
+          for (const rule of rules) {
+            if (rule.selectorText === '.own-editor') found.push(rule.cssText.slice(0, 60));
+          }
+        }
+        return found.join(' | ') || 'нет';
+      })(),
+      'диаг_листов': document.styleSheets.length,
+      'диаг_правил_own_editor': (() => {
+        let n = 0;
+        for (const sheet of document.styleSheets) {
+          let rules = [];
+          try { rules = Array.from(sheet.cssRules); } catch { continue; }
+          for (const rule of rules) if (rule.cssText && rule.cssText.indexOf('.own-editor') >= 0) n += 1;
+        }
+        return n;
+      })(),
+      'кадр_без_изменений_мс': Number(bare.toFixed(3)),
+      'кадр_с_пересборкой_мс': Number(rebuild.toFixed(3)),
+      'кадр_с_выделением_мс': Number(selected.toFixed(3)),
+      'кадр_с_декорациями_мс': Number(decorated.toFixed(3)),
+      'разбор_строки_мс': Number(highlight.toFixed(4)),
+    };
+    } catch (error) {
+      return { ошибка: String(error && error.stack ? error.stack : error) };
+    }
+  })()`);
+}
+
 async function main() {
   const lines = [];
   const log = (text) => {
@@ -3699,6 +3858,11 @@ async function main() {
   const caret = await caretCheck(win);
   log('## Каретка и высота строки');
   log(JSON.stringify(caret, null, 2));
+  log('');
+
+  const perf = await renderPerfCheck(win);
+  log('## Стоимость отрисовки (обоснование GPU)');
+  log(JSON.stringify(perf, null, 2));
   log('');
 
   const menuCombo = await menuComboCheck(win);
