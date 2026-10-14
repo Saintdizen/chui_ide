@@ -27,6 +27,7 @@
 
 import type { TextBuffer } from '../core/text-buffer';
 import { LineHighlighter } from '../highlight/highlighter';
+import { sharedTokens } from '../highlight/token-cache';
 import { grammarFor } from '../highlight/registry';
 import type { Token } from '../highlight/tokens';
 import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
@@ -243,8 +244,10 @@ export class EditorView {
     this.lineCount = buffer.lineCount;
     // Текст строки подсветка берёт сама — ей довольно функции: так её можно проверить
     // в тестах без модели текста (см. `highlight/highlighter.ts`).
-    this.highlighter = new LineHighlighter(options.language ? grammarFor(options.language) : null, (line) =>
-      this.buffer.lineText(line + 1),
+    this.highlighter = new LineHighlighter(
+      options.language ? grammarFor(options.language) : null,
+      (line) => this.buffer.lineText(line + 1),
+      sharedTokens,
     );
     // Радужные скобки берут текст и токены той же строки: разбор подсветки уже есть,
     // второй раз строку не разбираем. Вложенность ведём по всему документу.

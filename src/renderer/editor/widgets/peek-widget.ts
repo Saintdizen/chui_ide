@@ -19,6 +19,7 @@ import { languageFromPath } from '../../core/languages';
 import { placePopup } from '../../core/popup-placement';
 import { grammarFor } from '../highlight/registry';
 import { LineHighlighter } from '../highlight/highlighter';
+import { sharedTokens } from '../highlight/token-cache';
 import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
 import { peekCounter, peekStepIndex, peekWindow } from '../host/peek-model';
 
@@ -207,7 +208,7 @@ export class PeekWidget {
   /** Пересобрать видимое окно строк: номера и текст с подсветкой. */
   private render(): void {
     const grammar = grammarFor(this.language);
-    const highlighter = new LineHighlighter(grammar, (line) => this.lines[line] ?? '');
+    const highlighter = new LineHighlighter(grammar, (line) => this.lines[line] ?? '', sharedTokens);
     const fragment = document.createDocumentFragment();
     for (let line = this.first; line <= this.last; line += 1) {
       const row = document.createElement('div');

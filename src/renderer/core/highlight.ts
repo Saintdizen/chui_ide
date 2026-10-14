@@ -1,5 +1,6 @@
 import { LineHighlighter } from '../editor/highlight/highlighter';
 import { grammarFor } from '../editor/highlight/registry';
+import { sharedTokens } from '../editor/highlight/token-cache';
 import { tokenStyle, type Scheme } from './theme';
 
 /**
@@ -90,7 +91,7 @@ function buildHtml(code: string, language: string, current: Scheme): string {
   // наугад чужой грамматикой (та же логика, что в своём редакторе).
   if (!grammar) return source.map(escapeHtml).join('\n');
 
-  const highlighter = new LineHighlighter(grammar, (line) => source[line] ?? '');
+  const highlighter = new LineHighlighter(grammar, (line) => source[line] ?? '', sharedTokens);
   const out: string[] = [];
 
   for (let index = 0; index < source.length; index += 1) {

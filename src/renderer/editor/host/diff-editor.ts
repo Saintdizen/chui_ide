@@ -23,6 +23,7 @@
 
 import type { Token } from '../highlight/tokens';
 import { LineHighlighter } from '../highlight/highlighter';
+import { sharedTokens } from '../highlight/token-cache';
 import { grammarFor } from '../highlight/registry';
 import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
 import { buildDiff, type DiffHunk, type DiffRow } from './diff-model';
@@ -157,8 +158,8 @@ export class OwnDiffEditor implements OwnDiffHandle {
     this.modifiedLines = splitLines(modified);
     // Подсветка отдельная для каждой стороны: строки нумеруются независимо, и общий
     // кэш на две версии привёл бы к тому, что токены одной стороны описывали бы другую.
-    this.originalHighlighter = new LineHighlighter(grammar, (line) => this.originalLines[line] ?? '');
-    this.modifiedHighlighter = new LineHighlighter(grammar, (line) => this.modifiedLines[line] ?? '');
+    this.originalHighlighter = new LineHighlighter(grammar, (line) => this.originalLines[line] ?? '', sharedTokens);
+    this.modifiedHighlighter = new LineHighlighter(grammar, (line) => this.modifiedLines[line] ?? '', sharedTokens);
 
     const model = buildDiff(original, modified);
     this.rows = model.rows;

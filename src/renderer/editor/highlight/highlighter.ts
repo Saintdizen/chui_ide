@@ -22,6 +22,7 @@
  */
 
 import { ST_NORMAL, type Grammar } from './grammar';
+import type { TokenCache } from './token-cache';
 import type { Token } from './tokens';
 
 /** Пустой результат: одна и та же ссылка, чтобы не создавать массив на каждую строку. */
@@ -34,6 +35,12 @@ export class LineHighlighter {
    * откуда берётся текст, — в приложении это модель, в тестах массив строк.
    */
   private readonly getLine: (line: number) => string;
+  /**
+   * Общий кэш токенов (`null` — не пользуемся: кэш экземпляра сам держит префикс
+   * документа). Нужен тому, кто пересоздаёт разборщик на каждую отрисовку — копии
+   * кода, сравнению, блокам в чате: их строки уже разобраны кем-то ещё.
+   */
+  private readonly cache: TokenCache | null;
   /** `states[i]` — состояние в начале строки `i`. Значения ниже `frontier` верны. */
   private states: number[] = [ST_NORMAL];
   private tokens: Array<Token[] | null> = [];
@@ -45,9 +52,10 @@ export class LineHighlighter {
    */
   private knownEnd = 0;
 
-  constructor(grammar: Grammar | null, getLine: (line: number) => string) {
+  constructor(grammar: Grammar | null, getLine: (line: number) => string, cache: TokenCache | null = null) {
     this.grammar = grammar;
     this.getLine = getLine;
+    this.cache = cache;
   }
 
   /** Есть ли для этого языка подсветка. */
@@ -104,7 +112,12 @@ export class LineHighlighter {
 
     while (this.frontier <= line) {
       const index = this.frontier;
-      const result = grammar.line(this.getLine(index), this.states[index] ?? ST_NORMAL);
+      const startState = this.states[index] ?? ST_NORMAL;
+      // С общим кэшем строка, уже разобранная где-то ещё тем же языком и в том же
+      // режиме, не разбирается заново: результат берётся готовым.
+      const result = this.cache
+        ? this.cache.line(grammar, this.getLine(index), startState)
+        : grammar.line(this.getLine(index), startState);
       // Догадка о состоянии следующей строки — до того, как перезапишем её.
       const guess = this.states[index + 1];
       this.tokens[index] = result.tokens;
