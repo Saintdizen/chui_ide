@@ -26,7 +26,7 @@ import type { FileEdit, TextEdit } from '../../../shared/edits';
 import { toLocations, type SymbolLocation } from '../../../shared/lsp-locations';
 import { toCompletions, toResolvedCompletion, type ResolvedCompletion } from '../../../shared/lsp-completions';
 import { toCodeActions, toLspDiagnostics, type CodeActionItem } from '../../../shared/lsp-code-actions';
-import { pickRefactors, type RefactorAction } from '../../../shared/lsp-refactor';
+import { pickAnyRefactors, pickRefactors, type RefactorAction } from '../../../shared/lsp-refactor';
 import { toFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
 import { targetFromResolvedLink, toDocumentLinks, type DocumentLinkEntry } from '../../../shared/lsp-document-links';
 import { toLinkedRanges, type LinkedRange } from '../../../shared/lsp-linked-editing';
@@ -261,6 +261,26 @@ export class LspFeatures {
       context: { diagnostics: [], only: ['refactor'], triggerKind: 1 },
     });
     return pickRefactors(toCodeActions(result, uriToPath), action);
+  }
+
+  /**
+   * Все рефакторинги, которые сервер предлагает для выделения (или символа под кареткой).
+   * Отличие от `refactor`: не отбираем подвид, а отдаём весь раздел `refactor` — из него
+   * строится общий список «Рефакторинг…». Пусто — сервер ничего не предложил.
+   */
+  async refactorActions(
+    path: string,
+    range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
+  ): Promise<CodeActionItem[]> {
+    const result = await this.request(path, 'textDocument/codeAction', {
+      textDocument: { uri: pathToUri(path) },
+      range: {
+        start: { line: Math.max(0, range.startLine - 1), character: Math.max(0, range.startColumn - 1) },
+        end: { line: Math.max(0, range.endLine - 1), character: Math.max(0, range.endColumn - 1) },
+      },
+      context: { diagnostics: [], only: ['refactor'], triggerKind: 1 },
+    });
+    return pickAnyRefactors(toCodeActions(result, uriToPath));
   }
 
   /**

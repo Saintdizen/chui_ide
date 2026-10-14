@@ -31,6 +31,8 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { combo: 'Shift+Alt+F', command: 'format.document' },
   // Упорядочить импорты — как в VS Code: Shift+Alt+O.
   { combo: 'Shift+Alt+O', command: 'editor.organizeImports' },
+  // Рефакторинг — как в VS Code: Ctrl+Shift+R открывает список действий раздела `refactor`.
+  { combo: 'Ctrl+Shift+R', command: 'editor.refactor' },
   // Отладка — привычные из VS Code: F5 пуск/продолжить, Shift+F5 стоп,
   // F9 точка останова, F10/F11 шаги.
   { combo: 'F5', command: 'debug.continue' },

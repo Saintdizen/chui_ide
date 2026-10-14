@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LspFeatures } from '../src/renderer/editor/host/lsp-features';
 import type { RpcClient } from '../src/renderer/core/rpc';
-import { isRefactorKind, pickRefactors, refactorKind, refactorLabel } from '../src/shared/lsp-refactor';
+import {
+  isAnyRefactorKind,
+  isRefactorKind,
+  pickAnyRefactors,
+  pickRefactors,
+  refactorKind,
+  refactorLabel,
+} from '../src/shared/lsp-refactor';
 import type { CodeActionItem } from '../src/shared/lsp-code-actions';
 
 /**
@@ -49,6 +56,32 @@ describe('виды рефакторинга', () => {
     const items = [action('refactor.extract.function'), action('refactor.inline'), action('source.organizeImports')];
     expect(pickRefactors(items, 'extract').map((entry) => entry.kind)).toEqual(['refactor.extract.function']);
     expect(pickRefactors(items, 'inline').map((entry) => entry.kind)).toEqual(['refactor.inline']);
+  });
+
+  it('любой рефакторинг — это весь раздел refactor, без деления на подвиды', () => {
+    expect(isAnyRefactorKind('refactor')).toBe(true);
+    expect(isAnyRefactorKind('refactor.extract.function')).toBe(true);
+    expect(isAnyRefactorKind('refactor.rewrite')).toBe(true);
+    // Граница отрезка и чужие разделы.
+    expect(isAnyRefactorKind('refactoring')).toBe(false);
+    expect(isAnyRefactorKind('quickfix')).toBe(false);
+    expect(isAnyRefactorKind('source.organizeImports')).toBe(false);
+    expect(isAnyRefactorKind('')).toBe(false);
+  });
+
+  it('общий отбор берёт все рефакторинги и не трогает прочее', () => {
+    const items = [
+      action('refactor.extract.function'),
+      action('refactor.inline'),
+      action('refactor.rewrite'),
+      action('quickfix'),
+      action('source.organizeImports'),
+    ];
+    expect(pickAnyRefactors(items).map((entry) => entry.kind)).toEqual([
+      'refactor.extract.function',
+      'refactor.inline',
+      'refactor.rewrite',
+    ]);
   });
 });
 
@@ -105,6 +138,43 @@ describe('LspFeatures.refactor', () => {
     const features = new LspFeatures(rpc);
     await expect(
       features.refactor('/p/a.ts', { startLine: 1, startColumn: 1, endLine: 1, endColumn: 2 }, 'extract'),
+    ).resolves.toEqual([]);
+  });
+});
+
+describe('LspFeatures.refactorActions', () => {
+  it('просит раздел refactor и отдаёт ВСЕ рефакторинги, включая прочее', async () => {
+    const { rpc, calls } = recordingRpc([
+      action('refactor.extract.function', 'Извлечь в функцию'),
+      action('refactor.inline', 'Развернуть'),
+      action('refactor.rewrite', 'Вынести в файл'),
+      action('quickfix', 'Исправить'),
+    ]);
+    const features = new LspFeatures(rpc);
+
+    const actions = await features.refactorActions('/p/a.ts', {
+      startLine: 1,
+      startColumn: 1,
+      endLine: 1,
+      endColumn: 4,
+    });
+
+    expect(actions.map((entry) => entry.title)).toEqual(['Вынести в файл', 'Извлечь в функцию', 'Развернуть']);
+
+    const call = calls[0]!;
+    expect(call.method).toBe('textDocument/codeAction');
+    expect((call.params as { context: { only: string[] } }).context.only).toEqual(['refactor']);
+    expect((call.params as { range: unknown }).range).toEqual({
+      start: { line: 0, character: 0 },
+      end: { line: 0, character: 3 },
+    });
+  });
+
+  it('пусто — сервер рефакторингов не предложил', async () => {
+    const { rpc } = recordingRpc([]);
+    const features = new LspFeatures(rpc);
+    await expect(
+      features.refactorActions('/p/a.ts', { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1 }),
     ).resolves.toEqual([]);
   });
 });

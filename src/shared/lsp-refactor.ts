@@ -44,3 +44,21 @@ export function isRefactorKind(kind: string, action: RefactorAction): boolean {
 export function pickRefactors(items: readonly CodeActionItem[], action: RefactorAction): CodeActionItem[] {
   return items.filter((item) => isRefactorKind(item.kind, action));
 }
+
+/**
+ * Любой ли это рефакторинг — из раздела `refactor` (включая подвиды). Отбор по границе
+ * отрезка тот же, что у `isRefactorKind`: вид `refactor` и `refactor.*` — наши, а похожее
+ * слово (`refactoring`) — нет.
+ */
+export function isAnyRefactorKind(kind: string): boolean {
+  return kind === 'refactor' || kind.startsWith('refactor.');
+}
+
+/**
+ * Все рефакторинги из ответа сервера, без деления на извлечение и разворачивание. Так
+ * работает общий список «Рефакторинг…»: что предложил сервер, то и показываем — не только
+ * извлечение и inline, но и, например, «вынести в отдельный файл» или «преобразовать».
+ */
+export function pickAnyRefactors(items: readonly CodeActionItem[]): CodeActionItem[] {
+  return items.filter((item) => isAnyRefactorKind(item.kind));
+}

@@ -503,6 +503,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         // когда есть что выносить.
         const refactorPath = info.path;
         if (refactorPath) {
+          items.push({ label: 'Рефакторинг…', onSelect: () => void runRefactorMenu(refactorPath) });
           if (info.hasSelection) {
             items.push({ label: 'Извлечь…', onSelect: () => void runRefactor(refactorPath, 'extract') });
           }
@@ -642,6 +643,42 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       return;
     }
     // Одно действие — применяем сразу; несколько (в переменную и в функцию) — выбираем.
+    const [first] = actions;
+    if (actions.length === 1 && first) {
+      await applyCodeAction(path, first);
+      return;
+    }
+    const point = editors.caretPoint();
+    showPopupMenu(
+      actions.map((entry) => ({
+        label: entry.title,
+        hint: codeActionKindLabel(entry.kind),
+        onSelect: () => void applyCodeAction(path, entry),
+      })),
+      point?.left ?? 0,
+      (point?.bottom ?? 0) + 2,
+    );
+  };
+
+  /**
+   * Общий список рефакторингов: что сервер предлагает для выделения или символа под
+   * кареткой, то и показываем — извлечение, разворачивание и всё прочее из раздела
+   * `refactor` (вынести в файл, преобразовать…). Отдельные команды для извлечения и
+   * inline при этом остаются: они сразу прыгают в конкретный подвид, минуя выбор.
+   */
+  const runRefactorMenu = async (path: string): Promise<void> => {
+    const document = documents.get(path);
+    if (!document) return;
+    if (document.readOnly) {
+      showToast('Файл открыт только для чтения — рефакторинг не применить');
+      return;
+    }
+    const actions = await lsp.refactorActions(path, editors.selectionRange());
+    if (actions.length === 0) {
+      showToast('Сервер рефакторингов не предложил');
+      return;
+    }
+    // Один — применяем сразу, без списка из одной строки; несколько — выбираем.
     const [first] = actions;
     if (actions.length === 1 && first) {
       await applyCodeAction(path, first);
@@ -4566,6 +4603,27 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         return;
       }
       void runOrganizeImports(path);
+    },
+  );
+
+  // Общий список рефакторингов от сервера: что он предложит для выделения (или символа
+  // под кареткой) — извлечение, inline, вынести в файл и прочее. Это ответ на
+  // «какие тут вообще есть рефакторинги» без угадывания подвида.
+  define(
+    {
+      id: 'editor.refactor',
+      title: 'Рефакторинг…',
+      category: 'Редактор',
+      keybinding: 'Ctrl+Shift+R',
+      keywords: ['refactor', 'рефакторинг', 'все действия'],
+    },
+    () => {
+      const path = editors.currentPath;
+      if (!path) {
+        showToast('Нет открытого файла');
+        return;
+      }
+      void runRefactorMenu(path);
     },
   );
 
