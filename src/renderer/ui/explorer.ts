@@ -12,6 +12,15 @@ import { entryIsDirectory, entryIsFile, entryIsSymlink, symlinkLabel } from '../
 import { pairFromSelection } from '../core/file-compare';
 import { effectiveNestingRules, nestEntries } from '../core/file-nesting';
 import { groupByKind } from '../core/tree-group';
+import {
+  FILE_LABEL_IDS,
+  fileLabelName,
+  labelOf,
+  sanitizeLabels,
+  setLabel,
+  type FileLabelId,
+  type FileLabelRecord,
+} from '../../shared/file-labels';
 import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
 import { sortTree } from '../core/tree-sort';
 import { computeWindow } from '../core/tree-window';
@@ -68,6 +77,11 @@ export interface ExplorerView {
   restorePinned(paths: readonly string[]): void;
   /** Закрепить или открепить путь (пункт меню дерева). */
   togglePin(path: string): void;
+  /** Метки файлов в дереве: цветные ярлыки; хранятся в сессии проекта. */
+  labels(): FileLabelRecord[];
+  restoreLabels(records: unknown): void;
+  /** Поставить файлу метку, заменить прежнюю или снять (`null`). */
+  setFileLabel(path: string, label: FileLabelId | null): void;
 }
 
 /**
@@ -119,6 +133,8 @@ export interface ExplorerDeps {
   documents: DocumentStore;
   /** Закрепление изменилось — рабочее место стоит сохранить (см. сессию). */
   onPinsChange?: () => void;
+  /** Метка файла изменилась — рабочее место стоит сохранить (см. сессию). */
+  onLabelsChange?: () => void;
   /**
    * Просмотр файлов без открытия (peek): пути и точка, у которой показать копию.
    * Не задано — пункта «Просмотр» в меню и клавиши «пробел» нет.
@@ -201,6 +217,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let selected: string | null = null;
   /** Закреплённые пути (блок «Закреплённые» сверху); порядок закрепления сохраняем. */
   let pinned: string[] = [];
+  /** Метки файлов (цветные ярлыки в строках); живут в сессии проекта. */
+  let labels: FileLabelRecord[] = [];
   /** Выделенные строки (Ctrl/Shift) и якорь диапазона; порядок — как в дереве. */
   let selection: TreeSelection = EMPTY_SELECTION;
   /** Пути текущего перетаскивания: их и переносим при сбросе на папку. */
@@ -216,6 +234,17 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const setPinned = (path: string): void => {
     pinned = togglePin(pinned, path);
     deps.onPinsChange?.();
+    render();
+  };
+
+  /** Метка файла по пути или `null`. */
+  const labelFor = (path: string): FileLabelId | null => labelOf(labels, path);
+
+  /** Поставить метку, заменить прежнюю или снять её («Снять метку» в меню). */
+  const setFileLabel = (path: string, label: FileLabelId | null): void => {
+    if (labelFor(path) === label) return;
+    labels = setLabel(labels, path, label);
+    deps.onLabelsChange?.();
     render();
   };
 
@@ -508,6 +537,23 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             label: isPinned(pinned, entry.path) ? 'Открепить' : 'Закрепить сверху',
             onSelect: () => setPinned(entry.path),
           },
+          // Метка — подменю: один ярлык на файл, текущий отмечен галкой.
+          {
+            label: 'Метка',
+            submenu: [
+              ...FILE_LABEL_IDS.map((id) => ({
+                label: fileLabelName(id),
+                checked: labelFor(entry.path) === id,
+                onSelect: () => setFileLabel(entry.path, id),
+              })),
+              { separator: true as const },
+              {
+                label: 'Снять метку',
+                checked: labelFor(entry.path) === null,
+                onSelect: () => setFileLabel(entry.path, null),
+              },
+            ],
+          },
           { separator: true as const },
           // Открытие вне IDE: файл — программой системы, папка — в системном
           // проводнике, а терминал поднимается в той папке, где лежит выбранное.
@@ -674,6 +720,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const submodule = !isDeleted && isDirectory ? submodules.get(entry.path) : undefined;
     if (submodule) classes.push('is-submodule');
     const insideTitle = inside ? `Правок внутри: ${inside.count}` : undefined;
+    // Метка — личный ярлык на файле; у удалённого её не показываем (его нет на диске).
+    const label = isDeleted ? null : labelFor(entry.path);
 
     const row = h(
       'button',
@@ -704,6 +752,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           : fileIcon(entry.name)
         : svgIcon(isDirectory ? 'folder' : 'file', 15),
       h('span', { class: 'tree-name' }, entry.name),
+      // Метка — цветной ярлык: первая среди правых отметок, если она есть.
+      label ? h('span', { class: `tree-label is-${label}`, title: `Метка: ${fileLabelName(label)}` }) : null,
       isLink
         ? h(
             'span',
@@ -1406,6 +1456,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       render();
     },
     togglePin: setPinned,
+    labels: () => [...labels],
+    restoreLabels(records) {
+      // Чужие пути и неизвестные цвета отбрасываем: рисовать по ним нечего.
+      labels = sanitizeLabels(records, deps.workspace.root);
+      render();
+    },
+    setFileLabel,
     applySettings(next) {
       const dimChanged = options.dimIgnored !== next.dimIgnored;
       // Плотность строк меняет их высоту — перемерим её на следующей отрисовке.

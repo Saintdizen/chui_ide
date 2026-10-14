@@ -5374,6 +5374,36 @@ body > .overlay {
   margin-left: 4px;
 }
 
+/* Метка файла: цветной ярлык сразу за именем — по нему видно, что файл помечен.
+   Сжиматься не должен: имя уступает место, а метка остаётся видимой. Цвет берём
+   из роли темы по имени метки, поэтому обе схемы согласованы сами. */
+.tree-label {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--label_color, var(--text_color_tertiary));
+}
+
+.tree-label.is-red {
+  --label_color: var(--red_prime_background);
+}
+.tree-label.is-orange {
+  --label_color: var(--context_seg_results);
+}
+.tree-label.is-yellow {
+  --label_color: var(--yellow_prime_background);
+}
+.tree-label.is-green {
+  --label_color: var(--green_prime_background);
+}
+.tree-label.is-blue {
+  --label_color: var(--blue_prime_background);
+}
+.tree-label.is-purple {
+  --label_color: var(--purple_prime_background);
+}
+
 .sc-badge {
   margin-left: auto;
 }

@@ -16,6 +16,7 @@ import type { Snippet } from './snippets';
 import type { ReviewThread } from './review';
 import type { HistoryEntry } from './file-history';
 import type { BookmarkRecord } from './bookmarks';
+import type { FileLabelRecord } from './file-labels';
 import type { GitLfsInfo } from './git-lfs';
 import type { GitIdentity, GitSshKey } from './git-identity';
 import type { WorkspaceRoot } from './workspace-roots';
@@ -309,6 +310,8 @@ export interface SessionState {
   breakpoints?: BreakpointRecord[];
   /** Закладки: строки файлов, к которым человек возвращается. */
   bookmarks?: BookmarkRecord[];
+  /** Метки файлов в дереве: цветные ярлыки («в работе», «срочно»). */
+  labels?: FileLabelRecord[];
   /** Где стоял курсор в каждом открытом файле (1-based). */
   cursors?: Record<string, CursorPosition>;
   /** Записанный макрос: шаги записывает и разбирает редактор (`shared/macro.ts`). */

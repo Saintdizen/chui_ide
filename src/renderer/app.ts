@@ -773,6 +773,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     documents,
     // Закрепление — часть рабочего места: сохраняем при изменении (сессия ниже).
     onPinsChange: () => session.scheduleSave(),
+    // Метки файлов — тоже рабочее место проекта: сохраняем при изменении.
+    onLabelsChange: () => session.scheduleSave(),
     // Просмотр без открытия (пробел в дереве или пункт меню): копия кода «на месте».
     peekFiles: (paths, anchor) => {
       editors.peekFiles(paths, anchor);

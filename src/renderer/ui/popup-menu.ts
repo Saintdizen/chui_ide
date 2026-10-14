@@ -44,6 +44,13 @@ interface Level {
 const GAP = 6;
 const EDGE = 8;
 
+/**
+ * Пункт по его элементу. Индексы `entries` и `items` расходятся: разделители есть
+ * в `items`, но не в `entries`, — по одному числу другой список не найти. Поэтому
+ * пару «элемент -> пункт» помним явно.
+ */
+const itemOf = new WeakMap<HTMLElement, PopupMenuItem>();
+
 const levels: Level[] = [];
 let detach: (() => void) | null = null;
 let closed: (() => void) | null = null;
@@ -117,6 +124,7 @@ function buildLevel(level: Level): void {
     });
 
     level.entries.push(entry);
+    itemOf.set(entry, item);
     menu.appendChild(entry);
   }
 }
@@ -139,8 +147,8 @@ function openLevel(items: readonly PopupMenuItem[], x: number, y: number, parent
 /** Подменю от пункта: справа от него, а если места нет — слева. */
 function openSubmenu(levelIndex: number, itemIndex: number): void {
   const level = levels[levelIndex];
-  const item = level?.items[itemIndex];
   const entry = level?.entries[itemIndex];
+  const item = entry ? itemOf.get(entry) : undefined;
   if (!level || !item || !entry || !('submenu' in item) || !item.submenu) return;
 
   // Уровень уже открыт от этого пункта — ничего не пересобираем, иначе подменю
@@ -196,7 +204,8 @@ function move(levelIndex: number, step: number): void {
 
 function activateHighlighted(levelIndex: number): void {
   const index = highlighted(levelIndex);
-  const item = levels[levelIndex]?.items[index];
+  const entry = levels[levelIndex]?.entries[index];
+  const item = entry ? itemOf.get(entry) : undefined;
   if (item && 'submenu' in item && item.submenu) openSubmenu(levelIndex, index);
   else closeLevelsAbove(levelIndex);
 }
