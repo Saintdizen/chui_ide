@@ -7407,6 +7407,195 @@ body > .overlay {
 
 /* ── ячейки ноутбука ───────────────────────────────────── */
 
+/* ── формулы (LaTeX) ───────────────────────────────────────────────────── */
+
+/*
+  Формула остаётся текстом: знаки — обычные узлы, а строение несут эти правила.
+  Дробь — столбик с чертой, корень — знак с полоской, степень и индекс — сдвинутая
+  вбок колонка. Шрифт — тот же, что у текста: у математики нет своего в наборе,
+  а курсив у букв даёт «математический» вид и не тянет лишний файл шрифта.
+*/
+
+.md-math {
+  white-space: nowrap;
+  font-family: var(--font_mono);
+}
+
+.md-math-block {
+  margin: 10px 0;
+  padding: 8px 4px;
+  overflow-x: auto;
+  text-align: center;
+  font-family: var(--font_mono);
+  font-size: 1.05em;
+}
+
+/* Не разобравшаяся формула показана исходником — с подсказкой и во всю ширину. */
+.md-code.is-math-raw {
+  white-space: pre-wrap;
+}
+
+.math-text,
+.math-sym {
+  white-space: pre;
+}
+
+/* Греческие буквы и операции — курсивом, как их набирает LaTeX по умолчанию. */
+.math-sym.is-greek {
+  font-style: italic;
+}
+
+.math-styled.is-bb {
+  font-weight: 600;
+}
+
+.math-styled.is-bold {
+  font-weight: 700;
+}
+
+.math-styled.is-cal {
+  font-style: italic;
+}
+
+.math-styled.is-text {
+  font-style: normal;
+}
+
+/* Название оператора (\lim, \max) — прямым шрифтом, пределы снизу. */
+.math-bigop {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: middle;
+  margin: 0 2px;
+}
+
+.math-bigop.is-stacked .math-bigop-sym {
+  font-size: 1.25em;
+  line-height: 1;
+}
+
+.math-bigop-lim {
+  font-size: 0.7em;
+  line-height: 1.1;
+}
+
+/* Пустая клетка столбика: держит высоту, когда у оператора только предел снизу. */
+.math-bigop-gap {
+  display: none;
+}
+
+.math-bigop.is-stacked .math-bigop-gap {
+  display: block;
+  height: 0.5em;
+}
+
+.math-space.is-thin {
+  display: inline-block;
+  width: 0.17em;
+}
+
+.math-space.is-thick {
+  display: inline-block;
+  width: 0.28em;
+}
+
+.math-space.is-quad {
+  display: inline-block;
+  width: 1em;
+}
+
+/* Дробь: черта — верхняя граница знаменателя. */
+.math-frac {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: middle;
+  margin: 0 0.15em;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.math-frac-num,
+.math-frac-den {
+  padding: 0 0.25em;
+}
+
+.math-frac-den {
+  border-top: 1px solid currentColor;
+}
+
+/* Корень: знак с полоской над подкоренным выражением. */
+.math-sqrt {
+  display: inline-flex;
+  align-items: flex-start;
+  vertical-align: middle;
+}
+
+.math-sqrt-sign {
+  line-height: 1;
+}
+
+.math-sqrt-body {
+  padding: 0 0.15em;
+  border-top: 1px solid currentColor;
+}
+
+.math-sqrt.has-index .math-sqrt-index {
+  align-self: flex-start;
+  margin-right: -0.35em;
+  font-size: 0.62em;
+  transform: translateY(-0.2em);
+}
+
+/* Степень и индекс — сдвинутая вбок колонка из двух клеток. */
+.math-script {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.math-scripts {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-size: 0.7em;
+  line-height: 1.05;
+}
+
+.math-scripts-gap {
+  height: 0.55em;
+}
+
+/* Матрица: строки и ячейки с небольшим отступом, скобки — по краям. */
+.math-matrix {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+  vertical-align: middle;
+}
+
+.math-matrix-table {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.math-matrix-row {
+  display: inline-flex;
+  gap: 0.6em;
+  justify-content: center;
+}
+
+.math-matrix-delim {
+  font-size: 1.6em;
+  line-height: 0.9;
+}
+
+/* Неизвестная команда — видимым текстом, а не пропажей. */
+.math-unknown {
+  color: var(--red_prime_background);
+}
+
 .notebook {
   display: flex;
   flex-direction: column;

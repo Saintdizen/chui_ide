@@ -2415,6 +2415,30 @@ async function linkedEditingCheck(win) {
  * участков, которую отдаёт сервер. Подставной сервер пробы даёт фиксированную цепочку вокруг «a»
  * (имя → выражение → строка), поэтому по выделенному тексту виден шаг туда и обратно.
  */
+
+/**
+ * Формулы: в отчёте видно, что дробь, корень, пределы и матрица нарисованы узлами,
+ * а неверная формула осталась исходником. Проверяем наличие узлов по их классам:
+ * так ловится опечатка в имени класса или в порядке знаков.
+ */
+async function mathCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  return script(`(() => {
+    const host = window.probeMath.host;
+    const count = (selector) => host.querySelectorAll(selector).length;
+    return {
+      в_строке: count('.md-math'),
+      блоком: count('.md-math-block'),
+      дробей: count('.math-frac'),
+      корней: count('.math-sqrt'),
+      пределов: count('.math-bigop'),
+      матриц: count('.math-matrix'),
+      степеней: count('.math-sup'),
+      исходником: count('.is-math-raw'),
+    };
+  })()`);
+}
+
 async function selectionRangeCheck(win) {
   const script = (expression) => win.webContents.executeJavaScript(expression);
 
@@ -3597,6 +3621,11 @@ async function main() {
 
   const surround = await surroundCheck(win);
   log('## Обёртка выделения (surround with)');
+
+  const math = await mathCheck(win);
+  log('## Формулы LaTeX');
+  log(JSON.stringify(math, null, 2));
+  log('');
   log(JSON.stringify(surround, null, 2));
   log('');
 

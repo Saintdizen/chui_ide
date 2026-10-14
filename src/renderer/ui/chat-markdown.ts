@@ -1,4 +1,5 @@
 import { highlightInto } from '../core/highlight';
+import { renderDisplayMath, renderInlineMath } from './math-view';
 import { type Child, clear, h } from './dom';
 import { showToast } from './toast';
 
@@ -32,6 +33,29 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
     while (index < lines.length) {
       const line = lines[index] ?? '';
 
+      // Формула отдельным блоком: `$$…$$`, в том числе записанная в несколько строк
+      // (так её пишут в заметках). Проверяем раньше забора кода: это тоже разметка.
+      if (line.trimStart().startsWith('$$')) {
+        const rest = line.trim().slice(2);
+        const single = rest.endsWith('$$') && rest.length > 2;
+        let formula = single ? rest.slice(0, -2) : rest;
+        let closed = single;
+        index += 1;
+        while (!closed && index < lines.length) {
+          const next = lines[index] ?? '';
+          index += 1;
+          const close = next.indexOf('$$');
+          if (close >= 0) {
+            formula += `\n${next.slice(0, close)}`;
+            closed = true;
+            break;
+          }
+          formula += `\n${next}`;
+        }
+        nodes.push(mathNode(formula, true));
+        continue;
+      }
+
       // Блок кода: ``` с необязательным языком.
       if (line.trimStart().startsWith('```')) {
         const language = line.trim().slice(3).trim();
@@ -50,7 +74,18 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
         // Во время стрима незакрытый забор — это ещё растущий блок: не тратим
         // время на подсветку, она всё равно изменится на следующем кадре.
         // Красим, как только забор закроется (или ответ закончится).
-        nodes.push(codeBlock(body.join('\n'), language, streaming && !closed));
+        const fence = body.join('\n');
+        // Формулу в заборе рисуем как формулу: язык `latex` (он же `tex`, `math`)
+        // означает, что это не код, а математика. Не разобралась — показываем кодом,
+        // чтобы исходник не потерялся.
+        if (isMathLanguage(language)) {
+          const rendered = renderDisplayMath(fence);
+          if (rendered) {
+            nodes.push(rendered);
+            continue;
+          }
+        }
+        nodes.push(codeBlock(fence, language, streaming && !closed));
         continue;
       }
 
@@ -141,10 +176,17 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
     return nodes;
   }
 
-  /** Инлайн-разметка: `код`, **жирный** и ссылки в виде текста с подсказкой. */
+  /**
+   * Инлайн-разметка: `код`, **жирный**, ссылки текстом и формулы `$…$`.
+   *
+   * Порядок разбора — от самого «закрытого» к самому простому: код, потом формула,
+   * потом жирный и ссылка. Так `$` внутри кода (`ls -la $HOME`) остаётся кодом, а
+   * формула внутри `\text{…}` не рвётся на части.
+   */
   function inlineMarkdown(text: string): Child[] {
     const nodes: Child[] = [];
-    const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g;
+    const pattern =
+      /(`[^`]+`|\$\$(?!\s)[\s\S]+?(?<!\s)\$\$|(?<![\w$])\$(?!\s)[^$\n]+?(?<!\s)\$|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g;
     let last = 0;
 
     for (const match of text.matchAll(pattern)) {
@@ -154,6 +196,10 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
       const token = match[0];
       if (token.startsWith('`')) {
         nodes.push(inlineCode(token.slice(1, -1)));
+      } else if (token.startsWith('$$')) {
+        nodes.push(mathNode(token.slice(2, -2), true));
+      } else if (token.startsWith('$')) {
+        nodes.push(mathNode(token.slice(1, -1), false));
       } else if (token.startsWith('**')) {
         nodes.push(h('strong', {}, token.slice(2, -2)));
       } else {
@@ -166,6 +212,16 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
     if (last < text.length) nodes.push(text.slice(last));
     return nodes;
+  }
+
+  /**
+   * Формула: разобралась — рисуем узлами, нет — показываем исходник как код.
+   * Молча выбросить `$\foo$` нельзя: по недорисованной формуле не понять, что было.
+   */
+  function mathNode(source: string, display: boolean): HTMLElement {
+    const rendered = display ? renderDisplayMath(source) : renderInlineMath(source);
+    if (rendered) return rendered;
+    return h('code', { class: 'md-code is-math-raw', title: 'Формула не разобралась' }, source);
   }
 
   /**
@@ -294,6 +350,11 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
     const node = h('code', {});
     highlightInto(node, code, language);
     return node;
+  }
+
+  /** Язык забора, которым пишут формулу, а не код. */
+  function isMathLanguage(language: string): boolean {
+    return ['latex', 'tex', 'math'].includes(language.trim().toLowerCase());
   }
 
   return { renderInto };

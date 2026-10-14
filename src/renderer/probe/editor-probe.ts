@@ -28,6 +28,7 @@ import { SpellCheck } from '../core/spellcheck';
 import { FileDecorations } from '../editor/view/decorations';
 import { OwnDiffEditor } from '../editor/host/diff-editor';
 import { createProblemPanel } from '../ui/problem-panel';
+import { createMarkdownRenderer } from '../ui/chat-markdown';
 import type { DiagnosticItem } from '../../shared/api';
 import type { SymbolLocation } from '../../shared/lsp-locations';
 import { indentFoldRanges, mergeFoldRanges } from '../../shared/fold-ranges';
@@ -864,3 +865,41 @@ declare global {
 }
 
 window.probeSelection = { workspace: selectionWorkspace, store: selectionStore, doc: selectionDoc };
+
+// Формулы LaTeX: тот же разборщик markdown, что у предпросмотра и ленты чата. Рисуем
+// образец со всеми видами — дробью, корнем, степенью, пределом и матрицей, — чтобы в
+// отчёте было видно, что узлы и классы на месте (юнит-тесты проверяют только разбор).
+const mathRoot = document.createElement('div');
+mathRoot.id = 'probe-math';
+mathRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(mathRoot);
+
+const mathHost = document.createElement('div');
+mathRoot.append(mathHost);
+const mathRenderer = createMarkdownRenderer({ insertCode: () => false });
+mathRenderer.renderInto(
+  mathHost,
+  [
+    'Формула в строке $x^2 + \\frac{a}{b}$ и следом блок:',
+    '',
+    '$$',
+    '\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}',
+    '$$',
+    '',
+    'Корень $\\sqrt[3]{x}$ и матрица:',
+    '',
+    '$$',
+    '\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}',
+    '$$',
+    '',
+    'Неверная формула $\\frac{a}{$ остаётся исходником.',
+  ].join('\n'),
+);
+
+declare global {
+  interface Window {
+    probeMath: { host: HTMLElement };
+  }
+}
+
+window.probeMath = { host: mathHost };
