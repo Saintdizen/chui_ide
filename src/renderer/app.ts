@@ -99,6 +99,7 @@ import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-pop
 import { createOutline } from './ui/outline';
 import { createProblemPanel } from './ui/problem-panel';
 import { problemBadgeText } from '../shared/problem-list';
+import { TODO_QUERY, toTodoItems } from '../shared/todo-list';
 import { createPalette } from './ui/palette';
 import { createPopover, type PopoverView } from './ui/popover';
 import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-env-popover';
@@ -128,6 +129,7 @@ import { createTabs } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
 import { createDebugPanel } from './ui/debug-panel';
 import { createTestPanel } from './ui/test-panel';
+import { createTodoPanel } from './ui/todo-panel';
 import { showToast } from './ui/toast';
 import { createVenvModal } from './ui/venv-modal';
 
@@ -1110,6 +1112,23 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
     label: (path) => workspace.relative(path),
   });
+  // Задачи: пометки берём обычным поиском по проекту — тем же путём, что панель поиска
+  // и инструмент агента. Свой обход файлов панели не нужен, а разбор находок и
+  // группировку отдаёт `shared/todo-list.ts`.
+  const todoPanel = createTodoPanel({
+    scan: async () => {
+      const result = await rpc.request('workspace.search', {
+        query: TODO_QUERY,
+        isRegex: true,
+        caseSensitive: false,
+        maxResults: 500,
+      });
+      return toTodoItems(result.hits);
+    },
+    reveal: (path, line, column) => void openPath(path).then(() => editors.reveal(path, line, column)),
+    label: (path) => workspace.relative(path),
+    hasWorkspace: () => workspace.root !== null,
+  });
   dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });
   dock.register({ id: 'tests', title: 'Тесты', element: testPanel.element, onShow: () => void testPanel.refresh() });
   dock.register({
@@ -1134,6 +1153,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     element: problemPanel.element,
     badge: () => problemBadgeText(problemPanel.counts()),
     onShow: () => problemPanel.refresh(),
+  });
+  // Задачи: пометки TODO/FIXME/HACK/XXX по проекту. Список собирает поиск по проекту
+  // с готовым запросом, а разбор находок и группировку панели отдаёт `shared/todo-list.ts`.
+  dock.register({
+    id: 'todo',
+    title: 'Задачи',
+    element: todoPanel.element,
+    badge: () => todoPanel.badge(),
+    onShow: () => todoPanel.refresh(),
   });
   layout.dockHost.appendChild(dock.element);
 
@@ -4031,6 +4059,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     dock.show('problems');
   });
 
+  // Задачи: список пометок TODO/FIXME/HACK/XXX по проекту — как панель «Проблемы»,
+  // только источник у списка другой (поиск по проекту).
+  define(
+    { id: 'view.showTodos', title: 'Задачи (TODO/FIXME)', category: 'Вид', keywords: ['todo', 'fixme', 'пометки'] },
+    () => {
+      dock.show('todo');
+    },
+  );
+
   define({ id: 'view.toggleDock', title: 'Свернуть нижнюю панель', category: 'Вид' }, () => {
     if (dock.visible) dock.hide();
     else dock.show(dock.activeId ?? 'terminal');
@@ -4542,6 +4579,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         // Открытый файл мог измениться снаружи — обновляем и его содержимое.
         const payload = message.payload as WorkspaceChangedPayload;
         if (payload?.path) void reloadIfOpen(payload.path);
+        // Пометки TODO/FIXME могли появиться или пропасть — пересобираем список,
+        // но только когда панель задач на виду: поиск по проекту — работа заметная.
+        if (dock.visible && dock.activeId === 'todo') todoPanel.schedule();
         break;
       }
       case PushTopic.SettingsChanged:
