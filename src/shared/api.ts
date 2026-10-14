@@ -26,6 +26,7 @@ import type { SemanticToken } from './lsp-semantic-tokens';
 import type { FolderCompareResult } from './folder-compare';
 import type { StructuralProjectMatches, StructuralProjectOptions } from './structural-search';
 import type { ExportsQuery, ExportsResult } from './symbol-exports';
+import type { InheritanceQuery, InheritanceResult } from './type-inheritance';
 import type { ProjectPackage } from './monorepo';
 import type { ForgeInfo } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
@@ -1637,6 +1638,11 @@ export interface ChuiMethods {
    * такого запроса в LSP нет. Возвращает файлы с местами (строка, вид экспорта).
    */
   'workspace.findExports': { params: ExportsQuery; result: ExportsResult };
+  /**
+   * Наследование имени по проекту: кто наследует (`subtypes`) или от кого наследует
+   * (`supertypes`). Свой разбор строк (JS/TS и Python), без языкового сервера.
+   */
+  'workspace.findInheritance': { params: InheritanceQuery; result: InheritanceResult };
   'workspace.createFile': { params: { path: string }; result: { path: string } };
   'workspace.createDir': { params: { path: string }; result: { path: string } };
   'workspace.rename': { params: { from: string; to: string }; result: { path: string } };

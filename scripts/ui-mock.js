@@ -440,6 +440,63 @@ module.exports = [
    * `__all__` и объявления верхнего уровня. Это мок для взгляда на интерфейс, а не
    * повторение настоящего разбора (`src/shared/symbol-exports.ts`).
    */
+  /**
+   * Приблизительный разбор наследования для мока: JS/TS — `class ... extends/implements`,
+   * `interface ... extends`; Python — родители в скобках. Мок для взгляда на интерфейс,
+   * а не повторение настоящего разбора (`src/shared/type-inheritance.ts`).
+   */
+  const mockTypeDeclarations = (text) => {
+    const out = [];
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i += 1) {
+      const trimmed = lines[i].trim();
+      if (/^\s/.test(lines[i])) continue;
+      const line = i + 1;
+      const iface = /^(?:export\s+)?(?:declare\s+)?interface\s+([A-Za-z_$][\w$]*)\b([\s\S]*)$/.exec(trimmed);
+      if (iface) {
+        const ext = /\bextends\s+([^{]+)/.exec(iface[2]);
+        out.push({
+          name: iface[1],
+          line,
+          kind: 'interface',
+          bases: (ext ? ext[1] : '')
+            .split(',')
+            .map((x) => x.trim())
+            .filter(Boolean),
+        });
+        continue;
+      }
+      const klass =
+        /^(?:export\s+(?:default\s+)?)?(?:declare\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)([\s\S]*)$/.exec(
+          trimmed,
+        );
+      if (klass) {
+        const bases = [];
+        const ext = /\bextends\s+([A-Za-z_$][\w$.]*)/.exec(klass[2]);
+        if (ext) bases.push(ext[1]);
+        const impl = /\bimplements\s+([^{]+)/.exec(klass[2]);
+        if (impl) for (const part of impl[1].split(',')) if (part.trim()) bases.push(part.trim());
+        out.push({ name: klass[1], line, kind: 'class', bases });
+        continue;
+      }
+      const py = /^class\s+([A-Za-z_]\w*)\s*(?:\(([^)]*)\))?\s*:/.exec(trimmed);
+      if (py) {
+        const bases = (py[2] ?? '')
+          .split(',')
+          .map((x) => x.trim())
+          .filter((x) => x && !x.includes('=') && !x.startsWith('*'));
+        out.push({ name: py[1], line, kind: 'class', bases });
+      }
+    }
+    return out;
+  };
+
+  const normalizeBase = (base) => {
+    const withoutGeneric = base.replace(/[<[].*$/, '').trim();
+    const dot = withoutGeneric.lastIndexOf('.');
+    return (dot < 0 ? withoutGeneric : withoutGeneric.slice(dot + 1)).trim();
+  };
+
   const mockExportedNames = (text) => {
     const found = [];
     const lines = text.split('\n');
@@ -734,6 +791,29 @@ module.exports = [
         files.push({ path: full, entries });
       }
       return { name, files, total, scanned };
+    },
+    // Как main: наследование имени по проекту — свой разбор строк.
+    'workspace.findInheritance': (params) => {
+      const name = String(params.name ?? '').trim();
+      const direction = params.direction === 'supertypes' ? 'supertypes' : 'subtypes';
+      const target = normalizeBase(name);
+      const files = [];
+      let total = 0;
+      let scanned = 0;
+      for (const [full, text] of FILES) {
+        if (!full.startsWith(`${ROOT}/`)) continue;
+        if (!/\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|py)$/.test(full)) continue;
+        scanned += 1;
+        const decls = mockTypeDeclarations(text);
+        const entries =
+          direction === 'subtypes'
+            ? decls.filter((d) => d.bases.some((b) => normalizeBase(b) === target))
+            : decls.filter((d) => d.name === name);
+        if (entries.length === 0) continue;
+        total += entries.length;
+        files.push({ path: full, entries });
+      }
+      return { name, direction, files, total, scanned };
     },
     // Как main: относительные (POSIX) пути всех файлов — для быстрого открывателя.
     'workspace.listFiles': () =>

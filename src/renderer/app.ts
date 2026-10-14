@@ -4007,6 +4007,64 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   );
 
   /**
+   * Наследование имени под кареткой по проекту: кто наследует (subtypes) или от кого
+   * наследует (supertypes). Тем же списком, что экспорты: свой разбор строк, без сервера
+   * (иерархию типов сервер показывает лишь для символа под курсором).
+   */
+  const openInheritance = async (direction: 'subtypes' | 'supertypes'): Promise<void> => {
+    const path = editors.currentPath;
+    if (!path) {
+      showToast('Откройте файл', 'error');
+      return;
+    }
+    const name = editors.selectedText().trim() || editors.wordAtCursor() || '';
+    if (!name) {
+      showToast('Поставьте курсор на имя типа', 'info');
+      return;
+    }
+
+    const result = await rpc.request('workspace.findInheritance', { name, direction }).catch(() => null);
+    if (!result) {
+      showToast('Не удалось искать по проекту', 'error');
+      return;
+    }
+    const empty = direction === 'subtypes' ? `${name}: наследников не найдено` : `${name}: объявлений не найдено`;
+    if (result.total === 0) {
+      showToast(empty);
+      return;
+    }
+
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(
+      result.files.flatMap((file) =>
+        file.entries.map((entry) => ({
+          label: `${workspace.relative(file.path)}:${entry.line}`,
+          hint: describeType(entry),
+          onSelect: () => void openPath(file.path).then(() => editors.reveal(file.path, entry.line, 1)),
+        })),
+      ),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+    showToast(direction === 'subtypes' ? `Наследуют ${name}: ${result.total}` : `${name}: ${result.total}`);
+  };
+
+  define(
+    { id: 'search.findSubtypes', title: 'Кто наследует тип', category: 'Поиск', keywords: ['наслед', 'subclass'] },
+    () => void openInheritance('subtypes'),
+  );
+  define(
+    {
+      id: 'search.findSupertypes',
+      title: 'От кого наследует тип',
+      category: 'Поиск',
+      keywords: ['родител', 'superclass'],
+    },
+    () => void openInheritance('supertypes'),
+  );
+
+  /**
    * Моникер символа под курсором: устойчивое имя, по которому символ связывается с тем же
    * символом в других инструментах. Показываем список (схем бывает несколько), а первый
    * сразу копируем в буфер — чаще всего его и нужно вставить в другой инструмент.
@@ -5314,4 +5372,10 @@ function exportKindLabel(kind: string): string {
   if (kind === 'star') return 'звёздочкой';
   if (kind === 'named') return 'списком';
   return 'объявлением';
+}
+
+/** Подпись объявления типа для списка: вид и его прямые родители. */
+function describeType(entry: { kind: string; bases: string[] }): string {
+  if (entry.bases.length === 0) return entry.kind;
+  return `${entry.kind} · ${entry.bases.join(', ')}`;
 }

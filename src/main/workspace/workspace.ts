@@ -43,6 +43,13 @@ import {
   type ExportFileHits,
 } from '../../shared/symbol-exports';
 import { languageFromPath } from '../../shared/languages';
+import {
+  inheritanceMatches,
+  supportsInheritance,
+  type InheritanceQuery,
+  type InheritanceResult,
+  type InheritanceFileHits,
+} from '../../shared/type-inheritance';
 import { MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../../shared/large-file';
 import { buildFolderDiff, splitFolderLists, type FolderCompareResult } from '../../shared/folder-compare';
 
@@ -946,6 +953,47 @@ export class WorkspaceService {
     }
 
     return { name, files, total, scanned };
+  }
+
+  /**
+   * Наследование имени: «кто наследует» (`direction: 'subtypes'`) или «от кого наследует»
+   * (`'supertypes'`). Обходим те же файлы, что поиск экспортов, и разбираем объявления
+   * типов по языку. Это не запрос к серверу: иерархию типов сервер показывает для символа
+   * под курсором, а тут нужен ответ по всему проекту.
+   *
+   * Языки без разбора пропускаем: притворяться, что «не нашлось», там нечестно.
+   */
+  async findInheritance(options: InheritanceQuery): Promise<InheritanceResult> {
+    const name = options.name.trim();
+    if (name === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задано имя типа');
+    const direction = options.direction === 'supertypes' ? 'supertypes' : 'subtypes';
+
+    const root = this.requireRoot();
+    const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
+    const files: InheritanceFileHits[] = [];
+    let total = 0;
+    let scanned = 0;
+
+    for (const file of await this.collectFiles()) {
+      const relative = path.relative(root, file).split(path.sep).join('/');
+      if (matcher && !matcher.test(relative)) continue;
+      const language = languageFromPath(relative);
+      if (!supportsInheritance(language)) continue;
+      const stat = await fs.stat(file).catch(() => null);
+      if (!stat || stat.size > MAX_FILE_BYTES) continue;
+      const buffer = await fs.readFile(file).catch(() => null);
+      if (!buffer) continue;
+      scanned += 1;
+
+      const text = buffer.toString('utf8').replace(/\r\n/g, '\n');
+      const found = inheritanceMatches(text, language, name, direction);
+      if (found.length === 0) continue;
+
+      total += found.length;
+      files.push({ path: file, entries: found });
+    }
+
+    return { name, direction, files, total, scanned };
   }
 
   /**

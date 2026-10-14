@@ -488,8 +488,14 @@ npm run smoke:terminal   # TerminalService целиком: сессия, вво�
 нет — экспорт виден по строкам (`export`, список с алиасом, `default`, `*`; у Python
 `__all__` и публичные `def`/`class` верхнего уровня), прочие языки пропускаются
 (`shared/symbol-exports.ts`, `WorkspaceService.findExports`; проверка —
-`tests/symbol-exports.test.ts`, `tests/exports-project.test.ts`). ◐ Поиска по
-типам и наследованию по-прежнему нет. ✓ Метки файлов: цветной ярлык в строке (один на файл) из
+`tests/symbol-exports.test.ts`, `tests/exports-project.test.ts`). ✓ Поиск по наследованию
+(`search.findSubtypes` «Кто наследует тип», `search.findSupertypes` «От кого наследует
+тип»): по имени типа под кареткой проект обходится своими средствами, и находятся
+объявления, у которых это имя стоит среди родителей, — либо родители самого типа. Разбор
+по строкам без дерева (`class … extends/implements`, `interface … extends`; у Python —
+родители в скобках; имя сверяется по последнему отрезку пути и без дженериков),
+прочие языки пропускаются (`shared/type-inheritance.ts`, `WorkspaceService.findInheritance`;
+проверка — `tests/type-inheritance.test.ts`, `tests/inheritance-project.test.ts`). ✓ Метки файлов: цветной ярлык в строке (один на файл) из
 подменю «Метка» в меню дерева; живут в сессии проекта (`shared/file-labels.ts`,
 проверка — `tests/file-labels.test.ts`). ✓ Группировка файлов по назначению:
 `explorer.groupByType` собирает тесты, стили, документацию и прочее под подписанные
