@@ -32,6 +32,7 @@ import type { Token } from '../highlight/tokens';
 import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
 import { overlayRanges, type RoleRange } from '../highlight/overlay';
 import { semanticTokenRole, type SemanticToken } from '../../../shared/lsp-semantic-tokens';
+import type { CursorStyle } from '../../../shared/cursor-style';
 import { measureFont, monospaceMetrics, type GlyphMetrics } from './glyph-metrics';
 import { columnForX, layoutLine, xForColumn } from './line-layout';
 import { FileDecorations, squigglyRect, type LensDecoration, type LinkDecoration } from './decorations';
@@ -755,6 +756,30 @@ export class EditorView {
     if (this.root.style.fontSize === `${size}px`) return;
     this.root.style.fontSize = `${size}px`;
     this.remeasure();
+  }
+
+  /**
+   * Высота строки, px. `0` — «по шрифту»: своё значение снимаем, и высота считается
+   * от кегля (1.4, из таблицы стилей). Метрики после этого перемеряем: от них зависит
+   * вся раскладка — прокрутка, попадание мышью и слой кареток.
+   */
+  setLineHeight(lineHeight: number): void {
+    const px = Math.round(lineHeight);
+    const next = px > 0 ? `${px}px` : '';
+    if (this.root.style.lineHeight === next) return;
+    this.root.style.lineHeight = next;
+    this.remeasure();
+  }
+
+  /** Форма каретки: полоска, блок или подчёркивание. Вид рисует CSS по `data-cursor`. */
+  setCursorStyle(style: CursorStyle): void {
+    if (this.root.dataset.cursor === style) return;
+    this.root.dataset.cursor = style;
+  }
+
+  /** Мигание каретки: выключенное спокойнее глазу при долгом чтении. */
+  setCursorBlink(blink: boolean): void {
+    this.root.dataset.cursorBlink = blink ? 'on' : 'off';
   }
 
   /** Язык, для которого сейчас есть подсветка (`null` — текст показывается как простой). */

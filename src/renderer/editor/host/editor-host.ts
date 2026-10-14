@@ -55,6 +55,7 @@ import { EmmetExpander } from '../input/emmet';
 import type { SurroundOption } from '../input/surround';
 import type { CompletionTriggers } from './lsp-features';
 import { EditorView, type DebugInlineValue } from '../view/editor-view';
+import type { CursorStyle } from '../../../shared/cursor-style';
 import { normalizeWhitespaceMode, type WhitespaceMode } from '../view/whitespace';
 import { caret, isEmpty, type Selection } from '../view/selection';
 import { FileDecorations, type LensDecoration, type LinkDecoration } from '../view/decorations';
@@ -149,6 +150,12 @@ export interface EditorHostOptions {
   tabSize?: number;
   /** Кегль текста в редакторе, px. */
   fontSize?: number;
+  /** Высота строки, px; `0` — «по шрифту». */
+  lineHeight?: number;
+  /** Форма каретки: полоска, блок или подчёркивание. */
+  cursorStyle?: CursorStyle;
+  /** Мигает ли каретка. */
+  cursorBlink?: boolean;
   /** Столбцы направляющих (ruler): вертикальные черты на этих столбцах. */
   rulers?: readonly number[];
   /** Показывать ли невидимые знаки: `none` (по умолчанию), `trailing` или `all`. */
@@ -523,6 +530,9 @@ export class EditorHost {
     });
     this.view.setWordWrap(options.wordWrap === true);
     if (options.fontSize !== undefined) this.view.setFontSize(options.fontSize);
+    if (options.lineHeight !== undefined) this.view.setLineHeight(options.lineHeight);
+    if (options.cursorStyle !== undefined) this.view.setCursorStyle(options.cursorStyle);
+    if (options.cursorBlink !== undefined) this.view.setCursorBlink(options.cursorBlink);
     if (options.rulers) this.view.setRulers(options.rulers);
     this.viewport = this.view.element.querySelector<HTMLElement>('.own-editor-viewport');
     // Значок «только чтение» — поверх панели: файл большой, правки в нём выключены.
@@ -866,10 +876,13 @@ export class EditorHost {
     this.view.setSelection(this.controller.selection);
   }
 
-  /** Настройки редактора, влияющие на вид: ширина отступа (Tab) и кегль текста. */
+  /** Настройки редактора, влияющие на вид: отступ (Tab), кегль, высота строки и каретка. */
   applyOptions(options: {
     tabSize?: number;
     fontSize?: number;
+    lineHeight?: number;
+    cursorStyle?: CursorStyle;
+    cursorBlink?: boolean;
     rulers?: readonly number[];
     whitespace?: WhitespaceMode;
     minimap?: boolean;
@@ -883,6 +896,9 @@ export class EditorHost {
       this.view.setTabSize(options.tabSize);
     }
     if (options.fontSize !== undefined) this.view.setFontSize(options.fontSize);
+    if (options.lineHeight !== undefined) this.view.setLineHeight(options.lineHeight);
+    if (options.cursorStyle !== undefined) this.view.setCursorStyle(options.cursorStyle);
+    if (options.cursorBlink !== undefined) this.view.setCursorBlink(options.cursorBlink);
     if (options.rulers !== undefined) this.view.setRulers(options.rulers);
     if (options.whitespace !== undefined) this.view.setWhitespace(normalizeWhitespaceMode(options.whitespace));
     if (options.minimap !== undefined) this.view.setMinimap(options.minimap);

@@ -59,6 +59,7 @@ import {
   type RunMarkerHit,
   type TestMarkerHit,
 } from './editor-host';
+import type { CursorStyle } from '../../../shared/cursor-style';
 import type { WhitespaceMode } from '../view/whitespace';
 
 /** Значение выражения для подсказки отладчика: что показать и какого типа. */
@@ -78,6 +79,12 @@ export interface EditorWorkspaceOptions {
   tabSize?: number;
   /** Кегль текста в редакторе, px. */
   fontSize?: number;
+  /** Высота строки, px; `0` — «по шрифту». */
+  lineHeight?: number;
+  /** Форма каретки: полоска, блок или подчёркивание. */
+  cursorStyle?: CursorStyle;
+  /** Мигает ли каретка. */
+  cursorBlink?: boolean;
   /** Столбцы направляющих (ruler): вертикальные черты на этих столбцах. */
   rulers?: readonly number[];
   /** Показывать ли невидимые знаки: `none`, `trailing` или `all`. */
@@ -210,6 +217,9 @@ export class EditorWorkspace {
   private scheme: Scheme;
   private readonly tabSize: number | undefined;
   private readonly fontSize: number | undefined;
+  private readonly lineHeight: number | undefined;
+  private readonly cursorStyle: CursorStyle | undefined;
+  private readonly cursorBlink: boolean | undefined;
   /** Столбцы направляющих — панели равны, как отступы и кегль. */
   private readonly rulers: readonly number[] | undefined;
   /** Невидимые знаки: панели равны, как отступы и кегль. */
@@ -325,6 +335,9 @@ export class EditorWorkspace {
     this.scheme = options.scheme ?? 'dark';
     this.tabSize = options.tabSize;
     this.fontSize = options.fontSize;
+    this.lineHeight = options.lineHeight;
+    this.cursorStyle = options.cursorStyle;
+    this.cursorBlink = options.cursorBlink;
     this.rulers = options.rulers;
     this.whitespace = options.whitespace;
     this.minimap = options.minimap;
@@ -420,6 +433,9 @@ export class EditorWorkspace {
     const pane = new EditorHost(host, this.registry, {
       tabSize: this.tabSize,
       fontSize: this.fontSize,
+      lineHeight: this.lineHeight,
+      cursorStyle: this.cursorStyle,
+      cursorBlink: this.cursorBlink,
       rulers: this.rulers,
       whitespace: this.whitespace,
       minimap: this.minimap,
@@ -770,6 +786,9 @@ export class EditorWorkspace {
   applyOptions(options: {
     tabSize?: number;
     fontSize?: number;
+    lineHeight?: number;
+    cursorStyle?: CursorStyle;
+    cursorBlink?: boolean;
     rulers?: readonly number[];
     whitespace?: WhitespaceMode;
     minimap?: boolean;

@@ -394,7 +394,6 @@
   line-height: var(--own-editor-line-height);
 }
 
-/* Каретка: тонкая полоса, мигает. Высоту и место задаёт представление. */
 /* Слой кареток: их может быть несколько (мультикурсор), поэтому каретка — узел внутри,
    а не отдельный слой полотна. */
 .own-editor-carets {
@@ -403,20 +402,53 @@
   pointer-events: none;
 }
 
+/* Каретка: мигающая метка. Место и высоту задаёт представление (inline), а ФОРМУ —
+   `data-cursor` на корне: видимую часть рисует `::after`, поэтому смена формы не
+   требует перерисовки кареток. */
 .own-editor-caret {
   position: absolute;
   top: 0;
   left: 0;
   width: 2px;
-  background: var(--accent_fill);
-  will-change: transform;
   animation: own-editor-caret-blink 1s step-end infinite;
+  will-change: transform;
+}
+
+.own-editor-caret::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent_fill);
+}
+
+/* Блок и подчёркивание — на всю клетку знака. */
+.own-editor[data-cursor='block'] .own-editor-caret,
+.own-editor[data-cursor='underline'] .own-editor-caret {
+  width: var(--own-editor-char-width);
+}
+
+/* Блок — полупрозрачный: знак под кареткой должен читаться, а не пропадать. */
+.own-editor[data-cursor='block'] .own-editor-caret::after {
+  opacity: 0.5;
+}
+
+/* Подчёркивание — тонкая черта внизу клетки. */
+.own-editor[data-cursor='underline'] .own-editor-caret::after {
+  top: auto;
+  bottom: 0;
+  height: 2px;
 }
 
 /* Неглавные каретки не мигают: при десятке кареток мигание рябит, а главную видно
    по одному мигающему курсору. */
 .own-editor-caret.is-idle {
   animation: none;
+}
+
+/* Мигание выключено настройкой: каретка просто стоит. */
+.own-editor[data-cursor-blink='off'] .own-editor-caret {
+  animation: none;
+  opacity: 1;
 }
 
 @keyframes own-editor-caret-blink {

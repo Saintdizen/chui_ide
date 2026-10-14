@@ -6,6 +6,7 @@
  */
 
 import type { MenuRole } from './app-menu';
+import type { CursorStyle } from './cursor-style';
 import type { ApplyResult, FileEdit, TextEdit } from './edits';
 import type { BlameLine } from './git-blame';
 import type { PatchFile } from './patch';
@@ -642,6 +643,12 @@ export interface EditorSettings {
   tabSize: number;
   /** Кегль текста в редакторе, px. */
   fontSize: number;
+  /** Высота строки в px; `0` — «по шрифту» (авто, 1.4 от кегля). */
+  lineHeight: number;
+  /** Форма каретки: полоска, блок или подчёркивание. */
+  cursorStyle: CursorStyle;
+  /** Мигает ли каретка. Выключенное мигание спокойнее глазу при долгом чтении. */
+  cursorBlink: boolean;
   insertSpaces: boolean;
   /** Язык задаёт свои отступы: Python — 4 пробела, Makefile — символ табуляции. */
   languageIndent: boolean;

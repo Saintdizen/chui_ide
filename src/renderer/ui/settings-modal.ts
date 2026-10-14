@@ -13,6 +13,7 @@ import type {
 import type { AiProviderPatch, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
 import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
+import { CURSOR_STYLES, CURSOR_STYLE_LABELS, MAX_LINE_HEIGHT, normalizeCursorStyle } from '../../shared/cursor-style';
 import { serializeThemeFile } from '../../shared/theme-file';
 import { normalizeRulers, rulersToText } from '../../shared/rulers';
 import { PULL_MODES, pullModeLabel } from '../../shared/git-pull';
@@ -872,6 +873,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'Размер шрифта',
         numberInput(editor.fontSize, 8, 32, 1, (value) => editable({ fontSize: value })),
       ),
+      field(
+        'Высота строки, px (0 — по шрифту)',
+        numberInput(editor.lineHeight, 0, MAX_LINE_HEIGHT, 1, (value) => editable({ lineHeight: value })),
+      ),
       h('div', { class: 'settings-divider' }),
       h('div', { class: 'field-label' }, 'Отступы'),
       field(
@@ -944,6 +949,23 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'div',
         { class: 'field-hint' },
         'Лигатуры рисуют `=>`, `!=`, `->` одним знаком. Нужен шрифт с лигатурами — иначе ничего не изменится.',
+      ),
+
+      h('div', { class: 'settings-divider' }),
+      h('div', { class: 'field-label' }, 'Каретка'),
+      field(
+        'Форма',
+        selectInput(
+          CURSOR_STYLES.map((style) => ({ value: style, label: CURSOR_STYLE_LABELS[style] })),
+          editor.cursorStyle,
+          (value) => editable({ cursorStyle: normalizeCursorStyle(value) }),
+        ),
+      ),
+      switchRow('Мигание каретки', editor.cursorBlink, (value) => editable({ cursorBlink: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Блок — каретка на всю клетку знака, подчёркивание — тонкая черта под ним. Выключенное мигание спокойнее при долгом чтении.',
       ),
 
       h('div', { class: 'settings-divider' }),

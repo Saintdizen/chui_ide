@@ -22,6 +22,7 @@ import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
 import { normalizeRulers } from '../shared/rulers';
+import { normalizeCursorStyle, normalizeLineHeight } from '../shared/cursor-style';
 import { normalizeWhitespaceMode } from '../shared/whitespace';
 import { normalizeSpellWords } from '../shared/spellcheck';
 import { normalizePullMode } from '../shared/git-pull';
@@ -161,6 +162,12 @@ const DEFAULT_SETTINGS: StoredSettings = {
   editor: {
     tabSize: 4,
     fontSize: 14,
+    // Высота строки по шрифту: редактор считает её от кегля (1.4). Число здесь —
+    // для тех, кому нужнее плотный или просторный текст.
+    lineHeight: 0,
+    // Каретка — привычная тонкая полоска, и она мигает: так видно, что фокус в редакторе.
+    cursorStyle: 'line',
+    cursorBlink: true,
     insertSpaces: true,
     // Python и Makefile требуют разного отступа: пусть язык решает сам.
     languageIndent: true,
@@ -417,6 +424,10 @@ export class SettingsStore {
       if (patch.editor.formatOnPaste !== undefined) next.formatOnPaste = patch.editor.formatOnPaste === true;
       if (patch.editor.spellcheck !== undefined) next.spellcheck = patch.editor.spellcheck === true;
       if (patch.editor.spellWords !== undefined) next.spellWords = normalizeSpellWords(patch.editor.spellWords);
+      // Высота строки и каретка приходят из формы: приводим тем же разбором, что при чтении.
+      if (patch.editor.lineHeight !== undefined) next.lineHeight = normalizeLineHeight(patch.editor.lineHeight);
+      if (patch.editor.cursorStyle !== undefined) next.cursorStyle = normalizeCursorStyle(patch.editor.cursorStyle);
+      if (patch.editor.cursorBlink !== undefined) next.cursorBlink = patch.editor.cursorBlink === true;
       this.data.editor = next;
     }
     if (patch.explorer) {
@@ -731,6 +742,11 @@ function loadSettings(filePath: string): StoredSettings {
       // Орфография включена только явным `true`: старый settings.json её не знает.
       spellcheck: parsed.editor?.spellcheck === true,
       spellWords: normalizeSpellWords(parsed.editor?.spellWords),
+      // Высоту строки и вид каретки правили в файле руками — проверяем и их.
+      lineHeight: normalizeLineHeight(parsed.editor?.lineHeight),
+      cursorStyle: normalizeCursorStyle(parsed.editor?.cursorStyle),
+      // Мигание включено только явным `true`: старый settings.json его не знает.
+      cursorBlink: parsed.editor?.cursorBlink !== false,
     },
     // Секции появились позже первых версий: старый settings.json их не знает,
     // поэтому неполный файл догружается значениями по умолчанию, а список

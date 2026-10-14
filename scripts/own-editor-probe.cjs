@@ -2974,6 +2974,63 @@ async function menuComboCheck(win) {
   };
 }
 
+
+/**
+ * Каретка и высота строки: форма, мигание и своя высота.
+ *
+ * Проверяем то, что видно только в настоящем окне: как форму каретки рисует CSS по
+ * `data-cursor` на корне, что «мигание» — это `animation-name`, а не отсутствие
+ * свойства, и что своя высота строки действительно меняет высоту нарисованной строки,
+ * а `0` возвращает её к шрифту (1.4 от кегля).
+ */
+async function caretCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  return script(`(async () => {
+    const { view, input } = window.probe;
+    const root = view.element;
+    const caret = () => root.querySelector('.own-editor-caret');
+    const after = (node) => getComputedStyle(node, '::after');
+    const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    input.focus();
+
+    view.setCursorStyle('line');
+    const line = Math.round(caret().getBoundingClientRect().width);
+    view.setCursorStyle('block');
+    const blockWidth = Math.round(caret().getBoundingClientRect().width);
+    const blockOpacity = Number(after(caret()).opacity);
+    view.setCursorStyle('underline');
+    const underlineHeight = after(caret()).height;
+    const underlineBottom = after(caret()).bottom;
+
+    view.setCursorBlink(false);
+    const blinkOff = getComputedStyle(caret()).animationName;
+    view.setCursorBlink(true);
+    const blinkOn = getComputedStyle(caret()).animationName;
+
+    view.setLineHeight(30);
+    await frame();
+    const row30 = Math.round(root.querySelector('.own-editor-line').getBoundingClientRect().height);
+    const varHeight = root.style.getPropertyValue('--own-editor-line-height');
+    view.setLineHeight(0);
+    await frame();
+    const rowAuto = Math.round(root.querySelector('.own-editor-line').getBoundingClientRect().height);
+
+    return {
+      'полоска_ширина': line,
+      'блок_ширина': blockWidth,
+      'блок_прозрачность': blockOpacity,
+      'подчёркивание_высота': underlineHeight,
+      'подчёркивание_снизу': underlineBottom,
+      'мигание_выключено': blinkOff,
+      'мигание_включено': blinkOn,
+      'строка_30px': row30,
+      'переменная_высоты': varHeight,
+      'строка_по_шрифту': rowAuto,
+      'ширина_клетки': root.style.getPropertyValue('--own-editor-char-width'),
+    };
+  })()`);
+}
+
 async function main() {
   const lines = [];
   const log = (text) => {
@@ -3251,6 +3308,11 @@ async function main() {
   const ctrlClick = await ctrlClickCheck(win);
   log('## Ctrl+Click по слову');
   log(JSON.stringify(ctrlClick, null, 2));
+  log('');
+
+  const caret = await caretCheck(win);
+  log('## Каретка и высота строки');
+  log(JSON.stringify(caret, null, 2));
   log('');
 
   const menuCombo = await menuComboCheck(win);
