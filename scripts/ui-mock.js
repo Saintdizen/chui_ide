@@ -295,7 +295,7 @@ module.exports = [
     // Языковые серверы: как main — секция есть всегда, по умолчанию выключена.
     lsp: { enabled: false, servers: [] },
     // Git: режим pull по умолчанию — как в main (поведение самого git).
-    git: { pullMode: 'default' },
+    git: { pullMode: 'default', saveBeforeCommit: true },
     // Изменённые горячие клавиши: по умолчанию пусто — сочетания берутся из кода.
     keybindings: { overrides: [] },
     // «Системная» — чтобы схему в проверке задавал Playwright (`emulateMedia`).

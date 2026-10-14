@@ -288,7 +288,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
   },
   // Git: по умолчанию не подсказываем режим pull — git ведёт себя как настроен.
   // Навязывать слияние или перебазирование без спроса было бы навязчиво.
-  git: { pullMode: 'default' },
+  // Перед коммитом сохраняем несохранённые файлы: коммит читает рабочее дерево, а
+  // не экран, и правки из буфера иначе остались бы в стороне от коммита.
+  git: { pullMode: 'default', saveBeforeCommit: true },
   // Сочетаний по умолчанию тут нет: они живут в коде (`renderer/core/default-keybindings.ts`).
   // Здесь — только то, что человек поменял сам.
   keybindings: { overrides: [] },
@@ -401,7 +403,7 @@ export class SettingsStore {
       },
       // Копия: снимок настроек не должен меняться вслед за правкой списка.
       keybindings: { overrides: this.data.keybindings.overrides.map((item) => ({ ...item })) },
-      git: { pullMode: this.data.git.pullMode },
+      git: { pullMode: this.data.git.pullMode, saveBeforeCommit: this.data.git.saveBeforeCommit },
     };
   }
 
@@ -814,7 +816,10 @@ function loadSettings(filePath: string): StoredSettings {
     // Файл могут править руками: сочетания приводим к известному виду.
     keybindings: { overrides: normalizeKeybindingOverrides(parsed.keybindings?.overrides) },
     // Режим pull могли записать чем угодно — держим только известные значения.
-    git: { pullMode: normalizePullMode(parsed.git?.pullMode) },
+    git: {
+      pullMode: normalizePullMode(parsed.git?.pullMode),
+      saveBeforeCommit: parsed.git?.saveBeforeCommit !== false,
+    },
   };
 }
 

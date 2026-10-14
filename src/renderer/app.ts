@@ -2161,6 +2161,27 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   };
 
   /**
+   * Сохранить несохранённые буферы перед операцией, которая читает рабочее дерево.
+   *
+   * Коммит (и исправление коммита) работает с файлами на диске, а не с экраном:
+   * без этого правки из буфера в коммит не попадали, зато вкладка оставалась с
+   * пометкой «не сохранён» — и работа человека терялась из виду.
+   *
+   * `false` — сохранить не удалось: человек отказался перезаписывать файл, который
+   * изменили снаружи, или файл открыт только для чтения. Тогда операцию не начинаем:
+   * иначе она прошла бы по устаревшему содержимому.
+   */
+  const saveDirtyForGit = async (): Promise<boolean> => {
+    // Настройку могли ещё не прочитать: отсутствие значения — это «сохранять»,
+    // как и умолчание main, а не «не сохранять».
+    if (settings.git.saveBeforeCommit === false) return true;
+    for (const document of documents.dirty()) {
+      if (!(await saveDocument(document))) return false;
+    }
+    return true;
+  };
+
+  /**
    * Сохранить документ ПОД ДРУГИМ ИМЕНЕМ (Save As). Путь выбирает человек системным
    * диалогом, поэтому в отличие от Ctrl+S запись идёт не по пути документа, а по
    * выбранному. Прежний файл на диске остаётся как был — это копия, и терять его
@@ -3242,6 +3263,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       return undefined;
     }
 
+    // Правки в буферах git ещё не видит: он смотрит рабочее дерево, а не экран.
+    // Сохраняем ДО индексации — иначе и в индекс, и в коммит ушло бы старое содержимое.
+    if (!(await saveDirtyForGit())) return undefined;
+
     // Как в других IDE: пустой индекс — не повод отказывать, а повод спросить.
     if (git.staged.length === 0) {
       if (git.unstaged.length === 0) {
@@ -3318,6 +3343,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         showToast('Исправлять нечего: коммитов ещё нет', 'error');
         return undefined;
       }
+      if (!(await saveDirtyForGit())) return undefined;
       const info = await git.commit(text, undefined, true);
       showToast(`Коммит ${info.hash} исправлен: ${info.summary}`);
       return info;
@@ -5098,14 +5124,39 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   /**
+   * О расхождении с диском уже сказали: повторять на каждое событие наблюдателя
+   * незачем. Из набора путь уходит, когда буфер снова совпал с диском, — тогда
+   * следующий разлом стоит объяснить заново.
+   */
+  const diskDiffWarned = new Set<string>();
+  documents.onDidChangeDirty((document) => {
+    if (!document.dirty) diskDiffWarned.delete(document.path);
+  });
+
+  /**
    * Файл изменился на диске. Открытый документ перечитываем: иначе в редакторе
    * останется старая версия — например, после правки во внешнем инструменте или в
    * терминале. Несохранённые правки при этом НЕ теряются — решение принимает сам
    * `reloadFromDisk` (содержимое совпало — снимаем «грязность», разошлось — оставляем буфер).
+   *
+   * О разошедшемся буфере говорим вслух и сразу предлагаем перечитать: иначе пометка
+   * «не сохранён» висит без объяснения, а Ctrl+S спрашивает про файл, которого человек
+   * не трогал, — и непонятно, чьи правки в буфере и что с ними делать.
    */
   const reloadIfOpen = async (path: string): Promise<void> => {
-    if (!documents.get(path)) return;
+    const document = documents.get(path);
+    if (!document) return;
     await edits.reloadFromDisk(path).catch(() => undefined);
+    // Буфер остался правленым — значит версия на диске с ним разошлась: совпавший
+    // текст снял бы «грязность» (см. `reloadFromDisk`).
+    if (!document.dirty || diskDiffWarned.has(path)) return;
+    diskDiffWarned.add(path);
+    showToast(`Файл «${basename(path)}» изменился на диске: ваши правки в редакторе целы`, 'info', {
+      action: {
+        label: 'Перечитать',
+        run: () => void commands.execute('file.revertFromDisk', path),
+      },
+    });
   };
 
   /**
