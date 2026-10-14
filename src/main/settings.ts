@@ -26,6 +26,7 @@ import { normalizeCursorStyle, normalizeLineHeight } from '../shared/cursor-styl
 import { normalizeWhitespaceMode } from '../shared/whitespace';
 import { normalizeSpellWords } from '../shared/spellcheck';
 import { normalizePullMode } from '../shared/git-pull';
+import { DEFAULT_GIT_SETTINGS, sanitizeGitSettings } from '../shared/git-settings';
 import { normalizeKeybindingOverrides, type KeybindingSettings } from '../shared/keybindings';
 import { sanitizeThemeFile, type ThemeFile } from '../shared/theme-file';
 import { sanitizeUiScale } from '../shared/ui-scale';
@@ -286,11 +287,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     trace: false,
     servers: [],
   },
-  // Git: по умолчанию не подсказываем режим pull — git ведёт себя как настроен.
-  // Навязывать слияние или перебазирование без спроса было бы навязчиво.
-  // Перед коммитом сохраняем несохранённые файлы: коммит читает рабочее дерево, а
-  // не экран, и правки из буфера иначе остались бы в стороне от коммита.
-  git: { pullMode: 'default', saveBeforeCommit: true },
+  // Git: значения по умолчанию и разбор — в `shared/git-settings.ts` (под тестами).
+  git: { ...DEFAULT_GIT_SETTINGS },
   // Сочетаний по умолчанию тут нет: они живут в коде (`renderer/core/default-keybindings.ts`).
   // Здесь — только то, что человек поменял сам.
   keybindings: { overrides: [] },
@@ -403,7 +401,7 @@ export class SettingsStore {
       },
       // Копия: снимок настроек не должен меняться вслед за правкой списка.
       keybindings: { overrides: this.data.keybindings.overrides.map((item) => ({ ...item })) },
-      git: { pullMode: this.data.git.pullMode, saveBeforeCommit: this.data.git.saveBeforeCommit },
+      git: { ...this.data.git },
     };
   }
 
@@ -815,11 +813,7 @@ function loadSettings(filePath: string): StoredSettings {
     lsp: sanitizeLsp({ ...DEFAULT_SETTINGS.lsp, ...(parsed.lsp ?? {}) }),
     // Файл могут править руками: сочетания приводим к известному виду.
     keybindings: { overrides: normalizeKeybindingOverrides(parsed.keybindings?.overrides) },
-    // Режим pull могли записать чем угодно — держим только известные значения.
-    git: {
-      pullMode: normalizePullMode(parsed.git?.pullMode),
-      saveBeforeCommit: parsed.git?.saveBeforeCommit !== false,
-    },
+    git: sanitizeGitSettings(parsed.git),
   };
 }
 

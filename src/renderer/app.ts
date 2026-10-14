@@ -2175,9 +2175,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Настройку могли ещё не прочитать: отсутствие значения — это «сохранять»,
     // как и умолчание main, а не «не сохранять».
     if (settings.git.saveBeforeCommit === false) return true;
-    for (const document of documents.dirty()) {
+    const dirty = documents.dirty();
+    if (dirty.length === 0) return true;
+    for (const document of dirty) {
       if (!(await saveDocument(document))) return false;
     }
+    // Файлы на диске только что изменились, а снимок статуса git у нас ещё прежний:
+    // без пересчёта коммит решил бы, что правок нет (его модель помнит старый ответ).
+    await git.refresh().catch(() => undefined);
     return true;
   };
 
@@ -5132,6 +5137,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   documents.onDidChangeDirty((document) => {
     if (!document.dirty) diskDiffWarned.delete(document.path);
   });
+  // Закрытая вкладка: набор не должен держать путь вечно — иначе после повторного
+  // открытия о расхождении с диском уже не скажем.
+  documents.onDidClose((document) => diskDiffWarned.delete(document.path));
 
   /**
    * Файл изменился на диске. Открытый документ перечитываем: иначе в редакторе
