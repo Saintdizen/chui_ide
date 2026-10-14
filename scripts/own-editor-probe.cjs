@@ -3031,6 +3031,55 @@ async function caretCheck(win) {
   })()`);
 }
 
+
+/**
+ * Плавная прокрутка: дальний прыжок курсора ведёт текст разгоном, а не скачком.
+ *
+ * Проверяем то, что видно только в настоящем окне: положение поля прокрутки по кадрам.
+ * Если бы прокрутка ставилась напрямую, сразу после прыжка она уже стояла бы в цели —
+ * значит, признак работает: после прыжка прокрутка ещё в пути, на кадрах она едет
+ * вперёд и доезжает ровно, а при выключенной настройке встаёт мгновенно.
+ */
+async function smoothScrollCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  return script(`(async () => {
+    const { view, buffer } = window.probeScroll;
+    const viewport = view.element.querySelector('.own-editor-viewport');
+    const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+    const top = () => Math.round(viewport.scrollTop);
+
+    // Плавность включена: прыжок в конец файла должен ехать по кадрам.
+    view.setSmoothScroll(true);
+    viewport.scrollTop = 0;
+    await frame();
+    await frame();
+    view.revealOffset(buffer.length);
+    const rightAfter = top();
+    const frames = [];
+    for (let i = 0; i < 5; i += 1) {
+      await frame();
+      frames.push(top());
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const settled = top();
+
+    // Выключенная настройка: тот же прыжок — уже в цели на первом кадре.
+    view.setSmoothScroll(false);
+    viewport.scrollTop = 0;
+    await frame();
+    view.revealOffset(buffer.length);
+    const instant = top();
+
+    return {
+      'сразу_после_прыжка': rightAfter,
+      'кадры': frames,
+      'доехало_до': settled,
+      'поехало_по_кадрам': frames[frames.length - 1] > rightAfter,
+      'без_плавности_сразу_в_цели': instant === settled,
+    };
+  })()`);
+}
+
 async function main() {
   const lines = [];
   const log = (text) => {
@@ -3308,6 +3357,11 @@ async function main() {
   const ctrlClick = await ctrlClickCheck(win);
   log('## Ctrl+Click по слову');
   log(JSON.stringify(ctrlClick, null, 2));
+  log('');
+
+  const smooth = await smoothScrollCheck(win);
+  log('## Плавная прокрутка');
+  log(JSON.stringify(smooth, null, 2));
   log('');
 
   const caret = await caretCheck(win);

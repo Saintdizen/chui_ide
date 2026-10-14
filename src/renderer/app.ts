@@ -314,6 +314,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     whitespace: settings.editor.renderWhitespace,
     minimap: settings.editor.minimap,
     wordWrap: settings.editor.wordWrap,
+    smoothScroll: settings.editor.smoothScroll,
     ligatures: settings.editor.fontLigatures,
     // Живой геттер: настройку меняют в окне без пересоздания редактора.
     emmetEnabled: () => settings.editor.emmet,
@@ -4484,6 +4485,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       whitespace: next.editor.renderWhitespace,
       minimap: next.editor.minimap,
       wordWrap: next.editor.wordWrap,
+      smoothScroll: next.editor.smoothScroll,
       ligatures: next.editor.fontLigatures,
       spellcheck: next.editor.spellcheck,
     });

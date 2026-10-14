@@ -933,6 +933,12 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
       switchRow('Миникарта', editor.minimap, (value) => editable({ minimap: value })),
       switchRow('Перенос длинных строк', editor.wordWrap, (value) => editable({ wordWrap: value })),
+      switchRow('Плавная прокрутка', editor.smoothScroll, (value) => editable({ smoothScroll: value })),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Прыжок курсора (Ctrl+G, переход к строке, F8) уводит текст коротким разгоном, а не скачком. По клику и при наборе прокрутка остаётся мгновенной.',
+      ),
       switchRow('Лигатуры шрифта', editor.fontLigatures, (value) => editable({ fontLigatures: value })),
       switchRow('Emmet (раскрытие сокращений по Tab)', editor.emmet, (value) => editable({ emmet: value })),
       h(

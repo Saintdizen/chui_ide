@@ -93,6 +93,8 @@ export interface EditorWorkspaceOptions {
   minimap?: boolean;
   /** Переносить ли длинные строки (word wrap). */
   wordWrap?: boolean;
+  /** Плавная прокрутка: прыжок курсора ведёт текст разгоном. */
+  smoothScroll?: boolean;
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
   /** Emmet: раскрытие сокращений по Tab в разметке и стилях (см. `input/emmet.ts`). */
@@ -226,6 +228,7 @@ export class EditorWorkspace {
   private readonly whitespace: WhitespaceMode | undefined;
   private readonly minimap: boolean | undefined;
   private readonly wordWrap: boolean | undefined;
+  private readonly smoothScroll: boolean | undefined;
   /** Включён ли Emmet — живой геттер: его меняют в настройках без пересоздания панели. */
   private readonly emmetEnabled: (() => boolean) | undefined;
   /** Проверка орфографии: словарь и настройка — одни на все панели. */
@@ -342,6 +345,7 @@ export class EditorWorkspace {
     this.whitespace = options.whitespace;
     this.minimap = options.minimap;
     this.wordWrap = options.wordWrap;
+    this.smoothScroll = options.smoothScroll;
     this.emmetEnabled = options.emmetEnabled;
     this.spell = options.spellcheck;
     this.spellEnabled = options.spellcheckEnabled;
@@ -440,6 +444,7 @@ export class EditorWorkspace {
       whitespace: this.whitespace,
       minimap: this.minimap,
       wordWrap: this.wordWrap,
+      smoothScroll: this.smoothScroll,
       emmetEnabled: this.emmetEnabled,
       spellcheck: this.spell,
       spellcheckEnabled: this.spellEnabled,
@@ -793,6 +798,7 @@ export class EditorWorkspace {
     whitespace?: WhitespaceMode;
     minimap?: boolean;
     wordWrap?: boolean;
+    smoothScroll?: boolean;
     ligatures?: boolean;
     spellcheck?: boolean;
   }): void {

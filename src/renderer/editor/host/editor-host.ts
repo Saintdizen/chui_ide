@@ -164,6 +164,8 @@ export interface EditorHostOptions {
   minimap?: boolean;
   /** Переносить ли длинные строки (word wrap). */
   wordWrap?: boolean;
+  /** Плавная прокрутка: прыжок курсора ведёт текст разгоном. */
+  smoothScroll?: boolean;
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
   /**
@@ -529,6 +531,7 @@ export class EditorHost {
       ligatures: options.ligatures,
     });
     this.view.setWordWrap(options.wordWrap === true);
+    this.view.setSmoothScroll(options.smoothScroll === true);
     if (options.fontSize !== undefined) this.view.setFontSize(options.fontSize);
     if (options.lineHeight !== undefined) this.view.setLineHeight(options.lineHeight);
     if (options.cursorStyle !== undefined) this.view.setCursorStyle(options.cursorStyle);
@@ -887,6 +890,7 @@ export class EditorHost {
     whitespace?: WhitespaceMode;
     minimap?: boolean;
     wordWrap?: boolean;
+    smoothScroll?: boolean;
     ligatures?: boolean;
     spellcheck?: boolean;
   }): void {
@@ -903,6 +907,7 @@ export class EditorHost {
     if (options.whitespace !== undefined) this.view.setWhitespace(normalizeWhitespaceMode(options.whitespace));
     if (options.minimap !== undefined) this.view.setMinimap(options.minimap);
     if (options.wordWrap !== undefined) this.view.setWordWrap(options.wordWrap);
+    if (options.smoothScroll !== undefined) this.view.setSmoothScroll(options.smoothScroll);
     if (options.ligatures !== undefined) this.view.setLigatures(options.ligatures);
     // Проверку включили или выключили: отметки пересчитываем или снимаем.
     if (options.spellcheck !== undefined) this.refreshSpell();

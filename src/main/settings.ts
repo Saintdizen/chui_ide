@@ -187,6 +187,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     minimap: false,
     // Перенос длинных строк выключен: по умолчанию строку не ломают, её тянут вбок.
     wordWrap: false,
+    // Плавная прокрутка включена: дальний прыжок так читается, а быстрый набор она не
+    // задевает (плавными едут только прыжки, а не каждое движение курсора).
+    smoothScroll: true,
     // Лигатуры выключены: не всякий шрифт их умеет, и не всем они нравятся.
     fontLigatures: false,
     // Своих сниппетов по умолчанию нет: набор, что знает редактор, живёт в коде
@@ -419,6 +422,7 @@ export class SettingsStore {
         next.renderWhitespace = normalizeWhitespaceMode(patch.editor.renderWhitespace);
       if (patch.editor.minimap !== undefined) next.minimap = patch.editor.minimap === true;
       if (patch.editor.wordWrap !== undefined) next.wordWrap = patch.editor.wordWrap === true;
+      if (patch.editor.smoothScroll !== undefined) next.smoothScroll = patch.editor.smoothScroll === true;
       if (patch.editor.fontLigatures !== undefined) next.fontLigatures = patch.editor.fontLigatures === true;
       if (patch.editor.emmet !== undefined) next.emmet = patch.editor.emmet === true;
       if (patch.editor.formatOnPaste !== undefined) next.formatOnPaste = patch.editor.formatOnPaste === true;
@@ -735,6 +739,8 @@ function loadSettings(filePath: string): StoredSettings {
       renderWhitespace: normalizeWhitespaceMode(parsed.editor?.renderWhitespace),
       minimap: parsed.editor?.minimap === true,
       wordWrap: parsed.editor?.wordWrap === true,
+      // Плавная прокрутка выключена только явным `false`: старый settings.json её не знает.
+      smoothScroll: parsed.editor?.smoothScroll !== false,
       fontLigatures: parsed.editor?.fontLigatures === true,
       emmet: parsed.editor?.emmet !== false,
       // Форматирование при вставке включено только явным `true`: старый файл его не знает.

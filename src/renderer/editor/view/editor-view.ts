@@ -34,6 +34,7 @@ import { overlayRanges, type RoleRange } from '../highlight/overlay';
 import { semanticTokenRole, type SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import type { CursorStyle } from '../../../shared/cursor-style';
 import { measureFont, monospaceMetrics, type GlyphMetrics } from './glyph-metrics';
+import { scrollFinished, scrollStep } from './smooth-scroll';
 import { columnForX, layoutLine, xForColumn } from './line-layout';
 import { FileDecorations, squigglyRect, type LensDecoration, type LinkDecoration } from './decorations';
 import { findBracketPair, findOccurrences, type BracketPair } from './context-highlight';
@@ -135,6 +136,10 @@ export class EditorView {
   /** Курсоры. Обычно один; при мультикурсоре — несколько (последний — главный). */
   private selections: Selection[] = [caret(0)];
   private scrollTop = 0;
+  /** Плавная прокрутка включена настройкой (и не отменена системой). */
+  private smooth = false;
+  /** Идущая анимация прокрутки (`null` — не идёт). */
+  private scrollAnimation: { from: number; to: number; startedAt: number; frame: number; last: number } | null = null;
   private disposed = false;
   /**
    * Перенос длинных строк. Пока выключен, одна строка занимает один ряд и вся
@@ -334,6 +339,7 @@ export class EditorView {
       viewportHeight: () => this.viewport.clientHeight,
       color: () => window.getComputedStyle(this.root).color,
       scrollToRow: (row) => {
+        this.stopScrollAnimation();
         this.viewport.scrollTop = row * this.metrics.lineHeight;
       },
     });
@@ -750,6 +756,53 @@ export class EditorView {
     this.rerender();
   }
 
+  /**
+   * Плавная прокрутка: дальний прыжок курсора ведёт текст разгоном. Просьба системы
+   * «меньше движения» сильнее настройки: при ней прокрутка едет мгновенно.
+   */
+  setSmoothScroll(on: boolean): void {
+    this.smooth = on && !prefersReducedMotion();
+    if (!this.smooth) this.stopScrollAnimation();
+  }
+
+  /** Остановить анимацию прокрутки — перед любой неанимированной записью прокрутки. */
+  private stopScrollAnimation(): void {
+    if (!this.scrollAnimation) return;
+    cancelAnimationFrame(this.scrollAnimation.frame);
+    this.scrollAnimation = null;
+  }
+
+  /**
+   * Поставить прокрутку на нужное место: мгновенно или разгоном. Разгон — только для
+   * дальних прыжков: на строку-две плавность мешала бы набору, а прыжок на сотню строк
+   * без неё непонятно откуда взялся.
+   */
+  private setScrollTop(target: number, animated: boolean): void {
+    const distance = Math.abs(target - this.viewport.scrollTop);
+    this.stopScrollAnimation();
+    if (!animated || !this.smooth || distance <= this.metrics.lineHeight) {
+      this.viewport.scrollTop = target;
+      return;
+    }
+    const from = this.viewport.scrollTop;
+    const animation = { from, to: target, startedAt: 0, frame: 0, last: from };
+    const step = (now: number): void => {
+      if (this.scrollAnimation !== animation) return;
+      if (animation.startedAt === 0) animation.startedAt = now;
+      const elapsed = now - animation.startedAt;
+      animation.last = scrollStep(from, target, elapsed);
+      this.viewport.scrollTop = animation.last;
+      if (scrollFinished(elapsed)) {
+        this.viewport.scrollTop = target;
+        this.scrollAnimation = null;
+        return;
+      }
+      animation.frame = requestAnimationFrame(step);
+    };
+    this.scrollAnimation = animation;
+    animation.frame = requestAnimationFrame(step);
+  }
+
   /** Сменить кегль текста: меняется ширина клетки и высота строки — метрики перемеряем. */
   setFontSize(fontSize: number): void {
     const size = Math.max(1, Math.floor(fontSize));
@@ -814,6 +867,7 @@ export class EditorView {
     // Подсказки-вставки принадлежали прошлому файлу: их поставит хозяин для нового.
     this.inlayByLine.clear();
     this.inlineValueByLine.clear();
+    this.stopScrollAnimation();
     this.viewport.scrollTo({ top: 0, left: 0 });
     // Украшения принадлежали прошлому файлу (полоски git, точки останова): их
     // рисует хозяин уже для нового — до этого не должно остаться чужих значков.
@@ -1858,8 +1912,9 @@ export class EditorView {
       this.rowCount(),
     );
     if (scrollTop !== this.scrollTop) {
-      this.viewport.scrollTop = scrollTop;
-      // Прокрутка сдвинулась — строки пересобираем (это сделает обработчик `scroll`).
+      // Прокрутка сдвинулась — строки пересобирает обработчик `scroll`. Дальний прыжок
+      // (курсор уехал за экран) ведём разгоном, если плавность включена и не отменена.
+      this.setScrollTop(scrollTop, true);
       return;
     }
     // Строка и так видна: хватит передвинуть каретку, пересобирать строки незачем.
@@ -1871,6 +1926,11 @@ export class EditorView {
   }
 
   private readonly onScroll = (): void => {
+    // Прокрутку мог тронуть человек (колесо, полоса прокрутки) — тогда анимацию бросаем:
+    // она бы спорила с его рукой. Отличаем по месту: если поле уехало не туда, куда его
+    // повёл наш кадр, значит прокрутил кто-то другой.
+    const animation = this.scrollAnimation;
+    if (animation && Math.abs(this.viewport.scrollTop - animation.last) > 1) this.stopScrollAnimation();
     this.render();
   };
 
@@ -1896,6 +1956,11 @@ export class EditorView {
       this.root.style.setProperty(`--own-token-${role}`, color);
     }
   }
+}
+
+/** Просит ли система меньше движения (`prefers-reduced-motion`). */
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches === true;
 }
 
 /** Отрезок, покрывающий всю строку (перенос выключен). */

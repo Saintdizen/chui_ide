@@ -79,6 +79,17 @@ window.addEventListener('unhandledrejection', (event) => {
 const root = document.getElementById('probe-root');
 if (!root) throw new Error('не найден #probe-root');
 
+// Плавная прокрутка проверяется на своём полотне с ДЛИННЫМ документом: на коротком
+// файле прокручивать нечего, и признак «поехало по кадрам» ничего не показал бы.
+const scrollRoot = document.createElement('div');
+scrollRoot.id = 'probe-scroll';
+scrollRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 400px';
+document.body.append(scrollRoot);
+const scrollBuffer = new TextBuffer(
+  Array.from({ length: 2000 }, (_, index) => `const line${index} = ${index};`).join('\n'),
+);
+const scrollView = new EditorView(scrollRoot, scrollBuffer, { language: 'typescript', scheme: 'dark' });
+
 const buffer = new TextBuffer(sampleDocument());
 // Язык и схема заданы — значит, строки собираются из токенов с цветами темы.
 const view = new EditorView(root, buffer, { language: 'typescript', scheme: 'dark' });
@@ -141,6 +152,7 @@ input.focus();
 
 declare global {
   interface Window {
+    probeScroll: { view: EditorView; buffer: TextBuffer };
     probe: {
       view: EditorView;
       buffer: TextBuffer;
@@ -170,6 +182,8 @@ const decorationClicks: { glyph: number[]; glyphMenu: number[]; strip: number[] 
 view.onGlyphClick = (line) => decorationClicks.glyph.push(line);
 view.onGlyphContextMenu = (line) => decorationClicks.glyphMenu.push(line);
 view.onStripClick = (line) => decorationClicks.strip.push(line);
+
+window.probeScroll = { view: scrollView, buffer: scrollBuffer };
 
 window.probe = {
   view,
