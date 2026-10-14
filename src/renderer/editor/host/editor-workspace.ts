@@ -36,6 +36,7 @@ import { availableCommands, findEditorCommand, type EditorCommandContext } from 
 import { ProblemNavigation } from './problem-navigation';
 import type { SymbolSource } from './symbol-navigation';
 import type { HoverExternalInfo } from '../widgets/hover-widget';
+import type { PeekAnchor } from '../widgets/peek-widget';
 import type { CompletionItem } from '../complete/completions';
 import type { CompletionTriggers } from './lsp-features';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
@@ -747,6 +748,19 @@ export class EditorWorkspace {
   /** Позиция курсора активной панели. */
   cursor(): { line: number; column: number } {
     return this.pane.cursor();
+  }
+
+  /**
+   * Показать файлы «на месте», не открывая вкладок (просмотр из дерева): и виджет,
+   * и чтение текста — у панели. `false` — показывать нечем (нет шва чтения).
+   */
+  peekFiles(paths: readonly string[], anchor?: PeekAnchor): boolean {
+    return this.pane.peekFiles(paths, anchor);
+  }
+
+  /** Отдать клавишу показанной копии в активной панели (фокус бывает вне редактора). */
+  handlePeekKey(event: KeyboardEvent): boolean {
+    return this.pane.handlePeekKey(event);
   }
 
   /**

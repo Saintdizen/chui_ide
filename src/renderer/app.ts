@@ -773,6 +773,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     documents,
     // Закрепление — часть рабочего места: сохраняем при изменении (сессия ниже).
     onPinsChange: () => session.scheduleSave(),
+    // Просмотр без открытия (пробел в дереве или пункт меню): копия кода «на месте».
+    peekFiles: (paths, anchor) => {
+      editors.peekFiles(paths, anchor);
+    },
+    // Пока копия показана, её клавиши (Esc, Enter, стрелки) забирает она сама.
+    peekKey: (event) => editors.handlePeekKey(event),
   });
   layout.sidebarBody.appendChild(explorer.element);
 

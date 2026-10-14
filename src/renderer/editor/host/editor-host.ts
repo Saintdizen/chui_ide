@@ -66,7 +66,7 @@ import { GotoLineWidget } from '../widgets/goto-widget';
 import { HoverWidget, type HoverExternalInfo, type HoverProblem } from '../widgets/hover-widget';
 import { problemsAt } from '../hover/problem-at';
 import { LocationsWidget } from '../widgets/locations-widget';
-import { PeekWidget } from '../widgets/peek-widget';
+import { PeekWidget, type PeekAnchor } from '../widgets/peek-widget';
 import { PeekController } from './peek-controller';
 import { SignatureWidget } from '../widgets/signature-widget';
 import { SuggestWidget } from '../widgets/suggest-widget';
@@ -621,12 +621,13 @@ export class EditorHost {
     // Список мест (определения, ссылки). Есть только когда дан источник: без языкового
     // сервера переходить некуда, и попап не нужен.
     this.locations = options.symbols ? new LocationsWidget(container) : null;
-    // Заглядывание в определение: нужны и места (сервер), и текст файла (чтение).
-    this.peekWidget = options.symbols && options.readText ? new PeekWidget(container, this.scheme) : null;
+    // Копия «на месте»: нужен текст файла (чтение). Места определения — от сервера;
+    // без него заглядывание в определение недоступно, а просмотр файла работает.
+    this.peekWidget = options.readText ? new PeekWidget(container, this.scheme) : null;
     this.peek =
-      options.symbols && options.readText && this.peekWidget
+      options.readText && this.peekWidget
         ? new PeekController({
-            definition: (path, position) => options.symbols!.definition(path, position),
+            definition: options.symbols ? (path, position) => options.symbols!.definition(path, position) : undefined,
             readText: (path) => options.readText!(path),
             widget: this.peekWidget,
             anchor: () => this.caretAnchor(),
@@ -1214,6 +1215,22 @@ export class EditorHost {
         : range;
     this.formatRangeHandler(this.path, effective);
     return true;
+  }
+
+  /**
+   * Показать файлы «на месте», не открывая вкладок (просмотр из дерева). Якорь — у
+   * строки дерева (если задан), иначе у каретки. `false` — показывать нечем.
+   */
+  peekFiles(paths: readonly string[], anchor?: PeekAnchor): boolean {
+    if (!this.peek || paths.length === 0) return false;
+    this.navigation?.hide();
+    this.peek.peekFiles(paths, anchor);
+    return true;
+  }
+
+  /** Отдать клавишу показанной копии (фокус бывает вне редактора — например, в дереве). */
+  handlePeekKey(event: KeyboardEvent): boolean {
+    return this.peek?.handleKey(event) ?? false;
   }
 
   /** Заглянуть в определение, не уходя из файла. `false` — заглядывать нечем. */

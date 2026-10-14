@@ -95,6 +95,18 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
 
 import { isRecentlyModified, recentLabel } from '../core/tree-recent';
 
+/** Где показать просмотр файла: прямоугольник строки (или точка меню) в системе окна. */
+export interface PeekAnchorPoint {
+  left: number;
+  top: number;
+  bottom: number;
+}
+
+/** Точка меню как якорь просмотра: копия встанет под курсором. */
+function menuAnchor(event: MouseEvent): PeekAnchorPoint {
+  return { left: event.clientX, top: event.clientY, bottom: event.clientY + 1 };
+}
+
 export interface ExplorerDeps {
   workspace: WorkspaceModel;
   rpc: RpcClient;
@@ -105,6 +117,16 @@ export interface ExplorerDeps {
   documents: DocumentStore;
   /** Закрепление изменилось — рабочее место стоит сохранить (см. сессию). */
   onPinsChange?: () => void;
+  /**
+   * Просмотр файлов без открытия (peek): пути и точка, у которой показать копию.
+   * Не задано — пункта «Просмотр» в меню и клавиши «пробел» нет.
+   */
+  peekFiles?: (paths: readonly string[], anchor: PeekAnchorPoint) => void;
+  /**
+   * Клавиши показанной копии просмотра (Esc, Enter, стрелки с Alt): фокус сейчас
+   * в дереве, и до ввода редактора событие не дойдёт. Не задано — копия клавиш не берёт.
+   */
+  peekKey?: (event: KeyboardEvent) => boolean;
 }
 
 /**
@@ -148,11 +170,25 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const target = event.target as HTMLElement | null;
     // Поле ввода живёт внутри дерева (создание, переименование) — там клавиши чужие.
     if (target?.closest('input, textarea, select') || target?.isContentEditable) return;
+    // Показанная копия забирает свои клавиши первой: она видна, а фокус — в дереве.
+    if (deps.peekKey?.(event)) {
+      event.preventDefault();
+      return;
+    }
     if (!selected) return;
 
     if (event.key === 'F2') {
       event.preventDefault();
       startRename(selected);
+      return;
+    }
+    if (event.key === ' ' && deps.peekFiles) {
+      // Пробел — быстрый просмотр: показываем выделенные файлы, вкладок не открывая.
+      const paths = peekablePaths();
+      if (paths.length > 0) {
+        event.preventDefault();
+        deps.peekFiles(paths, rowAnchor(paths[0]!, event));
+      }
       return;
     }
     if (event.key === 'Delete') {
@@ -179,6 +215,24 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     pinned = togglePin(pinned, path);
     deps.onPinsChange?.();
     render();
+  };
+
+  /** Файлы выделения (или под курсором) для просмотра: папки не показываем. */
+  const peekablePaths = (): string[] => {
+    const list = selection.paths.length > 0 ? [...selection.paths] : selected ? [selected] : [];
+    return list.filter((path) => {
+      const found = findEntry(path);
+      return found !== undefined && entryIsFile(found);
+    });
+  };
+
+  /** Прямоугольник строки пути (в дереве) — у него показывать просмотр. */
+  const rowAnchor = (path: string, event: Event): PeekAnchorPoint => {
+    const host = event.currentTarget as HTMLElement | null;
+    const row = host?.querySelector?.(`[data-path="${CSS.escape(path)}"]`);
+    const box = row?.getBoundingClientRect();
+    if (!box) return { left: 0, top: 0, bottom: 1 };
+    return { left: box.left, top: box.top, bottom: box.bottom };
   };
 
   /**
@@ -434,6 +488,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
                 : []),
           ...(entryIsFile(entry)
             ? [
+                ...(deps.peekFiles
+                  ? [
+                      {
+                        label: 'Просмотр',
+                        onSelect: () => deps.peekFiles?.([entry.path], menuAnchor(event)),
+                      },
+                    ]
+                  : []),
                 {
                   label: 'Локальная история',
                   onSelect: () => void deps.commands.execute('file.history', entry.path),

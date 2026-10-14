@@ -24,8 +24,12 @@ import { clampPeekIndex, peekStepIndex } from './peek-model';
 import type { PeekAnchor, PeekWidget } from '../widgets/peek-widget';
 
 export interface PeekDeps {
-  /** Где берём места определения (обычно — `LspFeatures.definition`). */
-  definition(path: string, position: { line: number; column: number }): Promise<SymbolLocation[]>;
+  /**
+   * Где берём места определения (обычно — `LspFeatures.definition`). Не задано —
+   * «заглядывание в определение» недоступно, но показ файла («просмотр») работает:
+   * ему языковой сервер не нужен, хватает чтения текста.
+   */
+  definition?(path: string, position: { line: number; column: number }): Promise<SymbolLocation[]>;
   /** Текст файла: у открытого — из документа, у прочего — с диска. `null` — прочитать не вышло. */
   readText(path: string): Promise<string | null>;
   /** Куда показывать копию. */
@@ -47,6 +51,10 @@ export class PeekController {
   /** Найденные места и какое из них показываем. */
   private targets: SymbolLocation[] = [];
   private index = 0;
+  /** Якорь ближайшего показа: показ файла приходит со своим (у строки дерева). */
+  private pendingAnchor: PeekAnchor | null = null;
+  /** Показываем файл целиком (просмотр), а не место определения: в заголовке нет строки. */
+  private filesMode = false;
   /** Тексты по путям: один файл может содержать несколько мест. Живут до закрытия. */
   private readonly texts = new Map<string, string | null>();
   /** Номер показа: ответ на устаревший запрос не применяем. */
@@ -69,6 +77,21 @@ export class PeekController {
     void this.run();
   }
 
+  /**
+   * Показать файлы «на месте» (просмотр без открытия): текст берётся швом чтения,
+   * ход стрелками — по списку файлов. Языковой сервер для этого не нужен.
+   */
+  peekFiles(paths: readonly string[], anchor?: PeekAnchor): void {
+    const targets = paths.map((path) => ({ path, line: 1, column: 1 }));
+    if (targets.length === 0) return;
+    this.filesMode = true;
+    this.pendingAnchor = anchor ?? null;
+    this.targets = targets;
+    this.index = 0;
+    this.texts.clear();
+    void this.showCurrent();
+  }
+
   /** Текст или курсор изменились: копия про прежнее место больше не годится. */
   onChange(_change: EditorChange): void {
     if (this.deps.widget.isVisible) this.hide();
@@ -79,16 +102,21 @@ export class PeekController {
     this.targets = [];
     this.index = 0;
     this.texts.clear();
+    this.pendingAnchor = null;
+    this.filesMode = false;
     this.deps.widget.hide();
   }
 
   private async run(): Promise<void> {
+    // Заглядывание в определение — только когда есть у кого спросить места.
+    const definition = this.deps.definition;
+    if (!definition) return;
     const { path, line, column } = this.deps.position();
     if (!path) return;
 
     let locations: SymbolLocation[];
     try {
-      locations = await this.deps.definition(path, { line, column });
+      locations = await definition(path, { line, column });
     } catch {
       this.deps.notice('Не удалось прочитать определение');
       return;
@@ -104,6 +132,7 @@ export class PeekController {
     this.targets = targets;
     this.index = 0;
     this.texts.clear();
+    this.filesMode = false;
     await this.showCurrent();
   }
 
@@ -133,12 +162,17 @@ export class PeekController {
         text,
         path: target.path,
         targetLine: target.line,
-        title: `${this.deps.label(target)}:${target.line}`,
+        title: this.filesMode ? this.deps.label(target) : `${this.deps.label(target)}:${target.line}`,
         index: this.index,
         total: this.targets.length,
       },
-      this.deps.anchor(),
+      this.anchorAt(),
     );
+  }
+
+  /** Якорь показа: свой (у строки дерева при просмотре файла) или у каретки. */
+  private anchorAt(): PeekAnchor {
+    return this.pendingAnchor ?? this.deps.anchor();
   }
 
   /** Текст файла с памятью на время показа. `null` — прочитать не удалось. */
