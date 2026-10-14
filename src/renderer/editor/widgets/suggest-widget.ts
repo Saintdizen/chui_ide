@@ -190,7 +190,9 @@ export class SuggestWidget {
 
     const label = document.createElement('span');
     label.className = 'own-editor-suggest-label';
-    label.textContent = item.label;
+    // Совпавшие с набранным знаки выделяем — как в PyCharm: по ним сразу видно, ПОЧЕМУ
+    // строка в списке, а при совпадении по «горбам» это единственная подсказка об этом.
+    renderLabel(label, item);
 
     const detail = document.createElement('span');
     // Вид подсказки красим классом: значок в списке — по нему, а не по тексту.
@@ -272,6 +274,40 @@ export class SuggestWidget {
     this.list.removeEventListener('mousedown', this.onMouseDown);
     this.root.remove();
   }
+}
+
+/**
+ * Подпись строки: совпавшие знаки — отдельным куском, остальное — как есть. Так в списке
+ * видно, что именно совпало с набранным (в PyCharm совпадение выделено жирным).
+ * Без `positions` (серверные подсказки, Ctrl+Space) подпись рисуется целиком.
+ */
+function renderLabel(node: HTMLElement, item: CompletionItem): void {
+  const positions = item.positions;
+  if (!positions || positions.length === 0) {
+    node.textContent = item.label;
+    return;
+  }
+  const marked = new Set(positions);
+  const fragment = document.createDocumentFragment();
+  let plain = '';
+  const flush = (): void => {
+    if (plain.length === 0) return;
+    fragment.append(document.createTextNode(plain));
+    plain = '';
+  };
+  for (let index = 0; index < item.label.length; index += 1) {
+    if (marked.has(index)) {
+      flush();
+      const span = document.createElement('span');
+      span.className = 'own-editor-suggest-match';
+      span.textContent = item.label[index]!;
+      fragment.append(span);
+    } else {
+      plain += item.label[index]!;
+    }
+  }
+  flush();
+  node.replaceChildren(fragment);
 }
 
 /**

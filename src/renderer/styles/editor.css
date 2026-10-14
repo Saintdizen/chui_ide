@@ -749,6 +749,20 @@
   font-size: var(--font_small_size);
 }
 
+/* Совпавшие с набранным знаки — жирным и акцентом, как в PyCharm: по ним видно, почему
+   строка в списке, особенно при совпадении по «горбам» (`gT` → `getTitle`). */
+.own-editor-suggest-match {
+  font-weight: 600;
+  color: var(--link_color);
+}
+
+/* Совпавшие с набранным знаки — жирным и акцентом, как в PyCharm: по ним видно, почему
+   строка в списке, особенно при совпадении по «горбам» (`gT` → `getTitle`). */
+.own-editor-suggest-match {
+  font-weight: 600;
+  color: var(--link_color);
+}
+
 /* Слово языка — заметно иное, чем имя из файла: по этой пометке и выбирают. */
 .own-editor-suggest-detail.is-language {
   color: var(--text_color_secondary);
@@ -1008,6 +1022,9 @@
 
 .own-editor-hover-body {
   color: var(--text_color_secondary);
+  /* Текст пометки языка бывает длинной строкой без пробелов — переносим по знаку,
+     иначе он вылезает за карточку и его не прочитать. */
+  overflow-wrap: anywhere;
 }
 
 /* ── Токены подсветки ───────────────────────────────────────────────────────

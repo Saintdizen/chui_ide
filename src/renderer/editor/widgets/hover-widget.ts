@@ -43,6 +43,18 @@ export interface HoverExternalInfo {
   readonly text: string;
 }
 
+/**
+ * Проблема (диагностика) в месте под курсором. Нужна потому, что волна под словом сама
+ * по себе ничего не объясняет: человек видит подчёркивание и не знает, что не так.
+ * Здесь — тот самый текст, который и надо прочитать.
+ */
+export interface HoverProblem {
+  readonly severity: 'error' | 'warning' | 'info';
+  readonly message: string;
+  /** Кто сообщил (`pyright`, `ts`, `chui`) — видно, к кому идти за подробностями. */
+  readonly source?: string;
+}
+
 export interface HoverWidgetOptions {
   /**
    * Источник подсказки от языкового сервера. `null` — сказать нечего (сервера нет или
@@ -55,6 +67,11 @@ export interface HoverWidgetOptions {
    * языковой, а не соперничает с ней за одну карточку.
    */
   sources?: readonly ((offset: number) => Promise<HoverExternalInfo | null>)[];
+  /**
+   * Проблемы (пометки языка, орфография) в месте под курсором — текст ошибки.
+   * Показываются ПЕРВЫМИ: увидев волну, человек хочет прочитать, в чём дело.
+   */
+  problems?: (offset: number) => readonly HoverProblem[];
 }
 
 export class HoverWidget {
@@ -62,6 +79,11 @@ export class HoverWidget {
   private readonly view: EditorView;
   private readonly root: HTMLElement;
   private readonly sources: readonly ((offset: number) => Promise<HoverExternalInfo | null>)[];
+  /** Пометки языка в месте под курсором (текст ошибки), если их дали. */
+  private readonly problems: ((offset: number) => readonly HoverProblem[]) | undefined;
+  /** Заголовок и строки уже показанной проблемы: сервер обязан их ДОПОЛНИТЬ, а не стереть. */
+  private problemTitle: string | null = null;
+  private problemLines: readonly string[] = [];
   private timer: number | null = null;
   private visible = false;
   /**
@@ -74,6 +96,7 @@ export class HoverWidget {
     this.view = view;
     this.buffer = buffer;
     this.sources = options.sources ?? (options.external ? [options.external] : []);
+    this.problems = options.problems;
 
     this.root = document.createElement('div');
     this.root.className = 'own-editor-hover';
@@ -116,7 +139,18 @@ export class HoverWidget {
     const quiet = tokenType === STRING || tokenType === COMMENT;
     const role = roleLabel(tokenType);
     let shownLocal = false;
-    if (info && !quiet) {
+    // Проблемы этого места — то, что человек ищет, увидев волну: сам ТЕКСТ ошибки, а не
+    // только подчёркивание. Показываем их первыми и даже там, где о самом слове сказать
+    // нечего (в строке или комментарии пометка тоже бывает).
+    const problems = this.problems ? this.problems(offset) : [];
+    this.problemTitle = null;
+    this.problemLines = [];
+    if (problems.length > 0) {
+      this.problemTitle = titleForProblem(problems[0]!);
+      this.problemLines = linesForProblems(problems);
+      this.show(this.problemTitle, this.problemLines, clientX, clientY);
+      shownLocal = true;
+    } else if (info && !quiet) {
       const worthShowing = role !== null || info.occurrences > 1 || info.declaredAt !== null;
       if (worthShowing) {
         const described = describeWord(info);
@@ -149,8 +183,12 @@ export class HoverWidget {
       if (!result?.text.trim()) continue;
 
       this.externalShown += 1;
-      const lines = result.text.split('\n').map((line) => line.replace(/\s+$/, ''));
-      this.show(result.title ?? this.currentTitle ?? '', lines, clientX, clientY);
+      const external = result.text.split('\n').map((line) => line.replace(/\s+$/, ''));
+      // Текст проблемы остаётся СВЕРХУ: именно его ищут, увидев волну. Ответ сервера
+      // (тип, сигнатура) идёт следом и не должен вытеснять сообщение об ошибке.
+      const title = this.problemTitle ?? result.title ?? this.currentTitle ?? '';
+      const lines = this.problemLines.length > 0 ? [...this.problemLines, '', ...external] : external;
+      this.show(title, lines, clientX, clientY);
       return;
     }
   }
@@ -263,4 +301,30 @@ export class HoverWidget {
     viewport?.removeEventListener('scroll', this.onMouseLeave);
     this.root.remove();
   }
+}
+
+/** Заголовок карточки проблемы: «Ошибка · pyright». */
+function titleForProblem(problem: HoverProblem): string {
+  const label = severityLabel(problem.severity);
+  return problem.source ? `${label} · ${problem.source}` : label;
+}
+
+/** Степень важности словами: волна красная, жёлтая или синяя — а что это значит? */
+function severityLabel(severity: HoverProblem['severity']): string {
+  if (severity === 'error') return 'Ошибка';
+  if (severity === 'warning') return 'Предупреждение';
+  return 'Замечание';
+}
+
+/** Строки карточки: сообщения проблем. Несколько — со степенью важности и разрывом. */
+function linesForProblems(problems: readonly HoverProblem[]): string[] {
+  const lines: string[] = [];
+  for (const problem of problems) {
+    if (lines.length > 0) lines.push('');
+    const marked = problems.length > 1 ? `${severityLabel(problem.severity)}: ` : '';
+    for (const [index, line] of problem.message.split('\n').entries()) {
+      lines.push(index === 0 ? `${marked}${line}` : line);
+    }
+  }
+  return lines;
 }

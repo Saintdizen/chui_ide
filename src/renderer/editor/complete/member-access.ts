@@ -110,8 +110,119 @@ export function selfMembers(text: string): MemberEntry[] {
   return [...found.values()];
 }
 
+/**
+ * Члены НАЗВАННОГО класса прямо из текста файла.
+ *
+ * Запасной путь, который закрывает то, чего не умеет разбор по `self`: набрав
+ * `self.Elements.ba`, человек ждёт членов класса `Elements` (вложенный класс, поле,
+ * фабрика), а не только своих. Собираем объявления внутри класса с учётом отступа:
+ * присваивания (`back_to_old_design = Element(…)`) — поля, `def`/`name() {` — методы,
+ * вложенный `class` — тоже поле. Тело методов пропускаем по отступу: строки глубже
+ * первого члена — это уже код метода, а не члены класса.
+ *
+ * Разбор по отступу работает и для Python, и для JS/TS (в них члены класса тоже
+ * сдвинуты вправо), поэтому отдельная грамматика на каждый язык не нужна.
+ */
+export function classMembers(text: string, className: string): MemberEntry[] {
+  const lines = text.split('\n');
+  for (let index = 0; index < lines.length; index += 1) {
+    const header = CLASS_DECL.exec(lines[index] ?? '');
+    if (!header || header[2] !== className) continue;
+    const baseIndent = header[1]?.length ?? 0;
+    const found = new Map<string, MemberEntry>();
+    const remember = (name: string, kind: MemberEntry['kind']): void => {
+      if (!name || RESERVED.has(name) || found.has(name)) return;
+      found.set(name, { name, kind });
+    };
+
+    let bodyIndent: number | null = null;
+    for (let at = index + 1; at < lines.length; at += 1) {
+      const line = lines[at] ?? '';
+      if (!line.trim()) continue;
+      const indent = leadingSpaces(line);
+      // Отступ вернулся на уровень класса или выше — объявление кончилось.
+      if (indent <= baseIndent) break;
+      // Первый член задаёт отступ тела: всё глубже — это уже код метода.
+      if (bodyIndent === null) bodyIndent = indent;
+      if (indent > bodyIndent) continue;
+
+      const method = METHOD_DECL.exec(line);
+      if (method?.[1]) {
+        remember(method[1], 'method');
+        continue;
+      }
+      const nested = CLASS_DECL.exec(line);
+      if (nested?.[2]) {
+        remember(nested[2], 'field');
+        continue;
+      }
+      const field = FIELD_LINE.exec(line);
+      if (field?.[2]) remember(field[2], 'field');
+    }
+    return [...found.values()];
+  }
+  return [];
+}
+
+/**
+ * Имя ТИПА приёмника по тексту файла: аннотация (`browser: BaseWebDriver`) или
+ * присваивание экземпляра (`self.browser = BaseWebDriver(...)`).
+ *
+ * Это ровно то, чего не хватало МНОГОУРОВНЕВОМУ вложению: в `self.browser.driver.`
+ * приёмник `browser` — ни `self`, ни имя класса, и по одному имени разобрать его было
+ * нечем. Тип берём из объявления, а аннотацию ставим выше присваивания: она точнее.
+ * `null` — тип в тексте не назван (тогда остаётся ответ языкового сервера).
+ */
+export function receiverType(text: string, receiver: string): string | null {
+  const name = escapeRegExp(receiver);
+  // Владелец — `self.`/`this.`/`cls.` или ничего: `browser: BaseWebDriver` — параметр.
+  const head = String.raw`(?:^|[^\w.$])(?:self|this|cls)?\.?${name}`;
+  const patterns = [
+    new RegExp(String.raw`${head}\s*:\s*['"]?(${IDENT})`, 'mu'),
+    new RegExp(String.raw`${head}\s*=\s*(?:new\s+)?(${IDENT})\s*\(`, 'mu'),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (match?.[1]) return match[1];
+  }
+  return null;
+}
+
+/**
+ * Члены приёмника из текста файла. `self`/`this`/`cls` — члены текущего объекта
+ * (`selfMembers`). Имя класса — его члены (`classMembers`). Поле или переменная
+ * (`browser`, `driver`) — члены ТИПА, который ей присвоен или приписан аннотацией.
+ */
+export function membersOf(text: string, receiver: string): MemberEntry[] {
+  if (isSelfReceiver(receiver)) return selfMembers(text);
+  const named = classMembers(text, receiver);
+  if (named.length > 0) return named;
+  const type = receiverType(text, receiver);
+  return type ? classMembers(text, type) : [];
+}
+
+/** Экранирование имени для вставки в регулярное выражение. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Сколько пробелов от начала строки до первого знака (`\t` считаем за два). */
+function leadingSpaces(line: string): number {
+  let count = 0;
+  for (const ch of line) {
+    if (ch === ' ') count += 1;
+    else if (ch === '\t') count += 2;
+    else break;
+  }
+  return count;
+}
+
 /** Имя словами (буквы и цифры) — для разбора строк файла. */
 const IDENT = String.raw`[\p{L}\p{Nl}\p{Nd}\p{Pc}_$][\p{L}\p{Nl}\p{Nd}\p{Pc}_$]*`;
+/** Объявление класса: `class Elements:` (Python) или `class Elements {` (JS/TS). */
+const CLASS_DECL = new RegExp(String.raw`^(\s*)class\s+(${IDENT})`, 'u');
+/** Присваивание на уровне класса: `back_to_old_design = …` или `x: int = …`. */
+const FIELD_LINE = new RegExp(String.raw`^(\s*)(${IDENT})\s*(?::[^=]*)?=`, 'u');
 /** Имя члена: у закрытого поля впереди `#`. */
 const MEMBER = `#?${IDENT}`;
 

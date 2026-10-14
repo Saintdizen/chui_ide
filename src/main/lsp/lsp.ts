@@ -4,6 +4,7 @@ import { appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PushTopic, type LspDiagnostic, type LspServerConfig, type LspSettings } from '../../shared/api';
+import { downgradeSeverity } from '../../shared/lsp-severity';
 import type { LspServerOrigin, LspStatus } from '../../shared/lsp-status';
 import type { FileEdit } from '../../shared/edits';
 import { toWorkspaceFileEdits } from '../../shared/lsp-workspace-edit';
@@ -353,6 +354,15 @@ export class LspService {
   private generation = 0;
   private readonly languageOfPath = new Map<string, string>();
   /**
+   * Последний текст документа, о котором мы знаем. Нужен потому, что правка может
+   * обогнать открытие: сервер поднимается секундами, а человек печатает уже сейчас.
+   * Если `didOpen` уйдёт с текстом, каким он был в начале подъёма, сервер будет
+   * разбирать устаревший код — и подчёркивать то, чего на экране давно нет.
+   */
+  private readonly latestText = new Map<string, string>();
+  /** В каком сервере документ уже открыт (`didOpen` ушёл). Нет записи — ещё не открыт. */
+  private readonly openedIn = new Map<string, ServerRuntime>();
+  /**
    * Языки, сервер которых поднять не удалось: язык → причина. Без кэша каждый файл
    * такого языка заново искал бы сервер (диск, PATH, окружения) — на пустом ответе
    * это дорого и ничего не меняет. Снимается перезапуском (`restart`).
@@ -441,20 +451,37 @@ export class LspService {
 
   /** Открыть документ в подходящем сервере. Нет сервера для языка — тихо ничего не делаем. */
   async open(path: string, languageId: string, text: string): Promise<void> {
-    const runtime = await this.runtimeFor(languageId);
-    if (!runtime) return;
-
+    // Язык и текст помним сразу, до подъёма сервера: правки могут прийти уже сейчас,
+    // а `didOpen` уедет только после `initialize`.
     this.languageOfPath.set(path, languageId);
+    this.latestText.set(path, text);
+    const runtime = await this.runtimeFor(languageId);
+    if (!runtime) {
+      this.languageOfPath.delete(path);
+      this.latestText.delete(path);
+      return;
+    }
     await runtime.initialized.catch(() => undefined);
+    // Файл успели закрыть или переоткрыть другим языком — открывать нечего.
+    if (this.languageOfPath.get(path) !== languageId) return;
+    // Пока сервер поднимался, файл могли править: отдаём АКТУАЛЬНЫЙ текст, а не тот,
+    // что был при открытии, — иначе сервер разберёт устаревший код.
+    const current = this.latestText.get(path) ?? text;
     runtime.versions.set(path, 1);
+    this.openedIn.set(path, runtime);
     runtime.connection.notify('textDocument/didOpen', {
-      textDocument: { uri: pathToFileURL(path).toString(), languageId, version: 1, text },
+      textDocument: { uri: pathToFileURL(path).toString(), languageId, version: 1, text: current },
     });
   }
 
   change(path: string, text: string): void {
+    // Помним последний текст даже до появления сервера: если `didOpen` ещё не ушёл,
+    // именно этот текст и уедет серверу (см. `open`) — правка не потеряется.
+    this.latestText.set(path, text);
     const runtime = this.runtimeForPath(path);
     if (!runtime) return;
+    // Сервер ещё не получил `didOpen` — правку отдаст он сам, актуальным текстом.
+    if (this.openedIn.get(path) !== runtime) return;
     const version = (runtime.versions.get(path) ?? 1) + 1;
     runtime.versions.set(path, version);
     // Полная синхронизация (sync kind 1): нам не нужно считать диапазоны самим.
@@ -469,15 +496,24 @@ export class LspService {
   close(path: string): void {
     const runtime = this.runtimeForPath(path);
     this.languageOfPath.delete(path);
+    this.latestText.delete(path);
     if (!runtime) return;
+    // `didClose` только если документ и правда был открыт: иначе мы закрыли бы то,
+    // чего сервер не видел (открытие ещё шло), и он потерял бы файл.
+    const opened = this.openedIn.get(path) === runtime;
+    this.openedIn.delete(path);
     runtime.versions.delete(path);
-    runtime.connection.notify('textDocument/didClose', { textDocument: { uri: pathToFileURL(path).toString() } });
+    if (opened) {
+      runtime.connection.notify('textDocument/didClose', { textDocument: { uri: pathToFileURL(path).toString() } });
+    }
     this.publish(PushTopic.LspDiagnostics, { path, diagnostics: [] });
   }
 
   dispose(): void {
     this.generation += 1;
     this.failed.clear();
+    this.latestText.clear();
+    this.openedIn.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
   }
 
@@ -1071,7 +1107,7 @@ export class LspService {
       return;
     }
     if (method !== 'textDocument/publishDiagnostics') return;
-    const payload = params as { uri?: string; diagnostics?: unknown[] };
+    const payload = params as { uri?: string; diagnostics?: unknown[]; version?: unknown };
     if (typeof payload.uri !== 'string') return;
     // uri → путь: у сервиса свой корень, но file:// понимает и fileURLToPath.
     let path: string;
@@ -1079,6 +1115,13 @@ export class LspService {
       path = fileURLToPath(payload.uri);
     } catch {
       return;
+    }
+    // Устаревшая публикация: сервер посчитал пометки для прежней версии текста, а мы
+    // уже правили файл. Показать их — значит подчеркнуть то, чего на экране нет.
+    const runtime = this.runtimeForPath(path);
+    if (runtime && typeof payload.version === 'number') {
+      const known = runtime.versions.get(path);
+      if (known !== undefined && payload.version < known) return;
     }
     this.publish(PushTopic.LspDiagnostics, { path, diagnostics: toDiagnostics(payload.diagnostics) });
   }
@@ -1120,6 +1163,16 @@ const SEVERITY: Record<number, LspDiagnostic['severity']> = {
   4: 'info',
 };
 
+/** Код правила из ответа: строка как есть, число — в строку. Иначе — не задан. */
+function codeOf(raw: unknown): string | undefined {
+  if (typeof raw === 'string' && raw.trim()) return raw;
+  if (typeof raw === 'number') return String(raw);
+  if (raw && typeof raw === 'object' && typeof (raw as { value?: unknown }).value === 'string') {
+    return (raw as { value: string }).value;
+  }
+  return undefined;
+}
+
 /** LSP-диагностика (0-based, severity 1..4) → наш формат (1-based, текстом). */
 function toDiagnostics(raw: unknown): LspDiagnostic[] {
   if (!Array.isArray(raw)) return [];
@@ -1131,18 +1184,20 @@ function toDiagnostics(raw: unknown): LspDiagnostic[] {
       severity?: number;
       message?: unknown;
       source?: unknown;
+      code?: unknown;
     };
     const start = value.range?.start;
     const end = value.range?.end;
     if (!start || typeof start.line !== 'number' || typeof start.character !== 'number') continue;
     out.push({
-      severity: SEVERITY[value.severity ?? 3] ?? 'info',
+      severity: downgradeSeverity(SEVERITY[value.severity ?? 3] ?? 'info', codeOf(value.code)),
       line: start.line + 1,
       column: start.character + 1,
       endLine: typeof end?.line === 'number' ? end.line + 1 : start.line + 1,
       endColumn: typeof end?.character === 'number' ? end.character + 1 : start.character + 1,
       message: typeof value.message === 'string' ? value.message : String(value.message ?? ''),
       source: typeof value.source === 'string' ? value.source : undefined,
+      ...(codeOf(value.code) ? { code: codeOf(value.code) } : {}),
     });
   }
   return out;

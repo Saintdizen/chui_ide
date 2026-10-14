@@ -61,7 +61,30 @@ describe('подсказки по префиксу', () => {
   it('свои дополнения идут первыми', () => {
     const index = indexOf(['value']);
     const items = buildCompletions(index, 'typescript', 'v', { external: ['valueFromServer'] });
-    expect(items[0]).toEqual({ label: 'valueFromServer', kind: 'external', detail: 'предложено' });
+    // Сравниваем существенное: у подсказки ещё есть `positions` (подсветка совпадения).
+    expect(items[0]).toMatchObject({ label: 'valueFromServer', kind: 'external', detail: 'предложено' });
+  });
+
+  it('совпадение по «горбам»: gT находит getTitle', () => {
+    const index = indexOf(['const getTitle = () => {}']);
+    const items = buildCompletions(index, 'typescript', 'gT');
+    expect(labels(items)).toContain('getTitle');
+    // Совпали именно «горбы» — их индексы и отдаём для подсветки.
+    expect(items[0]?.positions).toEqual([0, 3]);
+  });
+
+  it('заглавная в набранном требует заглавной в имени', () => {
+    const index = indexOf(['macOS macos']);
+    const items = buildCompletions(index, 'typescript', 'MC');
+    // `MC` — это `MyClass`-подобное совпадение: `macOS` его не удовлетворяет.
+    expect(labels(items)).not.toContain('macOS');
+  });
+
+  it('лучшее совпадение — первым: точное начало обгоняет продолжение', () => {
+    const index = indexOf(['format formatRow']);
+    const items = buildCompletions(index, 'typescript', 'form');
+    // `format` — короче, при равном начале оно и должно быть выше.
+    expect(items[0]?.label).toBe('format');
   });
 
   it('исключённые слова не предлагаются', () => {

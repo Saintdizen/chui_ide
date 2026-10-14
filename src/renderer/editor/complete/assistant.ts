@@ -26,8 +26,9 @@ import { snippetsForLanguage, type Snippet } from '../../../shared/snippets';
 import type { EditorController, EditorChange } from '../input/editor-controller';
 import type { EditorView } from '../view/editor-view';
 import { allCompletions, buildCompletions, DEFAULT_LIMIT, type CompletionItem } from './completions';
+import { EXTERNAL_BONUS, matchScore } from './fuzzy';
 import { expandSnippet } from './snippet';
-import { isSelfReceiver, memberAccessAt, selfMembers, type MemberAccess } from './member-access';
+import { memberAccessAt, membersOf, type MemberAccess } from './member-access';
 import { prefixAt } from './prefix';
 import { WordIndex } from './word-index';
 import type { SuggestWidget } from '../widgets/suggest-widget';
@@ -144,9 +145,9 @@ export class CompletionAssistant {
     }
     // Пока список виден, он забирает стрелки, Enter, Tab и Escape.
     if (this.widget.isVisible && this.widget.handleKey(event)) return true;
-    // Ввод обычного знака закроет список: набранное перестанет быть началом слова,
-    // и это выяснится при следующем изменении текста. Пока просто прячем его.
-    if (this.widget.isVisible && isTypedChar(event)) this.widget.hide();
+    // Знак не прячем здесь: лишнее перепрятывание давало мигание — попап гас на нажатии
+    // и тут же возвращался на изменении текста. Список обновит `onChange`, а если
+    // набранное перестало совпадать — он и закроет попап (см. `show`).
     return false;
   }
 
@@ -257,23 +258,35 @@ export class CompletionAssistant {
    */
   private showMembers(member: MemberAccess): void {
     const caret = this.controller.caret;
-    const items: CompletionItem[] = [];
+    const ranked: { item: CompletionItem; score: number }[] = [];
     const taken = new Set<string>();
-    const lowered = member.prefix.toLowerCase();
-    const push = (label: string, kind: CompletionItem['kind'], detail: string): void => {
-      if (label.length === 0 || taken.has(label)) return;
-      if (lowered.length > 0 && !label.toLowerCase().startsWith(lowered)) return;
-      taken.add(label);
-      items.push({ label, kind, detail });
-    };
 
-    if (isSelfReceiver(member.receiver)) {
-      for (const entry of selfMembers(this.textAroundCaret())) {
-        push(entry.name, 'word', entry.kind === 'method' ? 'метод' : 'поле');
-      }
+    // Члены приёмника из текста файла: `self.` — свои, `self.Elements.` — члены
+    // НАЗВАННОГО класса (вложенного, фабрики). Работает и без сервера, и сразу.
+    for (const entry of membersOf(this.textAroundCaret(), member.receiver)) {
+      if (entry.name.length === 0 || taken.has(entry.name)) continue;
+      // Набранное после точки совпадает с именем члена по тем же правилам, что и
+      // слова в обычном списке: `gT` найдёт `getTitle` и после `this.`.
+      const match = matchScore(entry.name, member.prefix);
+      if (!match) continue;
+      taken.add(entry.name);
+      ranked.push({
+        item: {
+          label: entry.name,
+          kind: 'word',
+          detail: entry.kind === 'method' ? 'метод' : 'поле',
+          positions: match.positions,
+        },
+        score: match.score,
+      });
     }
 
-    this.widget.show(items, this.anchor(caret), member.replaces);
+    ranked.sort((left, right) => right.score - left.score);
+    this.widget.show(
+      ranked.map((entry) => entry.item),
+      this.anchor(caret),
+      member.replaces,
+    );
     this.askServer(member.prefix, caret);
   }
 
@@ -293,25 +306,19 @@ export class CompletionAssistant {
         // Курсор уехал или пришёл новый запрос — ответ про прежнее место не показываем.
         if (id !== this.lspRequestId || this.controller.caret !== caret) return;
         // Набранное начало проверяем и у ответа сервера: часть серверов отдаёт список
-        // ЦЕЛИКОМ, полагаясь на отбор у клиента. Без этого после точки появлялся бы
-        // весь список вперемешку — ровно то, на что жаловались.
-        const lowered = prefix.toLowerCase();
+        // ЦЕЛИКОМ, полагаясь на отбор у клиента (см. `fuzzy.ts` — правила те же, что
+        // и у наших слов, чтобы `gT` находил `getTitle` и у серверных подсказок).
         const local = this.widget.allItems;
         const known = new Set(local.map((item) => item.label));
-        const fresh = extra.filter((item) => {
-          if (known.has(item.label)) return false;
-          if (lowered.length === 0) return true;
-          // Сопоставляем по `filterText`, если он есть: у CamelCase-серверов он не
-          // равен подписи, и фильтр по подписи терял бы верные ответы.
-          return (item.filterText ?? item.label).toLowerCase().startsWith(lowered);
-        });
+        const fresh = extra.filter((item) => !known.has(item.label) && hasMatch(item, prefix));
         if (fresh.length === 0) {
           // Пусто — сервер ещё греется. Повторяем один раз, если курсор не уехал.
           if (attempt === 0) this.lspRetry = window.setTimeout(() => this.askServer(prefix, caret, 1), LSP_RETRY_MS);
           return; // подтвердить нечего — список остаётся прежним
         }
-        // Сервер впереди: он знает типы, а словарь — только имена.
-        this.widget.show([...fresh, ...local], this.anchor(caret), prefix.length);
+        // Сервер впереди: он знает типы, а словарь — только имена. Оценку совпадения
+        // даём подсказке сервера небольшим превышением (см. `fuzzy.ts`: EXTERNAL_BONUS).
+        this.widget.show(rankServerItems(fresh, local, prefix), this.anchor(caret), prefix.length);
       })
       .catch(() => {
         // Сервера нет или он не ответил — остаются слова языка и документа.
@@ -471,10 +478,35 @@ export class CompletionAssistant {
   private lastToken: string | null = null;
 }
 
-/** Печатный знак без Ctrl/Alt: такой ввод меняет текст и закрывает список. */
-function isTypedChar(event: KeyboardEvent): boolean {
-  if (event.ctrlKey || event.metaKey || event.altKey) return false;
-  return event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete';
+/**
+ * Совпадает ли подсказка с набранным — по тем же правилам, что и слова (см. `fuzzy.ts`),
+ * но с учётом `filterText`: у CamelCase-серверов он не равен подписи, и фильтр по
+ * подписи терял бы верные ответы.
+ */
+function hasMatch(item: CompletionItem, prefix: string): boolean {
+  if (prefix.length === 0) return true;
+  return matchScore(item.filterText ?? item.label, prefix) !== null;
+}
+
+/**
+ * Собрать список к показу: подсказки сервера — с надбавкой к оценке (он знает типы),
+ * затем — наши слова в том порядке, в каком их собрал `buildCompletions`. Простое
+ * «серверные сверху, наши следом» ломало бы релевантность: хорошее наше имя уезжало
+ * под слабую серверную подсказку.
+ */
+function rankServerItems(
+  fresh: readonly CompletionItem[],
+  local: readonly CompletionItem[],
+  prefix: string,
+): CompletionItem[] {
+  const scored = [
+    ...fresh.map((item) => ({
+      item,
+      score: (matchScore(item.filterText ?? item.label, prefix)?.score ?? 0) + EXTERNAL_BONUS,
+    })),
+    ...local.map((item) => ({ item, score: matchScore(item.label, prefix)?.score ?? 0 })),
+  ];
+  return scored.sort((left, right) => right.score - left.score).map((entry) => entry.item);
 }
 
 /** Знак перед кареткой: им узнаём набранный знак-триггер сервера (`@`, `:`). */

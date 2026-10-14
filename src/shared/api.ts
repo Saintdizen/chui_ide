@@ -921,6 +921,12 @@ export interface LspDiagnostic {
   endColumn: number;
   message: string;
   source?: string;
+  /**
+   * Код правила у сервера (`reportIncompatibleVariableOverride` у pyright, `E501` у ruff).
+   * Нужен, чтобы отличать настоящую ошибку от замечания о стиле: и то и другое сервер
+   * шлёт как `error`, а по коду видно, чего это правило стоит (см. `shared/lsp-severity.ts`).
+   */
+  code?: string;
 }
 
 /** Полезная нагрузка события `PushTopic.LspDiagnostics`. */

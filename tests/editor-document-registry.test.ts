@@ -47,6 +47,24 @@ describe('DocumentRegistry', () => {
     expect(document.dirty).toBe(true);
   });
 
+  it('push синхронен: слушатель видит новый текст ещё до возврата', () => {
+    const { documents, registry } = setup();
+    const document = documents.open('/p/a.ts', 'abc');
+    const buffer = registry.resolve(document);
+    const seen: string[] = [];
+    documents.onDidChange(() => seen.push(document.value));
+
+    buffer.insert(3, 'def');
+    registry.push('/p/a.ts');
+
+    // На этом стоит починка гонки подсказок (см. `editor-host.ts`): документ узнаёт о
+    // правке СИНХРОННО, тем же тиком, — поэтому `lsp.change` уезжает серверу РАНЬШЕ,
+    // чем запрос подсказок, и сервер отвечает по актуальному тексту, а не по прошлому.
+    // Станет push отложенным — запрос уйдёт раньше правки, и подсказка снова будет не
+    // про то место; тест это и стережёт.
+    expect(seen).toEqual(['abcdef']);
+  });
+
   it('push без изменений сообщает, что менять нечего', () => {
     const { documents, registry } = setup();
     const document = documents.open('/p/a.ts', 'abc');

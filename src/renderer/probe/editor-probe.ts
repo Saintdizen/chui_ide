@@ -129,7 +129,26 @@ const assistant = new CompletionAssistant(view, controller, buffer, suggest, {
 // остановленного кадра) идёт раньше языковой. Переключатель `debugHoverControl.on`
 // позволяет пробе увидеть оба случая: с отладчиком и без него.
 const debugHoverControl = { on: false };
+// Пометки, которые проба кладёт в наведение: карточка обязана показать их ТЕКСТ, а не
+// только волну под словом (см. `problems` в `hover-widget.ts`).
+const hoverProblems: {
+  line: number;
+  column: number;
+  endColumn: number;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  source?: string;
+}[] = [];
 const hover = new HoverWidget(view, buffer, {
+  problems: (offset) => {
+    const position = buffer.positionAt(offset);
+    return hoverProblems.filter(
+      (item) =>
+        item.line === position.line &&
+        position.column >= item.column &&
+        position.column <= Math.max(item.endColumn, item.column + 1),
+    );
+  },
   sources: [
     async () => (debugHoverControl.on ? { title: 'отладчик', text: '`x` = 42 — `int`' } : null),
     async (offset) => {
@@ -172,6 +191,14 @@ declare global {
       suggest: SuggestWidget;
       assistant: CompletionAssistant;
       hover: HoverWidget;
+      hoverProblems: {
+        line: number;
+        column: number;
+        endColumn: number;
+        severity: 'error' | 'warning' | 'info';
+        message: string;
+        source?: string;
+      }[];
       debugHoverControl: { on: boolean };
       decorations: FileDecorations;
       decorationClicks: { glyph: number[]; glyphMenu: number[]; strip: number[] };
@@ -204,6 +231,7 @@ window.probe = {
   suggest,
   assistant,
   hover,
+  hoverProblems,
   debugHoverControl,
   decorations,
   decorationClicks,

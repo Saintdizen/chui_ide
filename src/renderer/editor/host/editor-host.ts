@@ -63,7 +63,8 @@ import { caret, isEmpty, type Selection } from '../view/selection';
 import { FileDecorations, type LensDecoration, type LinkDecoration } from '../view/decorations';
 import { FindWidget } from '../widgets/find-widget';
 import { GotoLineWidget } from '../widgets/goto-widget';
-import { HoverWidget, type HoverExternalInfo } from '../widgets/hover-widget';
+import { HoverWidget, type HoverExternalInfo, type HoverProblem } from '../widgets/hover-widget';
+import { problemsAt } from '../hover/problem-at';
 import { LocationsWidget } from '../widgets/locations-widget';
 import { PeekWidget } from '../widgets/peek-widget';
 import { PeekController } from './peek-controller';
@@ -555,6 +556,13 @@ export class EditorHost {
     container.append(this.readOnlyBadge);
     this.indentSize = options.tabSize ?? 4;
     this.controller = new EditorController(buffer, { tabSize: options.tabSize });
+    // Документ (истина о содержимом) узнаёт о правке ПЕРВЫМ — раньше попапов.
+    // Иначе запрос подсказок уходит серверу раньше синхронизации (`lsp.change`), и тот
+    // отвечает по тексту БЕЗ последнего набранного знака: позиция в нём уже другая, и
+    // вместо членов объекта приходит что попало («BaseWebDriver» вместо «driver»).
+    // Подписка стоит здесь, до создания ввода и попапов — они подписываются позже
+    // и видят изменение уже после записи текста в документ (см. `sync` в editor-input).
+    this.unsubscribe = this.controller.onChange((change) => this.onControllerChange(change));
     this.find = new FindWidget(this.view, this.controller, buffer);
     this.goto = new GotoLineWidget(this.view, this.controller, buffer);
     this.suggest = new SuggestWidget(container);
@@ -564,7 +572,12 @@ export class EditorHost {
       lsp: options.completionFromLanguage
         ? (_prefix, position) => {
             const path = this.activePath;
-            return path ? options.completionFromLanguage!(path, position) : Promise.resolve([]);
+            if (!path) return Promise.resolve([]);
+            // Текст — серверу ДО вопроса. Знак набран, а синхронизация могла ещё
+            // не уехать (правка идёт разными путями): тогда сервер ответит по
+            // устаревшему документу, и подсказка будет не про то место.
+            this.registry.push(path);
+            return options.completionFromLanguage!(path, position);
           }
         : undefined,
       // Дотягивание подсказки: путь берём активный — панель о нём знает, ассистент нет.
@@ -576,6 +589,9 @@ export class EditorHost {
         : undefined,
     });
     this.hover = new HoverWidget(this.view, buffer, {
+      // Пометки языка — текстом: волна под словом сама ничего не объясняет, а человек,
+      // увидев её, хочет прочитать, в чём дело (см. `showAt` в `hover-widget.ts`).
+      problems: (offset) => this.problemsAtOffset(offset),
       // Порядок источников = приоритет: отладочная подсказка важнее языковой (во время
       // останова нужно значение переменной, а не тип из сервера).
       sources: [
@@ -693,7 +709,6 @@ export class EditorHost {
     // обработчик открытия). Слушаем в фазе захвата: иначе ввод успеет начать выделение.
     this.viewport?.addEventListener('mousedown', this.onViewMouseDown, true);
 
-    this.unsubscribe = this.controller.onChange((change) => this.onControllerChange(change));
     // Внешняя замена буфера (диск, форматирование, правки агента) прошла мимо контроллера:
     // текст на экране устарел, и о ней надо перерисовать самим.
     const bufferSubscription = this.registry.onDidChangeBuffer((path) => this.onExternalBufferChange(path));
@@ -2046,6 +2061,19 @@ export class EditorHost {
     if (!path || !this.lensCommand) return;
     const entry = (this.codeLenses.get(path) ?? []).find((item) => item.range.start.line + 1 === line);
     if (entry?.command) this.lensCommand(path, entry.command);
+  }
+
+  /**
+   * Пометки активного файла, накрывающие смещение: их текст показывает карточка
+   * наведения. Координаты пометок — строка и столбец с единицы, как их видит редактор.
+   */
+  private problemsAtOffset(offset: number): readonly HoverProblem[] {
+    const path = this.path;
+    if (!path) return [];
+    const markers = this.externalMarkers.get(path);
+    if (!markers || markers.length === 0) return [];
+    const position = this.controller.bufferRef.positionAt(offset);
+    return problemsAt(markers, position);
   }
 
   /** Позиция курсора активного файла в понятиях «строка и столбец». */

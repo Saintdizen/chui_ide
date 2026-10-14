@@ -11,10 +11,11 @@
  *   3. СВОИ ДОПОЛНЕНИЯ — то, что передал вызывающий (позже здесь появятся подсказки
  *      от языкового сервера). Они идут первыми: кто дал их, знает больше нашего.
  *
- * Разумное правило отбора: если префикс целиком укладывается в языковое слово, языковое
- * идёт первым — набрано `f`, и предложить `for` честнее, чем `foo`. Но как только
- * совпадение по префиксу длинное (совпало больше двух знаков), вперёд идут слова
- * документа: человек явно набирает что-то из файла.
+ * Раньше друг друга источники ставит ОЦЕНКА совпадения, а не происхождение слова (см.
+ * `fuzzy.ts`): так же, как в PyCharm. Набрано `f` — короткое `for` обгонит `formatRow` из
+ * файла; набрано `gT` — найдётся `getTitle` по «горбам»; набрано `getT` — вперёд выйдет
+ * имя из файла, дальше совпало. При равной оценке сохраняется порядок добавления: свои
+ * дополнения, сниппеты, слова языка, затем частые слова файла.
  *
  * Модуль чистый: он не знает ни о DOM, ни о буфере — слова ему отдают. Поэтому список
  * проверяется в тестах без окна.
@@ -23,6 +24,7 @@
 import type { TextEdit } from '../../../shared/edits';
 import { CODE_GRAMMARS } from '../highlight/languages/code';
 import type { Snippet } from '../../../shared/snippets';
+import { EXTERNAL_BONUS, matchScore } from './fuzzy';
 import type { WordIndex } from './word-index';
 
 /** Что за подсказка: по виду панель рисует значок, а не полагается на текст. */
@@ -34,6 +36,8 @@ export interface CompletionItem {
   readonly kind: CompletionKind;
   /** Пояснение справа от подписи: «ключевое слово», «в файле: 12» и подобное. */
   readonly detail: string;
+  /** Индексы совпавших знаков подписи — по ним в списке подсвечивается совпадение. */
+  readonly positions?: readonly number[];
   /**
    * Что вставится вместо набранного. Не задано — вставляется `label`. Сервер языка
    * может подставить не то, что написано в подписи (например, вызов с остальными
@@ -78,6 +82,17 @@ export interface CompletionOptions {
 /** Предел списка по умолчанию: столько строк попапа глаз охватывает без прокрутки. */
 export const DEFAULT_LIMIT = 50;
 
+/** Надбавка сниппетам: их задал человек, и триггер уже даёт точное совпадение. */
+const SNIPPET_BONUS = 60;
+
+/** Подсказка с оценкой — для сортировки списка по релевантности. */
+interface RankedItem {
+  readonly item: CompletionItem;
+  readonly score: number;
+  /** Порядок добавления: при равной оценке сохраняет прежний порядок (стабильность). */
+  readonly order: number;
+}
+
 /**
  * Слова языка: ключевые, типы и управляющие конструкции его грамматики.
  *
@@ -109,63 +124,75 @@ export function buildCompletions(
   const limit = options.limit ?? DEFAULT_LIMIT;
   if (prefix.length === 0) return [];
 
-  const exclude = options.exclude ?? new Set<string>();
-  const lowered = prefix.toLowerCase();
-  const items: CompletionItem[] = [];
-  const taken = new Set<string>(exclude);
+  const excluded = options.exclude ?? new Set<string>();
+  const emitted = new Set<string>();
+  const ranked: RankedItem[] = [];
+  let order = 0;
 
-  // 1. Свои дополнения — первыми: они знают то, чего не знаем мы.
+  const blocked = (label: string): boolean => excluded.has(label) || emitted.has(label);
+
+  // 1. Свои дополнения — с надбавкой: их знает языковой сервер, а он точнее словаря.
   for (const label of options.external ?? []) {
-    if (!label.toLowerCase().startsWith(lowered) || taken.has(label)) continue;
-    items.push({ label, kind: 'external', detail: 'предложено' });
-    taken.add(label);
-  }
-
-  // Сниппеты — сразу за своими дополнениями: их задал человек, и они важнее слов
-  // языка. Именно так и ждёт тот, кто набрал триггер заготовки. Набранное слово
-  // сниппету НЕ помеха (в отличие от слов файла): триггер и есть набранное слово,
-  // поэтому исключение `exclude` сюда не применяем — иначе сниппет не нашёлся бы.
-  const snippetLabels = new Set<string>();
-  for (const snippet of options.snippets ?? []) {
-    if (items.length >= limit) break;
-    if (!snippet.prefix.toLowerCase().startsWith(lowered) || snippetLabels.has(snippet.prefix)) continue;
-    snippetLabels.add(snippet.prefix);
-    items.push({
-      label: snippet.prefix,
-      kind: 'snippet',
-      detail: snippet.description ?? 'сниппет',
-      snippet: snippet.body,
+    if (blocked(label)) continue;
+    const match = matchScore(label, prefix);
+    if (!match) continue;
+    emitted.add(label);
+    ranked.push({
+      item: { label, kind: 'external', detail: 'предложено', positions: match.positions },
+      score: match.score + EXTERNAL_BONUS,
+      order: order++,
     });
-    taken.add(snippet.prefix);
   }
 
-  // 2. Слова языка и слова документа. Что из них раньше — решает длина совпадения.
-  const language = languageWords(languageId).filter((word) => word.toLowerCase().startsWith(lowered));
-  const words = index.candidates(prefix, limit * 2, taken);
-  const languageFirst = lowered.length <= 2;
-
-  const push = (label: string, kind: CompletionKind, detail: string): void => {
-    if (taken.has(label) || items.length >= limit) return;
-    items.push({ label, kind, detail });
-    taken.add(label);
-  };
-
-  const languagePass = (): void => {
-    for (const word of language) push(word, 'language', 'язык');
-  };
-  const wordPass = (): void => {
-    for (const word of words) push(word, 'word', `в файле: ${index.count(word)}`);
-  };
-
-  if (languageFirst) {
-    languagePass();
-    wordPass();
-  } else {
-    wordPass();
-    languagePass();
+  // 2. Сниппеты — по триггеру. Набранное сниппету не помеха: триггер и есть набранное,
+  //    поэтому `exclude` (слова строки) к ним не применяем — иначе они бы не нашлись.
+  for (const snippet of options.snippets ?? []) {
+    if (emitted.has(snippet.prefix)) continue;
+    const match = matchScore(snippet.prefix, prefix);
+    if (!match) continue;
+    emitted.add(snippet.prefix);
+    ranked.push({
+      item: {
+        label: snippet.prefix,
+        kind: 'snippet',
+        detail: snippet.description ?? 'сниппет',
+        snippet: snippet.body,
+        positions: match.positions,
+      },
+      score: match.score + SNIPPET_BONUS,
+      order: order++,
+    });
   }
 
-  return items.slice(0, limit);
+  // 3. Слова языка и слова документа. Раньше друг друга их ставит оценка совпадения, а
+  //    не источник (см. `fuzzy.ts`) — то же правило, что в PyCharm.
+  for (const word of languageWords(languageId)) {
+    if (blocked(word)) continue;
+    const match = matchScore(word, prefix);
+    if (!match) continue;
+    emitted.add(word);
+    ranked.push({
+      item: { label: word, kind: 'language', detail: 'язык', positions: match.positions },
+      score: match.score,
+      order: order++,
+    });
+  }
+
+  const words = index.candidates(prefix, limit * 2, new Set([...excluded, ...emitted]));
+  for (const word of words) {
+    if (emitted.has(word)) continue;
+    const match = matchScore(word, prefix);
+    if (!match) continue;
+    emitted.add(word);
+    ranked.push({
+      item: { label: word, kind: 'word', detail: `в файле: ${index.count(word)}`, positions: match.positions },
+      score: match.score,
+      order: order++,
+    });
+  }
+
+  ranked.sort((left, right) => right.score - left.score || left.order - right.order);
+  return ranked.slice(0, limit).map((entry) => entry.item);
 }
 
 /**
