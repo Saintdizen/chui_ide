@@ -97,6 +97,7 @@ const VIEW: MenuNode = {
     { separator: true },
     { label: 'Терминал', accelerator: 'Alt+F12', command: 'view.showTerminal' },
     { label: 'Структура файла', command: 'view.showOutline' },
+    { label: 'Ячейки ноутбука', command: 'view.notebooks' },
     { label: 'Предпросмотр Markdown', command: 'view.showMarkdownPreview' },
     { label: 'Отладчик регулярных выражений…', command: 'view.regexTester' },
     { label: 'Задачи (TODO/FIXME)', command: 'view.showTodos' },

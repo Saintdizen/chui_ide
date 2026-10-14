@@ -96,6 +96,7 @@ import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
 import { createLspPopover, type LspPopoverView } from './ui/lsp-popover';
 import { createMarkdownPreview } from './ui/markdown-preview';
+import { createNotebookPanel } from './ui/notebook-panel';
 import { logoMark } from './ui/logo';
 import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-popover';
 import { createOutline } from './ui/outline';
@@ -1168,6 +1169,22 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     title: 'Markdown',
     element: markdownPreview.element,
     onShow: () => markdownPreview.refresh(),
+  });
+
+  // Ячейки ноутбука: `.ipynb` показан ячейками (markdown отрисован, код — блоком),
+  // а «Сравнить с HEAD» сопоставляет их с версией из git по ячейкам, не по строкам JSON.
+  const notebookPanel = createNotebookPanel({
+    activePath: () => editors.currentPath,
+    readText: (path) => documents.get(path)?.value ?? null,
+    readHead: (path) => git.headText(path),
+    relativePath: (path) => workspace.relative(path),
+    isVisible: () => dock.activeId === 'notebooks',
+  });
+  dock.register({
+    id: 'notebooks',
+    title: 'Ячейки',
+    element: notebookPanel.element,
+    onShow: () => notebookPanel.refresh(),
   });
   dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });
   dock.register({ id: 'tests', title: 'Тесты', element: testPanel.element, onShow: () => void testPanel.refresh() });
@@ -4161,6 +4178,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define({ id: 'view.showOutline', title: 'Структура файла', category: 'Вид' }, () => {
     dock.toggle('outline');
+  });
+
+  define({ id: 'view.notebooks', title: 'Ячейки ноутбука', category: 'Вид' }, () => {
+    dock.show('notebooks');
   });
 
   define({ id: 'view.showMarkdownPreview', title: 'Предпросмотр Markdown', category: 'Вид' }, () => {

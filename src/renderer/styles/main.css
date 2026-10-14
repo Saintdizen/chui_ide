@@ -7405,6 +7405,172 @@ body > .overlay {
   padding: 10px 12px 16px;
 }
 
+/* ── ячейки ноутбука ───────────────────────────────────── */
+
+.notebook {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.notebook-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.notebook-title {
+  font-weight: 600;
+}
+
+.notebook-path {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.notebook-head-spacer {
+  flex: 1;
+}
+
+.notebook-summary {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+}
+
+.notebook-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px 16px;
+}
+
+/* Ячейка: подпись сверху, содержимое под ней — как в Jupyter. */
+.notebook-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+}
+
+.notebook-cell.is-code {
+  background: var(--sunken_background);
+}
+
+.notebook-cell-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notebook-cell-badge {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_micro_size);
+}
+
+.notebook-cell-body {
+  min-width: 0;
+}
+
+.notebook-source,
+.notebook-output {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.notebook-output {
+  margin-top: 4px;
+  border-left: 2px solid var(--blue_prime_background);
+  background: var(--element_background);
+  color: var(--text_color_secondary);
+}
+
+.notebook-output.is-error {
+  border-left-color: var(--red_prime_background);
+  color: var(--red_prime_background);
+}
+
+/* Сравнение: строка изменения — те же цвета, что у вставки и удаления в diff. */
+.notebook-diff-summary {
+  margin-bottom: 8px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.notebook-change {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-left-width: 3px;
+  border-radius: var(--radius_sm);
+}
+
+.notebook-change.is-added {
+  border-left-color: var(--green_prime_background);
+}
+
+.notebook-change.is-removed {
+  border-left-color: var(--red_prime_background);
+}
+
+.notebook-change.is-changed {
+  border-left-color: var(--yellow_prime_background);
+}
+
+.notebook-change-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.notebook-change-status {
+  color: var(--text_color);
+  font-weight: 600;
+  font-size: var(--font_labels_size);
+}
+
+.notebook-change-kind {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_micro_size);
+}
+
+.notebook-line {
+  margin: 0;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.notebook-line.is-added {
+  background: color-mix(in srgb, var(--green_prime_background) 16%, transparent);
+}
+
+.notebook-line.is-removed {
+  background: color-mix(in srgb, var(--red_prime_background) 16%, transparent);
+}
+
 /* ── отладчик регулярных выражений ─────────────────────────────────────── */
 
 /* Окно шире диалога одного поля: слева поля, справа ответ — но не на весь экран. */
