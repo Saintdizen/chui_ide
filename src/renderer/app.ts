@@ -318,6 +318,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     vimMode: settings.editor.vimMode,
     // Смена режима Vim обновляет значок в строке состояния.
     onVimModeChange: () => refreshStatus(),
+    emacsMode: settings.editor.emacsMode,
     ligatures: settings.editor.fontLigatures,
     // Живой геттер: настройку меняют в окне без пересоздания редактора.
     emmetEnabled: () => settings.editor.emmet,
@@ -4350,6 +4351,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void saveSettingsPatch({ editor: { vimMode: next } }).catch(() => undefined);
   });
 
+  /**
+   * Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода. Переключение применяется
+   * сразу (и к уже открытым панелям), а не дожидается повторного чтения настроек.
+   */
+  define({ id: 'editor.toggleEmacs', title: 'Emacs-режим: включить или выключить', category: 'Редактор' }, () => {
+    const next = !settings.editor.emacsMode;
+    settings = { ...settings, editor: { ...settings.editor, emacsMode: next } };
+    editors.setEmacsMode(next);
+    showToast(next ? 'Emacs-режим включён' : 'Emacs-режим выключен');
+    void saveSettingsPatch({ editor: { emacsMode: next } }).catch(() => undefined);
+  });
+
   // Орфография: добавить слово под курсором в словарь или пропустить его на сеанс.
   define(
     {
@@ -4563,6 +4576,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       wordWrap: next.editor.wordWrap,
       smoothScroll: next.editor.smoothScroll,
       vimMode: next.editor.vimMode,
+      emacsMode: next.editor.emacsMode,
       ligatures: next.editor.fontLigatures,
       spellcheck: next.editor.spellcheck,
     });

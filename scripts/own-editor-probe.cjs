@@ -3238,6 +3238,60 @@ async function vimCheck(win) {
   };
 }
 
+/**
+ * Emacs-режим: включаем и жмём НАСТОЯЩИЕ сочетания Ctrl. Режим не модальный, поэтому
+ * проверяем сочетания: Ctrl+F сдвигает каретку, Ctrl+E ведёт к концу строки, Ctrl+K
+ * убивает до конца строки, а Ctrl+Y возвращает убитое. В конце режим выключаем.
+ */
+async function emacsCheck(win) {
+  const send = (event) => win.webContents.sendInputEvent(event);
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  await script(
+    '(() => { window.probeScroll.input.setEmacsMode(true); window.probeScroll.input.focus(); return true; })()',
+  );
+  win.focus();
+  await wait(200);
+
+  const pressCtrl = async (keyCode) => {
+    send({ type: 'keyDown', keyCode, modifiers: ['control'] });
+    send({ type: 'keyUp', keyCode, modifiers: ['control'] });
+    await wait(50);
+  };
+
+  await script(`(() => {
+    const { controller } = window.probeScroll;
+    controller.setSelection({ anchor: 0, active: 0 });
+    return true;
+  })()`);
+  await pressCtrl('F');
+  const afterF = await script('window.probeScroll.controller.caret');
+  await pressCtrl('E');
+  const afterE = await script('window.probeScroll.controller.caret');
+
+  // Ctrl+K убивает от начала строки до конца, Ctrl+Y возвращает убитое.
+  const lineText = await script('window.probeScroll.buffer.lineText(1)');
+  await script(`(() => {
+    const { controller } = window.probeScroll;
+    controller.setSelection({ anchor: 0, active: 0 });
+    return true;
+  })()`);
+  await pressCtrl('K');
+  const afterK = await script('window.probeScroll.buffer.lineText(1)');
+  await pressCtrl('Y');
+  const afterY = await script('window.probeScroll.buffer.lineText(1)');
+
+  await script('(() => { window.probeScroll.input.setEmacsMode(false); return true; })()');
+
+  return {
+    каретка_после_ctrl_f: afterF,
+    каретка_после_ctrl_e: afterE,
+    длина_строки: lineText.length,
+    строка_после_ctrl_k: afterK,
+    строка_после_ctrl_y: afterY.slice(0, 20),
+  };
+}
+
 async function main() {
   const lines = [];
   const log = (text) => {
@@ -3525,6 +3579,11 @@ async function main() {
   const vim = await vimCheck(win);
   log('## Vim-режим');
   log(JSON.stringify(vim, null, 2));
+  log('');
+
+  const emacs = await emacsCheck(win);
+  log('## Emacs-режим');
+  log(JSON.stringify(emacs, null, 2));
   log('');
 
   const smooth = await smoothScrollCheck(win);

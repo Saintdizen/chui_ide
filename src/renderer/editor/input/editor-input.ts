@@ -31,6 +31,7 @@ import { chordCommand, chordName, isChordPrefix, resolveKey, type EditCommand, t
 import { MacroRecorder, recordsCommand, runMacro, type MacroStep, type MacroTarget } from './macro';
 import { VimBinding } from './vim-binding';
 import type { VimMode } from './vim';
+import { EmacsBinding } from './emacs-binding';
 import type { EditorChange, EditorController } from './editor-controller';
 
 import type { EditorView } from '../view/editor-view';
@@ -84,6 +85,8 @@ export interface EditorInputOptions {
   vimMode?: boolean;
   /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
   onVimModeChange?: (mode: VimMode) => void;
+  /** Emacs-режим включён при создании (настройка `editor.emacsMode`). */
+  emacsMode?: boolean;
 }
 
 export class EditorInputBinding {
@@ -107,6 +110,8 @@ export class EditorInputBinding {
   private readonly macro = new MacroRecorder();
   /** Модальный Vim-режим: разбор клавиш и применение команд. */
   private readonly vim: VimBinding;
+  /** Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода. */
+  private readonly emacs: EmacsBinding;
   private readonly unsubscribe: () => void;
 
   constructor(view: EditorView, controller: EditorController, options: EditorInputOptions = {}) {
@@ -119,6 +124,8 @@ export class EditorInputBinding {
     // Vim: начальное состояние ставим молча — слушателя режима на этом этапе ещё нет.
     this.vim = new VimBinding(controller, options.onVimModeChange);
     this.vim.setEnabled(options.vimMode === true, false);
+    this.emacs = new EmacsBinding(controller);
+    this.emacs.setEnabled(options.emacsMode === true);
     this.input = document.createElement('textarea');
     this.input.className = 'own-editor-input';
     this.input.setAttribute('autocapitalize', 'off');
@@ -205,6 +212,16 @@ export class EditorInputBinding {
     this.vim.setEnabled(on);
   }
 
+  /** Emacs-режим включён? */
+  emacsEnabled(): boolean {
+    return this.emacs.enabled;
+  }
+
+  /** Включить или выключить Emacs-режим (настройка `editor.emacsMode`). */
+  setEmacsMode(on: boolean): void {
+    this.emacs.setEnabled(on);
+  }
+
   /** Поставить фокус в редактор — ввод идёт в скрытое поле. */
   focus(): void {
     this.input.focus();
@@ -272,6 +289,12 @@ export class EditorInputBinding {
       return;
     }
 
+    // Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода (режим не модальный).
+    if (this.emacs.handleKey(chord)) {
+      event.preventDefault();
+      return;
+    }
+
     // Сочетания-приставки (`Ctrl+K Ctrl+F`): первая клавиша пары ничего не делает, а
     // только ждёт вторую. Нажали что-то другое — пары не было, клавиша идёт обычным путём.
     const name = chordName(chord);
@@ -323,6 +346,8 @@ export class EditorInputBinding {
       event.preventDefault();
       return;
     }
+    // Набор текста снимает метку Emacs: она относится к выделению, а не к вводу.
+    if (this.emacs.enabled) this.emacs.clearMark();
     // Пока идёт состав, ввод не трогаем: итог придёт по `compositionend`.
     if (this.composing) return;
     const { inputType, data } = event;

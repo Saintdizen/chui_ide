@@ -101,6 +101,8 @@ export interface EditorWorkspaceOptions {
   vimMode?: boolean;
   /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
   onVimModeChange?: (mode: VimMode) => void;
+  /** Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода (настройка `editor.emacsMode`). */
+  emacsMode?: boolean;
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
   /** Emmet: раскрытие сокращений по Tab в разметке и стилях (см. `input/emmet.ts`). */
@@ -237,6 +239,7 @@ export class EditorWorkspace {
   private readonly smoothScroll: boolean | undefined;
   private readonly vimModeInitial: boolean | undefined;
   private readonly vimModeChange: ((mode: VimMode) => void) | undefined;
+  private readonly emacsMode: boolean | undefined;
   /** Включён ли Emmet — живой геттер: его меняют в настройках без пересоздания панели. */
   private readonly emmetEnabled: (() => boolean) | undefined;
   /** Проверка орфографии: словарь и настройка — одни на все панели. */
@@ -356,6 +359,7 @@ export class EditorWorkspace {
     this.smoothScroll = options.smoothScroll;
     this.vimModeInitial = options.vimMode;
     this.vimModeChange = options.onVimModeChange;
+    this.emacsMode = options.emacsMode;
     this.emmetEnabled = options.emmetEnabled;
     this.spell = options.spellcheck;
     this.spellEnabled = options.spellcheckEnabled;
@@ -457,6 +461,7 @@ export class EditorWorkspace {
       smoothScroll: this.smoothScroll,
       vimMode: this.vimModeInitial,
       onVimModeChange: this.vimModeChange,
+      emacsMode: this.emacsMode,
       emmetEnabled: this.emmetEnabled,
       spellcheck: this.spell,
       spellcheckEnabled: this.spellEnabled,
@@ -837,6 +842,11 @@ export class EditorWorkspace {
     for (const pane of this.panes) pane.setVimMode(on);
   }
 
+  /** Включить или выключить Emacs-режим во всех панелях. */
+  setEmacsMode(on: boolean): void {
+    for (const pane of this.panes) pane.setEmacsMode(on);
+  }
+
   /** Раздать макрос всем панелям: повтор доступен в любой из них. */
   restoreMacro(steps: readonly MacroStep[]): void {
     for (const pane of this.panes) pane.restoreMacro(steps);
@@ -855,6 +865,7 @@ export class EditorWorkspace {
     wordWrap?: boolean;
     smoothScroll?: boolean;
     vimMode?: boolean;
+    emacsMode?: boolean;
     ligatures?: boolean;
     spellcheck?: boolean;
   }): void {

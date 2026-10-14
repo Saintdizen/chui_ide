@@ -192,6 +192,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     smoothScroll: true,
     // Vim-режим выключен: это выбор человека, а не поведение по умолчанию.
     vimMode: false,
+    // Emacs-режим тоже выключен: это выбор человека, а не поведение по умолчанию.
+    emacsMode: false,
     // Лигатуры выключены: не всякий шрифт их умеет, и не всем они нравятся.
     fontLigatures: false,
     // Своих сниппетов по умолчанию нет: набор, что знает редактор, живёт в коде
@@ -426,6 +428,7 @@ export class SettingsStore {
       if (patch.editor.wordWrap !== undefined) next.wordWrap = patch.editor.wordWrap === true;
       if (patch.editor.smoothScroll !== undefined) next.smoothScroll = patch.editor.smoothScroll === true;
       if (patch.editor.vimMode !== undefined) next.vimMode = patch.editor.vimMode === true;
+      if (patch.editor.emacsMode !== undefined) next.emacsMode = patch.editor.emacsMode === true;
       if (patch.editor.fontLigatures !== undefined) next.fontLigatures = patch.editor.fontLigatures === true;
       if (patch.editor.emmet !== undefined) next.emmet = patch.editor.emmet === true;
       if (patch.editor.formatOnPaste !== undefined) next.formatOnPaste = patch.editor.formatOnPaste === true;
@@ -746,6 +749,8 @@ function loadSettings(filePath: string): StoredSettings {
       smoothScroll: parsed.editor?.smoothScroll !== false,
       // Vim-режим включён только явным `true`: старый settings.json его не знает.
       vimMode: parsed.editor?.vimMode === true,
+      // Emacs-режим включён только явным `true`: старый settings.json его не знает.
+      emacsMode: parsed.editor?.emacsMode === true,
       fontLigatures: parsed.editor?.fontLigatures === true,
       emmet: parsed.editor?.emmet !== false,
       // Форматирование при вставке включено только явным `true`: старый файл его не знает.

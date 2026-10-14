@@ -940,11 +940,11 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         { class: 'field-hint' },
         'Модальное управление клавишами, как в Vim: нормальный и визуальный режимы, операторы (d/c/y), счётчики. Выход из вставки — Escape.',
       ),
-      switchRow('Vim-режим', editor.vimMode, (value) => editable({ vimMode: value })),
+      switchRow('Emacs-режим', editor.emacsMode, (value) => editable({ emacsMode: value })),
       h(
         'div',
         { class: 'field-hint' },
-        'Модальное управление клавишами, как в Vim: нормальный и визуальный режимы, операторы (d/c/y), счётчики. Выход из вставки — Escape.',
+        'Сочетания Ctrl/Alt, как в Emacs: Ctrl+F/B/N/P — движение, Ctrl+A/E — края строки, Ctrl+K/U/Y — убить и вставить, Ctrl+Space — метка. Обычный ввод при этом не меняется.',
       ),
       h(
         'div',

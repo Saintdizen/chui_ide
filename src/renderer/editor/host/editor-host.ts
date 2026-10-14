@@ -172,6 +172,8 @@ export interface EditorHostOptions {
   vimMode?: boolean;
   /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
   onVimModeChange?: (mode: VimMode) => void;
+  /** Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода (настройка `editor.emacsMode`). */
+  emacsMode?: boolean;
   /** Включать ли лигатуры шрифта. */
   ligatures?: boolean;
   /**
@@ -681,6 +683,8 @@ export class EditorHost {
       // Vim-режим: модальный разбор клавиш снаружи обычной раскладки.
       vimMode: options.vimMode,
       onVimModeChange: options.onVimModeChange,
+      // Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода.
+      emacsMode: options.emacsMode,
     });
     // После закрытия панели фокус возвращается в текст: работа продолжается там.
     this.find.onClose = () => this.input.focus();
@@ -928,6 +932,11 @@ export class EditorHost {
     this.input.setVimMode(on);
   }
 
+  /** Включить или выключить Emacs-режим (настройка `editor.emacsMode`). */
+  setEmacsMode(on: boolean): void {
+    this.input.setEmacsMode(on);
+  }
+
   /** Настройки редактора, влияющие на вид: отступ (Tab), кегль, высота строки и каретка. */
   applyOptions(options: {
     tabSize?: number;
@@ -941,6 +950,7 @@ export class EditorHost {
     wordWrap?: boolean;
     smoothScroll?: boolean;
     vimMode?: boolean;
+    emacsMode?: boolean;
     ligatures?: boolean;
     spellcheck?: boolean;
   }): void {
@@ -959,6 +969,7 @@ export class EditorHost {
     if (options.wordWrap !== undefined) this.view.setWordWrap(options.wordWrap);
     if (options.smoothScroll !== undefined) this.view.setSmoothScroll(options.smoothScroll);
     if (options.vimMode !== undefined) this.input.setVimMode(options.vimMode);
+    if (options.emacsMode !== undefined) this.input.setEmacsMode(options.emacsMode);
     if (options.ligatures !== undefined) this.view.setLigatures(options.ligatures);
     // Проверку включили или выключили: отметки пересчитываем или снимаем.
     if (options.spellcheck !== undefined) this.refreshSpell();

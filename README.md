@@ -1556,7 +1556,16 @@ w/b/e, W/B/E, 0/^/$, gg/G и стрелки; операторы d/c/y со сч�
 объекты текста iw/aw; x/X, D/C, p/P, u и Ctrl+r, J, ~, r (замена знака); вход в вставку
 i/a/I/A/o/O, выход — Escape. Разбор и участки — `input/vim.ts`, применение —
 `input/vim-binding.ts`, проверка — tests/editor-vim.test.ts и раздел «Vim-режим» в
-`npm run probe:editor`. ✗ Emacs-режим. ✓ Плавная прокрутка: дальний прыжок курсора ведёт
+`npm run probe:editor`.
+✓ Emacs-режим (настройка `editor.emacsMode`, выключен по умолчанию): сочетания Ctrl/Alt
+поверх обычного ввода, режим не модальный. Ctrl+F/B/N/P — движение по знакам и строкам,
+Ctrl+A/E — края строки, Alt+F/B — по словам, Alt+&lt;/Alt+&gt; — края файла, Ctrl+D/H —
+удаление знака вперёд/назад, Ctrl+K/U — убить до конца/начала строки, Ctrl+Y — вставить
+убитое, Ctrl+_ — отмена, Ctrl+T — перестановка знаков, Ctrl+O — открыть строку,
+Ctrl+Space — метка (выделение движениями), Ctrl+G — сброс, Alt+D/Alt+Backspace — убить
+слово вперёд/назад. Системные Ctrl+C/X/V/Z/S не перехватываются. Разбор — `input/emacs.ts`,
+применение — `input/emacs-binding.ts`, проверка — tests/editor-emacs.test.ts и раздел
+«Emacs-режим» в `npm run probe:editor`. ✓ Плавная прокрутка: дальний прыжок курсора ведёт
 текст коротким разгоном (настройка `editor.smoothScroll`, включена; разгон бросается,
 если прокрутил человек, и выключен при `prefers-reduced-motion`; `view/smooth-scroll.ts`,
 проверка — раздел «Плавная прокрутка» в `npm run probe:editor`). ✓ Анимация каретки: узел
