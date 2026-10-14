@@ -79,6 +79,14 @@ export interface EditorCommandContext {
   formatSelection?(): void;
   /** Переименовать символ под курсором (нужен языковой сервер и ввод имени — дело вызывающего). */
   renameSymbol?(): void;
+  /** Выделить по структуре ШИРЕ: следующий объёмлющий участок (нужен языковой сервер). */
+  expandSelection?(): void;
+  /** Выделить УЖЕ: вложенный участок, а с самого узкого — к каретке (нужен языковой сервер). */
+  shrinkSelection?(): void;
+  /** Выделить по структуре ШИРЕ: следующий объёмлющий участок (нужен языковой сервер). */
+  expandSelection?(): void;
+  /** Выделить УЖЕ: вложенный участок, а с самого узкого — к каретке (нужен языковой сервер). */
+  shrinkSelection?(): void;
   /** Перейти к следующей пометке языка (ошибке или предупреждению). */
   nextProblem?(): void;
   /** Перейти к предыдущей пометке языка. */
@@ -111,7 +119,9 @@ export type EditorCommandRequirement =
   | 'formatCode'
   | 'nextProblem'
   | 'previousProblem'
-  | 'codeActions';
+  | 'codeActions'
+  | 'expandSelection'
+  | 'shrinkSelection';
 
 export interface EditorCommand {
   /** Наш идентификатор: `editor.undo`. Приставка отделяет от команд приложения. */
@@ -377,6 +387,24 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     category: 'Навигация',
     requires: 'renameSymbol',
     run: (context) => context.renameSymbol?.(),
+  },
+  {
+    id: 'editor.expandSelection',
+    label: 'Выделить шире (по структуре)',
+    alias: 'expandSelection',
+    keybinding: 'Shift+Alt+→',
+    category: 'Навигация',
+    requires: 'expandSelection',
+    run: (context) => context.expandSelection?.(),
+  },
+  {
+    id: 'editor.shrinkSelection',
+    label: 'Выделить уже (по структуре)',
+    alias: 'shrinkSelection',
+    keybinding: 'Shift+Alt+←',
+    category: 'Навигация',
+    requires: 'shrinkSelection',
+    run: (context) => context.shrinkSelection?.(),
   },
   {
     id: 'editor.format',

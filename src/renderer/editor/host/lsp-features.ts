@@ -30,6 +30,7 @@ import { pickRefactors, type RefactorAction } from '../../../shared/lsp-refactor
 import { toFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
 import { targetFromResolvedLink, toDocumentLinks, type DocumentLinkEntry } from '../../../shared/lsp-document-links';
 import { toLinkedRanges, type LinkedRange } from '../../../shared/lsp-linked-editing';
+import { toSelectionSpans, type SelectionSpan } from '../../../shared/lsp-selection-range';
 import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import { toMonikers, type MonikerEntry } from '../../../shared/lsp-moniker';
 import { toInlineValues, type InlineValue } from '../../../shared/lsp-inline-value';
@@ -373,6 +374,19 @@ export class LspFeatures {
       position: toLspPosition(position),
     });
     return toLinkedRanges(result);
+  }
+
+  /**
+   * Цепочка участков вокруг позиции (`textDocument/selectionRange`): от узкого к широкому.
+   * По ней работает «выделить по структуре» — слово, потом выражение, строка, блок.
+   * Пусто — сервер не умеет или участков нет; это не ошибка, шагать будет некуда.
+   */
+  async selectionRanges(path: string, position: LspPosition): Promise<SelectionSpan[]> {
+    const result = await this.request(path, 'textDocument/selectionRange', {
+      textDocument: { uri: pathToUri(path) },
+      positions: [toLspPosition(position)],
+    });
+    return toSelectionSpans(result);
   }
 
   /**

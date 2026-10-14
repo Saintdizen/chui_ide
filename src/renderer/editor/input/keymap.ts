@@ -106,7 +106,10 @@ export type EditCommand =
   /** Ctrl+Shift+T — выбрать обёртку для выделения («surround with»). */
   | 'surroundWith'
   /** Ctrl+K Ctrl+F — форматировать выделение (участок, а не файл целиком). */
-  | 'formatSelection';
+  | 'formatSelection'
+  /** Shift+Alt+→/← — выделить по структуре шире или уже (границы — от сервера). */
+  | 'expandSelection'
+  | 'shrinkSelection';
 
 /**
  * Во что превращается нажатие.
@@ -152,6 +155,13 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   // Escape после мультикурсора оставляет одну каретку — как в других редакторах.
   if (key === 'Escape') return { kind: 'edit', edit: 'collapseSelections' };
 
+  // Shift+Alt+→/← — выделить по структуре: шире и уже. Границы участков знает сервер,
+  // поэтому команда уходит наружу (см. `EditorInputBinding`). Проверяем раньше стрелок:
+  // иначе Shift+Alt+← стало бы выделением по словам.
+  if (chord.alt && extend) {
+    if (key === 'ArrowRight') return { kind: 'edit', edit: 'expandSelection' };
+    if (key === 'ArrowLeft') return { kind: 'edit', edit: 'shrinkSelection' };
+  }
   if (key === 'ArrowLeft') return motion(control ? 'wordLeft' : 'left', extend);
   if (key === 'ArrowRight') return motion(control ? 'wordRight' : 'right', extend);
   // Ctrl+Alt+↑/↓ добавляет каретку на соседнюю строку — проверяем раньше переноса строк

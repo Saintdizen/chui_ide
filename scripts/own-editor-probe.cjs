@@ -2411,6 +2411,44 @@ async function linkedEditingCheck(win) {
 }
 
 /**
+ * Выделение по структуре (selectionRange): «шире» и «уже» ходят по цепочке
+ * участков, которую отдаёт сервер. Подставной сервер пробы даёт фиксированную цепочку вокруг «a»
+ * (имя → выражение → строка), поэтому по выделенному тексту виден шаг туда и обратно.
+ */
+async function selectionRangeCheck(win) {
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+
+  await script(`(() => {
+    const { workspace, doc } = window.probeSelection;
+    workspace.reveal(doc.path, 1, 15);
+    return true;
+  })()`);
+  await wait(60);
+
+  const caret = await script('window.probeSelection.workspace.selectedText()');
+  await script('window.probeSelection.workspace.expandSelection()');
+  await wait(80);
+  const word = await script('window.probeSelection.workspace.selectedText()');
+  await script('window.probeSelection.workspace.expandSelection()');
+  await wait(80);
+  const expressionText = await script('window.probeSelection.workspace.selectedText()');
+  await script('window.probeSelection.workspace.expandSelection()');
+  await wait(80);
+  const line = await script('window.probeSelection.workspace.selectedText()');
+  await script('window.probeSelection.workspace.shrinkSelection()');
+  await wait(80);
+  const back = await script('window.probeSelection.workspace.selectedText()');
+
+  return {
+    каретка: caret,
+    шире_раз: word,
+    шире_два: expressionText,
+    шире_три: line,
+    уже_раз: back,
+  };
+}
+
+/**
  * Семантическая подсветка (semanticTokens): роли от сервера перекрывают грамматику.
  * Ставим на основной редактор текст и семантические токены, где имя функции сервер
  * назвал типом, — тогда по классу спана видно, что семантика победила грамматику.
@@ -3560,6 +3598,11 @@ async function main() {
   const surround = await surroundCheck(win);
   log('## Обёртка выделения (surround with)');
   log(JSON.stringify(surround, null, 2));
+  log('');
+
+  const selectionRange = await selectionRangeCheck(win);
+  log('## Выделение по структуре (selectionRange)');
+  log(JSON.stringify(selectionRange, null, 2));
   log('');
 
   log('## Подсказки языкового сервера');

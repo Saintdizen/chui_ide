@@ -56,6 +56,7 @@ const CANCELLABLE_METHODS: ReadonlySet<string> = new Set([
   'textDocument/codeLens',
   'textDocument/inlayHint',
   'textDocument/foldingRange',
+  'textDocument/selectionRange',
   'textDocument/documentSymbol',
   'textDocument/semanticTokens/full',
 ]);
@@ -727,6 +728,9 @@ export class LspService {
             documentSymbol: { hierarchicalDocumentSymbolSupport: true },
             rename: { prepareSupport: true },
             foldingRange: { lineFoldingOnly: true },
+            // Выделение по структуре: сервер отдаёт цепочку участков вокруг места —
+            // слово, выражение, строка, блок (см. `LspFeatures.selectionRanges`).
+            selectionRange: {},
             codeLens: { dynamicRegistration: false },
             codeAction: {
               isPreferredSupport: true,

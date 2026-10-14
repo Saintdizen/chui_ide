@@ -357,6 +357,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     openLink: (target, path) => void openDocumentLink(target, path),
     // Связанные участки: имена парных тегов (открывающий и закрывающий) правятся вместе.
     linkedEditing: (path, position) => lsp.linkedEditingRanges(path, position),
+    // Выделение по структуре: сервер отдаёт цепочку участков вокруг места (слово,
+    // выражение, строка, блок) — по ней работают «выделить шире/уже».
+    selectionRanges: (path, position) => lsp.selectionRanges(path, position),
     // Семантическая подсветка: точные роли от сервера поверх своей грамматики.
     semanticTokens: (path) => lsp.semanticTokens(path),
     // Знаки-триггеры сервера (`@` в CSS, `:` в JSON): попап открывается сразу по ним.

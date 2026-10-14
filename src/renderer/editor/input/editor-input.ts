@@ -54,7 +54,10 @@ export type CommandName =
   /** Обернуть выделение парой знаков; пару выбирает вызывающий. */
   | 'surroundWith'
   /** Отформатировать выделение участком (Ctrl+K Ctrl+F); сервер спрашивает вызывающий. */
-  | 'formatSelection';
+  | 'formatSelection'
+  /** Выделить по структуре шире/уже — участки берёт вызывающий у сервера. */
+  | 'expandSelection'
+  | 'shrinkSelection';
 
 /**
  * Кто может забрать клавишу себе раньше редактора. Так устроены попапы: при видимом
@@ -644,6 +647,12 @@ export class EditorInputBinding {
         break;
       case 'formatSelection':
         this.onCommand?.('formatSelection');
+        break;
+      case 'expandSelection':
+        this.onCommand?.('expandSelection');
+        break;
+      case 'shrinkSelection':
+        this.onCommand?.('shrinkSelection');
         break;
       // Мультикурсор: вхождения слова, каретки по столбцу и сброс к главной.
       case 'selectNextOccurrence':

@@ -41,6 +41,8 @@ const NOT_RECORDED: ReadonlySet<EditCommand> = new Set<EditCommand>([
   'peekDefinition',
   'surroundWith',
   'formatSelection',
+  'expandSelection',
+  'shrinkSelection',
 ]);
 
 /** Попадёт ли эта правка в макрос. */

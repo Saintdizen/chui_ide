@@ -24,6 +24,7 @@ function handle(message) {
           definitionProvider: true,
           renameProvider: true,
           foldingRangeProvider: true,
+          selectionRangeProvider: true,
           // Форматирование участка: по нему проверяем и «форматировать выделение», и
           // форматирование на вставке (см. scripts/lsp-smoke.cjs).
           documentRangeFormattingProvider: true,
@@ -428,6 +429,24 @@ function handle(message) {
           { start: { line: 0, character: 7 }, end: { line: 0, character: 10 } },
         ],
       },
+    });
+    return;
+  }
+
+  // Выделение по структуре: цепочка участков вокруг места (слово → выражение → строка).
+  if (message.method === 'textDocument/selectionRange') {
+    send({
+      jsonrpc: '2.0',
+      id: message.id,
+      result: [
+        {
+          range: { start: { line: 0, character: 6 }, end: { line: 0, character: 10 } },
+          parent: {
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 10 } },
+            parent: { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 24 } } },
+          },
+        },
+      ],
     });
     return;
   }

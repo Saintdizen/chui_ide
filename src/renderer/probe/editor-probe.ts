@@ -832,3 +832,35 @@ window.probeProblemPanel = {
     problemsPanel.refresh();
   },
 };
+
+// Выделение по структуре (selectionRange): подставной сервер отдаёт
+// фиксированную цепочку участков вокруг имени «a» — само имя, выражение «a + b» и всю строку.
+// Проверяем, что «шире»/«уже» ходят по цепочке на шаг.
+const selectionRoot = document.createElement('div');
+selectionRoot.id = 'probe-selection';
+selectionRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 480px';
+document.body.append(selectionRoot);
+
+const selectionStore = new DocumentStore();
+const selectionRegistry = new DocumentRegistry(selectionStore);
+const selectionWorkspace = new EditorWorkspace(selectionRoot, selectionRegistry, {
+  scheme: 'dark',
+  // Цепочка фиксирована: имя «a» (15–16) внутри «a + b» (15–20) внутри строки (1–21).
+  selectionRanges: async () => [
+    { startLine: 1, startColumn: 15, endLine: 1, endColumn: 16 },
+    { startLine: 1, startColumn: 15, endLine: 1, endColumn: 20 },
+    { startLine: 1, startColumn: 1, endLine: 1, endColumn: 21 },
+  ],
+});
+const selectionDoc = selectionStore.open('/probe/selection.ts', 'const total = a + b;\n', {
+  languageId: 'typescript',
+});
+selectionWorkspace.open(selectionDoc);
+
+declare global {
+  interface Window {
+    probeSelection: { workspace: EditorWorkspace; store: DocumentStore; doc: TextDocument };
+  }
+}
+
+window.probeSelection = { workspace: selectionWorkspace, store: selectionStore, doc: selectionDoc };

@@ -60,6 +60,28 @@ describe('правки', () => {
     expect(resolveKey({ key: 't', ctrl: true })).toEqual({ kind: 'swallow' });
   });
 
+  it('Shift+Alt+→/← — выделить по структуре шире и уже', () => {
+    expect(resolveKey({ key: 'ArrowRight', alt: true, shift: true })).toEqual({
+      kind: 'edit',
+      edit: 'expandSelection',
+    });
+    expect(resolveKey({ key: 'ArrowLeft', alt: true, shift: true })).toEqual({ kind: 'edit', edit: 'shrinkSelection' });
+    // Без Alt те же стрелки — обычное движение и выделение по словам.
+    expect(resolveKey({ key: 'ArrowRight', shift: true })).toEqual({ kind: 'move', motion: 'right', extend: true });
+    expect(resolveKey({ key: 'ArrowLeft' })).toEqual({ kind: 'move', motion: 'left', extend: false });
+  });
+
+  it('Shift+Alt+→/← — выделить по структуре шире и уже', () => {
+    expect(resolveKey({ key: 'ArrowRight', alt: true, shift: true })).toEqual({
+      kind: 'edit',
+      edit: 'expandSelection',
+    });
+    expect(resolveKey({ key: 'ArrowLeft', alt: true, shift: true })).toEqual({ kind: 'edit', edit: 'shrinkSelection' });
+    // Без Alt те же стрелки — обычное движение и выделение по словам.
+    expect(resolveKey({ key: 'ArrowRight', shift: true })).toEqual({ kind: 'move', motion: 'right', extend: true });
+    expect(resolveKey({ key: 'ArrowLeft' })).toEqual({ kind: 'move', motion: 'left', extend: false });
+  });
+
   it('Ctrl+A, C, X, V — выделить, копировать, вырезать, вставить', () => {
     expect(resolveKey({ key: 'a', ctrl: true })).toEqual({ kind: 'edit', edit: 'selectAll' });
     expect(resolveKey({ key: 'c', ctrl: true })).toEqual({ kind: 'edit', edit: 'copy' });

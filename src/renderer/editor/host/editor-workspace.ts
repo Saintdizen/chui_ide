@@ -45,6 +45,7 @@ import type { CodeLensCommand, CodeLensEntry } from '../../../shared/lsp-code-le
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
 import type { DocumentLinkEntry } from '../../../shared/lsp-document-links';
 import type { LinkedRange } from '../../../shared/lsp-linked-editing';
+import type { SelectionSpan } from '../../../shared/lsp-selection-range';
 import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import type { DebugInlineValue } from '../view/editor-view';
 import type { DocumentRegistry } from './document-registry';
@@ -139,6 +140,11 @@ export interface EditorWorkspaceOptions {
    * правятся вместе (см. `LspFeatures.linkedEditingRanges`).
    */
   linkedEditing?: (path: string, position: { line: number; column: number }) => Promise<readonly LinkedRange[]>;
+  /**
+   * Цепочка участков вокруг позиции (`selectionRange`) — для «выделить по структуре»:
+   * слово, выражение, строка, блок (см. `LspFeatures.selectionRanges`).
+   */
+  selectionRanges?: (path: string, position: { line: number; column: number }) => Promise<readonly SelectionSpan[]>;
   /** Семантическая подсветка от сервера: `LspFeatures.semanticTokens`. */
   semanticTokens?: (path: string) => Promise<readonly SemanticToken[]>;
   /** Исполнить команду линзы: её выбирает сервер, а запускает приложение. */
@@ -293,6 +299,8 @@ export class EditorWorkspace {
   private readonly openLink: EditorWorkspaceOptions['openLink'];
   /** Связанные участки — тот же шов. */
   private readonly linkedEditing: EditorWorkspaceOptions['linkedEditing'];
+  /** Выделение по структуре — тот же шов (у сервера цепочка участков). */
+  private readonly selectionRanges: EditorWorkspaceOptions['selectionRanges'];
   /** Семантическая подсветка — тот же шов. */
   private readonly semanticTokens: EditorWorkspaceOptions['semanticTokens'];
   /** Короткий путь для подписи места в списке. */
@@ -376,6 +384,7 @@ export class EditorWorkspace {
     this.documentLinks = options.documentLinks;
     this.openLink = options.openLink;
     this.linkedEditing = options.linkedEditing;
+    this.selectionRanges = options.selectionRanges;
     this.semanticTokens = options.semanticTokens;
     this.hoverFromLanguage = options.hoverFromLanguage;
     this.completionFromLanguage = options.completionFromLanguage;
@@ -484,6 +493,7 @@ export class EditorWorkspace {
       documentLinks: this.documentLinks,
       openLink: this.openLink,
       linkedEditing: this.linkedEditing,
+      selectionRanges: this.selectionRanges,
       semanticTokens: this.semanticTokens,
       symbols: this.symbols,
       revealLocation: this.revealLocation,
@@ -697,6 +707,11 @@ export class EditorWorkspace {
     // Переименование — шов приложения: ему нужен диалог имени и документная модель.
     const renameSymbol = this.renameSymbol;
     if (renameSymbol) context.renameSymbol = () => path && renameSymbol(path, this.pane.cursor());
+    // Выделение по структуре — тоже шов: цепочку участков отдаёт сервер.
+    if (this.selectionRanges) {
+      context.expandSelection = () => this.pane.expandSelection();
+      context.shrinkSelection = () => this.pane.shrinkSelection();
+    }
     // Быстрые исправления — тот же порядок: список показывает приложение.
     const codeActions = this.codeActions;
     if (codeActions) context.codeActions = () => path && codeActions(path, this.pane.cursor());
@@ -786,6 +801,16 @@ export class EditorWorkspace {
   /** Обернуть выделение активной панели парой знаков (выбор делает приложение). */
   surroundSelection(option: SurroundOption): boolean {
     return this.pane.surroundSelection(option);
+  }
+
+  /** Выделить по структуре ШИРЕ на активной панели (участки отдаёт сервер). */
+  expandSelection(): void {
+    this.pane.expandSelection();
+  }
+
+  /** Выделить УЖЕ на активной панели; с самого узкого — к каретке. */
+  shrinkSelection(): void {
+    this.pane.shrinkSelection();
   }
 
   /** Есть ли в активной панели непустое выделение. */

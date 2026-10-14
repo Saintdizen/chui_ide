@@ -7,6 +7,7 @@ const path = require('node:path');
 
 const { LspService } = require('../dist/main/lsp/lsp.js');
 const { formatOutline } = require('../dist/shared/lsp-symbols.js');
+const { toSelectionSpans } = require('../dist/shared/lsp-selection-range.js');
 
 const LSP_DIAGNOSTICS = 'lsp:diagnostics';
 
@@ -150,6 +151,18 @@ async function main() {
     position: { line: 0, character: 2 },
   });
   ok('связанные участки получены', Array.isArray(linked?.ranges) && linked.ranges.length === 2, JSON.stringify(linked));
+
+  /* Выделение по структуре (selectionRange): сервер отдаёт цепочку участков (слово → выражение → строка). Проверяем, что разбор разворачивает родителей в список 1-based. */
+  const selectionRaw = await lsp.request(sample, 'textDocument/selectionRange', {
+    textDocument: { uri: `file://${sample}` },
+    positions: [{ line: 0, character: 7 }],
+  });
+  const selectionSpans = toSelectionSpans(selectionRaw);
+  ok(
+    'цепочка выделения разобрана в 1-based',
+    selectionSpans.length === 3 && selectionSpans[0].startColumn === 7 && selectionSpans[2].endColumn === 25,
+    JSON.stringify(selectionSpans),
+  );
 
   /* Форматирование УЧАСТКА (`textDocument/rangeFormatting`): сервер правит только
      запрошенный диапазон, а не файл целиком. Именно этим «форматировать выделение»

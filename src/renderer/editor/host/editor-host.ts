@@ -30,6 +30,7 @@ import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { InlayHint } from '../../../shared/lsp-inlay-hints';
 import type { DocumentLinkEntry } from '../../../shared/lsp-document-links';
 import type { LinkedRange } from '../../../shared/lsp-linked-editing';
+import { type SelectionSpan, type SelectionStep, stepSelection } from '../../../shared/lsp-selection-range';
 import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import type { RunnableTest } from '../../../shared/python-tests';
 import type { Snippet } from '../../../shared/snippets';
@@ -293,6 +294,12 @@ export interface EditorHostOptions {
    */
   linkedEditing?: (path: string, position: { line: number; column: number }) => Promise<readonly LinkedRange[]>;
   /**
+   * Цепочка участков вокруг позиции (`selectionRange`) — для «выделить по структуре»:
+   * слово, выражение, строка, блок (см. `shared/lsp-selection-range.ts`). Не задано —
+   * команды выделения по структуре нет, в палитре не появляется.
+   */
+  selectionRanges?: (path: string, position: { line: number; column: number }) => Promise<readonly SelectionSpan[]>;
+  /**
    * Семантическая подсветка файла от сервера (`semanticTokens/full`): точные роли поверх
    * своей грамматики (см. `shared/lsp-semantic-tokens.ts`). Не задано — только грамматика.
    */
@@ -396,6 +403,11 @@ export class EditorHost {
     | undefined;
   private linkedRequestId = 0;
   private linkedTimer: number | null = null;
+  /** Выделение по структуре — от приложения (языковой сервер): источник и номер запроса. */
+  private readonly selectionSource:
+    | ((path: string, position: { line: number; column: number }) => Promise<readonly SelectionSpan[]>)
+    | undefined;
+  private selectionRequestId = 0;
   /** Семантическая подсветка — от приложения (языковой сервер): источник и номер запроса. */
   private readonly semanticSource: ((path: string) => Promise<readonly SemanticToken[]>) | undefined;
   private semanticRequestId = 0;
@@ -521,6 +533,7 @@ export class EditorHost {
     this.documentLinkSource = options.documentLinks;
     this.openLink = options.openLink;
     this.linkedSource = options.linkedEditing;
+    this.selectionSource = options.selectionRanges;
     this.semanticSource = options.semanticTokens;
     this.completionTriggersSource = options.completionTriggers;
     this.spell = options.spellcheck;
@@ -1754,6 +1767,8 @@ export class EditorHost {
     else if (command === 'peekDefinition') this.peekDefinition();
     else if (command === 'surroundWith') this.surroundWithHandler?.();
     else if (command === 'formatSelection') this.formatSelection();
+    else if (command === 'expandSelection') this.expandSelection();
+    else if (command === 'shrinkSelection') this.shrinkSelection();
     else this.find.show(command === 'replace' ? 'replace' : 'find');
   }
 
@@ -1876,6 +1891,53 @@ export class EditorHost {
   private clearLinked(): void {
     this.controller.setLinkedRanges(null);
     this.view.setLinkedRanges([]);
+  }
+
+  // — выделение по структуре (Expand/Shrink Selection) —
+
+  /** Выделить по структуре ШИРЕ: следующий объёмлющий участок от сервера. */
+  expandSelection(): void {
+    void this.stepSelection('expand');
+  }
+
+  /** Выделить УЖЕ: вернуться к вложенному участку, а с самого узкого — к каретке. */
+  shrinkSelection(): void {
+    void this.stepSelection('shrink');
+  }
+
+  /**
+   * Шаг «выделить по структуре»: спросить у сервера цепочку участков вокруг выделения
+   * и перейти на соседний по направлению.
+   *
+   * Состояния не держим: и «шире», и «уже» считаются от ТЕКУЩЕГО выделения и свежей
+   * цепочки (`stepSelection`). Так команда не разъезжается с тем, что человек выделил
+   * руками: шире берётся ближайший объемлющий узел, уже — самый глубокий вложенный.
+   */
+  private async stepSelection(direction: SelectionStep): Promise<void> {
+    const source = this.selectionSource;
+    const path = this.path;
+    if (!source || !path) return;
+
+    const buffer = this.controller.bufferRef;
+    const selection = this.controller.selection;
+    const current = isEmpty(selection) ? null : spanOfSelection(buffer, selection);
+    // Спрашиваем у САМОГО ЛЕВОГО края выделения: он точно внутри нужных узлов, а край
+    // промежутка может уже выпасть из узкого участка.
+    const from = buffer.positionAt(Math.min(selection.anchor, selection.active));
+
+    const id = (this.selectionRequestId += 1);
+    const spans = await source(path, { line: from.line, column: from.column }).catch(() => []);
+    if (id !== this.selectionRequestId || this.path !== path) return;
+
+    const next = stepSelection(spans, current, direction);
+    if (next) {
+      const start = buffer.offsetAt({ line: next.startLine, column: next.startColumn });
+      const end = buffer.offsetAt({ line: next.endLine, column: next.endColumn });
+      this.controller.setSelection({ anchor: start, active: end });
+    } else if (direction === 'shrink' && current) {
+      // Уже самого узкого участка нет — сворачиваем выделение к каретке.
+      this.controller.setSelection(caret(selection.active));
+    }
   }
 
   // — семантическая подсветка —
@@ -2108,6 +2170,13 @@ export class EditorHost {
 function selectionAt(buffer: TextBuffer, position: CursorPosition): Selection {
   const offset = buffer.offsetAt({ line: position.line, column: position.column });
   return caret(offset);
+}
+
+/** Выделение в виде участка (строка/столбец, 1-based) — для сравнения с ответом сервера. */
+function spanOfSelection(buffer: TextBuffer, selection: Selection): SelectionSpan {
+  const start = buffer.positionAt(Math.min(selection.anchor, selection.active));
+  const end = buffer.positionAt(Math.max(selection.anchor, selection.active));
+  return { startLine: start.line, startColumn: start.column, endLine: end.line, endColumn: end.column };
 }
 
 /** Класс серьёзности пометки для волнистого подчёркивания (`editor.css`). */
