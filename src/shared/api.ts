@@ -311,6 +311,18 @@ export interface SessionState {
   bookmarks?: BookmarkRecord[];
   /** Где стоял курсор в каждом открытом файле (1-based). */
   cursors?: Record<string, CursorPosition>;
+  /**
+   * Несохранённые правки: текст буферов, которые человек не успел сохранить
+   * («hot exit»). При следующем открытии проекта они возвращаются как есть —
+   * файл на диске при этом не трогается.
+   */
+  unsaved?: UnsavedBuffer[];
+}
+
+/** Текст несохранённого буфера: путь файла и правленое содержимое. */
+export interface UnsavedBuffer {
+  path: string;
+  text: string;
 }
 
 /** Позиция курсора в файле (1-based) - как её считает редактор. */

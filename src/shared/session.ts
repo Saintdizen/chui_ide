@@ -1,4 +1,11 @@
-import type { BreakpointRecord, CursorPosition, DebugExceptionFilters, DebugLaunchOptions, SessionState } from './api';
+import type {
+  BreakpointRecord,
+  CursorPosition,
+  DebugExceptionFilters,
+  DebugLaunchOptions,
+  SessionState,
+  UnsavedBuffer,
+} from './api';
 import { sanitizeBookmarks } from './bookmarks';
 
 /**
@@ -24,6 +31,12 @@ const MAX_SETTING_CHARS = 4096;
 /** Общий предел длины строки: хватает и пути, и одному аргументу. */
 const MAX_PATH_CHARS = 4096;
 const MAX_ENV_VALUE_CHARS = 8192;
+/** Сколько несохранённых буферов помним: больше — и сессия перестаёт быть лёгкой. */
+export const MAX_UNSAVED_FILES = 20;
+/** Предел размера одного буфера: гигант не должен утяжелять запись сессии. */
+export const MAX_UNSAVED_CHARS = 1_000_000;
+/** Общий потолок несохранённого текста в сессии. */
+export const MAX_UNSAVED_TOTAL_CHARS = 4_000_000;
 
 /** Пустое рабочее место: используется, когда файла сессии ещё нет. */
 export const EMPTY_SESSION: SessionState = {
@@ -86,8 +99,50 @@ export function sanitizeSession(raw: unknown): SessionState {
   // Позиции курсоров — только для открытых файлов: у закрытого она мертва.
   const cursors = cursorPositions(value.cursors, tabs);
   if (Object.keys(cursors).length > 0) state.cursors = cursors;
+  // Несохранённые правки («hot exit»): их возвращает редактор при следующем открытии.
+  const unsaved = unsavedBuffers(value.unsaved);
+  if (unsaved.length > 0) state.unsaved = unsaved;
 
   return state;
+}
+
+/**
+ * Отобрать буферы для «hot exit»: непустые, не гигантские и в пределах общего
+ * потолка. Порядок сохраняется (он же порядок вкладок) — так файл сессии
+ * предсказуем, а возврат правок повторяем. Дубли по пути отбрасываются.
+ */
+export function selectUnsavedBuffers(candidates: readonly { path: string; text: string }[]): UnsavedBuffer[] {
+  const result: UnsavedBuffer[] = [];
+  const seen = new Set<string>();
+  let total = 0;
+  for (const item of candidates) {
+    if (result.length >= MAX_UNSAVED_FILES) break;
+    if (!item.path || item.text.length === 0) continue;
+    if (item.text.length > MAX_UNSAVED_CHARS) continue;
+    if (seen.has(item.path)) continue;
+    if (total + item.text.length > MAX_UNSAVED_TOTAL_CHARS) break;
+    seen.add(item.path);
+    total += item.text.length;
+    result.push({ path: item.path, text: item.text });
+  }
+  return result;
+}
+
+/**
+ * Несохранённые буферы из сессии: только объекты с непустым путём и текстом.
+ * Битый или чужой файл сессии не должен вернуть в редактор мусор.
+ */
+export function unsavedBuffers(raw: unknown): UnsavedBuffer[] {
+  if (!Array.isArray(raw)) return [];
+  const candidates: { path: string; text: string }[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    if (typeof value.path !== 'string' || !value.path) continue;
+    if (typeof value.text !== 'string') continue;
+    candidates.push({ path: value.path.slice(0, MAX_PATH_CHARS), text: value.text });
+  }
+  return selectUnsavedBuffers(candidates);
 }
 
 /**

@@ -1,4 +1,11 @@
-import type { BreakpointRecord, DebugLaunchOptions, SessionState, WorkspaceInfo } from '../../shared/api';
+import type {
+  BreakpointRecord,
+  DebugLaunchOptions,
+  SessionState,
+  UnsavedBuffer,
+  WorkspaceInfo,
+} from '../../shared/api';
+import { selectUnsavedBuffers } from '../../shared/session';
 import type { BookmarkRecord } from '../../shared/bookmarks';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import type { DockView } from '../ui/dock';
@@ -81,6 +88,12 @@ export interface SessionControl {
 const SAVE_DEBOUNCE_MS = 400;
 
 /**
+ * Пауза перед записью несохранённых правок: текст меняется на каждое нажатие, а
+ * сессия — файл целиком. Дольше, чем у вкладок, чтобы набор не тормозил записью.
+ */
+const HOT_EXIT_DEBOUNCE_MS = 2000;
+
+/**
  * Рабочее место проекта: что открыто, что раскрыто и какие точки останова стоят.
  * Живёт отдельно от сборки окна — приложению о нём напоминают только две вещи:
  * восстановить место при открытии проекта и попросить сохранить при изменении.
@@ -93,6 +106,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
   /** Пока идёт восстановление, сохранять нельзя — иначе затрём файл пустотой. */
   let restoring = false;
   let saveTimer = 0;
+  /** Свой таймер для несохранённого текста: он меняется чаще, чем состав вкладок. */
+  let hotExitTimer = 0;
 
   /** Точки останова в виде записей сессии: файл + строка + настройки. */
   const captureBreakpoints = (): BreakpointRecord[] => {
@@ -133,6 +148,33 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     for (const [path, list] of debug.allBreakpoints()) editors.setBreakpoints(path, list);
   };
 
+  /**
+   * Вернуть несохранённые правки в буферы. Текст ставится источником `programmatic`:
+   * это не ввод человека, но и не диск — правка обязана остаться «не сохранённой»,
+   * а буфер редактора обязан её подхватить (за это отвечает реестр документов).
+   *
+   * Возвращает пути, которые действительно получили текст: по ним видно, какие
+   * вкладки надо показать, если их нет в списке открытых.
+   */
+  const restoreUnsaved = async (buffers: readonly UnsavedBuffer[]): Promise<string[]> => {
+    const restored: string[] = [];
+    for (const item of buffers) {
+      try {
+        // Файла может не быть (удалили) — тогда возвращать правку некуда: вкладку
+        // открывать нечем, а держать текст «в воздухе» незачем.
+        if (!documents.get(item.path)) await deps.openPath(item.path);
+      } catch {
+        continue;
+      }
+      const document = documents.get(item.path);
+      // Большой файл править нельзя — и вернуть в него правку тоже нечего.
+      if (!document || document.readOnly) continue;
+      if (document.setText(item.text, 'programmatic')) restored.push(item.path);
+      else if (document.dirty) restored.push(item.path);
+    }
+    return restored;
+  };
+
   /** Текущее рабочее место: что открыто, что раскрыто, какие панели видны. */
   const capture = (): SessionState => {
     const breakpoints = captureBreakpoints();
@@ -141,6 +183,11 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     const exceptions = debug.exceptionFilters();
     const options = deps.getDebugOptions();
     const cursors = editors.cursorPositions();
+    // Несохранённые правки — часть рабочего места: без них перезапуск (и любое
+    // закрытие окна) терял бы работу, которую человек ещё не записал.
+    const unsaved = selectUnsavedBuffers(
+      documents.dirty().map((document) => ({ path: document.path, text: document.value })),
+    );
     const roots = workspace.roots.map((item) => item.root);
     return {
       // Корни области — только когда папок больше одной: обычный проект дублировать незачем.
@@ -163,6 +210,7 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       // Место работы в каждом файле — часть рабочего места: без него после
       // перезапуска вкладки те же, а курсор в начале файла.
       ...(Object.keys(cursors).length > 0 ? { cursors } : {}),
+      ...(unsaved.length > 0 ? { unsaved } : {}),
     };
   };
 
@@ -171,6 +219,19 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
     if (!root || restoring) return;
     // не сохранилось — не повод мешать работе
     void rpc.request('session.save', { root, state: capture() }).catch(() => undefined);
+  };
+
+  /**
+   * Записать сессию с несохранённым текстом. Задержка своя, и она длиннее: правка
+   * приходит на каждое нажатие, а писать файл сессии так часто ни к чему.
+   */
+  const scheduleHotExit = (): void => {
+    if (!root || restoring) return;
+    if (hotExitTimer) window.clearTimeout(hotExitTimer);
+    hotExitTimer = window.setTimeout(() => {
+      hotExitTimer = 0;
+      persist();
+    }, HOT_EXIT_DEBOUNCE_MS);
   };
 
   const scheduleSave = (): void => {
@@ -195,6 +256,10 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
       openEditors.closeAll();
       const state = await rpc.request('session.load', { root: target });
 
+      // Несохранённые правки возвращаем ДО открытия вкладок: `open` подхватит готовый
+      // текст из документа, и на экране сразу будет то, что человек не успел сохранить.
+      const dirtyPaths = await restoreUnsaved(state.unsaved ?? []);
+
       // Позиции курсоров ставим ДО открытия файлов: `open` подхватит их при показе.
       editors.restoreCursorPositions(state.cursors ?? {});
 
@@ -203,6 +268,16 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
           await deps.openPath(path);
         } catch {
           // файла больше нет — просто пропускаем
+        }
+      }
+      // Буфер мог быть открыт ради правки, а вкладки в списке не оказаться: показываем
+      // его, иначе работа вернулась бы «в никуда».
+      for (const path of dirtyPaths) {
+        if (openEditors.has(path)) continue;
+        try {
+          await deps.openPath(path);
+        } catch {
+          // файла нет — правку вернуть некуда, и вкладку открывать нечем
         }
       }
       if (state.activeTab && openEditors.has(state.activeTab)) {
@@ -247,6 +322,8 @@ export function createSessionControl(deps: SessionDeps): SessionControl {
   };
 
   openEditors.onDidChange(scheduleSave);
+  // Правка текста — тоже повод записать сессию: несохранённое должно пережить перезапуск.
+  documents.onDidChange(scheduleHotExit);
   dock.onVisibilityChange(scheduleSave);
   // Точки останова — тоже часть рабочего места: поставили или сняли — сохраняем.
   debug.onDidChangeBreakpoints(scheduleSave);

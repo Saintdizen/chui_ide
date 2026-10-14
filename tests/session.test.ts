@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_SESSION, MAX_EXPANDED, MAX_TABS, MAX_WATCH, sanitizeSession } from '../src/shared/session';
+import {
+  EMPTY_SESSION,
+  MAX_EXPANDED,
+  MAX_TABS,
+  MAX_UNSAVED_CHARS,
+  MAX_UNSAVED_FILES,
+  MAX_WATCH,
+  sanitizeSession,
+  selectUnsavedBuffers,
+  unsavedBuffers,
+} from '../src/shared/session';
 
 describe('sanitizeSession', () => {
   it('не объект → пустая сессия', () => {
@@ -204,5 +214,44 @@ describe('границы пустой сессии не мутируются', (
     const state = sanitizeSession(null);
     state.tabs.push('/p/x.ts');
     expect(JSON.stringify(EMPTY_SESSION)).toBe(snapshot);
+  });
+});
+
+describe('несохранённые правки («hot exit»)', () => {
+  it('отбор: пустой текст, дубли и гиганты не берём', () => {
+    const picked = selectUnsavedBuffers([
+      { path: '/p/a.ts', text: 'правка' },
+      { path: '/p/empty.ts', text: '' },
+      { path: '/p/a.ts', text: 'дубль' },
+      { path: '/p/huge.ts', text: 'x'.repeat(MAX_UNSAVED_CHARS + 1) },
+      { path: '/p/b.ts', text: 'ещё' },
+    ]);
+    expect(picked).toEqual([
+      { path: '/p/a.ts', text: 'правка' },
+      { path: '/p/b.ts', text: 'ещё' },
+    ]);
+  });
+
+  it('отбор: порядок сохраняется, число файлов ограничено', () => {
+    const many = Array.from({ length: MAX_UNSAVED_FILES + 5 }, (_, i) => ({ path: `/p/${i}.ts`, text: 'x' }));
+    const picked = selectUnsavedBuffers(many);
+    expect(picked).toHaveLength(MAX_UNSAVED_FILES);
+    expect(picked[0]!.path).toBe('/p/0.ts');
+  });
+
+  it('из сессии читаются только объекты с путём и текстом', () => {
+    expect(unsavedBuffers(null)).toEqual([]);
+    expect(unsavedBuffers('нет')).toEqual([]);
+    expect(unsavedBuffers([{ path: '', text: 'x' }, { path: '/p/a.ts' }, 5, null])).toEqual([]);
+    expect(unsavedBuffers([{ path: '/p/a.ts', text: 'код' }])).toEqual([{ path: '/p/a.ts', text: 'код' }]);
+  });
+
+  it('sanitizeSession сохраняет несохранённое и не пишет пустое', () => {
+    const state = sanitizeSession({ tabs: ['/p/a.ts'], expanded: [], unsaved: [{ path: '/p/a.ts', text: 'код' }] });
+    expect(state.unsaved).toEqual([{ path: '/p/a.ts', text: 'код' }]);
+    expect(sanitizeSession({ tabs: [], expanded: [], unsaved: [] }).unsaved).toBeUndefined();
+    expect(
+      sanitizeSession({ tabs: [], expanded: [], unsaved: [{ path: '/p/a.ts', text: '' }] }).unsaved,
+    ).toBeUndefined();
   });
 });
