@@ -2906,6 +2906,74 @@ async function ctrlClickCheck(win) {
   })()`);
 }
 
+/**
+ * Сочетания меню не должны срабатывать в редакторе второй раз.
+ *
+ * Нажатие акселератора системного меню (Ctrl+Shift+P и подобные) доходит и до renderer
+ * обычным `keydown` — это подтверждает проба `probe:keyleak`. Значит сочетание, которое
+ * уже есть у меню, редактор обязан пропустить: иначе команда срабатывает дважды. Здесь
+ * три случая, где пути пересекались: Ctrl+Shift+F (поиск по проекту) не должен открывать
+ * поиск в файле, Ctrl+Shift+G (панель «Изменения») — переход к строке, Ctrl+Shift+A
+ * (панель AI) — выделение всего документа. Рядом Ctrl+F и Ctrl+G — положительный
+ * контроль: без Shift это по-прежнему наши сочетания, и «скрыто» значит «не наше», а не
+ * «ввод не слушает клавиатуру».
+ */
+async function menuComboCheck(win) {
+  const send = (event) => win.webContents.sendInputEvent(event);
+  const script = (expression) => win.webContents.executeJavaScript(expression);
+  const key = async (keyCode, modifiers) => {
+    send({ type: 'keyDown', keyCode, modifiers });
+    send({ type: 'keyUp', keyCode, modifiers });
+    await wait(120);
+  };
+  const panels = () =>
+    script(`(() => ({
+      поиск: !document.querySelector('.own-editor-find').hidden,
+      строка: !document.querySelector('.own-editor-goto').hidden,
+      выделено_символов: window.probe.controller.selectedText().length,
+      всего_символов: window.probe.buffer.text.length,
+    }))()`);
+  const reset = () =>
+    script(`(() => {
+      document.querySelector('.own-editor-find').hidden = true;
+      document.querySelector('.own-editor-goto').hidden = true;
+      window.probe.controller.collapseToPrimary();
+      window.probe.input.focus();
+      return true;
+    })()`);
+
+  win.focus();
+
+  await reset();
+  await key('F', ['control', 'shift']);
+  const ctrlShiftF = await panels();
+
+  await reset();
+  await key('G', ['control', 'shift']);
+  const ctrlShiftG = await panels();
+
+  await reset();
+  await key('A', ['control', 'shift']);
+  const ctrlShiftA = await panels();
+
+  // Положительный контроль: без Shift эти же клавиши — наши сочетания.
+  await reset();
+  await key('F', ['control']);
+  const ctrlF = await panels();
+  await reset();
+  await key('G', ['control']);
+  const ctrlG = await panels();
+  await reset();
+
+  return {
+    'Ctrl+Shift+F (меню: поиск по проекту)': ctrlShiftF,
+    'Ctrl+Shift+G (меню: изменения)': ctrlShiftG,
+    'Ctrl+Shift+A (меню: панель AI)': ctrlShiftA,
+    'контроль Ctrl+F': ctrlF,
+    'контроль Ctrl+G': ctrlG,
+  };
+}
+
 async function main() {
   const lines = [];
   const log = (text) => {
@@ -3183,6 +3251,11 @@ async function main() {
   const ctrlClick = await ctrlClickCheck(win);
   log('## Ctrl+Click по слову');
   log(JSON.stringify(ctrlClick, null, 2));
+  log('');
+
+  const menuCombo = await menuComboCheck(win);
+  log('## Сочетания меню в редакторе: не срабатывают второй раз');
+  log(JSON.stringify(menuCombo, null, 2));
   log('');
 
   // 7. Ввод настоящими клавишами и мышью: то, чего юнит-тесты не видят — связку
