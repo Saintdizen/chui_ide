@@ -252,6 +252,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   /** Раскрытые строки блока удалённых папок: адрес → прочитанное содержимое. */
   const remoteExpanded = new Set<string>();
   const remoteChildren = new Map<string, DirEntry[]>();
+  /**
+   * Что сейчас читается и что прочитать не удалось. Без этого пустая папка и папка,
+   * которая ещё читается (или уже отказала), выглядели бы одинаково — а по ssh чтение
+   * занимает секунды, и «папка пуста» на них было бы прямой ложью.
+   */
+  const remoteLoading = new Set<string>();
+  const remoteFailed = new Set<string>();
   /** Метки файлов (цветные ярлыки в строках); живут в сессии проекта. */
   let labels: FileLabelRecord[] = [];
   /** Выделенные строки (Ctrl/Shift) и якорь диапазона; порядок — как в дереве. */
@@ -397,8 +404,21 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const remoteBlock = (): HTMLElement => {
     const header = h('div', { class: 'tree-remote-head' }, svgIcon('server', 12), h('span', {}, 'Удалённые папки'));
     const roots = deps.remoteRoots?.() ?? [];
+    // Адрес убрали из списка — забываем и его содержимое, и отметки о нём: держать
+    // чужое незачем, а вернув адрес обратно, человек получит свежее чтение.
+    pruneRemote(roots);
     const rows = roots.map((address) => remoteTree(address, 0));
     return h('div', { class: 'tree-remote' }, header, ...rows);
+  };
+
+  /** Забыть данные адресов, которых больше нет в списке (вместе с их подкаталогами). */
+  const pruneRemote = (roots: readonly string[]): void => {
+    if (remoteChildren.size === 0 && remoteExpanded.size === 0 && remoteFailed.size === 0) return;
+    const alive = (key: string): boolean => roots.some((root) => key === root || key.startsWith(`${root}/`));
+    for (const key of [...remoteChildren.keys()]) if (!alive(key)) remoteChildren.delete(key);
+    for (const key of [...remoteExpanded]) if (!alive(key)) remoteExpanded.delete(key);
+    for (const key of [...remoteFailed]) if (!alive(key)) remoteFailed.delete(key);
+    for (const key of [...remoteLoading]) if (!alive(key)) remoteLoading.delete(key);
   };
 
   /** Строка удалённой папки и (если раскрыта) её содержимое. */
@@ -452,8 +472,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       fileRow.addEventListener('click', () => deps.openRemoteFile?.(entry.path));
       rows.push(fileRow);
     }
-    if (kids.length === 0) {
-      rows.push(h('div', { class: 'tree-empty-note' }, 'Папка пуста или недоступна'));
+    // Три разных состояния — тремя разными словами: читается, не прочиталось, пусто.
+    if (remoteLoading.has(address)) {
+      rows.push(h('div', { class: 'tree-empty-note' }, 'Читаю…'));
+    } else if (remoteFailed.has(address)) {
+      rows.push(h('div', { class: 'tree-empty-note is-error' }, 'Не удалось прочитать — проверьте адрес и доступ'));
+    } else if (kids.length === 0) {
+      rows.push(h('div', { class: 'tree-empty-note' }, 'Папка пуста'));
     }
     return h('div', { class: 'tree-remote-node' }, ...rows);
   };
@@ -467,15 +492,23 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     }
     remoteExpanded.add(address);
     render();
-    if (!remoteChildren.has(address)) await reloadRemote(address);
+    // Отказ прошлого чтения не запоминаем: раскрытие снова пробует адрес.
+    if (!remoteChildren.has(address) && !remoteLoading.has(address)) await reloadRemote(address);
   };
 
   const reloadRemote = async (address: string): Promise<void> => {
+    if (remoteLoading.has(address)) return;
+    remoteLoading.add(address);
+    remoteFailed.delete(address);
+    render();
     try {
       remoteChildren.set(address, await deps.rpc.request('remote.readDir', { address }));
     } catch (error) {
-      remoteChildren.set(address, []);
+      remoteChildren.delete(address);
+      remoteFailed.add(address);
       console.error('[chui] не удалось прочитать удалённую папку', address, error);
+    } finally {
+      remoteLoading.delete(address);
     }
     render();
   };

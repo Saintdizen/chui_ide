@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { addressName, formatFsAddress, joinAddress, parseFsAddress, type FsAddress } from '../../shared/fs-address';
 import type { DirEntry } from '../../shared/api';
+import { joinAddress, type FsAddress } from '../../shared/fs-address';
 
 /**
  * Удалённые файловые системы: SSH, WSL и контейнеры.
@@ -71,6 +71,9 @@ export function sshTargetArgs(authority: string): string[] {
   return port ? ['-p', port, target] : [target];
 }
 
+/** Потолок списка каталога: папка с сотней тысяч файлов не должна вешать окно. */
+const MAX_DIR_ENTRIES = 5000;
+
 /** Команда «прочитать каталог»: папки/файлы/ссылки плюс время и размер. */
 export function listDirCommand(address: FsAddress): string {
   // `find` с `-printf` есть в GNU coreutils (Linux на той стороне — обычное дело).
@@ -102,9 +105,6 @@ export function parseDirListing(stdout: string, address: FsAddress): DirEntry[] 
   return entries;
 }
 
-/** Потолок списка каталога: папка с сотней тысяч файлов не должна вешать окно. */
-export const MAX_DIR_ENTRIES = 5000;
-
 /** Команда «прочитать файл»: `cat` с ограничением размера. */
 export function readFileCommand(address: FsAddress, maxBytes: number): string {
   // `head -c` обрезает на той стороне: тянуть мегабайты по сети ради отказа нельзя.
@@ -134,7 +134,7 @@ export function parseStat(stdout: string): { mtimeMs: number; size: number; kind
   };
 }
 
-/** Команды изменения: создание каталогов, переименование, копирование, удаление. */
+/** Команды изменения: создание каталогов, переименование, удаление. */
 export function mkdirCommand(address: FsAddress): string {
   return `mkdir -p -- ${shellQuote(address.path)}`;
 }
@@ -143,28 +143,8 @@ export function moveCommand(from: FsAddress, to: FsAddress): string {
   return `mv -- ${shellQuote(from.path)} ${shellQuote(to.path)}`;
 }
 
-export function copyCommand(from: FsAddress, to: FsAddress): string {
-  return `cp -r -- ${shellQuote(from.path)} ${shellQuote(to.path)}`;
-}
-
 export function removeCommand(address: FsAddress, recursive = true): string {
   return `rm ${recursive ? '-rf' : '-f'} -- ${shellQuote(address.path)}`;
-}
-
-/** Короткая подпись адреса для сообщений: «SSH: host: /srv/app» — из `shared/fs-address`. */
-export function remoteName(address: FsAddress): string {
-  return addressName(address) || address.authority;
-}
-
-/** Адрес строкой — так он уходит в RPC и настройки. */
-export function remoteToString(address: FsAddress): string {
-  return formatFsAddress(address);
-}
-
-/** Проверка «путь принадлежит этому адресу»: по-другому его открывать нельзя. */
-export function belongsToAddress(address: FsAddress, path: string): boolean {
-  const parsed = parseFsAddress(path);
-  return parsed !== null && formatFsAddress(parsed) === formatFsAddress(address);
 }
 
 /**

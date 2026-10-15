@@ -689,16 +689,35 @@ app.whenReady().then(async () => {
       ),
     )}`,
   );
-  await ask(ide, `document.querySelector('.tree-remote .tree-row.is-remote')?.click()`);
+  // Раскрытие в момент чтения: строка обязана сказать «Читаю…», а не «папка пуста».
+  // Читаем сразу после клика — обработчик до первого `await` успевает перерисовать
+  // дерево, поэтому слово видно ещё до того, как ответит (или не ответит) клиент.
+  console.log(
+    `[explorer] удалённая папка в момент чтения: ${JSON.stringify(
+      await ask(
+        ide,
+        `(() => {
+          const row = document.querySelector('.tree-remote .tree-row.is-remote');
+          if (!row) return 'нет строки';
+          row.click();
+          return document.querySelector('.tree-remote .tree-empty-note')?.textContent ?? null;
+        })()`,
+      ),
+    )}`,
+  );
   await wait(12000);
   console.log(
     `[explorer] недоступная удалённая папка: ${JSON.stringify(
       await ask(
         ide,
-        `(() => ({
-          заметка: document.querySelector('.tree-remote .tree-empty-note')?.textContent ?? null,
-          дерево_живо: Boolean(document.querySelector('.tree-rows .tree-row')),
-        }))()`,
+        `(() => {
+          const note = document.querySelector('.tree-remote .tree-empty-note');
+          return {
+            заметка: note?.textContent ?? null,
+            отказ_помечен: note?.classList.contains('is-error') ?? false,
+            дерево_живо: Boolean(document.querySelector('.tree-rows .tree-row')),
+          };
+        })()`,
       ),
     )}`,
   );

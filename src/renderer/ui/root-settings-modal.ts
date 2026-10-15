@@ -2,7 +2,6 @@ import type { ExplorerSettings, ExplorerRootOverride, ExplorerRootOverrides } fr
 import {
   clearRootOverride,
   describeOverride,
-  hasRootOverride,
   OVERRIDE_LABELS,
   ROOT_OVERRIDE_FLAGS,
   rootOverrideOf,
@@ -160,9 +159,13 @@ export function createRootSettingsModal(deps: RootSettingsModalDeps): RootSettin
       rows.appendChild(row);
     }
     excluded.value = (draft.exclude ?? []).join('\n');
-    summary.textContent = hasRootOverride({ [currentRoot ?? '']: collect() }, currentRoot)
-      ? `Отличия: ${describeOverride(collect())}`
-      : 'Отличий нет — папка живёт по общим настройкам.';
+    // «Есть ли отличия» решаем по собранным полям, а не по сохранённой карте: строка
+    // показывает ЧЕРНОВИК — до нажатия «Готово» он и есть то, что видит человек.
+    const own = collect();
+    summary.textContent =
+      Object.keys(own).length > 0
+        ? `Отличия: ${describeOverride(own)}`
+        : 'Отличий нет — папка живёт по общим настройкам.';
   };
 
   async function apply(): Promise<void> {

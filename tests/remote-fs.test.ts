@@ -1,18 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   addressName,
-  addressParent,
   addressProblem,
-  addressSchemeOf,
   formatFsAddress,
   fsAddressLabel,
-  isFsAddress,
   joinAddress,
   normalizeRemotePath,
   parseFsAddress,
 } from '../src/shared/fs-address';
 import {
-  belongsToAddress,
   clientNameOf,
   listDirCommand,
   mkdirCommand,
@@ -59,10 +55,9 @@ describe('разбор адреса', () => {
     expect(parseFsAddress('ssh://')).toBeNull();
   });
 
-  it('обычный путь адресом не считается', () => {
-    expect(isFsAddress('/home/me/proj')).toBe(false);
-    expect(addressSchemeOf('/home/me/proj')).toBeNull();
-    expect(addressSchemeOf('wsl://Ubuntu/home')).toBe('wsl');
+  it('обычный путь адресом не считается, а схема видна у адреса', () => {
+    expect(parseFsAddress('/home/me/proj')).toBeNull();
+    expect(parseFsAddress('wsl://Ubuntu/home')?.scheme).toBe('wsl');
   });
 
   it('сборка и разбор обратимы', () => {
@@ -79,12 +74,10 @@ describe('части адреса', () => {
     expect(addressName(parseFsAddress('ssh://host')!)).toBe('host');
   });
 
-  it('спуск и подъём', () => {
+  it('спуск в подкаталог', () => {
     expect(joinAddress(address, 'src')).toBe('ssh://host/srv/app/src');
-    expect(addressParent(address)).toBe('ssh://host/srv');
-    expect(addressParent(parseFsAddress('ssh://host/srv')!)).toBe('ssh://host');
-    // Из корня подниматься некуда.
-    expect(addressParent(parseFsAddress('ssh://host')!)).toBeNull();
+    // Путь корня в адресе не печатается: спуск идёт от имени хоста.
+    expect(joinAddress(parseFsAddress('ssh://host')!, 'srv')).toBe('ssh://host/srv');
   });
 
   it('подпись говорит, чем открывается', () => {
@@ -143,12 +136,6 @@ describe('команды клиентам', () => {
     expect(statCommand(address)).toContain('stat -c');
     expect(mkdirCommand(address)).toContain('mkdir -p');
     expect(moveCommand(address, parseFsAddress('ssh://build@ci:2222/srv/b')!)).toBe("mv -- '/srv/app' '/srv/b'");
-  });
-
-  it('«свой адрес» проверяется до открытия файла', () => {
-    expect(belongsToAddress(address, 'ssh://build@ci:2222/srv/app/a.ts')).toBe(false);
-    const owner = parseFsAddress('ssh://build@ci:2222/srv/app')!;
-    expect(belongsToAddress(owner, 'ssh://build@ci:2222/srv/app')).toBe(true);
   });
 
   it('клиент называется по схеме', () => {

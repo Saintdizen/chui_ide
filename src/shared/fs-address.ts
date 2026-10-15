@@ -38,12 +38,6 @@ export const FS_SCHEME_LABELS: Record<FsScheme, string> = {
 
 const SCHEMES: readonly FsScheme[] = ['ssh', 'wsl', 'container'];
 
-/** Похоже ли на адрес: есть схема из известных и `://`. */
-export function isFsAddress(value: string): boolean {
-  const match = /^([a-z][a-z0-9+.-]*):\/\//i.exec(value.trim());
-  return match !== null && SCHEMES.includes(match[1]!.toLowerCase() as FsScheme);
-}
-
 /**
  * Разобрать адрес. `null` — это не адрес или он неполный: вызывающий решает, что
  * сказать человеку (см. `addressProblem`).
@@ -98,14 +92,6 @@ export function addressName(address: FsAddress): string {
   return parts[parts.length - 1] ?? address.authority;
 }
 
-/** Путь родителя внутри адреса: `null` — уже корень, подниматься некуда. */
-export function addressParent(address: FsAddress): string | null {
-  if (address.path === '/') return null;
-  const parts = address.path.split('/').filter((part) => part.length > 0);
-  parts.pop();
-  return formatFsAddress({ ...address, path: parts.length > 0 ? `/${parts.join('/')}` : '/' });
-}
-
 /**
  * Подпись адреса человеческим языком: по ней видно, чем он открывается.
  * Владелец показывается целиком — именно его надо править, если ошиблись.
@@ -130,12 +116,4 @@ export function addressProblem(value: string): string | null {
     return `Схема «${scheme}» не поддерживается: известны ssh, wsl и container`;
   }
   return 'В адресе не хватает владельца: после «://» нужен хост, дистрибутив или имя контейнера';
-}
-
-/**
- * Схема адреса в имени пути: файлы внутри удалённой системы main адресует тем же
- * адресом плюс путь, поэтому «чем открывать» видно прямо по строке.
- */
-export function addressSchemeOf(value: string): FsScheme | null {
-  return parseFsAddress(value)?.scheme ?? null;
 }

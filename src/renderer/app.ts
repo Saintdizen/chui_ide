@@ -5283,8 +5283,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     });
     // Словарь человека изменили — пересобираем модель (она сама перепроверит текст).
     if (previous.editor.spellWords !== next.editor.spellWords) spell.setUserWords(next.editor.spellWords);
-    // Режим автосохранения сменили: снимаем уже назначенную паузу или ставим новую.
-    if (previous.editor.autoSave !== next.editor.autoSave) autoSave.settingsChanged();
+    // Автосохранение сменили — режим или паузу: снимаем уже назначенную запись или
+    // ставим новую с новой задержкой. Иначе правка ждала бы прежней задержки.
+    if (
+      previous.editor.autoSave !== next.editor.autoSave ||
+      previous.editor.autoSaveDelayMs !== next.editor.autoSaveDelayMs
+    ) {
+      autoSave.settingsChanged();
+    }
     // Дерево получает настройки С УЧЁТОМ отличий активного корня: у каждой папки
     // области они свои (см. `shared/explorer-settings.ts`).
     explorer.applySettings(resolveExplorerSettings(next.explorer, workspace.root));
