@@ -815,8 +815,6 @@ export class NodeAdapter {
       void this.queueBreakpoints(() => this.applyBreakpoints(file, wanted));
       // Файл уже знаком: ждать больше нечего, даже если постановка не изменилась.
       this.pendingSources.delete(file);
-      // Файл уже знаком: ждать больше нечего, даже если постановка не изменилась.
-      this.pendingSources.delete(file);
     }
   }
 

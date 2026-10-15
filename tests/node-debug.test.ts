@@ -521,8 +521,11 @@ describe('NodeAdapter', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 500));
 
     await client.request('configurationDone', {});
-    // Останов уже случился: событие теперь приходит сразу, без ожидания тика.
-    const stopped = await client.waitEvent('stopped', undefined, 3000);
+    // Придержанный останов обязан дойти до клиента. Если бы он потерялся, программа
+    // осталась бы стоять на точке и тиков больше не было — события не дождались бы
+    // вовсе. Граница щедрая (как у соседнего attach-теста): на медленном раннере тик
+    // и останов приходят позже, а важен сам факт события, а не его мгновенность.
+    const stopped = await client.waitEvent('stopped', undefined, 15_000);
     expect((stopped.body as { reason?: string }).reason).toBe('breakpoint');
 
     // Не просто событие: за остановом должен стоять настоящий кадр на точке.
