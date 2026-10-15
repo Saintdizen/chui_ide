@@ -2,6 +2,7 @@ import type { ForgeComment, ForgeInfo, ForgeIssue } from '../../shared/git-platf
 import { issueLabel, issueWebUrl, newIssueWebUrl, openIssueCount, platformLabel } from '../../shared/git-platform';
 import type { GitModel } from '../core/git-model';
 import { clear, h, svgIcon } from './dom';
+import { loadingNote } from './loading';
 import { createModal } from './modal';
 
 export interface IssuesModalDeps {
@@ -172,7 +173,7 @@ export function createIssuesModal(deps: IssuesModalDeps): IssuesModalView {
 
     const load = async (): Promise<void> => {
       clear(listNode);
-      listNode.append(h('p', { class: 'field-hint' }, 'Загружаю обсуждение…'));
+      listNode.append(loadingNote('Загружаю обсуждение…'));
       try {
         renderComments(await deps.git.forgeIssueComments(issue.number));
       } catch (error) {

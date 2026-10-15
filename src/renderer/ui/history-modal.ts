@@ -4,6 +4,7 @@ import { nameOf } from '../../shared/paths';
 import { mergeTimeline, timelineActionLabel, timelineSummary, type TimelineItem } from '../../shared/timeline';
 import type { RpcClient } from '../core/rpc';
 import { clear, h, svgIcon } from './dom';
+import { skeleton } from './loading';
 import { createModal } from './modal';
 
 export interface HistoryModalDeps {
@@ -221,7 +222,7 @@ export function createHistoryModal(deps: HistoryModalDeps): HistoryModalView {
       selected = null;
       modal.open();
       summary.textContent = nameOf(filePath);
-      list.replaceChildren(h('p', { class: 'history-empty' }, 'Читаю историю…'));
+      list.replaceChildren(skeleton(5));
       preview.textContent = '';
       actionButton.disabled = true;
       try {

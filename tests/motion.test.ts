@@ -168,7 +168,9 @@ describe('движение отключается системной настр�
     // ряда: незаметная запись собрала бы все нажатия, и о ней надо помнить.
     const names = [...MAIN.matchAll(/animation:\s*([\w-]+)[^;]*\binfinite\b/g)].map((match) => match[1]);
     expect(names.length).toBeGreaterThan(0);
-    expect(new Set(names)).toEqual(new Set(['tab-pulse', 'activity-dot', 'tool-spin', 'macro-pulse']));
+    expect(new Set(names)).toEqual(
+      new Set(['tab-pulse', 'activity-dot', 'tool-spin', 'macro-pulse', 'skeleton-pulse']),
+    );
   });
 
   it('скрытые панели гасят свои анимации — их убирают через display: none', () => {

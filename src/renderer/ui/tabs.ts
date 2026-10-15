@@ -34,12 +34,48 @@ export interface Tabs {
 
 /** Вкладки как в PyCharm: скруглённые, у активной — синяя полоса сверху. */
 export function createTabs(deps: TabsDeps): Tabs {
-  const element = h('div', { class: 'tabs' });
+  const element = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Открытые файлы' });
 
   /** Тот же зазор, что у отступа полосы: до него прокрутка доводит вкладку. */
   const TAB_GAP = 6;
 
+  /**
+   * Ход по полосе с клавиатуры: стрелки и Home/End переносят фокус и выбор на соседнюю
+   * вкладку (выбор едет вместе с фокусом — так ждёт ролевая модель вкладок), Enter или
+   * пробел открывают файл вкладки, Delete закрывает. Tab при этом один: в полосе
+   * фокусируема только активная вкладка (`tabindex` выше).
+   */
+  const onTabKey = (event: KeyboardEvent, path: string): void => {
+    const paths = [...element.querySelectorAll<HTMLElement>('.tab')];
+    const index = paths.findIndex((node) => node.dataset.path === path);
+    if (index < 0) return;
+
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    const target =
+      step !== 0 ? index + step : event.key === 'Home' ? 0 : event.key === 'End' ? paths.length - 1 : index;
+    if (target !== index && target >= 0 && target < paths.length) {
+      event.preventDefault();
+      const next = paths[target]!;
+      const nextPath = next.dataset.path;
+      if (nextPath) void deps.commands.execute('file.activate', nextPath);
+      next.focus();
+      return;
+    }
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      void deps.commands.execute('file.activate', path);
+      return;
+    }
+    if (event.key === 'Delete') {
+      event.preventDefault();
+      void deps.commands.execute('file.close', path);
+    }
+  };
+
   const render = (): void => {
+    // Полоса пересобирается целиком: узел с фокусом исчезает, и без переноса фокуса
+    // он упал бы на `body` — человек, идущий по вкладкам стрелками, терял бы место.
+    const hadFocus = element.contains(document.activeElement);
     clear(element);
     const auxiliary = deps.auxiliary;
     const auxActive = auxiliary?.active === true;
@@ -65,7 +101,17 @@ export function createTabs(deps: TabsDeps): Tabs {
 
       const tab = h(
         'div',
-        { class: classes.join(' '), title: path },
+        {
+          class: classes.join(' '),
+          title: path,
+          // Полоса — это вкладки: роль, выбор и ход стрелками. Внутри вкладки крестик
+          // остаётся настоящей кнопкой, и это её собственное место (см. ниже).
+          role: 'tab',
+          dataset: { path },
+          'aria-selected': path === active ? 'true' : 'false',
+          // Ходить по полосе — Tab (встаёт на активной) плюс стрелки внутри (см. `onTabKey`).
+          tabindex: path === active ? '0' : '-1',
+        },
         pinned ? svgIcon('pin', 13) : svgIcon('file', 13),
         h('span', { class: 'tab-label' }, basename(path)),
         h(
@@ -88,6 +134,8 @@ export function createTabs(deps: TabsDeps): Tabs {
       tab.addEventListener('auxclick', (event) => {
         if (event.button === 1) void deps.commands.execute('file.close', path);
       });
+      // Стрелки ходят по полосе, как в списке вкладок: фокус и выбор едут вместе.
+      tab.addEventListener('keydown', (event) => onTabKey(event, path));
       // Правый клик — то, чего не сделать перетаскиванием: закрепить вкладку или
       // закрыть соседей. Само действие — команда: одно и то же из меню и палитры.
       tab.addEventListener('contextmenu', (event) => {
@@ -105,12 +153,6 @@ export function createTabs(deps: TabsDeps): Tabs {
               label: 'Сохранить как…',
               hint: 'Ctrl+Shift+S',
               onSelect: () => void deps.commands.execute('file.saveAs', path),
-            },
-            // Буфер мог разойтись с файлом — его переписал другой инструмент. Возврат
-            // к версии на диске рядом: искать эту команду в палитре незачем.
-            {
-              label: 'Перечитать с диска',
-              onSelect: () => void deps.commands.execute('file.revertFromDisk', path),
             },
             // Буфер мог разойтись с файлом — его переписал другой инструмент. Возврат
             // к версии на диске рядом: искать эту команду в палитре незачем.
@@ -161,7 +203,9 @@ export function createTabs(deps: TabsDeps): Tabs {
 
     // Активная вкладка могла уехать за край — подкручиваем к ней, но без движения,
     // если она и так видна.
-    element.querySelector('.tab.is-active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    const activeTab = element.querySelector<HTMLElement>('.tab.is-active');
+    activeTab?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    if (hadFocus) activeTab?.focus();
     syncEdges();
   };
 

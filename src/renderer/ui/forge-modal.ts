@@ -9,6 +9,7 @@ import {
 } from '../../shared/git-platform';
 import type { GitModel } from '../core/git-model';
 import { clear, h, svgIcon } from './dom';
+import { loadingNote } from './loading';
 import { createModal } from './modal';
 import { createSelect } from './select';
 
@@ -192,7 +193,7 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
 
     const load = async (): Promise<void> => {
       clear(listNode);
-      listNode.append(h('p', { class: 'field-hint' }, 'Загружаю обсуждение…'));
+      listNode.append(loadingNote('Загружаю обсуждение…'));
       try {
         renderComments(await deps.git.forgeComments(request.number));
       } catch (error) {

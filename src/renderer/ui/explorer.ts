@@ -991,6 +991,12 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         class: classes.join(' '),
         type: 'button',
         draggable: 'true',
+        // Папка — кнопка, которая раскрывает содержимое: сказать об этом читалке
+        // обязательно, иначе «папка» и «файл» звучат одинаково. Роль `treeitem`
+        // не ставим намеренно: она обещает ход стрелками по дереву, а его у нас
+        // нет — полоса прокручивается как обычный список.
+        ...(isDirectory ? { 'aria-expanded': isExpanded ? 'true' : 'false' } : {}),
+        ...(selected === entry.path ? { 'aria-current': 'true' } : {}),
         title: isDeleted
           ? `${entry.path} — удалён, но ещё не закоммичен`
           : linkLabel

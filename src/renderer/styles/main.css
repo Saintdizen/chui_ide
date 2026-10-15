@@ -85,6 +85,47 @@ textarea {
   backdrop-filter: var(--popup_filter);
 }
 
+/* ── «идёт чтение» ──────────────────────────────────────────────────────── */
+
+/* Пока данные едут, место показывает не слово «Читаю…», а свой силуэт: несколько
+   серых полос на месте будущих строк. Разница видна на медленном ответе (ssh, сеть):
+   по полосам понятно, ЧТО появится и сколько, а текст о ходе работы ничего не обещает.
+   Полосы дышат одной короткой анимацией — это индикатор «идёт работа», а не украшение;
+   под «уменьшить движение» она гаснет общим правилом (см. `prefers-reduced-motion`). */
+.loading-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space_sm);
+  padding: var(--space_md) var(--space_lg);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.loading-note .icon {
+  flex: 0 0 auto;
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space_md);
+  padding: var(--space_md) var(--space_lg);
+}
+
+/* Полоса-силуэт: ширина задаётся из кода (строки бывают разной длины). */
+.skeleton-row {
+  height: 10px;
+  border-radius: var(--radius_2xs);
+  background: var(--element_background);
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
 /* ── каркас ─────────────────────────────────────────────────────────────── */
 
 .app {

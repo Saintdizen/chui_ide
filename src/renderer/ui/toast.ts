@@ -25,14 +25,21 @@ const TOAST_ICON: Record<ToastKind, IconName> = {
 /** Одноразовые уведомления в правом нижнем углу — самый дешёвый способ показать ошибку. */
 export function showToast(message: string, kind: ToastKind = 'info', options: ToastOptions = {}): void {
   if (!container) {
-    container = h('div', { class: 'toasts' });
+    // Область живёт всё время: читалка замечает подмену содержимого только у того
+    // узла, который уже был в документе, — на созданном «в момент события» она молчит.
+    container = h('div', { class: 'toasts', role: 'region', 'aria-live': 'polite', 'aria-label': 'Уведомления' });
     document.body.appendChild(container);
   }
 
   const action = options.action;
   const toast = h(
     'div',
-    { class: `toast toast-${kind}`, title: 'Нажмите, чтобы закрыть' },
+    {
+      class: `toast toast-${kind}`,
+      title: 'Нажмите, чтобы закрыть',
+      // Ошибку объявляем сразу (это важное), остальное — когда читалка дойдёт.
+      role: kind === 'error' ? 'alert' : 'status',
+    },
     svgIcon(TOAST_ICON[kind], 14),
     h('span', { class: 'toast-text' }, message),
     // Кнопка — настоящий `<button>`: берётся фокусом с клавиатуры, а её клик

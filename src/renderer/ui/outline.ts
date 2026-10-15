@@ -11,6 +11,7 @@ import type { DocumentStore } from '../core/document-store';
 import type { OpenEditors } from '../core/open-editors';
 import type { RpcClient } from '../core/rpc';
 import { clear, h } from './dom';
+import { skeleton } from './loading';
 
 export interface OutlineDeps {
   rpc: RpcClient;
@@ -110,7 +111,9 @@ export function createOutline(deps: OutlineDeps): OutlineView {
     title.textContent = basename(document.path);
     if (loading) {
       summary.textContent = '…';
-      body.appendChild(h('div', { class: 'outline-empty' }, 'Читаю структуру…'));
+      // Силуэт, а не слово: структура приходит с сервера, и на большом файле видно,
+      // сколько строк объявлений ждать.
+      body.appendChild(skeleton(6));
       return;
     }
 
