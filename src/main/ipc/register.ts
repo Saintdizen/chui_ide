@@ -55,6 +55,22 @@ import type { ReviewStore } from '../project/review-store';
 import type { HistoryStore } from '../project/history-store';
 import { mergeByPriority } from '../../shared/lsp-bundled';
 import { NO_LSP_STATUS } from '../../shared/lsp-status';
+import { addressProblem, parseFsAddress, type FsAddress } from '../../shared/fs-address';
+import { MAX_OPEN_BYTES } from '../../shared/large-file';
+import { parseBadgeTheme } from '../../shared/icon-badges';
+import {
+  listDirCommand,
+  mkdirCommand,
+  moveCommand,
+  parseDirListing,
+  parseStat,
+  readFileCommand,
+  RemoteShell,
+  removeCommand,
+  shellQuote,
+  statCommand,
+  writeFileCommand,
+} from '../workspace/remote-fs';
 import { parseThemeFile } from '../../shared/theme-file';
 import { unsavedClosePrompt } from '../../shared/unsaved';
 import type { TerminalService } from '../terminal/terminal';
@@ -248,6 +264,117 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   });
 
   router.register('theme.clear', () => deps.settings.update({ appearance: { customTheme: null } }));
+
+  // Удалённые файловые системы: адрес разбирается общим кодом, а ходит туда клиент
+  // системы (`ssh`, `wsl`, `docker`). Ошибку клиента возвращаем как есть — человеку
+  // по ней понятно, ключ это, сеть или опечатка в адресе.
+  const remote = new RemoteShell();
+  const remoteAddress = (value: string): FsAddress => {
+    const address = parseFsAddress(value);
+    if (!address) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, addressProblem(value) ?? 'Не разобрать адрес');
+    }
+    return address;
+  };
+  const remoteFail = (result: { stderr: string; stdout: string }, what: string): never => {
+    throw new RpcFailure(RpcErrorCode.Internal, result.stderr.trim() || result.stdout.trim() || `Не удалось ${what}`);
+  };
+
+  // Проверка адреса — в два шага. Сперва есть ли клиент (без `ssh`/`wsl`/`docker`
+  // ходить нечем), потом пускают ли по адресу и на месте ли путь: без второго шага
+  // «подключено» обещало бы больше, чем есть, а опечатка в хосте всплыла бы позже,
+  // пустой папкой. Просим у той стороны всего лишь `cd` и `pwd`.
+  router.register('remote.check', async (params) => {
+    const address = remoteAddress(params.address);
+    const client = await remote.available(address);
+    if (!client.ok) return client;
+    const probe = await remote.run(address, `cd ${shellQuote(address.path)} && pwd`);
+    if (!probe.ok) {
+      return {
+        ok: false,
+        detail: probe.stderr.trim() || probe.stdout.trim() || 'Не удалось подключиться по адресу',
+      };
+    }
+    return { ok: true, detail: `${client.detail} · ${probe.stdout.trim()}` };
+  });
+
+  router.register('remote.readDir', async (params) => {
+    const address = remoteAddress(params.address);
+    const result = await remote.run(address, listDirCommand(address));
+    if (!result.ok) remoteFail(result, 'прочитать папку');
+    return parseDirListing(result.stdout, address);
+  });
+
+  router.register('remote.readFile', async (params) => {
+    const address = remoteAddress(params.address);
+    // Читаем не больше MAX_OPEN_BYTES: это тот же потолок, выше которого файл не
+    // открывают и локально (`shared/large-file.ts`) — тянуть его по сети тем более незачем.
+    const limit = Math.min(Math.max(Math.round(params.maxBytes ?? MAX_OPEN_BYTES), 1), MAX_OPEN_BYTES);
+    const result = await remote.run(address, readFileCommand(address, limit));
+    if (!result.ok) remoteFail(result, 'прочитать файл');
+    const stat = await remote.run(address, statCommand(address));
+    const size = stat.ok ? (parseStat(stat.stdout)?.size ?? result.stdout.length) : result.stdout.length;
+    return { text: result.stdout, truncated: size > Buffer.byteLength(result.stdout, 'utf8') };
+  });
+
+  router.register('remote.writeFile', async (params) => {
+    const address = remoteAddress(params.address);
+    const result = await remote.run(address, writeFileCommand(address), params.text);
+    if (!result.ok) remoteFail(result, 'записать файл');
+    return { ok: true };
+  });
+
+  router.register('remote.stat', async (params) => {
+    const address = remoteAddress(params.address);
+    const result = await remote.run(address, statCommand(address));
+    const stat = result.ok ? parseStat(result.stdout) : null;
+    return stat
+      ? { exists: true, kind: stat.kind, size: stat.size, mtimeMs: stat.mtimeMs }
+      : { exists: false, kind: 'file' as const, size: 0, mtimeMs: 0 };
+  });
+
+  router.register('remote.mkdir', async (params) => {
+    const address = remoteAddress(params.address);
+    const result = await remote.run(address, mkdirCommand(address));
+    if (!result.ok) remoteFail(result, 'создать папку');
+    return { ok: true };
+  });
+
+  router.register('remote.rename', async (params) => {
+    const from = remoteAddress(params.from);
+    const to = remoteAddress(params.to);
+    const result = await remote.run(from, moveCommand(from, to));
+    if (!result.ok) remoteFail(result, 'переименовать');
+    return { ok: true };
+  });
+
+  router.register('remote.remove', async (params) => {
+    const address = remoteAddress(params.address);
+    const result = await remote.run(address, removeCommand(address));
+    if (!result.ok) remoteFail(result, 'удалить');
+    return { ok: true };
+  });
+
+  // Набор значков дерева из JSON-файла: диалог и чтение — в main, разбор — общим
+  // кодом (`shared/icon-badges`): та же проверка, что при чтении настроек.
+  router.register('explorer.importBadges', async (_params, ctx) => {
+    const result = await dialog.showOpenDialog(senderWindow(ctx), {
+      title: 'Набор значков дерева',
+      properties: ['openFile'],
+      filters: [{ name: 'Набор значков', extensions: ['json'] }],
+    });
+    const file = result.filePaths[0];
+    if (result.canceled || !file) {
+      return { settings: deps.settings.get(), count: deps.settings.get().explorer.badges.length };
+    }
+    const text = await fs.readFile(file, 'utf8');
+    const parsed = parseBadgeTheme(text);
+    if (!parsed.ok) throw new RpcFailure(RpcErrorCode.InvalidParams, parsed.error);
+    return {
+      settings: deps.settings.update({ explorer: { badges: parsed.rules } }),
+      count: parsed.rules.length,
+    };
+  });
 
   // Экспорт шаблона: содержимое готовит renderer (там живёт палитра), main пишет файл.
   router.register('theme.export', async (params, ctx) => {

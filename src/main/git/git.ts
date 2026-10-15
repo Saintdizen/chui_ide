@@ -648,7 +648,10 @@ export class GitService {
     // Поля разделяем байтом US (0x1f), который git вставляет по `%x1f`: автор или
     // заголовок могут содержать пробелы и двоеточия, и печатный разделитель
     // рано или поздно совпал бы с текстом.
-    const args = ['log', `-n${count}`, '--date=short', '--format=%h%x1f%ad%x1f%an%x1f%s'];
+    // `%at` — время коммита секундами: по нему лента истории файла ставит коммиты и
+    // снимки редактора в один порядок (`shared/timeline.ts`). Дата без времени для
+    // этого груба: два коммита одного дня встали бы не по порядку.
+    const args = ['log', `-n${count}`, '--date=short', '--format=%h%x1f%at%x1f%ad%x1f%an%x1f%s'];
     if (filePath) args.push('--', path.relative(repoRoot, path.resolve(filePath)));
 
     // allowFailure: в репозитории без коммитов `git log` завершается ошибкой,
@@ -659,9 +662,16 @@ export class GitService {
     const commits: GitCommit[] = [];
     for (const line of result.stdout.split('\n')) {
       if (!line) continue;
-      const [hash, date, author, ...rest] = line.split('\u001f');
+      const [hash, seconds, date, author, ...rest] = line.split('\u001f');
       if (!hash || !date || !author) continue;
-      commits.push({ hash, date, author, summary: rest.join('\u001f') });
+      const at = Number(seconds);
+      commits.push({
+        hash,
+        date,
+        author,
+        summary: rest.join('\u001f'),
+        ...(Number.isFinite(at) && at > 0 ? { at: at * 1000 } : {}),
+      });
     }
     return commits;
   }

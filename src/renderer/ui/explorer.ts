@@ -23,6 +23,9 @@ import {
   type FileLabelId,
   type FileLabelRecord,
 } from '../../shared/file-labels';
+import { isFavorite, normalizeFavorites, toggleFavorite } from '../../shared/favorites';
+import { addressName, parseFsAddress } from '../../shared/fs-address';
+import { badgeFor, badgeTitle } from '../../shared/icon-badges';
 import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
 import { sortTree } from '../core/tree-sort';
 import { computeWindow } from '../core/tree-window';
@@ -79,6 +82,15 @@ export interface ExplorerView {
   restorePinned(paths: readonly string[]): void;
   /** Закрепить или открепить путь (пункт меню дерева). */
   togglePin(path: string): void;
+  /**
+   * «Избранное»: постоянный список мест. Живёт в настройках IDE и переживает смену
+   * проекта — в отличие от закрепления, которое принадлежит сессии проекта
+   * (см. `shared/favorites.ts`).
+   */
+  favorites(): string[];
+  setFavorites(paths: readonly string[]): void;
+  /** Добавить путь в избранное или убрать его (пункт меню дерева). */
+  toggleFavorite(path: string): void;
   /** Метки файлов в дереве: цветные ярлыки; хранятся в сессии проекта. */
   labels(): FileLabelRecord[];
   restoreLabels(records: unknown): void;
@@ -110,6 +122,8 @@ const FALLBACK_SETTINGS: ExplorerSettings = {
   updateImportsOnRename: true,
   groupByType: false,
   groupByPackage: false,
+  byRoot: {},
+  badges: [],
 };
 
 import { isRecentlyModified, recentLabel } from '../core/tree-recent';
@@ -136,6 +150,17 @@ export interface ExplorerDeps {
   documents: DocumentStore;
   /** Закрепление изменилось — рабочее место стоит сохранить (см. сессию). */
   onPinsChange?: () => void;
+  /** Избранное изменилось — список надо записать в настройки IDE. */
+  onFavoritesChange?: () => void;
+  /**
+   * Удалённые папки рабочего места: адреса SSH/WSL/контейнера. Не задано — блока
+   * в дереве нет (как и у прочих необязательных возможностей).
+   */
+  remoteRoots?: () => string[];
+  /** Убрать адрес из списка удалённых папок (настройки правит вызывающий). */
+  removeRemoteRoot?: (address: string) => void;
+  /** Открыть файл удалённой папки: у него свой просмотр (см. `ui/remote-file-modal.ts`). */
+  openRemoteFile?: (address: string) => void;
   /** Метка файла изменилась — рабочее место стоит сохранить (см. сессию). */
   onLabelsChange?: () => void;
   /** Пакеты проекта: по ним дерево в монорепо показывает проекты строками. */
@@ -222,6 +247,11 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let selected: string | null = null;
   /** Закреплённые пути (блок «Закреплённые» сверху); порядок закрепления сохраняем. */
   let pinned: string[] = [];
+  /** Избранные пути (блок «Избранное» над деревом); список живёт в настройках IDE. */
+  let favorites: string[] = [];
+  /** Раскрытые строки блока удалённых папок: адрес → прочитанное содержимое. */
+  const remoteExpanded = new Set<string>();
+  const remoteChildren = new Map<string, DirEntry[]>();
   /** Метки файлов (цветные ярлыки в строках); живут в сессии проекта. */
   let labels: FileLabelRecord[] = [];
   /** Выделенные строки (Ctrl/Shift) и якорь диапазона; порядок — как в дереве. */
@@ -240,6 +270,36 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     pinned = togglePin(pinned, path);
     deps.onPinsChange?.();
     render();
+  };
+
+  /**
+   * Добавить путь в избранное или убрать его. Список сохраняется в настройки IDE:
+   * он общий для всех проектов (см. `onFavoritesChange`).
+   */
+  const setFavorite = (path: string): void => {
+    favorites = toggleFavorite(favorites, path);
+    deps.onFavoritesChange?.();
+    render();
+  };
+
+  /** Лежит ли путь внутри какого-нибудь корня области. */
+  const isInsideRoots = (path: string): boolean => deps.workspace.roots.some((item) => isInsidePath(item.root, path));
+
+  /**
+   * Клик по избранному: файл открываем, папку внутри области показываем в дереве, а
+   * папку ВНЕ области поднимаем корнем — ради этого избранное и живёт вне сессии
+   * проекта: сюда кладут чужие репозитории, которые правят заодно.
+   */
+  const openFavorite = (path: string, isDirectory: boolean): void => {
+    if (!isDirectory) {
+      void deps.commands.execute('file.open', path);
+      return;
+    }
+    if (isInsideRoots(path)) {
+      reveal(path);
+      return;
+    }
+    void deps.workspace.addRoot(path).catch(() => undefined);
   };
 
   /** Метка файла по пути или `null`. */
@@ -325,6 +385,156 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     return h('div', { class: 'tree-pins' }, header, ...rows);
   };
 
+  /**
+   * Блок удалённых папок: адреса SSH/WSL/контейнера из настроек рабочего места.
+   *
+   * Папки читаются тем же `remote.readDir`, что и локальные — `workspace.readDir`:
+   * содержимое приходит обычными `DirEntry`, а путь внутри адреса остаётся адресом
+   * (`ssh://host/srv/app/src`). Отдельный блок, а не корень области, намеренно:
+   * корень участвует в git, поиске, запуске и наблюдении — а это всё локальные
+   * вещи (`main/workspace/remote-fs.ts`). Файл открывается своим окном.
+   */
+  const remoteBlock = (): HTMLElement => {
+    const header = h('div', { class: 'tree-remote-head' }, svgIcon('server', 12), h('span', {}, 'Удалённые папки'));
+    const roots = deps.remoteRoots?.() ?? [];
+    const rows = roots.map((address) => remoteTree(address, 0));
+    return h('div', { class: 'tree-remote' }, header, ...rows);
+  };
+
+  /** Строка удалённой папки и (если раскрыта) её содержимое. */
+  const remoteTree = (address: string, depth: number): HTMLElement => {
+    const parsed = parseFsAddress(address);
+    const name = parsed ? addressName(parsed) : address;
+    const isExpanded = remoteExpanded.has(address);
+    const kids = remoteChildren.get(address) ?? [];
+    const row = h(
+      'div',
+      { class: `tree-row is-remote${isExpanded ? ' is-expanded' : ''}`, title: address, dataset: { path: address } },
+      h('span', { class: `tree-twisty${isExpanded ? ' is-open' : ''}` }, svgIcon('chevron', 12)),
+      svgIcon('server', 15),
+      h('span', { class: 'tree-name' }, name),
+    );
+    row.style.paddingLeft = `${8 + depth * options.indent}px`;
+    row.addEventListener('click', () => void toggleRemote(address));
+    row.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showContextMenu(
+        [
+          { label: 'Обновить', onSelect: () => void reloadRemote(address) },
+          {
+            label: 'Копировать адрес',
+            onSelect: () => void navigator.clipboard?.writeText(address).catch(() => undefined),
+          },
+          { separator: true as const },
+          { label: 'Убрать из списка', danger: true, onSelect: () => deps.removeRemoteRoot?.(address) },
+        ],
+        event.clientX,
+        event.clientY,
+      );
+    });
+
+    const rows: HTMLElement[] = [row];
+    if (!isExpanded) return h('div', { class: 'tree-remote-node' }, ...rows);
+    for (const entry of kids) {
+      if (entry.kind === 'directory') {
+        rows.push(remoteTree(entry.path, depth + 1));
+        continue;
+      }
+      const fileRow = h(
+        'button',
+        { class: 'tree-row is-remote-file', type: 'button', title: entry.path, dataset: { path: entry.path } },
+        h('span', { class: 'tree-twisty' }),
+        svgIcon('file', 15),
+        h('span', { class: 'tree-name' }, entry.name),
+      );
+      fileRow.style.paddingLeft = `${8 + (depth + 1) * options.indent}px`;
+      fileRow.addEventListener('click', () => deps.openRemoteFile?.(entry.path));
+      rows.push(fileRow);
+    }
+    if (kids.length === 0) {
+      rows.push(h('div', { class: 'tree-empty-note' }, 'Папка пуста или недоступна'));
+    }
+    return h('div', { class: 'tree-remote-node' }, ...rows);
+  };
+
+  /** Раскрыть/свернуть удалённую папку: содержимое читаем при первом раскрытии. */
+  const toggleRemote = async (address: string): Promise<void> => {
+    if (remoteExpanded.has(address)) {
+      remoteExpanded.delete(address);
+      render();
+      return;
+    }
+    remoteExpanded.add(address);
+    render();
+    if (!remoteChildren.has(address)) await reloadRemote(address);
+  };
+
+  const reloadRemote = async (address: string): Promise<void> => {
+    try {
+      remoteChildren.set(address, await deps.rpc.request('remote.readDir', { address }));
+    } catch (error) {
+      remoteChildren.set(address, []);
+      console.error('[chui] не удалось прочитать удалённую папку', address, error);
+    }
+    render();
+  };
+
+  /**
+   * Блок «Избранное» над деревом. Рисуется по абсолютным путям, как и закреплённые:
+   * путь может вести и за пределы области. Удалённую папку из списка не выкидываем
+   * молча — клик по ней скажет, что открыть нечего.
+   */
+  const favoritesBlock = (): HTMLElement => {
+    const header = h('div', { class: 'tree-favorites-head' }, svgIcon('star', 12), h('span', {}, 'Избранное'));
+    const rows = favorites.map((path) => {
+      const entry = findEntry(path);
+      // Про путь вне области дерево ничего не знает: считаем его папкой — в избранное
+      // кладут места, а не отдельные файлы, и раскрытие осмысленно всегда.
+      const isDirectory = entry ? entryIsDirectory(entry) : true;
+      const row = h(
+        'div',
+        { class: 'tree-row is-favorite', title: path, dataset: { path } },
+        h('span', { class: 'tree-twisty' }),
+        options.icons ? (isDirectory ? folderIcon(nameOf(path), true) : fileIcon(nameOf(path))) : svgIcon('file', 15),
+        h('span', { class: 'tree-name' }, nameOf(path)),
+        h(
+          'button',
+          {
+            class: 'icon-btn tree-unfavorite',
+            type: 'button',
+            title: 'Убрать из избранного',
+            onClick: (event: Event) => {
+              event.stopPropagation();
+              setFavorite(path);
+            },
+          },
+          svgIcon('close', 12),
+        ),
+      );
+      row.addEventListener('click', () => openFavorite(path, isDirectory));
+      row.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        showContextMenu(
+          [
+            { label: 'Убрать из избранного', onSelect: () => setFavorite(path) },
+            isDirectory
+              ? {
+                  label: isInsideRoots(path) ? 'Показать в дереве' : 'Добавить как папку области',
+                  onSelect: () => openFavorite(path, true),
+                }
+              : { label: 'Открыть', onSelect: () => void deps.commands.execute('file.open', path) },
+          ],
+          event.clientX,
+          event.clientY,
+        );
+      });
+      return row;
+    });
+    return h('div', { class: 'tree-favorites' }, header, ...rows);
+  };
+
   /** Удаление в корзину: одну строку — обычной командой, группу — пачкой с одним вопросом. */
   const deleteTargets = (paths: readonly string[]): void => {
     if (paths.length === 1) void deps.commands.execute('file.delete', paths[0]);
@@ -349,6 +559,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         return !options.exclude.some((pattern) => matchesGlob(entry.name, relative, pattern));
       }),
     );
+  };
+
+  /** Путь от корня, которому принадлежит файл: по нему работают маски значков. */
+  const relativeOf = (path: string): string => {
+    const owner = deps.workspace.ownerOf(path);
+    if (!owner || path === owner.root) return nameOf(path);
+    return pathAfter(owner.root, path) || nameOf(path);
   };
 
   const sortEntries = (entries: readonly DirEntry[]): DirEntry[] =>
@@ -542,6 +759,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
             label: isPinned(pinned, entry.path) ? 'Открепить' : 'Закрепить сверху',
             onSelect: () => setPinned(entry.path),
           },
+          {
+            label: isFavorite(favorites, entry.path) ? 'Убрать из избранного' : 'В избранное',
+            onSelect: () => setFavorite(entry.path),
+          },
           // Метка — подменю: один ярлык на файл, текущий отмечен галкой.
           {
             label: 'Метка',
@@ -727,6 +948,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const insideTitle = inside ? `Правок внутри: ${inside.count}` : undefined;
     // Метка — личный ярлык на файле; у удалённого её не показываем (его нет на диске).
     const label = isDeleted ? null : labelFor(entry.path);
+    // Значок от стороннего набора: чужую пометку проекта IDE придумать не может,
+    // её приносит человек или набор значков (`explorer.badges`).
+    const badge = options.badges.length > 0 ? badgeFor(entry.path, relativeOf(entry.path), options.badges) : null;
 
     const row = h(
       'button',
@@ -759,6 +983,9 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       h('span', { class: 'tree-name' }, entry.name),
       // Метка — цветной ярлык: первая среди правых отметок, если она есть.
       label ? h('span', { class: `tree-label is-${label}`, title: `Метка: ${fileLabelName(label)}` }) : null,
+      badge
+        ? h('span', { class: `tree-badge is-custom is-${badge.color}`, title: badgeTitle(badge) }, badge.badge ?? '')
+        : null,
       isLink
         ? h(
             'span',
@@ -1211,6 +1438,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       showContextMenu(
         [
           { label: 'Сделать активной', onSelect: () => void deps.workspace.setActiveRoot(item.root) },
+          { label: 'Настройки папки…', onSelect: () => void deps.commands.execute('explorer.rootSettings', item.root) },
           { separator: true as const },
           {
             label: 'Убрать из рабочей области',
@@ -1337,6 +1565,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     treeEl = tree;
     const host = h('div', { class: 'tree-rows' });
     rowsHost = host;
+    // Избранное — выше закреплённых: это постоянный список, к нему возвращаются чаще.
+    if (favorites.length > 0) tree.appendChild(favoritesBlock());
+    // Удалённые папки — над локальным деревом: они о рабочем месте, а не о проекте.
+    if ((deps.remoteRoots?.() ?? []).length > 0) tree.appendChild(remoteBlock());
     if (pinned.length > 0) tree.appendChild(pinnedBlock());
     tree.appendChild(host);
     tree.addEventListener('contextmenu', (event) => openMenu(null, event));
@@ -1524,6 +1756,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       render();
     },
     togglePin: setPinned,
+    favorites: () => [...favorites],
+    setFavorites(paths) {
+      // Чужие и повторные пути отбрасываем тем же разбором, что у модели списка.
+      favorites = normalizeFavorites(paths);
+      render();
+    },
+    toggleFavorite: setFavorite,
     labels: () => [...labels],
     restoreLabels(records) {
       // Чужие пути и неизвестные цвета отбрасываем: рисовать по ним нечего.

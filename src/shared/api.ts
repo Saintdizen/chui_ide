@@ -12,6 +12,8 @@ import type { BlameLine } from './git-blame';
 import type { PatchFile } from './patch';
 import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
+import type { AutoSaveMode } from './auto-save';
+import type { IconBadgeRule } from './icon-badges';
 import type { Snippet } from './snippets';
 import type { ReviewThread } from './review';
 import type { HistoryEntry } from './file-history';
@@ -525,6 +527,12 @@ export interface GitCommit {
   /** Дата коммита, `ГГГГ-ММ-ДД`. */
   date: string;
   summary: string;
+  /**
+   * Время коммита в миллисекундах эпохи. По нему лента истории файла ставит коммиты
+   * и локальные снимки в один порядок (см. `shared/timeline.ts`); у старых ответов
+   * поля нет — тогда берём дату.
+   */
+  at?: number;
 }
 
 /** Удалённый репозиторий: как он назван в `git remote` и куда ведут адреса. */
@@ -686,6 +694,13 @@ export interface EditorSettings {
   trimTrailingWhitespace: boolean;
   /** Дописывать перевод строки в конце файла при сохранении. */
   insertFinalNewline: boolean;
+  /**
+   * Автосохранение: когда правка уходит на диск сама, без Ctrl+S. По умолчанию
+   * выключено — «само записалось» застаёт врасплох (см. `shared/auto-save.ts`).
+   */
+  autoSave: AutoSaveMode;
+  /** Пауза автосохранения в миллисекундах: для режима «через паузу после правки». */
+  autoSaveDelayMs: number;
   /** Столбцы направляющих (ruler): вертикальные черты через всю высоту редактора. */
   rulers: number[];
   /** Показ невидимых знаков: ничего, только хвостовые пробелы или все. */
@@ -787,7 +802,45 @@ export interface ExplorerSettings {
    * Пусто — берутся правила по умолчанию (см. `core/file-nesting.ts`).
    */
   nestingRules: string[];
+  /**
+   * Отличия настроек для отдельных корней рабочей области: «путь папки → своё».
+   * Зачем — см. `shared/explorer-settings.ts`; там же и разрешение настроек.
+   */
+  byRoot: ExplorerRootOverrides;
+  /**
+   * Значки поверх дерева от ЧУЖИХ наборов: правила «маска → подпись и цвет».
+   * Свои украшения (git, подмодули, приглушение) дерево знает и без них — здесь
+   * пометки проекта, которые IDE придумать не может (см. `shared/icon-badges.ts`).
+   */
+  badges: IconBadgeRule[];
 }
+
+/**
+ * Что можно задать отдельно для папки: вид и фильтрация дерева. Поведение, которое
+ * меняет файлы (обновление импортов при переименовании), сюда не входит.
+ */
+export interface ExplorerRootOverride {
+  showHidden?: boolean;
+  foldersFirst?: boolean;
+  sort?: TreeSort;
+  indent?: number;
+  rowDensity?: TreeRowDensity;
+  icons?: boolean;
+  gitDecorations?: boolean;
+  folderChangeDot?: boolean;
+  recentChanges?: boolean;
+  dimIgnored?: boolean;
+  openOnSingleClick?: boolean;
+  confirmDelete?: boolean;
+  exclude?: string[];
+  fileNesting?: boolean;
+  nestingRules?: string[];
+  groupByType?: boolean;
+  groupByPackage?: boolean;
+}
+
+/** Карта «корень → отличия»: ключ — абсолютный путь папки, как у корней области. */
+export type ExplorerRootOverrides = Record<string, ExplorerRootOverride>;
 
 export type PackageManagerChoice = 'auto' | 'npm' | 'pnpm' | 'yarn' | 'bun';
 
@@ -832,6 +885,18 @@ export interface AppearanceSettings {
 export interface WorkspaceSettings {
   /** Недавние проекты, новые в начале списка. */
   recent: string[];
+  /**
+   * Удалённые папки рабочего места: адреса вида `ssh://user@host/srv/app`,
+   * `wsl://Ubuntu/home/me/app`, `container://имя/workspace`. Ходят туда клиентом
+   * самой системы (см. `main/workspace/remote-fs.ts`), а не своим протоколом.
+   */
+  remoteRoots: string[];
+  /**
+   * «Избранное»: постоянные места (папки и файлы), к которым человек возвращается.
+   * Живёт в настройках IDE, а не в сессии проекта: список переживает смену проекта
+   * и может указывать на папку вне рабочей области (см. `shared/favorites.ts`).
+   */
+  favorites: string[];
 }
 
 /**
@@ -1223,6 +1288,13 @@ export interface AiBrowserSettings {
   headless: boolean;
 }
 
+export interface WorkspaceSettingsPatch {
+  /** Полная замена списка избранного (порядок — как добавили). */
+  favorites?: string[];
+  /** Полная замена списка удалённых папок. */
+  remoteRoots?: string[];
+}
+
 export interface SettingsPatch {
   ai?: AiSettingsPatch;
   editor?: Partial<EditorSettings>;
@@ -1230,6 +1302,7 @@ export interface SettingsPatch {
   run?: Partial<RunSettings>;
   appearance?: Partial<AppearanceSettings>;
   layout?: Partial<LayoutSettings>;
+  workspace?: WorkspaceSettingsPatch;
   lsp?: Partial<LspSettings>;
   git?: Partial<GitSettings>;
   keybindings?: Partial<KeybindingSettings>;
@@ -1630,6 +1703,24 @@ export interface ChuiMethods {
   'workspace.readFile': { params: { path: string }; result: FileContent };
   'workspace.writeFile': { params: { path: string; text: string }; result: { mtimeMs: number } };
   'workspace.stat': { params: { path: string }; result: FileStat };
+
+  /*
+   * Удалённые файловые системы (SSH, WSL, контейнер): адрес собирается из схемы и
+   * пути (см. `shared/fs-address.ts`), а main ходит туда клиентом системы
+   * (`main/workspace/remote-fs.ts`). Отдельные методы, а не общие с `workspace.*`:
+   * путь-адрес не проверяется `safePath` и в списки локальных корней не попадает.
+   */
+  'remote.check': { params: { address: string }; result: { ok: boolean; detail: string } };
+  'remote.readDir': { params: { address: string }; result: DirEntry[] };
+  'remote.readFile': { params: { address: string; maxBytes?: number }; result: { text: string; truncated: boolean } };
+  'remote.writeFile': { params: { address: string; text: string }; result: { ok: boolean } };
+  'remote.stat': {
+    params: { address: string };
+    result: { exists: boolean; kind: 'file' | 'directory'; size: number; mtimeMs: number };
+  };
+  'remote.mkdir': { params: { address: string }; result: { ok: boolean } };
+  'remote.rename': { params: { from: string; to: string }; result: { ok: boolean } };
+  'remote.remove': { params: { address: string }; result: { ok: boolean } };
   'workspace.search': { params: SearchOptions; result: SearchResult };
   /** Относительные (POSIX) пути всех файлов проекта — для быстрого открывателя. */
   'workspace.listFiles': { params: void; result: string[] };
@@ -1961,6 +2052,8 @@ export interface ChuiMethods {
 
   /* Темы из файла: импорт, экспорт шаблона и снятие. */
   'theme.import': { params: void; result: { settings: Settings; name: string | null } };
+  /** Импорт набора значков дерева из JSON-файла: правила «маска → значок». */
+  'explorer.importBadges': { params: void; result: { settings: Settings; count: number } };
   'theme.export': { params: { contents: string; name: string }; result: { path: string | null } };
   'theme.clear': { params: void; result: Settings };
 

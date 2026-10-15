@@ -17,7 +17,10 @@ import {
   type SettingsPatch,
   type WorkspaceSettings,
 } from '../shared/api';
+import { AUTO_SAVE_DELAY_MS, normalizeAutoSaveDelay, normalizeAutoSaveMode } from '../shared/auto-save';
 import { COMPACT_AT_TOKENS } from '../shared/context-fit';
+import { normalizeFavorites } from '../shared/favorites';
+import { parseFsAddress, formatFsAddress } from '../shared/fs-address';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
 import { DEFAULT_SANDBOX, sanitizeSandbox, type AiSandboxSettings } from '../shared/sandbox';
 import { normalizeSnippets } from '../shared/snippets';
@@ -26,6 +29,8 @@ import { normalizeCursorStyle, normalizeLineHeight } from '../shared/cursor-styl
 import { normalizeWhitespaceMode } from '../shared/whitespace';
 import { normalizeSpellWords } from '../shared/spellcheck';
 import { normalizePullMode } from '../shared/git-pull';
+import { normalizeRootOverrides } from '../shared/explorer-settings';
+import { sanitizeBadgeRules } from '../shared/icon-badges';
 import { DEFAULT_GIT_SETTINGS, sanitizeGitSettings } from '../shared/git-settings';
 import { normalizeKeybindingOverrides, type KeybindingSettings } from '../shared/keybindings';
 import { sanitizeThemeFile, type ThemeFile } from '../shared/theme-file';
@@ -211,6 +216,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     spellcheck: false,
     // Своих слов у человека нет: словарь берётся из системы (см. `spell.dictionary`).
     spellWords: [],
+    // Автосохранение выключено: файл пишет человек, а не таймер, пока он не попросит.
+    autoSave: 'off',
+    autoSaveDelayMs: AUTO_SAVE_DELAY_MS,
   },
   explorer: {
     icons: true,
@@ -245,6 +253,11 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Пакеты монорепо выключены: в обычном проекте группировать нечего, а в монорепо
     // это осознанный выбор (как и прочие режимы вида дерева).
     groupByPackage: false,
+    // Своих настроек у папок нет: пока человек не откроет «Настройки папки», все
+    // корни области живут по общим значениям.
+    byRoot: {},
+    // Сторонних значков нет: набор приносит человек (файлом или правкой настроек).
+    badges: [],
   },
   run: {
     // Пусто: сначала ищем окружение проекта, потом `python3` из PATH.
@@ -265,6 +278,10 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // История открытых папок живёт в настройках, а не в renderer: её показывает
     // стартовое окно, а оно — отдельный процесс со своим хранилищем.
     recent: [],
+    // «Избранное» по умолчанию пусто: список наполняет человек.
+    favorites: [],
+    // Удалённых папок нет: схему подключает человек, зная, что ssh/wsl стоит.
+    remoteRoots: [],
   },
   // Размеры и видимость панелей — рабочее место человека, общее для всех проектов.
   // Значения совпадают с CSS-переменными по умолчанию и сбросом сплиттеров.
@@ -392,7 +409,11 @@ export class SettingsStore {
         ...this.data.appearance,
         customTheme: cloneThemeFile(this.data.appearance.customTheme),
       },
-      workspace: { recent: [...this.data.workspace.recent] },
+      workspace: {
+        recent: [...this.data.workspace.recent],
+        favorites: [...this.data.workspace.favorites],
+        remoteRoots: [...this.data.workspace.remoteRoots],
+      },
       layout: { ...this.data.layout },
       lsp: {
         enabled: this.data.lsp.enabled,
@@ -440,6 +461,11 @@ export class SettingsStore {
       if (patch.editor.formatOnPaste !== undefined) next.formatOnPaste = patch.editor.formatOnPaste === true;
       if (patch.editor.spellcheck !== undefined) next.spellcheck = patch.editor.spellcheck === true;
       if (patch.editor.spellWords !== undefined) next.spellWords = normalizeSpellWords(patch.editor.spellWords);
+      // Автосохранение: режим — из известного списка, задержка — в разумных рамках.
+      if (patch.editor.autoSave !== undefined) next.autoSave = normalizeAutoSaveMode(patch.editor.autoSave);
+      if (patch.editor.autoSaveDelayMs !== undefined) {
+        next.autoSaveDelayMs = normalizeAutoSaveDelay(patch.editor.autoSaveDelayMs);
+      }
       // Высота строки и каретка приходят из формы: приводим тем же разбором, что при чтении.
       if (patch.editor.lineHeight !== undefined) next.lineHeight = normalizeLineHeight(patch.editor.lineHeight);
       if (patch.editor.cursorStyle !== undefined) next.cursorStyle = normalizeCursorStyle(patch.editor.cursorStyle);
@@ -452,6 +478,10 @@ export class SettingsStore {
       if (patch.explorer.recentWindowHours !== undefined) {
         next.recentWindowHours = clampRecentHours(patch.explorer.recentWindowHours);
       }
+      // Карта настроек по корням приходит целиком: она короткая, и её правит форма.
+      if (patch.explorer.byRoot !== undefined) next.byRoot = normalizeRootOverrides(patch.explorer.byRoot);
+      // Значки дерева: набор правил из формы или из файла — проверяем тем же разбором.
+      if (patch.explorer.badges !== undefined) next.badges = sanitizeBadgeRules(patch.explorer.badges);
       this.data.explorer = next;
     }
     if (patch.run) {
@@ -474,6 +504,13 @@ export class SettingsStore {
     }
     if (patch.lsp) {
       this.data.lsp = sanitizeLsp({ ...this.data.lsp, ...patch.lsp });
+    }
+    if (patch.workspace?.favorites !== undefined) {
+      // Список приходит целиком: он короткий, и «заменить» понятнее, чем «добавить».
+      this.data.workspace.favorites = normalizeFavorites(patch.workspace.favorites);
+    }
+    if (patch.workspace?.remoteRoots !== undefined) {
+      this.data.workspace.remoteRoots = normalizeRemoteRoots(patch.workspace.remoteRoots);
     }
     if (patch.keybindings) {
       this.data.keybindings = { overrides: normalizeKeybindingOverrides(patch.keybindings.overrides) };
@@ -769,6 +806,9 @@ function loadSettings(filePath: string): StoredSettings {
       cursorStyle: normalizeCursorStyle(parsed.editor?.cursorStyle),
       // Мигание включено только явным `true`: старый settings.json его не знает.
       cursorBlink: parsed.editor?.cursorBlink !== false,
+      // Автосохранение: файл могли править руками — берём только известный режим.
+      autoSave: normalizeAutoSaveMode(parsed.editor?.autoSave),
+      autoSaveDelayMs: normalizeAutoSaveDelay(parsed.editor?.autoSaveDelayMs),
     },
     // Секции появились позже первых версий: старый settings.json их не знает,
     // поэтому неполный файл догружается значениями по умолчанию, а список
@@ -791,6 +831,10 @@ function loadSettings(filePath: string): StoredSettings {
       // Свежесть: включаем, если не выключили явно; окно — разумное число часов.
       recentChanges: parsed.explorer?.recentChanges !== false,
       recentWindowHours: clampRecentHours(parsed.explorer?.recentWindowHours),
+      // Настройки отдельных папок: файл правят руками — берём только известные ключи.
+      byRoot: normalizeRootOverrides(parsed.explorer?.byRoot),
+      // Наборы значков из файла тоже могли править руками: маски и цвета проверяем.
+      badges: sanitizeBadgeRules(parsed.explorer?.badges),
     },
     run: sanitizeRun({ ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) }),
     appearance: {
@@ -809,6 +853,10 @@ function loadSettings(filePath: string): StoredSettings {
       recent: Array.isArray(parsed.workspace?.recent)
         ? parsed.workspace!.recent.filter((item): item is string => typeof item === 'string')
         : [],
+      // Избранное правили в интерфейсе или руками — тот же разбор, что у модели.
+      favorites: normalizeFavorites(parsed.workspace?.favorites),
+      // Удалённые папки: берём только адреса, которые сами же и разбираем.
+      remoteRoots: normalizeRemoteRoots(parsed.workspace?.remoteRoots),
     },
     lsp: sanitizeLsp({ ...DEFAULT_SETTINGS.lsp, ...(parsed.lsp ?? {}) }),
     // Файл могут править руками: сочетания приводим к известному виду.
@@ -816,6 +864,29 @@ function loadSettings(filePath: string): StoredSettings {
     git: sanitizeGitSettings(parsed.git),
   };
 }
+
+/**
+ * Удалённые папки: берём только разобранные адреса и приводим их к одному виду.
+ * Битая строка (человек правил settings.json руками) отбрасывается — по ней
+ * открывать нечего, а «молча ничего не открылось» хуже, чем её отсутствие.
+ */
+function normalizeRemoteRoots(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const result: string[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'string') continue;
+    const address = parseFsAddress(item);
+    if (!address) continue;
+    const text = formatFsAddress(address);
+    if (result.includes(text)) continue;
+    result.push(text);
+    if (result.length >= MAX_REMOTE_ROOTS) break;
+  }
+  return result;
+}
+
+/** Потолок удалённых папок: десятка хватает, а список должен остаться читаемым. */
+export const MAX_REMOTE_ROOTS = 10;
 
 /** Копия темы из файла: снимок настроек не должен меняться вслед за правкой. */
 function cloneThemeFile(theme: ThemeFile | null | undefined): ThemeFile | null {

@@ -1540,14 +1540,15 @@ textarea {
   background: var(--element_background_hover);
 }
 
-/* Блок закреплённых сверху дерева: свой заголовок и строки по абсолютным путям. */
-.tree-pins {
+/* Блок удалённых папок: адреса SSH/WSL/контейнера над локальным деревом. Вид тот же,
+   что у прочих блоков по абсолютным путям, но с пометкой «удалённое» (`ui/explorer.ts`). */
+.tree-remote {
   border-bottom: 1px solid var(--separator_color);
   padding-bottom: 4px;
   margin-bottom: 4px;
 }
 
-.tree-pins-head {
+.tree-remote-head {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1558,13 +1559,49 @@ textarea {
   letter-spacing: 0.04em;
 }
 
-.tree-row.is-pinned .tree-unpin {
+.tree-row.is-remote .tree-twisty svg,
+.tree-row.is-remote .icon,
+.tree-row.is-remote svg {
+  color: var(--text_color_tertiary);
+}
+
+.tree-empty-note {
+  padding: 2px 8px 6px 24px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+/* Блоки над деревом: «Избранное» (постоянный список из настроек) и закреплённые
+   (из сессии проекта). Вид у них общий — это одинаковые строки по абсолютным путям. */
+.tree-pins,
+.tree-favorites {
+  border-bottom: 1px solid var(--separator_color);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+}
+
+.tree-pins-head,
+.tree-favorites-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tree-row.is-pinned .tree-unpin,
+.tree-row.is-favorite .tree-unfavorite {
   margin-left: auto;
   opacity: 0;
 }
 
 .tree-row.is-pinned:hover .tree-unpin,
-.tree-row.is-pinned:focus-within .tree-unpin {
+.tree-row.is-pinned:focus-within .tree-unpin,
+.tree-row.is-favorite:hover .tree-unfavorite,
+.tree-row.is-favorite:focus-within .tree-unfavorite {
   opacity: 1;
 }
 
@@ -6217,6 +6254,106 @@ body > .overlay {
   width: min(620px, 94vw);
 }
 
+/* Значок от стороннего набора правил (`explorer.badges`): подпись в цвете роли.
+   Пустая подпись — просто точка: правило может только помечать файл цветом. */
+.tree-badge.is-custom {
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: 6px;
+  font-size: var(--font_micro_size);
+  line-height: 12px;
+  text-align: center;
+  color: var(--badge_inverse, var(--text_color));
+}
+
+.tree-badge.is-custom:empty {
+  min-width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: 50%;
+}
+
+.tree-badge.is-custom.is-red {
+  background: var(--red_prime_background);
+}
+.tree-badge.is-custom.is-orange {
+  background: var(--context_seg_results);
+}
+.tree-badge.is-custom.is-yellow {
+  background: var(--yellow_prime_background);
+}
+.tree-badge.is-custom.is-green {
+  background: var(--green_prime_background);
+}
+.tree-badge.is-custom.is-blue {
+  background: var(--blue_prime_background);
+}
+.tree-badge.is-custom.is-purple {
+  background: var(--purple_prime_background);
+}
+.tree-badge.is-custom.is-gray {
+  background: var(--text_color_tertiary);
+}
+
+/* Файл удалённой папки: просмотр и правка в отдельном окне — там своя запись
+   клиентом системы (`ui/remote-file-modal.ts`). */
+.remote-file-modal {
+  width: min(760px, 94vw);
+}
+
+.remote-file-text {
+  width: 100%;
+  min-height: 320px;
+  resize: vertical;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre;
+}
+
+.remote-file-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* «Настройки папки»: форма на ОДИН корень области — строки с трёхзначным селектом
+   («как в области / включено / выключено») и список исключений папки. */
+.root-settings-modal {
+  width: min(560px, 94vw);
+}
+
+.root-settings-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.root-settings-row {
+  gap: 10px;
+}
+
+/* Чему равно общее значение — видно прямо в строке: так понятно, от чего отличается своё. */
+.root-settings-row .field-note {
+  margin-left: 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+}
+
+.root-settings-exclude {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font_mono);
+}
+
+.root-settings-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
 .sparse-status {
   margin-bottom: 6px;
 }
@@ -6611,6 +6748,23 @@ body > .overlay {
 
 .history-row.is-active {
   background: var(--selection_background);
+}
+
+/* Источник записи ленты: снимок редактора или коммит git. Слово короткое — по нему
+   видно и что это, и что с записью можно сделать (см. `ui/history-modal.ts`). */
+.history-row-source {
+  align-self: flex-start;
+  padding: 0 4px;
+  border-radius: var(--radius_sm);
+  font-size: var(--font_micro_size);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--element_background);
+  color: var(--text_color_tertiary);
+}
+
+.history-row-source.is-git {
+  color: var(--git_modified);
 }
 
 .history-row-name {

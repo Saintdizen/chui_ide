@@ -13,6 +13,7 @@ import type {
 import type { AiProviderPatch, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
 import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
+import { AUTO_SAVE_LABELS, AUTO_SAVE_MODES, normalizeAutoSaveMode } from '../../shared/auto-save';
 import { CURSOR_STYLES, CURSOR_STYLE_LABELS, MAX_LINE_HEIGHT, normalizeCursorStyle } from '../../shared/cursor-style';
 import { serializeThemeFile } from '../../shared/theme-file';
 import { normalizeRulers, rulersToText } from '../../shared/rulers';
@@ -1012,6 +1013,25 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         { class: 'field-hint' },
         'Вставленный кусок приводит в порядок языковой сервер — он правит только вставленное, ' +
           'а не файл целиком. Инструмент проекта так не умеет, поэтому без сервера настройка молчит.',
+      ),
+      field(
+        'Автосохранение',
+        selectInput(
+          AUTO_SAVE_MODES.map((mode) => ({ value: mode, label: AUTO_SAVE_LABELS[mode] })),
+          editor.autoSave,
+          (value) => editable({ autoSave: normalizeAutoSaveMode(value) }),
+        ),
+      ),
+      field(
+        'Пауза после правки, мс',
+        numberInput(editor.autoSaveDelayMs, 200, 60_000, 100, (value) => editable({ autoSaveDelayMs: value })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Пока автосохранение выключено, файл пишет человек (Ctrl+S). «Через паузу» пишет сам, ' +
+          'когда набор остановился; «при переходе» — когда открываешь другой файл; «при потере фокуса» — ' +
+          'когда окно уходит в фон. Правки при сохранении и форматирование применяются так же, как при Ctrl+S.',
       ),
       switchRow('Убирать пробелы в конце строк', editor.trimTrailingWhitespace, (value) =>
         editable({ trimTrailingWhitespace: value }),

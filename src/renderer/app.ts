@@ -15,6 +15,7 @@ import type { FileOperation } from '../shared/lsp-workspace-edit';
 import { progressLabel, type LspProgress, type WorkProgress } from '../shared/lsp-progress';
 import { DEFAULT_SNIPPETS } from '../shared/snippets';
 import { revertPrompt } from '../shared/unsaved';
+import { AutoSave } from './core/auto-save';
 import { createBlameController } from './core/blame';
 import { createChangeGutterController } from './core/change-gutter';
 import { CommandRegistry, type CommandDescriptor } from './core/commands';
@@ -48,6 +49,8 @@ import { envWidgetLabel } from './core/env-widget';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
 import { RpcClient } from './core/rpc';
+import { addressProblem } from '../shared/fs-address';
+import { resolveExplorerSettings } from '../shared/explorer-settings';
 import { createSessionControl } from './core/session-control';
 import {
   collectRunTargets,
@@ -118,6 +121,8 @@ import { createPromptModal } from './ui/prompt-modal';
 import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
 import { createSourceControl } from './ui/source-control';
+import { createRootSettingsModal } from './ui/root-settings-modal';
+import { createRemoteFileModal } from './ui/remote-file-modal';
 import { createStashModal } from './ui/stash-modal';
 import { createRebaseModal } from './ui/rebase-modal';
 import { createRefDiffModal } from './ui/ref-diff-modal';
@@ -824,10 +829,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     documents,
     // Закрепление — часть рабочего места: сохраняем при изменении (сессия ниже).
     onPinsChange: () => session.scheduleSave(),
+    // Избранное — наоборот, свойство IDE, а не проекта: список уходит в настройки.
+    onFavoritesChange: () => void saveSettingsPatch({ workspace: { favorites: explorer.favorites() } }),
     // Метки файлов — тоже рабочее место проекта: сохраняем при изменении.
     onLabelsChange: () => session.scheduleSave(),
     // Пакеты монорепо: их список нужен дереву, чтобы показать проекты строками.
     packages,
+    // Удалённые папки рабочего места: адреса из настроек, файл смотрит своё окно.
+    remoteRoots: () => settings.workspace.remoteRoots,
+    removeRemoteRoot: (address) => {
+      const next = settings.workspace.remoteRoots.filter((item) => item !== address);
+      void saveSettingsPatch({ workspace: { remoteRoots: next } });
+    },
+    openRemoteFile: (address) => void remoteFileModal.open(address),
     // Просмотр без открытия (пробел в дереве или пункт меню): копия кода «на месте».
     peekFiles: (paths, anchor) => {
       editors.peekFiles(paths, anchor);
@@ -2016,6 +2030,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       document.setText(text, 'programmatic');
       await edits.saveDocument(document, { force: true });
     },
+    // Вторая половина ленты — коммиты git того же файла. Нет репозитория — лента
+    // останется со снимками: `git.log` для файла вне git вернёт пусто, а не сбой.
+    gitHistory: (path) => git.log(path, 50),
+    // Действие для записи из git: различие с текущим текстом — на экране сравнения.
+    openCommitDiff: (target, hash) => void diffView.open(target, false, hash),
     notify: (message, kind) => showToast(message, kind),
   });
   document.body.appendChild(historyModal.element);
@@ -2178,6 +2197,28 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     reveal: (path, line) => void openPath(path).then(() => editors.reveal(path, line, 1)),
   });
   document.body.appendChild(bookmarksModal.element);
+
+  /**
+   * «Настройки папки»: вид дерева для ОДНОГО корня области. Путь приходит аргументом
+   * команды (пункт меню у строки корня) — поэтому окно и открывается на конкретной папке.
+   */
+  let rootSettingsTarget: string | null = null;
+  const rootSettingsModal = createRootSettingsModal({
+    root: () => rootSettingsTarget ?? workspace.root,
+    settings: () => settings.explorer,
+    save: async (byRoot) => {
+      await saveSettingsPatch({ explorer: { byRoot } });
+    },
+  });
+  document.body.appendChild(rootSettingsModal.element);
+
+  /**
+   * Удалённый файл: свой просмотр с записью клиентом системы (`ssh`/`wsl`/`docker`).
+   * Вкладку для него не открываем: у неё вся жизнь про локальный диск — сервер,
+   * наблюдение, git (`main/workspace/remote-fs.ts`).
+   */
+  const remoteFileModal = createRemoteFileModal({ rpc, notify: (message, kind) => showToast(message, kind) });
+  document.body.appendChild(remoteFileModal.element);
 
   /** Файлы, у которых значки закладок уже розданы: с них же и снимаем их. */
   const paintedBookmarks = new Set<string>();
@@ -2978,6 +3019,81 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (!path) return;
     const { ok } = await rpc.request('shell.openTerminal', { path });
     if (!ok) showToast('Не нашёл терминал: задайте свой в настройке `TERMINAL`', 'error');
+  });
+
+  /**
+   * Подключить удалённую папку: адрес спрашиваем строкой (системный диалог папки
+   * локальный — удалённую папку он выбрать не может), проверяем разбором и клиентом.
+   */
+  const addRemoteRoot = (): void => {
+    conditionInput.open({
+      title: 'Удалённая папка',
+      label: 'Адрес',
+      placeholder: 'ssh://user@host/srv/app',
+      confirmLabel: 'Подключить',
+      onAccept: (value) => void connectRemoteRoot(value),
+    });
+  };
+
+  const connectRemoteRoot = async (value: string): Promise<void> => {
+    const problem = addressProblem(value);
+    if (problem) {
+      showToast(problem, 'error');
+      return;
+    }
+    // Клиент проверяем ДО записи в настройки: без ssh/wsl/docker адрес открывать нечем,
+    // и лучше сказать это сразу, чем оставить молча нерабочую строку в списке.
+    const check = await rpc.request('remote.check', { address: value }).catch((error: unknown) => ({
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    }));
+    if (!check.ok) {
+      showToast(check.detail, 'error');
+      return;
+    }
+    if (settings.workspace.remoteRoots.includes(value)) {
+      showToast('Такая папка уже подключена');
+      return;
+    }
+    await saveSettingsPatch({ workspace: { remoteRoots: [...settings.workspace.remoteRoots, value] } });
+    showToast(`Подключено: ${check.detail || value}`);
+  };
+
+  define({ id: 'remote.addRoot', title: 'Подключить удалённую папку…', category: 'Вид' }, () => addRemoteRoot());
+
+  define({ id: 'remote.openFile', title: 'Открыть удалённый файл…', category: 'Вид' }, (address) => {
+    if (typeof address !== 'string' || address === '') return;
+    void remoteFileModal.open(address);
+  });
+
+  // Набор значков дерева из файла: правила приносит человек или сторонний набор.
+  define({ id: 'explorer.importBadges', title: 'Набор значков дерева из файла…', category: 'Вид' }, async () => {
+    const result = await rpc.request('explorer.importBadges', undefined).catch((error: unknown) => {
+      showToast(error instanceof Error ? error.message : 'Не удалось прочитать набор значков', 'error');
+      return null;
+    });
+    if (!result) return;
+    applySettings(result.settings);
+    showToast(result.count > 0 ? `Значков дерева: ${result.count}` : 'Набор значков пуст');
+  });
+
+  // Настройки вида дерева для одной папки области: пункт меню у строки корня.
+  define({ id: 'explorer.rootSettings', title: 'Настройки папки…', category: 'Вид' }, (path) => {
+    rootSettingsTarget = typeof path === 'string' && path !== '' ? path : workspace.root;
+    if (!rootSettingsTarget) {
+      showToast('Папка не открыта', 'error');
+      return;
+    }
+    rootSettingsModal.open();
+  });
+
+  // Избранное: то же, что пункт меню дерева, но по текущему файлу или папке.
+  define({ id: 'explorer.favorite', title: 'В избранное / убрать', category: 'Файл' }, async (path) => {
+    const target = typeof path === 'string' && path !== '' ? path : (editors.currentPath ?? workspace.root);
+    if (!target) return;
+    const wasFavorite = explorer.favorites().includes(target);
+    explorer.toggleFavorite(target);
+    showToast(wasFavorite ? 'Убрано из избранного' : 'Добавлено в избранное');
   });
 
   // Закреплённое сверху дерева: то же, что пункт меню, но по текущему файлу.
@@ -5167,7 +5283,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     });
     // Словарь человека изменили — пересобираем модель (она сама перепроверит текст).
     if (previous.editor.spellWords !== next.editor.spellWords) spell.setUserWords(next.editor.spellWords);
-    explorer.applySettings(next.explorer);
+    // Режим автосохранения сменили: снимаем уже назначенную паузу или ставим новую.
+    if (previous.editor.autoSave !== next.editor.autoSave) autoSave.settingsChanged();
+    // Дерево получает настройки С УЧЁТОМ отличий активного корня: у каждой папки
+    // области они свои (см. `shared/explorer-settings.ts`).
+    explorer.applySettings(resolveExplorerSettings(next.explorer, workspace.root));
+    // Избранное живёт в настройках: пришли новые — показываем их (список сверяется
+    // у модели, поэтому писать его обратно по этому событию не нужно).
+    explorer.setFavorites(next.workspace.favorites);
     // Лигатуры консоли следуют за лигатурами кода: вид обоих полотен остаётся единым.
     terminalPanel.setLigatures(next.editor.fontLigatures);
     chat.applySettings(next);
@@ -5309,6 +5432,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   openEditors.onDidChange(() => {
+    // Перешли к другому файлу: в этом режиме автосохранение пишет прежний прямо здесь.
+    autoSave.activeDocumentChanged();
     refreshStatus();
     syncEmptyState();
     syncRunControl();
@@ -5331,6 +5456,46 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // не быть. На возврат фокуса перечитываем состояние репозитория, чтобы пометки
   // в дереве и счётчик не отставали от жизни.
   window.addEventListener('focus', () => void git.refresh());
+  /**
+   * Автосохранение: пишет несохранённые файлы по режиму из настроек. Путь записи — тот же,
+   * что у Ctrl+S (правки при сохранении и форматирование), но без вопроса и тостов на каждый
+   * файл: пишет таймер, а не человек. Конфликт с диском автосохранение НЕ перезаписывает —
+   * говорит один раз, что пропустило: молча терять чужую правку оно не вправе.
+   */
+  const autoSave = new AutoSave({
+    mode: () => settings.editor.autoSave,
+    delay: () => settings.editor.autoSaveDelayMs,
+    save: async () => {
+      const dirty = documents.dirty().filter((document) => !document.readOnly);
+      if (dirty.length === 0) return;
+      const skipped: string[] = [];
+      for (const document of dirty) {
+        const prepared = applySaveEdits(document.value, {
+          trimTrailingWhitespace: settings.editor.trimTrailingWhitespace,
+          insertFinalNewline: settings.editor.insertFinalNewline,
+        });
+        if (prepared !== document.value) document.setText(prepared, 'programmatic');
+        if (settings.editor.formatOnSave) await formatDocument(document);
+        try {
+          const outcome = await edits.saveDocument(document);
+          if (outcome === 'conflict') skipped.push(basename(document.path));
+        } catch {
+          // Не записалось — файл остался «грязным», следующая попытка повторит.
+        }
+      }
+      if (skipped.length > 0) {
+        showToast(`Автосохранение пропущено (файл изменён на диске): ${skipped.join(', ')}`, 'error');
+      }
+    },
+  });
+  // Реакция только на правку ЧЕЛОВЕКОМ: правки ассистента ложатся в буфер и пишутся своим
+  // путём (см. «не записано на диск»), а загрузка с диска — не повод что-то записывать.
+  documents.onDidChange(({ change }) => {
+    if (change.source === 'user') autoSave.documentChanged();
+  });
+  // Окно ушло в фон: в этом режиме здесь и записываем — иначе работа останется в буфере.
+  window.addEventListener('blur', () => autoSave.windowBlurred());
+
   documents.onDidChange(({ document }) => {
     refreshStatus();
     // Правка текста может добавить или убрать точку входа — значок запуска
@@ -5565,7 +5730,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         preloadEnvironment();
       })();
       void ensureLspServers();
-      explorer.render();
+      // Активный корень сменился — у него может быть свой набор настроек дерева.
+      explorer.applySettings(resolveExplorerSettings(settings.explorer, workspace.root));
       return;
     }
 

@@ -8,7 +8,7 @@
  * переноса проверяется по файловой системе, а не по разметке: дерево могло
  * покраситься правильно, а файл остаться на месте.
  */
-const { app } = require('electron');
+const { app, dialog } = require('electron');
 const { promises: fs } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -58,10 +58,21 @@ app.whenReady().then(async () => {
   await fs.writeFile(path.join(project, 'README.md'), '# demo\n', 'utf8');
   await fs.writeFile(path.join(project, 'note.txt'), 'перенос\n', 'utf8');
   await fs.writeFile(path.join(project, 'src', 'a.ts'), 'const a = 1;\n', 'utf8');
+  // Скрытый файл — для проверки настроек НА КОРЕНЬ (см. ниже): общая настройка его
+  // показывает, а своя настройка папки прячет.
+  await fs.writeFile(path.join(project, '.secret.txt'), 'скрытое\n', 'utf8');
+  // Вторая папка рабочей области: строки корней и «Настройки папки…» видны только
+  // в многообласти.
+  await fs.mkdir(path.join(dir, 'extra'), { recursive: true });
   // Файлы для проверки вложения: спутники рядом с родителем.
   await fs.mkdir(path.join(project, 'ui'), { recursive: true });
   await fs.writeFile(path.join(project, 'ui', 'Button.tsx'), 'export const Button = () => null;\n', 'utf8');
   await fs.writeFile(path.join(project, 'ui', 'Button.module.css'), '.btn {}\n', 'utf8');
+
+  // Диалог выбора папки — свой: проба добавляет вторую папку рабочей области тем же
+  // путём, что и человек (кнопка «+» в шапке проводника), а системное окно выбора
+  // в прогоне не показать. Возвращаем подготовленный каталог.
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path.join(dir, 'extra')] });
 
   serveRenderer();
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
@@ -465,6 +476,257 @@ app.whenReady().then(async () => {
       ),
     )}`,
   );
+
+  /* ── автосохранение ─────────────────────────────────────────────────────── */
+
+  // Режим «через паузу»: правим открытый файл и ждём — запись на диск должна случиться
+  // сама, без Ctrl+S. Проверяем ФАЙЛ на диске, а не разметку: вкладка могла погасить
+  // пометку «не сохранён» и от другого события.
+  await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'fresh.txt',
+      );
+      if (!row) return 'нет строки';
+      row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      return 'ok';
+    })()`,
+  );
+  await wait(1500);
+  settings.update({ editor: { autoSave: 'afterDelay', autoSaveDelayMs: 400 } });
+  await wait(900);
+  const autoTarget = path.join(project, 'fresh.txt');
+  const autoBefore = await fs.readFile(autoTarget, 'utf8');
+  await ask(ide, `document.querySelector('.own-editor-input')?.focus(); 'ok'`);
+  ide.webContents.sendInputEvent({ type: 'char', keyCode: 'Z' });
+  await wait(2500);
+  const autoAfter = await fs.readFile(autoTarget, 'utf8');
+  console.log(
+    `[explorer] автосохранение: активная вкладка=${JSON.stringify(
+      await ask(ide, `document.querySelector('.tab.is-active .tab-label')?.textContent ?? null`),
+    )} записалось=${autoAfter !== autoBefore} стало=${JSON.stringify(autoAfter.trim())}`,
+  );
+  settings.update({ editor: { autoSave: 'off' } });
+  await wait(400);
+
+  /* ── избранное ─────────────────────────────────────────────────────────── */
+
+  // Постоянный список мест: пункт «В избранное» в меню дерева кладёт путь в блок над
+  // деревом, крестик его убирает. Список живёт в настройках IDE, а не в сессии проекта
+  // (`workspace.favorites`) — поэтому проверяем и настройки, и разметку.
+  await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'old.txt',
+      );
+      if (!row) return 'нет строки';
+      const rect = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + 40, clientY: rect.top + 8 }));
+      return 'ok';
+    })()`,
+  );
+  await wait(500);
+  await ask(
+    ide,
+    `(async () => {
+      const item = [...document.querySelectorAll('.context-menu .context-item')].find((node) =>
+        (node.textContent ?? '').includes('В избранное'),
+      );
+      if (!item) return 'пункта нет';
+      item.click();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      return 'нажато';
+    })()`,
+  );
+  await wait(700);
+  console.log(
+    `[explorer] избранное в блоке: ${JSON.stringify(
+      await ask(
+        ide,
+        `[...document.querySelectorAll('.tree-favorites .tree-row.is-favorite')].map((row) => row.querySelector('.tree-name')?.textContent ?? '')`,
+      ),
+    )}`,
+  );
+  console.log(`[explorer] избранное в настройках: ${JSON.stringify(settings.get().workspace.favorites)}`);
+  await ask(ide, `document.querySelector('.tree-favorites .tree-unfavorite')?.click()`);
+  await wait(700);
+  console.log(
+    `[explorer] блоков избранного после снятия: ${await ask(ide, `document.querySelectorAll('.tree-favorites').length`)}`,
+  );
+
+  /* ── сторонние значки дерева ────────────────────────────────────────────── */
+
+  // Правила «маска → подпись и цвет» приходят из настроек `explorer.badges` (их же
+  // кладёт импорт набора файлом). Проверяем, что значок встал в строку с подписью,
+  // цветом роли и подсказкой правила.
+  settings.update({ explorer: { badges: [{ pattern: '*.txt', badge: 'txt', color: 'blue', title: 'черновик' }] } });
+  await wait(1000);
+  console.log(
+    `[explorer] значок правила: ${JSON.stringify(
+      await ask(
+        ide,
+        `(() => {
+          const row = [...document.querySelectorAll('.tree-row')].find(
+            (item) => item.querySelector('.tree-name')?.textContent === 'old.txt',
+          );
+          const badge = row?.querySelector('.tree-badge.is-custom');
+          return badge
+            ? {
+                подпись: badge.textContent,
+                цвет: badge.classList.contains('is-blue'),
+                подсказка: badge.getAttribute('title'),
+              }
+            : 'значка нет';
+        })()`,
+      ),
+    )}`,
+  );
+  settings.update({ explorer: { badges: [] } });
+  await wait(600);
+
+  /* ── настройки на каждый корень ─────────────────────────────────────────── */
+
+  // Отличия для одной папки области: общая настройка скрытое показывает, а своя
+  // настройка корня — прячет. Проверяем обе стороны: файл пропал из строк, а общее
+  // значение осталось нетронутым.
+  const hiddenRows = `[...document.querySelectorAll('.tree-row .tree-name')].map((node) => node.textContent).filter((name) => name === '.secret.txt')`;
+  console.log(`[explorer] скрытый файл до своих настроек: ${JSON.stringify(await ask(ide, hiddenRows))}`);
+  settings.update({ explorer: { byRoot: { [project]: { showHidden: false } } } });
+  await wait(1000);
+  console.log(`[explorer] скрытый файл при своих настройках папки: ${JSON.stringify(await ask(ide, hiddenRows))}`);
+  console.log(`[explorer] общая настройка скрытого: ${settings.get().explorer.showHidden}`);
+
+  // «Настройки папки…» — пункт меню строки КОРНЯ, а строки корней видны в многообласти.
+  // Вторую папку добавляем кнопкой «+» в шапке проводника — через диалог, который
+  // подменён выше, — а не вызовом сервиса: так проверяется и путь человека.
+  await ask(
+    ide,
+    `(() => {
+      const button = document.querySelector('.panel-actions .icon-btn[title="Добавить папку в рабочую область"]');
+      if (!button) return 'кнопки нет';
+      button.click();
+      return 'нажато';
+    })()`,
+  );
+  await wait(2200);
+  console.log(`[explorer] строк корней: ${await ask(ide, `document.querySelectorAll('.tree-row.is-root').length`)}`);
+  await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row.is-root')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'demo',
+      );
+      if (!row) return 'нет строки корня';
+      const rect = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + 40, clientY: rect.top + 8 }));
+      return 'ok';
+    })()`,
+  );
+  await wait(600);
+  console.log(
+    `[explorer] меню корня: ${JSON.stringify(
+      await ask(ide, `[...document.querySelectorAll('.context-menu .context-item')].map((n) => n.textContent.trim())`),
+    )}`,
+  );
+  await ask(
+    ide,
+    `(async () => {
+      const item = [...document.querySelectorAll('.context-menu .context-item')].find((node) =>
+        (node.textContent ?? '').includes('Настройки папки'),
+      );
+      if (!item) return 'пункта нет';
+      item.click();
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      return 'нажато';
+    })()`,
+  );
+  await wait(800);
+  console.log(
+    `[explorer] окно настроек папки: ${JSON.stringify(
+      await ask(
+        ide,
+        `(() => {
+          const modal = document.querySelector('.root-settings-modal');
+          return {
+            открыто: Boolean(modal && !modal.closest('.modal-backdrop').hidden),
+            заголовок: modal?.querySelector('.modal-title')?.textContent ?? null,
+            строк: modal?.querySelectorAll('.root-settings-row').length ?? 0,
+            // Свои отличия папки форма показывает не «как в области», а значением.
+            настроено: [...(modal?.querySelectorAll('.root-settings-row') ?? [])]
+              .filter((row) => row.dataset.state !== 'inherit')
+              .map((row) => row.dataset.flag + ':' + row.dataset.state),
+          };
+        })()`,
+      ),
+    )}`,
+  );
+  await ask(ide, `document.querySelector('.root-settings-modal .modal-header .icon-btn')?.click()`);
+  await wait(500);
+
+  /* ── удалённые файловые системы ─────────────────────────────────────────── */
+
+  // Настоящего ssh-хоста в пробе нет, поэтому проверяем главное: блок рисуется,
+  // недоступная папка НЕ роняет дерево и говорит об этом словами, а проверка адреса
+  // отвечает отказом, а не «подключено». Домен `.invalid` не разрешается по стандарту.
+  settings.update({ workspace: { remoteRoots: ['ssh://нет-такого.invalid/srv/app'] } });
+  await wait(1200);
+  console.log(
+    `[explorer] блок удалённых: ${JSON.stringify(
+      await ask(
+        ide,
+        `[...document.querySelectorAll('.tree-remote .tree-row.is-remote .tree-name')].map((node) => node.textContent)`,
+      ),
+    )}`,
+  );
+  console.log(
+    `[explorer] проверка недоступного адреса: ${JSON.stringify(
+      await ask(
+        ide,
+        `window.chui.call({ id: 'probe-remote', method: 'remote.check', params: { address: 'ssh://нет-такого.invalid/srv/app' } })`,
+        40000,
+      ),
+    )}`,
+  );
+  await ask(ide, `document.querySelector('.tree-remote .tree-row.is-remote')?.click()`);
+  await wait(12000);
+  console.log(
+    `[explorer] недоступная удалённая папка: ${JSON.stringify(
+      await ask(
+        ide,
+        `(() => ({
+          заметка: document.querySelector('.tree-remote .tree-empty-note')?.textContent ?? null,
+          дерево_живо: Boolean(document.querySelector('.tree-rows .tree-row')),
+        }))()`,
+      ),
+    )}`,
+  );
+  await ask(
+    ide,
+    `(() => {
+      const row = document.querySelector('.tree-remote .tree-row.is-remote');
+      if (!row) return 'нет строки';
+      const rect = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + 40, clientY: rect.top + 8 }));
+      return 'ok';
+    })()`,
+  );
+  await wait(600);
+  await ask(
+    ide,
+    `(async () => {
+      const item = [...document.querySelectorAll('.context-menu .context-item')].find((node) =>
+        (node.textContent ?? '').includes('Убрать из списка'),
+      );
+      if (!item) return 'пункта нет';
+      item.click();
+      await new Promise((resolve) => setTimeout(resolve, 700));
+      return 'нажато';
+    })()`,
+  );
+  await wait(900);
+  console.log(`[explorer] удалённых папок в настройках: ${JSON.stringify(settings.get().workspace.remoteRoots)}`);
 
   const finalTree = await ask(
     ide,

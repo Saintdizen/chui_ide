@@ -271,6 +271,9 @@ module.exports = [
       // Правки текста при сохранении: как в main — выключены по умолчанию.
       trimTrailingWhitespace: false,
       insertFinalNewline: false,
+      // Автосохранение: как в main — выключено, пока не попросят.
+      autoSave: 'off',
+      autoSaveDelayMs: 1000,
       // Направляющие и показ невидимых знаков: как в main.
       rulers: [80, 120],
       renderWhitespace: 'none',
@@ -294,6 +297,8 @@ module.exports = [
       openOnSingleClick: false,
       confirmDelete: true,
       exclude: [],
+      byRoot: {},
+      badges: [],
     },
     run: { pythonPath: '', packageManager: 'auto', saveBeforeRun: true, pythonByRoot: {} },
     // Языковые серверы: как main — секция есть всегда, по умолчанию выключена.
@@ -314,7 +319,7 @@ module.exports = [
       dockVisible: false,
     },
     // История открытых папок — для стартового окна; в моке пусто.
-    workspace: { recent: [] },
+    workspace: { recent: [], favorites: [], remoteRoots: [] },
   };
 
   /* ── шина: события вызова и широковещательные push-сообщения ───────────── */
@@ -1046,7 +1051,36 @@ module.exports = [
       push('settings:changed', snapshot);
       return { settings: snapshot, name: settings.appearance.customTheme.name };
     },
+    // Удалённые файловые системы: мок отвечает так, будто ssh/wsl/docker есть, а
+    // папка — с двумя уровнями и файлом. Нужно, чтобы блок «Удалённые папки» и окно
+    // просмотра удалённого файла можно было проверить в браузере.
+    'remote.check': () => ({ ok: true, detail: 'mock client 1.0' }),
+    'remote.readDir': (params) => {
+      if (String(params.address).endsWith('/srv/app')) {
+        return [
+          { name: 'src', path: `${params.address}/src`, kind: 'directory', size: 0, mtimeMs: Date.now() },
+          { name: 'README.md', path: `${params.address}/README.md`, kind: 'file', size: 12, mtimeMs: Date.now() },
+        ];
+      }
+      return [{ name: 'main.ts', path: `${params.address}/main.ts`, kind: 'file', size: 12, mtimeMs: Date.now() }];
+    },
+    'remote.readFile': (params) => ({ text: `// мок ${params.address}\n`, truncated: false }),
+    'remote.writeFile': () => ({ ok: true }),
+    'remote.stat': () => ({ exists: true, kind: 'file', size: 12, mtimeMs: Date.now() }),
+    'remote.mkdir': () => ({ ok: true }),
+    'remote.rename': () => ({ ok: true }),
+    'remote.remove': () => ({ ok: true }),
     'theme.export': () => ({ path: '/mock/config/chui-theme.json' }),
+    // Набор значков дерева: мок берёт готовые правила — как будто файл прочитан.
+    'explorer.importBadges': () => {
+      settings.explorer.badges = [
+        { pattern: '*.generated.*', badge: 'gen', color: 'orange', title: 'Сгенерированный файл' },
+        { pattern: 'src/api/**', badge: '', color: 'blue', title: 'Только через клиент API' },
+      ];
+      const snapshot = structuredClone(settings);
+      push('settings:changed', snapshot);
+      return { settings: snapshot, count: settings.explorer.badges.length };
+    },
     'theme.clear': () => {
       settings.appearance.customTheme = null;
       const scheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
