@@ -218,10 +218,13 @@ export interface EditorWorkspaceOptions {
 }
 
 /**
- * Рабочее место: панели в ряд и одна из них активная. Активность решает фокус — так же,
+ * Рабочее место: панели в ряд или сеткой 2×2 и одна из них активная. Активность решает фокус — так же,
  * как у сервиса на Monaco: куда кликнули, туда и придёт следующий файл, оттуда и курсор
  * в статус-бар.
  */
+/** Сколько панелей в сетке: две в ряд и две во втором ряду (2×2). */
+const GRID_PANES = 4;
+
 export class EditorWorkspace {
   private readonly registry: DocumentRegistry;
   private readonly panesHost: HTMLElement;
@@ -446,6 +449,11 @@ export class EditorWorkspace {
     return this.panes.length > 1;
   }
 
+  /** Разложены ли панели сеткой (три или четыре), а не в ряд. */
+  get isGrid(): boolean {
+    return this.panes.length > 2;
+  }
+
   /** Панель, в которой открыт файл (`null` — файл нигде не открыт). */
   private paneWith(path: string): EditorHost | null {
     return this.panes.find((pane) => pane.activePath === path) ?? null;
@@ -564,22 +572,53 @@ export class EditorWorkspace {
     const current = this.activePath;
     const document = current ? this.documents.get(current) : null;
     const pane = this.createPane();
-    this.panesHost.classList.add('is-split');
-    this.splitter.hidden = false;
-    this.setActivePane(this.panes.length - 1);
     if (document) pane.open(document);
+    this.applyPaneLayout();
+    this.setActivePane(this.panes.length - 1);
     this.splitEmitter.fire(true);
     pane.focus();
+  }
+
+  /**
+   * Сетка из четырёх панелей: доводим число панелей до четырёх и раскладываем в 2×2.
+   * Из одной панели выйдет сетка, из двух — тоже; файл каждой новой — тот же, что в
+   * активной. Повторный вызов ничего не меняет: сетка уже полна.
+   */
+  splitEditorGrid(): void {
+    if (this.panes.length >= GRID_PANES) return;
+    const current = this.activePath;
+    const document = current ? this.documents.get(current) : null;
+    while (this.panes.length < GRID_PANES) {
+      const pane = this.createPane();
+      if (document) pane.open(document);
+    }
+    this.applyPaneLayout();
+    this.setActivePane(this.panes.length - 1);
+    this.splitEmitter.fire(true);
+    this.pane.focus();
+  }
+
+  /** Разложить панели: одна — во всю зону, две — в ряд, три и четыре — сеткой. */
+  private applyPaneLayout(): void {
+    const count = this.panes.length;
+    this.panesHost.classList.toggle('is-split', count > 1);
+    this.panesHost.classList.toggle('is-grid', count > 2);
+    this.panesHost.dataset.panes = String(count);
+    // Разделитель с перетаскиванием — только у ряда из двух панелей.
+    this.splitter.hidden = count !== 2;
   }
 
   /** Убрать разделение: остаётся первая панель. Буфера не трогаем — ими владеет реестр. */
   closeSplit(): void {
     if (!this.isSplit) return;
-    const pane = this.panes.pop()!;
-    const host = this.paneHosts.pop()!;
-    pane.dispose();
-    host.remove();
-    this.panesHost.classList.remove('is-split');
+    while (this.panes.length > 1) {
+      const pane = this.panes.pop()!;
+      const host = this.paneHosts.pop()!;
+      pane.dispose();
+      host.remove();
+    }
+    this.panesHost.classList.remove('is-split', 'is-grid');
+    this.panesHost.removeAttribute('data-panes');
     this.splitter.hidden = true;
     this.setActivePane(0);
     this.splitEmitter.fire(false);

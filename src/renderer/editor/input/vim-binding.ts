@@ -73,6 +73,9 @@ export class VimBinding {
   /** Желаемый столбец для вертикальных движений. */
   private goal = 0;
   private register: VimRegister = { text: '', linewise: false };
+  private readonly namedRegisters = new Map<string, VimRegister>();
+  private activeRegister: string | null = null;
+  private awaitRegister = false;
   private on = false;
   /** Последняя правка — что повторяет `.`. `null` — повторять нечего. */
   private lastChange: VimChange | null = null;
@@ -117,6 +120,8 @@ export class VimBinding {
     this.pendingInsert = null;
     this.insertTyped = '';
     this.insertExact = true;
+    this.awaitRegister = false;
+    this.activeRegister = null;
     if (notify) this.onModeChange?.(this.mode);
   }
 
@@ -138,11 +143,26 @@ export class VimBinding {
     // Cmd-сочетания в нормальном режиме не трогаем: пусть работают обычные команды.
     if (chord.meta === true && chord.ctrl !== true) return false;
 
+    // Регистр: `"` начинает выбор, буква следом его называет (`"a`, `"A`, `"_`).
+    if (this.awaitRegister) {
+      this.awaitRegister = false;
+      if (chord.ctrl !== true && chord.key.length === 1 && /[A-Za-z_"]/.test(chord.key)) {
+        this.activeRegister = chord.key;
+      }
+      return true;
+    }
+    if (chord.key === '"' && chord.ctrl !== true) {
+      this.awaitRegister = true;
+      return true;
+    }
+
     const step = vimKey(chord, this.state);
     if (step.kind === 'pass') return false;
     this.state = step.state;
     if (step.kind === 'wait') return true;
     this.run(step.command);
+    // Названный регистр действует только на одну команду.
+    this.activeRegister = null;
     return true;
   }
 
@@ -260,6 +280,9 @@ export class VimBinding {
       case 'repeat':
         this.repeat(command.count);
         break;
+      case 'repeatVisual':
+        this.repeatVisual();
+        break;
       case 'search':
         this.openSearch(command.forward);
         break;
@@ -331,6 +354,23 @@ export class VimBinding {
     }
   }
 
+  /**
+   * `.` в визуальном режиме: оператор последней правки применяется к выделению. Если
+   * последняя правка оператором не была (`x`, `~`…), повторять к выделению нечего.
+   */
+  private repeatVisual(): void {
+    const change = this.lastChange;
+    if (!change) return;
+    const operator = 'operator' in change.command ? change.command.operator : null;
+    if (!operator) return;
+    this.replaying = true;
+    try {
+      this.applyOperatorSelection(operator);
+    } finally {
+      this.replaying = false;
+    }
+  }
+
   /** Вставить текст в каретку — повтор вставки по `.`. */
   private insertText(text: string): void {
     const offset = this.controller.caret;
@@ -384,7 +424,7 @@ export class VimBinding {
     const fullEnd = bottom < buffer.lineCount ? buffer.lineStart(bottom + 1) : buffer.length;
 
     if (operator === 'yank') {
-      this.register = { text: buffer.getText(start, fullEnd), linewise: true };
+      this.setRegister(buffer.getText(start, fullEnd), true);
       this.controller.setSelection({ anchor: start, active: start });
       return;
     }
@@ -392,13 +432,13 @@ export class VimBinding {
       // Строки схлопываются в одну пустую: текст убираем, перевод строки оставляем.
       const contentEnd = buffer.lineStart(bottom) + buffer.lineText(bottom).length;
       const removed = buffer.getText(start, contentEnd);
-      this.register = { text: `${removed}\n`, linewise: true };
+      this.setRegister(`${removed}\n`, true);
       this.controller.applyEdit({ start, removed, inserted: '' }, { anchor: start, active: start });
       this.enterInsert('lineStart');
       return;
     }
     const removed = buffer.getText(start, fullEnd);
-    this.register = { text: removed, linewise: true };
+    this.setRegister(removed, true);
     this.controller.applyEdit({ start, removed, inserted: '' }, { anchor: start, active: start });
     // Каретка — на первый непробельный знак строки, что встала на место удалённых.
     const target = Math.min(start, buffer.length);
@@ -428,7 +468,7 @@ export class VimBinding {
   private applyRange(operator: VimOperator, range: VimRange): void {
     const buffer = this.controller.bufferRef;
     const text = buffer.getText(range.start, range.end);
-    this.register = { text, linewise: range.linewise };
+    this.setRegister(text, range.linewise);
     if (operator === 'yank') {
       this.controller.setSelection({ anchor: range.start, active: range.start });
       return;
@@ -452,7 +492,7 @@ export class VimBinding {
     const available = Math.max(0, Math.min(count, text.length - (offset - start)));
     if (available === 0) return;
     const removed = text.slice(offset - start, offset - start + available);
-    this.register = { text: removed, linewise: false };
+    this.setRegister(removed, false);
     this.controller.applyEdit({ start: offset, removed, inserted: '' }, { anchor: offset, active: offset });
   }
 
@@ -464,7 +504,7 @@ export class VimBinding {
     const available = Math.max(0, Math.min(count, offset - start));
     if (available === 0) return;
     const removed = buffer.getText(offset - available, offset);
-    this.register = { text: removed, linewise: false };
+    this.setRegister(removed, false);
     const target = offset - available;
     this.controller.applyEdit({ start: target, removed, inserted: '' }, { anchor: target, active: target });
   }
@@ -476,7 +516,7 @@ export class VimBinding {
     const end = buffer.lineStart(line) + buffer.lineText(line).length;
     const removed = buffer.getText(offset, end);
     if (removed.length > 0) {
-      this.register = { text: removed, linewise: false };
+      this.setRegister(removed, false);
       this.controller.applyEdit({ start: offset, removed, inserted: '' }, { anchor: offset, active: offset });
     }
     if (change) this.enterInsert('before');
@@ -543,12 +583,13 @@ export class VimBinding {
   }
 
   private put(after: boolean, count: number): void {
-    const text = this.register.text;
+    const reg = this.getRegister();
+    const text = reg.text;
     if (text.length === 0) return;
     const buffer = this.controller.bufferRef;
     const offset = this.controller.caret;
     const times = Math.max(1, count);
-    if (this.register.linewise) {
+    if (reg.linewise) {
       const block = (text.endsWith('\n') ? text : `${text}\n`).repeat(times);
       if (after) {
         // Строка встаёт ПОД текущей: если следующая есть, вставляем в её начало
@@ -574,6 +615,32 @@ export class VimBinding {
     const inserted = text.repeat(times);
     const caret = insertAt + Math.max(0, inserted.length - 1);
     this.controller.applyEdit({ start: insertAt, removed: '', inserted }, { anchor: caret, active: caret });
+  }
+
+  /** Записать в регистр: именованный (если задан) или безымянный. Заглавная буква — дописать. */
+  private setRegister(text: string, linewise: boolean): void {
+    const name = this.activeRegister;
+    if (name === '_') return;
+    if (name && name !== '"' && name !== name.toLowerCase()) {
+      const key = name.toLowerCase();
+      const previous = this.namedRegisters.get(key);
+      this.namedRegisters.set(key, {
+        text: previous ? previous.text + text : text,
+        linewise: linewise || (previous?.linewise ?? false),
+      });
+      return;
+    }
+    const value = { text, linewise };
+    this.register = value;
+    if (name && name !== '"') this.namedRegisters.set(name, value);
+  }
+
+  /** Прочитать регистр: именованный (если задан) или безымянный. `_` — чёрная дыра. */
+  private getRegister(): VimRegister {
+    const name = this.activeRegister;
+    if (!name || name === '"') return this.register;
+    if (name === '_') return { text: '', linewise: false };
+    return this.namedRegisters.get(name.toLowerCase()) ?? { text: '', linewise: false };
   }
 
   private swapEnds(): void {

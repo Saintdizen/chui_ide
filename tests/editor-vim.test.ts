@@ -379,6 +379,11 @@ describe('разбор повтора и поиска (vim.ts)', () => {
   it('счётчик перед точкой попадает в команду повтора', () => {
     expect(run([chord('3'), chord('.')]).command).toEqual({ kind: 'repeat', count: 3 });
   });
+
+  it('точка в визуальном режиме даёт свою команду', () => {
+    const entered = run([chord('v')]);
+    expect(run([chord('.')], entered.state).command).toEqual({ kind: 'repeatVisual' });
+  });
 });
 
 describe('повтор правки (`.`)', () => {
@@ -464,6 +469,62 @@ describe('повтор правки (`.`)', () => {
     press('3');
     press('.');
     expect(text()).toBe('hiabchihihi');
+  });
+
+  it('точка в визуальном режиме повторяет оператор на выделении', () => {
+    const { press, text } = setup('foo bar baz', 0);
+    press('d');
+    press('w');
+    expect(text()).toBe('bar baz');
+    press('v');
+    press('w');
+    press('.');
+    expect(text()).toBe('baz');
+  });
+});
+
+describe('именованные регистры Vim', () => {
+  it('"ap вставляет то, что положили в регистр a', () => {
+    const { press, text } = setup('alpha\nbeta', 0);
+    press('"');
+    press('a');
+    press('y');
+    press('y');
+    expect(text()).toBe('alpha\nbeta');
+    press('j');
+    press('"');
+    press('a');
+    press('p');
+    expect(text()).toBe('alpha\nbeta\nalpha\n');
+  });
+
+  it('заглавная буква дописывает в регистр', () => {
+    const { press, text } = setup('one\ntwo\nthree', 0);
+    press('"');
+    press('a');
+    press('y');
+    press('y');
+    press('j');
+    press('"');
+    press('A');
+    press('y');
+    press('y');
+    press('G');
+    press('"');
+    press('a');
+    press('p');
+    expect(text()).toBe('one\ntwo\nthree\none\ntwo\n');
+  });
+
+  it('черная дыра "_ удаляет, не трогая безымянный регистр', () => {
+    const { press, text } = setup('one\ntwo', 0);
+    press('"');
+    press('_');
+    press('d');
+    press('d');
+    expect(text()).toBe('two');
+    press('p');
+    expect(text()).toBe('two');
   });
 });
 

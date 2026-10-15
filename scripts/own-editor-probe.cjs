@@ -1202,6 +1202,32 @@ async function workspaceCheck(win) {
     };
   })()`);
 
+  // Сетка из четырёх панелей: раскладывается 2×2 при трёх и четырёх панелях.
+  const grid = await script(`(() => {
+    const { workspace } = window.probeWorkspace;
+    workspace.splitEditorGrid();
+    const host = document.querySelector('#probe-workspace .editor-panes');
+    const panes = [...host.querySelectorAll('.editor-pane')];
+    return {
+      сетка: workspace.isGrid,
+      панелей: panes.length,
+      класс_сетки: host.classList.contains('is-grid'),
+      колонок: getComputedStyle(host).gridTemplateColumns.split(' ').filter(Boolean).length,
+      активных_панелей: panes.filter((pane) => pane.classList.contains('is-active')).length,
+    };
+  })()`);
+  await wait(60);
+  const gridClosed = await script(`(() => {
+    const { workspace } = window.probeWorkspace;
+    workspace.closeSplit();
+    const host = document.querySelector('#probe-workspace .editor-panes');
+    return {
+      разделено: workspace.isSplit,
+      панелей: document.querySelectorAll('#probe-workspace .editor-pane').length,
+      класс_сетки: host.classList.contains('is-grid'),
+    };
+  })()`);
+
   const shotWorkspace = await shot(win, '12-split');
   return {
     открытие: opened,
@@ -1211,6 +1237,8 @@ async function workspaceCheck(win) {
     соседняя_панель: siblings,
     второй_файл: secondFile,
     закрытие: closed,
+    сетка: grid,
+    закрытие_сетки: gridClosed,
     снимок: shotWorkspace,
   };
 }

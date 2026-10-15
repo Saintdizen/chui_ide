@@ -85,17 +85,60 @@ export class LineHighlighter {
 
   /**
    * Текст изменился начиная со строки `fromLine` (с нуля). `structural` — правка
-   * изменила число строк: тогда догадки о строках ниже недействительны.
+   * изменила число строк; `delta` — на сколько строк сдвинулся хвост ниже места правки
+   * (плюс — вставили, минус — убрали). При сдвиге токены и состояния хвоста ПЕРЕЕЗЖАЮТ
+   * на новое место: текст тех строк не менялся, и если состояние на месте правки сойдётся,
+   * разбор снова остановится на первой же строке — файл не переразбирается целиком.
    */
-  invalidate(fromLine: number, structural = false): void {
+  invalidate(fromLine: number, structural = false, delta = 0): void {
     const from = Math.max(0, fromLine);
-    if (structural) {
-      // Строки ниже сдвинулись: их токены — о другом тексте, выбрасываем.
+
+    if (structural && delta !== 0) {
+      this.shiftTail(from, delta);
+    } else if (structural) {
+      // Число строк то же — сдвига нет: хвост о другом тексте, выбрасываем.
       for (let line = from; line < this.tokens.length; line += 1) this.tokens[line] = null;
       if (this.states.length > from + 1) this.states.length = from + 1;
       this.knownEnd = Math.min(this.knownEnd, from);
     }
+
     if (from < this.frontier) this.frontier = from;
+  }
+
+  /**
+   * Перенести разобранный хвост на `delta` строк вниз (`delta` < 0 — вверх). Токены
+   * строк ДО места правки остаются на месте, строки места правки теряются, удалённые —
+   * выкидываются. Состояние в начале места правки тоже не менялось (строки выше целы) —
+   * его оставляем, чтобы разбор начался с верного режима.
+   */
+  private shiftTail(from: number, delta: number): void {
+    const tokens: Array<Token[] | null> = [];
+    for (let index = 0; index < this.tokens.length; index += 1) {
+      if (index < from) {
+        tokens[index] = this.tokens[index] ?? null;
+        continue;
+      }
+      const target = index + delta;
+      if (target < from) continue; // строка удалена
+      tokens[target] = this.tokens[index] ?? null;
+    }
+    this.tokens = tokens;
+
+    const states: number[] = [];
+    for (let index = 0; index < this.states.length; index += 1) {
+      if (index < from) {
+        states[index] = this.states[index]!;
+        continue;
+      }
+      const target = index + delta;
+      if (target < from) continue;
+      states[target] = this.states[index]!;
+    }
+    const entry = this.states[from];
+    if (entry !== undefined) states[from] = entry;
+    this.states = states.length > 0 ? states : [ST_NORMAL];
+
+    this.knownEnd = Math.max(from, this.knownEnd + delta);
   }
 
   /** Токены строки. Разбирает строку и то, что перед ней, если ещё не разобрано. */

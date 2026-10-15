@@ -731,9 +731,11 @@ export class EditorView {
   refresh(fromOffset?: number): void {
     this.layoutCache = null;
     if (fromOffset !== undefined) {
-      // Правка, изменившая число строк, сдвигает всё ниже: подсветке об этом надо сказать.
+      // Правка, изменившая число строк, сдвигает всё ниже: подсветке об этом надо сказать —
+      // и на сколько именно строк сдвинулся хвост, чтобы она перенесла разобранное ниже.
       const structural = this.buffer.lineCount !== this.lineCount;
-      this.highlighter.invalidate(this.buffer.lineAt(fromOffset) - 1, structural);
+      const delta = this.buffer.lineCount - this.lineCount;
+      this.highlighter.invalidate(this.buffer.lineAt(fromOffset) - 1, structural, delta);
       this.bracketDepth.invalidate(this.buffer.lineAt(fromOffset) - 1, structural);
     }
     this.lineCount = this.buffer.lineCount;

@@ -4754,6 +4754,21 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncViewButtons();
   });
 
+  // Сетка из четырёх панелей: разложить в 2×2, повторный вызов возвращает одну панель.
+  define(
+    {
+      id: 'view.splitEditorGrid',
+      title: 'Разделить на четыре (сетка)',
+      category: 'Вид',
+      keybinding: 'Ctrl+Shift+\\',
+    },
+    () => {
+      if (editors.isGrid) editors.closeSplit();
+      else editors.splitEditorGrid();
+      syncViewButtons();
+    },
+  );
+
   define({ id: 'app.showMenu', title: 'Меню приложения', category: 'Вид', keybinding: 'Alt+F10' }, () => {
     // Повторное нажатие закрывает: так ведёт себя системное меню, и так ждёт человек.
     if (isPopupOpen()) {

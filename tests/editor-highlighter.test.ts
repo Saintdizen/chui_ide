@@ -123,6 +123,51 @@ describe('LineHighlighter', () => {
     expect(typeAt(setup.highlighter.tokensFor(0), 0)).toBe(COMMENT);
   });
 
+  it('сдвиг хвоста при вставке строки не переразбирает файл целиком', () => {
+    const setup = harness(TYPESCRIPT, lines(30));
+    setup.highlighter.tokensFor(29);
+    setup.clearCalls();
+
+    // Вставили обычный комментарий: состояние обычное, хвост переехал и остаётся верным.
+    setup.lines.unshift('// новая строка');
+    setup.highlighter.invalidate(0, true, 1);
+    const tokens = setup.highlighter.tokensFor(5);
+
+    // Разобрана ровно одна строка: дальше состояние сошлось с перенесённой догадкой.
+    expect(setup.calls()).toBe(1);
+    expect(typeAt(setup.highlighter.tokensFor(0), 0)).toBe(COMMENT);
+    // Строка ниже переехала на единицу, но её токены — те же (ключевое слово).
+    expect(typeAt(setup.highlighter.tokensFor(1), 0)).toBe(KEYWORD);
+    expect(typeAt(tokens, 0)).toBe(KEYWORD);
+  });
+
+  it('сдвиг хвоста при удалении строки', () => {
+    const setup = harness(TYPESCRIPT, lines(30));
+    setup.highlighter.tokensFor(29);
+    setup.clearCalls();
+
+    // Убрали строку 5: хвост переехал на строку вверх, разбор снова сходится сразу.
+    setup.lines.splice(5, 1);
+    setup.highlighter.invalidate(5, true, -1);
+    setup.highlighter.tokensFor(20);
+    expect(setup.calls()).toBe(1);
+    expect(typeAt(setup.highlighter.tokensFor(5), 0)).toBe(KEYWORD);
+  });
+
+  it('вставка незакрытого комментария переразбирает хвост вниз', () => {
+    const setup = harness(TYPESCRIPT, lines(10));
+    setup.highlighter.tokensFor(9);
+    setup.clearCalls();
+
+    setup.lines.unshift('/*');
+    setup.highlighter.invalidate(0, true, 1);
+    const tokens = setup.highlighter.tokensFor(9);
+
+    // Состояние не сошлось ни на одной строке — переразобраны все десять, и всё в комментарии.
+    expect(setup.calls()).toBe(10);
+    expect(typeAt(tokens, 0)).toBe(COMMENT);
+  });
+
   it('смена языка меняет разбор строки', () => {
     const setup = harness(TYPESCRIPT, ['const a = 1;']);
     expect(typeAt(setup.highlighter.tokensFor(0), 0)).toBe(KEYWORD);

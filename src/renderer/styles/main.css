@@ -932,6 +932,26 @@ textarea {
   min-height: 0;
 }
 
+/* Три и четыре панели — сеткой 2×2: четыре равных ячейки; при трёх первая занимает
+   левый столбец целиком. Разделитель с перетаскиванием — только у ряда из двух. */
+.editor-panes.is-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.editor-panes.is-grid .editor-pane {
+  flex: none;
+}
+
+.editor-panes.is-grid[data-panes="3"] .editor-pane:first-child {
+  grid-row: span 2;
+}
+
+.editor-panes.is-grid .editor-splitter {
+  display: none;
+}
+
 .editor-pane {
   position: relative;
   flex: 1 1 0;

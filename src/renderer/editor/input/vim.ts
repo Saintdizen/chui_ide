@@ -69,6 +69,8 @@ export type VimCommand =
   | { readonly kind: 'swapEnds' }
   /** `.` — повторить последнюю правку `count` раз. Что повторять, помнит слой-исполнитель. */
   | { readonly kind: 'repeat'; readonly count: number }
+  /** `.` в визуальном режиме — применить оператор последней правки к выделению. */
+  | { readonly kind: 'repeatVisual' }
   /** `/` и `?` — открыть поиск; `forward` — искать вперёд (`/`) или назад (`?`). */
   | { readonly kind: 'search'; readonly forward: boolean }
   /** `n` и `N` — следующий (`same`) или обратный поиску шаг. */
@@ -330,6 +332,7 @@ function vimVisualKey(chord: KeyChord, state: VimState): VimStep {
   if (key === 'd' || key === 'x') return run({ kind: 'operatorSelection', operator: 'delete' }, reset(state));
   if (key === 'c') return run({ kind: 'operatorSelection', operator: 'change' }, reset(state));
   if (key === 'y') return run({ kind: 'operatorSelection', operator: 'yank' }, reset(state));
+  if (key === '.') return run({ kind: 'repeatVisual' }, reset(state));
   if (key === 'o') return run({ kind: 'swapEnds' }, reset(state));
   if (key === 'J') return run({ kind: 'join', count: state.count || 1 }, reset(state));
   if (key === '~') return run({ kind: 'toggleCase', count: state.count || 1 }, reset(state));
