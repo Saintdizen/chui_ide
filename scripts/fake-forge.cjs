@@ -154,6 +154,49 @@ const GLAB_PIPELINES = [
   },
 ];
 
+const GH_NOTIFICATIONS = [
+  {
+    id: '9001',
+    unread: true,
+    reason: 'review_requested',
+    updated_at: '2024-05-05T08:00:00Z',
+    subject: {
+      title: 'Добавить поиск',
+      type: 'PullRequest',
+      url: 'https://api.github.com/repos/acme/web/pulls/12',
+    },
+  },
+  {
+    id: '9002',
+    unread: false,
+    reason: 'subscribed',
+    updated_at: '2024-05-04T08:00:00Z',
+    subject: { title: 'Падает импорт', type: 'Issue', url: 'https://api.github.com/repos/acme/web/issues/3' },
+  },
+];
+
+const GLAB_TODOS = [
+  {
+    id: 7001,
+    action_name: 'mentioned',
+    target_type: 'Issue',
+    state: 'pending',
+    created_at: '2024-05-06T08:00:00Z',
+    target: { title: 'Медленный старт', web_url: 'https://gitlab.com/team/api/-/issues/9' },
+    project: { path_with_namespace: 'team/api' },
+  },
+  {
+    // Чужой проект — в список задач этого репозитория попасть не должен.
+    id: 7002,
+    action_name: 'assigned',
+    target_type: 'Issue',
+    state: 'pending',
+    created_at: '2024-05-06T09:00:00Z',
+    target: { title: 'Чужая задача', web_url: 'https://gitlab.com/other/proj/-/issues/1' },
+    project: { path_with_namespace: 'other/proj' },
+  },
+];
+
 if (cli === 'gh') {
   if (args[0] === 'pr' && args[1] === 'list') {
     print(GH_REQUESTS);
@@ -211,6 +254,15 @@ if (cli === 'gh') {
   if (args[0] === 'run' && args[1] === 'rerun') {
     process.exit(0);
   }
+  if (args[0] === 'api') {
+    const whole = args.join(' ');
+    // Отметка «прочитано» — PATCH notifications/threads/:id.
+    if (whole.includes('notifications/threads')) process.exit(0);
+    if (whole.includes('notifications')) {
+      print(GH_NOTIFICATIONS);
+      process.exit(0);
+    }
+  }
   process.stderr.write(`fake gh: неизвестная команда: ${args.join(' ')}\n`);
   process.exit(1);
 }
@@ -225,6 +277,12 @@ if (args[0] === 'api') {
   const target = String(args[1] || '');
   if (target.includes('/pipelines')) {
     print(GLAB_PIPELINES);
+    process.exit(0);
+  }
+  // Уведомления GitLab — это дела (`todos`): список и отметка «готово».
+  if (args.join(' ').includes('mark_as_done')) process.exit(0);
+  if (args.join(' ').includes('todos')) {
+    print(GLAB_TODOS);
     process.exit(0);
   }
   // Форма ответа `glab api …/notes`: массив заметок плюс системное событие.

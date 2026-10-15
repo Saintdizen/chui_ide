@@ -596,3 +596,112 @@ export function activePipelineCount(pipelines: readonly ForgePipeline[]): number
 export function failedPipelineCount(pipelines: readonly ForgePipeline[]): number {
   return pipelines.filter((pipeline) => pipeline.state === 'failed').length;
 }
+
+/* ── уведомления ─────────────────────────────────────────────────── */
+
+/**
+ * Уведомление площадки — то, что ждёт внимания человека: непрочитанная ветка
+ * обсуждения у GitHub (notifications) и незакрытое дело у GitLab (todos).
+ * Понятия разные по устройству, но по смыслу одно: о чём-то написали.
+ */
+export interface ForgeNotification {
+  /** Идентификатор записи (у GitHub — строка, у GitLab — число; здесь всегда строка). */
+  id: string;
+  /** Заголовок предмета: название запроса, задачи или обсуждения. */
+  title: string;
+  /** Вид предмета словами площадки, сведённый: `issue`, `pull request`, … */
+  kind: string;
+  /** Почему пришло: `mention`, `review_requested`, `assigned`, … */
+  reason: string;
+  /** Ждёт ли внимания: непрочитанная ветка (GitHub) или незакрытое дело (GitLab). */
+  unread: boolean;
+  /** Когда появилось (текст площадки — приводить к дате не берёмся). */
+  updatedAt: string;
+  /** Ссылка на предмет в браузере. */
+  url: string;
+}
+
+/** Виды предметов по именам площадок — в человеческие слова. */
+const KIND_LABELS: Record<string, string> = {
+  PullRequest: 'pull request',
+  MergeRequest: 'merge request',
+  Issue: 'issue',
+  Release: 'release',
+  Discussion: 'discussion',
+  Commit: 'commit',
+  Epic: 'epic',
+  Alert: 'alert',
+};
+
+/** Вид предмета словами; незнакомый отдаём как есть. */
+function kindLabel(type: string): string {
+  return KIND_LABELS[type] ?? type;
+}
+
+/**
+ * Разбор ответа `gh api repos/:owner/:repo/notifications` — ветки обсуждений
+ * этого репозитория. Адрес предмета приходит как адрес API — переводим его
+ * в обычную страницу, чтобы ссылка открывалась в браузере.
+ */
+export function parseGhNotifications(json: string): ForgeNotification[] {
+  const items: ForgeNotification[] = [];
+  for (const item of safeArray(json)) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    const id = String(value.id ?? '').trim();
+    if (id === '') continue;
+    const subject =
+      typeof value.subject === 'object' && value.subject !== null ? (value.subject as Record<string, unknown>) : {};
+    const apiUrl = typeof subject.url === 'string' ? subject.url : '';
+    items.push({
+      id,
+      title: typeof subject.title === 'string' ? subject.title : '',
+      kind: kindLabel(typeof subject.type === 'string' ? subject.type : ''),
+      reason: typeof value.reason === 'string' ? value.reason : '',
+      // `unread` у GitHub — это и есть «ждёт внимания».
+      unread: value.unread === true,
+      updatedAt: typeof value.updated_at === 'string' ? value.updated_at : '',
+      url: apiUrl.replace('https://api.github.com/repos/', 'https://github.com/'),
+    });
+  }
+  return items;
+}
+
+/**
+ * Разбор ответа `glab api todos`. У GitLab «уведомления» — это незакрытые дела
+ * (`todos`), и список общий для всех проектов человека. Поэтому отбираем только
+ * свои: по пути проекта, если он задан (`projectPath` вида `team/api`).
+ */
+export function parseGlabTodos(json: string, projectPath?: string): ForgeNotification[] {
+  const wanted = (projectPath ?? '').toLowerCase();
+  const items: ForgeNotification[] = [];
+  for (const item of safeArray(json)) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    const id = String(value.id ?? '').trim();
+    if (id === '') continue;
+    const project =
+      typeof value.project === 'object' && value.project !== null ? (value.project as Record<string, unknown>) : {};
+    const full = typeof project.path_with_namespace === 'string' ? project.path_with_namespace.toLowerCase() : '';
+    // Путь проекта может быть не указан — тогда не отбрасываем: лучше лишнее, чем молчание.
+    if (wanted !== '' && full !== '' && full !== wanted) continue;
+    const target =
+      typeof value.target === 'object' && value.target !== null ? (value.target as Record<string, unknown>) : {};
+    items.push({
+      id,
+      title: typeof target.title === 'string' ? target.title : '',
+      kind: kindLabel(typeof value.target_type === 'string' ? value.target_type : ''),
+      reason: typeof value.action_name === 'string' ? value.action_name : '',
+      // У GitLab отдельного «прочитано» нет: дело либо ждёт (`pending`), либо закрыто (`done`).
+      unread: value.state !== 'done',
+      updatedAt: typeof value.created_at === 'string' ? value.created_at : '',
+      url: typeof target.web_url === 'string' ? target.web_url : '',
+    });
+  }
+  return items;
+}
+
+/** Сколько уведомлений ждёт внимания — для заголовка списка. */
+export function unreadNotificationCount(notifications: readonly ForgeNotification[]): number {
+  return notifications.filter((notification) => notification.unread).length;
+}

@@ -140,6 +140,7 @@ import { createIdentityModal } from './ui/identity-modal';
 import { createForgeModal } from './ui/forge-modal';
 import { createIssuesModal } from './ui/issues-modal';
 import { createPipelinesModal } from './ui/pipelines-modal';
+import { createNotificationsModal } from './ui/notifications-modal';
 import { createTextModal } from './ui/text-modal';
 import { createStatusBar } from './ui/statusbar';
 import { createSettingsModal } from './ui/settings-modal';
@@ -2076,6 +2077,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   document.body.appendChild(pipelinesModal.element);
 
+  // Уведомления площадки: непрочитанные ветки (GitHub) или незакрытые дела (GitLab).
+  const notificationsModal = createNotificationsModal({
+    git,
+    notify: (message, kind) => showToast(message, kind),
+  });
+  document.body.appendChild(notificationsModal.element);
+
   // Поиск символа по проекту (Ctrl+T): файл открываем тем же путём, что и дерево,
   // а затем встаём на строку объявления.
   const symbolPicker = createSymbolPicker({
@@ -3741,6 +3749,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         return;
       }
       await pipelinesModal.open();
+    },
+  );
+
+  /** Уведомления площадки (непрочитанные ветки / незакрытые дела) через `gh`/`glab`. */
+  define(
+    {
+      id: 'git.notifications',
+      title: 'Уведомления площадки',
+      category: 'Git',
+      keywords: ['уведомления', 'notifications', 'todos', 'github', 'gitlab', 'непрочитано'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await notificationsModal.open();
     },
   );
 

@@ -13,12 +13,14 @@ import {
   openRequestCount,
   parseGhComments,
   parseGhIssues,
+  parseGhNotifications,
   parseGhRequests,
   parseGhRuns,
   parseGlabComments,
   parseGlabIssues,
   parseGlabPipelines,
   parseGlabRequests,
+  parseGlabTodos,
   parseRemoteUrl,
   pipelineActive,
   platformLabel,
@@ -27,6 +29,7 @@ import {
   requestLabel,
   requestWebUrl,
   requestWord,
+  unreadNotificationCount,
 } from '../src/shared/git-platform';
 
 /**
@@ -518,5 +521,86 @@ describe('состояние и счётчики прогонов', () => {
     const runs = [run('running'), run('pending'), run('failed'), run('failed'), run('success')];
     expect(activePipelineCount(runs)).toBe(2);
     expect(failedPipelineCount(runs)).toBe(2);
+  });
+});
+
+describe('parseGhNotifications', () => {
+  const json = JSON.stringify([
+    {
+      id: '9001',
+      unread: true,
+      reason: 'review_requested',
+      updated_at: '2024-05-05T08:00:00Z',
+      subject: {
+        title: 'Добавить поиск',
+        type: 'PullRequest',
+        url: 'https://api.github.com/repos/acme/web/pulls/12',
+      },
+    },
+    { id: '9002', unread: false, reason: 'subscribed', subject: { title: 'Падает импорт', type: 'Issue' } },
+  ]);
+
+  it('читает уведомление и переводит адрес в страницу', () => {
+    expect(parseGhNotifications(json)[0]).toEqual({
+      id: '9001',
+      title: 'Добавить поиск',
+      kind: 'pull request',
+      reason: 'review_requested',
+      unread: true,
+      updatedAt: '2024-05-05T08:00:00Z',
+      url: 'https://github.com/acme/web/pulls/12',
+    });
+  });
+
+  it('прочитанное отмечено как прочитанное', () => {
+    expect(parseGhNotifications(json)[1]?.unread).toBe(false);
+  });
+
+  it('без id — пропуск, битый json — пусто', () => {
+    expect(parseGhNotifications(JSON.stringify([{ unread: true }]))).toEqual([]);
+    expect(parseGhNotifications('не json')).toEqual([]);
+  });
+});
+
+describe('parseGlabTodos', () => {
+  const json = JSON.stringify([
+    {
+      id: 7001,
+      action_name: 'mentioned',
+      target_type: 'Issue',
+      state: 'pending',
+      created_at: '2024-05-06T08:00:00Z',
+      target: { title: 'Медленный старт', web_url: 'https://gitlab.com/team/api/-/issues/9' },
+      project: { path_with_namespace: 'team/api' },
+    },
+    {
+      id: 7002,
+      action_name: 'assigned',
+      target_type: 'MergeRequest',
+      state: 'done',
+      target: { title: 'Чужая', web_url: '' },
+      project: { path_with_namespace: 'other/proj' },
+    },
+  ]);
+
+  it('дела своего проекта, чужой отброшен', () => {
+    const todos = parseGlabTodos(json, 'team/api');
+    expect(todos).toHaveLength(1);
+    expect(todos[0]).toMatchObject({ id: '7001', title: 'Медленный старт', kind: 'issue', unread: true });
+  });
+
+  it('без пути проекта ничего не отбрасываем', () => {
+    expect(parseGlabTodos(json)).toHaveLength(2);
+  });
+
+  it('закрытое дело — не ждёт внимания', () => {
+    expect(parseGlabTodos(json)[1]?.unread).toBe(false);
+  });
+});
+
+describe('unreadNotificationCount', () => {
+  it('считает только ждущие внимания', () => {
+    const note = (unread) => ({ id: '1', title: '', kind: '', reason: '', unread, updatedAt: '', url: '' });
+    expect(unreadNotificationCount([note(true), note(false), note(true)])).toBe(2);
   });
 });

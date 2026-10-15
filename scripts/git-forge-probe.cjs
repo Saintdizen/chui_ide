@@ -167,6 +167,34 @@ async function main() {
   check('GitLab: провал — failed', glRuns[1]?.state === 'failed', glRuns[1]);
   check('GitLab: ветка из ref', glRuns[1]?.branch === 'fix/build', glRuns[1]);
 
+  /* ── уведомления ──────────────────────────────── */
+
+  const notes = await service.forgeNotifications();
+  check('GitHub: уведомления прочитаны', notes.length === 2, notes);
+  check(
+    'GitHub: адрес предмета переведён в страницу',
+    notes[0]?.url === 'https://github.com/acme/web/pulls/12',
+    notes[0],
+  );
+  check(
+    'GitHub: причина и вид на месте',
+    notes[0]?.reason === 'review_requested' && notes[0]?.kind === 'pull request',
+    notes[0],
+  );
+  check('GitHub: второе — прочитано', notes[1]?.unread === false, notes[1]);
+
+  const afterRead = await service.forgeNotificationRead('9001');
+  check('GitHub: отметка прочитанного вернула список', afterRead.length === 2, afterRead.length);
+
+  const glTodos = await glService.forgeNotifications();
+  // Чужой проект из общего списка дел попасть не должен — остаётся только свой.
+  check('GitLab: дела своего проекта', glTodos.length === 1, glTodos);
+  check('GitLab: заголовок дела', glTodos[0]?.title === 'Медленный старт', glTodos[0]);
+  check('GitLab: дело ждёт внимания', glTodos[0]?.unread === true, glTodos[0]);
+
+  const glAfterRead = await glService.forgeNotificationRead('7001');
+  check('GitLab: отметка дела вернула список', glAfterRead.length === 1, glAfterRead.length);
+
   /* ── какие команды ушли клиенту ────────────────────────────────────────── */
 
   const calls = (await fs.readFile(logFile, 'utf8')).split('\n').filter(Boolean);
@@ -185,9 +213,15 @@ async function main() {
   check('gh звали за прогонами', has('gh run list'));
   check('gh перезапускал прогон', has('gh run rerun 42'));
   check('glab читал прогоны через api', has('glab api projects/:id/pipelines'));
+  check('gh читал уведомления', has('gh api repos/acme/web/notifications'));
+  check('gh отметил ветку прочитанной', has('notifications/threads/9001'));
+  check('glab читал дела', has('glab api todos'));
+  check('glab отметил дело готовым', has('todos/7001/mark_as_done'));
 
   await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
-  console.log(failed ? '[проба] площадки: есть расхождения' : '[проба] запросы и комментарии работают');
+  console.log(
+    failed ? '[проба] площадки: есть расхождения' : '[проба] запросы, задачи, прогоны и уведомления работают',
+  );
   process.exit(failed ? 1 : 0);
 }
 

@@ -31,7 +31,7 @@ import type { StructuralProjectMatches, StructuralProjectOptions } from './struc
 import type { ExportsQuery, ExportsResult } from './symbol-exports';
 import type { InheritanceQuery, InheritanceResult } from './type-inheritance';
 import type { ProjectPackage } from './monorepo';
-import type { ForgeComment, ForgeInfo, ForgeIssue, ForgePipeline } from './git-platform';
+import type { ForgeComment, ForgeInfo, ForgeIssue, ForgeNotification, ForgePipeline } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
 import type { GitStashEntry } from './git-stash';
 import type { GitTag } from './git-tags';
@@ -1980,6 +1980,10 @@ export interface ChuiMethods {
   'git.forgePipelines': { params: void; result: ForgePipeline[] };
   /** Перезапустить прогон: возвращает обновлённый список. */
   'git.forgePipelineRerun': { params: { id: number }; result: ForgePipeline[] };
+  /** Уведомления площадки (непрочитанные ветки / незакрытые дела). */
+  'git.forgeNotifications': { params: void; result: ForgeNotification[] };
+  /** Отметить уведомление прочитанным: возвращает обновлённый список. */
+  'git.forgeNotificationRead': { params: { id: string }; result: ForgeNotification[] };
   /** Открыть ссылку в браузере системы (страницы площадки и запросов). */
   'shell.openExternal': { params: { url: string }; result: { ok: boolean } };
   /** Показать файл или папку в проводнике системы (выделить объект). */

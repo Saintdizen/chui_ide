@@ -206,6 +206,27 @@ module.exports = [
       createdAt: '2024-05-01T12:00:00Z',
     },
   ];
+  /** Уведомления площадки: мок живёт, пока открыто окно. */
+  const mockForgeNotifications = [
+    {
+      id: '9001',
+      title: 'Добавить поиск',
+      kind: 'pull request',
+      reason: 'review_requested',
+      unread: true,
+      updatedAt: '2024-05-05T08:00:00Z',
+      url: 'https://github.com/acme/web/pull/12',
+    },
+    {
+      id: '9002',
+      title: 'Падает импорт',
+      kind: 'issue',
+      reason: 'subscribed',
+      unread: false,
+      updatedAt: '2024-05-04T08:00:00Z',
+      url: 'https://github.com/acme/web/issues/3',
+    },
+  ];
 
   const gitBranches = [
     { name: 'main', current: true, remote: false },
@@ -799,6 +820,16 @@ module.exports = [
     'git.forgePipelineRerun': async () => {
       await sleep(120);
       return mockForgePipelines.map((run) => ({ ...run }));
+    },
+    'git.forgeNotifications': async () => {
+      await sleep(120);
+      return mockForgeNotifications.map((note) => ({ ...note }));
+    },
+    'git.forgeNotificationRead': async (params) => {
+      await sleep(120);
+      const note = mockForgeNotifications.find((item) => item.id === params.id);
+      if (note) note.unread = false;
+      return mockForgeNotifications.map((item) => ({ ...item }));
     },
 
     'workspace.current': () => ({ root: currentRoot }),

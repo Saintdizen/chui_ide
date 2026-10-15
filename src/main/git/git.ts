@@ -53,15 +53,18 @@ import {
   type ForgeComment,
   type ForgeInfo,
   type ForgeIssue,
+  type ForgeNotification,
   type ForgePipeline,
   parseGhComments,
   parseGhIssues,
+  parseGhNotifications,
   parseGhRequests,
   parseGhRuns,
   parseGlabComments,
   parseGlabIssues,
   parseGlabPipelines,
   parseGlabRequests,
+  parseGlabTodos,
 } from '../../shared/git-platform';
 import {
   isConePatterns,
@@ -148,6 +151,16 @@ function requireRequestNumber(value: number): number {
   const n = Math.floor(value);
   if (!Number.isFinite(n) || n <= 0) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Неверный номер запроса');
   return n;
+}
+
+/**
+ * Идентификатор уведомления: только цифры. Из него собирается путь запроса к
+ * площадке, поэтому всякий лишний знак — это не «странный номер», а чужой адрес.
+ */
+function requireNotificationId(value: string): string {
+  const id = String(value ?? '').trim();
+  if (!/^\d+$/.test(id)) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Неверный номер уведомления');
+  return id;
 }
 export class GitService {
   /** Наблюдение за метаданными репозитория: показывает чужие коммиты в дереве. */
@@ -1612,6 +1625,47 @@ export class GitService {
       );
     }
     return this.forgePipelines();
+  }
+
+  /**
+   * Уведомления площадки: у GitHub — непрочитанные ветки обсуждений этого
+   * репозитория (`repos/:owner/:repo/notifications`), у GitLab — незакрытые дела
+   * (`todos`), из которых отбираем дела своего проекта.
+   */
+  async forgeNotifications(): Promise<ForgeNotification[]> {
+    const { repoRoot, info } = await this.forgeReady();
+    if (!info.repo) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Площадка не определена');
+    const path = `${info.repo.owner}/${info.repo.repo}`;
+    const args = info.cli === 'gh' ? ['api', `repos/${path}/notifications?per_page=50`] : ['api', 'todos?per_page=100'];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || `Клиент ${info.cli} не смог получить уведомления`,
+      );
+    }
+    return info.cli === 'gh' ? parseGhNotifications(result.stdout) : parseGlabTodos(result.stdout, path);
+  }
+
+  /**
+   * Отметить уведомление прочитанным: у GitHub — `PATCH notifications/threads/:id`,
+   * у GitLab — `POST todos/:id/mark_as_done`. Возвращаем обновлённый список.
+   */
+  async forgeNotificationRead(id: string): Promise<ForgeNotification[]> {
+    const { repoRoot, info } = await this.forgeReady();
+    const thread = requireNotificationId(id);
+    const args =
+      info.cli === 'gh'
+        ? ['api', '--method', 'PATCH', `notifications/threads/${thread}`]
+        : ['api', '--method', 'POST', `todos/${thread}/mark_as_done`];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || 'Клиент не смог отметить уведомление прочитанным',
+      );
+    }
+    return this.forgeNotifications();
   }
 
   /**
