@@ -138,6 +138,7 @@ import { createRegexTester } from './ui/regex-tester';
 import { createStructuralSearch } from './ui/structural-search';
 import { createIdentityModal } from './ui/identity-modal';
 import { createForgeModal } from './ui/forge-modal';
+import { createIssuesModal } from './ui/issues-modal';
 import { createTextModal } from './ui/text-modal';
 import { createStatusBar } from './ui/statusbar';
 import { createSettingsModal } from './ui/settings-modal';
@@ -2057,6 +2058,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   document.body.appendChild(forgeModal.element);
 
+  // Задачи площадки (issues): тот же приём, что у запросов на слияние — всё делает
+  // клиент `gh`/`glab`, а окно показывает список и зовёт его же на «создать» и «закрыть».
+  const issuesModal = createIssuesModal({
+    git,
+    notify: (message, kind) => showToast(message, kind),
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+  });
+  document.body.appendChild(issuesModal.element);
+
   // Поиск символа по проекту (Ctrl+T): файл открываем тем же путём, что и дерево,
   // а затем встаём на строку объявления.
   const symbolPicker = createSymbolPicker({
@@ -3686,6 +3696,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         return;
       }
       await forgeModal.open();
+    },
+  );
+
+  /** Задачи площадки (issues) через `gh`/`glab`. */
+  define(
+    {
+      id: 'git.issues',
+      title: 'Задачи площадки (issues)',
+      category: 'Git',
+      keywords: ['issue', 'issues', 'задача', 'задачи', 'github', 'gitlab', 'ticket'],
+      enabled: () => git.isRepository,
+    },
+    async () => {
+      if (!git.isRepository) {
+        showToast('Рабочая папка не в репозитории git', 'error');
+        return;
+      }
+      await issuesModal.open();
     },
   );
 

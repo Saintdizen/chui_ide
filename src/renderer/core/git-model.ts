@@ -27,7 +27,7 @@ import type { GitLfsInfo } from '../../shared/git-lfs';
 import type { GitSparseInfo } from '../../shared/git-sparse';
 import type { GitIdentity, GitSshKey } from '../../shared/git-identity';
 import type { ProjectPackage } from '../../shared/monorepo';
-import type { ForgeComment, ForgeInfo } from '../../shared/git-platform';
+import type { ForgeComment, ForgeInfo, ForgeIssue } from '../../shared/git-platform';
 import type { GitRootFetch, GitRootSummary } from '../../shared/git-multiroot';
 import { Emitter } from './events';
 import { separatorOf } from '../../shared/paths';
@@ -489,6 +489,31 @@ export class GitModel {
   /** Написать комментарий к запросу: возвращает обновлённое обсуждение. */
   forgeComment(number: number, body: string): Promise<ForgeComment[]> {
     return this.rpc.request('git.forgeComment', { number, body });
+  }
+
+  /** Задачи площадки (issues): открытые и закрытые. */
+  forgeIssues(): Promise<ForgeIssue[]> {
+    return this.rpc.request('git.forgeIssues');
+  }
+
+  /** Создать задачу: возвращает обновлённый список. */
+  forgeIssueCreate(options: { title: string; body?: string }): Promise<ForgeIssue[]> {
+    return this.rpc.request('git.forgeIssueCreate', options);
+  }
+
+  /** Закрыть задачу: возвращает обновлённый список. */
+  forgeIssueClose(number: number): Promise<ForgeIssue[]> {
+    return this.rpc.request('git.forgeIssueClose', { number });
+  }
+
+  /** Комментарии задачи: обсуждение (читает клиент площадки). */
+  forgeIssueComments(number: number): Promise<ForgeComment[]> {
+    return this.rpc.request('git.forgeIssueComments', { number });
+  }
+
+  /** Написать комментарий к задаче: возвращает обновлённое обсуждение. */
+  forgeIssueComment(number: number, body: string): Promise<ForgeComment[]> {
+    return this.rpc.request('git.forgeIssueComment', { number, body });
   }
 
   /** Открыть ссылку в браузере системы. */

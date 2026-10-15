@@ -373,3 +373,110 @@ export function requestForBranch(requests: readonly ForgeRequest[], branch: stri
     ) ?? null
   );
 }
+
+/* ── задачи (issues) ───────────────────────────────────────────────────── */
+
+/** Состояние задачи: открыта или закрыта (у задач нет черновиков и «слито»). */
+export type ForgeIssueState = 'open' | 'closed';
+
+/** Задача площадки (issue) в одной записи, независимо от площадки. */
+export interface ForgeIssue {
+  /** Номер: `#12` и на GitHub, и на GitLab. */
+  number: number;
+  title: string;
+  author: string;
+  state: ForgeIssueState;
+  /** Страница задачи в браузере. */
+  url: string;
+  /** Когда последний раз трогали (текст площадки — приводить к дате не берёмся). */
+  updatedAt: string;
+  /** Метки/теги задачи. */
+  labels: string[];
+}
+
+/** Состояние задачи из того, что пишет площадка: закрыта — только `closed`. */
+function issueStateOf(value: unknown): ForgeIssueState {
+  return String(value ?? '').toLowerCase() === 'closed' ? 'closed' : 'open';
+}
+
+/**
+ * Разбор ответа `gh issue list --json …`. Форма та же, что у запросов на слияние:
+ * автор — `author.login`, номер — `number`, состояние — `OPEN`/`CLOSED`.
+ */
+export function parseGhIssues(json: string): ForgeIssue[] {
+  const issues: ForgeIssue[] = [];
+  for (const item of safeArray(json)) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    const number = Number(value.number);
+    if (!Number.isFinite(number) || number <= 0) continue;
+    issues.push({
+      number,
+      title: typeof value.title === 'string' ? value.title : '',
+      author:
+        typeof value.author === 'object' &&
+        value.author !== null &&
+        typeof (value.author as { login?: unknown }).login === 'string'
+          ? ((value.author as { login: string }).login as string)
+          : '',
+      state: issueStateOf(value.state),
+      url: typeof value.url === 'string' ? value.url : '',
+      updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : '',
+      labels: labelsOf(value.labels),
+    });
+  }
+  return issues;
+}
+
+/**
+ * Разбор ответа `glab issue list --output json`. GitLab пишет номер как `iid`,
+ * автора — как `author.username`, адрес — `web_url`, состояние — `opened`/`closed`.
+ */
+export function parseGlabIssues(json: string): ForgeIssue[] {
+  const issues: ForgeIssue[] = [];
+  for (const item of safeArray(json)) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    const number = Number(value.iid ?? value.number);
+    if (!Number.isFinite(number) || number <= 0) continue;
+    issues.push({
+      number,
+      title: typeof value.title === 'string' ? value.title : '',
+      author:
+        typeof value.author === 'object' &&
+        value.author !== null &&
+        typeof (value.author as { username?: unknown }).username === 'string'
+          ? ((value.author as { username: string }).username as string)
+          : '',
+      state: issueStateOf(value.state),
+      url: typeof value.web_url === 'string' ? value.web_url : '',
+      updatedAt: typeof value.updated_at === 'string' ? value.updated_at : '',
+      labels: labelsOf(value.labels),
+    });
+  }
+  return issues;
+}
+
+/** Страница задачи в браузере. */
+export function issueWebUrl(repo: ForgeRepo, number: number): string {
+  const base = `https://${repo.host}/${repo.owner}/${repo.repo}`;
+  if (repo.platform === 'gitlab') return `${base}/-/issues/${number}`;
+  return `${base}/issues/${number}`;
+}
+
+/** Страница создания задачи: у GitLab отдельная (`/-/issues/new`), у GitHub общая. */
+export function newIssueWebUrl(repo: ForgeRepo): string {
+  const base = `https://${repo.host}/${repo.owner}/${repo.repo}`;
+  if (repo.platform === 'gitlab') return `${base}/-/issues/new`;
+  return `${base}/issues/new`;
+}
+
+/** Подпись задачи: `#12 заголовок`. */
+export function issueLabel(issue: ForgeIssue): string {
+  return `#${issue.number} ${issue.title}`.trim();
+}
+
+/** Сколько открытых задач — для заголовка списка. */
+export function openIssueCount(issues: readonly ForgeIssue[]): number {
+  return issues.filter((issue) => issue.state === 'open').length;
+}

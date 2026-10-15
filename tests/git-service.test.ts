@@ -409,6 +409,18 @@ describe('GitService: удалённые и сеть', () => {
     await expect(service.forgeCheckout(1)).rejects.toThrow(/gh/);
   });
 
+  it('forgeIssues() без клиента объясняет причину', async () => {
+    if (!gitAvailable) return;
+    const { work } = await makeRepos();
+    await git(work, ['remote', 'set-url', 'origin', 'git@github.com:acme/web.git']);
+    const service = serviceFor(work);
+    const info = await service.forgeInfo();
+    // Кейс верен только там, где клиента нет (в CI его тоже не будет).
+    if (info.cliAvailable) return;
+    await expect(service.forgeIssues()).rejects.toThrow(/gh/);
+    await expect(service.forgeIssueClose(1)).rejects.toThrow(/gh/);
+  });
+
   it('identity(): читает настройки, setIdentity() пишет их в ЛОКАЛЬНЫЙ конфиг', async () => {
     if (!gitAvailable) return;
     const { work } = await makeRepos();

@@ -695,6 +695,11 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('git.forgeCheckout', (params) => deps.git.forgeCheckout(params.number));
   router.register('git.forgeComments', (params) => deps.git.forgeComments(params.number));
   router.register('git.forgeComment', (params) => deps.git.forgeComment(params.number, params.body));
+  router.register('git.forgeIssues', () => deps.git.forgeIssues());
+  router.register('git.forgeIssueCreate', (params) => deps.git.forgeIssueCreate(params));
+  router.register('git.forgeIssueClose', (params) => deps.git.forgeIssueClose(params.number));
+  router.register('git.forgeIssueComments', (params) => deps.git.forgeIssueComments(params.number));
+  router.register('git.forgeIssueComment', (params) => deps.git.forgeIssueComment(params.number, params.body));
 
   router.register('git.identity', () => deps.git.identity());
   router.register('git.setIdentity', (params) => deps.git.setIdentity(params.values));

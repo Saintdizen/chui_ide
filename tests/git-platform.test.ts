@@ -3,11 +3,17 @@ import {
   branchesLabel,
   cliFor,
   forgeRepo,
+  issueLabel,
+  issueWebUrl,
+  newIssueWebUrl,
   newRequestWebUrl,
+  openIssueCount,
   openRequestCount,
   parseGhComments,
+  parseGhIssues,
   parseGhRequests,
   parseGlabComments,
+  parseGlabIssues,
   parseGlabRequests,
   parseRemoteUrl,
   platformLabel,
@@ -335,5 +341,83 @@ describe('parseGlabComments', () => {
   it('без текста запись пропускается, битый json даёт пусто', () => {
     expect(parseGlabComments(JSON.stringify([{ author: { username: 'x' } }]))).toEqual([]);
     expect(parseGlabComments('мусор')).toEqual([]);
+  });
+});
+
+describe('parseGhIssues', () => {
+  const json = JSON.stringify([
+    {
+      number: 3,
+      title: 'Импорт',
+      author: { login: 'ivan' },
+      state: 'OPEN',
+      url: 'https://github.com/acme/web/issues/3',
+      labels: [{ name: 'bug' }],
+    },
+  ]);
+
+  it('читает задачу', () => {
+    expect(parseGhIssues(json)[0]).toMatchObject({
+      number: 3,
+      title: 'Импорт',
+      author: 'ivan',
+      state: 'open',
+      labels: ['bug'],
+    });
+  });
+
+  it('битый json даёт пусто', () => {
+    expect(parseGhIssues('не json')).toEqual([]);
+  });
+});
+
+describe('parseGlabIssues', () => {
+  const json = JSON.stringify([
+    {
+      iid: 9,
+      title: 'Старт',
+      author: { username: 'petr' },
+      state: 'opened',
+      web_url: 'https://gitlab.com/t/a/-/issues/9',
+      labels: ['perf'],
+    },
+  ]);
+
+  it('читает задачу', () => {
+    expect(parseGlabIssues(json)[0]).toMatchObject({
+      number: 9,
+      title: 'Старт',
+      author: 'petr',
+      state: 'open',
+      labels: ['perf'],
+    });
+  });
+
+  it('битый json даёт пусто', () => {
+    expect(parseGlabIssues('мусор')).toEqual([]);
+  });
+});
+
+describe('адреса и подписи задач', () => {
+  const github = { platform: 'github' as const, host: 'github.com', owner: 'acme', repo: 'web' };
+  const gitlab = { platform: 'gitlab' as const, host: 'gitlab.com', owner: 'team/api', repo: 'web' };
+
+  it('страница задачи', () => {
+    expect(issueWebUrl(github, 3)).toBe('https://github.com/acme/web/issues/3');
+    expect(issueWebUrl(gitlab, 3)).toBe('https://gitlab.com/team/api/web/-/issues/3');
+  });
+
+  it('страница создания: у GitLab отдельная', () => {
+    expect(newIssueWebUrl(github)).toBe('https://github.com/acme/web/issues/new');
+    expect(newIssueWebUrl(gitlab)).toBe('https://gitlab.com/team/api/web/-/issues/new');
+  });
+
+  it('подпись задачи и число открытых', () => {
+    const issues = [
+      { number: 1, title: 'Первая', author: '', state: 'open' as const, url: '', updatedAt: '', labels: [] },
+      { number: 2, title: 'Вторая', author: '', state: 'closed' as const, url: '', updatedAt: '', labels: [] },
+    ];
+    expect(issueLabel(issues[0]!)).toBe('#1 Первая');
+    expect(openIssueCount(issues)).toBe(1);
   });
 });

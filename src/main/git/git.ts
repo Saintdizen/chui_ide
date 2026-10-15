@@ -52,9 +52,12 @@ import {
   forgeRepo,
   type ForgeComment,
   type ForgeInfo,
+  type ForgeIssue,
   parseGhComments,
+  parseGhIssues,
   parseGhRequests,
   parseGlabComments,
+  parseGlabIssues,
   parseGlabRequests,
 } from '../../shared/git-platform';
 import {
@@ -1453,6 +1456,129 @@ export class GitService {
     // Список читаем заново, а не приписываем отправленное к прежнему: у клиента
     // может быть своё форматирование, и «эхо» разошлось бы с тем, что на площадке.
     return this.forgeComments(n);
+  }
+
+  /**
+   * Задачи площадки (issues): список открытых и закрытых вместе.
+   *
+   * Понятие есть и на GitHub, и на GitLab, и читается тем же клиентом, что и
+   * запросы на слияние. Общей модели хватит: номер, заголовок, автор, состояние,
+   * метки. GitHub отдаёт `gh issue list --state all`, GitLab — `glab issue list`.
+   */
+  async forgeIssues(): Promise<ForgeIssue[]> {
+    const { repoRoot, info } = await this.forgeReady();
+    const args =
+      info.cli === 'gh'
+        ? [
+            'issue',
+            'list',
+            '--limit',
+            '40',
+            '--state',
+            'all',
+            '--json',
+            'number,title,author,state,url,updatedAt,labels',
+          ]
+        : ['issue', 'list', '--output', 'json', '--per-page', '40'];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || `Клиент ${info.cli} не смог получить список задач`,
+      );
+    }
+    return info.cli === 'gh' ? parseGhIssues(result.stdout) : parseGlabIssues(result.stdout);
+  }
+
+  /**
+   * Создать задачу. Тексты передаём как есть, а площадка сама дополнит шаблоном.
+   * Возвращаем обновлённый список, чтобы окно перерисовалось без второго запроса.
+   */
+  async forgeIssueCreate(options: { title: string; body?: string }): Promise<ForgeIssue[]> {
+    const { repoRoot, info } = await this.forgeReady();
+    const title = options.title.trim();
+    if (title === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Нужен заголовок задачи');
+
+    const args =
+      info.cli === 'gh'
+        ? ['issue', 'create', '--title', title, ...(options.body ? ['--body', options.body] : ['--body', ''])]
+        : ['issue', 'create', '--title', title, ...(options.body ? ['--description', options.body] : []), '--yes'];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || 'Клиент отказался создавать задачу',
+      );
+    }
+    return this.forgeIssues();
+  }
+
+  /** Закрыть задачу. Открытым задачам это единственное действие со стороны IDE. */
+  async forgeIssueClose(number: number): Promise<ForgeIssue[]> {
+    const { repoRoot, info } = await this.forgeReady();
+    const n = requireRequestNumber(number);
+    const result = await this.forgeRun(info.cli, ['issue', 'close', String(n)], repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || 'Клиент не смог закрыть задачу',
+      );
+    }
+    return this.forgeIssues();
+  }
+
+  /** Комментарии задачи — тем же разбором, что и обсуждение запроса. */
+  async forgeIssueComments(number: number): Promise<ForgeComment[]> {
+    const { repoRoot, info } = await this.forgeReady();
+    const n = requireRequestNumber(number);
+    // У GitLab заметки задачи берём через `glab api`: своего `--json` у `glab issue view` нет.
+    const args =
+      info.cli === 'gh'
+        ? ['issue', 'view', String(n), '--json', 'comments']
+        : ['api', `projects/:id/issues/${n}/notes?per_page=100`];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || 'Клиент не смог получить комментарии задачи',
+      );
+    }
+    return info.cli === 'gh' ? parseGhComments(result.stdout) : parseGlabComments(result.stdout);
+  }
+
+  /** Написать комментарий к задаче. Возвращаем обновлённое обсуждение. */
+  async forgeIssueComment(number: number, body: string): Promise<ForgeComment[]> {
+    const { repoRoot, info } = await this.forgeReady();
+    const n = requireRequestNumber(number);
+    const text = body.trim();
+    if (text === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Пустой комментарий');
+
+    const args =
+      info.cli === 'gh' ? ['issue', 'comment', String(n), '--body', text] : ['issue', 'note', String(n), '-m', text];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || 'Клиент отказался отправить комментарий',
+      );
+    }
+    return this.forgeIssueComments(n);
+  }
+
+  /**
+   * Площадка и клиент для действий с задачами. Сводит три проверки (есть удалённый
+   * адрес, есть клиент, клиент найден), которые иначе повторялись бы в каждом методе.
+   */
+  private async forgeReady(): Promise<{ repoRoot: string; info: ForgeInfo & { cli: 'gh' | 'glab' } }> {
+    const repoRoot = await this.requireRoot();
+    const info = await this.forgeInfo();
+    if (!info.repo || !info.cli) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, info.note || 'Площадка не определена');
+    }
+    if (!info.cliAvailable) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `Клиент ${info.cli} не найден в системе`);
+    }
+    return { repoRoot, info: info as ForgeInfo & { cli: 'gh' | 'glab' } };
   }
 
   /**

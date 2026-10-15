@@ -27,14 +27,25 @@ const flag = (name) => {
   return at >= 0 ? args[at + 1] : undefined;
 };
 
-/** Комментарии, накопленные в этом прогоне (то, что «человек уже написал»). */
-const sentComments = () => {
+/**
+ * Комментарии, накопленные в этом прогоне (то, что «человек уже написал»).
+ * Хранится тройкой «раздел — номер — текст»: обсуждение запроса и задачи
+ * не смешиваются, а клиент возвращает свой список заметок на каждое.
+ */
+const sentComments = (kind, number) => {
   if (!stateFile || !fs.existsSync(stateFile)) return [];
   return fs
     .readFileSync(stateFile, 'utf8')
     .split('\n')
     .filter(Boolean)
-    .map((line) => JSON.parse(line).body);
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry.kind === kind && (number === undefined || entry.number === number))
+    .map((entry) => entry.body);
+};
+
+/** Дописать комментарий в файл состояния с пометкой раздела и номера. */
+const saveComment = (kind, number, body) => {
+  if (stateFile) fs.appendFileSync(stateFile, `${JSON.stringify({ kind, number, body })}\n`);
 };
 
 if (args[0] === '--version') {
@@ -77,6 +88,30 @@ const GLAB_REQUESTS = [
   },
 ];
 
+const GH_ISSUES = [
+  {
+    number: 3,
+    title: 'Падает импорт',
+    author: { login: 'ivan' },
+    state: 'OPEN',
+    url: 'https://github.com/acme/web/issues/3',
+    updatedAt: '2024-05-03T08:00:00Z',
+    labels: [{ name: 'bug' }],
+  },
+];
+
+const GLAB_ISSUES = [
+  {
+    iid: 9,
+    title: 'Медленный старт',
+    author: { username: 'petr' },
+    state: 'opened',
+    web_url: 'https://gitlab.com/team/api/-/issues/9',
+    updated_at: '2024-05-04T08:00:00Z',
+    labels: ['perf'],
+  },
+];
+
 if (cli === 'gh') {
   if (args[0] === 'pr' && args[1] === 'list') {
     print(GH_REQUESTS);
@@ -87,7 +122,7 @@ if (cli === 'gh') {
     print({
       comments: [
         { author: { login: 'ivan' }, body: 'Посмотрите тесты.', createdAt: '2024-05-01T11:00:00Z', url: '' },
-        ...sentComments().map((body) => ({
+        ...sentComments('pr', Number(args[2])).map((body) => ({
           author: { login: 'you' },
           body,
           createdAt: '2024-05-01T12:00:00Z',
@@ -98,8 +133,33 @@ if (cli === 'gh') {
     process.exit(0);
   }
   if (args[0] === 'pr' && args[1] === 'comment') {
-    const body = flag('--body') ?? '';
-    if (stateFile) fs.appendFileSync(stateFile, `${JSON.stringify({ body })}\n`);
+    saveComment('pr', Number(args[2]), flag('--body') ?? '');
+    process.exit(0);
+  }
+  if (args[0] === 'issue' && args[1] === 'list') {
+    print(GH_ISSUES);
+    process.exit(0);
+  }
+  if (args[0] === 'issue' && args[1] === 'view') {
+    // Форма ответа `gh issue view --json comments`: объект с полем `comments`.
+    print({
+      comments: [
+        { author: { login: 'ivan' }, body: 'Воспроизводится у меня.', createdAt: '2024-05-03T11:00:00Z', url: '' },
+        ...sentComments('issue', Number(args[2])).map((body) => ({
+          author: { login: 'you' },
+          body,
+          createdAt: '2024-05-03T12:00:00Z',
+          url: '',
+        })),
+      ],
+    });
+    process.exit(0);
+  }
+  if (args[0] === 'issue' && args[1] === 'comment') {
+    saveComment('issue', Number(args[2]), flag('--body') ?? '');
+    process.exit(0);
+  }
+  if (args[0] === 'issue' && (args[1] === 'create' || args[1] === 'close')) {
     process.exit(0);
   }
   process.stderr.write(`fake gh: неизвестная команда: ${args.join(' ')}\n`);
@@ -112,10 +172,18 @@ if (args[0] === 'mr' && args[1] === 'list') {
 }
 if (args[0] === 'api') {
   // Форма ответа `glab api …/notes`: массив заметок плюс системное событие.
+  // Тот же путь обслуживает заметки задачи (`…/issues/<n>/notes`).
+  const kind = String(args[1] || '').includes('/issues/') ? 'issue' : 'mr';
+  const base =
+    kind === 'issue'
+      ? [{ author: { username: 'ivan' }, body: 'Воспроизводится у меня.', created_at: '2024-05-04T09:00:00Z' }]
+      : [
+          { author: { username: 'petr' }, body: 'Готово.', created_at: '2024-05-02T09:00:00Z' },
+          { author: { username: 'ci' }, body: 'Ветка обновлена', system: true },
+        ];
   print([
-    { author: { username: 'petr' }, body: 'Готово.', created_at: '2024-05-02T09:00:00Z' },
-    { author: { username: 'ci' }, body: 'Ветка обновлена', system: true },
-    ...sentComments().map((body) => ({
+    ...base,
+    ...sentComments(kind).map((body) => ({
       author: { username: 'you' },
       body,
       created_at: '2024-05-02T10:00:00Z',
@@ -124,8 +192,18 @@ if (args[0] === 'api') {
   process.exit(0);
 }
 if (args[0] === 'mr' && args[1] === 'note') {
-  const body = flag('-m') ?? '';
-  if (stateFile) fs.appendFileSync(stateFile, `${JSON.stringify({ body })}\n`);
+  saveComment('mr', Number(args[2]), flag('-m') ?? '');
+  process.exit(0);
+}
+if (args[0] === 'issue' && args[1] === 'list') {
+  print(GLAB_ISSUES);
+  process.exit(0);
+}
+if (args[0] === 'issue' && args[1] === 'note') {
+  saveComment('issue', Number(args[2]), flag('-m') ?? '');
+  process.exit(0);
+}
+if (args[0] === 'issue' && (args[1] === 'create' || args[1] === 'close')) {
   process.exit(0);
 }
 

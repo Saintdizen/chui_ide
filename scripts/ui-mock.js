@@ -173,6 +173,18 @@ module.exports = [
   const mockForgeComments = [
     { author: 'petr', body: 'Посмотрите тесты, пожалуйста.', createdAt: '2024-05-01T11:00:00Z', url: '' },
   ];
+  /** Задачи площадки: мок живёт, пока открыто окно. */
+  const mockForgeIssues = [
+    {
+      number: 3,
+      title: 'Падает импорт',
+      author: 'ivan',
+      state: 'open',
+      url: 'https://github.com/acme/web/issues/3',
+      updatedAt: '2024-05-03T08:00:00Z',
+      labels: ['bug'],
+    },
+  ];
 
   const gitBranches = [
     { name: 'main', current: true, remote: false },
@@ -723,6 +735,38 @@ module.exports = [
       return mockForgeComments.map((comment) => ({ ...comment }));
     },
     'git.forgeComment': async (params) => {
+      await sleep(120);
+      mockForgeComments.push({ author: 'вы', body: params.body, createdAt: '2024-05-01T12:00:00Z', url: '' });
+      return mockForgeComments.map((comment) => ({ ...comment }));
+    },
+    'git.forgeIssues': async () => {
+      await sleep(120);
+      return mockForgeIssues.map((issue) => ({ ...issue }));
+    },
+    'git.forgeIssueCreate': async (params) => {
+      await sleep(120);
+      mockForgeIssues.push({
+        number: mockForgeIssues.length + 1,
+        title: params.title,
+        author: 'вы',
+        state: 'open',
+        url: '',
+        updatedAt: '',
+        labels: [],
+      });
+      return mockForgeIssues.map((issue) => ({ ...issue }));
+    },
+    'git.forgeIssueClose': async (params) => {
+      await sleep(120);
+      const issue = mockForgeIssues.find((item) => item.number === params.number);
+      if (issue) issue.state = 'closed';
+      return mockForgeIssues.map((item) => ({ ...item }));
+    },
+    'git.forgeIssueComments': async () => {
+      await sleep(120);
+      return mockForgeComments.map((comment) => ({ ...comment }));
+    },
+    'git.forgeIssueComment': async (params) => {
       await sleep(120);
       mockForgeComments.push({ author: 'вы', body: params.body, createdAt: '2024-05-01T12:00:00Z', url: '' });
       return mockForgeComments.map((comment) => ({ ...comment }));

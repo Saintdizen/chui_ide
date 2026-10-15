@@ -123,6 +123,30 @@ async function main() {
   const glAfter = await glService.forgeComment(7, 'Спасибо, заберу.');
   check('GitLab: отправка заметки прошла', glAfter.length === 2, glAfter.length);
 
+  /* ── задачи (issues) ───────────────────────────────────── */
+
+  const issues = await service.forgeIssues();
+  check('GitHub: задачи прочитаны', issues.length === 1, issues);
+  check('GitHub: заголовок задачи', issues[0]?.title === 'Падает импорт', issues[0]);
+  check('GitHub: состояние задачи', issues[0]?.state === 'open', issues[0]);
+
+  const issueComments = await service.forgeIssueComments(3);
+  check('GitHub: комментарии задачи прочитаны', issueComments.length === 1, issueComments);
+  check('GitHub: текст комментария задачи', issueComments[0]?.body === 'Воспроизводится у меня.', issueComments[0]);
+
+  const afterIssueComment = await service.forgeIssueComment(3, 'Проверяю на свежем коде.');
+  check('GitHub: комментарий к задаче отправлен', afterIssueComment.length === 2, afterIssueComment.length);
+
+  const created = await service.forgeIssueCreate({ title: 'Новая задача', body: 'Описание' });
+  check('GitHub: создание задачи не уронило список', created.length === 1, created.length);
+
+  const closed = await service.forgeIssueClose(3);
+  check('GitHub: закрытие задачи вернуло список', closed.length === 1, closed.length);
+
+  const glIssues = await glService.forgeIssues();
+  check('GitLab: задачи прочитаны', glIssues.length === 1, glIssues);
+  check('GitLab: заголовок задачи', glIssues[0]?.title === 'Медленный старт', glIssues[0]);
+
   /* ── какие команды ушли клиенту ────────────────────────────────────────── */
 
   const calls = (await fs.readFile(logFile, 'utf8')).split('\n').filter(Boolean);
@@ -132,6 +156,12 @@ async function main() {
   check('gh отправил комментарий через --body', has('gh pr comment 12 --body'));
   check('glab читал заметки через api', has('glab api projects/:id/merge_requests/7/notes'));
   check('glab отправил заметку через mr note -m', has('glab mr note 7 -m'));
+  check('gh звали за задачами', has('gh issue list'));
+  check('gh звали за комментариями задачи', has('gh issue view 3 --json comments'));
+  check('gh отправил комментарий задачи через --body', has('gh issue comment 3 --body'));
+  check('gh создавал задачу', has('gh issue create'));
+  check('gh закрывал задачу', has('gh issue close 3'));
+  check('glab читал задачи', has('glab issue list'));
 
   await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   console.log(failed ? '[проба] площадки: есть расхождения' : '[проба] запросы и комментарии работают');
