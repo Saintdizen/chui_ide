@@ -29,7 +29,7 @@ import type { StructuralProjectMatches, StructuralProjectOptions } from './struc
 import type { ExportsQuery, ExportsResult } from './symbol-exports';
 import type { InheritanceQuery, InheritanceResult } from './type-inheritance';
 import type { ProjectPackage } from './monorepo';
-import type { ForgeInfo } from './git-platform';
+import type { ForgeComment, ForgeInfo } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
 import type { GitStashEntry } from './git-stash';
 import type { GitTag } from './git-tags';
@@ -1871,6 +1871,10 @@ export interface ChuiMethods {
   };
   /** Забрать ветку запроса в рабочий каталог (клиент делает fetch и checkout). */
   'git.forgeCheckout': { params: { number: number }; result: GitStatus };
+  /** Комментарии запроса на слияние (обсуждение). */
+  'git.forgeComments': { params: { number: number }; result: ForgeComment[] };
+  /** Написать комментарий к запросу: возвращает обновлённое обсуждение. */
+  'git.forgeComment': { params: { number: number; body: string }; result: ForgeComment[] };
   /** Открыть ссылку в браузере системы (страницы площадки и запросов). */
   'shell.openExternal': { params: { url: string }; result: { ok: boolean } };
   /** Показать файл или папку в проводнике системы (выделить объект). */

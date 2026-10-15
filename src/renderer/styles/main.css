@@ -5857,6 +5857,72 @@ body > .overlay {
   color: var(--text_color_tertiary);
 }
 
+/* Запрос вместе с раскрытым под ним обсуждением — одна единица списка. */
+.forge-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.forge-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 8px 12px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border_color);
+  background: var(--sunken_background);
+  border-radius: var(--radius_sm);
+}
+
+.forge-comments[hidden] {
+  display: none;
+}
+
+.forge-comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.forge-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.forge-comment-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--font_small_size);
+}
+
+.forge-comment-author {
+  font-weight: 600;
+}
+
+.forge-comment-date {
+  color: var(--text_color_tertiary);
+}
+
+.forge-comment-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.forge-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.forge-comment-input {
+  width: 100%;
+  font-family: var(--font_ui);
+  resize: vertical;
+}
+
 .forge-create {
   display: flex;
   flex-direction: column;

@@ -169,6 +169,10 @@ module.exports = [
 
   // Отложенные изменения в моке: список, который правится действиями окна stash.
   const mockStash = [{ index: 0, ref: 'stash@{0}', message: 'мок-доработка', branch: 'main' }];
+  /** Обсуждение запроса на слияние: мок живёт, пока открыта страница. */
+  const mockForgeComments = [
+    { author: 'petr', body: 'Посмотрите тесты, пожалуйста.', createdAt: '2024-05-01T11:00:00Z', url: '' },
+  ];
 
   const gitBranches = [
     { name: 'main', current: true, remote: false },
@@ -678,6 +682,45 @@ module.exports = [
       gitState.repository.branch = params.name;
       for (const branch of gitBranches) branch.current = branch.name === params.name;
       return gitChanged();
+    },
+
+    'git.forgeInfo': () => ({
+      repo: { platform: 'github', host: 'github.com', owner: 'acme', repo: 'web' },
+      remote: 'origin',
+      cli: 'gh',
+      cliAvailable: true,
+      authenticated: true,
+      requests: [
+        {
+          number: 12,
+          title: 'Добавить поиск',
+          author: 'ivan',
+          state: 'open',
+          sourceBranch: 'feat/search',
+          targetBranch: 'main',
+          url: 'https://github.com/acme/web/pull/12',
+          updatedAt: '2024-05-01T10:00:00Z',
+          labels: ['enhancement'],
+        },
+      ],
+      note: '',
+    }),
+    'git.forgeCreate': async () => {
+      await sleep(120);
+      return handlers['git.forgeInfo']();
+    },
+    'git.forgeCheckout': (params) => {
+      gitState.repository.branch = `pr-${params.number}`;
+      return gitChanged();
+    },
+    'git.forgeComments': async () => {
+      await sleep(120);
+      return mockForgeComments.map((comment) => ({ ...comment }));
+    },
+    'git.forgeComment': async (params) => {
+      await sleep(120);
+      mockForgeComments.push({ author: 'вы', body: params.body, createdAt: '2024-05-01T12:00:00Z', url: '' });
+      return mockForgeComments.map((comment) => ({ ...comment }));
     },
 
     'workspace.current': () => ({ root: currentRoot }),

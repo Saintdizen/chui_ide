@@ -27,7 +27,7 @@ import type { GitLfsInfo } from '../../shared/git-lfs';
 import type { GitSparseInfo } from '../../shared/git-sparse';
 import type { GitIdentity, GitSshKey } from '../../shared/git-identity';
 import type { ProjectPackage } from '../../shared/monorepo';
-import type { ForgeInfo } from '../../shared/git-platform';
+import type { ForgeComment, ForgeInfo } from '../../shared/git-platform';
 import type { GitRootFetch, GitRootSummary } from '../../shared/git-multiroot';
 import { Emitter } from './events';
 import { separatorOf } from '../../shared/paths';
@@ -479,6 +479,16 @@ export class GitModel {
   /** Забрать ветку запроса в рабочий каталог: клиент делает fetch и checkout. */
   async forgeCheckout(number: number): Promise<GitStatus> {
     return this.apply(await this.rpc.request('git.forgeCheckout', { number }));
+  }
+
+  /** Комментарии запроса: обсуждение (читает клиент площадки). */
+  forgeComments(number: number): Promise<ForgeComment[]> {
+    return this.rpc.request('git.forgeComments', { number });
+  }
+
+  /** Написать комментарий к запросу: возвращает обновлённое обсуждение. */
+  forgeComment(number: number, body: string): Promise<ForgeComment[]> {
+    return this.rpc.request('git.forgeComment', { number, body });
   }
 
   /** Открыть ссылку в браузере системы. */

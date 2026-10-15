@@ -262,6 +262,93 @@ function safeArray(json: string): unknown[] {
   }
 }
 
+/* ── комментарии к запросу ─────────────────────────────────────────────── */
+
+/** Комментарий (note) к запросу на слияние в одной записи, независимо от площадки. */
+export interface ForgeComment {
+  /** Автор: логин на GitHub, имя пользователя на GitLab. */
+  author: string;
+  /** Текст комментария — markdown как есть, без пересказа. */
+  body: string;
+  /** Когда написан (текст площадки — приводить к дате не берёмся). */
+  createdAt: string;
+  /** Прямая ссылка на комментарий, если площадка её дала. */
+  url: string;
+}
+
+/** Автор из вложенного объекта: `author.login` у GitHub, `author.username` у GitLab. */
+function commentAuthor(value: unknown): string {
+  if (typeof value !== 'object' || value === null) return typeof value === 'string' ? value : '';
+  const author = value as { login?: unknown; username?: unknown; name?: unknown };
+  if (typeof author.login === 'string') return author.login;
+  if (typeof author.username === 'string') return author.username;
+  return typeof author.name === 'string' ? author.name : '';
+}
+
+/** Текст комментария из поля, как его называет площадка (`body` / `note`). */
+function commentBody(value: Record<string, unknown>): string {
+  if (typeof value.body === 'string') return value.body;
+  return typeof value.note === 'string' ? value.note : '';
+}
+
+/**
+ * Разбор ответа `gh pr view <n> --json comments`. GitHub отдаёт объект с полем
+ * `comments` (автор — `author.login`). Терпимо принимаем и голый массив: версии
+ * и соседние команды печатают по-разному, а понятую строку лучше показать.
+ */
+export function parseGhComments(json: string): ForgeComment[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  const list = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { comments?: unknown }).comments)
+      ? ((parsed as { comments: unknown[] }).comments as unknown[])
+      : [];
+
+  const comments: ForgeComment[] = [];
+  for (const item of list) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    const body = commentBody(value);
+    if (body === '') continue;
+    comments.push({
+      author: commentAuthor(value.author),
+      body,
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : '',
+      url: typeof value.url === 'string' ? value.url : '',
+    });
+  }
+  return comments;
+}
+
+/**
+ * Разбор ответа `glab api projects/:id/merge_requests/<n>/notes`. GitLab отдаёт
+ * массив заметок: текст в `body`, автор — `author.username`, время — `created_at`.
+ * Системные заметки (`system: true`) — это события о смене ветки и меток, а не
+ * слова человека, поэтому их не показываем.
+ */
+export function parseGlabComments(json: string): ForgeComment[] {
+  const comments: ForgeComment[] = [];
+  for (const item of safeArray(json)) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    if (value.system === true) continue;
+    const body = commentBody(value);
+    if (body === '') continue;
+    comments.push({
+      author: commentAuthor(value.author),
+      body,
+      createdAt: typeof value.created_at === 'string' ? value.created_at : '',
+      url: '',
+    });
+  }
+  return comments;
+}
+
 /** Подпись запроса: `#12 · заголовок`, а черновик помечен словом. */
 export function requestLabel(request: ForgeRequest): string {
   const mark = request.state === 'draft' ? 'черновик · ' : '';

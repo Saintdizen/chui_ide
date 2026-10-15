@@ -47,7 +47,16 @@ import {
   type GitIdentity,
   type GitSshKey,
 } from '../../shared/git-identity';
-import { cliFor, forgeRepo, parseGhRequests, parseGlabRequests, type ForgeInfo } from '../../shared/git-platform';
+import {
+  cliFor,
+  forgeRepo,
+  type ForgeComment,
+  type ForgeInfo,
+  parseGhComments,
+  parseGhRequests,
+  parseGlabComments,
+  parseGlabRequests,
+} from '../../shared/git-platform';
 import {
   isConePatterns,
   normalizeSparseDirectory,
@@ -127,6 +136,13 @@ interface GitResult {
  * Сервис ничего не знает про renderer: он отдаёт доменные объекты и сам
  * публикует push-событие, когда состояние репозитория изменилось.
  */
+
+/** Номер запроса: целое больше нуля. Клиент на неверный номер отвечает непонятным текстом. */
+function requireRequestNumber(value: number): number {
+  const n = Math.floor(value);
+  if (!Number.isFinite(n) || n <= 0) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Неверный номер запроса');
+  return n;
+}
 export class GitService {
   /** Наблюдение за метаданными репозитория: показывает чужие коммиты в дереве. */
   private watcher: FSWatcher | null = null;
@@ -1360,6 +1376,73 @@ export class GitService {
       );
     }
     return this.refresh();
+  }
+
+  /**
+   * Комментарии запроса: что люди написали в обсуждении.
+   *
+   * Читаем их тем же клиентом, что и список: он же знает и вход, и доступ к
+   * приватному репозиторию. У GitHub это `gh pr view --json comments`, у GitLab —
+   * заметки запроса через `glab api`. Свой разговор с API тут не заводим: он
+   * потянул бы за собой токены и слой авторизации, а это осознанно оставлено
+   * клиенту площадки.
+   */
+  async forgeComments(number: number): Promise<ForgeComment[]> {
+    const repoRoot = await this.requireRoot();
+    const info = await this.forgeInfo();
+    if (!info.repo || !info.cli) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, info.note || 'Площадка не определена');
+    }
+    if (!info.cliAvailable) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `Клиент ${info.cli} не найден в системе`);
+    }
+    const n = requireRequestNumber(number);
+
+    // У GitLab заметки берём через `glab api`: своего `--json` у `glab mr view` нет.
+    // `:id` клиент заменяет на идентификатор текущего проекта.
+    const args =
+      info.cli === 'gh'
+        ? ['pr', 'view', String(n), '--json', 'comments']
+        : ['api', `projects/:id/merge_requests/${n}/notes?per_page=100`];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || 'Клиент не смог получить комментарии',
+      );
+    }
+    return info.cli === 'gh' ? parseGhComments(result.stdout) : parseGlabComments(result.stdout);
+  }
+
+  /**
+   * Написать комментарий к запросу. Возвращаем обновлённый список, а не «ок»:
+   * окно и так перерисовывает обсуждение, и второй запрос ему ни к чему.
+   */
+  async forgeComment(number: number, body: string): Promise<ForgeComment[]> {
+    const repoRoot = await this.requireRoot();
+    const info = await this.forgeInfo();
+    if (!info.repo || !info.cli) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, info.note || 'Площадка не определена');
+    }
+    if (!info.cliAvailable) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `Клиент ${info.cli} не найден в системе`);
+    }
+    const n = requireRequestNumber(number);
+    const text = body.trim();
+    if (text === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Пустой комментарий');
+
+    const args =
+      info.cli === 'gh' ? ['pr', 'comment', String(n), '--body', text] : ['mr', 'note', String(n), '-m', text];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || 'Клиент отказался отправить комментарий',
+      );
+    }
+    // Список читаем заново, а не приписываем отправленное к прежнему: у клиента
+    // может быть своё форматирование, и «эхо» разошлось бы с тем, что на площадке.
+    return this.forgeComments(n);
   }
 
   /**

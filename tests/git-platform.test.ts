@@ -5,7 +5,9 @@ import {
   forgeRepo,
   newRequestWebUrl,
   openRequestCount,
+  parseGhComments,
   parseGhRequests,
+  parseGlabComments,
   parseGlabRequests,
   parseRemoteUrl,
   platformLabel,
@@ -265,5 +267,73 @@ describe('подписи запроса', () => {
     ];
     expect(requestForBranch(requests, 'feat')?.number).toBe(2);
     expect(requestForBranch(requests, 'нет-такой')).toBeNull();
+  });
+});
+
+describe('parseGhComments', () => {
+  const json = JSON.stringify({
+    comments: [
+      {
+        author: { login: 'ivan' },
+        body: 'Поправьте тесты, пожалуйста.',
+        createdAt: '2024-05-01T11:00:00Z',
+        url: 'https://github.com/acme/web/pull/12#issuecomment-1',
+      },
+      { author: { login: 'petr' }, body: '', createdAt: '2024-05-01T12:00:00Z' },
+    ],
+  });
+
+  it('читает комментарии и пропускает пустые', () => {
+    const comments = parseGhComments(json);
+    expect(comments).toHaveLength(1);
+    expect(comments[0]).toEqual({
+      author: 'ivan',
+      body: 'Поправьте тесты, пожалуйста.',
+      createdAt: '2024-05-01T11:00:00Z',
+      url: 'https://github.com/acme/web/pull/12#issuecomment-1',
+    });
+  });
+
+  it('принимает и голый массив — версии печатают по-разному', () => {
+    const comments = parseGhComments(JSON.stringify([{ author: { login: 'x' }, body: 'привет' }]));
+    expect(comments[0]).toMatchObject({ author: 'x', body: 'привет' });
+  });
+
+  it('битый json и чужой формат дают пусто', () => {
+    expect(parseGhComments('не json')).toEqual([]);
+    expect(parseGhComments('{"comments": 5}')).toEqual([]);
+    expect(parseGhComments('[]')).toEqual([]);
+  });
+
+  it('автор без login не роняет разбор', () => {
+    expect(parseGhComments(JSON.stringify([{ author: {}, body: 'текст' }]))[0]?.author).toBe('');
+  });
+});
+
+describe('parseGlabComments', () => {
+  const json = JSON.stringify([
+    { author: { username: 'petr' }, body: 'Готово.', created_at: '2024-05-02T09:00:00Z' },
+    { author: { username: 'ci' }, body: 'Ветка обновлена', system: true },
+    { author: { username: 'ivan' }, note: 'Через поле note тоже бывает.' },
+  ]);
+
+  it('читает заметки, а системные события пропускает', () => {
+    const comments = parseGlabComments(json);
+    expect(comments.map((comment) => comment.author)).toEqual(['petr', 'ivan']);
+    expect(comments[0]).toEqual({
+      author: 'petr',
+      body: 'Готово.',
+      createdAt: '2024-05-02T09:00:00Z',
+      url: '',
+    });
+  });
+
+  it('текст берётся и из поля note', () => {
+    expect(parseGlabComments(json)[1]?.body).toBe('Через поле note тоже бывает.');
+  });
+
+  it('без текста запись пропускается, битый json даёт пусто', () => {
+    expect(parseGlabComments(JSON.stringify([{ author: { username: 'x' } }]))).toEqual([]);
+    expect(parseGlabComments('мусор')).toEqual([]);
   });
 });

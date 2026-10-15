@@ -1,4 +1,4 @@
-import type { ForgeInfo, ForgeRequest } from '../../shared/git-platform';
+import type { ForgeComment, ForgeInfo, ForgeRequest } from '../../shared/git-platform';
 import {
   branchesLabel,
   newRequestWebUrl,
@@ -175,6 +175,89 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
     if (info.note) statusLine.append(h('p', { class: 'forge-note' }, info.note));
   };
 
+  /**
+   * Обсуждение запроса: список комментариев и поле «написать».
+   *
+   * Читаем лениво — только когда человек раскрыл блок: список запросов нужен сразу,
+   * а обсуждение к каждому из них — по требованию (это ещё один вызов клиента).
+   */
+  const commentsBlock = (request: ForgeRequest): { element: HTMLElement; toggle(): void } => {
+    const listNode = h('div', { class: 'forge-comment-list' });
+    const field = h('textarea', {
+      class: 'field-input forge-comment-input',
+      rows: '2',
+      spellcheck: false,
+      placeholder: 'Написать комментарий…',
+    });
+    const sendButton = h('button', { class: 'btn btn-primary', type: 'button' }, 'Отправить');
+    const element = h(
+      'div',
+      { class: 'forge-comments', hidden: true },
+      listNode,
+      h('div', { class: 'forge-comment-form' }, field, sendButton),
+    );
+
+    const renderComments = (comments: ForgeComment[]): void => {
+      clear(listNode);
+      if (comments.length === 0) {
+        listNode.append(h('p', { class: 'forge-empty' }, 'Комментариев пока нет.'));
+        return;
+      }
+      for (const comment of comments) {
+        listNode.append(
+          h(
+            'div',
+            { class: 'forge-comment' },
+            h(
+              'div',
+              { class: 'forge-comment-head' },
+              h('span', { class: 'forge-comment-author' }, comment.author || 'неизвестный'),
+              comment.createdAt ? h('span', { class: 'forge-comment-date' }, comment.createdAt) : null,
+            ),
+            h('div', { class: 'forge-comment-body' }, comment.body),
+          ),
+        );
+      }
+    };
+
+    const load = async (): Promise<void> => {
+      clear(listNode);
+      listNode.append(h('p', { class: 'field-hint' }, 'Загружаю обсуждение…'));
+      try {
+        renderComments(await deps.git.forgeComments(request.number));
+      } catch (error) {
+        clear(listNode);
+        listNode.append(h('p', { class: 'forge-note' }, error instanceof Error ? error.message : String(error)));
+      }
+    };
+
+    sendButton.addEventListener('click', () => {
+      void run(async () => {
+        const text = field.value.trim();
+        if (text === '') {
+          deps.notify('Пустой комментарий', 'error');
+          return;
+        }
+        // Клиент возвращает обновлённый список — рисуем его, а не приписываем эхо.
+        renderComments(await deps.git.forgeComment(request.number, text));
+        field.value = '';
+        deps.notify('Комментарий отправлен');
+      });
+    });
+
+    let loaded = false;
+    return {
+      element,
+      toggle: () => {
+        element.hidden = !element.hidden;
+        if (!element.hidden && !loaded) {
+          loaded = true;
+          void load();
+        }
+      },
+    };
+  };
+
   /** Одна строка списка: номер с заголовком, ветки, автор, действия. */
   const requestRow = (request: ForgeRequest): HTMLElement => {
     const state = h('span', { class: `forge-state is-${request.state}` }, STATE_LABEL[request.state]);
@@ -185,7 +268,15 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
       if (url) void deps.git.openExternal(url);
     });
 
-    const buttons = h('div', { class: 'forge-row-actions' }, open);
+    const comments = commentsBlock(request);
+    const discuss = h(
+      'button',
+      { class: 'btn btn-small', type: 'button', title: 'Показать обсуждение запроса' },
+      'Комментарии',
+    );
+    discuss.addEventListener('click', () => comments.toggle());
+
+    const buttons = h('div', { class: 'forge-row-actions' }, open, discuss);
     // Ветку имеет смысл забирать только у открытого запроса: слитый или закрытый
     // переключать некуда — работа уже закончена.
     if (request.state === 'open' || request.state === 'draft') {
@@ -211,33 +302,38 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
 
     return h(
       'div',
-      { class: 'forge-row' },
+      { class: 'forge-item' },
       h(
         'div',
-        { class: 'forge-row-info' },
+        { class: 'forge-row' },
         h(
           'div',
-          { class: 'forge-row-title' },
-          h('span', { class: 'forge-number' }, `#${request.number}`),
-          h('span', { class: 'forge-title' }, request.title || '(без заголовка)'),
-          state,
+          { class: 'forge-row-info' },
+          h(
+            'div',
+            { class: 'forge-row-title' },
+            h('span', { class: 'forge-number' }, `#${request.number}`),
+            h('span', { class: 'forge-title' }, request.title || '(без заголовка)'),
+            state,
+          ),
+          h(
+            'div',
+            { class: 'forge-row-meta' },
+            h('code', { class: 'forge-branches' }, branchesLabel(request)),
+            request.author ? h('span', {}, ` · ${request.author}`) : null,
+            request.updatedAt ? h('span', { class: 'forge-updated' }, ` · ${request.updatedAt}`) : null,
+          ),
+          request.labels.length > 0
+            ? h(
+                'div',
+                { class: 'forge-labels' },
+                ...request.labels.map((label) => h('span', { class: 'forge-label' }, label)),
+              )
+            : null,
         ),
-        h(
-          'div',
-          { class: 'forge-row-meta' },
-          h('code', { class: 'forge-branches' }, branchesLabel(request)),
-          request.author ? h('span', {}, ` · ${request.author}`) : null,
-          request.updatedAt ? h('span', { class: 'forge-updated' }, ` · ${request.updatedAt}`) : null,
-        ),
-        request.labels.length > 0
-          ? h(
-              'div',
-              { class: 'forge-labels' },
-              ...request.labels.map((label) => h('span', { class: 'forge-label' }, label)),
-            )
-          : null,
+        buttons,
       ),
-      buttons,
+      comments.element,
     );
   };
 
