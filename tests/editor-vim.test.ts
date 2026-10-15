@@ -369,16 +369,15 @@ describe('применение команд (VimBinding)', () => {
 
 describe('разбор повтора и поиска (vim.ts)', () => {
   it('точка, слеш, вопросительный знак и n/N дают свои команды', () => {
-    expect(run([chord('.')]).command).toEqual({ kind: 'repeat' });
+    expect(run([chord('.')]).command).toEqual({ kind: 'repeat', count: 1 });
     expect(run([chord('/')]).command).toEqual({ kind: 'search', forward: true });
     expect(run([chord('?')]).command).toEqual({ kind: 'search', forward: false });
     expect(run([chord('n')]).command).toEqual({ kind: 'searchRepeat', same: true });
     expect(run([chord('N')]).command).toEqual({ kind: 'searchRepeat', same: false });
   });
 
-  it('счётчик перед точкой не мешает разбору', () => {
-    // Счётчик у `.` мы пока не учитываем, но набранное число не должно ломать разбор.
-    expect(run([chord('3'), chord('.')]).command).toEqual({ kind: 'repeat' });
+  it('счётчик перед точкой попадает в команду повтора', () => {
+    expect(run([chord('3'), chord('.')]).command).toEqual({ kind: 'repeat', count: 3 });
   });
 });
 
@@ -444,6 +443,27 @@ describe('повтор правки (`.`)', () => {
     press('Escape');
     press('.');
     expect(text()).toBe('cdef');
+  });
+
+  it('счётчик повторяет правку несколько раз (3.)', () => {
+    const { press, text } = setup('abcdef', 0);
+    press('x');
+    expect(text()).toBe('bcdef');
+    press('3');
+    press('.');
+    expect(text()).toBe('ef');
+  });
+
+  it('счётчик повторяет и вставку (3. после i…Esc)', () => {
+    const { press, type, text } = setup('abc', 0);
+    press('i');
+    type('hi');
+    press('Escape');
+    expect(text()).toBe('hiabc');
+    press('$');
+    press('3');
+    press('.');
+    expect(text()).toBe('hiabchihihi');
   });
 });
 

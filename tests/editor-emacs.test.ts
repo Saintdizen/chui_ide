@@ -40,6 +40,7 @@ describe('разбор сочетаний Emacs', () => {
     expect(resolveEmacs(chord('_', { ctrl: true }))).toEqual({ kind: 'undo' });
     expect(resolveEmacs(chord('d', { alt: true }))).toEqual({ kind: 'killWordForward' });
     expect(resolveEmacs(chord('Backspace', { alt: true }))).toEqual({ kind: 'killWordBackward' });
+    expect(resolveEmacs(chord('y', { alt: true }))).toEqual({ kind: 'yankPop' });
   });
 
   it('обычный ввод и системные сочетания не перехватываются', () => {
@@ -110,6 +111,36 @@ describe('применение команд Emacs (EmacsBinding)', () => {
     expect(controller.caret).toBe(5);
     press('y', { ctrl: true });
     expect(text()).toBe('hello world');
+  });
+
+  it('подряд идущие убийства сливаются в один кусок', () => {
+    const { press, text } = setup('foo bar baz', 0);
+    press('d', { alt: true });
+    press('d', { alt: true });
+    expect(text()).toBe(' baz');
+    press('y', { ctrl: true });
+    expect(text()).toBe('foo bar baz');
+  });
+
+  it('убийства назад сливаются в правильном порядке', () => {
+    const { press, text } = setup('foo bar', 7);
+    press('Backspace', { alt: true });
+    press('u', { ctrl: true });
+    expect(text()).toBe('');
+    press('y', { ctrl: true });
+    expect(text()).toBe('foo bar');
+  });
+
+  it('Ctrl+Y вставляет свежее, Alt+Y прокручивает к предыдущему убитому', () => {
+    const { press, text } = setup('aaa\nbbb', 0);
+    press('k', { ctrl: true });
+    press('n', { ctrl: true });
+    press('k', { ctrl: true });
+    expect(text()).toBe('\n');
+    press('y', { ctrl: true });
+    expect(text()).toBe('\nbbb');
+    press('y', { alt: true });
+    expect(text()).toBe('\naaa');
   });
 
   it('Ctrl+K в конце строки убивает перевод строки', () => {

@@ -11,7 +11,8 @@
  *   • Ctrl+F/B — знак вперёд/назад, Ctrl+N/P — строка вниз/вверх, Ctrl+A/E — начало/конец строки.
  *   • Ctrl+D — удалить знак вперёд, Ctrl+H — назад.
  *   • Ctrl+K — «убить» до конца строки (или перевод строки в конце), Ctrl+U — до начала строки.
- *   • Ctrl+Y — вставить («yank») последнее убитое.
+ *   • Ctrl+Y — вставить («yank») последнее убитое, Alt+Y — прокрутить кольцо убитого
+ *     (заменить только что вставленное на предыдущее убитое).
  *   • Ctrl+_ — отмена.
  *   • Ctrl+Space — поставить метку (начать выделение), Ctrl+G — сбросить.
  *   • Ctrl+T — переставить знаки, Ctrl+O — вставить строку, оставив каретку перед ней.
@@ -55,6 +56,8 @@ export type EmacsCommand =
   | { readonly kind: 'killWordBackward' }
   /** Ctrl+Y — вставить последнее убитое. */
   | { readonly kind: 'yank' }
+  /** Alt+Y — «прокрутить» кольцо убитого: заменить только что вставленное. */
+  | { readonly kind: 'yankPop' }
   /** Ctrl+Space — поставить или снять метку. */
   | { readonly kind: 'setMark' }
   /** Ctrl+G — сбросить выделение и метку. */
@@ -127,6 +130,8 @@ export function resolveEmacs(chord: KeyChord): EmacsCommand | null {
         return move('wordLeft');
       case 'd':
         return { kind: 'killWordForward' };
+      case 'y':
+        return { kind: 'yankPop' };
       default:
         return null;
     }

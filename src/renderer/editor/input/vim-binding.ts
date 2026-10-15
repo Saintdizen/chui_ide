@@ -258,7 +258,7 @@ export class VimBinding {
         this.swapEnds();
         break;
       case 'repeat':
-        this.repeat();
+        this.repeat(command.count);
         break;
       case 'search':
         this.openSearch(command.forward);
@@ -311,16 +311,20 @@ export class VimBinding {
     }
   }
 
-  /** `.` — повторить последнюю правку (для вставки — вместе с набранным текстом). */
-  private repeat(): void {
+  /** `.` — повторить последнюю правку; счётчик (`3.`) повторяет её столько раз.
+   *  Для вставки повтор — вместе с набранным текстом. */
+  private repeat(times = 1): void {
     const change = this.lastChange;
     if (!change) return;
+    const runs = Math.max(1, times);
     this.replaying = true;
     try {
-      this.run(change.command);
-      if (change.insertText !== undefined && change.insertText !== '') {
-        this.insertText(change.insertText);
-        this.setMode('normal');
+      for (let step = 0; step < runs; step += 1) {
+        this.run(change.command);
+        if (change.insertText !== undefined && change.insertText !== '') {
+          this.insertText(change.insertText);
+          this.setMode('normal');
+        }
       }
     } finally {
       this.replaying = false;

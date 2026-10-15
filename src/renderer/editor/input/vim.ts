@@ -67,8 +67,8 @@ export type VimCommand =
   | { readonly kind: 'replaceChar'; readonly char: string; readonly count: number }
   | { readonly kind: 'toggleCase'; readonly count: number }
   | { readonly kind: 'swapEnds' }
-  /** `.` — повторить последнюю правку. Что именно повторять, помнит слой-исполнитель. */
-  | { readonly kind: 'repeat' }
+  /** `.` — повторить последнюю правку `count` раз. Что повторять, помнит слой-исполнитель. */
+  | { readonly kind: 'repeat'; readonly count: number }
   /** `/` и `?` — открыть поиск; `forward` — искать вперёд (`/`) или назад (`?`). */
   | { readonly kind: 'search'; readonly forward: boolean }
   /** `n` и `N` — следующий (`same`) или обратный поиску шаг. */
@@ -279,7 +279,7 @@ function vimNormalKey(chord: KeyChord, state: VimState): VimStep {
     case 'u':
       return run({ kind: 'undo' }, reset(state));
     case '.':
-      return run({ kind: 'repeat' }, reset(state));
+      return run({ kind: 'repeat', count }, reset(state));
     case '/':
       return run({ kind: 'search', forward: true }, reset(state));
     case '?':

@@ -6,9 +6,9 @@
  * возвращает последнее убитое на место. Слой встраивается в ввод одной проверкой
  * (см. `editor-input.ts`).
  *
- * Кольцо убитого упрощено до одного места: запоминается только последнее убитое. В настоящем
- * Emacs их список, и несколько Ctrl+K подряд сливаются в один кусок; здесь этого нет —
- * для правки кода хватает и одного.
+ * Кольцо убитого — настоящий список: несколько «убивающих» команд подряд (Ctrl+K, Alt+D,
+ * Alt+Backspace…) сливаются в один кусок, а Ctrl+Y вставляет самый свежий. Alt+Y («yank-pop»)
+ * прокручивает кольцо, заменяя только что вставленное на предыдущее убитое.
  *
  * Метка (Ctrl+Space) — это якорь выделения: пока она стоит, движения тянут выделение от
  * неё (как с зажатым Shift), а Ctrl+G или любая правка её снимают.
@@ -25,8 +25,15 @@ import { resolveEmacs, type EmacsCommand, type EmacsMotion } from './emacs';
  */
 export class EmacsBinding {
   private on = false;
-  /** Последнее убитое — что вернёт Ctrl+Y. */
-  private kill = '';
+  /** Кольцо убитого: список убитых кусков, последний — самый свежий (его вернёт Ctrl+Y). */
+  private killRing: string[] = [];
+  /** Предыдущая команда была «убивающей»: следующий kill сливается с прежним куском. */
+  private killAppend = false;
+  /** Где начнётся и как длинно последнее вставленное — чтобы Alt+Y заменил именно его. */
+  private yankStart: number | null = null;
+  private yankLength = 0;
+  /** Место в кольце, с которого начался yank-pop. */
+  private killIndex = 0;
   /** Якорь метки (`null` — метка не стоит). */
   private markAnchor: number | null = null;
 
@@ -63,6 +70,8 @@ export class EmacsBinding {
   }
 
   private run(command: EmacsCommand): void {
+    // Подряд идущие убийства сливаются; всё остальное прерывает этот ряд.
+    if (!isKill(command)) this.killAppend = false;
     switch (command.kind) {
       case 'move':
         this.move(command.motion);
@@ -89,6 +98,9 @@ export class EmacsBinding {
         break;
       case 'yank':
         this.yank();
+        break;
+      case 'yankPop':
+        this.yankPop();
         break;
       case 'setMark':
         this.setMark();
@@ -169,14 +181,14 @@ export class EmacsBinding {
     const end = start + buffer.lineText(line).length;
     if (offset < end) {
       const removed = buffer.getText(offset, end);
-      this.kill = removed;
+      this.pushKill(removed, false);
       this.controller.applyEdit({ start: offset, removed, inserted: '' });
       return;
     }
     if (line < buffer.lineCount) {
       const next = buffer.lineStart(line + 1);
       const removed = buffer.getText(offset, next);
-      this.kill = removed;
+      this.pushKill(removed, false);
       this.controller.applyEdit({ start: offset, removed, inserted: '' });
     }
   }
@@ -189,7 +201,7 @@ export class EmacsBinding {
     const start = buffer.lineStart(buffer.lineAt(offset));
     if (offset <= start) return;
     const removed = buffer.getText(start, offset);
-    this.kill = removed;
+    this.pushKill(removed, true);
     this.controller.applyEdit({ start, removed, inserted: '' });
   }
 
@@ -201,7 +213,7 @@ export class EmacsBinding {
     const to = moveWordRight(buffer, offset);
     if (to <= offset) return;
     const removed = buffer.getText(offset, to);
-    this.kill = removed;
+    this.pushKill(removed, false);
     this.controller.applyEdit({ start: offset, removed, inserted: '' });
   }
 
@@ -213,14 +225,56 @@ export class EmacsBinding {
     const from = moveWordLeft(buffer, offset);
     if (from >= offset) return;
     const removed = buffer.getText(from, offset);
-    this.kill = removed;
+    this.pushKill(removed, true);
     this.controller.applyEdit({ start: from, removed, inserted: '' });
   }
 
-  /** Ctrl+Y: вставить последнее убитое в каретку. */
+  /**
+   * Положить убитое в кольцо. Подряд идущие убийства сливаются в один кусок: вперёд
+   * (`Ctrl+K`, `Alt+D`) — с дописыванием в конец, назад (`Ctrl+U`, `Alt+Backspace`) — в начало.
+   */
+  private pushKill(text: string, prepend: boolean): void {
+    if (text.length === 0) return;
+    const ring = this.killRing;
+    if (this.killAppend && ring.length > 0) {
+      const last = ring[ring.length - 1]!;
+      ring[ring.length - 1] = prepend ? `${text}${last}` : `${last}${text}`;
+    } else {
+      ring.push(text);
+    }
+    this.killAppend = true;
+    // Новое убийство прерывает прокрутку: заменять уже вставленное больше нечем.
+    this.yankStart = null;
+  }
+
+  /** Ctrl+Y: вставить самое свежее убитое в каретку. */
   private yank(): void {
     this.clearMark();
-    if (this.kill.length > 0) this.controller.paste(this.kill);
+    const ring = this.killRing;
+    if (ring.length === 0) return;
+    this.killIndex = ring.length - 1;
+    const at = this.controller.caret;
+    this.controller.paste(ring[this.killIndex]!);
+    // Запомним, что именно легло и куда: Alt+Y заменит ровно этот кусок.
+    this.yankStart = at;
+    this.yankLength = this.controller.caret - at;
+    this.killAppend = false;
+  }
+
+  /** Alt+Y: заменить только что вставленное на предыдущее убитое, прокручивая кольцо. */
+  private yankPop(): void {
+    const start = this.yankStart;
+    const ring = this.killRing;
+    if (start === null || ring.length === 0) return;
+    this.clearMark();
+    this.killIndex = (this.killIndex - 1 + ring.length) % ring.length;
+    const text = ring[this.killIndex]!;
+    const buffer = this.controller.bufferRef;
+    const removed = buffer.getText(start, start + this.yankLength);
+    const end = start + text.length;
+    this.controller.applyEdit({ start, removed, inserted: text }, { anchor: end, active: end });
+    this.yankLength = text.length;
+    this.killAppend = false;
   }
 
   /** Ctrl+O: перевод строки в каретке, сама каретка остаётся перед ним. */
@@ -229,4 +283,14 @@ export class EmacsBinding {
     const offset = this.controller.caret;
     this.controller.applyEdit({ start: offset, removed: '', inserted: '\n' }, { anchor: offset, active: offset });
   }
+}
+
+/** «Убивающая» команда — та, что кладёт текст в кольцо (и участвует в слиянии подряд). */
+function isKill(command: EmacsCommand): boolean {
+  return (
+    command.kind === 'killLine' ||
+    command.kind === 'killToStart' ||
+    command.kind === 'killWordForward' ||
+    command.kind === 'killWordBackward'
+  );
 }
