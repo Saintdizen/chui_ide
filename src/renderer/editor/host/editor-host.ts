@@ -1816,6 +1816,8 @@ export class EditorHost {
     this.hover.dispose();
     this.signature?.dispose();
     this.suggest.dispose();
+    // Ассистент держит отложенный запрос к серверу — снимаем его вместе с видом.
+    this.assistant.dispose();
     this.locations?.dispose();
     this.peekWidget?.dispose();
     this.inline?.dismiss();

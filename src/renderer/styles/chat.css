@@ -330,6 +330,21 @@
   flex-direction: column;
   gap: 3px;
   max-width: 100%;
+  /* Новое сообщение «приходит», а не возникает рывком: мягкий сдвиг снизу.
+     Движение только по transform/opacity и конечное — см. сторож motion.test. */
+  animation: msg-in var(--motion_base) var(--motion_ease);
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .msg-body {
@@ -647,6 +662,18 @@
   background: var(--element_background_hover);
 }
 
+/* Отклик на нажатие кнопки, действие которой не меняет её вид (копировать,
+   оценить): короткое сжатие-возврат. Класс ставит `pulseOnClick` в dom.ts. */
+.is-pulsing {
+  animation: control-pulse var(--motion_fast) var(--motion_ease);
+}
+
+@keyframes control-pulse {
+  50% {
+    transform: scale(0.9);
+  }
+}
+
 /* Поиск по беседам: поле и список совпадений над лентой. */
 .chat-search {
   display: flex;
@@ -882,6 +909,11 @@
   display: none;
 }
 
+/* Кнопка стеклянная (у неё блюр), поэтому появляется кросс-фейдом, без сдвига. */
+.chat-jump:not([hidden]) {
+  animation: popup-fade var(--motion_fast) var(--motion_ease);
+}
+
 /* ── markdown: таблицы, линии, чек-листы и diff ─────────────────────────── */
 
 .md-table {
@@ -1002,6 +1034,22 @@
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
   font-size: var(--font_small_size);
+}
+
+/* Сводка группы пересчитывается на каждом вызове: короткий фейд показывает, что
+   текст именно обновился, а не мигнул подменой. Класс ставит `sync` в chat-tools. */
+.tool-group-tools.is-updated {
+  animation: brief-fade var(--motion_fast) var(--motion_ease);
+}
+
+@keyframes brief-fade {
+  from {
+    opacity: 0.35;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
 .tool-group-state {
@@ -1141,10 +1189,22 @@
   color: var(--text_color_error);
 }
 
+/* Строка вызова и её группа появляются тем же движением, что и сообщение: лента
+   набирается сверху вниз, и новая строка «приходит» снизу, а не вспыхивает. */
+.tool-card,
+.tool-group {
+  animation: msg-in var(--motion_fast) var(--motion_ease);
+}
+
 /* Подробности инструмента — только по запросу: в ленте нужна одна строка. */
 .tool-panel {
   padding: 2px 6px 6px;
   color: var(--text_color_tertiary);
+}
+
+/* Раскрытые подробности проявляются мягко: строка «разворачивается» вниз. */
+.tool-panel:not([hidden]) {
+  animation: msg-in var(--motion_fast) var(--motion_ease);
 }
 
 .tool-summary {
@@ -1193,6 +1253,8 @@
 .review.decision-done {
   border-color: var(--separator_color);
   background: none;
+  /* Карточка сменила вид на строку итога — смена идёт кросс-фейдом, не рывком. */
+  animation: popup-fade var(--motion_base) var(--motion_ease);
 }
 
 /* ── ревью правок агента ────────────────────────────────────────────────── */
@@ -1282,10 +1344,6 @@
   border-top: 1px solid var(--separator_color);
 }
 
-.review-status {
-  color: var(--text_color_tertiary);
-}
-
 /* ── подтверждение команды агента ───────────────────────────────────────── */
 
 .approval {
@@ -1328,10 +1386,6 @@
   border-top: 1px solid var(--separator_color);
 }
 
-.approval-status {
-  color: var(--text_color_tertiary);
-}
-
 .chat-footer {
   position: relative; /* меню композера позиционируется от него */
   flex: 0 0 auto;
@@ -1354,6 +1408,12 @@
 .chat-footer > .composer-changes,
 .chat-footer > .composer-plan {
   padding: 0;
+}
+
+/* Появление панелей в футере — мягкий подъём снизу: они вырастают из композера. */
+.composer-plan:not([hidden]),
+.composer-changes:not([hidden]) {
+  animation: msg-in var(--motion_base) var(--motion_ease);
 }
 
 .chat-footer .chat-input {
@@ -1546,6 +1606,37 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* Чип контекста появляется лёгким «выдохом» — но ТОЛЬКО новый: класс `is-new`
+   ставит разметка, иначе при пересборке полосы оживали бы и все соседние чипы. */
+.composer-chips .chip.is-new {
+  animation: chip-in var(--motion_fast) var(--motion_ease);
+}
+
+/* Снятый чип схлопывается: видно, что именно он уходит, а не пропадает рывком. */
+.composer-chips .chip.is-leaving {
+  animation: chip-out var(--motion_fast) var(--motion_ease);
+  pointer-events: none;
+}
+
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes chip-out {
+  to {
+    opacity: 0;
+    transform: scale(0.85);
+  }
 }
 
 /* Список файлов живёт в попапе: строки одна под другой, без переноса чипов. */
@@ -1832,6 +1923,14 @@
   width: 24px;
   height: 24px;
   border-radius: var(--radius_circle);
+}
+
+/* Смена значка — «отправить ↔ стоп», «идёт ↔ готово»: подмена идёт кросс-фейдом,
+   а не рывком. У значка «в работе» своё правило со спиннером — оно важнее. */
+.composer-action .icon,
+.tool-state .icon,
+.tool-group-state .icon {
+  animation: popup-fade var(--motion_fast) var(--motion_ease);
 }
 
 .chat-footer .composer-toolbar .composer-action-send {

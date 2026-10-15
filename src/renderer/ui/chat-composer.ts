@@ -111,6 +111,8 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     syncMode();
   });
 
+  /** Подпись модели держим ссылкой: искомый «последний ребёнок» — хрупко. */
+  const modelLabel = h('span', {}, 'модель не выбрана');
   const modelButton = h(
     'button',
     {
@@ -120,7 +122,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
       onClick: () => deps.onOpenSettings(),
     },
     svgIcon('sparkle', 12),
-    h('span', {}, 'модель не выбрана'),
+    modelLabel,
   );
 
   const effortSelect = createSelect({
@@ -237,8 +239,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
 
   /** Подпись кнопки модели — «Провайдер - Модель»: где и чем спрашиваем, видно сразу. */
   function setModel(providerLabel: string, model: string): void {
-    const text = modelButton.lastElementChild;
-    if (text) text.textContent = `${providerLabel} - ${model}`;
+    modelLabel.textContent = `${providerLabel} - ${model}`;
     modelButton.title = `${providerLabel} · ${model}\nНажмите, чтобы сменить провайдера, модель или ключ`;
   }
 

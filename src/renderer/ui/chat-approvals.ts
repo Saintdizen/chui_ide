@@ -101,7 +101,6 @@ export function createEditReview(host: ApprovalHost): EditReview {
       block.appendChild(section);
     });
 
-    const status = h('span', { class: 'review-status' });
     let settle: (result: FileEdit[] | null) => void = () => undefined;
     const decision = new Promise<FileEdit[] | null>((resolve) => {
       settle = resolve;
@@ -175,7 +174,7 @@ export function createEditReview(host: ApprovalHost): EditReview {
     for (const box of checks) box.addEventListener('change', syncCount);
     syncCount();
 
-    block.appendChild(h('div', { class: 'review-actions' }, applyButton, rejectButton, allButton, status));
+    block.appendChild(h('div', { class: 'review-actions' }, applyButton, rejectButton, allButton));
     host.mount(block);
     host.scrollToEnd();
 
@@ -216,7 +215,6 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
     block.appendChild(h('pre', { class: 'approval-command' }, request.body));
     block.appendChild(h('div', { class: 'field-hint' }, request.hint));
 
-    const status = h('span', { class: 'approval-status' });
     let settle: (allowed: boolean) => void = () => undefined;
     const decision = new Promise<boolean>((resolve) => {
       settle = resolve;
@@ -252,7 +250,7 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
     const abort = (): void => finish(false, 'отменено');
     const unregister = host.register(abort);
 
-    block.appendChild(h('div', { class: 'approval-actions' }, runButton, skipButton, status));
+    block.appendChild(h('div', { class: 'approval-actions' }, runButton, skipButton));
     host.mount(block);
     host.scrollToEnd();
 

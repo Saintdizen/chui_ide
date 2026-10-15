@@ -170,3 +170,19 @@ describe('отступы', () => {
     expect(buffer.text).toBe('x');
   });
 });
+
+describe('пакет правок', () => {
+  it('правки применяются от конца текста, в каком бы порядке ни пришли', () => {
+    const { controller, buffer } = make('abcdef');
+    // Длины разные: при неверном порядке смещения соседей съехали бы.
+    controller.applyEdits([
+      { start: 1, removed: '', inserted: 'XX' },
+      { start: 4, removed: 'e', inserted: 'E' },
+    ]);
+    expect(buffer.text).toBe('aXXbcdEf');
+    // Курсор — в конец ВЕРХНЕЙ правки.
+    expect(controller.caret).toBe(3);
+    controller.undo();
+    expect(buffer.text).toBe('abcdef');
+  });
+});

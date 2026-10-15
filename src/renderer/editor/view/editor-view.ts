@@ -730,6 +730,10 @@ export class EditorView {
    */
   refresh(fromOffset?: number): void {
     this.layoutCache = null;
+    // Самая широкая строка могла исчезнуть: ширину полотна пересобираем заново по тому,
+    // что рисуем сейчас — иначе полотно остаётся растянутым вправо и после удаления
+    // длинной строки ползёт в пустоту.
+    this.widest = 0;
     if (fromOffset !== undefined) {
       // Правка, изменившая число строк, сдвигает всё ниже: подсветке об этом надо сказать —
       // и на сколько именно строк сдвинулся хвост, чтобы она перенесла разобранное ниже.
@@ -1413,6 +1417,8 @@ export class EditorView {
       else byLine.set(hint.line, [item]);
     }
     this.inlayByLine = byLine;
+    // Вставки-подсказки меняют ширину строк: самую широкую строку считаем заново.
+    this.widest = 0;
     this.layoutCache = null;
     this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.render();
@@ -1438,6 +1444,8 @@ export class EditorView {
       else byLine.set(value.line, [item]);
     }
     this.inlineValueByLine = byLine;
+    // Значения отладчика тоже шире строки — ширину полотна считаем заново.
+    this.widest = 0;
     this.layoutCache = null;
     this.rendered = { version: -1, first: -1, last: -1, decorations: -1, wrap: '', semantic: -1, folds: -1 };
     this.render();
@@ -1942,7 +1950,10 @@ export class EditorView {
   }
 
   private revealLineInternal(line: number): void {
-    this.revealRowInternal(this.rowOf(line) - 1);
+    // Ряд — это именно ряд целевой строки (без сдвига на единицу): так же считает путь
+    // с переносом (см. `revealOffset`) и клик по закреплённому заголовку. С прежним
+    // `- 1` показывался ряд ВЫШЕ цели, и шаг каретки за нижний край не прокручивал ленту.
+    this.revealRowInternal(this.rowOf(line));
   }
 
   private readonly onScroll = (): void => {

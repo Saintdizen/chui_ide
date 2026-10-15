@@ -154,23 +154,35 @@ export class TextBuffer {
    * на разницу длин — пересборка индекса целиком тут не нужна.
    */
   private refreshLines(start: number, removed: string, inserted: string): void {
+    const newLength = this.table.length;
+    const delta = inserted.length - removed.length;
     const firstLine = this.lineIndexAt(start);
     const lastLine = this.lineIndexAt(start + removed.length);
 
-    // Новые начала: каждая граница строки внутри вставленного текста.
-    const insertedStarts: number[] = [];
-    for (let index = 0; index < inserted.length; index += 1) {
-      const code = inserted.charCodeAt(index);
-      if (code === 10) insertedStarts.push(start + index + 1);
-      else if (code === 13) {
-        if (inserted.charCodeAt(index + 1) === 10) continue;
-        insertedStarts.push(start + index + 1);
-      }
+    // Строки ДО правки не трогаем: их начала лежат левее и верны как были.
+    const next = this.starts.slice(0, firstLine);
+    const windowStart = this.starts[firstLine];
+    const hasTail = lastLine + 1 < this.starts.length;
+    // Правый край пересчёта: после правки — начало строки, следующей за задетой, либо
+    // конец документа.
+    const windowEnd = hasTail ? this.starts[lastLine + 1] + delta : newLength;
+
+    // Начала строк считаем заново ТОЛЬКО для задетого места и с одним знаком контекста
+    // слева. Он нужен на стыке: возврат каретки до правки и перевод сразу за ней — ОДИН
+    // разрыв (и наоборот, перевод перед вставленным возвратом разрывать нельзя). Без
+    // этого контекста граница на стыке считалась бы дважды или пропадала.
+    const before = windowStart > 0 ? this.table.getText(windowStart - 1, windowStart) : '';
+    const region = this.table.getText(windowStart, windowEnd);
+    const after = windowEnd < newLength ? this.table.getText(windowEnd, windowEnd + 1) : '';
+    const shift = windowStart - before.length;
+    for (const boundary of computeLineStarts(before + region + after)) {
+      const at = shift + boundary;
+      if (at < windowStart) continue;
+      if (hasTail ? at >= windowEnd : at > windowEnd) continue;
+      next.push(at);
     }
 
-    const delta = inserted.length - removed.length;
-    const next = this.starts.slice(0, firstLine + 1);
-    for (const value of insertedStarts) next.push(value);
+    // Хвост документа лишь сдвигается на разницу длин — начала строк в нём те же.
     for (let index = lastLine + 1; index < this.starts.length; index += 1) {
       next.push(this.starts[index] + delta);
     }

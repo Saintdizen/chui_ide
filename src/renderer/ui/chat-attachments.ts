@@ -72,42 +72,62 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
   /** Полоса чипов над полем ввода: у каждой беседы своя, поэтому перерисовываем целиком. */
   const element = h('div', { class: 'composer-chips', hidden: true });
 
+  /**
+   * Подписи чипов с прошлой отрисовки и беседа, к которой они относились. Полосу
+   * пересобираем целиком, но анимировать нужно ТОЛЬКО что добавленный чип: иначе
+   * при каждом добавлении/снятии оживали бы и все остальные — полоса мигала бы.
+   */
+  let shownLabels = new Set<string>();
+  let shownSession: ChatSession | null = null;
+  /** Узлы чипов по порядку — чтобы уметь схлопнуть снимаемый (см. `removeAttachment`). */
+  let chipNodes: HTMLElement[] = [];
+
   function render(): void {
-    const attachments = deps.session().attachments;
+    const session = deps.session();
+    const attachments = session.attachments;
+    // Сменили вкладку — это не «добавление», показывать анимацию появления нечем.
+    const sameSession = shownSession === session;
     clear(element);
     element.hidden = attachments.length === 0;
+    chipNodes = [];
+    const nextLabels = new Set<string>();
 
     attachments.forEach((item, index) => {
       const image = item.kind === 'image' && item.dataUrl ? item : null;
-      element.appendChild(
+      const isNew = sameSession && !shownLabels.has(item.label);
+      nextLabels.add(item.label);
+      const chip = h(
+        'span',
+        {
+          class: `chip chip-static${image ? ' chip-image' : ''}${isNew ? ' is-new' : ''}`,
+          title: image
+            ? `${item.title} · ${formatBytes(item.bytes ?? 0)}`
+            : `${item.title}\n\n${item.text.slice(0, 300)}`,
+        },
+        // У картинки вместо значка — она сама: по миниатюре видно, что приложено,
+        // и не приходится открывать файл, чтобы это проверить.
+        image
+          ? h('img', { class: 'chip-thumb', src: image.dataUrl!, alt: item.label })
+          : svgIcon(item.kind === 'problems' ? 'warning' : 'file', 12),
+        h('span', { class: 'chip-name' }, item.label),
+        image ? h('span', { class: 'chip-hint' }, formatBytes(item.bytes ?? 0)) : null,
         h(
-          'span',
+          'button',
           {
-            class: `chip chip-static${image ? ' chip-image' : ''}`,
-            title: image
-              ? `${item.title} · ${formatBytes(item.bytes ?? 0)}`
-              : `${item.title}\n\n${item.text.slice(0, 300)}`,
+            class: 'chip-remove',
+            type: 'button',
+            title: 'Убрать из контекста',
+            onClick: () => removeAttachment(index),
           },
-          // У картинки вместо значка — она сама: по миниатюре видно, что приложено,
-          // и не приходится открывать файл, чтобы это проверить.
-          image
-            ? h('img', { class: 'chip-thumb', src: image.dataUrl!, alt: item.label })
-            : svgIcon(item.kind === 'problems' ? 'warning' : 'file', 12),
-          h('span', { class: 'chip-name' }, item.label),
-          image ? h('span', { class: 'chip-hint' }, formatBytes(item.bytes ?? 0)) : null,
-          h(
-            'button',
-            {
-              class: 'chip-remove',
-              type: 'button',
-              title: 'Убрать из контекста',
-              onClick: () => removeAttachment(index),
-            },
-            svgIcon('close', 10),
-          ),
+          svgIcon('close', 10),
         ),
       );
+      chipNodes.push(chip);
+      element.appendChild(chip);
     });
+
+    shownLabels = nextLabels;
+    shownSession = session;
   }
 
   function addAttachment(item: ChatAttachment | null): void {
@@ -123,8 +143,19 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
 
   function removeAttachment(index: number): void {
     const session = deps.session();
-    session.attachments = session.attachments.filter((_, position) => position !== index);
-    render();
+    const commit = (): void => {
+      session.attachments = session.attachments.filter((_, position) => position !== index);
+      render();
+    };
+    // Схлопываем чип перед перерисовкой: полоса пересобирается целиком, и без
+    // этого снятый чип пропадал бы мгновенно, без связи с нажатием.
+    const chip = chipNodes[index];
+    if (!chip) {
+      commit();
+      return;
+    }
+    chip.classList.add('is-leaving');
+    chip.addEventListener('animationend', commit, { once: true });
   }
 
   /** Файл из буфера или перетаскивания — в data-URL средствами браузера. */
@@ -309,9 +340,12 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
 
   /** Плоский список путей для подсказки `@`: пересобирается при смене папки. */
   let mentionCache: string[] | null = null;
+  /** Номер текущего обхода: старый, доехавший позже нового, не должен затирать кэш. */
+  let mentionRun = 0;
 
   async function collectMentions(): Promise<void> {
     const root = deps.workspace.root;
+    const run = (mentionRun += 1);
     if (!root) {
       mentionCache = [];
       return;
@@ -319,6 +353,8 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
 
     const result: string[] = [];
     const walk = async (dir: string, depth: number): Promise<void> => {
+      // Корень сменился, пока гуляли: обход устарел, его результат уже не нужен.
+      if (run !== mentionRun) return;
       if (depth > 6 || result.length >= MAX_MENTIONS) return;
       let entries: DirEntry[];
       try {
@@ -327,6 +363,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
         return;
       }
       for (const entry of entries) {
+        if (run !== mentionRun) return;
         if (result.length >= MAX_MENTIONS) return;
         const rel = relativePath(root, entry.path);
         if (entryIsDirectory(entry)) {
@@ -339,7 +376,8 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
       }
     };
     await walk(root, 0);
-    mentionCache = result;
+    // Кэш пишет только последний обход: иначе устаревший перетёр бы свежий.
+    if (run === mentionRun) mentionCache = result;
   }
 
   /** Вложения приложены к конкретному вопросу: при отправке их снимаем и отдаём. */

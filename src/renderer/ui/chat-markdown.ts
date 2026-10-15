@@ -1,7 +1,7 @@
 import { highlightInto } from '../core/highlight';
 import { renderDisplayMath, renderInlineMath } from './math-view';
 import { renderMermaid } from './mermaid-view';
-import { type Child, clear, h } from './dom';
+import { type Child, h, pulseOnClick } from './dom';
 import { showToast } from './toast';
 
 /**
@@ -17,22 +17,53 @@ export interface MarkdownDeps {
   insertCode(code: string): boolean;
 }
 
+/** Разобранный блок разметки и ключ-исходник, по которому узнаётся его неизменность. */
+interface MarkdownBlock {
+  key: string;
+  node: HTMLElement;
+}
+
 export function createMarkdownRenderer(deps: MarkdownDeps): {
   renderInto(container: HTMLElement, text: string, options?: { streaming?: boolean }): void;
 } {
+  /**
+   * Готовые узлы последнего рендера. Стрим зовёт `renderInto` каждый кадр, и без
+   * этого весь ответ пересобирался бы заново — вместе с подсветкой кода, самой
+   * дорогой частью. Ведущие блоки, чей исходник не изменился, переиспользуем:
+   * отрисовка блока — чистая функция от исходника, поэтому тот же ключ даёт тот
+   * же вид, и подмены не случится.
+   */
+  const rendered = new WeakMap<HTMLElement, { keys: string[]; nodes: HTMLElement[] }>();
+
   function renderInto(container: HTMLElement, text: string, options: { streaming?: boolean } = {}): void {
-    clear(container);
-    if (!text) return;
-    for (const node of markdownBlocks(text, options.streaming === true)) container.appendChild(node);
+    const blocks = text ? markdownBlocks(text, options.streaming === true) : [];
+    const prev = rendered.get(container);
+    // Сколько ведущих блоков не изменилось: у них тот же ключ — берём готовый узел.
+    let same = 0;
+    if (prev) {
+      while (same < blocks.length && same < prev.nodes.length && prev.keys[same] === blocks[same]!.key) same += 1;
+    }
+    const nodes = blocks.map((block, at) => (prev && at < same ? prev.nodes[at]! : block.node));
+    // Снимаем только изменившийся хвост, а общий префикс оставляем на месте: так
+    // браузер не пересобирает уже показанные блоки.
+    while (container.childNodes.length > same) container.lastChild?.remove();
+    for (let at = same; at < nodes.length; at += 1) container.appendChild(nodes[at]!);
+    rendered.set(container, { keys: blocks.map((block) => block.key), nodes });
   }
 
-  function markdownBlocks(text: string, streaming: boolean): HTMLElement[] {
-    const nodes: HTMLElement[] = [];
+  function markdownBlocks(text: string, streaming: boolean): MarkdownBlock[] {
+    const blocks: MarkdownBlock[] = [];
     const lines = text.split('\n');
     let index = 0;
 
     while (index < lines.length) {
+      const start = index;
       const line = lines[index] ?? '';
+      // Ключ — исходник блока и режим отрисовки: у незакрытого во время стрима
+      // блока кода вид другой, и переиспользовать его после закрытия нельзя.
+      const emit = (node: HTMLElement, mode = ''): void => {
+        blocks.push({ key: `${mode}|${lines.slice(start, index).join('\n')}`, node });
+      };
 
       // Формула отдельным блоком: `$$…$$`, в том числе записанная в несколько строк
       // (так её пишут в заметках). Проверяем раньше забора кода: это тоже разметка.
@@ -53,7 +84,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
           }
           formula += `\n${next}`;
         }
-        nodes.push(mathNode(formula, true));
+        emit(mathNode(formula, true), 'math');
         continue;
       }
 
@@ -80,22 +111,23 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
         // означает, что это не код, а математика. Не разобралась — показываем кодом,
         // чтобы исходник не потерялся.
         if (isMathLanguage(language)) {
-          const rendered = renderDisplayMath(fence);
-          if (rendered) {
-            nodes.push(rendered);
+          const formula = renderDisplayMath(fence);
+          if (formula) {
+            emit(formula, 'math');
             continue;
           }
         }
         // Диаграмму Mermaid рисуем своим слоем: язык `mermaid`. Не разобралась —
         // показываем кодом, чтобы исходник не потерялся.
         if (isMermaidLanguage(language)) {
-          const rendered = renderMermaid(fence);
-          if (rendered) {
-            nodes.push(rendered);
+          const diagram = renderMermaid(fence);
+          if (diagram) {
+            emit(diagram, 'mermaid');
             continue;
           }
         }
-        nodes.push(codeBlock(fence, language, streaming && !closed));
+        const plain = streaming && !closed;
+        emit(codeBlock(fence, language, plain), plain ? 'code-plain' : 'code');
         continue;
       }
 
@@ -106,7 +138,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
       const heading = /^(#{1,4})\s+(.*)$/.exec(line);
       if (heading) {
-        nodes.push(h('div', { class: `md-heading md-h${heading[1]!.length}` }, ...inlineMarkdown(heading[2] ?? '')));
+        emit(h('div', { class: `md-heading md-h${heading[1]!.length}` }, ...inlineMarkdown(heading[2] ?? '')), 'h');
         index += 1;
         continue;
       }
@@ -117,7 +149,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
           body.push((lines[index] ?? '').replace(/^>\s?/, ''));
           index += 1;
         }
-        nodes.push(h('blockquote', { class: 'md-quote' }, ...inlineMarkdown(body.join(' '))));
+        emit(h('blockquote', { class: 'md-quote' }, ...inlineMarkdown(body.join(' '))), 'q');
         continue;
       }
 
@@ -130,13 +162,13 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
           rows.push(splitRow(lines[index] ?? ''));
           index += 1;
         }
-        nodes.push(tableBlock(header, rows));
+        emit(tableBlock(header, rows), 't');
         continue;
       }
 
       // Горизонтальная линия: `---`, `***` или `___` (от трёх знаков).
       if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
-        nodes.push(h('hr', { class: 'md-hr' }));
+        emit(h('hr', { class: 'md-hr' }), 'hr');
         index += 1;
         continue;
       }
@@ -166,7 +198,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
           }
           index += 1;
         }
-        nodes.push(list);
+        emit(list, bullet ? 'ul' : 'ol');
         continue;
       }
 
@@ -179,11 +211,11 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
         paragraph.push(next.trim());
         index += 1;
       }
-      if (paragraph.length > 0) nodes.push(h('p', { class: 'md-p' }, ...inlineMarkdown(paragraph.join(' '))));
+      if (paragraph.length > 0) emit(h('p', { class: 'md-p' }, ...inlineMarkdown(paragraph.join(' '))), 'p');
       else index += 1;
     }
 
-    return nodes;
+    return blocks;
   }
 
   /**
@@ -295,36 +327,41 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
   /** Блок кода с действиями: без них ответ переносят руками. */
   function codeBlock(code: string, language: string, plain = false): HTMLElement {
+    const copyButton = h(
+      'button',
+      {
+        class: 'btn btn-small',
+        type: 'button',
+        onClick: () => {
+          void navigator.clipboard.writeText(code).then(
+            () => showToast('Скопировано'),
+            () => showToast('Не удалось скопировать', 'error'),
+          );
+        },
+      },
+      'Копировать',
+    );
+    const insertButton = h(
+      'button',
+      {
+        class: 'btn btn-small',
+        type: 'button',
+        onClick: () => {
+          if (deps.insertCode(code)) showToast('Вставлено в позицию курсора');
+          else showToast('Нет открытого редактора', 'error');
+        },
+      },
+      'Вставить',
+    );
+    // Копирование и вставка вид кнопки не меняют — нажатие подтверждаем пульсом.
+    pulseOnClick(copyButton);
+    pulseOnClick(insertButton);
     const bar = h(
       'div',
       { class: 'code-bar' },
       h('span', { class: 'code-lang' }, language || 'text'),
-      h(
-        'button',
-        {
-          class: 'btn btn-small',
-          type: 'button',
-          onClick: () => {
-            void navigator.clipboard.writeText(code).then(
-              () => showToast('Скопировано'),
-              () => showToast('Не удалось скопировать', 'error'),
-            );
-          },
-        },
-        'Копировать',
-      ),
-      h(
-        'button',
-        {
-          class: 'btn btn-small',
-          type: 'button',
-          onClick: () => {
-            if (deps.insertCode(code)) showToast('Вставлено в позицию курсора');
-            else showToast('Нет открытого редактора', 'error');
-          },
-        },
-        'Вставить',
-      ),
+      copyButton,
+      insertButton,
     );
 
     return h(

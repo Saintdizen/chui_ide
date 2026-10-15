@@ -260,7 +260,12 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         flushSegment();
         collapseReasoning();
         tools.seal();
-        session.history.push(...(done.agentMessages ?? [{ role: 'assistant', content: done.text }]));
+        // Пустой ответ в историю не кладём: он ничего не говорит, а следующий
+        // запрос понёс бы его как реплику модели. Вызовы инструментов — другое
+        // дело: даже с пустым текстом это часть хода, и без них история разойдётся
+        // с лентой, которая карточки показывает.
+        const messages = done.agentMessages ?? [{ role: 'assistant' as const, content: done.text }];
+        if (messages.some((message) => message.content || message.toolCalls?.length)) session.history.push(...messages);
         session.usage = done.usage;
         // След прогона копим в беседе: расход и число шагов видны за всё время,
         // а не только за последний шаг (см. «Информацию о сессии»).
@@ -316,7 +321,8 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       host.closeApprovals();
       if (error instanceof RpcError && error.cancelled) {
         segment.appendChild(h('div', { class: 'field-hint' }, 'генерация остановлена'));
-        session.history.push({ role: 'assistant', content: buffer });
+        // Оборвали с самого начала — текста нет, и пустой реплике в истории не место.
+        if (buffer) session.history.push({ role: 'assistant', content: buffer });
       } else {
         clear(segment);
         segment.appendChild(h('p', { class: 'msg-error' }, error instanceof Error ? error.message : String(error)));

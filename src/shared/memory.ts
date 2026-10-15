@@ -6,36 +6,60 @@
  * проектом, а не внутри диалога, поэтому «мы договорились использовать pytest»
  * остаётся правдой и в новой беседе.
  *
+ * Хранение — обычные .md-файлы: их видно и можно править руками, как заметки в
+ * блокноте. Заметка — строка, начинающаяся с «- »; всё прочее (заголовок,
+ * пояснение) при разборе пропускается, поэтому файл можно дописывать от руки,
+ * не ломая чтение.
+ *
+ * Областей две: `workspace` — заметки проекта, `global` — общие для всех
+ * проектов (личные предпочтения). Каждая область — свой файл.
+ *
  * Здесь только правило и текст: чтение с диска — дело main. Поэтому модуль чистый
  * и проверяется без Electron.
  */
 
-/** Одна заметка. `at` — когда записана, чтобы можно было показать свежие первыми. */
+/** Одна заметка — одна мысль. */
 export interface MemoryNote {
   text: string;
-  /** Unix-время записи (мс). */
-  at: number;
 }
+
+/** Область памяти: заметки проекта или общие для всех проектов. */
+export type MemoryScope = 'workspace' | 'global';
 
 /** Сколько заметок держим: память — выжимка, а не дневник. За полем — отказ, не молчание. */
 export const MAX_NOTES = 40;
 /** Потолок одной заметки: длинная заметка — это уже не заметка, а простыня в промпте. */
 export const MAX_NOTE_CHARS = 500;
 
-/** Проверить прочитанное с диска: файл мог быть правлен руками. */
-export function sanitizeNotes(raw: unknown): MemoryNote[] {
-  if (!Array.isArray(raw)) return [];
+/**
+ * Разобрать файл памяти (.md). Заметки — строки, начинающиеся с дефиса и пробела;
+ * заголовки, пояснения и пустые строки пропускаем: файл правят руками, и лишняя
+ * строка не должна сбивать чтение. Число заметок и длину каждой подрезаем.
+ */
+export function parseMemory(text: string): MemoryNote[] {
   const notes: MemoryNote[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const value = item as { text?: unknown; at?: unknown };
-    if (typeof value.text !== 'string') continue;
-    const text = value.text.trim();
-    if (!text) continue;
-    notes.push({ text: text.slice(0, MAX_NOTE_CHARS), at: typeof value.at === 'number' ? value.at : 0 });
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line.startsWith('- ')) continue;
+    const value = line.slice(2).trim();
+    if (!value) continue;
+    notes.push({ text: value.slice(0, MAX_NOTE_CHARS) });
     if (notes.length >= MAX_NOTES) break;
   }
   return notes;
+}
+
+/** Собрать файл памяти (.md) вместе с шапкой-пояснением, как его править руками. */
+export function serializeMemory(notes: readonly MemoryNote[], title: string): string {
+  const head = [
+    '# ' + title,
+    '',
+    'Заметки ассистента. Строка, начинающаяся с дефиса и пробела, — отдельная заметка.',
+    'Файл можно править вручную: правки подхватятся при следующем ответе.',
+  ];
+  const body = notes.map((note) => '- ' + note.text);
+  const lines = body.length > 0 ? head.concat([''], body) : head;
+  return lines.join('\n') + '\n';
 }
 
 /** Итог добавления: либо новая память, либо причина отказа (её видит агент). */
@@ -48,7 +72,7 @@ export type RememberResult =
  * дважды, только засоряет промпт. Потолок достигнут — честный отказ: агент
  * должен сначала убрать лишнее, а не потерять новое молча.
  */
-export function addNote(notes: readonly MemoryNote[], text: string, at: number): RememberResult {
+export function addNote(notes: readonly MemoryNote[], text: string): RememberResult {
   const clean = text.trim().slice(0, MAX_NOTE_CHARS);
   if (!clean) return { ok: false, reason: 'empty' };
 
@@ -56,7 +80,7 @@ export function addNote(notes: readonly MemoryNote[], text: string, at: number):
   if (existing) return { ok: true, notes: [...notes], added: false };
   if (notes.length >= MAX_NOTES) return { ok: false, reason: 'full' };
 
-  return { ok: true, notes: [...notes, { text: clean, at }], added: true };
+  return { ok: true, notes: [...notes, { text: clean }], added: true };
 }
 
 /**
@@ -70,9 +94,22 @@ export function removeNotes(notes: readonly MemoryNote[], query: string): { note
   return { notes: kept, removed: notes.length - kept.length };
 }
 
-/** Блок памяти для системного промпта; пустая память — `null`, чтобы не слать заголовок впустую. */
-export function formatMemory(notes: readonly MemoryNote[]): string | null {
+/** Подпись области в промпте — по ней видно, откуда заметка. */
+const SCOPE_LABEL: Record<MemoryScope, string> = {
+  workspace: 'проекта',
+  global: 'общая (для всех проектов)',
+};
+
+/**
+ * Блок памяти для системного промпта; пустая память — `null`, чтобы не слать
+ * заголовок впустую. Область называем прямо: глобальная заметка — не про этот
+ * проект, и агент не должен принимать её за него.
+ */
+export function formatMemory(notes: readonly MemoryNote[], scope: MemoryScope = 'workspace'): string | null {
   if (notes.length === 0) return null;
-  const lines = notes.map((note) => `- ${note.text}`);
-  return ['Память проекта (заметки, которые ты оставил ранее; они переживают беседу):', ...lines].join('\n');
+  const lines = notes.map((note) => '- ' + note.text);
+  return [
+    'Память ' + SCOPE_LABEL[scope] + ' (заметки, которые ты оставил ранее; они переживают беседу):',
+    ...lines,
+  ].join('\n');
 }

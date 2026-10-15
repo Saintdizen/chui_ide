@@ -16,7 +16,7 @@ import { formatBrowserSnapshot, type BrowserSnapshot } from '../../shared/browse
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import { formatDocsAnswer } from '../../shared/docs-index';
 import { formatBlame, type BlameLine } from '../../shared/git-blame';
-import type { MemoryNote, RememberResult } from '../../shared/memory';
+import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
 import { parsePatchFiles, type PatchFile } from '../../shared/patch';
@@ -186,8 +186,8 @@ export interface TestRunner {
  * проверяемыми без файловой системы.
  */
 export interface MemoryTools {
-  remember(text: string): Promise<RememberResult>;
-  forget(query: string): Promise<{ notes: readonly MemoryNote[]; removed: number }>;
+  remember(text: string, scope?: MemoryScope): Promise<RememberResult>;
+  forget(query: string, scope?: MemoryScope): Promise<{ notes: readonly MemoryNote[]; removed: number }>;
 }
 
 /**
@@ -2029,17 +2029,24 @@ async function gitPush(ctx: ToolContext, args: Record<string, unknown>): Promise
 
 /* ── память проекта ─────────────────────────────────────────────────────── */
 
+/** Область памяти из аргументов: по умолчанию — память проекта. */
+function readScope(args: Record<string, unknown>): MemoryScope {
+  return args.scope === 'global' ? 'global' : 'workspace';
+}
+
 /**
- * Записать заметку в память проекта. Память переживает беседу и её сжатие —
- * сюда уходит то, о чём договорились насовсем: предпочтения, решения, «как
- * запускать». Не дублируем точные повторы и честно отказываем, когда заметок
- * стало слишком много: терять новую из-за переполнения молча нельзя.
+ * Записать заметку в память. Память переживает беседу и её сжатие — сюда уходит
+ * то, о чём договорились насовсем: предпочтения, решения, «как запускать». Личные
+ * предпочтения (язык ответов и прочее), годные в любом проекте, идут в глобальную
+ * область (`scope: "global"`). Не дублируем точные повторы и честно отказываем,
+ * когда заметок стало слишком много: терять новую из-за переполнения молча нельзя.
  */
 async function remember(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.memory) return { ok: false, summary: 'Память проекта недоступна' };
+  if (!ctx.memory) return { ok: false, summary: 'Память недоступна' };
 
   const text = requireString(args, 'text');
-  const result = await ctx.memory.remember(text);
+  const scope = readScope(args);
+  const result = await ctx.memory.remember(text, scope);
 
   if (!result.ok) {
     if (result.reason === 'full') {
@@ -2054,31 +2061,33 @@ async function remember(ctx: ToolContext, args: Record<string, unknown>): Promis
     return { ok: false, summary: 'Пустая заметка', detail: 'Передай непустой текст в аргументе `text`.' };
   }
 
+  const where = scope === 'global' ? 'в глобальной памяти' : 'в памяти проекта';
   return {
     ok: true,
     summary: result.added ? 'заметка записана' : 'такая заметка уже есть',
-    detail: `В памяти проекта заметок: ${result.notes.length}.`,
+    detail: 'Заметок ' + where + ' теперь: ' + result.notes.length + '.',
   };
 }
 
-/** Убрать из памяти проекта заметки, в которых встречается подстрока. */
+/** Убрать заметки (в области `scope`), в которых встречается подстрока. */
 async function forget(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.memory) return { ok: false, summary: 'Память проекта недоступна' };
+  if (!ctx.memory) return { ok: false, summary: 'Память недоступна' };
 
   const query = requireString(args, 'query');
-  const result = await ctx.memory.forget(query);
+  const scope = readScope(args);
+  const result = await ctx.memory.forget(query, scope);
   if (result.removed === 0) {
     return {
       ok: true,
       summary: 'подходящих заметок нет',
-      detail: `В памяти нет заметок с «${query}». Посмотри список, чтобы уточнить формулировку.`,
+      detail: 'В этой области нет заметок с «' + query + '». Посмотри список, чтобы уточнить формулировку.',
     };
   }
 
   return {
     ok: true,
-    summary: `убрано заметок: ${result.removed}`,
-    detail: `В памяти проекта осталось заметок: ${result.notes.length}.`,
+    summary: 'убрано заметок: ' + result.removed,
+    detail: 'Осталось заметок: ' + result.notes.length + '.',
   };
 }
 

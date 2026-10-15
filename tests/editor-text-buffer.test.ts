@@ -120,6 +120,30 @@ describe('TextBuffer', () => {
     expect(buffer.text).toBe('a\nb');
   });
 
+  it('стык правки не двоит и не теряет разрыв на границе перевода строки', () => {
+    // Возврат каретки уже в тексте, перевод приходит правкой — это ОДИН разрыв.
+    const ahead = new TextBuffer('a\r');
+    expect(ahead.lineCount).toBe(2);
+    ahead.insert(2, '\n');
+    expect(ahead.text).toBe('a\r\n');
+    expect(ahead.lineCount).toBe(2);
+
+    // По знакам: сперва возврат, потом перевод — та же одна граница.
+    const step = new TextBuffer('ab');
+    step.insert(1, '\r');
+    expect(step.lineCount).toBe(2);
+    step.insert(2, '\n');
+    expect(step.text).toBe('a\r\nb');
+    expect(step.lineCount).toBe(2);
+
+    // Обратно: убираем возврат из готовой пары — разрыв остаётся один.
+    const pair = new TextBuffer('a\r\nb');
+    expect(pair.lineCount).toBe(2);
+    pair.delete(1, 1);
+    expect(pair.text).toBe('a\nb');
+    expect(pair.lineCount).toBe(2);
+  });
+
   const SEED = 20251012;
   const STEPS = 1200;
 

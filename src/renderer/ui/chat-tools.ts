@@ -367,6 +367,16 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
   // ПОСЛЕ вызовов, оказывается выше них. С якорем порядок — порядок прихода.
   container.insertBefore(root, anchor);
 
+  /** Сводка изменилась — короткий фейд: текст не «моргает» подменой. */
+  const setBrief = (value: string): void => {
+    if (tools.textContent === value) return;
+    tools.textContent = value;
+    tools.classList.remove('is-updated');
+    // Перезапуск анимации: чтение раскладки сбрасывает прежний прогон.
+    void tools.offsetWidth;
+    tools.classList.add('is-updated');
+  };
+
   const sync = (): void => {
     // Заголовок — имена действий, а счётчик — серым рядом: в шапке видно, ЧТО
     // делал агент, а не сколько раз он это делал. Слово «Действия» больше не
@@ -382,7 +392,7 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
     // сколько их. Терять это нельзя: по одному кресту не понять размах.
     if (failed > 0) briefParts.push(`ошибок: ${failed}`);
     if (changedFiles > 0) briefParts.push(`${changedFiles} ${fileWord(changedFiles)}`);
-    tools.textContent = briefParts.length > 0 ? `· ${briefParts.join(' · ')}` : '';
+    setBrief(briefParts.length > 0 ? `· ${briefParts.join(' · ')}` : '');
 
     if (pending > 0) {
       paintToolState(state, 'tool-group-state', 'running');

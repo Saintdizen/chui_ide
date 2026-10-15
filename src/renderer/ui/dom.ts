@@ -40,6 +40,21 @@ export function clear(node: Element): void {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+/**
+ * Короткий отклик на нажатие: кнопка на миг сжимается и возвращается. Нужен там,
+ * где действие не меняет вид кнопки (скопировать, оценить ответ), — иначе нажатие
+ * остаётся без ответа. Вид задаёт класс `is-pulsing`, кадр — в `chat.css`.
+ */
+export function pulseOnClick(button: HTMLElement): void {
+  button.addEventListener('click', () => {
+    button.classList.remove('is-pulsing');
+    // Перезапуск анимации: чтение раскладки сбрасывает прежний прогон кадра.
+    void button.offsetWidth;
+    button.classList.add('is-pulsing');
+  });
+  button.addEventListener('animationend', () => button.classList.remove('is-pulsing'));
+}
+
 function applyProps(element: HTMLElement, props: Record<string, PropValue>): void {
   for (const [key, value] of Object.entries(props)) {
     if (value === null || value === undefined || value === false) continue;

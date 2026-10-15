@@ -18,7 +18,7 @@ import type { EditorApi } from '../core/editor-api';
 import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { type RpcClient, RpcError } from '../core/rpc';
-import { basename, clear, h, type IconName, svgIcon } from './dom';
+import { basename, clear, h, type IconName, pulseOnClick, svgIcon } from './dom';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
 import { createToolFeed, type ToolCardView } from './chat-tools';
@@ -296,17 +296,28 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return hits;
   }
 
+  /** Таймер снятия подсветки поиска: она подсказка, а не разметка ленты. */
+  let searchHitTimer = 0;
+
   /** Клик по результату поиска: открыть беседу и показать найденное место. */
   function pickSearchHit(id: number, query: string): void {
     activate(id);
     const target = sessions.find((session) => session.id === id);
     if (!target) return;
+    // Прошлую подсветку снимаем: без этого она копилась бы по всем поискам и
+    // осталась бы в ленте навсегда.
+    for (const session of sessions) {
+      for (const marked of session.thread.querySelectorAll('.is-search-hit')) marked.classList.remove('is-search-hit');
+    }
     requestAnimationFrame(() => {
       const node = [...target.thread.querySelectorAll('.msg')].find((el) =>
         (el.textContent ?? '').toLowerCase().includes(query),
       );
-      node?.scrollIntoView({ block: 'center' });
-      node?.classList.add('is-search-hit');
+      if (!node) return;
+      node.scrollIntoView({ block: 'center' });
+      node.classList.add('is-search-hit');
+      if (searchHitTimer) clearTimeout(searchHitTimer);
+      searchHitTimer = window.setTimeout(() => node.classList.remove('is-search-hit'), 2500);
     });
   }
 
@@ -707,23 +718,25 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * Иначе провайдер обрежет запрос или вернёт ошибку лимита. Сжимать нечего —
    * просто предупреждаем.
    */
-  async function ensureContextFits(session: ChatSession, pending: string): Promise<void> {
+  async function ensureContextFits(session: ChatSession, pending: string): Promise<boolean> {
     const usage = contextUsage(sessionInfoData(session, pending));
     const nearWindow = usage.used + settings.ai.maxTokens > usage.limit * COMPACT_AT_RATIO;
     const absolute = settings.ai.compactAtTokens;
     const tooLong = absolute > 0 && usage.used > absolute;
-    if (!nearWindow && !tooLong) return;
+    if (!nearWindow && !tooLong) return true;
 
     if (session.history.length < 2) {
       showToast('Контекст переполнен, но сжимать почти нечего — ответ может обрезаться', 'error');
-      return;
+      return true;
     }
     showToast(
       nearWindow
         ? 'Контекст переполнен — сжимаю беседу перед отправкой'
         : 'Беседа слишком длинная — сжимаю перед отправкой',
     );
-    await compactSession(session);
+    // Сжатие не удалось — запрос не отправляем: иначе он уйдёт обрезанным, и
+    // пользователь получит ошибку лимита вместо ответа.
+    return compactSession(session);
   }
 
   /** После сжатия в ленте остаётся отметка и само резюме — его стоит видеть. */
@@ -1071,11 +1084,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /** Действие над сообщением — иконка-кнопка: подпись заменяет подсказка, ряд не шумит. */
   function messageAction(icon: IconName, label: string, onClick: () => void): HTMLButtonElement {
-    return h(
+    const button = h(
       'button',
       { class: 'icon-btn', type: 'button', title: label, 'aria-label': label, onClick },
       svgIcon(icon, 14),
     );
+    // Копирование и оценка вид кнопки не меняют — нажатие подтверждаем пульсом.
+    pulseOnClick(button);
+    return button;
   }
 
   /** Кнопки под сообщением пользователя: править текст вопроса и скопировать. */
@@ -1184,7 +1200,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
 
     const provider = currentProvider();
-    const model = compactionModel();
+    // Повтор — обычный вопрос, а не сжатие: идём активной моделью беседы, а не
+    // моделью сжатия (`ai.compactModel`), иначе ответ придёт не тем, чем просили.
+    const model = currentModel();
     if (!provider || !model) {
       showToast('Провайдер не настроен', 'error');
       return;
@@ -1216,7 +1234,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     // Не влезает в окно — сначала освобождаем контекст, потом спрашиваем.
     // Вес самого вопроса тоже учитываем: в историю он попадёт лишь ниже.
-    await ensureContextFits(session, text);
+    // Сжать не вышло — не отправляем: иначе запрос уйдёт обрезанным.
+    if (!(await ensureContextFits(session, text))) return;
 
     input.value = '';
     session.draft = '';

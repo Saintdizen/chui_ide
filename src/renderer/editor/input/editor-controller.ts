@@ -704,8 +704,8 @@ export class EditorController {
    * языкового сервера. Одним шагом, а не по одной: отмена должна вернуть всё разом, а
    * не заставлять жать Ctrl+Z столько раз, сколько правок пришло.
    *
-   * Правки должны идти в порядке применения (как их вернул `translateEdits` — по убыванию
-   * смещения). Записываем их в историю в том же порядке: отмена перевернёт список и
+   * Сами правки перед применением сортируем по убыванию места (порядок вызывающего
+   * может быть любым) и в том же порядке пишем в историю: отмена перевернёт список и
    * применит обратные с конца — тогда ни одна правка не съедет. Так же устроен шаг
    * набора: правки в нём лежат в порядке применения.
    */
@@ -717,18 +717,23 @@ export class EditorController {
     if (usable.length === 0) return;
 
     const before = this.selection;
-    for (const change of usable) this.buffer.replace(change.start, change.removed.length, change.inserted);
-    for (const change of usable) this.ledger.shift(change);
+    // Правки применяем от конца текста к началу: правка левее сдвигала бы смещения
+    // соседних. Порядок сверху вниз приходит от вызывающего, но полагаться на это
+    // нельзя — шов открыт для LSP и ассистента. Сортируем сами, чтобы порядок не был
+    // молчаливым условием.
+    const ordered = [...usable].sort((left, right) => right.start - left.start);
+    for (const change of ordered) this.buffer.replace(change.start, change.removed.length, change.inserted);
+    for (const change of ordered) this.ledger.shift(change);
 
     // Курсор — в конец верхней правки: после неё текст виден целиком, и это то место,
     // куда смотрит человек, когда правка пришла «сверху вниз».
-    const top = usable[usable.length - 1]!;
+    const top = ordered[ordered.length - 1]!;
     const after: Selection = selection ?? {
       anchor: top.start + top.inserted.length,
       active: top.start + top.inserted.length,
     };
     const entry: HistoryEntry = {
-      changes: [...usable],
+      changes: [...ordered],
       before: [before],
       after: [after],
       kind: 'other',
@@ -738,7 +743,7 @@ export class EditorController {
     this.restoreCursors([after]);
     this.emit(
       'text',
-      usable.reduce((min, change) => Math.min(min, change.start), Number.POSITIVE_INFINITY),
+      ordered.reduce((min, change) => Math.min(min, change.start), Number.POSITIVE_INFINITY),
     );
   }
 

@@ -678,8 +678,8 @@ export class AiService {
     if (this.linter) toolContext.linter = this.linter;
     if (this.tests) toolContext.tests = this.tests;
     toolContext.memory = {
-      remember: (text) => this.memory.remember(this.workspace.rootPath(), text),
-      forget: (query) => this.memory.forget(this.workspace.rootPath(), query),
+      remember: (text, scope) => this.memory.remember(this.workspace.rootPath(), text, scope),
+      forget: (query, scope) => this.memory.forget(this.workspace.rootPath(), query, scope),
     };
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
@@ -1406,10 +1406,13 @@ export class AiService {
       const map = await this.projectMapLine(root);
       if (map) parts.push(map);
     }
-    // Память проекта — рядом с картой: заметки агента переживают беседу и её
-    // сжатие, поэтому их видно в начале каждого ответа, а не только в исходной.
-    const memory = formatMemory(await this.memory.list(root));
+    // Память — рядом с картой: заметки агента переживают беседу и её сжатие, поэтому
+    // их видно в начале каждого ответа. Областей две: заметки проекта и общие — идут
+    // отдельными блоками, чтобы агент не принял глобальную заметку за проектную.
+    const memory = formatMemory(await this.memory.list(root, 'workspace'), 'workspace');
     if (memory) parts.push(memory);
+    const globalMemory = formatMemory(await this.memory.list(root, 'global'), 'global');
+    if (globalMemory) parts.push(globalMemory);
     let spent = 0;
     for (const name of INSTRUCTION_FILES) {
       if (spent >= MAX_INSTRUCTIONS_TOTAL_BYTES) break;

@@ -76,9 +76,14 @@ export function createChatTabs(deps: ChatTabsDeps): ChatTabsView {
     svgIcon('search', 14),
   );
 
+  /** Таймер отложенного поиска: ввод идёт быстро, а поиск — по всей истории. */
+  let searchTimer = 0;
+
   function toggleSearch(): void {
     searchBar.hidden = !searchBar.hidden;
     if (searchBar.hidden) {
+      if (searchTimer) clearTimeout(searchTimer);
+      searchTimer = 0;
       searchInput.value = '';
       searchResults.hidden = true;
       clear(searchResults);
@@ -119,7 +124,12 @@ export function createChatTabs(deps: ChatTabsDeps): ChatTabsView {
     }
   }
 
-  searchInput.addEventListener('input', runSearch);
+  // Ищем с короткой задержкой: одна буква — один проход по всем беседам, а
+  // набирают их быстрее, чем нужен результат.
+  searchInput.addEventListener('input', () => {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(runSearch, 120);
+  });
   searchInput.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
