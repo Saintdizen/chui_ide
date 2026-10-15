@@ -495,6 +495,18 @@ describe('parseGlabPipelines', () => {
   it('имя идёт в заголовок', () => {
     expect(parseGlabPipelines(json)[2]).toMatchObject({ title: 'Сборка', state: 'running' });
   });
+
+  it('запись без id и не-объект пропускаются, пустые поля не роняют разбор', () => {
+    expect(parseGlabPipelines(JSON.stringify([{ status: 'success' }, 5, null]))).toEqual([]);
+    // Есть только id и status: остальное пустое, но прогон читается.
+    expect(parseGlabPipelines(JSON.stringify([{ id: 3, status: 'success' }]))[0]).toMatchObject({
+      id: 3,
+      title: '',
+      branch: '',
+      url: '',
+      createdAt: '',
+    });
+  });
 });
 
 describe('состояние и счётчики прогонов', () => {
@@ -521,6 +533,37 @@ describe('состояние и счётчики прогонов', () => {
     const runs = [run('running'), run('pending'), run('failed'), run('failed'), run('success')];
     expect(activePipelineCount(runs)).toBe(2);
     expect(failedPipelineCount(runs)).toBe(2);
+  });
+
+  it('словари площадок сведены к одному состоянию', () => {
+    // `pipelineStateOf` не экспортирован — проверяем через разбор ответов.
+    const glab = (status: string): string | undefined =>
+      parseGlabPipelines(JSON.stringify([{ id: 1, status, ref: 'main' }]))[0]?.state;
+    expect(glab('success')).toBe('success');
+    expect(glab('failed')).toBe('failed');
+    expect(glab('canceled')).toBe('canceled');
+    expect(glab('skipped')).toBe('skipped');
+    expect(glab('running')).toBe('running');
+    // Очередь у GitLab называется по-разному: все эти слова — «в очереди».
+    for (const status of ['pending', 'created', 'preparing', 'waiting_for_resource', 'scheduled']) {
+      expect(glab(status), status).toBe('pending');
+    }
+    // Незнакомое слово не выдумываем: «неизвестно», а не «открыт».
+    expect(glab('нет-такого')).toBe('unknown');
+  });
+
+  it('слова GitHub узнаются и в conclusion, и в status', () => {
+    const state = (value: Record<string, unknown>): string | undefined =>
+      parseGhRuns(JSON.stringify([{ databaseId: 1, ...value }]))[0]?.state;
+    // `timed_out` и `action_required` — это провал, а не «что-то своё».
+    expect(state({ status: 'completed', conclusion: 'timed_out' })).toBe('failed');
+    expect(state({ status: 'completed', conclusion: 'action_required' })).toBe('failed');
+    // Ещё не завершён: смотрим сам status, в том числе очередь и отмену.
+    expect(state({ status: 'queued', conclusion: '' })).toBe('pending');
+    expect(state({ status: 'requested', conclusion: '' })).toBe('pending');
+    expect(state({ status: 'waiting', conclusion: '' })).toBe('pending');
+    expect(state({ status: 'cancelled', conclusion: '' })).toBe('canceled');
+    expect(state({ status: 'skipped', conclusion: '' })).toBe('skipped');
   });
 });
 
@@ -559,6 +602,14 @@ describe('parseGhNotifications', () => {
   it('без id — пропуск, битый json — пусто', () => {
     expect(parseGhNotifications(JSON.stringify([{ unread: true }]))).toEqual([]);
     expect(parseGhNotifications('не json')).toEqual([]);
+    // Не-объект в массиве тоже пропускаем.
+    expect(parseGhNotifications(JSON.stringify([5, null, 'строка']))).toEqual([]);
+  });
+
+  it('пропавшие поля не роняют разбор', () => {
+    // Есть id, но нет ни subject, ни reason: заголовок и вид пустые, ссылки нет.
+    const sparse = parseGhNotifications(JSON.stringify([{ id: 7 }]));
+    expect(sparse[0]).toMatchObject({ id: '7', title: '', kind: '', reason: '', url: '', unread: false });
   });
 });
 
@@ -595,6 +646,22 @@ describe('parseGlabTodos', () => {
 
   it('закрытое дело — не ждёт внимания', () => {
     expect(parseGlabTodos(json)[1]?.unread).toBe(false);
+  });
+
+  it('запись без id и не-объект пропускаются', () => {
+    expect(parseGlabTodos(JSON.stringify([{ project: { path_with_namespace: 'team/api' } }, 5, null]))).toEqual([]);
+  });
+
+  it('дело без проекта не отбрасывается даже при заданном пути', () => {
+    // Путь проекта может не прийти — тогда лучше показать лишнее, чем промолчать.
+    const noProject = JSON.stringify([{ id: 1, target: { title: 'Без проекта' } }]);
+    expect(parseGlabTodos(noProject, 'team/api')).toHaveLength(1);
+  });
+
+  it('пропавшие поля не роняют разбор', () => {
+    // Нет `target` (не объект) и нет `web_url` — заголовок и адрес пустые, дело читается.
+    const sparse = JSON.stringify([{ id: 5, project: { path_with_namespace: 'team/api' } }]);
+    expect(parseGlabTodos(sparse, 'team/api')[0]).toMatchObject({ id: '5', title: '', url: '', unread: true });
   });
 });
 

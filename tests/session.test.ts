@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_MACRO_STEPS, rawMacroSteps } from '../src/shared/macro';
 import {
   EMPTY_SESSION,
   MAX_EXPANDED,
@@ -253,5 +254,25 @@ describe('несохранённые правки («hot exit»)', () => {
     expect(
       sanitizeSession({ tabs: [], expanded: [], unsaved: [{ path: '/p/a.ts', text: '' }] }).unsaved,
     ).toBeUndefined();
+  });
+});
+
+describe('макрос в сессии', () => {
+  it('длинный список обрезается по пределу', () => {
+    const many = Array.from({ length: MAX_MACRO_STEPS + 50 }, (_, index) => ({ kind: 'move', index }));
+    expect(rawMacroSteps(many)).toHaveLength(MAX_MACRO_STEPS);
+  });
+
+  it('не массив — пусто: форму шага проверяет редактор, а не сессия', () => {
+    expect(rawMacroSteps(null)).toEqual([]);
+    expect(rawMacroSteps('нет')).toEqual([]);
+    expect(rawMacroSteps({ kind: 'move' })).toEqual([]);
+  });
+
+  it('sanitizeSession сохраняет непустой макрос и не пишет пустой', () => {
+    const steps = [{ kind: 'move' }];
+    expect(sanitizeSession({ tabs: [], expanded: [], macro: steps }).macro).toEqual(steps);
+    expect(sanitizeSession({ tabs: [], expanded: [], macro: [] }).macro).toBeUndefined();
+    expect(sanitizeSession({ tabs: [], expanded: [], macro: 'нет' }).macro).toBeUndefined();
   });
 });
