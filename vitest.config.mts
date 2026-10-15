@@ -20,4 +20,12 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
   },
+  // Порог покрытия — проверяется при `npm run test:coverage` (отдельный шаг CI).
+  // Уровни стоят чуть ниже достигнутого, чтобы отличать сползание от случайного
+  // колебания: цифра не должна падать ниже, чем была.
+  coverage: {
+    provider: 'v8',
+    reporter: ['text'],
+    thresholds: { statements: 78, branches: 72, functions: 76, lines: 80 },
+  },
 });
