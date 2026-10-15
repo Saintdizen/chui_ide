@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { ApplyEditsHostResult } from '../src/shared/api';
+import { mergePatchResult } from '../src/renderer/ui/chat-patches';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import type { WorkspaceService } from '../src/main/workspace/workspace';
 
@@ -83,17 +84,25 @@ describe('apply_patch: записан ли файл на диск', () => {
   });
 
   it('одна запись осталась в буфере — говорим и о ней', async () => {
-    const applyPatches = bridge({
-      rejected: false,
-      result: {
-        reports: [
-          { path: '/proj/a.ts', applied: 1, version: 1 },
-          { path: '/proj/b.ts', applied: 1, version: 1 },
-        ],
-        failed: [],
-      },
-      unwritten: ['/proj/b.ts'],
-    });
+    // Ответ собираем тем же сводом, что и окно (`mergePatchResult`): иначе проверка
+    // сторожила бы только main, а оговорку терял бы renderer — и в живом окне её
+    // не было бы видно, хотя тест зелёный.
+    const applyPatches = bridge(
+      mergePatchResult(
+        {
+          rejected: false,
+          result: {
+            reports: [
+              { path: '/proj/a.ts', applied: 1, version: 1 },
+              { path: '/proj/b.ts', applied: 1, version: 1 },
+            ],
+            failed: [],
+          },
+          unwritten: ['/proj/b.ts'],
+        },
+        [],
+      ),
+    );
     const outcome = await runTool(
       context({ applyPatches }),
       'apply_patch',

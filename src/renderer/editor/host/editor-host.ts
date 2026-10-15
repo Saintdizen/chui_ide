@@ -37,7 +37,7 @@ import type { Snippet } from '../../../shared/snippets';
 import type { TestOutcome } from '../../../shared/test-model';
 import { spellProblemsInLine, type CharRange, type SpellProblem } from '../../../shared/spellcheck';
 import type { BreakpointInput } from '../../core/debug';
-import type { TextDocument } from '../../core/document';
+import type { EditSource, TextDocument } from '../../core/document';
 import { Emitter } from '../../core/events';
 import type { SpellCheck } from '../../core/spellcheck';
 import { CompletionAssistant } from '../complete/assistant';
@@ -833,10 +833,13 @@ export class EditorHost {
    * Правки извне — ассистент, языковой сервер. Переводим позиции LSP в смещения буфера и
    * применяем ОДНИМ шагом истории: отмена должна вернуть всё разом.
    *
-   * Открытый файл правит контроллер (тогда правка попадает в историю и в документ), а
-   * файл за кадром — прямо в буфер и в документ: история нужна там, где человек печатает.
+   * Применяет кто-то ОДИН. Открытый файл правит контроллер: правка ложится в историю и
+   * уходит в документ (см. `onControllerChange`). Файл за кадром правит сам документ —
+   * в буфер его донесёт реестр, и о замене узнают все панели с этим файлом. Двух
+   * применений быть не должно: дошедшая второй раз правка ложится в текст повторно,
+   * а совпавший `oldText` повтор не отсекает — от этого в файлах задваивались строки.
    */
-  applyEdits(document: TextDocument, edits: readonly TextEdit[]): TranslatedEdits {
+  applyEdits(document: TextDocument, edits: readonly TextEdit[], source: EditSource = 'programmatic'): TranslatedEdits {
     // Файл только для чтения правок не принимает — ни от ассистента, ни от сервера.
     if (document.readOnly) return { changes: [], skipped: [] };
     const buffer = this.registry.resolve(document);
@@ -846,10 +849,9 @@ export class EditorHost {
     if (this.path === document.path) {
       this.controller.applyEdits(translated.changes);
     } else {
-      for (const change of translated.changes) {
-        buffer.replace(change.start, change.removed.length, change.inserted);
-      }
-      this.registry.push(document.path);
+      // За кадром: текст правит документ — истина о содержимом, а буфер подтянет реестр.
+      // Так же приходят правки с диска и форматирование при сохранении.
+      document.applyEdits(edits, source);
     }
     return translated;
   }

@@ -74,16 +74,26 @@ export class EditService {
           throw new Error(`Версия документа устарела: ожидалась ${file.expectedVersion}, текущая ${document.version}`);
         }
 
-        const applied = document.applyEdits(file.edits, source);
-        if (applied === 0) {
+        // Применяет кто-то ОДИН — редактор для открытого файла, документ для файла за кадром
+        // (см. `EditorHost.applyEdits`). Раньше обе ступени шли подряд, и до второй текст
+        // доезжал уже применённым — правка ложилась ещё раз, а совпавший `oldText` повтор
+        // не отсекал: от этого в файлах задваивались строки.
+        const translated = this.deps.editors.applyEdits(document, file.edits, source);
+        if (translated.changes.length === 0) {
           // Разбор прошёл, но текст не изменился: позиции указывают не туда.
           // «применено 0» без объяснения модель читает как успех и повторяет ошибку.
+          const reason = translated.skipped[0]?.reason;
           throw new Error(
-            'правки не изменили документ: позиции не совпали с содержимым файла — перечитай файл и повтори',
+            reason
+              ? `правки не изменили документ: ${reason} — перечитай файл и повтори`
+              : 'правки не изменили документ: позиции не совпали с содержимым файла — перечитай файл и повтори',
           );
         }
-        this.deps.editors.applyEdits(document, file.edits);
-        reports.push({ path: file.path, applied, version: document.version });
+        // Пропущенная правка не молчит: рядом с применёнными о ней надо сказать отдельно.
+        for (const skip of translated.skipped) {
+          failed.push({ path: file.path, message: `правка пропущена: ${skip.reason}` });
+        }
+        reports.push({ path: file.path, applied: translated.changes.length, version: document.version });
       } catch (error) {
         failed.push({ path: file.path, message: error instanceof Error ? error.message : String(error) });
       }

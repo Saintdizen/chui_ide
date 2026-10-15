@@ -30,6 +30,7 @@ import { createPlanPanel } from './chat-plan';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
 import { createCommandApproval, createEditReview, type ApprovalHost } from './chat-approvals';
+import { mergePatchResult } from './chat-patches';
 import { countLines, plural, snippetFor, titleFrom } from './chat-text';
 import { createChatTabs, type ChatSearchHit } from './chat-tabs';
 import { createChatPersistence, newChatUid } from './chat-persistence';
@@ -1449,13 +1450,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     const outcome = await applyAgentEdits({ edits, autoApprove: params.autoApprove });
     if (outcome.rejected) return outcome;
-    return {
-      rejected: false,
-      result: {
-        reports: outcome.result?.reports ?? [],
-        failed: [...(outcome.result?.failed ?? []), ...failed],
-      },
-    };
+    // Несведённые якоря — к тому же ответу, что и применённые файлы: оговорку
+    // «осталось в буфере» свод сохраняет (см. `mergePatchResult`).
+    return mergePatchResult(outcome, failed);
   }
 
   /** Разбор ответа в узлы: движок markdown живёт в отдельном модуле. */

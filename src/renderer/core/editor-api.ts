@@ -15,14 +15,18 @@
 import type { CursorPosition, DiagnosticItem, LspDiagnostic } from '../../shared/api';
 import type { TextEdit } from '../../shared/edits';
 import type { MacroStep } from '../editor/input/macro';
+import type { TranslatedEdits } from '../editor/host/document-edits';
 import type { BreakpointInput } from './debug';
-import type { TextDocument } from './document';
+import type { EditSource, TextDocument } from './document';
 
 export interface EditorApi {
   /** Открыть файл в активной панели. */
   open(document: TextDocument): void;
-  /** Применить правки извне (ассистент, языковой сервер). Возврат — что применилось. */
-  applyEdits(document: TextDocument, edits: readonly TextEdit[]): unknown;
+  /**
+   * Применить правки извне (ассистент, языковой сервер). Возврат — что применилось:
+   * редактор сам решает, какие правки годятся, — по его ответу видно, что пропало.
+   */
+  applyEdits(document: TextDocument, edits: readonly TextEdit[], source?: EditSource): TranslatedEdits;
   /** Позиции курсоров по файлам — их берёт сессия проекта. */
   cursorPositions(): Record<string, CursorPosition>;
   /** Раздать позиции курсоров: панели подхватят их при открытии файла. */
