@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { COMPONENT_PARTS, readMainCss, readStyle } from './style-files';
 
 /**
  * Страж палитры и шкал: значения живут в `theme.css`, а правила берут их токенами.
@@ -21,10 +22,7 @@ import { describe, expect, it } from 'vitest';
 const STYLES = resolve(process.cwd(), 'src/renderer/styles');
 const THEME = readFileSync(resolve(STYLES, 'theme.css'), 'utf8');
 /** Компоненты: их правила обязаны брать цвета и шкалы из палитры. */
-const COMPONENTS = ['main.css', 'editor.css', 'terminal.css'].map((name) => ({
-  name,
-  css: readFileSync(resolve(STYLES, name), 'utf8'),
-}));
+const COMPONENTS = COMPONENT_PARTS.map((name) => ({ name, css: readStyle(name) }));
 
 /** Правила без комментариев: в пояснениях числа и оттенки — это нормально. */
 function rulesOnly(css: string): string {
@@ -55,7 +53,7 @@ describe('цвета берутся из палитры', () => {
 
   it('в масках `#000` — это не цвет, сторож его не считает', () => {
     // Маска берёт прозрачность, а не оттенок: `#000` там значит «непрозрачно».
-    const MAIN = rulesOnly(readFileSync(resolve(STYLES, 'main.css'), 'utf8'));
+    const MAIN = rulesOnly(readMainCss());
     expect(MAIN).toMatch(/mask-image:[^;]*#000/);
   });
 });

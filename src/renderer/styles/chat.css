@@ -1,0 +1,1904 @@
+/* Панель ассистента: беседы, лента ответа с разметкой, вызовы инструментов, ревью
+   правок, композер. Часть одной таблицы стилей — порядок задан в `main.css`. */
+/* ── чат ────────────────────────────────────────────────────────────────── */
+
+.chat {
+  position: relative; /* от него позиционируется окно информации о сессии */
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Ассистент выключен мастер-тумблером в настройках: панель видна, но не работает —
+   поле ввода и лента не принимают ввод, а поверх висит подсказка, как включить обратно. */
+.chat.is-ai-disabled .chat-body,
+.chat.is-ai-disabled .chat-footer,
+.chat.is-ai-disabled .chat-search {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* Плашка-подсказка: заливки хватает, чтобы отделить её от полотна, — рамка
+   тут лишний «хром» (Clarity: интерфейс не спорит с содержимым). */
+.chat.is-ai-disabled .chat-body::after {
+  content: "AI выключен в настройках. Включить: Настройки → AI.";
+  display: block;
+  margin-bottom: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  pointer-events: auto;
+}
+
+/* ── вкладки бесед: те же классы, что у вкладок редактора ──────────────── */
+
+.chat-tabs {
+  /* Плотный отступ со всех сторон: шапка вкладок бесед ниже панельной и не
+     должна отжимать содержимое к краям. */
+  padding: 3px;
+}
+
+/* Полоса вкладок редактора рассчитана на свою высоту — здесь она живёт в шапке. */
+.chat-tab-list {
+  height: auto;
+  padding: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Идёт генерация: точка у вкладки — тот же язык, что точка несохранённого файла. */
+.chat-tab.is-busy .tab-label::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: var(--radius_circle);
+  background: var(--blue_prime_background);
+  animation: tab-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes tab-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* ── окно информации о сессии ──────────────────────────────────────────── */
+
+.session-info {
+  position: absolute;
+  /* Якорь — слот статус-бара (.status-chat): отсчёт этого bottom идёт от него,
+     а не от всего окна, поэтому окно встаёт прямо над кольцом «4%». */
+  right: 5px;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  width: 262px;
+  padding: 10px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_material);
+  box-shadow: var(--box_shadow_small);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
+}
+
+.session-info[hidden] {
+  display: none;
+}
+
+.session-info-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--text_color);
+  font-weight: 600;
+  font-size: var(--font_labels_size);
+}
+
+.session-info-sub {
+  margin-bottom: 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.session-info-gauge {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.session-info-value {
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.session-info-percent {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+/* Полоса заполнения: доли частей контекста друг относительно друга. */
+.context-bar {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--radius_pill);
+  background: var(--sunken_background);
+}
+
+/* Состав контекста — категориальная диаграмма, а не состояния: у каждой доли
+   свой оттенок из `--context_seg_*`, и цвета ошибки/предупреждения/успеха
+   в неё не берём. Раньше «инструменты» и «файлы» делили один жёлтый, а
+   результаты/файлы тянули git-роли — доли путались. */
+.context-seg-system {
+  background: var(--context_seg_system);
+}
+
+.context-seg-tools {
+  background: var(--context_seg_tools);
+}
+
+.context-seg-messages {
+  background: var(--context_seg_messages);
+}
+
+.context-seg-results {
+  background: var(--context_seg_results);
+}
+
+.context-seg-files {
+  background: var(--context_seg_files);
+}
+
+.session-info-reserved {
+  margin-top: 5px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.session-info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 10px;
+}
+
+.session-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.session-info-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.context-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius_circle);
+}
+
+.session-info-share {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.session-info-note {
+  margin-top: 8px;
+}
+
+.session-info-compact {
+  width: 100%;
+  justify-content: center;
+  margin-top: 10px;
+  gap: 6px;
+}
+
+/* ── кнопка «Информация о сессии»: кольцо контекста и виджеты AI ────────── */
+
+.context-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 1px 4px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+}
+
+.context-ring:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color_secondary);
+}
+
+.ring-track {
+  stroke: var(--separator_color);
+}
+
+/* Дуга кольца: цвет говорит о запасе контекста — синий, жёлтый, красный. */
+.ring-value {
+  stroke: var(--blue_prime_background);
+  stroke-linecap: round;
+  transition: stroke-dashoffset var(--motion_base) var(--motion_ease);
+}
+
+.context-ring.is-tight .ring-value {
+  stroke: var(--yellow_prime_background);
+}
+
+.context-ring.is-full .ring-value {
+  stroke: var(--red_prime_background);
+}
+
+/* ── лента беседы и её сводка после сжатия ─────────────────────────────── */
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.chat-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.chat-thread[hidden] {
+  display: none;
+}
+
+/* Ход беседы: вопрос и ответы на него. Обёртка держит их вместе, чтобы вопрос
+   не отрывался от своего ответа при разметке ленты. */
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.thread-summary {
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  font-size: var(--font_labels_size);
+}
+
+.thread-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  color: var(--text_color_secondary);
+  cursor: pointer;
+}
+
+.thread-summary-text {
+  max-height: 220px;
+  padding: 0 8px 8px;
+  overflow: auto;
+  color: var(--text_color_tertiary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-config {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 12px;
+  border-bottom: 1px solid var(--separator_color);
+  background: var(--sunken_background);
+}
+
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+
+.chat-intro {
+  color: var(--text_color_secondary);
+}
+
+.chat-intro p {
+  margin: 0 0 6px;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 100%;
+}
+
+.msg-body {
+  padding: 7px 9px;
+  border-radius: var(--radius_sm);
+  font-size: var(--font_labels_size);
+  overflow-wrap: anywhere;
+}
+
+/* Ответы идут плоским текстом: у них нет ни рамки, ни подложки — коробки
+   спорили с карточками инструментов и размышлениями и мешали читать длинные
+   ответы. Пузырь остаётся только там, где он уместен, — у вопроса. */
+
+/* Вопрос пользователя — пузырь: подложка отделяет реплику от полотна, а сторона
+   (справа) отличает её от ответа без чтения. Ответ остаётся плоским текстом:
+   длинные ответы читаются лучше без коробки, а вопрос всегда короткий. */
+.msg-user {
+  align-items: flex-end;
+}
+
+.msg-user .msg-body {
+  /* Пузырь не на всю ширину ленты: край виден, и реплика читается как своя. */
+  max-width: 85%;
+  padding: 7px 11px;
+  border-radius: var(--radius_md);
+  /* Заливка контрола: та же ступень поверхности, что у кнопок и полей, —
+     пузырь не заводит отдельный цвет и в обеих схемах ложится на полотно. */
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+.msg-assistant .msg-body,
+.msg-assistant .msg-body.msg-note {
+  padding: 0 2px;
+  color: var(--text_color);
+}
+
+/* Картинки вопроса — прямо в ленте: видно, что ушло модели вместе с вопросом. */
+.msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.msg-image {
+  max-width: 100%;
+  max-height: 220px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  object-fit: contain;
+}
+
+.text-block {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+}
+
+.text-block:last-child {
+  margin-bottom: 0;
+}
+
+.code-block {
+  margin: 0 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+}
+
+.code-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 8px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.code-lang {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+}
+
+.code-action {
+  color: var(--text_color_secondary);
+}
+
+.code-action:hover {
+  color: var(--link_color);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.6;
+}
+
+/* Подсвеченный код — тот же предок, но `code` у браузера моноширинный по умолчанию
+   и со своим кеглем: цвета приходят от Monaco, а шрифт должен остаться нашим. */
+.code-block pre code {
+  display: block;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+.msg-error {
+  margin: 0;
+  color: var(--text_color_error);
+}
+
+.typing {
+  color: var(--text_color_tertiary);
+  font-style: italic;
+}
+
+/* Индикатор работы ассистента: три пульсирующие точки и подпись состояния.
+   Пока генерация идёт, он виден внизу сообщения — иначе ответ «висит» без
+   признаков жизни, особенно когда модель думает или вызывает инструмент. */
+.msg-activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 2px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.msg-activity-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.msg-activity-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius_circle);
+  background: currentColor;
+  animation: activity-dot 1.1s ease-in-out infinite;
+}
+
+.msg-activity-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.msg-activity-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes activity-dot {
+  0%,
+  70%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+
+  35% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+/* Значок «в работе» — круг с разрывом, который вращается: движение тут показывает,
+   что процесс жив. Ему и только ему анимация здесь и нужна. */
+.tool-state.is-running .icon,
+.tool-group-state.is-running .icon {
+  animation: tool-spin 0.9s linear infinite;
+}
+
+@keyframes tool-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Пустой сегмент (например, между двумя вызовами инструментов) не должен
+   рисовать пустую рамку. */
+.msg-body:empty {
+  display: none;
+}
+
+/* ── текст ответа: компактный markdown ──────────────────────────────────── */
+
+.md-p,
+.text-block {
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+
+.md-p:last-child,
+.text-block:last-child {
+  margin-bottom: 0;
+}
+
+.md-heading {
+  margin: 10px 0 5px;
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.md-heading:first-child {
+  margin-top: 0;
+}
+
+.md-h1 {
+  font-size: var(--font_default_size);
+}
+
+.md-h2 {
+  font-size: var(--font_labels_size);
+}
+
+.md-h3,
+.md-h4 {
+  font-size: var(--font_labels_size);
+}
+
+.md-list {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+
+.md-list:last-child {
+  margin-bottom: 0;
+}
+
+.md-list li {
+  margin-bottom: 2px;
+}
+
+.md-quote {
+  margin: 0 0 6px;
+  padding: 2px 0 2px 9px;
+  border-left: 2px solid var(--separator_color);
+  color: var(--text_color_secondary);
+}
+
+.md-code {
+  padding: 1px 4px;
+  border-radius: var(--radius_xs);
+  background: var(--element_background);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.md-link {
+  color: var(--link_color);
+  text-decoration: underline dotted;
+}
+
+/* ── размышления модели ─────────────────────────────────────────────────── */
+
+/* Счётчик шагов: по нему видно, что размышления собраны из нескольких врезок. */
+.reasoning-count:not(:empty) {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius_pill);
+  background: var(--element_background);
+  font-size: var(--font_micro_size);
+  color: var(--text_color_tertiary);
+}
+
+/* Читаемый тон в обеих схемах: берём `--text_color_secondary`
+   (70 % белого / 50 % чёрного) — вторичный, но различимый текст; для
+   рассуждения тихой ступени tertiary уже мало. */
+.reasoning-text {
+  max-height: 180px;
+  margin-top: 3px;
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.5;
+  color: var(--text_color_secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── действия над сообщением, обрыв ответа, план ─────────────────────────── */
+
+/* Кнопки под сообщением появляются при наведении: в спокойном виде лента чище. */
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 1px;
+  opacity: 0;
+  /* Длительность — из общей шкалы: литерал 120ms тут был единственным «своим»
+     временем в файле и не совпадал ни с одной ступенью. */
+  transition: opacity var(--motion_fast) var(--motion_ease);
+}
+
+.msg:hover .msg-actions,
+.msg:focus-within .msg-actions {
+  opacity: 1;
+}
+
+.msg-user .msg-actions {
+  justify-content: flex-end;
+}
+
+/* Действие над сообщением — иконка-кнопка из общего набора: фон проявляется
+   при наведении, подпись живёт в подсказке. Размер меньше панельного — под
+   высоту строки, тон приглушённый: ряд не спорит с текстом сообщения. */
+.msg-actions .icon-btn {
+  width: 24px;
+  height: 24px;
+  color: var(--text_color_secondary);
+}
+
+/* Выбранная оценка (👍/👎) красится акцентом — видно, что отмечено. */
+.msg-actions .icon-btn.is-active {
+  color: var(--blue_prime_background);
+  background: var(--element_background_hover);
+}
+
+/* Поиск по беседам: поле и список совпадений над лентой. */
+.chat-search {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 5px;
+  border-bottom: 1px solid var(--separator_color);
+  background: var(--sunken_background);
+}
+
+.chat-search[hidden] {
+  display: none;
+}
+
+.chat-search-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+  color: var(--text_color);
+  font: inherit;
+  font-size: var(--font_labels_size);
+}
+
+.chat-search-input:focus {
+  border-color: var(--focus_ring_color);
+  outline: none;
+}
+
+.chat-search-results {
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+.chat-search-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px 6px;
+  border-radius: var(--radius_sm);
+  text-align: left;
+}
+
+.chat-search-item:hover {
+  background: var(--element_background_hover);
+}
+
+.chat-search-title {
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+}
+
+.chat-search-snippet {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-search-empty {
+  padding: 6px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.msg.is-search-hit .msg-body {
+  outline: 1px solid var(--focus_ring_color);
+}
+
+/* Ответ оборван по лимиту токенов: строка-предупреждение с продолжением. */
+.finish-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+/* Ответ оборван по лимиту токенов — это предупреждение, и значок носит его цвет. */
+.finish-note .icon {
+  flex: 0 0 auto;
+  color: var(--yellow_prime_background);
+}
+
+/* Ответ достраивается сам: это не предупреждение, а ход работы — тише и без рамки. */
+.finish-note.is-continue {
+  border-color: transparent;
+  background: none;
+  padding-left: 0;
+  font-style: italic;
+}
+
+/* Но «продолжаю ответ» — это ход работы, а не предупреждение: значок нейтральный. */
+.finish-note.is-continue .icon {
+  color: inherit;
+}
+
+/* Панель плана: чек-лист без собственного нижнего отступа — зазор даёт футер. */
+.composer-plan .plan-card {
+  margin-bottom: 0;
+}
+
+/* Чек-лист плана агента. */
+.plan-card {
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  font-size: var(--font_labels_size);
+}
+
+/* Шапка плана — кнопка-переключатель: клик по ней сворачивает и разворачивает шаги. */
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text_color_tertiary);
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-head:hover {
+  color: var(--text_color);
+}
+
+/* Шеврон — первый значок в шапке: в свёрнутом виде указывает вправо. */
+.plan-head > svg:first-child {
+  transition: transform var(--motion_fast) var(--motion_ease);
+}
+
+.plan-head.is-collapsed > svg:first-child {
+  transform: rotate(-90deg);
+}
+
+.plan-title {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+/* Счётчик готовых шагов — справа: видно прогресс, даже когда список свёрнут. */
+.plan-count {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.plan-step {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text_color_tertiary);
+}
+
+.plan-mark {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--blue_prime_background);
+  text-align: center;
+}
+
+.plan-step.is-in_progress {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.plan-step.is-done .plan-text {
+  color: var(--text_color_secondary);
+  text-decoration: line-through;
+}
+
+/* Выполненный шаг — ролью «успех», а не git-добавлением: это итог работы. */
+.plan-step.is-done .plan-mark {
+  color: var(--green_prime_background);
+}
+
+/* Кнопка «к последнему сообщению» в правом нижнем углу ленты. Крепится к футеру
+   и висит НАД композером: фиксированный отступ от низа панели не знал о высоте
+   поля ввода и при нескольких строках кнопка ложилась прямо на него. Висит она
+   НАД содержимым, поэтому носит тот же стеклянный материал, что всплывающие
+   слои: код под кнопкой размывается, а не просвечивает сквозь неё резко. */
+.chat-jump {
+  position: absolute;
+  right: 14px;
+  bottom: calc(100% + 8px);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--popup_border);
+  border-radius: var(--radius_circle);
+  background: var(--popup_material);
+  backdrop-filter: var(--popup_filter);
+  color: var(--text_color_tertiary);
+  box-shadow: var(--box_shadow_drop);
+}
+
+/* Кнопка не на цветной заливке, поэтому «ярче» — это основной текст, а не белый.
+   Материал под курсором плотнее, но остаётся стеклянным: блюр никуда не уходит. */
+.chat-jump:hover {
+  color: var(--text_color);
+  background: color-mix(in srgb, var(--popup_background) 94%, transparent);
+}
+
+.chat-jump[hidden] {
+  display: none;
+}
+
+/* ── markdown: таблицы, линии, чек-листы и diff ─────────────────────────── */
+
+.md-table {
+  width: 100%;
+  margin: 0 0 6px;
+  border-collapse: collapse;
+  font-size: var(--font_small_size);
+}
+
+.md-table th,
+.md-table td {
+  padding: 4px 7px;
+  border: 1px solid var(--separator_color);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table th {
+  background: var(--sunken_background);
+  font-weight: 600;
+}
+
+.md-hr {
+  margin: 8px 0;
+  border: none;
+  border-top: 1px solid var(--separator_color);
+}
+
+.md-task {
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.md-list .md-task {
+  margin-left: -16px;
+}
+
+.md-check {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--blue_prime_background);
+}
+
+.md-task.is-done {
+  color: var(--text_color_secondary);
+}
+
+/* Diff-блок: строки с плюсом - зелёные, с минусом - красные. */
+.diff-code {
+  display: block;
+}
+
+.diff-line {
+  display: block;
+  white-space: pre;
+}
+
+.diff-line.diff-add {
+  color: var(--git_added);
+  background: var(--git_added_tint, transparent);
+}
+
+.diff-line.diff-del {
+  color: var(--git_deleted);
+  background: var(--git_deleted_tint, transparent);
+}
+
+.diff-line.diff-hunk {
+  color: var(--text_color_secondary);
+}
+
+/* ── вызовы инструментов ────────────────────────────────────────────────── */
+
+/* Цепочка вызовов — одна строка в ленте. Строки живут внутри, под раскрытием. */
+/* Действия агента — лента (timeline): вертикальная линия слева, на ней узел
+   с иконкой вызова. Рамку и плашки убрали: строку держит узел, а не коробка,
+   поэтому лента шагов читается как ход работы, а не как стопка карточек.
+   Отступы сжаты — шаг агента занимает минимум места. */
+.tool-group {
+  font-size: var(--font_labels_size);
+  color: var(--text_color_tertiary);
+}
+
+.tool-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 4px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+  text-align: left;
+}
+
+.tool-group-head:hover {
+  background: var(--element_background_hover);
+}
+
+/* Заголовок группы — сами действия, а не слово «Действия»: имя вызова читается
+   сразу, без раскрытия. Кегль меньше строки ленты: список имён длинный, и жирный
+   в полный размер перевешивал бы строки под ним. */
+.tool-group-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color);
+  font-weight: 600;
+  font-size: var(--font_small_size);
+}
+
+/* Сколько вызовов в группе — серым и моноширинно, тем же кеглем, что заголовок. */
+.tool-group-tools {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.tool-group-state {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+}
+
+/* Итог группы красим так же, как строки: зелёный — готово, красный — ошибки.
+   Зелёный берём ролью «успех», а не git-добавлением: это итог работы, а не статус файла. */
+.tool-group-state.is-ok {
+  color: var(--green_prime_background);
+}
+
+.tool-group-state.is-fail {
+  color: var(--text_color_error);
+}
+
+/* Тело ленты: слева идёт линия, строки сдвинуты под неё. */
+.tool-group-body {
+  position: relative;
+  margin-top: 1px;
+  padding-left: 20px;
+}
+
+.tool-group-body::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 2px;
+  bottom: 2px;
+  width: 1px;
+  background: var(--separator_color);
+}
+
+/* Строка ленты — без рамки и фона; разделители между строками тоже убраны. */
+.tool-group-body .tool-card,
+.tool-card {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: var(--font_labels_size);
+}
+
+/* Строка целиком — кнопка: подробности открываются кликом по любому её месту. */
+.tool-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 3px 6px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+  text-align: left;
+}
+
+.tool-head:hover {
+  background: var(--element_background_hover);
+}
+
+/* Узел ленты: иконка вызова садится на линию. Фон панели перекрывает линию
+   под значком, поэтому узел читается точкой на рельсе. Берём `:first-child` —
+   последний значок строки это шеврон, его трогать нельзя. */
+.tool-group-body .tool-head > .icon:first-child {
+  position: absolute;
+  top: 50%;
+  left: -20px;
+  box-sizing: border-box;
+  width: 17px;
+  height: 17px;
+  padding: 3px;
+  transform: translateY(-50%);
+  border-radius: var(--radius_circle);
+  background: var(--element_background_2);
+  color: var(--text_color_secondary);
+}
+
+.tool-failed .tool-head > .icon:first-child {
+  color: var(--text_color_error);
+}
+
+/* Имя вызова в строке ленты: жирным, но меньшим кеглем — строка читается как
+   подпись, а не спорит размером с текстом ответа. */
+.tool-name {
+  flex: 0 0 auto;
+  color: var(--text_color);
+  font-weight: 600;
+  font-size: var(--font_small_size);
+}
+
+.tool-args {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+/* Состояние — ЗНАЧОК, а не подпись: галочка в круге, крест в круге или круг «идёт».
+   Форма читается быстрее слова, а цвет дублирует её (зелёный — готово, красный —
+   ошибка). Слово живёт в подсказке значка (см. `paintToolState`). */
+.tool-state {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+}
+
+/* Готово — зелёным, ошибка — красным: итог видно, не раскрывая строку.
+   «Готово» — роль «успех», а не git-добавление: это итог вызова, а не статус файла. */
+.tool-state.is-ok {
+  color: var(--green_prime_background);
+}
+
+.tool-state.is-fail {
+  color: var(--text_color_error);
+}
+
+.tool-state .icon,
+.tool-group-state .icon {
+  display: block;
+}
+
+.tool-chevron {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+  transition: transform var(--motion_fast) var(--motion_ease);
+}
+
+.tool-card.is-open > .tool-head .tool-chevron,
+.tool-group.is-open > .tool-group-head .tool-chevron {
+  transform: rotate(180deg);
+}
+
+.tool-failed .tool-name {
+  color: var(--text_color_error);
+}
+
+/* Подробности инструмента — только по запросу: в ленте нужна одна строка. */
+.tool-panel {
+  padding: 2px 6px 6px;
+  color: var(--text_color_tertiary);
+}
+
+.tool-summary {
+  color: var(--text_color_secondary);
+}
+
+.tool-raw {
+  max-height: 240px;
+  margin: 4px 0 0;
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Подсвеченный код внутри вывода: шрифт и цвет наследуются от `pre`. */
+.tool-raw code {
+  display: block;
+  font: inherit;
+  color: inherit;
+}
+
+/* ── решение принято: от карточки остаётся одна строка ──────────────────── */
+
+.decision-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.decision-status {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+}
+
+/* Карточка уже не требует действия — гасим акцентную рамку.
+   Селектор с классом карточки: без него жёлтая рамка `.approval` (она ниже
+   по файлу и с той же специфичностью) перебивает это правило. */
+.decision-done,
+.approval.decision-done,
+.review.decision-done {
+  border-color: var(--separator_color);
+  background: none;
+}
+
+/* ── ревью правок агента ────────────────────────────────────────────────── */
+
+.review {
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+  font-size: var(--font_labels_size);
+}
+
+.review-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.review-file {
+  padding-bottom: 6px;
+}
+
+/* Шапка файла кликабельна целиком: щелчок по имени тоже ставит/снимает галочку. */
+.review-file-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 0;
+  cursor: pointer;
+}
+
+.review-path {
+  overflow-wrap: anywhere;
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.review-check {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--blue_prime_background);
+}
+
+/* Снятая галочка приглушает файл: видно, что он не попадёт в применение. */
+.review-file:has(.review-check:not(:checked)) .review-hunk,
+.review-file:has(.review-check:not(:checked)) .review-error {
+  opacity: 0.45;
+}
+
+.review-all {
+  color: var(--text_color_secondary);
+}
+
+.review-all:hover {
+  color: var(--link_color);
+}
+
+.review-hunk {
+  padding: 4px 8px;
+  overflow-wrap: anywhere;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.review-range {
+  color: var(--text_color_tertiary);
+}
+
+.review-del {
+  color: var(--text_color_error);
+}
+
+/* Добавленная строка — цветом git-добавления, как в diff-блоке: синий тут
+   читался как ссылка и ничего не говорил про знак строки. */
+.review-add {
+  color: var(--git_added);
+}
+
+.review-error {
+  padding: 4px 8px;
+  color: var(--text_color_tertiary);
+}
+
+.review-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--separator_color);
+}
+
+.review-status {
+  color: var(--text_color_tertiary);
+}
+
+/* ── подтверждение команды агента ───────────────────────────────────────── */
+
+.approval {
+  border: 1px solid var(--yellow_prime_background);
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+  font-size: var(--font_labels_size);
+}
+
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.approval .field-hint {
+  padding: 0 8px 8px;
+}
+
+.approval-command {
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-top: 1px solid var(--separator_color);
+}
+
+.approval-status {
+  color: var(--text_color_tertiary);
+}
+
+.chat-footer {
+  position: relative; /* меню композера позиционируется от него */
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  /* Небольшой зазор со всех сторон: стопка не липнет к рамке панели,
+     а верхний отступ отделяет её от ленты. Отдельной линии сверху нет —
+     границу композера носит его собственная карточка. */
+  padding: 5px;
+}
+
+/* Чипы контекста держат свой боковой отступ — шире общего зазора футера:
+   вложенные строки не липнут к рамке панели. */
+.chat-footer > .composer-chips {
+  padding: 0 10px;
+}
+
+/* Панели изменений и плана прижаты к зазору футера: у обеих своя рамка/подложка. */
+.chat-footer > .composer-changes,
+.chat-footer > .composer-plan {
+  padding: 0;
+}
+
+.chat-footer .chat-input {
+  /* Вверх поле растёт само: в стопке ему отдана свободная высота, а не фиксированные
+     строки — под панелью остаётся минимум места для ленты. */
+  flex: 1 1 auto;
+  min-height: 50px;
+  max-height: 40vh;
+  /* Поле лежит внутри карточки: свою рамку и подложку оно не несёт — границу
+     носит карточка. */
+  padding: 5px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Композер — карточка: поле ввода и ряд действий лежат одной поверхностью.
+   Подложка — «утопленная», как была у поля ввода; рамка намеренно тише
+   границы панели, чтобы карточка читалась фоном, а не контуром. */
+.composer-box {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  padding: 5px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--sunken_background);
+}
+
+/* ── меню композера: команды «/» и контекст «#» ─────────────────────────── */
+
+.composer-menu {
+  position: absolute;
+  right: 10px;
+  bottom: calc(100% + 4px);
+  left: 10px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_material);
+  box-shadow: var(--box_shadow_small);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
+}
+
+.composer-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+  text-align: left;
+}
+
+.composer-menu-item:hover,
+.composer-menu-item.is-cursor {
+  background: var(--element_background);
+}
+
+.composer-menu-title {
+  font-size: var(--font_labels_size);
+}
+
+.composer-menu-hint {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.chat-input {
+  width: 100%;
+  padding: 8px 10px;
+  resize: vertical;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+}
+/* ── композер: панель изменений, чипы, тулбар, статус ────────────────────── */
+
+.composer-changes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Раскрытый список файлов: строки-чипы идут плотнее, чем в свёрнутом виде. */
+.composer-changes.is-open {
+  gap: 5px;
+}
+
+/* Шапка панели — кнопка: список файлов скрывается целиком, а не по одному. */
+.changes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 6px 2px 2px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+}
+
+.changes-toggle:hover {
+  background: var(--element_background_hover);
+}
+
+.changes-toggle svg {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+  transition: transform var(--motion_fast) var(--motion_ease);
+}
+
+.composer-changes.is-open .changes-toggle svg {
+  transform: rotate(180deg);
+}
+
+.changes-summary {
+  color: var(--text_color);
+}
+
+/* Счётчик правок: своя типографика, чтобы числа не сливались с подписью. */
+.changes-stat,
+.chip-stat {
+  display: inline-flex;
+  gap: 6px;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+/* Операция агента с файлом: создан, удалён или перенесён. Вертикальный паддинг и
+   плотный line-height сами задают высоту пилюли: при нулевом паддинге буквы упирались
+   в круглые торцы (радиус 999px при высоте строки ~14.5px) и текст выглядел срезанным. */
+.chip-kind {
+  padding: 1px 8px;
+  border-radius: var(--radius_pill);
+  background: var(--element_background);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* Созданный файл — цветом добавления, удалённый — цветом ошибки: как состояния git.
+   Запасное значение убрано: цвет приходит только из роли темы, а не из литерала,
+   который со сменой палитры разошёлся бы с ней. */
+.chip-kind-created {
+  color: var(--git_added);
+}
+
+.chip-kind-deleted {
+  color: var(--text_color_error);
+}
+
+/* Добавленное — зелёное, удалённое — красное: те же цвета, что у статусов файлов. */
+.stat-add {
+  color: var(--git_added);
+}
+
+.stat-del {
+  color: var(--git_deleted);
+}
+
+/* Содержимое попапа изменений: строки файлов, под ними — действия. */
+.changes-popover {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* Действия («Сохранить», «Отменить») — внизу попапа, за чертой под списком файлов. */
+.changes-popover-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border_color);
+}
+
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Список файлов живёт в попапе: строки одна под другой, без переноса чипов. */
+.changes-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Строка списка — кнопка: клик открывает файл в редакторе. */
+.changes-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.changes-row:hover {
+  background: var(--element_background_hover);
+}
+
+.changes-row-name {
+  flex: 0 0 auto;
+  color: var(--text_color);
+  white-space: nowrap;
+}
+
+/* Папка — приглушённо и с многоточием: она нужна для ориентации, а не для чтения. */
+.changes-row-dir {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.changes-row .chip-stat,
+.changes-row .chip-kind {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Зазор от края строки нужен только счётчику правок; пилюля вида операции
+   держит симметричные отступы: с правым 2px против левого 5px текст уезжал к
+   правому круглому торцу и выглядел срезанным. */
+.changes-row .chip-stat {
+  padding-right: 2px;
+}
+
+/* Файлов бывает много: длинный список прокручиваем, а не вылезаем за окно. */
+.popover-changes {
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px dashed var(--border_color);
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--button_border_color_hover);
+  color: var(--text_color);
+}
+
+.chip-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* В чипе числа стоят плотнее: места мало, а разделитель и так виден. */
+.chip-stat {
+  gap: 4px;
+}
+
+/* Приложенный контекст — не кнопка: он не открывает файл, а только снимается. */
+.chip-static {
+  cursor: default;
+}
+
+.chip-static:hover {
+  border-color: var(--border_color);
+  color: var(--text_color_secondary);
+}
+
+.chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius_circle);
+  color: var(--text_color_tertiary);
+}
+
+.chip-remove:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Приложенное изображение: в чипе стоит его миниатюра, а не значок файла —
+   так видно, что именно приложено, не открывая файл. */
+.chip-image {
+  padding: 2px 6px 2px 2px;
+}
+
+.chip-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_xs);
+  background: var(--sunken_background);
+}
+
+.chip-hint {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+}
+
+/* Перетаскивание изображения на панель чата: подсвечиваем место приёма, иначе
+   ничего не говорит о том, что панель готова принять файл. */
+.chat.is-dropping {
+  outline: 1px dashed var(--blue_prime_background_tint_strong);
+  outline-offset: -3px;
+}
+
+.composer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  row-gap: 6px;
+  min-width: 0;
+  margin-top: 0;
+  padding: 0;
+}
+
+.composer-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  row-gap: 6px;
+  min-width: 0;
+}
+
+/* Правый край ряда — «приложить» и «отправить»: к нему и прижимается группа. */
+.composer-group-end {
+  margin-left: auto;
+  gap: 6px;
+}
+
+.composer-select,
+.composer-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+/* Селект — это `.select` (кнопка), но в тулбаре он должен выглядеть как текст. */
+.composer-select {
+  width: auto;
+  min-height: 24px;
+  padding: 0 4px 0 8px;
+  border-color: transparent;
+  background: none;
+  color: var(--text_color_secondary);
+}
+
+.composer-select svg {
+  margin-left: 0;
+}
+
+.composer-select.is-disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.composer-select:hover,
+.composer-model:hover {
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+/* Режим композера: цвет значка и подписи подсказывает, что режим делает.
+   Вопрос — не спрашивает инструменты (нейтральный), агент — работает (синий),
+   план — только читает (фиолетовый): цвета не спорят с акцентом ссылок. */
+.composer-select.is-mode-ask {
+  color: var(--text_color_tertiary);
+}
+
+.composer-select.is-mode-agent {
+  color: var(--blue_prime_background);
+}
+
+.composer-select.is-mode-plan {
+  color: var(--purple_prime_background);
+}
+
+/* Подпись режима в статусе — тем же цветом, что и селект. */
+.composer-status-item.is-mode-ask {
+  color: var(--text_color_tertiary);
+}
+
+.composer-status-item.is-mode-agent {
+  color: var(--blue_prime_background);
+}
+
+.composer-status-item.is-mode-plan {
+  color: var(--purple_prime_background);
+}
+
+/* Обёртка контролов тулбара: подсказка должна работать и у выключенного контрола,
+   а сам disabled-элемент событий мыши не получает. */
+.composer-field {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Кнопки-иконки тулбара композера держат высоту строки (24px), а не панельную
+   (28px): иначе «+», замок и «отправить» выше селектов, и ряд выглядит рвано. */
+.chat-footer .composer-toolbar .icon-btn {
+  width: 24px;
+  height: 24px;
+}
+
+/* Кнопка прав доступа: цвет меняется по состоянию — размер задаёт правило выше. */
+.composer-perm {
+  color: var(--text_color_secondary);
+}
+
+.composer-perm.is-active {
+  color: var(--yellow_prime_background);
+}
+
+.composer-perm:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.composer-model {
+  max-width: 190px;
+  min-width: 0;
+}
+
+.composer-model span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Кнопка отправки — круглая и залитая акцентом: главное действие композера
+   видно сразу. Круг держим высотой строки (24px, как ряд иконок). Форму задаём
+   селектором с весом не ниже ряда иконок — иначе `.icon-btn { 24px }` перебьёт
+   скругление. */
+.chat-footer .composer-toolbar .composer-action {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius_circle);
+}
+
+.chat-footer .composer-toolbar .composer-action-send {
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+}
+
+.chat-footer .composer-toolbar .composer-action-send:hover {
+  background: var(--blue_prime_background);
+}
+
+.chat-footer .composer-toolbar .composer-action-stop {
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+/* Строка статуса ассистента — режим и заполнение контекста. Живёт в общей
+   полосе окна (статус-баре), а не в композере, поэтому своей подложки и
+   собственного размера не несёт: наследует цвет и кегль полосы. */
+.chat-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Выключенный ассистент гаснет и здесь — тем же тоном, что и панель чата. */
+.chat-status.is-ai-disabled {
+  opacity: 0.5;
+}
+
+/* Кнопка «Информация о сессии» — единственный виджет AI в полосе: в неё входят
+   значок режима, кольцо и искра, поэтому отступки слева ей не надо. */
+.chat-status .context-ring {
+  margin-left: 0;
+}
+
+.composer-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  /* В общей полосе подпись держим в одну строку: иначе длинное имя режима
+     раздувает статус-бар вверх. */
+  white-space: nowrap;
+}
+
+/* Значок режима: обёртка центрирует иконку по вертикали. У инлайнового svg
+   снизу остаётся место под выносную линию, и значок уезжает вверх относительно
+   подписи. Тот же приём, что у значка селекта (.select-icon). */
+.composer-status-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}

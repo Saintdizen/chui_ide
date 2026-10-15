@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { tokenColor, tokenStyle, vivid } from '../src/renderer/core/theme';
 import { WINDOW_BACKGROUND } from '../src/shared/colors';
+import { MAIN_PARTS, readMainCss, stylePath } from './style-files';
 
 const HEX = /^#[0-9a-f]{6}$/i;
 
@@ -372,10 +373,7 @@ describe('контраст тихих ступеней текста (пол 3:1)
  * белый текст допустим только там, где тем же правилом задана заливка.
  */
 describe('белый текст только на цветной заливке', () => {
-  const MAIN_CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles/main.css'), 'utf8').replace(
-    /\/\*[\s\S]*?\*\//g,
-    '',
-  );
+  const MAIN_CSS = readMainCss().replace(/\/\*[\s\S]*?\*\//g, '');
   const FILLS = ['--accent_fill', '--danger_fill'];
 
   it('color: var(--text_color_hover) встречается лишь вместе с заливкой', () => {
@@ -539,7 +537,8 @@ describe('доли контекста различимы', () => {
  * `--vscode-*` пропускаем: их пишет сам Monaco в рантайме, в наших файлах их нет.
  */
 describe('токены стилей объявлены', () => {
-  const STYLE_FILES = ['theme.css', 'main.css'].map((name) => resolve(process.cwd(), 'src/renderer/styles', name));
+  // `main.css` — сборка из частей; токены ищутся и в них (см. `style-files.ts`).
+  const STYLE_FILES = [stylePath('theme.css'), ...MAIN_PARTS.map(stylePath)];
 
   it('нет var(--…) без объявления и без запасного значения', () => {
     const defined = new Set<string>();

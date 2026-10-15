@@ -1,0 +1,1875 @@
+/* Git и площадки: панель изменений, окна рабочих каталогов, запросов и задач,
+   личность и подпись, LFS, разреженный каталог, bisect, сравнение веток, обёртка
+   выделения, закладки, история файла, rebase, stash, текст от git, попап статусбара.
+   Часть одной таблицы стилей — порядок задан в `main.css`. */
+/* ── git ────────────────────────────────────────────────────────────────── */
+
+/* Состояние файла — один язык для дерева и панели изменений: класс строки
+   задаёт цвет, а буква и имя берут его из переменной. */
+.is-modified {
+  --change_color: var(--git_modified);
+}
+
+.is-added {
+  --change_color: var(--git_added);
+}
+
+.is-untracked {
+  --change_color: var(--git_added);
+}
+
+.is-deleted {
+  --change_color: var(--git_deleted);
+}
+
+.is-renamed {
+  --change_color: var(--git_renamed);
+}
+
+.is-conflicted {
+  --change_color: var(--git_conflicted);
+}
+
+.tree-badge,
+.sc-badge {
+  min-width: 14px;
+  color: var(--change_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  text-align: center;
+}
+
+.tree-badge {
+  margin-left: auto;
+  padding-right: 2px;
+}
+
+/* Значок подмодуля: это отдельный репозиторий, а не папка проекта. Цвет — по
+   состоянию (не забран / другой коммит), поэтому смотрим не на `--change_color`,
+   а на своё состояние. */
+.tree-badge.is-submodule {
+  --change_color: var(--text_color_tertiary);
+}
+
+.tree-badge.is-submodule.is-missing,
+.tree-badge.is-submodule.is-conflict {
+  --change_color: var(--yellow_prime_background);
+}
+
+.tree-badge.is-submodule.is-modified {
+  --change_color: var(--git_modified);
+}
+
+/* Папка-подмодуль: значок папки гасим, чтобы её не путали с обычной. */
+.tree-row.is-submodule .folder-icon {
+  opacity: 0.75;
+}
+
+/* Символическая ссылка: стрелка вместо буквы состояния. Битая ссылка — красная,
+   а имя зачёркнуто: по ней ничего не открыть, и это видно без клика. */
+.tree-badge.is-symlink {
+  --change_color: var(--text_color_tertiary);
+}
+
+.tree-badge.is-symlink.is-broken {
+  --change_color: var(--text_color_error);
+}
+
+.tree-row.is-broken-link .tree-name {
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+
+/* Папка с правками внутри: точка в цвете самой заметной из них. Именно точка,
+   а не буква: сама папка не изменена, и «M» на ней читалась бы неправдой. */
+.tree-dot {
+  flex: 0 0 auto;
+  margin-left: auto;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius_circle);
+  background: var(--change_color);
+}
+
+/* Свежесть правки: точка того же размера, но своего цвета и отдельно от пометки
+   папки — они означают разное («внутри есть правки» и «тронут недавно»). Цвет
+   приглушённый: это подсказка о времени, а не состояние репозитория. */
+.tree-dot.is-recent {
+  /* Точка свежести — у правого края строки: своё место она держит сама.
+     Иначе она прилипала бы к имени и уезжала влево вместе с обрезкой («…»),
+     а у правого края оказывалась только на узком островке. */
+  margin-left: auto;
+  width: 5px;
+  height: 5px;
+  background: var(--text_color_tertiary);
+}
+
+/* Но если перед точкой свежести уже есть пометка или точка, свободное место
+   держат они: тут хватает отступа в 4px, чтобы две точки не слились. */
+.tree-badge ~ .tree-dot.is-recent,
+.tree-dot ~ .tree-dot.is-recent {
+  margin-left: 4px;
+}
+
+/* Метка файла: цветной ярлык сразу за именем — по нему видно, что файл помечен.
+   Сжиматься не должен: имя уступает место, а метка остаётся видимой. Цвет берём
+   из роли темы по имени метки, поэтому обе схемы согласованы сами. */
+.tree-label {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius_2xs);
+  background: var(--label_color, var(--text_color_tertiary));
+}
+
+.tree-label.is-red {
+  --label_color: var(--red_prime_background);
+}
+.tree-label.is-orange {
+  --label_color: var(--context_seg_results);
+}
+.tree-label.is-yellow {
+  --label_color: var(--yellow_prime_background);
+}
+.tree-label.is-green {
+  --label_color: var(--green_prime_background);
+}
+.tree-label.is-blue {
+  --label_color: var(--blue_prime_background);
+}
+.tree-label.is-purple {
+  --label_color: var(--purple_prime_background);
+}
+
+.sc-badge {
+  margin-left: auto;
+}
+
+/* Имя файла красим, только пока строка не выделена: на заливке выделения
+   статусный цвет теряет контраст с фоном. */
+.tree-row:not(.is-active):not(.is-selected) .tree-name,
+.sc-row .sc-row-name {
+  color: var(--change_color, inherit);
+}
+
+.source-control {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.sc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 8px;
+  color: var(--text_color_tertiary);
+}
+
+.sc-branch-name {
+  overflow: hidden;
+  color: var(--text_color);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sc-branch-select {
+  width: auto;
+  max-width: 240px;
+  min-height: 22px;
+  margin-left: auto;
+}
+
+/* Сводка по корням рабочей области: строка на папку. Видна только в многообласти,
+   иначе статус активного корня и так показан целиком ниже. Заголовок блока держит
+   кнопку «обновить всё»: папок несколько, и по каждой свой репозиторий. */
+.sc-roots-box {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.sc-roots-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sc-roots-head .icon-btn {
+  margin-left: auto;
+}
+
+.sc-roots {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
+}
+
+.sc-root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: transparent;
+  color: var(--text_color_secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sc-root:hover {
+  background: var(--element_background_hover);
+}
+
+/* Активный корень: им отвечает git, поиск и запуск — выделяем заливкой. */
+.sc-root.is-active {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+.sc-root-name {
+  overflow: hidden;
+  color: var(--text_color);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sc-root-state {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sc-root-count {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+}
+
+.sc-commit-box {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 8px 8px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.sc-message {
+  width: 100%;
+  min-height: 54px;
+  padding: 6px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  resize: vertical;
+}
+
+.sc-commit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* «Исправить последний коммит»: флажок рядом с полем сообщения, тихий — это режим,
+   а не действие. */
+.sc-amend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sc-amend-box {
+  accent-color: var(--blue_prime_background);
+  margin: 0;
+}
+
+/* ── окно рабочих каталогов (worktree) ─────────────────────────────────── */
+
+.worktree-modal {
+  width: min(760px, 94vw);
+}
+
+.worktree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 8px 0;
+  max-height: 42vh;
+  overflow: auto;
+}
+
+/* Строка каталога: слева ветка и путь, справа действия. */
+.worktree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius_sm);
+}
+
+.worktree-row:hover {
+  background: var(--element_background_hover);
+}
+
+/* Текущий каталог отмечаем заливкой: видно, где мы работаем сейчас. */
+.worktree-row.is-current {
+  background: var(--selection_background);
+}
+
+.worktree-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.worktree-branch {
+  font-family: var(--font_mono);
+  color: var(--text_color);
+}
+
+.worktree-path {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.worktree-note {
+  color: var(--yellow_prime_background);
+  font-size: var(--font_small_size);
+}
+
+.worktree-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.worktree-add {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border_color);
+}
+
+.worktree-add-fields {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.worktree-add-fields .field-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.worktree-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+/* Монорепо: подгруппы пакетов внутри списка правок панели изменений. */
+.sc-package {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 8px 2px 14px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.sc-package-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── запросы на слияние (PR/MR) ─────────────────────────────────────────── */
+
+.forge-modal {
+  width: min(760px, 94vw);
+}
+
+.forge-headline {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.forge-platform {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.forge-repo {
+  color: var(--text_color_tertiary);
+}
+
+.forge-repo-name {
+  font-family: var(--font_mono);
+}
+
+.forge-remote {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.forge-line {
+  margin: 2px 0 0;
+  color: var(--text_color_secondary);
+}
+
+.forge-note {
+  margin: 2px 0 0;
+  color: var(--yellow_prime_background);
+}
+
+.forge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 44vh;
+  overflow: auto;
+  margin: 6px 0;
+}
+
+.forge-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.forge-row-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.forge-row-title {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.forge-number {
+  flex: none;
+  color: var(--link_color);
+  font-family: var(--font_mono);
+}
+
+.forge-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color);
+}
+
+.forge-state {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--radius_sm);
+  font-size: var(--font_small_size);
+}
+
+.forge-state.is-open {
+  background: color-mix(in srgb, var(--git_added) 22%, transparent);
+  color: var(--git_added);
+}
+
+.forge-state.is-draft {
+  color: var(--text_color_tertiary);
+}
+
+.forge-state.is-merged {
+  color: var(--purple_prime_background);
+}
+
+.forge-state.is-closed {
+  color: var(--git_deleted);
+}
+
+/* Состояния прогонов CI (Actions/Pipelines). */
+.forge-state.is-success {
+  background: color-mix(in srgb, var(--git_added) 22%, transparent);
+  color: var(--git_added);
+}
+
+.forge-state.is-failed {
+  background: color-mix(in srgb, var(--git_deleted) 22%, transparent);
+  color: var(--git_deleted);
+}
+
+.forge-state.is-running {
+  background: color-mix(in srgb, var(--purple_prime_background) 22%, transparent);
+  color: var(--purple_prime_background);
+}
+
+.forge-state.is-pending,
+.forge-state.is-canceled,
+.forge-state.is-skipped,
+.forge-state.is-unknown {
+  color: var(--text_color_tertiary);
+}
+
+.forge-row-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.forge-branches {
+  font-family: var(--font_mono);
+}
+
+.forge-labels {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.forge-label {
+  padding: 0 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background_hover);
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.forge-row-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.forge-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+/* Запрос вместе с раскрытым под ним обсуждением — одна единица списка. */
+.forge-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.forge-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 8px 12px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border_color);
+  background: var(--sunken_background);
+  border-radius: var(--radius_sm);
+}
+
+.forge-comments[hidden] {
+  display: none;
+}
+
+.forge-comment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.forge-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.forge-comment-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: var(--font_small_size);
+}
+
+.forge-comment-author {
+  font-weight: 600;
+}
+
+.forge-comment-date {
+  color: var(--text_color_tertiary);
+}
+
+.forge-comment-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.forge-comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.forge-comment-input {
+  width: 100%;
+  font-family: var(--font_ui);
+  resize: vertical;
+}
+
+.forge-create {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed var(--link_color);
+  border-radius: var(--radius_sm);
+}
+
+.forge-create[hidden] {
+  display: none;
+}
+
+.forge-create-head {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.forge-body {
+  font-family: var(--font_ui);
+}
+
+.forge-create-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.forge-draft {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.forge-create-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* ── личность автора и подпись коммитов ─────────────────────────────────── */
+
+.identity-modal {
+  width: min(680px, 94vw);
+}
+
+.identity-line {
+  margin: 0;
+  color: var(--text_color_secondary);
+}
+
+.identity-problem {
+  margin: 0;
+  color: var(--yellow_prime_background);
+  font-size: var(--font_small_size);
+}
+
+.identity-problems:not(:empty) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.identity-check {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 2px 0;
+  cursor: pointer;
+}
+
+.identity-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.identity-key {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.identity-key-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.identity-key-name,
+.identity-key-fp {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.identity-key-name {
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.identity-key-fp {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.identity-key-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.identity-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+/* Соавторы коммита: строки под полем сообщения. */
+.sc-commit-rows {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sc-coauthor {
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--text_color_secondary);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.sc-coauthor:hover {
+  border-color: var(--link_color);
+  color: var(--text_color);
+}
+
+/* «Сообщение по diff»: кнопка-иконка рядом с «Соавтор» — та же строка, тот же размер.
+   Иконка искры, а не текст: в строке уже есть слово, второе её раздувает. */
+.sc-from-diff {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  padding: 3px 6px;
+  background: transparent;
+  color: var(--text_color_secondary);
+  cursor: pointer;
+}
+
+.sc-from-diff:hover {
+  border-color: var(--link_color);
+  color: var(--text_color);
+}
+
+/* Пока модель думает, кнопку видно нажатой: запрос не мгновенный. */
+.sc-from-diff:active {
+  background: var(--element_background_hover);
+}
+
+.sc-coauthors {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0;
+}
+
+.sc-coauthor-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.sc-coauthor-remove {
+  padding: 0;
+  background: transparent;
+  color: var(--text_color_tertiary);
+}
+
+/* ── большие файлы (Git LFS) ────────────────────────────────────────────── */
+
+.lfs-modal {
+  width: min(680px, 94vw);
+}
+
+.lfs-status {
+  margin-bottom: 6px;
+}
+
+.lfs-line {
+  margin: 0;
+  color: var(--text_color_secondary);
+}
+
+.lfs-warn {
+  margin: 0 0 4px;
+  color: var(--yellow_prime_background);
+  font-weight: 600;
+}
+
+.lfs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  margin: 6px 0;
+}
+
+.lfs-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.lfs-row.is-missing .lfs-state {
+  color: var(--git_deleted);
+}
+
+.lfs-pattern {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font_mono);
+  color: var(--text_color);
+}
+
+.lfs-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.lfs-state {
+  flex: none;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.lfs-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+.lfs-add {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.lfs-add .field-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.lfs-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* ── разреженный рабочий каталог (sparse checkout) ─────────────────────── */
+
+.sparse-modal {
+  width: min(620px, 94vw);
+}
+
+/* Значок от стороннего набора правил (`explorer.badges`): подпись в цвете роли.
+   Пустая подпись — просто точка: правило может только помечать файл цветом. */
+.tree-badge.is-custom {
+  min-width: 12px;
+  height: 12px;
+  padding: 0 3px;
+  border-radius: var(--radius_xs);
+  font-size: var(--font_micro_size);
+  line-height: 12px;
+  text-align: center;
+  color: var(--badge_inverse, var(--text_color));
+}
+
+.tree-badge.is-custom:empty {
+  min-width: 8px;
+  height: 8px;
+  padding: 0;
+  border-radius: var(--radius_circle);
+}
+
+.tree-badge.is-custom.is-red {
+  background: var(--red_prime_background);
+}
+.tree-badge.is-custom.is-orange {
+  background: var(--context_seg_results);
+}
+.tree-badge.is-custom.is-yellow {
+  background: var(--yellow_prime_background);
+}
+.tree-badge.is-custom.is-green {
+  background: var(--green_prime_background);
+}
+.tree-badge.is-custom.is-blue {
+  background: var(--blue_prime_background);
+}
+.tree-badge.is-custom.is-purple {
+  background: var(--purple_prime_background);
+}
+.tree-badge.is-custom.is-gray {
+  background: var(--text_color_tertiary);
+}
+
+/* Файл удалённой папки: просмотр и правка в отдельном окне — там своя запись
+   клиентом системы (`ui/remote-file-modal.ts`). */
+.remote-file-modal {
+  width: min(760px, 94vw);
+}
+
+.remote-file-text {
+  width: 100%;
+  min-height: 320px;
+  resize: vertical;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre;
+}
+
+.remote-file-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* «Настройки папки»: форма на ОДИН корень области — строки с трёхзначным селектом
+   («как в области / включено / выключено») и список исключений папки. */
+.root-settings-modal {
+  width: min(560px, 94vw);
+}
+
+.root-settings-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.root-settings-row {
+  gap: 10px;
+}
+
+/* Чему равно общее значение — видно прямо в строке: так понятно, от чего отличается своё. */
+.root-settings-row .field-note {
+  margin-left: 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+}
+
+.root-settings-exclude {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font_mono);
+}
+
+.root-settings-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.sparse-status {
+  margin-bottom: 6px;
+}
+
+.sparse-line {
+  margin: 0;
+  color: var(--text_color_secondary);
+}
+
+.sparse-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow: auto;
+  margin: 6px 0;
+}
+
+.sparse-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.sparse-dir,
+.sparse-pattern {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font_mono);
+  color: var(--text_color);
+}
+
+.sparse-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+.sparse-add {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.sparse-add .field-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+.sparse-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+/* ── окно поиска багованного коммита (bisect) ──────────────────────────── */
+
+.bisect-modal {
+  width: min(640px, 94vw);
+}
+
+.bisect-headline {
+  font-family: var(--font_mono);
+  font-size: var(--font_default_size);
+  margin-bottom: 4px;
+}
+
+.bisect-detail {
+  color: var(--text_color_secondary);
+  margin-bottom: 10px;
+}
+
+.bisect-start {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.bisect-start .field-input {
+  width: 180px;
+  font-family: var(--font_mono);
+}
+
+.bisect-sep {
+  color: var(--text_color_tertiary);
+}
+
+.bisect-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+/* Слова git показываем как есть: по ним видно, что он делает и на чём споткнулся. */
+.bisect-message {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+}
+
+/* ── окно сравнения веток ──────────────────────────────────────────────── */
+
+.refdiff-modal {
+  width: min(720px, 94vw);
+}
+
+.refdiff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.refdiff-arrow {
+  color: var(--text_color_tertiary);
+}
+
+.refdiff-summary {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  font-variant-numeric: tabular-nums;
+}
+
+.refdiff-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 54vh;
+  overflow: auto;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+/* Строка файла: буква статуса, путь и счётчик строк. Клик открывает сравнение. */
+.refdiff-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius_sm);
+  cursor: pointer;
+}
+
+.refdiff-row:hover {
+  background: var(--element_background_hover);
+}
+
+.refdiff-status {
+  flex: 0 0 1em;
+  text-align: center;
+  font-weight: bold;
+}
+
+/* Буква статуса тем же цветом, что полоски изменений git: одно состояние читается
+   одинаково и в жёлобе, и здесь. */
+.refdiff-row.is-added .refdiff-status {
+  color: var(--git_added);
+}
+
+.refdiff-row.is-deleted .refdiff-status {
+  color: var(--git_deleted);
+}
+
+.refdiff-row.is-renamed .refdiff-status {
+  color: var(--git_modified);
+}
+
+.refdiff-row.is-modified .refdiff-status {
+  color: var(--link_color);
+}
+
+.refdiff-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.refdiff-counts {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.refdiff-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_ui);
+  font-size: var(--font_default_size);
+}
+
+/* ── обёртка выделения («surround with») ───────────────────────────────── */
+
+.surround-modal {
+  width: min(420px, 92vw);
+}
+
+.surround-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.surround-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Выделенную строку подсвечиваем тем же цветом, что и строку попапа подсказок:
+   это того же рода выбор — «сюда придёт действие по Enter». */
+.surround-row.is-active {
+  background: var(--selection_background);
+}
+
+/* Знаки обёртки — моношрифтом: `(` и `{` должны быть видны, а не «сливаться». */
+.surround-signs {
+  flex: none;
+  min-width: 48px;
+  font-family: var(--font_mono);
+  color: var(--link_color);
+}
+
+.surround-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── окно закладок ─────────────────────────────────────────────────────── */
+
+.bookmarks-modal {
+  width: min(560px, 94vw);
+}
+
+.bookmarks-toolbar {
+  margin-bottom: 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.bookmarks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 54vh;
+  overflow: auto;
+}
+
+.bookmarks-file {
+  margin-top: 6px;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--separator_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  color: var(--text_color_tertiary);
+}
+
+.bookmarks-item {
+  display: flex;
+}
+
+.bookmarks-row {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bookmarks-row:hover {
+  background: var(--element_background_hover);
+}
+
+.bookmarks-line {
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  font-variant-numeric: tabular-nums;
+}
+
+.bookmarks-remove {
+  flex: none;
+  opacity: 0;
+}
+
+.bookmarks-item:hover .bookmarks-remove {
+  opacity: 1;
+}
+
+.bookmarks-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.bookmarks-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+/* ── окно локальной истории файла ──────────────────────────────────────── */
+
+.history-modal {
+  width: min(820px, 94vw);
+}
+
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text_color_tertiary);
+}
+
+.history-summary {
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.history-body {
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+}
+
+.history-list {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 54vh;
+  overflow: auto;
+}
+
+.history-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.history-row:hover {
+  background: var(--element_background_hover);
+}
+
+.history-row.is-active {
+  background: var(--selection_background);
+}
+
+/* Источник записи ленты: снимок редактора или коммит git. Слово короткое — по нему
+   видно и что это, и что с записью можно сделать (см. `ui/history-modal.ts`). */
+.history-row-source {
+  align-self: flex-start;
+  padding: 0 4px;
+  border-radius: var(--radius_sm);
+  font-size: var(--font_micro_size);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--element_background);
+  color: var(--text_color_tertiary);
+}
+
+.history-row-source.is-git {
+  color: var(--git_modified);
+}
+
+.history-row-name {
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  color: var(--text_color);
+}
+
+.history-row-label {
+  font-size: var(--font_small_size);
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.history-preview {
+  flex: 1;
+  min-width: 0;
+  max-height: 54vh;
+  overflow: auto;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  color: var(--text_color_secondary);
+  white-space: pre;
+}
+
+.history-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.history-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ── окно интерактивного rebase ────────────────────────────────────────── */
+
+.rebase-modal {
+  width: min(760px, 94vw);
+}
+
+.rebase-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.rebase-depth {
+  width: 72px;
+}
+
+.rebase-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+/* Строка списка: слева перестановка, затем действие, хеш и тема коммита. */
+.rebase-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: var(--radius_sm);
+}
+
+.rebase-row:hover {
+  background: var(--element_background_hover);
+}
+
+.rebase-move-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  flex: 0 0 auto;
+}
+
+.rebase-move {
+  height: 14px;
+  padding: 0;
+}
+
+.rebase-action {
+  flex: 0 0 190px;
+}
+
+.rebase-hash {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.rebase-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Переписываемое сообщение помечаем: строка изменится не как остальные. */
+.rebase-subject.is-reword {
+  font-style: italic;
+  color: var(--link_color);
+}
+
+.rebase-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+.rebase-hint.is-error {
+  color: var(--text_color_error);
+}
+
+.rebase-note {
+  flex: 1;
+  min-width: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+/* ── окно отложенных изменений (stash) ─────────────────────────────────── */
+
+.stash-modal {
+  width: min(720px, 92vw);
+}
+
+.stash-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 52vh;
+  overflow: auto;
+}
+
+.stash-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+/* Строка записи: слева описание (нажимается — раскрывает патч), справа действия. */
+.stash-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stash-info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: transparent;
+  color: var(--text_color);
+  text-align: left;
+  cursor: pointer;
+}
+
+.stash-info:hover {
+  background: var(--element_background_hover);
+}
+
+.stash-ref {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  flex: 0 0 auto;
+}
+
+.stash-message {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.stash-branch {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  flex: 0 0 auto;
+}
+
+.stash-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+/* Содержимое записи показывается патчем: читается как в терминале. */
+.stash-patch {
+  margin: 4px 0 8px;
+  padding: 8px 10px;
+  max-height: 240px;
+  overflow: auto;
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre;
+}
+
+.stash-save {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.stash-message-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.stash-untracked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.stash-untracked-box {
+  accent-color: var(--blue_prime_background);
+  margin: 0;
+}
+
+/* ── окно с текстом от git (граф веток) ─────────────────────────────────── */
+
+.text-modal {
+  width: min(900px, 94vw);
+}
+
+.text-modal-body {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 70vh;
+  overflow: auto;
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.4;
+  white-space: pre;
+}
+
+.sc-hint {
+  margin: 0;
+  color: var(--text_color_tertiary);
+}
+
+.sc-commit {
+  margin-left: auto;
+}
+
+.sc-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 0 10px;
+}
+
+.sc-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 2px;
+  color: var(--text_color_tertiary);
+}
+
+.sc-group-count {
+  font-family: var(--font_mono);
+}
+
+/* Массовые действия группы: у того же правого края, что и строки файлов. */
+.sc-group-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.sc-group-action {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius_xs);
+  color: var(--text_color_tertiary);
+}
+
+.sc-group-action:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Поле имени новой ветки: та же левая линия 8px, что и у остальных блоков. */
+.sc-branch-create {
+  flex: 0 0 auto;
+  padding: 0 8px 6px;
+}
+
+.sc-branch-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--focus_ring_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+}
+
+.sc-branch-input:focus {
+  outline: none;
+}
+
+.sc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 8px);
+  height: calc(24px * var(--density));
+  margin: 0 4px;
+  padding: 0 4px;
+  border-radius: calc(var(--radius_sm) - 3px);
+  color: var(--text_color_secondary);
+  text-align: left;
+}
+
+.sc-row:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.sc-row-name {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.sc-row-action {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius_xs);
+  color: var(--text_color_tertiary);
+  opacity: 0;
+  transition: opacity var(--motion_fast) var(--motion_ease);
+}
+
+.sc-row:hover .sc-row-action,
+.sc-row-action:focus-visible {
+  opacity: 1;
+}
+
+.sc-row-action:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* ── git-менеджер в поповере статусбара ─────────────────────────────────── */
+
+/* Тот же менеджер, что и панель изменений, но во всплывающей рамке у кнопки
+   ветки: ограничиваем ширину и высоту списка, чтобы попап не разрастался. */
+.popover-git {
+  padding: 5px;
+}
+
+/* Ширину панели задаёт попап: внутри она просто заполняет его. */
+.popover-git .source-control {
+  width: -webkit-fill-available;
+  height: auto;
+}
+
+/* Заголовок и поле коммита держатся на отступах попапа, а не на своих:
+   в боковой панели отступы остаются прежними. */
+.popover-git .sc-head {
+  padding: 0;
+}
+
+.popover-git .sc-commit-box {
+  padding: 5px 0;
+}
+
+.popover-git .sc-list {
+  max-height: 320px;
+}
+
+.popover-git .sc-message {
+  min-height: 48px;
+}

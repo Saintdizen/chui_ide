@@ -1,0 +1,2366 @@
+/* Вьюеры и панели: чат в области редактора, сравнение версий, ревью, конфликты,
+   тесты, структура файла, ноутбук, формулы, диаграммы Mermaid, отладчик регулярных
+   выражений, замена по структуре, проблемы, задачи, отладка и попап Python.
+   Часть одной таблицы стилей — порядок задан в `main.css`. */
+/* ── чат в области редактора ────────────────────────────────────────────── */
+
+/* Чат — обычная вкладка рядом с файлами: пока она активна, файловое полотно
+   и хлебные крошки прячутся, а чат занимает освободившееся место. */
+.chat-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  background: var(--editor_background);
+}
+
+.chat-editor[hidden] {
+  display: none;
+}
+
+.editor-island.is-chat .editor-host > :not(.chat-editor) {
+  display: none;
+}
+
+/* На широком экране беседа растягивалась бы в нечитаемые строки. */
+.chat-editor .chat {
+  width: -webkit-fill-available;
+  max-width: -webkit-fill-available;
+  /* margin: 0 auto; */
+}
+
+/* ── сравнение версий файла ─────────────────────────────────────────────── */
+
+.diff-view {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--editor_background);
+}
+
+.diff-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_tertiary);
+}
+
+.diff-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.diff-subtitle {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.diff-header .icon-btn {
+  margin-left: auto;
+}
+
+/* Действия экрана (блоки, режим, закрытие) — одной группой у правого края:
+   правило выше прижимало каждую кнопку по отдельности, и они разъезжались. */
+.diff-header .diff-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.diff-header .diff-actions .icon-btn {
+  margin-left: 0;
+}
+
+/* Сравнение и лента замечаний — рядом: сравнение тянется, лента своей ширины. */
+.diff-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.diff-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ── лента замечаний ревью ─────────────────────────────────────────────── */
+
+.diff-review {
+  display: flex;
+  flex: 0 0 300px;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--separator_color);
+  background: var(--element_background);
+}
+
+.diff-review[hidden] {
+  display: none;
+}
+
+.review-head {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_tertiary);
+}
+
+.review-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.review-summary {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.review-head-actions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  margin-left: auto;
+}
+
+.review-toggle {
+  border: none;
+  border-radius: var(--radius_sm);
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.review-toggle.is-active {
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+}
+
+.review-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.review-empty {
+  padding: 8px 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  line-height: 1.5;
+}
+
+.review-thread {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-left: 3px solid var(--git_modified);
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+}
+
+.review-thread.is-active {
+  border-color: var(--link_color);
+  border-left-color: var(--link_color);
+}
+
+.review-thread.is-resolved {
+  border-left-color: var(--git_added);
+  opacity: 0.75;
+}
+
+.review-thread-head {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.review-jump {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--link_color);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.review-thread .icon-btn {
+  padding: 1px;
+  background: transparent;
+  color: var(--text_color_tertiary);
+}
+
+.review-thread .icon-btn:hover {
+  color: var(--text_color);
+}
+
+.review-thread .icon-btn.is-active {
+  color: var(--git_added);
+}
+
+.review-comments {
+  margin: 4px 0;
+}
+
+.review-comment-head {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.review-author {
+  color: var(--text_color);
+  font-size: var(--font_small_size);
+  font-weight: 600;
+}
+
+.review-time {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.review-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text_color);
+  font-size: var(--font_small_size);
+  line-height: 1.45;
+}
+
+.review-input {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  padding: 4px 6px;
+  background: var(--element_background);
+  color: var(--text_color);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+}
+
+.review-reply,
+.review-draft {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.review-draft {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px dashed var(--link_color);
+  border-radius: var(--radius_sm);
+}
+
+.review-draft-head {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.review-draft-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.review-submit {
+  align-self: flex-end;
+  border: none;
+  border-radius: var(--radius_sm);
+  padding: 3px 10px;
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.review-submit:hover {
+  background: var(--blue_prime_background);
+}
+
+.review-cancel {
+  border: none;
+  border-radius: var(--radius_sm);
+  padding: 3px 10px;
+  background: transparent;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.review-cancel:hover {
+  color: var(--text_color);
+}
+
+/* Кнопка у блока изменений: висит над его первой строкой в изменённой части. */
+.diff-hunk-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 6px 2px 0;
+}
+
+.diff-hunk-action {
+  padding: 2px 8px;
+  border: none;
+  border-radius: var(--radius_sm);
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+  font-family: var(--font_ui);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.diff-hunk-action:hover {
+  background: var(--blue_prime_background);
+}
+
+/* ── разрешение конфликтов слияния ─────────────────────────────────────── */
+
+.conflict-view {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  background: var(--editor_background);
+}
+
+/* Сравнение обеих сторон занимает верхнюю часть и не растягивается. */
+.conflict-diff {
+  flex: 0 0 40%;
+  min-height: 120px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.conflict-blocks {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px;
+}
+
+.conflict-empty {
+  margin: 8px;
+  color: var(--text_color_tertiary);
+}
+
+.conflict-block {
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.conflict-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.conflict-index {
+  font-weight: 600;
+  color: var(--text_color);
+}
+
+.conflict-lines {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+/* Кнопки выбора стороны — с отступом вправо, как у действий строки. */
+.conflict-choice {
+  padding: 2px 10px;
+  font-size: var(--font_small_size);
+}
+
+.conflict-head .conflict-choice:first-of-type {
+  margin-left: auto;
+}
+
+.conflict-choice.is-active {
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+  border-color: transparent;
+}
+
+.conflict-side {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.conflict-side-label {
+  flex: 0 0 auto;
+  min-width: 60px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  padding-top: 4px;
+}
+
+.conflict-side-text {
+  flex: 1;
+  margin: 0 0 4px;
+  padding: 4px 6px;
+  max-height: 120px;
+  overflow: auto;
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+  font-family: "JetBrains Mono", monospace;
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+}
+
+.conflict-footer {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--separator_color);
+}
+
+/* ── ветка в статусбаре ─────────────────────────────────────────────────── */
+
+.status-git {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-radius: var(--radius_xs);
+  cursor: pointer;
+}
+
+.status-git:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* ── панель тестов ─────────────────────────────────────────────────────── */
+
+.tests-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── панель структуры файла (Outline) ──────────────────────────────────── */
+
+.outline-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Предпросмотр Markdown: собранная разметка активного файла. Панель — как у
+   «Структуры»: шапка с путём и прокручиваемое тело с разметкой. Сама разметка
+   стилизуется теми же классами `md-*`, что и лента чата. */
+.md-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.md-preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.md-preview-title {
+  font-weight: 600;
+}
+
+.md-preview-path {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.md-preview-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px 16px;
+}
+
+/* ── ячейки ноутбука ───────────────────────────────────── */
+
+/* ── формулы (LaTeX) ───────────────────────────────────────────────────── */
+
+/*
+  Формула остаётся текстом: знаки — обычные узлы, а строение несут эти правила.
+  Дробь — столбик с чертой, корень — знак с полоской, степень и индекс — сдвинутая
+  вбок колонка. Шрифт — тот же, что у текста: у математики нет своего в наборе,
+  а курсив у букв даёт «математический» вид и не тянет лишний файл шрифта.
+*/
+
+.md-math {
+  white-space: nowrap;
+  font-family: var(--font_mono);
+}
+
+.md-math-block {
+  margin: 10px 0;
+  padding: 8px 4px;
+  overflow-x: auto;
+  text-align: center;
+  font-family: var(--font_mono);
+  font-size: 1.05em;
+}
+
+/* Не разобравшаяся формула показана исходником — с подсказкой и во всю ширину. */
+.md-code.is-math-raw {
+  white-space: pre-wrap;
+}
+
+.math-text,
+.math-sym {
+  white-space: pre;
+}
+
+/* Греческие буквы и операции — курсивом, как их набирает LaTeX по умолчанию. */
+.math-sym.is-greek {
+  font-style: italic;
+}
+
+.math-styled.is-bb {
+  font-weight: 600;
+}
+
+.math-styled.is-bold {
+  font-weight: 700;
+}
+
+.math-styled.is-cal {
+  font-style: italic;
+}
+
+.math-styled.is-text {
+  font-style: normal;
+}
+
+/* Название оператора (\lim, \max) — прямым шрифтом, пределы снизу. */
+.math-bigop {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: middle;
+  margin: 0 2px;
+}
+
+.math-bigop.is-stacked .math-bigop-sym {
+  font-size: 1.25em;
+  line-height: 1;
+}
+
+.math-bigop-lim {
+  font-size: 0.7em;
+  line-height: 1.1;
+}
+
+/* Пустая клетка столбика: держит высоту, когда у оператора только предел снизу. */
+.math-bigop-gap {
+  display: none;
+}
+
+.math-bigop.is-stacked .math-bigop-gap {
+  display: block;
+  height: 0.5em;
+}
+
+.math-space.is-thin {
+  display: inline-block;
+  width: 0.17em;
+}
+
+.math-space.is-thick {
+  display: inline-block;
+  width: 0.28em;
+}
+
+.math-space.is-quad {
+  display: inline-block;
+  width: 1em;
+}
+
+/* Дробь: черта — верхняя граница знаменателя. */
+.math-frac {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  vertical-align: middle;
+  margin: 0 0.15em;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.math-frac-num,
+.math-frac-den {
+  padding: 0 0.25em;
+}
+
+.math-frac-den {
+  border-top: 1px solid currentColor;
+}
+
+/* Корень: знак с полоской над подкоренным выражением. */
+.math-sqrt {
+  display: inline-flex;
+  align-items: flex-start;
+  vertical-align: middle;
+}
+
+.math-sqrt-sign {
+  line-height: 1;
+}
+
+.math-sqrt-body {
+  padding: 0 0.15em;
+  border-top: 1px solid currentColor;
+}
+
+.math-sqrt.has-index .math-sqrt-index {
+  align-self: flex-start;
+  margin-right: -0.35em;
+  font-size: 0.62em;
+  transform: translateY(-0.2em);
+}
+
+/* Степень и индекс — сдвинутая вбок колонка из двух клеток. */
+.math-script {
+  display: inline-flex;
+  align-items: baseline;
+}
+
+.math-scripts {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-size: 0.7em;
+  line-height: 1.05;
+}
+
+.math-scripts-gap {
+  height: 0.55em;
+}
+
+/* Матрица: строки и ячейки с небольшим отступом, скобки — по краям. */
+.math-matrix {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15em;
+  vertical-align: middle;
+}
+
+.math-matrix-table {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.math-matrix-row {
+  display: inline-flex;
+  gap: 0.6em;
+  justify-content: center;
+}
+
+.math-matrix-delim {
+  font-size: 1.6em;
+  line-height: 0.9;
+}
+
+/* Неизвестная команда — видимым текстом, а не пропажей. */
+.math-unknown {
+  color: var(--red_prime_background);
+}
+
+/* ── диаграммы Mermaid ─────────────────────────────────────────────────── */
+
+.md-mermaid {
+  margin: 10px 0;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.md-mermaid .mm-svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Общее для подписей: цвет из темы, шрифт интерфейса. */
+.mm-node-text,
+.mm-edge-label,
+.mm-participant-text,
+.mm-message-label,
+.mm-note-text,
+.mm-slice-label,
+.mm-pie-title {
+  fill: var(--text_color);
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  text-anchor: middle;
+}
+
+.mm-node-shape {
+  fill: var(--popup_background);
+  stroke: var(--text_color_tertiary);
+  stroke-width: 1.2;
+}
+
+.mm-subgraph {
+  fill: color-mix(in srgb, var(--popup_background) 55%, transparent);
+  stroke: var(--border_color);
+  stroke-width: 1;
+}
+
+.mm-subgraph-title,
+.mm-frame-label {
+  fill: var(--text_color_secondary);
+  text-anchor: start;
+  font-size: var(--font_labels_size);
+}
+
+.mm-subgraph-title {
+  font-weight: 600;
+}
+
+.mm-edge-line {
+  fill: none;
+  stroke: var(--text_color_secondary);
+  stroke-width: 1.4;
+}
+
+.mm-edge.is-dashed .mm-edge-line {
+  stroke-dasharray: 5 4;
+}
+
+.mm-edge.is-thick .mm-edge-line {
+  stroke-width: 2.6;
+}
+
+.mm-arrow {
+  fill: var(--text_color_secondary);
+}
+
+.mm-edge-label {
+  fill: var(--text_color_secondary);
+}
+
+.mm-edge-label-bg {
+  fill: var(--main_background);
+}
+
+/* Диаграмма последовательностей. */
+.mm-lifeline {
+  stroke: var(--border_color);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.mm-participant {
+  fill: var(--popup_background);
+  stroke: var(--text_color_tertiary);
+  stroke-width: 1.2;
+}
+
+.mm-participant.is-actor {
+  stroke: var(--blue_prime_background);
+}
+
+.mm-message-line {
+  fill: none;
+  stroke: var(--text_color_secondary);
+  stroke-width: 1.4;
+}
+
+.mm-message.is-dashed .mm-message-line {
+  stroke-dasharray: 5 4;
+}
+
+.mm-note {
+  fill: color-mix(in srgb, var(--yellow_prime_background) 16%, var(--popup_background));
+  stroke: var(--yellow_prime_background);
+  stroke-width: 1;
+}
+
+.mm-frame {
+  fill: none;
+  stroke: var(--border_color);
+  stroke-width: 1;
+}
+
+.mm-frame-tab {
+  fill: var(--element_background);
+}
+
+/* Круговая диаграмма: доли — основными тонами темы и их соседями. */
+.mm-slice {
+  stroke: var(--main_background);
+  stroke-width: 1.5;
+}
+
+.mm-slice.is-0 {
+  fill: var(--blue_prime_background);
+}
+
+.mm-slice.is-1 {
+  fill: var(--yellow_prime_background);
+}
+
+.mm-slice.is-2 {
+  fill: var(--red_prime_background);
+}
+
+.mm-slice.is-3 {
+  fill: var(--green_prime_background);
+}
+
+.mm-slice.is-4 {
+  fill: var(--purple_prime_background);
+}
+
+.mm-slice.is-5 {
+  fill: color-mix(in srgb, var(--blue_prime_background) 55%, var(--green_prime_background));
+}
+
+.mm-slice-label {
+  font-size: var(--font_labels_size);
+}
+
+.mm-pie-title {
+  font-weight: 600;
+}
+
+.notebook {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.notebook-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.notebook-title {
+  font-weight: 600;
+}
+
+.notebook-path {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.notebook-head-spacer {
+  flex: 1;
+}
+
+.notebook-summary {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+}
+
+.notebook-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 10px 16px;
+}
+
+/* Ячейка: подпись сверху, содержимое под ней — как в Jupyter. */
+.notebook-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+}
+
+.notebook-cell.is-code {
+  background: var(--sunken_background);
+}
+
+.notebook-cell-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notebook-cell-badge {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_micro_size);
+}
+
+.notebook-cell-body {
+  min-width: 0;
+}
+
+.notebook-source,
+.notebook-output {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.notebook-output {
+  margin-top: 4px;
+  border-left: 2px solid var(--blue_prime_background);
+  background: var(--element_background);
+  color: var(--text_color_secondary);
+}
+
+.notebook-output.is-error {
+  border-left-color: var(--red_prime_background);
+  color: var(--red_prime_background);
+}
+
+/* Сравнение: строка изменения — те же цвета, что у вставки и удаления в diff. */
+.notebook-diff-summary {
+  margin-bottom: 8px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.notebook-change {
+  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-left-width: 3px;
+  border-radius: var(--radius_sm);
+}
+
+.notebook-change.is-added {
+  border-left-color: var(--green_prime_background);
+}
+
+.notebook-change.is-removed {
+  border-left-color: var(--red_prime_background);
+}
+
+.notebook-change.is-changed {
+  border-left-color: var(--yellow_prime_background);
+}
+
+.notebook-change-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.notebook-change-status {
+  color: var(--text_color);
+  font-weight: 600;
+  font-size: var(--font_labels_size);
+}
+
+.notebook-change-kind {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_micro_size);
+}
+
+.notebook-line {
+  margin: 0;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.notebook-line.is-added {
+  background: color-mix(in srgb, var(--green_prime_background) 16%, transparent);
+}
+
+.notebook-line.is-removed {
+  background: color-mix(in srgb, var(--red_prime_background) 16%, transparent);
+}
+
+/* ── отладчик регулярных выражений ─────────────────────────────────────── */
+
+/* Окно шире диалога одного поля: слева поля, справа ответ — но не на весь экран. */
+/* ── замена по структуре кода ───────────────────────────────────────────── */
+
+/* Слева образец и замена, справа найденное — как у отладчика регэкспов. */
+.structural-modal {
+  width: min(760px, 100%);
+  height: min(560px, 100%);
+}
+
+.structural-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.structural-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  border-right: 1px solid var(--separator_color);
+}
+
+.structural-form .field-label {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Образец и замена — код: моноширинный, как в редакторе. */
+.structural-pattern,
+.structural-replacement {
+  font-family: var(--font_mono);
+}
+
+.structural-replace-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.structural-replace-row .structural-replacement {
+  flex: 1;
+  min-width: 0;
+}
+
+.structural-output {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
+
+.structural-status {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.structural-status.is-error {
+  color: var(--red_prime_background);
+}
+
+.structural-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.structural-match {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.structural-match-text {
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  overflow-wrap: anywhere;
+}
+
+.structural-match-captures {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_micro_size);
+  overflow-wrap: anywhere;
+}
+
+.structural-more {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+}
+
+/* Область поиска: в файле или по всему проекту — переключатель из двух кнопок. */
+.structural-scope {
+  display: inline-flex;
+  gap: 0;
+  align-self: flex-start;
+  padding: 2px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+}
+
+.structural-scope .seg-btn {
+  padding: 3px 10px;
+  border: none;
+  /* Вкладка внутри рамки с отступом 2px: внутренний радиус меньше внешнего ровно
+     на этот отступ, иначе углы «расходятся» и рамка выглядит криво. */
+  border-radius: calc(var(--radius_sm) - 2px);
+  background: transparent;
+  color: var(--text_color_secondary);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+.structural-scope .seg-btn.is-active {
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+/* Найденное по проекту: строкой файл с числом мест, под ним — сами места. */
+.structural-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.structural-file-name {
+  overflow: hidden;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--blue_prime_background);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.structural-file-count {
+  flex: 0 0 auto;
+  padding: 0 6px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+  color: var(--text_color_secondary);
+  font-size: var(--font_micro_size);
+}
+
+/* Место внутри файла — с отступом, как вложенная строка в списке проблем. */
+.structural-match.is-nested,
+.structural-more.is-nested {
+  margin-left: 14px;
+}
+
+.regex-modal {
+  width: min(900px, 100%);
+  height: min(620px, 100%);
+}
+
+.regex-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+/* Левая колонка: шаблон, флаги, текст и замена. */
+.regex-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  border-right: 1px solid var(--separator_color);
+}
+
+.regex-form .field-label {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Шаблон в обрамлении косых — как литерал `/…/gi`. */
+.regex-pattern-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.regex-slash {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+}
+
+.regex-pattern {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font_mono);
+}
+
+.regex-flags {
+  flex: 0 0 auto;
+  width: 64px;
+  font-family: var(--font_mono);
+}
+
+/* Чипы флагов: включённый подсвечен — как выбранный пункт. */
+.regex-flag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.regex-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_pill);
+  background: var(--sunken_background);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.regex-flag:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.regex-flag.is-on {
+  border-color: var(--focus_ring_color);
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+.regex-flag-char {
+  font-family: var(--font_mono);
+  font-weight: 600;
+}
+
+.regex-flag.is-on .regex-flag-char {
+  color: var(--blue_prime_background);
+}
+
+/* Текст тянется по высоте, замена — одна строка. */
+.regex-text {
+  flex: 1 1 auto;
+  min-height: 120px;
+  padding: 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  line-height: 1.5;
+  resize: none;
+}
+
+.regex-text:focus,
+.regex-pattern:focus,
+.regex-flags:focus,
+.regex-replacement:focus {
+  outline: none;
+  border-color: var(--focus_ring_color);
+}
+
+.regex-replacement {
+  font-family: var(--font_mono);
+}
+
+/* Правая колонка: ответ. Прокручивается целиком — совпадений бывает много. */
+.regex-output {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+}
+
+.regex-status {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.regex-status.is-error {
+  color: var(--red_prime_background);
+}
+
+/* Текст с подсвеченными совпадениями: моно, перенос по словам. */
+.regex-preview {
+  flex: 0 0 auto;
+  max-height: 160px;
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+
+.regex-hit {
+  padding: 0 1px;
+  border-radius: var(--radius_xs);
+  background: var(--highlight_background);
+  color: var(--text_color);
+}
+
+/* Соседние совпадения красим в другой оттенок — видно, где кончается одно. */
+.regex-hit.is-alt {
+  background: color-mix(in srgb, var(--blue_prime_background) 30%, transparent);
+}
+
+/* Пустое (нулевой ширины) совпадение — тонкая метка: текст она не занимает. */
+.regex-hit.is-empty {
+  display: inline-block;
+  width: 2px;
+}
+
+.regex-matches {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.regex-match {
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+.regex-match-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.regex-match-no,
+.regex-match-range {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+  font-variant-numeric: tabular-nums;
+}
+
+.regex-match-text,
+.regex-group-text {
+  overflow-wrap: anywhere;
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.regex-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 3px;
+  padding-left: 10px;
+}
+
+.regex-group-name {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.regex-replaced {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.regex-replaced-text {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow: auto;
+}
+
+.outline-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.outline-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.outline-summary {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.outline-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0;
+}
+
+.outline-empty {
+  padding: 6px 10px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Строка символа: значок вида, имя и отступ по вложенности (задаёт paddingLeft). */
+.outline-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: 8px;
+  border: none;
+  background: none;
+  color: var(--text_color);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.outline-row:hover {
+  background: var(--element_background_hover);
+}
+
+/* Значок вида — моноширинный и приглушённый: имя символа важнее. */
+.outline-kind {
+  flex: 0 0 auto;
+  width: 14px;
+  color: var(--run_accent);
+  font-family: "JetBrains Mono", monospace;
+  text-align: center;
+}
+
+.outline-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ── панель проблем ────────────────────────────────────────────────────── */
+
+.problems-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.problems-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.problems-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.problems-summary {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Поле фильтра — как остальные поля панелей: живёт в тулбаре справа. */
+.problems-filter {
+  width: 220px;
+  padding: 3px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+}
+
+.problems-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.problems-empty {
+  padding: 6px 10px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Заголовок файла в списке: имя важнее отдельных строк под ним. */
+.problem-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 2px;
+}
+
+.problem-file {
+  overflow: hidden;
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.problem-group-counts {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.problem-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 10px 3px 22px;
+  border: none;
+  background: none;
+  color: var(--text_color);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.problem-row:hover {
+  background: var(--element_background_hover);
+}
+
+/* Значок вида: те же цвета, что у волнистого подчёркивания в редакторе. */
+.problem-severity {
+  flex: 0 0 auto;
+  width: 12px;
+  font-family: "JetBrains Mono", monospace;
+  text-align: center;
+}
+
+.problem-severity.is-error {
+  color: var(--severity_error);
+}
+
+.problem-severity.is-warning {
+  color: var(--severity_warning);
+}
+
+.problem-severity.is-info {
+  color: var(--severity_info);
+}
+
+.problem-message {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.problem-source,
+.problem-position {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.problem-position {
+  font-family: "JetBrains Mono", monospace;
+}
+
+/* ── панель задач (TODO/FIXME) ─────────────────────────────────────────── */
+
+.todo-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.todo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.todo-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.todo-summary {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.todo-filter {
+  width: 200px;
+  padding: 3px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+}
+
+.todo-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 6px;
+}
+
+.todo-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.todo-empty {
+  padding: 6px 10px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.todo-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 2px;
+}
+
+.todo-file {
+  overflow: hidden;
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.todo-group-counts {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.todo-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 3px 10px 3px 22px;
+  border: none;
+  background: none;
+  color: var(--text_color);
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.todo-row:hover {
+  background: var(--element_background_hover);
+}
+
+/* Вид пометки — словом: у задач вид важнее строки, и он виден без легенды. */
+.todo-marker {
+  flex: 0 0 auto;
+  min-width: 46px;
+  font-size: var(--font_small_size);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.todo-marker.is-todo {
+  color: var(--link_color);
+}
+
+.todo-marker.is-fixme {
+  color: var(--text_color_error);
+}
+
+.todo-marker.is-hack {
+  color: var(--severity_warning);
+}
+
+.todo-marker.is-xxx {
+  color: var(--text_color_tertiary);
+}
+
+.todo-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.todo-position {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-family: "JetBrains Mono", monospace;
+  font-size: var(--font_small_size);
+}
+
+.tests-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.tests-summary {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.tests-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 0;
+}
+
+.tests-node {
+  display: flex;
+  flex-direction: column;
+}
+
+.tests-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+  padding-right: 8px;
+  cursor: default;
+  font-size: var(--font_labels_size);
+}
+
+.tests-row:hover {
+  background: var(--element_background_hover);
+}
+
+.tests-file .tests-label {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+/* Иерархия узлов: файл — основной текст, класс — вторичный, тест — третичный.
+   Здесь стоял `--text_color_hover` (роль «текст на цветной заливке»), и в светлой
+   схеме белое имя класса сливалось с белой панелью. */
+.tests-class .tests-label {
+  color: var(--text_color_secondary);
+}
+
+.tests-test .tests-label {
+  color: var(--text_color_tertiary);
+}
+
+.tests-arrow {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--text_color_secondary);
+}
+
+.tests-arrow.is-toggle {
+  cursor: pointer;
+}
+
+.tests-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Кнопка запуска появляется при наведении: список не должен пестреть стрелками. */
+.tests-run {
+  margin-left: auto;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius_xs);
+  background: none;
+  color: var(--blue_prime_background);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.tests-row:hover .tests-run {
+  opacity: 1;
+}
+
+.tests-run:hover {
+  background: var(--element_background_hover);
+}
+
+/* Исход последнего прогона узла: галочка прошёл, крестик упал, многоточие идёт. */
+.tests-status {
+  flex: 0 0 auto;
+  color: var(--text_color_secondary);
+}
+
+.tests-status.is-passed {
+  color: var(--green_prime_background);
+}
+
+.tests-status.is-failed {
+  color: var(--red_prime_background);
+}
+
+/* Упавший прогон виден и на самой строке, а не только по значку. */
+.tests-row.is-failed .tests-label {
+  color: var(--red_prime_background);
+}
+
+/* ── панель отладки ─────────────────────────────────────────────────────── */
+
+.debug-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: var(--font_labels_size);
+}
+
+.debug-toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.debug-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/*
+ * Вывод программы и строки точек-журналов. Своя прокрутка и ограниченная высота:
+ * иначе вывод в сотни строк выдавил бы стек и переменные из панели. Пустой блок
+ * не занимает места — пока программа молчит, панель выглядит как раньше.
+ */
+.debug-output {
+  flex: 0 0 auto;
+  max-height: 40%;
+  min-height: 0;
+  margin: 0;
+  padding: 6px 8px;
+  border-top: 1px solid var(--separator_color);
+  overflow: auto;
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.debug-output:empty {
+  display: none;
+}
+
+.debug-section {
+  padding: 4px 0 8px;
+}
+
+.debug-heading {
+  margin: 6px 8px 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.debug-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.debug-exc {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 8px;
+}
+
+.debug-exc-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.debug-exc-box {
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--blue_prime_background);
+}
+
+.debug-row,
+.debug-frame {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.debug-frame:hover,
+.debug-row:hover {
+  background: var(--element_background_hover);
+}
+
+.debug-frame.is-active {
+  background: var(--element_background);
+}
+
+.debug-frame-name {
+  color: var(--text_color);
+}
+
+.debug-frame-line {
+  margin-left: auto;
+  color: var(--text_color_secondary);
+}
+
+.debug-toggle {
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--text_color_secondary);
+}
+
+.debug-toggle.is-active {
+  cursor: pointer;
+  color: var(--text_color);
+}
+
+.debug-var-name {
+  color: var(--text_color);
+}
+
+.debug-var-value {
+  color: var(--link_color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.debug-var-type {
+  color: var(--text_color_secondary);
+}
+
+.debug-scope {
+  margin: 4px 8px 2px;
+  color: var(--text_color_tertiary);
+  font-weight: 600;
+}
+
+/* Поле наблюдения: внутри прокручиваемого тела панели, поэтому отступы свои. */
+.debug-watch-input {
+  margin: 6px 8px 0;
+  width: calc(100% - 16px);
+}
+
+/* Крестик «убрать из наблюдения» — в конце строки, появляется при наведении. */
+.debug-watch-remove {
+  margin-left: auto;
+  opacity: 0;
+}
+
+.debug-row:hover .debug-watch-remove {
+  opacity: 1;
+}
+
+.debug-empty {
+  padding: 8px 10px;
+  color: var(--text_color_secondary);
+}
+
+.debug-idle {
+  padding: 12px;
+  white-space: normal;
+}
+
+.tests-empty {
+  padding: 12px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+  text-align: center;
+}
+
+/* Плагины окружения, отключённые при сборе: не ошибка проекта, но сказать надо. */
+.tests-note {
+  margin: 6px 10px;
+  padding: 6px 10px;
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.tests-errors {
+  margin: 6px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--red_prime_background);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+}
+
+.tests-error-title {
+  margin-bottom: 4px;
+  color: var(--text_color);
+  font-weight: 600;
+  font-size: var(--font_labels_size);
+}
+
+.tests-error-line {
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  overflow-wrap: anywhere;
+}
+
+/* Покрытие по файлам: сначала самые проблемные — с нулевым покрытием. */
+.tests-coverage-box {
+  margin: 6px 0 12px;
+  border-top: 1px solid var(--separator_color);
+  padding-top: 6px;
+}
+
+.tests-cov-title {
+  padding: 0 8px 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tests-cov-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px;
+  font-size: var(--font_labels_size);
+}
+
+.tests-cov-path {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text_color_secondary);
+}
+
+.tests-cov-percent {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Колонка ветвей — мельче и бледнее процента: это уточнение, а не главное число. */
+.tests-cov-branch {
+  color: var(--text_color_secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.tests-cov-row.is-bad .tests-cov-percent {
+  color: var(--red_prime_background);
+}
+
+.tests-cov-row.is-more {
+  color: var(--text_color_secondary);
+}
+
+/* ── попап Python-окружения в статусбаре ──────────────────────────────── */
+
+/* Отступ даёт сам попап (`.popover`): своё поле здесь сложилось бы с ним
+   в двойную рамку. */
+.python-env {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Окружений бывает много: длинный список прокручиваем, а не вылезаем за окно. */
+.popover-python-env,
+.popover-node-env {
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+
+.python-env-title {
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.python-env-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.python-env-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--font_labels_size);
+}
+
+.python-env-key {
+  flex: 0 0 auto;
+  width: 92px;
+  color: var(--text_color_secondary);
+}
+
+/* Путь может быть длинным: переносим по любому месту, а не растягиваем попап. */
+.python-env-value {
+  min-width: 0;
+  color: var(--text_color);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  overflow-wrap: anywhere;
+}
+
+.python-env-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.python-env-badge {
+  padding: 1px 6px;
+  border-radius: var(--radius_pill);
+  /* Под белым текстом — заливка, а не полупрозрачный акцент: тот давал 2.1:1. */
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+  font-size: var(--font_micro_size);
+}
+
+/* Раздел выбора: подпись над списком, как у секций в других окнах. */
+.python-env-heading {
+  margin-top: 2px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Строка выбора интерпретатора: клик выбирает, рамка показывает текущий. */
+.python-env-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  text-align: left;
+  cursor: pointer;
+}
+
+.python-env-option:hover {
+  border-color: var(--blue_prime_background);
+}
+
+.python-env-option.is-selected {
+  border-color: var(--blue_prime_background);
+  background: var(--blue_prime_background_tint_strong);
+}
+
+.python-env-option-name {
+  flex: 0 0 auto;
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+/* Подробность строки может быть длинной: усекаем, а не растягиваем попап. */
+.python-env-option-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.python-env-empty {
+  padding: 10px;
+  border: 1px dashed var(--separator_color);
+  border-radius: var(--radius_sm);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+  text-align: center;
+}
+
+.python-env-manage {
+  padding: 6px 10px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+/* Наведение подсвечиваем рамкой: текст остаётся основным, а не белым (фон тут
+   обычный, и в светлой схеме белый текст был бы невидим). */
+.python-env-manage:hover {
+  border-color: var(--blue_prime_background);
+  color: var(--text_color);
+}
+
+/* Поломки окружения: точка цветом важности и объяснение словами. */
+.python-env-health {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+}
+
+.python-env-issue {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--font_labels_size);
+  line-height: 1.4;
+}
+
+.python-env-issue-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius_circle);
+  background: var(--text_color_secondary);
+}
+
+.python-env-issue.is-error .python-env-issue-dot {
+  background: var(--red_prime_background);
+}
+
+.python-env-issue.is-warning .python-env-issue-dot {
+  background: var(--yellow_prime_background);
+}
+
+.python-env-issue.is-error {
+  color: var(--text_color);
+}
+
+.python-env-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.python-env-heading {
+  margin: 0;
+  color: var(--text_color_secondary);
+  font-size: var(--font_micro_size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.python-env-note {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Сверка с requirements.txt: чуть заметнее прочей подписи — по ней решают, что доставить. */
+.python-env-requirements {
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+}
+
+/* Подпись без моно-шрифта: путь — код, а «источник» — просто слово. */
+.python-env-plain {
+  font-family: inherit;
+  font-size: var(--font_labels_size);
+}

@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readMainCss } from './style-files';
 
 /**
  * Страж каркаса модальных окон (`src/renderer/ui/modal.ts`).
@@ -84,7 +85,7 @@ describe('каркас модальных окон', () => {
 });
 
 describe('тело окна не раскладывается в две колонки по умолчанию', () => {
-  const MAIN = readFileSync(resolve(process.cwd(), 'src/renderer/styles/main.css'), 'utf8');
+  const MAIN = readMainCss();
 
   it('общий `.modal-body` — столбец', () => {
     const rule = MAIN.match(/\n\.modal-body \{([^}]*)\}/)?.[1] ?? '';

@@ -1,0 +1,2100 @@
+/* Каркас окна и панели: сетка приложения, шапка, боковые панели, вкладки, крошки,
+   запуск файла, приветствие, кнопки и поля, проводник, значки, нижняя панель,
+   терминал и поиск по проекту. Часть одной таблицы стилей: порядок частей задан
+   в `main.css`, и менять его нельзя — правила перекрывают друг друга по порядку. */
+/**
+ * Раскладка и компоненты. Цветов здесь нет — только токены из `theme.css`,
+ * которые переключаются вместе со схемой (`prefers-color-scheme`).
+ * Геометрия и движение — тоже токены: `--radius_*`, `--control_height`, `--motion_*`.
+ */
+
+:root {
+  /* Размеры панелей: их двигают сплиттеры во время работы,
+     поэтому это не токены палитры, а состояние раскладки. */
+  --sidebar-size: 260px;
+  --right-size: 400px;
+  --dock-size: 260px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Панели скрываются атрибутом hidden, а классы задают им display: flex. */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--main_background);
+  color: var(--text_color);
+  font-family: var(--font_ui);
+  font-size: var(--font_labels_size);
+  line-height: var(--line_height_ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}
+
+button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: var(--focus_outline);
+  outline-offset: var(--focus_outline_offset);
+}
+
+/* Скроллбары — системные оверлеи Chromium (флаг `OverlayScrollbar`, см.
+   `main/index.ts`): полоса всплывает поверх содержимого и не занимает ширину.
+   Своих правил `::-webkit-scrollbar` здесь быть НЕ должно: любая такая
+   кастомизация отключает оверлей и возвращает занимающую место полосу. */
+
+/* Все всплывающие слои лежат НАД содержимым: тот же материал (полупрозрачная
+   подложка + блюр фона) читается как «стекло» над интерфейсом и задаёт глубину
+   одним языком. Список один, чтобы слои не разъезжались по оформлению.
+   Только стандартное `backdrop-filter`: Blink webkit-алиас не понимает
+   (CSS.supports('-webkit-backdrop-filter') — false), а минификатор сборки
+   схлопывает пару «префикс + стандарт» в одну декларацию и оставлял как раз
+   префикс — блюр пропадал у всех слоёв сразу. Поэтому префикса тут быть не должно. */
+.select-popup,
+.context-menu,
+.composer-menu,
+.session-info,
+.popover,
+.palette,
+.toast,
+.modal {
+  backdrop-filter: var(--popup_filter);
+}
+
+/* ── «идёт чтение» ──────────────────────────────────────────────────────── */
+
+/* Пока данные едут, место показывает не слово «Читаю…», а свой силуэт: несколько
+   серых полос на месте будущих строк. Разница видна на медленном ответе (ssh, сеть):
+   по полосам понятно, ЧТО появится и сколько, а текст о ходе работы ничего не обещает.
+   Полосы дышат одной короткой анимацией — это индикатор «идёт работа», а не украшение;
+   под «уменьшить движение» она гаснет общим правилом (см. `prefers-reduced-motion`). */
+.loading-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space_sm);
+  padding: var(--space_md) var(--space_lg);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.loading-note .icon {
+  flex: 0 0 auto;
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space_md);
+  padding: var(--space_md) var(--space_lg);
+}
+
+/* Полоса-силуэт: ширина задаётся из кода (строки бывают разной длины). */
+.skeleton-row {
+  height: 10px;
+  border-radius: var(--radius_2xs);
+  background: var(--element_background);
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes skeleton-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* ── каркас ─────────────────────────────────────────────────────────────── */
+
+.app {
+  display: grid;
+  /* Отступы есть только по бокам: шапка и статусбар примыкают к панелям,
+     иначе сверху и снизу читаются лишние пустые полосы.
+     Зазоры между панелями — колонки со сплиттерами; зазор скрытой панели
+     схлопывается вместе с ней, иначе сбоку останется двойной отступ. */
+  --sidebar-gap: var(--space_sm);
+  --right-gap: var(--space_sm);
+  /* Размер и видимость — разные переменные: сплиттер пишет размер инлайном
+     на этом же элементе, а инлайн перебивает класс. Здесь размер превращается
+     в ширину панели, и уже её отменяет правило скрытия — иначе скрытая панель
+     оставляла бы пустую колонку своего размера после перетаскивания. */
+  --sidebar-width: var(--sidebar-size);
+  --right-width: var(--right-size);
+  --dock-height: var(--dock-size);
+  grid-template-columns: 6px var(--sidebar-width) var(--sidebar-gap) minmax(0, 1fr) var(--right-gap) var(--right-width) 6px;
+  grid-template-rows: var(--topbar_height) minmax(0, 1fr) 24px;
+  height: 100%;
+  /* Safe areas: на мониторе нули (переменные из `theme.css`), а у выреза или
+     скруглённых углов содержимое отступает от края, а не упирается в него. */
+  padding: var(--safe_top) var(--safe_right) var(--safe_bottom) var(--safe_left);
+  background: var(--main_background);
+}
+
+/* Сворачивание панелей — мгновенное, без анимации: панели меняют ширину дорожки
+   сетки, а анимировать раскладку нельзя (см. `tests/motion.test.ts`). Ступень
+   Normal из шкалы движения сюда не применяется намеренно. */
+.app.is-sidebar-hidden {
+  --sidebar-width: 0px;
+  --sidebar-gap: 0px;
+}
+
+.app.is-sidebar-hidden .sidebar,
+.app.is-sidebar-hidden .splitter-left {
+  display: none;
+}
+
+/* Режим дзен: кроме панелей (их скрывает `is-sidebar-hidden` и родня) прячем и
+   обвязку — шапку и строку состояния. Остаётся только редактор. */
+.app.is-zen .topbar,
+.app.is-zen .statusbar-host {
+  display: none;
+}
+
+.app.is-right-hidden {
+  --right-width: 0px;
+  --right-gap: 0px;
+}
+
+.app.is-right-hidden .right-panel,
+.app.is-right-hidden .splitter-right {
+  display: none;
+}
+
+.app.is-dock-hidden .dock-wrap {
+  display: none;
+}
+
+/* «Остров»: содержимое окна светлее самого окна, поэтому панель читается карточкой. */
+.island {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--element_background_2);
+}
+
+.topbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) minmax(0, auto);
+  align-items: center;
+  gap: var(--space_md);
+  padding: 0 var(--space_sm);
+  /* Шапка — область перетаскивания окна: без системной рамки двигать окно больше нечем.
+     Жест ведёт Chromium через оконный менеджер, поэтому движение плавное. */
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+/* Кнопки шапки меньше панельных: высота полосы 36 px, зазор по 6 px со всех сторон —
+   сверху и снизу от края окна, поэтому размер кнопки 24 px. */
+.topbar .icon-btn {
+  width: var(--topbar_control_size);
+  height: var(--topbar_control_size);
+}
+
+/* Кнопка со знаком приложения — прямоугольная: знак шире обычного значка, и в квадрате
+   он упирается в края. Ширина по содержимому, отступ по 6 px с боков — ровно шаг
+   между кнопками, поэтому ряд остаётся ровным. */
+.topbar .icon-btn.has-mark {
+  width: auto;
+  padding: 0 6px;
+}
+
+.topbar .icon-btn.has-mark .logo-mark {
+  display: block;
+  height: 13px;
+  width: auto;
+}
+
+/* Всё кликабельное в шапке выключается из области перетаскивания. */
+.topbar button,
+.topbar input,
+.topbar select {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.topbar-title {
+  overflow: hidden;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Название приложения — тем же шрифтом, что код и терминал (JetBrains Mono).
+   Так подписано стартовое окно; в редакторе имя файла носит `.topbar-name`. */
+.topbar-title.is-brand {
+  font-family: var(--font_mono);
+}
+
+/* Центр шапки, когда в нём стоит кнопка запуска: содержимое выравниваем по
+   центру, а не по тексту. Название эмблемы в стартовом окне — обычный текст. */
+.topbar-title:has(.run-control) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Имя открытого файла в центре шапки: показывается, когда кнопки запуска нет.
+   Обрезается многоточием — путь с именем проекта бывает длинным. */
+.topbar-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Название приложения — тем же шрифтом, что код и терминал (JetBrains Mono);
+   имя файла — интерфейсным: это не название, а данные. */
+.topbar-name.is-brand {
+  font-family: var(--font_mono);
+}
+
+.topbar-left,
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* На macOS свои кнопки не нужны: там остаются системные «светофоры»,
+   и под них надо освободить место слева. */
+:root.is-mac .topbar-left {
+  padding-left: 68px;
+}
+
+:root.is-mac .window-controls {
+  display: none;
+}
+
+.window-controls {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 6px;
+}
+
+.window-btn {
+  display: grid;
+  place-items: center;
+  width: var(--topbar_control_size);
+  height: var(--topbar_control_size);
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease);
+}
+
+.window-btn:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.window-btn.is-close:hover {
+  background: var(--danger_fill);
+  color: var(--text_color_hover);
+}
+
+/* Края растягивания: у безрамочного окна на Linux системных краёв нет.
+   Полоса сверху и снизу — 4 px, то есть меньше зазора кнопки в шапке (6 px),
+   иначе край накрывает кнопки и клик по их краю тянет окно вместо действия. */
+.resize-edge {
+  position: fixed;
+  z-index: var(--layer_edge);
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.resize-edge-n,
+.resize-edge-s {
+  right: 8px;
+  left: 8px;
+  height: 4px;
+  cursor: ns-resize;
+}
+
+.resize-edge-n {
+  top: 0;
+}
+
+.resize-edge-s {
+  bottom: 0;
+}
+
+.resize-edge-e,
+.resize-edge-w {
+  top: 8px;
+  bottom: 8px;
+  width: 5px;
+  cursor: ew-resize;
+}
+
+.resize-edge-e {
+  right: 0;
+}
+
+.resize-edge-w {
+  left: 0;
+}
+
+.resize-edge-ne,
+.resize-edge-nw,
+.resize-edge-se,
+.resize-edge-sw {
+  width: 10px;
+  height: 10px;
+}
+
+.resize-edge-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.resize-edge-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.resize-edge-se {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.resize-edge-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
+.sidebar {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+}
+
+.splitter {
+  position: relative;
+  background: transparent;
+  /* Ширина полосы — 6 px. Без этого тач-жест уводит прокрутку вместо перетаскивания. */
+  touch-action: none;
+}
+
+/* Метка-хендл: три точки по центру полосы. До наведения её не видно, а сама
+   полоса остаётся тонкой — прежний «толстый» фокус на всю ширину убран. */
+.splitter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--motion_fast) var(--motion_ease);
+  background-image: radial-gradient(circle, var(--text_color_tertiary) 1.4px, transparent 1.5px);
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+}
+
+/* Вертикальные разделители — точки столбиком. */
+.splitter-left::after,
+.splitter-right::after {
+  width: 4px;
+  height: 16px;
+  background-position:
+    center top,
+    center center,
+    center bottom;
+}
+
+/* Горизонтальный разделитель дока — точки в ряд. */
+.splitter-dock::after {
+  width: 16px;
+  height: 4px;
+  background-position:
+    left center,
+    center center,
+    right center;
+}
+
+.splitter-left {
+  grid-column: 3;
+  grid-row: 2;
+  cursor: col-resize;
+}
+
+.splitter-right {
+  grid-column: 5;
+  grid-row: 2;
+  cursor: col-resize;
+}
+
+.splitter-dock {
+  cursor: row-resize;
+}
+
+.splitter:hover::after,
+.splitter.is-dragging::after {
+  opacity: 1;
+}
+
+/* Пока тянем — курсор и запрет выделения на весь интерфейс. Иначе редактор под
+   курсором переключает его на текстовый, и непонятно, что вообще происходит. */
+.app.is-resizing-x,
+.app.is-resizing-x * {
+  cursor: col-resize !important;
+}
+
+.app.is-resizing-y,
+.app.is-resizing-y * {
+  cursor: row-resize !important;
+}
+
+.app.is-resizing-x,
+.app.is-resizing-y {
+  user-select: none;
+}
+
+.app > .center {
+  grid-column: 4;
+  grid-row: 2;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dock-wrap {
+  display: grid;
+  grid-template-rows: 6px var(--dock-height);
+  min-height: 0;
+}
+
+.editor-island {
+  display: flex;
+  flex-direction: column;
+}
+
+.right-panel {
+  grid-column: 6;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Тело панели — единственный ребёнок «острова», поэтому тянется на всю высоту.
+   Без растяжения панель чата получает высоту по содержимому и всё липнет к верху. */
+.right-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.statusbar-host {
+  grid-column: 1 / -1;
+  grid-row: 3;
+}
+
+/* ── заголовки панелей ──────────────────────────────────────────────────── */
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 var(--space_sm) 0 var(--space_lg);
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_tertiary);
+}
+
+.panel-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  color: var(--text_color);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* У ассистента свой акцент — фиолетовый: так его роль читается отдельно от системных. */
+.panel-header-ai svg {
+  color: var(--purple_prime_background);
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: var(--toolbar_control_size);
+  height: var(--toolbar_control_size);
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease);
+}
+
+.icon-btn:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Кнопка-переключатель панели: синий значок значит «панель открыта». */
+.icon-btn.is-active {
+  color: var(--blue_prime_background);
+}
+
+/* ── вкладки редактора ──────────────────────────────────────────────────── */
+
+/* Полоса вкладок — того же цвета, что полотно: вкладки читаются обводкой,
+   а не заливками, поэтому полоса не выглядит отдельной панелью. */
+.tabs-host {
+  flex: 0 0 auto;
+  background: var(--editor_background);
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 36px;
+  padding: 0 3px;
+  /* Прокрутка доводит вкладку до того же зазора, что и отступ полосы: иначе
+     последняя вкладка встаёт вплотную к краю и он выглядит срезанным. */
+  scroll-padding-inline: 3px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Вкладка, обрезанная краем полосы, читается как «дальше есть ещё», если край
+   мягко уходит: без этого она выглядит случайно срезанной. Классы ставит полоса
+   (вкладки есть с той стороны, куда можно прокрутить). */
+.tabs.is-scrolled-start {
+  mask-image: linear-gradient(to right, transparent 0, #000 16px);
+}
+
+.tabs.is-scrolled-end {
+  mask-image: linear-gradient(to left, transparent 0, #000 16px);
+}
+
+.tabs.is-scrolled-start.is-scrolled-end {
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  max-width: 200px;
+  padding: 0 6px 0 9px;
+  border-radius: var(--radius_sm);
+  background: transparent;
+  color: var(--text_color_secondary);
+  white-space: nowrap;
+  /* Без перехода (ступень Instant): переключение вкладок — частое действие,
+     подсветка должна вставать мгновенно, а не проявляться переходом. */
+}
+
+.tab:hover {
+  background: var(--element_background);
+  color: var(--text_color);
+}
+
+/* Активная вкладка залита тем же выделением, что выбранная строка дерева:
+   одно состояние читается одинаково в любом списке интерфейса. */
+.tab.is-active {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+/* Предпросмотр — вкладка «на посмотреть»: её вытеснит следующая такая же, поэтому
+   подпись курсивом. Так вкладка-предпросмотр отличается от открытых насовсем. */
+.tab.is-preview .tab-label {
+  font-style: italic;
+}
+
+/* Закреплённая вкладка помечена булавкой: её не вытеснит предпросмотр, и в «закрыть
+   другие» она не попадёт. Значок — тем же акцентом, что активная полоса вкладки. */
+.tab.is-pinned svg {
+  color: var(--link_color);
+}
+
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Крестик показывается на наведении, у активной и у изменённой вкладки:
+   так полоса не забита одинаковыми значками закрытия. */
+.tab-close {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius_xs);
+  color: var(--text_color_tertiary);
+  opacity: 0;
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease),
+    opacity var(--motion_fast) var(--motion_ease);
+}
+
+.tab:hover .tab-close,
+.tab.is-active .tab-close,
+.tab.is-dirty .tab-close {
+  opacity: 1;
+}
+
+.tab-close:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.tab-dirty {
+  width: 7px;
+  height: 7px;
+  margin-right: -2px;
+  border-radius: var(--radius_circle);
+  background: var(--blue_prime_background);
+}
+
+/* ── хлебные крошки ─────────────────────────────────────────────────────── */
+
+/* Путь к открытому файлу живёт в строке состояния (см. `ui/statusbar.ts`):
+   раньше крошки шли отдельной полосой под вкладками, а тот же путь повторялся
+   ссылкой в полосе — теперь он один. */
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.crumb:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.crumb.is-file {
+  color: var(--text_color_secondary);
+}
+
+/* ── запуск файла ────────────────────────────────────────────────────────
+   Кнопка стоит в центре шапки: это действие над открытым файлом, и заметнее
+   места у него нет. Видна она только когда запускать есть что — иначе центр
+   шапки пуст, а название файла всё равно есть в статусбаре. */
+.run-control {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.run-button,
+.run-picker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  /* 24 — минимум интерактивного элемента для десктопа; было 20. */
+  height: 24px;
+  padding: 0 8px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.run-button:hover,
+.run-picker:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.run-button {
+  color: var(--run_accent);
+  font-weight: 500;
+}
+
+.run-button-label {
+  max-width: 190px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.run-picker {
+  padding: 0 4px;
+  margin-left: -2px;
+}
+
+/* Значок ▶ на поле номеров строк: нажимается, как кнопка, но живёт в жёлобе. */
+.run-glyph {
+  position: relative;
+  cursor: pointer;
+}
+
+.run-glyph::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 0;
+  height: 0;
+  border-left: 7px solid var(--run_accent);
+  border-top: 4.5px solid transparent;
+  border-bottom: 4.5px solid transparent;
+}
+
+/* Значок теста после прогона: вместо ▶ — галочка (прошёл) или крестик (упал).
+   До первого прогона это всё тот же ▶: запускать есть что. */
+.run-glyph.test-glyph.is-passed::after,
+.run-glyph.test-glyph.is-failed::after {
+  width: auto;
+  height: auto;
+  border: none;
+  margin: 0;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font_small_size);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.run-glyph.test-glyph.is-passed::after {
+  content: "✓";
+  color: var(--green_prime_background);
+}
+
+.run-glyph.test-glyph.is-failed::after {
+  content: "✗";
+  color: var(--red_prime_background);
+}
+
+/* Прогон идёт — значок приглушён, чтобы не читался как готовый исход. */
+.run-glyph.test-glyph.is-running {
+  opacity: 0.5;
+}
+
+/* Точка останова на поле номеров строк: красный кружок вместо значка запуска. */
+.breakpoint-glyph {
+  position: relative;
+  cursor: pointer;
+}
+
+.breakpoint-glyph::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius_circle);
+  background: var(--red_prime_background);
+}
+
+/* Условная точка — ромб: её видно и без подсказки, и не спутать с безусловной. */
+.breakpoint-glyph.is-conditional::after {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius_2xs);
+  transform: rotate(45deg);
+}
+
+/* Точка в журнал — ромб другого цвета: она не останавливает программу. */
+.breakpoint-glyph.is-log::after {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--radius_2xs);
+  transform: rotate(45deg);
+  background: var(--run_accent);
+}
+
+/* Закладка на строке: ленточка в поле значков. Значок самый слабый — точка
+   останова, запуск и тест его перекрывают (см. buildGlyphs в редакторе). */
+.bookmark-glyph {
+  position: relative;
+  cursor: pointer;
+}
+
+.bookmark-glyph::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 9px;
+  height: 12px;
+  background: var(--blue_prime_background);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 74%, 0 100%);
+}
+
+/* Строка, где стоит отладчик: подсвечиваем всю строку, а не только жёлоб. */
+.debug-line {
+  background: var(--debug_line_background);
+}
+
+/* Подпись blame у строки под курсором: тихий текст после кода, не мешая чтению. */
+.blame-inline {
+  color: var(--text_color_tertiary);
+  font-style: italic;
+}
+
+/* Код-линза: кликабельная подпись-действие после строки («3 ссылки», «Запустить тест»).
+   Тише кода, но заметнее подписи blame: это действие, а не справка, — и ведёт себя как
+   ссылка (курсор-рука, подсветка при наведении). */
+.own-editor-lens {
+  color: var(--text_color_tertiary);
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.own-editor-lens:hover {
+  color: var(--accent_fill);
+  text-decoration: underline;
+}
+
+/* Строки, не исполненные тестами: подсвечиваются после прогона с покрытием. */
+.coverage-line {
+  background: var(--coverage_missing_background);
+}
+
+/* Строки, где ветвь условия пройдена лишь наполовину: тесты строку исполнили, но не
+   прошли одну из ветвей. Жёлтый тише красного — это мягче полного непокрытия. */
+.coverage-partial-line {
+  background: var(--coverage_partial_background);
+}
+
+/* Горячие строки профиля: чем больше времени строка съела, тем плотнее заливка.
+   Ступеней три — градация видна, а пестроты нет; мелочь не красится вовсе. */
+.profile-line.is-hot-1 {
+  background: var(--profile_cool_background);
+}
+
+.profile-line.is-hot-2 {
+  background: var(--profile_warm_background);
+}
+
+.profile-line.is-hot-3 {
+  background: var(--profile_hot_background);
+}
+
+/* Полоски изменений в жёлобе: узкая черта в полосе украшений справа от номеров
+   строк — добавлено (зелёная), изменено (жёлтая), удалено (красная). Цвета — те
+   же роли git, что у пометок в дереве и в панели изменений. */
+.change-gutter {
+  border-left: 3px solid transparent;
+  cursor: pointer;
+}
+
+.change-gutter.is-added {
+  border-left-color: var(--git_added);
+}
+
+.change-gutter.is-modified {
+  border-left-color: var(--git_modified);
+}
+
+.change-gutter.is-deleted {
+  border-left-color: var(--git_deleted);
+}
+
+.editor-host {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--editor_background);
+}
+
+/* Зона редактора делится на панели при разделении: панели лежат в ряд, между
+   ними — разделитель. Пока панель одна, она занимает всю зону. */
+.editor-panes {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Три и четыре панели — сеткой 2×2: четыре равных ячейки; при трёх первая занимает
+   левый столбец целиком. Разделитель с перетаскиванием — только у ряда из двух. */
+.editor-panes.is-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+}
+
+.editor-panes.is-grid .editor-pane {
+  flex: none;
+}
+
+.editor-panes.is-grid[data-panes="3"] .editor-pane:first-child {
+  grid-row: span 2;
+}
+
+.editor-panes.is-grid .editor-splitter {
+  display: none;
+}
+
+.editor-pane {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Разделитель виден, только когда панелей две (иначе у него `hidden`). */
+.editor-splitter {
+  flex: 0 0 6px;
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+
+.editor-splitter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 4px;
+  height: 16px;
+  margin: auto;
+  opacity: 0;
+  pointer-events: none;
+  background-image: radial-gradient(circle, var(--text_color_tertiary) 1.4px, transparent 1.5px);
+  background-repeat: no-repeat;
+  background-position:
+    center top,
+    center center,
+    center bottom;
+  transition: opacity var(--motion_fast) var(--motion_ease);
+}
+
+.editor-splitter:hover::after {
+  opacity: 1;
+}
+
+/* Активную панель отмечаем линией сверху: с двумя областями иначе не видно, куда
+   придёт открываемый файл и где стоит курсор. */
+.editor-panes.is-split .editor-pane.is-active::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  z-index: 3;
+  opacity: 0.7;
+  pointer-events: none;
+  background: var(--blue_prime_background);
+}
+
+/* ── приветствие ────────────────────────────────────────────────────────── */
+
+.welcome {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+  text-align: center;
+  background: var(--editor_background);
+  color: var(--blue_prime_background);
+}
+
+/* Знак — не тянущийся элемент: во флекс-колонке он иначе сжимается по высоте,
+   когда редактор низкий, и перестаёт быть квадратным. */
+.welcome .logo-mark {
+  flex: 0 0 auto;
+}
+
+.welcome-title {
+  margin: 2px 0 0;
+  color: var(--text_color);
+  /* Название приложения: тот же шрифт, что у кода и терминала. */
+  font-family: var(--font_mono);
+  font-size: var(--font_display_size);
+  font-weight: 600;
+}
+
+.welcome-hints {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.welcome-hints li {
+  margin: 2px 0;
+}
+
+/* ── кнопки и поля ──────────────────────────────────────────────────────── */
+
+/* Отклик на наведение и нажатие — у РЕДКИХ действий: кнопки, значки, поля.
+   Вкладки, пункты палитры меню и строки списков сюда НЕ входят: переключение
+   вкладок и ходьба по списку стрелками — частые действия, и подсветка должна
+   вставать мгновенно, а не догонять курсор переходом. Их мгновенность стережёт
+   `tests/motion.test.ts`. */
+.btn,
+.icon-btn,
+.select,
+.window-btn {
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease),
+    border-color var(--motion_fast) var(--motion_ease),
+    transform var(--motion_fast) var(--motion_ease);
+}
+
+.btn:active:not(:disabled),
+.icon-btn:active,
+.window-btn:active,
+.launcher-item:active {
+  transform: scale(0.97);
+}
+
+/* Мишень мелких кнопок-значков: значок остаётся 14–18 px, а невидимая область
+   клика растягивается до 24×24 — минимум интерактивного элемента для десктопа.
+   Вид и раскладку это не меняет: псевдоэлемент прозрачен и не участвует в
+   потоке, а промах мимо значка перестаёт быть частым. */
+.chip-remove,
+.launcher-item-remove,
+.sc-row-action,
+.sc-group-action,
+.tab-close {
+  position: relative;
+}
+
+.chip-remove::after,
+.launcher-item-remove::after,
+.sc-row-action::after,
+.sc-group-action::after,
+.tab-close::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control_height);
+  padding: var(--control_padding_sm) 12px;
+  border: 1px solid var(--button_border_color);
+  border-radius: var(--radius_sm);
+  background: var(--button_background);
+  color: var(--text_color);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    border-color var(--motion_fast) var(--motion_ease);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: var(--button_border_color_hover);
+  background: var(--element_background_hover);
+}
+
+.btn:disabled {
+  background: var(--button_background_disabled);
+  color: var(--text_color_disabled);
+  cursor: default;
+}
+
+/* Заливка основного действия — `--accent_fill`, а не сам акцент: под белым
+   текстом нужна ступень темнее (у акцента — 3.2:1, у ступени — 4.9:1). */
+.btn-primary {
+  border-color: transparent;
+  background: var(--accent_fill);
+  color: var(--text_color_hover);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent_fill);
+  filter: brightness(1.08);
+}
+
+/* Выключенная кнопка — серая, как у всех выключенных: белый текст на
+   полупрозрачном акценте давал 2.1:1 и выглядел «нажимаемым». */
+.btn-primary:disabled {
+  background: var(--button_background_disabled);
+  color: var(--text_color_disabled);
+}
+
+.btn-small {
+  min-height: calc(var(--control_height) - 4px);
+  /* Вертикаль — от токена плотности, как у .btn: иначе при смене плотности
+     крупная и малая кнопки расходятся по высоте. Горизонталь меньше на 3px. */
+  padding: calc(var(--control_padding_sm) - 2px) 9px;
+}
+
+.link-btn {
+  align-self: flex-start;
+  padding: 0;
+  color: var(--link_color);
+  font-size: var(--font_labels_size);
+}
+
+.link-btn:hover {
+  text-decoration: underline;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-row .field-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Поле — углубление на своей панели, поэтому заливка относительная, а не готовый цвет.
+   Та же геометрия у выпадающего списка: снаружи он кнопка, но выглядеть должен полем. */
+.field-input,
+.select {
+  width: 100%;
+  min-height: var(--control_height);
+  padding: var(--control_padding_sm) 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    border-color var(--motion_fast) var(--motion_ease);
+}
+
+.select {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+}
+
+.select:hover:not(.is-disabled) {
+  background: var(--element_background_hover);
+}
+
+.select > svg {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+}
+
+/* Значок значения (иконка опции): цвет берёт от режима/контрола, не свой. */
+.select-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.select-icon svg {
+  color: inherit;
+}
+
+.select-value {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Пустое значение — подсказка, а не текст: та же роль, что placeholder. */
+.select-value.is-empty {
+  color: var(--placeholder_text_color);
+}
+
+.select[aria-expanded="true"] {
+  border-color: var(--focus_ring_color);
+}
+
+.select-popup {
+  position: fixed;
+  z-index: var(--layer_select);
+  max-height: 320px;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_md);
+  background: var(--popup_material);
+  box-shadow: var(--box_shadow_small);
+  animation: popup-fade var(--motion_base) var(--motion_ease);
+}
+
+.select-popup:focus {
+  outline: none;
+}
+
+.select-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: var(--control_padding_sm) 9px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+  text-align: left;
+  font-size: var(--font_labels_size);
+}
+
+.select-item:hover,
+.select-item.is-cursor {
+  background: var(--element_background_hover);
+}
+
+/* Текущее значение — та же заливка выделения, что у строки дерева и вкладки. */
+.select-item.is-selected {
+  background: var(--selection_background);
+}
+
+.select-item-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.select-item-hint {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.select-item:hover .select-item-hint,
+.select-item.is-cursor .select-item-hint,
+.select-item.is-selected .select-item-hint {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.field-input::placeholder,
+.chat-input::placeholder,
+.palette-input::placeholder {
+  color: var(--placeholder_text_color);
+}
+
+.field-input:focus,
+.search-input:focus,
+.chat-input:focus,
+.sc-message:focus {
+  outline: none;
+  border-color: var(--focus_ring_color);
+}
+
+.field-hint {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Ряд кнопок под полем настроек (например, тема из файла): без своей раскладки
+   кнопки липли бы вплотную друг к другу. */
+.field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space_sm);
+}
+
+/* ── проводник ──────────────────────────────────────────────────────────── */
+
+.explorer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Список дерева проекта. Прокручивается САМ: виртуализация рисует окно строк
+   вокруг видимой части, и точкой отсчёта служит список, а не общий столбец панели.
+   Селектор привязан к панели проводника не для красоты: класс `tree` есть и у
+   виджета подсказок Monaco (`.suggest-widget > .tree` — это сам список), и это
+   правило протекало туда. Отступ 4/12 px воровал у списка подсказок 16 px высоты:
+   строки обрезались по краям — отсюда «поехавшие» подсказки. */
+.explorer .tree {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0 12px;
+}
+
+/* Распорки виртуализации: держат длину прокрутки за невидимые строки. Высоту
+   задаёт скрипт; здесь только запрет сжиматься во flex-раскладке. */
+.tree-gap {
+  flex: none;
+}
+
+/* Дерево фокусируется программно (клик по строке) ради клавиш F2/Del: рамка
+   фокуса тут не нужна — выделенная строка и так подсвечена. */
+.explorer .tree:focus {
+  outline: none;
+}
+
+/* Плотность дерева — настройка проводника: строки ниже/выше, значок и отступ
+   остаются те же, поэтому меняется только высота. */
+.explorer[data-rows="compact"] {
+  --tree_row_height: 21px;
+}
+
+.explorer[data-rows="cozy"] {
+  --tree_row_height: 27px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 8px);
+  height: calc(var(--tree_row_height) * var(--density));
+  margin: 0 4px;
+  padding-right: 8px;
+  border-radius: calc(var(--radius_sm) - 3px);
+  color: var(--text_color_secondary);
+  text-align: left;
+}
+
+/* Полка группировки по назначению: подпись и число файлов. Высоту держит ту же,
+   что и строка: по ней считается окно виртуализации, и другая высота сдвинула бы
+   прокрутку. Строка без действий — её не выбирают и не тащат. */
+.tree-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 8px);
+  height: calc(var(--tree_row_height) * var(--density));
+  margin: 0 4px;
+  padding-right: 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.tree-group-label {
+  white-space: nowrap;
+}
+
+.tree-group-count {
+  margin-left: auto;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Строка пакета монорепо: имя проекта и путь от корня. Промежуточные каталоги
+   (`packages`) скрыты, поэтому место на диске видно подписью справа. */
+.tree-package-path {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_micro_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.tree-row.is-package .tree-name {
+  font-weight: 600;
+}
+
+/* ── значки файлов и папок ──────────────────────────────────────────────
+   Значок — часть строки, а не украшение поверх неё: он держит свою ширину,
+   не сжимается в узкой панели и не перекрашивается вместе с текстом строки.
+   Цвет приходит из ролей `--file_*`/`--folder_*` в theme.css, вид — из
+   ui/file-icons.ts. */
+.file-icon,
+.folder-icon {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.file-icon {
+  color: var(--file_text);
+}
+
+.folder-icon {
+  color: var(--folder_default);
+}
+
+.file-icon.is-code {
+  color: var(--file_code);
+}
+.file-icon.is-js {
+  color: var(--file_js);
+}
+.file-icon.is-ts {
+  color: var(--file_ts);
+}
+.file-icon.is-python {
+  color: var(--file_python);
+}
+.file-icon.is-json {
+  color: var(--file_json);
+}
+.file-icon.is-markdown {
+  color: var(--file_markdown);
+}
+.file-icon.is-css {
+  color: var(--file_css);
+}
+.file-icon.is-html {
+  color: var(--file_html);
+}
+.file-icon.is-shell {
+  color: var(--file_shell);
+}
+.file-icon.is-yaml {
+  color: var(--file_yaml);
+}
+.file-icon.is-config {
+  color: var(--file_config);
+}
+.file-icon.is-database {
+  color: var(--file_database);
+}
+.file-icon.is-docker {
+  color: var(--file_docker);
+}
+.file-icon.is-image {
+  color: var(--file_image);
+}
+.file-icon.is-archive {
+  color: var(--file_archive);
+}
+.file-icon.is-lock {
+  color: var(--file_lock);
+}
+.file-icon.is-git {
+  color: var(--file_git);
+}
+
+.folder-icon.is-open {
+  color: var(--folder_open);
+}
+.folder-icon.is-git {
+  color: var(--file_git);
+}
+.folder-icon.is-deps {
+  color: var(--file_shell);
+}
+.folder-icon.is-build {
+  color: var(--file_lock);
+}
+.folder-icon.is-test {
+  color: var(--file_shell);
+}
+.folder-icon.is-docs {
+  color: var(--file_markdown);
+}
+.folder-icon.is-assets {
+  color: var(--file_image);
+}
+.folder-icon.is-scripts {
+  color: var(--file_archive);
+}
+.folder-icon.is-ci,
+.folder-icon.is-source {
+  color: var(--file_ts);
+}
+
+/* Внутри значка не нужен обработчик событий и свой слой: SVG — украшение строки. */
+.tree-row .file-icon,
+.tree-row .folder-icon,
+.crumb .file-icon,
+.crumb .folder-icon {
+  pointer-events: none;
+}
+
+.tree-row:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Выбранная строка — тонировка акцента: текст остаётся основным и читается в обеих схемах. */
+.tree-row.is-active,
+.tree-row.is-selected {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+.tree-row.is-editing {
+  background: var(--element_background_hover);
+}
+
+/* Блок удалённых папок: адреса SSH/WSL/контейнера над локальным деревом. Вид тот же,
+   что у прочих блоков по абсолютным путям, но с пометкой «удалённое» (`ui/explorer.ts`). */
+.tree-remote {
+  border-bottom: 1px solid var(--separator_color);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+}
+
+.tree-remote-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tree-row.is-remote .tree-twisty svg,
+.tree-row.is-remote .icon,
+.tree-row.is-remote svg {
+  color: var(--text_color_tertiary);
+}
+
+.tree-empty-note {
+  padding: 2px 8px 6px 24px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+/* Отказ чтения отличается от «пусто» цветом: это не состояние папки, а беда с доступом. */
+.tree-empty-note.is-error {
+  color: var(--text_color_error);
+}
+
+/* Блоки над деревом: «Избранное» (постоянный список из настроек) и закреплённые
+   (из сессии проекта). Вид у них общий — это одинаковые строки по абсолютным путям. */
+.tree-pins,
+.tree-favorites {
+  border-bottom: 1px solid var(--separator_color);
+  padding-bottom: 4px;
+  margin-bottom: 4px;
+}
+
+.tree-pins-head,
+.tree-favorites-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tree-row.is-pinned .tree-unpin,
+.tree-row.is-favorite .tree-unfavorite {
+  margin-left: auto;
+  opacity: 0;
+}
+
+.tree-row.is-pinned:hover .tree-unpin,
+.tree-row.is-pinned:focus-within .tree-unpin,
+.tree-row.is-favorite:hover .tree-unfavorite,
+.tree-row.is-favorite:focus-within .tree-unfavorite {
+  opacity: 1;
+}
+
+/* Удалённый, но ещё не закоммиченный файл: строка остаётся в дереве, хотя файла
+   на диске уже нет, — зачёркнутое имя и приглушённый цвет говорят об этом. */
+.tree-row.is-deleted .tree-name {
+  text-decoration: line-through;
+  color: var(--text_color_tertiary);
+}
+
+/* Спутник, свёрнутый под родителя (file nesting): имя чуть тише — оно
+   второстепенно, а отступ уже показывает связь с родителем. */
+.tree-row.is-nested .tree-name {
+  color: var(--text_color_secondary);
+}
+
+/* Куда встанет перенос при перетаскивании: рамка акцента по краю строки. */
+.tree-row.is-drop-target {
+  background: var(--element_background_hover);
+  box-shadow: inset 0 0 0 2px var(--focus_ring_color);
+}
+
+/* Строка КОРНЯ рабочей области (когда папок несколько): имя папки жирным, а
+   активный корень помечен точкой — по нему работают git, поиск и запуск. */
+.tree-row.is-root {
+  font-weight: 600;
+}
+
+.tree-row.is-root .tree-root-active {
+  margin-left: 6px;
+  color: var(--link_color);
+}
+
+/* Раскрытие папки: строки-дети «выезжают» из-под родителя вниз, а не возникают на
+   месте (движение идёт туда, откуда пришёл элемент).
+   Старт выше финала — строка въезжает сверху вниз, продолжая жест раскрытия.
+   Анимируются только `opacity` и `transform`, а под «уменьшить движение» анимация
+   гаснет общим правилом. */
+@keyframes tree-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.tree-row.is-entering {
+  animation: tree-reveal var(--motion_fast) var(--motion_ease);
+}
+
+.tree-twisty {
+  display: grid;
+  place-items: center;
+  /* Стрелка держит свою ширину: без этого при обрезке длинного имени («…»)
+     свободного места не хватает, и сжатие достаётся ей вместе с именем —
+     стрелка и значок файла уезжают влево на несколько пикселей. */
+  flex: 0 0 auto;
+  width: 12px;
+  color: var(--text_color_tertiary);
+  transition: transform var(--motion_fast) var(--motion_ease);
+}
+
+.tree-twisty.is-open {
+  transform: rotate(90deg);
+}
+
+.tree-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Игнорируемое git (`.gitignore`) — приглушаем: файл видно и можно открыть, но он
+   не отвлекает. Значок и стрелку тоже гасим, иначе цветной значок перетягивал бы
+   взгляд к тому, что обычно и не нужно. */
+.tree-row.is-ignored .tree-name,
+.tree-row.is-ignored .tree-twisty,
+.tree-row.is-ignored .file-icon,
+.tree-row.is-ignored .folder-icon {
+  opacity: 0.55;
+}
+
+.tree-input {
+  flex: 1;
+  min-width: 0;
+  padding: 1px 6px;
+  border: 1px solid var(--focus_ring_color);
+  border-radius: calc(var(--radius_sm) - 3px);
+  background: var(--sunken_background);
+  font-size: var(--font_labels_size);
+}
+
+.tree-loading,
+.empty-note {
+  padding: 10px 12px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.empty-note p {
+  margin: 0 0 8px;
+}
+
+/* ── нижняя панель ──────────────────────────────────────────────────────── */
+
+.dock {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Обёртка дока — точка монтирования панелей (поиск, терминал, изменения).
+   Без растяжения цепочка высот рвётся: панель берёт высоту по содержимому,
+   терминал — размер по умолчанию (24 строки), и низ вылезает за док. */
+.dock-host {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.dock-host > .dock {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.dock-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  height: 32px;
+  padding: 0 6px 0 8px;
+  border-bottom: 1px solid var(--separator_color);
+}
+
+.dock-header-spacer,
+.toolbar-spacer {
+  flex: 1;
+}
+
+.dock-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.dock-tab {
+  /* Та же ступень, что у вкладок терминала: это один вид контрола — вкладка
+     панели. Раньше здесь стоял `--text_color_tertiary`, и неактивная вкладка
+     дока была тише неактивной вкладки терминала без причины. */
+  padding: 4px 10px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.dock-tab:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Активная вкладка дока — та же заливка выделения, что у вкладки редактора,
+   выбранной строки дерева и пункта списков. */
+.dock-tab.is-active {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+/* Значок на вкладке дока: те же числа, что у проблем в статус-баре. */
+.dock-tab-badge {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: var(--radius_sm);
+  background: var(--element_background_hover);
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  line-height: 14px;
+}
+
+.dock-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dock-body > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ── терминал ───────────────────────────────────────────────────────────── */
+
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.term-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 3px 6px;
+}
+
+.term-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.term-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.term-tab {
+  /* Геометрия та же, что у вкладок дока: это вкладки одного док-острова. */
+  padding: 4px 10px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+}
+
+.term-tab:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.term-tab.is-active {
+  background: var(--selection_background);
+  color: var(--text_color);
+}
+
+.term-tab.is-exited {
+  opacity: 0.6;
+  text-decoration: line-through;
+}
+
+/* Полотно консоли — углубление в доке: фон совпадает с полотном редактора. */
+.term-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 2px 0 0 6px;
+  background: var(--editor_terminal_background);
+}
+
+.term-instance {
+  height: 100%;
+}
+
+/* Панель поиска в консоли: висит поверх полотна справа сверху. */
+.term-find {
+  position: absolute;
+  top: 4px;
+  right: 14px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--surface_popup);
+  box-shadow: var(--box_shadow_small);
+}
+
+.term-find-input {
+  width: 180px;
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  outline: none;
+}
+
+.term-find-input::placeholder {
+  color: var(--text_color_tertiary);
+}
+
+.term-find-count {
+  min-width: 44px;
+  padding: 0 4px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* ── поиск ──────────────────────────────────────────────────────────────── */
+
+.search-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.search-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  padding: 8px 10px 6px;
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  color: var(--text_color_tertiary);
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Строка замены: поле тянется, кнопка держится справа. */
+.search-replace {
+  gap: 6px;
+  padding-top: 0;
+}
+
+.search-replace-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.search-scope {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+/* Выбор области поиска — компактный, не тянется вместе с полем. */
+.search-scope-select {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 120px;
+}
+
+.search-status {
+  flex: 0 0 auto;
+  padding: 0 12px 6px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+}
+
+.search-results {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 10px;
+}
+
+.search-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px 2px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.search-file-path {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.search-count {
+  margin-left: auto;
+  padding: 0 6px;
+  border-radius: var(--radius_pill);
+  background: var(--element_background);
+  color: var(--text_color_tertiary);
+  font-size: var(--font_micro_size);
+}
+
+.search-hit {
+  display: flex;
+  gap: 10px;
+  width: calc(100% - 16px);
+  margin: 0 8px;
+  padding: 2px 8px 2px 14px;
+  border-radius: var(--radius_xs);
+  color: var(--text_color_secondary);
+  text-align: left;
+  font-size: var(--font_labels_size);
+}
+
+.search-hit:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.search-line {
+  min-width: 28px;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  text-align: right;
+}
+
+.search-text {
+  overflow: hidden;
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.search-text mark {
+  padding: 0 1px;
+  border-radius: var(--radius_xs);
+  background: var(--highlight_background);
+  color: var(--text_color);
+}

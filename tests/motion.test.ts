@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readMainCss, stylePath } from './style-files';
 
 /**
  * Движение — только по делу и только короткое. Сторож держит техническую
@@ -17,7 +18,15 @@ import { describe, expect, it } from 'vitest';
  * Что движение осмысленно (а не украшение ради) — сторож не проверит: это
  * вопрос ревью. Здесь ловится лишь то, что нарушает правило молча.
  */
-const STYLE_FILES = ['theme.css', 'main.css'].map((name) => resolve(process.cwd(), 'src/renderer/styles', name));
+// `main.css` — сборка из частей (см. `style-files.ts`): правила живут в них.
+const STYLE_FILES = [
+  stylePath('theme.css'),
+  stylePath('chrome.css'),
+  stylePath('chat.css'),
+  stylePath('shell.css'),
+  stylePath('git.css'),
+  stylePath('views.css'),
+];
 
 /** Свойства, которые трогать анимацией дорого: они тянут за собой раскладку. */
 const LAYOUT_PROPERTIES = [
@@ -104,7 +113,7 @@ describe('длительность движения — из общей шкал
  */
 describe('шкала движения — четыре ступени', () => {
   const THEME = readFileSync(resolve(process.cwd(), 'src/renderer/styles/theme.css'), 'utf8');
-  const MAIN = readFileSync(resolve(process.cwd(), 'src/renderer/styles/main.css'), 'utf8');
+  const MAIN = readMainCss();
 
   it('в theme.css объявлены все четыре ступени с ожидаемыми значениями', () => {
     expect(THEME).toMatch(/--motion_instant:\s*0s;/);
@@ -126,7 +135,7 @@ describe('шкала движения — четыре ступени', () => {
 /* ── Движение можно отключить системной настройкой ──────────────────────── */
 
 describe('движение отключается системной настройкой', () => {
-  const MAIN = readFileSync(resolve(process.cwd(), 'src/renderer/styles/main.css'), 'utf8');
+  const MAIN = readMainCss();
   // Тело блока `@media (prefers-reduced-motion: reduce) { … }`: закрывающая скобка
   // стоит в начале строки, вложенные — с отступом.
   const REDUCE = MAIN.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
@@ -209,10 +218,7 @@ describe('движение отключается системной настр�
  * список частых селекторов ведёт человек.
  */
 describe('частые действия не анимируются', () => {
-  const MAIN = readFileSync(resolve(process.cwd(), 'src/renderer/styles/main.css'), 'utf8').replace(
-    /\/\*[\s\S]*?\*\//g,
-    '',
-  );
+  const MAIN = readMainCss().replace(/\/\*[\s\S]*?\*\//g, '');
 
   /** Элементы, которые трогают сотни раз в день: вкладки, списки, палитра, меню. */
   const FREQUENT = ['.tab', '.dock-tab', '.term-tab', '.palette-item', '.select-item', '.context-item', '.tree-row'];
@@ -239,7 +245,7 @@ describe('частые действия не анимируются', () => {
  * вообще стоит анимировать — вопрос ревью.
  */
 describe('раскрытие дерева идёт в сторону появления', () => {
-  const MAIN = readFileSync(resolve(process.cwd(), 'src/renderer/styles/main.css'), 'utf8');
+  const MAIN = readMainCss();
 
   it('дети раскрытой папки въезжают сверху вниз', () => {
     const reveal = MAIN.match(/@keyframes\s+tree-reveal\s*\{([\s\S]*?)\n\}/)?.[1] ?? '';
@@ -268,7 +274,7 @@ describe('раскрытие дерева идёт в сторону появл�
  * поверхностей без блюра — там он бесплатен.
  */
 describe('слой с блюром появляется кросс-фейдом, а не сдвигом', () => {
-  const MAIN = readFileSync(resolve(process.cwd(), 'src/renderer/styles/main.css'), 'utf8');
+  const MAIN = readMainCss();
 
   /** Материал с блюром: тот же список, что у `backdrop-filter` в начале файла. */
   const BLURRED = [
@@ -324,10 +330,7 @@ describe('слой с блюром появляется кросс-фейдом,
  * Здесь — то, что ни один из прежних сторожей не ловил.
  */
 describe('нет анимации там, где она раздражает', () => {
-  const MAIN = readFileSync(resolve(process.cwd(), 'src/renderer/styles/main.css'), 'utf8').replace(
-    /\/\*[\s\S]*?\*\//g,
-    '',
-  );
+  const MAIN = readMainCss().replace(/\/\*[\s\S]*?\*\//g, '');
 
   it('точка «не сохранён» статична — сохранение не анимируется', () => {
     const dirty = MAIN.match(/\.tab-dirty\s*\{[^}]*\}/)?.[0] ?? '';
