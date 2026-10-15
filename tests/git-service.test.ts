@@ -30,12 +30,41 @@ function git(cwd: string, args: string[]): Promise<{ code: number; stdout: strin
   });
 }
 
-/** Есть ли команда в PATH (для проверок клиентов площадки). */
-function shellHas(command: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile('sh', ['-c', `command -v ${command}`], { windowsHide: true }, (error) => resolve(error === null));
-  });
+/**
+ * Положить в начало PATH свою исполняемую команду — заглушку клиента (`gh`, `git-lfs`).
+ *
+ * Наличие этих инструментов на машине от теста не зависит: на CI они обычно есть, на
+ * рабочей машине — не обязательно. А сверять свой замер («есть ли команда») с ответом
+ * сервиса нельзя: это ДВА разных запуска одного и того же, и на загруженной машине они
+ * вправе разойтись (один не уложился в таймаут). Своя заглушка делает ответ известным
+ * заранее — и одинаковым на любой машине. Скрипт молчит и отдаёт нужный код: так
+ * проверяются оба случая, «клиент есть» и «клиента нет».
+ *
+ * Возвращает функцию, возвращающую PATH как было.
+ */
+async function withStubCommand(name: string, ok: boolean): Promise<() => void> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-cli-stub-'));
+  roots.push(dir);
+  const code = ok ? 0 : 1;
+  if (process.platform === 'win32') {
+    await fs.writeFile(path.join(dir, `${name}.cmd`), `@echo off\r\nexit /b ${code}\r\n`, 'utf8');
+  } else {
+    const file = path.join(dir, name);
+    await fs.writeFile(file, `#!/bin/sh\nexit ${code}\n`, 'utf8');
+    await fs.chmod(file, 0o755);
+  }
+  const previous = process.env.PATH ?? '';
+  process.env.PATH = `${dir}${path.delimiter}${previous}`;
+  return () => {
+    process.env.PATH = previous;
+  };
 }
+
+/**
+ * Работает ли заглушка из PATH: на Windows `.cmd`/`.bat` через `execFile` не
+ * запускается (нужен cmd.exe), поэтому там остаётся терпимая проверка «как получится».
+ */
+const stubSupported = process.platform !== 'win32';
 
 let gitAvailable = true;
 
@@ -356,18 +385,39 @@ describe('GitService: удалённые и сеть', () => {
     await git(work, ['commit', '-q', '-m', 'init']);
 
     const service = serviceFor(work);
-    const info = await service.lfsInfo();
-    // Шаблоны лежат в .gitattributes: их видно и без установленного git-lfs.
-    expect(info.patterns.map((item) => item.pattern)).toEqual(['*.bin']);
-    expect(info.configured).toBe(true);
+    if (!stubSupported) {
+      // Windows: заглушку в PATH не запустить. Проверяем ответ машине как есть —
+      // шаблоны видны всегда, а про git-lfs ответ должен соответствовать наличию.
+      const info = await service.lfsInfo();
+      expect(info.patterns.map((item) => item.pattern)).toEqual(['*.bin']);
+      if (!info.available) expect(info.files).toEqual([]);
+      return;
+    }
 
-    // Наличие самого git-lfs зависит от машины: проверяем, что ответ ему соответствует.
-    const hasLfs = (await git(work, ['lfs', 'version'])).code === 0;
-    expect(info.available).toBe(hasLfs);
-    if (!hasLfs) {
+    // Наличие git-lfs на машине от теста не зависит, а сверять свой замер с ответом
+    // сервиса нельзя: это два разных запуска, и под нагрузкой они вправе разойтись.
+    // Подставляем свою заглушку `git-lfs` — так оба случая видны одинаково везде.
+    const ok = await withStubCommand('git-lfs', true);
+    try {
+      const info = await service.lfsInfo();
+      // Шаблоны лежат в .gitattributes: их видно и без установленного git-lfs.
+      expect(info.patterns.map((item) => item.pattern)).toEqual(['*.bin']);
+      expect(info.configured).toBe(true);
+      expect(info.available).toBe(true);
+    } finally {
+      ok();
+    }
+
+    // Заглушка со сбоем — как будто git-lfs не установлен: ответ честный, а не пустой.
+    const broken = await withStubCommand('git-lfs', false);
+    try {
+      const info = await service.lfsInfo();
+      expect(info.available).toBe(false);
       expect(info.files).toEqual([]);
       // И операция, которой нечего делать без git-lfs, объясняет причину.
       await expect(service.lfsTrack('*.psd')).rejects.toThrow(/lfs/i);
+    } finally {
+      broken();
     }
   });
 
@@ -378,15 +428,39 @@ describe('GitService: удалённые и сеть', () => {
     await git(work, ['remote', 'set-url', 'origin', 'git@github.com:acme/web.git']);
 
     const service = serviceFor(work);
-    const info = await service.forgeInfo();
-    expect(info.repo).toMatchObject({ platform: 'github', host: 'github.com', owner: 'acme', repo: 'web' });
-    expect(info.remote).toBe('origin');
-    expect(info.cli).toBe('gh');
+    if (!stubSupported) {
+      // Windows: заглушку в PATH не запустить — проверяем разбор адреса и ответ машине.
+      const info = await service.forgeInfo();
+      expect(info.repo).toMatchObject({ platform: 'github', host: 'github.com', owner: 'acme', repo: 'web' });
+      expect(info.remote).toBe('origin');
+      expect(info.cli).toBe('gh');
+      if (!info.cliAvailable) expect(info.note).toContain('gh');
+      return;
+    }
 
-    // Наличие клиента зависит от машины: ответ должен ему соответствовать.
-    const hasGh = (await git(work, ['--version'])).code === 0 && (await shellHas('gh'));
-    expect(info.cliAvailable).toBe(hasGh);
-    if (!hasGh) expect(info.note).toContain('gh');
+    // Клиента `gh` на машине может не быть, а сверять свой замер с ответом сервиса
+    // нельзя (это два разных запуска — под нагрузкой расходятся). Подставляем свою
+    // заглушку: тогда «клиент есть» и «клиента нет» видны одинаково на любой машине.
+    const ok = await withStubCommand('gh', true);
+    try {
+      const info = await service.forgeInfo();
+      expect(info.repo).toMatchObject({ platform: 'github', host: 'github.com', owner: 'acme', repo: 'web' });
+      expect(info.remote).toBe('origin');
+      expect(info.cli).toBe('gh');
+      expect(info.cliAvailable).toBe(true);
+    } finally {
+      ok();
+    }
+
+    // Заглушка со сбоем — как будто клиента нет: причина названа, а не показана пустота.
+    const broken = await withStubCommand('gh', false);
+    try {
+      const info = await service.forgeInfo();
+      expect(info.cliAvailable).toBe(false);
+      expect(info.note).toContain('gh');
+    } finally {
+      broken();
+    }
   });
 
   it('forgeInfo(): свой GitLab узнаётся и без клиента', async () => {
@@ -403,10 +477,21 @@ describe('GitService: удалённые и сеть', () => {
     const { work } = await makeRepos();
     await git(work, ['remote', 'set-url', 'origin', 'git@github.com:acme/web.git']);
     const service = serviceFor(work);
-    const info = await service.forgeInfo();
-    // Кейс верен только там, где клиента нет (в CI его тоже не будет).
-    if (info.cliAvailable) return;
-    await expect(service.forgeCheckout(1)).rejects.toThrow(/gh/);
+    if (!stubSupported) {
+      const info = await service.forgeInfo();
+      if (info.cliAvailable) return;
+      await expect(service.forgeCheckout(1)).rejects.toThrow(/gh/);
+      return;
+    }
+
+    // Клиента нет — заглушкой со сбоем: так ветвь проверяется на любой машине,
+    // а не только там, где `gh` не установлен.
+    const broken = await withStubCommand('gh', false);
+    try {
+      await expect(service.forgeCheckout(1)).rejects.toThrow(/gh/);
+    } finally {
+      broken();
+    }
   });
 
   it('forgeIssues() без клиента объясняет причину', async () => {
@@ -414,11 +499,21 @@ describe('GitService: удалённые и сеть', () => {
     const { work } = await makeRepos();
     await git(work, ['remote', 'set-url', 'origin', 'git@github.com:acme/web.git']);
     const service = serviceFor(work);
-    const info = await service.forgeInfo();
-    // Кейс верен только там, где клиента нет (в CI его тоже не будет).
-    if (info.cliAvailable) return;
-    await expect(service.forgeIssues()).rejects.toThrow(/gh/);
-    await expect(service.forgeIssueClose(1)).rejects.toThrow(/gh/);
+    if (!stubSupported) {
+      const info = await service.forgeInfo();
+      if (info.cliAvailable) return;
+      await expect(service.forgeIssues()).rejects.toThrow(/gh/);
+      return;
+    }
+
+    // Клиента нет — заглушкой со сбоем: так ветвь проверяется на любой машине.
+    const broken = await withStubCommand('gh', false);
+    try {
+      await expect(service.forgeIssues()).rejects.toThrow(/gh/);
+      await expect(service.forgeIssueClose(1)).rejects.toThrow(/gh/);
+    } finally {
+      broken();
+    }
   });
 
   it('identity(): читает настройки, setIdentity() пишет их в ЛОКАЛЬНЫЙ конфиг', async () => {
