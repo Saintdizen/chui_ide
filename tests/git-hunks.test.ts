@@ -51,6 +51,31 @@ describe('hunkRanges', () => {
     expect(hunkRanges('')).toEqual([]);
     expect(hunkRanges('просто текст\n')).toEqual([]);
   });
+
+  it('заголовок следующего файла закрывает блок предыдущего', () => {
+    // Строка `diff --git` — не тело блока (не начинается со знака изменения), поэтому
+    // она и завершает предыдущий блок, и открывает заголовок следующего файла.
+    const two = [
+      'diff --git a/a.ts b/a.ts',
+      '--- a/a.ts',
+      '+++ b/a.ts',
+      '@@ -1 +1 @@',
+      '-old',
+      '+new',
+      'diff --git a/b.ts b/b.ts',
+      '--- a/b.ts',
+      '+++ b/b.ts',
+      '@@ -1 +1 @@',
+      '-x',
+      '+y',
+      '',
+    ].join('\n');
+    // Оба блока найдены: закрытие первого строкой `diff --git` разбор не сбило.
+    expect(hunkRanges(two)).toEqual([
+      { oldStart: 1, oldCount: 1, newStart: 1, newCount: 1 },
+      { oldStart: 1, oldCount: 1, newStart: 1, newCount: 1 },
+    ]);
+  });
 });
 
 describe('hunkPatch', () => {

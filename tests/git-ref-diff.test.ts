@@ -51,6 +51,12 @@ describe('parseNumstat', () => {
     expect(parseNumstat(stdout).get('new.ts')).toEqual({ additions: 5, deletions: 2 });
     expect(parseNumstat(stdout).get('old.ts')).toBeUndefined();
   });
+
+  it('обрезанный хвост переименования: нового пути нет — остаётся старый', () => {
+    // Вывод кончился сразу после старого пути: не теряем запись из-за обрыва.
+    const stdout = `5\t2\t${NUL}old.ts`;
+    expect(parseNumstat(stdout).get('old.ts')).toEqual({ additions: 5, deletions: 2 });
+  });
 });
 
 describe('mergeRefDiff', () => {
