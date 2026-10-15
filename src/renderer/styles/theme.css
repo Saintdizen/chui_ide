@@ -216,7 +216,10 @@
      `core/theme.ts`) остаются ещё тише — см. сторож «направляющая тише границы». */
   --border_color: rgba(255, 255, 255, 0.06);
   --button_border_color: rgba(255, 255, 255, 0.1);
-  --button_border_color_hover: #0091ff;
+  /* Наведение — ступень вверх по нейтрали, а не акцент: синий закреплён за
+     фокусом (кольцо `--focus_outline`), и рамка, красящаяся на наведении в синий,
+     читалась как «поле в фокусе» у каждой кнопки под курсором. */
+  --button_border_color_hover: rgba(255, 255, 255, 0.18);
   --separator_color: rgba(84, 84, 88, 0.4);
   --opaque_separator_color: #38383a;
 
@@ -379,7 +382,7 @@
 
     --border_color: rgba(0, 0, 0, 0.08);
     --button_border_color: rgba(0, 0, 0, 0.14);
-    --button_border_color_hover: #0088ff;
+    --button_border_color_hover: rgba(0, 0, 0, 0.22);
     --separator_color: rgba(60, 60, 67, 0.18);
     --opaque_separator_color: #c6c6c8;
 

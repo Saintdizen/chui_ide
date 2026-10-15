@@ -62,7 +62,7 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
   }
 
   function button(label: string, onClick: () => void): HTMLElement {
-    return h('button', { class: 'python-env-manage', type: 'button', onClick: () => onClick() }, label);
+    return h('button', { class: 'btn btn-small python-env-manage', type: 'button', onClick: () => onClick() }, label);
   }
 
   // Данные спрашиваются асинхронно: без стража устаревший ответ (открыли, закрыли,

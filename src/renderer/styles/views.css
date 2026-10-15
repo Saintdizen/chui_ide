@@ -147,6 +147,13 @@
   cursor: pointer;
 }
 
+/* Наведение — та же заливка, что у прочих переключателей ленты: отклик есть
+   у каждого, и он одинаков. Активное состояние не трогаем — оно сильнее. */
+.review-toggle:hover:not(.is-active) {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
 .review-toggle.is-active {
   background: var(--accent_fill);
   color: var(--text_color_hover);
@@ -288,37 +295,6 @@
   justify-content: flex-end;
 }
 
-.review-submit {
-  align-self: flex-end;
-  border: none;
-  border-radius: var(--radius_sm);
-  padding: 3px 10px;
-  background: var(--accent_fill);
-  color: var(--text_color_hover);
-  font-family: var(--font_ui);
-  font-size: var(--font_small_size);
-  cursor: pointer;
-}
-
-.review-submit:hover {
-  background: var(--blue_prime_background);
-}
-
-.review-cancel {
-  border: none;
-  border-radius: var(--radius_sm);
-  padding: 3px 10px;
-  background: transparent;
-  color: var(--text_color_tertiary);
-  font-family: var(--font_ui);
-  font-size: var(--font_small_size);
-  cursor: pointer;
-}
-
-.review-cancel:hover {
-  color: var(--text_color);
-}
-
 /* Кнопка у блока изменений: висит над его первой строкой в изменённой части. */
 .diff-hunk-bar {
   display: flex;
@@ -338,7 +314,7 @@
 }
 
 .diff-hunk-action:hover {
-  background: var(--blue_prime_background);
+  filter: brightness(1.08);
 }
 
 /* ── разрешение конфликтов слияния ─────────────────────────────────────── */
@@ -1986,7 +1962,7 @@
 }
 
 .debug-frame.is-active {
-  background: var(--element_background);
+  background: var(--selection_background);
 }
 
 .debug-frame-name {
@@ -2275,23 +2251,6 @@
   color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
   text-align: center;
-}
-
-.python-env-manage {
-  padding: 6px 10px;
-  border: 1px solid var(--separator_color);
-  border-radius: var(--radius_sm);
-  background: none;
-  color: var(--text_color);
-  font-size: var(--font_labels_size);
-  cursor: pointer;
-}
-
-/* Наведение подсвечиваем рамкой: текст остаётся основным, а не белым (фон тут
-   обычный, и в светлой схеме белый текст был бы невидим). */
-.python-env-manage:hover {
-  border-color: var(--blue_prime_background);
-  color: var(--text_color);
 }
 
 /* Поломки окружения: точка цветом важности и объяснение словами. */

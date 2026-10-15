@@ -77,11 +77,7 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
     { class: 'btn btn-primary', type: 'button', onClick: () => void create() },
     'Создать окружение',
   );
-  const cancelButton = h(
-    'button',
-    { class: 'link-btn', type: 'button', hidden: true, onClick: () => cancel() },
-    'Отмена',
-  );
+  const cancelButton = h('button', { class: 'btn', type: 'button', hidden: true, onClick: () => cancel() }, 'Отмена');
 
   const modal = createModal({
     className: 'venv-modal',

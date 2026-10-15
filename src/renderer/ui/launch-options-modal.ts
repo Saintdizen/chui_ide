@@ -52,7 +52,7 @@ export function createLaunchOptionsModal(): LaunchOptionsModalView {
     placeholder: 'пусто — корень проекта',
   });
 
-  const resetButton = h('button', { class: 'link-btn', type: 'button' }, 'Сбросить');
+  const resetButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Сбросить');
   const runButton = h('button', { class: 'btn btn-primary', type: 'button' }, 'Запустить');
 
   // Текущий обработчик запуска: у каждого открытия свой (см. `open`).

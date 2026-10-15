@@ -155,7 +155,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h(
         'button',
         {
-          class: 'link-btn',
+          class: 'btn',
           type: 'button',
           onClick: () => {
             close();

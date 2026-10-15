@@ -302,7 +302,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
       h(
         'button',
         {
-          class: 'link-btn code-action',
+          class: 'btn btn-small',
           type: 'button',
           onClick: () => {
             void navigator.clipboard.writeText(code).then(
@@ -316,7 +316,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
       h(
         'button',
         {
-          class: 'link-btn code-action',
+          class: 'btn btn-small',
           type: 'button',
           onClick: () => {
             if (deps.insertCode(code)) showToast('Вставлено в позицию курсора');

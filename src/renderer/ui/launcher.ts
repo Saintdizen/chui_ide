@@ -72,7 +72,7 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
       'div',
       { class: 'launcher-row' },
       cloneButton,
-      h('button', { class: 'link-btn', type: 'button', onClick: () => toggleClone(false) }, 'Отмена'),
+      h('button', { class: 'btn', type: 'button', onClick: () => toggleClone(false) }, 'Отмена'),
     ),
     cloneProgress,
   );

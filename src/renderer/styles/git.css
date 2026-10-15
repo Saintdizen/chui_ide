@@ -792,7 +792,8 @@
 }
 
 .sc-coauthor:hover {
-  border-color: var(--link_color);
+  border-color: var(--button_border_color_hover);
+  background: var(--element_background_hover);
   color: var(--text_color);
 }
 
@@ -812,7 +813,8 @@
 }
 
 .sc-from-diff:hover {
-  border-color: var(--link_color);
+  border-color: var(--button_border_color_hover);
+  background: var(--element_background_hover);
   color: var(--text_color);
 }
 

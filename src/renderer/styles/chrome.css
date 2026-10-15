@@ -313,9 +313,6 @@ textarea {
   height: var(--topbar_control_size);
   border-radius: var(--radius_sm);
   color: var(--text_color_tertiary);
-  transition:
-    background var(--motion_fast) var(--motion_ease),
-    color var(--motion_fast) var(--motion_ease);
 }
 
 .window-btn:hover {
@@ -573,14 +570,17 @@ textarea {
   height: var(--toolbar_control_size);
   border-radius: var(--radius_sm);
   color: var(--text_color_tertiary);
-  transition:
-    background var(--motion_fast) var(--motion_ease),
-    color var(--motion_fast) var(--motion_ease);
 }
 
-.icon-btn:hover {
+.icon-btn:hover:not(:disabled) {
   background: var(--element_background_hover);
   color: var(--text_color);
+}
+
+/* Кнопка-значок своей заливки не имеет: выключенную гасим целиком, а не подложкой. */
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 /* Кнопка-переключатель панели: синий значок значит «панель открыта». */
@@ -646,7 +646,7 @@ textarea {
 }
 
 .tab:hover {
-  background: var(--element_background);
+  background: var(--element_background_hover);
   color: var(--text_color);
 }
 
@@ -1102,6 +1102,7 @@ textarea {
 .btn,
 .icon-btn,
 .select,
+.field-input,
 .window-btn {
   transition:
     background var(--motion_fast) var(--motion_ease),
@@ -1153,9 +1154,6 @@ textarea {
   border-radius: var(--radius_sm);
   background: var(--button_background);
   color: var(--text_color);
-  transition:
-    background var(--motion_fast) var(--motion_ease),
-    border-color var(--motion_fast) var(--motion_ease);
 }
 
 .btn:hover:not(:disabled) {
@@ -1163,7 +1161,10 @@ textarea {
   background: var(--element_background_hover);
 }
 
-.btn:disabled {
+/* Выключенный контрол — один язык: у залитых гаснут и подложка, и текст,
+   у значков и текстовых — сам контрол (их цвет задаёт состояние). */
+.btn:disabled,
+.select.is-disabled {
   background: var(--button_background_disabled);
   color: var(--text_color_disabled);
   cursor: default;
@@ -1198,17 +1199,6 @@ textarea {
   padding: calc(var(--control_padding_sm) - 2px) 9px;
 }
 
-.link-btn {
-  align-self: flex-start;
-  padding: 0;
-  color: var(--link_color);
-  font-size: var(--font_labels_size);
-}
-
-.link-btn:hover {
-  text-decoration: underline;
-}
-
 .field {
   display: flex;
   flex-direction: column;
@@ -1240,9 +1230,6 @@ textarea {
   background: var(--sunken_background);
   color: var(--text_color);
   font-size: var(--font_labels_size);
-  transition:
-    background var(--motion_fast) var(--motion_ease),
-    border-color var(--motion_fast) var(--motion_ease);
 }
 
 .select {

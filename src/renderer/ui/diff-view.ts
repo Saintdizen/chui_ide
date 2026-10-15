@@ -400,7 +400,7 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
         },
       },
       input,
-      h('button', { class: 'review-submit', type: 'submit' }, 'Ответить'),
+      h('button', { class: 'btn btn-small btn-primary', type: 'submit' }, 'Ответить'),
     );
     card.append(form);
     return card;
@@ -432,11 +432,11 @@ export function createDiffView(deps: DiffViewDeps): DiffView {
       h(
         'div',
         { class: 'review-draft-actions' },
-        h('button', { class: 'review-submit', type: 'submit' }, 'Добавить'),
+        h('button', { class: 'btn btn-small btn-primary', type: 'submit' }, 'Добавить'),
         h(
           'button',
           {
-            class: 'review-cancel',
+            class: 'btn btn-small',
             type: 'button',
             onClick: () => {
               draft = null;

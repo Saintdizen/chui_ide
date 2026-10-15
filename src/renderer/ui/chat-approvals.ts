@@ -149,7 +149,7 @@ export function createEditReview(host: ApprovalHost): EditReview {
     const allButton = h(
       'button',
       {
-        class: 'link-btn review-all',
+        class: 'btn btn-small',
         type: 'button',
         onClick: () => {
           const all = checks.every((box) => box.checked);

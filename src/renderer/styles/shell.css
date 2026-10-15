@@ -229,23 +229,6 @@
   padding-top: 2px;
 }
 
-.lsp-status-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid var(--separator_color);
-  border-radius: var(--radius_sm);
-  background: var(--sunken_background);
-  color: var(--text_color);
-  font-size: var(--font_labels_size);
-  cursor: pointer;
-}
-
-.lsp-status-action:hover {
-  border-color: var(--blue_prime_background);
-}
-
 /* Искра состояния ассистента внутри кнопки «Информация о сессии»: цвет —
    подсказка, синий во время генерации. */
 .status-ai {
@@ -467,7 +450,7 @@
 }
 
 .modal-nav-item.is-active {
-  background: var(--element_background);
+  background: var(--selection_background);
   color: var(--text_color);
 }
 
@@ -765,7 +748,7 @@
 }
 
 .recent-item:hover {
-  background: var(--element_background);
+  background: var(--element_background_hover);
 }
 
 .recent-name {
@@ -1199,7 +1182,7 @@ body > .overlay {
 }
 
 .launcher-item:hover {
-  background: var(--element_background);
+  background: var(--element_background_hover);
   color: var(--text_color);
 }
 

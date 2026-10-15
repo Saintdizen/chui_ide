@@ -302,7 +302,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             { class: 'finish-note' },
             svgIcon('warning', 12),
             h('span', {}, 'Ответ обрезан по лимиту токенов'),
-            h('button', { class: 'link-btn', type: 'button', onClick: () => host.continueAnswer() }, 'Продолжить'),
+            h('button', { class: 'btn btn-small', type: 'button', onClick: () => host.continueAnswer() }, 'Продолжить'),
           ),
           activity.element,
         );

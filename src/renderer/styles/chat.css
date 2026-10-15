@@ -419,14 +419,6 @@
   font-size: var(--font_micro_size);
 }
 
-.code-action {
-  color: var(--text_color_secondary);
-}
-
-.code-action:hover {
-  color: var(--link_color);
-}
-
 .code-block pre {
   margin: 0;
   padding: 8px 10px;
@@ -782,7 +774,10 @@
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 0;
+  /* Отступ и равное ему отрицательное поле: подложка наведения получает воздух,
+     а сам текст шапки остаётся на прежнем месте. */
+  padding: 2px 6px;
+  margin: -2px -6px;
   border: none;
   background: none;
   color: var(--text_color_tertiary);
@@ -792,6 +787,7 @@
 }
 
 .plan-head:hover {
+  background: var(--element_background_hover);
   color: var(--text_color);
 }
 
@@ -1250,14 +1246,6 @@
   opacity: 0.45;
 }
 
-.review-all {
-  color: var(--text_color_secondary);
-}
-
-.review-all:hover {
-  color: var(--link_color);
-}
-
 .review-hunk {
   padding: 4px 8px;
   overflow-wrap: anywhere;
@@ -1429,7 +1417,7 @@
 
 .composer-menu-item:hover,
 .composer-menu-item.is-cursor {
-  background: var(--element_background);
+  background: var(--element_background_hover);
 }
 
 .composer-menu-title {
@@ -1761,13 +1749,15 @@
 }
 
 .composer-select.is-disabled {
+  /* Заливки у контрола строки нет — гаснет он сам, а не подложка. */
+  background: none;
   opacity: 0.5;
   cursor: default;
 }
 
-.composer-select:hover,
+.composer-select:not(.is-disabled):hover,
 .composer-model:hover {
-  background: var(--element_background);
+  background: var(--element_background_hover);
   color: var(--text_color);
 }
 
@@ -1823,11 +1813,6 @@
   color: var(--yellow_prime_background);
 }
 
-.composer-perm:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
 .composer-model {
   max-width: 190px;
   min-width: 0;
@@ -1854,8 +1839,11 @@
   color: var(--text_color_hover);
 }
 
+/* Наведение залитой акцентом кнопки — та же ступень, что у «основного»
+   действия: заливка не меняет цвет, а светлеет (у акцента под белым текстом
+   своя ступень — `--accent_fill`). */
 .chat-footer .composer-toolbar .composer-action-send:hover {
-  background: var(--blue_prime_background);
+  filter: brightness(1.08);
 }
 
 .chat-footer .composer-toolbar .composer-action-stop {

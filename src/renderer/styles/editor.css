@@ -640,7 +640,7 @@
 
 .own-editor-find-btn:hover {
   background: var(--element_background_hover);
-  color: var(--text_color_hover);
+  color: var(--text_color);
 }
 
 .own-editor-find-btn.is-toggle[aria-pressed="true"] {
@@ -963,8 +963,8 @@
 }
 
 .own-editor-peek-btn:hover:not(:disabled) {
-  background: var(--button_background);
-  border-color: var(--border_color);
+  background: var(--element_background_hover);
+  border-color: var(--button_border_color);
 }
 
 .own-editor-peek-btn:disabled {

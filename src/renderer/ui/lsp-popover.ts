@@ -33,13 +33,13 @@ export function createLspPopover(deps: LspPopoverDeps): LspPopoverView {
 
   const restartButton = h(
     'button',
-    { class: 'lsp-status-action', type: 'button', onClick: () => deps.onRestart() },
+    { class: 'btn btn-small lsp-status-action', type: 'button', onClick: () => deps.onRestart() },
     svgIcon('refresh', 12),
     h('span', {}, 'Перезапустить'),
   );
   const settingsButton = h(
     'button',
-    { class: 'lsp-status-action', type: 'button', onClick: () => deps.onOpenSettings() },
+    { class: 'btn btn-small lsp-status-action', type: 'button', onClick: () => deps.onOpenSettings() },
     svgIcon('settings', 12),
     h('span', {}, 'Настройки'),
   );
