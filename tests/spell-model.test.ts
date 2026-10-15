@@ -42,4 +42,23 @@ describe('SpellCheck', () => {
     spell.ignore('то');
     expect(listener).toHaveBeenCalledTimes(4);
   });
+
+  it('подсказывает замену для слова с опечаткой', () => {
+    const spell = new SpellCheck();
+    spell.setDictionary(['hello', 'help', 'world']);
+    expect(spell.suggest('helo')).toEqual(['help', 'hello']);
+  });
+
+  it('свои слова идут вперёд системных и не повторяются', () => {
+    const spell = new SpellCheck();
+    spell.setDictionary(['hello']);
+    spell.addUserWord('hallo');
+    // «hallo» (расстояние 2) из своих слов — впереди «hello» (расстояние 1) из системных.
+    expect(spell.suggest('helo')).toEqual(['hallo', 'hello']);
+  });
+
+  it('пустой словарь — подсказок нет', () => {
+    const spell = new SpellCheck();
+    expect(spell.suggest('helo')).toEqual([]);
+  });
 });

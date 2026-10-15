@@ -147,6 +147,76 @@ function undouble(stem: string): string {
   return stem;
 }
 
+/** Насколько далеко может быть слово-подсказка: две правки — предел обычной опечатки. */
+const MAX_SUGGEST_DISTANCE = 2;
+
+/**
+ * Расстояние между словами (Дамерау—Левенштейн): сколько вставок, удалений, замен и
+ * перестановок СОСЕДНИХ знаков нужно, чтобы получить одно слово из другого. `teh` → `the`
+ * — одна перестановка, а не две замены, — иначе такой опечатки подсказка не найдёт.
+ *
+ * `max` обрывает счёт: если слова уже разошлись сильнее, точное значение не нужно, и
+ * цикл выходит раньше. Возврат при обрыве — заведомо больше `max`.
+ */
+export function editDistance(a: string, b: string, max = Number.POSITIVE_INFINITY): number {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  const n = a.length;
+  const m = b.length;
+  if (n === 0) return m;
+  if (m === 0) return n;
+
+  // Три строки: предыдущая-предыдущая нужна для перестановки соседних знаков.
+  let prev2: number[] | null = null;
+  let prev: number[] = Array.from({ length: m + 1 }, (_, j) => j);
+  for (let i = 1; i <= n; i += 1) {
+    const cur: number[] = [i];
+    let rowMin = i;
+    for (let j = 1; j <= m; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let value = Math.min(prev[j]! + 1, cur[j - 1]! + 1, prev[j - 1]! + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        value = Math.min(value, prev2![j - 2]! + 1);
+      }
+      cur.push(value);
+      if (value < rowMin) rowMin = value;
+    }
+    // Вся строка уже дальше предела — точное расстояние не понадобится.
+    if (rowMin > max) return max + 1;
+    prev2 = prev;
+    prev = cur;
+  }
+  return prev[m]!;
+}
+
+/**
+ * Подсказки-замены для слова с опечаткой: слова словаря, похожие на него.
+ *
+ * Отбор дешёвый, но с двумя отсечками, чтобы не считать расстояние по всему словарю:
+ *   • первая буква — почти всегда верная даже при опечатке, чужие слова не трогаем;
+ *   • длина — больше чем на две буквы не расходится при обычной опечатке.
+ * Остальные сравниваем расстоянием и берём не дальше `MAX_SUGGEST_DISTANCE`.
+ *
+ * Порядок — по близости: сперва меньше правок, потом меньше разница в длине, потом
+ * по алфавиту: список читают глазами, и первая подсказка должна быть самой правдоподобной.
+ */
+export function suggestSpellWords(word: string, words: Iterable<string>, limit = 5): string[] {
+  const target = word.toLowerCase();
+  if (target.length === 0 || limit <= 0) return [];
+  const scored: { word: string; distance: number; lengthDiff: number }[] = [];
+  for (const candidate of words) {
+    if (candidate.length === 0 || candidate === target) continue;
+    if (candidate[0] !== target[0]) continue;
+    const lengthDiff = Math.abs(candidate.length - target.length);
+    if (lengthDiff > MAX_SUGGEST_DISTANCE) continue;
+    const distance = editDistance(target, candidate, MAX_SUGGEST_DISTANCE);
+    if (distance > MAX_SUGGEST_DISTANCE) continue;
+    scored.push({ word: candidate, distance, lengthDiff });
+  }
+  scored.sort((a, b) => a.distance - b.distance || a.lengthDiff - b.lengthDiff || a.word.localeCompare(b.word));
+  return scored.slice(0, limit).map((item) => item.word);
+}
+
 /**
  * Словарь слов. Хранит основы и умеет проверить слово и его простые формы. `add`
  * нужен словарю человека: он пополняется словами, о которых знает только он.
@@ -176,6 +246,17 @@ export class SpellDictionary {
       if (this.words.has(base)) return true;
     }
     return false;
+  }
+
+  /**
+   * Похожие слова — подсказки-замены для слова, которого словарь не знает. Форм словаря
+   * для этого мало (в словаре лежат основы), поэтому сравниваем слова как есть, а
+   * человеку показываем то, что лежит в словаре. Пусто — близких не нашлось.
+   */
+  suggest(word: string, limit = 5): string[] {
+    const normalized = normalizeDictionaryWord(word);
+    if (!normalized) return [];
+    return suggestSpellWords(normalized, this.words, limit);
   }
 }
 

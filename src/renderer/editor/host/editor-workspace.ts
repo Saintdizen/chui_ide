@@ -841,6 +841,16 @@ export class EditorWorkspace {
     return this.pane.spellingWordAtCursor();
   }
 
+  /** Слово с ошибкой под курсором и подсказки-замены — свои быстрые правки без сервера. */
+  spellingSuggestionsAtCursor(limit = 5): { word: string; suggestions: string[] } | null {
+    return this.pane.spellingSuggestionsAtCursor(limit);
+  }
+
+  /** Заменить слово с ошибкой под курсором. `false` — под курсором не ошибка. */
+  replaceSpellingWord(replacement: string): boolean {
+    return this.pane.replaceSpellingWord(replacement);
+  }
+
   /** Добавить слово под курсором в словарь человека. `false` — под курсором не ошибка. */
   addSpellingWordToDictionary(): boolean {
     return this.pane.addSpellingWordToDictionary();

@@ -577,6 +577,28 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   };
 
   /**
+   * Свои быстрые правки из диагностики — без языкового сервера. Сейчас это замены для
+   * отмеченного орфографией слова: подсказки из словаря, плюс «в словарь» и «пропустить».
+   * Нет слова с ошибкой — списка нет.
+   */
+  const spellingQuickFixes = (): PopupMenuItem[] => {
+    const found = editors.spellingSuggestionsAtCursor();
+    if (!found) return [];
+    const items: PopupMenuItem[] = found.suggestions.map((word) => ({
+      label: `Заменить на «${word}»`,
+      hint: 'орфография',
+      onSelect: () => {
+        if (!editors.replaceSpellingWord(word)) showToast('Не удалось заменить слово', 'error');
+      },
+    }));
+    items.push(
+      { label: 'Добавить в словарь', hint: 'орфография', onSelect: () => editors.addSpellingWordToDictionary() },
+      { label: 'Пропустить слово', hint: 'орфография', onSelect: () => editors.ignoreSpellingWord() },
+    );
+    return items;
+  };
+
+  /**
    * Быстрые исправления под курсором: спросить сервер, показать список у каретки,
    * применить выбранное. Правки идут через документную модель — значит с undo; команда
    * сервера выполняется там, где он живёт.
@@ -586,14 +608,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const diagnostics = editors.lspDiagnostics(path).filter((item) => item.line === position.line);
     const actions = await lsp.codeActions(path, position, diagnostics);
     // Свои правки идут вперёд: они отвечают на наши же пометки и понятнее серверных.
-    const items: PopupMenuItem[] = [
-      ...importInstallActions(path, position),
-      ...actions.map((action) => ({
-        label: action.title,
-        hint: codeActionKindLabel(action.kind),
-        onSelect: () => void applyCodeAction(path, action),
-      })),
-    ];
+    const own: PopupMenuItem[] = [...spellingQuickFixes(), ...importInstallActions(path, position)];
+    const fromServer: PopupMenuItem[] = actions.map((action) => ({
+      label: action.title,
+      hint: codeActionKindLabel(action.kind),
+      onSelect: () => void applyCodeAction(path, action),
+    }));
+    const items: PopupMenuItem[] =
+      own.length > 0 && fromServer.length > 0 ? [...own, { separator: true }, ...fromServer] : [...own, ...fromServer];
     if (items.length === 0) {
       showToast('Быстрых исправлений здесь нет');
       return;

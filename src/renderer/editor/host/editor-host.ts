@@ -1526,14 +1526,7 @@ export class EditorHost {
   spellingWordAtCursor(): string | null {
     const path = this.path;
     if (!path) return null;
-    const problems = this.spellProblems.get(path);
-    if (!problems || problems.length === 0) return null;
-    const position = this.cursorPosition();
-    for (const problem of problems) {
-      if (problem.line !== position.line) continue;
-      if (position.column >= problem.startColumn && position.column <= problem.endColumn) return problem.word;
-    }
-    return null;
+    return this.spellingProblemAtCursor(path)?.word ?? null;
   }
 
   /** Добавить слово под курсором в словарь человека. `false` — под курсором не ошибка. */
@@ -1551,6 +1544,44 @@ export class EditorHost {
     if (!word) return false;
     this.spell?.ignore(word);
     return true;
+  }
+
+  /**
+   * Слово под курсором с ошибкой и похожие слова из словаря — свои быстрые правки без
+   * языкового сервера. `null` — под курсором не слово с ошибкой (или словаря нет).
+   */
+  spellingSuggestionsAtCursor(limit = 5): { word: string; suggestions: string[] } | null {
+    const word = this.spellingWordAtCursor();
+    if (!word) return null;
+    return { word, suggestions: this.spell?.suggest(word, limit) ?? [] };
+  }
+
+  /** Заменить слово под курсором одним шагом истории. `false` — под курсором не ошибка. */
+  replaceSpellingWord(replacement: string): boolean {
+    const path = this.path;
+    if (!path || replacement.length === 0) return false;
+    const problem = this.spellingProblemAtCursor(path);
+    if (!problem) return false;
+    const buffer = this.controller.bufferRef;
+    const start = buffer.offsetAt({ line: problem.line, column: problem.startColumn });
+    const end = buffer.offsetAt({ line: problem.line, column: problem.endColumn });
+    const removed = buffer.getText(start, end);
+    if (removed === replacement) return false;
+    const caret = start + replacement.length;
+    this.controller.applyEdit({ start, removed, inserted: replacement }, { anchor: caret, active: caret });
+    return true;
+  }
+
+  /** Ошибка орфографии ровно под кареткой (`null` — под ней нет слова с ошибкой). */
+  private spellingProblemAtCursor(path: string): SpellProblem | null {
+    const problems = this.spellProblems.get(path);
+    if (!problems || problems.length === 0) return null;
+    const position = this.cursorPosition();
+    for (const problem of problems) {
+      if (problem.line !== position.line) continue;
+      if (position.column >= problem.startColumn && position.column <= problem.endColumn) return problem;
+    }
+    return null;
   }
 
   /** Пересчитать проверку (настройку включили/выключили или словарь подгрузился). */

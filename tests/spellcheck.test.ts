@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   baseForms,
+  editDistance,
   isCheckableWord,
   normalizeDictionaryWord,
   normalizeSpellWords,
   SpellDictionary,
   spellProblemsInLine,
+  suggestSpellWords,
   wordSpans,
 } from '../src/shared/spellcheck';
 
@@ -132,6 +134,62 @@ describe('spellProblemsInLine', () => {
   it('слова вне участков не проверяются вовсе', () => {
     const problems = spellProblemsInLine(1, 'const value = 1;', () => false, [{ start: 1, end: 5 }]);
     expect(problems).toEqual([]);
+  });
+});
+
+describe('editDistance: расстояние между словами', () => {
+  it('считает замены, вставки и удаления', () => {
+    expect(editDistance('cat', 'cat')).toBe(0);
+    expect(editDistance('cat', 'cut')).toBe(1);
+    expect(editDistance('cat', 'cats')).toBe(1);
+    expect(editDistance('cat', 'at')).toBe(1);
+  });
+
+  it('перестановка соседних знаков — одна правка', () => {
+    expect(editDistance('teh', 'the')).toBe(1);
+  });
+
+  it('пустое слово: расстояние равно длине другого', () => {
+    expect(editDistance('', 'abc')).toBe(3);
+    expect(editDistance('abc', '')).toBe(3);
+  });
+
+  it('предел обрывает счёт: возврат заведомо больше его', () => {
+    expect(editDistance('cat', 'dog', 2)).toBeGreaterThan(2);
+    // Разная длина уже больше предела — считаем, не заходя в цикл.
+    expect(editDistance('a', 'abcd', 1)).toBeGreaterThan(1);
+  });
+});
+
+describe('suggestSpellWords: подсказки-замены', () => {
+  it('берёт близкие слова и отсеивает далёкие', () => {
+    expect(suggestSpellWords('helo', ['hello', 'help', 'helm', 'world', 'hell'])).toEqual([
+      'hell',
+      'helm',
+      'help',
+      'hello',
+    ]);
+  });
+
+  it('порядок: расстояние, потом разница длины, потом алфавит', () => {
+    expect(suggestSpellWords('cat', ['cot', 'cuts', 'cats', 'cat'], 3)).toEqual(['cot', 'cats', 'cuts']);
+  });
+
+  it('чужая первая буква отсеивается сразу', () => {
+    expect(suggestSpellWords('cat', ['bat', 'hat'])).toEqual([]);
+  });
+
+  it('слово длиннее на три буквы не сопоставляем', () => {
+    expect(suggestSpellWords('cat', ['catchy'])).toEqual([]);
+  });
+
+  it('пустое слово и предел 0 дают пустой список', () => {
+    expect(suggestSpellWords('', ['cat'])).toEqual([]);
+    expect(suggestSpellWords('cat', ['cats'], 0)).toEqual([]);
+  });
+
+  it('само слово в словаре подсказкой не становится', () => {
+    expect(suggestSpellWords('cat', ['cat'])).toEqual([]);
   });
 });
 

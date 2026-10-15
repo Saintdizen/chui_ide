@@ -61,4 +61,20 @@ export class SpellCheck {
     if (this.ignored.has(value)) return true;
     return this.user.has(value) || this.system.has(value);
   }
+
+  /**
+   * Подсказки-замены для слова с опечаткой. Свои слова идут вперёд системных: то, что
+   * человек внёс сам, ему и ближе. Дубли (одно слово в обоих словарях) схлопываются.
+   */
+  suggest(word: string, limit = 5): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const candidate of [...this.user.suggest(word, limit), ...this.system.suggest(word, limit)]) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      out.push(candidate);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
 }
