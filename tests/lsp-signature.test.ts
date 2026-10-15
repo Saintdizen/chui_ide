@@ -52,6 +52,30 @@ describe('разбор подсказки о параметрах', () => {
     expect(help!.signatures[1]!.documentation).toBe('**жирный**');
   });
 
+  it('документация собирается из массива частей, пустая даёт null', () => {
+    const help = toSignatureHelp({
+      signatures: [
+        { label: 'f()', documentation: ['часть', { kind: 'plaintext', value: 'вторая' }] },
+        { label: 'g()', documentation: '   ' },
+      ],
+      activeSignature: 0,
+      activeParameter: 0,
+    });
+    // Части склеиваются пустой строкой между абзацами.
+    expect(help!.signatures[0]!.documentation).toBe('часть\n\nвторая');
+    // Пробельная строка — это «документации нет», а не пустой абзац.
+    expect(help!.signatures[1]!.documentation).toBeNull();
+  });
+
+  it('пустая метка параметра пропускается, остальные остаются', () => {
+    const help = toSignatureHelp({
+      signatures: [{ label: 'f(a)', parameters: [{ label: '' }, { label: 'a' }] }],
+      activeSignature: 0,
+      activeParameter: 0,
+    });
+    expect(help!.signatures[0]!.parameters.map((part) => part.text)).toEqual(['a']);
+  });
+
   it('чужие индексы подрезаются по границам', () => {
     const help = toSignatureHelp({
       signatures: [{ label: 'f(a)' }, { label: 'g()' }],
@@ -72,6 +96,11 @@ describe('разбор подсказки о параметрах', () => {
     expect(toSignatureHelp({})).toBeNull();
     expect(toSignatureHelp({ signatures: [] })).toBeNull();
     expect(toSignatureHelp('строка')).toBeNull();
+  });
+
+  it('чужие записи и подписи без метки отсеиваются', () => {
+    // Не-объект в списке подписей пропускаем; если метки нет ни у одной — показывать нечего.
+    expect(toSignatureHelp({ signatures: [5, null, { documentation: 'текст' }] })).toBeNull();
   });
 
   it('подпись без метки пропускается, но остальные остаются', () => {

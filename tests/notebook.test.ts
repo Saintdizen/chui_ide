@@ -59,6 +59,38 @@ describe('parseNotebook: разбор ячеек', () => {
     expect(parsed.cells[0]!.outputs).toEqual([{ kind: 'image/png', text: '(изображение)' }]);
   });
 
+  it('текстовый вывод берётся из text/plain и text/html', () => {
+    const outputs = [
+      { output_type: 'display_data', data: { 'text/html': '<b>привет</b>' } },
+      // Только машинные данные (без картинки и без текста) в окне не показываем.
+      { output_type: 'execute_result', data: { 'application/json': '{}' } },
+      // Мусор вместо вывода и вместо данных не роняет разбор.
+      { output_type: 'display_data', data: 'нет' },
+      null,
+    ];
+    const parsed = parseNotebook(notebook([code('x', outputs)]));
+    expect(parsed.cells[0]!.outputs).toEqual([{ kind: 'text', text: '<b>привет</b>' }]);
+  });
+
+  it('не-строки в кусках вывода отбрасываются', () => {
+    // nbformat допускает массив кусков; числа и прочий мусор туда не идут.
+    const outputs = [
+      { output_type: 'stream', text: ['a', 5, 'b'] },
+      { output_type: 'stream', text: 5 },
+    ];
+    const parsed = parseNotebook(notebook([code('x', outputs)]));
+    expect(parsed.cells[0]!.outputs).toEqual([
+      { kind: 'text', text: 'ab' },
+      { kind: 'text', text: '' },
+    ]);
+  });
+
+  it('JSON не-объектом — тоже «не ноутбук», а не исключение', () => {
+    expect(parseNotebook('42').error).toContain('не похож на ноутбук');
+    expect(parseNotebook('"строка"').error).toContain('не похож на ноутбук');
+    expect(parseNotebook('null').error).toContain('не похож на ноутбук');
+  });
+
   it('язык ядра читается из метаданных', () => {
     expect(parseNotebook(notebook([])).language).toBe('python');
   });
