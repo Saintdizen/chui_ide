@@ -22,11 +22,11 @@ import type { HostService } from '../core/host';
 import type { WorkspaceModel } from '../core/workspace-model';
 import { type RpcClient, RpcError } from '../core/rpc';
 import { basename, clear, h, type IconName, svgIcon } from './dom';
-import { createSelect } from './select';
 import { createSessionInfo, createUsageRing, type SessionInfoData } from './session-info';
 import { createAttachments } from './chat-attachments';
 import { createToolFeed, type ToolCardView } from './chat-tools';
 import { createMarkdownRenderer } from './chat-markdown';
+import { createChatComposer } from './chat-composer';
 import { createComposerMenu } from './chat-composer-menu';
 import { createChangesPanel } from './chat-changes';
 import { createPlanPanel } from './chat-plan';
@@ -34,6 +34,7 @@ import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
 import { createCommandApproval, createEditReview, type ApprovalHost } from './chat-approvals';
 import { countLines, plural, snippetFor, titleFrom } from './chat-text';
+import { createChatTabs, type ChatSearchHit } from './chat-tabs';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
 
@@ -80,9 +81,6 @@ export interface ChatDeps {
   isInEditor?: () => boolean;
 }
 
-/** Режим работы панели: спросить, поработать с подтверждениями или наметить план. */
-type ChatMode = 'ask' | 'agent' | 'plan';
-
 /**
  * Сжатие беседы: старая история заменяется резюме. Пересказ просим у модели сжатия —
  * по умолчанию той же, что и беседа, но её можно задать в настройках (`ai.compactModel`).
@@ -125,12 +123,6 @@ const COMPACT_AT_RATIO = 0.8;
 export function createChatPanel(deps: ChatDeps): ChatView {
   let settings = deps.settings;
   let busy = false;
-  /** Режим панели: ответ на вопрос, агент с подтверждениями или план без изменений. */
-  let mode: ChatMode = 'ask';
-  let useTools = false;
-  let planMode = false;
-  // Права доступа: кнопка в композере. Включено — команды и правки без вопросов.
-  let autoApprove = false;
   /**
    * Тянем ли ленту вниз автоматически. Пользователь прокрутил вверх —
    * стрим не дёргает ленту; вернулся к низу (или нажал кнопку) — снова тянем.
@@ -178,14 +170,23 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     autoScroll = distance < 40;
     jumpButton.hidden = autoScroll;
   });
-  const input = h('textarea', {
-    class: 'chat-input',
-    rows: 3,
-    placeholder: 'Спросите о коде. «/» — команды, «#» — контекст, «@» — файл проекта (Enter — отправить)',
-    spellcheck: false,
-  });
+  /* ── композер: поле вопроса, режим, права, модель ─────────────────────── */
 
-  /* ── композер: панель изменений, чипы, тулбар, статус ──────────────────── */
+  // Панель ввода — отдельный модуль (`chat-composer.ts`): он владеет режимом и
+  // правами и рисует свои контролы. Панель беседы только читает поле и подключает
+  // к нему отправку и меню — для этого поле вынесено наружу алиасом `input`.
+  const composer = createChatComposer({
+    rpc: deps.rpc,
+    onSend: (text) => void send(text),
+    onStop: () => stop(),
+    onOpenSettings: () => deps.settingsModal.open(),
+    onContext: () => menu.toggleContext(),
+    onPasteImages: (files) => void attachments.attachFiles(files),
+    onEffortChange: (effort) => void saveEffort(effort),
+  });
+  const input = composer.input;
+
+  /* ── панель изменений, план агента и контекст к вопросу ──────────────────── */
 
   /**
    * Показать файл человеку: сперва открыть, потом встать на место. Документа может
@@ -233,33 +234,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     requestMentions: () => attachments.requestMentions(),
   });
 
-  /** Скрепка открывает тот же список контекста, что и «#»: его видно и без подсказки. */
-  const contextButton = h(
-    'button',
-    {
-      class: 'icon-btn',
-      type: 'button',
-      title: 'Приложить контекст (или «#»)',
-      onClick: () => menu.toggleContext(),
-    },
-    svgIcon('attach', 16),
-  );
-
-  // Вставка из буфера: screenshot в буфере — самое частое, что прикладывают к
-  // вопросу. Текст с картинкой вместе вставляется как текст: картинку берём только
-  // тогда, когда она в буфере есть отдельным файлом.
-  input.addEventListener('paste', (event) => {
-    const items = [...(event.clipboardData?.items ?? [])];
-    const files = items
-      .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => file !== null);
-    if (files.length === 0) return;
-
-    event.preventDefault();
-    void attachments.attachFiles(files);
-  });
-
   // Перетаскивание файла на панель чата: тот же результат, что вставка из буфера.
   // Слушатели вешаются ниже, когда корневой элемент уже собран.
 
@@ -267,207 +241,23 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   document.addEventListener('pointerdown', (event) => {
     if (!menu.isOpen()) return;
     const node = event.target as Node;
-    if (menu.element.contains(node) || input.contains(node) || contextButton.contains(node)) return;
+    if (menu.element.contains(node) || composer.element.contains(node)) return;
     menu.hide();
   });
 
-  const actionButton = h('button', {
-    class: 'icon-btn composer-action',
-    type: 'button',
-    onClick: () => {
-      if (busy) stop();
-      else void send(input.value);
-    },
-  });
-
-  /**
-   * Отправка и остановка — одна кнопка: во время генерации она превращается
-   * в «стоп». Двух кнопок рядом не бывает: нажимать их одновременно нельзя.
-   */
-  function syncActionButton(): void {
-    clear(actionButton);
-    actionButton.appendChild(svgIcon(busy ? 'stop' : 'arrowUp', 16));
-    actionButton.title = busy ? 'Остановить генерацию' : 'Отправить (Enter)';
-    actionButton.classList.toggle('composer-action-send', !busy);
-    actionButton.classList.toggle('composer-action-stop', busy);
-  }
-
-  const modeSelect = createSelect({
-    class: 'composer-select',
-    title:
-      'Вопрос — просто ответ без инструментов. Агент — сам читает проект, правит файлы и запускает команды, ' +
-      'но действия подтверждаете вы (права — кнопкой рядом). План — только читает проект и составляет план, ничего не меняя.',
-  });
-  modeSelect.setOptions([
-    { value: 'ask', label: 'Вопрос', icon: 'bubble' },
-    { value: 'agent', label: 'Агент', icon: 'wrench' },
-    { value: 'plan', label: 'План', icon: 'checklist' },
-  ]);
-  modeSelect.onChange((value) => {
-    mode = value as ChatMode;
-    syncMode();
-  });
-
-  const modelButton = h(
-    'button',
-    {
-      class: 'composer-model',
-      type: 'button',
-      title: 'Провайдер, модель, ключ',
-      onClick: () => deps.settingsModal.open(),
-    },
-    svgIcon('sparkle', 12),
-    h('span', {}, 'модель не выбрана'),
-  );
-  const effortSelect = createSelect({
-    class: 'composer-select',
-    title: 'Усилие размышления: сколько модель думает перед ответом',
-  });
-  effortSelect.setOptions([
-    { value: 'off', label: 'Без размышлений' },
-    { value: 'low', label: 'Low' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'high', label: 'High' },
-  ]);
-  effortSelect.onChange((value) => void saveEffort(value as ReasoningEffort));
-
-  /**
-   * Подсказку вешаем на обёртку: у выключенного контрола браузер не показывает
-   * `title`, а именно там и нужно объяснить, почему он выключен.
-   */
-  const effortField = h('span', { class: 'composer-field' }, effortSelect.element);
-
-  /** Значок статуса — тот же, что у режима в селекте: картинка и подпись совпадают. */
-  const modeIcon = h('span', { class: 'composer-status-icon' }, svgIcon('bubble', 12));
-  // Режим — только значком: слово («Инструменты выключены» и т. п.) висело в полосе
-  // всегда и дублировало селект режима. Смысл остаётся в значке и в подсказке.
-  const modeBadge = h('span', { class: 'composer-status-item' }, modeIcon);
-
-  /**
-   * Права доступа — отдельный тумблер, а не часть режима: включён — команды и правки
-   * выполняются без вопросов, выключен — на каждое действие спрашиваем. В «Вопросе»
-   * и «Плане» смысла не имеет: там менять нечего, поэтому кнопка недоступна.
-   */
-  const permButton = h('button', {
-    class: 'icon-btn composer-perm',
-    type: 'button',
-    onClick: () => {
-      autoApprove = !autoApprove;
-      syncPermButton();
-      // Сообщаем main: если агент уже работает, следующее действие возьмёт новые права.
-      void deps.rpc.request('ai.setPermission', { autoApprove }).catch(() => undefined);
-    },
-  });
-
-  /** Состояние кнопки прав: значок, подпись и активный вид — по текущему режиму. */
-  function syncPermButton(): void {
-    // Только в «Агенте» есть что разрешать: в «Вопросе» и «Плане» изменений нет.
-    const canToggle = mode === 'agent';
-    permButton.disabled = !canToggle;
-    clear(permButton);
-    permButton.appendChild(svgIcon(canToggle && autoApprove ? 'unlock' : 'lock', 14));
-    permButton.classList.toggle('is-active', canToggle && autoApprove);
-    permButton.title = !canToggle
-      ? 'Права доступа: доступно в режиме «Агент»'
-      : autoApprove
-        ? 'Полный доступ: команды и правки выполняются без подтверждений'
-        : 'Спрашивать разрешение на каждое действие';
-  }
-
   /* ── беседы: вкладки в стиле вкладок редактора ───────────────────── */
 
-  const tabList = h('div', { class: 'tabs chat-tab-list' });
-  const newChatButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Новая беседа', onClick: () => newChat() },
-    svgIcon('plus', 15),
-  );
-
-  /* ── поиск по беседам ──────────────────────────────────────────────────── */
-
-  const searchInput = h('input', {
-    class: 'chat-search-input',
-    type: 'text',
-    spellcheck: false,
-    placeholder: 'Поиск по всем беседам',
-  });
-  const searchResults = h('div', { class: 'chat-search-results', hidden: true });
-  const searchBar = h('div', { class: 'chat-search', hidden: true }, searchInput, searchResults);
-  const searchButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Поиск по беседам', onClick: () => toggleSearch() },
-    svgIcon('search', 14),
-  );
-
-  function toggleSearch(): void {
-    searchBar.hidden = !searchBar.hidden;
-    if (searchBar.hidden) {
-      searchInput.value = '';
-      searchResults.hidden = true;
-      clear(searchResults);
-      input.focus();
-    } else {
-      searchInput.focus();
-    }
-  }
-
-  function runSearch(): void {
-    const query = searchInput.value.trim().toLowerCase();
-    clear(searchResults);
-    if (!query) {
-      searchResults.hidden = true;
-      return;
-    }
-
-    const matches: Array<{ session: ChatSession; snippet: string }> = [];
-    for (const session of sessions) {
-      for (const message of session.history) {
-        const snippet = snippetFor(message.content ?? '', query);
-        if (snippet === null) continue;
-        matches.push({ session, snippet });
-        break; // одна строка на беседу — список читается легче
-      }
-      if (matches.length >= 30) break;
-    }
-
-    searchResults.hidden = false;
-    if (matches.length === 0) {
-      searchResults.appendChild(h('div', { class: 'chat-search-empty' }, 'Ничего не найдено'));
-      return;
-    }
-
-    for (const match of matches) {
-      searchResults.appendChild(
-        h(
-          'button',
-          {
-            class: 'chat-search-item',
-            type: 'button',
-            onClick: () => {
-              const target = match.session;
-              activate(target.id);
-              requestAnimationFrame(() => {
-                const node = [...target.thread.querySelectorAll('.msg')].find((el) =>
-                  (el.textContent ?? '').toLowerCase().includes(query),
-                );
-                node?.scrollIntoView({ block: 'center' });
-                node?.classList.add('is-search-hit');
-              });
-            },
-          },
-          h('span', { class: 'chat-search-title' }, match.session.title),
-          h('span', { class: 'chat-search-snippet' }, match.snippet),
-        ),
-      );
-    }
-  }
-
-  searchInput.addEventListener('input', runSearch);
-  searchInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      toggleSearch();
-    }
+  // Полоса вкладок и поиск по беседам — отдельный модуль (`chat-tabs.ts`): он
+  // рисует по списку бесед, а переключение, закрытие, меню и переход к
+  // найденному приходят к беседам колбэками. Состояние бесед остаётся здесь.
+  const tabs = createChatTabs({
+    onActivate: (id) => activate(id),
+    onClose: (id) => closeSession(id),
+    onNewChat: () => newChat(),
+    onMenu: (id, event) => openTabMenu(id, event),
+    search: (query) => searchChats(query),
+    onPickSearch: (id, query) => pickSearchHit(id, query),
+    focusInput: () => input.focus(),
   });
 
   /**
@@ -475,7 +265,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * Перенос — не свойство одной беседы, панель переезжает целиком, но открыть
    * меню логично на той вкладке, с которой работаешь.
    */
-  function openTabMenu(session: ChatSession, event: MouseEvent): void {
+  function openTabMenu(id: number, event: MouseEvent): void {
     const inEditor = deps.isInEditor?.() === true;
     showContextMenu(
       [
@@ -484,7 +274,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           // Клавиша только открывает: подпись для возврата была бы обманом.
           hint: inEditor ? undefined : 'Ctrl+Alt+E',
           onSelect: () => {
-            activate(session.id);
+            activate(id);
             void deps.commands.execute(inEditor ? 'ai.backToPanel' : 'ai.openInEditor');
           },
         },
@@ -492,7 +282,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         {
           label: 'Закрыть беседу',
           danger: true,
-          onSelect: () => closeSession(session.id),
+          onSelect: () => closeSession(id),
         },
       ],
       event.clientX,
@@ -500,71 +290,43 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     );
   }
 
-  function renderTabs(): void {
-    clear(tabList);
+  /** Поиск по беседам: одна строка на беседу, в которой нашлось совпадение. */
+  function searchChats(query: string): ChatSearchHit[] {
+    const hits: ChatSearchHit[] = [];
     for (const session of sessions) {
-      const isActive = session.id === activeId;
-      const isStreaming = session.id === streamingSession?.id;
-      // Классы — как у вкладок редактора: одна полоса, одно поведение, один вид.
-      const classes = ['tab', 'chat-tab'];
-      if (isActive) classes.push('is-active');
-      if (isStreaming) classes.push('is-busy');
-
-      const tab = h(
-        'div',
-        {
-          class: classes.join(' '),
-          role: 'tab',
-          tabindex: '0',
-          'aria-selected': String(isActive),
-          // Пульс точки — не единственный носитель «идёт генерация»: то же сказано
-          // подписью для наведения и `aria-label` для озвучки — важное нельзя
-          // передавать только анимацией. Под «уменьшить движение» точка статична, а
-          // смысл остаётся.
-          title: isStreaming ? `${session.title} — идёт генерация` : session.title,
-          'aria-label': isStreaming ? `${session.title}, идёт генерация` : undefined,
-        },
-        svgIcon('chat', 13),
-        h('span', { class: 'tab-label' }, session.title),
-      );
-
-      tab.addEventListener('click', () => activate(session.id));
-      tab.addEventListener('contextmenu', (event) => {
-        event.preventDefault();
-        openTabMenu(session, event);
-      });
-      tab.addEventListener('keydown', (event) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-        event.preventDefault();
-        activate(session.id);
-      });
-      // Средняя кнопка мыши закрывает вкладку — так же, как вкладки файлов.
-      tab.addEventListener('auxclick', (event) => {
-        if (event.button !== 1) return;
-        event.preventDefault();
-        closeSession(session.id);
-      });
-
-      // Крестик есть и у единственной беседы: без него вкладка выглядит
-      // незаконченной, а отступы справа и слева расходятся (слева иконка, справа пусто).
-      tab.appendChild(
-        h(
-          'button',
-          {
-            class: 'tab-close',
-            type: 'button',
-            title: 'Закрыть беседу',
-            onClick: (event) => {
-              event.stopPropagation();
-              closeSession(session.id);
-            },
-          },
-          svgIcon('close', 11),
-        ),
-      );
-
-      tabList.appendChild(tab);
+      for (const message of session.history) {
+        const snippet = snippetFor(message.content ?? '', query);
+        if (snippet === null) continue;
+        hits.push({ id: session.id, title: session.title, snippet });
+        break; // одна строка на беседу — список читается легче
+      }
     }
+    return hits;
+  }
+
+  /** Клик по результату поиска: открыть беседу и показать найденное место. */
+  function pickSearchHit(id: number, query: string): void {
+    activate(id);
+    const target = sessions.find((session) => session.id === id);
+    if (!target) return;
+    requestAnimationFrame(() => {
+      const node = [...target.thread.querySelectorAll('.msg')].find((el) =>
+        (el.textContent ?? '').toLowerCase().includes(query),
+      );
+      node?.scrollIntoView({ block: 'center' });
+      node?.classList.add('is-search-hit');
+    });
+  }
+
+  function renderTabs(): void {
+    tabs.render(
+      sessions.map((session) => ({
+        id: session.id,
+        title: session.title,
+        streaming: session.id === streamingSession?.id,
+      })),
+      activeId,
+    );
   }
 
   function createSession(uid = newUid()): ChatSession {
@@ -837,7 +599,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const contextRing = createUsageRing(() => toggleSessionInfo());
   const aiSparkle = h('span', { class: 'status-ai', title: 'AI: готов' }, svgIcon('sparkle', 12));
   // Значок режима и искра генерации — рядом в начале кнопки, за ними кольцо.
-  contextRing.element.prepend(modeBadge, aiSparkle);
+  contextRing.element.prepend(composer.modeBadge, aiSparkle);
 
   /**
    * Статус ассистента живёт в общей полосе окна (статус-баре), а не в композере:
@@ -853,7 +615,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       history: session.history,
       attachments: session.attachments,
       systemPrompt: settings.ai.systemPrompt,
-      tools: useTools,
+      tools: composer.modes().useTools,
       // Вес описаний берём из следа последнего прогона: его знает main. Пока
       // ответа не было — числа нет, и панель оценит по всему списку, честно
       // помечая «≈».
@@ -1045,37 +807,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     if (session.id === activeId) body.scrollTop = 0;
   }
 
-  /** Режим задаёт доступ к инструментам; права на изменения — отдельный тумблер. */
-  function syncMode(): void {
-    useTools = mode !== 'ask';
-    planMode = mode === 'plan';
-    modeSelect.setValue(mode);
-    // Класс режима красит и селект, и статус одним цветом — см. main.css.
-    for (const name of ['ask', 'agent', 'plan'] as const) {
-      modeSelect.element.classList.toggle(`is-mode-${name}`, mode === name);
-      modeBadge.classList.toggle(`is-mode-${name}`, mode === name);
-    }
-    // Значок статуса повторяет значок режима: «Вопрос» — реплика, «Агент» — ключ,
-    // «План» — чек-лист. Раньше здесь всегда висел предупреждающий треугольник.
-    const badgeIcon = mode === 'plan' ? 'checklist' : mode === 'agent' ? 'wrench' : 'bubble';
-    clear(modeIcon);
-    modeIcon.appendChild(svgIcon(badgeIcon, 12));
-    modeBadge.title =
-      mode === 'plan'
-        ? 'План: только чтение, без изменений'
-        : mode === 'agent'
-          ? 'Инструменты разрешены'
-          : 'Инструменты выключены';
-    syncPermButton();
-  }
-
   /** Подпись кнопки модели — «Провайдер - Модель»: где и чем спрашиваем, видно сразу. */
   function syncModelLabel(): void {
     const provider = currentProvider()?.label ?? 'провайдер не задан';
     const label = currentModel() || 'модель не выбрана';
-    const text = modelButton.lastElementChild;
-    if (text) text.textContent = `${provider} - ${label}`;
-    modelButton.title = `${provider} · ${label}\nНажмите, чтобы сменить провайдера, модель или ключ`;
+    composer.setModel(provider, label);
     // Усилие размышления относится к модели: сменилась модель — сменилась и доступность.
     syncEffort();
   }
@@ -1087,13 +823,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   function syncEffort(): void {
     const effort = settings.ai.reasoningEffort ?? 'off';
-    effortSelect.setValue(effort);
-
     const capabilities = modelCapabilities(currentModel());
-    effortSelect.setDisabled(!capabilities.reasoningEffort);
-    effortField.title = capabilities.reasoningEffort
-      ? 'Усилие размышления: сколько модель думает перед ответом'
-      : `Модель не принимает усилие размышления: ${capabilities.note ?? 'параметр не поддерживается'}`;
+    composer.setEffort(
+      effort,
+      !capabilities.reasoningEffort,
+      capabilities.reasoningEffort
+        ? 'Усилие размышления: сколько модель думает перед ответом'
+        : `Модель не принимает усилие размышления: ${capabilities.note ?? 'параметр не поддерживается'}`,
+    );
   }
 
   async function saveEffort(effort: ReasoningEffort): Promise<void> {
@@ -1245,34 +982,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     planPanel.element,
     changesPanel.element,
     attachments.element,
-    h(
-      'div',
-      { class: 'composer-box' },
-      input,
-      h(
-        'div',
-        { class: 'composer-toolbar' },
-        h('div', { class: 'composer-group' }, modeSelect.element, permButton, modelButton, effortField),
-        h('div', { class: 'composer-group composer-group-end' }, contextButton, actionButton),
-      ),
-    ),
+    composer.element,
     menu.element,
   );
   footer.appendChild(jumpButton);
 
-  const element = h(
-    'div',
-    { class: 'chat' },
-    h(
-      'div',
-      { class: 'panel-header chat-tabs' },
-      tabList,
-      h('div', { class: 'panel-actions' }, searchButton, newChatButton),
-    ),
-    searchBar,
-    body,
-    footer,
-  );
+  const element = h('div', { class: 'chat' }, tabs.element, tabs.searchBar, body, footer);
 
   // Перетаскивание изображения на панель чата — тот же путь, что вставка из буфера.
   // Слушатели на корне: файл можно бросить в любое место панели, не только в поле.
@@ -1597,11 +1312,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     aiSparkle.classList.toggle('is-busy', busy);
     aiSparkle.title = busy ? 'AI: генерация…' : 'AI: готов';
     // Поле ввода гасит прогон, а он в окне один (см. `rpc.ts`: активный стрим —
-    // один). Поэтому блокируем поле разом для всех вкладок, а не только для
-    // стримящей: иначе, переключившись во время генерации в другую беседу,
-    // оставляли бы её поле заблокированным после конца ответа.
-    input.disabled = value;
-    syncActionButton();
+    // один). Поэтому блокируем поле разом для всех вкладок: композер ставит
+    // `disabled` на общее поле и меняет кнопку отправки на «стоп».
+    composer.setBusy(value);
   }
 
   function stop(): void {
@@ -1842,7 +1555,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       syncSessionInfo();
       scheduleSave();
     },
-    modes: () => ({ useTools, autoApprove, planMode }),
+    modes: () => composer.modes(),
   });
 
   input.addEventListener('input', () => menu.sync());
@@ -1876,9 +1589,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // панель изменений читают состояние активной беседы, без неё им нечего показывать.
   initPersistence();
   syncProviderFields();
-  syncMode();
   syncEffort();
-  syncActionButton();
   attachments.render();
   renderChanges();
 
