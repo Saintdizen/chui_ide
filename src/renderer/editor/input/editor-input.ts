@@ -29,7 +29,7 @@ import { wordAt } from '../core/graphemes';
 import { blockCommentFor, lineCommentFor } from './comments';
 import { chordCommand, chordName, isChordPrefix, resolveKey, type EditCommand, type Motion } from './keymap';
 import { MacroRecorder, recordsCommand, runMacro, type MacroStep, type MacroTarget } from './macro';
-import { VimBinding } from './vim-binding';
+import { VimBinding, type VimSearchAction } from './vim-binding';
 import type { VimMode } from './vim';
 import { EmacsBinding } from './emacs-binding';
 import type { EditorChange, EditorController } from './editor-controller';
@@ -88,6 +88,11 @@ export interface EditorInputOptions {
   vimMode?: boolean;
   /** Режим Vim сменился — по нему приложение показывает значок в строке состояния. */
   onVimModeChange?: (mode: VimMode) => void;
+  /**
+   * Vim просит поиск: `/`/`?` открывают строку поиска, `n`/`N` шагают по совпадениям.
+   * Саму строку ведёт панель поиска редактора — сюда вынесено только намерение.
+   */
+  onVimSearch?: (action: VimSearchAction) => void;
   /** Emacs-режим включён при создании (настройка `editor.emacsMode`). */
   emacsMode?: boolean;
 }
@@ -125,7 +130,7 @@ export class EditorInputBinding {
     this.language = options.language;
     this.onPasted = options.onPasted;
     // Vim: начальное состояние ставим молча — слушателя режима на этом этапе ещё нет.
-    this.vim = new VimBinding(controller, options.onVimModeChange);
+    this.vim = new VimBinding(controller, options.onVimModeChange, options.onVimSearch);
     this.vim.setEnabled(options.vimMode === true, false);
     this.emacs = new EmacsBinding(controller);
     this.emacs.setEnabled(options.emacsMode === true);

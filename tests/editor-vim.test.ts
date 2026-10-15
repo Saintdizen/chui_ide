@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TextBuffer } from '../src/renderer/editor/core/text-buffer';
 import { EditorController } from '../src/renderer/editor/input/editor-controller';
 import type { KeyChord } from '../src/renderer/editor/input/keymap';
-import { VimBinding } from '../src/renderer/editor/input/vim-binding';
+import { VimBinding, type VimSearchAction } from '../src/renderer/editor/input/vim-binding';
 import {
   isHorizontalMotion,
   toggleCaseText,
@@ -271,19 +271,29 @@ describe('смена регистра', () => {
   });
 });
 
-describe('применение команд (VimBinding)', () => {
-  function setup(text: string, caret = 0) {
-    const buffer = new TextBuffer(text);
-    const controller = new EditorController(buffer);
-    controller.setSelection({ anchor: caret, active: caret });
-    const vim = new VimBinding(controller);
-    vim.setEnabled(true);
-    const press = (key: string): void => {
-      vim.handleKey({ key });
-    };
-    return { controller, vim, press, text: () => controller.bufferRef.text };
-  }
+function setup(text: string, caret = 0, onSearch?: (action: VimSearchAction) => void) {
+  const buffer = new TextBuffer(text);
+  const controller = new EditorController(buffer);
+  controller.setSelection({ anchor: caret, active: caret });
+  const vim = new VimBinding(controller, undefined, onSearch);
+  vim.setEnabled(true);
+  const press = (key: string): void => {
+    vim.handleKey({ key });
+  };
+  /**
+   * Набор в режиме вставки: Vim пропускает знак дальше (возвращает `false`), а текст
+   * печатает поле ввода — здесь его роль играет `controller.type`. Знак при этом
+   * проходит через Vim, поэтому попадает в запись для повтора `.`.
+   */
+  const type = (keys: string): void => {
+    for (const ch of keys) {
+      if (!vim.handleKey({ key: ch })) controller.type(ch);
+    }
+  };
+  return { controller, vim, press, type, text: () => controller.bufferRef.text };
+}
 
+describe('применение команд (VimBinding)', () => {
   it('dw удаляет слово с пробелом', () => {
     const { press, text, controller } = setup('foo bar baz', 0);
     press('d');
@@ -354,5 +364,123 @@ describe('применение команд (VimBinding)', () => {
     expect(vim.mode).toBe('insert');
     expect(vim.handleKey({ key: 'x' })).toBe(false);
     expect(controller.bufferRef.text).toBe('abc');
+  });
+});
+
+describe('разбор повтора и поиска (vim.ts)', () => {
+  it('точка, слеш, вопросительный знак и n/N дают свои команды', () => {
+    expect(run([chord('.')]).command).toEqual({ kind: 'repeat' });
+    expect(run([chord('/')]).command).toEqual({ kind: 'search', forward: true });
+    expect(run([chord('?')]).command).toEqual({ kind: 'search', forward: false });
+    expect(run([chord('n')]).command).toEqual({ kind: 'searchRepeat', same: true });
+    expect(run([chord('N')]).command).toEqual({ kind: 'searchRepeat', same: false });
+  });
+
+  it('счётчик перед точкой не мешает разбору', () => {
+    // Счётчик у `.` мы пока не учитываем, но набранное число не должно ломать разбор.
+    expect(run([chord('3'), chord('.')]).command).toEqual({ kind: 'repeat' });
+  });
+});
+
+describe('повтор правки (`.`)', () => {
+  it('повторяет удаление слова (dw)', () => {
+    const { press, text } = setup('foo bar baz', 0);
+    press('d');
+    press('w');
+    expect(text()).toBe('bar baz');
+    press('.');
+    expect(text()).toBe('baz');
+  });
+
+  it('повторяет удаление знака (x) и строки (dd)', () => {
+    const { press, text } = setup('abcdef', 0);
+    press('x');
+    press('.');
+    expect(text()).toBe('cdef');
+
+    const lines = setup('one\ntwo\nthree', 0);
+    lines.press('d');
+    lines.press('d');
+    lines.press('.');
+    expect(lines.text()).toBe('three');
+  });
+
+  it('повторяет вставку вместе с набранным текстом (i…Esc)', () => {
+    const { press, type, text } = setup('abc', 0);
+    press('i');
+    type('hello');
+    press('Escape');
+    expect(text()).toBe('helloabc');
+    press('$');
+    press('.');
+    expect(text()).toBe('helloabchello');
+  });
+
+  it('повторяет замену слова (cw…Esc) целиком', () => {
+    const { press, type, text } = setup('foo bar', 0);
+    press('c');
+    press('w');
+    type('foo');
+    press('Escape');
+    expect(text()).toBe('foo bar');
+    press('w');
+    press('.');
+    expect(text()).toBe('foo foo');
+  });
+
+  it('без правки повторять нечего', () => {
+    const { press, text } = setup('abc', 1);
+    press('.');
+    expect(text()).toBe('abc');
+  });
+
+  it('вставку со стрелками не повторяем, но прежняя правка остаётся', () => {
+    const { press, vim, text } = setup('abcdef', 0);
+    press('x');
+    expect(text()).toBe('bcdef');
+    // Вставка со стрелкой: текст её повтору не поддаётся, поэтому прежний повтор (x) цел.
+    press('i');
+    vim.handleKey({ key: 'ArrowLeft' });
+    press('Escape');
+    press('.');
+    expect(text()).toBe('cdef');
+  });
+});
+
+describe('поиск Vim отдаётся наружу (`/`, `?`, `n`, `N`)', () => {
+  function withSearch(): { actions: VimSearchAction[]; press: (key: string) => void } {
+    const actions: VimSearchAction[] = [];
+    const { press } = setup('abc', 0, (action) => actions.push(action));
+    return { actions, press };
+  }
+
+  it('слеш и вопросительный знак просят открыть поиск с направлением', () => {
+    const { actions, press } = withSearch();
+    press('/');
+    press('?');
+    expect(actions).toEqual([
+      { kind: 'open', forward: true },
+      { kind: 'open', forward: false },
+    ]);
+  });
+
+  it('n идёт в ту же сторону, что последний поиск, N — в обратную', () => {
+    const forward = withSearch();
+    forward.press('/');
+    forward.press('n');
+    forward.press('N');
+    expect(forward.actions.slice(1)).toEqual([
+      { kind: 'step', forward: true },
+      { kind: 'step', forward: false },
+    ]);
+
+    const backward = withSearch();
+    backward.press('?');
+    backward.press('n');
+    backward.press('N');
+    expect(backward.actions.slice(1)).toEqual([
+      { kind: 'step', forward: false },
+      { kind: 'step', forward: true },
+    ]);
   });
 });

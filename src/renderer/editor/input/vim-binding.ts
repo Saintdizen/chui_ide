@@ -13,6 +13,13 @@
  *   • `cw` меняет слово до его конца (как `ce`), а не с пробелом — так делает Vim, и это
  *     тот случай, который человек замечает чаще всего.
  *   • Правка ложится в историю ОДНИМ шагом (`applyEdit`): `dd` отменяется одним Ctrl+Z.
+ *   • `.` повторяет последнюю правку. Для вставки помним и набранный текст: `cwfoo<Esc>`
+ *     повторяется как «сменить слово на foo», а не только как удаление. Что описать
+ *     текстом нельзя (стрелки, Delete, состав IME), повторять не берёмся — лучше
+ *     промолчать, чем повторить неверно.
+ *   • Поиск `/`, `?` и шаги `n`, `N` отдаём наружу: строка поиска — не наша забота,
+ *     её ведёт панель поиска редактора. Сюда же уходит и направление последнего поиска,
+ *     чтобы `n` шёл «туда же».
  */
 
 import type { EditorController } from './editor-controller';
@@ -41,6 +48,21 @@ interface VimRegister {
 }
 
 /**
+ * Запись последней правки — то, что повторяет `.`. Кроме самой команды помним текст,
+ * набранный во вставке, которую она открыла: `cwfoo<Esc>` повторяется целиком.
+ */
+interface VimChange {
+  command: VimCommand;
+  /** Что набрали в открытой вставке; `undefined` — команда не открывала вставку. */
+  insertText?: string;
+}
+
+/** Что Vim просит у поиска: открыть строку поиска или шагнуть к совпадению. */
+export type VimSearchAction =
+  | { readonly kind: 'open'; readonly forward: boolean }
+  | { readonly kind: 'step'; readonly forward: boolean };
+
+/**
  * Vim-режим над одним редактором. Включается настройкой `editor.vimMode`; пока выключен,
  * `handleKey` отвечает `false` и ввод работает как обычно.
  */
@@ -52,11 +74,25 @@ export class VimBinding {
   private goal = 0;
   private register: VimRegister = { text: '', linewise: false };
   private on = false;
+  /** Последняя правка — что повторяет `.`. `null` — повторять нечего. */
+  private lastChange: VimChange | null = null;
+  /** Команда, открывшая вставку: её текст допишем при выходе — для повтора `.`. */
+  private pendingInsert: { command: VimCommand; changed: boolean } | null = null;
+  /** Что набрали в режиме вставки — из этого собирается текст для `.`. */
+  private insertTyped = '';
+  /** Нажатие в вставке нельзя описать текстом (стрелки, Delete, IME) — повтор пропустим. */
+  private insertExact = true;
+  /** Идёт повтор: во время него новую «последнюю правку» не записываем. */
+  private replaying = false;
+  /** Направление последнего `/` или `?` — по нему идут `n` и `N`. */
+  private searchForward = true;
 
   constructor(
     private readonly controller: EditorController,
     /** Смена режима — для значка в строке состояния. */
     private readonly onModeChange?: (mode: VimMode) => void,
+    /** Поиск `/`/`?` и шаги `n`/`N` — их ведёт панель поиска, не Vim. */
+    private readonly onSearch?: (action: VimSearchAction) => void,
   ) {}
 
   /** Включён ли режим. */
@@ -77,6 +113,10 @@ export class VimBinding {
   setEnabled(on: boolean, notify = true): void {
     this.on = on;
     this.state = vimInitialState('normal');
+    // Незавершённую вставку забываем: её текст к новому включению не относится.
+    this.pendingInsert = null;
+    this.insertTyped = '';
+    this.insertExact = true;
     if (notify) this.onModeChange?.(this.mode);
   }
 
@@ -85,11 +125,13 @@ export class VimBinding {
     if (!this.on) return false;
 
     // В режиме вставки Vim забирает только выход из него; остальное — обычный ввод.
+    // Но каждое нажатие запоминаем: из них собирается текст для повтора `.`.
     if (this.state.mode === 'insert') {
       if (chord.key === 'Escape' || (chord.ctrl === true && chord.key === '[')) {
         this.leaveInsert();
         return true;
       }
+      this.noteInsertKey(chord);
       return false;
     }
 
@@ -111,6 +153,50 @@ export class VimBinding {
     const target = vimMoveTarget(buffer, offset, 'charLeft', 1, 0).offset;
     if (target !== offset) this.controller.setSelection({ anchor: target, active: target });
     this.setMode('normal');
+    this.finishInsert();
+  }
+
+  /**
+   * Запомнить нажатие, набранное в режиме вставки: из этих знаков собирается текст для
+   * повтора `.`. Что собрать нельзя (стрелки, Delete, состав IME) — помечаем, и тогда
+   * текст вставки для повтора не берём: повторить неверно хуже, чем не повторить.
+   */
+  private noteInsertKey(chord: KeyChord): void {
+    if (!this.insertExact) return;
+    if (chord.ctrl === true || chord.meta === true) {
+      this.insertExact = false;
+      return;
+    }
+    const { key } = chord;
+    if (key === 'Backspace') {
+      this.insertTyped = this.insertTyped.slice(0, -1);
+      return;
+    }
+    if (key === 'Enter') {
+      this.insertTyped += '\n';
+      return;
+    }
+    if (key === 'Tab') {
+      this.insertTyped += '\t';
+      return;
+    }
+    if (key.length === 1) {
+      this.insertTyped += key;
+      return;
+    }
+    // Delete, Home, End, стрелки, Process (состав IME) — текстом не опишем.
+    this.insertExact = false;
+  }
+
+  /** Закрыть вставку: собрать её в «последнюю правку» для повтора `.`. */
+  private finishInsert(): void {
+    const pending = this.pendingInsert;
+    this.pendingInsert = null;
+    if (!pending || this.replaying) return;
+    const typed = this.insertExact ? this.insertTyped : '';
+    // Чистая вставка без текста (`i<Esc>`) ничего не меняла — прежний повтор не трогаем.
+    if (typed === '' && !pending.changed) return;
+    this.lastChange = typed === '' ? { command: pending.command } : { command: pending.command, insertText: typed };
   }
 
   private setMode(mode: VimMode): void {
@@ -121,6 +207,7 @@ export class VimBinding {
   }
 
   private run(command: VimCommand): void {
+    this.record(command);
     switch (command.kind) {
       case 'mode':
         this.setMode(command.mode);
@@ -170,7 +257,92 @@ export class VimBinding {
       case 'swapEnds':
         this.swapEnds();
         break;
+      case 'repeat':
+        this.repeat();
+        break;
+      case 'search':
+        this.openSearch(command.forward);
+        break;
+      case 'searchRepeat':
+        this.repeatSearch(command.same);
+        break;
     }
+  }
+
+  /**
+   * Запомнить правку для повтора `.`. Правкой считаем то, что меняет текст; движения,
+   * смена режима, отмена и поиск — не правки. Команда, открывающая вставку, ждёт выхода
+   * из неё: тогда к записи добавится набранный текст (см. `finishInsert`).
+   */
+  private record(command: VimCommand): void {
+    if (this.replaying) return;
+    switch (command.kind) {
+      case 'operator':
+      case 'operatorLines':
+      case 'operatorSelection':
+        if (command.operator === 'yank') return; // копирование текста не меняет
+        if (command.operator === 'change') {
+          this.pendingInsert = { command, changed: true };
+          return;
+        }
+        this.lastChange = { command };
+        return;
+      case 'deleteToEnd':
+        if (command.change) {
+          this.pendingInsert = { command, changed: true };
+          return;
+        }
+        this.lastChange = { command };
+        return;
+      case 'deleteChar':
+      case 'deleteCharBefore':
+      case 'put':
+      case 'join':
+      case 'replaceChar':
+      case 'toggleCase':
+        this.lastChange = { command };
+        return;
+      case 'enterInsert':
+        this.pendingInsert = { command, changed: false };
+        return;
+      default:
+        // motion, mode, undo, redo, swapEnds, repeat, search, searchRepeat — не правки.
+        return;
+    }
+  }
+
+  /** `.` — повторить последнюю правку (для вставки — вместе с набранным текстом). */
+  private repeat(): void {
+    const change = this.lastChange;
+    if (!change) return;
+    this.replaying = true;
+    try {
+      this.run(change.command);
+      if (change.insertText !== undefined && change.insertText !== '') {
+        this.insertText(change.insertText);
+        this.setMode('normal');
+      }
+    } finally {
+      this.replaying = false;
+    }
+  }
+
+  /** Вставить текст в каретку — повтор вставки по `.`. */
+  private insertText(text: string): void {
+    const offset = this.controller.caret;
+    const at = offset + text.length;
+    this.controller.applyEdit({ start: offset, removed: '', inserted: text }, { anchor: at, active: at });
+  }
+
+  /** `/` и `?` — открыть строку поиска. Направление помним: по нему пойдут `n` и `N`. */
+  private openSearch(forward: boolean): void {
+    this.searchForward = forward;
+    this.onSearch?.({ kind: 'open', forward });
+  }
+
+  /** `n`/`N` — шаг к следующему (`same`) или обратному совпадению. */
+  private repeatSearch(same: boolean): void {
+    this.onSearch?.({ kind: 'step', forward: same ? this.searchForward : !this.searchForward });
   }
 
   // — движения —
@@ -407,6 +579,9 @@ export class VimBinding {
   }
 
   private enterInsert(at: InsertPlace): void {
+    // Начинаем чистую запись вставки: из неё соберётся текст для повтора `.`.
+    this.insertTyped = '';
+    this.insertExact = true;
     const buffer = this.controller.bufferRef;
     const offset = this.controller.caret;
     const line = buffer.lineAt(offset);

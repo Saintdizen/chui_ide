@@ -272,6 +272,19 @@ export class FindWidget {
     this.applySnapshotKeepingFocus();
   }
 
+  /**
+   * Повторить последний поиск шагом (Vim `n`/`N`): панель при этом не открываем — человек
+   * уже задал запрос раньше. Запрос пересчитываем по текущему тексту: после правок прежние
+   * места были бы неверны. Пусто в запросе — шагать некуда.
+   */
+  searchStep(delta: number): void {
+    const { query, options } = this.state.snapshot;
+    if (query.length === 0) return;
+    this.state.setSource(this.source());
+    this.state.setQuery(query, options, this.controller.caret);
+    this.step(delta);
+  }
+
   /** Показать совпадение: курсор и выделение на него, прокрутка к нему. */
   private reveal(match: FindMatch): void {
     this.controller.selectRange(match.start, match.end);

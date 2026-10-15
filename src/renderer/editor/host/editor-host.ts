@@ -719,6 +719,11 @@ export class EditorHost {
       // Vim-режим: модальный разбор клавиш снаружи обычной раскладки.
       vimMode: options.vimMode,
       onVimModeChange: options.onVimModeChange,
+      // Vim `/`, `?`, `n`, `N`: строку поиска ведёт панель поиска редактора, а не Vim.
+      onVimSearch: (action) => {
+        if (action.kind === 'open') this.find.show('find');
+        else this.find.searchStep(action.forward ? 1 : -1);
+      },
       // Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода.
       emacsMode: options.emacsMode,
     });
