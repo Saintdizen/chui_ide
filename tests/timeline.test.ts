@@ -48,10 +48,18 @@ describe('свод ленты', () => {
   });
 
   it('при равном времени снимок идёт выше коммита', () => {
-    const at = NOW - 10_000;
-    const items = mergeTimeline([snapshot('s1', 0)], [commit('aaa1111', at)], at);
-    // Снимок в этой паре имеет то же время — он про этот файл прямо сейчас.
+    // Времена совпадают: у снимка mtimeMs = NOW, у коммита точное время NOW.
+    const items = mergeTimeline([snapshot('s1', 0)], [commit('aaa1111', NOW)], NOW);
+    // Решает источник: снимок про этот файл прямо сейчас, он выше.
     expect(items.map((item) => item.source)).toEqual(['local', 'git']);
+  });
+
+  it('при равном времени и источнике порядок по заголовку устойчив', () => {
+    // Два коммита одного времени: различает их только заголовок (hash · сообщение).
+    const first = mergeTimeline([], [commit('aaa1111', NOW, 'первый'), commit('bbb2222', NOW, 'второй')], NOW);
+    const swapped = mergeTimeline([], [commit('bbb2222', NOW, 'второй'), commit('aaa1111', NOW, 'первый')], NOW);
+    // Порядок детерминирован и не зависит от того, в каком порядке пришли коммиты.
+    expect(first.map((item) => item.id)).toEqual(swapped.map((item) => item.id));
   });
 
   it('коммит без точного времени берёт дату', () => {

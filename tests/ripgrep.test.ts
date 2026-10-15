@@ -96,6 +96,25 @@ describe('parseRipgrepJson', () => {
     expect(result.hits[0]!.after).toEqual(['после']);
   });
 
+  it('столбец верен и после трёх- и четырёхбайтных символов', () => {
+    // CJK — 3 байта на символ, эмодзи — 4: пересчёт байтов в символы должен учитывать все длины.
+    const cjk = parseRipgrepJson(match('/p/a.ts', 1, '中 needle', 4), { query: 'needle' }, 200);
+    expect(cjk.hits[0]!.column).toBe(3);
+    const emoji = parseRipgrepJson(match('/p/a.ts', 1, '😀 needle', 5), { query: 'needle' }, 200);
+    expect(emoji.hits[0]!.column).toBe(3);
+  });
+
+  it('разрыв между совпадениями начинает контекст заново', () => {
+    // Первое совпадение, далёкая строка контекста (не соседняя) и второе совпадение:
+    // дальний контекст относится ко второму — он и становится его `before`.
+    const output =
+      match('/p/a.ts', 1, 'needle тут') + context('/p/a.ts', 5, 'далеко') + match('/p/a.ts', 6, 'needle снова');
+    const result = parseRipgrepJson(output, { query: 'needle', context: 2 }, 200);
+    expect(result.hits).toHaveLength(2);
+    expect(result.hits[1]!.before).toEqual(['далеко']);
+    expect(result.hits[0]!.after).toBeUndefined();
+  });
+
   it('без контекста соседние строки не прикладываются', () => {
     const output = context('/p/a.ts', 1, 'до') + match('/p/a.ts', 2, 'needle', 0);
     const result = parseRipgrepJson(output, { query: 'needle' }, 200);
