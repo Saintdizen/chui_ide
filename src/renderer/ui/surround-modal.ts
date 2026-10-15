@@ -1,5 +1,6 @@
 import type { SurroundOption } from '../editor/input/surround';
 import { clear, h } from './dom';
+import { createModal } from './modal';
 
 export interface SurroundModalDeps {
   /** Из чего выбирать: зависит от языка файла — список считает вызывающий. */
@@ -30,20 +31,16 @@ export function createSurroundModal(deps: SurroundModalDeps): SurroundModalView 
   let items: readonly SurroundOption[] = [];
   let selected = 0;
 
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal surround-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Обернуть выделение' },
-      h('header', { class: 'modal-header' }, h('span', { class: 'modal-title' }, 'Обернуть выделение')),
-      h('div', { class: 'modal-body' }, list, hint),
-    ),
-  );
+  const modal = createModal({
+    className: 'surround-modal',
+    title: 'Обернуть выделение',
+    // Свой разбор клавиш (стрелки, Enter) снимаем вместе с окном.
+    onClose: () => document.removeEventListener('keydown', onKeyDown, true),
+  });
+  modal.body.append(list, hint);
 
   function close(): void {
-    element.hidden = true;
-    document.removeEventListener('keydown', onKeyDown, true);
+    modal.close();
   }
 
   function choose(index: number): void {
@@ -90,12 +87,8 @@ export function createSurroundModal(deps: SurroundModalDeps): SurroundModalView 
   }
 
   function onKeyDown(event: KeyboardEvent): void {
-    if (element.hidden) return;
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      close();
-      return;
-    }
+    if (!modal.isOpen) return;
+    // Escape разбирает каркас окна (см. `ui/modal.ts`); здесь — только ходьба и выбор.
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       move(1);
@@ -112,23 +105,18 @@ export function createSurroundModal(deps: SurroundModalDeps): SurroundModalView 
     }
   }
 
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
-
   return {
-    element,
+    element: modal.element,
     close,
     open() {
       items = deps.options();
       selected = 0;
       hint.textContent = 'Обёртка встаёт вокруг выделения; пустое выделение даёт пару с кареткой между знаками.';
       render();
-      element.hidden = false;
-      // Слушаем в capture и позже текущего клика: иначе Esc сработает на открытии.
+      modal.open(list);
+      // Слушаем в capture и позже текущего клика: иначе нажатие сработает на открытии.
       document.removeEventListener('keydown', onKeyDown, true);
       window.setTimeout(() => document.addEventListener('keydown', onKeyDown, true), 0);
-      list.focus();
     },
   };
 }

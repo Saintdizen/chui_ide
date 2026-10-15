@@ -10,7 +10,8 @@ import {
   runRegex,
   toggleFlag,
 } from '../../shared/regex-tester';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 
 export interface RegexTesterDeps {
   /**
@@ -75,12 +76,6 @@ export function createRegexTester(deps: RegexTesterDeps = {}): RegexTesterView {
   const matchList = h('div', { class: 'regex-matches' });
   const replacedBox = h('div', { class: 'regex-replaced', hidden: true });
 
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: () => close() },
-    svgIcon('close', 15),
-  );
-
   const form = h(
     'div',
     { class: 'regex-form' },
@@ -102,26 +97,9 @@ export function createRegexTester(deps: RegexTesterDeps = {}): RegexTesterView {
 
   const output = h('div', { class: 'regex-output' }, status, preview, replacedBox, matchList);
 
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      {
-        class: 'modal regex-modal',
-        role: 'dialog',
-        'aria-modal': 'true',
-        'aria-label': 'Отладчик регулярных выражений',
-      },
-      h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Отладчик регулярных выражений'),
-        closeButton,
-      ),
-      h('div', { class: 'modal-body regex-body' }, form, output),
-    ),
-  );
+  const modal = createModal({ className: 'regex-modal', title: 'Отладчик регулярных выражений' });
+  modal.body.classList.add('regex-body');
+  modal.body.append(form, output);
 
   // Чипы флагов: клик переключает, подсказка объясняет — как в литерале, но нагляднее.
   const flagButtons = new Map<RegexFlagChar, HTMLButtonElement>();
@@ -280,33 +258,18 @@ export function createRegexTester(deps: RegexTesterDeps = {}): RegexTesterView {
   });
 
   function close(): void {
-    element.hidden = true;
-    document.removeEventListener('keydown', onKeyDown, true);
+    modal.close();
   }
-
-  function onKeyDown(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    close();
-  }
-
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
 
   return {
-    element,
+    element: modal.element,
     open() {
       const seed = deps.initialText?.() ?? '';
       if (textArea.value === '' && seed !== '') textArea.value = seed;
       flagsInput.value = flagsToString(flags);
       paintFlags();
       compute();
-      element.hidden = false;
-      // Слушаем в capture и позже текущего клика: иначе Esc сработает на открытии.
-      document.removeEventListener('keydown', onKeyDown, true);
-      window.setTimeout(() => document.addEventListener('keydown', onKeyDown, true), 0);
-      patternInput.focus();
+      modal.open(patternInput);
       patternInput.select();
     },
     close,

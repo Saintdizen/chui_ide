@@ -4429,11 +4429,31 @@ textarea {
   text-overflow: ellipsis;
 }
 
+/* Кнопки в шапке окна (обновить, создать, закрыть): где бы окно ни строилось,
+   они живут в одном контейнере и прижаты к правому краю. */
+.modal-head-actions {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* Тело окна — обычный столбец: так его и используют почти все модалки.
+   Двухколоночная раскладка (список разделов + содержимое) — частный случай
+   окна настроек, и живёт она на нём, а не на общем классе: раньше сетка стояла
+   ЗДЕСЬ, и десяток окон без списка разделов раскладывались в первую колонку
+   190 px — текст в них переносился по узкой полосе. */
 .modal-body {
-  display: grid;
-  grid-template-columns: 190px minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+}
+
+/* Настройки — единственное окно с колонкой разделов слева. */
+.settings-modal .modal-body {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
 }
 
 /* Диалог одного поля: узкий и по высоте содержимого, а не 560 px, как настройки. */
@@ -5770,13 +5790,6 @@ body > .overlay {
 
 .forge-modal {
   width: min(760px, 94vw);
-}
-
-.forge-head-actions {
-  display: flex;
-  gap: 2px;
-  align-items: center;
-  margin-left: auto;
 }
 
 .forge-headline {

@@ -1,6 +1,7 @@
 import type { GitRefDiffFile } from '../../shared/git-ref-diff';
 import type { GitModel } from '../core/git-model';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 import { createSelect } from './select';
 
 export interface RefDiffModalDeps {
@@ -55,50 +56,22 @@ export function createRefDiffModal(deps: RefDiffModalDeps): RefDiffModalView {
   const list = h('div', { class: 'refdiff-list' });
   const summary = h('span', { class: 'refdiff-summary' });
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({ className: 'refdiff-modal', title: 'Сравнить ветки' });
+  modal.body.append(
     h(
       'div',
-      { class: 'modal refdiff-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Сравнить ветки' },
-      h('header', { class: 'modal-header' }, h('span', { class: 'modal-title' }, 'Сравнить ветки'), closeButton),
-      h(
-        'div',
-        { class: 'modal-body' },
-        h(
-          'div',
-          { class: 'refdiff-toolbar' },
-          h('span', { class: 'field-label' }, 'С чем:'),
-          fromSelect.element,
-          h('span', { class: 'refdiff-arrow' }, '→'),
-          h('span', { class: 'field-label' }, 'Что:'),
-          toSelect.element,
-          summary,
-        ),
-        list,
-      ),
+      { class: 'refdiff-toolbar' },
+      h('span', { class: 'field-label' }, 'С чем:'),
+      fromSelect.element,
+      h('span', { class: 'refdiff-arrow' }, '→'),
+      h('span', { class: 'field-label' }, 'Что:'),
+      toSelect.element,
+      summary,
     ),
+    list,
   );
 
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   const load = async (): Promise<void> => {
     if (busy) return;
@@ -153,7 +126,7 @@ export function createRefDiffModal(deps: RefDiffModalDeps): RefDiffModalView {
   toSelect.onChange(() => void load());
 
   async function open(): Promise<void> {
-    element.hidden = false;
+    modal.open();
     try {
       const branches = await deps.git.branches();
       options = branches.map((branch) => ({
@@ -183,5 +156,5 @@ export function createRefDiffModal(deps: RefDiffModalDeps): RefDiffModalView {
     await load();
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }

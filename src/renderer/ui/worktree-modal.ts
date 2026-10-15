@@ -1,7 +1,8 @@
 import type { GitWorktree } from '../../shared/git-worktrees';
 import { worktreeLabel } from '../../shared/git-worktrees';
 import type { GitModel } from '../core/git-model';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 import { createSelect } from './select';
 
 export interface WorktreeModalDeps {
@@ -50,52 +51,19 @@ export function createWorktreeModal(deps: WorktreeModalDeps): WorktreeModalView 
     placeholder: 'новая ветка (необязательно)',
   });
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({ className: 'worktree-modal', title: 'Рабочие каталоги (worktree)' });
+  modal.body.append(
     h(
       'div',
-      { class: 'modal worktree-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Рабочие каталоги' },
-      h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Рабочие каталоги (worktree)'),
-        closeButton,
-      ),
-      h(
-        'div',
-        { class: 'modal-body' },
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Каждый рабочий каталог — та же история репозитория, выложенная в отдельную папку на своей ветке. ' +
-            'Так две задачи живут рядом и не мешают друг другу.',
-        ),
-        list,
-        addRow,
-      ),
+      { class: 'field-hint' },
+      'Каждый рабочий каталог — та же история репозитория, выложенная в отдельную папку на своей ветке. ' +
+        'Так две задачи живут рядом и не мешают друг другу.',
     ),
+    list,
+    addRow,
   );
 
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   const action = (label: string, run: () => void, danger = false): HTMLElement =>
     h('button', { class: `btn btn-small${danger ? ' is-danger' : ''}`, type: 'button', onClick: run }, label);
@@ -253,7 +221,7 @@ export function createWorktreeModal(deps: WorktreeModalDeps): WorktreeModalView 
   };
 
   async function open(): Promise<void> {
-    element.hidden = false;
+    modal.open();
     try {
       [worktrees, branches] = await Promise.all([
         deps.git.worktrees(),
@@ -270,5 +238,5 @@ export function createWorktreeModal(deps: WorktreeModalDeps): WorktreeModalView 
     render();
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }

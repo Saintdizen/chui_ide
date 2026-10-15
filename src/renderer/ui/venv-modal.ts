@@ -8,7 +8,8 @@ import {
 } from '../../shared/python-env';
 import { envList } from '../core/python-view';
 import type { RpcClient } from '../core/rpc';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 import { createSelect, type SelectOption } from './select';
 import { showToast } from './toast';
 
@@ -82,37 +83,29 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
     'Отмена',
   );
 
-  const title = h('span', { class: 'modal-title' }, 'Python-окружения');
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: () => close() },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({
+    className: 'venv-modal',
+    title: 'Python-окружения',
+    headerIcon: 'terminal',
+    footer: h('footer', { class: 'modal-footer' }, cancelButton, createButton),
+    // Закрытие во время создания — это отмена: подрядчик обязан её получить.
+    onClose: () => {
+      if (creating) cancel();
+    },
+  });
+  modal.body.classList.add('venv-body');
+  modal.body.append(
+    h('section', { class: 'venv-section' }, h('h3', { class: 'venv-heading' }, 'Найдено в проекте'), list),
     h(
-      'div',
-      { class: 'modal venv-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Виртуальные окружения Python' },
-      h('header', { class: 'modal-header' }, svgIcon('terminal', 15), title, closeButton),
-      h(
-        'div',
-        { class: 'modal-body venv-body' },
-        h('section', { class: 'venv-section' }, h('h3', { class: 'venv-heading' }, 'Найдено в проекте'), list),
-        h(
-          'section',
-          { class: 'venv-section' },
-          h('h3', { class: 'venv-heading' }, 'Создать новое'),
-          h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Каталог'), nameInput),
-          h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Интерпретатор'), baseSelect.element),
-          h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Пакеты'), presetSelect.element),
-          presetHint,
-          requirementsRow,
-          log,
-        ),
-      ),
-      h('footer', { class: 'modal-footer' }, cancelButton, createButton),
+      'section',
+      { class: 'venv-section' },
+      h('h3', { class: 'venv-heading' }, 'Создать новое'),
+      h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Каталог'), nameInput),
+      h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Интерпретатор'), baseSelect.element),
+      h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Пакеты'), presetSelect.element),
+      presetHint,
+      requirementsRow,
+      log,
     ),
   );
 
@@ -121,21 +114,8 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
 
   /* ── инфраструктура окна ───────────────────────────────────────────────── */
 
-  function isOpen(): boolean {
-    return !element.hidden;
-  }
-
   function close(): void {
-    if (!isOpen()) return;
-    if (creating) cancel();
-    element.hidden = true;
-    document.removeEventListener('keydown', onKeyDown, true);
-  }
-
-  function onKeyDown(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    close();
+    modal.close();
   }
 
   function updatePresetHint(): void {
@@ -153,13 +133,13 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
   }
 
   async function open(): Promise<void> {
-    element.hidden = false;
-    document.addEventListener('keydown', onKeyDown, true);
+    modal.open(nameInput);
     nameInput.value = DEFAULT_VENV_DIR;
     log.hidden = true;
     clear(log);
     await refresh();
     nameInput.focus();
+    nameInput.select();
   }
 
   /** Перечитать окружения и наличие requirements.txt. */
@@ -272,5 +252,5 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
     }
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }

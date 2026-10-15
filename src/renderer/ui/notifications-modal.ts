@@ -2,6 +2,7 @@ import type { ForgeInfo, ForgeNotification } from '../../shared/git-platform';
 import { platformLabel, unreadNotificationCount } from '../../shared/git-platform';
 import type { GitModel } from '../core/git-model';
 import { clear, h, svgIcon } from './dom';
+import { createModal } from './modal';
 
 export interface NotificationsModalDeps {
   git: GitModel;
@@ -36,40 +37,14 @@ export function createNotificationsModal(deps: NotificationsModalDeps): Notifica
     { class: 'icon-btn', type: 'button', title: 'Обновить список', onClick: () => void reload() },
     svgIcon('refresh', 14),
   );
-  const close = (): void => {
-    element.hidden = true;
-  };
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal forge-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Уведомления' },
-      h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Уведомления'),
-        h('div', { class: 'forge-head-actions' }, refreshButton, closeButton),
-      ),
-      h('div', { class: 'modal-body' }, headline, statusLine, h('div', { class: 'settings-divider' }), list),
-    ),
-  );
-
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
+  const modal = createModal({
+    className: 'forge-modal',
+    title: 'Уведомления',
+    headerActions: [refreshButton],
   });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  modal.body.append(headline, statusLine, h('div', { class: 'settings-divider' }), list);
+
+  const close = (): void => modal.close();
 
   const run = async (operation: () => Promise<void>): Promise<void> => {
     if (busy) return;
@@ -185,12 +160,12 @@ export function createNotificationsModal(deps: NotificationsModalDeps): Notifica
   }
 
   async function open(): Promise<void> {
-    element.hidden = false;
+    modal.open();
     headline.replaceChildren();
     statusLine.replaceChildren(h('p', { class: 'field-hint' }, 'Спрашиваю git и клиента площадки…'));
     list.replaceChildren();
     await reload();
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }

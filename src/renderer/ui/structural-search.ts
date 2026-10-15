@@ -9,7 +9,8 @@ import {
   structuralFind,
   structuralReplaceEdit,
 } from '../../shared/structural-search';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 import { showToast } from './toast';
 
 /** Результат замены по проекту: изменённые пути и число замен. */
@@ -108,52 +109,30 @@ export function createStructuralSearch(deps: StructuralSearchDeps): StructuralSe
   const matchesBox = h('div', { class: 'structural-matches' });
   const applyButton = h('button', { class: 'btn btn-primary', type: 'button', disabled: true }, 'Заменить всё в файле');
 
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: () => close() },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({
+    className: 'structural-modal',
+    title: 'Замена по структуре кода',
+    footer: h('footer', { class: 'modal-footer' }, applyButton),
+  });
+  modal.body.classList.add('structural-body');
+  modal.body.append(
     h(
       'div',
-      {
-        class: 'modal structural-modal',
-        role: 'dialog',
-        'aria-modal': 'true',
-        'aria-label': 'Замена по структуре кода',
-      },
+      { class: 'structural-form' },
+      h('div', { class: 'field-label' }, 'Область'),
+      scopeBar,
+      h('div', { class: 'field-label' }, 'Образец'),
+      patternInput,
+      h('div', { class: 'field-label' }, 'Замена'),
+      h('div', { class: 'structural-replace-row' }, replacementInput, fromSelectionButton),
       h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Замена по структуре кода'),
-        closeButton,
+        'p',
+        { class: 'field-hint' },
+        'В образце: $имя — любой один кусок, $имя... — любая последовательность, $$ — знак доллара. ' +
+          'В замене те же $имя подставляются на место пойманного.',
       ),
-      h(
-        'div',
-        { class: 'modal-body structural-body' },
-        h(
-          'div',
-          { class: 'structural-form' },
-          h('div', { class: 'field-label' }, 'Область'),
-          scopeBar,
-          h('div', { class: 'field-label' }, 'Образец'),
-          patternInput,
-          h('div', { class: 'field-label' }, 'Замена'),
-          h('div', { class: 'structural-replace-row' }, replacementInput, fromSelectionButton),
-          h(
-            'p',
-            { class: 'field-hint' },
-            'В образце: $имя — любой один кусок, $имя... — любая последовательность, $$ — знак доллара. ' +
-              'В замене те же $имя подставляются на место пойманного.',
-          ),
-        ),
-        h('div', { class: 'structural-output' }, status, matchesBox),
-      ),
-      h('footer', { class: 'modal-footer' }, applyButton),
     ),
+    h('div', { class: 'structural-output' }, status, matchesBox),
   );
 
   const report = (text: string, error = false): void => {
@@ -358,30 +337,15 @@ export function createStructuralSearch(deps: StructuralSearchDeps): StructuralSe
   });
 
   function close(): void {
-    element.hidden = true;
-    document.removeEventListener('keydown', onKeyDown, true);
+    modal.close();
   }
-
-  function onKeyDown(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    close();
-  }
-
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
 
   return {
-    element,
+    element: modal.element,
     close,
     open() {
       compute();
-      element.hidden = false;
-      // Слушаем в capture и позже текущего клика: иначе Esc сработает на открытии.
-      document.removeEventListener('keydown', onKeyDown, true);
-      window.setTimeout(() => document.addEventListener('keydown', onKeyDown, true), 0);
-      patternInput.focus();
+      modal.open(patternInput);
       patternInput.select();
     },
   };

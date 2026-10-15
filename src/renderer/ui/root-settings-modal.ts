@@ -8,7 +8,8 @@ import {
   setRootOverride,
 } from '../../shared/explorer-settings';
 import { nameOf } from '../../shared/paths';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 import { createSelect } from './select';
 
 export interface RootSettingsModalDeps {
@@ -52,65 +53,43 @@ export function createRootSettingsModal(deps: RootSettingsModalDeps): RootSettin
   let draft: ExplorerRootOverride = {};
   let currentRoot: string | null = null;
 
-  const title = h('span', { class: 'modal-title' }, 'Настройки папки');
   const rows = h('div', { class: 'root-settings-rows' });
   const excluded = h('textarea', { class: 'field-input root-settings-exclude', rows: 4, spellcheck: false });
   const summary = h('div', { class: 'field-hint' });
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({ className: 'root-settings-modal', title: 'Настройки папки' });
+  modal.body.append(
     h(
       'div',
-      { class: 'modal root-settings-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Настройки папки' },
+      { class: 'field-hint' },
+      'Эти настройки относятся к одной папке области: в другом корне дерево может выглядеть иначе. ' +
+        '«Как в области» — наследовать общую настройку.',
+    ),
+    rows,
+    h('div', { class: 'settings-divider' }),
+    h('div', { class: 'field-label' }, 'Исключения папки'),
+    h(
+      'div',
+      { class: 'field-hint' },
+      'Свои маски (`*.min.js`, `dist`, `generated/**`) — по строке на маску. Пусто — берутся ' +
+        'исключения области. Это фильтр ДЕРЕВА: поиск и индексация им не пользуются.',
+    ),
+    excluded,
+    h('div', { class: 'settings-divider' }),
+    summary,
+    h(
+      'div',
+      { class: 'root-settings-actions' },
       h(
-        'header',
-        { class: 'modal-header' },
-        title,
-        h(
-          'button',
-          { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-          svgIcon('close', 15),
-        ),
+        'button',
+        { class: 'btn', type: 'button', title: 'Жить по общим настройкам', onClick: () => void reset() },
+        'Сбросить настройки папки',
       ),
-      h(
-        'div',
-        { class: 'modal-body' },
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Эти настройки относятся к одной папке области: в другом корне дерево может выглядеть иначе. ' +
-            '«Как в области» — наследовать общую настройку.',
-        ),
-        rows,
-        h('div', { class: 'settings-divider' }),
-        h('div', { class: 'field-label' }, 'Исключения папки'),
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Свои маски (`*.min.js`, `dist`, `generated/**`) — по строке на маску. Пусто — берутся ' +
-            'исключения области. Это фильтр ДЕРЕВА: поиск и индексация им не пользуются.',
-        ),
-        excluded,
-        h('div', { class: 'settings-divider' }),
-        summary,
-        h(
-          'div',
-          { class: 'root-settings-actions' },
-          h(
-            'button',
-            { class: 'btn', type: 'button', title: 'Жить по общим настройкам', onClick: () => void reset() },
-            'Сбросить настройки папки',
-          ),
-          h('button', { class: 'btn btn-primary', type: 'button', onClick: () => void apply() }, 'Готово'),
-        ),
-      ),
+      h('button', { class: 'btn btn-primary', type: 'button', onClick: () => void apply() }, 'Готово'),
     ),
   );
+
+  const close = (): void => modal.close();
 
   /** Собрать черновик отличий из значений формы. */
   const collect = (): ExplorerRootOverride => {
@@ -181,28 +160,17 @@ export function createRootSettingsModal(deps: RootSettingsModalDeps): RootSettin
     close();
   }
 
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
-
   return {
-    element,
+    element: modal.element,
     open() {
       currentRoot = deps.root();
       if (!currentRoot) return;
       // Копия: правки формы не должны менять сохранённую карту до нажатия «Готово».
       draft = { ...rootOverrideOf(deps.settings().byRoot, currentRoot) };
       if (draft.exclude) draft.exclude = [...draft.exclude];
-      title.textContent = `Настройки папки: ${nameOf(currentRoot)}`;
+      modal.title.textContent = `Настройки папки: ${nameOf(currentRoot)}`;
       render();
-      element.hidden = false;
-      excluded.focus();
+      modal.open(excluded);
     },
     close,
   };

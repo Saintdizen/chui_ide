@@ -4,6 +4,7 @@ import { nameOf } from '../../shared/paths';
 import { mergeTimeline, timelineActionLabel, timelineSummary, type TimelineItem } from '../../shared/timeline';
 import type { RpcClient } from '../core/rpc';
 import { clear, h, svgIcon } from './dom';
+import { createModal } from './modal';
 
 export interface HistoryModalDeps {
   rpc: RpcClient;
@@ -65,42 +66,14 @@ export function createHistoryModal(deps: HistoryModalDeps): HistoryModalView {
     'Очистить снимки',
   );
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
+  const modal = createModal({ className: 'history-modal', title: 'История файла' });
+  modal.body.append(
+    h('div', { class: 'history-toolbar' }, svgIcon('revert', 14), summary),
+    h('div', { class: 'history-body' }, list, h('div', { class: 'history-detail' }, preview)),
+    h('div', { class: 'history-actions' }, clearButton, actionButton),
   );
 
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal history-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'История файла' },
-      h('header', { class: 'modal-header' }, h('span', { class: 'modal-title' }, 'История файла'), closeButton),
-      h(
-        'div',
-        { class: 'modal-body' },
-        h('div', { class: 'history-toolbar' }, svgIcon('revert', 14), summary),
-        h('div', { class: 'history-body' }, list, h('div', { class: 'history-detail' }, preview)),
-        h('div', { class: 'history-actions' }, clearButton, actionButton),
-      ),
-    ),
-  );
-
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   const renderList = (): void => {
     clear(list);
@@ -236,7 +209,7 @@ export function createHistoryModal(deps: HistoryModalDeps): HistoryModalView {
   }
 
   return {
-    element,
+    element: modal.element,
     close,
     async open(filePath) {
       // Путь мог прийти откуда угодно (меню дерева, команда) — берём строку как есть.
@@ -246,7 +219,7 @@ export function createHistoryModal(deps: HistoryModalDeps): HistoryModalView {
       commits = [];
       items = [];
       selected = null;
-      element.hidden = false;
+      modal.open();
       summary.textContent = nameOf(filePath);
       list.replaceChildren(h('p', { class: 'history-empty' }, 'Читаю историю…'));
       preview.textContent = '';

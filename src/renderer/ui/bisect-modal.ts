@@ -1,6 +1,7 @@
 import type { GitBisectState } from '../../shared/git-bisect';
 import type { GitModel } from '../core/git-model';
-import { h, svgIcon } from './dom';
+import { h } from './dom';
+import { createModal } from './modal';
 
 export interface BisectModalDeps {
   git: GitModel;
@@ -83,41 +84,13 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
     resetButton,
   );
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal bisect-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Поиск багованного коммита' },
-      h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Поиск багованного коммита (bisect)'),
-        closeButton,
-      ),
-      h('div', { class: 'modal-body' }, headline, detail, startRow, actions, message),
-    ),
-  );
-
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
+  const modal = createModal({
+    className: 'bisect-modal',
+    title: 'Поиск багованного коммита (bisect)',
   });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  modal.body.append(headline, detail, startRow, actions, message);
+
+  const close = (): void => modal.close();
 
   /** Показать состояние: заголовок, место проверки и доступные действия. */
   const render = (): void => {
@@ -226,11 +199,11 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
   }
 
   async function open(): Promise<void> {
-    element.hidden = false;
+    modal.open();
     state = null;
     render();
     await read();
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }

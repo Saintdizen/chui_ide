@@ -1,7 +1,8 @@
 import type { GitSparseInfo } from '../../shared/git-sparse';
 import { addSparseDirectory, removeSparseDirectory, sparseDirectories, sparseSummary } from '../../shared/git-sparse';
 import type { GitModel } from '../core/git-model';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 
 export interface SparseModalDeps {
   git: GitModel;
@@ -39,16 +40,6 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
     placeholder: 'например, packages/api',
   });
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
   const addButton = h('button', { class: 'btn btn-primary', type: 'button', onClick: () => void add() }, 'Добавить');
   const disableButton = h(
     'button',
@@ -56,53 +47,30 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
     'Выключить режим',
   );
 
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({ className: 'sparse-modal', title: 'Разреженный рабочий каталог' });
+  modal.body.append(
+    status,
+    h('div', { class: 'settings-divider' }),
+    h('div', { class: 'field-label' }, 'Каталоги на диске'),
     h(
       'div',
-      { class: 'modal sparse-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Разреженный каталог' },
-      h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Разреженный рабочий каталог'),
-        closeButton,
-      ),
-      h(
-        'div',
-        { class: 'modal-body' },
-        status,
-        h('div', { class: 'settings-divider' }),
-        h('div', { class: 'field-label' }, 'Каталоги на диске'),
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Файлы вне этих каталогов в рабочем дереве не появляются. История git от этого не ' +
-            'меняется: режим решает, что выкладывать на диск. Через запятую можно задать сразу ' +
-            'несколько — например, `src, tests`.',
-        ),
-        dirsList,
-        h('div', { class: 'sparse-add' }, dirInput, addButton),
-        h('div', { class: 'settings-divider' }),
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Выключение возвращает на диск весь репозиторий — это может занять время и место.',
-        ),
-        h('div', { class: 'sparse-actions' }, disableButton),
-      ),
+      { class: 'field-hint' },
+      'Файлы вне этих каталогов в рабочем дереве не появляются. История git от этого не ' +
+        'меняется: режим решает, что выкладывать на диск. Через запятую можно задать сразу ' +
+        'несколько — например, `src, tests`.',
     ),
+    dirsList,
+    h('div', { class: 'sparse-add' }, dirInput, addButton),
+    h('div', { class: 'settings-divider' }),
+    h(
+      'div',
+      { class: 'field-hint' },
+      'Выключение возвращает на диск весь репозиторий — это может занять время и место.',
+    ),
+    h('div', { class: 'sparse-actions' }, disableButton),
   );
 
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   const action = (label: string, run: () => void, danger = false): HTMLElement =>
     h('button', { class: `btn btn-small${danger ? ' is-danger' : ''}`, type: 'button', onClick: run }, label);
@@ -199,7 +167,7 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
   }
 
   async function open(): Promise<void> {
-    element.hidden = false;
+    modal.open();
     status.replaceChildren(h('p', { class: 'field-hint' }, 'Спрашиваю git…'));
     dirsList.replaceChildren();
     try {
@@ -211,5 +179,5 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
     render();
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }

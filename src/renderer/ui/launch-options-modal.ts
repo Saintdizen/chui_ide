@@ -1,7 +1,8 @@
 import type { DebugLaunchOptions } from '../../shared/api';
 import { formatArguments, parseArguments } from '../../shared/args';
 import { parseEnvFile } from '../../shared/env-file';
-import { h, svgIcon } from './dom';
+import { h } from './dom';
+import { createModal } from './modal';
 
 /**
  * Диалог параметров запуска отладки: аргументы, переменные окружения, рабочий каталог.
@@ -32,8 +33,6 @@ function formatEnv(env: Record<string, string> | undefined): string {
 }
 
 export function createLaunchOptionsModal(): LaunchOptionsModalView {
-  const title = h('span', { class: 'modal-title' }, 'Параметры запуска');
-
   const argsInput = h('input', {
     class: 'field-input',
     type: 'text',
@@ -53,60 +52,49 @@ export function createLaunchOptionsModal(): LaunchOptionsModalView {
     placeholder: 'пусто — корень проекта',
   });
 
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: () => close() },
-    svgIcon('close', 15),
-  );
   const resetButton = h('button', { class: 'link-btn', type: 'button' }, 'Сбросить');
   const runButton = h('button', { class: 'btn btn-primary', type: 'button' }, 'Запустить');
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal launch-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Параметры запуска' },
-      h('header', { class: 'modal-header' }, svgIcon('play', 15), title, closeButton),
-      h(
-        'div',
-        { class: 'modal-body' },
-        h(
-          'div',
-          { class: 'field' },
-          h('span', {}, 'Аргументы командной строки'),
-          argsInput,
-          h('div', { class: 'field-hint' }, 'Кавычки и экранирование работают как в оболочке.'),
-        ),
-        h(
-          'div',
-          { class: 'field' },
-          h('span', {}, 'Переменные окружения'),
-          envInput,
-          h('div', { class: 'field-hint' }, 'По строке `КЛЮЧ=значение`. Значения перекрывают `.env` проекта.'),
-        ),
-        h(
-          'div',
-          { class: 'field' },
-          h('span', {}, 'Рабочий каталог'),
-          cwdInput,
-          h('div', { class: 'field-hint' }, 'Откуда запускать программу. Пусто — корень проекта.'),
-        ),
-      ),
-      h('footer', { class: 'modal-footer' }, resetButton, runButton),
-    ),
-  );
 
   // Текущий обработчик запуска: у каждого открытия свой (см. `open`).
   let accept: ((options: DebugLaunchOptions) => void) | null = null;
   let reset: (() => void) | null = null;
 
+  const modal = createModal({
+    className: 'launch-modal',
+    title: 'Параметры запуска',
+    headerIcon: 'play',
+    footer: h('footer', { class: 'modal-footer' }, resetButton, runButton),
+    onClose: () => {
+      accept = null;
+      reset = null;
+    },
+  });
+  modal.body.append(
+    h(
+      'div',
+      { class: 'field' },
+      h('span', {}, 'Аргументы командной строки'),
+      argsInput,
+      h('div', { class: 'field-hint' }, 'Кавычки и экранирование работают как в оболочке.'),
+    ),
+    h(
+      'div',
+      { class: 'field' },
+      h('span', {}, 'Переменные окружения'),
+      envInput,
+      h('div', { class: 'field-hint' }, 'По строке `КЛЮЧ=значение`. Значения перекрывают `.env` проекта.'),
+    ),
+    h(
+      'div',
+      { class: 'field' },
+      h('span', {}, 'Рабочий каталог'),
+      cwdInput,
+      h('div', { class: 'field-hint' }, 'Откуда запускать программу. Пусто — корень проекта.'),
+    ),
+  );
+
   function close(): void {
-    if (element.hidden) return;
-    element.hidden = true;
-    accept = null;
-    reset = null;
-    document.removeEventListener('keydown', onKeyDown, true);
+    modal.close();
   }
 
   /** Собрать параметры из полей: пустое поле — настройки нет. */
@@ -128,12 +116,6 @@ export function createLaunchOptionsModal(): LaunchOptionsModalView {
     handler?.(options);
   }
 
-  function onKeyDown(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    close();
-  }
-
   runButton.addEventListener('click', () => submit());
   resetButton.addEventListener('click', () => {
     const handler = reset;
@@ -141,13 +123,8 @@ export function createLaunchOptionsModal(): LaunchOptionsModalView {
     handler?.();
   });
 
-  // Клик по затемнению закрывает окно, клик по самому окну — нет.
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
-
   return {
-    element,
+    element: modal.element,
     open(input) {
       argsInput.value = formatArguments(input.options.args ?? []);
       envInput.value = formatEnv(input.options.env);
@@ -155,11 +132,7 @@ export function createLaunchOptionsModal(): LaunchOptionsModalView {
       accept = input.onAccept;
       reset = input.onReset;
 
-      element.hidden = false;
-      // Слушаем в capture и позже текущего клика, иначе Esc сработает на открытии.
-      document.removeEventListener('keydown', onKeyDown, true);
-      window.setTimeout(() => document.addEventListener('keydown', onKeyDown, true), 0);
-      argsInput.focus();
+      modal.open(argsInput);
       argsInput.select();
     },
     close,

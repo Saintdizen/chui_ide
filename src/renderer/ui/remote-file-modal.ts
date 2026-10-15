@@ -1,6 +1,7 @@
 import { fsAddressLabel, parseFsAddress } from '../../shared/fs-address';
 import type { RpcClient } from '../core/rpc';
-import { h, svgIcon } from './dom';
+import { h } from './dom';
+import { createModal } from './modal';
 
 export interface RemoteFileModalDeps {
   rpc: RpcClient;
@@ -32,7 +33,6 @@ export function createRemoteFileModal(deps: RemoteFileModalDeps): RemoteFileModa
   let address = '';
   let busy = false;
 
-  const title = h('span', { class: 'modal-title' }, 'Удалённый файл');
   const note = h('div', { class: 'field-hint' });
   const editor = h('textarea', { class: 'field-input remote-file-text', spellcheck: false });
   const saveButton = h(
@@ -41,51 +41,20 @@ export function createRemoteFileModal(deps: RemoteFileModalDeps): RemoteFileModa
     'Сохранить',
   );
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({ className: 'remote-file-modal', title: 'Удалённый файл' });
+  modal.body.append(
+    note,
+    editor,
     h(
       'div',
-      { class: 'modal remote-file-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Удалённый файл' },
-      h(
-        'header',
-        { class: 'modal-header' },
-        title,
-        h(
-          'button',
-          { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-          svgIcon('close', 15),
-        ),
-      ),
-      h(
-        'div',
-        { class: 'modal-body' },
-        note,
-        editor,
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Запись идёт клиентом системы (ssh, wsl или docker) — сеть должна быть доступна, а ключи настроены. ' +
-            'Языковой сервер, git-пометки и наблюдение за папкой на удалённые файлы не действуют.',
-        ),
-        h('div', { class: 'remote-file-actions' }, saveButton),
-      ),
+      { class: 'field-hint' },
+      'Запись идёт клиентом системы (ssh, wsl или docker) — сеть должна быть доступна, а ключи настроены. ' +
+        'Языковой сервер, git-пометки и наблюдение за папкой на удалённые файлы не действуют.',
     ),
+    h('div', { class: 'remote-file-actions' }, saveButton),
   );
 
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   async function load(): Promise<void> {
     editor.value = '';
@@ -121,13 +90,13 @@ export function createRemoteFileModal(deps: RemoteFileModalDeps): RemoteFileModa
   }
 
   return {
-    element,
+    element: modal.element,
     close,
     async open(target) {
       const parsed = parseFsAddress(target);
       address = target;
-      title.textContent = parsed ? fsAddressLabel(parsed) : 'Удалённый файл';
-      element.hidden = false;
+      modal.title.textContent = parsed ? fsAddressLabel(parsed) : 'Удалённый файл';
+      modal.open();
       await load();
     },
   };

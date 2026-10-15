@@ -1,6 +1,7 @@
 import type { GitStashEntry } from '../../shared/git-stash';
 import type { GitModel } from '../core/git-model';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 
 export interface StashModalDeps {
   git: GitModel;
@@ -45,43 +46,19 @@ export function createStashModal(deps: StashModalDeps): StashModalView {
   const saveButton = h('button', { class: 'btn btn-primary', type: 'button' }, 'Отложить');
   const busy = { value: false };
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal stash-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Отложенные изменения' },
-      h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Отложенные изменения (stash)'),
-        closeButton,
-      ),
-      h('div', { class: 'modal-body' }, list, empty),
-      h('footer', { class: 'modal-footer' }, h('div', { class: 'stash-save' }, messageInput, untrackedRow), saveButton),
+  const modal = createModal({
+    className: 'stash-modal',
+    title: 'Отложенные изменения (stash)',
+    footer: h(
+      'footer',
+      { class: 'modal-footer' },
+      h('div', { class: 'stash-save' }, messageInput, untrackedRow),
+      saveButton,
     ),
-  );
+  });
+  modal.body.append(list, empty);
 
-  // Esc и клик по затемнению закрывают окно — как у прочих наших модалок.
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   /** Одна запись: заголовок с метаданными, действия и раскрывающийся патч. */
   const row = (entry: GitStashEntry): HTMLElement => {
@@ -193,10 +170,9 @@ export function createStashModal(deps: StashModalDeps): StashModalView {
   });
 
   return {
-    element,
+    element: modal.element,
     async open() {
-      element.hidden = false;
-      messageInput.focus();
+      modal.open(messageInput);
       await refresh();
     },
     close,

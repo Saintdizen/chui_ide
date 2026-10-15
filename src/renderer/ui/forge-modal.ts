@@ -9,6 +9,7 @@ import {
 } from '../../shared/git-platform';
 import type { GitModel } from '../core/git-model';
 import { clear, h, svgIcon } from './dom';
+import { createModal } from './modal';
 import { createSelect } from './select';
 
 export interface ForgeModalDeps {
@@ -84,56 +85,25 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
     if (creating) titleInput.focus();
   });
 
-  const close = (): void => {
-    element.hidden = true;
-    creating = false;
-    createForm.hidden = true;
-  };
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal forge-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Запросы на слияние' },
-      h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Запросы на слияние'),
-        h('div', { class: 'forge-head-actions' }, refreshButton, newButton, closeButton),
-      ),
-      h(
-        'div',
-        { class: 'modal-body' },
-        headline,
-        statusLine,
-        h('div', { class: 'settings-divider' }),
-        list,
-        createForm,
-      ),
-    ),
-  );
-
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      // Escape сперва закрывает форму создания, и только потом сам экран.
-      if (creating) {
-        creating = false;
-        createForm.hidden = true;
-        return;
-      }
-      close();
-    }
+  const modal = createModal({
+    className: 'forge-modal',
+    title: 'Запросы на слияние',
+    headerActions: [refreshButton, newButton],
+    onClose: () => {
+      creating = false;
+      createForm.hidden = true;
+    },
+    // Escape сперва закрывает форму создания, и только потом сам экран.
+    onEscape: () => {
+      if (!creating) return false;
+      creating = false;
+      createForm.hidden = true;
+      return true;
+    },
   });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  modal.body.append(headline, statusLine, h('div', { class: 'settings-divider' }), list, createForm);
+
+  const close = (): void => modal.close();
 
   const run = async (operation: () => Promise<void>): Promise<void> => {
     if (busy) return;
@@ -444,7 +414,7 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
   }
 
   async function open(): Promise<void> {
-    element.hidden = false;
+    modal.open();
     headline.replaceChildren();
     statusLine.replaceChildren(h('p', { class: 'field-hint' }, 'Спрашиваю git и клиента площадки…'));
     list.replaceChildren();
@@ -457,5 +427,5 @@ export function createForgeModal(deps: ForgeModalDeps): ForgeModalView {
     await reload();
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }

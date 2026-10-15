@@ -2,6 +2,7 @@ import type { FolderCompareEntry } from '../../shared/folder-compare';
 import { nameOf, separatorOf } from '../../shared/paths';
 import type { RpcClient } from '../core/rpc';
 import { clear, h, svgIcon } from './dom';
+import { createModal } from './modal';
 
 export interface FolderCompareModalDeps {
   rpc: RpcClient;
@@ -37,61 +38,34 @@ const CHANGE_WORD: Record<FolderCompareEntry['change'], string> = {
  * из рабочей области, сравнение делает main.
  */
 export function createFolderCompareModal(deps: FolderCompareModalDeps): FolderCompareModalView {
-  const title = h('span', { class: 'modal-title' }, 'Сравнить папки');
   const names = h('span', { class: 'refdiff-summary' });
   const list = h('div', { class: 'refdiff-list' });
   let busy = false;
 
-  const close = (): void => {
-    element.hidden = true;
-  };
+  const modal = createModal({ className: 'refdiff-modal', title: 'Сравнить папки' });
+  modal.body.append(h('div', { class: 'refdiff-toolbar' }, svgIcon('folder', 14), names), list);
 
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal refdiff-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Сравнить папки' },
-      h('header', { class: 'modal-header' }, title, closeButton),
-      h('div', { class: 'modal-body' }, h('div', { class: 'refdiff-toolbar' }, svgIcon('folder', 14), names), list),
-    ),
-  );
-
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   /** Абсолютный путь файла на нужной стороне: относительный путь — всегда с «/». */
   const absolute = (base: string, relative: string): string =>
     `${base}${separatorOf(base)}${relative.split('/').join(separatorOf(base))}`;
 
   return {
-    element,
+    element: modal.element,
     close,
     async open(left, right) {
-      element.hidden = false;
+      modal.open();
       clear(list);
       names.textContent = `${nameOf(left)} ↔ ${nameOf(right)}`;
-      title.textContent = 'Сравнить папки';
+      modal.title.textContent = 'Сравнить папки';
       if (busy) return;
       busy = true;
       list.append(h('p', { class: 'refdiff-empty' }, 'Сравниваю…'));
       try {
         const result = await deps.rpc.request('workspace.compareFolders', { left, right });
         clear(list);
-        title.textContent = `Сравнить: ${nameOf(result.left)} ↔ ${nameOf(result.right)}`;
+        modal.title.textContent = `Сравнить: ${nameOf(result.left)} ↔ ${nameOf(result.right)}`;
         if (result.files.length === 0) {
           names.textContent = result.truncated
             ? 'различий не найдено (часть файлов не сравнивалась)'

@@ -1,7 +1,8 @@
 import type { GitIdentity, GitSignFormat, GitSshKey } from '../../shared/git-identity';
 import { identityProblems, isValidEmail, signingLabel, sshKeyLabel } from '../../shared/git-identity';
 import type { GitModel } from '../core/git-model';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 import { createSelect } from './select';
 
 export interface IdentityModalDeps {
@@ -70,92 +71,60 @@ export function createIdentityModal(deps: IdentityModalDeps): IdentityModalView 
   const problemsBox = h('div', { class: 'identity-problems' });
   const keysList = h('div', { class: 'identity-keys' });
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
   const saveButton = h('button', { class: 'btn btn-primary', type: 'button', onClick: () => void save() }, 'Сохранить');
 
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({ className: 'identity-modal', title: 'Личность и подпись коммитов' });
+  modal.body.append(
+    status,
+    problemsBox,
+    h('div', { class: 'settings-divider' }),
+    h('div', { class: 'field-label' }, 'Автор коммитов'),
+    h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Имя'), nameInput),
+    h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Почта'), emailInput),
     h(
       'div',
-      { class: 'modal identity-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Личность и подпись' },
-      h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Личность и подпись коммитов'),
-        closeButton,
-      ),
-      h(
-        'div',
-        { class: 'modal-body' },
-        status,
-        problemsBox,
-        h('div', { class: 'settings-divider' }),
-        h('div', { class: 'field-label' }, 'Автор коммитов'),
-        h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Имя'), nameInput),
-        h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Почта'), emailInput),
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Эти значения попадают в каждый коммит. Пишутся в конфиг ЭТОГО репозитория ' +
-            '(`user.name`, `user.email`); глобальные настройки не трогаются.',
-        ),
-
-        h('div', { class: 'settings-divider' }),
-        h('div', { class: 'field-label' }, 'Подпись'),
-        h('label', { class: 'identity-check' }, signCommits, 'Подписывать коммиты (commit.gpgsign)'),
-        h('label', { class: 'identity-check' }, signTags, 'Подписывать теги (tag.gpgsign)'),
-        h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Формат'), formatSelect.element),
-        h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Ключ'), keyInput),
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Для GPG — отпечаток ключа или его почта; для ssh — путь к файлу ключа ' +
-            '(например, ~/.ssh/id_ed25519). Подпись проверяют при слиянии и в интерфейсе платформы.',
-        ),
-
-        h('div', { class: 'settings-divider' }),
-        h('div', { class: 'field-label' }, 'Пароли HTTP'),
-        h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Хранилище'), helperInput),
-        h(
-          'div',
-          { class: 'field-hint' },
-          'credential.helper — где git хранит логин и токен для https. `store` пишет их в файл ' +
-            'открытым текстом, `cache` держит в памяти, `libsecret`/`manager` спрашивают систему. ' +
-            'Пусто — git спросит при каждой операции.',
-        ),
-
-        h('div', { class: 'settings-divider' }),
-        h('div', { class: 'field-label' }, 'Ключи SSH'),
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Открытые ключи из ~/.ssh. Публичную часть добавляют в свой аккаунт на GitHub/GitLab — ' +
-            'ею же git подписывает коммиты в формате ssh.',
-        ),
-        keysList,
-        h('div', { class: 'modal-actions' }, saveButton),
-      ),
+      { class: 'field-hint' },
+      'Эти значения попадают в каждый коммит. Пишутся в конфиг ЭТОГО репозитория ' +
+        '(`user.name`, `user.email`); глобальные настройки не трогаются.',
     ),
+
+    h('div', { class: 'settings-divider' }),
+    h('div', { class: 'field-label' }, 'Подпись'),
+    h('label', { class: 'identity-check' }, signCommits, 'Подписывать коммиты (commit.gpgsign)'),
+    h('label', { class: 'identity-check' }, signTags, 'Подписывать теги (tag.gpgsign)'),
+    h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Формат'), formatSelect.element),
+    h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Ключ'), keyInput),
+    h(
+      'div',
+      { class: 'field-hint' },
+      'Для GPG — отпечаток ключа или его почта; для ssh — путь к файлу ключа ' +
+        '(например, ~/.ssh/id_ed25519). Подпись проверяют при слиянии и в интерфейсе платформы.',
+    ),
+
+    h('div', { class: 'settings-divider' }),
+    h('div', { class: 'field-label' }, 'Пароли HTTP'),
+    h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Хранилище'), helperInput),
+    h(
+      'div',
+      { class: 'field-hint' },
+      'credential.helper — где git хранит логин и токен для https. `store` пишет их в файл ' +
+        'открытым текстом, `cache` держит в памяти, `libsecret`/`manager` спрашивают систему. ' +
+        'Пусто — git спросит при каждой операции.',
+    ),
+
+    h('div', { class: 'settings-divider' }),
+    h('div', { class: 'field-label' }, 'Ключи SSH'),
+    h(
+      'div',
+      { class: 'field-hint' },
+      'Открытые ключи из ~/.ssh. Публичную часть добавляют в свой аккаунт на GitHub/GitLab — ' +
+        'ею же git подписывает коммиты в формате ssh.',
+    ),
+    keysList,
+    h('div', { class: 'modal-actions' }, saveButton),
   );
 
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   /** То, что сейчас в полях: по нему показываем предупреждения до сохранения. */
   const preview = (): GitIdentity => ({
@@ -266,7 +235,7 @@ export function createIdentityModal(deps: IdentityModalDeps): IdentityModalView 
   }
 
   async function open(): Promise<void> {
-    element.hidden = false;
+    modal.open();
     status.replaceChildren(h('p', { class: 'field-hint' }, 'Читаю настройки git…'));
     problemsBox.replaceChildren();
     keysList.replaceChildren();
@@ -280,5 +249,5 @@ export function createIdentityModal(deps: IdentityModalDeps): IdentityModalView 
     render();
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }

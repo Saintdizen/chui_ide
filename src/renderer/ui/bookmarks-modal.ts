@@ -2,6 +2,7 @@ import { bookmarkLabel, countBookmarks, type BookmarkRecord } from '../../shared
 import { nameOf } from '../../shared/paths';
 import type { BookmarkModel } from '../core/bookmarks';
 import { clear, h, svgIcon } from './dom';
+import { createModal } from './modal';
 
 export interface BookmarksModalDeps {
   bookmarks: BookmarkModel;
@@ -29,16 +30,6 @@ export function createBookmarksModal(deps: BookmarksModalDeps): BookmarksModalVi
   const summary = h('span', { class: 'bookmarks-summary' });
   const list = h('div', { class: 'bookmarks-list' });
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
   const clearButton = h(
     'button',
     {
@@ -50,27 +41,14 @@ export function createBookmarksModal(deps: BookmarksModalDeps): BookmarksModalVi
     'Убрать все',
   );
 
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal bookmarks-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Закладки' },
-      h('header', { class: 'modal-header' }, h('span', { class: 'modal-title' }, 'Закладки'), closeButton),
-      h('div', { class: 'modal-body' }, h('div', { class: 'bookmarks-toolbar' }, summary), list),
-      h('div', { class: 'bookmarks-actions' }, clearButton),
-    ),
-  );
+  const modal = createModal({
+    className: 'bookmarks-modal',
+    title: 'Закладки',
+    footer: h('div', { class: 'bookmarks-actions' }, clearButton),
+  });
+  modal.body.append(h('div', { class: 'bookmarks-toolbar' }, summary), list);
 
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   /** Одна строка закладки. */
   const row = (record: BookmarkRecord): HTMLElement => {
@@ -141,14 +119,14 @@ export function createBookmarksModal(deps: BookmarksModalDeps): BookmarksModalVi
 
   // Список открыт — держим его в согласии с моделью: закладку могли снять значком.
   deps.bookmarks.onDidChange(() => {
-    if (!element.hidden) render();
+    if (modal.isOpen) render();
   });
 
   return {
-    element,
+    element: modal.element,
     close,
     open() {
-      element.hidden = false;
+      modal.open();
       render();
     },
   };

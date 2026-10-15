@@ -36,6 +36,7 @@ import type { RpcClient } from '../core/rpc';
 import type { ThemeService } from '../core/theme-service';
 import { themeTemplate } from '../core/theme';
 import { type Child, append, clear, h, svgIcon } from './dom';
+import { createModal } from './modal';
 import { createSelect } from './select';
 import { showToast } from './toast';
 
@@ -143,78 +144,50 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
 
   const nav = h('nav', { class: 'modal-nav' });
   const pane = h('div', { class: 'modal-pane' });
-  const title = h('span', { class: 'modal-title' }, 'Настройки');
 
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: () => close() },
-    svgIcon('close', 15),
-  );
-
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
-    h(
-      'div',
-      { class: 'modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Настройки приложения' },
-      h('header', { class: 'modal-header' }, svgIcon('settings', 15), title, closeButton),
-      h('div', { class: 'modal-body' }, h('div', { class: 'modal-nav-column' }, search, nav), pane),
+  const modal = createModal({
+    className: 'settings-modal',
+    title: 'Настройки',
+    headerIcon: 'settings',
+    footer: h(
+      'footer',
+      { class: 'modal-footer' },
       h(
-        'footer',
-        { class: 'modal-footer' },
-        h(
-          'button',
-          {
-            class: 'link-btn',
-            type: 'button',
-            onClick: () => {
-              close();
-              void deps.commands.execute('settings.revealFile');
-            },
+        'button',
+        {
+          class: 'link-btn',
+          type: 'button',
+          onClick: () => {
+            close();
+            void deps.commands.execute('settings.revealFile');
           },
-          'Открыть settings.json',
-        ),
-        h('button', { class: 'btn btn-primary', type: 'button', onClick: () => close() }, 'Готово'),
+        },
+        'Открыть settings.json',
       ),
+      h('button', { class: 'btn btn-primary', type: 'button', onClick: () => close() }, 'Готово'),
     ),
-  );
-
-  /* ── инфраструктура окна ───────────────────────────────────────────────── */
-
-  const isOpen = (): boolean => !element.hidden;
-
-  function close(): void {
-    if (!isOpen()) return;
-    element.hidden = true;
-    document.removeEventListener('keydown', onKeyDown, true);
-  }
-
-  function onKeyDown(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
     // Esc в поиске сначала снимает запрос: закрывать окно, теряя набранное,
     // человек не просил. Поиск пуст — закрываем, как раньше.
-    if (query) {
+    onEscape: () => {
+      if (!query) return false;
       query = '';
       search.value = '';
       render();
-      return;
-    }
-    close();
-  }
-
-  // Клик по затемнению закрывает окно, клик по самому окну — нет.
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
+      return true;
+    },
   });
+  modal.body.append(h('div', { class: 'modal-nav-column' }, search, nav), pane);
+
+  /* ── инфраструктура окна ───────────────────────────────────────────────── */
+
+  function close(): void {
+    modal.close();
+  }
 
   async function open(sectionId?: SectionId): Promise<void> {
     // Раздел — до первой отрисовки: `render` ниже берёт текущее значение.
     if (sectionId) section = sectionId;
-    element.hidden = false;
-    // Слушаем в capture и позже текущего клика, иначе Esc сработает на открытии.
-    document.removeEventListener('keydown', onKeyDown, true);
-    window.setTimeout(() => document.addEventListener('keydown', onKeyDown, true), 0);
+    modal.open();
 
     try {
       settings = await deps.rpc.request('settings.get');
@@ -1961,10 +1934,10 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       append(pane, sectionContent(section));
       pane.scrollTop = 0;
     }
-    title.textContent = needle
+    modal.title.textContent = needle
       ? `Настройки · поиск: ${query.trim()}`
       : `Настройки · ${SECTIONS.find((item) => item.id === section)?.title ?? ''}`;
   }
 
-  return { element, open, close, applySettings };
+  return { element: modal.element, open, close, applySettings };
 }

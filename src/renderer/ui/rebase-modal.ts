@@ -8,6 +8,7 @@ import {
 } from '../../shared/git-rebase';
 import type { GitModel } from '../core/git-model';
 import { clear, h, svgIcon } from './dom';
+import { createModal } from './modal';
 import { createSelect } from './select';
 
 export interface RebaseModalDeps {
@@ -54,66 +55,36 @@ export function createRebaseModal(deps: RebaseModalDeps): RebaseModalView {
     value: String(DEFAULT_DEPTH),
   });
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
   const startButton = h('button', { class: 'btn btn-primary', type: 'button' }, 'Перестроить');
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
 
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({
+    className: 'rebase-modal',
+    title: 'Перестроить историю (interactive rebase)',
+    footer: h(
+      'footer',
+      { class: 'modal-footer' },
+      h('span', { class: 'rebase-note' }, 'Base — коммит перед первым в списке.'),
+      startButton,
+    ),
+  });
+  modal.body.append(
     h(
       'div',
-      { class: 'modal rebase-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Интерактивный rebase' },
+      { class: 'rebase-toolbar' },
+      h('span', { class: 'field-label' }, 'Сколько последних коммитов:'),
+      depthInput,
       h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Перестроить историю (interactive rebase)'),
-        closeButton,
-      ),
-      h(
-        'div',
-        { class: 'modal-body' },
-        h(
-          'div',
-          { class: 'rebase-toolbar' },
-          h('span', { class: 'field-label' }, 'Сколько последних коммитов:'),
-          depthInput,
-          h(
-            'span',
-            { class: 'field-hint' },
-            'Выше — раньше в истории. Порядок меняется перетаскиванием строки или стрелками, ' +
-              'действие — в списке слева.',
-          ),
-        ),
-        list,
-        hint,
-      ),
-      h(
-        'footer',
-        { class: 'modal-footer' },
-        h('span', { class: 'rebase-note' }, 'Base — коммит перед первым в списке.'),
-        startButton,
+        'span',
+        { class: 'field-hint' },
+        'Выше — раньше в истории. Порядок меняется перетаскиванием строки или стрелками, ' +
+          'действие — в списке слева.',
       ),
     ),
+    list,
+    hint,
   );
 
-  // Esc и клик по затемнению закрывают окно — как у прочих наших модалок.
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   startButton.addEventListener('click', () => void run());
   depthInput.addEventListener('change', () => {
@@ -309,10 +280,10 @@ export function createRebaseModal(deps: RebaseModalDeps): RebaseModalView {
   };
 
   async function open(): Promise<void> {
-    element.hidden = false;
+    modal.open();
     depthInput.value = String(depth);
     await load();
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }

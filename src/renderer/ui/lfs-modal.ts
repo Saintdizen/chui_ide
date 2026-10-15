@@ -1,7 +1,8 @@
 import type { GitLfsInfo } from '../../shared/git-lfs';
 import { lfsFileLabel, missingCount } from '../../shared/git-lfs';
 import type { GitModel } from '../core/git-model';
-import { clear, h, svgIcon } from './dom';
+import { clear, h } from './dom';
+import { createModal } from './modal';
 
 export interface LfsModalDeps {
   git: GitModel;
@@ -42,16 +43,6 @@ export function createLfsModal(deps: LfsModalDeps): LfsModalView {
     placeholder: 'например, *.psd',
   });
 
-  const close = (): void => {
-    element.hidden = true;
-  };
-
-  const closeButton = h(
-    'button',
-    { class: 'icon-btn', type: 'button', title: 'Закрыть (Esc)', onClick: close },
-    svgIcon('close', 15),
-  );
-
   const trackButton = h(
     'button',
     { class: 'btn btn-primary', type: 'button', onClick: () => void track() },
@@ -68,55 +59,32 @@ export function createLfsModal(deps: LfsModalDeps): LfsModalView {
     'Поставить хуки',
   );
 
-  const element = h(
-    'div',
-    { class: 'modal-backdrop', hidden: true },
+  const modal = createModal({ className: 'lfs-modal', title: 'Большие файлы (Git LFS)' });
+  modal.body.append(
+    status,
+    h('div', { class: 'settings-divider' }),
+    h('div', { class: 'field-label' }, 'Отслеживаемые шаблоны'),
     h(
       'div',
-      { class: 'modal lfs-modal', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Git LFS' },
-      h(
-        'header',
-        { class: 'modal-header' },
-        h('span', { class: 'modal-title' }, 'Большие файлы (Git LFS)'),
-        closeButton,
-      ),
-      h(
-        'div',
-        { class: 'modal-body' },
-        status,
-        h('div', { class: 'settings-divider' }),
-        h('div', { class: 'field-label' }, 'Отслеживаемые шаблоны'),
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Шаблон — это правило по имени файла (`*.psd`, `assets/**`). Строка уходит в ' +
-            '`.gitattributes` и коммитится вместе с кодом: так LFS настраивается для всех.',
-        ),
-        patternsList,
-        h('div', { class: 'lfs-add' }, patternInput, trackButton, installButton),
-        h('div', { class: 'settings-divider' }),
-        h('div', { class: 'field-label' }, 'Файлы под LFS'),
-        h(
-          'div',
-          { class: 'field-hint' },
-          'Указатель — путь файла в репозитории; само содержимое лежит в хранилище. ' +
-            '«Не подтянут» значит, что файла на диске нет и его надо скачать.',
-        ),
-        filesList,
-        h('div', { class: 'lfs-actions' }, pullButton),
-      ),
+      { class: 'field-hint' },
+      'Шаблон — это правило по имени файла (`*.psd`, `assets/**`). Строка уходит в ' +
+        '`.gitattributes` и коммитится вместе с кодом: так LFS настраивается для всех.',
     ),
+    patternsList,
+    h('div', { class: 'lfs-add' }, patternInput, trackButton, installButton),
+    h('div', { class: 'settings-divider' }),
+    h('div', { class: 'field-label' }, 'Файлы под LFS'),
+    h(
+      'div',
+      { class: 'field-hint' },
+      'Указатель — путь файла в репозитории; само содержимое лежит в хранилище. ' +
+        '«Не подтянут» значит, что файла на диске нет и его надо скачать.',
+    ),
+    filesList,
+    h('div', { class: 'lfs-actions' }, pullButton),
   );
 
-  document.addEventListener('keydown', (event) => {
-    if (!element.hidden && event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    }
-  });
-  element.addEventListener('pointerdown', (event) => {
-    if (event.target === element) close();
-  });
+  const close = (): void => modal.close();
 
   const action = (label: string, run: () => void, danger = false): HTMLElement =>
     h('button', { class: `btn btn-small${danger ? ' is-danger' : ''}`, type: 'button', onClick: run }, label);
@@ -229,7 +197,7 @@ export function createLfsModal(deps: LfsModalDeps): LfsModalView {
   }
 
   async function open(): Promise<void> {
-    element.hidden = false;
+    modal.open();
     status.replaceChildren(h('p', { class: 'field-hint' }, 'Спрашиваю git…'));
     patternsList.replaceChildren();
     filesList.replaceChildren();
@@ -242,5 +210,5 @@ export function createLfsModal(deps: LfsModalDeps): LfsModalView {
     render();
   }
 
-  return { element, open, close };
+  return { element: modal.element, open, close };
 }
