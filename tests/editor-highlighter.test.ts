@@ -168,6 +168,63 @@ describe('LineHighlighter', () => {
     expect(typeAt(tokens, 0)).toBe(COMMENT);
   });
 
+  // Свойство сдвига хвоста: после переноса строк токены должны совпасть со свежим
+  // разбором того же текста. Проверка ловит ошибку в смещении состояний, которую
+  // подсчёт вызовов не видит.
+  const content = () => [
+    'const a = 1;',
+    '/* блок',
+    'внутри',
+    'конец */ const b = 2;',
+    'const c = 3;',
+    '// хвост',
+    'const d = 4;',
+    'function f() { return 1; }',
+  ];
+
+  it('токены после вставки строки совпадают со свежим разбором', () => {
+    const setup = harness(TYPESCRIPT, content());
+    setup.highlighter.tokensFor(setup.lines.length - 1);
+    setup.lines.splice(1, 0, '// вставка');
+    setup.highlighter.invalidate(1, true, 1);
+    const incremental = setup.lines.map((_, index) => setup.highlighter.tokensFor(index));
+
+    const expected = content();
+    expected.splice(1, 0, '// вставка');
+    const fresh = harness(TYPESCRIPT, expected);
+    const freshTokens = fresh.lines.map((_, index) => fresh.highlighter.tokensFor(index));
+    expect(incremental).toEqual(freshTokens);
+  });
+
+  it('токены после удаления строки совпадают со свежим разбором', () => {
+    const setup = harness(TYPESCRIPT, content());
+    setup.highlighter.tokensFor(setup.lines.length - 1);
+    setup.lines.splice(2, 1);
+    setup.highlighter.invalidate(2, true, -1);
+    const incremental = setup.lines.map((_, index) => setup.highlighter.tokensFor(index));
+
+    const expected = content();
+    expected.splice(2, 1);
+    const fresh = harness(TYPESCRIPT, expected);
+    const freshTokens = fresh.lines.map((_, index) => fresh.highlighter.tokensFor(index));
+    expect(incremental).toEqual(freshTokens);
+  });
+
+  it('токены после замены строки комментарием совпадают со свежим разбором', () => {
+    const setup = harness(TYPESCRIPT, content());
+    setup.highlighter.tokensFor(setup.lines.length - 1);
+    // Меняем строку без сдвига, но с другим состоянием на выходе (открываем комментарий).
+    setup.lines[0] = '/* открылся';
+    setup.highlighter.invalidate(0);
+    const incremental = setup.lines.map((_, index) => setup.highlighter.tokensFor(index));
+
+    const expected = content();
+    expected[0] = '/* открылся';
+    const fresh = harness(TYPESCRIPT, expected);
+    const freshTokens = fresh.lines.map((_, index) => fresh.highlighter.tokensFor(index));
+    expect(incremental).toEqual(freshTokens);
+  });
+
   it('смена языка меняет разбор строки', () => {
     const setup = harness(TYPESCRIPT, ['const a = 1;']);
     expect(typeAt(setup.highlighter.tokensFor(0), 0)).toBe(KEYWORD);
