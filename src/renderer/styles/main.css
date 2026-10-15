@@ -5861,6 +5861,29 @@ body > .overlay {
   color: var(--git_deleted);
 }
 
+/* Состояния прогонов CI (Actions/Pipelines). */
+.forge-state.is-success {
+  background: color-mix(in srgb, var(--git_added) 22%, transparent);
+  color: var(--git_added);
+}
+
+.forge-state.is-failed {
+  background: color-mix(in srgb, var(--git_deleted) 22%, transparent);
+  color: var(--git_deleted);
+}
+
+.forge-state.is-running {
+  background: color-mix(in srgb, var(--purple_prime_background) 22%, transparent);
+  color: var(--purple_prime_background);
+}
+
+.forge-state.is-pending,
+.forge-state.is-canceled,
+.forge-state.is-skipped,
+.forge-state.is-unknown {
+  color: var(--text_color_tertiary);
+}
+
 .forge-row-meta {
   overflow: hidden;
   white-space: nowrap;

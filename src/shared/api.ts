@@ -31,7 +31,7 @@ import type { StructuralProjectMatches, StructuralProjectOptions } from './struc
 import type { ExportsQuery, ExportsResult } from './symbol-exports';
 import type { InheritanceQuery, InheritanceResult } from './type-inheritance';
 import type { ProjectPackage } from './monorepo';
-import type { ForgeComment, ForgeInfo, ForgeIssue } from './git-platform';
+import type { ForgeComment, ForgeInfo, ForgeIssue, ForgePipeline } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
 import type { GitStashEntry } from './git-stash';
 import type { GitTag } from './git-tags';
@@ -1976,6 +1976,10 @@ export interface ChuiMethods {
   'git.forgeIssueComments': { params: { number: number }; result: ForgeComment[] };
   /** Написать комментарий к задаче: возвращает обновлённое обсуждение. */
   'git.forgeIssueComment': { params: { number: number; body: string }; result: ForgeComment[] };
+  /** Прогоны CI площадки (Actions/Pipelines): свежие сверху. */
+  'git.forgePipelines': { params: void; result: ForgePipeline[] };
+  /** Перезапустить прогон: возвращает обновлённый список. */
+  'git.forgePipelineRerun': { params: { id: number }; result: ForgePipeline[] };
   /** Открыть ссылку в браузере системы (страницы площадки и запросов). */
   'shell.openExternal': { params: { url: string }; result: { ok: boolean } };
   /** Показать файл или папку в проводнике системы (выделить объект). */

@@ -147,6 +147,26 @@ async function main() {
   check('GitLab: задачи прочитаны', glIssues.length === 1, glIssues);
   check('GitLab: заголовок задачи', glIssues[0]?.title === 'Медленный старт', glIssues[0]);
 
+  /* ── прогоны CI (Actions/Pipelines) ─────────────────────── */
+
+  const runs = await service.forgePipelines();
+  check('GitHub: прогоны прочитаны', runs.length === 2, runs);
+  check('GitHub: успешный прогон — success', runs[0]?.state === 'success', runs[0]);
+  check('GitHub: идущий прогон — running', runs[1]?.state === 'running', runs[1]);
+  check(
+    'GitHub: ветка и событие на месте',
+    runs[1]?.branch === 'feat/search' && runs[1]?.event === 'pull_request',
+    runs[1],
+  );
+
+  const afterRerun = await service.forgePipelineRerun(42);
+  check('GitHub: перезапуск вернул список', afterRerun.length === 2, afterRerun.length);
+
+  const glRuns = await glService.forgePipelines();
+  check('GitLab: прогоны прочитаны', glRuns.length === 2, glRuns);
+  check('GitLab: провал — failed', glRuns[1]?.state === 'failed', glRuns[1]);
+  check('GitLab: ветка из ref', glRuns[1]?.branch === 'fix/build', glRuns[1]);
+
   /* ── какие команды ушли клиенту ────────────────────────────────────────── */
 
   const calls = (await fs.readFile(logFile, 'utf8')).split('\n').filter(Boolean);
@@ -162,6 +182,9 @@ async function main() {
   check('gh создавал задачу', has('gh issue create'));
   check('gh закрывал задачу', has('gh issue close 3'));
   check('glab читал задачи', has('glab issue list'));
+  check('gh звали за прогонами', has('gh run list'));
+  check('gh перезапускал прогон', has('gh run rerun 42'));
+  check('glab читал прогоны через api', has('glab api projects/:id/pipelines'));
 
   await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
   console.log(failed ? '[проба] площадки: есть расхождения' : '[проба] запросы и комментарии работают');

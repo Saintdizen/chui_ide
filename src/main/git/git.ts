@@ -53,11 +53,14 @@ import {
   type ForgeComment,
   type ForgeInfo,
   type ForgeIssue,
+  type ForgePipeline,
   parseGhComments,
   parseGhIssues,
   parseGhRequests,
+  parseGhRuns,
   parseGlabComments,
   parseGlabIssues,
+  parseGlabPipelines,
   parseGlabRequests,
 } from '../../shared/git-platform';
 import {
@@ -1563,6 +1566,52 @@ export class GitService {
       );
     }
     return this.forgeIssueComments(n);
+  }
+
+  /**
+   * Прогоны CI: Actions у GitHub и Pipelines у GitLab — одно и то же по смыслу.
+   * Свежие сверху; список тот же, что показывает сама площадка.
+   */
+  async forgePipelines(): Promise<ForgePipeline[]> {
+    const { repoRoot, info } = await this.forgeReady();
+    // У GitLab `glab ci list` печатает таблицу — машинный ответ берём через `glab api`.
+    const args =
+      info.cli === 'gh'
+        ? [
+            'run',
+            'list',
+            '--limit',
+            '20',
+            '--json',
+            'databaseId,displayTitle,status,conclusion,headBranch,event,createdAt,url',
+          ]
+        : ['api', 'projects/:id/pipelines?per_page=20'];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || `Клиент ${info.cli} не смог получить прогоны CI`,
+      );
+    }
+    return info.cli === 'gh' ? parseGhRuns(result.stdout) : parseGlabPipelines(result.stdout);
+  }
+
+  /**
+   * Перезапустить прогон: у GitHub — `gh run rerun`, у GitLab — `glab ci retry`.
+   * Возвращаем обновлённый список, а не «ок»: окно и так перерисовывает его.
+   */
+  async forgePipelineRerun(id: number): Promise<ForgePipeline[]> {
+    const { repoRoot, info } = await this.forgeReady();
+    const n = requireRequestNumber(id);
+    const args = info.cli === 'gh' ? ['run', 'rerun', String(n)] : ['ci', 'retry', String(n)];
+    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    if (!result.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        result.stderr.trim() || result.stdout.trim() || 'Клиент не смог перезапустить прогон',
+      );
+    }
+    return this.forgePipelines();
   }
 
   /**

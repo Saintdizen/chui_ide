@@ -27,7 +27,7 @@ import type { GitLfsInfo } from '../../shared/git-lfs';
 import type { GitSparseInfo } from '../../shared/git-sparse';
 import type { GitIdentity, GitSshKey } from '../../shared/git-identity';
 import type { ProjectPackage } from '../../shared/monorepo';
-import type { ForgeComment, ForgeInfo, ForgeIssue } from '../../shared/git-platform';
+import type { ForgeComment, ForgeInfo, ForgeIssue, ForgePipeline } from '../../shared/git-platform';
 import type { GitRootFetch, GitRootSummary } from '../../shared/git-multiroot';
 import { Emitter } from './events';
 import { separatorOf } from '../../shared/paths';
@@ -514,6 +514,16 @@ export class GitModel {
   /** Написать комментарий к задаче: возвращает обновлённое обсуждение. */
   forgeIssueComment(number: number, body: string): Promise<ForgeComment[]> {
     return this.rpc.request('git.forgeIssueComment', { number, body });
+  }
+
+  /** Прогоны CI площадки (Actions/Pipelines): свежие сверху. */
+  forgePipelines(): Promise<ForgePipeline[]> {
+    return this.rpc.request('git.forgePipelines');
+  }
+
+  /** Перезапустить прогон: возвращает обновлённый список. */
+  forgePipelineRerun(id: number): Promise<ForgePipeline[]> {
+    return this.rpc.request('git.forgePipelineRerun', { id });
   }
 
   /** Открыть ссылку в браузере системы. */

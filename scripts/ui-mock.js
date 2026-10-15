@@ -185,6 +185,27 @@ module.exports = [
       labels: ['bug'],
     },
   ];
+  /** Прогоны CI: мок живёт, пока открыто окно. */
+  const mockForgePipelines = [
+    {
+      id: 42,
+      title: 'CI',
+      branch: 'main',
+      event: 'push',
+      state: 'success',
+      url: 'https://github.com/acme/web/actions/runs/42',
+      createdAt: '2024-05-01T10:00:00Z',
+    },
+    {
+      id: 43,
+      title: 'CI',
+      branch: 'feat/search',
+      event: 'pull_request',
+      state: 'failed',
+      url: 'https://github.com/acme/web/actions/runs/43',
+      createdAt: '2024-05-01T12:00:00Z',
+    },
+  ];
 
   const gitBranches = [
     { name: 'main', current: true, remote: false },
@@ -770,6 +791,14 @@ module.exports = [
       await sleep(120);
       mockForgeComments.push({ author: 'вы', body: params.body, createdAt: '2024-05-01T12:00:00Z', url: '' });
       return mockForgeComments.map((comment) => ({ ...comment }));
+    },
+    'git.forgePipelines': async () => {
+      await sleep(120);
+      return mockForgePipelines.map((run) => ({ ...run }));
+    },
+    'git.forgePipelineRerun': async () => {
+      await sleep(120);
+      return mockForgePipelines.map((run) => ({ ...run }));
     },
 
     'workspace.current': () => ({ root: currentRoot }),

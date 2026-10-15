@@ -480,3 +480,119 @@ export function issueLabel(issue: ForgeIssue): string {
 export function openIssueCount(issues: readonly ForgeIssue[]): number {
   return issues.filter((issue) => issue.state === 'open').length;
 }
+
+/* ── прогоны CI (Actions/Pipelines) ────────────────────────────────────── */
+
+/** Состояние прогона CI — сводное для обеих площадок. */
+export type PipelineState = 'running' | 'success' | 'failed' | 'pending' | 'canceled' | 'skipped' | 'unknown';
+
+/** Один прогон CI (Actions run на GitHub, pipeline на GitLab). */
+export interface ForgePipeline {
+  /** Идентификатор прогона (у GitHub — `databaseId`, у GitLab — `id`). */
+  id: number;
+  /** Заголовок: у GitHub `displayTitle`, у GitLab — имя или ветка. */
+  title: string;
+  /** Ветка, на которой шёл прогон. */
+  branch: string;
+  /** Что запустило прогон: `push`, `pull_request`/`merge_request_event`, `schedule`… */
+  event: string;
+  state: PipelineState;
+  /** Страница прогона в браузере. */
+  url: string;
+  /** Когда запущен (текст площадки — приводить к дате не берёмся). */
+  createdAt: string;
+}
+
+/**
+ * Состояние прогона по словам площадок. Словари у GitHub и GitLab разные
+ * (`in_progress`/`running`, `failure`/`failed`, `cancelled`/`canceled`), а состояние
+ * нужно одно — поэтому сводим оба словаря здесь, в одном месте.
+ */
+function pipelineStateOf(value: unknown): PipelineState {
+  const text = String(value ?? '').toLowerCase();
+  if (text === 'success') return 'success';
+  if (text === 'failed' || text === 'failure' || text === 'timed_out' || text === 'action_required') return 'failed';
+  if (text === 'canceled' || text === 'cancelled') return 'canceled';
+  if (text === 'skipped' || text === 'manual' || text === 'neutral') return 'skipped';
+  if (text === 'running' || text === 'in_progress') return 'running';
+  if (
+    text === 'pending' ||
+    text === 'queued' ||
+    text === 'requested' ||
+    text === 'waiting' ||
+    text === 'created' ||
+    text === 'preparing' ||
+    text === 'waiting_for_resource' ||
+    text === 'scheduled'
+  ) {
+    return 'pending';
+  }
+  return 'unknown';
+}
+
+/**
+ * Разбор ответа `gh run list --json …`. У GitHub состояние приходит двумя полями:
+ * `status` (`queued`/`in_progress`/`completed`) и `conclusion` (`success`/`failure`/…),
+ * причём `conclusion` осмыслен только у завершённого прогона. Поэтому при `completed`
+ * смотрим на `conclusion`, а иначе — на сам `status`.
+ */
+export function parseGhRuns(json: string): ForgePipeline[] {
+  const runs: ForgePipeline[] = [];
+  for (const item of safeArray(json)) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    const id = Number(value.databaseId);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    const completed = String(value.status ?? '').toLowerCase() === 'completed';
+    runs.push({
+      id,
+      title: typeof value.displayTitle === 'string' ? value.displayTitle : '',
+      branch: typeof value.headBranch === 'string' ? value.headBranch : '',
+      event: typeof value.event === 'string' ? value.event : '',
+      state: completed ? pipelineStateOf(value.conclusion) : pipelineStateOf(value.status),
+      url: typeof value.url === 'string' ? value.url : '',
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : '',
+    });
+  }
+  return runs;
+}
+
+/**
+ * Разбор ответа `glab api projects/:id/pipelines`. GitLab пишет идентификатор в `id`,
+ * ветку — в `ref`, состояние — одним полем `status` (без отдельного conclusion).
+ */
+export function parseGlabPipelines(json: string): ForgePipeline[] {
+  const runs: ForgePipeline[] = [];
+  for (const item of safeArray(json)) {
+    if (typeof item !== 'object' || item === null) continue;
+    const value = item as Record<string, unknown>;
+    const id = Number(value.id);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    const ref = typeof value.ref === 'string' ? value.ref : '';
+    runs.push({
+      id,
+      title: typeof value.name === 'string' && value.name !== '' ? value.name : ref,
+      branch: ref,
+      event: typeof value.source === 'string' ? value.source : '',
+      state: pipelineStateOf(value.status),
+      url: typeof value.web_url === 'string' ? value.web_url : '',
+      createdAt: typeof value.created_at === 'string' ? value.created_at : '',
+    });
+  }
+  return runs;
+}
+
+/** Идёт ли прогон прямо сейчас или ещё в очереди. */
+export function pipelineActive(pipeline: ForgePipeline): boolean {
+  return pipeline.state === 'running' || pipeline.state === 'pending';
+}
+
+/** Сколько прогонов не завершено — для заголовка списка. */
+export function activePipelineCount(pipelines: readonly ForgePipeline[]): number {
+  return pipelines.filter(pipelineActive).length;
+}
+
+/** Сколько прогонов провалено — по ним и интересен повтор. */
+export function failedPipelineCount(pipelines: readonly ForgePipeline[]): number {
+  return pipelines.filter((pipeline) => pipeline.state === 'failed').length;
+}

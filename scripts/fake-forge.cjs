@@ -112,6 +112,48 @@ const GLAB_ISSUES = [
   },
 ];
 
+const GH_RUNS = [
+  {
+    databaseId: 42,
+    displayTitle: 'CI',
+    status: 'completed',
+    conclusion: 'success',
+    headBranch: 'main',
+    event: 'push',
+    createdAt: '2024-05-01T10:00:00Z',
+    url: 'https://github.com/acme/web/actions/runs/42',
+  },
+  {
+    databaseId: 43,
+    displayTitle: 'CI',
+    status: 'in_progress',
+    conclusion: '',
+    headBranch: 'feat/search',
+    event: 'pull_request',
+    createdAt: '2024-05-01T12:00:00Z',
+    url: 'https://github.com/acme/web/actions/runs/43',
+  },
+];
+
+const GLAB_PIPELINES = [
+  {
+    id: 100,
+    status: 'success',
+    source: 'push',
+    ref: 'main',
+    web_url: 'https://gitlab.com/team/api/-/pipelines/100',
+    created_at: '2024-05-02T09:00:00Z',
+  },
+  {
+    id: 101,
+    status: 'failed',
+    source: 'merge_request_event',
+    ref: 'fix/build',
+    web_url: 'https://gitlab.com/team/api/-/pipelines/101',
+    created_at: '2024-05-02T10:00:00Z',
+  },
+];
+
 if (cli === 'gh') {
   if (args[0] === 'pr' && args[1] === 'list') {
     print(GH_REQUESTS);
@@ -162,6 +204,13 @@ if (cli === 'gh') {
   if (args[0] === 'issue' && (args[1] === 'create' || args[1] === 'close')) {
     process.exit(0);
   }
+  if (args[0] === 'run' && args[1] === 'list') {
+    print(GH_RUNS);
+    process.exit(0);
+  }
+  if (args[0] === 'run' && args[1] === 'rerun') {
+    process.exit(0);
+  }
   process.stderr.write(`fake gh: неизвестная команда: ${args.join(' ')}\n`);
   process.exit(1);
 }
@@ -171,9 +220,15 @@ if (args[0] === 'mr' && args[1] === 'list') {
   process.exit(0);
 }
 if (args[0] === 'api') {
+  // Тот же путь `glab api` обслуживает три вещи: заметки запроса, заметки задачи
+  // и прогоны CI. Разбираем по адресу запроса.
+  const target = String(args[1] || '');
+  if (target.includes('/pipelines')) {
+    print(GLAB_PIPELINES);
+    process.exit(0);
+  }
   // Форма ответа `glab api …/notes`: массив заметок плюс системное событие.
-  // Тот же путь обслуживает заметки задачи (`…/issues/<n>/notes`).
-  const kind = String(args[1] || '').includes('/issues/') ? 'issue' : 'mr';
+  const kind = target.includes('/issues/') ? 'issue' : 'mr';
   const base =
     kind === 'issue'
       ? [{ author: { username: 'ivan' }, body: 'Воспроизводится у меня.', created_at: '2024-05-04T09:00:00Z' }]
@@ -204,6 +259,9 @@ if (args[0] === 'issue' && args[1] === 'note') {
   process.exit(0);
 }
 if (args[0] === 'issue' && (args[1] === 'create' || args[1] === 'close')) {
+  process.exit(0);
+}
+if (args[0] === 'ci' && args[1] === 'retry') {
   process.exit(0);
 }
 

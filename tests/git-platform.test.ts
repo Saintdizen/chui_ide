@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activePipelineCount,
   branchesLabel,
   cliFor,
+  failedPipelineCount,
   forgeRepo,
   issueLabel,
   issueWebUrl,
@@ -12,10 +14,13 @@ import {
   parseGhComments,
   parseGhIssues,
   parseGhRequests,
+  parseGhRuns,
   parseGlabComments,
   parseGlabIssues,
+  parseGlabPipelines,
   parseGlabRequests,
   parseRemoteUrl,
+  pipelineActive,
   platformLabel,
   platformOf,
   requestForBranch,
@@ -419,5 +424,99 @@ describe('адреса и подписи задач', () => {
     ];
     expect(issueLabel(issues[0]!)).toBe('#1 Первая');
     expect(openIssueCount(issues)).toBe(1);
+  });
+});
+
+describe('parseGhRuns', () => {
+  const json = JSON.stringify([
+    {
+      databaseId: 42,
+      displayTitle: 'CI',
+      status: 'completed',
+      conclusion: 'success',
+      headBranch: 'main',
+      event: 'push',
+      createdAt: '2024-05-01T10:00:00Z',
+      url: 'https://github.com/acme/web/actions/runs/42',
+    },
+    { databaseId: 43, status: 'in_progress', conclusion: '', headBranch: 'feat', event: 'pull_request' },
+  ]);
+
+  it('завершённый берёт состояние из conclusion', () => {
+    expect(parseGhRuns(json)[0]).toMatchObject({
+      id: 42,
+      title: 'CI',
+      branch: 'main',
+      event: 'push',
+      state: 'success',
+      url: 'https://github.com/acme/web/actions/runs/42',
+    });
+  });
+
+  it('незавершённый берёт состояние из status', () => {
+    expect(parseGhRuns(json)[1]?.state).toBe('running');
+  });
+
+  it('провал из conclusion', () => {
+    const failed = JSON.stringify([{ databaseId: 1, status: 'completed', conclusion: 'failure' }]);
+    expect(parseGhRuns(failed)[0]?.state).toBe('failed');
+  });
+
+  it('без id — пропуск, битый json — пусто', () => {
+    expect(parseGhRuns(JSON.stringify([{ displayTitle: 'x' }]))).toEqual([]);
+    expect(parseGhRuns('не json')).toEqual([]);
+  });
+});
+
+describe('parseGlabPipelines', () => {
+  const json = JSON.stringify([
+    { id: 100, status: 'success', source: 'push', ref: 'main' },
+    { id: 101, status: 'failed', source: 'merge_request_event', ref: 'fix/build' },
+    { id: 102, status: 'running', ref: '', name: 'Сборка' },
+  ]);
+
+  it('читает прогон из status и ref', () => {
+    expect(parseGlabPipelines(json)[0]).toMatchObject({
+      id: 100,
+      title: 'main',
+      branch: 'main',
+      event: 'push',
+      state: 'success',
+    });
+  });
+
+  it('провал и ветка из ref', () => {
+    expect(parseGlabPipelines(json)[1]).toMatchObject({ state: 'failed', branch: 'fix/build' });
+  });
+
+  it('имя идёт в заголовок', () => {
+    expect(parseGlabPipelines(json)[2]).toMatchObject({ title: 'Сборка', state: 'running' });
+  });
+});
+
+describe('состояние и счётчики прогонов', () => {
+  const run = (
+    state: 'running' | 'success' | 'failed' | 'pending' | 'canceled' | 'skipped' | 'unknown',
+  ): Parameters<typeof pipelineActive>[0] => ({
+    id: 1,
+    title: '',
+    branch: '',
+    event: '',
+    state,
+    url: '',
+    createdAt: '',
+  });
+
+  it('активны только идущие и в очереди', () => {
+    expect(pipelineActive(run('running'))).toBe(true);
+    expect(pipelineActive(run('pending'))).toBe(true);
+    expect(pipelineActive(run('success'))).toBe(false);
+    expect(pipelineActive(run('failed'))).toBe(false);
+  });
+
+  it('счётчики активных и проваленных', () => {
+    const runs = [run('running'), run('pending'), run('failed'), run('failed'), run('success')];
+    expect(activePipelineCount(runs)).toBe(2);
+    expect(failedPipelineCount(runs)).toBe(2);
   });
 });
