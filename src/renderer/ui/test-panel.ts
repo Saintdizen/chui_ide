@@ -81,6 +81,18 @@ export interface TestPanelView {
   outcomes(): ReadonlyMap<string, TestOutcome>;
   /** Исходы изменились — редактор перерисовывает значки. Возвращает отписку. */
   onDidChangeOutcomes(listener: () => void): () => void;
+  /**
+   * Показать готовый отчёт покрытия. Нужен раннерам, которые печатают отчёт не в
+   * терминал, а файлом (Node): панель сама его из вывода не собирает, и без этого
+   * сводка и список файлов остались бы пустыми.
+   */
+  setCoverage(report: CoverageReport | null): void;
+  /**
+   * Показать готовый отчёт покрытия. Нужен раннерам, которые печатают отчёт не в
+   * терминал, а файлом (Node): панель сама его из вывода не собирает, и без этого
+   * сводка и список файлов остались бы пустыми.
+   */
+  setCoverage(report: CoverageReport | null): void;
 }
 
 export function createTestPanel(deps: TestPanelDeps): TestPanelView {
@@ -275,9 +287,11 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
   function render(): void {
     clear(body);
 
-    // Покрытие умеет не каждый раннер: у Node своего отчёта пока нет, и кнопка
-    // «С покрытием» там только обещала бы работу, которой не будет.
-    coverageButton.hidden = !deps.onCoverage || deps.canCoverage?.() === false;
+    // Покрытие умеет не каждый раннер: у `node --test` отчёта нет, и кнопка
+    // «С покрытием» там только обещала бы работу, которой не будет. Спрашиваем
+    // только когда список уже собран: вид проекта нужен, а проект открывается
+    // уже после создания панели.
+    coverageButton.hidden = !deps.onCoverage || suite === null || deps.canCoverage?.() === false;
 
     if (loading) {
       summary.textContent = 'Собираю…';
@@ -401,6 +415,10 @@ export function createTestPanel(deps: TestPanelDeps): TestPanelView {
     onDidChangeOutcomes: (listener) => {
       outcomeListeners.add(listener);
       return () => outcomeListeners.delete(listener);
+    },
+    setCoverage: (report) => {
+      coverage = report;
+      render();
     },
   };
 }

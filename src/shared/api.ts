@@ -1726,10 +1726,17 @@ export interface ChuiMethods {
    */
   'project.packages': { params: void; result: ProjectPackage[] };
   /**
-   * Куда прогон с покрытием пишет JSON-отчёт (`--cov-report=json:…`). Путь во временном
-   * каталоге: файл нужен IDE, а захламлять им корень проекта незачем.
+   * Куда прогон с покрытием пишет отчёт. `path` — файл для pytest
+   * (`--cov-report=json:…`), `dir` — каталог, куда раннеры Node (vitest, jest)
+   * кладут свой `coverage-final.json`. Оба — во временном каталоге.
    */
-  'project.coverageJsonPath': { params: void; result: { path: string } };
+  'project.coverageJsonPath': { params: void; result: { path: string; dir: string } };
+  /**
+   * Прочитать файл отчёта покрытия, который IDE сама попросила у раннера. Лежит
+   * он во временном каталоге, куда `workspace.readFile` не пускает, — поэтому за
+   * него отвечает main. Читает только СВОЙ файл: путь он вычисляет из корня.
+   */
+  'project.readCoverage': { params: { kind: 'pytest' | 'node' }; result: { text: string | null } };
 
   'git.status': { params: void; result: GitStatus };
   /**

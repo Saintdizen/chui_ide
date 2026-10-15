@@ -1,5 +1,6 @@
 import { basename } from '../../shared/languages';
 import {
+  type DeclaredNodeRunner,
   nodeTestNamePattern,
   nodeTestRunnerLabel,
   parseNodeTestSelector,
@@ -308,6 +309,48 @@ export function nodeTestsTarget(
     id: selector ? `node-tests:${selector}` : 'node-tests:all',
     label: selector ? `Тесты: ${basename(file ?? selector)}` : `Запустить тесты (${nodeTestRunnerLabel(runner)})`,
     detail: `${nodeTestRunnerLabel(runner)} · тесты проекта`,
+    command,
+    source: 'test',
+  };
+}
+
+/**
+ * Цель тестов Node с покрытием. Отдельно от обычного прогона: покрытие требует
+ * провайдера в проекте и пишет отчёт ПОСЛЕ тестов, а смешивать это в одной
+ * кнопке значило бы гадать, чего ждёт человек.
+ *
+ * Покрытие умеют vitest и jest, и оба пишут отчёт в формате istanbul
+ * (`coverage-final.json`). Имена флагов у них разные: у vitest — `--coverage.*`,
+ * у jest — `--coverage*`. Каталог отчёта задаём своим: файл нужен IDE, а
+ * захламлять им `coverage/` в проекте незачем.
+ *
+ * Встроенный `node --test` сюда не годится: у него покрытие отчёт даёт только
+ * текстом и без построчной разбивки — подсвечивать в редакторе нечего.
+ */
+export function nodeCoverageTarget(
+  tools: ProjectTools,
+  runner: DeclaredNodeRunner,
+  selector: string | null,
+  options: { report?: boolean; platform?: string; outputDir?: string } = {},
+): RunTarget {
+  const { file, name } = selector ? parseNodeTestSelector(selector) : { file: null, name: null };
+  const args = [nodeTestBase(tools, runner), '--coverage'];
+  if (runner === 'vitest') {
+    args.push('--coverage.reporter=json');
+    if (options.outputDir) args.push(`--coverage.reportsDirectory=${shellQuote(options.outputDir)}`);
+  } else {
+    args.push('--coverageReporters=json');
+    if (options.outputDir) args.push(`--coverageDirectory=${shellQuote(options.outputDir)}`);
+  }
+  if (file) args.push(shellQuote(file));
+  if (name) args.push('-t', shellQuote(nodeTestNamePattern(name)));
+
+  const base = args.join(' ');
+  const command = options.report && options.platform ? `${base}${resultMarkerCommand(options.platform)}` : base;
+  return {
+    id: selector ? `node-cov:${selector}` : 'node-cov:all',
+    label: selector ? `Покрытие: ${basename(file ?? selector)}` : `Тесты с покрытием (${nodeTestRunnerLabel(runner)})`,
+    detail: `${nodeTestRunnerLabel(runner)} · с покрытием`,
     command,
     source: 'test',
   };

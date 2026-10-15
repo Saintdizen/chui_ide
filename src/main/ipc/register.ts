@@ -624,14 +624,28 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
 
   router.register('project.packages', () => findPackages(requireRoot()));
 
-  // JSON-отчёт покрытия: пишем во временный каталог, а не в корень проекта. Имя
+  // Отчёты покрытия: пишем во временный каталог, а не в корень проекта. Имя каталога
   // выводим из пути проекта, чтобы прогоны разных папок не затирали друг друга.
+  // `path` — файл для pytest (`--cov-report=json:…`), `dir` — каталог, куда раннеры
+  // Node (vitest, jest) кладут свой `coverage-final.json`.
   router.register('project.coverageJsonPath', async () => {
     const root = requireRoot();
     const hash = createHash('sha1').update(path.resolve(root)).digest('hex').slice(0, 12);
-    const dir = path.join(app.getPath('temp'), 'chui-coverage');
+    const dir = path.join(app.getPath('temp'), 'chui-coverage', hash);
     await fs.mkdir(dir, { recursive: true });
-    return { path: path.join(dir, `${hash}.json`) };
+    return { path: path.join(dir, 'coverage.json'), dir };
+  });
+
+  // Прочитать СВОЙ файл отчёта покрытия. Через `workspace.readFile` его не взять:
+  // тот не пускает за пределы рабочей папки, а отчёт лежит во временном каталоге.
+  // Путь вычисляем сами, из корня: снаружи сюда не подсунуть произвольный файл.
+  router.register('project.readCoverage', async (params) => {
+    const root = requireRoot();
+    const hash = createHash('sha1').update(path.resolve(root)).digest('hex').slice(0, 12);
+    const dir = path.join(app.getPath('temp'), 'chui-coverage', hash);
+    const name = params.kind === 'node' ? 'coverage-final.json' : 'coverage.json';
+    const text = await fs.readFile(path.join(dir, name), 'utf8').catch(() => null);
+    return { text };
   });
 
   router.register('review.load', () => deps.reviews?.load(requireRoot()) ?? []);

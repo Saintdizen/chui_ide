@@ -32,6 +32,7 @@ import { BookmarkModel } from './core/bookmarks';
 import { SpellCheck } from './core/spellcheck';
 import { ProjectPackagesModel } from './core/project-packages';
 import { parseCoverageJson } from '../shared/coverage-json';
+import { parseNodeCoverage } from '../shared/node-coverage';
 import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
 import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
@@ -51,6 +52,7 @@ import { createSessionControl } from './core/session-control';
 import {
   collectRunTargets,
   entryLine,
+  nodeCoverageTarget,
   nodeInstallTarget,
   nodeTestsTarget,
   pytestCoverageTarget,
@@ -77,7 +79,7 @@ import { decideSaveAs } from '../shared/save-as';
 import { isEmptyCommitMessage } from '../shared/commit-message';
 import { pairFromSelection } from './core/file-compare';
 import { hunkAtLine } from '../shared/hunk-lines';
-import { joinPath, separatorOf, splitPath } from '../shared/paths';
+import { isInsidePath, joinPath, pathAfter, separatorOf, splitPath } from '../shared/paths';
 import { copyPlan, movePlan } from './core/tree-move';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
@@ -1085,19 +1087,63 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   let coverageJsonPath: string | null = null;
 
   /**
+   * Куда писать отчёт покрытия Node: vitest и jest складывают туда файл
+   * `coverage-final.json`. Каталог даёт main — он же выдаёт путь для pytest.
+   */
+  let nodeCoverageDir: string | null = null;
+
+  /**
    * Уточнить покрытие по JSON-отчёту: терминальный даёт только непокрытые строки, а
    * здесь есть ещё и наполовину пройденные ветви. Нет файла или он битый — молча
    * остаёмся при том, что пришло из вывода pytest.
    */
   const applyCoverageJson = async (absolute: (path: string) => string): Promise<void> => {
-    if (!coverageJsonPath) return;
-    const file = await rpc.request('workspace.readFile', { path: coverageJsonPath }).catch(() => null);
-    if (!file) return;
+    const file = await rpc.request('project.readCoverage', { kind: 'pytest' }).catch(() => null);
+    if (!file?.text) return;
     const json = parseCoverageJson(file.text);
     if (json.files.length === 0) return;
     editors.setCoverage(
       json.files.map((entry) => [absolute(entry.path), entry.missingLines, entry.partialLines] as const),
     );
+  };
+
+  /**
+   * Покрытие Node: отчёт кладёт сам раннер (`coverage-final.json` в общем каталоге
+   * отчётов). Пути в нём абсолютные — от раннера, а редактор ключует файлы тем, как
+   * их открыл IDE, поэтому внутренние пути приводим к своему написанию, а чужие
+   * оставляем как есть. Итог отдаём и панели: там сводка и список файлов.
+   */
+  const applyNodeCoverage = async (root: string): Promise<void> => {
+    const file = await rpc.request('project.readCoverage', { kind: 'node' }).catch(() => null);
+    if (!file?.text) return;
+    const report = parseNodeCoverage(file.text);
+    if (report.files.length === 0) return;
+
+    const separator = separatorOf(root);
+    const absolute = (filePath: string): string => joinPath(root, splitPath(filePath).join(separator));
+    const entries = report.files.map((entry) => {
+      // Отчёт печатает пути с прямыми слэшами; корень на Windows — с обратными.
+      const native = entry.path.split(/[/\\]+/).join(separator);
+      const inside = isInsidePath(root, native);
+      const relative = inside ? pathAfter(root, native) : entry.path;
+      return { path: inside ? absolute(relative) : entry.path, relative, file: entry };
+    });
+
+    editors.setCoverage(
+      entries.map((entry) => [entry.path, entry.file.missingLines, entry.file.partialLines] as const),
+    );
+    testPanel.setCoverage({
+      total: report.total,
+      files: entries.map((entry) => ({
+        path: entry.relative,
+        percent: entry.file.percent,
+        statements: entry.file.statements,
+        missing: entry.file.missing,
+        missingLines: entry.file.missingLines,
+        branches: entry.file.branches,
+        branchPartial: entry.file.branchPartial,
+      })),
+    });
   };
 
   // Панель тестов: список собирается при показе — правки в коде меняют его.
@@ -1119,10 +1165,25 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Панель просит отчёт — команда уносит в терминал и печать кода выхода,
     // по ней панель и красит узлы.
     onRun: (selector, options) => void runTarget(testTargetFor(selector, options)),
-    // Покрытие пока умеет только pytest: у Node своего отчёта нет, и кнопка
-    // «С покрытием» в его проектах не показывается вовсе.
+    // Покрытие у Python считает pytest-cov, у Node — провайдер проекта (vitest или
+    // jest). У встроенного `node --test` отчёт текстовый, без построчной разбивки —
+    // там кнопки «С покрытием» нет (см. `canCoverage`).
     onCoverage: (selector) => {
       void (async () => {
+        if (!isPythonProject()) {
+          const runner = nodeRunner();
+          if (runner !== 'vitest' && runner !== 'jest') return;
+          const paths = await rpc.request('project.coverageJsonPath').catch(() => null);
+          nodeCoverageDir = paths?.dir ?? null;
+          void runTarget(
+            nodeCoverageTarget(tools.get(), runner, selector, {
+              report: true,
+              platform: info.platform,
+              outputDir: nodeCoverageDir ?? undefined,
+            }),
+          );
+          return;
+        }
         coverageJsonPath = await rpc
           .request('project.coverageJsonPath')
           .then((result) => result.path)
@@ -1138,12 +1199,25 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     // Покрытие считает плагин pytest-cov: если он не загрузился, кнопка только
     // обещала бы отчёт, которого не будет (`--cov` без плагина — ошибка запуска).
-    canCoverage: () => isPythonProject() && !pytestDisabledPlugins.includes('pytest_cov'),
+    // У Node отчёт умеют vitest и jest; встроенный `node --test` — нет.
+    canCoverage: () => {
+      if (!isPythonProject()) {
+        const runner = nodeRunner();
+        return runner === 'vitest' || runner === 'jest';
+      }
+      return !pytestDisabledPlugins.includes('pytest_cov');
+    },
     // Отчёт покрытия → подсветка непокрытых строк в редакторе. Отчёт даёт пути от
     // корня проекта; редактор ключует файлы абсолютными — собираем их здесь.
     onCoverageReport: (report) => {
       const root = workspace.root;
       if (!root) return;
+      // Node отдаёт готовый отчёт файлом (его читает `applyNodeCoverage`), а из
+      // вывода терминала покрытия там нет — не разбираем его как pytest.
+      if (!isPythonProject()) {
+        void applyNodeCoverage(root);
+        return;
+      }
       const separator = separatorOf(root);
       const absolute = (filePath: string): string => joinPath(root, splitPath(filePath).join(separator));
       editors.setCoverage(

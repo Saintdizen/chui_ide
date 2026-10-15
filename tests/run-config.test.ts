@@ -4,6 +4,7 @@ import type { ProjectTools } from '../src/renderer/core/project-tools';
 import {
   collectRunTargets,
   fileRunTarget,
+  nodeCoverageTarget,
   nodeInstallTarget,
   nodeTestsRunTargets,
   nodeTestsTarget,
@@ -276,5 +277,45 @@ describe('nodeTestsRunTargets', () => {
   it('коллекция целей запуска включает тесты Node', () => {
     const scan = scanOf(['package.json', 'tests/a.test.ts']);
     expect(collectRunTargets(null, tools, scan, 'vitest').map((item) => item.id)).toContain('node-tests:all');
+  });
+});
+
+describe('nodeCoverageTarget', () => {
+  it('vitest: включает покрытие и просит JSON-отчёт', () => {
+    expect(nodeCoverageTarget(tools, 'vitest', null)).toMatchObject({
+      id: 'node-cov:all',
+      label: 'Тесты с покрытием (vitest)',
+      detail: 'vitest · с покрытием',
+      command: 'npx vitest run --coverage --coverage.reporter=json',
+      source: 'test',
+    });
+  });
+
+  it('jest: у него флаги покрытия свои', () => {
+    expect(nodeCoverageTarget(tools, 'jest', null).command).toBe('npx jest --coverage --coverageReporters=json');
+  });
+
+  it('каталог отчёта задаётся свой — файл нужен IDE, а не человеку в `coverage/`', () => {
+    expect(nodeCoverageTarget(tools, 'vitest', null, { outputDir: '/tmp/cov' }).command).toBe(
+      'npx vitest run --coverage --coverage.reporter=json --coverage.reportsDirectory=/tmp/cov',
+    );
+    expect(nodeCoverageTarget(tools, 'jest', null, { outputDir: '/tmp/cov' }).command).toBe(
+      'npx jest --coverage --coverageReporters=json --coverageDirectory=/tmp/cov',
+    );
+  });
+
+  it('селектор узла идёт после флагов покрытия', () => {
+    expect(nodeCoverageTarget(tools, 'vitest', 'tests/a.test.ts').command).toBe(
+      'npx vitest run --coverage --coverage.reporter=json tests/a.test.ts',
+    );
+    expect(nodeCoverageTarget(tools, 'vitest', 'tests/a.test.ts::сумма > складывает').command).toBe(
+      "npx vitest run --coverage --coverage.reporter=json tests/a.test.ts -t 'сумма > складывает'",
+    );
+  });
+
+  it('с report дописывает печать кода выхода — по ней панель узнаёт исход', () => {
+    expect(nodeCoverageTarget(tools, 'vitest', null, { report: true, platform: 'linux' }).command).toBe(
+      'npx vitest run --coverage --coverage.reporter=json; echo "chui-test-result $?"',
+    );
   });
 });
