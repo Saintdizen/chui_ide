@@ -3,10 +3,7 @@ import {
   type ApplyEditsHostParams,
   type ApplyEditsHostResult,
   type ApplyPatchesHostParams,
-  type ChatConversation,
   type ChatDeltaPayload,
-  type ChatHistory,
-  type ChatMessage,
   type ReasoningEffort,
   type Settings,
 } from '../../shared/api';
@@ -35,6 +32,7 @@ import type { ChatSession } from './chat-session';
 import { createCommandApproval, createEditReview, type ApprovalHost } from './chat-approvals';
 import { countLines, plural, snippetFor, titleFrom } from './chat-text';
 import { createChatTabs, type ChatSearchHit } from './chat-tabs';
+import { createChatPersistence, newChatUid } from './chat-persistence';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
 
@@ -136,13 +134,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   let nextId = 1;
   /** Беседа, которая сейчас генерирует: хостовые вызовы приходят именно от неё. */
   let streamingSession: ChatSession | null = null;
-  /** Корень папки, к которой привязана текущая история: ключ сохранения. */
-  let chatRoot: string | null = null;
-  let saveTimer = 0;
-  let uidSeq = 0;
-  /** Идентификатор беседы: переживает перезапуск, поэтому не равен номеру вкладки. */
-  const newUid = (): string => `chat_${Date.now().toString(36)}_${((uidSeq += 1)).toString(36)}`;
-
   const active = (): ChatSession => sessions.find((session) => session.id === activeId) ?? sessions[0]!;
 
   const body = h('div', { class: 'chat-body' });
@@ -329,7 +320,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     );
   }
 
-  function createSession(uid = newUid()): ChatSession {
+  function createSession(uid = newChatUid()): ChatSession {
     const session: ChatSession = {
       id: nextId,
       uid,
@@ -408,48 +399,45 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /* ── сохранение бесед ─────────────────────────────────────────────────────
-   * Источник истины — renderer: он собирает ленту и историю. main пишет файл
-   * по корню проекта, поэтому при смене папки сначала сохраняется старая, а
-   * затем восстанавливается новая. Пишем с задержкой: история меняется пачкой
-   * (вопрос → ответ → инструменты), а файл нужен один на всю пачку.
+   * Источник истины — renderer: он собирает ленту и историю, а main пишет файл
+   * по корню проекта. Вся возня с записью, задержкой и переключением папок —
+   * в `chat-persistence.ts`: панель отдаёт снимок бесед и принимает
+   * восстановленную историю, а остальное остаётся модулю.
    */
 
-  /** Сериализация беседы: лента DOM и незаписанные правки на диск не уходят. */
-  function serializeSession(session: ChatSession): ChatConversation {
-    return {
-      uid: session.uid,
-      title: session.title,
-      updatedAt: Date.now(),
-      messages: session.history.map((message) => {
-        const copy: ChatMessage = { role: message.role, content: message.content };
-        if (message.name) copy.name = message.name;
-        if (message.toolCallId) copy.toolCallId = message.toolCallId;
-        if (message.rating) copy.rating = message.rating;
-        if (message.toolCalls?.length) copy.toolCalls = message.toolCalls.map((call) => ({ ...call }));
-        return copy;
-      }),
-      ...(session.usage ? { usage: { ...session.usage } } : {}),
-      ...(session.trace ? { trace: { ...session.trace, usage: { ...session.trace.usage } } } : {}),
-    };
-  }
+  const persistence = createChatPersistence({
+    rpc: deps.rpc,
+    workspace: deps.workspace,
+    snapshot: () => {
+      const current = active();
+      return { sessions, ...(current ? { activeUid: current.uid } : {}) };
+    },
+    // Восстановление: вкладки и ленты строятся по сохранённой истории.
+    restore: (history) => {
+      for (const session of sessions) session.thread.remove();
+      sessions.length = 0;
+      nextId = 1;
 
-  /** Записать беседы этой папки немедленно: снимок берём синхронно, до отправки. */
-  function persistTo(root: string): void {
-    const conversations = sessions.map(serializeSession);
-    const activeUid = active()?.uid;
-    void deps.rpc
-      .request('ai.chats.save', { root, conversations, ...(activeUid ? { activeUid } : {}) })
-      .catch(() => undefined); // не сохранилось — не повод показывать ошибку в чате
-  }
+      for (const conversation of history.conversations) {
+        const session = createSession(conversation.uid);
+        session.title = conversation.title;
+        session.history = [...conversation.messages];
+        session.usage = conversation.usage;
+        session.trace = conversation.trace;
+        renderHistory(session);
+      }
+      if (sessions.length === 0) createSession();
 
-  function scheduleSave(): void {
-    if (!chatRoot) return;
-    if (saveTimer) window.clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(() => {
-      saveTimer = 0;
-      if (chatRoot) persistTo(chatRoot);
-    }, 400);
-  }
+      const restored = history.activeUid ? sessions.find((item) => item.uid === history.activeUid) : undefined;
+      activeId = (restored ?? sessions[0]!).id;
+      syncActiveView();
+    },
+    // Корень сменился после старта: список путей для `@` собираем заново.
+    onRootChanged: () => attachments.requestMentions(),
+  });
+
+  /** Записать беседы с задержкой: пачка правок даёт один файл. */
+  const scheduleSave = (): void => persistence.schedule();
 
   /** Обновить вид активной беседы после восстановления вкладок. */
   function syncActiveView(): void {
@@ -534,57 +522,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       }
     });
     scrollToEnd(session);
-  }
-
-  async function loadChats(root: string): Promise<void> {
-    let history: ChatHistory;
-    try {
-      history = await deps.rpc.request('ai.chats.load', { root });
-    } catch {
-      return; // история — не то, ради чего стоит ломать открытие проекта
-    }
-    if (chatRoot !== root) return; // проект сменился, пока грузили
-
-    for (const session of sessions) session.thread.remove();
-    sessions.length = 0;
-    nextId = 1;
-
-    for (const conversation of history.conversations) {
-      const session = createSession(conversation.uid);
-      session.title = conversation.title;
-      session.history = [...conversation.messages];
-      session.usage = conversation.usage;
-      session.trace = conversation.trace;
-      renderHistory(session);
-    }
-    if (sessions.length === 0) createSession();
-
-    const restored = history.activeUid ? sessions.find((item) => item.uid === history.activeUid) : undefined;
-    activeId = (restored ?? sessions[0]!).id;
-    syncActiveView();
-  }
-
-  function initPersistence(): void {
-    const applyRoot = (root: string | null): void => {
-      if (root === chatRoot) return;
-      // Прежняя папка сохраняется до смены chatRoot: сессии ещё её.
-      if (chatRoot) persistTo(chatRoot);
-      chatRoot = root;
-      if (root) void loadChats(root);
-    };
-
-    applyRoot(deps.workspace.root);
-    if (!chatRoot) {
-      // Проект открывается позже (окно IDE стартует после лаунчера): пустая беседа.
-      createSession();
-      renderTabs();
-    }
-    // Список путей для `@` собираем заранее: подсказка должна открыться мгновенно.
-    attachments.requestMentions();
-    deps.workspace.onDidChange(({ info }) => {
-      applyRoot(info?.root ?? null);
-      attachments.requestMentions();
-    });
   }
 
   /* ── информация о сессии ───────────────────────────────────────────────── */
@@ -1587,7 +1524,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   // Первая беседа и восстановление истории — до отрисовки композера: чипы и
   // панель изменений читают состояние активной беседы, без неё им нечего показывать.
-  initPersistence();
+  persistence.start();
+  if (!persistence.root()) {
+    // Проект открывается позже (окно IDE стартует после лаунчера): пустая беседа.
+    createSession();
+    renderTabs();
+  }
+  // Список путей для `@` собираем заранее: подсказка должна открыться мгновенно.
+  attachments.requestMentions();
   syncProviderFields();
   syncEffort();
   attachments.render();

@@ -23,6 +23,7 @@ const path = require('node:path');
 const { AiService } = require('../dist/main/ai/service.js');
 const { GitService } = require('../dist/main/git/git.js');
 const { registerIpc } = require('../dist/main/ipc/register.js');
+const { ChatStore } = require('../dist/main/ai/chat-store.js');
 const { HostClient } = require('../dist/main/ipc/host.js');
 const { pushToRenderers } = require('../dist/main/ipc/push.js');
 const { registerAppScheme, serveRenderer } = require('../dist/main/protocol.js');
@@ -73,7 +74,9 @@ app.whenReady().then(async () => {
   );
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
-  registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient() });
+  // Беседы пишем в свой каталог: проверка не трогает настоящий userData.
+  const chatStore = new ChatStore(path.join(dir, 'chats'));
+  registerIpc({ settings, workspace, ai, terminals, git, chatStore, host: new HostClient() });
   await workspace.open(project);
 
   const ide = openIdeWindow();
@@ -308,12 +311,85 @@ app.whenReady().then(async () => {
     toggled.подсказка,
   );
 
+  /* ── сохранение и восстановление ───────────────────────────────────────── */
+
+  // Вторая беседа: к этому месту в пробе одна закрыта, так что проверяем на двух.
+  await ask(
+    ide,
+    `(async () => {
+      const button = [...document.querySelectorAll('.icon-btn')].find(
+        (node) => node.getAttribute('title') === 'Новая беседа',
+      );
+      button.click();
+      return true;
+    })()`,
+  );
+  // Даём сработать отложенной записи (400 мс) и смотрим, что ушло в файл.
+  await wait(800);
+  const before = await ask(
+    ide,
+    `(() => {
+      const tabs = [...document.querySelectorAll('.chat-tab-list .chat-tab')];
+      return {
+        подписи: tabs.map((tab) => tab.querySelector('.tab-label')?.textContent ?? ''),
+        активная: document.querySelector('.chat-tab.is-active .tab-label')?.textContent ?? null,
+      };
+    })()`,
+  );
+  check('перед записью в панели две беседы', before.подписи?.length === 2, before);
+
+  const chatDir = path.join(dir, 'chats');
+  const chatFile = (await fs.readdir(chatDir).catch(() => [])).find((name) => name.endsWith('.json'));
+  check('беседы записаны в файл проекта', Boolean(chatFile), chatFile);
+
+  const saved = chatFile ? JSON.parse(await fs.readFile(path.join(chatDir, chatFile), 'utf8')) : { conversations: [] };
+  const uids = saved.conversations.map((item) => item.uid);
+  check('в файле обе беседы', saved.conversations.length === 2, saved.conversations.length);
+  check('uid бесед разные', uids.length === 2 && uids[0] !== uids[1], uids);
+  check('активной записана вторая беседа', saved.activeUid === uids[1], { activeUid: saved.activeUid, uids });
+
+  // Переоткрытие: окно IDE одно на приложение, поэтому закрываем его и поднимаем
+  // заново — новый renderer читает беседы уже из файла. Приложение при закрытии
+  // последнего окна завершилось бы, поэтому выход на время переоткрытия глушим.
+  const realQuit = app.quit.bind(app);
+  app.quit = () => undefined;
   const shotFile = await shot(ide, 'composer');
+  ide.destroy();
+  await wait(2000);
+  const second = openIdeWindow();
+  app.quit = realQuit;
+  await wait(6000);
+
+  const restored = await ask(
+    second,
+    `(() => {
+      const tabs = [...document.querySelectorAll('.chat-tab-list .chat-tab')];
+      return {
+        подписи: tabs.map((tab) => tab.querySelector('.tab-label')?.textContent ?? ''),
+        активная: document.querySelector('.chat-tab.is-active .tab-label')?.textContent ?? null,
+      };
+    })()`,
+  );
+  check('окно подняло обе беседы из файла', restored.подписи?.length === 2, restored);
+  check(
+    'заголовки бесед совпали с сохранёнными',
+    Array.isArray(restored.подписи) && restored.подписи.join('|') === (before.подписи ?? []).join('|'),
+    { было: before.подписи, стало: restored.подписи },
+  );
+  check('активной поднялась та же беседа', restored.активная === before.активная, {
+    было: before.активная,
+    стало: restored.активная,
+  });
+
   console.log(`\n[проба] снимок: ${shotFile}`);
 
   terminals.dispose();
   workspace.dispose();
   await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
-  console.log(failed ? '[проба] панель ассистента: есть расхождения' : '[проба] вкладки и композер работают');
+  console.log(
+    failed
+      ? '[проба] панель ассистента: есть расхождения'
+      : '[проба] вкладки и композер работают, беседы пережили переоткрытие',
+  );
   app.exit(failed ? 1 : 0);
 });
