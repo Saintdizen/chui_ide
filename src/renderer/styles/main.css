@@ -636,7 +636,7 @@ textarea {
   place-items: center;
   width: 16px;
   height: 16px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   color: var(--text_color_tertiary);
   opacity: 0;
   transition:
@@ -773,7 +773,7 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--font_small_size);
   font-weight: 700;
   line-height: 1;
 }
@@ -806,7 +806,7 @@ textarea {
   margin: auto;
   width: 10px;
   height: 10px;
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
   background: var(--red_prime_background);
 }
 
@@ -814,7 +814,7 @@ textarea {
 .breakpoint-glyph.is-conditional::after {
   width: 9px;
   height: 9px;
-  border-radius: 1px;
+  border-radius: var(--radius_2xs);
   transform: rotate(45deg);
 }
 
@@ -822,7 +822,7 @@ textarea {
 .breakpoint-glyph.is-log::after {
   width: 9px;
   height: 9px;
-  border-radius: 1px;
+  border-radius: var(--radius_2xs);
   transform: rotate(45deg);
   background: var(--run_accent);
 }
@@ -1031,7 +1031,7 @@ textarea {
   color: var(--text_color);
   /* Название приложения: тот же шрифт, что у кода и терминала. */
   font-family: var(--font_mono);
-  font-size: 24px;
+  font-size: var(--font_display_size);
   font-weight: 600;
 }
 
@@ -1801,7 +1801,7 @@ textarea {
 .dock-tab-badge {
   margin-left: 6px;
   padding: 0 5px;
-  border-radius: 8px;
+  border-radius: var(--radius_sm);
   background: var(--element_background_hover);
   color: var(--text_color_secondary);
   font-size: var(--font_small_size);
@@ -2020,7 +2020,7 @@ textarea {
   width: calc(100% - 16px);
   margin: 0 8px;
   padding: 2px 8px 2px 14px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   color: var(--text_color_secondary);
   text-align: left;
   font-size: var(--font_labels_size);
@@ -2049,7 +2049,7 @@ textarea {
 
 .search-text mark {
   padding: 0 1px;
-  border-radius: 3px;
+  border-radius: var(--radius_xs);
   background: var(--highlight_background);
   color: var(--text_color);
 }
@@ -2470,7 +2470,7 @@ textarea {
   white-space: nowrap;
   text-overflow: ellipsis;
   color: var(--text_color_tertiary);
-  font-size: 10.5px;
+  font-size: var(--font_micro_size);
 }
 
 .code-action {
@@ -2486,7 +2486,7 @@ textarea {
   padding: 8px 10px;
   overflow: auto;
   font-family: var(--font_mono);
-  font-size: 11.5px;
+  font-size: var(--font_small_size);
   line-height: 1.6;
 }
 
@@ -2599,16 +2599,16 @@ textarea {
 }
 
 .md-h1 {
-  font-size: 14px;
+  font-size: var(--font_default_size);
 }
 
 .md-h2 {
-  font-size: 13px;
+  font-size: var(--font_labels_size);
 }
 
 .md-h3,
 .md-h4 {
-  font-size: 12px;
+  font-size: var(--font_labels_size);
 }
 
 .md-list {
@@ -2633,7 +2633,7 @@ textarea {
 
 .md-code {
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: var(--radius_xs);
   background: var(--element_background);
   font-family: var(--font_mono);
   font-size: var(--font_small_size);
@@ -2922,7 +2922,7 @@ textarea {
   width: 28px;
   height: 28px;
   border: 1px solid var(--popup_border);
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
   background: var(--popup_material);
   backdrop-filter: var(--popup_filter);
   color: var(--text_color_tertiary);
@@ -2946,7 +2946,7 @@ textarea {
   width: 100%;
   margin: 0 0 6px;
   border-collapse: collapse;
-  font-size: 11.5px;
+  font-size: var(--font_small_size);
 }
 
 .md-table th,
@@ -3132,7 +3132,7 @@ textarea {
   height: 17px;
   padding: 3px;
   transform: translateY(-50%);
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
   background: var(--element_background_2);
   color: var(--text_color_secondary);
 }
@@ -3723,7 +3723,7 @@ textarea {
   justify-content: center;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
   color: var(--text_color_tertiary);
 }
 
@@ -3743,7 +3743,7 @@ textarea {
   height: 28px;
   object-fit: cover;
   border: 1px solid var(--border_color);
-  border-radius: 3px;
+  border-radius: var(--radius_xs);
   background: var(--sunken_background);
 }
 
@@ -3900,7 +3900,7 @@ textarea {
 .chat-footer .composer-toolbar .composer-action {
   width: 24px;
   height: 24px;
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
 }
 
 .chat-footer .composer-toolbar .composer-action-send {
@@ -4027,7 +4027,7 @@ textarea {
 /* Файл открыт только для чтения (большой): заметная, но не кричащая пометка. */
 .status-readonly {
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   color: var(--text_color_tertiary);
   background: var(--element_background_hover);
 }
@@ -4039,7 +4039,7 @@ textarea {
   align-items: center;
   gap: 5px;
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   color: var(--text_color_error);
   background: var(--element_background_hover);
 }
@@ -4047,7 +4047,7 @@ textarea {
 .status-macro-dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
   background: var(--text_color_error);
   animation: macro-pulse 1.2s ease-in-out infinite;
 }
@@ -4067,7 +4067,7 @@ textarea {
    визуальном режимах клавиши не печатают, а командуют — знать о них надо всегда. */
 .status-vim {
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--text_color_secondary);
@@ -4078,7 +4078,7 @@ textarea {
 .status-env {
   padding: 0 4px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   background: none;
   color: var(--text_color_tertiary);
   cursor: pointer;
@@ -4096,120 +4096,7 @@ textarea {
   gap: 4px;
   padding: 0 4px;
   border: none;
-  border-radius: 4px;
-  background: none;
-  color: var(--text_color_tertiary);
-  cursor: pointer;
-}
-
-.status-lsp:hover {
-  background: var(--element_background_hover);
-  color: var(--text_color);
-}
-
-/* Сервер не поднялся — это и есть ответ «почему нет подсказок»: не молчим. */
-.status-lsp.is-failed {
-  color: var(--red_prime_background);
-}
-
-/* Попап языковых серверов: список того, что запущено и что не поднялось. */
-.popover-lsp-status {
-  max-height: calc(100vh - 16px);
-  overflow: auto;
-}
-
-.lsp-status {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lsp-status-title {
-  color: var(--text_color_secondary);
-  font-size: var(--font_small_size);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.lsp-status-body {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.lsp-status-heading {
-  margin-top: 2px;
-  color: var(--text_color_secondary);
-  font-size: var(--font_small_size);
-}
-
-.lsp-status-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: var(--font_labels_size);
-}
-
-.lsp-status-name {
-  min-width: 0;
-  color: var(--text_color);
-  overflow-wrap: anywhere;
-}
-
-.lsp-status-row.is-failed .lsp-status-name {
-  color: var(--red_prime_background);
-}
-
-.lsp-status-lang {
-  color: var(--text_color_tertiary);
-  font-size: var(--font_small_size);
-}
-
-.lsp-status-origin {
-  margin-left: auto;
-  color: var(--text_color_secondary);
-  font-size: var(--font_small_size);
-  white-space: nowrap;
-}
-
-.lsp-status-empty,
-.lsp-status-hint {
-  color: var(--text_color_tertiary);
-  font-size: var(--font_small_size);
-}
-
-.lsp-status-actions {
-  display: flex;
-  gap: 6px;
-  padding-top: 2px;
-}
-
-.lsp-status-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid var(--separator_color);
-  border-radius: var(--radius_sm);
-  background: var(--sunken_background);
-  color: var(--text_color);
-  font-size: var(--font_labels_size);
-  cursor: pointer;
-}
-
-.lsp-status-action:hover {
-  border-color: var(--blue_prime_background);
-}
-
-/* Языковой сервер — кнопка: клик открывает попап со списком серверов. */
-.status-lsp {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 4px;
-  border: none;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   background: none;
   color: var(--text_color_tertiary);
   cursor: pointer;
@@ -4787,7 +4674,7 @@ textarea {
   display: block;
   width: 34px;
   height: 20px;
-  border-radius: 10px;
+  border-radius: var(--radius_pill);
   background: var(--element_background);
   transition: background var(--motion_fast) var(--motion_ease);
 }
@@ -4799,7 +4686,7 @@ textarea {
   left: 2px;
   width: 16px;
   height: 16px;
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
   background: var(--text_color);
   transition: transform var(--motion_fast) var(--motion_ease);
 }
@@ -5055,10 +4942,10 @@ body > .overlay {
 .palette-item-key {
   padding: 1px 6px;
   border: 1px solid var(--border_color);
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
-  font-size: 10.5px;
+  font-size: var(--font_micro_size);
 }
 
 .palette-empty {
@@ -5179,7 +5066,7 @@ body > .overlay {
   margin: 0;
   /* Название приложения: тот же шрифт, что у кода и терминала. */
   font-family: var(--font_mono);
-  font-size: 26px;
+  font-size: var(--font_display_size);
   font-weight: 600;
 }
 
@@ -5312,7 +5199,7 @@ body > .overlay {
   place-items: center;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   color: var(--text_color_tertiary);
   opacity: 0;
   transition: opacity var(--motion_fast) var(--motion_ease);
@@ -5493,7 +5380,7 @@ body > .overlay {
   flex: 0 0 auto;
   width: 7px;
   height: 7px;
-  border-radius: 2px;
+  border-radius: var(--radius_2xs);
   background: var(--label_color, var(--text_color_tertiary));
 }
 
@@ -6321,7 +6208,7 @@ body > .overlay {
   min-width: 12px;
   height: 12px;
   padding: 0 3px;
-  border-radius: 6px;
+  border-radius: var(--radius_xs);
   font-size: var(--font_micro_size);
   line-height: 12px;
   text-align: center;
@@ -6332,7 +6219,7 @@ body > .overlay {
   min-width: 8px;
   height: 8px;
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
 }
 
 .tree-badge.is-custom.is-red {
@@ -7143,7 +7030,7 @@ body > .overlay {
   place-items: center;
   width: 20px;
   height: 20px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   color: var(--text_color_tertiary);
 }
 
@@ -7200,7 +7087,7 @@ body > .overlay {
   place-items: center;
   width: 18px;
   height: 18px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   color: var(--text_color_tertiary);
   opacity: 0;
   transition: opacity var(--motion_fast) var(--motion_ease);
@@ -7701,7 +7588,7 @@ body > .overlay {
   align-items: center;
   gap: 4px;
   padding: 0 4px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   cursor: pointer;
 }
 
@@ -7982,7 +7869,7 @@ body > .overlay {
 .mm-pie-title {
   fill: var(--text_color);
   font-family: var(--font_ui);
-  font-size: 13px;
+  font-size: var(--font_labels_size);
   text-anchor: middle;
 }
 
@@ -8002,7 +7889,7 @@ body > .overlay {
 .mm-frame-label {
   fill: var(--text_color_secondary);
   text-anchor: start;
-  font-size: 12px;
+  font-size: var(--font_labels_size);
 }
 
 .mm-subgraph-title {
@@ -8109,7 +7996,7 @@ body > .overlay {
 }
 
 .mm-slice-label {
-  font-size: 12px;
+  font-size: var(--font_labels_size);
 }
 
 .mm-pie-title {
@@ -8388,14 +8275,16 @@ body > .overlay {
   align-self: flex-start;
   padding: 2px;
   border: 1px solid var(--border_color);
-  border-radius: 7px;
+  border-radius: var(--radius_sm);
   background: var(--sunken_background);
 }
 
 .structural-scope .seg-btn {
   padding: 3px 10px;
   border: none;
-  border-radius: 5px;
+  /* Вкладка внутри рамки с отступом 2px: внутренний радиус меньше внешнего ровно
+     на этот отступ, иначе углы «расходятся» и рамка выглядит криво. */
+  border-radius: calc(var(--radius_sm) - 2px);
   background: transparent;
   color: var(--text_color_secondary);
   font-family: inherit;
@@ -8432,7 +8321,7 @@ body > .overlay {
 .structural-file-count {
   flex: 0 0 auto;
   padding: 0 6px;
-  border-radius: 8px;
+  border-radius: var(--radius_sm);
   background: var(--element_background);
   color: var(--text_color_secondary);
   font-size: var(--font_micro_size);
@@ -8598,7 +8487,7 @@ body > .overlay {
 
 .regex-hit {
   padding: 0 1px;
-  border-radius: 3px;
+  border-radius: var(--radius_xs);
   background: var(--highlight_background);
   color: var(--text_color);
 }
@@ -8853,15 +8742,15 @@ body > .overlay {
 }
 
 .problem-severity.is-error {
-  color: #e5484d;
+  color: var(--severity_error);
 }
 
 .problem-severity.is-warning {
-  color: #d29922;
+  color: var(--severity_warning);
 }
 
 .problem-severity.is-info {
-  color: #5c9bd6;
+  color: var(--severity_info);
 }
 
 .problem-message {
@@ -8999,145 +8888,7 @@ body > .overlay {
 }
 
 .todo-marker.is-hack {
-  color: #d29922;
-}
-
-.todo-marker.is-xxx {
-  color: var(--text_color_tertiary);
-}
-
-.todo-text {
-  flex: 1 1 auto;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.todo-position {
-  flex: 0 0 auto;
-  color: var(--text_color_tertiary);
-  font-family: "JetBrains Mono", monospace;
-  font-size: var(--font_small_size);
-}
-
-/* ── панель задач (TODO/FIXME) ─────────────────────────────────────────── */
-
-.todo-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-}
-
-.todo-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--separator_color);
-}
-
-.todo-title {
-  color: var(--text_color);
-  font-weight: 600;
-}
-
-.todo-summary {
-  color: var(--text_color_tertiary);
-  font-size: var(--font_labels_size);
-}
-
-.todo-filter {
-  width: 200px;
-  padding: 3px 8px;
-  border: 1px solid var(--border_color);
-  border-radius: var(--radius_sm);
-  background: var(--sunken_background);
-  color: var(--text_color);
-  font-family: inherit;
-  font-size: var(--font_labels_size);
-}
-
-.todo-refresh {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 3px 6px;
-}
-
-.todo-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  padding: 4px 0;
-}
-
-.todo-empty {
-  padding: 6px 10px;
-  color: var(--text_color_tertiary);
-  font-size: var(--font_labels_size);
-}
-
-.todo-group-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px 2px;
-}
-
-.todo-file {
-  overflow: hidden;
-  color: var(--text_color);
-  font-size: var(--font_labels_size);
-  font-weight: 600;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.todo-group-counts {
-  flex: 0 0 auto;
-  color: var(--text_color_tertiary);
-  font-size: var(--font_small_size);
-}
-
-.todo-row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  width: 100%;
-  padding: 3px 10px 3px 22px;
-  border: none;
-  background: none;
-  color: var(--text_color);
-  font-family: inherit;
-  font-size: var(--font_labels_size);
-  text-align: left;
-  cursor: pointer;
-}
-
-.todo-row:hover {
-  background: var(--element_background_hover);
-}
-
-/* Вид пометки — словом: у задач вид важнее строки, и он виден без легенды. */
-.todo-marker {
-  flex: 0 0 auto;
-  min-width: 46px;
-  font-size: var(--font_small_size);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.todo-marker.is-todo {
-  color: var(--link_color);
-}
-
-.todo-marker.is-fixme {
-  color: var(--text_color_error);
-}
-
-.todo-marker.is-hack {
-  color: #d29922;
+  color: var(--severity_warning);
 }
 
 .todo-marker.is-xxx {
@@ -9235,7 +8986,7 @@ body > .overlay {
   margin-left: auto;
   padding: 0 6px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   background: none;
   color: var(--blue_prime_background);
   cursor: pointer;
@@ -9699,7 +9450,7 @@ body > .overlay {
   flex: 0 0 auto;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
   background: var(--text_color_secondary);
 }
 

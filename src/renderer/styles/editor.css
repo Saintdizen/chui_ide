@@ -180,7 +180,7 @@
   z-index: 4;
   padding: 2px 8px;
   border: 1px solid var(--border_color);
-  border-radius: 10px;
+  border-radius: var(--radius_pill);
   background: var(--editor_background);
   color: var(--text_color_tertiary);
   font-size: 0.85em;
@@ -213,7 +213,7 @@
   right: 0;
   background: color-mix(in srgb, var(--text_color) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--text_color) 28%, transparent);
-  border-radius: 2px;
+  border-radius: var(--radius_2xs);
   cursor: grab;
 }
 
@@ -287,7 +287,11 @@
 }
 
 /* Волнистые подчёркивания пометок. Цвет — по серьёзности; линия нарисована фоном
-   у самого низа строки, чтобы не закрывать буквы (как в Monaco). */
+   у самого низа строки, чтобы не закрывать буквы (как в Monaco).
+   Знак волны — картинка (data URI), а в неё переменную темы не подставить, поэтому
+   оттенок здесь записан числом. Число обязано совпадать с `--severity_*` из theme.css:
+   тот же цвет рисует значок в панели проблем, и разойтись им нельзя — стережёт
+   `tests/theme-tokens.test.ts`. */
 .own-editor-squiggly {
   position: absolute;
   inset: 0;
@@ -365,7 +369,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  border-radius: 2px;
+  border-radius: var(--radius_2xs);
   background: var(--selection_background);
   will-change: transform;
 }
@@ -510,7 +514,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  border-radius: 2px;
+  border-radius: var(--radius_2xs);
   will-change: transform;
 }
 
@@ -549,7 +553,7 @@
   position: absolute;
   top: 0;
   left: 0;
-  border-radius: 2px;
+  border-radius: var(--radius_2xs);
   background: var(--highlight_background);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--highlight_background) 70%, transparent);
   will-change: transform;
@@ -602,7 +606,7 @@
   padding: 3px 6px;
   background: var(--sunken_background);
   border: 1px solid var(--border_color);
-  border-radius: 5px;
+  border-radius: var(--radius_xs);
   color: var(--text_color);
   font: inherit;
 }
@@ -628,7 +632,7 @@
   padding: 3px 6px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius_xs);
   color: var(--text_color_secondary);
   font: inherit;
   cursor: pointer;
@@ -681,7 +685,7 @@
   padding: 3px 6px;
   background: var(--sunken_background);
   border: 1px solid var(--border_color);
-  border-radius: 5px;
+  border-radius: var(--radius_xs);
   color: var(--text_color);
   font: inherit;
   text-align: right;
@@ -708,7 +712,7 @@
   padding: 4px;
   background: var(--popup_background);
   border: 1px solid var(--border_color);
-  border-radius: 8px;
+  border-radius: var(--radius_sm);
   box-shadow: var(--box_shadow_small);
   font-family: var(--font_ui);
   font-size: var(--font_labels_size);
@@ -728,7 +732,7 @@
   padding: 2px 6px;
   max-height: 20px;
   line-height: 16px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   cursor: pointer;
 }
 
@@ -792,7 +796,7 @@
   padding: 6px 10px;
   background: var(--popup_background);
   border: 1px solid var(--border_color);
-  border-radius: 8px;
+  border-radius: var(--radius_sm);
   box-shadow: var(--box_shadow_small);
   font-family: var(--font_mono);
   font-size: var(--font_labels_size);
@@ -807,7 +811,7 @@
 /* Активный довод — то же, что выделение в тексте: он же подсвечен и в исходнике. */
 .own-editor-signature-label .is-active {
   background: var(--selection_background);
-  border-radius: 3px;
+  border-radius: var(--radius_xs);
   font-weight: 600;
 }
 
@@ -835,7 +839,7 @@
   padding: 4px;
   background: var(--popup_background);
   border: 1px solid var(--border_color);
-  border-radius: 8px;
+  border-radius: var(--radius_sm);
   box-shadow: var(--box_shadow_small);
   font-family: var(--font_ui);
   font-size: var(--font_labels_size);
@@ -865,7 +869,7 @@
   padding: 2px 6px;
   max-height: 20px;
   line-height: 16px;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   cursor: pointer;
 }
 
@@ -899,7 +903,7 @@
   max-height: 70vh;
   background: var(--popup_background);
   border: 1px solid var(--border_color);
-  border-radius: 8px;
+  border-radius: var(--radius_sm);
   box-shadow: var(--box_shadow_small);
   font-family: var(--font_ui);
   font-size: var(--font_labels_size);
@@ -950,7 +954,7 @@
   min-width: 20px;
   padding: 0 6px;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius_xs);
   background: none;
   color: var(--text_color);
   font: inherit;
@@ -1007,7 +1011,7 @@
   padding: 6px 10px;
   background: var(--popup_background);
   border: 1px solid var(--border_color);
-  border-radius: 8px;
+  border-radius: var(--radius_sm);
   box-shadow: var(--box_shadow_small);
   font-family: var(--font_ui);
   font-size: var(--font_labels_size);
@@ -1102,7 +1106,7 @@
    приглушённый акцент темы, что у совпадений, поэтому читается и в светлой, и в тёмной. */
 .own-editor-todo {
   background: var(--highlight_background);
-  border-radius: 2px;
+  border-radius: var(--radius_2xs);
   font-weight: 600;
 }
 
@@ -1274,7 +1278,7 @@
   width: 6px;
   height: 6px;
   margin-left: 2px;
-  border-radius: 50%;
+  border-radius: var(--radius_circle);
   background: var(--git_modified);
 }
 
