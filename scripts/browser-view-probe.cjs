@@ -1,0 +1,526 @@
+/**
+ * Проба встроенного браузера: страница открывается вкладкой рядом с кодом.
+ *
+ *   npm run probe:browser-view
+ *
+ * Поднимаем настоящий http-сервер с маленьким сайтом (три страницы и ссылка между
+ * ними) и открываем его в окне IDE так, как это делает человек: палитра команд →
+ * «Открыть страницу…» → адрес в диалоге → Enter. Смотрим не «как выглядит», а факты:
+ *
+ *  1. команда открывает вкладку: страница встаёт в полосу вкладок, а полотно
+ *     редактора уступает ей (`.is-browser` на острове);
+ *  2. вложение действительно загрузило адрес: заголовок и текст читаем ИЗ САМОГО
+ *     вложения (`panel.contents(id)`), а не из нашего интерфейса;
+ *  3. гостю не отдано ничего лишнего: в странице нет ни `require`, ни `process` —
+ *     за это отвечает раздел сессии и флаги вложения в `main/browser/panel.ts`;
+ *  4. переход по ссылке внутри страницы тянет за собой и подпись вкладки, и
+ *     адресную строку (`did-navigate` → модель вкладок → полоса);
+ *  5. вторая страница — вторая вкладка, и у каждой СВОЁ вложение: первая к тому
+ *     моменту на другом адресе, то есть история и состояние не общие;
+ *  6. `file:` открывать отказывается: сказано почему, а вкладки не появляется;
+ *  7. закрытие вкладки убирает вложение из дерева окна — гость не остаётся жить.
+ *
+ * Дополнительно проверяем проводку меню: пункт «Вид → Открыть страницу…» есть в
+ * системном меню и держит `Ctrl+Shift+B` (сама клавиша живёт в меню Electron, а не
+ * в renderer, поэтому нажатие подделать нельзя — проверяем сам пункт).
+ *
+ * Снимок окна — `.chui_ide/probe-shots/browser-view.png`. Саму страницу на нём
+ * не видно (вложение — отдельный слой окна), поэтому содержимое пробник читает
+ * у вложения, а снимок нужен для шапки и полосы вкладок.
+ * Нужен собранный код: `npm run build` (скрипт делает это сам).
+ */
+const { app, Menu } = require('electron');
+const http = require('node:http');
+const { mkdtempSync, promises: fs } = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { AiService } = require('../dist/main/ai/service.js');
+const { GitService } = require('../dist/main/git/git.js');
+const { registerIpc } = require('../dist/main/ipc/register.js');
+const { HostClient } = require('../dist/main/ipc/host.js');
+const { pushToRenderers } = require('../dist/main/ipc/push.js');
+const { createApplicationMenu } = require('../dist/main/menu.js');
+const { registerAppScheme, serveRenderer } = require('../dist/main/protocol.js');
+const { SettingsStore } = require('../dist/main/settings.js');
+const { TerminalService } = require('../dist/main/terminal/terminal.js');
+const { WorkspaceService } = require('../dist/main/workspace/workspace.js');
+const { getIdeWindow, openIdeWindow } = require('../dist/main/window.js');
+const { BrowserPanel } = require('../dist/main/browser/panel.js');
+const { AgentBrowser } = require('../dist/main/browser/agent-browser.js');
+
+const PROJECT = path.join(__dirname, '..');
+const SHOTS = path.join(PROJECT, '.chui_ide', 'probe-shots');
+
+// Профиль свой: проба не должна ни делить замок с запущенной IDE
+// (`requestSingleInstanceLock`), ни трогать настройки разработчика.
+app.setPath('userData', mkdtempSync(path.join(os.tmpdir(), 'chui-browser-view-profile-')));
+
+registerAppScheme();
+// Проба сама решает, когда выходить: окно закроется раньше, а Electron без окон завершает работу.
+app.on('window-all-closed', () => {});
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const step = (text) => console.log(`[проба] ${text}`);
+
+let failed = 0;
+const check = (label, condition, extra) => {
+  if (!condition) failed += 1;
+  const tail = extra !== undefined ? `: ${JSON.stringify(extra)}` : '';
+  console.log(`  ${condition ? 'ok  ' : 'FAIL'} ${label}${tail}`);
+};
+
+/** Ждать, пока условие станет истинным. `null` — не дождались. */
+const waitFor = async (probe, timeoutMs = 15000) => {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await probe();
+    if (value) return value;
+    if (Date.now() > deadline) return null;
+    await wait(150);
+  }
+};
+
+const ask = (win, expression, timeoutMs = 20000) =>
+  Promise.race([
+    win.webContents.executeJavaScript(expression).catch((error) => `ошибка: ${error.message}`),
+    wait(timeoutMs).then(() => 'нет ответа'),
+  ]);
+
+/* --- Сайт для проверки: три страницы, ссылка между ними, счётчик на кнопке -------- */
+
+const HOME = `<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Домашняя страница</title></head>
+<body>
+  <h1>Маленький сайт</h1>
+  <p>Эта страница открыта во встроенном браузере IDE.</p>
+  <p><button id="count" onclick="document.getElementById('out').textContent = 'нажатий: 1'">Нажать</button></p>
+  <p id="out"></p>
+  <p><a id="next" href="/about">О странице</a></p>
+</body></html>`;
+
+const ABOUT = `<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>О странице</title></head>
+<body><h1>Вторая страница</h1><p><a href="/">На главную</a></p></body></html>`;
+
+const THIRD = `<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Третья страница</title></head>
+<body><h1>Третья страница</h1><p>Пришла своим адресом.</p></body></html>`;
+
+const POPUP = `<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><title>Всплывающая</title></head>
+<body><h1>Всплывающая</h1><p>Открылась новой вкладкой.</p>
+<script>console.log('привет из страницы'); console.warn('предупреждение из страницы');</script>
+</body></html>`;
+
+/* --- Снимок интерфейса: то, что видит человек ------------------------------------ */
+
+const UI_STATE = `(() => {
+  const view = document.querySelector('.browser-view');
+  const tabs = [...document.querySelectorAll('.tab-page')];
+  const back = [...document.querySelectorAll('.browser-toolbar button')].find(
+    (item) => item.getAttribute('title') === 'Назад',
+  );
+  return {
+    панель: view ? !view.hidden : false,
+    полотно: document.querySelector('.editor-island')?.classList.contains('is-browser') ?? false,
+    вкладки: tabs.map((tab) => tab.querySelector('.tab-label')?.textContent ?? ''),
+    активная: tabs.find((tab) => tab.classList.contains('is-active'))?.querySelector('.tab-label')?.textContent ?? null,
+    адрес: document.querySelector('.browser-address')?.value ?? null,
+    назадВключена: back ? !back.disabled : null,
+    уведомление: document.querySelector('.toast-text')?.textContent ?? null,
+  };
+})()`;
+
+app.whenReady().then(async () => {
+  step('старт');
+  await fs.mkdir(SHOTS, { recursive: true });
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-browser-view-'));
+  const project = path.join(dir, 'demo');
+  await fs.mkdir(project, { recursive: true });
+  await fs.writeFile(path.join(project, 'note.txt'), 'файл рядом со страницей\n', 'utf8');
+
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    const page = req.url === '/about' ? ABOUT : req.url === '/third' ? THIRD : req.url === '/popup' ? POPUP : HOME;
+    res.end(page);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  step(`сайт поднят: ${base}`);
+
+  serveRenderer();
+  const settings = new SettingsStore(path.join(dir, 'settings.json'));
+  const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
+  const git = new GitService(
+    () => workspace.rootPath(),
+    (topic, payload) => pushToRenderers(topic, payload),
+  );
+  const ai = new AiService(settings, workspace);
+  const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
+  // Панель встроенного браузера держит вложения (`WebContentsView`). Пробе она нужна
+  // как своим глазам: страницу рисует не renderer, и снимок окна её не покажет —
+  // содержимое читаем прямо из вложения.
+  const panel = new BrowserPanel({
+    window: () => getIdeWindow(),
+    notify: (topic, payload) => pushToRenderers(topic, payload),
+    openExternal: () => undefined,
+  });
+  registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient(), browserPanel: panel });
+  await workspace.open(project);
+
+  // Меню собираем так же, как приложение: пункт «Открыть страницу…» — это его клавиша.
+  createApplicationMenu();
+
+  const ide = openIdeWindow();
+  await wait(6000);
+
+  /* --- 1. Меню: пункт и клавиша -------------------------------------------------- */
+  const viewMenu = Menu.getApplicationMenu()?.items.find((item) => item.label === 'Вид');
+  const pageItem = viewMenu?.submenu?.items.find((item) => item.label === 'Открыть страницу…');
+  check('меню: «Вид → Открыть страницу…» есть', pageItem !== undefined, pageItem?.label);
+  check('меню: клавиша пункта — Ctrl+Shift+B', pageItem?.accelerator === 'Ctrl+Shift+B', pageItem?.accelerator);
+
+  /** Открыть адрес как человек: палитра → «Открыть страницу…» → адрес → Enter. */
+  const openUrl = async (url) => {
+    const result = await ask(
+      ide,
+      `(async () => {
+        const button = [...document.querySelectorAll('.icon-btn')].find((item) =>
+          (item.getAttribute('title') ?? '').startsWith('Палитра команд'),
+        );
+        if (!button) return 'нет кнопки палитры';
+        button.click();
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const input = document.querySelector('.palette-input');
+        if (!input) return 'нет поля палитры';
+        input.value = 'страница';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const item = [...document.querySelectorAll('.palette-item')].find((node) =>
+          (node.querySelector('.palette-item-title')?.textContent ?? '').startsWith('Открыть страницу'),
+        );
+        if (!item) {
+          return 'пункта нет: ' + [...document.querySelectorAll('.palette-item-title')].map((n) => n.textContent).join(' | ');
+        }
+        item.click();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const field = document.querySelector('.prompt-modal .field-input');
+        if (!field) return 'нет диалога адреса';
+        field.value = ${JSON.stringify(url)};
+        field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        return 'адрес принят';
+      })()`,
+    );
+    step(`открываю ${url}: ${result}`);
+    return result;
+  };
+
+  const guests = () =>
+    panel
+      .ids()
+      .map((id) => panel.contents(id))
+      .filter((item) => item !== null);
+  const guestAt = (url) => guests().find((item) => item.getURL().startsWith(url));
+  /** Нажать кнопку шапки, как это делает человек: по подписи в подсказке. */
+  const pressToolbar = (title) =>
+    ask(
+      ide,
+      `(() => {
+        const button = [...document.querySelectorAll('.browser-toolbar button')].find(
+          (item) => item.getAttribute('title') === ${JSON.stringify(title)},
+        );
+        if (!button) return 'нет кнопки';
+        if (button.disabled) return 'выключена';
+        button.click();
+        return 'нажата';
+      })()`,
+    );
+  /** Прочитать страницу ИЗ вложения: так проверка не верит интерфейсу на слово. */
+  const readGuest = async (guest) => ({
+    заголовок: guest.getTitle(),
+    адрес: guest.getURL(),
+    текст: String(await guest.executeJavaScript('document.body.innerText'))
+      .replace(/\s+/g, ' ')
+      .trim(),
+    require: await guest.executeJavaScript('typeof require'),
+    process: await guest.executeJavaScript('typeof process'),
+  });
+
+  /* --- 2. Первая страница -------------------------------------------------------- */
+  check('у палитры есть пункт «Открыть страницу…»', (await openUrl(base)) === 'адрес принят');
+  const first = await waitFor(() => guestAt(base));
+  check('вложение создано и загрузило адрес', first !== null, first?.getURL());
+  const loaded = first ? await waitFor(() => first.getTitle() === 'Домашняя страница' && first) : null;
+  check('заголовок пришёл со страницы', loaded !== null, first?.getTitle());
+
+  const home = first ? await readGuest(first) : { текст: '' };
+  check('текст страницы прочитан из вложения', home.текст.includes('Маленький сайт'), home.текст.slice(0, 60));
+  check('гость без Node: нет require', home.require === 'undefined', home.require);
+  check('гость без Node: нет process', home.process === 'undefined', home.process);
+
+  const uiAfterOpen = await ask(ide, UI_STATE);
+  check('полотно редактора уступило странице', uiAfterOpen.полотно === true, uiAfterOpen.полотно);
+  check('вложение в дереве одно', panel.ids().length === 1, panel.ids());
+  check('в полосе вкладка страницы', uiAfterOpen.вкладки.length === 1, uiAfterOpen.вкладки);
+  check('подпись вкладки — заголовок страницы', uiAfterOpen.вкладки[0] === 'Домашняя страница', uiAfterOpen.вкладки[0]);
+  check('адресная строка показывает адрес', uiAfterOpen.адрес === `${base}/`, uiAfterOpen.адрес);
+
+  /* --- 2.1. Кнопка в шапке ------------------------------------------------------- */
+  // Кнопка открытия страницы стоит в шапке после переключателей раскладки и своего
+  // разделителя. Проверяем и место, и что она подсвечена, пока страница показана.
+  const topbar = await ask(
+    ide,
+    `(() => {
+      const left = [...document.querySelectorAll('.topbar-left > *')];
+      const button = left.find((node) => node.tagName === 'BUTTON' && (node.title ?? '').startsWith('Открыть страницу'));
+      const index = left.indexOf(button);
+      return {
+        есть: Boolean(button),
+        подсказка: button?.title ?? null,
+        подсвечена: button?.classList.contains('is-active') ?? false,
+        послеРазделителя: index > 0 && left[index - 1]?.classList.contains('topbar-sep') === true,
+        порядок: left.map((node) => (node.tagName === 'SPAN' ? '|' : (node.title ?? '').slice(0, 12))),
+      };
+    })()`,
+  );
+  check('в шапке есть кнопка «Открыть страницу»', topbar.есть === true, topbar.подсказка);
+  check('она отделена своим разделителем', topbar.послеРазделителя === true, topbar.порядок);
+  check('пока страница показана — кнопка подсвечена', topbar.подсвечена === true, topbar.подсвечена);
+
+  /* --- 3. Чужая схема: file: ------------------------------------------------------ */
+  await openUrl('file:///etc/passwd');
+  await wait(700);
+  const uiAfterFile = await ask(ide, UI_STATE);
+  check('file: вкладки не открыл', uiAfterFile.вкладки.length === 1, uiAfterFile.вкладки);
+  check('file: вложений не прибавил', panel.ids().length === 1, panel.ids());
+  check('file: сказано почему', /http/i.test(uiAfterFile.уведомление ?? ''), uiAfterFile.уведомление);
+
+  /* --- 4. Переход по ссылке внутри страницы -------------------------------------- */
+  const clicked = first
+    ? await first.executeJavaScript("document.getElementById('next').click(); 'клик'")
+    : 'нет вложения';
+  check('ссылка нажата в самой странице', clicked === 'клик', clicked);
+  const onAbout = first ? await waitFor(() => first.getURL().endsWith('/about') && first) : null;
+  check('страница ушла на второй адрес', onAbout !== null, first?.getURL());
+  const uiAfterLink = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.вкладки[0] === 'О странице' ? state : null;
+  });
+  check('подпись вкладки пошла за страницей', uiAfterLink !== null, uiAfterLink?.вкладки);
+  check('адресная строка пошла за страницей', uiAfterLink?.адрес === `${base}/about`, uiAfterLink?.адрес);
+  // Кнопки обновляются по своему событию загрузки — ждём его, а не первый же снимок.
+  const backEnabled = await waitFor(async () => (await ask(ide, UI_STATE)).назадВключена === true);
+  check('кнопка «Назад» ожила после перехода', backEnabled === true, backEnabled);
+  // Живая кнопка ещё ничего не значит: у Electron 44 `canGoBack()/goBack()` врут,
+  // поэтому шаг идёт по индексу истории — проверяем, что возврат СОСТОЯЛСЯ.
+  check('нажатие «Назад»', (await pressToolbar('Назад')) === 'нажата');
+  const backHome = first ? await waitFor(() => first.getURL() === `${base}/` && first) : null;
+  check('«Назад» вернула на прежний адрес', backHome !== null, first?.getURL());
+  check('нажатие «Вперёд»', (await pressToolbar('Вперёд')) === 'нажата');
+  const forwardAgain = first ? await waitFor(() => first.getURL().endsWith('/about') && first) : null;
+  check('«Вперёд» вернула на второй адрес', forwardAgain !== null, first?.getURL());
+
+  /* --- 5. Вторая страница — вторая вкладка --------------------------------------- */
+  check('второй адрес принят', (await openUrl(`${base}/third`)) === 'адрес принят');
+  const third = await waitFor(() => guestAt(`${base}/third`));
+  check('второе вложение создано', third !== null, third?.getURL());
+  const thirdLoaded = third ? await waitFor(() => third.getTitle() === 'Третья страница' && third) : null;
+  check('второй заголовок пришёл со страницы', thirdLoaded !== null, third?.getTitle());
+  const uiTwo = await ask(ide, UI_STATE);
+  check('в полосе две вкладки', uiTwo.вкладки.length === 2, uiTwo.вкладки);
+  check('активна вторая', uiTwo.активная === 'Третья страница', uiTwo.активная);
+  check('вложений тоже два (по одному на вкладку)', panel.ids().length === 2, panel.ids());
+  // Первая вкладка к этому моменту на другом адресе — состояние у вложений разное.
+  check('первая вкладка осталась на своём адресе', first?.getURL().endsWith('/about') === true, first?.getURL());
+
+  /* --- 6. Адресная строка: набор адреса вручную ---------------------------------- */
+  await ask(
+    ide,
+    `(() => {
+      const field = document.querySelector('.browser-address');
+      field.value = ${JSON.stringify(`${base}/about`)};
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return 'набрано';
+    })()`,
+  );
+  const uiTyped = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.активная === 'О странице' ? state : null;
+  });
+  check('набранный адрес открылся в активной вкладке', uiTyped !== null, uiTyped?.активная);
+  check('вторая вкладка ушла на набранный адрес', third?.getURL().endsWith('/about') === true, third?.getURL());
+
+  /* --- 7. Закрытие вкладки убирает вложение -------------------------------------- */
+  await ask(
+    ide,
+    `(() => {
+      document.querySelector('.tab-page.is-active .tab-close')?.click();
+      return 'закрыто';
+    })()`,
+  );
+  const oneGuest = await waitFor(() => guests().length === 1 && true);
+  check('закрытие вкладки убрало вложение из дерева', oneGuest === true, guests().length);
+  const uiClosed = await ask(ide, UI_STATE);
+  check('осталась одна вкладка', uiClosed.вкладки.length === 1, uiClosed.вкладки);
+  check('полотно показывает оставшуюся страницу', uiClosed.полотно === true && panel.ids().length === 1, uiClosed);
+
+  /* --- 8. Агент в том же браузере ------------------------------------------------ */
+  // Заглушка вместо отдельного Chromium: если агент позвал бы её — это была бы ошибка
+  // (проверяем, что он работает во ВСТРОЕННОМ браузере, а не в своём процессе).
+  const forbidden = () => {
+    throw new Error('агент ушёл в отдельный браузер вместо встроенного');
+  };
+  // Заглушка отдельного Chromium: если агент позвал бы её — проверка бы упала.
+  const externalStub = {
+    open: forbidden,
+    snapshot: forbidden,
+    click: forbidden,
+    type: forbidden,
+    evaluate: forbidden,
+    close: async () => {},
+  };
+  const agent = new AgentBrowser(panel, externalStub, () => true);
+
+  const agentSnapshot = await agent.open(`${base}/`).catch((error) => ({ error: String(error) }));
+  check(
+    'агент открыл страницу во встроенном браузере',
+    agentSnapshot.title === 'Домашняя страница',
+    agentSnapshot.title,
+  );
+  check(
+    'страницу агента видно вложением',
+    (await waitFor(() => panel.ids().includes('agent-1'))) === true,
+    panel.ids(),
+  );
+  const agentTab = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.вкладки.length === 2 ? state : null;
+  });
+  check('в полосе появилась вкладка агента', agentTab !== null, agentTab?.вкладки);
+  // Читаем ту же страницу, что и человек: тот же адрес, то же содержимое.
+  const agentTitle = await agent.evaluate('document.title');
+  check('агент видит ту же страницу', agentTitle === 'Домашняя страница', agentTitle);
+  const agentText = await agent.evaluate('document.body.innerText');
+  check('и то же содержимое', String(agentText).includes('Маленький сайт'), String(agentText).slice(0, 40));
+
+  await agent.close();
+  const agentGone = await waitFor(async () => (await ask(ide, UI_STATE)).вкладки.length === 1);
+  check('закрытие агента убрало его вкладку', agentGone === true, panel.ids());
+
+  /* --- 9. Общий доступ: агент работает в странице человека ------------------------ */
+  const human = panel.ids().find((id) => id.startsWith('page-')) ?? null;
+  check('осталась одна вкладка человека', human !== null && panel.ids().length === 1, panel.ids());
+  check('до кнопки общего доступа нет', panel.sharedPageId === null, panel.sharedPageId);
+
+  check('кнопка «поделиться» нажата', (await pressToolbar('Поделиться страницей с ассистентом')) === 'нажата');
+  const sharedId = await waitFor(() => panel.sharedPageId);
+  check('общий доступ выставлен на вкладку', sharedId === human, sharedId);
+
+  // Кнопка сменила подсказку — человеку видно, что доступ открыт, и как его снять.
+  const sharedLabel = await waitFor(() =>
+    ask(
+      ide,
+      "[...document.querySelectorAll('.browser-toolbar button')].map((b) => b.title).find((t) => t && t.startsWith('Отозвать')) ?? null",
+    ),
+  );
+  check('кнопка показывает «отозвать»', typeof sharedLabel === 'string', sharedLabel);
+
+  // Агент теперь работает в поделённой странице и НЕ заводит свою.
+  const sharedAgent = new AgentBrowser(panel, externalStub, () => true);
+  const beforeCount = panel.ids().length;
+  const viaShared = await sharedAgent.open(base + '/third').catch((error) => ({ error: String(error) }));
+  check(
+    'агент получил страницу через общий доступ',
+    viaShared.title === 'Третья страница',
+    viaShared.title ?? viaShared.error,
+  );
+  check('агент не завёл свою вкладку', panel.ids().length === beforeCount, panel.ids());
+  check(
+    'поделённая страница ушла на адрес агента',
+    panel.contents(human)?.getURL().endsWith('/third') === true,
+    panel.contents(human)?.getURL(),
+  );
+  await sharedAgent.close();
+
+  check('кнопка «отозвать» нажата', (await pressToolbar('Отозвать доступ ассистента к странице')) === 'нажата');
+  const cleared = await waitFor(async () => (panel.sharedPageId === null ? 'снят' : null));
+  check('общий доступ снят', cleared === 'снят', panel.sharedPageId);
+
+  // Без общего доступа агент снова заводит СВОЮ вкладку во временной сессии.
+  const ownAgent = new AgentBrowser(panel, externalStub, () => true);
+  await ownAgent.open(base + '/').catch(() => undefined);
+  const ownTab = await waitFor(() => panel.ids().some((id) => id.startsWith('agent-')));
+  check('без общего доступа агент завёл свою вкладку', ownTab === true, panel.ids());
+  await ownAgent.close();
+  await waitFor(() => !panel.ids().some((id) => id.startsWith('agent-')));
+
+  /* --- 10. Ссылка со страницы: новая вкладка в той же полосе ---------------------- */
+  const opener = panel
+    .ids()
+    .map((id) => panel.contents(id))
+    .find((item) => item && item.getURL().endsWith('/third'));
+  check('страница-источник найдена', opener !== undefined, panel.ids());
+  if (opener) await opener.executeJavaScript('window.open(' + JSON.stringify(base + '/popup') + "); 'ок'");
+  const popupTab = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.вкладки.length === 2 ? state : null;
+  });
+  check('window.open завёл вторую вкладку', popupTab !== null, popupTab?.вкладки);
+  const popupGuest = await waitFor(() => guestAt(base + '/popup'));
+  check('вложение новой вкладки загрузило адрес', popupGuest !== null, popupGuest?.getURL());
+
+  /* --- 11. Снимок и консоль страницы — в чат ------------------------------------- */
+  // Активна всплывающая вкладка — она писала в консоль (см. POPUP).
+  const chatChips = () =>
+    ask(
+      ide,
+      "[...document.querySelectorAll('.composer-chips .chip')].map((c) => c.querySelector('.chip-name')?.textContent ?? '')",
+    );
+  const pressChatMenu = (label) =>
+    ask(
+      ide,
+      '(async () => {' +
+        "const button = [...document.querySelectorAll('.browser-toolbar button')].find((b) => b.getAttribute('title') === 'Добавить в чат');" +
+        "if (!button) return 'нет кнопки';" +
+        "if (button.disabled) return 'выключена';" +
+        'button.click();' +
+        'await new Promise((r) => setTimeout(r, 250));' +
+        "const item = [...document.querySelectorAll('.context-item')].find((node) => (node.querySelector('.context-label')?.textContent ?? '') === " +
+        JSON.stringify(label) +
+        ');' +
+        "if (!item) return 'нет пункта';" +
+        'item.click();' +
+        "return 'нажато';" +
+        '})()',
+    );
+
+  check('пункт «Снимок страницы в чат» нажат', (await pressChatMenu('Снимок страницы в чат')) === 'нажато');
+  const imageChip = await waitFor(async () => {
+    const chips = await chatChips();
+    return Array.isArray(chips) && chips.some((name) => String(name).startsWith('Страница ')) ? chips : null;
+  });
+  check('снимок страницы пришёл в чат картинкой', imageChip !== null, imageChip);
+  const thumb = await ask(ide, "document.querySelectorAll('.composer-chips .chip-image .chip-thumb').length");
+  check('чип картинки показывает миниатюру', thumb >= 1, thumb);
+
+  check('пункт «Журнал консоли в чат» нажат', (await pressChatMenu('Журнал консоли в чат')) === 'нажато');
+  const consoleChip = await waitFor(async () => {
+    const chips = await chatChips();
+    return Array.isArray(chips) && chips.some((name) => String(name).startsWith('Журнал консоли')) ? chips : null;
+  });
+  check('журнал консоли пришёл в чат контекстом', consoleChip !== null, consoleChip);
+
+  const shot = await ide.capturePage();
+  await fs.writeFile(path.join(SHOTS, 'browser-view.png'), shot.toPNG());
+
+  console.log(failed === 0 ? '\nвстроенный браузер работает' : `\nпровалов: ${failed}`);
+  console.log(`Снимок: ${path.join(SHOTS, 'browser-view.png')}`);
+
+  server.close();
+  terminals.dispose();
+  workspace.dispose();
+  panel.dispose();
+  await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  app.exit(failed === 0 ? 0 : 1);
+});

@@ -32,6 +32,9 @@ const ask = (window, expression, timeoutMs = 20000) =>
 
 const MANY = 3000;
 
+/** Случилась ли ошибка: окно строк, оставшееся куцым, — это провал, а не отчёт. */
+let failed = false;
+
 app.whenReady().then(async () => {
   const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-tree-probe-')));
   const project = path.join(dir, 'demo');
@@ -104,8 +107,50 @@ app.whenReady().then(async () => {
   await wait(800);
   console.log(`[tree] снизу: ${JSON.stringify(await snapshot())}`);
 
+  /* Окно строк считают по ВЫСОТЕ панели в момент отрисовки. Если она была нулевой
+     (раскладка не встала, переключали панели, тянули окно), окно схлопывалось в
+     пару строк и таким и оставалось: прокрутка честная, а строк мало и ниже пустота.
+     Высоту меняем и смотрим, что окно пересчиталось на новую. */
+  await ask(
+    ide,
+    `(() => {
+      const sidebar = document.querySelector('.sidebar');
+      if (sidebar) sidebar.style.display = 'none';
+      const tree = document.querySelector('.explorer .tree');
+      if (tree) {
+        tree.scrollTop = 2000;
+        tree.dispatchEvent(new Event('scroll'));
+      }
+      return true;
+    })()`,
+  );
+  await wait(500);
+  const collapsed = await snapshot();
+  await ask(
+    ide,
+    `(() => {
+      const sidebar = document.querySelector('.sidebar');
+      if (sidebar) sidebar.style.display = '';
+      return true;
+    })()`,
+  );
+  await wait(900);
+  const regrown = await snapshot();
+  console.log(`[tree] при нулевой высоте: ${JSON.stringify(collapsed)}`);
+  console.log(`[tree] после возврата высоты: ${JSON.stringify(regrown)}`);
+  // Куцым окно выдаёт себя двумя приметами: строк меньше, чем влезает в высоту, и
+  // нет распорки сверху (окно прижато к началу, хотя прокрутка стоит в середине).
+  const coversViewport = regrown.вDOM >= 20;
+  const scrolledWindow = regrown.распорки >= 1;
+  if (coversViewport && scrolledWindow) {
+    console.log('[tree] окно строк пересчитано на высоту панели');
+  } else {
+    console.log('[tree] ПРОВАЛ: окно осталось куцым — строк видно мало, ниже пустота');
+    failed = true;
+  }
+
   terminals.dispose();
   workspace.dispose();
   await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
-  app.exit(0);
+  app.exit(failed ? 1 : 0);
 });

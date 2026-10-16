@@ -21,6 +21,7 @@ import { ChatStore } from '../ai/chat-store';
 import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
 import type { GitService } from '../git/git';
 import type { DebugService } from '../debug/debug';
+import type { BrowserPanel } from '../browser/panel';
 import type { LspService } from '../lsp/lsp';
 import type { McpService } from '../mcp/mcp';
 import { performMenuRole } from '../menu';
@@ -34,6 +35,7 @@ import { findPackages } from '../project/packages';
 import { testCommand } from '../project/tests';
 import { activateCommand, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
 import { missingPackages } from '../node/packages';
+import { missingLocalImports } from '../project/local-imports';
 import {
   checkEnvironment as checkNodeEnvironment,
   nodeInfo,
@@ -87,6 +89,8 @@ export interface AppDependencies {
   git: GitService;
   /** Обратные вызовы main → renderer (правки в документной модели). */
   host: HostClient;
+  /** Встроенный браузер: страница — вкладка в редакторе (`WebContentsView`). */
+  browserPanel?: BrowserPanel;
   /** Хранилище бесед. Необязательно: пробникам история чата не нужна. */
   chatStore?: ChatStore;
   /** Языковые серверы. Необязательно: пробникам LSP не нужен. */
@@ -494,14 +498,17 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   });
 
   // Проверка импортов: какие модули файл подключает, а проект их не видит.
-  // У Python окружение — интерпретатор, у JS/TS — каталоги `node_modules`.
+  // У Python окружение — интерпретатор, у JS/TS — каталоги `node_modules`,
+  // а у относительных ссылок (`./util`, `from .mod`) — сам диск.
   router.register('imports.missing', async (params) => {
     const root = deps.workspace.rootPath();
     const missing =
       params.language === 'python'
         ? await missingModules(root, resolvePython(root), params.modules)
         : await missingPackages(root, params.modules);
-    return { missing };
+    // Свои модули проекта ищем рядом с файлом, который их импортирует.
+    const local = await missingLocalImports(params.language, params.path, params.locals);
+    return { missing: [...missing, ...local] };
   });
 
   // Установленные пакеты главного окружения: имя и версия.
@@ -823,6 +830,61 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     return { ok: (await shell.openPath(target).catch(() => 'ошибка')) === '' };
   });
 
+  /* Встроенный браузер. Вложение живёт не в DOM, а отдельным слоем окна, поэтому
+     место ему задаётся числами: прямоугольник области редактора меряет renderer. */
+  router.register('browser.viewCreate', (params) => {
+    const panel = deps.browserPanel;
+    if (!panel) return { ok: false, reason: 'Браузер недоступен' };
+    return panel.create(params.id, params.url);
+  });
+  router.register('browser.viewShow', (params) => {
+    const panel = deps.browserPanel;
+    if (!panel) return { ok: false };
+    return panel.show(params.id, params.rect);
+  });
+  // Спрятать вложение нужно и тогда, когда страница никуда не делась: палитра,
+  // окна и уведомления лежат в DOM, а слой вложения перекрывает их.
+  router.register('browser.viewHide', () => {
+    deps.browserPanel?.hide();
+    return { ok: true };
+  });
+  router.register('browser.viewLayout', (params) => {
+    deps.browserPanel?.layout(params.rect);
+    return { ok: true };
+  });
+  router.register('browser.viewCommand', (params) => {
+    const panel = deps.browserPanel;
+    if (!panel) return { ok: false, reason: 'Браузер недоступен' };
+    return panel.command(params.id, params.action, params.url);
+  });
+  router.register('browser.viewClose', (params) => {
+    deps.browserPanel?.close(params.id);
+    return { ok: true };
+  });
+  router.register('browser.viewCloseAll', () => {
+    deps.browserPanel?.closeAll();
+    return { ok: true };
+  });
+  // Общий доступ к вкладке: без него агент работает только в своей сессии, а
+  // поделившись — в этой же странице, вместе с её логином и куками.
+  router.register('browser.viewShare', (params) => deps.browserPanel?.share(params.id) ?? { ok: false });
+  router.register('browser.viewUnshare', () => {
+    deps.browserPanel?.unshare();
+    return { ok: true };
+  });
+  // Страница — слой окна, а не элемент документа: снять её и прочитать консоль
+  // может только main, поэтому эти два запроса тоже идут сюда.
+  router.register('browser.viewCapture', (params) => {
+    const panel = deps.browserPanel;
+    if (!panel) return { ok: false, reason: 'Браузер недоступен' };
+    return panel.capture(params.id);
+  });
+  router.register('browser.viewConsole', (params) => {
+    const panel = deps.browserPanel;
+    if (!panel) return { ok: false, lines: [] };
+    return { ok: true, lines: panel.consoleLines(params.id) };
+  });
+
   // Терминал системы в папке проекта: привычный человеку терминал — за окном IDE.
   // Рабочий каталог ставим процессу: не всякий терминал умеет «откройся здесь» доводом.
   router.register('shell.openTerminal', async (params) => {
@@ -877,6 +939,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   });
   router.register('lsp.restart', () => deps.lsp?.restart() ?? NO_LSP_STATUS);
   router.register('lsp.status', () => deps.lsp?.status() ?? NO_LSP_STATUS);
+  // Прогрев: поднять серверы языков проекта, не дожидаясь открытия файлов.
+  router.register('lsp.prewarm', async (params) => {
+    await deps.lsp?.prewarm(params.languages);
+  });
   // Прокси к серверу: подсказки, наведение, переход к определению. Сервера нет —
   // возвращаем null, и редактор просто не покажет подсказку.
   router.register('lsp.request', (params) => deps.lsp?.request(params.path, params.method, params.params) ?? null);

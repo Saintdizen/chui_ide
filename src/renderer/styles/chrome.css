@@ -148,7 +148,10 @@ textarea {
   --right-width: var(--right-size);
   --dock-height: var(--dock-size);
   grid-template-columns: 6px var(--sidebar-width) var(--sidebar-gap) minmax(0, 1fr) var(--right-gap) var(--right-width) 6px;
-  grid-template-rows: var(--topbar_height) minmax(0, 1fr) 24px;
+  /* Четыре ряда: шапка, рабочая зона (лево · редактор · право), нижний остров
+     и строка состояния. Нижний остров — своя дорожка, поэтому он лежит ниже
+     боковой панели и редактора, а не между ними. */
+  grid-template-rows: var(--topbar_height) minmax(0, 1fr) auto 24px;
   height: 100%;
   /* Safe areas: на мониторе нули (переменные из `theme.css`), а у выреза или
      скруглённых углов содержимое отступает от края, а не упирается в него. */
@@ -289,6 +292,15 @@ textarea {
   min-width: 0;
 }
 
+/* Разделитель в шапке: отделяет действия над содержимым (сохранить, поиск)
+   от переключателей раскладки (панели, разделение редактора). */
+.topbar-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--separator_color);
+}
+
 /* На macOS свои кнопки не нужны: там остаются системные «светофоры»,
    и под них надо освободить место слева. */
 :root.is-mac .topbar-left {
@@ -383,7 +395,8 @@ textarea {
 
 .splitter-right {
   grid-column: 5;
-  grid-row: 2;
+  /* Ручка тянется на всю высоту правой панели: та занимает и ряд нижнего острова. */
+  grid-row: 2 / 4;
   cursor: col-resize;
 }
 
@@ -417,12 +430,18 @@ textarea {
   grid-column: 4;
   grid-row: 2;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
 }
 
+/* Нижний остров — от левого края рабочей зоны (под боковой панелью и редактором),
+   но НЕ под правой панелью: вкладка чата идёт вниз до строки состояния и делит с
+   редактором всю высоту. Колонки 2–4: край острова совпадает с краем боковой панели
+   слева и редактора справа. Высота ряда — `auto`: скрытый док схлопывается в ноль. */
 .dock-wrap {
+  grid-column: 2 / 5;
+  grid-row: 3;
   display: grid;
   grid-template-rows: 6px var(--dock-height);
   min-height: 0;
@@ -435,7 +454,9 @@ textarea {
 
 .right-panel {
   grid-column: 6;
-  grid-row: 2;
+  /* Правая панель (чат) идёт на оба ряда вниз, до строки состояния: нижний остров
+     её не перекрывает. Так под чатом — его же площадь, а не панель инструментов. */
+  grid-row: 2 / 4;
   display: flex;
   flex-direction: column;
 }
@@ -451,7 +472,7 @@ textarea {
 
 .statusbar-host {
   grid-column: 1 / -1;
-  grid-row: 3;
+  grid-row: 4;
 }
 
 /* ── заголовки панелей ──────────────────────────────────────────────────── */
@@ -624,6 +645,37 @@ textarea {
 
 .tab-close:hover {
   background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+/* Кнопка режима вкладки (просмотр разметки у .md): как крестик — прячется до
+   наведения, но остаётся видна, пока режим включён (`aria-pressed`). */
+.tab-action {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius_xs);
+  color: var(--text_color_tertiary);
+  opacity: 0;
+  transition:
+    background var(--motion_fast) var(--motion_ease),
+    color var(--motion_fast) var(--motion_ease),
+    opacity var(--motion_fast) var(--motion_ease);
+}
+
+.tab:hover .tab-action,
+.tab.is-active .tab-action,
+.tab-action[aria-pressed="true"] {
+  opacity: 1;
+}
+
+.tab-action:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color);
+}
+
+.tab-action[aria-pressed="true"] {
   color: var(--text_color);
 }
 
@@ -1216,6 +1268,28 @@ textarea {
 
 .select-popup:focus {
   outline: none;
+}
+
+/* ── подсказка приложения ──────────────────────────────────────────────── */
+
+/* Своя подсказка вместо системной (см. `ui/tooltip.ts`): тот же слой-материал, что
+   у прочих всплывающих поверхностей, — подсказка читается как часть IDE, а не как
+   окно рабочего стола. Наведение на себя отключено: подсказка стоит под курсором
+   и не должна перехватывать события у кнопки, которую поясняет. */
+.app-tooltip {
+  position: fixed;
+  z-index: var(--layer_tooltip);
+  max-width: 340px;
+  padding: 4px 8px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--popup_background);
+  box-shadow: var(--box_shadow_small);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  line-height: var(--line_height_ui);
+  pointer-events: none;
+  animation: popup-fade var(--motion_fast) var(--motion_ease);
 }
 
 .select-item {

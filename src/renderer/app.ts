@@ -1,5 +1,6 @@
 import {
   PushTopic,
+  type BrowserEventPayload,
   type DebugLaunchOptions,
   type LayoutSettings,
   type LspServerConfig,
@@ -38,7 +39,9 @@ import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
 import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
 import { languageFromPath, languageLabel, languageIndent } from './core/languages';
+import { normalizeBrowserUrl, isLocalUrl } from '../shared/browser';
 import { imageFormatLabel, isImagePath } from '../shared/images';
+import { BrowserTabs } from './core/browser-tabs';
 import { ImportChecker } from './core/import-check';
 import { LspClient } from './core/lsp';
 import { fetchCallHierarchy, type CallDirection } from './core/call-hierarchy';
@@ -91,18 +94,19 @@ import { WorkspaceModel } from './core/workspace-model';
 import { showApplicationMenu } from './ui/app-menu';
 import { showContextMenu } from './ui/context-menu';
 import { createBreadcrumbs } from './ui/breadcrumbs';
-import { createChatPanel } from './ui/chat';
+import { createChatPanel, type ChatView } from './ui/chat';
 import { createDock } from './ui/dock';
 import { createConflictView } from './ui/conflict-view';
 import { createDiffView } from './ui/diff-view';
 import { basename, clear, h, svgIcon, type IconName } from './ui/dom';
 import { createEmptyState } from './ui/empty-state';
 import { createImageView } from './ui/image-view';
+import { createBrowserView } from './ui/browser-view';
 import { createExplorer } from './ui/explorer';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
 import { createLspPopover, type LspPopoverView } from './ui/lsp-popover';
-import { createMarkdownPreview } from './ui/markdown-preview';
+import { createMarkdownPreview, isMarkdownPath } from './ui/markdown-preview';
 import { createNotebookPanel } from './ui/notebook-panel';
 import { logoMark } from './ui/logo';
 import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-popover';
@@ -146,12 +150,13 @@ import { createNotificationsModal } from './ui/notifications-modal';
 import { createTextModal } from './ui/text-modal';
 import { createStatusBar } from './ui/statusbar';
 import { createSettingsModal } from './ui/settings-modal';
-import { createTabs } from './ui/tabs';
+import { createTabs, type PagesTabSource } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
 import { createDebugPanel } from './ui/debug-panel';
 import { createTestPanel } from './ui/test-panel';
 import { createTodoPanel } from './ui/todo-panel';
 import { showToast } from './ui/toast';
+import { installTooltips } from './ui/tooltip';
 import { createVenvModal } from './ui/venv-modal';
 
 /**
@@ -159,6 +164,10 @@ import { createVenvModal } from './ui/venv-modal';
  * Всё остальное — модули, которые друг о друге почти ничего не знают.
  */
 export async function startApplication(mount: HTMLElement): Promise<void> {
+  // Подсказки — свои, вместо системных: ставятся один раз на всё окно и ловят
+  // наведение на документе (см. `ui/tooltip.ts`).
+  installTooltips();
+
   const rpc = new RpcClient();
   const commands = new CommandRegistry();
   const documents = new DocumentStore();
@@ -891,16 +900,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   /**
-   * Менеджер git в поповере: тот же самописный менеджер, что и панель изменений,
-   * только всплывает у кнопки ветки в статусбаре. Создаём при первом клике —
-   * чтобы не держать вторую подписку на модель, пока попап ни разу не открывали.
+   * Менеджер git в поповере: та же панель изменений всплывает у кнопки ветки
+   * в статусбаре — вкладки «Изменения» в нижней панели больше нет. Экземпляр один:
+   * берём тот же `sourceControl`, а не заводим вторую копию с отдельной подпиской.
    */
   let gitManagerPopover: PopoverView | null = null;
 
   function openGitManager(anchor: HTMLElement): void {
     if (!gitManagerPopover) {
-      const manager = createSourceControl({ git, workspace, commands });
-      gitManagerPopover = createPopover(manager.element, { width: 360 });
+      gitManagerPopover = createPopover(sourceControl.element, { width: 360 });
       gitManagerPopover.element.classList.add('popover-git');
     }
     // Свежее состояние: репозиторий мог измениться вне приложения.
@@ -1087,6 +1095,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     scheme: theme.resolved,
     // Лигатуры консоли — те же, что у кода: единый вид обоих полотен.
     ligatures: () => settings.editor.fontLigatures,
+    // Ссылка из вывода терминала: локальный адрес — вкладкой в IDE, чужой — системным.
+    openLink: (url) => openLinkFromTerminal(url),
   });
 
   /** Карта проекта: из неё берём тесты и точку входа. Пусто, пока проект не открыт. */
@@ -1313,21 +1323,21 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     label: (path) => workspace.relative(path),
     hasWorkspace: () => workspace.root !== null,
   });
-  // Предпросмотр Markdown: разметка активного файла. Рисует её тот же разборщик,
-  // что ленту чата, — безопасно (без `innerHTML`) и с той же подсветкой кода.
+  // Предпросмотр Markdown — режим вкладки файла .md, а не панель: разметку показываем
+  // оверлеем в области редактора (как вьюер картинок и встроенный браузер), а
+  // переключает режим кнопка в самой вкладке. Рисует разметку тот же разборщик, что
+  // ленту чата, — безопасно (без `innerHTML`) и с той же подсветкой кода.
+  // Какие файлы в режиме просмотра — помним набором путей: переключение вкладок режим не сбрасывает.
+  const markdownPreviews = new Set<string>();
   const markdownPreview = createMarkdownPreview({
     openEditors,
     documents,
     insertCode: (code) => editors.insertAtCursor(code),
     relativePath: (path) => workspace.relative(path),
-    isVisible: () => dock.activeId === 'preview',
+    isVisible: () => previewingMarkdownPath() !== null,
+    onEdit: () => setMarkdownPreview(false),
   });
-  dock.register({
-    id: 'preview',
-    title: 'Markdown',
-    element: markdownPreview.element,
-    onShow: () => markdownPreview.refresh(),
-  });
+  layout.editorHost.appendChild(markdownPreview.element);
 
   // Ячейки ноутбука: `.ipynb` показан ячейками (markdown отрисован, код — блоком),
   // а «Сравнить с HEAD» сопоставляет их с версией из git по ячейкам, не по строкам JSON.
@@ -1338,26 +1348,23 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     relativePath: (path) => workspace.relative(path),
     isVisible: () => dock.activeId === 'notebooks',
   });
-  dock.register({
-    id: 'notebooks',
-    title: 'Ячейки',
-    element: notebookPanel.element,
-    onShow: () => notebookPanel.refresh(),
-  });
-  dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });
-  dock.register({ id: 'tests', title: 'Тесты', element: testPanel.element, onShow: () => void testPanel.refresh() });
+
+  // Порядок вкладок задаёт порядок регистрации, поэтому он здесь явный: первыми идут
+  // те, что открывают чаще всего, — терминал и поиск, — дальше остальные.
   dock.register({
     id: 'terminal',
     title: 'Терминал',
     element: terminalPanel.element,
     onShow: () => void terminalPanel.open(),
   });
+  dock.register({ id: 'search', title: 'Поиск', element: searchView.element, onShow: () => searchView.focus() });
   dock.register({
-    id: 'git',
-    title: 'Изменения',
-    element: sourceControl.element,
-    onShow: () => sourceControl.focus(),
+    id: 'notebooks',
+    title: 'Ячейки',
+    element: notebookPanel.element,
+    onShow: () => notebookPanel.refresh(),
   });
+  dock.register({ id: 'tests', title: 'Тесты', element: testPanel.element, onShow: () => void testPanel.refresh() });
   // Структуру собираем при показе вкладки: файл мог смениться, пока панель была скрыта.
   dock.register({ id: 'outline', title: 'Структура', element: outline.element, onShow: () => outline.refresh() });
   // Список собираем при показе вкладки и по изменению пометок (ниже). Значок на вкладке —
@@ -1394,6 +1401,44 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Когда он виден — решает `syncImage` по активной вкладке.
   const imageView = createImageView({ rpc, notify: (message) => showToast(message, 'error') });
   layout.editorHost.appendChild(imageView.element);
+
+  // Вкладки встроенного браузера: страницы живут в той же полосе, что файлы, а
+  // рисует их вложение окна (WebContentsView) — место ему считает renderer.
+  const browserTabs = new BrowserTabs();
+  // Чат создаётся ниже, а браузеру он нужен уже сейчас: «добавить в чат» шлёт туда
+  // снимок страницы и её консоль. Держим ленивую ссылку — к моменту нажатия кнопки
+  // чат уже создан.
+  let chatForBrowser: ChatView | null = null;
+  const browserView = createBrowserView({
+    rpc,
+    openExternal: (url) => void rpc.request('shell.openExternal', { url }).catch(() => undefined),
+    notify: (message) => showToast(message, 'error'),
+    attachImage: (image) => chatForBrowser?.attachImage(image),
+    attachContext: (item) => chatForBrowser?.attachContext(item),
+  });
+  layout.editorHost.appendChild(browserView.element);
+
+  /**
+   * Полоса вкладок закрывает страницу так же, как файл, — но вложение само из дерева
+   * не уходит: за это отвечает `browserView.forget`. Поэтому закрытие вкладки проходит
+   * через него, а не зовёт модель напрямую — иначе гость остался бы жить процессом.
+   */
+  const browserPages: PagesTabSource = {
+    get list() {
+      return browserTabs.list;
+    },
+    get activePageId() {
+      return browserTabs.activePageId;
+    },
+    activate: (id) => browserTabs.activate(id),
+    close: (id) => {
+      browserView.forget(id);
+      browserTabs.close(id);
+    },
+    onDidChange: (listener) => {
+      browserTabs.onDidChange(listener);
+    },
+  };
 
   let chatInEditor = false;
   /** Вкладка чата показана сейчас: файлы ждут своей очереди. */
@@ -1433,10 +1478,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const shown = chatInEditor && chatTabActive;
     chatEditor.hidden = !shown;
     layout.editorIsland.classList.toggle('is-chat', shown);
-    // Чат и картинка делят одну область — одновременно их не показываем.
+    // Чат, картинка, страница и разметка делят одну область — одновременно их не показываем.
     if (shown) {
       imageView.hide();
       layout.editorIsland.classList.remove('is-image');
+      browserView.hide();
+      layout.editorIsland.classList.remove('is-browser');
+      markdownPreview.hide();
+      layout.editorIsland.classList.remove('is-markdown');
+    } else {
+      // Чат ушёл — вернуть тот экран, которому принадлежит активная вкладка.
+      syncImage();
+      syncBrowser();
+      syncMarkdown();
     }
     tabs.refresh();
     // Вкладка чата — это тоже «показан ли чат»: кнопка AI должна это отражать.
@@ -1450,11 +1504,85 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   function syncImage(): void {
     const path = openEditors.active?.path ?? null;
     const image = path !== null && isImagePath(path) ? path : null;
-    const shown = image !== null && !(chatInEditor && chatTabActive);
+    // Страница браузера занимает ту же область: уступаем ей.
+    const shown = image !== null && browserTabs.activePageId === null && !(chatInEditor && chatTabActive);
     layout.editorIsland.classList.toggle('is-image', shown);
     if (shown && image !== null) imageView.show(image);
     else imageView.hide();
   }
+
+  /**
+   * Активная вкладка — страница браузера: полотно редактора уступает вложению.
+   * Чат и страница делят одну область, поэтому показан может быть только один.
+   */
+  function syncBrowser(): void {
+    const page = browserTabs.active;
+    const shown = page !== null && !(chatInEditor && chatTabActive);
+    layout.editorIsland.classList.toggle('is-browser', shown);
+    if (shown && page) {
+      // Вложение приезжает из main готовым слоем: показываем, только если его нет.
+      // Иначе каждый чих вкладки (смена заголовка, загрузка) дёргал бы main зря.
+      if (browserView.pageId !== page.id || !browserView.isOpen) browserView.show(page);
+    } else {
+      browserView.hide();
+    }
+    if (shown) {
+      // Картинке здесь места нет: обе области — это один и тот же прямоугольник экрана.
+      imageView.hide();
+      layout.editorIsland.classList.remove('is-image');
+      markdownPreview.hide();
+      layout.editorIsland.classList.remove('is-markdown');
+    }
+    // Подсветка кнопки в шапке идёт за страницей: она показывает, открыт ли браузер.
+    syncViewButtons();
+  }
+
+  /** Путь активного файла, если он сейчас показан разметкой; иначе `null`. */
+  function previewingMarkdownPath(): string | null {
+    const path = openEditors.active?.path ?? null;
+    return path !== null && markdownPreviews.has(path) ? path : null;
+  }
+
+  /** Включить/выключить просмотр разметки (по умолчанию — у активного файла). */
+  function setMarkdownPreview(on: boolean, path: string | null = openEditors.active?.path ?? null): void {
+    if (path === null || !isMarkdownPath(path)) return;
+    if (on) markdownPreviews.add(path);
+    else markdownPreviews.delete(path);
+    syncMarkdown();
+    tabs.refresh();
+  }
+
+  /** Переключить режим файла (.md): текст ↔ разметка. */
+  function toggleMarkdownPreview(path: string): void {
+    setMarkdownPreview(!markdownPreviews.has(path), path);
+  }
+
+  /**
+   * Активная вкладка — markdown в режиме просмотра: полотно уступает разметке.
+   * Режим помним по пути файла, поэтому переключение вкладок его не сбрасывает.
+   */
+  function syncMarkdown(): void {
+    const path = previewingMarkdownPath();
+    const shown = path !== null && browserTabs.activePageId === null && !(chatInEditor && chatTabActive);
+    layout.editorIsland.classList.toggle('is-markdown', shown);
+    if (shown) {
+      markdownPreview.show();
+      // Разметке здесь места не больше, чем картинке: та же прямоугольная область экрана.
+      imageView.hide();
+      layout.editorIsland.classList.remove('is-image');
+      browserView.hide();
+      layout.editorIsland.classList.remove('is-browser');
+    } else {
+      markdownPreview.hide();
+    }
+  }
+
+  // Страница навигировалась, открылась или закрылась — полотно идёт за ней,
+  // а разметка уступает место, если страница заняла область.
+  browserTabs.onDidChange(() => {
+    syncBrowser();
+    syncMarkdown();
+  });
 
   function setChatInEditor(next: boolean): void {
     if (next === chatInEditor) {
@@ -1524,6 +1652,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     isInEditor: () => chatInEditor,
   });
   layout.rightBody.appendChild(chat.element);
+  // Чат готов — браузер теперь может слать ему снимок страницы и её консоль.
+  chatForBrowser = chat;
   // Статус ассистента (режим и заполнение контекста) живёт в общей полосе окна:
   // композер отдаёт готовую строку, статус-бар принимает её в свой слот.
   statusBar.chatSlot.appendChild(chat.statusElement);
@@ -1532,6 +1662,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     openEditors,
     documents,
     commands,
+    // Вкладки браузера стоят в этой же полосе — страница закрывается так же, как файл.
+    pages: browserPages,
+    // Файлы .md получают в вкладке кнопку «текст ↔ разметка».
+    preview: {
+      applies: (path) => isMarkdownPath(path),
+      active: (path) => markdownPreviews.has(path),
+      toggle: (path) => toggleMarkdownPreview(path),
+    },
     auxiliary: {
       title: 'Чат',
       get visible() {
@@ -1659,9 +1797,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * после перезапуска документы в нём уже не значатся: без повторного `lsp.open`
    * подсказки пропали бы до переоткрытия файла.
    */
-  function reopenLsp(): void {
-    if (!settings.lsp.enabled) return;
-    void rpc
+  function reopenLsp(): Promise<void> {
+    if (!settings.lsp.enabled) return Promise.resolve();
+    return rpc
       .request('lsp.restart')
       .then((status) => {
         // Перезапуск снял и «не поднялось» — обновляем чип сразу ответом, а серверы
@@ -1680,6 +1818,27 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   }
 
   /**
+   * Прогреть серверы языков проекта, не дожидаясь открытия файлов.
+   *
+   * Языки берём из карты проекта: греть серверы языков, которых в проекте нет, —
+   * лишние процессы. Карта от другого корня (проект только что сменился) — молчим:
+   * прогреем, когда она пересчитается. Для каких языков сервер есть, решает main —
+   * у него свежие настройки, а здешние могли отстать.
+   */
+  function prewarmLsp(): void {
+    if (!settings.lsp.enabled) return;
+    const root = workspace.root;
+    const scan = projectScan;
+    if (!root || !scan || scan.root !== root) return;
+    const languages = scan.languages.map((item) => item.id);
+    if (languages.length === 0) return;
+    void rpc
+      .request('lsp.prewarm', { languages })
+      .then(() => refreshLspStatus())
+      .catch(() => undefined);
+  }
+
+  /**
    * Подхватить появившиеся серверы и перезапустить уже настроенные.
    *
    * Одно без другого бессмысленно: без перезапуска новый сервер не поднимется, а
@@ -1688,7 +1847,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * окружение могло измениться: сначала дополнить список, потом перезапуск.
    */
   function refreshLsp(): void {
-    void ensureLspServers().then(() => reopenLsp());
+    void ensureLspServers()
+      .then(() => reopenLsp())
+      .then(() => prewarmLsp());
   }
 
   /** Окружение изменилось: перечитать инструменты, карту проекта, подсказки и импорты. */
@@ -1819,8 +1980,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const syncViewButtons = (): void => {
     viewButtons.get('project')?.classList.toggle('is-active', layout.sidebarVisible);
     viewButtons.get('search')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'search');
-    viewButtons.get('terminal')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'terminal');
+    // Кнопка нижней панели помнит состояние самого острова, а не одной вкладки:
+    // она его распахивает и захлопывает целиком.
+    viewButtons.get('dock')?.classList.toggle('is-active', layout.dockVisible);
     viewButtons.get('split')?.classList.toggle('is-active', editors.isSplit);
+    // Кнопка браузера помнит, показана ли страница сейчас: тем же значком её и
+    // открывают повторно — как кнопки панелей.
+    viewButtons.get('browser')?.classList.toggle('is-active', browserView.isOpen);
     // Выключенный AI прячем из шапки: неактивная кнопка всё равно звала бы в чат.
     const aiButton = viewButtons.get('ai');
     if (aiButton) {
@@ -1865,17 +2031,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   layout.topBarLeft.appendChild(menuButton);
   // Отдельного виджета проекта в шапке нет: имя проекта показывает заголовок
   // панели проекта, а открыть другую папку можно из меню (Ctrl+O).
-  // Переключатель боковой панели стоит рядом с меню: он про то же — что открыто слева.
-  // Раньше для него была отдельная полоса иконок у края окна.
-  addTopButton(layout.topBarLeft, 'project', 'panel', 'Боковая панель (Ctrl+B)', 'view.toggleSidebar');
-
-  // Действия шапки. Слева — то, что показывает содержимое: файлы, поиск,
-  // терминал. Справа — служебное: ассистент, палитра, настройки, тема.
+  // Действия шапки. Слева — то, что показывает содержимое: файлы, поиск. Дальше,
+  // за разделителем, — переключатели панелей окна и разделение редактора.
+  // Справа — служебное: ассистент, палитра, настройки, тема.
   addTopButton(layout.topBarLeft, 'save', 'save', 'Сохранить всё (Ctrl+Shift+S)', 'file.saveAll');
   addTopButton(layout.topBarLeft, 'search', 'search', 'Поиск по проекту (Ctrl+Shift+F)', 'search.project');
-  addTopButton(layout.topBarLeft, 'terminal', 'terminal', 'Терминал (Alt+F12)', 'view.showTerminal');
+  // Разделитель отделяет действия над содержимым от переключателей раскладки.
+  layout.topBarLeft.appendChild(h('span', { class: 'topbar-sep' }));
+  // Переключатель боковой панели: он про то же — что открыто слева.
+  addTopButton(layout.topBarLeft, 'project', 'panel', 'Боковая панель (Ctrl+B)', 'view.toggleSidebar');
+  // Нижний остров (терминал, поиск, задачи): кнопка целиком включает и выключает его,
+  // а значок — та же рамка с полосой, что у боковой панели, только полоса снизу.
+  addTopButton(layout.topBarLeft, 'dock', 'panelBottom', 'Нижняя панель (Alt+F12)', 'view.toggleDock');
   // Разделение области редактора: два файла рядом. Кнопка помнит состояние.
   addTopButton(layout.topBarLeft, 'split', 'split', 'Разделить редактор (Ctrl+\\)', 'view.splitEditor');
+  // Встроенный браузер: страница вкладкой рядом с кодом. Своим разделителем — это
+  // не раскладка окна, а ещё один способ открыть содержимое рядом с редактором.
+  layout.topBarLeft.appendChild(h('span', { class: 'topbar-sep' }));
+  addTopButton(layout.topBarLeft, 'browser', 'globe', 'Открыть страницу (Ctrl+Shift+B)', 'browser.open');
 
   // Центр шапки отдан главному: кнопке запуска, а когда запускать нечего — имени
   // открытого файла (см. syncRunControl). Одно сменяет другое, пустоты не бывает.
@@ -3607,6 +3780,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         return;
       }
       sourceControl.setMessage(message);
+      // Панель изменений теперь в поповере у кнопки ветки: показываем её, чтобы
+      // готовое сообщение было видно. Уже открытый не переключаем (toggle бы закрыл).
+      if (!gitManagerPopover?.isOpen) openGitManager(statusBar.gitAnchor);
       // Диф обрезан — предупреждаем: модель видела не всю правку, тему стоит проверить.
       showToast(context.truncated ? 'Сообщение готово (diff был обрезан — проверьте)' : 'Сообщение готово');
     } catch (error) {
@@ -4686,8 +4862,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
+  // Вкладки «Изменения» в нижней панели больше нет: полный менеджер git открывается
+  // поповером от кнопки ветки в статусбаре.
   define({ id: 'view.showChanges', title: 'Показать изменения', category: 'Вид', keybinding: 'Ctrl+Shift+G' }, () => {
-    dock.show('git');
+    openGitManager(statusBar.gitAnchor);
   });
 
   define({ id: 'view.toggleSidebar', title: 'Боковая панель', category: 'Вид', keybinding: 'Ctrl+B' }, () => {
@@ -4740,8 +4918,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
-  define({ id: 'view.showTerminal', title: 'Терминал', category: 'Вид', keybinding: 'Alt+F12' }, () => {
-    dock.toggle('terminal');
+  // Alt+F12 и кнопка шапки включают и выключают нижний остров целиком — как есть,
+  // с той вкладкой, что была открыта (первая по умолчанию — терминал).
+  define({ id: 'view.toggleDock', title: 'Нижняя панель', category: 'Вид', keybinding: 'Alt+F12' }, () => {
+    dock.toggle(dock.activeId ?? 'terminal');
+  });
+
+  // Открыть именно вкладку терминала (палитра, Ctrl+`).
+  define({ id: 'view.showTerminal', title: 'Терминал', category: 'Вид' }, () => {
+    dock.show('terminal');
   });
 
   define({ id: 'view.showOutline', title: 'Структура файла', category: 'Вид' }, () => {
@@ -4753,7 +4938,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   define({ id: 'view.showMarkdownPreview', title: 'Предпросмотр Markdown', category: 'Вид' }, () => {
-    dock.toggle('preview');
+    const path = openEditors.active?.path ?? null;
+    if (path === null || !isMarkdownPath(path)) {
+      showToast('Предпросмотр Markdown: откройте файл .md', 'error');
+      return;
+    }
+    toggleMarkdownPreview(path);
   });
 
   define({ id: 'view.regexTester', title: 'Отладчик регулярных выражений', category: 'Вид' }, () => {
@@ -4777,9 +4967,65 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
-  define({ id: 'view.toggleDock', title: 'Свернуть нижнюю панель', category: 'Вид' }, () => {
+  // Тумблер острова — одна команда на палитру, кнопку шапки и Alt+F12: показывает
+  // нижнюю панель с прежней вкладкой, а если она уже открыта — скрывает целиком.
+  define({ id: 'view.toggleDock', title: 'Нижняя панель', category: 'Вид', keybinding: 'Alt+F12' }, () => {
     if (dock.visible) dock.hide();
     else dock.show(dock.activeId ?? 'terminal');
+  });
+
+  /**
+   * Открыть адрес вкладкой встроенного браузера. Адрес нормализуем тем же правилом,
+   * что и браузер агента (`shared/browser.ts`): без схемы — https, локальные — http,
+   * а всем прочим схемам (file:, javascript:) отказ.
+   */
+  const openBrowserPage = (rawUrl: string): void => {
+    const normalized = normalizeBrowserUrl(rawUrl);
+    if (!normalized.ok) {
+      showToast(normalized.reason, 'error');
+      return;
+    }
+    // Дальше всё делает модель: вкладка появится в полосе, а полотно покажет страницу.
+    browserTabs.open(normalized.url);
+  };
+
+  /**
+   * Ссылка из вывода терминала. Локальный адрес открываем вкладкой в IDE: это почти
+   * всегда свой запущенный сервер или тест, и смотреть его надо рядом с кодом, а не
+   * искать окно браузера. Чужой адрес отдаём системному браузеру — схему проверит main.
+   * Развилка та же, что у VS Code (там она выведена настройкой), и по умолчанию
+   * локальные ссылки открываются встроенным браузером.
+   */
+  const openLinkFromTerminal = (url: string): void => {
+    if (isLocalUrl(url)) {
+      openBrowserPage(url);
+      return;
+    }
+    void rpc.request('shell.openExternal', { url }).catch(() => undefined);
+  };
+
+  // Встроенный браузер: страница открывается вкладкой в редакторе, как в VS Code.
+  define(
+    {
+      id: 'browser.open',
+      title: 'Открыть страницу (браузер в редакторе)',
+      category: 'Вид',
+      keybinding: 'Ctrl+Shift+B',
+      keywords: ['browser', 'url', 'страница', 'браузер', 'интернет'],
+    },
+    async () => {
+      const value = await promptValue({ title: 'Открыть страницу', label: 'Адрес', value: 'https://' });
+      if (value === null || value.trim() === '') return;
+      openBrowserPage(value);
+    },
+  );
+
+  // Закрыть все вкладки браузера: у файлов есть «закрыть другие», у страниц не было,
+  // а их набирается много, когда ходишь по одному сайту.
+  define({ id: 'browser.closeAll', title: 'Закрыть все вкладки браузера', category: 'Вид' }, () => {
+    if (browserTabs.list.length === 0) return;
+    void rpc.request('browser.viewCloseAll', undefined).catch(() => undefined);
+    browserTabs.closeAll();
   });
 
   define({ id: 'view.toggleRight', title: 'Панель AI', category: 'Вид', keybinding: 'Ctrl+Shift+A' }, () => {
@@ -5472,6 +5718,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         if (layout.rightVisible) layout.setRightVisible(false);
       });
     }
+    // Языковые серверы включили тумблером в настройках — подхватываем их и греем
+    // сразу, не дожидаясь открытия файла: иначе подсказок не было бы до переоткрытия
+    // файла. Выключение здесь ничего не делает: подъёмы прекращает сам main
+    // (`startLanguage` смотрит на `lsp.enabled`).
+    if (!previous.lsp.enabled && next.lsp.enabled) refreshLsp();
     syncViewButtons();
     // Инструменты проекта зависят от настроек запуска: путь к интерпретатору
     // и менеджеру пакетов могли поменять — перепроверяем проект заново.
@@ -5505,6 +5756,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // открытия о расхождении с диском уже не скажем.
   documents.onDidClose((document) => {
     diskDiffWarned.delete(document.path);
+    // Режим разметки у закрытого файла больше не нужен.
+    markdownPreviews.delete(document.path);
     // Прочитанную картинку забываем: файл мог на диске и измениться.
     imageView.forget(document.path);
   });
@@ -5603,6 +5856,35 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       case PushTopic.LspProgress:
         applyLspProgress(message.payload as LspProgress);
         break;
+      case PushTopic.BrowserNav: {
+        const payload = message.payload as BrowserEventPayload;
+        if (!payload || typeof payload !== 'object') break;
+        // Страница просит новую вкладку (`_blank`, `window.open`): вторых окон у нас
+        // нет — заводим вкладку в той же полосе.
+        if (payload.kind === 'newTab') {
+          browserTabs.open(payload.url);
+          break;
+        }
+        // Страницу открыл агент: вложение уже есть, ключ дал main — забираем вкладку.
+        if (payload.kind === 'opened') {
+          browserTabs.adopt(payload.id, payload.url);
+          break;
+        }
+        // Агент закончил: вкладка уходит вместе с вложением.
+        if (payload.kind === 'closed') {
+          browserPages.close(payload.id);
+          break;
+        }
+        // Общий доступ к странице: агент работает в этой же вкладке.
+        if (payload.kind === 'shared' || payload.kind === 'unshared') {
+          browserView.setShared(payload.id, payload.kind === 'shared');
+          break;
+        }
+        // Заголовок и адрес — в модель (их видит полоса), состояние — в шапку вкладки.
+        browserTabs.update(payload.id, { url: payload.url, title: payload.title });
+        browserView.update(payload.id, payload);
+        break;
+      }
       default:
         break;
     }
@@ -5615,9 +5897,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncEmptyState();
     syncRunControl();
     // Файл стал активным — показываем его, а вкладка чата просто ждёт в полосе.
-    if (openEditors.active) hideChatTab();
-    // Активной могла стать картинка — тогда полотно уступает вьюеру.
+    // Файл стал активным — показываем его, а вкладка чата просто ждёт в полосе.
+    if (openEditors.active) {
+      hideChatTab();
+      // Страницы браузера тоже отступают: активен файл — показываем файл.
+      browserTabs.deactivate();
+    }
+    // Активной могла стать картинка или markdown в режиме разметки — полотно уступает им.
     syncImage();
+    syncMarkdown();
     // Точки останова контроллер помнит по файлам, а редактор о них не знает:
     // при открытии вкладки отдаём ему набор — значки (с условиями) появятся сразу.
     for (const path of openEditors.paths) editors.setBreakpoints(path, debug.breakpointsOf(path));
@@ -5907,8 +6195,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         syncRunControl();
         await refreshScan();
         preloadEnvironment();
+        // Смена активного корня может сменить языки проекта — греем их серверы.
+        await ensureLspServers();
+        prewarmLsp();
       })();
-      void ensureLspServers();
       // Активный корень сменился — у него может быть свой набор настроек дерева.
       explorer.applySettings(resolveExplorerSettings(settings.explorer, workspace.root));
       return;
@@ -5920,9 +6210,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       syncRunControl();
       await refreshScan();
       preloadEnvironment();
+      // У нового проекта мог появиться свой сервер в окружении (pylsp в его venv):
+      // сначала подхватываем серверы, затем греем языки проекта.
+      await ensureLspServers();
+      prewarmLsp();
     })();
-    // Новый проект — могли появиться свои серверы в окружении (pylsp в venv).
-    void ensureLspServers();
     // Другой проект — другое рабочее место: восстанавливаем его из сессии,
     // затем накладываем настройки и макет проекта из .chui_ide.
     if (info) {
@@ -5980,6 +6272,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   await ensureLspServers();
   // Состав серверов читаем сразу: чип в статусбаре покажет, что поднято и откуда.
   void refreshLspStatus();
+  // И греем серверы языков проекта, не дожидаясь открытия файлов: подсказки,
+  // переходы и поиск по символам готовы сразу (см. `prewarmLsp`).
+  prewarmLsp();
   syncRunControl();
   // Окружение читаем тут же: к первому клику по чипу попап уже наполнен.
   preloadEnvironment();

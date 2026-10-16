@@ -46,7 +46,9 @@ function calledMethods(): Set<string> {
       if (entry.isDirectory()) walk(path);
       else if (path.endsWith('.ts')) {
         const source = readFileSync(path, 'utf8');
-        for (const match of source.matchAll(/rpc\.request\(\s*'([a-z]+(?:\.[A-Za-z0-9]+)+)'/g)) {
+        // Пробелы и перевод строки между `rpc` и `.request` допустимы: длинный вызов
+        // форматируется в столбик, и страж не должен считать его ненайденным.
+        for (const match of source.matchAll(/rpc\s*\.\s*request\(\s*'([a-z]+(?:\.[A-Za-z0-9]+)+)'/g)) {
           found.add(match[1]!);
         }
       }
@@ -66,16 +68,24 @@ const NOT_MOCKED: Record<string, string[]> = {
   'отладчик в браузере не работает — нет адаптера': [
     'debug.attach',
     'debug.continue',
+    'debug.evaluate',
+    'debug.hover',
     'debug.pause',
     'debug.scopes',
     'debug.setBreakpoints',
     'debug.setExceptionBreakpoints',
+    'debug.setExpression',
     'debug.setVariable',
     'debug.start',
     'debug.step',
     'debug.stop',
     'debug.variables',
   ],
+  'правка импортов и словарь орфографии — файлы и языковой сервер живут в main': [
+    'spell.dictionary',
+    'workspace.updateImports',
+  ],
+  'внешние инструменты (MCP) — процессы запускает main': ['ai.mcpTools'],
   'нужен настоящий репозиторий и клиент git — в моке их нет': [
     'git.bisectMark',
     'git.bisectReset',
@@ -132,6 +142,19 @@ const NOT_MOCKED: Record<string, string[]> = {
     'ai.setWebSearchKey',
     'ai.clearWebSearchKey',
     'ai.setPermission',
+  ],
+  'встроенный браузер держит main: вложение — слой окна, а не элемент страницы': [
+    'browser.viewCapture',
+    'browser.viewClose',
+    'browser.viewCloseAll',
+    'browser.viewCommand',
+    'browser.viewConsole',
+    'browser.viewCreate',
+    'browser.viewHide',
+    'browser.viewLayout',
+    'browser.viewShare',
+    'browser.viewShow',
+    'browser.viewUnshare',
   ],
   'обращение наружу и диалог закрытия окна': ['shell.openExternal', 'dialog.confirmClose'],
 };

@@ -44,9 +44,12 @@ describe('каркас модальных окон', () => {
   });
 
   it('задник (`modal-backdrop`) строит ТОЛЬКО каркас', () => {
+    // Именно СОЗДАНИЕ элемента (`class: 'modal-backdrop'`), а не любое упоминание
+    // класса: упомянуть его можно и в селекторе — так делает встроенный браузер,
+    // которому нужно знать, что окно открыто, чтобы спрятать страницу под ним.
     const owners = readdirSync(UI_DIR)
       .filter((name) => name.endsWith('.ts'))
-      .filter((name) => codeOf(name).includes('modal-backdrop'));
+      .filter((name) => /class:\s*['"`]modal-backdrop/.test(codeOf(name)));
     expect(owners).toEqual(['modal.ts']);
   });
 

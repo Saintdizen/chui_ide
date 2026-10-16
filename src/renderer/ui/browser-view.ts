@@ -1,0 +1,413 @@
+import type { BrowserAction, BrowserNavState, BrowserRect, ChatAttachment, PickedImage } from '../../shared/api';
+import { normalizeBrowserUrl } from '../../shared/browser';
+import type { BrowserPage } from '../core/browser-tabs';
+import type { RpcClient } from '../core/rpc';
+import { showContextMenu } from './context-menu';
+import { h, svgIcon } from './dom';
+
+/**
+ * Встроенный браузер: страница открывается вкладкой в редакторе, как в VS Code.
+ *
+ * Саму страницу рисует НЕ renderer. Вложение — это `WebContentsView`: отдельный
+ * слой окна, которым владеет main (`main/browser/panel.ts`). Здесь остаётся то,
+ * чего слою не сделать самому:
+ *
+ *   • шапка — кнопки и адресная строка. Она живёт в DOM и потому ВСЕГДА видна:
+ *     вложение ставится только на место «сцены» под шапкой, а не на всю вкладку;
+ *   • место. Вложение не в DOM, поэтому его прямоугольник меряет renderer
+ *     (`getBoundingClientRect` сцены) и присылает в main — при показе и на каждый
+ *     переезд области редактора (окно, панели, сплиттер);
+ *   • уступка оверлеям. Палитра, окна и уведомления — это DOM, а слой вложения
+ *     лежит поверх DOM. Пока открыт оверлей, страницу приходится прятать, иначе
+ *     её не увидеть и не нажать: слой перекроет и палитру.
+ *
+ * Состояние страницы (адрес, заголовок, кнопки «назад/вперёд») приходит обратным
+ * событием, а не читается у вложения напрямую: у renderer'а нет доступа к слою.
+ * Поэтому `update` — такой же вход, как события для любого другого вида.
+ */
+
+export interface BrowserView {
+  element: HTMLElement;
+  /** Показать вкладку. Вложение заводится при первом показе. */
+  show(page: BrowserPage): void;
+  hide(): void;
+  /** Вкладку закрыли — вложение больше не нужно. */
+  forget(id: string): void;
+  /** Перейти по адресу в активной вкладке. */
+  navigate(url: string): void;
+  /** Поставить фокус в адресную строку — так «открыть адрес» не заставляет искать мышью. */
+  focusAddress(): void;
+  /** Вложение сообщило о себе: обновить адресную строку и кнопки. */
+  update(id: string, state: BrowserNavState): void;
+  /** Вложение сообщило, что вкладка отдана ассистенту (или доступ отозван). */
+  setShared(id: string, shared: boolean): void;
+  readonly isOpen: boolean;
+  readonly pageId: string | null;
+}
+
+export interface BrowserViewDeps {
+  rpc: RpcClient;
+  /** Открыть адрес браузером системы. */
+  openExternal(url: string): void;
+  notify(message: string): void;
+  /** Приложить картинку к вопросу чата: снимок страницы. */
+  attachImage(image: PickedImage): void;
+  /** Приложить текстовый контекст к вопросу чата: журнал консоли страницы. */
+  attachContext(item: ChatAttachment): void;
+}
+
+export function createBrowserView(deps: BrowserViewDeps): BrowserView {
+  const address = h('input', {
+    class: 'browser-address',
+    type: 'text',
+    spellcheck: 'false',
+    placeholder: 'Адрес страницы',
+    'aria-label': 'Адрес страницы',
+  }) as HTMLInputElement;
+
+  const backButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Назад', onClick: () => run('back') },
+    svgIcon('arrowLeft', 14),
+  );
+  const forwardButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Вперёд', onClick: () => run('forward') },
+    svgIcon('arrowRight', 14),
+  );
+  // Одна кнопка на два дела: идёт загрузка — «стоп», иначе «обновить» (как в браузерах).
+  const reloadButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Обновить', onClick: () => run('reload') },
+    svgIcon('refresh', 14),
+  );
+  const externalButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Открыть в браузере системы', onClick: () => openExternal() },
+    svgIcon('externalLink', 14),
+  );
+  const devtoolsButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Инструменты разработчика страницы', onClick: () => run('devtools') },
+    svgIcon('command', 14),
+  );
+  // Поделиться страницей с ассистентом: без этого агент работает только в своей
+  // вкладке (временная сессия), а поделившись — в этой же, с её логином и куками.
+  const shareButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Поделиться страницей с ассистентом', onClick: () => toggleShare() },
+    svgIcon('sparkle', 14),
+  );
+  // «Добавить в чат»: снимок страницы или её консоль уходят контекстом вопроса.
+  const chatButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Добавить в чат', onClick: (event: Event) => openChatMenu(event) },
+    svgIcon('chat', 14),
+  );
+
+  // Сцена — это «дырка», которую занимает вложение. Своей высоты у неё нет: она
+  // тянется под шапкой, а вложение встаёт ровно по её прямоугольнику.
+  const stage = h('div', { class: 'browser-stage' });
+  const element = h(
+    'div',
+    { class: 'browser-view', hidden: true },
+    h(
+      'div',
+      { class: 'browser-toolbar' },
+      backButton,
+      forwardButton,
+      reloadButton,
+      address,
+      externalButton,
+      shareButton,
+      devtoolsButton,
+      chatButton,
+    ),
+    stage,
+  );
+
+  /** Вложения, уже заведённые в main: ключ вкладки → есть. */
+  const created = new Set<string>();
+  let open = false;
+  let activeId: string | null = null;
+  let loading = false;
+  /** Адрес активной страницы: им адресная строка возвращается после правки. */
+  let currentUrl = '';
+  /** Ключ страницы, отданной ассистенту: `null` — ничем не делились. */
+  let sharedId: string | null = null;
+  /** Оверлей закрывает сцену — вложение на это время спрятано. */
+  let occluded = false;
+  let layoutFrame = 0;
+
+  /** Прямоугольник сцены в координатах окна: по нему вложение и встаёт. */
+  const rectOf = (): BrowserRect => {
+    const box = stage.getBoundingClientRect();
+    return {
+      x: Math.round(box.x),
+      y: Math.round(box.y),
+      width: Math.max(0, Math.round(box.width)),
+      height: Math.max(0, Math.round(box.height)),
+    };
+  };
+
+  /** Действие над вкладкой уходит в main: у renderer'а нет доступа к слою. */
+  function run(action: BrowserAction, url?: string): void {
+    if (!activeId) return;
+    const id = activeId;
+    void deps.rpc
+      .request('browser.viewCommand', url === undefined ? { id, action } : { id, action, url })
+      .then((result) => {
+        if (!result.ok && result.reason) deps.notify(result.reason);
+      })
+      .catch(() => undefined);
+  }
+
+  /** Показать сцену на текущем месте: спрятанное вложение возвращается тем же путём. */
+  function applyVisibility(): void {
+    if (!open || !activeId) return;
+    deps.rpc
+      .request('browser.viewShow', { id: activeId, rect: rectOf() })
+      .then((result) => {
+        if (!result.ok) deps.notify('Не удалось показать страницу');
+      })
+      .catch(() => undefined);
+  }
+
+  /** Завести вложение для вкладки, если его ещё нет, и показать по месту сцены. */
+  async function openPage(page: BrowserPage): Promise<void> {
+    if (!created.has(page.id)) {
+      const result = await deps.rpc.request('browser.viewCreate', { id: page.id, url: page.url }).catch(() => null);
+      if (!result || !result.ok) {
+        deps.notify(result?.reason ?? 'Не удалось открыть страницу');
+        return;
+      }
+      created.add(page.id);
+    }
+    // Пока ходили в main, человек мог переключиться на другую вкладку.
+    if (!open || activeId !== page.id) return;
+    applyVisibility();
+  }
+
+  /** Адресная строка и кнопки идут за состоянием активной страницы. */
+  const syncToolbar = (): void => {
+    if (!activeId) {
+      backButton.disabled = true;
+      forwardButton.disabled = true;
+      reloadButton.disabled = true;
+      externalButton.disabled = true;
+      devtoolsButton.disabled = true;
+      shareButton.disabled = true;
+      chatButton.disabled = true;
+      return;
+    }
+    reloadButton.disabled = false;
+    externalButton.disabled = false;
+    devtoolsButton.disabled = false;
+    shareButton.disabled = false;
+    chatButton.disabled = false;
+    // Кнопка показывает, поделена ли ИМЕННО эта страница: агент работает в ней же.
+    const shared = sharedId === activeId;
+    shareButton.classList.toggle('is-active', shared);
+    shareButton.title = shared ? 'Отозвать доступ ассистента к странице' : 'Поделиться страницей с ассистентом';
+    reloadButton.title = loading ? 'Остановить загрузку' : 'Обновить';
+    reloadButton.replaceChildren(svgIcon(loading ? 'close' : 'refresh', 14));
+    element.classList.toggle('is-loading', loading);
+    // Адресную строку не трогаем, пока её правят: иначе навигация вырвала бы ввод.
+    if (document.activeElement !== address) address.value = currentUrl;
+  };
+
+  /** Переставить вложение: сцена переехала или изменилась. Вызовы схлопываем по кадру. */
+  function scheduleLayout(): void {
+    if (!open || occluded) return;
+    if (layoutFrame) cancelAnimationFrame(layoutFrame);
+    layoutFrame = requestAnimationFrame(() => {
+      layoutFrame = 0;
+      if (!open) return;
+      void deps.rpc.request('browser.viewLayout', { rect: rectOf() }).catch(() => undefined);
+    });
+  }
+
+  /**
+   * Оверлеи (палитра, окна) лежат в DOM, а вложение — слоем поверх DOM: пока
+   * оверлей открыт, страницу нужно спрятать. Следим за появлением и снятием
+   * оверлеев наблюдателем, а не просьбами из каждого окна: окна заводятся в
+   * разных местах, и не забыть ни одного проще с одной стороны.
+   */
+  const syncOcclusion = (): void => {
+    const next = document.querySelector('.overlay:not([hidden]), .modal-backdrop:not([hidden])') !== null;
+    if (next === occluded) return;
+    occluded = next;
+    if (!open) return;
+    if (occluded) void deps.rpc.request('browser.viewHide', undefined).catch(() => undefined);
+    else applyVisibility();
+  };
+  const observer = new MutationObserver(syncOcclusion);
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributeFilter: ['hidden', 'class'],
+  });
+
+  const resizeObserver = new ResizeObserver(scheduleLayout);
+  resizeObserver.observe(stage);
+  window.addEventListener('resize', scheduleLayout);
+
+  address.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      navigate(address.value);
+      return;
+    }
+    // Escape возвращает адрес страницы: правку в строке отменяют, а не закрывают панель.
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      address.value = currentUrl;
+      address.blur();
+    }
+  });
+  // Ушли из строки, ничего не набрав, — показываем настоящий адрес страницы.
+  address.addEventListener('blur', () => {
+    address.value = currentUrl;
+  });
+
+  /** Перейти по адресу в текущей вкладке: адрес мог быть набран в палитре команд. */
+  function navigate(rawUrl: string): void {
+    const normalized = normalizeBrowserUrl(rawUrl);
+    if (!normalized.ok) {
+      deps.notify(normalized.reason);
+      return;
+    }
+    if (!activeId) return;
+    address.value = normalized.url;
+    run('navigate', normalized.url);
+  }
+
+  /** Найти текущий адрес: он нужен кнопке «открыть в браузере системы». */
+  function openExternal(): void {
+    if (currentUrl) deps.openExternal(currentUrl);
+  }
+
+  /** Поделиться активной страницей с ассистентом или отозвать доступ. */
+  function toggleShare(): void {
+    if (!activeId) return;
+    if (sharedId === activeId) {
+      void deps.rpc.request('browser.viewUnshare', undefined).catch(() => undefined);
+      return;
+    }
+    void deps.rpc
+      .request('browser.viewShare', { id: activeId })
+      .then((result) => {
+        if (!result.ok) deps.notify('Не удалось поделиться страницей');
+      })
+      .catch(() => undefined);
+  }
+
+  /** Меню «в чат»: снимок страницы и её консоль — то, что у VS Code в Add to Chat. */
+  function openChatMenu(event: Event): void {
+    const id = activeId;
+    if (!id) return;
+    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    showContextMenu(
+      [
+        { label: 'Снимок страницы в чат', onSelect: () => void addScreenshot(id) },
+        { label: 'Журнал консоли в чат', onSelect: () => void addConsole(id) },
+      ],
+      box.left,
+      box.bottom,
+    );
+  }
+
+  /** Снимок страницы уходит в чат картинкой: полотно — слой окна, снимает его main. */
+  async function addScreenshot(id: string): Promise<void> {
+    const result = await deps.rpc.request('browser.viewCapture', { id }).catch(() => null);
+    if (!result || !result.ok || !result.dataUrl) {
+      deps.notify(result?.reason ?? 'Не удалось снять страницу');
+      return;
+    }
+    const comma = result.dataUrl.indexOf(',');
+    const bytes = Math.round(Math.max(0, result.dataUrl.length - comma - 1) * 0.75);
+    deps.attachImage({
+      name: 'Страница ' + id + '.png',
+      mime: 'image/png',
+      bytes,
+      dataUrl: result.dataUrl,
+    });
+    deps.notify('Снимок страницы добавлен в чат');
+  }
+
+  /** Журнал консоли уходит в чат текстовым контекстом. */
+  async function addConsole(id: string): Promise<void> {
+    const result = await deps.rpc.request('browser.viewConsole', { id }).catch(() => null);
+    if (!result || !result.ok) {
+      deps.notify('Не удалось прочитать журнал консоли');
+      return;
+    }
+    if (result.lines.length === 0) {
+      deps.notify('В консоли страницы пусто');
+      return;
+    }
+    deps.attachContext({
+      kind: 'note',
+      label: 'Журнал консоли (' + result.lines.length + ' строк)',
+      title: 'Журнал консоли страницы ' + currentUrl,
+      text: result.lines.join('\n'),
+    });
+    deps.notify('Журнал консоли добавлен в чат: ' + result.lines.length);
+  }
+
+  return {
+    element,
+
+    show(page: BrowserPage): void {
+      open = true;
+      element.hidden = false;
+      activeId = page.id;
+      currentUrl = page.url;
+      syncToolbar();
+      void openPage(page);
+    },
+
+    hide(): void {
+      open = false;
+      element.hidden = true;
+      void deps.rpc.request('browser.viewHide', undefined).catch(() => undefined);
+    },
+
+    forget(id: string): void {
+      created.delete(id);
+      void deps.rpc.request('browser.viewClose', { id }).catch(() => undefined);
+      if (activeId === id) activeId = null;
+    },
+
+    navigate,
+
+    setShared(id: string, shared: boolean): void {
+      sharedId = shared ? id : sharedId === id ? null : sharedId;
+      syncToolbar();
+    },
+
+    focusAddress(): void {
+      address.focus();
+      address.select();
+    },
+
+    update(id: string, state: BrowserNavState): void {
+      // Состояние приходит на любую вкладку, а показываем мы активную.
+      if (id !== activeId) return;
+      currentUrl = state.url;
+      loading = state.loading;
+      backButton.disabled = !state.canGoBack;
+      forwardButton.disabled = !state.canGoForward;
+      syncToolbar();
+      if (state.error) deps.notify(`Страница не загрузилась: ${state.error}`);
+    },
+
+    get isOpen(): boolean {
+      return open;
+    },
+
+    get pageId(): string | null {
+      return activeId;
+    },
+  };
+}

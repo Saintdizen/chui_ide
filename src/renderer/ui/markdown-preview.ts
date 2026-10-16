@@ -1,20 +1,22 @@
 import type { DocumentStore } from '../core/document-store';
 import type { OpenEditors } from '../core/open-editors';
 import { createMarkdownRenderer } from './chat-markdown';
-import { clear, h } from './dom';
+import { clear, h, svgIcon } from './dom';
 
 /**
  * Предпросмотр Markdown: разметка открытого файла, как её прочитает читатель.
  *
- * Отдельная вкладка нижней панели, а не экран поверх редактора: правку видно и в
- * разметке, и в тексте сразу — держать оба перед глазами и есть смысл предпросмотра.
- * Рисует его тот же разборщик, что ленту чата (`chat-markdown.ts`): он собирает узлы
- * напрямую, без `innerHTML`, поэтому чужой markdown не вставит разметку в интерфейс.
+ * Это режим вкладки, а не отдельная панель: файл .md показывается либо текстом, либо
+ * разметкой, и переключает их кнопка в самой вкладке (как «Open Preview» в VS Code).
+ * Экран ложится поверх области редактора — тем же приёмом, что вьюер картинок и
+ * встроенный браузер. Рисует его тот же разборщик, что ленту чата (`chat-markdown.ts`):
+ * он собирает узлы напрямую, без `innerHTML`, поэтому чужой markdown не вставит
+ * разметку в интерфейс.
  *
- * Панель ничего не читает сама: текст активного файла берётся из документа (с
- * несохранёнными правками). Перерисовка идёт по правке с небольшой задержкой и только
- * когда панель на виду: пересобирать разметку на каждое нажатие незачем. Когда открыт не
- * markdown — говорим об этом, а не показываем пустоту: пустота читалась бы как «сломалось».
+ * Текст берётся из документа (с несохранёнными правками). Перерисовка идёт по правке с
+ * небольшой задержкой и только когда экран на виду: пересобирать разметку на каждое
+ * нажатие незачем. Когда показан не markdown — говорим об этом, а не показываем пустоту:
+ * пустота читалась бы как «сломалось».
  */
 
 export interface MarkdownPreviewDeps {
@@ -22,15 +24,20 @@ export interface MarkdownPreviewDeps {
   documents: DocumentStore;
   /** Вставить код из блока в позицию курсора (кнопка «Вставить»). */
   insertCode(code: string): boolean;
-  /** Короткий путь для заголовка панели. */
+  /** Короткий путь для заголовка. */
   relativePath(path: string): string;
-  /** Панель сейчас на экране — обновлять её, пока скрыта, смысла нет. */
+  /** Экран сейчас на виду — обновлять скрытый смысла нет. */
   isVisible(): boolean;
+  /** Вернуться к правке текста (кнопка в шапке предпросмотра). */
+  onEdit(): void;
 }
 
 export interface MarkdownPreviewView {
   element: HTMLElement;
-  /** Перерисовать по активному файлу (вызывается при показе вкладки). */
+  /** Показать разметку активного файла. */
+  show(): void;
+  hide(): void;
+  /** Перерисовать по активному файлу. */
   refresh(): void;
 }
 
@@ -45,11 +52,26 @@ export function isMarkdownPath(path: string): boolean {
 export function createMarkdownPreview(deps: MarkdownPreviewDeps): MarkdownPreviewView {
   const renderer = createMarkdownRenderer({ insertCode: (code) => deps.insertCode(code) });
 
-  const title = h('span', { class: 'md-preview-title' }, 'Предпросмотр Markdown');
+  const title = h('span', { class: 'md-preview-title' }, 'Предпросмотр');
   const pathLabel = h('span', { class: 'md-preview-path' });
-  const head = h('div', { class: 'md-preview-head' }, title, pathLabel);
+  // Кнопка возврата к тексту: тот же переключатель, что в вкладке, — чтобы не
+  // искать его в полосе, когда взгляд на разметке.
+  const editButton = h(
+    'button',
+    { class: 'btn btn-small', type: 'button', title: 'Показать исходный текст', onClick: () => deps.onEdit() },
+    svgIcon('pencil', 13),
+    h('span', {}, 'Редактировать'),
+  );
+  const head = h(
+    'div',
+    { class: 'md-preview-head' },
+    title,
+    pathLabel,
+    h('div', { class: 'md-preview-spacer' }),
+    editButton,
+  );
   const body = h('div', { class: 'md-preview-body' });
-  const element = h('div', { class: 'md-preview' }, head, body);
+  const element = h('div', { class: 'md-preview', hidden: true }, head, body);
 
   let timer: number | null = null;
 
@@ -104,5 +126,15 @@ export function createMarkdownPreview(deps: MarkdownPreviewDeps): MarkdownPrevie
 
   refresh();
 
-  return { element, refresh };
+  return {
+    element,
+    refresh,
+    show(): void {
+      element.hidden = false;
+      refresh();
+    },
+    hide(): void {
+      element.hidden = true;
+    },
+  };
 }

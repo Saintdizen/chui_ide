@@ -95,7 +95,11 @@ export function normalizeBrowserUrl(raw: string): { ok: true; url: string } | { 
   return { ok: true, url: url.toString() };
 }
 
-/** Локальный ли адрес: у него нет сертификата, поэтому схема по умолчанию — http. */
+/**
+ * Локальный ли адрес. У локального адреса нет сертификата, поэтому схема по
+ * умолчанию — http. Набор хостов тот же, что у VS Code: и петлевые адреса, и
+ * «все интерфейсы» (`0.0.0.0`, `[::]`) — это машина разработчика, а не чужой сайт.
+ */
 export function isLocalHost(text: string): boolean {
   const host = text.split(/[/?#]/, 1)[0] ?? '';
   return (
@@ -104,8 +108,27 @@ export function isLocalHost(text: string): boolean {
     host === '127.0.0.1' ||
     host.startsWith('127.0.0.1:') ||
     host === '[::1]' ||
-    host.startsWith('[::1]:')
+    host.startsWith('[::1]:') ||
+    host === '0.0.0.0' ||
+    host.startsWith('0.0.0.0:') ||
+    host === '[::]' ||
+    host.startsWith('[::]:')
   );
+}
+
+/**
+ * Адрес ведёт на локальную машину — такой открываем вкладкой в IDE, а не системным
+ * браузером: это почти всегда свой запущенный сервер, и смотреть его надо рядом с
+ * кодом. Ту же развилку делает терминал для ссылок (см. `app.ts`).
+ */
+export function isLocalUrl(target: string): boolean {
+  try {
+    const url = new URL(target);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    return isLocalHost(url.host);
+  } catch {
+    return false;
+  }
 }
 
 /**

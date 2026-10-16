@@ -31,7 +31,7 @@ export function createDock(): DockView {
   const tabsHost = h('div', { class: 'dock-tabs' });
   const collapse = h(
     'button',
-    { class: 'icon-btn', type: 'button', title: 'Свернуть панель', onClick: () => hide() },
+    { class: 'icon-btn', type: 'button', title: 'Свернуть нижнюю панель', onClick: () => hide() },
     svgIcon('chevronDown', 14),
   );
   const header = h('div', { class: 'dock-header' }, tabsHost, h('div', { class: 'dock-header-spacer' }), collapse);

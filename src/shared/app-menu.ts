@@ -92,10 +92,12 @@ const VIEW: MenuNode = {
   label: 'Вид',
   children: [
     { label: 'Боковая панель', accelerator: 'Ctrl+B', command: 'view.toggleSidebar' },
+    { label: 'Нижняя панель', accelerator: 'Alt+F12', command: 'view.toggleDock' },
     { label: 'Панель AI', accelerator: 'Ctrl+Shift+A', command: 'view.toggleRight' },
     { label: 'Режим дзен', accelerator: 'Alt+Z', command: 'view.zen' },
     { separator: true },
-    { label: 'Терминал', accelerator: 'Alt+F12', command: 'view.showTerminal' },
+    { label: 'Терминал', command: 'view.showTerminal' },
+    { label: 'Открыть страницу…', accelerator: 'Ctrl+Shift+B', command: 'browser.open' },
     { label: 'Структура файла', command: 'view.showOutline' },
     { label: 'Ячейки ноутбука', command: 'view.notebooks' },
     { label: 'Предпросмотр Markdown', command: 'view.showMarkdownPreview' },

@@ -51,9 +51,11 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
   const dockSplitter = h('div', { class: 'splitter splitter-dock' });
   const dockHost = h('div', { class: 'dock-host' });
   const dockIsland = h('section', { class: 'island dock' }, dockHost);
+  // Нижний остров — своей дорожкой сетки: под левой панелью и редактором, но НЕ под
+  // правой (чат тянется вниз до строки состояния).
   const dockWrap = h('div', { class: 'dock-wrap' }, dockSplitter, dockIsland);
 
-  const center = h('div', { class: 'center' }, editorIsland, dockWrap);
+  const center = h('div', { class: 'center' }, editorIsland);
   const rightSplitter = h('div', { class: 'splitter splitter-right' });
 
   const rightBody = h('div', { class: 'right-body' });
@@ -70,6 +72,7 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     center,
     rightSplitter,
     rightPanel,
+    dockWrap,
     statusBarHost,
   );
 

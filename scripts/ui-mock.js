@@ -1214,6 +1214,7 @@ module.exports = [
     'lsp.change': () => undefined,
     'lsp.close': () => undefined,
     'lsp.restart': () => ({ running: [], servers: [], failed: [] }),
+    'lsp.prewarm': () => undefined,
     'lsp.status': () => ({
       running: ['python'],
       servers: [{ language: 'python', label: 'Pyright', origin: 'bundled' }],

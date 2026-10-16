@@ -6,26 +6,29 @@ import {
   BROWSER_EXECUTABLES,
   normalizeBrowserUrl,
   parseDevToolsEndpoint,
-  SNAPSHOT_SCRIPT,
-  sanitizeSnapshot,
   type BrowserSnapshot,
 } from '../../shared/browser';
 import { CdpConnection } from '../debug/cdp';
+import { PageSession, settle } from './session';
 
 /**
- * Браузерная автоматизация: свой Chromium, управляемый по CDP.
+ * Отдельный Chromium под управлением агента: свой процесс и свой профиль в temp.
  *
- * Своего браузера у IDE нет и быть не должно: агент работает в настоящем
- * Chromium, запущенном отдельным процессом с отдельным профилем в temp. Поэтому
- * он ничего не знает о закладках и сессиях человека, а закрывается вместе с ним.
+ * Раньше вся браузерная работа агента шла только здесь. Теперь у неё есть второй
+ * хозяин — встроенный браузер (`panel.ts`), где страница живёт вложением окна IDE
+ * и агент работает с той же страницей, что видит человек. Логика страницы общая и
+ * лежит в `session.ts`; здесь остаётся то, чем эти два пути РАЗЛИЧАЮТСЯ: запуск
+ * настоящего Chromium.
  *
- * Разговор идёт по Chrome DevTools Protocol — тем же клиентом, что и отладчик
- * (`main/debug/cdp.ts`). Порт браузер выбирает сам (`--remote-debugging-port=0`),
- * а узнать его можно только из строки в stderr — её и разбирает `parseDevToolsEndpoint`.
- * Подключаемся прямо к вкладке: тогда команды идут без sessionId, и клиент остаётся
- * тем же, что у отладчика.
+ * Зачем этот путь вообще остался: он даёт то, чего вложение дать не может, —
+ * проверку страницы в НАСТОЯЩЕМ браузере человека (его Chrome, Brave, Edge), а не
+ * в движке Electron. Процесс живёт с пустым профилем в temp, поэтому закладок и
+ * сессий человека он не видит, а закрывается вместе с сессией.
  *
- * Проверяемая часть — адрес, снимок и его разбор — лежит в `shared/browser.ts`.
+ * Порт браузер выбирает сам (`--remote-debugging-port=0`), и узнать его можно
+ * только из строки в stderr — её разбирает `parseDevToolsEndpoint`. Подключаемся
+ * прямо к вкладке: тогда команды идут без sessionId, и клиент остаётся тем же, что
+ * у отладчика.
  */
 
 export interface BrowserLaunchOptions {
@@ -51,17 +54,15 @@ export interface BrowserTools {
   close(): Promise<void>;
 }
 
-/** Ожидание загрузки: страница бывает медленной, но ждать её вечно нельзя. */
-const LOAD_TIMEOUT_MS = 20_000;
 /** Сколько ждём строку DevTools при запуске: холодный старт Chrome бывает долгим. */
 const LAUNCH_TIMEOUT_MS = 20_000;
-/** Потолок результата `browser_evaluate`: это ответ модели, а не дамп памяти. */
-const MAX_EVALUATE_CHARS = 8000;
 
 export class BrowserService implements BrowserTools {
   private child: ChildProcess | null = null;
   private connection: CdpConnection | null = null;
   private profileDir: string | null = null;
+  /** Сессия страницы: снимок, нажатия, ввод, выражения. Логика — в `session.ts`. */
+  private page: PageSession | null = null;
   /** Запуск идёт прямо сейчас: два `browser_open` не должны поднять два браузера. */
   private starting: Promise<void> | null = null;
 
@@ -75,104 +76,25 @@ export class BrowserService implements BrowserTools {
   async open(rawUrl: string): Promise<BrowserSnapshot> {
     const normalized = normalizeBrowserUrl(rawUrl);
     if (!normalized.ok) throw new Error(normalized.reason);
-
-    const connection = await this.ensure();
-    await connection.send('Page.navigate', { url: normalized.url });
-    await this.waitForLoad();
-    return this.snapshot();
+    const page = await this.ensure();
+    await page.navigate(normalized.url);
+    return page.snapshot();
   }
 
   async snapshot(): Promise<BrowserSnapshot> {
-    const connection = await this.ensure();
-    const result = await connection.send('Runtime.evaluate', {
-      expression: SNAPSHOT_SCRIPT,
-      returnByValue: true,
-      awaitPromise: false,
-    });
-    const value = (result as { result?: { value?: unknown } }).result?.value;
-    return sanitizeSnapshot(value);
+    return (await this.ensure()).snapshot();
   }
 
   async click(ref: string): Promise<BrowserSnapshot> {
-    const connection = await this.ensure();
-    const outcome = await evaluateOnPage(
-      connection,
-      `(() => {
-        const node = document.querySelector('[data-chui-ref="${escapeRef(ref)}"]');
-        if (!node) return { ok: false, reason: 'элемент не найден' };
-        node.scrollIntoView({ block: 'center', inline: 'center' });
-        if (typeof node.click === 'function') node.click();
-        else node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-        return { ok: true };
-      })()`,
-    );
-
-    const answer = outcome as { ok?: boolean; reason?: string } | null;
-    if (!answer?.ok) throw new Error(answer?.reason ?? 'не удалось нажать элемент');
-    await settle();
-    return this.snapshot();
+    return (await this.ensure()).click(ref);
   }
 
   async type(ref: string, text: string, submit: boolean): Promise<BrowserSnapshot> {
-    const connection = await this.ensure();
-    const focused = await evaluateOnPage(
-      connection,
-      `(() => {
-        const node = document.querySelector('[data-chui-ref="${escapeRef(ref)}"]');
-        if (!node) return { ok: false, reason: 'элемент не найден' };
-        node.scrollIntoView({ block: 'center', inline: 'center' });
-        node.focus();
-        // Выделяем прежнее содержимое: ввод заменяет его, а не дописывает.
-        if (typeof node.select === 'function') node.select();
-        else if (typeof node.setSelectionRange === 'function') node.setSelectionRange(0, (node.value || '').length);
-        return { ok: true };
-      })()`,
-    );
-
-    const answer = focused as { ok?: boolean; reason?: string } | null;
-    if (!answer?.ok) throw new Error(answer?.reason ?? 'не удалось найти поле');
-
-    // Ввод делаем средствами CDP, а не присваиванием значения: так событие
-    // приходит настоящим, и React-подобные формы его видят.
-    await connection.send('Input.insertText', { text });
-    if (submit) {
-      for (const type of ['keyDown', 'keyUp']) {
-        await connection.send('Input.dispatchKeyEvent', {
-          type,
-          key: 'Enter',
-          code: 'Enter',
-          windowsVirtualKeyCode: 13,
-          nativeVirtualKeyCode: 13,
-          text: type === 'keyDown' ? '\r' : undefined,
-        });
-      }
-      await this.waitForLoad();
-    }
-    await settle();
-    return this.snapshot();
+    return (await this.ensure()).type(ref, text, submit);
   }
 
   async evaluate(expression: string): Promise<string> {
-    const text = expression.trim();
-    if (!text) throw new Error('Пустое выражение');
-    const connection = await this.ensure();
-    const result = (await connection.send('Runtime.evaluate', {
-      expression: text,
-      returnByValue: true,
-      awaitPromise: true,
-    })) as {
-      result?: { value?: unknown; description?: string };
-      exceptionDetails?: { exception?: { description?: string }; text?: string };
-    };
-
-    if (result.exceptionDetails) {
-      const reason = result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? 'ошибка';
-      throw new Error(`Выражение завершилось ошибкой: ${reason.split('\n')[0]}`);
-    }
-
-    const value = result.result?.value;
-    const rendered = value === undefined ? (result.result?.description ?? 'undefined') : render(value);
-    return rendered.length > MAX_EVALUATE_CHARS ? `${rendered.slice(0, MAX_EVALUATE_CHARS)}\n… (обрезано)` : rendered;
+    return (await this.ensure()).evaluate(expression);
   }
 
   async close(): Promise<void> {
@@ -180,6 +102,7 @@ export class BrowserService implements BrowserTools {
     this.child = null;
     this.connection?.close();
     this.connection = null;
+    this.page = null;
     this.starting = null;
     if (child && child.exitCode === null) child.kill('SIGTERM');
 
@@ -193,12 +116,12 @@ export class BrowserService implements BrowserTools {
     void this.close();
   }
 
-  /** Запустить браузер, если он ещё не запущен, и вернуть живое соединение. */
-  private async ensure(): Promise<CdpConnection> {
-    if (this.connection && !this.connection.closed && this.child) return this.connection;
+  /** Запустить браузер, если он ещё не запущен, и вернуть живую сессию страницы. */
+  private async ensure(): Promise<PageSession> {
+    if (this.page && this.connection && !this.connection.closed && this.child) return this.page;
     if (this.starting) {
       await this.starting;
-      if (this.connection && !this.connection.closed) return this.connection;
+      if (this.page && this.connection && !this.connection.closed) return this.page;
     }
     this.starting = this.launch();
     try {
@@ -206,8 +129,8 @@ export class BrowserService implements BrowserTools {
     } finally {
       this.starting = null;
     }
-    if (!this.connection) throw new Error('Браузер не запустился');
-    return this.connection;
+    if (!this.page) throw new Error('Браузер не запустился');
+    return this.page;
   }
 
   private async launch(): Promise<void> {
@@ -280,12 +203,15 @@ export class BrowserService implements BrowserTools {
         this.child = null;
         this.connection?.close();
         this.connection = null;
+        this.page = null;
       }
     });
 
-    this.connection = await CdpConnection.connect(pageUrl, LAUNCH_TIMEOUT_MS);
-    await this.connection.send('Page.enable');
-    await this.connection.send('Runtime.enable');
+    const connection = await CdpConnection.connect(pageUrl, LAUNCH_TIMEOUT_MS);
+    this.connection = connection;
+    await connection.send('Page.enable');
+    await connection.send('Runtime.enable');
+    this.page = new PageSession(connection);
   }
 
   /** Вкладка появляется не мгновенно: спрашиваем список целей, пока она не найдётся. */
@@ -305,22 +231,6 @@ export class BrowserService implements BrowserTools {
     }
     return null;
   }
-
-  /** Ждём, пока документ догрузится: `Page.navigate` отвечает до загрузки. */
-  private async waitForLoad(): Promise<void> {
-    const connection = this.connection;
-    if (!connection) return;
-    const deadline = Date.now() + LOAD_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      try {
-        const state = await evaluateOnPage(connection, `document.readyState`);
-        if (state === 'complete') return;
-      } catch {
-        return; // страница не отвечает — пусть снимок покажет, что вышло
-      }
-      await settle(150);
-    }
-  }
 }
 
 /** Найти исполняемый файл браузера: сперва заданный путь, потом известные имена в PATH. */
@@ -336,44 +246,4 @@ export function resolveExecutable(configured?: string): string | null {
     }
   }
   return null;
-}
-
-/** Выражение на странице; значение — то, что вернул `Runtime.evaluate`. */
-async function evaluateOnPage(connection: CdpConnection, expression: string): Promise<unknown> {
-  const result = (await connection.send('Runtime.evaluate', {
-    expression,
-    returnByValue: true,
-    awaitPromise: true,
-  })) as {
-    result?: { value?: unknown };
-    exceptionDetails?: { exception?: { description?: string } };
-  };
-  if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.exception?.description?.split('\n')[0] ?? 'выражение не выполнилось');
-  }
-  return result.result?.value;
-}
-
-/** Номер из снимка подставляется в селектор — экранируем, чтобы метка не сломала его. */
-function escapeRef(ref: string): string {
-  return ref.trim().replace(/[^0-9]/g, '');
-}
-
-/** Пауза: даём странице перерисоваться после действия. */
-function settle(ms = 250): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Значение из `Runtime.evaluate` в текст: строка — как есть, объект — JSON. */
-function render(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (value === null) return 'null';
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch {
-      return String(value);
-    }
-  }
-  return String(value);
 }

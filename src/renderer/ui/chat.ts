@@ -3,7 +3,9 @@ import {
   type ApplyEditsHostParams,
   type ApplyEditsHostResult,
   type ApplyPatchesHostParams,
+  type ChatAttachment,
   type ChatDeltaPayload,
+  type PickedImage,
   type ReasoningEffort,
   type Settings,
 } from '../../shared/api';
@@ -48,6 +50,13 @@ export interface ChatView {
   stop(): void;
   askAboutSelection(mode: 'explain' | 'fix'): Promise<void>;
   applySettings(settings: Settings): void;
+  /**
+   * Приложить готовое изображение к вопросу — снимок страницы из встроенного браузера.
+   * Через этот метод вложение кладётся в активную беседу, как из скрепки или Ctrl+V.
+   */
+  attachImage(image: PickedImage): void;
+  /** Приложить готовый контекст (журнал консоли страницы и подобное). */
+  attachContext(item: ChatAttachment): void;
 }
 
 /** Что чату нужно от окна настроек: только показать его. */
@@ -1583,6 +1592,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     newChat,
     stop,
     askAboutSelection,
+    attachImage: (image: PickedImage) => attachments.attachImage(image),
+    attachContext: (item: ChatAttachment) => attachments.attachContext(item),
     applySettings(next: Settings) {
       settings = next;
       syncProviderFields();

@@ -419,9 +419,19 @@
 .code-bar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  /* Подпись языка держит левый край, действия — правый: между ними всю ширину,
+     поэтому зазор нужен только маленький — между самими значками. */
+  gap: 2px;
   padding: 3px 8px;
   border-bottom: 1px solid var(--separator_color);
+}
+
+/* Действия над блоком кода — значки-кнопки, как у сообщений: подпись живёт в
+   подсказке, взгляд ищет привычный значок, а не слово. */
+.code-bar .icon-btn {
+  width: 24px;
+  height: 24px;
+  color: var(--text_color_secondary);
 }
 
 .code-lang {
@@ -1404,11 +1414,21 @@
   overflow-wrap: anywhere;
 }
 
+/* Варианты ответа — строки во всю ширину карточки, текст от левого края. Вариант у
+   агента — фраза, а не слово: в ряд с переносом длинный растягивался на всю ширину,
+   короткие оставались «чипами», и список выглядел рвано. Строками они встают ровно
+   и читаются как список ответов (тот же язык, что у строки выбора окружения). */
 .ask-options {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 2px;
   padding: 0 8px 8px;
+}
+
+.ask-options .btn {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
 }
 
 .ask-input {

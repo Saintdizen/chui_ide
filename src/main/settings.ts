@@ -89,6 +89,8 @@ interface StoredSettings {
       /** Путь к браузеру; пусто — ищем известные имена в PATH. */
       executable: string;
       headless: boolean;
+      /** Работать во встроенном браузере (вкладка в IDE), а не отдельным Chromium. */
+      integrated: boolean;
     };
     /** Песочница: команды агента выполняются в контейнере. */
     sandbox: AiSandboxSettings;
@@ -155,7 +157,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     webSearch: { enabled: false, provider: 'searxng', endpoint: '' },
     // Браузер выключен: агент ходил бы по чужим страницам и нажимал там кнопки.
     // Включается осознанно — вместе с ним включаются и подтверждения действий.
-    browser: { enabled: false, executable: '', headless: true },
+    browser: { enabled: false, executable: '', headless: true, integrated: true },
     // Песочница выключена: команды агента идут на хосте, как раньше. Включив её,
     // человек сам выбирает образ — в нём должны быть инструменты проекта.
     sandbox: { ...DEFAULT_SANDBOX },
@@ -383,6 +385,8 @@ export class SettingsStore {
           // Без окна по умолчанию: браузер заводят ради автоматизации, а не ради
           // того, чтобы он всплывал поверх редактора.
           headless: ai.browser?.headless !== false,
+          // Встроенный — по умолчанию: человек видит, что делает агент.
+          integrated: ai.browser?.integrated !== false,
         },
         // Копия: правка настроек не должна менять уже отданный снимок.
         sandbox: { ...sanitizeSandbox(ai.sandbox) },
@@ -636,6 +640,7 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     if (incoming.enabled !== undefined) target.browser.enabled = incoming.enabled === true;
     if (incoming.executable !== undefined) target.browser.executable = incoming.executable.trim();
     if (incoming.headless !== undefined) target.browser.headless = incoming.headless === true;
+    if (incoming.integrated !== undefined) target.browser.integrated = incoming.integrated === true;
   }
 
   // Песочница: проверяем образ и рабочий каталог теми же функциями, что и при
@@ -750,6 +755,7 @@ function loadSettings(filePath: string): StoredSettings {
     enabled: storedBrowser.enabled === true,
     executable: typeof storedBrowser.executable === 'string' ? storedBrowser.executable : '',
     headless: storedBrowser.headless !== false,
+    integrated: storedBrowser.integrated !== false,
   };
 
   // Песочница: образ и рабочий каталог задаёт человек, файл правят и руками.

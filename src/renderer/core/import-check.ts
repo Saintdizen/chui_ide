@@ -1,9 +1,9 @@
 import type { LspDiagnostic } from '../../shared/api';
 import {
+  checkTargets,
   missingImports,
   parsePythonImports,
   parseScriptImports,
-  topLevelModules,
   type ImportRef,
 } from '../../shared/imports';
 import type { DocumentStore } from './document-store';
@@ -106,8 +106,8 @@ export class ImportChecker {
     }
 
     const imports = rule.parse(document.value);
-    const modules = topLevelModules(imports);
-    if (modules.length === 0) {
+    const { modules, locals } = checkTargets(imports);
+    if (modules.length === 0 && locals.length === 0) {
       this.checked.delete(path);
       this.lastMissing.delete(path);
       this.editors.setExternalMarkers(path, OWNER, []);
@@ -115,14 +115,16 @@ export class ImportChecker {
     }
 
     // Набор импортов не изменился — прошлый ответ всё ещё верен.
-    const signature = modules.join(',');
+    const signature = `${modules.join(',')}|${locals.join(',')}`;
     if (this.checked.get(path) === signature) return;
 
     let missing: string[];
     try {
       ({ missing } = await this.rpc.request('imports.missing', {
         language: document.languageId,
+        path,
         modules,
+        locals,
       }));
     } catch {
       return; // без ответа подчёркивать нечего: молчание безопаснее ложной пометки
@@ -167,13 +169,19 @@ function ruleFor(languageId: string): LanguageRule | null {
   if (languageId === 'python') {
     return {
       parse: parsePythonImports,
-      message: (item) => `Модуль «${item.top}» не установлен в окружении проекта`,
+      message: (item) =>
+        item.kind === 'local'
+          ? `Модуль «${item.module}» не найден в проекте`
+          : `Модуль «${item.top}» не установлен в окружении проекта`,
     };
   }
   if (languageId === 'javascript' || languageId === 'typescript') {
     return {
       parse: parseScriptImports,
-      message: (item) => `Пакет «${item.top}» не установлен в node_modules`,
+      message: (item) =>
+        item.kind === 'local'
+          ? `Модуль «${item.module}» не найден`
+          : `Пакет «${item.top}» не установлен в node_modules`,
     };
   }
   return null;

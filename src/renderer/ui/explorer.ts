@@ -1618,6 +1618,21 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       savedScroll = tree.scrollTop;
       renderWindow();
     });
+    // Высоту панели меняют окно, нижний док и переключатели панелей — а окно строк
+    // считают по ВЫСОТЕ в момент отрисовки (см. `renderWindow`). Без пересчёта окно,
+    // посчитанное при маленькой или НУЛЕВОЙ высоте (раскладка в тот момент ещё не
+    // встала, и `clientHeight` равен нулю), таким и оставалось бы: строк видно мало,
+    // а ниже — пустота на всю панель. Высота сравнивается с прошлой: иначе замена
+    // строк в `renderWindow` зациклила бы наблюдателя.
+    let lastViewport = -1;
+    const syncViewport = (): void => {
+      const height = tree.clientHeight;
+      if (height === lastViewport) return;
+      lastViewport = height;
+      renderWindow();
+    };
+    new ResizeObserver(syncViewport).observe(tree);
+    window.addEventListener('resize', syncViewport);
     // Сброс мимо строк — в корень области: так файл уезжает «наверх», к проекту.
     tree.addEventListener('dragover', (event) => {
       const root = deps.workspace.root;

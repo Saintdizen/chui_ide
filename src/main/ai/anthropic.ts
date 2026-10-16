@@ -144,6 +144,60 @@ export class AnthropicProvider implements AiProvider {
     let cachedTokens: number | undefined;
     const toolSlots = new Map<number, { id: string; name: string; args: string }>();
 
+    /** Одна строка SSE: разбираем её и раскладываем по накопителям. */
+    const handleLine = (raw: string): void => {
+      const line = raw.trim();
+      if (!line.startsWith('data:')) return; // `event:` нам не нужен: тип лежит в самом JSON
+
+      const data = line.slice(5).trim();
+      if (data.length === 0) return;
+
+      let chunk: AnthropicStreamEvent;
+      try {
+        chunk = JSON.parse(data) as AnthropicStreamEvent;
+      } catch {
+        return;
+      }
+
+      if (chunk.type === 'message_start' && chunk.message?.usage) {
+        promptTokens = chunk.message.usage.input_tokens;
+        completionTokens = chunk.message.usage.output_tokens ?? completionTokens;
+        const fromCache = chunk.message.usage.cache_read_input_tokens ?? 0;
+        if (fromCache > 0) cachedTokens = fromCache;
+        return;
+      }
+
+      if (chunk.type === 'content_block_start') {
+        const block = chunk.content_block;
+        const index = chunk.index ?? 0;
+        if (block?.type === 'tool_use') {
+          toolSlots.set(index, { id: block.id ?? '', name: block.name ?? '', args: '' });
+        }
+        return;
+      }
+
+      if (chunk.type === 'content_block_delta') {
+        const delta = chunk.delta;
+        if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+          text += delta.text;
+          handlers.onDelta(delta.text);
+        } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+          thoughts += delta.thinking;
+          handlers.onReasoning?.(delta.thinking);
+        } else if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          const slot = toolSlots.get(chunk.index ?? 0);
+          if (slot) slot.args += delta.partial_json;
+        }
+        return;
+      }
+
+      if (chunk.type === 'message_delta') {
+        if (chunk.delta?.stop_reason) finishReason = mapStopReason(chunk.delta.stop_reason);
+        if (chunk.usage?.output_tokens !== undefined) completionTokens = chunk.usage.output_tokens;
+      }
+      // message_stop / ping / content_block_stop игнорируем
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -151,60 +205,15 @@ export class AnthropicProvider implements AiProvider {
 
       let newline = buffer.indexOf('\n');
       while (newline >= 0) {
-        const line = buffer.slice(0, newline).trim();
+        handleLine(buffer.slice(0, newline));
         buffer = buffer.slice(newline + 1);
         newline = buffer.indexOf('\n');
-        if (!line.startsWith('data:')) continue; // `event:` нам не нужен: тип лежит в самом JSON
-
-        const data = line.slice(5).trim();
-        if (data.length === 0) continue;
-
-        let chunk: AnthropicStreamEvent;
-        try {
-          chunk = JSON.parse(data) as AnthropicStreamEvent;
-        } catch {
-          continue;
-        }
-
-        if (chunk.type === 'message_start' && chunk.message?.usage) {
-          promptTokens = chunk.message.usage.input_tokens;
-          completionTokens = chunk.message.usage.output_tokens ?? completionTokens;
-          const fromCache = chunk.message.usage.cache_read_input_tokens ?? 0;
-          if (fromCache > 0) cachedTokens = fromCache;
-          continue;
-        }
-
-        if (chunk.type === 'content_block_start') {
-          const block = chunk.content_block;
-          const index = chunk.index ?? 0;
-          if (block?.type === 'tool_use') {
-            toolSlots.set(index, { id: block.id ?? '', name: block.name ?? '', args: '' });
-          }
-          continue;
-        }
-
-        if (chunk.type === 'content_block_delta') {
-          const delta = chunk.delta;
-          if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
-            text += delta.text;
-            handlers.onDelta(delta.text);
-          } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-            thoughts += delta.thinking;
-            handlers.onReasoning?.(delta.thinking);
-          } else if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
-            const slot = toolSlots.get(chunk.index ?? 0);
-            if (slot) slot.args += delta.partial_json;
-          }
-          continue;
-        }
-
-        if (chunk.type === 'message_delta') {
-          if (chunk.delta?.stop_reason) finishReason = mapStopReason(chunk.delta.stop_reason);
-          if (chunk.usage?.output_tokens !== undefined) completionTokens = chunk.usage.output_tokens;
-        }
-        // message_stop / ping / content_block_stop игнорируем
       }
     }
+    // Добираем хвост: последняя строка потока легко приходит без завершающего
+    // перевода строки, и без этого её текст теряется — ответ обрывается на полуслове.
+    buffer += decoder.decode();
+    handleLine(buffer);
 
     const toolCalls: ChatToolCall[] = [...toolSlots.entries()]
       .sort((a, b) => a[0] - b[0])

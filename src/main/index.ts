@@ -1,10 +1,12 @@
-import { app, BrowserWindow, nativeTheme } from 'electron';
+import { app, BrowserWindow, nativeTheme, shell } from 'electron';
 import { statSync } from 'node:fs';
 import path from 'node:path';
 import { PushTopic } from '../shared/api';
 import { folderFromCommandLine, type CommandLineFolder } from '../shared/cli';
 import { AiService } from './ai/service';
 import { BrowserService } from './browser/browser';
+import { AgentBrowser } from './browser/agent-browser';
+import { BrowserPanel } from './browser/panel';
 import { DebugService } from './debug/debug';
 import { installDiagnostics } from './diagnostics';
 import { GitService } from './git/git';
@@ -27,7 +29,7 @@ import { HistoryStore } from './project/history-store';
 import { SettingsStore } from './settings';
 import { TerminalService } from './terminal/terminal';
 import { WorkspaceService } from './workspace/workspace';
-import { createWelcomeWindow, isWaylandSession } from './window';
+import { createWelcomeWindow, getIdeWindow, isWaylandSession } from './window';
 
 // Схему нужно объявить до инициализации приложения, иначе Chromium не даст ей привилегий.
 registerAppScheme();
@@ -259,7 +261,19 @@ if (!app.requestSingleInstanceLock()) {
       const settingsForBrowser = settings.get().ai.browser;
       return { executable: settingsForBrowser.executable, headless: settingsForBrowser.headless };
     });
-    ai.attachBrowser(browser);
+
+    // Встроенный браузер: страница — вкладка в редакторе, рисует её `WebContentsView`
+    // поверх окна (как в VS Code). Окно панель берёт лениво: на старте его ещё нет,
+    // а притворяться, что есть, — значит создавать IDE тому, кто просил только список
+    // проектов. Через ту же панель агент подключается к странице по CDP.
+    const browserPanel = new BrowserPanel({
+      window: () => getIdeWindow(),
+      notify: (topic, payload) => pushToRenderers(topic, payload),
+      openExternal: (url) => void shell.openExternal(url).catch(() => undefined),
+    });
+    // Что из двух достанется агенту, решает настройка: встроенный браузер (по умолчанию)
+    // или отдельный Chromium. Разница между ними — в `agent-browser.ts`.
+    ai.attachBrowser(new AgentBrowser(browserPanel, browser, () => settings.get().ai.browser.integrated));
 
     // Песочница: команды и тесты агента идут в контейнер вместо хоста. Движок
     // ищем один раз при старте — по PATH, как браузер: включённая песочница без
@@ -295,6 +309,7 @@ if (!app.requestSingleInstanceLock()) {
       reviews,
       history,
       mcp,
+      browserPanel,
       host: new HostClient(),
     };
     registerIpc(deps);
@@ -336,6 +351,8 @@ if (!app.requestSingleInstanceLock()) {
       git.dispose();
       // Браузер — наш процесс: без остановки он остался бы висеть после выхода.
       browser.dispose();
+      // Вложения встроенного браузера держат процессы: закрываем вместе с окном.
+      browserPanel.dispose();
       // Серверы MCP — наши процессы: без остановки они остались бы висеть после выхода.
       mcp.dispose();
       workspace.dispose();

@@ -1,7 +1,7 @@
 import { highlightInto } from '../core/highlight';
 import { renderDisplayMath, renderInlineMath } from './math-view';
 import { renderMermaid } from './mermaid-view';
-import { type Child, h, pulseOnClick } from './dom';
+import { type Child, h, pulseOnClick, svgIcon } from './dom';
 import { showToast } from './toast';
 
 /**
@@ -327,11 +327,14 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
   /** Блок кода с действиями: без них ответ переносят руками. */
   function codeBlock(code: string, language: string, plain = false): HTMLElement {
+    // Действия — значки-кнопки, как под сообщением: подпись живёт в подсказке, ряд не шумит.
     const copyButton = h(
       'button',
       {
-        class: 'btn btn-small',
+        class: 'icon-btn',
         type: 'button',
+        title: 'Копировать',
+        'aria-label': 'Копировать',
         onClick: () => {
           void navigator.clipboard.writeText(code).then(
             () => showToast('Скопировано'),
@@ -339,19 +342,21 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
           );
         },
       },
-      'Копировать',
+      svgIcon('copy', 14),
     );
     const insertButton = h(
       'button',
       {
-        class: 'btn btn-small',
+        class: 'icon-btn',
         type: 'button',
+        title: 'Вставить в позицию курсора',
+        'aria-label': 'Вставить в позицию курсора',
         onClick: () => {
           if (deps.insertCode(code)) showToast('Вставлено в позицию курсора');
           else showToast('Нет открытого редактора', 'error');
         },
       },
-      'Вставить',
+      svgIcon('paste', 14),
     );
     // Копирование и вставка вид кнопки не меняют — нажатие подтверждаем пульсом.
     pulseOnClick(copyButton);

@@ -85,6 +85,7 @@ export const PushTopic = {
   DebugState: 'debug:state',
   DebugStopped: 'debug:stopped',
   DebugOutput: 'debug:output',
+  BrowserNav: 'browser:nav',
 } as const;
 
 /* ── Транспорт ──────────────────────────────────────────────────────────── */
@@ -371,6 +372,56 @@ export interface TerminalExitPayload {
   exitCode: number;
   signal?: number;
 }
+
+/**
+ * Прямоугольник области страницы в координатах окна.
+ *
+ * Вложение рисует не DOM, а сам Chromium отдельным слоем окна, поэтому его место
+ * задаётся числами: renderer меряет область редактора и присылает сюда результат.
+ */
+export interface BrowserRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** Состояние вкладки встроенного браузера: то, чем живёт адресная строка и кнопки. */
+export interface BrowserNavState {
+  url: string;
+  title: string;
+  loading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  /** Причина неудачи загрузки — показывается человеком словами, а не кодом. */
+  error?: string;
+}
+
+/**
+ * Полезная нагрузка события `PushTopic.BrowserNav`: вложение сообщило о себе.
+ *
+ * Виды разные по смыслу, а не по оттенку одного: состояние вкладки, просьба
+ * страницы о новой вкладке, страница, которую открыл агент, закрытие и общий
+ * доступ. Объединять их в один объект с необязательными полями значило бы
+ * заставлять renderer угадывать смысл события по тому, какие поля оказались
+ * заполнены.
+ */
+export type BrowserEventPayload =
+  /** Состояние активной вкладки: им живут адресная строка и кнопки. */
+  | ({ kind: 'state'; id: string } & BrowserNavState)
+  /** Страница просит новую вкладку (`_blank`, `window.open`): вторых окон у нас нет. */
+  | { kind: 'newTab'; id: string; url: string }
+  /** Страницу открыл агент: вкладку заводит renderer, а ключ вкладки дал main. */
+  | { kind: 'opened'; id: string; url: string }
+  /** Агент закончил работу — вкладку убираем вместе с вложением. */
+  | { kind: 'closed'; id: string }
+  /** Человек поделился вкладкой с ассистентом: агент работает в этой же странице. */
+  | { kind: 'shared'; id: string }
+  /** Общий доступ снят (отозван или вкладка закрыта): агент снова заводит свою. */
+  | { kind: 'unshared'; id: string };
+
+/** Действие над вкладкой браузера, которое renderer просит выполнить main. */
+export type BrowserAction = 'back' | 'forward' | 'reload' | 'stop' | 'navigate' | 'devtools';
 
 /* ── Git ───────────────────────────────────────────────────────────────── */
 
@@ -1220,8 +1271,8 @@ export interface AiSettingsPatch {
   compressOutput?: boolean;
   /** Настройки веб-поиска: ключ задаётся отдельным вызовом `ai.setWebSearchKey`. */
   webSearch?: { enabled?: boolean; provider?: WebSearchProvider; endpoint?: string };
-  /** Браузерная автоматизация: включение, путь к браузеру и режим без окна. */
-  browser?: { enabled?: boolean; executable?: string; headless?: boolean };
+  /** Браузерная автоматизация: включение, встроенный или отдельный Chromium. */
+  browser?: { enabled?: boolean; executable?: string; headless?: boolean; integrated?: boolean };
   /** Песочница: включение, образ, рабочий каталог и сеть. */
   sandbox?: { enabled?: boolean; image?: string; workdir?: string; network?: boolean };
   /** Список серверов MCP заменяется целиком: так его проще править из интерфейса. */
@@ -1279,6 +1330,12 @@ export interface AiBrowserSettings {
   executable: string;
   /** Работать без окна: браузер не отвлекает и заводится на машинах без экрана. */
   headless: boolean;
+  /**
+   * Работать во встроенном браузере — вкладкой в редакторе, рядом с кодом. Агент
+   * подключается к той же странице, которую видит человек. Выключено — отдельный
+   * Chromium с пустым профилем: ею проверяют страницу в настоящем браузере человека.
+   */
+  integrated: boolean;
 }
 
 export interface WorkspaceSettingsPatch {
@@ -1831,7 +1888,10 @@ export interface ChuiMethods {
    * для JS/TS — `node_modules`. Пустой ответ — либо всё на месте, либо судить
    * не по чему (нет интерпретатора, не найден каталог пакетов).
    */
-  'imports.missing': { params: { language: string; modules: string[] }; result: { missing: string[] } };
+  'imports.missing': {
+    params: { language: string; path: string; modules: string[]; locals: string[] };
+    result: { missing: string[] };
+  };
   /**
    * Пакеты проекта (монорепо): где лежат манифесты. Нужны панели изменений, чтобы
    * разложить правки по пакетам, а не показывать один общий список файлов.
@@ -2014,6 +2074,35 @@ export interface ChuiMethods {
   /** Открыть терминал системы в папке. `ok: false` — подходящего терминала нет. */
   'shell.openTerminal': { params: { path: string }; result: { ok: boolean; command?: string } };
 
+  /* Встроенный браузер: страница — вкладка в редакторе, рисует её WebContentsView.
+     Место вложения задаётся числами, потому что оно не в DOM, а отдельным слоем
+     окна; состояние вкладки приходит обратным событием `PushTopic.BrowserNav`. */
+  /** Завести вложение для вкладки. Адрес приходит уже нормализованным. */
+  'browser.viewCreate': { params: { id: string; url: string }; result: { ok: boolean; reason?: string } };
+  /** Показать вложение на месте области редактора. */
+  'browser.viewShow': { params: { id: string; rect: BrowserRect }; result: { ok: boolean } };
+  /** Спрятать вложение: активна не страница (файл, чат, картинка). */
+  'browser.viewHide': { params: void; result: { ok: boolean } };
+  /** Область редактора переехала или изменилась — переставить вложение. */
+  'browser.viewLayout': { params: { rect: BrowserRect }; result: { ok: boolean } };
+  /** Действие над вкладкой: назад, вперёд, обновить, стоп, переход, DevTools. */
+  'browser.viewCommand': {
+    params: { id: string; action: BrowserAction; url?: string };
+    result: { ok: boolean; reason?: string };
+  };
+  /** Закрыть вложение вкладки: она ушла из полосы. */
+  'browser.viewClose': { params: { id: string }; result: { ok: boolean } };
+  /** Закрыть все вложения сразу. */
+  'browser.viewCloseAll': { params: void; result: { ok: boolean } };
+  /** Поделиться вкладкой с ассистентом: агент работает в этой же странице и сессии. */
+  'browser.viewShare': { params: { id: string }; result: { ok: boolean } };
+  /** Отозвать общий доступ: агент снова заводит свою вкладку во временной сессии. */
+  'browser.viewUnshare': { params: void; result: { ok: boolean } };
+  /** Снимок страницы вкладки (data-URL): уходит в чат как вложение-картинка. */
+  'browser.viewCapture': { params: { id: string }; result: { ok: boolean; dataUrl?: string; reason?: string } };
+  /** Журнал консоли страницы вкладки: строки для вложения-контекста. */
+  'browser.viewConsole': { params: { id: string }; result: { ok: boolean; lines: string[] } };
+
   /* Личность автора, подпись коммитов и ключи: настройки git, а не IDE. */
   /** Действующие имя, почта, подпись и хранилище паролей. */
   'git.identity': { params: void; result: GitIdentity };
@@ -2100,6 +2189,11 @@ export interface ChuiMethods {
   'lsp.close': { params: { path: string }; result: void };
   'lsp.restart': { params: void; result: LspStatus };
   'lsp.status': { params: void; result: LspStatus };
+  /**
+   * Прогреть серверы языков проекта, не дожидаясь открытия файлов (см. `LspService.prewarm`).
+   * Языки приходят из карты проекта: у каждого должен быть сервер в настройках.
+   */
+  'lsp.prewarm': { params: { languages: string[] }; result: void };
   /** Символы проекта по запросу: классы, функции, переменные — «перейти к символу». */
   'lsp.symbols': { params: { query: string }; result: ProjectSymbol[] };
   /** Найти в PATH известные языковые серверы и вернуть готовые конфигурации. */

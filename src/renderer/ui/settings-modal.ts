@@ -678,10 +678,22 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h(
         'div',
         { class: 'field-hint' },
-        'Даёт ассистенту открывать страницы, нажимать кнопки и заполнять формы: он запускает свой ' +
-          'Chromium с пустым профилем в системном временном каталоге, поэтому не видит ваши сессии, ' +
-          'закладки и пароли. Действия на странице спрашивают подтверждение, пока включён обычный ' +
-          'режим доступа. Выключено по умолчанию: это ход наружу.',
+        'Даёт ассистенту открывать страницы, нажимать кнопки и заполнять формы. Действия на ' +
+          'странице спрашивают подтверждение, пока включён обычный режим доступа. Выключено ' +
+          'по умолчанию: это ход наружу.',
+      ),
+      switchRow(
+        'Во встроенном браузере',
+        ai.browser.integrated,
+        (value) => void patch({ ai: { browser: { integrated: value } } }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Включено — агент работает вкладкой в редакторе, рядом с кодом, и видит ту же страницу, ' +
+          'что и вы; открытые им страницы живут во временной сессии и ваших входов не видят. ' +
+          'Выключено — отдельный Chromium: нужен, когда страницу надо проверить именно в вашем ' +
+          'браузере, а не в движке IDE.',
       ),
       field(
         'Путь к браузеру',
@@ -690,15 +702,16 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       h(
         'div',
         { class: 'field-hint' },
-        'Пусто — искать в PATH известные имена (google-chrome, chromium, brave-browser, msedge). ' +
-          'Firefox не подойдёт: он говорит не на том протоколе, которым управляет IDE.',
+        'Для отдельного Chromium. Пусто — искать в PATH известные имена (google-chrome, chromium, ' +
+          'brave-browser, msedge). Firefox не подойдёт: он говорит не на том протоколе, которым ' +
+          'управляет IDE.',
       ),
       switchRow('Без окна', ai.browser.headless, (value) => void patch({ ai: { browser: { headless: value } } })),
       h(
         'div',
         { class: 'field-hint' },
-        'С окном работу агента видно, но браузер всплывает поверх редактора. Без окна — тихо и ' +
-          'годится на машинах без экрана.',
+        'Для отдельного Chromium. С окном работу агента видно, но браузер всплывает поверх ' +
+          'редактора. Без окна — тихо и годится на машинах без экрана.',
       ),
       h('div', { class: 'settings-divider' }),
       switchRow(
@@ -1693,7 +1706,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         .then((result) => {
           lspRunning = result.running;
           render();
-          showToast('Серверы остановлены — поднимутся при следующем открытии файла');
+          showToast('Серверы остановлены — поднимутся заново при следующем открытии проекта или файла');
         })
         .catch((error) => {
           showToast(error instanceof Error ? error.message : String(error), 'error');
@@ -1745,7 +1758,8 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         'div',
         { class: 'field-hint' },
         'Кнопка проверяет PATH и подставляет найденное (pylsp/pyright, typescript-language-server, ' +
-          'rust-analyzer, gopls и другие). Запускать сервер без вашего ведома IDE не станет.',
+          'rust-analyzer, gopls и другие). Серверы языков проекта IDE поднимает сама, как только ' +
+          'проект открыт; тумблер «Запускать языковые серверы» выше останавливает их и запрещает запуск.',
       ),
       isPythonProject ? field('Установить сервер', installButton) : null,
       isPythonProject

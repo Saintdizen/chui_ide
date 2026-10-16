@@ -2,6 +2,7 @@ import { CloneEvent, type CloneProgressPayload, type RecentProject } from '../..
 import { RpcClient } from '../core/rpc';
 import { WindowFrame } from '../core/window-frame';
 import { h, svgIcon } from './dom';
+import { installTooltips } from './tooltip';
 
 /**
  * Стартовое окно: выбрать проект, клонировать или открыть один из недавних.
@@ -11,6 +12,9 @@ import { h, svgIcon } from './dom';
  * состояние и шлёт запросы, поэтому его легко проверить моком моста.
  */
 export async function startLauncher(mount: HTMLElement): Promise<void> {
+  // Подсказки — свои, вместо системных (см. `ui/tooltip.ts`).
+  installTooltips();
+
   const rpc = new RpcClient();
 
   const topBarLeft = h('div', { class: 'topbar-left' });

@@ -136,6 +136,58 @@ export class OpenAiCompatibleProvider implements AiProvider {
     let usage: ChatStreamDone['usage'];
     const toolSlots = new Map<number, { id: string; name: string; args: string }>();
 
+    /** Одна строка SSE: разбираем её и раскладываем по накопителям. */
+    const handleLine = (raw: string): void => {
+      const line = raw.trim();
+      if (line.length === 0 || !line.startsWith('data:')) return;
+
+      const data = line.slice(5).trim();
+      if (data.length === 0 || data === '[DONE]') return;
+
+      let chunk: ChatCompletionChunk;
+      try {
+        chunk = JSON.parse(data) as ChatCompletionChunk;
+      } catch {
+        return; // неполный или нестандартный чанк — пропускаем, поток продолжается
+      }
+
+      const choice = chunk.choices?.[0];
+
+      // Размышления отдельным потоком: в ответ они не входят и в историю не пишутся.
+      const reasoning = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
+      if (typeof reasoning === 'string' && reasoning.length > 0) {
+        thoughts += reasoning;
+        handlers.onReasoning?.(reasoning);
+      }
+
+      const delta = choice?.delta?.content;
+      if (typeof delta === 'string' && delta.length > 0) {
+        text += delta;
+        handlers.onDelta(delta);
+      }
+
+      // Вызовы инструментов приходят фрагментами: id и имя — обычно целиком
+      // в первом чанке, аргументы — по кускам JSON, которые надо склеить.
+      for (const call of choice?.delta?.tool_calls ?? []) {
+        const index = typeof call.index === 'number' ? call.index : 0;
+        const slot = toolSlots.get(index) ?? { id: '', name: '', args: '' };
+        if (call.id && !slot.id) slot.id = call.id;
+        if (call.function?.name) slot.name += call.function.name;
+        if (call.function?.arguments) slot.args += call.function.arguments;
+        toolSlots.set(index, slot);
+      }
+
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
+      if (chunk.usage) {
+        const cached = chunk.usage.prompt_tokens_details?.cached_tokens;
+        usage = {
+          promptTokens: chunk.usage.prompt_tokens,
+          completionTokens: chunk.usage.completion_tokens,
+          ...(cached !== undefined && cached > 0 ? { cachedTokens: cached } : {}),
+        };
+      }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -143,58 +195,15 @@ export class OpenAiCompatibleProvider implements AiProvider {
 
       let newline = buffer.indexOf('\n');
       while (newline >= 0) {
-        const line = buffer.slice(0, newline).trim();
+        handleLine(buffer.slice(0, newline));
         buffer = buffer.slice(newline + 1);
         newline = buffer.indexOf('\n');
-        if (line.length === 0 || !line.startsWith('data:')) continue;
-
-        const data = line.slice(5).trim();
-        if (data.length === 0 || data === '[DONE]') continue;
-
-        let chunk: ChatCompletionChunk;
-        try {
-          chunk = JSON.parse(data) as ChatCompletionChunk;
-        } catch {
-          continue; // неполный или нестандартный чанк — пропускаем, поток продолжается
-        }
-
-        const choice = chunk.choices?.[0];
-
-        // Размышления отдельным потоком: в ответ они не входят и в историю не пишутся.
-        const reasoning = choice?.delta?.reasoning_content ?? choice?.delta?.reasoning;
-        if (typeof reasoning === 'string' && reasoning.length > 0) {
-          thoughts += reasoning;
-          handlers.onReasoning?.(reasoning);
-        }
-
-        const delta = choice?.delta?.content;
-        if (typeof delta === 'string' && delta.length > 0) {
-          text += delta;
-          handlers.onDelta(delta);
-        }
-
-        // Вызовы инструментов приходят фрагментами: id и имя — обычно целиком
-        // в первом чанке, аргументы — по кускам JSON, которые надо склеить.
-        for (const call of choice?.delta?.tool_calls ?? []) {
-          const index = typeof call.index === 'number' ? call.index : 0;
-          const slot = toolSlots.get(index) ?? { id: '', name: '', args: '' };
-          if (call.id && !slot.id) slot.id = call.id;
-          if (call.function?.name) slot.name += call.function.name;
-          if (call.function?.arguments) slot.args += call.function.arguments;
-          toolSlots.set(index, slot);
-        }
-
-        if (choice?.finish_reason) finishReason = choice.finish_reason;
-        if (chunk.usage) {
-          const cached = chunk.usage.prompt_tokens_details?.cached_tokens;
-          usage = {
-            promptTokens: chunk.usage.prompt_tokens,
-            completionTokens: chunk.usage.completion_tokens,
-            ...(cached !== undefined && cached > 0 ? { cachedTokens: cached } : {}),
-          };
-        }
       }
     }
+    // Добираем хвост: последняя строка потока легко приходит без завершающего
+    // перевода строки, и без этого её текст теряется — ответ обрывается на полуслове.
+    buffer += decoder.decode();
+    handleLine(buffer);
 
     const toolCalls: ChatToolCall[] = [...toolSlots.entries()]
       .sort((a, b) => a[0] - b[0])

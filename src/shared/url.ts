@@ -1,6 +1,22 @@
 export const EXTERNAL_SCHEMES = ['http:', 'https:', 'mailto:'];
 
 /**
+ * Адрес, который можно показать во встроенном браузере (`<webview>`).
+ *
+ * Пускаем только сетевые схемы: `file:` показал бы локальный файл мимо дерева и
+ * прав, а `javascript:` и `data:` — это уже запуск чужого кода. Схему читаем
+ * разбором через `URL`, а не поиском подстроки: регистр не должен влиять.
+ */
+export function isWebPageUrl(target: string): boolean {
+  try {
+    const protocol = new URL(target).protocol.toLowerCase();
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Адрес можно отдать системному обработчику.
  *
  * Ссылки из интерфейса (ответ модели, документация) должны открываться в браузере

@@ -24,6 +24,33 @@ export interface TabsDeps {
   commands: CommandRegistry;
   /** Вкладка-спутник появится в полосе, если она задана. */
   auxiliary?: AuxiliaryTab;
+  /** Вкладки встроенного браузера: страницы стоят в той же полосе, что файлы. */
+  pages?: PagesTabSource;
+  /**
+   * Переключение предпросмотра/правки у файлов, которые его понимают (.md).
+   * Куда идёт режим (оверлей редактора или панель) — дело приложения, полоса только
+   * рисует кнопку и шлёт переключение.
+   */
+  preview?: {
+    /** Файл умеет показываться разметкой. */
+    applies(path: string): boolean;
+    /** Сейчас показана разметка (а не текст). */
+    active(path: string): boolean;
+    /** Переключить режим. */
+    toggle(path: string): void;
+  };
+}
+
+/**
+ * Что нужно полосе от вкладок браузера. Сама модель (`core/browser-tabs.ts`) не
+ * знает ни про DOM, ни про эту полосу: здесь только список, активная и действия.
+ */
+export interface PagesTabSource {
+  readonly list: readonly { id: string; title: string; url: string }[];
+  readonly activePageId: string | null;
+  activate(id: string): void;
+  close(id: string): void;
+  onDidChange(listener: () => void): void;
 }
 
 export interface Tabs {
@@ -79,8 +106,10 @@ export function createTabs(deps: TabsDeps): Tabs {
     clear(element);
     const auxiliary = deps.auxiliary;
     const auxActive = auxiliary?.active === true;
-    // Пока активна вкладка-спутник, ни один файл не выглядит открытым.
-    const active = auxActive ? null : (deps.openEditors.active?.path ?? null);
+    const pages = deps.pages;
+    const pageActive = pages?.activePageId ?? null;
+    // Пока активна вкладка-спутник или страница браузера, ни один файл не выглядит открытым.
+    const active = auxActive || pageActive !== null ? null : (deps.openEditors.active?.path ?? null);
 
     // Закреплённые — левее прочих: их место не «съедает» предпросмотр, и так видно,
     // что они не уедут. Порядок внутри группы прежний (сортировка устойчива).
@@ -90,6 +119,7 @@ export function createTabs(deps: TabsDeps): Tabs {
     for (const path of paths) {
       const document = deps.documents.get(path);
       const pinned = deps.openEditors.isPinned(path);
+      const preview = deps.preview;
       const classes = ['tab'];
       if (path === active) classes.push('is-active');
       // У изменённой вкладки крестик остаётся видимым: иначе точка правки
@@ -114,6 +144,23 @@ export function createTabs(deps: TabsDeps): Tabs {
         },
         pinned ? svgIcon('pin', 13) : svgIcon('file', 13),
         h('span', { class: 'tab-label' }, basename(path)),
+        // У markdown — кнопка режима: глаз (показать разметку) / карандаш (вернуться к тексту).
+        preview?.applies(path)
+          ? h(
+              'button',
+              {
+                class: 'tab-action',
+                type: 'button',
+                title: preview.active(path) ? 'Показать исходный текст' : 'Просмотр разметки',
+                'aria-pressed': preview.active(path) ? 'true' : 'false',
+                onClick: (event: Event) => {
+                  event.stopPropagation();
+                  preview.toggle(path);
+                },
+              },
+              svgIcon(preview.active(path) ? 'pencil' : 'eye', 12),
+            )
+          : null,
         h(
           'button',
           {
@@ -169,6 +216,42 @@ export function createTabs(deps: TabsDeps): Tabs {
         );
       });
 
+      element.appendChild(tab);
+    }
+
+    // Вкладки браузера — после файлов: страница не документ, но место в полосе у неё своё,
+    // и закрывается она так же — крестиком или средней кнопкой.
+    for (const page of pages?.list ?? []) {
+      const classes = ['tab', 'tab-page'];
+      if (page.id === pageActive) classes.push('is-active');
+      const tab = h(
+        'div',
+        {
+          class: classes.join(' '),
+          title: `${page.title}\n${page.url}`,
+          role: 'tab',
+          'aria-selected': page.id === pageActive ? 'true' : 'false',
+        },
+        svgIcon('globe', 13),
+        h('span', { class: 'tab-label' }, page.title),
+        h(
+          'button',
+          {
+            class: 'tab-close',
+            type: 'button',
+            title: 'Закрыть (Ctrl+W)',
+            onClick: (event: Event) => {
+              event.stopPropagation();
+              pages?.close(page.id);
+            },
+          },
+          svgIcon('close', 11),
+        ),
+      );
+      tab.addEventListener('click', () => pages?.activate(page.id));
+      tab.addEventListener('auxclick', (event) => {
+        if (event.button === 1) pages?.close(page.id);
+      });
       element.appendChild(tab);
     }
 
@@ -269,6 +352,8 @@ export function createTabs(deps: TabsDeps): Tabs {
 
   deps.openEditors.onDidChange(render);
   deps.documents.onDidChange(render);
+  // Страница браузера навигировалась или закрылась — полоса идёт за ней.
+  deps.pages?.onDidChange(render);
   // Сохранение не меняет текст, но снимает пометку правки: точка на вкладке
   // обязана погаснуть сразу, а не по событию наблюдателя за файлом.
   deps.documents.onDidChangeDirty(render);

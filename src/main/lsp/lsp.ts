@@ -9,7 +9,7 @@ import type { LspServerOrigin, LspStatus } from '../../shared/lsp-status';
 import type { FileEdit } from '../../shared/edits';
 import { toWorkspaceFileEdits } from '../../shared/lsp-workspace-edit';
 import { languageInfoForPath } from '../../shared/languages';
-import { serverCandidates } from '../../shared/lsp-bundled';
+import { prewarmLanguages, serverCandidates } from '../../shared/lsp-bundled';
 import { toLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { parseProgress } from '../../shared/lsp-progress';
 import {
@@ -429,6 +429,29 @@ export class LspService {
     this.failed.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
     return this.status();
+  }
+
+  /**
+   * Поднять серверы заранее, не дожидаясь открытия файла.
+   *
+   * Обычный путь ленивый: сервер стартует на первом `open` файла своего языка. Но
+   * подъём занимает секунды, и всё это время подсказки, переходы и поиск по символам
+   * молчат, а чип в статусбаре пуст. Прогрев убирает паузу: проект открыт — серверы
+   * его языков начинают подниматься сразу.
+   *
+   * Берём только языки, для которых сервер ЕСТЬ в настройках: язык без сервера
+   * пропускаем молча, не записывая его в `failed`, — иначе чип засорился бы «сервер
+   * не найден» у языков, о серверах для которых речи не шло. Мастер-тумблер
+   * `lsp.enabled` уважаем так же, как везде. Возврат после подъёма: вызывающий
+   * сразу видит итог в `status`.
+   */
+  async prewarm(languages: readonly string[]): Promise<void> {
+    if (!this.settings().enabled) return;
+    const wanted = prewarmLanguages(languages, this.settings().servers);
+    // Параллельно: языки независимы, и ждать их по очереди — терять время зря.
+    // Повторный прогрев безопасен: уже поднятый сервер отдаётся как есть, а два
+    // одновременных вызова одного языка ждут один и тот же подъём (см. `starting`).
+    await Promise.all(wanted.map((language) => this.runtimeFor(language).catch(() => null)));
   }
 
   /**

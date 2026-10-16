@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatBrowserSnapshot,
   isLocalHost,
+  isLocalUrl,
   MAX_SNAPSHOT_ELEMENTS,
   MAX_SNAPSHOT_TEXT,
   normalizeBrowserUrl,
@@ -52,6 +53,26 @@ describe('isLocalHost', () => {
     expect(isLocalHost('[::1]:8080')).toBe(true);
     expect(isLocalHost('localhost.example.com')).toBe(false);
     expect(isLocalHost('127.0.0.1.example.com')).toBe(false);
+  });
+
+  it('«все интерфейсы» — тоже своя машина', () => {
+    expect(isLocalHost('0.0.0.0:8080')).toBe(true);
+    expect(isLocalHost('[::]:3000')).toBe(true);
+  });
+});
+
+describe('isLocalUrl', () => {
+  it('локальные адреса узнаёт, чужие — нет', () => {
+    expect(isLocalUrl('http://localhost:3000/app')).toBe(true);
+    expect(isLocalUrl('http://127.0.0.1/')).toBe(true);
+    expect(isLocalUrl('http://0.0.0.0:8080/')).toBe(true);
+    expect(isLocalUrl('https://example.com/')).toBe(false);
+    expect(isLocalUrl('https://localhost.example.com/')).toBe(false);
+  });
+
+  it('не сетевая схема — не наш случай, даже если хост локальный', () => {
+    expect(isLocalUrl('file:///etc/passwd')).toBe(false);
+    expect(isLocalUrl('не адрес')).toBe(false);
   });
 });
 

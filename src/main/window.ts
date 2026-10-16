@@ -26,6 +26,16 @@ interface WindowOptions {
 let ideWindow: BrowserWindow | null = null;
 
 /**
+ * Окно IDE, если оно уже открыто. Нужно тем, кто прикрепляет к окну свои слои
+ * (встроенный браузер — это `WebContentsView` поверх окна) и не должен его
+ * создавать сам: геттер с побочным эффектом «заодно открою окно» — вручил бы
+ * приложению окно, которого человек не просил.
+ */
+export function getIdeWindow(): BrowserWindow | null {
+  return ideWindow && !ideWindow.isDestroyed() ? ideWindow : null;
+}
+
+/**
  * Окно IDE. Оно одно на приложение: повторный вызов поднимает уже открытое,
  * а не создаёт второе.
  */

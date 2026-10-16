@@ -66,6 +66,11 @@ export interface StatusState {
 export interface StatusBarView {
   element: HTMLElement;
   /**
+   * Кнопка ветки git в полосе: к ней привязывается поповер менеджера git — и по клику,
+   * и командой «Показать изменения», когда вкладки в нижней панели больше нет.
+   */
+  readonly gitAnchor: HTMLElement;
+  /**
    * Куда монтируется статус ассистента: режим работы и заполнение контекста.
    * Композер отдаёт сюда свою строку статуса, чтобы она жила в общей полосе окна,
    * а не занимала высоту панели чата.
@@ -307,6 +312,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
 
   return {
     element,
+    gitAnchor: gitItem,
     chatSlot,
     fileSlot,
     update(patch) {

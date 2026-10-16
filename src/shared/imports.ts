@@ -10,12 +10,27 @@
  * чужого проекта. Такую проверку IDE может сделать сама.
  */
 
+/**
+ * Откуда берётся модуль: из установленных пакетов или из самого проекта.
+ *
+ * Проверки у них разные, поэтому и вид разный: пакет сверяется с окружением
+ * (интерпретатор Python, каталоги `node_modules`), а локальный — с диском: есть ли
+ * такой файл рядом с импортирующим. Смешивать их нельзя — `./util` не пакет, и
+ * искать его в `node_modules` бессмысленно.
+ */
+export type ImportKind = 'module' | 'local';
+
 /** Одно место в тексте, где подключают модуль. */
 export interface ImportRef {
-  /** Имя модуля, как написано: `os.path`, `requests`, `pkg.sub`. */
+  /** Имя модуля, как написано: `os.path`, `requests`, `./util`, `.mod`. */
   module: string;
-  /** Верхнеуровневое имя: по нему и проверяем установку (`os.path` → `os`). */
+  /**
+   * Верхнеуровневое имя для проверки установки: `os.path` → `os`, `pkg/sub` → `pkg`.
+   * У локального импорта — сам спецификатор: сверять его с пакетами незачем.
+   */
   top: string;
+  /** Пакет или свой модуль проекта (см. `ImportKind`). */
+  kind: ImportKind;
   /** Строка (1-based). */
   line: number;
   /** Столбец начала имени (1-based). */
@@ -97,10 +112,13 @@ function blankLine(line: string, state: { triple: Quote | null }): string {
 }
 
 /** Ссылка на импорт из позиции имени в строке (столбцы 1-based). */
-function makeRef(module: string, line: number, column: number): ImportRef {
+function makeRef(module: string, line: number, column: number, kind: ImportKind = 'module'): ImportRef {
   return {
     module,
-    top: module.split('.')[0],
+    // У локального импорта верхнеуровневым именем считаем его самого: дробление по
+    // точке дало бы пустую строку (`.mod`), а сверять его с пакетами не с чем.
+    top: kind === 'local' ? module : module.split('.')[0],
+    kind,
     line,
     startColumn: column + 1,
     endColumn: column + module.length + 1,
@@ -118,12 +136,20 @@ function parseStatement(statement: string, line: number, offset: number): Import
   const start = offset + lead;
   const body = statement.slice(lead);
 
-  // `from a.b import c, d` — модуль между `from` и `import`. Относительные
-  // (`from . import x`, `from .mod import y`) пропускаем: это свои модули проекта.
+  // `from a.b import c, d` — модуль между `from` и `import`.
   const from = /^from\s+([A-Za-z_.][\w.]*)\s+import\b/.exec(body);
   if (from) {
     const module = from[1];
-    if (!module.startsWith('.')) refs.push(makeRef(module, line, start + body.indexOf(module)));
+    const at = start + body.indexOf(module);
+    if (module.startsWith('.')) {
+      // Относительный импорт — свой модуль проекта, проверяется по диску. Берём
+      // только названный путь (`.mod`, `..pkg.mod`): у `from . import name` имя
+      // может быть определено в `__init__.py`, и файла с таким именем просто нет —
+      // пометка была бы ложной.
+      if (/^\.+\w/.test(module)) refs.push(makeRef(module, line, at, 'local'));
+      return refs;
+    }
+    refs.push(makeRef(module, line, at));
     return refs;
   }
 
@@ -164,12 +190,34 @@ export function parsePythonImports(text: string): ImportRef[] {
 
 /** Уникальные верхнеуровневые имена — то, что имеет смысл проверять на установку. */
 export function topLevelModules(imports: readonly ImportRef[]): string[] {
-  return [...new Set(imports.map((item) => item.top))];
+  return [...new Set(imports.filter((item) => item.kind === 'module').map((item) => item.top))];
+}
+
+/**
+ * Ключ сверки с ответом main: у пакета — верхнеуровневое имя, у своего модуля —
+ * спецификатор. Ответ приходит одним списком, и по ключу видно, какая ссылка мимо.
+ */
+export function importKey(item: ImportRef): string {
+  return item.kind === 'local' ? item.module : item.top;
+}
+
+/**
+ * Что спрашивать у main. Пакеты и локальные пути — разные проверки (окружение
+ * против диска), поэтому и уезжают они разными списками, а не одним.
+ */
+export function checkTargets(imports: readonly ImportRef[]): { modules: string[]; locals: string[] } {
+  const modules = new Set<string>();
+  const locals = new Set<string>();
+  for (const item of imports) {
+    if (item.kind === 'local') locals.add(item.module);
+    else modules.add(item.top);
+  }
+  return { modules: [...modules], locals: [...locals] };
 }
 
 /** Импорты, чей модуль отсутствует: их и подчёркиваем. */
 export function missingImports(imports: readonly ImportRef[], missing: ReadonlySet<string>): ImportRef[] {
-  return imports.filter((item) => missing.has(item.top));
+  return imports.filter((item) => missing.has(importKey(item)));
 }
 
 /* ── JavaScript и TypeScript ────────────────────────────────────────────── */
@@ -199,6 +247,23 @@ export function isExternalSpecifier(specifier: string): boolean {
   if (specifier.startsWith('#')) return false;
   if (specifier.includes(':')) return false;
   return true;
+}
+
+/**
+ * Что это за спецификатор: установленный пакет, свой модуль проекта или не наша
+ * забота.
+ *
+ * `null` — проверять нечего. Абсолютные пути и адреса с протоколом (`node:fs`,
+ * `https://…`) за `node_modules` не отвечают; путь-алиас вида `@/components`
+ * (привычка Vite и `paths` в tsconfig) разрешается конфигом, которого мы не
+ * читаем, — объявить его недостающим пакетом значило бы врать.
+ */
+export function classifySpecifier(specifier: string): ImportKind | null {
+  if (!specifier) return null;
+  if (specifier === '.' || specifier === '..') return 'local';
+  if (specifier.startsWith('./') || specifier.startsWith('../')) return 'local';
+  if (specifier.startsWith('@/')) return null;
+  return isExternalSpecifier(specifier) ? 'module' : null;
 }
 
 /** Виды лексем: слова (ключевые и имена), строки и одиночная пунктуация. */
@@ -301,11 +366,13 @@ export function parseScriptImports(text: string): ImportRef[] {
 
   const refs: ImportRef[] = [];
   const push = (token: ScriptToken): void => {
-    if (!isExternalSpecifier(token.value)) return;
+    const kind = classifySpecifier(token.value);
+    if (!kind) return;
     const { line, startColumn } = at(token.start);
     refs.push({
       module: token.value,
-      top: packageNameOf(token.value),
+      top: kind === 'local' ? token.value : packageNameOf(token.value),
+      kind,
       line,
       startColumn,
       endColumn: startColumn + token.value.length,

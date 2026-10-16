@@ -70,6 +70,8 @@ export function createTerminalPanel(deps: {
   scheme: Scheme;
   /** Включать ли лигатуры шрифта — то же значение, что у редактора кода. */
   ligatures: () => boolean;
+  /** Ссылка из консоли: решает вызывающий — вкладкой в IDE или системным браузером. */
+  openLink: (url: string) => void;
 }): TerminalPanelView {
   let scheme = deps.scheme;
 
@@ -226,10 +228,9 @@ export function createTerminalPanel(deps: {
       onSelectionChange: (text) => {
         if (text) void navigator.clipboard.writeText(text).catch(() => undefined);
       },
-      // Гиперссылка (OSC 8): адрес уходит системе. Разрешение схемы — забота main.
-      onLink: (url) => {
-        void deps.rpc.request('shell.openExternal', { url }).catch(() => undefined);
-      },
+      // Гиперссылка (OSC 8): решает вызывающий. Локальный адрес открывается вкладкой
+      // в IDE (рядом с кодом), чужой — системным браузером; схемы проверяет main.
+      onLink: (url) => deps.openLink(url),
     });
 
     // Подгоняем сетку под контейнер и только потом просим pty: оболочка должна родиться

@@ -56,6 +56,10 @@ export interface AttachmentsView {
   attachFrom(kind: 'selection' | 'file' | 'problems'): void;
   /** Выбор изображений системным диалогом. */
   attachImagesFromDialog(): Promise<void>;
+  /** Приложить готовое изображение (data-URL): снимок страницы из встроенного браузера. */
+  attachImage(image: PickedImage): void;
+  /** Приложить готовый контекст: журнал консоли страницы и подобное. */
+  attachContext(item: ChatAttachment): void;
   /** Файлы из буфера и перетаскивания. */
   attachFiles(files: readonly File[]): Promise<void>;
   /** Показать файл или папку по пути (перетаскивание из дерева). */
@@ -396,6 +400,8 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     attachBest,
     attachFrom: (kind) => addAttachment(attachmentFrom(kind)),
     attachImagesFromDialog,
+    attachImage: (image) => addImage(image),
+    attachContext: (item) => addAttachment(item),
     attachFiles,
     attachPath,
     attachMention,

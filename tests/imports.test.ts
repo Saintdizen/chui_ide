@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  checkTargets,
+  classifySpecifier,
   isExternalSpecifier,
   missingImports,
   packageNameOf,
@@ -16,7 +18,7 @@ function modulesOf(text: string): string[] {
 describe('parsePythonImports', () => {
   it('простой импорт и позиция имени', () => {
     expect(parsePythonImports('import os')).toEqual([
-      { module: 'os', top: 'os', line: 1, startColumn: 8, endColumn: 10 },
+      { module: 'os', top: 'os', kind: 'module', line: 1, startColumn: 8, endColumn: 10 },
     ]);
   });
 
@@ -34,13 +36,20 @@ describe('parsePythonImports', () => {
 
   it('`from … import …` — подчёркиваем только модуль', () => {
     expect(parsePythonImports('from requests.adapters import HTTPAdapter')).toEqual([
-      { module: 'requests.adapters', top: 'requests', line: 1, startColumn: 6, endColumn: 23 },
+      { module: 'requests.adapters', top: 'requests', kind: 'module', line: 1, startColumn: 6, endColumn: 23 },
     ]);
   });
 
-  it('относительные импорты пропускаем', () => {
+  it('относительный импорт с путём — свой модуль проекта', () => {
+    // `from . import x` не берём: имя может быть из `__init__.py`, файла с ним нет.
     expect(modulesOf('from . import x')).toEqual([]);
-    expect(modulesOf('from .mod import y')).toEqual([]);
+    expect(parsePythonImports('from .mod import y')[0]).toMatchObject({
+      module: '.mod',
+      kind: 'local',
+      startColumn: 6,
+      endColumn: 10,
+    });
+    expect(modulesOf('from ..pkg.mod import z')).toEqual(['..pkg.mod']);
   });
 
   it('отступ не сбивает столбцы', () => {
@@ -113,6 +122,34 @@ describe('isExternalSpecifier', () => {
   });
 });
 
+describe('classifySpecifier', () => {
+  it('пакет, свой модуль или не наша забота', () => {
+    expect(classifySpecifier('react')).toBe('module');
+    expect(classifySpecifier('@scope/pkg')).toBe('module');
+    expect(classifySpecifier('./a')).toBe('local');
+    expect(classifySpecifier('../b')).toBe('local');
+    // Алиас из конфига сборщика: разрешается не нами — объявлять его пропавшим нельзя.
+    expect(classifySpecifier('@/components/Button')).toBeNull();
+    expect(classifySpecifier('node:fs')).toBeNull();
+    expect(classifySpecifier('/abs')).toBeNull();
+    expect(classifySpecifier('#internal')).toBeNull();
+  });
+});
+
+describe('checkTargets', () => {
+  it('разводит пакеты и свои модули по разным спискам', () => {
+    const refs = parseScriptImports(["import a from 'pkg'", "import b from './b'"].join('\n'));
+    expect(checkTargets(refs)).toEqual({ modules: ['pkg'], locals: ['./b'] });
+  });
+});
+
+describe('missingImports (свои модули)', () => {
+  it('отдаёт ссылки и на пакеты, и на файлы проекта', () => {
+    const refs = parseScriptImports(["import a from 'pkg'", "import b from './b'"].join('\n'));
+    expect(missingImports(refs, new Set(['./b'])).map((item) => item.module)).toEqual(['./b']);
+  });
+});
+
 describe('parseScriptImports', () => {
   it('именованный, побочный и default-импорт', () => {
     const text = ["import { a } from 'pkg-a'", "import 'pkg-b'", "import React from 'react'"].join('\n');
@@ -123,6 +160,7 @@ describe('parseScriptImports', () => {
     expect(parseScriptImports("import x from 'react'")[0]).toEqual({
       module: 'react',
       top: 'react',
+      kind: 'module',
       line: 1,
       startColumn: 16,
       endColumn: 21,
@@ -130,7 +168,7 @@ describe('parseScriptImports', () => {
   });
 
   it('`export … from` тоже импорт', () => {
-    expect(scriptModules("export { helper } from './helper'\nexport * from 'pkg'")).toEqual(['pkg']);
+    expect(scriptModules("export { helper } from './helper'\nexport * from 'pkg'")).toEqual(['./helper', 'pkg']);
   });
 
   it('require и динамический import', () => {
@@ -150,9 +188,12 @@ describe('parseScriptImports', () => {
     expect(refs[0]).toMatchObject({ module: 'pkg-multi', line: 4, startColumn: 9, endColumn: 18 });
   });
 
-  it('относительные и встроенные не проверяем', () => {
+  it('относительные — свои модули, встроенные не проверяем', () => {
     const text = ["import a from './a'", "import b from '../b'", "import fs from 'node:fs'"].join('\n');
-    expect(scriptModules(text)).toEqual([]);
+    expect(parseScriptImports(text).map((item) => [item.module, item.kind])).toEqual([
+      ['./a', 'local'],
+      ['../b', 'local'],
+    ]);
   });
 
   it('импорт в комментарии не считается', () => {

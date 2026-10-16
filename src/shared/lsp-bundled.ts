@@ -211,3 +211,23 @@ export function serverCandidates(
   }
   return result;
 }
+
+/**
+ * Языки проекта, у которых есть сервер в настройках — те, что имеет смысл греть заранее.
+ *
+ * Нужно при открытии проекта: серверы языков проекта поднимаются сразу, а не при первом
+ * открытии файла. Язык без сервера отбрасываем: поднимать для него нечего, а пометка
+ * «сервер не найден» засорила бы статус. Выключенный сервер — воля человека, его тоже
+ * пропускаем. Повторы убираем: языки приходят из карты проекта, где одного языка нет дважды,
+ * но функция чистая и полагаться на это не должна.
+ */
+export function prewarmLanguages(languages: readonly string[], configured: readonly LspServerConfig[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const language of languages) {
+    if (seen.has(language)) continue;
+    seen.add(language);
+    if (serverCandidates(configured, [], language).length > 0) result.push(language);
+  }
+  return result;
+}

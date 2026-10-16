@@ -5,7 +5,7 @@ import { type SelectionSpan, stepSelection, toSelectionSpans } from '../src/shar
 function chain(...ranges: [number, number, number, number][]): unknown {
   // Собираем снаружи внутрь: так первый аргумент оказывается самым узким (`raw[0]`),
   // а `parent` каждого ведёт к более широкому — ровно как отвечает сервер.
-  let node: unknown = undefined;
+  let node: unknown;
   for (let index = ranges.length - 1; index >= 0; index -= 1) {
     const [startLine, startCharacter, endLine, endCharacter] = ranges[index]!;
     node = {

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { LSP_BUNDLED_SERVERS, matchBundledServers, mergeByPriority, serverCandidates } from '../src/shared/lsp-bundled';
+import {
+  LSP_BUNDLED_SERVERS,
+  matchBundledServers,
+  mergeByPriority,
+  prewarmLanguages,
+  serverCandidates,
+} from '../src/shared/lsp-bundled';
 import type { LspServerConfig } from '../src/shared/api';
 
 /**
@@ -134,5 +140,39 @@ describe('serverCandidates', () => {
   it('сервер без команды пропускается', () => {
     const chain = serverCandidates([], [server('python', '  '), server('python', 'pyright')], 'python');
     expect(chain.map((item) => item.command)).toEqual(['pyright']);
+  });
+});
+
+/**
+ * Отбор языков для прогрева: серверы поднимаются при открытии проекта, и греть
+ * нужно ровно те языки, для которых сервер ЕСТЬ в настройках. Язык без сервера
+ * грелся бы впустую и оставил бы в статусе «сервер не найден».
+ */
+describe('prewarmLanguages', () => {
+  const server = (language: string, command: string, enabled = true): LspServerConfig => ({
+    language,
+    command,
+    args: [],
+    enabled,
+  });
+
+  it('оставляет только языки с настроенным сервером', () => {
+    const servers = [server('python', 'pylsp'), server('typescript', 'typescript-language-server')];
+    // json есть в проекте, но сервера для него нет — его и не греем.
+    expect(prewarmLanguages(['python', 'json', 'typescript', 'markdown'], servers)).toEqual(['python', 'typescript']);
+  });
+
+  it('язык с выключенным сервером не греется', () => {
+    // Выключенный сервер — воля человека: поднимать его без спроса нельзя.
+    expect(prewarmLanguages(['python'], [server('python', 'pylsp', false)])).toEqual([]);
+  });
+
+  it('пустой список серверов — греть нечего', () => {
+    expect(prewarmLanguages(['python', 'typescript'], [])).toEqual([]);
+  });
+
+  it('повтор языка в карте проекта не греет его дважды', () => {
+    // Языки приходят из карты проекта, но функция чистая: на дубль не полагаемся.
+    expect(prewarmLanguages(['python', 'python'], [server('python', 'pylsp')])).toEqual(['python']);
   });
 });
