@@ -15,7 +15,7 @@
  * проще чинить: у каждого случая видно, где он кончается.
  */
 
-import { ST_NORMAL, type Grammar, type LineResult } from '../grammar';
+import type { Grammar, LineResult } from '../grammar';
 import { isDigit, push, scanQuoted } from '../scanner';
 import { ATTRIBUTE, KEYWORD, NUMBER, STRING, TAG, type Token } from '../tokens';
 
@@ -82,7 +82,7 @@ export const cssGrammar: Grammar = {
         index = end;
         continue;
       }
-      // Цвет: `#rrggbb` и `#rgb` — числом, как это делает и VS Code.
+      // Цвет: `#rrggbb` и `#rgb` — числом.
       if (ch === '#' && /[0-9a-fA-F]/.test(text[index + 1] ?? '')) {
         let end = index + 1;
         while (end < text.length && /[0-9a-fA-F]/.test(text[end]!)) end += 1;
@@ -137,7 +137,7 @@ export const cssGrammar: Grammar = {
         index = end;
         continue;
       }
-      // Значение внутри блока: имена (`flex`, `none`) оставляем без цвета — так и в VS Code.
+      // Значение внутри блока: имена (`flex`, `none`) оставляем без цвета.
       let end = index;
       while (end < text.length && !';}{'.includes(text[end]!)) end += 1;
       index = end > index ? end : index + 1;
@@ -146,6 +146,3 @@ export const cssGrammar: Grammar = {
     return { tokens, state: (inComment ? IN_COMMENT : 0) + depth };
   },
 };
-
-/** Начальное состояние: нет ни комментария, ни открытого блока. */
-export const CSS_INITIAL_STATE = ST_NORMAL;

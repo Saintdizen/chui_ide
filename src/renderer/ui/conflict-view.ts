@@ -17,7 +17,7 @@ export interface ConflictViewDeps {
   git: GitModel;
   /** Текущий текст файла в рабочем дереве: в нём и лежат маркеры конфликта. */
   readText: (path: string) => Promise<string>;
-  /** Применить правки к документу (через app: документ и Monaco вместе, с undo). */
+  /** Применить правки к документу (через app: документ и редактор вместе, с undo). */
   applyEdits: (path: string, edits: readonly TextEdit[]) => Promise<void>;
   /** Сохранить файл и отметить конфликт решённым (`git add`). */
   finish: (path: string) => Promise<void>;

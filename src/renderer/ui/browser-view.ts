@@ -6,7 +6,7 @@ import { showContextMenu } from './context-menu';
 import { h, svgIcon } from './dom';
 
 /**
- * Встроенный браузер: страница открывается вкладкой в редакторе, как в VS Code.
+ * Встроенный браузер: страница открывается вкладкой в редакторе.
  *
  * Саму страницу рисует НЕ renderer. Вложение — это `WebContentsView`: отдельный
  * слой окна, которым владеет main (`main/browser/panel.ts`). Здесь остаётся то,
@@ -234,7 +234,10 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
    * разных местах, и не забыть ни одного проще с одной стороны.
    */
   const syncOcclusion = (): void => {
-    const next = document.querySelector('.overlay:not([hidden]), .modal-backdrop:not([hidden])') !== null;
+    // Панели-меню (`.context-menu`) тоже лежат в DOM и тоже всплывают поверх
+    // сцены: без них выпадающее меню уходило бы ПОД страницу и не читалось.
+    const next =
+      document.querySelector('.overlay:not([hidden]), .modal-backdrop:not([hidden]), .context-menu') !== null;
     if (next === occluded) return;
     occluded = next;
     if (!open) return;
@@ -302,7 +305,7 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
       .catch(() => undefined);
   }
 
-  /** Меню «в чат»: снимок страницы и её консоль — то, что у VS Code в Add to Chat. */
+  /** Меню «в чат»: снимок страницы и её консоль. */
   function openChatMenu(event: Event): void {
     const id = activeId;
     if (!id) return;

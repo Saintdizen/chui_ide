@@ -1,15 +1,28 @@
 import { CloneEvent, type CloneProgressPayload, type RecentProject } from '../../shared/api';
+import {
+  PROJECT_KINDS,
+  isProjectKind,
+  projectKindInfo,
+  projectNameProblem,
+  type ProjectKind,
+} from '../../shared/project-kinds';
 import { RpcClient } from '../core/rpc';
 import { WindowFrame } from '../core/window-frame';
 import { h, svgIcon } from './dom';
+import { createSelect } from './select';
 import { installTooltips } from './tooltip';
 
 /**
- * Стартовое окно: выбрать проект, клонировать или открыть один из недавних.
+ * Стартовое окно: открыть проект, клонировать, создать новый или взять один из недавних.
  *
  * Своей логики про файлы здесь нет — всё делает main (история живёт
- * в settings.json, клонирование идёт через git). Окно лишь показывает
- * состояние и шлёт запросы, поэтому его легко проверить моком моста.
+ * в settings.json, клонирование идёт через git, заготовки нового проекта пишет
+ * `project/scaffold`). Окно лишь показывает состояние и шлёт запросы, поэтому его
+ * легко проверить моком моста.
+ *
+ * Клонирование и создание устроены одинаково: своя форма, своя папка назначения
+ * и один и тот же переход в проект — `openProject` по ответу main. Разница только
+ * в том, откуда берётся содержимое папки: из сети или из заготовки.
  */
 export async function startLauncher(mount: HTMLElement): Promise<void> {
   // Подсказки — свои, вместо системных (см. `ui/tooltip.ts`).
@@ -35,6 +48,13 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
     { class: 'btn launcher-action', type: 'button', onClick: () => toggleClone() },
     svgIcon('branch', 15),
     h('span', {}, 'Склонировать проект'),
+  );
+
+  const createToggle = h(
+    'button',
+    { class: 'btn launcher-action', type: 'button', onClick: () => toggleCreate() },
+    svgIcon('folderPlus', 15),
+    h('span', {}, 'Создать проект'),
   );
 
   /* ── форма клонирования ────────────────────────────────────────────────── */
@@ -81,6 +101,56 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
     cloneProgress,
   );
 
+  /* ── форма создания ────────────────────────────────────────────────────── */
+
+  // Создание повторяет клонирование по устройству: имя, папка назначения и один
+  // переход в проект. Добавляется только выбор типа: от него зависит набор
+  // файлов-заготовок, а значит и то, что человек увидит в дереве после открытия.
+  const nameInput = h('input', {
+    class: 'field-input',
+    type: 'text',
+    spellcheck: false,
+    placeholder: 'my-project',
+  });
+  // Тип проекта — наш список, а не системный `<select>`: он подчиняется палитре
+  // и плотности приложения, как остальные выпадашки (см. `ui/select.ts`).
+  const kindSelect = createSelect({ title: 'Тип проекта', class: 'launcher-kind' });
+  kindSelect.setOptions(PROJECT_KINDS.map((item) => ({ value: item.kind, label: item.label, hint: item.hint })));
+  const kindHint = h('p', { class: 'field-hint' }, projectKindInfo(PROJECT_KINDS[0].kind).hint);
+  const nameHint = h('p', { class: 'field-hint' });
+  const createDestination = h('span', { class: 'launcher-path is-empty' }, 'папка не выбрана');
+  const pickCreateDestination = h(
+    'button',
+    { class: 'btn', type: 'button', onClick: () => void pickCreateFolder() },
+    'Выбрать папку',
+  );
+  const createButton = h(
+    'button',
+    { class: 'btn btn-primary', type: 'button', onClick: () => void create() },
+    'Создать',
+  );
+  const createProgress = h('div', { class: 'launcher-progress' });
+
+  const createForm = h(
+    'div',
+    { class: 'launcher-create', hidden: true },
+    h('label', { class: 'field' }, h('span', {}, 'Имя проекта'), nameInput, nameHint),
+    h('label', { class: 'field' }, h('span', {}, 'Тип проекта'), kindSelect.element, kindHint),
+    h(
+      'label',
+      { class: 'field' },
+      h('span', {}, 'Где создать'),
+      h('div', { class: 'field-row' }, createDestination, pickCreateDestination),
+    ),
+    h(
+      'div',
+      { class: 'launcher-row' },
+      createButton,
+      h('button', { class: 'btn', type: 'button', onClick: () => toggleCreate(false) }, 'Отмена'),
+    ),
+    createProgress,
+  );
+
   /* ── недавние проекты ──────────────────────────────────────────────────── */
 
   const recentHost = h('div', { class: 'launcher-recent' });
@@ -96,11 +166,12 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
       h(
         'p',
         { class: 'launcher-subtitle' },
-        'Откройте папку проекта или склонируйте репозиторий — дальше начнётся обычная работа в редакторе.',
+        'Откройте проект, создайте новый или склонируйте репозиторий — дальше начнётся обычная работа в редакторе.',
       ),
     ),
-    h('div', { class: 'launcher-actions' }, openButton, cloneToggle),
+    h('div', { class: 'launcher-actions' }, openButton, cloneToggle, createToggle),
     cloneForm,
+    createForm,
     errorLine,
     h('div', { class: 'launcher-section-title' }, 'Недавние проекты'),
     recentHost,
@@ -113,6 +184,7 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
   void frame.refresh();
 
   let destinationPath = '';
+  let createDestinationPath = '';
   let busy = false;
 
   const showError = (text: string | null): void => {
@@ -127,6 +199,11 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
     cloneToggle.disabled = next;
     urlInput.disabled = next;
     pickDestination.disabled = next;
+    createToggle.disabled = next;
+    nameInput.disabled = next;
+    pickCreateDestination.disabled = next;
+    kindSelect.setDisabled(next);
+    refreshCreate();
   };
 
   const renderRecent = (projects: readonly RecentProject[]): void => {
@@ -203,6 +280,38 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
     destination.classList.remove('is-empty');
   }
 
+  async function pickCreateFolder(): Promise<void> {
+    const result = await rpc.request('dialog.pickFolder', { title: 'Где создать проект' });
+    if (!result.path) return;
+    createDestinationPath = result.path;
+    createDestination.textContent = createDestinationPath;
+    createDestination.classList.remove('is-empty');
+    refreshCreate();
+  }
+
+  /**
+   * Что показать под полем имени и можно ли уже создавать.
+   *
+   * Проверка имени — общей функцией (`projectNameProblem`), той же, что у main:
+   * окно говорит о причине до запроса, а main не даёт обойти правило в обход окна.
+   */
+  function refreshCreate(): void {
+    const name = nameInput.value.trim();
+    const problem = projectNameProblem(name);
+    const preview = problem ?? (name && createDestinationPath ? `${createDestinationPath}/${name}` : '');
+    nameHint.textContent = preview;
+    nameHint.classList.toggle('is-error', Boolean(problem));
+    nameHint.hidden = preview === '';
+    kindHint.textContent = projectKindInfo(chosenKind()).hint;
+    createButton.disabled = busy || Boolean(problem) || !createDestinationPath;
+  }
+
+  /** Выбранный вид: список отдаёт строку, поэтому сверяем её со списком видов. */
+  function chosenKind(): ProjectKind {
+    const value = kindSelect.value;
+    return isProjectKind(value) ? value : PROJECT_KINDS[0].kind;
+  }
+
   /** Открыть проект: без пути спрашиваем папку, с путём открываем сразу. */
   async function openProject(path?: string): Promise<void> {
     if (busy) return;
@@ -210,7 +319,7 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
 
     let target = path;
     if (!target) {
-      const picked = await rpc.request('dialog.pickFolder', { title: 'Открыть папку проекта' });
+      const picked = await rpc.request('dialog.pickFolder', { title: 'Открыть проект' });
       if (!picked.path) return;
       target = picked.path;
     }
@@ -264,15 +373,73 @@ export async function startLauncher(mount: HTMLElement): Promise<void> {
     }
   }
 
+  /**
+   * Создать проект: main пишет папку с заготовками выбранного вида и возвращает
+   * путь, дальше — тот же переход, что после клонирования.
+   */
+  async function create(): Promise<void> {
+    if (busy) return;
+    showError(null);
+
+    const name = nameInput.value.trim();
+    const problem = projectNameProblem(name);
+    if (problem) {
+      showError(problem);
+      nameInput.focus();
+      return;
+    }
+    if (!createDestinationPath) {
+      showError('Выберите папку, где создать проект');
+      return;
+    }
+
+    setBusy(true);
+    createProgress.textContent = 'Создаю проект…';
+    try {
+      const result = await rpc.request('app.createProject', {
+        name,
+        directory: createDestinationPath,
+        kind: chosenKind(),
+      });
+      createProgress.textContent = 'Готово, открываю проект…';
+      setBusy(false);
+      await openProject(result.path);
+    } catch (error) {
+      setBusy(false);
+      createProgress.textContent = '';
+      showError(describe(error));
+    }
+  }
+
   function toggleClone(show = cloneForm.hidden): void {
     cloneForm.hidden = !show;
+    // Две формы занимают одно место на экране: открытая вторая только мешала бы.
+    if (show) createForm.hidden = true;
     showError(null);
     if (show) urlInput.focus();
+  }
+
+  function toggleCreate(show = createForm.hidden): void {
+    createForm.hidden = !show;
+    if (show) cloneForm.hidden = true;
+    showError(null);
+    if (show) {
+      refreshCreate();
+      nameInput.focus();
+    }
   }
 
   urlInput.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') void clone();
   });
+  nameInput.addEventListener('input', refreshCreate);
+  kindSelect.onChange(refreshCreate);
+  nameInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') void create();
+  });
+
+  // Кнопка «Создать» серая, пока нет имени или папки, а подсказка говорит, чего не хватает.
+  refreshCreate();
 
   await loadRecent();
   await frame.refresh();

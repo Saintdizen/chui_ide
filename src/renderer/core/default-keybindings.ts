@@ -15,25 +15,25 @@ import type { Keybinding } from './keybindings';
 export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { combo: 'Alt+1', command: 'view.showExplorer' },
   { combo: 'Alt+2', command: 'search.project' },
-  // Символ по проекту — привычка из VS Code и PyCharm.
+  // Символ по проекту — привычное сочетание.
   { combo: 'Ctrl+T', command: 'navigate.symbol' },
   { combo: 'Ctrl+,', command: 'settings.open' },
   { combo: 'Ctrl+Shift+G', command: 'view.showChanges' },
   { combo: 'Ctrl+`', command: 'view.showTerminal' },
   { combo: 'Ctrl+Alt+E', command: 'ai.openInEditor' },
-  // Запуск — как в PyCharm (Shift+F10) и VS Code (Ctrl+F5): обе привычки живут рядом.
+  // Запуск — Shift+F10 и Ctrl+F5: обе привычки живут рядом.
   { combo: 'Ctrl+F5', command: 'run.file' },
   { combo: 'Shift+F10', command: 'run.choose' },
   // Тесты — рядом с запуском: Ctrl+Shift+F5, как принято в IDE.
   { combo: 'Ctrl+Shift+F5', command: 'run.tests' },
-  // Форматирование — как в VS Code и PyCharm: Shift+Alt+F. Инструмент выбирается
+  // Форматирование — Shift+Alt+F. Инструмент выбирается
   // по языку: у Python это ruff/black окружения, у JS/TS — prettier/biome проекта.
   { combo: 'Shift+Alt+F', command: 'format.document' },
-  // Упорядочить импорты — как в VS Code: Shift+Alt+O.
+  // Упорядочить импорты — Shift+Alt+O.
   { combo: 'Shift+Alt+O', command: 'editor.organizeImports' },
-  // Рефакторинг — как в VS Code: Ctrl+Shift+R открывает список действий раздела `refactor`.
+  // Рефакторинг — Ctrl+Shift+R открывает список действий раздела `refactor`.
   { combo: 'Ctrl+Shift+R', command: 'editor.refactor' },
-  // Отладка — привычные из VS Code: F5 пуск/продолжить, Shift+F5 стоп,
+  // Отладка — привычные сочетания: F5 пуск/продолжить, Shift+F5 стоп,
   // F9 точка останова, F10/F11 шаги.
   { combo: 'F5', command: 'debug.continue' },
   { combo: 'Shift+F5', command: 'debug.stop' },
@@ -41,7 +41,7 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { combo: 'F10', command: 'debug.stepOver' },
   { combo: 'F11', command: 'debug.stepInto' },
   { combo: 'Shift+F11', command: 'debug.stepOut' },
-  // Закладки — как в расширении Bookmarks для VS Code: K — поставить, L/J — переходы.
+  // Закладки — привычные сочетания: K — поставить, L/J — переходы.
   { combo: 'Ctrl+Alt+K', command: 'editor.toggleBookmark' },
   { combo: 'Ctrl+Alt+L', command: 'editor.nextBookmark' },
   { combo: 'Ctrl+Alt+J', command: 'editor.previousBookmark' },

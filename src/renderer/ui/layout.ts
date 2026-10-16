@@ -1,7 +1,7 @@
 import { clear, h } from './dom';
 
 /**
- * Каркас в стиле PyCharm New UI: фон приложения темнее панелей, панели —
+ * Каркас в духе современных IDE: фон приложения темнее панелей, панели —
  * «острова» со скруглёнными углами, а зазоры между ними служат сплиттерами.
  */
 export interface Layout {
@@ -103,10 +103,10 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
   attachSplitter(root, rightSplitter, {
     cssVar: '--right-size',
     axis: 'x',
-    min: 280,
+    min: RIGHT_MIN_SIZE,
     max: 760,
     invert: true,
-    reset: 400,
+    reset: RIGHT_MIN_SIZE,
     oppositeVar: '--sidebar-width',
     onCommit: options.onChange,
   });
@@ -172,7 +172,8 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
       root.style.setProperty('--sidebar-size', `${Math.round(size)}px`);
     },
     setRightSize(size: number) {
-      root.style.setProperty('--right-size', `${Math.round(size)}px`);
+      // Кламп: макет из прежней версии или другого экрана мог быть уже минимума.
+      root.style.setProperty('--right-size', `${Math.round(Math.max(size, RIGHT_MIN_SIZE))}px`);
     },
     setDockSize(size: number) {
       root.style.setProperty('--dock-size', `${Math.round(size)}px`);
@@ -197,6 +198,14 @@ interface SplitterOptions {
 
 /** Ниже этого редактор уже не читается — дальше панель не пускаем. */
 const MIN_EDITOR = 200;
+
+/**
+ * Ниже этого правую панель не сужаем: в ней живёт композер ассистента, и на
+ * меньшей ширине его контролы не встают даже в две колонки. Предел общий для
+ * перетаскивания и восстановления макета: сохранённый размер из прежней версии
+ * мог быть меньше, и без клампа панель открылась бы уже минимума.
+ */
+const RIGHT_MIN_SIZE = 500;
 
 /**
  * Перетаскивание разделителя.

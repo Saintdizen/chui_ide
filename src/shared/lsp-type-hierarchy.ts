@@ -14,13 +14,10 @@
  * Модуль чистый: диапазоны остаются в нумерации LSP (с нуля), перевод делает renderer.
  */
 
-import { toCallHierarchyNodes, type CallHierarchyNode, type LspRange } from './lsp-call-hierarchy';
+import { toCallHierarchyNodes, type CallHierarchyNode } from './lsp-call-hierarchy';
 
 /** Узел иерархии типов: форма та же, что у узла вызовов. */
 export type TypeHierarchyNode = CallHierarchyNode;
-
-/** Пределы LSP: они общие у обеих иерархий. */
-export type TypeHierarchyRange = LspRange;
 
 /** Что за иерархию просим: от кого наследует символ или кто наследует от него. */
 export type TypeDirection = 'supertypes' | 'subtypes';

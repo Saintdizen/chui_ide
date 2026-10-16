@@ -123,6 +123,122 @@ app.whenReady().then(async () => {
   await wait(300);
   console.log(`[explorer] выделено после снятия: ${JSON.stringify(await selected())}`);
 
+  /* ── создание и переименование из дерева ─────────────────────────────── */
+
+  // Регрессия: инлайн-поле ввода имени открывалось и тут же закрывалось само,
+  // потому что `paint` заводил НОВЫЙ наблюдатель за высотой дерева, не снимая
+  // прежний. Прежний следил за уже отброшенным узлом (высота ноль) и пересобирал
+  // строки ещё раз — поле теряло фокус, `blur` отменял ввод. Проверяем не только
+  // итог (файл на диске), но и что поле ЖИВО во времени: иначе гонка проскочила бы.
+  const openTreeMenu = (name) =>
+    ask(
+      ide,
+      `(() => {
+        const row = [...document.querySelectorAll('.tree-row')].find(
+          (item) => item.querySelector('.tree-name')?.textContent === ${JSON.stringify(name)},
+        );
+        if (!row) return 'нет строки';
+        const rect = row.getBoundingClientRect();
+        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + 40, clientY: rect.top + 8 }));
+        return 'ok';
+      })()`,
+    );
+  const clickTreeMenu = (label) =>
+    ask(
+      ide,
+      `(async () => {
+        const item = [...document.querySelectorAll('.context-menu .context-item')].find((node) =>
+          (node.textContent ?? '').includes(${JSON.stringify(label)}),
+        );
+        if (!item) return 'пункта нет';
+        item.click();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return 'нажато';
+      })()`,
+    );
+  const typeName = (value) =>
+    ask(
+      ide,
+      `(async () => {
+        const input = document.querySelector('.tree-input');
+        if (!input) return 'нет поля ввода';
+        input.focus();
+        input.value = ${JSON.stringify(value)};
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        return 'введено';
+      })()`,
+    );
+  // Поле обязано пережить несколько кадров: если его гасит лишняя пересборка строк,
+  // это видно уже на 300–400 мс, а не только по отсутствию файла.
+  const inputAlive = () =>
+    ask(
+      ide,
+      `(async () => {
+        const seen = [];
+        for (let i = 0; i < 5; i += 1) {
+          seen.push(Boolean(document.querySelector('.tree-input')));
+          await new Promise((resolve) => setTimeout(resolve, 120));
+        }
+        return seen;
+      })()`,
+    );
+
+  console.log(`[explorer] меню на строке src: ${JSON.stringify(await openTreeMenu('src'))}`);
+  await wait(400);
+  console.log(`[explorer] «Новый файл…» нажато: ${JSON.stringify(await clickTreeMenu('Новый файл…'))}`);
+  const createdField = await inputAlive();
+  console.log(`[explorer] поле создания живо (по кадрам): ${JSON.stringify(createdField)}`);
+  // У поля своя рамка в цвете фокуса, поэтому глобальный `outline` (`:focus-visible`)
+  // давал ВТОРУЮ рамку — двойной контур. Индикатор фокуса должен быть один.
+  console.log(
+    `[explorer] обводка поля ввода (одна): ${JSON.stringify(
+      await ask(
+        ide,
+        `(() => {
+          const input = document.querySelector('.tree-input');
+          if (!input) return null;
+          const s = getComputedStyle(input);
+          return { outlineStyle: s.outlineStyle, outlineWidth: s.outlineWidth, borderColor: s.borderTopColor };
+        })()`,
+      ),
+    )}`,
+  );
+  console.log(`[explorer] ввод имени файла: ${JSON.stringify(await typeName('created-in-tree.ts'))}`);
+  console.log(`[explorer] файл появился на диске: ${await exists(path.join(project, 'src', 'created-in-tree.ts'))}`);
+
+  console.log(`[explorer] меню на новом файле: ${JSON.stringify(await openTreeMenu('created-in-tree.ts'))}`);
+  await wait(400);
+  console.log(`[explorer] «Переименовать…» нажато: ${JSON.stringify(await clickTreeMenu('Переименовать…'))}`);
+  const renameField = await inputAlive();
+  console.log(`[explorer] поле переименования живо (по кадрам): ${JSON.stringify(renameField)}`);
+  console.log(`[explorer] ввод нового имени: ${JSON.stringify(await typeName('renamed-in-tree.ts'))}`);
+  console.log(
+    `[explorer] переименование: новый=${await exists(path.join(project, 'src', 'renamed-in-tree.ts'))} старый=${await exists(path.join(project, 'src', 'created-in-tree.ts'))}`,
+  );
+
+  // Escape отменяет создание: ни файла, ни поля.
+  await openTreeMenu('src');
+  await wait(300);
+  await clickTreeMenu('Новый файл…');
+  await wait(400);
+  await ask(
+    ide,
+    `(() => {
+      const input = document.querySelector('.tree-input');
+      if (!input) return 'нет поля';
+      input.value = 'mut.txt';
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return 'esc';
+    })()`,
+  );
+  await wait(400);
+  console.log(
+    `[explorer] Escape отменяет создание: файла нет=${!(await exists(path.join(project, 'src', 'mut.txt')))} поле закрыто=${!(await ask(ide, `Boolean(document.querySelector('.tree-input'))`))}`,
+  );
+
   if (linksOk) {
     // Как выглядят ссылки: класс, значок-стрелка и подсказка с целью.
     console.log(

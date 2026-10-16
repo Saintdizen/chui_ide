@@ -59,7 +59,7 @@ export interface Tabs {
   refresh(): void;
 }
 
-/** Вкладки как в PyCharm: скруглённые, у активной — синяя полоса сверху. */
+/** Вкладки: скруглённые, у активной — синяя полоса сверху. */
 export function createTabs(deps: TabsDeps): Tabs {
   const element = h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'Открытые файлы' });
 

@@ -8,7 +8,7 @@ import {
   type CancellationLike,
 } from '../src/shared/inline-ai';
 
-/** Простой токен отмены: повторяет поведение токена Monaco. */
+/** Простой токен отмены: повторяет поведение отмены редактора. */
 function tokenStub() {
   let cancelled = false;
   const listeners = new Set<() => void>();

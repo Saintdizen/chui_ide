@@ -27,7 +27,7 @@ function lineOf(text: string): string {
 /**
  * Столбец совпадения (1-based) по байтовому смещению.
  *
- * ripgrep считает смещение в байтах UTF-8, а Monaco и наша панель — в символах:
+ * ripgrep считает смещение в байтах UTF-8, а наша панель — в символах:
  * без пересчёта в строке с кириллицей столбец уезжал бы вправо.
  */
 function columnAt(line: string, byteOffset: number): number {

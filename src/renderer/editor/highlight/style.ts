@@ -12,18 +12,13 @@
  */
 
 import type { TokenKey } from '../../../shared/theme-file';
-import { tokenKeyFor, tokenPalette, tokenStyle, type Scheme } from '../../core/theme';
+import { tokenKeyFor, tokenPalette, type Scheme } from '../../core/theme';
 
 export type { Scheme } from '../../core/theme';
 
 /** Роль палитры для типа токена. `null` — тип бесцветный. */
 export function roleOfToken(type: string): TokenKey | null {
   return tokenKeyFor(type);
-}
-
-/** Оформление типа токена в текущей схеме: цвет и начертание. */
-export function appearanceOf(scheme: Scheme, type: string): { color: string | null; italic: boolean; bold: boolean } {
-  return tokenStyle(scheme, type);
 }
 
 /**

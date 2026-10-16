@@ -78,7 +78,7 @@ function isWordChar(ch: string | undefined): boolean {
 /**
  * Совпадение стоит на границе слова, если слева и справа от него нет буквы или цифры.
  * Проверяем по тексту СТРОКИ: её край — тоже граница, слово не перетекает на соседнюю
- * строку (так же считает и Monaco).
+ * строку.
  */
 function atWordBoundary(text: string, start: number, end: number): boolean {
   return !isWordChar(text[start - 1]) && !isWordChar(text[end]);

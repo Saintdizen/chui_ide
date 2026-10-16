@@ -930,13 +930,6 @@
   min-width: 160px;
 }
 
-.lfs-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
-
 /* ── разреженный рабочий каталог (sparse checkout) ─────────────────────── */
 
 .sparse-modal {
@@ -993,17 +986,12 @@
 
 .remote-file-text {
   width: 100%;
+  flex: 1;
   min-height: 320px;
   resize: vertical;
   font-family: var(--font_mono);
   font-size: var(--font_small_size);
   white-space: pre;
-}
-
-.remote-file-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
 }
 
 /* «Настройки папки»: форма на ОДИН корень области — строки с трёхзначным селектом
@@ -1034,13 +1022,6 @@
   width: 100%;
   resize: vertical;
   font-family: var(--font_mono);
-}
-
-.root-settings-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-  margin-top: 8px;
 }
 
 .sparse-status {
@@ -1098,13 +1079,6 @@
   min-width: 160px;
 }
 
-.sparse-actions {
-  display: flex;
-  gap: 6px;
-  justify-content: flex-end;
-  margin-top: 8px;
-}
-
 /* ── окно поиска багованного коммита (bisect) ──────────────────────────── */
 
 .bisect-modal {
@@ -1137,14 +1111,6 @@
 
 .bisect-sep {
   color: var(--text_color_tertiary);
-}
-
-.bisect-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
 }
 
 /* Слова git показываем как есть: по ним видно, что он делает и на чём споткнулся. */
@@ -1317,8 +1283,9 @@
 .bookmarks-list {
   display: flex;
   flex-direction: column;
+  flex: 1;
   gap: 1px;
-  max-height: 54vh;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -1375,12 +1342,6 @@
   font-size: var(--font_small_size);
 }
 
-.bookmarks-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 10px;
-}
-
 /* ── окно локальной истории файла ──────────────────────────────────────── */
 
 .history-modal {
@@ -1390,8 +1351,7 @@
 .history-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 5px;
   color: var(--text_color_tertiary);
 }
 
@@ -1405,7 +1365,8 @@
 
 .history-body {
   display: flex;
-  gap: 10px;
+  flex: 1;
+  gap: 5px;
   min-height: 0;
 }
 
@@ -1414,15 +1375,15 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 54vh;
+  min-height: 0;
   overflow: auto;
 }
 
 .history-row {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 4px 8px;
+  gap: 5px;
+  padding: 2.5px 5px;
   border: none;
   border-radius: var(--radius_sm);
   background: none;
@@ -1443,7 +1404,8 @@
    видно и что это, и что с записью можно сделать (см. `ui/history-modal.ts`). */
 .history-row-source {
   align-self: flex-start;
-  padding: 0 4px;
+  padding: 2.5px 5px;
+  margin: 2.5px 0;
   border-radius: var(--radius_sm);
   font-size: var(--font_micro_size);
   text-transform: uppercase;
@@ -1460,27 +1422,31 @@
   font-family: var(--font_mono);
   font-size: var(--font_small_size);
   color: var(--text_color);
+  padding: 2.5px;
+  overflow-wrap: anywhere;
 }
 
 .history-row-label {
   font-size: var(--font_small_size);
   color: var(--text_color_tertiary);
   font-variant-numeric: tabular-nums;
+  padding: 2.5px;
 }
 
 .history-detail {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
 }
 
 .history-preview {
   flex: 1;
   min-width: 0;
-  max-height: 54vh;
+  min-height: 0;
   overflow: auto;
   margin: 0;
-  padding: 8px;
+  padding: 5px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_sm);
   background: var(--sunken_background);
@@ -1494,14 +1460,6 @@
   margin: 0;
   color: var(--text_color_tertiary);
   font-size: var(--font_small_size);
-}
-
-.history-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
 }
 
 /* ── окно интерактивного rebase ────────────────────────────────────────── */

@@ -391,7 +391,7 @@ export class CompletionAssistant {
     }
 
     // Сниппет раскрывается ПОСЛЕ вставки: разметка `${1:…}` в тексте не остаётся, а
-    // курсор встаёт на первое место — так же ведёт себя Monaco (`InsertAsSnippet`).
+    // курсор встаёт на первое место — так же ведёт себя вставка сниппета.
     if (item.snippet !== undefined) {
       const expanded = expandSnippet(item.snippet);
       this.controller.applyEdit(

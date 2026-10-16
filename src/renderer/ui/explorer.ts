@@ -178,7 +178,7 @@ export interface ExplorerDeps {
 }
 
 /**
- * Проводник как в PyCharm: скруглённые строки, инлайн-переименование
+ * Проводник: скруглённые строки, инлайн-переименование
  * и контекстное меню. Папки читаются лениво и кэшируются.
  */
 export function createExplorer(deps: ExplorerDeps): ExplorerView {
@@ -212,7 +212,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   /**
    * Клавиши дерева. Слушаем на самом дереве, а не глобально: `Delete` в общей
    * привязке удалял бы выбранный файл, пока человек набирает текст в редакторе —
-   * там событие приходит от скрытой textarea Monaco, и отличить его сложно.
+   * там событие приходит от скрытой textarea редактора, и отличить его сложно.
    */
   const onTreeKey = (event: KeyboardEvent): void => {
     const target = event.target as HTMLElement | null;
@@ -850,11 +850,15 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 
   const startCreateIn = (parent: string, entryKind: 'file' | 'directory'): void => {
     expanded.add(parent);
-    if (!children.has(parent)) void load(parent);
     inlineEdit = { kind: 'create', parent, entryKind };
+    // Папку дочитываем до перерисовки: поле имени рисуется только у папки, чей
+    // список детей уже есть (иначе на её месте строка «Читаю папку…», и поля нет),
+    // а `render` после дочитки молчит, пока открыт ввод. Без ожидания создание в
+    // ещё не открытой папке не показывало поля вообще.
+    const ready = children.has(parent) ? Promise.resolve() : load(parent);
     // Рисуем ровно один раз и уже после перечитывания папок: лишняя перерисовка
     // заменила бы поле ввода только что созданным, а подмена узла закрывает ввод.
-    void refresh().then(paint);
+    void ready.then(refresh).then(paint);
   };
 
   const startCreate = (entryKind: 'file' | 'directory'): void => {
@@ -1092,7 +1096,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       // редактора при любом обновлении дерева).
       refocusTreeOnce = true;
       // Папка раскрывается всегда одним кликом (так работает стрелка),
-      // а файл — по настройке: PyCharm открывает двойным, VS Code — одинарным.
+      // а файл — по настройке: двойным кликом или одинарным.
       // Одиночный клик открывает файл «на посмотреть» (вкладку-предпросмотр):
       // навигация по дереву не должна плодить вкладки. Двойной — «насовсем».
       if (isDirectory || options.openOnSingleClick) void onClick(entry, !isDirectory && options.openOnSingleClick);
@@ -1159,6 +1163,29 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let savedScroll = 0;
   /** Путь, к которому просили прокрутить: строка может появиться позже (папка читается). */
   let revealTarget: string | null = null;
+
+  /**
+   * Высота дерева на прошлой перерисовке окна строк. Высоту меняют окно, нижний док и
+   * переключатели панелей, а окно строк считают ПО НЕЙ (см. `renderWindow`): без
+   * пересчёта оно осталось бы посчитанным при старой высоте — а в момент, когда
+   * раскладка ещё не встала, `clientHeight` равен нулю, и строк было бы видно мало.
+   *
+   * Живёт ОДНА на всё дерево, а не заводится заново в каждой отрисовке. Иначе
+   * получалось так: `paint` рисовал новые строки и заводил НОВЫЙ наблюдатель, а
+   * прежний продолжал следить за уже отброшенным узлом — у него высота ноль, — и
+   * пересобирал строки ещё раз. Пересборка уничтожала только что открытое поле ввода
+   * имени: фокус терялся, `blur` отменял ввод, и создание/переименование не работало.
+   */
+  let lastViewport = -1;
+  const syncViewport = (): void => {
+    const height = treeEl?.clientHeight ?? 0;
+    if (height === lastViewport) return;
+    lastViewport = height;
+    renderWindow();
+  };
+  /** Наблюдатель один: в `paint` он переводится на новый узел дерева (см. `syncViewport`). */
+  const treeResize = new ResizeObserver(syncViewport);
+  window.addEventListener('resize', syncViewport);
 
   /**
    * Видимые строки дерева в порядке отображения: раскрытые папки, их дети и
@@ -1524,7 +1551,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
               type: 'button',
               onClick: () => void deps.commands.execute('workspace.openFolder'),
             },
-            'Открыть папку',
+            'Открыть проект',
           ),
         ),
       );
@@ -1624,15 +1651,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // встала, и `clientHeight` равен нулю), таким и оставалось бы: строк видно мало,
     // а ниже — пустота на всю панель. Высота сравнивается с прошлой: иначе замена
     // строк в `renderWindow` зациклила бы наблюдателя.
-    let lastViewport = -1;
-    const syncViewport = (): void => {
-      const height = tree.clientHeight;
-      if (height === lastViewport) return;
-      lastViewport = height;
-      renderWindow();
-    };
-    new ResizeObserver(syncViewport).observe(tree);
-    window.addEventListener('resize', syncViewport);
+    // Высоту панели меняют окно, нижний док и переключатели панелей — а окно строк
+    // считают по ВЫСОТЕ (см. `renderWindow`). Переводим на этот узел единственный
+    // наблюдатель: свой на каждую отрисовку оставил бы прежний следить за уже
+    // отброшенным узлом (высота ноль) — и тот пересобирал бы строки зря, гася
+    // открытое поле ввода имени (см. `syncViewport`).
+    treeResize.disconnect();
+    treeResize.observe(tree);
     // Сброс мимо строк — в корень области: так файл уезжает «наверх», к проекту.
     tree.addEventListener('dragover', (event) => {
       const root = deps.workspace.root;
@@ -1699,7 +1724,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   const refresh = async (): Promise<void> => {
     const info = deps.workspace.current;
     if (!info) return;
-    const dirs = [info.root, ...[...expanded].filter((dir) => children.has(dir))];
+    // Перечитываем все корни области, а не только активный: в дереве видны они все,
+    // и создание/переименование в папке соседнего корня рисовалось бы иначе без
+    // прочитанного родителя (строка «Читаю папку…» вместо поля имени).
+    const dirs = [...info.roots.map((item) => item.root), ...[...expanded].filter((dir) => children.has(dir))];
     children.clear();
     failed.clear();
     for (const dir of dirs) await load(dir);

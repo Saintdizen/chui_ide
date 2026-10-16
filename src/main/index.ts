@@ -29,7 +29,7 @@ import { HistoryStore } from './project/history-store';
 import { SettingsStore } from './settings';
 import { TerminalService } from './terminal/terminal';
 import { WorkspaceService } from './workspace/workspace';
-import { createWelcomeWindow, getIdeWindow, isWaylandSession } from './window';
+import { getIdeWindow, isWaylandSession, openWelcomeWindow } from './window';
 
 // Схему нужно объявить до инициализации приложения, иначе Chromium не даст ей привилегий.
 registerAppScheme();
@@ -38,7 +38,7 @@ registerAppScheme();
 // в профиль монитора. На широкоохватном экране без нормального ICC-профиля
 // sRGB-контент растягивается и выглядит кислотнее задуманного — один и тот же
 // hex даёт разный цвет на разных машинах. Флаг прибивает цветовое пространство
-// рендеринга к sRGB, и цвета совпадают с тем, что задано в CSS и в теме Monaco.
+// рендеринга к sRGB, и цвета совпадают с тем, что задано в CSS и в теме редактора.
 // Флаг читает Chromium до старта GPU-процесса, поэтому ставить его нужно здесь,
 // а не после `whenReady`.
 app.commandLine.appendSwitch('force-color-profile', 'srgb');
@@ -263,7 +263,7 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     // Встроенный браузер: страница — вкладка в редакторе, рисует её `WebContentsView`
-    // поверх окна (как в VS Code). Окно панель берёт лениво: на старте его ещё нет,
+    // поверх окна. Окно панель берёт лениво: на старте его ещё нет,
     // а притворяться, что есть, — значит создавать IDE тому, кто просил только список
     // проектов. Через ту же панель агент подключается к странице по CDP.
     const browserPanel = new BrowserPanel({
@@ -333,7 +333,7 @@ if (!app.requestSingleInstanceLock()) {
         process.stderr.write(
           `[chui] не удалось открыть ${folder}: ${error instanceof Error ? error.message : error}\n`,
         );
-        if (BrowserWindow.getAllWindows().length === 0) createWelcomeWindow();
+        if (BrowserWindow.getAllWindows().length === 0) openWelcomeWindow();
       }
     };
 
@@ -342,7 +342,7 @@ if (!app.requestSingleInstanceLock()) {
     const requested = pendingFolder ?? fromArgs.folder;
     pendingFolder = null;
     if (requested) await requestOpenFolder(requested);
-    else createWelcomeWindow();
+    else openWelcomeWindow();
 
     app.on('will-quit', () => {
       terminals.dispose();
@@ -359,7 +359,7 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWelcomeWindow();
+      if (BrowserWindow.getAllWindows().length === 0) openWelcomeWindow();
     });
   });
 

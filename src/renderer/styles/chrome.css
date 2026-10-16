@@ -12,7 +12,7 @@
   /* Размеры панелей: их двигают сплиттеры во время работы,
      поэтому это не токены палитры, а состояние раскладки. */
   --sidebar-size: 260px;
-  --right-size: 400px;
+  --right-size: 500px;
   --dock-size: 260px;
 }
 
@@ -255,7 +255,7 @@ textarea {
   text-overflow: ellipsis;
 }
 
-/* Название приложения — тем же шрифтом, что код и терминал (JetBrains Mono).
+/* Название приложения — тем же шрифтом, что код и терминал.
    Так подписано стартовое окно; в редакторе имя файла носит `.topbar-name`. */
 .topbar-title.is-brand {
   font-family: var(--font_mono);
@@ -278,7 +278,7 @@ textarea {
   text-overflow: ellipsis;
 }
 
-/* Название приложения — тем же шрифтом, что код и терминал (JetBrains Mono);
+/* Название приложения — тем же шрифтом, что код и терминал;
    имя файла — интерфейсным: это не название, а данные. */
 .topbar-name.is-brand {
   font-family: var(--font_mono);
@@ -1180,9 +1180,10 @@ textarea {
 .field {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   color: var(--text_color_tertiary);
   font-size: var(--font_labels_size);
+  margin: 2.5px 5px;
 }
 
 .field-row {
@@ -1350,6 +1351,7 @@ textarea {
 .field-hint {
   color: var(--text_color_tertiary);
   font-size: var(--font_labels_size);
+  margin: 2.5px 5px;
 }
 
 /* Ряд кнопок под полем настроек (например, тема из файла): без своей раскладки
@@ -1377,7 +1379,7 @@ textarea {
 /* Список дерева проекта. Прокручивается САМ: виртуализация рисует окно строк
    вокруг видимой части, и точкой отсчёта служит список, а не общий столбец панели.
    Селектор привязан к панели проводника не для красоты: класс `tree` есть и у
-   виджета подсказок Monaco (`.suggest-widget > .tree` — это сам список), и это
+   виджета подсказок (в нём список помечен тем же классом `tree`), и это
    правило протекало туда. Отступ 4/12 px воровал у списка подсказок 16 px высоты:
    строки обрезались по краям — отсюда «поехавшие» подсказки. */
 .explorer .tree {
@@ -1752,6 +1754,13 @@ textarea {
   border-radius: calc(var(--radius_sm) - 3px);
   background: var(--sunken_background);
   font-size: var(--font_labels_size);
+}
+
+/* Поле открытого имени всегда в фокусе, и рамка у него уже в цвете фокуса:
+   глобальная обводка `:focus-visible` давала ВТОРУЮ рамку — двойной контур.
+   Индикатор фокуса оставляем один — свою рамку (как у .palette-input и родни). */
+.tree-input:focus {
+  outline: none;
 }
 
 .tree-loading,

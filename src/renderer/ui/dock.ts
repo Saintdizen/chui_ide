@@ -24,7 +24,7 @@ export interface DockView {
 }
 
 /**
- * Нижняя панель (терминал, поиск) — как tool window в PyCharm:
+ * Нижняя панель (терминал, поиск) — как панель инструментов:
  * свои вкладки слева, кнопка сворачивания справа.
  */
 export function createDock(): DockView {

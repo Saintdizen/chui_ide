@@ -95,6 +95,47 @@ app.whenReady().then(async () => {
   );
   check('панель ассистента есть в окне', visible === true, visible);
 
+  /* ── пустое состояние ─────────────────────────────────────────────────── */
+
+  // Подсказка пустой беседы стоит по центру области: строкой в левом верхнем углу
+  // она читалась как обрезанное сообщение, а в панели на 400 px липла к краю.
+  const intro = await ask(
+    ide,
+    `(() => {
+      const body = document.querySelector('.chat-body');
+      const node = document.querySelector('.chat-intro');
+      if (!body || !node) return null;
+      const area = body.getBoundingClientRect();
+      const box = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      const inner = body.clientWidth - parseFloat(getComputedStyle(body).paddingLeft) - parseFloat(getComputedStyle(body).paddingRight);
+      return {
+        вЛево: Math.round(box.left - area.left),
+        вПраво: Math.round(area.right - box.right),
+        центрX: Math.round(box.left + box.width / 2 - (area.left + area.width / 2)),
+        центрY: Math.round(box.top + box.height / 2 - (area.top + area.height / 2)),
+        ширина: Math.round(box.width),
+        ширинаОбласти: Math.round(inner),
+        выравнивание: style.textAlign,
+      };
+    })()`,
+  );
+  check('подсказка пустой беседы есть в панели', intro !== null, intro === null ? 'нет .chat-intro' : undefined);
+  check('подсказка стоит по центру области по горизонтали', Math.abs(intro?.центрX ?? 999) <= 4, {
+    центрX: intro?.центрX,
+    вЛево: intro?.вЛево,
+    вПраво: intro?.вПраво,
+  });
+  check('подсказка стоит по центру области по вертикали', Math.abs(intro?.центрY ?? 999) <= 8, {
+    центрY: intro?.центрY,
+  });
+  check('текст подсказки выровнен по центру', intro?.выравнивание === 'center', intro?.выравнивание);
+  check('строка подсказки не растянута во всю ширину панели', (intro?.ширина ?? 0) < (intro?.ширинаОбласти ?? 0) - 20, {
+    ширина: intro?.ширина,
+    ширинаОбласти: intro?.ширинаОбласти,
+  });
+  console.log(`  снимок пустой беседы: ${await shot(ide, 'intro')}`);
+
   /* ── вкладки бесед ─────────────────────────────────────────────────────── */
 
   const tabsState = () =>
@@ -309,6 +350,47 @@ app.whenReady().then(async () => {
     'подсказка прав сказала про полный доступ',
     typeof toggled.подсказка === 'string' && toggled.подсказка.includes('без подтверждений'),
     toggled.подсказка,
+  );
+
+  /* ── вёрстка тулбара композера ──────────────────────────────────────────── */
+
+  // Панель ассистента узкая: все контролы в один ряд не встают. Регрессия:
+  // тулбар-флекс ставил группу действий («приложить», «отправить») ОТДЕЛЬНОЙ
+  // строкой ПОД настройками, и кнопка отправки висела одна на почти пустом
+  // ряду. Теперь тулбар — сетка из двух колонок, и группа действий прижата к
+  // НИЖНЕМУ краю: её низ совпадает с низом настроек, а правая кромка — с правой
+  // кромкой тулбара. Проверяем геометрию: рядами это по разметке не видно.
+  const toolbar = await ask(
+    ide,
+    `(() => {
+      const tb = document.querySelector('.composer-toolbar');
+      const group = document.querySelector('.composer-toolbar .composer-group');
+      const end = document.querySelector('.composer-group-end');
+      if (!tb || !group || !end) return null;
+      const t = tb.getBoundingClientRect();
+      const g = group.getBoundingClientRect();
+      const e = end.getBoundingClientRect();
+      return {
+        display: getComputedStyle(tb).display,
+        overflow: tb.scrollWidth > tb.clientWidth,
+        endBottom: Math.round(e.bottom),
+        groupBottom: Math.round(g.bottom),
+        endRight: Math.round(e.right),
+        barRight: Math.round(t.right),
+      };
+    })()`,
+  );
+  check('тулбар композера — сетка в две колонки', toolbar?.display === 'grid', toolbar?.display);
+  check('тулбар не переполняется по ширине', toolbar?.overflow === false, toolbar?.overflow);
+  check(
+    'кнопки «приложить» и «отправить» прижаты к низу тулбара, а не отдельной строкой',
+    toolbar !== null && Math.abs(toolbar.endBottom - toolbar.groupBottom) <= 1,
+    toolbar && { endBottom: toolbar.endBottom, groupBottom: toolbar.groupBottom },
+  );
+  check(
+    'группа действий выровнена по правой кромке тулбара',
+    toolbar !== null && toolbar.endRight === toolbar.barRight,
+    toolbar && { endRight: toolbar.endRight, barRight: toolbar.barRight },
   );
 
   /* ── сохранение и восстановление ───────────────────────────────────────── */

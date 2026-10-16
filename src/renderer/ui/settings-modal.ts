@@ -1339,7 +1339,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       switchRow('Открывать файл одним кликом', explorer.openOnSingleClick, (value) =>
         apply({ openOnSingleClick: value }),
       ),
-      h('div', { class: 'field-hint' }, 'Выключено — как в PyCharm: одинарный клик выделяет, двойной открывает.'),
+      h('div', { class: 'field-hint' }, 'Выключено: одинарный клик выделяет, двойной открывает.'),
       switchRow('Пометки git у файлов', explorer.gitDecorations, (value) => apply({ gitDecorations: value })),
       switchRow('Точка у папок с правками', explorer.folderChangeDot, (value) => apply({ folderChangeDot: value })),
       switchRow('Отмечать недавно изменённые', explorer.recentChanges, (value) => apply({ recentChanges: value })),

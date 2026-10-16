@@ -67,6 +67,8 @@
     "probe:explorer": "npm run build && electron scripts/explorer-probe.cjs",
     "probe:tree": "npm run build && electron scripts/tree-virtual-probe.cjs",
     "probe:changes": "npm run build && electron scripts/changes-probe.cjs",
+    "probe:history": "npm run build && electron scripts/history-modal-probe.cjs",
+    "probe:close-project": "npm run build && electron scripts/project-close-probe.cjs",
     "probe:folders": "npm run build && electron scripts/folders-probe.cjs",
     "probe:revert": "npm run build && electron scripts/revert-probe.cjs",
     "probe:sort": "npm run build && electron scripts/sort-probe.cjs",

@@ -73,9 +73,11 @@ import {
   writeFileCommand,
 } from '../workspace/remote-fs';
 import { parseThemeFile } from '../../shared/theme-file';
+import { isProjectKind, projectNameProblem } from '../../shared/project-kinds';
+import { starterFiles } from '../project/scaffold';
 import { unsavedClosePrompt } from '../../shared/unsaved';
 import type { TerminalService } from '../terminal/terminal';
-import { openIdeWindow, windowState } from '../window';
+import { openIdeWindow, openWelcomeWindow, windowState } from '../window';
 import type { WorkspaceService } from '../workspace/workspace';
 import type { HostClient } from './host';
 import { pushToRenderers } from './push';
@@ -110,10 +112,6 @@ export interface AppDependencies {
 }
 
 /**
- * Связываем сервисы с контрактом RPC. Компилятор следит за тем, чтобы
- * аргументы и результат каждого метода совпадали с shared/api.ts.
- */
-/**
  * Открыть папку как проект: запомнить её, поднять окно IDE, обновить git.
  *
  * Один путь на все входы: стартовое окно, путь в командной строке, `open-file`
@@ -132,6 +130,10 @@ export async function openProjectFolder(
   return { root: info.root, name: info.name };
 }
 
+/**
+ * Связываем сервисы с контрактом RPC. Компилятор следит за тем, чтобы
+ * аргументы и результат каждого метода совпадали с shared/api.ts.
+ */
 export function registerIpc(deps: AppDependencies): RpcRouter {
   const router = new RpcRouter();
 
@@ -176,7 +178,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
 
   router.register('dialog.pickFolder', async (params: ParamsOf<'dialog.pickFolder'>) => {
     const result = await dialog.showOpenDialog({
-      title: params.title ?? 'Открыть папку',
+      title: params.title ?? 'Открыть проект',
       properties: ['openDirectory', 'createDirectory'],
     });
     return { path: result.canceled ? null : (result.filePaths[0] ?? null) };
@@ -452,7 +454,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   /** Корень проекта нужен методам, читающим файлы: без него им нечего сканировать. */
   const requireRoot = (): string => {
     const root = deps.workspace.rootPath();
-    if (!root) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Рабочая папка не открыта');
+    if (!root) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Проект не открыт');
     return root;
   };
 
@@ -619,6 +621,59 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // строки. Стартовое окно закрывает сам лаунчер, получив ответ: закрытие здесь
   // уничтожило бы окно раньше отправки ответа, и вызов остался бы без результата.
   router.register('app.openProject', (params) => openProjectFolder(deps, params.path));
+  /**
+   * Закрытие проекта: человек возвращается к списку проектов. Стартовое окно
+   * поднимаем ЗДЕСЬ и раньше закрытия окна IDE: иначе окна кончились бы совсем,
+   * и `window-all-closed` успел бы выйти из приложения на Windows и Linux.
+   *
+   * Само окно IDE закрывает renderer, получив ответ, — так же, как стартовое окно
+   * при переходе в IDE: закрытие в обработчике уничтожило бы отправителя раньше,
+   * чем до него дошёл бы результат вызова.
+   */
+  router.register('app.closeProject', () => {
+    openWelcomeWindow();
+  });
+
+  /**
+   * Создание проекта: папка с файлами-заготовками выбранного вида.
+   *
+   * Имя проверяет общее правило (`projectNameProblem`) — то же, что гасит кнопку
+   * «Создать» в стартовом окне. Без этой проверки имя вроде `../..` увело бы папку
+   * проекта из выбранного каталога: имя папки и есть имя проекта.
+   *
+   * Занятую папку не трогаем: как и `git.clone`, отказываемся — молча писать в чужие
+   * файлы нельзя. Неудача на середине убирает за собой: недоделанного проекта в чужом
+   * каталоге не остаётся.
+   */
+  router.register('app.createProject', async (params) => {
+    const name = params.name.trim();
+    const problem = projectNameProblem(name);
+    if (problem) throw new RpcFailure(RpcErrorCode.InvalidParams, problem);
+    if (!isProjectKind(params.kind)) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `Неизвестный вид проекта: ${params.kind}`);
+    }
+    const directory = params.directory.trim();
+    if (!directory) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана папка для проекта');
+
+    const target = path.resolve(directory, name);
+    const existing = await fs.stat(target).catch(() => null);
+    if (existing) throw new RpcFailure(RpcErrorCode.InvalidParams, `Папка уже существует: ${target}`);
+
+    await fs.mkdir(target);
+    try {
+      for (const file of starterFiles(params.kind, name)) {
+        // Путь в заготовке записан через «/»: на Windows его надо разложить самому.
+        const filePath = path.join(target, ...file.path.split('/'));
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, file.contents, 'utf8');
+      }
+    } catch (error) {
+      // Неполный проект хуже отсутствующего: человек увидит папку и решит, что всё цело.
+      await fs.rm(target, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
+    return { path: target };
+  });
 
   router.register('git.status', () => deps.git.status());
   // Diff будущего коммита: по нему модель пишет сообщение (см. `ai.commitMessage`).

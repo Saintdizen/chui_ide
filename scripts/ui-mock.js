@@ -859,6 +859,12 @@ module.exports = [
       currentRoot = params.path;
       return { root: params.path, name: params.path.split('/').filter(Boolean).pop() ?? params.path };
     },
+    // Закрытие проекта поднимает стартовое окно в main — в браузерном просмотре
+    // его нет, поэтому мок просто принимает вызов.
+    'app.closeProject': () => undefined,
+    // Создание проекта пишет файлы на диск: в браузере диска нет, поэтому мок
+    // подтверждает путь — как если бы папка была создана.
+    'app.createProject': (params) => ({ path: `${params.directory}/${params.name}` }),
     'git.clone': async (params, id) => {
       for (const line of ['Cloning into…', 'remote: Enumerating objects', 'Receiving objects: 100% (12/12), done.']) {
         await sleep(80);

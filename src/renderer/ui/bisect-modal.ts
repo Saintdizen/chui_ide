@@ -74,9 +74,11 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
     'Открыть коммит',
   );
 
-  const actions = h(
-    'div',
-    { class: 'bisect-actions', hidden: true },
+  // Действия — подвал окна. Пока поиск не идёт, подвал скрыт целиком: пустая
+  // полоса с рамкой на месте кнопок выглядела бы поломкой.
+  const footer = h(
+    'footer',
+    { class: 'modal-footer is-start', hidden: true },
     openCommitButton,
     goodButton,
     badButton,
@@ -87,8 +89,9 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
   const modal = createModal({
     className: 'bisect-modal',
     title: 'Поиск багованного коммита (bisect)',
+    footer,
   });
-  modal.body.append(headline, detail, startRow, actions, message);
+  modal.body.append(headline, detail, startRow, message);
 
   const close = (): void => modal.close();
 
@@ -105,7 +108,7 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
         'Укажите известный плохой коммит и известный хороший (можно оставить «плохой» пустым — им станет текущий). ' +
         'Дальше git будет сам переставлять ветку, а вы отмечаете проверенные коммиты.';
       startRow.hidden = false;
-      actions.hidden = true;
+      footer.hidden = true;
       return;
     }
 
@@ -114,7 +117,7 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
       detail.textContent =
         'Поиск нашёл виновника. Нажмите на него, чтобы посмотреть изменения, и «Закончить», чтобы вернуть ветку.';
       startRow.hidden = true;
-      actions.hidden = false;
+      footer.hidden = false;
       goodButton.hidden = true;
       badButton.hidden = true;
       skipButton.hidden = true;
@@ -130,7 +133,7 @@ export function createBisectModal(deps: BisectModalDeps): BisectModalView {
     const steps = current.steps === null ? '' : `примерно шагов: ${current.steps}`;
     detail.textContent = [left, steps].filter(Boolean).join(' · ') || 'git ещё не назвал остаток';
     startRow.hidden = true;
-    actions.hidden = false;
+    footer.hidden = false;
     goodButton.hidden = false;
     badButton.hidden = false;
     skipButton.hidden = false;

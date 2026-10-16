@@ -63,7 +63,7 @@ export class WorkspaceModel {
 
   /** Диалог выбора папки + открытие как проекта. Возвращает путь или null, если отменили. */
   async pick(): Promise<string | null> {
-    const result = await this.rpc.request('dialog.pickFolder', { title: 'Открыть папку проекта' });
+    const result = await this.rpc.request('dialog.pickFolder', { title: 'Открыть проект' });
     if (!result.path) return null;
     await this.open(result.path);
     return result.path;

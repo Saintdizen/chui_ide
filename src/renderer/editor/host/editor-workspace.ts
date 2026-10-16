@@ -5,7 +5,7 @@
  * приложения есть то, чего одна панель не выражает: РАЗДЕЛЕНИЕ редактора — два файла
  * рядом, и активная панель, куда придёт следующий файл. Это и есть забота рабочего места.
  *
- * Панелей максимум две, как и было у сервиса на Monaco. Модель (у нас — буфер) у панелей
+ * Панелей максимум две, как и было у прежнего сервиса. Модель (у нас — буфер) у панелей
  * ОБЩАЯ: её держит реестр документов, поэтому один файл в двух панелях остаётся одним
  * текстом. Отсюда же и обязанность рабочего места: правка в одной панели должна быть
  * видна в другой — буфер-то общий, но чужая панель о правке не узнает и не перерисуется.
@@ -219,7 +219,7 @@ export interface EditorWorkspaceOptions {
 
 /**
  * Рабочее место: панели в ряд или сеткой 2×2 и одна из них активная. Активность решает фокус — так же,
- * как у сервиса на Monaco: куда кликнули, туда и придёт следующий файл, оттуда и курсор
+ * как у прежнего сервиса: куда кликнули, туда и придёт следующий файл, оттуда и курсор
  * в статус-бар.
  */
 /** Сколько панелей в сетке: две в ряд и две во втором ряду (2×2). */
@@ -328,7 +328,7 @@ export class EditorWorkspace {
   private readonly splitEmitter = new Emitter<boolean>();
   readonly onDidChangeSplit = this.splitEmitter.event;
 
-  /** События мест украшений активной панели — те же имена, что у сервиса на Monaco. */
+  /** События мест украшений активной панели — те же имена, что у прежнего сервиса. */
   private readonly runMarkerEmitter = new Emitter<RunMarkerHit>();
   readonly onRunMarker = this.runMarkerEmitter.event;
   private readonly testMarkerEmitter = new Emitter<TestMarkerHit>();
@@ -348,7 +348,7 @@ export class EditorWorkspace {
 
   /**
    * Пометки языка — один набор на все панели: источники (LSP, импорты) кладут их
-   * по имени владельца, а в панели уезжает объединение. Так же было у Monaco, только
+   * по имени владельца, а в панели уезжает объединение. Так же было и прежде, только
    * объединял движок; здесь объединяем сами (см. `diagnostics.ts`).
    */
   private readonly diagnostics = new DiagnosticsStore();
@@ -418,7 +418,7 @@ export class EditorWorkspace {
       },
       notice: this.onNotice,
     });
-    // Ряд панелей и разделитель между ними — та же разметка, что была у Monaco-сервиса.
+    // Ряд панелей и разделитель между ними — та же разметка, что была у прежнего сервиса.
     this.panesHost = document.createElement('div');
     this.panesHost.className = 'editor-panes';
     this.splitter = document.createElement('div');
@@ -439,7 +439,7 @@ export class EditorWorkspace {
     return this.pane.activePath;
   }
 
-  /** Тот же файл, под именем сервиса на Monaco (`EditorService.currentPath`). */
+  /** Тот же файл, под прежним именем (`EditorService.currentPath`). */
   get currentPath(): string | null {
     return this.activePath;
   }
@@ -531,7 +531,7 @@ export class EditorWorkspace {
     // Правка в этой панели: соседние должны перерисоваться — буфер-то у них общий.
     pane.onDidChangeText(() => this.refreshSiblings(index, pane));
 
-    // Места украшений идут наружу только от активной панели — как у сервиса на Monaco.
+    // Места украшений идут наружу только от активной панели — как у прежнего сервиса.
     pane.onRunMarker((hit) => this.forward(index, this.runMarkerEmitter, hit));
     pane.onTestMarker((hit) => this.forward(index, this.testMarkerEmitter, hit));
     pane.onBreakpointToggle((hit) => this.forward(index, this.breakpointEmitter, hit));
@@ -673,7 +673,7 @@ export class EditorWorkspace {
   // — команды редактора —
 
   /**
-   * Список действий редактора — те же поля, что отдавал сервис на Monaco
+   * Список действий редактора — те же поля, что отдавал прежний сервис
    * (`listActions`), поэтому палитра наполняется ими без переделки. Список короткий:
    * это то, что редактор ДЕЙСТВИТЕЛЬНО умеет, а не чужие внутренние действия.
    */
@@ -821,7 +821,7 @@ export class EditorWorkspace {
   }
 
   /**
-   * Сравнение двух версий файла. Своё, без Monaco, но с ТОЙ ЖЕ границей, что отдавал
+   * Сравнение двух версий файла. Своё, но с ТОЙ ЖЕ границей, что отдавал
    * `EditorService.createDiff`, — поэтому просмотр различий и экран конфликтов работают
    * не меняясь. Схему берём текущую: сравнение должно следовать за темой приложения.
    */
@@ -969,7 +969,7 @@ export class EditorWorkspace {
   }
 
   /**
-   * Украшения файла: набор тот же, что у сервиса на Monaco, но адресуется всем панелям —
+   * Украшения файла: набор тот же, что у прежнего сервиса, но адресуется всем панелям —
    * файл может быть открыт в двух, и полоски должны быть в обеих.
    */
   setLineChanges(path: string, changes: readonly GitLineChange[]): void {
@@ -1075,8 +1075,8 @@ export class EditorWorkspace {
   }
 
   /**
-   * Перейти к следующей пометке языка (по кругу). Замена действия Monaco
-   * `editor.action.marker.nextInFiles`: его зовёт клик по счётчику проблем в статусбаре.
+   * Перейти к следующей пометке языка (по кругу). Его зовёт клик по счётчику
+   * проблем в статусбаре.
    */
   revealNextProblem(): void {
     this.problems.next();
@@ -1092,8 +1092,7 @@ export class EditorWorkspace {
   }
 
   /**
-   * Направить F1 на нашу палитру. У Monaco это перекрывало его же действие
-   * `editor.action.quickCommand`; своему редактору клавишу надо просто обработать.
+   * Направить F1 на нашу палитру: своему редактору клавишу надо просто обработать.
    */
   openPaletteOnF1(open: () => void): void {
     this.openPaletteOpener = open;

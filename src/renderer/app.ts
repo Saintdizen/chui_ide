@@ -329,7 +329,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     .catch(() => undefined);
 
   /**
-   * Редактор — своё ядро (`src/renderer/editor/`), без Monaco. Всё, что раньше навешивалось
+   * Редактор — своё ядро (`src/renderer/editor/`), без чужого движка. Всё, что раньше навешивалось
    * на движок (подсказки LSP, inline-AI, сниппеты, Ctrl+Click), приходит сюда опциями:
    * у рабочего места для каждого из них есть шов.
    */
@@ -1580,6 +1580,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Страница навигировалась, открылась или закрылась — полотно идёт за ней,
   // а разметка уступает место, если страница заняла область.
   browserTabs.onDidChange(() => {
+    // Страница заняла или освободила область: полотно, картинка и разметка делят
+    // её с ней, поэтому синхронизируем все экраны, а не только браузер.
+    syncImage();
     syncBrowser();
     syncMarkdown();
   });
@@ -2624,21 +2627,28 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * шанс сохранить рабочее место. А правки терять нельзя, поэтому закрытие
    * отменяем и спрашиваем системным диалогом; окно при этом остаётся живым:
    * Electron по умолчанию не игнорирует отмену из `beforeunload`.
+   *
+   * `toLauncher` — куда уходит закрытое окно: «Закрыть проект» возвращает человека
+   * к списку проектов (его поднимает main), обычное закрытие — просто выход.
+   * Стартовое окно просим ПЕРЕД своим закрытием: отправить ответ в уничтоженное
+   * окно невозможно, и вызов остался бы без результата.
    */
   let closing = false;
-  const confirmClose = async (): Promise<void> => {
+  const closeWindowSafely = async (toLauncher = false): Promise<void> => {
     closing = true;
     try {
       const files = documents.dirty();
-      if (files.length === 0) return;
-      const { choice } = await rpc.request('dialog.confirmClose', { files: files.map((file) => file.path) });
-      if (choice === 'cancel') return;
-      if (choice === 'save') {
-        for (const file of files) {
-          // Отмена перезаписи — окно оставляем: правки ещё в редакторе.
-          if (!(await saveDocument(file))) return;
+      if (files.length > 0) {
+        const { choice } = await rpc.request('dialog.confirmClose', { files: files.map((file) => file.path) });
+        if (choice === 'cancel') return;
+        if (choice === 'save') {
+          for (const file of files) {
+            // Отмена перезаписи — окно оставляем: правки ещё в редакторе.
+            if (!(await saveDocument(file))) return;
+          }
         }
       }
+      if (toLauncher) await rpc.request('app.closeProject');
       // «Сохранить» и «Выйти без сохранения» ведут сюда: этот `window.close`
       // проходит без повторного вопроса — флаг `closing` уже поднят.
       await rpc.request('window.close');
@@ -2649,6 +2659,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       closing = false;
     }
   };
+
+  const confirmClose = (): Promise<void> => closeWindowSafely();
 
   window.addEventListener('beforeunload', (event) => {
     session.saveNow();
@@ -2828,18 +2840,23 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     );
   };
 
-  define({ id: 'workspace.openFolder', title: 'Открыть папку', category: 'Файл', keybinding: 'Ctrl+O' }, async () => {
+  define({ id: 'workspace.openFolder', title: 'Открыть проект', category: 'Файл', keybinding: 'Ctrl+O' }, async () => {
     const path = await workspace.pick();
     if (!path) return;
     void commands.execute('view.showExplorer');
     showToast(`Открыт проект ${basename(path)}`);
   });
 
+  // Закрыть проект: окно IDE уступает место стартовому окну со списком проектов
+  // (`app.closeProject` в main). Путь тот же, что у закрытия окна, — с вопросом
+  // о несохранённых файлах.
+  define({ id: 'project.close', title: 'Закрыть проект', category: 'Файл' }, () => closeWindowSafely(true));
+
   // Добавить папку в рабочую область: несколько папок в одном окне (см. workspace-model).
   // Активной становится только что добавленная — туда идут git и поиск.
   define({ id: 'workspace.addFolder', title: 'Добавить папку в рабочую область', category: 'Файл' }, async () => {
     if (!workspace.current) {
-      showToast('Сначала откройте папку проекта', 'error');
+      showToast('Сначала откройте проект', 'error');
       return;
     }
     const result = await rpc.request('dialog.pickFolder', { title: 'Добавить папку в рабочую область' });
@@ -2871,8 +2888,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Картинку текстовому редактору не отдаём: её показывает вьюер.
     if (document && !isImagePath(path)) editors.open(document);
     // Файл мог быть активным и до этого: клик по его вкладке всё равно должен
-    // показать файл, а не оставить на экране чат.
+    // показать файл, а не оставить на экране чат или страницу браузера. Чат
+    // отступает сам, а странице нужен отдельный сигнал: её активность живёт в
+    // другой модели, и `openEditors.activate` при том же файле события не шлёт.
     hideChatTab();
+    browserTabs.deactivate();
   });
 
   define(
@@ -2958,7 +2978,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       id: 'file.saveAll',
       title: 'Сохранить всё',
       category: 'Файл',
-      // Ctrl+Shift+S отдано «Сохранить как…» — привычке из VS Code и PyCharm.
+      // Ctrl+Shift+S отдано «Сохранить как…» — привычному сочетанию.
       keybinding: 'Ctrl+Alt+S',
       enabled: () => documents.dirty().length > 0,
     },
@@ -3547,7 +3567,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     else dock.show('debug');
   });
 
-  // F5 как в VS Code: не идёт отладка — начать, стоит на паузе — продолжить.
+  // F5: не идёт отладка — начать, стоит на паузе — продолжить.
   define(
     { id: 'debug.continue', title: 'Отладка: продолжить / запустить', category: 'Отладка', keybinding: 'F5' },
     async () => {
@@ -3754,7 +3774,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    */
   define({ id: 'git.generateCommitMessage', title: 'Сообщение коммита по diff (AI)', category: 'Git' }, async () => {
     if (!git.isRepository) {
-      showToast('Рабочая папка не в репозитории git', 'error');
+      showToast('Проект не в репозитории git', 'error');
       return;
     }
     if (!aiEnabled()) {
@@ -3858,7 +3878,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** История в виде графа веток — текстом, как её рисует git. */
   define({ id: 'git.logGraph', title: 'История с графом веток', category: 'Git' }, async () => {
     if (!git.isRepository) {
-      showToast('Рабочая папка не в репозитории git', 'error');
+      showToast('Проект не в репозитории git', 'error');
       return;
     }
     const text = await git.logGraph(100);
@@ -3881,7 +3901,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Отложенные изменения (stash): список записей и действия над ними. */
   define({ id: 'git.openStash', title: 'Отложенные изменения (stash)', category: 'Git' }, async () => {
     if (!git.isRepository) {
-      showToast('Рабочая папка не в репозитории git', 'error');
+      showToast('Проект не в репозитории git', 'error');
       return;
     }
     await stashModal.open();
@@ -3910,7 +3930,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await bisectModal.open();
@@ -3928,7 +3948,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await worktreeModal.open();
@@ -3946,7 +3966,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await forgeModal.open();
@@ -3964,7 +3984,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await issuesModal.open();
@@ -3982,7 +4002,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await pipelinesModal.open();
@@ -4000,7 +4020,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await notificationsModal.open();
@@ -4018,7 +4038,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await identityModal.open();
@@ -4036,7 +4056,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await lfsModal.open();
@@ -4054,7 +4074,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await sparseModal.open();
@@ -4072,7 +4092,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       showToast('Забираю подмодули…');
@@ -4096,7 +4116,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await refDiffModal.open();
@@ -4114,7 +4134,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     async () => {
       if (!git.isRepository) {
-        showToast('Рабочая папка не в репозитории git', 'error');
+        showToast('Проект не в репозитории git', 'error');
         return;
       }
       await rebaseModal.open();
@@ -4209,7 +4229,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** История коммитов репозитория: у каждого — действия над этим коммитом. */
   define({ id: 'git.showLog', title: 'История коммитов', category: 'Git' }, async () => {
     if (!git.isRepository) {
-      showToast('Рабочая папка не в репозитории git', 'error');
+      showToast('Проект не в репозитории git', 'error');
       return;
     }
     const commits = await git.log(undefined, 50);
@@ -4233,7 +4253,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Создать тег на текущем коммите. */
   define({ id: 'git.createTag', title: 'Создать тег', category: 'Git' }, async () => {
     if (!git.isRepository) {
-      showToast('Рабочая папка не в репозитории git', 'error');
+      showToast('Проект не в репозитории git', 'error');
       return;
     }
     const name = await promptValue({ title: 'Создать тег', label: 'Имя тега', value: '' });
@@ -4249,7 +4269,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Теги: список с действиями и создание нового. */
   define({ id: 'git.tags', title: 'Теги', category: 'Git' }, async () => {
     if (!git.isRepository) {
-      showToast('Рабочая папка не в репозитории git', 'error');
+      showToast('Проект не в репозитории git', 'error');
       return;
     }
     const tags = await git.tags();
@@ -4336,7 +4356,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Журнал ссылок: сюда смотрят, чтобы откатить неудачный merge, rebase или reset. */
   define({ id: 'git.reflog', title: 'Журнал ссылок (reflog)', category: 'Git' }, async () => {
     if (!git.isRepository) {
-      showToast('Рабочая папка не в репозитории git', 'error');
+      showToast('Проект не в репозитории git', 'error');
       return;
     }
     const entries = await git.reflog(50);
@@ -4381,7 +4401,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Удалить ветку. Имя можно передать аргументом, иначе спрашиваем. */
   define({ id: 'git.deleteBranch', title: 'Удалить ветку', category: 'Git' }, async (nameArg) => {
     if (!git.isRepository) {
-      showToast('Рабочая папка не в репозитории git', 'error');
+      showToast('Проект не в репозитории git', 'error');
       return;
     }
     const name =
@@ -4477,7 +4497,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /**
    * Иерархия вызовов символа: кто его вызывает или кого вызывает он. Показываем
-   * списком (Monaco такой панели не даёт) — тем же попапом, что и прочие переходы.
+   * списком — тем же попапом, что и прочие переходы.
    */
   const openCallHierarchy = async (direction: CallDirection): Promise<void> => {
     const path = editors.currentPath;
@@ -4993,7 +5013,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * Ссылка из вывода терминала. Локальный адрес открываем вкладкой в IDE: это почти
    * всегда свой запущенный сервер или тест, и смотреть его надо рядом с кодом, а не
    * искать окно браузера. Чужой адрес отдаём системному браузеру — схему проверит main.
-   * Развилка та же, что у VS Code (там она выведена настройкой), и по умолчанию
+   * Развилка знакомая (в других редакторах она выведена настройкой), и по умолчанию
    * локальные ссылки открываются встроенным браузером.
    */
   const openLinkFromTerminal = (url: string): void => {
@@ -5004,7 +5024,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void rpc.request('shell.openExternal', { url }).catch(() => undefined);
   };
 
-  // Встроенный браузер: страница открывается вкладкой в редакторе, как в VS Code.
+  // Встроенный браузер: страница открывается вкладкой в редакторе.
   define(
     {
       id: 'browser.open',
@@ -5223,8 +5243,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         showToast('Файл открыт только для чтения — форматировать нечего');
         return;
       }
-      // Выделения нет — форматируем весь файл: как в VS Code, где команда участка без
-      // выделения берёт документ целиком. Иначе команда молчала бы о «нечего делать».
+      // Выделения нет — форматируем весь файл: команда участка без выделения
+      // берёт документ целиком. Иначе команда молчала бы о «нечего делать».
       if (!editors.hasSelection()) {
         const engine = formatEngine(document.languageId);
         if (!engine) {
@@ -5526,7 +5546,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       }
       const root = workspace.ownerOf(path)?.root ?? workspace.root;
       if (!root) {
-        showToast('Сначала откройте папку проекта', 'error');
+        showToast('Сначала откройте проект', 'error');
         return;
       }
 
@@ -5661,7 +5681,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const title = active ? (project ? `${basename(active.path)} — ${project}` : basename(active.path)) : 'chui_iDE';
     topBarName.textContent = title;
     document.title = title;
-    // Название приложения — моношрифтом (JetBrains Mono), имя файла — интерфейсным.
+    // Название приложения — моношрифтом, имя файла — интерфейсным.
     topBarName.classList.toggle('is-brand', !active);
     topBarName.title = active?.path ?? 'chui_iDE';
   };
@@ -5896,7 +5916,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     refreshStatus();
     syncEmptyState();
     syncRunControl();
-    // Файл стал активным — показываем его, а вкладка чата просто ждёт в полосе.
     // Файл стал активным — показываем его, а вкладка чата просто ждёт в полосе.
     if (openEditors.active) {
       hideChatTab();

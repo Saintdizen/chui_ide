@@ -2138,7 +2138,7 @@ export class GitService {
 
   private requireRoot(): string {
     const root = this.root();
-    if (!root) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Рабочая папка не открыта');
+    if (!root) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Проект не открыт');
     return root;
   }
 

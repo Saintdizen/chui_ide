@@ -41,7 +41,12 @@ export function createRemoteFileModal(deps: RemoteFileModalDeps): RemoteFileModa
     'Сохранить',
   );
 
-  const modal = createModal({ className: 'remote-file-modal', title: 'Удалённый файл' });
+  // «Сохранить» — подвал окна: поле тянется по телу, кнопка держится внизу.
+  const modal = createModal({
+    className: 'remote-file-modal',
+    title: 'Удалённый файл',
+    footer: h('footer', { class: 'modal-footer is-end' }, saveButton),
+  });
   modal.body.append(
     note,
     editor,
@@ -51,7 +56,6 @@ export function createRemoteFileModal(deps: RemoteFileModalDeps): RemoteFileModa
       'Запись идёт клиентом системы (ssh, wsl или docker) — сеть должна быть доступна, а ключи настроены. ' +
         'Языковой сервер, git-пометки и наблюдение за папкой на удалённые файлы не действуют.',
     ),
-    h('div', { class: 'remote-file-actions' }, saveButton),
   );
 
   const close = (): void => modal.close();

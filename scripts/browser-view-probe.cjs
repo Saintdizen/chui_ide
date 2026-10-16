@@ -24,6 +24,11 @@
  * системном меню и держит `Ctrl+Shift+B` (сама клавиша живёт в меню Electron, а не
  * в renderer, поэтому нажатие подделать нельзя — проверяем сам пункт).
  *
+ * Отдельно — два места, где вложение мешает обычной работе окна, потому что лежит
+ * слоем ПОВЕРХ DOM: клик по вкладке файла убирает страницу с экрана (даже если файл
+ * и так был активным документом — модель вкладок о том молчит), а открытое меню-панель
+ * (`.context-menu`) на время прячет вложение, иначе меню уходило бы под страницу.
+ *
  * Снимок окна — `.chui_ide/probe-shots/browser-view.png`. Саму страницу на нём
  * не видно (вложение — отдельный слой окна), поэтому содержимое пробник читает
  * у вложения, а снимок нужен для шапки и полосы вкладок.
@@ -246,6 +251,47 @@ app.whenReady().then(async () => {
     require: await guest.executeJavaScript('typeof require'),
     process: await guest.executeJavaScript('typeof process'),
   });
+  /** Открыть файл проекта кликом по строке дерева — как это делает человек. */
+  const openFile = (name) =>
+    ask(
+      ide,
+      `(async () => {
+        const row = [...document.querySelectorAll('.tree-row')].find(
+          (item) => item.querySelector('.tree-name')?.textContent === ${JSON.stringify(name)},
+        );
+        if (!row) return 'нет строки';
+        row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        return 'открыт';
+      })()`,
+    );
+  /** Нажать вкладку страницы — так показываем её поверх активного файла. */
+  const clickPageTab = () =>
+    ask(
+      ide,
+      `(() => {
+        const tab = document.querySelector('.tab-page');
+        if (!tab) return 'нет вкладки';
+        tab.click();
+        return 'нажата';
+      })()`,
+    );
+  /** Нажать вкладку файла по подписи. */
+  const clickFileTab = (name) =>
+    ask(
+      ide,
+      `(() => {
+        const tab = [...document.querySelectorAll('.tab')].find(
+          (t) => !t.classList.contains('tab-page') && (t.querySelector('.tab-label')?.textContent ?? '') === ${JSON.stringify(name)},
+        );
+        if (!tab) return 'нет вкладки';
+        tab.click();
+        return 'нажата';
+      })()`,
+    );
+  /** Сколько вложений прикреплено к окну прямо сейчас (слой окна, а не DOM). */
+  const attachedViews = () => ide.contentView.children.length;
 
   /* --- 2. Первая страница -------------------------------------------------------- */
   check('у палитры есть пункт «Открыть страницу…»', (await openUrl(base)) === 'адрес принят');
@@ -510,6 +556,87 @@ app.whenReady().then(async () => {
     return Array.isArray(chips) && chips.some((name) => String(name).startsWith('Журнал консоли')) ? chips : null;
   });
   check('журнал консоли пришёл в чат контекстом', consoleChip !== null, consoleChip);
+
+  /* --- 12. Переключение с браузера на вкладку файла ------------------------------- */
+  // Регрессия: файл открыт и активен, поверх него показана страница, а клик по вкладке
+  // ТОГО ЖЕ файла не убирал страницу — файл был активен и раньше, поэтому `openEditors`
+  // о смене не сообщал, а страница живёт в своей модели и сама не отступала.
+  step('переключение с браузера на вкладку файла');
+  check('файл открыт', (await openFile('note.txt')) === 'открыт');
+  const fileShown = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.полотно === false ? state : null;
+  });
+  check('файл вытеснил страницу', fileShown !== null, fileShown?.полотно);
+
+  // Показываем страницу снова кликом по её вкладке: активным документом остаётся файл.
+  check('страница показана кликом по вкладке', (await clickPageTab()) === 'нажата');
+  const pageBack = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.полотно === true ? state : null;
+  });
+  check('страница снова поверх файла', pageBack !== null, pageBack?.полотно);
+  const viewsWithPage = attachedViews();
+
+  // Клик по вкладке УЖЕ активного файла — тот случай, когда события смены нет.
+  check('вкладка файла нажата', (await clickFileTab('note.txt')) === 'нажата');
+  const switchedToFile = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.полотно === false ? state : null;
+  });
+  check('клик по вкладке файла убрал страницу с экрана', switchedToFile !== null, switchedToFile?.полотно);
+  check('вложение отцеплено от окна', (await waitFor(() => (attachedViews() < viewsWithPage ? true : null))) === true, {
+    было: viewsWithPage,
+    стало: attachedViews(),
+  });
+
+  /* --- 13. Меню не уходит под страницу -------------------------------------------- */
+  // Вложение — слой окна поверх DOM. Меню (`.context-menu`) рисуется в DOM и без
+  // утайки вложения оказалось бы ПОД страницей: её не видно и не нажать.
+  step('меню-панель и слой страницы');
+  check('страница показана перед меню', (await clickPageTab()) === 'нажата');
+  const shownForMenu = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.полотно === true ? state : null;
+  });
+  check('страница видна', shownForMenu !== null, shownForMenu?.полотно);
+  const viewsBeforeMenu = attachedViews();
+
+  // Меню открываем правым кликом по вкладке файла — это то же меню, что и везде.
+  await ask(
+    ide,
+    `(() => {
+      const files = [...document.querySelectorAll('.tab')].filter((t) => !t.classList.contains('tab-page'));
+      const tab = files.find((t) => (t.querySelector('.tab-label')?.textContent ?? '') === 'note.txt') ?? files[0];
+      if (!tab) return 'нет вкладки';
+      tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 160, clientY: 160 }));
+      return 'меню открыто';
+    })()`,
+  );
+  const menuHidesView = await waitFor(async () => {
+    const menus = await ask(ide, "document.querySelectorAll('.context-menu').length");
+    return menus > 0 && attachedViews() < viewsBeforeMenu ? { menus, views: attachedViews() } : null;
+  });
+  check(
+    'пока меню открыто, страница спрятана',
+    menuHidesView !== null,
+    menuHidesView ?? {
+      меню: await ask(ide, "document.querySelectorAll('.context-menu').length"),
+      было: viewsBeforeMenu,
+      стало: attachedViews(),
+    },
+  );
+
+  // Esc закрывает меню — страница обязана вернуться на место.
+  await ask(
+    ide,
+    `(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return 'esc';
+    })()`,
+  );
+  const viewBack = await waitFor(() => (attachedViews() === viewsBeforeMenu ? true : null));
+  check('после закрытия меню страница вернулась', viewBack === true, { было: viewsBeforeMenu, стало: attachedViews() });
 
   const shot = await ide.capturePage();
   await fs.writeFile(path.join(SHOTS, 'browser-view.png'), shot.toPNG());

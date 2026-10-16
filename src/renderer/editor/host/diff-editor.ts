@@ -1,10 +1,10 @@
 /**
  * Сравнение двух версий файла своим редактором.
  *
- * Что это и зачем. Возможности сравнения держались на Monaco (`createDiff`), и без
- * своей замены снять Monaco нельзя: на сравнении стоит и просмотр правок git, и
+ * Что это и зачем. Возможности сравнения держались на чужом движке,
+ * и без своей замены снять его нельзя: на сравнении стоит и просмотр правок git, и
  * разрешение конфликтов слияния. Этот модуль повторяет ТУ ЖЕ границу, что отдавал
- * Monaco (`set` / `setHunkActions` / `setLayout` / `goToChange` / `dispose`), поэтому
+ * прежний движок (`set` / `setHunkActions` / `setLayout` / `goToChange` / `dispose`),
  * вызывающий (просмотр различий и экран конфликтов) о подмене не знает.
  *
  * Как устроено. Сравнение — это ряд выровненных строк (`host/diff-model.ts`): у каждой
@@ -63,7 +63,7 @@ export interface OwnDiffCommentHandlers {
   onRequest: (side: DiffSide, line: number) => void;
 }
 
-/** Граница сравнения — та же, что отдавал Monaco (`DiffEditorHandle`). */
+/** Граница сравнения — та же, что была у прежнего движка (`DiffEditorHandle`). */
 export interface OwnDiffHandle {
   set(input: { language: string; original: string; modified: string }): void;
   setHunkActions(actions: readonly OwnDiffHunkAction[] | null, onSelect: (index: number) => void): void;
@@ -226,7 +226,7 @@ export class OwnDiffEditor implements OwnDiffHandle {
       this.currentHunk < 0 ? (direction > 0 ? 0 : count - 1) : (this.currentHunk + direction + count) % count;
     this.currentHunk = next;
     const hunk = this.hunks[next]!;
-    // Строка блока в изменённой версии — к ней и ведём, как делал Monaco.
+    // Строка блока в изменённой версии — к ней и ведём, как делал прежний движок.
     const rowIndex = this.rows.findIndex((row) => row.modifiedLine === hunk.modifiedStartLine);
     const scrollTop = revealLine(
       rowIndex < 0 ? hunk.modifiedStartLine - 1 : rowIndex,

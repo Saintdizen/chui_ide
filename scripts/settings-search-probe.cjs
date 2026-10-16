@@ -90,6 +90,47 @@ app.whenReady().then(async () => {
   );
   check('поиск есть в окне настроек', opened === 'открыт', opened);
 
+  /* Колонка настроек: поля и описания держат одну ширину.
+     Регрессия: `max-width` был только у `.field`, а у описаний (`.field-hint`)
+     и подписей — нет, и текст описания выезжал правее поля. */
+  const column = await ask(
+    ide,
+    `(() => {
+      const pane = document.querySelector('.modal-pane');
+      if (!pane) return null;
+      const widths = (sel) => [...pane.querySelectorAll(sel)].map((n) => Math.round(n.getBoundingClientRect().width));
+      return {
+        полей: [...new Set(widths('.field'))],
+        описаний: [...new Set(widths('.field-hint'))],
+        подписей: [...new Set(widths('.field-label'))],
+        // Остаток справа: сколько пустого места остаётся правее полей в колонке.
+        остаток: (() => {
+          const s = getComputedStyle(pane);
+          const inner = pane.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
+          const max = Math.max(...widths('.field'), 0);
+          return Math.round(inner - max);
+        })(),
+      };
+    })()`,
+  );
+  const maxField = Math.max(...(column?.полей ?? [0]));
+  check('поля настроек одной ширины', column?.полей?.length === 1, column?.полей);
+  check(
+    'описания не шире полей',
+    (column?.описаний ?? []).every((w) => w <= maxField),
+    { поля: column?.полей, описания: column?.описаний },
+  );
+  check(
+    'подписи не шире полей',
+    (column?.подписей ?? []).every((w) => w <= maxField),
+    { поля: column?.полей, подписи: column?.подписей },
+  );
+  // Пустого поля справа не остаётся: модалка сужена под колонку содержимого.
+  check('справа от колонки нет пустого места', Math.abs(column?.остаток ?? 999) <= 4, {
+    остаток: column?.остаток,
+    поля: column?.полей,
+  });
+
   /* Поиск по подписи поля: одна находка, раздел «Редактор». */
   const typed = await ask(ide, typeQuery('шрифта'));
   check('запрос набран', typed === 'набрано', typed);

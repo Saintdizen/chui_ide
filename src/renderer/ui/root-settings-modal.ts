@@ -57,7 +57,18 @@ export function createRootSettingsModal(deps: RootSettingsModalDeps): RootSettin
   const excluded = h('textarea', { class: 'field-input root-settings-exclude', rows: 4, spellcheck: false });
   const summary = h('div', { class: 'field-hint' });
 
-  const modal = createModal({ className: 'root-settings-modal', title: 'Настройки папки' });
+  const resetButton = h(
+    'button',
+    { class: 'btn', type: 'button', title: 'Жить по общим настройкам', onClick: () => void reset() },
+    'Сбросить настройки папки',
+  );
+  const doneButton = h('button', { class: 'btn btn-primary', type: 'button', onClick: () => void apply() }, 'Готово');
+  // Действия — подвал окна: тело (строки настроек и исключения) растёт.
+  const modal = createModal({
+    className: 'root-settings-modal',
+    title: 'Настройки папки',
+    footer: h('footer', { class: 'modal-footer is-end' }, resetButton, doneButton),
+  });
   modal.body.append(
     h(
       'div',
@@ -77,16 +88,6 @@ export function createRootSettingsModal(deps: RootSettingsModalDeps): RootSettin
     excluded,
     h('div', { class: 'settings-divider' }),
     summary,
-    h(
-      'div',
-      { class: 'root-settings-actions' },
-      h(
-        'button',
-        { class: 'btn', type: 'button', title: 'Жить по общим настройкам', onClick: () => void reset() },
-        'Сбросить настройки папки',
-      ),
-      h('button', { class: 'btn btn-primary', type: 'button', onClick: () => void apply() }, 'Готово'),
-    ),
   );
 
   const close = (): void => modal.close();

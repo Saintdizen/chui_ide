@@ -53,7 +53,7 @@ describe('правки', () => {
     expect(resolveKey({ key: 'y', ctrl: true, alt: true })).toEqual({ kind: 'edit', edit: 'redoAtCursor' });
   });
 
-  it('F1 открывает палитру команд (у Monaco — его действие)', () => {
+  it('F1 открывает палитру команд', () => {
     expect(resolveKey({ key: 'F1' })).toEqual({ kind: 'edit', edit: 'palette' });
   });
 

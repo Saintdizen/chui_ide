@@ -67,11 +67,16 @@ export function createHistoryModal(deps: HistoryModalDeps): HistoryModalView {
     'Очистить снимки',
   );
 
-  const modal = createModal({ className: 'history-modal', title: 'История файла' });
+  // Действия — подвал окна: тело (список и предпросмотр) растёт, а кнопки держатся
+  // у нижнего края, а не тонут в пустоте посреди окна.
+  const modal = createModal({
+    className: 'history-modal',
+    title: 'История файла',
+    footer: h('footer', { class: 'modal-footer' }, clearButton, actionButton),
+  });
   modal.body.append(
     h('div', { class: 'history-toolbar' }, svgIcon('revert', 14), summary),
     h('div', { class: 'history-body' }, list, h('div', { class: 'history-detail' }, preview)),
-    h('div', { class: 'history-actions' }, clearButton, actionButton),
   );
 
   const close = (): void => modal.close();

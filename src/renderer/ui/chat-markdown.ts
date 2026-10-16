@@ -384,7 +384,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
     return node;
   }
 
-  /** Диффом модель отвечает часто: + / − красим сами, Monaco его так не размечает. */
+  /** Диффом модель отвечает часто: + / − красим сами. */
   function diffNode(code: string): HTMLElement {
     const wrap = h('code', { class: 'diff-code' });
     for (const line of code.split('\n')) {
@@ -397,7 +397,7 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
     return wrap;
   }
 
-  /** Блок кода: текст сразу, цвета — как отдаст Monaco. */
+  /** Блок кода: текст сразу, цвета — как отдаст подсветка. */
   function codeNode(code: string, language: string): HTMLElement {
     const node = h('code', {});
     highlightInto(node, code, language);

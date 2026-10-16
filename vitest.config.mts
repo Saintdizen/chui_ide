@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * Юнит-тесты чистой логики: то, что не требует Electron, Monaco и DOM.
+ * Юнит-тесты чистой логики: то, что не требует Electron и DOM.
  * Проверки интерфейса и процессов живут в `scripts/*-smoke.cjs`.
  */
 export default defineConfig({

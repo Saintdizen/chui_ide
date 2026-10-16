@@ -6,11 +6,9 @@
 export {
   LANGUAGES,
   PLAIN_LANGUAGE,
-  basename as pathBasename,
   fileIconOf,
   languageFromPath,
   languageIndent,
-  languageInfo,
   languageInfoForPath,
   languageLabel,
   type FileIconKind,

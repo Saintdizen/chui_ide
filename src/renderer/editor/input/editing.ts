@@ -157,17 +157,6 @@ export function outdentLine(buffer: TextBuffer, offset: number, tabSize: number)
   return { selection: caretAt(caret), change };
 }
 
-/**
- * Сдвинуть текст всей строки (или всех строк выделения) — не используется сейчас,
- * но форма вызова та же, что у остальных правок: пригодится для Tab по выделению.
- */
-export function indentLine(buffer: TextBuffer, offset: number, tabSize: number): EditResult | null {
-  const line = buffer.lineAt(offset);
-  const start = buffer.lineStart(line);
-  const change = replaceRange(buffer, start, 0, ' '.repeat(tabSize));
-  return { selection: caretAt(offset + tabSize), change };
-}
-
 /* ── парные символы ──────────────────────────────────────────────────── */
 
 /** Открывающий знак → закрывающий. По нему ввод знает, что дописать за человеком. */

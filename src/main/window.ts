@@ -25,6 +25,9 @@ interface WindowOptions {
 
 let ideWindow: BrowserWindow | null = null;
 
+/** Стартовое окно — тоже одно: его поднимает «Закрыть проект». */
+let welcomeWindow: BrowserWindow | null = null;
+
 /**
  * Окно IDE, если оно уже открыто. Нужно тем, кто прикрепляет к окну свои слои
  * (встроенный браузер — это `WebContentsView` поверх окна) и не должен его
@@ -74,6 +77,32 @@ export function createWelcomeWindow(): BrowserWindow {
   });
 }
 
+/**
+ * Стартовое окно, если оно уже открыто. Как и у IDE, окно одно на приложение:
+ * «Закрыть проект» возвращает человека к списку проектов, а второй такой список
+ * рядом только путал бы — какой из них закрывать, непонятно.
+ */
+export function getWelcomeWindow(): BrowserWindow | null {
+  return welcomeWindow && !welcomeWindow.isDestroyed() ? welcomeWindow : null;
+}
+
+/** Показать стартовое окно: уже открытое — поднимаем, иначе создаём. */
+export function openWelcomeWindow(): BrowserWindow {
+  const existing = getWelcomeWindow();
+  if (existing) {
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    return existing;
+  }
+
+  const window = createWelcomeWindow();
+  welcomeWindow = window;
+  window.on('closed', () => {
+    if (welcomeWindow === window) welcomeWindow = null;
+  });
+  return window;
+}
+
 function createAppWindow(options: WindowOptions): BrowserWindow {
   const isMac = process.platform === 'darwin';
 
@@ -120,8 +149,6 @@ function createAppWindow(options: WindowOptions): BrowserWindow {
   // `isSameUrlOrigin`: перезагрузку своей страницы пускаем, уход на сайт — наружу.
   const isAppUrl = (target: string): boolean => isSameUrlOrigin(target, base);
 
-  // Ссылки из интерфейса отдаём системе, но только знакомые схемы: `file:` или
-  // своя схема в чужом обработчике — не то, чего человек ждёт от «открой ссылку».
   // Ссылки из интерфейса отдаём системе, но только знакомые схемы: `file:` или
   // своя схема в чужом обработчике — не то, чего человек ждёт от «открой ссылку».
   const openExternal = (url: string): void => {

@@ -47,7 +47,9 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
     'Выключить режим',
   );
 
-  const modal = createModal({ className: 'sparse-modal', title: 'Разреженный рабочий каталог' });
+  // Кнопка «Выключить режим» — подвал окна: тело (список каталогов) растёт.
+  const footer = h('footer', { class: 'modal-footer is-end' }, disableButton);
+  const modal = createModal({ className: 'sparse-modal', title: 'Разреженный рабочий каталог', footer });
   modal.body.append(
     status,
     h('div', { class: 'settings-divider' }),
@@ -67,7 +69,6 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
       { class: 'field-hint' },
       'Выключение возвращает на диск весь репозиторий — это может занять время и место.',
     ),
-    h('div', { class: 'sparse-actions' }, disableButton),
   );
 
   const close = (): void => modal.close();
@@ -79,7 +80,7 @@ export function createSparseModal(deps: SparseModalDeps): SparseModalView {
     clear(status);
     if (!info) return;
     status.append(h('p', { class: 'sparse-line' }, sparseSummary(info)));
-    disableButton.hidden = !info.enabled;
+    footer.hidden = !info.enabled;
     addButton.disabled = false;
   };
 

@@ -404,7 +404,7 @@ const symbolsWorkspace = new EditorWorkspace(symbolsRoot, symbolsRegistry, {
 });
 const symbolsDoc = symbolsStore.open('/probe/sym.ts', 'const value = 1;\nuse(value);\n', { languageId: 'typescript' });
 symbolsWorkspace.open(symbolsDoc);
-// F1 открывает палитру: у рабочего места это свой обработчик (у Monaco было его действие),
+// F1 открывает палитру: у рабочего места это свой обработчик,
 // а отладочная подсказка спрашивает значение слова — оба шва проверяем отсюда.
 const paletteOpens: string[] = [];
 symbolsWorkspace.openPaletteOnF1(() => paletteOpens.push('open'));

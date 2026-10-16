@@ -23,7 +23,7 @@ export function createEmptyState(): EmptyStateView {
     h(
       'ul',
       { class: 'welcome-hints' },
-      h('li', {}, 'Ctrl+O — открыть папку, Ctrl+S — сохранить'),
+      h('li', {}, 'Ctrl+O — открыть проект, Ctrl+S — сохранить'),
       h('li', {}, 'Alt+F12 — нижняя панель, Ctrl+Shift+F — поиск по проекту'),
       h('li', {}, 'Ctrl+Shift+P — палитра команд, Ctrl+B — боковая панель'),
     ),

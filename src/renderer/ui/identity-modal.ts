@@ -73,7 +73,12 @@ export function createIdentityModal(deps: IdentityModalDeps): IdentityModalView 
 
   const saveButton = h('button', { class: 'btn btn-primary', type: 'button', onClick: () => void save() }, 'Сохранить');
 
-  const modal = createModal({ className: 'identity-modal', title: 'Личность и подпись коммитов' });
+  // «Сохранить» — подвал окна: тело (поля и список ключей) растёт.
+  const modal = createModal({
+    className: 'identity-modal',
+    title: 'Личность и подпись коммитов',
+    footer: h('footer', { class: 'modal-footer is-end' }, saveButton),
+  });
   modal.body.append(
     status,
     problemsBox,
@@ -121,7 +126,6 @@ export function createIdentityModal(deps: IdentityModalDeps): IdentityModalView 
         'ею же git подписывает коммиты в формате ssh.',
     ),
     keysList,
-    h('div', { class: 'modal-actions' }, saveButton),
   );
 
   const close = (): void => modal.close();

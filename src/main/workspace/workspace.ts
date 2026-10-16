@@ -1122,7 +1122,7 @@ export class WorkspaceService {
   }
 
   private requireRoot(): string {
-    if (!this.active) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Рабочая папка не открыта');
+    if (!this.active) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Проект не открыт');
     return this.active;
   }
 

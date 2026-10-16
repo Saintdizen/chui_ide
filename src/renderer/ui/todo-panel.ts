@@ -128,7 +128,7 @@ export function createTodoPanel(deps: TodoPanelDeps): TodoPanel {
       current = [];
       summary.textContent = '';
       clear(list);
-      list.appendChild(h('div', { class: 'todo-empty' }, 'Сначала откройте папку проекта.'));
+      list.appendChild(h('div', { class: 'todo-empty' }, 'Сначала откройте проект.'));
       return;
     }
     const ticket = (sequence += 1);

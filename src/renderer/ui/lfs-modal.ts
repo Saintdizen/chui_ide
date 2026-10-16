@@ -59,7 +59,9 @@ export function createLfsModal(deps: LfsModalDeps): LfsModalView {
     'Поставить хуки',
   );
 
-  const modal = createModal({ className: 'lfs-modal', title: 'Большие файлы (Git LFS)' });
+  // Кнопка «Подтянуть файлы» — подвал окна: тело (шаблоны и файлы) растёт.
+  const footer = h('footer', { class: 'modal-footer is-end' }, pullButton);
+  const modal = createModal({ className: 'lfs-modal', title: 'Большие файлы (Git LFS)', footer });
   modal.body.append(
     status,
     h('div', { class: 'settings-divider' }),
@@ -81,7 +83,6 @@ export function createLfsModal(deps: LfsModalDeps): LfsModalView {
         '«Не подтянут» значит, что файла на диске нет и его надо скачать.',
     ),
     filesList,
-    h('div', { class: 'lfs-actions' }, pullButton),
   );
 
   const close = (): void => modal.close();
@@ -110,7 +111,7 @@ export function createLfsModal(deps: LfsModalDeps): LfsModalView {
     const missing = missingCount(info.files);
     if (missing > 0) parts.push(`не подтянуто: ${missing}`);
     status.append(h('p', { class: 'lfs-line' }, parts.join(' · ')));
-    pullButton.hidden = !info.configured;
+    footer.hidden = !info.configured;
   };
 
   const renderPatterns = (): void => {

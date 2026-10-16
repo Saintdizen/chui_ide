@@ -362,12 +362,29 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  /* Прокрутка — на теле: высота окна задана, а содержимое бывает выше (список
+     ключей SSH, вывод git). Окна со своей внутренней прокруткой (.modal-pane,
+     .venv-body) двух полос не дают: их содержимое ограничено ими же. */
+  overflow: auto;
+  padding: 5px;
 }
 
-/* Настройки — единственное окно с колонкой разделов слева. */
+/* Настройки — единственное окно с колонкой разделов слева.
+   Отступ тела тут снят: разделитель столбца разделов тянется во всю высоту и должен
+   стыковаться с шапкой и подвалом без зазора, а ширина окна посчитана под две
+   колонки без лишних 10 px (см. ширину .settings-modal выше). */
 .settings-modal .modal-body {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);
+  padding: 0;
+}
+
+/* Окно настроек уже общего (760px): колонка содержимого ограничена 420px (см.
+   ниже), и широкая модалка оставляла справа пустое поле. Ширина подобрана по
+   содержимому: 190 (список разделов) + 420 (колонка) + 32 (её отступы) + 2 (рамка).
+   На узком экране работает 100%. */
+.settings-modal {
+  width: min(644px, 100%);
 }
 
 /* Диалог одного поля: узкий и по высоте содержимого, а не 560 px, как настройки. */
@@ -496,7 +513,12 @@
   overflow: auto;
 }
 
-.modal-pane .field {
+/* Ширина колонки настроек: поля не растягиваются на всю панель — длинная строка
+   ввода читается хуже. Описания и подписи держат ровно ту же ширину, иначе
+   текст описания выезжал правее поля, и колонка выглядела рваной. */
+.modal-pane .field,
+.modal-pane .field-hint,
+.modal-pane .field-label {
   max-width: 420px;
 }
 
@@ -540,10 +562,21 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 5px;
   flex: 0 0 auto;
-  padding: 10px 12px;
+  flex-wrap: wrap;
+  padding: 5px;
   border-top: 1px solid var(--separator_color);
+}
+
+/* Действия у одной стороны: справа — у окон с одним главным действием, слева —
+   у окон с рядом равнозначных кнопок. По умолчанию подвал разводит их по краям. */
+.modal-footer.is-end {
+  justify-content: flex-end;
+}
+
+.modal-footer.is-start {
+  justify-content: flex-start;
 }
 
 /* ── окно Python-окружений ──────────────────────────────────────────────── */
@@ -870,8 +903,8 @@
 /* ── палитра команд ─────────────────────────────────────────────────────── */
 
 /* Затемнение модального слоя (палитра, быстрый переход, символы). Слой — прямой
-   потомок `body`, поэтому селектор это и говорит: класс `overlay` есть и у Monaco
-   (ползунки в виджете выбора цвета — `.colorpicker-body .strip .overlay`), и без
+   потомок `body`, поэтому селектор это и говорит: класс `overlay` есть и у чужого
+   виджета (ползунки в выборе цвета — `.colorpicker-body .strip .overlay`), и без
    уточнения правило накрывало их `position: fixed; inset: 0` — виджет обливался
    затемнением на весь экран. */
 body > .overlay {
@@ -1112,11 +1145,14 @@ body > .overlay {
   padding-inline: 14px;
 }
 
-.launcher-clone {
+/* Формы стартового окна — клонирование и создание: устройство у них одно (поля
+   сверху, ряд действий и строка хода работы снизу), а различаются только поля. */
+.launcher-clone,
+.launcher-create {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
+  gap: 5px;
+  padding: 5px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
   background: var(--element_background_2);
@@ -1126,7 +1162,8 @@ body > .overlay {
 .launcher-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 5px;
+  margin: 2.5px 5px;
 }
 
 .launcher-path {
@@ -1145,7 +1182,7 @@ body > .overlay {
 }
 
 .launcher-progress {
-  min-height: 15px;
+  min-height: 0px;
   overflow: hidden;
   color: var(--text_color_tertiary);
   font-family: var(--font_mono);
@@ -1284,7 +1321,8 @@ body > .overlay {
   .palette,
   .toast,
   .modal,
-  .launcher-clone {
+  .launcher-clone,
+  .launcher-create {
     animation-name: popup-fade !important;
     animation-duration: var(--motion_base) !important;
   }

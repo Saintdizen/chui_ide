@@ -238,7 +238,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     recentWindowHours: 24,
     // Игнорируемое приглушаем: это подсказка, а не запрет — файл остаётся виден.
     dimIgnored: true,
-    // Привычка из PyCharm: двойной клик открывает, одинарный — выделяет.
+    // Привычное поведение: двойной клик открывает, одинарный — выделяет.
     openOnSingleClick: false,
     confirmDelete: true,
     exclude: [],
@@ -289,7 +289,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
   // Значения совпадают с CSS-переменными по умолчанию и сбросом сплиттеров.
   layout: {
     sidebarSize: 260,
-    rightSize: 400,
+    rightSize: 500,
     dockSize: 260,
     sidebarVisible: true,
     rightVisible: true,
@@ -787,7 +787,7 @@ function loadSettings(filePath: string): StoredSettings {
       ...DEFAULT_SETTINGS.editor,
       ...(parsed.editor ?? {}),
       // Сниппеты правит человек в файле, поэтому и триггер, и тело проверяются:
-      // тело уходит в подсказку редактора разметкой Monaco.
+      // тело уходит в подсказку редактора привычной разметкой сниппетов.
       snippets: normalizeSnippets(parsed.editor?.snippets),
       // Направляющие могли править руками — приводим к списку столбцов тем же разбором.
       rulers: normalizeRulers(parsed.editor?.rulers),

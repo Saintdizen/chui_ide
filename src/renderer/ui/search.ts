@@ -178,7 +178,7 @@ export function createSearchView(deps: SearchDeps): SearchView {
     }
     // Поиск по вкладкам работает и без проекта: файлы уже открыты.
     if (mode === 'project' && !deps.workspace.root) {
-      status.textContent = 'Сначала откройте папку проекта';
+      status.textContent = 'Сначала откройте проект';
       return;
     }
 
@@ -211,7 +211,7 @@ export function createSearchView(deps: SearchDeps): SearchView {
       return;
     }
     if (!deps.workspace.root) {
-      status.textContent = 'Сначала откройте папку проекта';
+      status.textContent = 'Сначала откройте проект';
       return;
     }
 

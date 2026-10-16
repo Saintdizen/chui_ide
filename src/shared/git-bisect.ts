@@ -24,16 +24,6 @@ export interface GitBisectState {
   message: string;
 }
 
-/** Пустая (не идущая) сессия поиска. */
-export const EMPTY_BISECT: GitBisectState = {
-  active: false,
-  current: null,
-  remaining: null,
-  steps: null,
-  firstBad: null,
-  message: '',
-};
-
 /** Слова из вывода git: сколько версий осталось и сколько это примерно шагов. */
 export function parseBisectProgress(text: string): { remaining: number | null; steps: number | null } {
   // «Bisecting: 3 revisions left to test after this (roughly 2 steps)»

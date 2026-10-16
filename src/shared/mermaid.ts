@@ -102,12 +102,6 @@ export function parseMermaid(source: string): MermaidParseResult {
   return { ok: false, error: 'Вид диаграммы не поддерживается' };
 }
 
-/** Первая содержательная строка — объявление вида диаграммы. */
-export function diagramKind(source: string): 'flow' | 'sequence' | 'pie' | 'other' {
-  const result = parseMermaid(source);
-  return result.ok ? result.diagram.kind : 'other';
-}
-
 /** Убрать `%%`-комментарий (и служебную директиву `%%{...}%%` целиком). */
 function stripComment(line: string): string {
   const trimmed = line.trimStart();

@@ -90,7 +90,7 @@ export class WordIndex {
     const lowered = prefix.toLowerCase();
     // Слово, совпавшее с набранным, не предлагаем: дополнять его нечем — оно уже целиком в тексте.
     // Совпадение — не только по началу: `gT` находит `getTitle` (см. `fuzzy.ts`), поэтому
-    // имена из файла предлагаются так же, как в PyCharm, а не по одному `startsWith`.
+    // имена из файла предлагаются по совпадению, а не по одному `startsWith`.
     return this.select(limit, (word) => word.toLowerCase() !== lowered && matchScore(word, prefix) !== null, exclude);
   }
 

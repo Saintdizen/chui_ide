@@ -636,7 +636,7 @@ async function browserClose(ctx: ToolContext): Promise<ToolOutcome> {
  */
 async function projectMap(workspace: WorkspaceService): Promise<ToolOutcome> {
   const root = workspace.rootPath();
-  if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
+  if (!root) return { ok: false, summary: 'Проект не открыт' };
 
   const scan = await scanProject(root);
   const { summary, detail } = formatProjectMap(scan);
@@ -645,7 +645,7 @@ async function projectMap(workspace: WorkspaceService): Promise<ToolOutcome> {
 
 async function listDir(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
   const requested = optionalString(args, 'path') ?? workspace.rootPath();
-  if (!requested) return { ok: false, summary: 'Рабочая папка не открыта' };
+  if (!requested) return { ok: false, summary: 'Проект не открыт' };
 
   const root = workspace.rootPath();
   const entries = await workspace.readDir(requested);
@@ -1293,7 +1293,7 @@ async function renameSymbol(ctx: ToolContext, args: Record<string, unknown>): Pr
 async function runLinter(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.linter) return { ok: false, summary: 'Линтер недоступен' };
   const root = ctx.workspace.rootPath();
-  if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
+  if (!root) return { ok: false, summary: 'Проект не открыт' };
 
   const requested = optionalString(args, 'path');
   if (requested) await ctx.workspace.stat(requested);
@@ -1346,7 +1346,7 @@ async function runTests(ctx: ToolContext): Promise<ToolOutcome> {
   }
 
   const root = ctx.workspace.rootPath();
-  if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
+  if (!root) return { ok: false, summary: 'Проект не открыт' };
 
   if (ctx.sandbox && !ctx.sandbox.available) return sandboxUnavailable(ctx.sandbox);
   const result = ctx.sandbox
@@ -1643,7 +1643,7 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   }
 
   const root = ctx.workspace.rootPath();
-  if (!root) return { ok: false, summary: 'Рабочая папка не открыта' };
+  if (!root) return { ok: false, summary: 'Проект не открыт' };
 
   // Обычный агент спрашивает всегда; полный доступ — только если включена страховка.
   if (needsConfirmation(ctx, command)) {
@@ -1858,7 +1858,7 @@ async function gitStatus(ctx: ToolContext): Promise<ToolOutcome> {
   const status = await ctx.git.status();
   const repo = status.repository;
   if (!repo) {
-    return { ok: true, summary: 'не git-репозиторий', detail: 'Рабочая папка не лежит внутри git-репозитория.' };
+    return { ok: true, summary: 'не git-репозиторий', detail: 'Проект не лежит внутри git-репозитория.' };
   }
 
   const where = repo.branch
@@ -1942,7 +1942,7 @@ function gitPaths(ctx: ToolContext, args: Record<string, unknown>): string[] {
   const value = args.paths;
   if (!Array.isArray(value)) throw new Error('Не задан аргумент «paths»');
   const root = ctx.workspace.rootPath();
-  if (!root) throw new Error('Рабочая папка не открыта');
+  if (!root) throw new Error('Проект не открыт');
 
   const paths: string[] = [];
   for (const item of value) {

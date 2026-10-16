@@ -613,7 +613,7 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     if (!isRepo) {
       stagedGroup.hidden = true;
       unstagedGroup.hidden = true;
-      hint.textContent = 'Рабочая папка не в репозитории git';
+      hint.textContent = 'Проект не в репозитории git';
     } else {
       void renderBranches();
     }

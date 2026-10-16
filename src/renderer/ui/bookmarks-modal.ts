@@ -44,7 +44,7 @@ export function createBookmarksModal(deps: BookmarksModalDeps): BookmarksModalVi
   const modal = createModal({
     className: 'bookmarks-modal',
     title: 'Закладки',
-    footer: h('div', { class: 'bookmarks-actions' }, clearButton),
+    footer: h('footer', { class: 'modal-footer is-end' }, clearButton),
   });
   modal.body.append(h('div', { class: 'bookmarks-toolbar' }, summary), list);
 

@@ -491,7 +491,7 @@ export function createTerminalPanel(deps: {
 
       const entry = sessions.get(id);
       if (entry && title) {
-        // Имя вкладки — по запуску, как в PyCharm: видно, что это запуск, а не
+        // Имя вкладки — по запуску: видно, что это запуск, а не
         // свободная оболочка. Подсказка хранит саму команду, если она отличается
         // от имени (у задачи из package.json они совпадают).
         entry.tab.textContent = title;

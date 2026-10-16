@@ -27,7 +27,7 @@ files:
 # node-pty (нативный модуль) и наши языковые серверы. Распаковываем `node_modules`
 # целиком, а не список пакетов: серверу нужны и его зависимости (у
 # typescript-language-server это `typescript-language-server/lib/*` и
-# `vscode-languageserver*`), и перечислять их поимённо — значит чинить упаковку при
+# пакеты языковых серверов), и перечислять их поимённо — значит чинить упаковку при
 # каждом обновлении пакета.
 asarUnpack:
   - '**/*.node'
@@ -65,7 +65,7 @@ linux:
   maintainer: chui_iDE <chui-ide@users.noreply.github.com>
   synopsis: IDE с ассистентом
   description: >-
-    chui_iDE — редактор кода на Electron: дерево проекта, Monaco, терминал,
+    chui_iDE — редактор кода на Electron: дерево проекта, свой редактор, терминал,
     git, ассистент с инструментами агента.
   desktop:
     entry:

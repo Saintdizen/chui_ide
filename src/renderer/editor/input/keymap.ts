@@ -83,7 +83,7 @@ export type EditCommand =
   | 'joinLines'
   | 'insertLineBelow'
   | 'insertLineAbove'
-  /** F1 — палитра команд (у Monaco её открывало его же действие). */
+  /** F1 — палитра команд. */
   | 'palette'
   /** Ctrl+. — быстрые исправления под курсором (список показывает приложение). */
   | 'codeActions'
@@ -142,13 +142,13 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     // Shift+Tab снимает отступ со строки (один таб или до `tabSize` пробелов).
     return { kind: 'edit', edit: extend ? 'outdent' : 'indent' };
   }
-  // F1 — палитра команд: у Monaco её открывало его же действие, своему редактору
-  // нужна своя обработка. Сочетания клавиш у неё нет — это клавиша панели.
+  // F1 — палитра команд: своему редактору нужна своя обработка.
+  // Сочетания клавиш у неё нет — это клавиша панели.
   if (key === 'F1') return { kind: 'edit', edit: 'palette' };
   // Ctrl+Shift+T — обернуть выделение: список вариантов показывает вызывающий.
   if (control && extend && key.toLowerCase() === 't') return { kind: 'edit', edit: 'surroundWith' };
   // Навигация по символу: F12 — определение, Shift+F12 — ссылки, Ctrl+Shift+F12 —
-  // заглянуть (определение на месте). Привычные клавиши из VS Code и PyCharm.
+  // заглянуть (определение на месте). Привычные сочетания клавиш.
   // Без Alt: Alt+F12 — это терминал (акселератор меню), и его нажатие доходит и сюда.
   // Иначе открытие терминала заодно искало бы определение (и слало бы «не найдено»).
   if (key === 'F12' && !chord.alt) {
@@ -252,7 +252,7 @@ export function chordName(chord: KeyChord): string {
 
 /**
  * Сочетания-приставки: клавиша нажимается НЕ одна, а перед второй (как `Ctrl+K Ctrl+F`
- * в VS Code). Таблица — данные: по ней же видно, какие пары вообще есть.
+ * например). Таблица — данные: по ней же видно, какие пары вообще есть.
  */
 const CHORD_TABLE: Readonly<Record<string, Readonly<Record<string, EditCommand>>>> = {
   'Ctrl+K': { 'Ctrl+F': 'formatSelection' },
@@ -287,9 +287,4 @@ function isPrintable(key: string): boolean {
   }
   // Составные эмодзи (две и более единицы UTF-16) — тоже печатные.
   return Array.from(key).length === 1 && (key.codePointAt(0) ?? 0) >= 0x20;
-}
-
-/** Есть ли у клавиши модификатор, который мы не поддерживаем как имя команды. */
-export function isModified(chord: KeyChord): boolean {
-  return chord.ctrl === true || chord.meta === true || chord.alt === true;
 }

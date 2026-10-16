@@ -190,7 +190,7 @@ export class SuggestWidget {
 
     const label = document.createElement('span');
     label.className = 'own-editor-suggest-label';
-    // Совпавшие с набранным знаки выделяем — как в PyCharm: по ним сразу видно, ПОЧЕМУ
+    // Совпавшие с набранным знаки выделяем: по ним сразу видно, ПОЧЕМУ
     // строка в списке, а при совпадении по «горбам» это единственная подсказка об этом.
     renderLabel(label, item);
 
@@ -278,7 +278,7 @@ export class SuggestWidget {
 
 /**
  * Подпись строки: совпавшие знаки — отдельным куском, остальное — как есть. Так в списке
- * видно, что именно совпало с набранным (в PyCharm совпадение выделено жирным).
+ * видно, что именно совпало с набранным (совпадение выделено жирным).
  * Без `positions` (серверные подсказки, Ctrl+Space) подпись рисуется целиком.
  */
 function renderLabel(node: HTMLElement, item: CompletionItem): void {

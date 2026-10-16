@@ -44,13 +44,15 @@ export interface MenuNode {
 const FILE: MenuNode = {
   label: 'Файл',
   children: [
-    { label: 'Открыть папку…', accelerator: 'Ctrl+O', command: 'workspace.openFolder' },
+    { label: 'Открыть проект…', accelerator: 'Ctrl+O', command: 'workspace.openFolder' },
+    // Закрыть проект — вернуться к списку проектов: окно IDE уступает стартовому.
+    { label: 'Закрыть проект', command: 'project.close' },
     { separator: true },
     { label: 'Новый файл', accelerator: 'Ctrl+N', command: 'file.newFile' },
     { label: 'Новая папка', command: 'file.newFolder' },
     { separator: true },
     { label: 'Сохранить', accelerator: 'Ctrl+S', command: 'file.save' },
-    // «Сохранить как…» на Ctrl+Shift+S — привычка из VS Code и PyCharm; поэтому
+    // «Сохранить как…» на Ctrl+Shift+S — привычное сочетание; поэтому
     // «Сохранить всё» переехало на Ctrl+Alt+S: два пункта на одной клавише не жить.
     { label: 'Сохранить как…', accelerator: 'Ctrl+Shift+S', command: 'file.saveAs' },
     { label: 'Сохранить всё', accelerator: 'Ctrl+Alt+S', command: 'file.saveAll' },
@@ -118,7 +120,7 @@ const VIEW: MenuNode = {
     { label: 'Мельче', accelerator: 'Ctrl+-', role: 'zoomOut' },
     { separator: true },
     // Без акселератора: `F11` держит шаг отладки с заходом (`debug.stepInto`) —
-    // привычка VS Code и PyCharm. Полный экран остаётся пунктом меню, а не клавишей.
+    // привычное сочетание. Полный экран остаётся пунктом меню, а не клавишей.
     { label: 'Полный экран', role: 'fullscreen' },
   ],
 };

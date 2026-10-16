@@ -273,10 +273,6 @@ export function languageInfoForPath(filePath: string): LanguageInfo | null {
   return BY_EXTENSION.get(name.slice(dot + 1)) ?? null;
 }
 
-export function languageInfo(languageId: string): LanguageInfo | null {
-  return BY_ID.get(languageId) ?? null;
-}
-
 /** Идентификатор языка для файла по пути. */
 export function languageFromPath(filePath: string): string {
   return languageInfoForPath(filePath)?.id ?? PLAIN_LANGUAGE;

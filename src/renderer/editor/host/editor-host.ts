@@ -317,7 +317,7 @@ export interface EditorHostOptions {
   lensCommand?: (path: string, command: CodeLensCommand) => void;
   /**
    * Inline-подсказка «допиши за меня»: включение, задержка и запрос к модели. Не задана —
-   * призрачного текста в панели нет вовсе (у Monaco это был его провайдер подсказок).
+   * призрачного текста в панели нет вовсе (прежде это был провайдер движка).
    */
   inlineCompletion?: {
     enabled(): boolean;
@@ -730,8 +730,8 @@ export class EditorHost {
     // После закрытия панели фокус возвращается в текст: работа продолжается там.
     this.find.onClose = () => this.input.focus();
     this.goto.onClose = () => this.input.focus();
-    // Ctrl+Click по слову — переход к определению (жест, который у Monaco делал его
-    // обработчик открытия). Слушаем в фазе захвата: иначе ввод успеет начать выделение.
+    // Ctrl+Click по слову — переход к определению (жест от обработчика открытия).
+    // Слушаем в фазе захвата: иначе ввод успеет начать выделение.
     this.viewport?.addEventListener('mousedown', this.onViewMouseDown, true);
 
     // Внешняя замена буфера (диск, форматирование, правки агента) прошла мимо контроллера:
@@ -1434,7 +1434,7 @@ export class EditorHost {
     const items = (this.externalMarkers.get(path) ?? []).map((item) => ({
       line: item.line,
       startColumn: item.column,
-      // Многострочная пометка подчёркивается до конца своей первой строки — как в Monaco.
+      // Многострочная пометка подчёркивается до конца своей первой строки.
       endColumn: item.endLine === item.line ? Math.max(item.endColumn, item.column + 1) : Number.MAX_SAFE_INTEGER,
       className: severityClass(item.severity),
     }));

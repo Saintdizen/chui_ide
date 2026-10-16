@@ -50,6 +50,13 @@ const probePage = (window, expression, timeoutMs = 30000) =>
  * а `did-finish-load` за это время уже прошёл — ожидание повисало навсегда.
  * Подписка ставится до окончания загрузки, поэтому событие не пропускается.
  */
+/** Есть ли путь: у  здесь только обещания, поэтому проверка своя. */
+const pathExists = (target) =>
+  fs
+    .stat(target)
+    .then(() => true)
+    .catch(() => false);
+
 const loaded = (window, timeoutMs = 60000) =>
   Promise.race([
     new Promise((resolve) => window.webContents.once('did-finish-load', () => resolve(true))),
@@ -106,8 +113,8 @@ app.whenReady().then(async () => {
 
   check('разметка стартового окна на месте', Boolean(welcomeProbe?.launcher) && Boolean(welcomeProbe?.customFrame));
   check(
-    'есть обе кнопки старта',
-    welcomeProbe.actions.join('|') === 'Открыть проект|Склонировать проект',
+    'кнопки старта: открыть, склонировать и создать',
+    welcomeProbe.actions.join('|') === 'Открыть проект|Склонировать проект|Создать проект',
     welcomeProbe.actions,
   );
   check(
@@ -116,6 +123,163 @@ app.whenReady().then(async () => {
     welcomeProbe.recent,
   );
   await shot(welcome, 'chui-launcher-welcome.png');
+
+  /* ── создание проекта ─────────────────────────────────────────────────────── */
+
+  // Кнопка «Создать проект» открывает форму с именем, типом и папкой. Сначала
+  // смотрим форму как её видит человек, потом — само создание: файлы-заготовки
+  // должны появиться на диске, а занятую папку и дурное имя main обязан отвергнуть.
+  const createForm = await probePage(
+    welcome,
+    `(async () => {
+      const button = [...document.querySelectorAll('.launcher-action')].find(
+        (node) => node.textContent.trim() === 'Создать проект',
+      );
+      if (!button) return 'нет кнопки';
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const form = document.querySelector('.launcher-create');
+      const create = [...(form?.querySelectorAll('.launcher-row .btn') ?? [])].find(
+        (node) => node.textContent.trim() === 'Создать',
+      );
+      return {
+        открыта: Boolean(form) && !form.hidden,
+        формаКлонаСкрыта: Boolean(document.querySelector('.launcher-clone')?.hidden),
+        поля: [...(form?.querySelectorAll('.field > span') ?? [])].map((node) => node.textContent.trim()),
+        тип: form?.querySelector('.select-value')?.textContent ?? null,
+        создатьЗаблокировано: create?.disabled ?? null,
+      };
+    })()`,
+  );
+  check('кнопка «Создать проект» открыла форму', createForm?.открыта === true, createForm);
+  check('вторая форма при этом закрыта', createForm?.формаКлонаСкрыта === true, createForm?.формаКлонаСкрыта);
+  check(
+    'в форме есть имя, тип и папка',
+    JSON.stringify(createForm?.поля) === JSON.stringify(['Имя проекта', 'Тип проекта', 'Где создать']),
+    createForm?.поля,
+  );
+  check('тип по умолчанию — Python', createForm?.тип === 'Python', createForm?.тип);
+  check(
+    'без имени и папки создать нельзя',
+    createForm?.создатьЗаблокировано === true,
+    createForm?.создатьЗаблокировано,
+  );
+
+  // Имя с разделителем пути: папка ушла бы из выбранного каталога. Причина должна
+  // быть видна под полем, а кнопка — остаться серой.
+  const badName = await probePage(
+    welcome,
+    `(async () => {
+      const input = document.querySelector('.launcher-create .field-input');
+      input.value = '../побег';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const create = [...document.querySelectorAll('.launcher-create .launcher-row .btn')].find(
+        (node) => node.textContent.trim() === 'Создать',
+      );
+      return {
+        причина: document.querySelector('.launcher-create .field-hint.is-error')?.textContent ?? null,
+        создатьЗаблокировано: create?.disabled ?? null,
+      };
+    })()`,
+  );
+  check(
+    'дурное имя объяснено, создание заблокировано',
+    Boolean(badName?.причина) && badName?.создатьЗаблокировано === true,
+    badName,
+  );
+
+  // Тип переключается, и подсказка говорит, что появится в папке.
+  const kindSwitch = await probePage(
+    welcome,
+    `(async () => {
+      const select = document.querySelector('.launcher-create .select');
+      select.click();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const item = [...document.querySelectorAll('.select-popup .select-item')].find(
+        (node) => (node.querySelector('.select-item-label')?.textContent ?? '') === 'Node.js',
+      );
+      if (!item) return 'в списке нет Node.js';
+      item.click();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const hints = [...document.querySelectorAll('.launcher-create .field-hint')].map((node) => node.textContent);
+      return {
+        тип: document.querySelector('.launcher-create .select-value')?.textContent ?? null,
+        профайлы: hints.find((text) => text.includes('package.json')) ?? null,
+      };
+    })()`,
+  );
+  check('вид проекта переключается на Node.js', kindSwitch?.тип === 'Node.js', kindSwitch);
+  check('подсказка вида перечисляет файлы', Boolean(kindSwitch?.профайлы), kindSwitch?.профайлы);
+  await shot(welcome, 'chui-launcher-create.png');
+
+  // Само создание: через мост и настоящий роутер — тем же путём, что и кнопка формы.
+  const makeCall = (id, params) =>
+    probePage(
+      welcome,
+      `window.chui.call({ id: ${JSON.stringify(id)}, method: 'app.createProject', params: ${JSON.stringify(params)} })`,
+    );
+
+  const madeNode = await makeCall('probe-create-node', {
+    name: 'новый-проект',
+    directory: dir,
+    kind: 'node',
+  });
+  const nodeDir = path.join(dir, 'новый-проект');
+  check(
+    'создание вернуло путь новой папки',
+    madeNode?.ok === true && madeNode.value?.path === nodeDir,
+    madeNode?.ok ? madeNode.value : madeNode?.error,
+  );
+
+  const reading = (file) => fs.readFile(path.join(nodeDir, file), 'utf8').catch(() => null);
+  const [manifest, entry, ignore, readme] = await Promise.all([
+    reading('package.json'),
+    reading('src/index.js'),
+    reading('.gitignore'),
+    reading('README.md'),
+  ]);
+  check('в проекте Node.js есть package.json с точкой входа', String(manifest).includes('src/index.js'), manifest);
+  check('заготовка Node.js положила файл в src', String(entry).includes('console.log'), entry);
+  check('заготовка Node.js игнорирует node_modules', String(ignore).includes('node_modules/'), ignore);
+  check('README назван именем проекта', String(readme).startsWith('# новый-проект'), readme);
+
+  const madePython = await makeCall('probe-create-python', {
+    name: 'скрипт',
+    directory: dir,
+    kind: 'python',
+  });
+  check('создание проекта Python прошло', madePython?.ok === true, madePython?.error);
+  const pythonMain = await fs.readFile(path.join(dir, 'скрипт', 'main.py'), 'utf8').catch(() => null);
+  check('заготовка Python положила main.py', String(pythonMain).includes('def main'), pythonMain);
+
+  // Имя уводит папку из каталога: такое создавать нельзя, и ответ об этом говорит.
+  const escaped = await makeCall('probe-create-escape', {
+    name: '../побег',
+    directory: dir,
+    kind: 'python',
+  });
+  check('имя с разделителем пути отвергнуто', escaped?.ok === false, escaped?.error?.message);
+  check('папка вне каталога не появилась', !(await pathExists(path.join(dir, '..', 'побег'))));
+
+  // Занятую папку не трогаем — как и при клонировании.
+  const occupied = await makeCall('probe-create-occupied', {
+    name: 'скрипт',
+    directory: dir,
+    kind: 'node',
+  });
+  check('занятая папка не перезаписывается', occupied?.ok === false, occupied?.error?.message);
+  const stillPython = await fs.readFile(path.join(dir, 'скрипт', 'main.py'), 'utf8').catch(() => null);
+  check('файлы прежнего проекта целы', String(stillPython).includes('def main'));
+
+  // Неизвестный вид отвергается, а не создаёт пустую папку без файлов.
+  const unknownKind = await makeCall('probe-create-unknown', {
+    name: 'невесть-что',
+    directory: dir,
+    kind: 'ruby',
+  });
+  check('неизвестный вид проекта отвергнут', unknownKind?.ok === false, unknownKind?.error?.message);
+  check('папки по неизвестному виду не осталось', !(await pathExists(path.join(dir, 'невесть-что'))));
 
   // Открываем проект так же, как это делает кнопка в окне: через мост и реальный роутер.
   // Ограничиваем время ожидания: если main закроет окно до ответа, обещание не разрешится

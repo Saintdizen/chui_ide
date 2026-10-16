@@ -57,6 +57,7 @@ import type { WebSearchProvider } from './web-search';
 import type { AiSandboxSettings } from './sandbox';
 import type { WhitespaceMode } from './whitespace';
 import type { KeybindingSettings } from './keybindings';
+import type { ProjectKind } from './project-kinds';
 
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
 
@@ -995,9 +996,6 @@ export interface PythonInstallOptions {
   requirements?: boolean;
 }
 
-/** Событие прогресса установки: тот же поток, что и у создания окружения. */
-export type PythonInstallProgress = VenvProgressPayload;
-
 /** Результат установки: что реально поставили. */
 export interface PythonInstallResult {
   installed: string[];
@@ -1117,7 +1115,7 @@ export interface DebugBreakpoint {
   hitCondition?: string;
   /**
    * Точка в журнал: вместо останова печатает сообщение. `{выражение}` внутри
-   * текста подставляет значение — как в VS Code и как понимает отладчик.
+   * текста подставляет значение — так же, как его понимает отладчик.
    */
   logMessage?: string;
   /** Подтвердил ли точку отладчик (проверена ли исполнимость строки). */
@@ -2162,6 +2160,19 @@ export interface ChuiMethods {
   /* Стартовое окно: список недавних проектов и переход к IDE. */
   'app.recentProjects': { params: void; result: RecentProject[] };
   'app.openProject': { params: { path: string }; result: { root: string; name: string } };
+  /**
+   * Закрытие проекта: main поднимает стартовое окно со списком проектов, а окно IDE
+   * закрывает сам renderer — закрытие в обработчике уничтожило бы отправителя до ответа.
+   */
+  'app.closeProject': { params: void; result: void };
+  /**
+   * Создать проект: папка с файлами-заготовками выбранного вида. Возвращает путь
+   * новой папки — окно открывает его тем же путём, что и склонированный.
+   */
+  'app.createProject': {
+    params: { name: string; directory: string; kind: ProjectKind };
+    result: { path: string };
+  };
   'app.forgetProject': { params: { path: string }; result: RecentProject[] };
   /** Корень, открытый в main: окно IDE забирает его при старте. */
   'workspace.current': { params: void; result: { root: string | null; roots: WorkspaceRoot[] } };
