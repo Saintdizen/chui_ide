@@ -265,13 +265,6 @@ export interface WindowState {
   /** На macOS остаются системные «светофоры», свои кнопки не нужны. */
   customControls: boolean;
 }
-
-export interface WindowBounds {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
 /* ── Терминал ───────────────────────────────────────────────────────────── */
 
 export interface TerminalSession {
@@ -1371,6 +1364,18 @@ export interface PickedImage {
 }
 
 /**
+ * Картинка, открытая в редакторе на просмотр. Тот же `data-URL`, что у вложения
+ * в чат, но предел выше: посмотреть скриншот — не то же, что послать его модели.
+ */
+export interface ViewImage {
+  /** Тип содержимого (`image/png`). */
+  mime: string;
+  /** Размер файла в байтах — показываем в шапке вьюера. */
+  bytes: number;
+  dataUrl: string;
+}
+
+/**
  * Запрос подсказки inline-автодополнения. Контекст — уже нарезанный в renderer
  * текст вокруг курсора: main не читает файлы ради этого, он только спрашивает модель.
  */
@@ -1701,6 +1706,8 @@ export interface ChuiMethods {
   'workspace.open': { params: { path: string }; result: WorkspaceInfo };
   'workspace.readDir': { params: { path: string }; result: DirEntry[] };
   'workspace.readFile': { params: { path: string }; result: FileContent };
+  /** Прочитать файл-картинку для вьюера. Текстом её не открыть: бинарь. */
+  'workspace.readImage': { params: { path: string }; result: ViewImage };
   'workspace.writeFile': { params: { path: string; text: string }; result: { mtimeMs: number } };
   'workspace.stat': { params: { path: string }; result: FileStat };
 
@@ -2046,8 +2053,6 @@ export interface ChuiMethods {
   'window.minimize': { params: void; result: void };
   'window.toggleMaximize': { params: void; result: WindowState };
   'window.close': { params: void; result: void };
-  'window.getBounds': { params: void; result: WindowBounds };
-  'window.setBounds': { params: Partial<WindowBounds>; result: WindowBounds };
   /** Действие меню, которое умеет только main: буфер обмена, масштаб, окно. */
   'menu.role': { params: { role: MenuRole }; result: void };
 

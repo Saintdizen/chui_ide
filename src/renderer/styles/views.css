@@ -1,6 +1,6 @@
 /* Вьюеры и панели: чат в области редактора, сравнение версий, ревью, конфликты,
-   тесты, структура файла, ноутбук, формулы, диаграммы Mermaid, отладчик регулярных
-   выражений, замена по структуре, проблемы, задачи, отладка и попап Python.
+   вьюер изображений, тесты, структура файла, ноутбук, формулы, диаграммы Mermaid,
+   отладчик регулярных выражений, замена по структуре, проблемы, задачи, отладка и попап Python.
    Часть одной таблицы стилей — порядок задан в `main.css`. */
 /* ── чат в области редактора ────────────────────────────────────────────── */
 
@@ -20,6 +20,122 @@
 
 .editor-island.is-chat .editor-host > :not(.chat-editor) {
   display: none;
+}
+
+/* ── вьюер изображений ───────────────────────────────────────────── */
+
+/* Картинка — вкладка как у файла, но полотно отдано вьюеру: текстовый
+   редактор и соседние оверлеи на это время скрыты. */
+.editor-island.is-image .editor-host > :not(.image-view) {
+  display: none;
+}
+
+.image-view {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--editor_background);
+}
+
+.image-view[hidden] {
+  display: none;
+}
+
+.image-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--separator_color);
+  color: var(--text_color_tertiary);
+}
+
+.image-title {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.image-meta {
+  color: var(--text_color_tertiary);
+}
+
+.image-header-spacer {
+  flex: 1;
+}
+
+.image-zoom-label {
+  min-width: 46px;
+  text-align: right;
+}
+
+.image-actual {
+  font-size: var(--font_small_size);
+  font-weight: 600;
+}
+
+/* Подложка вьюера — «шахматка»: на ней видна прозрачность PNG.
+   `margin: auto` на картинке центрует её и не режет край при переполнении
+   (в отличие от `justify-content: center`). */
+.image-stage {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+  background-color: var(--element_background_2);
+  background-image:
+    linear-gradient(45deg, var(--sunken_background) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--sunken_background) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--sunken_background) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--sunken_background) 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+}
+
+.image-picture {
+  display: block;
+  margin: auto;
+  box-shadow: var(--box_shadow_small);
+}
+
+/* Скроется и картинка (у неё своё `display: block`), и заглушка (своё `flex`):
+   без этого правила атрибут `hidden` их не пересилит. */
+.image-picture[hidden],
+.image-placeholder[hidden] {
+  display: none;
+}
+
+/* Заглушка вместо картинки: формат, который движок не рисует (TIFF, HEIC),
+   или повреждённый файл. По центру, тихим цветом — это объяснение, а не ошибка. */
+.image-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: auto;
+  max-width: 420px;
+  padding: 24px;
+  text-align: center;
+  color: var(--text_color_tertiary);
+}
+
+.image-placeholder-title {
+  margin: 0;
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.image-placeholder-hint {
+  margin: 0;
+  color: var(--text_color_secondary);
 }
 
 /* На широком экране беседа растягивалась бы в нечитаемые строки. */

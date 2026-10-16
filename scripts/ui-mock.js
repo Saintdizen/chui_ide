@@ -629,7 +629,6 @@ module.exports = [
   // Беседы чата: мок держит их в памяти по корню проекта — смена папки и
   // обратная загрузка работают, а перезагрузка страницы их, как и в жизни, теряет.
   const savedChats = new Map();
-  let bounds = { x: 40, y: 40, width: 1280, height: 820 };
 
   const methods = {
     'app.info': () => ({
@@ -982,6 +981,14 @@ module.exports = [
       // Как main: размер и признак «только чтение» — по ним редактор решает, править ли файл.
       return { text, mtimeMs: Date.now(), size: text.length, readOnly: false };
     },
+    // Вьюер картинок: отдаём крошечную картинку — в браузере файлов с диска нет.
+    'workspace.readImage': () => {
+      const dataUrl =
+        'data:image/png;base64,' +
+        'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAHUlEQVR42mNk+M9Qz0AEYBxVSF+FjI' +
+        'MjCxkTFhUCAF1uCwG7vFcYAAAAAElFTkSuQmCC';
+      return { mime: 'image/png', bytes: 84, dataUrl };
+    },
     'workspace.writeFile': (params) => {
       FILES.set(params.path, params.text ?? '');
       // Как main: сохранение файла — это изменение в рабочей папке, о нём
@@ -1088,17 +1095,11 @@ module.exports = [
     'window.getState': () => ({ maximized: false, fullScreen: false, platform: 'linux', customControls: true }),
     'window.minimize': () => undefined,
     'window.toggleMaximize': () => {
-      bounds = { ...bounds, y: 0, height: 900 };
       const state = { maximized: true, fullScreen: false, platform: 'linux', customControls: true };
       push('window:state', state);
       return state;
     },
     'window.close': () => undefined,
-    'window.getBounds': () => ({ ...bounds }),
-    'window.setBounds': (params) => {
-      bounds = { ...bounds, ...params };
-      return { ...bounds };
-    },
     'menu.role': () => undefined,
 
     'settings.get': () => structuredClone(settings),

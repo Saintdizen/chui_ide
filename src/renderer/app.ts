@@ -38,6 +38,7 @@ import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
 import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
 import { languageFromPath, languageLabel, languageIndent } from './core/languages';
+import { imageFormatLabel, isImagePath } from '../shared/images';
 import { ImportChecker } from './core/import-check';
 import { LspClient } from './core/lsp';
 import { fetchCallHierarchy, type CallDirection } from './core/call-hierarchy';
@@ -96,6 +97,7 @@ import { createConflictView } from './ui/conflict-view';
 import { createDiffView } from './ui/diff-view';
 import { basename, clear, h, svgIcon, type IconName } from './ui/dom';
 import { createEmptyState } from './ui/empty-state';
+import { createImageView } from './ui/image-view';
 import { createExplorer } from './ui/explorer';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
@@ -1386,6 +1388,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const chatEditor = h('div', { class: 'chat-editor', hidden: true });
   layout.editorHost.appendChild(chatEditor);
 
+  // Вьюер картинок: та же область, но показывает изображение вместо текста.
+  // Когда он виден — решает `syncImage` по активной вкладке.
+  const imageView = createImageView({ rpc, notify: (message) => showToast(message, 'error') });
+  layout.editorHost.appendChild(imageView.element);
+
   let chatInEditor = false;
   /** Вкладка чата показана сейчас: файлы ждут своей очереди. */
   let chatTabActive = false;
@@ -1424,9 +1431,27 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const shown = chatInEditor && chatTabActive;
     chatEditor.hidden = !shown;
     layout.editorIsland.classList.toggle('is-chat', shown);
+    // Чат и картинка делят одну область — одновременно их не показываем.
+    if (shown) {
+      imageView.hide();
+      layout.editorIsland.classList.remove('is-image');
+    }
     tabs.refresh();
     // Вкладка чата — это тоже «показан ли чат»: кнопка AI должна это отражать.
     syncViewButtons();
+  }
+
+  /**
+   * Активная вкладка — картинка: полотно редактора уступает вьюеру. Зовётся по
+   * смене активной вкладки и по показу чата — они делят одну область экрана.
+   */
+  function syncImage(): void {
+    const path = openEditors.active?.path ?? null;
+    const image = path !== null && isImagePath(path) ? path : null;
+    const shown = image !== null && !(chatInEditor && chatTabActive);
+    layout.editorIsland.classList.toggle('is-image', shown);
+    if (shown && image !== null) imageView.show(image);
+    else imageView.hide();
   }
 
   function setChatInEditor(next: boolean): void {
@@ -1885,6 +1910,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /* ── вспомогательные действия ──────────────────────────────────────────── */
 
   const openPath = async (path: string, options: { preview?: boolean } = {}): Promise<void> => {
+    // Картинка — не текст: бинарь открывать редактором нельзя. Заводим документ-заглушку
+    // (он нужен вкладке, дереву и статусбару), а полотно покажет вьюер (см. `syncImage`).
+    if (isImagePath(path)) {
+      const document = documents.get(path) ?? documents.open(path, '', { readOnly: true });
+      openEditors.open(document, options);
+      explorer.reveal(path);
+      // Открыли файл — вкладка чата ждёт в полосе.
+      hideChatTab();
+      return;
+    }
     const document = await edits.ensureDocument(path);
     openEditors.open(document, options);
     editors.open(document);
@@ -2657,7 +2692,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (typeof path !== 'string') return;
     openEditors.activate(path);
     const document = documents.get(path);
-    if (document) editors.open(document);
+    // Картинку текстовому редактору не отдаём: её показывает вьюер.
+    if (document && !isImagePath(path)) editors.open(document);
     // Файл мог быть активным и до этого: клик по его вкладке всё равно должен
     // показать файл, а не оставить на экране чат.
     hideChatTab();
@@ -5335,7 +5371,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const projectTools = tools.get();
     // Отступ и язык — свойства файла: у Python четыре пробела, у Makefile таб,
     // поэтому в статусбаре видно ФАКТИЧЕСКОЕ значение, а не общее из настроек.
-    const language = active?.languageId ?? null;
+    // Картинка — не язык: в чипе показываем формат (PNG, SVG), а не «plaintext».
+    const activePath = active?.path ?? null;
+    const showImage = activePath !== null && isImagePath(activePath);
+    const language = showImage ? null : (active?.languageId ?? null);
     const indent = settings.editor.languageIndent && language ? languageIndent(language) : null;
     // Язык сменился — перечитываем состав серверов: сервер поднимается при первом
     // открытии файла языка, и до этого про него ничего не известно.
@@ -5345,7 +5384,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     }
     statusBar.update({
       readOnly: active?.readOnly ?? false,
-      language: language ? languageLabel(language) : null,
+      language:
+        showImage && activePath !== null ? imageFormatLabel(activePath) : language ? languageLabel(language) : null,
       lsp: settings.lsp.enabled ? lspChipFor(language, lspStatus) : null,
       version: active?.version ?? 0,
       tabSize: indent?.tabSize ?? settings.editor.tabSize,
@@ -5460,7 +5500,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   // Закрытая вкладка: набор не должен держать путь вечно — иначе после повторного
   // открытия о расхождении с диском уже не скажем.
-  documents.onDidClose((document) => diskDiffWarned.delete(document.path));
+  documents.onDidClose((document) => {
+    diskDiffWarned.delete(document.path);
+    // Прочитанную картинку забываем: файл мог на диске и измениться.
+    imageView.forget(document.path);
+  });
 
   /**
    * Файл изменился на диске. Открытый документ перечитываем: иначе в редакторе
@@ -5563,6 +5607,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncRunControl();
     // Файл стал активным — показываем его, а вкладка чата просто ждёт в полосе.
     if (openEditors.active) hideChatTab();
+    // Активной могла стать картинка — тогда полотно уступает вьюеру.
+    syncImage();
     // Точки останова контроллер помнит по файлам, а редактор о них не знает:
     // при открытии вкладки отдаём ему набор — значки (с условиями) появятся сразу.
     for (const path of openEditors.paths) editors.setBreakpoints(path, debug.breakpointsOf(path));

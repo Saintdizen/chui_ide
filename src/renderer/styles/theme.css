@@ -140,7 +140,6 @@
      Это ЛОКАЛЬНЫЙ порядок внутри одного компонента — строка поверх выделения,
      подсказка поверх полотна редактора: общей лестнице они не принадлежат, и менять
      их на `--layer_*` не надо (слой — про окно целиком, а не про соседей в панели). */
-  --layer_edge: 400; /* края растягивания безрамочного окна — всегда сверху */
 
   --focus_outline: 2px solid var(--focus_ring_color);
   --focus_outline_offset: 2px;
@@ -170,7 +169,7 @@
   --text_color_tertiary: rgba(255, 255, 255, 0.45);
   --placeholder_text_color: rgba(255, 255, 255, 0.4);
   --text_color_hover: #ffffff;
-  --text_color_error: #ff6a61;
+  --text_color_error: #ff7067;
   /* Цвета серьёзности пометки — те же, что у волнистого подчёркивания в редакторе
      (`editor.css`): значок в панели проблем и волнистая линия под словом должны
      читаться как одно. Схема их не меняет: пометка должна выглядеть одинаково и на
@@ -182,25 +181,27 @@
   /* Поверхности: окно — самый тёмный слой, содержимое лежит на нём карточкой.
      В светлой схеме карточка белая на сером окне, в тёмной — светлее окна: подъём
      в тёмных интерфейсах показывают светлой поверхностью, а не тенью.
-     Карточка совпадает по цвету с полотном редактора (как в VS Code Dark Modern),
-     поэтому активная вкладка сливается с кодом, а «остров» читается одной поверхностью. */
+     Карточка совпадает по цвету с полотном редактора, поэтому активная вкладка
+     сливается с кодом, а «остров» читается одной поверхностью. Дно поднято над
+     чистым VS Code (#1E1E1E): на большом тёмном экране тот читался как чёрная
+     дыра — схема осталась тёмной, но не «в ноль». */
   /* Лестница высоты: окно → содержимое → всплывающий слой. Ступени задаются
      один раз здесь, а роли (`--main_background`, `--element_background_2`,
      `--popup_background`) ссылаются на них — так порядок слоёв нельзя развести,
      не тронув саму ступень. */
-  --surface_window: #161618;
-  --surface_content: #1e1e1e;
+  --surface_window: #1d1d20;
+  --surface_content: #252528;
   /* Всплывающий слой — на ступень выше содержимого: подъём
      в тёмной схеме показывают светлой поверхностью, а не тенью. */
-  --surface_popup: #2c2c2e;
+  --surface_popup: #2d2d30;
 
   --main_background: var(--surface_window);
   --element_background_2: var(--surface_content);
 
   /* Полотно редактора и консоли. Эти два значения продублированы в `core/theme.ts`
      (редактор и терминал красят себя сами) — менять нужно в обоих местах. */
-  --editor_background: #1e1e1e;
-  --editor_terminal_background: #1e1e1e;
+  --editor_background: #252528;
+  --editor_terminal_background: #252528;
 
   /* Заливки контролов: полупрозрачные, ступень — плотность состояния. */
   --element_background: rgba(120, 120, 128, 0.32);
@@ -269,7 +270,7 @@
      `core/theme.ts` (`chrome.added/modified/deleted`) — менять в обоих местах. */
   --git_modified: #ffd600;
   --git_added: #30d158;
-  --git_deleted: #ff4245;
+  --git_deleted: #ff5b5e;
   --git_renamed: #00d2e0;
   --git_conflicted: #ff9230;
 
@@ -301,29 +302,29 @@
      роль. Тона в тёмной теме насыщеннее, в светлой — темнее (на белом светлые
      оттенки бледны для мелких глифов). */
   --file_text: #aeaeb2; /* gray */
-  --file_code: #db34f2; /* purple */
+  --file_code: #e157f6; /* purple */
   --file_js: #ffd600; /* yellow */
-  --file_ts: #0091ff; /* blue */
+  --file_ts: #0d97ff; /* blue */
   --file_python: #30d158; /* green */
   --file_json: #ffd600; /* yellow */
   --file_markdown: #00d2e0; /* teal */
-  --file_css: #6d7cff; /* indigo */
+  --file_css: #7d8aff; /* indigo */
   --file_html: #ff9230; /* orange */
   --file_shell: #00dac3; /* mint */
-  --file_yaml: #ff4245; /* red */
-  --file_config: #b78a66; /* brown */
+  --file_yaml: #ff5b5e; /* red */
+  --file_config: #b78b67; /* brown */
   --file_database: #ff9230; /* orange */
   --file_docker: #3cd3fe; /* cyan */
-  --file_image: #ff375f; /* pink */
-  --file_archive: #b78a66; /* brown */
+  --file_image: #ff5779; /* pink */
+  --file_archive: #b78b67; /* brown */
   --file_lock: #aeaeb2; /* gray */
-  --file_git: #ff4245; /* red */
+  --file_git: #ff5b5e; /* red */
   /* Промежутки внутри значка — это фон панели, а не белый: буквы читаются
      как вырез в цветной фигуре (так устроены значки Material Icon Theme). */
   --file_badge: var(--element_background_2);
-  --folder_default: #0091ff; /* blue */
+  --folder_default: #0d97ff; /* blue */
   --folder_special: #ffd600; /* yellow */
-  --folder_open: #0091ff; /* blue */
+  --folder_open: #0d97ff; /* blue */
 
   /* Запуск: зелёный из палитры IDE — одна роль на кнопку, значок в жёлобе
      и подпись инструмента в статусбаре. */
@@ -362,17 +363,18 @@
     --text_color_hover: #ffffff;
     --text_color_error: #a1251e;
 
-    --surface_window: #ececec;
-    --surface_content: #ffffff;
-    /* Выше белого подниматься некуда: всплывающий слой совпадает с содержимым,
-       а отделяет его тень. */
+    --surface_window: #e4e4e7;
+    --surface_content: #f5f5f7;
+    /* Полотно — не чистый белый, а мягкий off-white: на весь экран белый режет
+       глаз. Всплывающий слой остаётся белым — он ступенью выше содержимого,
+       и его отделяет ещё и тень. */
     --surface_popup: #ffffff;
 
     --main_background: var(--surface_window);
     --element_background_2: var(--surface_content);
 
-    --editor_background: #ffffff;
-    --editor_terminal_background: #ffffff;
+    --editor_background: #f5f5f7;
+    --editor_terminal_background: #f5f5f7;
 
     --element_background: rgba(120, 120, 128, 0.16);
     --element_background_hover: rgba(120, 120, 128, 0.24);
@@ -394,7 +396,7 @@
     --blue_prime_background: #0088ff;
     --red_prime_background: #ff383c;
     --yellow_prime_background: #ffcc00;
-    --green_prime_background: #008932;
+    --green_prime_background: #007f2e;
     --purple_prime_background: #cb30e0;
     /* Заливки — свои ступени под белым текстом (см. `:root`). */
     --accent_fill: #0066cc;
@@ -406,16 +408,15 @@
     --context_seg_results: #c55300; /* orange */
     --context_seg_files: #564ade; /* indigo */
 
-    /* Состояния git — те же роли, но на белом взяты темнее: added green
-       #008932, modified yellow #A16A00, deleted red #E9152D, renamed teal
-       #008198, conflicted orange #C55300. Эти цвета тут идут как мелкий текст
-       (color:) по светлому фону — светлые тона на белом бледны и не проходят
-       по контрасту. */
-    --git_modified: #a16a00;
-    --git_added: #008932;
-    --git_deleted: #e9152d;
-    --git_renamed: #008198;
-    --git_conflicted: #c55300;
+    /* Состояния git и значки файлов — те же роли, но на светлом фоне взяты
+       темнее: цветной МЕЛКИЙ текст и глифы на off-white (`#f5f5f7`) теряют
+       контраст быстрее, чем на чистом белом, и без затемнения не проходят AA.
+       Ступень подобрана так, чтобы держать 4.5:1 на новом полотне. */
+    --git_modified: #966300;
+    --git_added: #007f2e;
+    --git_deleted: #d91429;
+    --git_renamed: #00788e;
+    --git_conflicted: #b74d00;
 
     --focus_ring_color: var(--blue_prime_background);
     /* На белом акцентный синий даёт контраст около 3 — для текста он затемнён. */
@@ -432,26 +433,26 @@
     /* Значки файлов: те же роли, но темнее — на белом светлые тона бледны. */
     --file_text: #6c6c70; /* gray */
     --file_code: #b02fc2; /* purple */
-    --file_js: #a16a00; /* yellow */
-    --file_ts: #1e6ef4; /* blue */
-    --file_python: #008932; /* green */
-    --file_json: #a16a00; /* yellow */
-    --file_markdown: #008198; /* teal */
+    --file_js: #966300; /* yellow */
+    --file_ts: #0c62f2; /* blue */
+    --file_python: #007f2e; /* green */
+    --file_json: #966300; /* yellow */
+    --file_markdown: #00788e; /* teal */
     --file_css: #564ade; /* indigo */
-    --file_html: #c55300; /* orange */
-    --file_shell: #008575; /* mint */
-    --file_yaml: #e9152d; /* red */
-    --file_config: #956d51; /* brown */
-    --file_database: #c55300; /* orange */
-    --file_docker: #007eae; /* cyan */
-    --file_image: #e7124d; /* pink */
-    --file_archive: #956d51; /* brown */
+    --file_html: #b74d00; /* orange */
+    --file_shell: #007b6c; /* mint */
+    --file_yaml: #d91429; /* red */
+    --file_config: #8a654c; /* brown */
+    --file_database: #b74d00; /* orange */
+    --file_docker: #0075a2; /* cyan */
+    --file_image: #d71148; /* pink */
+    --file_archive: #8a654c; /* brown */
     --file_lock: #6c6c70; /* gray */
-    --file_git: #e9152d; /* red */
+    --file_git: #d91429; /* red */
     --file_badge: var(--element_background_2);
-    --folder_default: #1e6ef4; /* blue */
-    --folder_special: #a16a00; /* yellow */
-    --folder_open: #1e6ef4; /* blue */
+    --folder_default: #0c62f2; /* blue */
+    --folder_special: #966300; /* yellow */
+    --folder_open: #0c62f2; /* blue */
     --run_accent: #2f7d32;
     --debug_line_background: rgba(0, 136, 255, 0.16);
     --coverage_missing_background: rgba(255, 56, 60, 0.14);

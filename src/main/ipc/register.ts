@@ -15,7 +15,6 @@ import {
   type PickedImage,
   type RecentProject,
   type SettingsPatch,
-  type WindowBounds,
 } from '../../shared/api';
 import type { AiService } from '../ai/service';
 import { ChatStore } from '../ai/chat-store';
@@ -74,7 +73,7 @@ import {
 import { parseThemeFile } from '../../shared/theme-file';
 import { unsavedClosePrompt } from '../../shared/unsaved';
 import type { TerminalService } from '../terminal/terminal';
-import { applyBounds, openIdeWindow, windowState } from '../window';
+import { openIdeWindow, windowState } from '../window';
 import type { WorkspaceService } from '../workspace/workspace';
 import type { HostClient } from './host';
 import { pushToRenderers } from './push';
@@ -390,6 +389,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
 
   router.register('workspace.readDir', (params) => deps.workspace.readDir(params.path));
   router.register('workspace.readFile', (params) => deps.workspace.readFile(params.path));
+  router.register('workspace.readImage', (params) => deps.workspace.readImage(params.path));
   router.register('workspace.writeFile', (params) => deps.workspace.writeFile(params.path, params.text));
   router.register('workspace.stat', (params) => deps.workspace.stat(params.path));
   router.register('workspace.search', (params) => deps.workspace.search(params));
@@ -754,8 +754,6 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('window.close', (_params, ctx) => {
     senderWindow(ctx).close();
   });
-  router.register('window.getBounds', (_params, ctx) => senderWindow(ctx).getBounds());
-  router.register('window.setBounds', (params: Partial<WindowBounds>, ctx) => applyBounds(senderWindow(ctx), params));
   router.register('menu.role', (params, ctx) => {
     performMenuRole(senderWindow(ctx).webContents, params.role);
   });

@@ -13,6 +13,7 @@ import {
   type SearchOptions,
   type SearchResult,
   type SymlinkInfo,
+  type ViewImage,
   type WorkspaceChangedPayload,
   type WorkspaceInfo,
 } from '../../shared/api';
@@ -43,6 +44,7 @@ import {
   type ExportFileHits,
 } from '../../shared/symbol-exports';
 import { languageFromPath } from '../../shared/languages';
+import { MAX_VIEW_IMAGE_BYTES, imageMimeType } from '../../shared/images';
 import {
   inheritanceMatches,
   supportsInheritance,
@@ -368,6 +370,31 @@ export class WorkspaceService {
       size: stat.size,
       readOnly: isReadOnlySize(stat.size),
     };
+  }
+
+  /**
+   * Чтение картинки для вьюера: отдаём сразу data-URL — в таком виде её понимает
+   * `<img>`. Предел здесь свой (`MAX_VIEW_IMAGE_BYTES`): смотреть скриншот и
+   * посылать его модели — разные задачи, и общий с вложением предел был бы мал.
+   */
+  async readImage(filePath: string): Promise<ViewImage> {
+    const file = await this.safePath(filePath);
+    const mime = imageMimeType(file);
+    if (!mime) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `Не изображение: ${path.basename(file)}`);
+    }
+    const stat = await fs.stat(file).catch(() => null);
+    if (!stat?.isFile()) throw new RpcFailure(RpcErrorCode.NotFound, `Файл не найден: ${file}`);
+    if (stat.size > MAX_VIEW_IMAGE_BYTES) {
+      const megabytes = Math.round(stat.size / 1024 / 1024);
+      const limit = Math.round(MAX_VIEW_IMAGE_BYTES / 1024 / 1024);
+      throw new RpcFailure(
+        RpcErrorCode.InvalidParams,
+        `${path.basename(file)}: ${megabytes} МБ больше предела ${limit} МБ`,
+      );
+    }
+    const data = await fs.readFile(file);
+    return { mime, bytes: data.byteLength, dataUrl: `data:${mime};base64,${data.toString('base64')}` };
   }
 
   async writeFile(filePath: string, text: string): Promise<{ mtimeMs: number }> {

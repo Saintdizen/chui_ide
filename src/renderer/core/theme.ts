@@ -82,24 +82,25 @@ const VSCODE_DARK_TOKENS: TokenRules = {
 };
 
 /**
- * Светлая палитра. От VS Code Light+ отличается ровно двумя значениями —
- * `number` и `type`: их оригинальные тона (#098658, #267F99) на белом дают
- * 4.14:1 и 4.25:1, то есть ниже нормы 4.5:1 для обычного текста (WCAG AA).
- * Взяты те же оттенки на ступень темнее — это не своя палитра, а починка
- * контраста; обе ступени стережёт тест `tests/theme.test.ts`.
+ * Светлая палитра. От VS Code Light+ отличается тремя значениями — `number`,
+ * `type` и `attribute`: их оригинальные тона (#098658, #267F99, #E50000) на
+ * СВЕТЛОМ полотне (а оно у нас не чистый белый, а off-white `#F5F5F7`, и на
+ * `vivid` насыщенность ещё поднята) дают ниже 4.5:1 (WCAG AA для обычного
+ * текста). Взяты те же оттенки на ступень темнее — это не своя палитра, а
+ * починка контраста; ступени стережёт тест `tests/theme.test.ts`.
  */
 const VSCODE_LIGHT_TOKENS: TokenRules = {
   comment: '008000',
   string: 'a31515',
-  number: '0a7a4d',
+  number: '086e45',
   keyword: '0000ff',
   keywordControl: 'af00db',
   identifier: '001080',
   function: '795e26',
-  type: '22768d',
+  type: '1d6a7f',
   constant: '0070c1',
   tag: '800000',
-  attribute: 'e50000',
+  attribute: 'd40000',
 };
 
 /* ── насыщенность и яркость ─────────────────────────────────────────────── */
@@ -352,7 +353,7 @@ interface Chrome extends Record<ChromeKey, string> {
 }
 
 const DARK_CHROME: Chrome = {
-  background: '1e1e1e',
+  background: '252528',
   foreground: 'd4d4d4',
   lineNumber: '858585',
   lineNumberActive: 'c6c6c6',
@@ -365,11 +366,11 @@ const DARK_CHROME: Chrome = {
   whitespace: '3b3b3b',
 
   // Карточка интерфейса — та же поверхность, что у наших попапов: без прозрачности.
-  // Значение совпадает с `--surface_popup` в `styles/theme.css` (#2c2c2e): виджеты
+  // Значение совпадает с `--surface_popup` в `styles/theme.css` (#2d2d30): виджеты
   // редактора и наши дропдауны должны читаться как один и тот же слой. Прозрачность и
   // блюр наших попапов сюда не переносятся — виджет редактора лежит над живым кодом, и
   // размытие пришлось бы пересчитывать на каждой правке (см. README о попапах Monaco).
-  popover: '2c2c2e',
+  popover: '2d2d30',
   // Границы — полупрозрачный тон текста: те же значения, что `--border_color`
   // и `--separator_color` в `styles/theme.css` (менять нужно в обоих местах).
   border: 'ffffff0f',
@@ -393,10 +394,10 @@ const DARK_CHROME: Chrome = {
   warning: 'ffd600',
   highlight: 'ffd6003d',
   highlightStrong: 'ffd60073',
-  // Цвета изменений — те же, что `--git_*` в styles/theme.css (#30D158, #FFD600, #FF4245).
+  // Цвета изменений — те же, что `--git_*` в styles/theme.css (#30D158, #FFD600, #FF5B5E).
   added: '30D158', // --git_added
   modified: 'FFD600', // --git_modified
-  deleted: 'FF4245', // --git_deleted
+  deleted: 'FF5B5E', // --git_deleted
   scrollbar: '79797966',
   scrollbarHover: '646464b3',
   scrollbarActive: 'bfbfbf66',
@@ -404,7 +405,7 @@ const DARK_CHROME: Chrome = {
 };
 
 const LIGHT_CHROME: Chrome = {
-  background: 'ffffff',
+  background: 'f5f5f7',
   foreground: '000000',
   lineNumber: '237893',
   lineNumberActive: '0b216f',
@@ -440,8 +441,8 @@ const LIGHT_CHROME: Chrome = {
   warning: 'ffcc00',
   highlight: 'ffcc0052',
   highlightStrong: 'ffcc0080',
-  // Светлая схема — те же роли темнее: #008932, #A16A00, #E9152D.
-  added: '008932', // --git_added
+  // Светлая схема — те же роли темнее: #007F2E, #966300, #D91429.
+  added: '007f2e', // --git_added
   modified: 'A16A00', // --git_modified
   deleted: 'E9152D', // --git_deleted
   scrollbar: '64646466',
@@ -525,10 +526,10 @@ export function themeTemplate(scheme: Scheme): ThemeFile {
 /** Палитра консоли VS Code; фон тот же, что у редактора, поэтому панели не спорят. */
 export const TERMINAL_THEMES: Record<Scheme, TerminalTheme> = {
   dark: {
-    background: '#1e1e1e',
+    background: '#252528',
     foreground: '#d4d4d4',
     cursor: '#d4d4d4',
-    cursorAccent: '#1e1e1e',
+    cursorAccent: '#252528',
     selectionBackground: '#264f78',
     black: '#000000',
     red: '#cd3131',
@@ -548,10 +549,10 @@ export const TERMINAL_THEMES: Record<Scheme, TerminalTheme> = {
     brightWhite: '#e5e5e5',
   },
   light: {
-    background: '#ffffff',
+    background: '#f5f5f7',
     foreground: '#333333',
     cursor: '#333333',
-    cursorAccent: '#ffffff',
+    cursorAccent: '#f5f5f7',
     selectionBackground: '#add6ff',
     black: '#000000',
     red: '#cd3131',

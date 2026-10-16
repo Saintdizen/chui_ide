@@ -963,6 +963,13 @@ export class NodeAdapter {
     if (!this.entryResumed && hits.length === 0 && /start/i.test(String(params.reason ?? ''))) {
       this.entryResumed = true;
       await this.breakpointQueue.catch(() => undefined);
+      // Отложенные точки могли ещё не встать: их переставляет `retryPending` по
+      // `scriptParsed`, а он приходит вместе с остановом на входе — порой уже
+      // после того, как мы прочитали очередь. Пока такая точка не легла, пускать
+      // программу нельзя: короткий цикл успеет пройти мимо неё, и она промолчит
+      // (для точки-журнала это потеря целого попадания).
+      await this.awaitPendingBreakpoints();
+      await this.breakpointQueue.catch(() => undefined);
       await this.debuggerResume('continue');
       return;
     }
@@ -1001,6 +1008,22 @@ export class NodeAdapter {
     }
     // Точка-журнал или непройденный счётчик: клиент останова не видит, программа идёт.
     if (shouldResume) await this.debuggerResume('continue');
+  }
+
+  /**
+   * Дать отложенным точкам дождаться своих скриптов, прежде чем пускать программу.
+   *
+   * Точки для файла, ещё не ставшего скриптом, переставляет `retryPending` по
+   * `scriptParsed` — и делает это уже ПОСЛЕ того, как мы прочитали очередь.
+   * Пока такая точка не легла на CDP, короткая программа успеет пройти мимо.
+   * Предел — на случай точки в файле, который так и не загрузится.
+   */
+  private async awaitPendingBreakpoints(timeoutMs = 1500): Promise<void> {
+    if (this.pendingSources.size === 0) return;
+    const deadline = Date.now() + timeoutMs;
+    while (this.pendingSources.size > 0 && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+    }
   }
 
   /** Точка-журнал: напечатать сообщение с подставленными значениями и продолжить. */

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { MAX_CHAT_IMAGES, MAX_IMAGE_BYTES, RpcErrorCode, type PickedImage } from '../../shared/api';
+import { IMAGE_MIME_BY_EXTENSION } from '../../shared/images';
 import { RpcFailure } from '../ipc/router';
 
 /**
@@ -14,23 +15,16 @@ import { RpcFailure } from '../ipc/router';
  * base64 в каждом запросе, а история беседы пересылается целиком.
  */
 
-/** Расширения, которые предлагает системный диалог. */
+/** Расширения, которые предлагает системный диалог. Типы берём из общей таблицы,
+ * а список намеренно уже её: у вложения в чат свои требования к формату. */
 export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif'];
 
-const MIME_BY_EXTENSION: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-  gif: 'image/gif',
-  bmp: 'image/bmp',
-  avif: 'image/avif',
-};
+const ALLOWED = new Set(IMAGE_EXTENSIONS);
 
 /** Прочитать файл как data-URL. Проверяет и тип, и размер — иначе отказывает. */
 export async function readImageAsDataUrl(filePath: string): Promise<PickedImage> {
   const extension = path.extname(filePath).slice(1).toLowerCase();
-  const mime = MIME_BY_EXTENSION[extension];
+  const mime = ALLOWED.has(extension) ? IMAGE_MIME_BY_EXTENSION[extension] : undefined;
   if (!mime) {
     throw new RpcFailure(RpcErrorCode.InvalidParams, `Не изображение: ${path.basename(filePath)}`);
   }

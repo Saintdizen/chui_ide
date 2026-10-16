@@ -1,6 +1,6 @@
 import { BrowserWindow, nativeTheme, shell } from 'electron';
 import path from 'node:path';
-import { PushTopic, type WindowBounds, type WindowState } from '../shared/api';
+import { PushTopic, type WindowState } from '../shared/api';
 import { windowBackground } from '../shared/colors';
 import { pushToRenderers } from './ipc/push';
 import { APP_ORIGIN } from './protocol';
@@ -153,22 +153,9 @@ export function windowState(window: BrowserWindow): WindowState {
 }
 
 /**
- * Применяет новые размеры, зажимая их по минимуму окна.
- *
- * Вынесено отдельной функцией, потому что растягивание безрамочного окна
- * на Linux делает renderer (системных краёв у такого окна нет), и эту
- * арифметику нужно проверять тестом — см. `npm run smoke:window`.
+ * Сессия Wayland: композитор сам ведёт окно, поэтому Chromium настраивается иначе —
+ * иначе тёмные тона темы уезжают вверх (см. протокол цветоуправления в `index.ts`).
  */
-export function applyBounds(window: BrowserWindow, patch: Partial<WindowBounds>): WindowBounds {
-  const current = window.getBounds();
-  const [minWidth, minHeight] = window.getMinimumSize();
-
-  window.setBounds({
-    x: Math.round(patch.x ?? current.x),
-    y: Math.round(patch.y ?? current.y),
-    width: Math.round(Math.max(patch.width ?? current.width, minWidth)),
-    height: Math.round(Math.max(patch.height ?? current.height, minHeight)),
-  });
-
-  return window.getBounds();
+export function isWaylandSession(): boolean {
+  return process.env.XDG_SESSION_TYPE === 'wayland' || process.env.WAYLAND_DISPLAY !== undefined;
 }

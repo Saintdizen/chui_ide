@@ -29,8 +29,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
    Значения совпадают с ролями тёмной схемы в `src/renderer/styles/theme.css`:
    окно `--main_background`, карточка `--element_background_2`, линия
    `--border_color`, акцент `--blue_prime_background`. */
-const SURFACE = [30, 30, 30]; // #1e1e1e — полотно редактора
-const WINDOW = [22, 22, 24]; // #161618 — фон окна
+const SURFACE = [37, 37, 40]; // #252528 — полотно редактора
+const WINDOW = [29, 29, 32]; // #1d1d20 — фон окна
 const BORDER = [58, 58, 60]; // #3a3a3c — линия-контур
 const MARK = [0, 145, 255]; // #0091ff — акцент палитры
 

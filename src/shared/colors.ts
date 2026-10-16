@@ -9,13 +9,13 @@ export type ColorScheme = 'dark' | 'light';
  * палитры, поэтому значение живёт здесь и импортируется обоими.
  *
  * Это ЗЕРКАЛО токенов `styles/theme.css`, а не второй источник правды: тёмное
- * значение повторяет `--element_background_2` (полотно и карточка, #1E1E1E),
- * светлое — `--main_background` (фон окна, #ECECEC). Правка палитры — правка и
+ * значение повторяет `--element_background_2` (полотно и карточка, #252528),
+ * светлое — `--main_background` (фон окна, #E4E4E7). Правка палитры — правка и
  * здесь; расхождение ловит тест `tests/theme.test.ts`.
  */
 export const WINDOW_BACKGROUND: Record<ColorScheme, string> = {
-  dark: '#1e1e1e',
-  light: '#ececec',
+  dark: '#252528',
+  light: '#e4e4e7',
 };
 
 /** Фон окна под текущую схему системы. */

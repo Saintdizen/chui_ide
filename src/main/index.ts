@@ -27,7 +27,7 @@ import { HistoryStore } from './project/history-store';
 import { SettingsStore } from './settings';
 import { TerminalService } from './terminal/terminal';
 import { WorkspaceService } from './workspace/workspace';
-import { createWelcomeWindow } from './window';
+import { createWelcomeWindow, isWaylandSession } from './window';
 
 // Схему нужно объявить до инициализации приложения, иначе Chromium не даст ей привилегий.
 registerAppScheme();
@@ -59,10 +59,7 @@ app.commandLine.appendSwitch('force-color-profile', 'srgb');
 // `force-color-profile` такой сдвиг не лечит: он про профиль монитора, а тут
 // кривая на самом окне. Поэтому протокол отключаем, а значение флага дописываем
 // к уже переданному из командной строки, а не заменяем его.
-if (
-  process.platform === 'linux' &&
-  (process.env.XDG_SESSION_TYPE === 'wayland' || process.env.WAYLAND_DISPLAY !== undefined)
-) {
+if (isWaylandSession()) {
   const passed = app.commandLine.getSwitchValue('disable-features');
   app.commandLine.appendSwitch(
     'disable-features',
