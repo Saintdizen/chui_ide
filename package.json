@@ -1,6 +1,6 @@
 {
   "name": "chui-ide",
-  "version": "0.3.36",
+  "version": "0.3.37",
   "private": true,
   "license": "MIT",
   "author": {
@@ -78,6 +78,10 @@
     "probe:hoverproblems": "electron scripts/hover-problems-probe.cjs",
     "probe:gitwatch": "npm run build:main && electron scripts/git-watch-probe.cjs",
     "probe:toolstate": "electron scripts/tool-state-probe.cjs",
+    "probe:theme": "npm run build && electron scripts/theme-preview.cjs",
+    "probe:themes": "npm run build && electron scripts/theme-variants.cjs",
+    "probe:montage": "electron scripts/theme-montage.cjs",
+    "probe:image": "npm run build && electron scripts/image-probe.cjs",
     "probe:own-terminal": "electron scripts/own-terminal-probe.cjs",
     "probe:typing": "npm run build && electron scripts/type-probe.cjs",
     "probe:lsp": "npm run build && electron scripts/lsp-pickup-probe.cjs",
