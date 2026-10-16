@@ -257,6 +257,11 @@ export interface ToolContext {
   applyPatches?(patches: PatchFile[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Спросить у пользователя разрешение на запуск команды. */
   confirmCommand?(command: string): Promise<boolean>;
+  /**
+   * Задать человеку вопрос и дождаться ответа (инструмент `ask`). Пустой ответ —
+   * вопрос остался без ответа: прогон прервали или нажали «Отменить».
+   */
+  ask?(question: string, options?: readonly string[]): Promise<string>;
   /** Спросить разрешение на действие git (коммит, отправка, откат). */
   confirmGit?(action: string): Promise<boolean>;
   /** Пометки языка из редактора. */
@@ -410,6 +415,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       case 'update_plan':
         // План не исполняется здесь: его показывает service отдельным событием.
         return { ok: true, summary: 'план обновлён' };
+      case 'ask':
+        return await ask(ctx, parsed.value);
       case 'task':
         return await task(ctx, parsed.value);
       case 'browser_open':
@@ -473,6 +480,44 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
 }
 
 /* ── подзадача (sub-agent) ────────────────────────────────────────────── */
+
+/* ── вопрос человеку ────────────────────────────────────────── */
+
+/** Больше пяти вариантов — это уже список, а не выбор: кнопки теряют смысл. */
+const MAX_ASK_OPTIONS = 5;
+/** Вопрос длиннее — уже не вопрос, а простыня: читать её некогда. */
+const MAX_QUESTION_CHARS = 2000;
+
+/**
+ * `ask` — остановить прогон и спросить человека. Агент сам вопрос не придумывает и
+ * ничего не решает за него: без ответа он честно останавливается. Ответ уходит модели
+ * результатом вызова, и прогон продолжается тем же ходом (в отличие от подтверждений,
+ * где от ответа зависит лишь одно действие). Моста нет — инструмент не предлагается.
+ */
+async function ask(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.ask) return { ok: false, summary: 'Вопрос недоступен: окно чата не подключено' };
+
+  const question = (optionalString(args, 'question') ?? '').trim();
+  if (!question) {
+    return { ok: false, summary: 'Не задан вопрос', detail: 'Инструменту нужен непустой аргумент question.' };
+  }
+
+  const options = stringList(args.options).slice(0, MAX_ASK_OPTIONS);
+  const answer = (
+    await ctx.ask(question.slice(0, MAX_QUESTION_CHARS), options.length > 0 ? options : undefined)
+  ).trim();
+
+  if (!answer) {
+    return {
+      ok: false,
+      summary: 'Ответа нет',
+      detail:
+        'Человек не ответил: вопрос отклонили или прервали прогон. Не повторяй этот же вопрос — ' +
+        'продолжай доступными средствами или заверши с тем, что уже есть.',
+    };
+  }
+  return { ok: true, summary: answer, detail: answer };
+}
 
 /**
  * Делегировать подзадачу отдельному агенту со своим контекстом. Цикл подзадачи
@@ -2331,6 +2376,16 @@ function requireString(args: Record<string, unknown>, key: string): string {
 function optionalString(args: Record<string, unknown>, key: string): string | undefined {
   const value = args[key];
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
+}
+
+/**
+ * Список строк из аргумента: массив — как есть, одиночная строка — один элемент.
+ * Модель иной раз шлёт единственный вариант строкой — терять его из-за этого нельзя.
+ * Пустое и нестроковое отбрасываем: битая метка в кнопке хуже её отсутствия.
+ */
+function stringList(value: unknown): string[] {
+  const items = Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+  return items.map((item) => (typeof item === 'string' ? item.trim() : '')).filter((item) => item.length > 0);
 }
 
 /**

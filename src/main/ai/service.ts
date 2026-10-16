@@ -151,6 +151,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'git_blame',
   'open_file',
   'update_plan',
+  'ask',
   'task',
 ]);
 
@@ -292,6 +293,8 @@ export interface ChatHostBridge {
   confirmGit(action: string): Promise<boolean>;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
   confirmBrowser(action: string): Promise<boolean>;
+  /** Задать человеку вопрос и дождаться ответа: инструмент `ask`. Пустая строка — ответа не будет. */
+  ask(question: string, options?: readonly string[]): Promise<string>;
   /** Пометки языка: они живут в renderer (в редакторе). */
   getDiagnostics(path?: string): Promise<DiagnosticsHostResult>;
   /** Показать файл в редакторе на нужной позиции. */
@@ -708,6 +711,7 @@ export class AiService {
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
       toolContext.confirmGit = (action) => host.confirmGit(action);
       toolContext.confirmBrowser = (action) => host.confirmBrowser(action);
+      toolContext.ask = (question, options) => host.ask(question, options);
       toolContext.diagnostics = (path) => host.getDiagnostics(path);
       toolContext.openFile = (path, line, column) => host.openFile(path, line, column);
     }
@@ -1315,6 +1319,8 @@ export class AiService {
     if (tool.name === 'apply_patch') return host?.applyPatches !== undefined;
     if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
     if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
+    // Вопрос человеку живёт в ленте чата: без окна задать его негде.
+    if (tool.name === 'ask') return host?.ask !== undefined;
     if (tool.name === 'open_file') return host?.openFile !== undefined;
     if (
       tool.name === 'git_status' ||

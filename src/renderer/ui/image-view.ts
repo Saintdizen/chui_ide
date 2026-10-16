@@ -27,6 +27,11 @@ export interface ImageView {
   readonly path: string | null;
   /** Забыть прочитанное: файл закрыли или изменился. */
   forget(path: string): void;
+  /**
+   * Перечитать картинку с диска: файл изменился снаружи. Кэш по пути сбрасывается,
+   * а если именно она на экране — она же показывается заново.
+   */
+  refresh(path: string): void;
 }
 
 export interface ImageViewDeps {
@@ -232,43 +237,49 @@ export function createImageView(deps: ImageViewDeps): ImageView {
     applyScale();
   };
 
+  /**
+   * Показать картинку. Уже показанная не перечитывается: переключение вкладок не
+   * должно гонять base64 через IPC заново — свежесть файла проверяет `refresh`.
+   */
+  const showImage = (path: string): void => {
+    if (currentPath === path && open) return;
+    if (!isImagePath(path)) return;
+
+    const cached = cache.get(path);
+    if (cached) {
+      render(path, cached);
+      return;
+    }
+    // Пока грузим, показываем шапку с именем: пустой экран без подписи выглядит как сбой.
+    currentPath = path;
+    title.textContent = basename(path);
+    title.title = path;
+    meta.textContent = '…';
+    image.hidden = false;
+    placeholder.hidden = true;
+    setZoomEnabled(false);
+    image.removeAttribute('src');
+    element.hidden = false;
+    open = true;
+
+    void deps.rpc
+      .request('workspace.readImage', { path })
+      .then((data) => {
+        cache.set(path, data);
+        // Пока читали, могли переключиться на другую вкладку — тогда не подменяем.
+        if (currentPath === path) render(path, data);
+      })
+      .catch((error) => {
+        open = false;
+        element.hidden = true;
+        showError(path, error);
+      });
+  };
+
   return {
     element,
 
-    show(path: string): void {
-      if (currentPath === path && open) return;
-      if (!isImagePath(path)) return;
-
-      const cached = cache.get(path);
-      if (cached) {
-        render(path, cached);
-        return;
-      }
-      // Пока грузим, показываем шапку с именем: пустой экран без подписи выглядит как сбой.
-      currentPath = path;
-      title.textContent = basename(path);
-      title.title = path;
-      meta.textContent = '…';
-      image.hidden = false;
-      placeholder.hidden = true;
-      setZoomEnabled(false);
-      image.removeAttribute('src');
-      element.hidden = false;
-      open = true;
-
-      void deps.rpc
-        .request('workspace.readImage', { path })
-        .then((data) => {
-          cache.set(path, data);
-          // Пока читали, могли переключиться на другую вкладку — тогда не подменяем.
-          if (currentPath === path) render(path, data);
-        })
-        .catch((error) => {
-          open = false;
-          element.hidden = true;
-          showError(path, error);
-        });
-    },
+    show: showImage,
 
     hide(): void {
       open = false;
@@ -286,6 +297,15 @@ export function createImageView(deps: ImageViewDeps): ImageView {
 
     forget(path: string): void {
       cache.delete(path);
+    },
+
+    refresh(path: string): void {
+      cache.delete(path);
+      // Не на экране — достаточно забыть: при следующем показе файл прочтётся заново.
+      if (!open || currentPath !== path) return;
+      open = false;
+      currentPath = null;
+      showImage(path);
     },
   };
 }

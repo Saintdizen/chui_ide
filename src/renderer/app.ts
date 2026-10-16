@@ -402,6 +402,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Текст целевого файла для «заглядывания»: открытый берём из документа (в нём
     // и несохранённые правки), прочий — с диска. Не прочитали — копию не покажем.
     readText: async (path) => {
+      // Картинка — не текст: в копии оказался бы бинарь (см. `shared/images.ts`).
+      if (isImagePath(path)) return null;
       const open = documents.get(path);
       if (open) return open.value;
       try {
@@ -1913,7 +1915,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Картинка — не текст: бинарь открывать редактором нельзя. Заводим документ-заглушку
     // (он нужен вкладке, дереву и статусбару), а полотно покажет вьюер (см. `syncImage`).
     if (isImagePath(path)) {
-      const document = documents.get(path) ?? documents.open(path, '', { readOnly: true });
+      // Документ-заглушка: текста в нём нет и быть не должно (см. `imageDocument`).
+      const document = edits.imageDocument(path);
       openEditors.open(document, options);
       explorer.reveal(path);
       // Открыли файл — вкладка чата ждёт в полосе.
@@ -5519,6 +5522,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const reloadIfOpen = async (path: string): Promise<void> => {
     const document = documents.get(path);
     if (!document) return;
+    // Картинка — не текст: перечитывать её в документ нельзя (в буфер попадёт
+    // бинарь). Файл мог смениться на диске — об этом узнаёт вьюер, а не буфер.
+    if (isImagePath(path)) {
+      imageView.refresh(path);
+      return;
+    }
     await edits.reloadFromDisk(path).catch(() => undefined);
     // Буфер остался правленым — значит версия на диске с ним разошлась: совпавший
     // текст снял бы «грязность» (см. `reloadFromDisk`).

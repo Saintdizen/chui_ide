@@ -38,6 +38,7 @@ export type AgentToolName =
   | 'delete_file'
   | 'move_file'
   | 'update_plan'
+  | 'ask'
   | 'task'
   | 'browser_open'
   | 'browser_snapshot'
@@ -594,6 +595,28 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['steps'],
+    },
+  },
+  {
+    name: 'ask',
+    side: 'renderer',
+    description:
+      'Задать человеку вопрос и дождаться ответа. Вызывай, когда без его решения нельзя ' +
+      'продолжить: какой из вариантов выбрать, где взять данные, как поступить при неоднозначности. ' +
+      'Прогон встаёт и ждёт ответа, а ответ придёт результатом вызова — учитывай его дальше. ' +
+      'Не спрашивай о том, что видно в проекте: сперва посмотри инструментами чтения. ' +
+      'Если вариантов конечное число, перечисли их в options — человек ответит нажатием.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: { type: 'string', description: 'Что спросить. Один конкретный вопрос, без вступлений.' },
+        options: {
+          type: 'array',
+          description: 'Готовые варианты ответа (до 5) — показываются кнопками. Можно не задавать.',
+          items: { type: 'string', description: 'Формулировка варианта, например «Вариант А».' },
+        },
+      },
+      required: ['question'],
     },
   },
   {

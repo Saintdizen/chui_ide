@@ -1616,6 +1616,18 @@ export interface ConfirmGitHostResult {
   allowed: boolean;
 }
 
+/** Аргументы `ai.ask`: вопрос ассистента и, если есть, готовые варианты ответа. */
+export interface AskHostParams {
+  question: string;
+  /** Готовые варианты (до 5) — показываются кнопками. */
+  options?: readonly string[];
+}
+
+export interface AskHostResult {
+  /** Ответ человека. Пустая строка — вопрос остался без ответа (например, прогон прервали). */
+  answer: string;
+}
+
 /** Одна пометка языка: ошибка, предупреждение, подсказка. */
 export interface DiagnosticItem {
   path: string;
@@ -1659,6 +1671,8 @@ export interface HostMethods {
   'ai.confirmCommand': { params: ConfirmCommandHostParams; result: ConfirmCommandHostResult };
   'ai.confirmGit': { params: ConfirmGitHostParams; result: ConfirmGitHostResult };
   'ai.confirmBrowser': { params: ConfirmBrowserHostParams; result: ConfirmBrowserHostResult };
+  /** Вопрос человеку с ожиданием ответа: инструмент `ask`. */
+  'ai.ask': { params: AskHostParams; result: AskHostResult };
   /** Пометки языка живут в renderer (в редакторе), а не на диске. */
   'ai.getDiagnostics': { params: DiagnosticsHostParams; result: DiagnosticsHostResult };
   /** Показать файл в редакторе: открытие вкладки — тоже дело renderer. */

@@ -1250,6 +1250,7 @@
    по файлу и с той же специфичностью) перебивает это правило. */
 .decision-done,
 .approval.decision-done,
+.ask.decision-done,
 .review.decision-done {
   border-color: var(--separator_color);
   background: none;
@@ -1384,6 +1385,38 @@
   gap: 6px;
   padding: 8px;
   border-top: 1px solid var(--separator_color);
+}
+
+/* ── вопрос агента человеку ─────────────────────────────────────────────── */
+
+/* Вопрос — не подтверждение: синяя рамка вместо жёлтой. Жёлтый — «деструктивное
+   или необратимое», а вопрос безвреден и ответа ждёт долго. */
+.ask {
+  border: 1px solid var(--blue_prime_background);
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+  font-size: var(--font_labels_size);
+}
+
+.ask-question {
+  padding: 8px;
+  color: var(--text_color);
+  overflow-wrap: anywhere;
+}
+
+.ask-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 8px 8px;
+}
+
+.ask-input {
+  padding: 0 8px 8px;
+}
+
+.ask-input .field-input {
+  width: 100%;
 }
 
 .chat-footer {

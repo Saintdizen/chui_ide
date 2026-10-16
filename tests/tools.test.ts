@@ -47,6 +47,7 @@ describe('набор инструментов агента', () => {
       'delete_file',
       'move_file',
       'update_plan',
+      'ask',
       'task',
       'browser_open',
       'browser_snapshot',

@@ -284,3 +284,97 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
       }),
   };
 }
+
+/**
+ * Вопрос агента человеку (инструмент `ask`). Не решение «да/нет», а ответ текстом:
+ * агент останавливается и ждёт. Отсюда и отличие от подтверждений — поле ввода и,
+ * если у вопроса есть готовые варианты, кнопки с ними: один клик вместо набора.
+ * Прерванный прогон закрывает карточку так же, как approval, — через `host.register`.
+ */
+export interface AskPrompt {
+  /** Задать вопрос и дождаться ответа. Пустая строка — ответа не будет. */
+  ask(question: string, options?: readonly string[]): Promise<string>;
+}
+
+export function createAskPrompt(host: ApprovalHost): AskPrompt {
+  function ask(question: string, options?: readonly string[]): Promise<string> {
+    const block = h('div', { class: 'ask' });
+    block.appendChild(
+      h('div', { class: 'approval-head' }, svgIcon('bubble', 13), h('span', {}, 'Ассистент спрашивает')),
+    );
+    block.appendChild(h('div', { class: 'ask-question' }, question));
+
+    let settle: (answer: string) => void = () => undefined;
+    const decision = new Promise<string>((resolve) => {
+      settle = resolve;
+    });
+
+    /** Ответ принят — поле и кнопки убираем, остаётся строка итога с самим ответом. */
+    function finish(answer: string): void {
+      unregister();
+      const text = answer.trim();
+      block.classList.add('decision-done');
+      block.replaceChildren(
+        h(
+          'div',
+          { class: 'decision-line' },
+          svgIcon('bubble', 12),
+          h('span', {}, text ? 'Ответ отправлен ассистенту' : 'Вопрос оставлен без ответа'),
+          h(
+            'span',
+            { class: 'decision-status' },
+            text ? (text.length > 80 ? `${text.slice(0, 79)}…` : text) : 'отменено',
+          ),
+        ),
+      );
+      block.scrollIntoView({ block: 'nearest' });
+      settle(text);
+    }
+
+    const input = h('input', {
+      class: 'field-input',
+      type: 'text',
+      spellcheck: 'false',
+      placeholder: 'Ваш ответ',
+    }) as HTMLInputElement;
+
+    input.addEventListener('keydown', (event) => {
+      // Enter отправляет: карточка короткая, тянуться к кнопке незачем.
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      finish(input.value);
+    });
+
+    // Готовые варианты над полем: нажатие — это сразу ответ.
+    if (options && options.length > 0) {
+      const variants = h('div', { class: 'ask-options' });
+      for (const option of options) {
+        variants.appendChild(
+          h('button', { class: 'btn btn-small', type: 'button', onClick: () => finish(option) }, option),
+        );
+      }
+      block.appendChild(variants);
+    }
+
+    const answerButton = h(
+      'button',
+      { class: 'btn btn-small btn-primary', type: 'button', onClick: () => finish(input.value) },
+      'Ответить',
+    );
+    const skipButton = h('button', { class: 'btn btn-small', type: 'button', onClick: () => finish('') }, 'Отменить');
+
+    // Прогон прервали — отвечать больше некому, закрываем вопрос.
+    const abort = (): void => finish('');
+    const unregister = host.register(abort);
+
+    block.appendChild(h('div', { class: 'ask-input' }, input));
+    block.appendChild(h('div', { class: 'approval-actions' }, answerButton, skipButton));
+    host.mount(block);
+    host.scrollToEnd();
+    input.focus();
+
+    return decision;
+  }
+
+  return { ask };
+}

@@ -29,7 +29,7 @@ import { createChangesPanel } from './chat-changes';
 import { createPlanPanel } from './chat-plan';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
-import { createCommandApproval, createEditReview, type ApprovalHost } from './chat-approvals';
+import { createAskPrompt, createCommandApproval, createEditReview, type ApprovalHost } from './chat-approvals';
 import { mergePatchResult } from './chat-patches';
 import { countLines, plural, snippetFor, titleFrom } from './chat-text';
 import { createChatTabs, type ChatSearchHit } from './chat-tabs';
@@ -1350,6 +1350,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   };
   const editReview = createEditReview(approvals);
   const commandApproval = createCommandApproval(approvals);
+  const askPrompt = createAskPrompt(approvals);
 
   deps.host.handle('ai.confirmCommand', async (params) => ({
     allowed: await commandApproval.confirm(params.command),
@@ -1364,6 +1365,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // от имени пользователя, поэтому вопрос задаётся тем же способом.
   deps.host.handle('ai.confirmBrowser', async (params) => ({
     allowed: await commandApproval.confirmBrowser(params.action),
+  }));
+
+  // Вопрос агенту к человеку: карточка с полем ввода (и кнопками вариантов).
+  // Ответ уходит модели результатом вызова — прогон ждёт его и продолжается.
+  deps.host.handle('ai.ask', async (params) => ({
+    answer: await askPrompt.ask(params.question, params.options),
   }));
 
   deps.host.handle('ai.applyEdits', async (params) => applyAgentEdits(params));

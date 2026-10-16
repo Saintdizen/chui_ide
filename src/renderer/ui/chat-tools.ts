@@ -33,6 +33,7 @@ const TOOL_LABELS: Record<string, string> = {
   delete_file: 'Удаление',
   move_file: 'Перемещение',
   update_plan: 'План',
+  ask: 'Вопрос агента',
   task: 'Подзадача',
   browser_open: 'Открытие страницы',
   browser_snapshot: 'Снимок страницы',
@@ -68,6 +69,7 @@ const TOOL_ICONS: Record<string, IconName> = {
   delete_file: 'trash',
   move_file: 'file',
   update_plan: 'command',
+  ask: 'bubble',
   task: 'sparkle',
   browser_open: 'search',
   browser_snapshot: 'file',
@@ -131,6 +133,7 @@ function summarizeArgs(raw: string): string {
     if (typeof value.command === 'string') parts.push(value.command);
     if (typeof value.id === 'string') parts.push(value.id);
     if (typeof value.data === 'string') parts.push(`«${value.data.replace(/\n/g, '⏎').slice(0, 40)}»`);
+    if (typeof value.question === 'string') parts.push(`«${value.question.replace(/\s+/g, ' ').trim().slice(0, 80)}»`);
     if (Array.isArray(value.steps)) parts.push(`${value.steps.length} шагов`);
     // apply_edit: в карточке нужны имена файлов, а не сырой JSON на 80 символов.
     if (Array.isArray(value.edits)) {

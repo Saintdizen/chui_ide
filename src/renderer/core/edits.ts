@@ -1,4 +1,5 @@
 import type { ApplyFailure, ApplyReport, ApplyResult, FileEdit } from '../../shared/edits';
+import { isImagePath } from '../../shared/images';
 import { diskConflict, normalize, type TextDocument } from './document';
 import type { DocumentStore } from './document-store';
 import type { EditSource } from './document';
@@ -21,6 +22,14 @@ export class EditService {
 
   /** Открывает документ, подгружая текст с диска при необходимости. */
   async ensureDocument(path: string): Promise<TextDocument> {
+    // Картинка — не текст: читать её в документ нельзя. В буфере оказался бы
+    // бинарь — он же уехал бы в копию кода («заглядывание»), в поиск по открытым
+    // файлам и на диск при сохранении. Заглушка нужна вкладке, дереву и
+    // статусбару, а полотно показывает вьюер (см. `syncImage` в app.ts).
+    // Проверка идёт до «уже открыт»: в открытом документе картинки мог остаться
+    // бинарь от прежней версии — заглушка его очистит.
+    if (isImagePath(path)) return this.imageDocument(path);
+
     const existing = this.deps.documents.get(path);
     if (existing) return existing;
 
@@ -112,6 +121,11 @@ export class EditService {
    * обе точки перечитывания пропускают «грязные» документы, и сам он не очистится.
    */
   async reloadFromDisk(path: string): Promise<TextDocument> {
+    // Картинку не перечитываем: её содержимое — не текст. Документ-заглушка
+    // остаётся пустой, а показывать её умеет только вьюер; его кэш сбрасывает
+    // приложение (см. `reloadIfOpen` в app.ts) — иначе на диске новое, а на экране старое.
+    if (isImagePath(path)) return this.imageDocument(path);
+
     const file = await this.deps.rpc.request('workspace.readFile', { path });
     const existing = this.deps.documents.get(path);
 
@@ -141,6 +155,9 @@ export class EditService {
    * окна человек видел вопрос о файле, который и так равен диску.
    */
   async revertToDisk(path: string): Promise<TextDocument> {
+    // Та же причина, что у `reloadFromDisk`: у картинки нет текстовой версии.
+    if (isImagePath(path)) return this.imageDocument(path);
+
     const file = await this.deps.rpc.request('workspace.readFile', { path });
     const existing = this.deps.documents.get(path);
     const target = existing ?? this.deps.documents.open(path, file.text, { readOnly: file.readOnly });
@@ -149,5 +166,21 @@ export class EditService {
     target.setText(file.text, 'disk');
     target.markSaved(file.mtimeMs);
     return target;
+  }
+
+  /**
+   * Документ-заглушка картинки: TextDocument у неё есть (нужен вкладке, дереву
+   * и статусбару), а текста нет и быть не должно. Уже открытый документ
+   * очищаем: в него мог попасть бинарь раньше — например, перечитыванием файла
+   * до этой правки, — и такой буфер не должен ни показываться, ни сохраняться.
+   */
+  imageDocument(path: string): TextDocument {
+    const existing = this.deps.documents.get(path);
+    if (!existing) return this.deps.documents.open(path, '', { readOnly: true });
+    if (existing.value !== '') {
+      existing.setText('', 'programmatic');
+      existing.markSaved();
+    }
+    return existing;
   }
 }

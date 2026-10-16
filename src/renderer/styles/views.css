@@ -9,7 +9,7 @@
 .chat-editor {
   position: absolute;
   inset: 0;
-  z-index: 6;
+  z-index: var(--layer_view);
   display: flex;
   background: var(--editor_background);
 }
@@ -33,7 +33,10 @@
 .image-view {
   position: absolute;
   inset: 0;
-  z-index: 6;
+  /* Режим просмотра — поверх всего в области редактора: виджеты самого
+     редактора (подсказки, копия кода, список мест) живут на слоях 40–41, и без
+     этого копия кода оставалась бы поверх картинки (см. `--layer_view`). */
+  z-index: var(--layer_view);
   display: flex;
   flex-direction: column;
   background: var(--editor_background);
@@ -150,7 +153,7 @@
 .diff-view {
   position: absolute;
   inset: 0;
-  z-index: 6;
+  z-index: var(--layer_view);
   display: flex;
   flex-direction: column;
   background: var(--editor_background);
@@ -438,7 +441,7 @@
 .conflict-view {
   position: absolute;
   inset: 0;
-  z-index: 7;
+  z-index: var(--layer_view);
   display: flex;
   flex-direction: column;
   background: var(--editor_background);
