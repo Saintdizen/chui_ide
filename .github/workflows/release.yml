@@ -13,9 +13,37 @@ permissions:
   contents: read
 
 jobs:
+  # Черновик релиза готовится ОДИН раз, до сборки: три платформы льют файлы в один
+  # и тот же релиз, и создавать его параллельно им нельзя — они гонялись бы за ним.
+  #
+  # Заодно убираем прежний черновик по тегу: повторный запуск раньше падал на
+  # «update-a-release-asset → Not Found», потому что прежняя попытка оставляла
+  # файл в состоянии «starter» (оборванная загрузка), а такой не перезаписать.
+  # Тег не трогаем — так повторный запуск переживаем.
+  prepare:
+    name: Подготовить черновик релиза
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Убрать прошлый черновик и создать новый
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "${{ github.ref_name }}" --yes || true
+          gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" --generate-notes
+
   build:
     name: ${{ matrix.label }}
+    # Черновик есть — можно лить файлы. При ручном запуске `prepare` пропускается
+    # (публиковать некуда), но саму сборку это останавливать не должно.
+    needs: prepare
+    if: always()
     runs-on: ${{ matrix.os }}
+    permissions:
+      # Запись нужна, чтобы приложить собранные файлы к релизу.
+      contents: write
     strategy:
       # Платформы независимы: упавшая сборка deb не должна отменять dmg.
       fail-fast: false
@@ -24,15 +52,12 @@ jobs:
           - os: ubuntu-latest
             label: Linux (AppImage, deb)
             target: --linux AppImage deb
-            artifact: linux
           - os: windows-latest
             label: Windows (NSIS)
             target: --win nsis
-            artifact: windows
           - os: macos-latest
             label: macOS (dmg)
             target: --mac dmg
-            artifact: macos
 
     steps:
       - uses: actions/checkout@v4
@@ -58,55 +83,25 @@ jobs:
         run: npx electron-rebuild -f -w node-pty
 
       - name: Упаковать
-        # --publish never: публикацию делает отдельная задача ниже, одним местом.
+        # --publish never: публикацию делает шаг ниже, одним местом.
         run: npx electron-builder ${{ matrix.target }} --publish never
 
-      - name: Загрузить артефакты
-        uses: actions/upload-artifact@v4
+      # Файлы идут в релиз прямо отсюда, без промежуточного хранилища артефактов:
+      # прогон через `upload-artifact`/`download-artifact` стоил ~540 МБ на релиз
+      # (AppImage+deb+exe+dmg) и упирался в квоту — «Failed to CreateArtifact:
+      # Artifact storage quota has been hit», после чего релиз не выходил вовсе.
+      # Здесь каждый собирает своё и сразу прикладывает к общему черновику.
+      - name: Приложить файлы к релизу
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
         with:
-          name: chui-ide-${{ matrix.artifact }}
-          if-no-files-found: error
-          # Артефакт — перевалочный пункт: следующим job'ом файлы уходят в релиз,
-          # и дальше он не нужен. Без срока они жили 90 дней: сборочный набор — это
-          # ~540 МБ (AppImage+deb+exe+dmg), и несколько релизов подряд выбирали
-          # хранилище артефактов до отказа — создание нового падало с
-          # «Artifact storage quota has been hit».
-          retention-days: 1
-          path: |
+          draft: true
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: false
+          files: |
             release/*.exe
             release/*.AppImage
             release/*.deb
             release/*.dmg
             release/*.zip
             release/*.yml
-
-  release:
-    name: Опубликовать релиз
-    # Релиз собирается только по тегу: из ручного запуска публиковать нечего.
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Скачать артефакты
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      # Повторный запуск по тому же тегу раньше падал на «update-a-release-asset
-      # → Not Found»: прежняя попытка оставляла релиз-ЧЕРНОВИК, а в нём — файл,
-      # чья загрузка оборвалась. Такой файл в состоянии «starter» перезаписать
-      # нельзя, только залить заново. Поэтому убираем прежний черновик по тегу и
-      # создаём релиз с нуля. Тег не трогаем — так повторный запуск переживаем.
-      - name: Убрать прошлый черновик релиза
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release delete "${{ github.ref_name }}" --yes || true
-
-      - name: Приложить файлы к релизу
-        uses: softprops/action-gh-release@v2
-        with:
-          draft: true
-          files: artifacts/**/*
-          generate_release_notes: true
