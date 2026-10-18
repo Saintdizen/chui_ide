@@ -282,8 +282,8 @@ app.whenReady().then(async () => {
     ask(
       ide,
       `(() => {
-        const tab = [...document.querySelectorAll('.tab')].find(
-          (t) => !t.classList.contains('tab-page') && (t.querySelector('.tab-label')?.textContent ?? '') === ${JSON.stringify(name)},
+        const tab = [...document.querySelectorAll('.tab[data-kind=file]')].find(
+          (t) => (t.querySelector('.tab-label')?.textContent ?? '') === ${JSON.stringify(name)},
         );
         if (!tab) return 'нет вкладки';
         tab.click();
@@ -589,6 +589,166 @@ app.whenReady().then(async () => {
     было: viewsWithPage,
     стало: attachedViews(),
   });
+
+  /* --- 12б. Вкладка чата и вкладка страницы в одной полосе ----------------------- */
+  // Регрессия: чат, перенесённый в редактор, и страница браузера занимают ОДНУ область,
+  // но живут в разных моделях (`chatTabActive` в app.ts и `BrowserTabs`). Клик по вкладке
+  // страницы при показанном чате подсвечивал обе вкладки и оставлял на экране чат, а
+  // клик по вкладке чата при показанной странице — наоборот. Активной в полосе должна
+  // быть ровно одна вкладка, и на экране — ровно её содержимое.
+  step('вкладка чата и вкладка страницы');
+
+  /** Выполнить команду из палитры — тем же путём, что и человек. */
+  const runCommand = (title) =>
+    ask(
+      ide,
+      `(async () => {
+        const button = [...document.querySelectorAll('.icon-btn')].find((item) =>
+          (item.getAttribute('title') ?? '').startsWith('Палитра команд'),
+        );
+        if (!button) return 'нет кнопки палитры';
+        button.click();
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const input = document.querySelector('.palette-input');
+        if (!input) return 'нет поля палитры';
+        input.value = ${JSON.stringify(title)};
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const item = [...document.querySelectorAll('.palette-item')].find(
+          (node) => (node.querySelector('.palette-item-title')?.textContent ?? '') === ${JSON.stringify(title)},
+        );
+        if (!item) return 'пункта нет';
+        item.click();
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        return 'выполнено';
+      })()`,
+    );
+
+  /** Состояние полосы и области редактора: кто активен и что показано. */
+  const AREA_STATE = `(() => {
+    const island = document.querySelector('.editor-island');
+    // Только полоса редактора: у панели чата своя полоса бесед, и её вкладки помечены
+    // тем же классом (tab) — считать их за вкладки редактора нельзя.
+    const tabs = [...document.querySelectorAll('.tabs-host .tab')];
+    const active = tabs.filter((tab) => tab.classList.contains('is-active'));
+    return {
+      активныхВкладок: active.length,
+      активная: active[0]?.querySelector('.tab-label')?.textContent ?? null,
+      видов: tabs.map((tab) => tab.dataset.kind ?? 'file'),
+      страница: island?.classList.contains('is-browser') ?? false,
+      чат: island?.classList.contains('is-chat') ?? false,
+      чатВРедакторе: Boolean(document.querySelector('.chat-editor:not([hidden]) .chat')),
+    };
+  })()`;
+
+  const clickAuxTab = () =>
+    ask(
+      ide,
+      `(() => {
+        const tab = document.querySelector('.tab-auxiliary');
+        if (!tab) return 'нет вкладки';
+        tab.click();
+        return 'нажата';
+      })()`,
+    );
+
+  check('чат перенесён в редактор', (await runCommand('Перенести чат в окно редактора')) === 'выполнено');
+  const chatShown = await waitFor(async () => {
+    const state = await ask(ide, AREA_STATE);
+    return state.чат === true ? state : null;
+  });
+  check('в полосе появилась вкладка чата', chatShown !== null && chatShown.видов.includes('aux'), {
+    виды: chatShown?.видов,
+  });
+  check('на экране чат, страница уступила', chatShown !== null && chatShown.страница === false, chatShown);
+  check('активная вкладка одна — чат', chatShown?.активныхВкладок === 1, chatShown?.активныхВкладок);
+
+  // Клик по вкладке страницы: она забирает область у чата, и подсвечена только она.
+  check('страница показана кликом по её вкладке', (await clickPageTab()) === 'нажата');
+  const pageOverChat = await waitFor(async () => {
+    const state = await ask(ide, AREA_STATE);
+    return state.страница === true ? state : null;
+  });
+  check(
+    'клик по вкладке страницы убрал чат с экрана',
+    pageOverChat !== null && pageOverChat.чат === false,
+    pageOverChat,
+  );
+  check('активная вкладка одна — страница', pageOverChat?.активныхВкладок === 1, pageOverChat?.активныхВкладок);
+
+  // И обратно: вкладка чата возвращает чат, страница уступает.
+  check('вкладка чата нажата', (await clickAuxTab()) === 'нажата');
+  const chatOverPage = await waitFor(async () => {
+    const state = await ask(ide, AREA_STATE);
+    return state.чат === true ? state : null;
+  });
+  check(
+    'клик по вкладке чата убрал страницу с экрана',
+    chatOverPage !== null && chatOverPage.страница === false,
+    chatOverPage,
+  );
+  check('активная вкладка одна — чат', chatOverPage?.активныхВкладок === 1, chatOverPage?.активныхВкладок);
+
+  // Клавиатура: стрелка с вкладки страницы доходит до вкладки чата и наоборот. Раньше
+  // ход по полосе знал только файлы — страница и чат были недостижимы с клавиатуры.
+  const keyboard = await ask(
+    ide,
+    `(async () => {
+      // Полоса редактора: у панели чата своя полоса бесед с тем же классом (tab).
+      const tabs = () => [...document.querySelectorAll('.tabs-host .tab')];
+      const walk = (node, key) => {
+        if (!node) return false;
+        node.focus();
+        node.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+        return true;
+      };
+      const auxNode = () => tabs().find((node) => node.dataset.kind === 'aux') ?? null;
+      // Соседняя слева от чата вкладка — та, с которой стрелка вправо обязана дойти.
+      const передЧатом = () => {
+        const all = tabs();
+        const index = all.indexOf(auxNode());
+        return index > 0 ? all[index - 1] : null;
+      };
+      const послеВправо = walk(передЧатом(), 'ArrowRight');
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const вправо = {
+        шаг: послеВправо,
+        активная: document.querySelector('.tab.is-active .tab-label')?.textContent ?? null,
+        вРедакторе: Boolean(document.querySelector('.chat-editor:not([hidden]) .chat')),
+        страница: document.querySelector('.editor-island')?.classList.contains('is-browser') ?? false,
+        фокус: document.activeElement?.dataset?.kind ?? null,
+      };
+      walk(auxNode(), 'ArrowLeft');
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      const влево = {
+        активная: document.querySelector('.tab.is-active .tab-label')?.textContent ?? null,
+        страница: document.querySelector('.editor-island')?.classList.contains('is-browser') ?? false,
+        чат: document.querySelector('.editor-island')?.classList.contains('is-chat') ?? false,
+      };
+      return { вправо, влево };
+    })()`,
+  );
+  check('стрелка вправо с вкладки страницы открыла чат', keyboard?.вправо?.вРедакторе === true, keyboard?.вправо);
+  check('страница при этом уступила', keyboard?.вправо?.страница === false, keyboard?.вправо);
+  check('фокус уехал на вкладку чата', keyboard?.вправо?.фокус === 'aux', keyboard?.вправо);
+  check(
+    'стрелка влево вернула страницу',
+    keyboard?.влево?.страница === true && keyboard?.влево?.чат === false,
+    keyboard?.влево,
+  );
+
+  // Ctrl+W закрывает ту вкладку, что показана: с показанным чатом он отправляет чат
+  // обратно в панель, а не закрывает файл за ним.
+  check('вкладка чата нажата перед Ctrl+W', (await clickAuxTab()) === 'нажата');
+  await waitFor(async () => ((await ask(ide, AREA_STATE)).чат === true ? true : null));
+  ide.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'W', modifiers: ['control'] });
+  ide.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'W', modifiers: ['control'] });
+  const closedChat = await waitFor(async () => {
+    const state = await ask(ide, AREA_STATE);
+    return state.видов.includes('aux') === false ? state : null;
+  });
+  check('Ctrl+W убрал вкладку чата в панель', closedChat !== null, closedChat?.видов);
+  check('страница от этого не закрылась', closedChat !== null && closedChat.видов.includes('page'), closedChat?.видов);
 
   /* --- 13. Меню не уходит под страницу -------------------------------------------- */
   // Вложение — слой окна поверх DOM. Меню (`.context-menu`) рисуется в DOM и без

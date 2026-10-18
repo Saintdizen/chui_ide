@@ -1461,6 +1461,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       return;
     }
     chatTabActive = true;
+    // Страница уступает чату: область редактора у них одна, и активной вкладкой
+    // в полосе должна быть ровно одна — иначе подсвечены две, а на экране чат.
+    browserTabs.deactivate();
     syncChatTab();
   }
 
@@ -1577,6 +1580,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Страница навигировалась, открылась или закрылась — полотно идёт за ней,
   // а разметка уступает место, если страница заняла область.
   browserTabs.onDidChange(() => {
+    // Активная страница забирает область редактора у вкладки чата. Событие приходит и
+    // тогда, когда страницу открыл агент, поэтому уступать чат заставляем здесь, а не
+    // только в обработчике клика по вкладке.
+    if (browserTabs.activePageId !== null) hideChatTab();
     // Страница заняла или освободила область: полотно, картинка и разметка делят
     // её с ней, поэтому синхронизируем все экраны, а не только браузер.
     syncImage();
@@ -1597,6 +1604,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       layout.rightBody.replaceChildren();
       chatEditor.appendChild(chat.element);
       layout.setRightVisible(false);
+      // Чат занимает область редактора — страница браузера её уступает.
+      browserTabs.deactivate();
     } else {
       chatEditor.hidden = true;
       layout.rightBody.appendChild(chat.element);
@@ -2879,15 +2888,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     browserTabs.deactivate();
   });
 
+  /** В полосе показана вкладка без файла: страница браузера или чат. */
+  const straysShown = (): boolean => (chatInEditor && chatTabActive) || browserTabs.activePageId !== null;
+
   define(
     {
       id: 'file.close',
       title: 'Закрыть вкладку',
       category: 'Файл',
       keybinding: 'Ctrl+W',
-      enabled: () => openEditors.active !== null,
+      // Закрывать есть что и тогда, когда на экране страница или чат: Ctrl+W относится
+      // к показанной вкладке, а не только к последнему файлу в фоне.
+      enabled: () => openEditors.active !== null || straysShown(),
     },
     (path) => {
+      // Без явного пути (Ctrl+W) закрывается ТА вкладка, что показана. Иначе при
+      // открытом чате или странице команда молча закрывала бы файл за ними.
+      if (typeof path !== 'string') {
+        if (chatInEditor && chatTabActive) {
+          setChatInEditor(false);
+          return;
+        }
+        const pageId = browserTabs.activePageId;
+        if (pageId !== null) {
+          browserPages.close(pageId);
+          return;
+        }
+      }
       const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
       if (!target) return;
       openEditors.close(target);

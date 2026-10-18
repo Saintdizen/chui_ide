@@ -67,35 +67,83 @@ export function createTabs(deps: TabsDeps): Tabs {
   const TAB_GAP = 6;
 
   /**
+   * Вид вкладки в полосе. В одном ряду живут три разные вещи: файл (`OpenEditors`),
+   * страница браузера (`BrowserTabs`) и чат (вкладка-спутник). Ведутся они разные
+   * модели, поэтому вид вкладки хранится в её `dataset` и разбирается здесь, а не
+   * угадывается по наличию пути.
+   */
+  type TabKind = 'file' | 'page' | 'aux';
+
+  const kindOf = (node: HTMLElement): TabKind | null => {
+    const kind = node.dataset.kind;
+    return kind === 'file' || kind === 'page' || kind === 'aux' ? kind : null;
+  };
+
+  /** Открыть вкладку: у каждого вида свой адресат — файл, страница, чат. */
+  const openTab = (node: HTMLElement): void => {
+    switch (kindOf(node)) {
+      case 'file':
+        if (node.dataset.path) void deps.commands.execute('file.activate', node.dataset.path);
+        return;
+      case 'page':
+        if (node.dataset.pageId) deps.pages?.activate(node.dataset.pageId);
+        return;
+      case 'aux':
+        deps.auxiliary?.activate();
+        return;
+      default:
+        return;
+    }
+  };
+
+  /** Закрыть вкладку — тот же адресат, что и у открытия. */
+  const closeTabNode = (node: HTMLElement): void => {
+    switch (kindOf(node)) {
+      case 'file':
+        if (node.dataset.path) void deps.commands.execute('file.close', node.dataset.path);
+        return;
+      case 'page':
+        if (node.dataset.pageId) deps.pages?.close(node.dataset.pageId);
+        return;
+      case 'aux':
+        deps.auxiliary?.close();
+        return;
+      default:
+        return;
+    }
+  };
+
+  /**
    * Ход по полосе с клавиатуры: стрелки и Home/End переносят фокус и выбор на соседнюю
    * вкладку (выбор едет вместе с фокусом — так ждёт ролевая модель вкладок), Enter или
-   * пробел открывают файл вкладки, Delete закрывает. Tab при этом один: в полосе
+   * пробел открывают вкладку, Delete закрывает. Tab при этом один: в полосе
    * фокусируема только активная вкладка (`tabindex` выше).
+   *
+   * Ход идёт по ВСЕМ вкладкам подряд, не только по файлам: страница браузера и чат
+   * стоят в том же ряду, и стрелка из последнего файла обязана до них доходить.
    */
-  const onTabKey = (event: KeyboardEvent, path: string): void => {
-    const paths = [...element.querySelectorAll<HTMLElement>('.tab')];
-    const index = paths.findIndex((node) => node.dataset.path === path);
+  const onTabKey = (event: KeyboardEvent, node: HTMLElement): void => {
+    const tabs = [...element.querySelectorAll<HTMLElement>('.tab')];
+    const index = tabs.indexOf(node);
     if (index < 0) return;
 
     const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-    const target =
-      step !== 0 ? index + step : event.key === 'Home' ? 0 : event.key === 'End' ? paths.length - 1 : index;
-    if (target !== index && target >= 0 && target < paths.length) {
+    const target = step !== 0 ? index + step : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : index;
+    if (target !== index && target >= 0 && target < tabs.length) {
       event.preventDefault();
-      const next = paths[target]!;
-      const nextPath = next.dataset.path;
-      if (nextPath) void deps.commands.execute('file.activate', nextPath);
+      const next = tabs[target]!;
+      openTab(next);
       next.focus();
       return;
     }
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      void deps.commands.execute('file.activate', path);
+      openTab(node);
       return;
     }
     if (event.key === 'Delete') {
       event.preventDefault();
-      void deps.commands.execute('file.close', path);
+      closeTabNode(node);
     }
   };
 
@@ -137,7 +185,7 @@ export function createTabs(deps: TabsDeps): Tabs {
           // Полоса — это вкладки: роль, выбор и ход стрелками. Внутри вкладки крестик
           // остаётся настоящей кнопкой, и это её собственное место (см. ниже).
           role: 'tab',
-          dataset: { path },
+          dataset: { path, kind: 'file' },
           'aria-selected': path === active ? 'true' : 'false',
           // Ходить по полосе — Tab (встаёт на активной) плюс стрелки внутри (см. `onTabKey`).
           tabindex: path === active ? '0' : '-1',
@@ -182,7 +230,7 @@ export function createTabs(deps: TabsDeps): Tabs {
         if (event.button === 1) void deps.commands.execute('file.close', path);
       });
       // Стрелки ходят по полосе, как в списке вкладок: фокус и выбор едут вместе.
-      tab.addEventListener('keydown', (event) => onTabKey(event, path));
+      tab.addEventListener('keydown', (event) => onTabKey(event, tab));
       // Правый клик — то, чего не сделать перетаскиванием: закрепить вкладку или
       // закрыть соседей. Само действие — команда: одно и то же из меню и палитры.
       tab.addEventListener('contextmenu', (event) => {
@@ -220,7 +268,8 @@ export function createTabs(deps: TabsDeps): Tabs {
     }
 
     // Вкладки браузера — после файлов: страница не документ, но место в полосе у неё своё,
-    // и закрывается она так же — крестиком или средней кнопкой.
+    // и закрывается она так же — крестиком или средней кнопкой. Ведётся она своей моделью
+    // (`BrowserTabs`), поэтому вид вкладки помечен в `dataset.kind`.
     for (const page of pages?.list ?? []) {
       const classes = ['tab', 'tab-page'];
       if (page.id === pageActive) classes.push('is-active');
@@ -230,7 +279,9 @@ export function createTabs(deps: TabsDeps): Tabs {
           class: classes.join(' '),
           title: `${page.title}\n${page.url}`,
           role: 'tab',
+          dataset: { kind: 'page', pageId: page.id },
           'aria-selected': page.id === pageActive ? 'true' : 'false',
+          tabindex: page.id === pageActive ? '0' : '-1',
         },
         svgIcon('globe', 13),
         h('span', { class: 'tab-label' }, page.title),
@@ -252,6 +303,7 @@ export function createTabs(deps: TabsDeps): Tabs {
       tab.addEventListener('auxclick', (event) => {
         if (event.button === 1) pages?.close(page.id);
       });
+      tab.addEventListener('keydown', (event) => onTabKey(event, tab));
       element.appendChild(tab);
     }
 
@@ -260,7 +312,14 @@ export function createTabs(deps: TabsDeps): Tabs {
       if (auxActive) classes.push('is-active');
       const tab = h(
         'div',
-        { class: classes.join(' '), title: auxiliary.title },
+        {
+          class: classes.join(' '),
+          title: auxiliary.title,
+          role: 'tab',
+          dataset: { kind: 'aux' },
+          'aria-selected': auxActive ? 'true' : 'false',
+          tabindex: auxActive ? '0' : '-1',
+        },
         svgIcon('chat', 13),
         h('span', { class: 'tab-label' }, auxiliary.title),
         h(
@@ -281,6 +340,7 @@ export function createTabs(deps: TabsDeps): Tabs {
       tab.addEventListener('auxclick', (event) => {
         if (event.button === 1) auxiliary.close();
       });
+      tab.addEventListener('keydown', (event) => onTabKey(event, tab));
       element.appendChild(tab);
     }
 
