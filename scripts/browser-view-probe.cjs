@@ -987,6 +987,42 @@ app.whenReady().then(async () => {
   const badgeGone = await ask(ide, "document.querySelectorAll('.browser-agent:not([hidden])').length");
   check('и в шапке её тоже больше нет', badgeGone === 0, badgeGone);
 
+  /* --- 15. Подсказки не уходят под страницу --------------------------------------- */
+  // Страница — слой окна ПОВЕРХ DOM, поэтому подсказка под кнопками её шапки
+  // оказывалась под страницей: виден был только хвост за краем сцены.
+  step('подсказки и слой страницы');
+  // Подсказку спрашиваем в несколько заходов: слой показывается по задержке, а
+  // прошлое наведение могло оставить его погашенным (та же грабля, что у probe:tooltip).
+  const hint = await waitFor(async () => {
+    const answer = await ask(
+      ide,
+      `(async () => {
+        const stage = document.querySelector('.browser-stage');
+        const button = [...document.querySelectorAll('.browser-toolbar button')].find((item) =>
+          (item.getAttribute('title') ?? '').startsWith('Добавить в чат'),
+        );
+        if (!stage || !button) return null;
+        button.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        const tip = document.querySelector('.app-tooltip:not([hidden])');
+        if (!tip) return null;
+        const a = tip.getBoundingClientRect();
+        const b = stage.getBoundingClientRect();
+        const overlaps = a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+        return {
+          текст: tip.textContent,
+          пересекаетСцену: overlaps,
+          подсказка: { top: Math.round(a.top), bottom: Math.round(a.bottom) },
+          сцена: { top: Math.round(b.top), bottom: Math.round(b.bottom) },
+        };
+      })()`,
+    );
+    return answer && typeof answer === 'object' && answer.текст ? answer : null;
+  }, 8000);
+
+  check('подсказка у кнопки шапки появилась', typeof hint?.текст === 'string' && hint.текст.length > 0, hint);
+  check('подсказка не заходит на страницу', hint?.пересекаетСцену === false, hint);
+
   const shot = await ide.capturePage();
   await fs.writeFile(path.join(SHOTS, 'browser-view.png'), shot.toPNG());
 

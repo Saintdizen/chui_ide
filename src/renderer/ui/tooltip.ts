@@ -31,6 +31,35 @@ interface ShownTooltip {
   title: string;
 }
 
+/** Прямоугольник: место, которое занимает подсказка. */
+interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Сцена встроенного браузера, если страница показана прямо сейчас.
+ *
+ * Страница — не элемент документа, а отдельный слой окна (`WebContentsView`
+ * в `main/browser/panel.ts`), и лежит он ПОВЕРХ DOM. Значит любая подсказка,
+ * попавшая в этот прямоугольник, окажется под страницей: на экране видна только
+ * та её часть, что высунулась за край сцены.
+ */
+function pageStage(): Box | null {
+  const stage = document.querySelector('.browser-view:not([hidden]) .browser-stage');
+  if (!(stage instanceof HTMLElement)) return null;
+  const box = stage.getBoundingClientRect();
+  if (box.width <= 0 || box.height <= 0) return null;
+  return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+}
+
+/** Пересекаются ли прямоугольники: касание границ не в счёт. */
+function overlaps(a: Box, b: Box): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
 export function installTooltips(): void {
   // Повторный вызов (горячая перезагрузка) не должен завести второй слой.
   if (document.querySelector('.app-tooltip')) return;
@@ -60,7 +89,14 @@ export function installTooltips(): void {
     node.hidden = true;
   };
 
-  /** Поставить подсказку под элементом; у нижнего края окна — над ним. */
+  /**
+   * Поставить подсказку под элементом; у нижнего края окна — над ним.
+   *
+   * Третье правило важнее привычного «снизу»: снизу от кнопок шапки вкладки
+   * браузера лежит страница, а она — слой окна поверх DOM. Подсказка под такой
+   * кнопкой была видна только хвостом, высунувшимся за край страницы. Поэтому
+   * место, накрытое сценой, не годится, даже если формально влезает в окно.
+   */
   const place = (target: HTMLElement): void => {
     const rect = target.getBoundingClientRect();
     // Замер держим за краем окна: размеры настоящие, а прыжка из угла не видно.
@@ -68,12 +104,24 @@ export function installTooltips(): void {
     node.style.top = '0px';
     const size = node.getBoundingClientRect();
 
-    let top = rect.bottom + GAP_PX;
-    if (top + size.height > window.innerHeight - EDGE_PX) top = rect.top - GAP_PX - size.height;
-    // Не поместилось и сверху (высокая подсказка у верхнего края) — оставляем снизу.
-    if (top < EDGE_PX) top = rect.bottom + GAP_PX;
     const centred = rect.left + rect.width / 2 - size.width / 2;
     const left = Math.max(EDGE_PX, Math.min(centred, window.innerWidth - size.width - EDGE_PX));
+    const boxAt = (top: number): Box => ({ left, top, right: left + size.width, bottom: top + size.height });
+
+    const below = rect.bottom + GAP_PX;
+    const above = rect.top - GAP_PX - size.height;
+    const inWindow = (top: number): boolean => top >= EDGE_PX && top + size.height <= window.innerHeight - EDGE_PX;
+
+    const stage = pageStage();
+    const fits = (top: number): boolean => {
+      if (!inWindow(top)) return false;
+      const box = boxAt(top);
+      return stage === null || !overlaps(box, stage);
+    };
+
+    // Снизу — только если там нет страницы; иначе сверху; не вышло ни там, ни там —
+    // снизу, как раньше (в худшем случае подсказка частично под страницей).
+    const top = fits(below) ? below : fits(above) ? above : below;
 
     node.style.left = `${Math.round(left)}px`;
     node.style.top = `${Math.round(top)}px`;
