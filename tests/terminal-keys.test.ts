@@ -3,6 +3,7 @@ import {
   encodeKey,
   encodeMouse,
   encodePaste,
+  isPasteStroke,
   type KeyModes,
   type KeyStroke,
 } from '../src/renderer/terminal/input/keys';
@@ -84,6 +85,30 @@ describe('encodePaste', () => {
 
   it('с режимом текст обрамляется маркерами', () => {
     expect(encodePaste('ls', true)).toBe('\x1b[200~ls\x1b[201~');
+  });
+});
+
+// Вставка из буфера — не поле ввода: браузер не пришлёт ни `paste`, ни готовый текст,
+// поэтому комбинацию ловит сам терминал. Без этого `Ctrl+V` уходил в pty как `\x16`
+// (quoted-insert), и вставки не было вовсе.
+describe('isPasteStroke', () => {
+  it('Ctrl+V и Ctrl+Shift+V — вставка', () => {
+    expect(isPasteStroke(stroke('v', { ctrlKey: true }))).toBe(true);
+    expect(isPasteStroke(stroke('V', { ctrlKey: true, shiftKey: true }))).toBe(true);
+  });
+
+  it('⌘V на macOS — тоже вставка', () => {
+    expect(isPasteStroke(stroke('v', { metaKey: true }))).toBe(true);
+  });
+
+  it('одиночное `v` и Alt+V — не вставка: это ввод в консоль', () => {
+    expect(isPasteStroke(stroke('v'))).toBe(false);
+    expect(isPasteStroke(stroke('v', { altKey: true }))).toBe(false);
+  });
+
+  it('другие комбинации с Ctrl — не вставка', () => {
+    expect(isPasteStroke(stroke('c', { ctrlKey: true }))).toBe(false);
+    expect(isPasteStroke(stroke('f', { ctrlKey: true }))).toBe(false);
   });
 });
 

@@ -15,7 +15,8 @@ import { PushTopic, type TerminalDataPayload, type TerminalExitPayload, type Ter
 import type { RpcClient } from '../core/rpc';
 import { Terminal } from '../terminal/core/screen';
 import { searchBuffer, stepMatch } from '../terminal/core/search';
-import { encodeKey, encodeMouse, encodePaste } from '../terminal/input/keys';
+import { shortenShellTitle } from '../terminal/core/title';
+import { encodeKey, encodeMouse, encodePaste, isPasteStroke } from '../terminal/input/keys';
 import { TermView } from '../terminal/view/term-view';
 import { h, svgIcon } from './dom';
 import { showToast } from './toast';
@@ -280,17 +281,56 @@ export function createTerminalPanel(deps: {
    * Показать имя окна, запрошенное программой (OSC 0/2). Подпись запуска (`run`) не
    * перебиваем: там имя задачи, и оно важнее для человека. Когда программа снимает имя
    * (пустая строка), возвращаемся к подписи сессии.
+   *
+   * В подписи вкладки — укороченное имя (`shortenShellTitle`), полное — в подсказке:
+   * приглашение с путём целиком растягивало полосу дока.
    */
   function applyTitle(entry: SessionView): void {
     const wanted = entry.term.title;
     if (wanted === entry.title) return;
     entry.title = wanted;
-    entry.tab.textContent = entry.renamed ?? (wanted === '' ? entry.session.title : wanted);
+    const full = entry.renamed ?? (wanted === '' ? entry.session.title : wanted);
+    entry.tab.title = full;
+    entry.tab.textContent = shortenShellTitle(full);
+  }
+
+  /** Записать текст в сессию как вставку: с маркерами, если программа о них просила. */
+  function writePaste(entry: SessionView, text: string): void {
+    const data = encodePaste(text, entry.term.bracketedPaste);
+    void deps.rpc.request('terminal.write', { id: entry.session.id, data }).catch(() => undefined);
+  }
+
+  /**
+   * Вставить буфер обмена. Читаем его сами: терминал — не поле ввода, поэтому браузер
+   * не пришлёт ни `paste`, ни готовый текст для `Ctrl+V`.
+   */
+  function pasteFromClipboard(entry: SessionView): void {
+    void navigator.clipboard
+      .readText()
+      .then((text) => {
+        if (text) writePaste(entry, text);
+      })
+      .catch(() => undefined);
   }
 
   /** Клавиатура и вставка: событие с вида кодируется в байты и уходит в pty. */
   function bindInput(entry: SessionView): void {
-    entry.view.element.addEventListener('keydown', (event) => {
+    const root = entry.view.element;
+    root.addEventListener('keydown', (event) => {
+      const stroke = {
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+      };
+      // Вставка из буфера: `Ctrl+V` (и `Ctrl+Shift+V`) — привычная комбинация. Без
+      // этой ветки она уходила в pty как `\x16` — оболочка ждала следующий знак.
+      if (isPasteStroke(stroke)) {
+        event.preventDefault();
+        pasteFromClipboard(entry);
+        return;
+      }
       // Ctrl+F — поиск в консоли (как в редакторе).
       if (event.ctrlKey && !event.shiftKey && (event.key === 'f' || event.key === 'F')) {
         event.preventDefault();
@@ -307,16 +347,7 @@ export function createTerminalPanel(deps: {
         }
         return;
       }
-      const data = encodeKey(
-        {
-          key: event.key,
-          ctrlKey: event.ctrlKey,
-          altKey: event.altKey,
-          metaKey: event.metaKey,
-          shiftKey: event.shiftKey,
-        },
-        { applicationCursorKeys: entry.term.applicationCursorKeys },
-      );
+      const data = encodeKey(stroke, { applicationCursorKeys: entry.term.applicationCursorKeys });
       if (data === null) return;
       // Не даём браузеру обработать клавишу: `Tab`, `Ctrl+C` и стрелки в терминале —
       // не навигация по интерфейсу, а ввод в консоль.
@@ -324,12 +355,13 @@ export function createTerminalPanel(deps: {
       void deps.rpc.request('terminal.write', { id: entry.session.id, data }).catch(() => undefined);
     });
 
-    entry.view.element.addEventListener('paste', (event) => {
+    // Событие `paste` тоже слушаем: его пришлёт контекстное меню и вставка мышью
+    // (если полотну когда-нибудь дадут редактируемость). Обычный `Ctrl+V` идёт выше.
+    root.addEventListener('paste', (event) => {
       const text = event.clipboardData?.getData('text');
       if (!text) return;
       event.preventDefault();
-      const data = encodePaste(text, entry.term.bracketedPaste);
-      void deps.rpc.request('terminal.write', { id: entry.session.id, data }).catch(() => undefined);
+      writePaste(entry, text);
     });
   }
 

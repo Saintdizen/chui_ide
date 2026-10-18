@@ -124,6 +124,17 @@ export function encodeKey(stroke: KeyStroke, modes: KeyModes): string | null {
 }
 
 /**
+ * Комбинация вставки: `Ctrl+V` (на macOS — `⌘V`), в том числе с `Shift`.
+ *
+ * Терминал — не поле ввода, поэтому обработчика `paste` у него не будет: событие
+ * приходит только редактируемому элементу. Значит комбинацию ловим сами — иначе
+ * `Ctrl+V` уходит в pty управляющим кодом `\x16` (quoted-insert) и ничего не вставляет.
+ */
+export function isPasteStroke(stroke: KeyStroke): boolean {
+  return (stroke.ctrlKey || stroke.metaKey) && !stroke.altKey && stroke.key.toLowerCase() === 'v';
+}
+
+/**
  * Обрамить вставленный текст маркерами bracketed paste, если режим включён. Без режима
  * текст идёт как есть. Возвращается и признак того, что вставку надо отправить целиком.
  */

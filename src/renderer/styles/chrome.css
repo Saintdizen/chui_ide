@@ -1935,11 +1935,17 @@ textarea {
 
 .term-tab {
   /* Геометрия та же, что у вкладок дока: это вкладки одного док-острова. */
+  /* Ширина ограничена, как у вкладок файлов: имя окна от программы бывает любой
+     длины (`user@host: путь`), а растянутая вкладка уводит полосу в прокрутку.
+     Хвост текста обрезается многоточием, полное имя — в подсказке вкладки. */
+  max-width: 200px;
+  overflow: hidden;
   padding: 4px 10px;
   border-radius: var(--radius_sm);
   color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
   white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .term-tab:hover {

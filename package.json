@@ -73,6 +73,7 @@
     "probe:revert": "npm run build && electron scripts/revert-probe.cjs",
     "probe:sort": "npm run build && electron scripts/sort-probe.cjs",
     "probe:extterminal": "npm run build && electron scripts/ext-terminal-probe.cjs",
+    "probe:terminal": "npm run build && electron scripts/terminal-input-probe.cjs",
     "probe:editor": "electron scripts/own-editor-probe.cjs",
     "probe:lspbundled": "npm run build:main && electron scripts/lsp-bundled-probe.cjs",
     "probe:lspstatus": "npm run build && electron scripts/lsp-status-probe.cjs",
