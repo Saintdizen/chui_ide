@@ -1,5 +1,6 @@
 import type { KeybindingOverride } from '../../shared/keybindings';
 import { rendererOverrides } from '../../shared/keybindings';
+import { shortcutKey } from '../../shared/physical-key';
 import type { CommandRegistry } from './commands';
 
 export interface Keybinding {
@@ -14,13 +15,18 @@ export function isModifierKey(key: string): boolean {
   return key === 'Control' || key === 'Alt' || key === 'Shift' || key === 'Meta';
 }
 
+/**
+ * Сочетание из нажатия. Клавиша берётся по ФИЗИЧЕСКОМУ положению (`event.code`), а не
+ * по знаку раскладки: при русской раскладке `Ctrl+S` даёт `key === 'ы'`, и сочетание
+ * разошлось бы со своим именем — команда не нашлась бы. Служебные клавиши (`F5`,
+ * `Escape`) от раскладки не зависят, у них берётся `key`.
+ */
 export function comboFromEvent(event: KeyboardEvent): string {
   const parts: string[] = [];
   if (event.ctrlKey || event.metaKey) parts.push('Ctrl');
   if (event.altKey) parts.push('Alt');
   if (event.shiftKey) parts.push('Shift');
-  const key = event.key.length === 1 ? event.key.toUpperCase() : event.key;
-  parts.push(key);
+  parts.push(shortcutKey(event));
   return parts.join('+');
 }
 

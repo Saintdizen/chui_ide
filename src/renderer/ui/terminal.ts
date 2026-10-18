@@ -18,6 +18,7 @@ import { searchBuffer, stepMatch } from '../terminal/core/search';
 import { shortenShellTitle } from '../terminal/core/title';
 import { encodeKey, encodeMouse, encodePaste, isPasteStroke } from '../terminal/input/keys';
 import { TermView } from '../terminal/view/term-view';
+import { shortcutKey } from '../../shared/physical-key';
 import { h, svgIcon } from './dom';
 import { showToast } from './toast';
 
@@ -294,6 +295,9 @@ export function createTerminalPanel(deps: {
     entry.tab.textContent = shortenShellTitle(full);
   }
 
+  /** Клавиша для сочетания — по физическому положению: раскладка их не меняет. */
+  const shortcutOf = (event: KeyboardEvent): string => shortcutKey(event);
+
   /** Записать текст в сессию как вставку: с маркерами, если программа о них просила. */
   function writePaste(entry: SessionView, text: string): void {
     const data = encodePaste(text, entry.term.bracketedPaste);
@@ -319,6 +323,9 @@ export function createTerminalPanel(deps: {
     root.addEventListener('keydown', (event) => {
       const stroke = {
         key: event.key,
+        // Физическая клавиша рядом с символом: сочетания терминала не должны зависеть
+        // от раскладки, а сам ввод по-прежнему идёт символом раскладки.
+        code: event.code,
         ctrlKey: event.ctrlKey,
         altKey: event.altKey,
         metaKey: event.metaKey,
@@ -332,13 +339,13 @@ export function createTerminalPanel(deps: {
         return;
       }
       // Ctrl+F — поиск в консоли (как в редакторе).
-      if (event.ctrlKey && !event.shiftKey && (event.key === 'f' || event.key === 'F')) {
+      if (event.ctrlKey && !event.shiftKey && shortcutOf(event) === 'F') {
         event.preventDefault();
         openFind();
         return;
       }
       // Ctrl+Shift+C — копировать выделение (в терминале `Ctrl+C` — сигнал, а не копия).
-      if (event.ctrlKey && event.shiftKey && (event.key === 'C' || event.key === 'c')) {
+      if (event.ctrlKey && event.shiftKey && shortcutOf(event) === 'C') {
         const text = entry.view.selectedText();
         if (text) {
           void navigator.clipboard.writeText(text).catch(() => undefined);

@@ -13,9 +13,17 @@
  *     чтобы редактор не принял его за набранные команды.
  */
 
+import { physicalKeyName } from '../../../shared/physical-key';
+
 /** Что известно о нажатии: клавиша и модификаторы (как у `KeyboardEvent`). */
 export interface KeyStroke {
   readonly key: string;
+  /**
+   * `KeyboardEvent.code` — физическая клавиша. По ней считаются управляющие коды и
+   * сочетания: при русской раскладке `Ctrl+C` даёт `key === 'с'`, и в pty ушёл бы
+   * символ вместо сигнала `\x03`.
+   */
+  readonly code?: string;
   readonly ctrlKey: boolean;
   readonly altKey: boolean;
   readonly metaKey: boolean;
@@ -83,6 +91,9 @@ function controlCode(key: string): number | null {
  */
 export function encodeKey(stroke: KeyStroke, modes: KeyModes): string | null {
   const { key } = stroke;
+  // Управляющий код — по ФИЗИЧЕСКОЙ клавише: `Ctrl+C` при русской раскладке даёт
+  // `key === 'с'`, и без этого в pty уходил символ вместо сигнала прерывания.
+  const named = stroke.ctrlKey ? (physicalKeyName(stroke.code) ?? key) : key;
 
   // Навигация: стрелки бывают «обычными» и «прикладными»; прочие — с модификатором.
   const nav = NAVIGATION[key];
@@ -115,7 +126,8 @@ export function encodeKey(stroke: KeyStroke, modes: KeyModes): string | null {
 
   // Обычный знак. Ctrl превращает его в управляющий код, Alt добавляет префикс ESC.
   if (key.length === 1) {
-    const base = stroke.ctrlKey ? controlCode(key) : null;
+    const base = stroke.ctrlKey ? controlCode(named) : null;
+    // Без Ctrl у Alt остаётся символ раскладки: Alt — это префикс ESC к набранному.
     const produced = base !== null ? String.fromCharCode(base) : key;
     return stroke.altKey ? `\x1b${produced}` : produced;
   }
@@ -131,7 +143,9 @@ export function encodeKey(stroke: KeyStroke, modes: KeyModes): string | null {
  * `Ctrl+V` уходит в pty управляющим кодом `\x16` (quoted-insert) и ничего не вставляет.
  */
 export function isPasteStroke(stroke: KeyStroke): boolean {
-  return (stroke.ctrlKey || stroke.metaKey) && !stroke.altKey && stroke.key.toLowerCase() === 'v';
+  // По физической клавише: при русской раскладке `Ctrl+V` даёт `key === 'м'`.
+  const named = physicalKeyName(stroke.code) ?? stroke.key;
+  return (stroke.ctrlKey || stroke.metaKey) && !stroke.altKey && named.toLowerCase() === 'v';
 }
 
 /**

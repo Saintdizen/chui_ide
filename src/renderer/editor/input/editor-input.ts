@@ -25,6 +25,7 @@
  * тройной — строку. Счёт готовых щелчков даёт браузер в `event.detail`.
  */
 
+import { physicalKeyName } from '../../../shared/physical-key';
 import { wordAt } from '../core/graphemes';
 import { blockCommentFor, lineCommentFor } from './comments';
 import { chordCommand, chordName, isChordPrefix, resolveKey, type EditCommand, type Motion } from './keymap';
@@ -279,6 +280,9 @@ export class EditorInputBinding {
   private readonly onKeyDown = (event: KeyboardEvent): void => {
     const chord = {
       key: event.key,
+      // Физическое положение клавиши рядом с символом раскладки: по нему находятся
+      // команды (`Ctrl+Z`, `Ctrl+/`), а `key` остаётся для ввода текста.
+      physical: physicalKeyName(event.code) ?? undefined,
       shift: event.shiftKey,
       ctrl: event.ctrlKey,
       meta: event.metaKey,

@@ -10,15 +10,27 @@
  * Здесь только перевод клавиши в команду — никаких правок и движений. Что команда
  * делает, решает контроллер. Так раскладку можно менять, не трогая поведение.
  *
- * Пользуемся `event.key` (а не `code`): он учитывает раскладку и уже готовый символ
- * с модификатором (Shift+«1» даёт «!»). Для движений и управления этого достаточно;
- * физические клавиши (`code`) понадобились бы только для своих привязок вроде игровых.
+ * Две стороны нажатия важны по-разному, и путать их нельзя:
+ *
+ *   • КОМАНДЫ разбираются по физической клавише (`physical`, из `event.code`): при
+ *     русской раскладке `Ctrl+Z` даёт `key === 'я'`, и «отмена» перестала бы находиться.
+ *   • ВВОД ТЕКСТА берёт `key`: там раскладка и нужна — иначе по-русски печаталась
+ *     бы латиница.
+ *
+ * Отсюда в `KeyChord` два имени клавиши: `key` (символ раскладки) и `physical`
+ * (положение). Служебные клавиши — `Enter`, `F5`, стрелки — от раскладки не зависят,
+ * у них `physical` нет и берётся `key`.
  */
 
 /** Раскладка раскладки — то, что нужно знать о нажатии. Меньше, чем `KeyboardEvent`: так проще проверять. */
 export interface KeyChord {
   /** Значение `KeyboardEvent.key`: «a», «ArrowLeft», «Home», «\n» и так далее. */
   readonly key: string;
+  /**
+   * Клавиша по физическому положению (`KeyboardEvent.code` → «S», «1», «/»);
+   * `undefined` — служебная, её имя от раскладки не зависит.
+   */
+  readonly physical?: string;
   readonly shift?: boolean;
   readonly ctrl?: boolean;
   readonly meta?: boolean;
@@ -124,6 +136,9 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   const extend = chord.shift === true;
   const control = chord.ctrl === true || chord.meta === true;
   const { key } = chord;
+  // Для КОМАНД — физическое положение клавиши: раскладка не должна их отменять.
+  // Для ВВОДА остаётся `key` (см. последнюю ветку) — там нужен символ раскладки.
+  const named = chord.physical ?? key;
 
   // Разделители строк: разные раскладки и системы дают разные имена.
   if (key === 'Enter' || key === '\r' || key === '\n') {
@@ -146,7 +161,7 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   // Сочетания клавиш у неё нет — это клавиша панели.
   if (key === 'F1') return { kind: 'edit', edit: 'palette' };
   // Ctrl+Shift+T — обернуть выделение: список вариантов показывает вызывающий.
-  if (control && extend && key.toLowerCase() === 't') return { kind: 'edit', edit: 'surroundWith' };
+  if (control && extend && named.toLowerCase() === 't') return { kind: 'edit', edit: 'surroundWith' };
   // Навигация по символу: F12 — определение, Shift+F12 — ссылки, Ctrl+Shift+F12 —
   // заглянуть (определение на месте). Привычные сочетания клавиш.
   // Без Alt: Alt+F12 — это терминал (акселератор меню), и его нажатие доходит и сюда.
@@ -175,7 +190,7 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     // Ctrl+Alt+Z — отменить правку ТОЛЬКО главной каретки (независимая отмена),
     // Ctrl+Alt+Shift+Z и Ctrl+Alt+Y — вернуть её. Сочетание с Alt выбрано потому,
     // что обычные Ctrl+Z/Ctrl+Y заняты общей отменой и повтором.
-    const lower = key.toLowerCase();
+    const lower = named.toLowerCase();
     if (lower === 'z') return { kind: 'edit', edit: extend ? 'redoAtCursor' : 'undoAtCursor' };
     if (lower === 'y') return { kind: 'edit', edit: 'redoAtCursor' };
   }
@@ -185,7 +200,7 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     if (key === 'ArrowUp') return { kind: 'edit', edit: 'moveLineUp' };
     if (key === 'ArrowDown') return { kind: 'edit', edit: extend ? 'copyLineDown' : 'moveLineDown' };
     // Shift+Alt+A — блочный комментарий: знак пары берётся по языку на стороне ввода.
-    if (extend && key.toLowerCase() === 'a') return { kind: 'edit', edit: 'toggleBlockComment' };
+    if (extend && named.toLowerCase() === 'a') return { kind: 'edit', edit: 'toggleBlockComment' };
   }
   if (key === 'ArrowUp') return motion('up', extend);
   if (key === 'ArrowDown') return motion('down', extend);
@@ -196,7 +211,7 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
   if (key === 'End') return motion(control ? 'docEnd' : 'lineEnd', extend);
 
   if (control) {
-    const lower = key.toLowerCase();
+    const lower = named.toLowerCase();
     // Без Shift: Ctrl+Shift+A — это панель AI (акселератор меню), её нажатие
     // доходит и сюда; иначе оно заодно выделяло бы весь текст.
     if (lower === 'a' && !extend) return { kind: 'edit', edit: 'selectAll' };
@@ -215,13 +230,13 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
     if (lower === 'k' && extend) return { kind: 'edit', edit: 'deleteLine' };
     if (lower === 'j' && extend) return { kind: 'edit', edit: 'joinLines' };
     // Ctrl+/ — комментарий строки: буквенного имени у клавиши нет, проверяем сам знак.
-    if (key === '/') return { kind: 'edit', edit: 'toggleComment' };
+    if (named === '/') return { kind: 'edit', edit: 'toggleComment' };
     // Ctrl+. — быстрые исправления: как в других редакторах, на той же клавише.
-    if (key === '.') return { kind: 'edit', edit: 'codeActions' };
+    if (named === '.') return { kind: 'edit', edit: 'codeActions' };
     // Ctrl+Shift+[ сворачивает блок, Ctrl+Shift+] раскрывает — как в других редакторах.
     // Со сдвигом те же клавиши дают «{» и «}»: раскладка меняет знак, команда — та же.
-    if (key === '[' || key === '{') return { kind: 'edit', edit: 'fold' };
-    if (key === ']' || key === '}') return { kind: 'edit', edit: 'unfold' };
+    if (named === '[') return { kind: 'edit', edit: 'fold' };
+    if (named === ']') return { kind: 'edit', edit: 'unfold' };
     // Ctrl+Z — отмена; Ctrl+Shift+Z и Ctrl+Y — повтор (обе привычки поддержаны).
     if (lower === 'z') return { kind: 'edit', edit: extend ? 'redo' : 'undo' };
     if (lower === 'y') return { kind: 'edit', edit: 'redo' };
@@ -246,7 +261,10 @@ export function chordName(chord: KeyChord): string {
   if (chord.ctrl === true || chord.meta === true) parts.push('Ctrl');
   if (chord.alt === true) parts.push('Alt');
   if (chord.shift === true) parts.push('Shift');
-  parts.push(chord.key.length === 1 ? chord.key.toUpperCase() : chord.key);
+  // Имя — по физическому положению клавиши: при русской раскладке `Ctrl+K` даёт
+  // `key === 'л'`, и пара-приставка перестала бы находиться.
+  const key = chord.physical ?? chord.key;
+  parts.push(key.length === 1 ? key.toUpperCase() : key);
   return parts.join('+');
 }
 
