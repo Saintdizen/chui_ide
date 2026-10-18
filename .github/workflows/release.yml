@@ -1,5 +1,21 @@
 name: Сборка дистрибутивов
 
+# Код и сборка — здесь, в закрытом репозитории. Готовые файлы уезжают в открытый
+# `Saintdizen/chui_ide_site`: там релиз виден всем, браузер скачивает файл по прямой
+# ссылке без токена, и ссылка с сайта больше не упирается в 404 закрытого релиза.
+#
+# Отсюда две вещи, без которых ничего не выйдет:
+#   * `GITHUB_TOKEN` в чужой репозиторий не достаёт, даже если владелец общий.
+#     Нужен personal access token на запись в `chui_ide_site` (Contents: Read and
+#     write), положенный в секреты этого репозитория под именем `SITE_TOKEN`.
+#   * ноты релиза генерируются по истории коммитов, а в публичном репозитории
+#     коммитов приложения нет. Поэтому `prepare` просит ноты у здешнего
+#     репозитория (generate-notes) и передаёт готовый текст в публичный черновик.
+
+env:
+  # Куда публикуем релиз. Одно место, чтобы не искать строку по всему файлу.
+  RELEASE_REPO: Saintdizen/chui_ide_site
+
 # Собираем по тегу (`v1.2.3`) и вручную из интерфейса GitHub. На каждый push
 # полная сборка трёх платформ не нужна: она занимает десятки минут, а проверить
 # код на каждом изменении и так успевают обычные проверки (typecheck, smoke).
@@ -25,18 +41,40 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      # Здешний токен только читает: его дела хватает на generate-notes выше.
+      # Запись нужна в ПУБЛИЧНОМ репозитории — её даёт SITE_TOKEN ниже.
+      contents: read
     steps:
-      - name: Убрать прошлый черновик и создать новый
+      # Ноты генерируются по ЗДЕШНЕЙ истории: в публичном репозитории коммитов
+      # приложения нет, и `--generate-notes` там выдал бы пустой список изменений.
+      # Токен тут свой — здешний: SITE_TOKEN в приватный репозиторий не достаёт.
+      - name: Собрать описание изменений
         env:
           GH_TOKEN: ${{ github.token }}
+        run: |
+          # Без нот gh release create вообще откажется создавать релиз, а падать
+          # из-за косметики перед самой сборкой незачем: не вышло собрать описание —
+          # останется одна строка с тегом.
+          notes=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="${{ github.ref_name }}" --jq .body) || notes=""
+          [ -n "$notes" ] || notes="Сборка ${{ github.ref_name }}."
+          printf '%s\n' "$notes" > "$RUNNER_TEMP/notes.md"
+
+      - name: Убрать прошлый черновик и создать новый
+        env:
+          # Токен на запись в ПУБЛИЧНЫЙ репозиторий, здесь его и меняем.
+          GH_TOKEN: ${{ secrets.SITE_TOKEN }}
         # `--repo` обязателен: в этой задаче нет checkout, и без него gh не
         # понимает, о каком репозитории речь («fatal: not a git repository»), —
         # а с `|| true` это проходило молча, и черновик не готовился вовсе.
         # `--cleanup-tag` не ставим: тег трогать нельзя, по нему идёт сборка.
+        #
+        # Тег в публичном репозитории создаётся заново — на его дефолтной ветке:
+        # коммита с этим хешем там нет, а нужен он только как якорь релиза.
         run: |
-          gh release delete "${{ github.ref_name }}" --yes --repo "${{ github.repository }}" || true
-          gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" --generate-notes --repo "${{ github.repository }}"
+          gh release delete "${{ github.ref_name }}" --yes --repo "$RELEASE_REPO" || true
+          gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" \
+            --notes-file "$RUNNER_TEMP/notes.md" --repo "$RELEASE_REPO"
 
   build:
     name: ${{ matrix.label }}
@@ -46,8 +84,9 @@ jobs:
     if: always()
     runs-on: ${{ matrix.os }}
     permissions:
-      # Запись нужна, чтобы приложить собранные файлы к релизу.
-      contents: write
+      # Запись не нужна: файлы льются в публичный репозиторий, права на него
+      # несёт SITE_TOKEN (у GITHUB_TOKEN доступа туда нет).
+      contents: read
     strategy:
       # Платформы независимы: упавшая сборка deb не должна отменять dmg.
       fail-fast: false
@@ -99,6 +138,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          # Релиз в ДРУГОМ репозитории: сборка здесь, публикация — в открытом
+          # `chui_ide_site`. Поэтому и адрес, и токен задаются явно.
+          repository: ${{ env.RELEASE_REPO }}
+          token: ${{ secrets.SITE_TOKEN }}
           draft: true
           tag_name: ${{ github.ref_name }}
           generate_release_notes: false
