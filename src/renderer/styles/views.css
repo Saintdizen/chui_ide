@@ -1049,12 +1049,14 @@
   min-height: 0;
 }
 
+/* Тулбары панелей дока — одна полоса на всех: шаг 5 px, отступы 5/10. Значения
+   держатся вместе, иначе каждая панель дышит по-своему и переключение вкладок
+   дёргает полосу по высоте. */
 .notebook-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--separator_color);
+  gap: 5px;
+  padding: 5px 10px;
   color: var(--text_color_secondary);
   font-size: var(--font_labels_size);
 }
@@ -1614,9 +1616,8 @@
 .outline-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--separator_color);
+  gap: 5px;
+  padding: 5px 10px;
 }
 
 .outline-title {
@@ -1691,9 +1692,8 @@
 .problems-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--separator_color);
+  gap: 5px;
+  padding: 5px 10px;
 }
 
 .problems-title {
@@ -1823,9 +1823,8 @@
 .todo-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--separator_color);
+  gap: 5px;
+  padding: 5px 10px;
 }
 
 .todo-title {
@@ -1952,9 +1951,8 @@
 .tests-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--separator_color);
+  gap: 5px;
+  padding: 5px 10px;
 }
 
 .tests-summary {
@@ -2071,9 +2069,8 @@
 
 .debug-toolbar {
   display: flex;
-  gap: 4px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--separator_color);
+  gap: 5px;
+  padding: 5px 10px;
 }
 
 .debug-body {

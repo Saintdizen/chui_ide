@@ -2028,12 +2028,15 @@ textarea {
   min-height: 0;
 }
 
+/* Шаг и отступы у всех тулбаров дока одни: 5 px между контролами и 5 px по
+   вертикали с 10 px по краям. Каждая панель — свой остров, но полоса у них
+   общая, и разные шаги (4/6/8/10) читались как случайность. */
 .search-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 5px;
   flex: 0 0 auto;
-  padding: 8px 10px 6px;
+  padding: 5px 10px;
 }
 
 .search-box {
@@ -2052,8 +2055,7 @@ textarea {
 
 /* Строка замены: поле тянется, кнопка держится справа. */
 .search-replace {
-  gap: 6px;
-  padding-top: 0;
+  gap: 5px;
 }
 
 .search-replace-input {
