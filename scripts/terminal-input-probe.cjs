@@ -39,6 +39,16 @@ const check = (label, condition, extra) => {
 };
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Дождаться условия: опрос с шагом 100 мс. Возвращает true, если оно выполнилось. */
+async function waitFor(predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return true;
+    await wait(100);
+  }
+  return false;
+}
 const ask = (window, expression, timeoutMs = 20000) =>
   Promise.race([
     window.webContents.executeJavaScript(expression).catch((error) => `ошибка: ${error.message}`),
@@ -136,14 +146,32 @@ app.whenReady().then(async () => {
   );
   check('полотно терминала в фокусе', focused === 'в фокусе', focused);
 
-  press(ide, 'v', ['control']);
-  await wait(500);
+  // Окно должно быть в фокусе ОС: без него Chromium отказывает `readText()` («Document
+  // is not focused»), и вставка молча не срабатывает — в том числе в пробе на Wayland,
+  // где окно поднимается без фокуса.
+  ide.focus();
+  ide.webContents.focus();
+  await wait(400);
+
+  const readLog = () => (session ? terminals.read(session.id, 0).data : '');
+
+  // Ждём ЭХО вставки, а не фиксированную паузу: чтение буфера асинхронное, а на
+  // первых кадрах окно ещё не готово принять клавишу. Если первое нажатие
+  // потерялось — жмём снова: окну нужно дойти до фокуса, и это вопрос среды,
+  // а не вставки.
+  let echoed = false;
+  for (let attempt = 0; attempt < 3 && !echoed; attempt += 1) {
+    press(ide, 'v', ['control']);
+    echoed = await waitFor(async () => readLog().includes('printf'), 2500);
+  }
+  check('Ctrl+V довёл текст до оболочки', echoed, { хвост: readLog().slice(-120) });
+
   // Enter — отдельным нажатием: вставляем текст, а не перевод строки.
   press(ide, 'Return');
-  await wait(1500);
+  await waitFor(async () => readLog().includes('PASTE-OK'), 4000);
 
-  const log = session ? terminals.read(session.id, 0).data : '';
-  check('Ctrl+V довёл текст до оболочки и она его выполнила', log.includes('PASTE-OK'), {
+  const log = readLog();
+  check('вставленная команда выполнилась', log.includes('PASTE-OK'), {
     хвост: log.slice(-160),
   });
   // До починки комбинация уходила в pty управляющим кодом quoted-insert (`\x16`),
@@ -233,11 +261,10 @@ app.whenReady().then(async () => {
     },
   );
   // Высота не задана числом: computed `height` у элемента в раскладке всё равно
-  // вернётся в пикселях, поэтому проверяем факт — шапка и тулбар одной высоты
-  // (кроме пикселя рамки под шапкой).
+  // вернётся в пикселях, поэтому проверяем факт — шапка и тулбар одной высоты.
   check(
     'высота шапки — по содержимому, как у тулбара',
-    strip !== null && Math.abs(strip.шапкаВысота - strip.тулбарВысота - 1) <= 1,
+    strip !== null && strip.шапкаВысота === strip.тулбарВысота,
     strip && { шапка: strip.шапкаВысота, тулбар: strip.тулбарВысота },
   );
 
