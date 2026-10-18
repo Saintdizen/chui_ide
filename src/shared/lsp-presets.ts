@@ -90,8 +90,25 @@ export function presetCommands(): string[] {
  * тогда фильтровать нечем, показываем всё и не угадываем.
  */
 export function lspLanguagesForKind(kind: string | null): readonly string[] | null {
-  if (kind === 'python') return [...COMMON_LANGUAGES, 'python', 'ini'];
-  if (kind === 'node' || kind === 'deno') return [...COMMON_LANGUAGES, 'typescript', 'javascript'];
+  const primary = lspPrimaryLanguagesForKind(kind);
+  if (!primary) return null;
+  return kind === 'python' ? [...COMMON_LANGUAGES, ...primary, 'ini'] : [...COMMON_LANGUAGES, ...primary];
+}
+
+/**
+ * Языки, ради которых проект этого вида и существует — без сопутствующих (JSON, CSS,
+ * разметка). По ним греются серверы при открытии проекта (см. `LspService.prewarm`):
+ * язык вида — то, ради чего человек этот проект и открыл, и ждать первого файла
+ * здесь незачем. Сопутствующие серверы поднимутся сами, когда такой файл откроют:
+ * держать процессы ради конфигов — лишние системы.
+ *
+ * Вид берётся из карты проекта (`project.kind`), то есть из его манифестов, а не из
+ * расширений: репозиторий без единого `.py` остаётся Python-проектом, и сервер ему
+ * нужен.
+ */
+export function lspPrimaryLanguagesForKind(kind: string | null): readonly string[] | null {
+  if (kind === 'python') return ['python'];
+  if (kind === 'node' || kind === 'deno') return ['typescript', 'javascript'];
   return null;
 }
 

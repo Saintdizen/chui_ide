@@ -43,6 +43,21 @@ import { mergeEnv } from '../project-env';
 const INITIALIZE_TIMEOUT_MS = 15_000;
 
 /**
+ * Строка для обхода проекта (`workspace/symbol`). Именно РЕДКАЯ, а не пустая:
+ * обход нужен ради построенного индекса, а не ради списка, а пустой запрос в ответ
+ * присылает все символы проекта — на большом репозитории это сотни тысяч записей
+ * и мегабайты разбора ради того, что мы всё равно выбрасываем.
+ */
+const PROJECT_SCAN_QUERY = 'chui-project-scan';
+
+/**
+ * Сколько ждать обхода проекта (`workspace/symbol`). Обход — это разбор всех файлов
+ * проекта, и на большом репозитории он идёт секундами: предел щедрый, но не
+ * бесконечный — не дождавшись, отпускаем сервер спокойно, индекс догреется сам.
+ */
+const PROJECT_SCAN_TIMEOUT_MS = 60_000;
+
+/**
  * Запросы к документу, у которых свежий запрос вытесняет устаревший. Набор идёт быстрее,
  * чем отвечает сервер, и досказывать то, что уже не нужно, — трата сил сервера. Прочие
  * запросы (initialize, rename, форматирование) не отменяем: у них результат нужен.
@@ -371,6 +386,12 @@ export class LspService {
   private readonly failed = new Map<string, string>();
   /** Ответ на «лежит ли команда в окружении проекта»: по команде, с проверкой диска. */
   private readonly environmentCommands = new Map<string, boolean>();
+  /**
+   * Языки, чей проект сервер уже обошёл целиком (см. `scanProject`). Повторный
+   * прогрев тех же языков обход НЕ повторяет: сервер прочитал бы проект заново.
+   * Сбрасывается перезапуском: у нового процесса индекса нет.
+   */
+  private readonly scanned = new Set<string>();
 
   constructor(
     private readonly root: () => string | null,
@@ -398,6 +419,13 @@ export class LspService {
      * Не задано — журнала нет: писать некуда.
      */
     private readonly tracePath: () => string | null = () => null,
+    /**
+     * Файл-затравка языка: первый подходящий файл проекта и его текст. Открыв его
+     * серверу, мы даём серверу за что взяться при обходе проекта (см. `scanProject`).
+     * Не задано или null — серверу открывать нечего, обход идёт как раньше.
+     */
+    private readonly seedDocument: (language: string) => Promise<{ path: string; text: string } | null> = async () =>
+      null,
   ) {}
 
   /**
@@ -427,6 +455,8 @@ export class LspService {
     // Подъёмы, начатые до перезапуска, станут ненужными: счётчик версий их отсечёт.
     this.generation += 1;
     this.failed.clear();
+    // Новые процессы проекта ещё не читали: при следующем прогреве обойдут заново.
+    this.scanned.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
     return this.status();
   }
@@ -444,6 +474,9 @@ export class LspService {
    * не найден» у языков, о серверах для которых речи не шло. Мастер-тумблер
    * `lsp.enabled` уважаем так же, как везде. Возврат после подъёма: вызывающий
    * сразу видит итог в `status`.
+   *
+   * Поднятый сервер сразу получает обход проекта (`scanProject`): без него индекс
+   * собирался бы только по запросу — то есть первым поиском символа или ссылок.
    */
   async prewarm(languages: readonly string[]): Promise<void> {
     if (!this.settings().enabled) return;
@@ -451,7 +484,74 @@ export class LspService {
     // Параллельно: языки независимы, и ждать их по очереди — терять время зря.
     // Повторный прогрев безопасен: уже поднятый сервер отдаётся как есть, а два
     // одновременных вызова одного языка ждут один и тот же подъём (см. `starting`).
-    await Promise.all(wanted.map((language) => this.runtimeFor(language).catch(() => null)));
+    await Promise.all(
+      wanted.map(async (language) => {
+        const runtime = await this.runtimeFor(language).catch(() => null);
+        // Подняли впервые — сразу просим сервер обойти проект: с этого момента индекс
+        // готов, и поиск по символам не ждёт первого запроса человека.
+        if (runtime) await this.scanProject(runtime);
+      }),
+    );
+  }
+
+  /**
+   * Обход проекта сервером: сервер строит индекс файлов, а не отвечает по одному
+   * документу. Зовём `workspace/symbol` с редкой строкой и выбрасываем ответ —
+   * нужен не список, а то, что сервер к нему прочитает и разберёт.
+   *
+   * Без этого шага индекс собирается по требованию: первый поиск символа или ссылок
+   * после открытия проекта идёт секундами (а у части серверов на большом проекте —
+   * заметно дольше). Прогрев сервера без обхода закрывал только половину паузы.
+   *
+   * ПЕРЕД обходом серверу открывается файл-затравка (`seedDocument`). Это не
+   * украшение, а условие работы: у `tsserver` без единого открытого файла нет ни
+   * одного проекта, и `workspace/symbol` отвечает ошибкой «No Project.» — то есть
+   * обход не работал ВООБЩЕ, и поиск символов по проекту оставался пустым, пока
+   * человек не откроет вкладку. Затравку не закрываем: после `didClose` проект
+   * снова теряется и индекс пропадает.
+   *
+   * Сервер без `workspace/symbol` (pylsp, marksman) обойти проект не умеет —
+   * затравки ему хватает: дальше он индексирует сам, по мере надобности.
+   * Сбой или таймаут тоже не повод считать сервер сломанным — при первом
+   * настоящем запросе индекс дособерётся сам.
+   */
+  private async scanProject(runtime: ServerRuntime): Promise<void> {
+    const language = runtime.config.language;
+    if (this.scanned.has(language)) return;
+    await runtime.initialized.catch(() => undefined);
+    // Отмечаем ДО запросов: два прогрева одного языка, пришедшие разом, не должны
+    // запустить два обхода — сервер прочитал бы проект дважды.
+    this.scanned.add(language);
+    await this.seed(runtime);
+    if (!runtime.capabilities.workspaceSymbolProvider) return;
+    // Повтор: сервер мог ещё подхватывать затравку, а обход до этого — не знать
+    // ни одного проекта. Вторая попытка дешёва: первый запрос уже прогрел кеши.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await withTimeout(
+          runtime.connection.request('workspace/symbol', { query: PROJECT_SCAN_QUERY }),
+          PROJECT_SCAN_TIMEOUT_MS,
+          'обход проекта',
+        );
+        return;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)));
+      }
+    }
+  }
+
+  /**
+   * Открыть серверу файл языка из проекта, если он ещё ничего не знает. Без этого
+   * обход проекта у `tsserver` невозможен (см. `scanProject`), а у остальных серверов
+   * он просто начинает индекс раньше. Документ остаётся открытым — иначе сервер
+   * теряет проект и вместе с ним индекс.
+   */
+  private async seed(runtime: ServerRuntime): Promise<void> {
+    const seed = await this.seedDocument(runtime.config.language).catch(() => null);
+    if (!seed) return;
+    // Файл уже открыт в редакторе — сервер проект знает, затравка не нужна.
+    if (this.openedIn.has(seed.path)) return;
+    await this.open(seed.path, runtime.config.language, seed.text).catch(() => undefined);
   }
 
   /**
@@ -491,6 +591,12 @@ export class LspService {
     // Пока сервер поднимался, файл могли править: отдаём АКТУАЛЬНЫЙ текст, а не тот,
     // что был при открытии, — иначе сервер разберёт устаревший код.
     const current = this.latestText.get(path) ?? text;
+    // Документ уже открыт этим сервером (его открыл обход проекта, см. `seed`) —
+    // второй `didOpen` не нужен, но текст мог смениться: шлём правку.
+    if (this.openedIn.get(path) === runtime) {
+      this.change(path, current);
+      return;
+    }
     runtime.versions.set(path, 1);
     this.openedIn.set(path, runtime);
     runtime.connection.notify('textDocument/didOpen', {
@@ -536,6 +642,7 @@ export class LspService {
   dispose(): void {
     this.generation += 1;
     this.failed.clear();
+    this.scanned.clear();
     this.latestText.clear();
     this.openedIn.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);

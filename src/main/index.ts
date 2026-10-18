@@ -15,6 +15,7 @@ import { pushToRenderers } from './ipc/push';
 import { openProjectFolder, registerIpc } from './ipc/register';
 import { LspService } from './lsp/lsp';
 import { detectLspSources } from './lsp/detect';
+import { createSeedProvider } from './lsp/seed';
 import { McpService } from './mcp/mcp';
 import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
@@ -227,6 +228,9 @@ if (!app.requestSingleInstanceLock()) {
       },
       // Журнал обмена с серверами (настройка `lsp.trace`) — в пользовательских данных.
       () => path.join(app.getPath('userData'), 'lsp-trace.log'),
+      // Файл-затравка языка: без него сервер не знает проекта и не обходит его
+      // (см. `LspService.scanProject`) — поиск символов оставался бы пустым.
+      createSeedProvider(() => workspace.rootPath()),
     );
     // Отладчик: сессия debugpy по DAP. Интерпретатор тот же, что у запуска и тестов,
     // а `.env` проекта — тот же, что у терминала и языкового сервера.

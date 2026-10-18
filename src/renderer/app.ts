@@ -10,7 +10,7 @@ import {
 } from '../shared/api';
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
-import { lspLanguagesForKind, mergeLspServers } from '../shared/lsp-presets';
+import { lspLanguagesForKind, lspPrimaryLanguagesForKind, mergeLspServers } from '../shared/lsp-presets';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
 import type { FileOperation } from '../shared/lsp-workspace-edit';
 import { progressLabel, type LspProgress, type WorkProgress } from '../shared/lsp-progress';
@@ -1712,6 +1712,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   let lspHintShown = false;
   /** Подсказку «сервера для языка проекта нет» показываем один раз за сеанс. */
   let lspMissingHintShown = false;
+  /**
+   * Идущий прогон поиска серверов — один на всех вызывающих.
+   *
+   * В момент запуска окна `ensureLspServers` зовут почти одновременно трижды:
+   * загрузка окна, открытие проекта и смена активного корня. Настройки приходят
+   * в renderer push-событием (то есть ПОЗЖЕ ответа), поэтому каждый прогон видел
+   * один и тот же ещё не дополненный список, дописывал те же языки и показывал своё
+   * уведомление — три одинаковых тоста на старте. Вызовы, пришедшие во время
+   * прогона, ждут его результата и своего прогона не заводят.
+   */
+  let lspServersRun: Promise<boolean> | null = null;
+  /** Языки, о подключении которых уже сказали: повтор про то же — шум. */
+  const lspAnnounced = new Set<string>();
 
   /** Перечитать карту проекта: дёшево — обход имён без чтения содержимого. */
   async function refreshScan(): Promise<void> {
@@ -1723,21 +1736,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     refreshStatus();
   }
 
-  /**
-   * Языковые серверы: дополнить настроенные найденными.
-   *
-   * Список может пополниться не только «с нуля»: сервер появляется позже — его
-   * поставили в только что созданное окружение проекта. Поэтому выходим не на
-   * непустом списке, а сверяем языки: чего в списке нет, а в системе нашлось —
-   * добавляем (`mergeLspServers`). Настроенные записи не трогаем: в них решения
-   * человека — свой путь, свои аргументы, выключенный сервер.
-   *
-   * Ничего не запускаем: только проверяем, что команда есть (PATH и главное
-   * окружение проекта).
-   *
-   * Возвращает признак «список пополнился»: после этого серверы нужно
-   * перезапустить, иначе новый так и не поднимется.
-   */
   /**
    * Сервера для языка проекта нет — сказать об этом и предложить настройку.
    * Один раз за сеанс: на каждое обновление окружения это стало бы шумом.
@@ -1761,7 +1759,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     );
   }
 
-  async function ensureLspServers(): Promise<boolean> {
+  /**
+   * Языковые серверы: дополнить настроенные найденными.
+   *
+   * Список может пополниться не только «с нуля»: сервер появляется позже — его
+   * поставили в только что созданное окружение проекта. Поэтому выходим не на
+   * непустом списке, а сверяем языки: чего в списке нет, а в системе нашлось —
+   * добавляем (`mergeLspServers`). Настроенные записи не трогаем: в них решения
+   * человека — свой путь, свои аргументы, выключенный сервер.
+   *
+   * Ничего не запускаем: только проверяем, что команда есть (PATH и главное
+   * окружение проекта).
+   *
+   * Возвращает признак «список пополнился»: после этого серверы нужно
+   * перезапустить, иначе новый так и не поднимется.
+   *
+   * Зовётся только из `ensureLspServers`: прогон должен быть один на всех.
+   */
+  async function discoverLspServers(): Promise<boolean> {
     // Мастер-тумблер — решение человека: в обход него серверы не подставляем и не
     // запускаем. Но если серверы в проекте есть, а подсказки выключены, сказать об
     // этом стоит — иначе причину ищут в окружении, а не в настройке. Один раз за
@@ -1792,10 +1807,32 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
     // Дописанное всегда идёт в хвосте (см. `mergeLspServers`) — по длине исходного
     // списка видно, что именно подключилось, и об этом стоит сказать.
-    const added = merged.slice(configured.length).map((server) => server.language);
+    const added = merged
+      .slice(configured.length)
+      .map((server) => server.language)
+      .filter((language) => !lspAnnounced.has(language));
     await rpc.request('settings.update', { lsp: { servers: merged } }).catch(() => undefined);
+    // Сказать нечего — молчим: повторный прогон на тех же языках заметил бы их снова
+    // (настройки приходят push-событием позже ответа).
+    if (added.length === 0) return true;
+    for (const language of added) lspAnnounced.add(language);
     showToast(`Языковые серверы подключены: ${added.join(', ')}`);
     return true;
+  }
+
+  /**
+   * Дополнить настроенные серверы найденными — одним прогоном на всех.
+   *
+   * Сам поиск — в `discoverLspServers`; здесь только склейка вызовов: их в момент
+   * запуска несколько, и порознь каждый показывал своё уведомление.
+   */
+  function ensureLspServers(): Promise<boolean> {
+    if (!lspServersRun) {
+      lspServersRun = discoverLspServers().finally(() => {
+        lspServersRun = null;
+      });
+    }
+    return lspServersRun;
   }
 
   /**
@@ -1829,17 +1866,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /**
    * Прогреть серверы языков проекта, не дожидаясь открытия файлов.
    *
-   * Языки берём из карты проекта: греть серверы языков, которых в проекте нет, —
-   * лишние процессы. Карта от другого корня (проект только что сменился) — молчим:
-   * прогреем, когда она пересчитается. Для каких языков сервер есть, решает main —
-   * у него свежие настройки, а здешние могли отстать.
+   * Языки берём из двух мест, и оба нужны:
+   *   • карта проекта — что в нём действительно лежит;
+   *   • вид проекта — по его манифестам (`lspPrimaryLanguagesForKind`): репозиторий
+   *     может быть Python-проектом без единого `.py` (конфиги да пустой пакет), и
+   *     сервер ему всё равно нужен; сюда же попадают языки, чьих файлов пока нет.
+   *
+   * Греть серверы языков, которых в проекте нет, — лишние процессы. Карта от другого
+   * корня (проект только что сменился) — молчим: прогреем, когда она пересчитается.
+   * Для каких языков сервер есть, решает main — у него свежие настройки, а здешние
+   * могли отстать; там же поднятый сервер обходит проект и строит индекс.
    */
   function prewarmLsp(): void {
     if (!settings.lsp.enabled) return;
     const root = workspace.root;
     const scan = projectScan;
     if (!root || !scan || scan.root !== root) return;
-    const languages = scan.languages.map((item) => item.id);
+    const fromKind = lspPrimaryLanguagesForKind(scan.kind.id) ?? [];
+    const languages = [...new Set([...scan.languages.map((item) => item.id), ...fromKind])];
     if (languages.length === 0) return;
     void rpc
       .request('lsp.prewarm', { languages })
