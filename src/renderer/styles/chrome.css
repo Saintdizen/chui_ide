@@ -1649,7 +1649,7 @@ textarea {
 }
 
 .tree-row.is-editing {
-  background: var(--element_background_hover);
+  background: transparent;
 }
 
 /* Блок удалённых папок: адреса SSH/WSL/контейнера над локальным деревом. Вид тот же,
@@ -1810,7 +1810,9 @@ textarea {
   padding: 1px 6px;
   border: 1px solid var(--focus_ring_color);
   border-radius: calc(var(--radius_sm) - 3px);
-  background: var(--sunken_background);
+  /* Фона нет: поле стоит в строке дерева, и подложка под ним читалась как вторая
+     плашка поверх строки — рамки фокуса достаточно, она и говорит, куда печатать. */
+  background: transparent;
   font-size: var(--font_labels_size);
 }
 

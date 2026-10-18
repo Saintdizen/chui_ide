@@ -192,16 +192,24 @@ app.whenReady().then(async () => {
   const createdField = await inputAlive();
   console.log(`[explorer] поле создания живо (по кадрам): ${JSON.stringify(createdField)}`);
   // У поля своя рамка в цвете фокуса, поэтому глобальный `outline` (`:focus-visible`)
-  // давал ВТОРУЮ рамку — двойной контур. Индикатор фокуса должен быть один.
+  // давал ВТОРУЮ рамку — двойной контур. Индикатор фокуса должен быть один; а фона
+  // у поля (и у его строки) быть не должно — иначе под обводкой видна вторая плашка.
   console.log(
-    `[explorer] обводка поля ввода (одна): ${JSON.stringify(
+    `[explorer] вид поля ввода (одна обводка, без подложки): ${JSON.stringify(
       await ask(
         ide,
         `(() => {
           const input = document.querySelector('.tree-input');
           if (!input) return null;
           const s = getComputedStyle(input);
-          return { outlineStyle: s.outlineStyle, outlineWidth: s.outlineWidth, borderColor: s.borderTopColor };
+          const row = input.closest('.tree-row');
+          return {
+            outlineStyle: s.outlineStyle,
+            outlineWidth: s.outlineWidth,
+            borderColor: s.borderTopColor,
+            фон_поля: s.backgroundColor,
+            фон_строки: row ? getComputedStyle(row).backgroundColor : null,
+          };
         })()`,
       ),
     )}`,
