@@ -92,4 +92,20 @@ describe('вид подсказки — из общей палитры и выш
   it('появление — кросс-фейдом, как у прочих слоёв', () => {
     expect(rule).toMatch(/animation:\s*popup-fade/);
   });
+
+  // Подсказка всплывает над панелью, полотном и полосой вкладок. Плотная плашка на
+  // них читалась по-разному (над полотном — серая плитка, над тёмной панелью почти
+  // сливалась), поэтому фон у неё — тот же материал, что у меню и поповеров, вместе
+  // с блюром. Сторож в живом окне — `npm run probe:tooltip`.
+  it('фон — материал всплывающих слоёв, а не плотная плашка', () => {
+    expect(rule).toContain('background: var(--popup_material)');
+    expect(rule).not.toContain('background: var(--popup_background)');
+  });
+
+  it('подсказка в списке слоёв с блюром фона', () => {
+    const materials = CHROME.match(/\{[^}]*backdrop-filter:\s*var\(--popup_filter\)[^}]*\}/g) ?? [];
+    const block = (CHROME.match(/[^}]*\.app-tooltip[^}]*\{[^}]*backdrop-filter:[^}]*\}/) ?? [''])[0];
+    expect(materials.length).toBeGreaterThan(0);
+    expect(block).toContain('.app-tooltip');
+  });
 });

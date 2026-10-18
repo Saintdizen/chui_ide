@@ -285,6 +285,9 @@ app.whenReady().then(async () => {
         модель: document.querySelector('.composer-model')?.textContent ?? null,
         усилие: effort ? effort.querySelector('.select-value')?.textContent : null,
         кнопка: document.querySelector('.composer-action')?.getAttribute('title') ?? null,
+        // Значок кнопки: имя лежит в data-icon (см. svgIcon), поэтому «Enter» и
+        // «стрелка вверх» различаются без сверки контуров.
+        значок: document.querySelector('.composer-action svg')?.dataset.icon ?? null,
         _пусто: box ? box.childElementCount : 0,
       };
     })()`,
@@ -295,6 +298,9 @@ app.whenReady().then(async () => {
   check('в «Вопросе» права недоступны', composer.права_выключены === true, composer.права_выключены);
   check('усилие по умолчанию — без размышлений', composer.усилие === 'Без размышлений', composer.усилие);
   check('кнопка отправки подписана', composer.кнопка === 'Отправить (Enter)', composer.кнопка);
+  // Отправка подписана клавишей Enter, а не стрелкой вверх: стрелка читалась как
+  // «поднять/увеличить», хотя кнопка отправляет набранное.
+  check('значок отправки — клавиша Enter', composer.значок === 'enter', composer.значок);
 
   // Переключаем режим на «Агент» через настоящий список выбора: права должны стать
   // доступными. Это и проверяет связку «режим → права», вынесенную в chat-composer.ts.

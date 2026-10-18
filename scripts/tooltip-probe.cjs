@@ -215,6 +215,88 @@ app.whenReady().then(async () => {
     console.log('[подсказки] кнопок окна нет — проверка края пропущена');
   }
 
+  /* --- 5. Фон подсказки — тот же материал, что у прочих всплывающих слоёв -------- */
+  // Подсказка лежит поверх разных поверхностей: то над деревом (панель), то над
+  // полотном редактора, то над полосой вкладок. Плотная подложка без блюра на них
+  // читалась по-разному — над светлым полотном как серая плашка, над тёмной панелью
+  // почти сливалась с ней. Поэтому фон берётся из того же материала, что у меню и
+  // поповеров (`--popup_material` + `--popup_filter`), и вид у слоя один на всё окно.
+  await hover(ide, await ask(ide, centerOf(topButton)));
+  const material = await ask(
+    ide,
+    `(() => {
+      const tip = document.querySelector('.app-tooltip');
+      if (!tip || tip.hidden) return null;
+      const style = getComputedStyle(tip);
+      const root = getComputedStyle(document.documentElement);
+      // Для сравнения — другой всплывающий слой того же вида (меню редактора).
+      const menu = document.querySelector('.context-menu');
+      const menuStyle = menu ? getComputedStyle(menu) : null;
+      return {
+        фон: style.backgroundColor,
+        блюр: style.backdropFilter || style.webkitBackdropFilter || 'none',
+        материал: root.getPropertyValue('--popup_material').trim(),
+        плотный: root.getPropertyValue('--popup_background').trim(),
+        прозрачность: style.opacity,
+        менюБлюр: menuStyle ? menuStyle.backdropFilter || menuStyle.webkitBackdropFilter || 'none' : null,
+        цветТекста: style.color,
+        текстПрозрачность: style.opacity,
+      };
+    })()`,
+  );
+  check('подсказка нашлась для замера фона', material !== null, material);
+  // Материал — полупрозрачный: у плотной плашки альфа ровно 1. По альфе и различаем,
+  // потому что `color-mix` в вычисленном стиле уже развёрнут в `rgba(...)`.
+  // Chromium разворачивает `color-mix` либо в `rgba(...)`, либо в `color(srgb ... / a)`:
+  // альфу берём по тому виду, который пришёл.
+  const alpha = (value) => {
+    const text = String(value);
+    const modern = /\/\s*([\d.]+)\s*\)/.exec(text);
+    if (modern) return Number(modern[1]);
+    const legacy = /rgba\([^)]*,\s*([\d.]+)\s*\)/.exec(text);
+    return legacy ? Number(legacy[1]) : 1;
+  };
+  check(
+    'фон подсказки полупрозрачный — материал слоёв, а не плотная плашка',
+    material !== null && alpha(material.фон) < 1 && alpha(material.фон) > 0.6,
+    material && { фон: material.фон, альфа: alpha(material.фон) },
+  );
+  check(
+    'у подсказки тот же блюр фона, что у прочих слоёв',
+    material !== null && material.блюр !== 'none',
+    material?.блюр,
+  );
+  check('подсказка не полупрозрачна целиком', material?.прозрачность === '1', material?.прозрачность);
+
+  // Снимок: вид подсказки над панелью глазами — фон, рамка, тень и как сидит текст.
+  const shots = path.join(__dirname, '..', '.chui_ide', 'probe-shots');
+  await fs.mkdir(shots, { recursive: true });
+  const image = await ide.capturePage();
+  const shotFile = path.join(shots, 'tooltip.png');
+  await fs.writeFile(shotFile, image.toPNG());
+  console.log(`  снимок подсказки: ${shotFile}`);
+
+  // Тот же фон — над полотном редактора и над деревом: подсказка одна на окно, но
+  // подложка под ней разная, и вид не должен от этого меняться.
+  const editorPoint = await ask(ide, centerOf('.editor-island'));
+  if (editorPoint && typeof editorPoint === 'object') await hover(ide, editorPoint);
+  const overEditor = await ask(
+    ide,
+    `(() => {
+      const tip = document.querySelector('.app-tooltip');
+      if (!tip || tip.hidden) return { видна: false };
+      return { видна: true, фон: getComputedStyle(tip).backgroundColor };
+    })()`,
+  );
+  // Подсказка над полотном может не появиться (у полотна нет подписи) — тогда
+  // сравнивать нечего, но это не провал: фон задан правилом, а не местом.
+  if (overEditor?.видна) {
+    check('над полотном фон подсказки тот же', overEditor.фон === material?.фон, {
+      надПолотном: overEditor.фон,
+      было: material?.фон,
+    });
+  }
+
   console.log(failures === 0 ? '[подсказки] всё сошлось' : `[подсказки] провалов: ${failures}`);
   process.exitCode = failures === 0 ? 0 : 1;
   app.quit();

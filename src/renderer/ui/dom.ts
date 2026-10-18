@@ -190,6 +190,9 @@ const ICON_PATHS = {
   fit: ['M3 6.5V3h3.5', 'M13 6.5V3h-3.5', 'M3 9.5V13h3.5', 'M13 9.5V13h-3.5'],
   // Просмотр разметки: глаз — увидеть собранный документ, рядом карандаш — вернуться к правке.
   eye: ['M1.5 8S4.4 3.8 8 3.8 14.5 8 14.5 8 11.6 12.2 8 12.2 1.5 8 1.5 8z', 'M8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'],
+  // Клавиша Enter (↵): линия с поворотом влево и стрелка на конце. Отправка в чате
+  // подписана именно ей — стрелка вверх там читалась как «поднять/увеличить».
+  enter: ['M13.5 3v4.2a2.6 2.6 0 0 1-2.6 2.6H3.2', 'M5.9 6.9 3 9.8l2.9 2.9'],
 } as const satisfies Record<string, readonly string[]>;
 
 export type IconName = keyof typeof ICON_PATHS;
@@ -206,6 +209,9 @@ export function svgIcon(name: IconName, size = 16): SVGSVGElement {
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
   svg.classList.add('icon');
+  // Имя значка видно в разметке: по нему пробы (и человек в инспекторе) отличают
+  // «стрелка вверх» от «Enter», не сверяя координаты контуров.
+  svg.dataset.icon = name;
   for (const d of ICON_PATHS[name]) {
     const path = document.createElementNS(namespace, 'path');
     path.setAttribute('d', d);

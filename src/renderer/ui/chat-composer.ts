@@ -89,7 +89,9 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
    */
   function syncActionButton(): void {
     clear(actionButton);
-    actionButton.appendChild(svgIcon(busy ? 'stop' : 'arrowUp', 16));
+    // Отправка подписана клавишей Enter (↵), а не стрелкой вверх: стрелка читалась
+    // как «поднять/увеличить», хотя кнопка отправляет набранное.
+    actionButton.appendChild(svgIcon(busy ? 'stop' : 'enter', 16));
     actionButton.title = busy ? 'Остановить генерацию' : 'Отправить (Enter)';
     actionButton.classList.toggle('composer-action-send', !busy);
     actionButton.classList.toggle('composer-action-stop', busy);

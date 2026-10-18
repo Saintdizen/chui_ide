@@ -84,6 +84,9 @@ textarea {
 .popover,
 .palette,
 .toast,
+/* Подсказка — тоже слой над содержимым: под ней бывает и панель, и полотно, и полоса
+   вкладок, поэтому материал у неё тот же, а не своя плашка. */
+.app-tooltip,
 .modal {
   backdrop-filter: var(--popup_filter);
 }
@@ -1329,7 +1332,10 @@ textarea {
   padding: 4px 8px;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_sm);
-  background: var(--popup_background);
+  /* Материал всплывающих слоёв, а не плотная плашка: подсказка всплывает над панелью,
+     полотном и полосой вкладок, и плотный тон на них читался по-разному — над светлым
+     полотном серой плиткой, над тёмной панелью почти сливался с ней. */
+  background: var(--popup_material);
   box-shadow: var(--box_shadow_small);
   color: var(--text_color);
   font-size: var(--font_labels_size);
