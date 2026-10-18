@@ -41,6 +41,8 @@ export interface BrowserView {
   update(id: string, state: BrowserNavState): void;
   /** Вложение сообщило, что вкладка отдана ассистенту (или доступ отозван). */
   setShared(id: string, shared: boolean): void;
+  /** Агент действует на вкладке: показать это человеку и погасить через пару секунд. */
+  setAgentAction(id: string, action: string): void;
   readonly isOpen: boolean;
   readonly pageId: string | null;
 }
@@ -104,6 +106,11 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
     { class: 'icon-btn', type: 'button', title: 'Добавить в чат', onClick: (event: Event) => openChatMenu(event) },
     svgIcon('chat', 14),
   );
+  // Метка «агент работает»: без неё страница под руками человека сама нажимает
+  // кнопки и уходит на другие адреса — и не понять, кто это сделал. Живёт в шапке,
+  // потому что шапка — единственная часть вкладки, которую рисует DOM: сама
+  // страница — слой окна, и ничего поверх неё не положить.
+  const agentBadge = h('span', { class: 'browser-agent', hidden: true });
 
   // Сцена — это «дырка», которую занимает вложение. Своей высоты у неё нет: она
   // тянется под шапкой, а вложение встаёт ровно по её прямоугольнику.
@@ -118,6 +125,7 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
       forwardButton,
       reloadButton,
       address,
+      agentBadge,
       externalButton,
       shareButton,
       devtoolsButton,
@@ -138,6 +146,19 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
   /** Оверлей закрывает сцену — вложение на это время спрятано. */
   let occluded = false;
   let layoutFrame = 0;
+  /** Метка «агент работает» гаснет сама: держать её вечно — значит врать. */
+  let agentTimer = 0;
+
+  /** Как действие агента читается человеку. */
+  const AGENT_ACTIONS: Record<string, string> = {
+    open: 'открывает страницу',
+    read: 'читает страницу',
+    click: 'нажимает на странице',
+    type: 'вводит текст',
+    script: 'выполняет скрипт',
+  };
+  /** Сколько метка держится после последнего действия. */
+  const AGENT_NOTICE_MS = 3000;
 
   /** Прямоугольник сцены в координатах окна: по нему вложение и встаёт. */
   const rectOf = (): BrowserRect => {
@@ -164,11 +185,19 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
 
   /** Показать сцену на текущем месте: спрятанное вложение возвращается тем же путём. */
   function applyVisibility(): void {
-    if (!open || !activeId) return;
+    // Оверлей (палитра, окно) лежит в DOM, а вложение — слоем поверх DOM: пока он
+    // открыт, показывать страницу нельзя, иначе она закроет его собой.
+    if (!open || !activeId || occluded) return;
     deps.rpc
       .request('browser.viewShow', { id: activeId, rect: rectOf() })
       .then((result) => {
-        if (!result.ok) deps.notify('Не удалось показать страницу');
+        if (!result.ok) {
+          deps.notify('Не удалось показать страницу');
+          return;
+        }
+        // Размер сцены в момент показа мог быть ещё не окончательным (панель
+        // доезжает, сплиттер двигается) — дожимаем прямоугольник на следующем кадре.
+        scheduleLayout();
       })
       .catch(() => undefined);
   }
@@ -387,6 +416,20 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
     setShared(id: string, shared: boolean): void {
       sharedId = shared ? id : sharedId === id ? null : sharedId;
       syncToolbar();
+    },
+
+    setAgentAction(id: string, action: string): void {
+      // Метка в шапке говорит про активную вкладку: в шапке другой страницы она врёт.
+      if (id !== activeId) return;
+      if (agentTimer) clearTimeout(agentTimer);
+      agentBadge.textContent = `Ассистент ${AGENT_ACTIONS[action] ?? 'работает со страницей'}`;
+      agentBadge.hidden = false;
+      element.classList.add('is-agent');
+      agentTimer = window.setTimeout(() => {
+        agentTimer = 0;
+        agentBadge.hidden = true;
+        element.classList.remove('is-agent');
+      }, AGENT_NOTICE_MS);
     },
 
     focusAddress(): void {

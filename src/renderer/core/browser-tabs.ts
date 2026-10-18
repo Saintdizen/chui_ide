@@ -19,6 +19,12 @@ export interface BrowserPage {
   url: string;
   /** Заголовок из `<title>` страницы; до загрузки подставляем адрес. */
   title: string;
+  /**
+   * Страницу открыл ассистент. Вкладка при этом настоящая, но её завёл не человек:
+   * в полосе это видно значком, иначе непонятно, откуда взялась страница с пустым
+   * профилем и кто в ней сейчас нажимает кнопки.
+   */
+  byAgent?: boolean;
 }
 
 export class BrowserTabs {
@@ -73,12 +79,14 @@ export class BrowserTabs {
    * узнали о вкладке, и от ключа зависит, к какому вложению обращаться. Свой счётчик
    * здесь не подходит — из двух независимых счётчиков вышли бы совпадающие ключи.
    */
-  adopt(id: string, url: string): void {
+  adopt(id: string, url: string, byAgent = false): void {
     const existing = this.pages.find((page) => page.id === id);
     if (existing) {
       existing.url = url;
+      // Усыновили второй раз — вкладка агента агентской и остаётся.
+      existing.byAgent = byAgent || existing.byAgent === true;
     } else {
-      this.pages.push({ id, url, title: url });
+      this.pages.push({ id, url, title: url, ...(byAgent ? { byAgent: true } : {}) });
     }
     this.activeId = id;
     this.changeEmitter.fire();

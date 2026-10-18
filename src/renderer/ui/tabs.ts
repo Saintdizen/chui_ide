@@ -46,8 +46,14 @@ export interface TabsDeps {
  * знает ни про DOM, ни про эту полосу: здесь только список, активная и действия.
  */
 export interface PagesTabSource {
-  readonly list: readonly { id: string; title: string; url: string }[];
+  readonly list: readonly { id: string; title: string; url: string; byAgent?: boolean }[];
   readonly activePageId: string | null;
+  /**
+   * Страница, на которой прямо сейчас действует ассистент. Метка на вкладке нужна
+   * и тогда, когда страница не активна: агент работает в ней, пока человек смотрит
+   * на свой файл, и узнать об этом больше неоткуда.
+   */
+  readonly agentPageId?: string | null;
   activate(id: string): void;
   close(id: string): void;
   onDidChange(listener: () => void): void;
@@ -273,17 +279,26 @@ export function createTabs(deps: TabsDeps): Tabs {
     for (const page of pages?.list ?? []) {
       const classes = ['tab', 'tab-page'];
       if (page.id === pageActive) classes.push('is-active');
+      // Метка «тут работает ассистент»: без неё действия агента выглядят как
+      // самостоятельная жизнь страницы — тем более когда вкладка не активна.
+      const byAgent = page.id === pages?.agentPageId;
+      if (byAgent) classes.push('is-agent');
+      // Вкладка ассистента — не человеком открытая: значок другой и подпись об этом.
+      const agentPage = page.byAgent === true;
+      if (agentPage) classes.push('is-agent-page');
       const tab = h(
         'div',
         {
           class: classes.join(' '),
-          title: `${page.title}\n${page.url}`,
+          title: `${page.title}\n${page.url}${agentPage ? '\nСтраница открыта ассистентом' : ''}${
+            byAgent ? '\nАссистент работает здесь' : ''
+          }`,
           role: 'tab',
           dataset: { kind: 'page', pageId: page.id },
           'aria-selected': page.id === pageActive ? 'true' : 'false',
           tabindex: page.id === pageActive ? '0' : '-1',
         },
-        svgIcon('globe', 13),
+        svgIcon(agentPage ? 'sparkle' : 'globe', 13),
         h('span', { class: 'tab-label' }, page.title),
         h(
           'button',

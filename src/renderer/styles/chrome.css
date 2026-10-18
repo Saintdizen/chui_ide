@@ -735,6 +735,21 @@ textarea {
   opacity: 0;
 }
 
+/* «Здесь работает ассистент» — та же точка, что у вкладки чата во время генерации
+   (`chat.css`): одна и та же мысль в полосе читается одинаково. Вкладка при этом
+   бывает и не активной — тем важнее, что метку видно в любом состоянии: страница
+   меняется сама, пока человек смотрит на свой файл. Гасит её `ui/browser-view.ts`. */
+.tab-page.is-agent .tab-label::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: var(--radius_circle);
+  background: var(--blue_prime_background);
+  animation: tab-pulse 1.2s ease-in-out infinite;
+}
+
 /* ── хлебные крошки ─────────────────────────────────────────────────────── */
 
 /* Путь к открытому файлу живёт в строке состояния (см. `ui/statusbar.ts`):

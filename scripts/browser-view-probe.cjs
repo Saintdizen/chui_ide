@@ -29,6 +29,15 @@
  * и так был активным документом — модель вкладок о том молчит), а открытое меню-панель
  * (`.context-menu`) на время прячет вложение, иначе меню уходило бы под страницу.
  *
+ * Ещё два сторожа — про возврат и про агента:
+ *
+ *  • после ухода на другую вкладку и возврата страница обязана СНОВА РИСОВАТЬСЯ и
+ *    стоять ровно в текущем размере области. Раньше вложение на возврате отцепляли
+ *    и прицепляли заново — и слой переставал рисоваться: вкладка открывалась пустой.
+ *    Поэтому скрытие — это `View.setVisible(false)`, а видимость спрашиваем у panel;
+ *  • агент действует на странице — человек должен это видеть: метка в шапке страницы
+ *    и точка на вкладке, обе гаснут сами.
+ *
  * Снимок окна — `.chui_ide/probe-shots/browser-view.png`. Саму страницу на нём
  * не видно (вложение — отдельный слой окна), поэтому содержимое пробник читает
  * у вложения, а снимок нужен для шапки и полосы вкладок.
@@ -290,8 +299,10 @@ app.whenReady().then(async () => {
         return 'нажата';
       })()`,
     );
-  /** Сколько вложений прикреплено к окну прямо сейчас (слой окна, а не DOM). */
-  const attachedViews = () => ide.contentView.children.length;
+  /** Ключ вкладки, которой принадлежит вложение. */
+  const idOf = (contents) => panel.ids().find((id) => panel.contents(id) === contents) ?? null;
+  /** Какие вложения рисуются СЕЙЧАС: скрытое живёт в дереве окна, но не видно. */
+  const drawn = () => panel.ids().filter((id) => panel.isShown(id));
 
   /* --- 2. Первая страница -------------------------------------------------------- */
   check('у палитры есть пункт «Открыть страницу…»', (await openUrl(base)) === 'адрес принят');
@@ -444,6 +455,24 @@ app.whenReady().then(async () => {
     return state.вкладки.length === 2 ? state : null;
   });
   check('в полосе появилась вкладка агента', agentTab !== null, agentTab?.вкладки);
+  // Вкладка агента отличается от человеческой: значок ассистента вместо глобуса.
+  // Иначе непонятно, откуда взялась страница с пустым профилем.
+  const agentMark = await ask(
+    ide,
+    `(() => {
+      const tab = document.querySelector('.tab-page.is-agent-page');
+      if (!tab) return null;
+      return {
+        подпись: tab.querySelector('.tab-label')?.textContent ?? null,
+        подсказка: tab.getAttribute('title') ?? '',
+      };
+    })()`,
+  );
+  check(
+    'вкладка агента помечена',
+    agentMark !== null && agentMark.подсказка.includes('открыта ассистентом'),
+    agentMark,
+  );
   // Читаем ту же страницу, что и человек: тот же адрес, то же содержимое.
   const agentTitle = await agent.evaluate('document.title');
   check('агент видит ту же страницу', agentTitle === 'Домашняя страница', agentTitle);
@@ -576,7 +605,11 @@ app.whenReady().then(async () => {
     return state.полотно === true ? state : null;
   });
   check('страница снова поверх файла', pageBack !== null, pageBack?.полотно);
-  const viewsWithPage = attachedViews();
+  const pageKey = first ? idOf(first) : null;
+  check('видно ровно одно вложение — страницы', drawn().length === 1 && drawn()[0] === pageKey, {
+    наЭкране: drawn(),
+    ключ: pageKey,
+  });
 
   // Клик по вкладке УЖЕ активного файла — тот случай, когда события смены нет.
   check('вкладка файла нажата', (await clickFileTab('note.txt')) === 'нажата');
@@ -585,10 +618,42 @@ app.whenReady().then(async () => {
     return state.полотно === false ? state : null;
   });
   check('клик по вкладке файла убрал страницу с экрана', switchedToFile !== null, switchedToFile?.полотно);
-  check('вложение отцеплено от окна', (await waitFor(() => (attachedViews() < viewsWithPage ? true : null))) === true, {
-    было: viewsWithPage,
-    стало: attachedViews(),
+  const hiddenView = await waitFor(() => (panel.isShown(pageKey) ? null : true));
+  check('вложение погашено, но осталось в окне', hiddenView === true, {
+    наЭкране: drawn(),
+    вложений: panel.ids().length,
   });
+
+  // А вот и главное: возврат на вкладку страницы. Раньше вложение на возврате
+  // отцеплялось и прицеплялось заново, и слой переставал рисоваться — вкладка
+  // открывалась пустой. Теперь скрытие — `setVisible`, а не `removeChildView`.
+  check('вкладка страницы нажата снова', (await clickPageTab()) === 'нажата');
+  const shownAgain = await waitFor(() => (panel.isShown(pageKey) ? true : null));
+  check('вернулись на вкладку — вложение снова рисуется', shownAgain === true, { наЭкране: drawn() });
+
+  // И встаёт ровно по текущему размеру области вкладки (а не по тому, который был
+  // при первом показе): размер мог измениться, пока страница была в фоне.
+  const stageRect = await ask(
+    ide,
+    `(() => {
+      const box = document.querySelector('.browser-stage').getBoundingClientRect();
+      return {
+        x: Math.round(box.x), y: Math.round(box.y),
+        width: Math.max(0, Math.round(box.width)), height: Math.max(0, Math.round(box.height)),
+      };
+    })()`,
+  );
+  const fitted = await waitFor(() => {
+    const bounds = panel.boundsOf(pageKey);
+    if (!bounds) return null;
+    const same = bounds.width === stageRect.width && bounds.height === stageRect.height;
+    return same ? bounds : null;
+  });
+  check(
+    'вложение вписано в текущий размер области',
+    fitted !== null,
+    fitted ?? { вложение: panel.boundsOf(pageKey), область: stageRect },
+  );
 
   /* --- 12б. Вкладка чата и вкладка страницы в одной полосе ----------------------- */
   // Регрессия: чат, перенесённый в редактор, и страница браузера занимают ОДНУ область,
@@ -760,7 +825,8 @@ app.whenReady().then(async () => {
     return state.полотно === true ? state : null;
   });
   check('страница видна', shownForMenu !== null, shownForMenu?.полотно);
-  const viewsBeforeMenu = attachedViews();
+  const menuPage = drawn()[0] ?? null;
+  check('видно ровно вложение этой страницы', menuPage !== null, { наЭкране: drawn() });
 
   // Меню открываем правым кликом по вкладке файла — это то же меню, что и везде.
   await ask(
@@ -775,15 +841,14 @@ app.whenReady().then(async () => {
   );
   const menuHidesView = await waitFor(async () => {
     const menus = await ask(ide, "document.querySelectorAll('.context-menu').length");
-    return menus > 0 && attachedViews() < viewsBeforeMenu ? { menus, views: attachedViews() } : null;
+    return menus > 0 && panel.isShown(menuPage) === false ? { menus, наЭкране: drawn() } : null;
   });
   check(
     'пока меню открыто, страница спрятана',
     menuHidesView !== null,
     menuHidesView ?? {
       меню: await ask(ide, "document.querySelectorAll('.context-menu').length"),
-      было: viewsBeforeMenu,
-      стало: attachedViews(),
+      наЭкране: drawn(),
     },
   );
 
@@ -795,8 +860,30 @@ app.whenReady().then(async () => {
       return 'esc';
     })()`,
   );
-  const viewBack = await waitFor(() => (attachedViews() === viewsBeforeMenu ? true : null));
-  check('после закрытия меню страница вернулась', viewBack === true, { было: viewsBeforeMenu, стало: attachedViews() });
+  const viewBack = await waitFor(() => (panel.isShown(menuPage) ? true : null));
+  check('после закрытия меню страница вернулась', viewBack === true, { наЭкране: drawn() });
+
+  /* --- 14. Агент на странице: видно, что это он ----------------------------------- */
+  // Страница меняется не от мыши человека — нажатия и переходы приходят от ассистента.
+  // Без метки это неотличимо от собственной ошибки. Проверяем оба места (шапка вкладки
+  // и полоса) и то, что метка гаснет: вечная метка — это ложь.
+  step('метка «ассистент работает со страницей»');
+  check('страница показана', (await waitFor(async () => ((await ask(ide, UI_STATE)).полотно ? true : null))) === true);
+  panel.noteAgentAction(menuPage, 'click');
+  const badge = await waitFor(async () => {
+    const text = await ask(ide, "document.querySelector('.browser-agent:not([hidden])')?.textContent ?? null");
+    return typeof text === 'string' && text.includes('Ассистент') ? text : null;
+  });
+  check('в шапке страницы сказано, что действует ассистент', badge !== null, badge);
+  const tabMark = await ask(ide, "document.querySelectorAll('.tab-page.is-agent').length");
+  check('на вкладке страницы появилась метка', tabMark === 1, tabMark);
+  const markGone = await waitFor(async () => {
+    const count = await ask(ide, "document.querySelectorAll('.tab-page.is-agent').length");
+    return count === 0 ? true : null;
+  }, 8000);
+  check('метка гаснет сама', markGone === true);
+  const badgeGone = await ask(ide, "document.querySelectorAll('.browser-agent:not([hidden])').length");
+  check('и в шапке её тоже больше нет', badgeGone === 0, badgeGone);
 
   const shot = await ide.capturePage();
   await fs.writeFile(path.join(SHOTS, 'browser-view.png'), shot.toPNG());

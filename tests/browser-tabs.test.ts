@@ -126,4 +126,16 @@ describe('BrowserTabs', () => {
     expect(tabs.list).toHaveLength(1);
     expect(tabs.active?.url).toBe('https://example.com/next');
   });
+
+  it('вкладка агента помечена, и метка не теряется при повторном усыновлении', () => {
+    const tabs = new BrowserTabs();
+    tabs.adopt('agent-1', 'https://example.com/', true);
+    expect(tabs.active?.byAgent).toBe(true);
+
+    tabs.adopt('agent-1', 'https://example.com/next');
+    expect(tabs.active?.byAgent).toBe(true);
+    // Вкладка, открытая человеком, агентской не становится.
+    const own = tabs.open('https://other.example/');
+    expect(tabs.page(own)?.byAgent).toBeUndefined();
+  });
 });

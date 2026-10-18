@@ -1431,6 +1431,34 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   layout.editorHost.appendChild(browserView.element);
 
   /**
+   * Страница, на которой прямо сейчас действует ассистент. Метка живёт несколько
+   * секунд после последнего действия: агент шлёт событие на каждый шаг, а между
+   * шагами думает — мигать на каждом вызове было бы хуже, чем короткая задержка.
+   */
+  let agentPageId: string | null = null;
+  let agentPageTimer = 0;
+  /** Сколько живёт метка на вкладке после последнего действия. */
+  const AGENT_TAB_NOTICE_MS = 3000;
+
+  /** Агент что-то сделал на странице: сказать об этом человеку — в шапке и на вкладке. */
+  function markAgentPage(id: string, action: string): void {
+    // Шапка относится к активной вкладке — она решает сама, показывать ли метку.
+    browserView.setAgentAction(id, action);
+    if (agentPageTimer) clearTimeout(agentPageTimer);
+    // Полоса перерисовывается только на смену страницы: та же вкладка уже помечена.
+    if (agentPageId !== id) {
+      agentPageId = id;
+      tabs.refresh();
+    }
+    agentPageTimer = window.setTimeout(() => {
+      agentPageTimer = 0;
+      if (agentPageId === null) return;
+      agentPageId = null;
+      tabs.refresh();
+    }, AGENT_TAB_NOTICE_MS);
+  }
+
+  /**
    * Полоса вкладок закрывает страницу так же, как файл, — но вложение само из дерева
    * не уходит: за это отвечает `browserView.forget`. Поэтому закрытие вкладки проходит
    * через него, а не зовёт модель напрямую — иначе гость остался бы жить процессом.
@@ -1441,6 +1469,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     get activePageId() {
       return browserTabs.activePageId;
+    },
+    get agentPageId() {
+      return agentPageId;
     },
     activate: (id) => browserTabs.activate(id),
     close: (id) => {
@@ -5979,7 +6010,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         }
         // Страницу открыл агент: вложение уже есть, ключ дал main — забираем вкладку.
         if (payload.kind === 'opened') {
-          browserTabs.adopt(payload.id, payload.url);
+          browserTabs.adopt(payload.id, payload.url, true);
           break;
         }
         // Агент закончил: вкладка уходит вместе с вложением.
@@ -5990,6 +6021,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         // Общий доступ к странице: агент работает в этой же вкладке.
         if (payload.kind === 'shared' || payload.kind === 'unshared') {
           browserView.setShared(payload.id, payload.kind === 'shared');
+          break;
+        }
+        // Агент действует на странице: без метки его действия неотличимы от чужих.
+        if (payload.kind === 'agent') {
+          markAgentPage(payload.id, payload.action);
           break;
         }
         // Заголовок и адрес — в модель (их видит полоса), состояние — в шапку вкладки.

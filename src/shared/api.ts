@@ -419,7 +419,12 @@ export type BrowserEventPayload =
   /** Человек поделился вкладкой с ассистентом: агент работает в этой же странице. */
   | { kind: 'shared'; id: string }
   /** Общий доступ снят (отозван или вкладка закрыта): агент снова заводит свою. */
-  | { kind: 'unshared'; id: string };
+  | { kind: 'unshared'; id: string }
+  /**
+   * Агент действует на вкладке: нажал, ввёл текст, выполнил скрипт, открыл адрес.
+   * Человек должен видеть, что страница под его руками живёт не только от него.
+   */
+  | { kind: 'agent'; id: string; action: string };
 
 /** Действие над вкладкой браузера, которое renderer просит выполнить main. */
 export type BrowserAction = 'back' | 'forward' | 'reload' | 'stop' | 'navigate' | 'devtools';

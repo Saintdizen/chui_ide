@@ -149,17 +149,31 @@ export class BrowserPanel {
     return { ok: true };
   }
 
-  /** Показать вкладку на месте области редактора: остальные вложения отцепляем. */
+  /**
+   * Показать вкладку на месте области редактора: остальные вложения гасим.
+   *
+   * Вложение при этом НЕ отцепляется от окна и не прицепляется заново. Так было
+   * раньше, и это стоило дорого: после `removeChildView` + `addChildView` слой
+   * переставал рисоваться — вкладка возвращалась, шапка была на месте, а сцена
+   * оставалась пустой до перерисовки окна. Скрытие — это `setVisible(false)`:
+   * слой живёт в дереве окна, но не рисуется, и возврат к вкладке ничего не
+   * пересобирает.
+   */
   show(id: string, rect: BrowserRect): { ok: boolean } {
     const window = this.deps.window();
     const entry = this.views.get(id);
     if (!window || window.isDestroyed() || !entry) return { ok: false };
 
     this.rect = rect;
-    this.detach(window);
+    if (this.activeId !== null && this.activeId !== id) this.undraw();
     this.activeId = id;
+    // Слой поднимается наверх: в окне поверх страницы не должно остаться ничего,
+    // кроме того, что рисует сам renderer.
     window.contentView.addChildView(entry.view);
+    // Прямоугольник ставим ВСЕГДА, даже если он совпал с прежним: область редактора
+    // могла переехать, пока вкладка была в фоне.
     entry.view.setBounds(rect);
+    entry.view.setVisible(true);
     this.attached = true;
     this.publish(id);
     return { ok: true };
@@ -167,9 +181,25 @@ export class BrowserPanel {
 
   /** Спрятать вложение: активна не страница (файл, чат, картинка) или открыт оверлей. */
   hide(): { ok: boolean } {
-    const window = this.deps.window();
-    if (window && !window.isDestroyed()) this.detach(window);
+    this.undraw();
     return { ok: true };
+  }
+
+  /**
+   * Рисуется ли вложение прямо сейчас. Нужно пробам и отладке: прикреплённых
+   * слоёв теперь может быть много (скрытые тоже в дереве), и по числу детей окна
+   * уже не видно, что на экране.
+   */
+  isShown(id: string): boolean {
+    const entry = this.views.get(id);
+    return entry !== undefined && this.attached && this.activeId === id && entry.view.getVisible();
+  }
+
+  /** Где стоит вложение: тот же прямоугольник, что пришёл от renderer'а. */
+  boundsOf(id: string): BrowserRect | null {
+    const bounds = this.views.get(id)?.view.getBounds();
+    if (!bounds) return null;
+    return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
   }
 
   /** Область редактора переехала (окно, панели, док) — переставляем вложение. */
@@ -216,7 +246,12 @@ export class BrowserPanel {
     const entry = this.views.get(id);
     if (!entry) return { ok: true };
     const window = this.deps.window();
-    if (window && !window.isDestroyed() && this.activeId === id) this.detach(window);
+    if (window && !window.isDestroyed()) {
+      if (this.activeId === id) this.undraw();
+      // Слой живёт в дереве окна и после скрытия — убираем его совсем, иначе
+      // закрытая вкладка оставила бы в окне висячий невидимый слой.
+      window.contentView.removeChildView(entry.view);
+    }
     this.views.delete(id);
     if (this.activeId === id) this.activeId = null;
     // Вкладка ушла — делиться больше нечем: снимаем общий доступ, чтобы агент не
@@ -297,6 +332,16 @@ export class BrowserPanel {
     return { ok: true };
   }
 
+  /**
+   * Агент что-то делает на вкладке. Об этом обязательно знать человеку: страница
+   * может быть у него перед глазами, а действия приходят не от его мыши. Событие
+   * короткое — renderer сам решает, сколько держать метку.
+   */
+  noteAgentAction(id: string, action: string): void {
+    if (!this.views.has(id)) return;
+    this.deps.notify(PushTopic.BrowserNav, { kind: 'agent', id, action });
+  }
+
   /** Что страница вывела в консоль: хвост журнала для вложения-контекста. */
   consoleLines(id: string): string[] {
     return [...(this.views.get(id)?.console ?? [])];
@@ -347,11 +392,11 @@ export class BrowserPanel {
     if (entry) delete entry.error;
   }
 
-  /** Отцепить активное вложение от окна: оно остаётся жить, но не рисуется. */
-  private detach(window: BrowserWindow): void {
-    if (!this.attached || !this.activeId) return;
-    const entry = this.views.get(this.activeId);
-    if (entry) window.contentView.removeChildView(entry.view);
+  /** Погасить активное вложение: оно остаётся в дереве окна, но не рисуется. */
+  private undraw(): void {
+    if (!this.attached) return;
+    const entry = this.activeId === null ? undefined : this.views.get(this.activeId);
+    entry?.view.setVisible(false);
     this.attached = false;
   }
 

@@ -198,6 +198,30 @@
   outline: none;
 }
 
+/* Метка «с этой страницей работает ассистент». Живёт в шапке: сама страница —
+   слой окна, поверх него ничего из DOM не положить. Гаснет сама (см. `ui/browser-view.ts`). */
+.browser-agent {
+  flex: 0 0 auto;
+  margin: 0 4px 0 0;
+  padding: 0 6px;
+  border: 1px solid var(--blue_prime_background);
+  border-radius: var(--radius_sm);
+  color: var(--text_color);
+  font-size: var(--font_labels_size);
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.browser-agent[hidden] {
+  display: none;
+}
+
+/* Пока агент действует, шапка подсвечивается той же синей линией, что и метка:
+   боковым зрением видно, что страница сейчас не под твоей мышью. */
+.browser-view.is-agent .browser-toolbar {
+  border-bottom-color: var(--blue_prime_background);
+}
+
 /* Сцена — «дырка» под вложение браузера: страницу рисует не renderer, а
    `WebContentsView` — отдельный слой окна. Вложение встаёт ровно по её
    прямоугольнику (его меряет renderer и отдаёт в main), поэтому шапка над сценой

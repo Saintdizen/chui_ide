@@ -40,27 +40,42 @@ export class AgentBrowser implements BrowserTools {
 
   open(url: string): Promise<BrowserSnapshot> {
     if (!this.useIntegrated()) return this.external.open(url);
+    this.note('open');
     return this.openIntegrated(url);
   }
 
   snapshot(): Promise<BrowserSnapshot> {
     if (!this.useIntegrated()) return this.external.snapshot();
+    this.note('read');
     return this.integratedSession().then((session) => session.snapshot());
   }
 
   click(ref: string): Promise<BrowserSnapshot> {
     if (!this.useIntegrated()) return this.external.click(ref);
+    this.note('click');
     return this.integratedSession().then((session) => session.click(ref));
   }
 
   type(ref: string, text: string, submit: boolean): Promise<BrowserSnapshot> {
     if (!this.useIntegrated()) return this.external.type(ref, text, submit);
+    this.note('type');
     return this.integratedSession().then((session) => session.type(ref, text, submit));
   }
 
   evaluate(expression: string): Promise<string> {
     if (!this.useIntegrated()) return this.external.evaluate(expression);
+    this.note('script');
     return this.integratedSession().then((session) => session.evaluate(expression));
+  }
+
+  /**
+   * Сказать renderer'у, что на вкладке действует агент. Без этого человек видит
+   * только результат: страница под его руками сама нажимает кнопки, а кто —
+   * непонятно. Вкладку берём ту, в которой агент работает сейчас.
+   */
+  private note(action: string): void {
+    const id = this.panel.sharedPageId ?? this.pageId;
+    if (id) this.panel.noteAgentAction(id, action);
   }
 
   async close(): Promise<void> {
