@@ -102,6 +102,15 @@ describe('вид подсказки — из общей палитры и выш
     expect(rule).not.toContain('background: var(--popup_background)');
   });
 
+  // Подсказка часто несёт путь: `/home/…/package.json` — одно слово без пробелов.
+  // Без переноса внутри слова текст вылезал за `max-width` и подложка кончалась
+  // раньше текста — подсказка читалась как «без фона». Сторож в живом окне —
+  // раздел про точный длинный путь в `npm run probe:tooltip`.
+  it('длинный путь переносится, а не вылезает за подложку', () => {
+    expect(rule).toContain('overflow-wrap: anywhere');
+    expect(rule).toContain('white-space: pre-line');
+  });
+
   it('подсказка в списке слоёв с блюром фона', () => {
     const materials = CHROME.match(/\{[^}]*backdrop-filter:\s*var\(--popup_filter\)[^}]*\}/g) ?? [];
     const block = (CHROME.match(/[^}]*\.app-tooltip[^}]*\{[^}]*backdrop-filter:[^}]*\}/) ?? [''])[0];

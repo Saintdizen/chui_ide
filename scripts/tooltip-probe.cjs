@@ -297,6 +297,122 @@ app.whenReady().then(async () => {
     });
   }
 
+  /* --- 6. Длинная подсказка: переносится, и фон покрывает весь текст --------------- */
+  // Грех: у подсказки дерева длинный путь. Если строка не переносится, текст вылезает
+  // за `max-width` и фон под ним кончается — читается как «подсказка без подложки».
+  const row = await ask(
+    ide,
+    `(() => {
+      const node = [...document.querySelectorAll('.tree-row')].find((item) => item.getAttribute('title'));
+      if (!node) return null;
+      const r = node.getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), title: node.getAttribute('title') };
+    })()`,
+  );
+  if (row && typeof row === 'object') {
+    await hover(ide, row);
+    const longTip = await ask(
+      ide,
+      `(() => {
+        const node = document.querySelector('.app-tooltip');
+        if (!node || node.hidden) return { видна: false };
+        const r = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          видна: true,
+          текст: node.textContent,
+          слева: Math.round(r.left), справа: Math.round(r.right),
+          сверху: Math.round(r.top), снизу: Math.round(r.bottom),
+          ширина: Math.round(r.width), высота: Math.round(r.height),
+          прокруткаШ: node.scrollWidth, клиентШ: node.clientWidth,
+          прокруткаВ: node.scrollHeight, клиентВ: node.clientHeight,
+          перенос: style.whiteSpace, переполнение: style.overflow,
+          переносСлов: style.overflowWrap || style.wordBreak,
+          фон: style.backgroundColor,
+        };
+      })()`,
+    );
+    console.log(`[подсказки] длинная: ${JSON.stringify(longTip)}`);
+    check('длинная подсказка показалась', longTip?.видна === true, longTip?.текст?.slice(0, 40));
+    check(
+      'текст не вылезает за подложку по ширине',
+      longTip?.прокруткаШ !== undefined && longTip.прокруткаШ <= longTip.клиентШ + 1,
+      longTip && { прокруткаШ: longTip.прокруткаШ, клиентШ: longTip.клиентШ },
+    );
+    check(
+      'текст не вылезает за подложку по высоте',
+      longTip?.прокруткаВ !== undefined && longTip.прокруткаВ <= longTip.клиентВ + 1,
+      longTip && { прокруткаВ: longTip.прокруткаВ, клиентВ: longTip.клиентВ },
+    );
+    check('подложка не шире 340 px', (longTip?.ширина ?? 999) <= 340, longTip?.ширина);
+  } else {
+    console.log('[подсказки] строк дерева с подсказкой нет — проверка длинной пропущена');
+  }
+
+  /* --- 7. Подсказка ровно с тем текстом, что на снимке --------------------------- */
+  // Путь в дереве бывает почти во всю ширину подсказки. Такой случай проверяем
+  // отдельно: элемент заводим сами, чтобы текст был известен дословно.
+  const LONG = '/home/dethmond/PROJECTS/GITHUB/chui_ide/package.json — тронут 1 ч назад';
+  const probeNode = await ask(
+    ide,
+    `(() => {
+      const old = document.getElementById('probe-long-tip');
+      if (old) old.remove();
+      const node = document.createElement('button');
+      node.id = 'probe-long-tip';
+      node.type = 'button';
+      node.textContent = 'кнопка';
+      node.style.cssText = 'position:fixed;left:40px;top:300px;width:120px;height:24px;z-index:900;';
+      node.setAttribute('title', ${JSON.stringify(LONG)});
+      document.body.appendChild(node);
+      const r = node.getBoundingClientRect();
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    })()`,
+  );
+  if (probeNode && typeof probeNode === 'object') {
+    await hover(ide, probeNode);
+    const exact = await ask(
+      ide,
+      `(() => {
+        const node = document.querySelector('.app-tooltip');
+        if (!node || node.hidden) return { видна: false };
+        const r = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        // Сколько занимает сам текст: диапазон по содержимому.
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const text = range.getBoundingClientRect();
+        return {
+          видна: true,
+          текст: node.textContent,
+          подложка: { слева: Math.round(r.left), справа: Math.round(r.right), ширина: Math.round(r.width), высота: Math.round(r.height) },
+          текстРамка: { слева: Math.round(text.left), справа: Math.round(text.right), высота: Math.round(text.height) },
+          прокруткаШ: node.scrollWidth, клиентШ: node.clientWidth,
+          padding: style.padding, коробка: style.boxSizing,
+          строк: Math.round(text.height / parseFloat(style.lineHeight || '18')),
+        };
+      })()`,
+    );
+    console.log(`[подсказки] точный текст: ${JSON.stringify(exact)}`);
+    check('подсказка с длинным путём показалась', exact?.видна === true, exact?.текст?.slice(0, 30));
+    check(
+      'текст внутри подложки справа',
+      exact?.текстРамка !== undefined && exact.текстРамка.справа <= exact.подложка.справа + 1,
+      exact && { текст: exact.текстРамка.справа, подложка: exact.подложка.справа },
+    );
+    check(
+      'текст внутри подложки слева',
+      exact?.текстРамка !== undefined && exact.текстРамка.слева >= exact.подложка.слева - 1,
+      exact && { текст: exact.текстРамка.слева, подложка: exact.подложка.слева },
+    );
+    check(
+      'текст не выходит за подложку по ширине',
+      exact?.прокруткаШ !== undefined && exact.прокруткаШ <= exact.клиентШ + 1,
+      exact && { прокруткаШ: exact.прокруткаШ, клиентШ: exact.клиентШ },
+    );
+    await ask(ide, `document.getElementById('probe-long-tip')?.remove()`);
+  }
+
   console.log(failures === 0 ? '[подсказки] всё сошлось' : `[подсказки] провалов: ${failures}`);
   process.exitCode = failures === 0 ? 0 : 1;
   app.quit();

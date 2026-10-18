@@ -1340,6 +1340,13 @@ textarea {
   color: var(--text_color);
   font-size: var(--font_labels_size);
   line-height: var(--line_height_ui);
+  /* Подсказка часто несёт путь к файлу: `/home/…/package.json` — одно слово без
+     пробелов, и по пробелам оно не переносится. Без этого длинный путь вылезал за
+     `max-width` (текст шире подложки на 17 px) и читался как подсказка без фона.
+     `anywhere` разрешает перенос внутри такого слова; переносы строк в подписи
+     (заголовок и адрес страницы) сохраняются через `pre-line`. */
+  white-space: pre-line;
+  overflow-wrap: anywhere;
   pointer-events: none;
   animation: popup-fade var(--motion_fast) var(--motion_ease);
 }
