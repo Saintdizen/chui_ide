@@ -655,6 +655,108 @@ app.whenReady().then(async () => {
     fitted ?? { вложение: panel.boundsOf(pageKey), область: stageRect },
   );
 
+  /* --- 12в. Масштаб страницы ------------------------------------------------------ */
+  // Страница умеет масштаб так же, как вьюер картинок: кнопки в шапке, «1:1»,
+  // «вписать по ширине» и Ctrl+колесо. Масштаб — состояние вкладки, а не страницы,
+  // поэтому проверяем и его самого, и подпись в шапке (человек видит её, а не числа).
+  step('масштаб страницы');
+  const shownId = () => panel.ids().find((key) => panel.isShown(key)) ?? null;
+  const zoomId = shownId();
+  const zoomGuest = zoomId ? panel.contents(zoomId) : null;
+  check('страница показана — можно менять масштаб', zoomGuest !== null, zoomId);
+  check('по умолчанию масштаб 100 %', panel.zoomOf(zoomId) === 1, panel.zoomOf(zoomId));
+
+  const zoomLabel = () => ask(ide, "document.querySelector('.browser-zoom-label')?.textContent ?? null");
+  const pressZoom = async (title) => {
+    const result = await pressToolbar(title);
+    // Подпись живёт событием из main — даём ей доехать до DOM.
+    await wait(250);
+    return result;
+  };
+
+  check('кнопка «Крупнее» нажата', (await pressZoom('Крупнее (Ctrl+колесо)')) === 'нажата');
+  const zoomedIn = await waitFor(() => (panel.zoomOf(zoomId) > 1 ? panel.zoomOf(zoomId) : null));
+  check('масштаб вырос', zoomedIn === 1.25, { масштаб: panel.zoomOf(zoomId) });
+  const labelIn = await waitFor(async () => {
+    const text = await zoomLabel();
+    return text === '125%' ? text : null;
+  });
+  check('подпись в шапке показывает 125 %', labelIn === '125%', labelIn ?? (await zoomLabel()));
+
+  // Ctrl+колесо живёт не в DOM: колесо над страницей уходит в слой окна. Шлём
+  // настоящий жест — и смотрим, что масштаб поменялся так же, как от кнопки.
+  if (zoomGuest) {
+    zoomGuest.sendInputEvent({
+      type: 'mouseWheel',
+      x: 80,
+      y: 80,
+      deltaX: 0,
+      deltaY: -120,
+      wheelTicksX: 0,
+      wheelTicksY: 1,
+      modifiers: ['control'],
+    });
+  }
+  const wheeled = await waitFor(() => (panel.zoomOf(zoomId) > 1.25 ? panel.zoomOf(zoomId) : null), 4000);
+  check('Ctrl+колесо увеличило масштаб', wheeled !== null, { масштаб: panel.zoomOf(zoomId) });
+
+  // «Вписать по ширине» проверяем на заведомо широкой странице: на узкой вписывать
+  // нечего, и результат был бы неотличим от 100 %.
+  if (zoomGuest) await zoomGuest.executeJavaScript("document.body.style.minWidth = '1600px'; 'ок'");
+  check('кнопка «Вписать по ширине» нажата', (await pressZoom('Вписать по ширине')) === 'нажата');
+  const fittedZoom = await waitFor(() => {
+    const value = panel.zoomOf(zoomId);
+    return value !== null && value < 1 ? value : null;
+  });
+  check('вписывание уменьшило масштаб', fittedZoom !== null, { масштаб: panel.zoomOf(zoomId) });
+  // Влезание считаем в точках окна: `scrollWidth` и `clientWidth` живут в CSS-пикселях
+  // и от масштаба не меняются, поэтому сравнивать их между собой бессмысленно.
+  const contentWidth = zoomGuest ? await zoomGuest.executeJavaScript('document.documentElement.scrollWidth') : 0;
+  const windowWidth = zoomId ? (panel.boundsOf(zoomId)?.width ?? 0) : 0;
+  const renderedWidth = Math.round(contentWidth * (panel.zoomOf(zoomId) ?? 1));
+  check('после вписывания страница не прокручивается вбок', renderedWidth <= windowWidth + 2, {
+    контент: renderedWidth,
+    окно: windowWidth,
+  });
+  if (zoomGuest) await zoomGuest.executeJavaScript("document.body.style.minWidth = ''; 'ок'");
+
+  check('кнопка «1:1» нажата', (await pressZoom('Реальный масштаб (1:1)')) === 'нажата');
+  const backToOne = await waitFor(() => (panel.zoomOf(zoomId) === 1 ? true : null));
+  check('масштаб вернулся к 100 %', backToOne === true, panel.zoomOf(zoomId));
+
+  /* --- 12г. Выбор элемента страницы — в чат ------------------------------------------ */
+  // Обычный путь для «а вот тут криво»: человек нажимает кнопку, кликает по элементу,
+  // и в композер чата ложится его описание и снимок. Страница при этом не должна
+  // нажать кнопку или уйти по ссылке — выбор перехватывает клик.
+  step('выбор элемента страницы для чата');
+  const targetBox = zoomGuest
+    ? await zoomGuest.executeJavaScript(
+        "(() => { const el = document.querySelector('h1') || document.querySelector('p'); if (!el) return null; const r = el.getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2), tag: el.tagName.toLowerCase() }; })()",
+      )
+    : null;
+  check('на странице есть элемент — есть что выбирать', targetBox !== null, targetBox);
+  const urlBeforePick = zoomGuest ? zoomGuest.getURL() : null;
+
+  check('кнопка «Выбрать элемент для чата» нажата', (await pressToolbar('Выбрать элемент для чата')) === 'нажата');
+  await wait(600);
+  if (zoomGuest && targetBox) {
+    for (const type of ['mouseDown', 'mouseUp']) {
+      zoomGuest.sendInputEvent({ type, x: targetBox.x, y: targetBox.y, button: 'left', clickCount: 1 });
+    }
+  }
+  const pickedChip = await waitFor(async () => {
+    const chips = await chatChips();
+    return Array.isArray(chips) && chips.some((name) => String(name).startsWith('Элемент:')) ? chips : null;
+  }, 10000);
+  check('контекст элемента пришёл в чат', pickedChip !== null, pickedChip);
+  check('страница не ушла на другой адрес', zoomGuest?.getURL() === urlBeforePick, {
+    было: urlBeforePick,
+    стало: zoomGuest?.getURL(),
+  });
+  // Снимок области элемента приходит картинкой: без него «вот этот блок» опять словами.
+  const shotChip = Array.isArray(pickedChip) ? pickedChip.find((name) => /^Элемент .+\.png$/.test(String(name))) : null;
+  check('снимок элемента приложен картинкой', shotChip !== null && shotChip !== undefined, pickedChip);
+
   /* --- 12б. Вкладка чата и вкладка страницы в одной полосе ----------------------- */
   // Регрессия: чат, перенесённый в редактор, и страница браузера занимают ОДНУ область,
   // но живут в разных моделях (`chatTabActive` в app.ts и `BrowserTabs`). Клик по вкладке

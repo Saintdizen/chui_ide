@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatBrowserSnapshot,
+  formatPickedElement,
   isLocalHost,
   isLocalUrl,
   MAX_SNAPSHOT_ELEMENTS,
   MAX_SNAPSHOT_TEXT,
   normalizeBrowserUrl,
   parseDevToolsEndpoint,
+  sanitizePickedElement,
   SNAPSHOT_SCRIPT,
   sanitizeSnapshot,
 } from '../src/shared/browser';
@@ -165,6 +167,92 @@ describe('formatBrowserSnapshot', () => {
   it('обрезка текста помечена', () => {
     const text = formatBrowserSnapshot({ title: 't', url: 'u', elements: [], text: 'x', truncated: true });
     expect(text).toContain('текст страницы обрезан');
+  });
+});
+
+describe('sanitizePickedElement', () => {
+  it('оставляет описание элемента и обрезает длинные поля', () => {
+    const element = sanitizePickedElement({
+      tag: 'BUTTON',
+      selector: 'main.form > button#send',
+      name: '  Отправить  ',
+      role: 'button',
+      text: 'Отправить форму',
+      html: '<button id="send">Отправить форму</button>',
+      styles: { display: 'block', color: 'rgb(0, 0, 0)' },
+      rect: { x: 10.4, y: 20.6, width: 120, height: 32 },
+    });
+
+    expect(element).not.toBeNull();
+    expect(element?.tag).toBe('button');
+    expect(element?.name).toBe('Отправить');
+    expect(element?.rect).toEqual({ x: 10, y: 21, width: 120, height: 32 });
+    expect(element?.styles.color).toBe('rgb(0, 0, 0)');
+
+    const long = sanitizePickedElement({ tag: 'div', html: 'я'.repeat(5000), text: 'я'.repeat(5000) });
+    expect(long?.html.length).toBe(1200);
+    expect(long?.text.length).toBe(600);
+  });
+
+  it('без тега элемента нет: описание без него бесполезно', () => {
+    expect(sanitizePickedElement(null)).toBeNull();
+    expect(sanitizePickedElement({ selector: 'div' })).toBeNull();
+    expect(sanitizePickedElement({ tag: '   ' })).toBeNull();
+  });
+
+  it('чужие типы не пролезают: только строки, только числа', () => {
+    const element = sanitizePickedElement({
+      tag: 'div',
+      selector: { $: 'div' },
+      styles: { display: 42, color: 'red', '': 'x' },
+      rect: { width: 'много', height: -5 },
+    });
+    expect(element?.selector).toBe('');
+    expect(element?.styles).toEqual({ color: 'red' });
+    expect(element?.rect.height).toBe(0);
+  });
+});
+
+describe('formatPickedElement', () => {
+  it('пишет, что за элемент, где он и как выглядит', () => {
+    const text = formatPickedElement(
+      {
+        tag: 'button',
+        selector: 'form > button.primary',
+        name: 'Отправить',
+        role: 'button',
+        text: 'Отправить',
+        html: '<button class="primary">Отправить</button>',
+        styles: { display: 'inline-flex', color: 'rgb(255, 255, 255)' },
+        rect: { x: 12, y: 40, width: 120, height: 32 },
+      },
+      'http://localhost:3000/form',
+    );
+
+    expect(text).toContain('Элемент: <button> «Отправить»');
+    expect(text).toContain('Роль: button');
+    expect(text).toContain('Страница: http://localhost:3000/form');
+    expect(text).toContain('Селектор: form > button.primary');
+    expect(text).toContain('Место на странице: 12, 40 · 120 × 32');
+    expect(text).toContain('  color: rgb(255, 255, 255)');
+    expect(text).toContain('Разметка:');
+  });
+
+  it('скудный элемент не оставляет пустых разделов', () => {
+    const text = formatPickedElement({
+      tag: 'div',
+      selector: '',
+      name: '',
+      role: '',
+      text: '',
+      html: '',
+      styles: {},
+      rect: { x: 0, y: 0, width: 0, height: 0 },
+    });
+    expect(text.split('\n')[0]).toBe('Элемент: <div>');
+    expect(text).not.toContain('Стили:');
+    expect(text).not.toContain('Текст:');
+    expect(text).not.toContain('Разметка:');
   });
 });
 

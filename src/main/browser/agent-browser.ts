@@ -1,3 +1,4 @@
+import type { BrowserZoomMode } from '../../shared/api';
 import { normalizeBrowserUrl, type BrowserSnapshot } from '../../shared/browser';
 import type { BrowserTools } from './browser';
 import { DebuggerChannel } from './debugger-channel';
@@ -66,6 +67,23 @@ export class AgentBrowser implements BrowserTools {
     if (!this.useIntegrated()) return this.external.evaluate(expression);
     this.note('script');
     return this.integratedSession().then((session) => session.evaluate(expression));
+  }
+
+  /**
+   * Масштаб страницы — только во встроенном браузере: там масштаб — состояние вкладки,
+   * которое видит человек, и агент может показать ему вёрстку в другой ширине.
+   * У отдельного Chromium такого понятия в нашей обвязке нет.
+   */
+  async zoom(mode: BrowserZoomMode): Promise<{ ok: boolean; zoom?: number; reason?: string }> {
+    if (!this.useIntegrated()) {
+      return { ok: false, reason: 'масштаб доступен только во встроенном браузере' };
+    }
+    // В какой вкладке работает агент — решает общий доступ: поделённая страница
+    // человека важнее собственной вкладки агента.
+    const id = this.panel.sharedPageId ?? this.pageId;
+    if (!id) return { ok: false, reason: 'Страница ещё не открыта: сначала browser_open' };
+    this.note('zoom');
+    return this.panel.zoom(id, mode);
   }
 
   /**

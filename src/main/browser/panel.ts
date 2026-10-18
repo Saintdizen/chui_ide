@@ -1,6 +1,13 @@
 import { type BrowserWindow, WebContentsView, type WebContents } from 'electron';
-import { PushTopic, type BrowserAction, type BrowserNavState, type BrowserRect } from '../../shared/api';
-import { normalizeBrowserUrl } from '../../shared/browser';
+import {
+  PushTopic,
+  type BrowserAction,
+  type BrowserNavState,
+  type BrowserPickedElement,
+  type BrowserRect,
+  type BrowserZoomMode,
+} from '../../shared/api';
+import { normalizeBrowserUrl, sanitizePickedElement } from '../../shared/browser';
 import { isWebPageUrl, isSafeExternalUrl } from '../../shared/url';
 
 /**
@@ -51,10 +58,25 @@ interface Entry {
   error?: string;
   /** Хвост журнала консоли: страница пишет в неё, а мы держим последнее. */
   console: string[];
+  /**
+   * Масштаб страницы (1 — 100 %). Храним своё значение, а не спрашиваем у движка:
+   * Ctrl+колесо переведено в ручной режим (`zoomMode`), поэтому единственный
+   * источник правды — здесь. Иначе шаг колеса иногда применялся бы дважды.
+   */
+  zoom: number;
 }
 
 /** Сколько строк консоли держим на вкладку: это контекст для модели, а не лог. */
 const CONSOLE_LIMIT = 200;
+
+/**
+ * Границы масштаба страницы — те же, что у движка (25–500 %): шире он всё равно
+ * не даст, а за своими числами проще следить.
+ */
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 5;
+/** Шаг кнопок и колеса: тот же, что у просмотра картинок — привычная глазу доля. */
+const ZOOM_STEP = 1.25;
 
 /**
  * Разбор события консоли страницы. Сигнатуру Electron менял: сначала
@@ -78,6 +100,197 @@ function pushConsole(entry: Entry | undefined, args: readonly unknown[]): void {
   entry.console.push('[' + name + '] ' + message);
   if (entry.console.length > CONSOLE_LIMIT) entry.console.splice(0, entry.console.length - CONSOLE_LIMIT);
 }
+
+/**
+ * Мерка страницы для «вписать». Ширина контента в CSS-пикселях и ширина окна
+ * вложения в тех же единицах: по ним видно, во сколько раз нужно уменьшить
+ * масштаб, чтобы страница перестала прокручиваться вбок.
+ */
+const MEASURE_SCRIPT = `(() => {
+  const doc = document.documentElement;
+  const body = document.body;
+  return {
+    contentWidth: Math.max(doc.scrollWidth, body ? body.scrollWidth : 0),
+    viewportWidth: doc.clientWidth,
+  };
+})()`;
+
+/**
+ * Выбор элемента мышью прямо на странице.
+ *
+ * Почему скрипт, а не DOM в renderer'е: страница — слой окна, элементами которого
+ * владеет main. Ни подсветить её из нашего DOM, ни узнать, что человек нажал,
+ * renderer не может — поэтому режим выбора живёт в самой странице (подсветка и
+ * сбор описания), а результат уходит в main готовым объектом.
+ *
+ * Правила, по которым он написан:
+ *  • `pointer-events: none` на подсветке — иначе она сама стала бы целью клика;
+ *  • слушатели в capture-фазе и с отменой события: выбор элемента не должен
+ *    нажать кнопку или уйти по ссылке;
+ *  • Esc отменяет, повторный вызов гасит прошлый режим, а свой таймаут нужен,
+ *    чтобы запрос из окна не висел вечно, если человек передумал и ушёл;
+ *  • всё оформление — через `style.*`, а не атрибутом `style`: его режет CSP
+ *    чужих страниц.
+ */
+const PICK_SCRIPT = `(() => {
+  if (typeof window.__chuiPickCancel === 'function') window.__chuiPickCancel();
+
+  const accent = '#1f9cf0';
+  const box = document.createElement('div');
+  box.style.position = 'fixed';
+  box.style.zIndex = '2147483647';
+  box.style.pointerEvents = 'none';
+  box.style.border = '2px solid ' + accent;
+  box.style.background = 'rgba(31, 156, 240, 0.16)';
+  box.style.borderRadius = '2px';
+  box.style.display = 'none';
+
+  const tip = document.createElement('div');
+  tip.style.position = 'fixed';
+  tip.style.zIndex = '2147483647';
+  tip.style.pointerEvents = 'none';
+  tip.style.padding = '2px 6px';
+  tip.style.borderRadius = '3px';
+  tip.style.background = '#1f2937';
+  tip.style.color = '#f8fafc';
+  tip.style.font = '11px/1.4 monospace';
+  tip.style.whiteSpace = 'nowrap';
+  tip.style.maxWidth = '70vw';
+  tip.style.overflow = 'hidden';
+  tip.style.display = 'none';
+
+  document.documentElement.appendChild(box);
+  document.documentElement.appendChild(tip);
+
+  const selectorOf = (node) => {
+    const parts = [];
+    let current = node;
+    while (current && current.nodeType === 1 && parts.length < 6) {
+      let part = current.tagName.toLowerCase();
+      if (current.id) {
+        parts.unshift(part + '#' + current.id);
+        break;
+      }
+      const classes = [];
+      for (const name of current.classList) {
+        if (classes.length < 2 && name.length < 30) classes.push(name);
+      }
+      if (classes.length > 0) part += '.' + classes.join('.');
+      const parent = current.parentElement;
+      if (parent) {
+        let same = 0;
+        let index = 0;
+        for (const sibling of parent.children) {
+          if (sibling.tagName !== current.tagName) continue;
+          same += 1;
+          if (sibling === current) index = same;
+        }
+        if (same > 1) part += ':nth-of-type(' + index + ')';
+      }
+      parts.unshift(part);
+      current = parent;
+    }
+    return parts.join(' > ');
+  };
+
+  const clean = (value) => String(value === null || value === undefined ? '' : value).replace(/\\s+/g, ' ').trim();
+
+  const describe = (node) => {
+    const rect = node.getBoundingClientRect();
+    const computed = getComputedStyle(node);
+    const styles = {};
+    const keys = [
+      'display',
+      'position',
+      'color',
+      'background-color',
+      'font-family',
+      'font-size',
+      'font-weight',
+      'line-height',
+      'padding',
+      'margin',
+      'border',
+      'border-radius',
+      'width',
+      'height',
+      'overflow',
+    ];
+    for (const key of keys) {
+      const value = computed.getPropertyValue(key);
+      if (value) styles[key] = value;
+    }
+    const text = clean(node.innerText || node.textContent).slice(0, 600);
+    const name = clean(node.getAttribute('aria-label') || node.getAttribute('title') || text).slice(0, 160);
+    return {
+      tag: node.tagName.toLowerCase(),
+      selector: selectorOf(node),
+      name,
+      role: clean(node.getAttribute('role')).slice(0, 40),
+      text,
+      html: node.outerHTML.slice(0, 1200),
+      styles,
+      rect: {
+        x: Math.round(rect.left),
+        y: Math.round(rect.top),
+        width: Math.max(0, Math.round(rect.width)),
+        height: Math.max(0, Math.round(rect.height)),
+      },
+    };
+  };
+
+  const place = (node) => {
+    const rect = node.getBoundingClientRect();
+    const selector = selectorOf(node);
+    box.style.display = 'block';
+    box.style.left = rect.left + 'px';
+    box.style.top = rect.top + 'px';
+    box.style.width = Math.max(0, rect.width) + 'px';
+    box.style.height = Math.max(0, rect.height) + 'px';
+    tip.textContent = selector;
+    tip.style.display = 'block';
+    const above = rect.top > 26;
+    tip.style.left = Math.max(2, rect.left) + 'px';
+    tip.style.top = Math.max(2, above ? rect.top - 22 : rect.bottom + 4) + 'px';
+  };
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      document.removeEventListener('mousemove', onMove, true);
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('keydown', onKey, true);
+      box.remove();
+      tip.remove();
+      window.__chuiPickCancel = undefined;
+      resolve(value);
+    };
+    const onMove = (event) => {
+      const target = event.target;
+      if (target && target.nodeType === 1) place(target);
+    };
+    const onClick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = event.target;
+      finish(target && target.nodeType === 1 ? describe(target) : null);
+    };
+    const onKey = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      finish(null);
+    };
+    // Человек мог уйти, ничего не выбрав: без своего потолка запрос висел бы вечно.
+    const timer = setTimeout(() => finish(null), 120000);
+    window.__chuiPickCancel = () => finish(null);
+    document.addEventListener('mousemove', onMove, true);
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('keydown', onKey, true);
+  });
+})()`;
 
 export interface BrowserViewState extends BrowserNavState {
   id: string;
@@ -142,7 +355,11 @@ export class BrowserPanel {
         spellcheck: false,
       },
     });
-    this.views.set(id, { view, console: [] });
+    this.views.set(id, { view, console: [], zoom: 1 });
+    // Масштаб ведёт приложение, а не движок: в ручном режиме Ctrl+колесо
+    // присылает событие `zoom-changed`, но страницу не масштабирует — масштаб
+    // меняем мы сами. Так у кнопок шапки, у колеса и у агента один источник правды.
+    view.webContents.setZoomMode('manual');
     this.wire(window, id, view);
     if (this.rect) view.setBounds(this.rect);
     void view.webContents.loadURL(normalized.url).catch(() => undefined);
@@ -208,6 +425,69 @@ export class BrowserPanel {
     if (!this.attached || !this.activeId) return { ok: true };
     this.views.get(this.activeId)?.view.setBounds(rect);
     return { ok: true };
+  }
+
+  /**
+   * Масштаб страницы: кнопки шапки, Ctrl+колесо и агент ходят сюда же.
+   *
+   * «Вписать» здесь — по ширине: страница по высоте всё равно прокручивается,
+   * а подгонять её целиком в окно значило бы мельчить текст до нечитаемого.
+   * Крупнее 100 % вписывание не увеличивает: теснота заставляет уменьшать, а не растягивать.
+   */
+  async zoom(id: string, mode: BrowserZoomMode): Promise<{ ok: boolean; zoom?: number; reason?: string }> {
+    const entry = this.views.get(id);
+    if (!entry) return { ok: false, reason: 'Вкладка не найдена' };
+
+    if (mode === 'actual') return this.setZoom(entry, id, 1);
+    if (mode === 'in') return this.setZoom(entry, id, entry.zoom * ZOOM_STEP);
+    if (mode === 'out') return this.setZoom(entry, id, entry.zoom / ZOOM_STEP);
+
+    const measured = await this.measure(entry);
+    if (!measured) return { ok: false, reason: 'Страница ещё не загрузилась' };
+    if (measured.contentWidth <= 0 || measured.viewportWidth <= 0) {
+      return { ok: false, reason: 'Нечего вписывать: страница пуста' };
+    }
+    // Ширины Measured в CSS-пикселях, и масштаб их не меняет: окно вложения
+    // остаётся 534 CSS px и при 100 %, и при 195 % (проверено пробой), поэтому
+    // нынешний масштаб в долю не входит — в отличие от «вписать» у картинки.
+    const factor = measured.viewportWidth / measured.contentWidth;
+    return this.setZoom(entry, id, Math.min(1, factor));
+  }
+
+  /** Нынешний масштаб вкладки — для отчёта агента и проб. */
+  zoomOf(id: string): number | null {
+    return this.views.get(id)?.zoom ?? null;
+  }
+
+  /**
+   * Выбрать элемент страницы мышью: описание для чата и снимок его области.
+   *
+   * Выбор идёт на самой странице (см. `PICK_SCRIPT`): поверх чужого слоя окна
+   * нам нечем рисовать, а узнать, куда нажали, можно только там. Отмена (Esc или
+   * закрытие вкладки) возвращает `ok: false` без причины: человек передумал — это
+   * не ошибка, и ругаться на него незачем.
+   */
+  async pick(id: string): Promise<{
+    ok: boolean;
+    element?: BrowserPickedElement;
+    shot?: { dataUrl: string; bytes: number };
+    reason?: string;
+  }> {
+    const entry = this.views.get(id);
+    if (!entry) return { ok: false, reason: 'Вкладка не найдена' };
+    if (!this.attached || this.activeId !== id) {
+      return { ok: false, reason: 'Сначала покажите страницу: выбрать элемент можно только на ней' };
+    }
+
+    let raw: unknown;
+    try {
+      raw = await entry.view.webContents.executeJavaScript(PICK_SCRIPT, true);
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+    const element = sanitizePickedElement(raw);
+    if (!element) return { ok: false };
+    return { ok: true, element, ...(await this.shotOf(entry, element.rect)) };
   }
 
   command(id: string, action: BrowserAction, rawUrl?: string): { ok: boolean; reason?: string } {
@@ -378,6 +658,7 @@ export class BrowserPanel {
       loading: contents.isLoading(),
       canGoBack: canGo(contents, -1),
       canGoForward: canGo(contents, 1),
+      zoom: entry.zoom,
       ...(entry.error ? { error: entry.error } : {}),
     };
   }
@@ -392,10 +673,63 @@ export class BrowserPanel {
     if (entry) delete entry.error;
   }
 
+  /** Поставить масштаб и рассказать о нём renderer'у: подпись в шапке живёт событием. */
+  private setZoom(entry: Entry, id: string, factor: number): { ok: boolean; zoom: number } {
+    // До сотых: иначе шаг 1.25 три раза подряд даёт 1.953125 и подпись врёт.
+    const zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(factor * 100) / 100));
+    entry.zoom = zoom;
+    entry.view.webContents.setZoomFactor(zoom);
+    this.publish(id);
+    return { ok: true, zoom };
+  }
+
+  /** Мерка страницы для «вписать». `null` — страница ещё не готова считать. */
+  private async measure(entry: Entry): Promise<{ contentWidth: number; viewportWidth: number } | null> {
+    try {
+      const data = (await entry.view.webContents.executeJavaScript(MEASURE_SCRIPT)) as {
+        contentWidth?: unknown;
+        viewportWidth?: unknown;
+      } | null;
+      const contentWidth = Number(data?.contentWidth);
+      const viewportWidth = Number(data?.viewportWidth);
+      if (!Number.isFinite(contentWidth) || !Number.isFinite(viewportWidth)) return null;
+      return { contentWidth, viewportWidth };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Снимок области элемента: подсветить его в нашем DOM нечем, а показать человеку
+   * и модели «вот про это речь» — самое короткое объяснение.
+   *
+   * Прямоугольник со страницы — в CSS-пикселях, а `capturePage` ждёт DIP окна:
+   * при масштабе 80 % элемент занимает меньше точек, чем CSS-пикселей.
+   */
+  private async shotOf(entry: Entry, rect: BrowserRect): Promise<{ shot?: { dataUrl: string; bytes: number } }> {
+    if (rect.width <= 0 || rect.height <= 0) return {};
+    try {
+      const image = await entry.view.webContents.capturePage({
+        x: Math.max(0, Math.round(rect.x * entry.zoom)),
+        y: Math.max(0, Math.round(rect.y * entry.zoom)),
+        width: Math.round(rect.width * entry.zoom),
+        height: Math.round(rect.height * entry.zoom),
+      });
+      const dataUrl = image.toDataURL();
+      const comma = dataUrl.indexOf(',');
+      return { shot: { dataUrl, bytes: Math.round(Math.max(0, dataUrl.length - comma - 1) * 0.75) } };
+    } catch {
+      return {};
+    }
+  }
+
   /** Погасить активное вложение: оно остаётся в дереве окна, но не рисуется. */
   private undraw(): void {
     if (!this.attached) return;
     const entry = this.activeId === null ? undefined : this.views.get(this.activeId);
+    // Режим выбора мог остаться включённым: страницу прячут — выходим из него,
+    // иначе подсветка ждала бы клика на невидимой странице до своего таймера.
+    entry?.view.webContents.executeJavaScript('window.__chuiPickCancel?.(); undefined').catch(() => undefined);
     entry?.view.setVisible(false);
     this.attached = false;
   }
@@ -417,6 +751,11 @@ export class BrowserPanel {
     contents.on('did-start-loading', announce);
     contents.on('did-stop-loading', announce);
     contents.on('page-title-updated', announce);
+    // Ctrl+колесо: движок в ручном режиме (`setZoomMode('manual')`), поэтому он лишь
+    // сообщает о жесте, а масштаб меняем мы — тем же путём, что кнопки шапки.
+    contents.on('zoom-changed', (_event, direction) => {
+      void this.zoom(id, direction === 'in' ? 'in' : 'out');
+    });
     contents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
       // -3 — прерванная навигация (человек ушёл на другой адрес): это не ошибка.
       if (!isMainFrame || errorCode === -3) return;

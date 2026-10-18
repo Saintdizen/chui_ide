@@ -394,8 +394,42 @@ export interface BrowserNavState {
   loading: boolean;
   canGoBack: boolean;
   canGoForward: boolean;
+  /**
+   * Масштаб страницы: 1 — 100 %. Не часть адреса, а состояние вкладки: оно живёт
+   * в самом вложении и меняется кнопками шапки, Ctrl+колесом и агентом.
+   */
+  zoom: number;
   /** Причина неудачи загрузки — показывается человеком словами, а не кодом. */
   error?: string;
+}
+
+/** Как менять масштаб страницы: шаг туда-обратно, вписать по ширине или 1:1. */
+export type BrowserZoomMode = 'in' | 'out' | 'fit' | 'actual';
+
+/**
+ * Элемент страницы, выбранный мышью для вопроса в чате.
+ *
+ * Собирается на самой странице (см. `panel.ts`): в renderer'е нет ни доступа к
+ * DOM гостя, ни возможности что-то в нём подсветить — страница лежит отдельным
+ * слоем окна. Поэтому всё, что можно сказать об элементе, приходит готовым.
+ */
+export interface BrowserPickedElement {
+  /** Имя тега маленькими буквами: `button`, `input`, `div`. */
+  tag: string;
+  /** Путь до элемента: `main.form > input#email`. Короткий, но однозначный. */
+  selector: string;
+  /** Что написано на элементе или в его `aria-label`: подпись для чипа в чате. */
+  name: string;
+  /** Роль из `role`; пусто — роль выводится из тега. */
+  role: string;
+  /** Видимый текст элемента (обрезанный). */
+  text: string;
+  /** Разметка элемента (обрезанная): без неё непонятно, как он устроен. */
+  html: string;
+  /** Значимые вычисленные стили: то, что обычно и правят в вёрстке. */
+  styles: Record<string, string>;
+  /** Где он на странице (в CSS-пикселях, до масштаба). */
+  rect: BrowserRect;
 }
 
 /**
@@ -2109,6 +2143,19 @@ export interface ChuiMethods {
   'browser.viewCapture': { params: { id: string }; result: { ok: boolean; dataUrl?: string; reason?: string } };
   /** Журнал консоли страницы вкладки: строки для вложения-контекста. */
   'browser.viewConsole': { params: { id: string }; result: { ok: boolean; lines: string[] } };
+  /** Масштаб страницы: кнопки шапки и Ctrl+колесо. Возвращает получившийся масштаб. */
+  'browser.viewZoom': {
+    params: { id: string; mode: BrowserZoomMode };
+    result: { ok: boolean; zoom?: number; reason?: string };
+  };
+  /**
+   * Выбрать элемент страницы мышью (отмена — Esc). Возвращает его описание для чата
+   * и снимок области элемента: подсветить элемент в DOM нельзя — страница не в DOM.
+   */
+  'browser.viewPick': {
+    params: { id: string };
+    result: { ok: boolean; element?: BrowserPickedElement; shot?: { dataUrl: string; bytes: number }; reason?: string };
+  };
 
   /* Личность автора, подпись коммитов и ключи: настройки git, а не IDE. */
   /** Действующие имя, почта, подпись и хранилище паролей. */

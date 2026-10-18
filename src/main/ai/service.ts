@@ -1355,6 +1355,9 @@ export class AiService {
     if (tool.name.startsWith('browser_')) {
       if (!this.browser || !this.settings.get().ai.browser.enabled) return false;
       if (tool.name === 'browser_snapshot' || tool.name === 'browser_close') return true;
+      // Масштаб страницу не меняет и отменяется одной кнопкой — спрашивать нечего.
+      // Зато он есть только у встроенного браузера: без него инструмент не предлагаем.
+      if (tool.name === 'browser_zoom') return this.browser.zoom !== undefined;
       return host?.confirmBrowser !== undefined;
     }
     return tool.side === 'main';

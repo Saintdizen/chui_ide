@@ -8,6 +8,7 @@
  *
  * Модуль намеренно чистый: `npm test` проверяет его без Chromium.
  */
+import type { BrowserPickedElement } from './api';
 
 /** Источник снимка: то, что вернул скрипт `SNAPSHOT_SCRIPT` со страницы. */
 export interface SnapshotElement {
@@ -304,4 +305,81 @@ export function sanitizeSnapshot(raw: unknown): BrowserSnapshot {
     text: text.slice(0, MAX_SNAPSHOT_TEXT),
     ...(value.truncated === true || text.length > MAX_SNAPSHOT_TEXT ? { truncated: true } : {}),
   };
+}
+
+/** Потолки для выбранного элемента: это контекст вопроса, а не слепок страницы. */
+const MAX_PICKED_HTML = 1200;
+const MAX_PICKED_TEXT = 600;
+/** Стилей больше десятка уже не читаются, а весят как весь элемент. */
+const MAX_PICKED_STYLES = 16;
+
+/**
+ * Разбор элемента, выбранного на странице. Данные приходят из чужого документа:
+ * обрезаем длины и выбрасываем всё, что не строка — иначе в промпт уедет что попало.
+ */
+export function sanitizePickedElement(raw: unknown): BrowserPickedElement | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const tag = typeof value.tag === 'string' ? value.tag.trim().toLowerCase().slice(0, 24) : '';
+  if (!tag) return null;
+
+  const styles: Record<string, string> = {};
+  const rawStyles = (value.styles ?? {}) as Record<string, unknown>;
+  for (const [key, item] of Object.entries(rawStyles)) {
+    if (!key || typeof item !== 'string' || !item) continue;
+    styles[key.slice(0, 40)] = item.slice(0, 120);
+    if (Object.keys(styles).length >= MAX_PICKED_STYLES) break;
+  }
+
+  const rect = (value.rect ?? {}) as Record<string, unknown>;
+  const side = (key: string): number => {
+    const number = Number(rect[key]);
+    return Number.isFinite(number) ? Math.round(number) : 0;
+  };
+  const part = (key: string, limit: number): string =>
+    typeof value[key] === 'string' ? (value[key] as string).slice(0, limit) : '';
+
+  return {
+    tag,
+    selector: part('selector', 300),
+    name: part('name', 160).trim(),
+    role: part('role', 40),
+    text: part('text', MAX_PICKED_TEXT),
+    html: part('html', MAX_PICKED_HTML),
+    styles,
+    rect: { x: side('x'), y: side('y'), width: Math.max(0, side('width')), height: Math.max(0, side('height')) },
+  };
+}
+
+/**
+ * Текст выбранного элемента для промпта: что за элемент, где он, как выглядит.
+ *
+ * Порядок — от главного к деталям: сначала «что это», потом адрес в документе,
+ * потом стили и разметка. По такому тексту модель может и ответить на вопрос про
+ * вёрстку, и найти элемент в коде проекта.
+ */
+export function formatPickedElement(element: BrowserPickedElement, pageUrl = ''): string {
+  const lines: string[] = [];
+  const title = element.name ? `<${element.tag}> «${element.name}»` : `<${element.tag}>`;
+  lines.push(`Элемент: ${title}`);
+  if (element.role) lines.push(`Роль: ${element.role}`);
+  if (pageUrl) lines.push(`Страница: ${pageUrl}`);
+  if (element.selector) lines.push(`Селектор: ${element.selector}`);
+  const { x, y, width, height } = element.rect;
+  lines.push(`Место на странице: ${x}, ${y} · ${width} × ${height}`);
+
+  const styles = Object.entries(element.styles);
+  if (styles.length > 0) {
+    lines.push('Стили:');
+    for (const [key, value] of styles) lines.push(`  ${key}: ${value}`);
+  }
+  if (element.text) {
+    lines.push('Текст:');
+    lines.push(element.text);
+  }
+  if (element.html) {
+    lines.push('Разметка:');
+    lines.push(element.html);
+  }
+  return lines.join('\n');
 }

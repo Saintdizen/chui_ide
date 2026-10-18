@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type {
   ApplyEditsHostResult,
+  BrowserZoomMode,
   DiagnosticItem,
   DiagnosticsHostResult,
   DirEntry,
@@ -215,6 +216,12 @@ export interface BrowserTools {
   type(ref: string, text: string, submit: boolean): Promise<BrowserSnapshot>;
   /** Выполнить выражение на странице и вернуть результат текстом. */
   evaluate(expression: string): Promise<string>;
+  /**
+   * Масштаб страницы. Есть только у встроенного браузера: там масштаб — состояние
+   * вкладки, которое видит человек. Поэтому метод необязательный — без него
+   * инструмент честно скажет, что здесь так нельзя.
+   */
+  zoom?(mode: BrowserZoomMode): Promise<{ ok: boolean; zoom?: number; reason?: string }>;
   /** Закрыть браузер и убрать временный профиль. */
   close(): Promise<void>;
   /** Идёт ли сессия: `false` — браузер ещё не поднимали (или уже закрыли). */
@@ -429,6 +436,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await browserType(ctx, parsed.value);
       case 'browser_evaluate':
         return await browserEvaluate(ctx, parsed.value);
+      case 'browser_zoom':
+        return await browserZoom(ctx, parsed.value);
       case 'browser_close':
         return await browserClose(ctx);
       case 'remember':
@@ -615,6 +624,30 @@ async function browserEvaluate(ctx: ToolContext, args: Record<string, unknown>):
 
   const result = await ctx.browser.evaluate(expression);
   return { ok: true, summary: 'выражение выполнено', detail: result };
+}
+
+/**
+ * Масштаб страницы. Подтверждения не спрашивает: страница не меняется, а масштаб
+ * обратим одной кнопкой — и всё равно виден человеку в шапке.
+ */
+async function browserZoom(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.browser) return { ok: false, summary: 'Браузер недоступен' };
+  if (!ctx.browser.zoom) {
+    return {
+      ok: false,
+      summary: 'масштаб доступен только во встроенном браузере',
+      detail: 'Сейчас агент работает в отдельном Chromium. Встроенный браузер включается в настройках AI.',
+    };
+  }
+  const mode = requireString(args, 'mode').trim();
+  if (mode !== 'in' && mode !== 'out' && mode !== 'fit' && mode !== 'actual') {
+    return { ok: false, summary: 'mode должен быть in, out, fit или actual' };
+  }
+
+  const result = await ctx.browser.zoom(mode);
+  if (!result.ok) return { ok: false, summary: result.reason ?? 'не удалось изменить масштаб' };
+  const percent = Math.round((result.zoom ?? 1) * 100);
+  return { ok: true, summary: `масштаб ${percent}%`, detail: `Страница показана с масштабом ${percent}%.` };
 }
 
 async function browserClose(ctx: ToolContext): Promise<ToolOutcome> {

@@ -152,9 +152,11 @@ const NOT_MOCKED: Record<string, string[]> = {
     'browser.viewCreate',
     'browser.viewHide',
     'browser.viewLayout',
+    'browser.viewPick',
     'browser.viewShare',
     'browser.viewShow',
     'browser.viewUnshare',
+    'browser.viewZoom',
   ],
   'обращение наружу и диалог закрытия окна': ['shell.openExternal', 'dialog.confirmClose'],
 };

@@ -54,6 +54,7 @@ describe('набор инструментов агента', () => {
       'browser_click',
       'browser_type',
       'browser_evaluate',
+      'browser_zoom',
       'browser_close',
       'remember',
       'forget',

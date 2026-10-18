@@ -222,6 +222,22 @@
   border-bottom-color: var(--blue_prime_background);
 }
 
+/* Масштаб страницы — те же кнопки и та же подпись, что у просмотра картинок
+   (`image-zoom-label`): одна и та же мысль в разных вкладках читается одинаково. */
+.browser-zoom-label {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_labels_size);
+  min-width: 40px;
+  text-align: right;
+}
+
+.browser-actual {
+  font-size: var(--font_small_size);
+  font-weight: 600;
+}
+
 /* Сцена — «дырка» под вложение браузера: страницу рисует не renderer, а
    `WebContentsView` — отдельный слой окна. Вложение встаёт ровно по её
    прямоугольнику (его меряет renderer и отдаёт в main), поэтому шапка над сценой

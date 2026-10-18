@@ -45,6 +45,7 @@ export type AgentToolName =
   | 'browser_click'
   | 'browser_type'
   | 'browser_evaluate'
+  | 'browser_zoom'
   | 'browser_close'
   | 'remember'
   | 'forget'
@@ -704,6 +705,24 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         expression: { type: 'string', description: 'Выражение или код JS. Возвращай значение через return.' },
       },
       required: ['expression'],
+    },
+  },
+  {
+    name: 'browser_zoom',
+    side: 'main',
+    description:
+      'Изменить масштаб страницы: мельче, крупнее, вписать по ширине или 1:1. Масштаб — состояние ' +
+      'вкладки, а не страницы: он живёт до закрытия вкладки и его видит человек в шапке. Нужен, когда ' +
+      'проверяешь вёрстку в другой ширине окна или читаешь мелкий текст.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          description: 'Что сделать: in — крупнее, out — мельче, fit — вписать по ширине, actual — вернуть 1:1.',
+        },
+      },
+      required: ['mode'],
     },
   },
   {

@@ -1,5 +1,12 @@
-import type { BrowserAction, BrowserNavState, BrowserRect, ChatAttachment, PickedImage } from '../../shared/api';
-import { normalizeBrowserUrl } from '../../shared/browser';
+import type {
+  BrowserAction,
+  BrowserNavState,
+  BrowserRect,
+  BrowserZoomMode,
+  ChatAttachment,
+  PickedImage,
+} from '../../shared/api';
+import { formatPickedElement, normalizeBrowserUrl } from '../../shared/browser';
 import type { BrowserPage } from '../core/browser-tabs';
 import type { RpcClient } from '../core/rpc';
 import { showContextMenu } from './context-menu';
@@ -106,6 +113,36 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
     { class: 'icon-btn', type: 'button', title: 'Добавить в чат', onClick: (event: Event) => openChatMenu(event) },
     svgIcon('chat', 14),
   );
+  // Выбор элемента: страница уходит в чат контекстом вопроса вместе со снимком
+  // этого элемента. Обычный путь для «а вот тут криво» — быстрее, чем описывать словами.
+  const pickButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Выбрать элемент для чата', onClick: () => void pickElement() },
+    svgIcon('pick', 14),
+  );
+  // Масштаб страницы — те же четыре кнопки, что у просмотра картинок: привычно
+  // и не требует помнить, что у страницы он тоже есть (Ctrl+колесо работает).
+  const zoomLabel = h('span', { class: 'browser-zoom-label' });
+  const zoomOutButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Мельче (Ctrl+колесо)', onClick: () => void runZoom('out') },
+    svgIcon('minus', 14),
+  );
+  const zoomInButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Крупнее (Ctrl+колесо)', onClick: () => void runZoom('in') },
+    svgIcon('plus', 14),
+  );
+  const zoomActualButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Реальный масштаб (1:1)', onClick: () => void runZoom('actual') },
+    h('span', { class: 'browser-actual' }, '1:1'),
+  );
+  const zoomFitButton = h(
+    'button',
+    { class: 'icon-btn', type: 'button', title: 'Вписать по ширине', onClick: () => void runZoom('fit') },
+    svgIcon('fit', 14),
+  );
   // Метка «агент работает»: без неё страница под руками человека сама нажимает
   // кнопки и уходит на другие адреса — и не понять, кто это сделал. Живёт в шапке,
   // потому что шапка — единственная часть вкладки, которую рисует DOM: сама
@@ -126,6 +163,12 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
       reloadButton,
       address,
       agentBadge,
+      zoomLabel,
+      zoomOutButton,
+      zoomInButton,
+      zoomActualButton,
+      zoomFitButton,
+      pickButton,
       externalButton,
       shareButton,
       devtoolsButton,
@@ -141,6 +184,18 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
   let loading = false;
   /** Адрес активной страницы: им адресная строка возвращается после правки. */
   let currentUrl = '';
+  /**
+   * Масштаб активной страницы. Живёт событием из main: там его меняют и кнопки,
+   * и Ctrl+колесо, и агент — три пути, а подпись в шапке одна.
+   */
+  let zoom = 1;
+
+  /**
+   * Границы масштаба — те же числа, что в main (`panel.ts`): кнопка не должна
+   * выглядеть живой там, где движок всё равно не даст дальше.
+   */
+  const ZOOM_MIN = 0.25;
+  const ZOOM_MAX = 5;
   /** Ключ страницы, отданной ассистенту: `null` — ничем не делились. */
   let sharedId: string | null = null;
   /** Оверлей закрывает сцену — вложение на это время спрятано. */
@@ -156,6 +211,7 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
     click: 'нажимает на странице',
     type: 'вводит текст',
     script: 'выполняет скрипт',
+    zoom: 'меняет масштаб страницы',
   };
   /** Сколько метка держится после последнего действия. */
   const AGENT_NOTICE_MS = 3000;
@@ -181,6 +237,61 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
         if (!result.ok && result.reason) deps.notify(result.reason);
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * Сменить масштаб страницы. Подпись и состояние кнопок придут событием —
+   * по одному ответу их выставлять нельзя: масштаб меняет ещё и Ctrl+колесо.
+   */
+  async function runZoom(mode: BrowserZoomMode): Promise<void> {
+    if (!activeId) return;
+    const result = await deps.rpc.request('browser.viewZoom', { id: activeId, mode }).catch(() => null);
+    if (!result) {
+      deps.notify('Не удалось изменить масштаб страницы');
+      return;
+    }
+    if (!result.ok && result.reason) deps.notify(result.reason);
+  }
+
+  /**
+   * Выбрать элемент страницы и получить его контекстом вопроса: описание плюс снимок.
+   *
+   * Режим выбора живёт на самой странице (main), поэтому запрос висит до клика —
+   * кнопка на это время помечена, чтобы было понятно, что от человека ждут клика.
+   */
+  async function pickElement(): Promise<void> {
+    const id = activeId;
+    if (!id) return;
+    pickButton.classList.add('is-active');
+    const result = await deps.rpc.request('browser.viewPick', { id }).catch(() => null);
+    pickButton.classList.remove('is-active');
+    if (!result) {
+      deps.notify('Не удалось выбрать элемент');
+      return;
+    }
+    // Отмена — Esc или ничего не выбрано: это не ошибка, ругать человека не за что.
+    if (!result.ok || !result.element) {
+      if (result.reason) deps.notify(result.reason);
+      return;
+    }
+
+    const element = result.element;
+    const label = element.name || element.tag;
+    deps.attachContext({
+      kind: 'note',
+      label: 'Элемент: ' + element.tag + ' «' + label + '»',
+      title: 'Элемент страницы ' + currentUrl,
+      text: formatPickedElement(element, currentUrl),
+    });
+    if (result.shot) {
+      deps.attachImage({
+        name: 'Элемент ' + element.tag + '.png',
+        mime: 'image/png',
+        bytes: result.shot.bytes,
+        dataUrl: result.shot.dataUrl,
+      });
+    }
+    deps.notify('Элемент добавлен в чат');
   }
 
   /** Показать сцену на текущем месте: спрятанное вложение возвращается тем же путём. */
@@ -227,6 +338,12 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
       devtoolsButton.disabled = true;
       shareButton.disabled = true;
       chatButton.disabled = true;
+      pickButton.disabled = true;
+      zoomOutButton.disabled = true;
+      zoomInButton.disabled = true;
+      zoomActualButton.disabled = true;
+      zoomFitButton.disabled = true;
+      zoomLabel.textContent = '';
       return;
     }
     reloadButton.disabled = false;
@@ -234,6 +351,13 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
     devtoolsButton.disabled = false;
     shareButton.disabled = false;
     chatButton.disabled = false;
+    pickButton.disabled = false;
+    zoomOutButton.disabled = zoom <= ZOOM_MIN;
+    zoomInButton.disabled = zoom >= ZOOM_MAX;
+    zoomActualButton.disabled = zoom === 1;
+    zoomFitButton.disabled = false;
+    zoomLabel.textContent = Math.round(zoom * 100) + '%';
+    zoomLabel.title = 'Масштаб страницы: Ctrl+колесо тоже меняет его';
     // Кнопка показывает, поделена ли ИМЕННО эта страница: агент работает в ней же.
     const shared = sharedId === activeId;
     shareButton.classList.toggle('is-active', shared);
@@ -442,6 +566,7 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
       if (id !== activeId) return;
       currentUrl = state.url;
       loading = state.loading;
+      zoom = state.zoom;
       backButton.disabled = !state.canGoBack;
       forwardButton.disabled = !state.canGoForward;
       syncToolbar();

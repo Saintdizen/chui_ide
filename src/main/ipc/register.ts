@@ -960,6 +960,20 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     if (!panel) return { ok: false, lines: [] };
     return { ok: true, lines: panel.consoleLines(params.id) };
   });
+  // Масштаб страницы: и кнопки шапки, и Ctrl+колесо, и агент ходят одним путём.
+  // «Вписать» считается на странице, поэтому ответ асинхронный.
+  router.register('browser.viewZoom', async (params) => {
+    const panel = deps.browserPanel;
+    if (!panel) return { ok: false, reason: 'Браузер недоступен' };
+    return panel.zoom(params.id, params.mode);
+  });
+  // Выбор элемента мышью: режим выбора живёт на самой странице (в renderer'е нет
+  // ни её DOM, ни возможности что-то на ней подсветить), а сюда приходит ответ.
+  router.register('browser.viewPick', async (params) => {
+    const panel = deps.browserPanel;
+    if (!panel) return { ok: false, reason: 'Браузер недоступен' };
+    return panel.pick(params.id);
+  });
 
   // Терминал системы в папке проекта: привычный человеку терминал — за окном IDE.
   // Рабочий каталог ставим процессу: не всякий терминал умеет «откройся здесь» доводом.
