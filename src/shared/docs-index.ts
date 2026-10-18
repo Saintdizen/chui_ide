@@ -90,11 +90,22 @@ export function splitDocChunks(path: string, text: string): DocChunk[] {
   return splitPlain(path, lines);
 }
 
-/** Markdown (и mdx): разделы — по строкам `# …`, вложенность — цепочкой заголовков. */
+/** Строка забора кода: до трёх пробелов отступа, затем три и больше ` или `~`. */
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/**
+ * Markdown (и mdx): разделы — по строкам `# …`, вложенность — цепочкой заголовков.
+ *
+ * Внутри забора кода (три бэктика или три тильды) заголовков нет: там лежит пример,
+ * а не разметка. Без этого `# .ai_ignore` в примере `.gitignore` становился разделом
+ * документации и попадал в поиск как заголовок.
+ */
 function splitMarkdown(path: string, lines: readonly string[]): DocChunk[] {
   const chunks: DocChunk[] = [];
   const stack: Array<{ level: number; title: string }> = [];
   let current: { heading: string; line: number; body: string[] } | null = null;
+  /** Открытый забор кода: его вид и длина — закрыть может только такой же или длиннее. */
+  let fence: { kind: string; length: number } | null = null;
 
   const flush = (): void => {
     if (!current) return;
@@ -103,6 +114,24 @@ function splitMarkdown(path: string, lines: readonly string[]): DocChunk[] {
   };
 
   lines.forEach((line, index) => {
+    const fenceLine = FENCE_RE.exec(line);
+    if (fenceLine) {
+      const marker = fenceLine[1]!;
+      const rest = fenceLine[2] ?? '';
+      if (fence === null) {
+        fence = { kind: marker[0]!, length: marker.length };
+      } else if (marker[0] === fence.kind && marker.length >= fence.length && rest.trim() === '') {
+        // Закрывающая линия: тот же знак, не короче открывающего и без «языка» после.
+        fence = null;
+      }
+    }
+    if (fence !== null || fenceLine) {
+      // Строка внутри забора (и сам забор) — обычный текст раздела.
+      if (!current) current = { heading: '', line: index + 1, body: [] };
+      current.body.push(line);
+      return;
+    }
+
     // Закрывающие решётки (`# Заголовок ##`) не часть названия: убираем.
     const match = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
     if (match) {

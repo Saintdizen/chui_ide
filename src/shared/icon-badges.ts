@@ -17,6 +17,8 @@
  * папку целиком. Регистр не важен.
  */
 
+import { maskToRegExp } from './glob';
+
 /** Цвет значка берётся из роли палитры: обе схемы и тема из файла остаются согласованными. */
 export type BadgeColor = 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'purple' | 'gray';
 
@@ -45,16 +47,23 @@ function normalizeColor(value: unknown): BadgeColor {
   return BADGE_COLORS.includes(value as BadgeColor) ? (value as BadgeColor) : 'gray';
 }
 
-/** Маска в регулярное выражение: `*`, `?` и `**` — как у исключений дерева. */
-function maskToRegExp(pattern: string): RegExp {
-  const source = pattern
-    .trim()
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '\u0001')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\?/g, '[^/]')
-    .replace(/\u0001/g, '.*');
-  return new RegExp(`^(?:${source})$`, 'i');
+/** Готовые выражения правил: одна запись на объект правила. */
+const MASKS = new WeakMap<IconBadgeRule, RegExp>();
+
+/**
+ * Выражение правила — один раз на правило, а не на каждую строку дерева.
+ *
+ * `badgeFor` зовётся для каждой строки при каждой перерисовке: правил бывает до 200,
+ * а строк — тысячи, так что сборка выражения на месте стоила бы сотни тысяч
+ * `new RegExp` на кадр. Ключ — сам объект правила: когда настройки перечитают,
+ * придут новые объекты и старые записи уйдут вместе с ними.
+ */
+function maskFor(rule: IconBadgeRule): RegExp {
+  const cached = MASKS.get(rule);
+  if (cached) return cached;
+  const compiled = maskToRegExp(rule.pattern);
+  MASKS.set(rule, compiled);
+  return compiled;
 }
 
 /**
@@ -116,7 +125,7 @@ export function badgeFor(path: string, relative: string, rules: readonly IconBad
   if (rules.length === 0) return null;
   const name = path.split(/[/\\]/).pop() ?? path;
   for (const rule of rules) {
-    const regexp = maskToRegExp(rule.pattern);
+    const regexp = maskFor(rule);
     if (regexp.test(name) || regexp.test(relative) || regexp.test(path)) return rule;
   }
   return null;

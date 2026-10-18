@@ -26,3 +26,24 @@ export function globToRegExp(glob: string): RegExp {
     .replace(/\u0001/g, '.*');
   return new RegExp(`^${body}$`);
 }
+
+/**
+ * Маска из НАСТРОЕК (значки дерева, исключённые файлы) в регулярное выражение.
+ *
+ * Отличие от `globToRegExp` вдвух: без учёта регистра (на Windows регистр в именах
+ * файлов ни о чём не говорит) и без особого случая «двойная звёздочка со слэшем»:
+ * такую маску сверяют и с именем, и с путём по отдельности.
+ *
+ * Общий модуль, потому что эту сборку повторяли два места — дерево (`ui/explorer.ts`)
+ * и значки (`icon-badges.ts`), причём на каждом кадре.
+ */
+export function maskToRegExp(pattern: string): RegExp {
+  const source = pattern
+    .trim()
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*/g, '\u0001')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\?/g, '[^/]')
+    .replace(/\u0001/g, '.*');
+  return new RegExp(`^(?:${source})$`, 'i');
+}

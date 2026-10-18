@@ -24,6 +24,7 @@ const { GitService } = require('../dist/main/git/git.js');
 const { HostClient } = require('../dist/main/ipc/host.js');
 const { registerIpc } = require('../dist/main/ipc/register.js');
 const { pushToRenderers } = require('../dist/main/ipc/push.js');
+const { createApplicationMenu } = require('../dist/main/menu.js');
 const { registerAppScheme, serveRenderer } = require('../dist/main/protocol.js');
 const { SettingsStore } = require('../dist/main/settings.js');
 const { TerminalService } = require('../dist/main/terminal/terminal.js');
@@ -90,6 +91,10 @@ app.whenReady().then(async () => {
   const ai = new AiService(settings, workspace);
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
   registerIpc({ settings, workspace, ai, terminals, git: gitService, host: new HostClient() });
+  // Системное меню — часть предмета проверки, а не обстановка: его акселераторы
+  // (`Ctrl+C`, `Ctrl+V` у ролей буфера) Electron обрабатывает РАНЬШЕ renderer'а, и
+  // клавиша до терминала не доходит. Без этой строки проверка была бы холостой.
+  createApplicationMenu();
   await workspace.open(project);
 
   const ide = openIdeWindow();
@@ -177,6 +182,17 @@ app.whenReady().then(async () => {
   // До починки комбинация уходила в pty управляющим кодом quoted-insert (`\x16`),
   // и оболочка ждала следующий знак вместо вставки.
   check('в pty не ушёл управляющий символ вставки', !log.includes('\u0016'));
+
+  /* ── Ctrl+C — сигнал, а не копирование ──────────────────────────────── */
+
+  // В терминале `Ctrl+C` значит «прервать строку», а в меню та же клавиша закреплена
+  // за ролью `copy`. Если акселератор меню перехватывает её первым, сигнал не доходит
+  // до сессии: строка остаётся на месте, и проверить это можно только живой сессией.
+  for (const char of 'sleep 30') press(ide, char === ' ' ? 'Space' : char);
+  await wait(600);
+  press(ide, 'c', ['control']);
+  const interrupted = await waitFor(async () => readLog().includes('^C'), 2500);
+  check('Ctrl+C прерывает строку в терминале', interrupted, { хвост: readLog().slice(-120) });
 
   /* ── подпись вкладки ──────────────────────────────────────────────────── */
 

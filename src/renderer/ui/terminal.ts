@@ -378,8 +378,6 @@ export function createTerminalPanel(deps: {
     activeId = id;
     // Поиск привязан к сессии: у другой вкладки свой вывод.
     if (!findBar.hidden) closeFind();
-    // Поиск привязан к сессии: у другой вкладки свой вывод.
-    if (!findBar.hidden) closeFind();
 
     for (const [key, item] of sessions) {
       item.container.hidden = key !== id;

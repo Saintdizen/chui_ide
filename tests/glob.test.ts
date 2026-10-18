@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { globToRegExp } from '../src/shared/glob';
+import { globToRegExp, maskToRegExp } from '../src/shared/glob';
 
 const match = (glob: string, path: string): boolean => globToRegExp(glob).test(path);
 
@@ -56,5 +56,34 @@ describe('globToRegExp', () => {
     expect(match('a.ts', 'a.ts')).toBe(true);
     expect(match('a.ts', 'ats')).toBe(false);
     expect(match('{a}', '{a}')).toBe(true);
+  });
+});
+
+/**
+ * Маска из настроек (значки дерева, исключённые файлы): та же арифметика знаков,
+ * но без учёта регистра и без особого случая «двойная звёздочка со слэшем» —
+ * такую маску сверяют и с именем, и с путём по отдельности.
+ */
+describe('maskToRegExp', () => {
+  const matches = (mask: string, value: string): boolean => maskToRegExp(mask).test(value);
+
+  it('регистр не важен: маска пришла из настроек, а не из кода', () => {
+    expect(matches('*.min.js', 'app.MIN.JS')).toBe(true);
+    expect(matches('README*', 'readme.md')).toBe(true);
+  });
+
+  it('`*` и `**` работают на своих уровнях', () => {
+    expect(matches('*.ts', 'chat.ts')).toBe(true);
+    expect(matches('generated/*', 'generated/api.ts')).toBe(true);
+    expect(matches('generated/**', 'generated/a/b.ts')).toBe(true);
+  });
+
+  it('без обрамляющих пробелов: маску из настроек пишут руками', () => {
+    expect(matches('  dist  ', 'dist')).toBe(true);
+  });
+
+  it('точка и скобки остаются буквами', () => {
+    expect(matches('a+b.ts', 'a+b.ts')).toBe(true);
+    expect(matches('a+b.ts', 'aab.ts')).toBe(false);
   });
 });

@@ -58,6 +58,23 @@ describe('splitDocChunks — markdown', () => {
     expect(chunks[1]?.heading).toBe('Раздел');
   });
 
+  it('заголовки внутри забора кода разделами не считаются', () => {
+    // Так выглядит пример `.gitignore` в документации: решётка там — комментарий
+    // файла, а не заголовок раздела, и в поиск по документации она попадать не должна.
+    const text = '# Проект\n\n```gitignore\n# .ai_ignore\n# node_modules\n```\n\n# Установка\n\nnpm install\n';
+    const chunks = splitDocChunks('README.md', text);
+    expect(chunks.map((item) => item.heading)).toEqual(['Проект', 'Установка']);
+    expect(chunks[0]?.text).toContain('# .ai_ignore');
+  });
+
+  it('забор закрывается только тем же знаком нужной длины', () => {
+    // Внутри забора шапки — обычный текст: `~~~~` не закрывает забор из четырёх бэктиков.
+    const text = '# Раздел\n\n````md\n# не заголовок\n~~~~\n# тоже не заголовок\n````\n\n# Следующий\n';
+    const chunks = splitDocChunks('a.md', text);
+    expect(chunks.map((item) => item.heading)).toEqual(['Раздел', 'Следующий']);
+    expect(chunks[0]?.text).toContain('# тоже не заголовок');
+  });
+
   it('огромный раздел режется по абзацам', () => {
     const body = Array.from({ length: 40 }, (_, index) => `Абзац ${index}. ${'x'.repeat(120)}`).join('\n\n');
     const chunks = splitDocChunks('a.md', `# Большой\n\n${body}\n`);

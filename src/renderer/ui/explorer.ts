@@ -1,6 +1,7 @@
 import type { DirEntry, ExplorerSettings, GitChange, WorkspaceInfo } from '../../shared/api';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { submoduleStateLabel, type GitSubmodule } from '../../shared/git-submodules';
+import { maskToRegExp } from '../../shared/glob';
 import { isInsidePath, joinPath, nameOf, parentOf, pathAfter, separatorOf, splitPath } from '../../shared/paths';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
@@ -589,7 +590,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         if (!options.showHidden && entry.name.startsWith('.')) return false;
         if (options.exclude.length === 0) return true;
         const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-        return !options.exclude.some((pattern) => matchesGlob(entry.name, relative, pattern));
+        return !matchesExclude(entry.name, relative, options.exclude);
       }),
     );
   };
@@ -1877,21 +1878,29 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
 }
 
 /**
- * Совпадение имени с шаблоном из настроек: `*.min.js`, `dist`, `**
- * /generated/*`.
+ * Совпадение имени с шаблоном из настроек: `*.min.js`, `dist`, `generated/*`.
  * Полноценный glob тут не нужен — шаблоны задаёт человек руками, поэтому
  * поддерживаем `*`, `?` и `**` и сверяем и имя, и путь от корня проекта.
+ *
+ * Маску собираем ОДИН раз на набор, а не на каждую строку папки: в каталоге на
+ * несколько тысяч файлов с тремя шаблонами это тысячи `new RegExp` на каждое
+ * чтение папки. Ключ кеша — сам массив шаблонов из настроек: поменяется он —
+ * пересоберём.
  */
-function matchesGlob(name: string, relative: string, pattern: string): boolean {
-  const source = pattern
-    .trim()
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '\u0001')
-    .replace(/\*/g, '[^/]*')
-    .replace(/\?/g, '[^/]')
-    .replace(/\u0001/g, '.*');
-  const regexp = new RegExp(`^(?:${source})$`, 'i');
-  return regexp.test(name) || regexp.test(relative);
+let matcherCache: { patterns: readonly string[]; regexps: RegExp[] } | null = null;
+
+function excludeMatchers(patterns: readonly string[]): RegExp[] {
+  if (matcherCache?.patterns === patterns) return matcherCache.regexps;
+  const regexps = patterns.map((pattern) => maskToRegExp(pattern));
+  matcherCache = { patterns, regexps };
+  return regexps;
+}
+
+function matchesExclude(name: string, relative: string, patterns: readonly string[]): boolean {
+  for (const regexp of excludeMatchers(patterns)) {
+    if (regexp.test(name) || regexp.test(relative)) return true;
+  }
+  return false;
 }
 
 /* Имя и родителя пути считает shared/paths: разделитель там берётся из пути. */
