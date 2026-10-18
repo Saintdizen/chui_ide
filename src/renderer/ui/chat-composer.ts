@@ -44,6 +44,11 @@ export interface ComposerModes {
 export interface ChatComposerView {
   /** Панель ввода целиком: поле вопроса и тулбар. */
   element: HTMLElement;
+  /**
+   * Слот над полем внутри карточки: сюда панель чата кладёт план, изменённые файлы
+   * и чипы приложенного контекста. Они про набираемый вопрос, а не про ленту.
+   */
+  extras: HTMLElement;
   /** Поле вопроса: панель пишет в него черновик и читает текст для отправки. */
   input: HTMLTextAreaElement;
   /** Значок режима для полосы статуса окна. */
@@ -251,9 +256,19 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     effortField.title = title;
   }
 
+  /**
+   * Слот над полем ввода: панель плана, изменённые файлы и чипы приложенного
+   * контекста. Всё это относится к ВОПРОСУ, который человек набирает, а не к ленте
+   * беседы, поэтому живёт в самой карточке композера. Раскладку стопки держит
+   * карточка (flex-колонка с шагом 5 px), а `hidden` у невидимых панелей убирает их
+   * из потока — пустых полос над полем не остаётся.
+   */
+  const extras = h('div', { class: 'composer-extras' });
+
   const element = h(
     'div',
     { class: 'composer-box' },
+    extras,
     input,
     h(
       'div',
@@ -268,6 +283,8 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
 
   return {
     element,
+    /** Куда панель чата кладёт свои надстройки над полем (план, изменения, чипы). */
+    extras,
     input,
     modeBadge,
     modes: () => ({ mode, useTools, planMode, autoApprove }),

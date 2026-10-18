@@ -1468,15 +1468,30 @@
   padding: 5px;
 }
 
-/* Чипы контекста держат свой боковой отступ — шире общего зазора футера:
-   вложенные строки не липнут к рамке панели. */
-.chat-footer > .composer-chips {
-  padding: 0 10px;
+/* Слот над полем ввода внутри карточки композера: план, изменённые файлы и чипы
+   приложенного контекста. Стопка — своя колонка с тем же шагом 5 px, что у карточки;
+   пустая (все панели скрыты `hidden`) не занимает ни места, ни зазора. */
+.composer-extras {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
 }
 
-/* Панели изменений и плана прижаты к зазору футера: у обеих своя рамка/подложка. */
-.chat-footer > .composer-changes,
-.chat-footer > .composer-plan {
+.composer-extras:not(:has(> :not([hidden]))) {
+  display: none;
+}
+
+/* Чипы контекста выровнены по тексту поля: у карточки свой отступ 5 px, у поля —
+   ещё 5 px внутри, поэтому чипы держат те же 5 px. */
+.composer-box > .composer-extras > .composer-chips {
+  padding: 0 5px;
+}
+
+/* Панели изменений и плана внутри карточки не несут своего внешнего отступа:
+   его даёт слот, а рамку/подложку — они сами. */
+.composer-box > .composer-extras > .composer-changes,
+.composer-box > .composer-extras > .composer-plan {
   padding: 0;
 }
 

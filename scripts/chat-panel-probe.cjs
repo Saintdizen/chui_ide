@@ -493,6 +493,44 @@ app.whenReady().then(async () => {
   const back = await runCommand('Вернуть чат в боковую панель');
   check('чат вернулся в боковую панель', back === 'выполнено', back);
 
+  /* ── надстройки композера живут в его карточке ──────────────────────────── */
+
+  // Регрессия: план агента, изменённые файлы и чипы приложенного контекста стояли
+  // отдельными строками в футере — то есть ВНЕ карточки композера, хотя относятся к
+  // набираемому вопросу. Теперь они внутри `.composer-box`, над полем ввода.
+  const extras = await ask(
+    ide,
+    `(() => {
+      const box = document.querySelector('.composer-box');
+      if (!box) return { нет: 'композера' };
+      const inside = (cls) => Boolean(box.querySelector(':scope > .composer-extras > ' + cls));
+      const slot = box.querySelector(':scope > .composer-extras');
+      const input = box.querySelector('.chat-input');
+      const slotBox = slot ? slot.getBoundingClientRect() : null;
+      const inputBox = input ? input.getBoundingClientRect() : null;
+      return {
+        план: inside('.composer-plan'),
+        изменения: inside('.composer-changes'),
+        чипы: inside('.composer-chips'),
+        // Слот стоит ПЕРЕД полем ввода: он относится к вопросу, а не к тулбару.
+        надПолем: Boolean(slotBox && inputBox && slotBox.bottom <= inputBox.top + 1),
+        // Пустой слот не занимает высоты: иначе над полем была бы пустая полоса.
+        высотаПустого: slotBox ? Math.round(slotBox.height) : null,
+        вФутере: [...(document.querySelector('.chat-footer')?.children ?? [])].map((n) => n.className),
+      };
+    })()`,
+  );
+  check('план агента внутри карточки композера', extras?.план === true, extras);
+  check('изменённые файлы внутри карточки композера', extras?.изменения === true, extras);
+  check('чипы контекста внутри карточки композера', extras?.чипы === true, extras);
+  check('надстройки стоят над полем ввода', extras?.надПолем === true, extras);
+  check('пустой слот надстроек не занимает места', extras?.высотаПустого === 0, extras?.высотаПустого);
+  check(
+    'в футере осталась только карточка композера',
+    Array.isArray(extras?.вФутере) && !extras.вФутере.some((name) => /composer-(plan|changes|chips)/.test(name)),
+    extras?.вФутере,
+  );
+
   /* ── сохранение и восстановление ───────────────────────────────────────── */
 
   // Вторая беседа: к этому месту в пробе одна закрыта, так что проверяем на двух.

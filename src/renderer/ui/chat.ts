@@ -936,16 +936,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // Композер и всё, что под лентой. Кнопка «к последнему сообщению» живёт здесь
   // же и позиционируется от футера: иначе фиксированный отступ при высоком
   // поле ввода оставлял бы кнопку поверх него.
-  const footer = h(
-    'div',
-    { class: 'chat-footer' },
-    planPanel.element,
-    changesPanel.element,
-    attachments.element,
-    composer.element,
-    menu.element,
-  );
+  const footer = h('div', { class: 'chat-footer' }, composer.element, menu.element);
   footer.appendChild(jumpButton);
+
+  // План, изменённые файлы и приложенный контекст — ВНУТРИ карточки композера, над
+  // полем ввода: они относятся к вопросу, который человек набирает, а не к беседе.
+  // Порядок стопки — сверху вниз: план, изменения, чипы.
+  composer.extras.append(planPanel.element, changesPanel.element, attachments.element);
 
   const element = h('div', { class: 'chat' }, tabs.element, tabs.searchBar, body, footer);
 
