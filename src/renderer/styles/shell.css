@@ -688,6 +688,24 @@
   font-size: var(--font_small_size);
 }
 
+/* Свой путь до окружения: поле забирает ширину, кнопка «Выбрать…» не сжимается. */
+.venv-path-row {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.venv-path-row .field-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.venv-path-row .btn {
+  flex: 0 0 auto;
+}
+
 .venv-check {
   display: flex;
   align-items: center;

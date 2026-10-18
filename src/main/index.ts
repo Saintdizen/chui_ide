@@ -22,7 +22,7 @@ import { projectEnv } from './project-env';
 import { SandboxService } from './sandbox/sandbox';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { WINDOW_BACKGROUND } from '../shared/colors';
-import { activateCommand, findEnvironments, pythonInterpreterFor } from './python/environments';
+import { activationForInterpreter, pythonInterpreterFor } from './python/environments';
 import { SessionStore } from './session-store';
 import { ProjectConfigStore } from './project-config';
 import { ReviewStore } from './project/review-store';
@@ -170,9 +170,11 @@ if (!app.requestSingleInstanceLock()) {
       async () => {
         const root = workspace.rootPath();
         if (!root) return null;
-        const environments = await findEnvironments(root, process.platform);
-        const primary = environments.find((environment) => environment.primary);
-        return primary ? activateCommand(root, primary.path, process.platform) : null;
+        // Активируется то окружение, в котором лежит рабочий интерпретатор: обычно это
+        // главное окружение проекта, но выбранное для проекта может быть и вне его
+        // (`~/.venvs`) — тогда терминал обязан активировать именно его.
+        const run = settings.get().run;
+        return activationForInterpreter(root, run.pythonByRoot[root] ?? run.pythonPath, process.platform);
       },
       // `.env` проекта читаем на каждую сессию: файл правят во время работы, и
       // перезапуск IDE ради новой переменной — лишний.

@@ -33,7 +33,7 @@ import { lintProject } from '../project/lint';
 import { scanProject } from '../project/scan';
 import { findPackages } from '../project/packages';
 import { testCommand } from '../project/tests';
-import { activateCommand, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
+import { activationForInterpreter, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
 import { missingPackages } from '../node/packages';
 import { missingLocalImports } from '../project/local-imports';
 import {
@@ -489,14 +489,23 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
 
   // Создание долгое: шаги и вывод команд уезжают событиями, как у `git.clone`.
   router.register('python.createVenv', (params, ctx) =>
-    createVenv(requireRoot(), params, (payload) => ctx.emit(VenvEvent.Progress, payload), ctx.signal),
+    createVenv(
+      requireRoot(),
+      app.getPath('home'),
+      params,
+      (payload) => ctx.emit(VenvEvent.Progress, payload),
+      ctx.signal,
+    ),
   );
 
-  router.register('python.activateCommand', async () => {
+  router.register('python.activateCommand', () => {
     const root = requireRoot();
-    const environments = await findEnvironments(root, process.platform);
-    const primary = environments.find((environment) => environment.primary);
-    return { command: primary ? activateCommand(root, primary.path, process.platform) : null };
+    // Окружение берём по рабочему интерпретатору: выбранное для проекта может быть и
+    // вне проекта (`~/.venvs`), и команда активации должна вести именно в него.
+    const run = deps.settings.get().run;
+    return {
+      command: activationForInterpreter(root, run.pythonByRoot[root] ?? run.pythonPath, process.platform),
+    };
   });
 
   // Проверка импортов: какие модули файл подключает, а проект их не видит.

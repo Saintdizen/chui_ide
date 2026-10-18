@@ -233,7 +233,11 @@ export class ProjectToolsModel {
   private async detectPython(
     root: string,
   ): Promise<Pick<ProjectTools, 'pythonCommand' | 'pythonLabel' | 'pythonFromProject'>> {
-    const configured = this.settings().pythonPath.trim();
+    // Интерпретатор, выбранный для ЭТОГО проекта, важнее общего: два Python-проекта
+    // не должны подменять друг другу окружение. Именно так выбирается окружение,
+    // лежащее вне проекта (`~/.venvs`): поиск в проекте его не найдёт.
+    const run = this.settings();
+    const configured = (run.pythonByRoot?.[root] ?? '').trim() || run.pythonPath.trim();
     if (configured) {
       return { pythonCommand: shellQuote(configured), pythonLabel: configured, pythonFromProject: false };
     }

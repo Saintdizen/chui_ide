@@ -850,7 +850,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     rpc,
     root: () => workspace.root,
     // Окружение появилось — запуск, подсказки и статусбар должны увидеть его сразу.
-    onCreated: () => reloadPythonEnvironment(),
+    onCreated: (environment) => {
+      // Окружение вне проекта поиск в проекте не видит никогда и основным оно не станет.
+      // Назначаем его интерпретатором ЭТОГО проекта — иначе человек создал бы окружение,
+      // которым ничего не пользуется.
+      const root = workspace.root;
+      if (root && !isInsidePath(root, environment.path)) {
+        void setProjectInterpreter(environment.python).then(() => reloadPythonEnvironment());
+        return;
+      }
+      reloadPythonEnvironment();
+    },
   });
   document.body.appendChild(venvModal.element);
 
@@ -2827,6 +2837,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (command) pythonByRoot[root] = command;
     else delete pythonByRoot[root];
     await rpc.request('settings.update', { run: { pythonByRoot } });
+    // Инструменты и кнопка запуска пересчитываются сами по push-событию настроек
+    // (см. `applySettings`): здесь это делать не нужно.
   };
 
   /* ── реестр команд ─────────────────────────────────────────────────────── */

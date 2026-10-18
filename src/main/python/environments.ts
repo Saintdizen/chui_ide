@@ -3,16 +3,17 @@ import { existsSync } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
-  DEFAULT_VENV_DIR,
   installPackages,
-  isValidVenvName,
   parsePyvenvCfg,
+  resolveVenvTarget,
+  shortenHomePath,
   VENV_CANDIDATES,
   VENV_DIR_NAMES,
   venvPythonPath,
   venvActivateCommand,
   type PythonEnvironment,
 } from '../../shared/python-env';
+import { isInsidePath } from '../../shared/paths';
 import {
   RpcErrorCode,
   type CreateVenvOptions,
@@ -86,24 +87,26 @@ export async function findEnvironments(root: string, platform: string): Promise<
  */
 export async function createVenv(
   root: string,
+  home: string,
   options: CreateVenvOptions,
   emit: (event: VenvProgressPayload) => void,
   signal?: AbortSignal,
 ): Promise<CreateVenvResult> {
-  const name = (options.name ?? DEFAULT_VENV_DIR).trim();
-  if (!isValidVenvName(name)) {
-    throw new RpcFailure(RpcErrorCode.InvalidParams, `Неверное имя окружения: ${name}`);
-  }
+  const target = resolveVenvTarget({ root, home, location: options.location, name: options.name, path: options.path });
+  if ('error' in target) throw new RpcFailure(RpcErrorCode.InvalidParams, target.error);
 
-  const venvDir = path.join(root, name);
+  const venvDir = target.dir;
   if (await exists(venvDir)) {
-    throw new RpcFailure(RpcErrorCode.InvalidParams, `Каталог уже существует: ${name}`);
+    throw new RpcFailure(RpcErrorCode.InvalidParams, `Каталог уже существует: ${target.label}`);
   }
+  // Родителя может не быть: свою папку человек вписал руками, а `~/.venvs`
+  // появляется только вместе с первым общим окружением.
+  await fs.mkdir(path.dirname(venvDir), { recursive: true }).catch(() => undefined);
 
   const base = options.base?.trim() || defaultLauncher();
 
   try {
-    emit({ type: 'step', message: `Создаю окружение ${name}…` });
+    emit({ type: 'step', message: `Создаю окружение ${target.label}…` });
     await runCommand(base, ['-m', 'venv', venvDir], root, emit, signal);
 
     const python = venvPythonPath(venvDir, process.platform);
@@ -131,14 +134,19 @@ export async function createVenv(
     }
 
     emit({ type: 'done', message: 'Готово' });
+    const inside = isInsidePath(root, venvDir);
     return {
       environment: {
         path: venvDir,
-        relative: toPosix(path.relative(root, venvDir)),
+        // Окружение вне проекта от корня не считается: путь из `../../..` человеку
+        // ничего не говорит. Показываем его сокращённым через `~`.
+        relative: inside ? toPosix(path.relative(root, venvDir)) : shortenHomePath(venvDir, home),
         python,
-        label: name,
+        label: target.label,
         version: await readVenvVersion(venvDir),
-        primary: true,
+        // Вне проекта окружение основным не становится: поиск в проекте его не видит
+        // (см. `findEnvironments`) — его назначают интерпретатором проекта вручную.
+        primary: inside,
       },
       installed,
     };
@@ -183,8 +191,39 @@ export function pythonInterpreterFor(root: string | null, configured: string): s
 
 /** Команда активации окружения: её набирает терминал, чтобы venv был активен. */
 export function activateCommand(root: string, venvPath: string, platform: string): string {
-  const relative = toPosix(path.relative(root, venvPath)) || '.';
+  // Окружение вне проекта относительно корня не записать: `../../../.venvs/x`
+  // человеку ничего не говорит и разваливается, если оболочка сменила каталог.
+  const relative = isInsidePath(root, venvPath) ? toPosix(path.relative(root, venvPath)) || '.' : toPosix(venvPath);
   return venvActivateCommand(relative, platform);
+}
+
+/**
+ * Каталог окружения, в котором лежит интерпретатор: `<venv>/bin/python` или
+ * `<venv>/Scripts/python.exe`. Окружение узнаём по `pyvenv.cfg` рядом: сам по себе
+ * каталог `bin` бывает и у системного питона, а активировать там нечего.
+ */
+export function venvDirOfPython(python: string): string | null {
+  const dir = path.dirname(python);
+  const name = path.basename(dir).toLowerCase();
+  if (name !== 'bin' && name !== 'scripts') return null;
+  const venvDir = path.dirname(dir);
+  return existsSync(path.join(venvDir, 'pyvenv.cfg')) ? venvDir : null;
+}
+
+/**
+ * Команда активации для того интерпретатора, которым работают запуск и тесты.
+ *
+ * Обычный путь — главное окружение проекта; но интерпретатор можно назвать путём
+ * в настройке (`run.pythonPath` или выбранный для проекта), и тогда окружение может
+ * лежать где угодно — например, общее в `~/.venvs`. Без этого терминал работал бы
+ * без venv, а человек считал бы его активным.
+ */
+export function activationForInterpreter(root: string | null, configured: string, platform: string): string | null {
+  const python = pythonInterpreterFor(root, configured);
+  if (!python) return null;
+  const venvDir = venvDirOfPython(python);
+  if (!venvDir) return null;
+  return activateCommand(root ?? venvDir, venvDir, platform);
 }
 
 /* ── вспомогательное ────────────────────────────────────────────────────── */

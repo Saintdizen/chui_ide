@@ -9,6 +9,8 @@
  * (сервер языка ставится в venv) и терминалу — там окружение активируется само.
  */
 
+import { isInsidePath, joinPath, pathAfter } from './paths';
+
 /** Одно виртуальное окружение проекта. */
 export interface PythonEnvironment {
   /** Абсолютный путь к каталогу окружения. */
@@ -174,4 +176,114 @@ export function isValidVenvName(name: string): boolean {
   if (!trimmed) return false;
   if (trimmed.includes('/') || trimmed.includes('\\')) return false;
   return !/[*?"<>|]/.test(trimmed);
+}
+
+/* ── где создать окружение ──────────────────────────────────────────────── */
+
+/**
+ * Где создаётся окружение.
+ *
+ * `project` — обычный случай: каталог рядом с кодом, его находит поиск окружений
+ * (`VENV_CANDIDATES`), и оно само становится основным. `home` и `custom` — окружение
+ * ВНЕ проекта. Это нужно, когда окружение общее для нескольких проектов или когда в
+ * репозиторий его класть не хотят (бинарники в git, конфликт с `.gitignore`). Такое
+ * окружение поиск в проекте не найдёт никогда, поэтому после создания его назначают
+ * интерпретатором проекта (см. `onCreated` в окне создания).
+ */
+export type VenvLocation = 'project' | 'home' | 'custom';
+
+export interface VenvLocationOption {
+  id: VenvLocation;
+  label: string;
+  hint: string;
+}
+
+export const VENV_LOCATIONS: readonly VenvLocationOption[] = [
+  {
+    id: 'project',
+    label: 'В проекте',
+    hint: 'Каталог внутри проекта: `.venv` рядом с кодом находят запуск, тесты и подсказки',
+  },
+  {
+    id: 'home',
+    label: 'В домашнем каталоге',
+    hint: 'Общее окружение в `~/.venvs`: не попадает в репозиторий и годится нескольким проектам',
+  },
+  {
+    id: 'custom',
+    label: 'Своя папка',
+    hint: 'Любая папка на диске — например, общая для нескольких проектов',
+  },
+];
+
+/** Каталог общих окружений в домашней папке: `~/.venvs/<имя>`. */
+export const HOME_VENVS_DIR = '.venvs';
+
+/** Что известно о будущем окружении, чтобы решить, где его создавать. */
+export interface VenvTargetInput {
+  /** Корень проекта: для места «в проекте» и для относительного своего пути. */
+  root: string;
+  /** Домашний каталог: для `~/.venvs` и раскрытия `~`. */
+  home: string;
+  /** Где создавать. Не задано — в проекте (как было до появления выбора). */
+  location?: VenvLocation;
+  /** Имя каталога окружения. */
+  name?: string;
+  /** Своя папка: абсолютный путь, `~` или путь от корня проекта. */
+  path?: string;
+}
+
+/**
+ * Куда создавать окружение: каталог и его подпись для человека. Ошибка — строкой:
+ * ее показывает тот, кто создаёт, и она говорит, что именно не так.
+ */
+export type VenvTarget = { dir: string; label: string } | { error: string };
+
+/** Абсолютный ли путь. Windows — диск или сетевая папка; остальные — от корня. */
+export function isAbsolutePath(target: string): boolean {
+  if (/^[A-Za-z]:[/\\]/.test(target)) return true;
+  if (target.startsWith('\\\\')) return true;
+  return target.startsWith('/');
+}
+
+/**
+ * Домашний каталог в записи `~`: так пути показывают человеку и так их пишут
+ * в терминале. Внутри домашнего каталога — `~/...`, сам он — `~`.
+ */
+export function shortenHomePath(target: string, home: string): string {
+  if (!home || !isInsidePath(home, target)) return target;
+  const rest = pathAfter(home, target);
+  if (!rest) return '~';
+  return `~/${rest.split(/[/\\]/).filter(Boolean).join('/')}`;
+}
+
+/**
+ * Каталог будущего окружения — по выбранному месту. Правило живéт здесь, а не в main:
+ * его проверяют тесты без диска и процессов, а ошибиться в нём дорого — окружение
+ * создаётся минутами и может лечь не туда (например, внутрь чужого репозитория).
+ */
+export function resolveVenvTarget(input: VenvTargetInput): VenvTarget {
+  const location = input.location ?? 'project';
+  const name = (input.name ?? DEFAULT_VENV_DIR).trim();
+
+  if (location === 'project') {
+    if (!isValidVenvName(name)) return { error: `Неверное имя окружения: ${name}` };
+    if (!input.root) return { error: 'Проект не открыт — создавать окружение некуда' };
+    return { dir: joinPath(input.root, name), label: name };
+  }
+
+  if (location === 'home') {
+    if (!isValidVenvName(name)) return { error: `Неверное имя окружения: ${name}` };
+    if (!input.home) return { error: 'Домашний каталог неизвестен — выберите свою папку' };
+    const dir = joinPath(joinPath(input.home, HOME_VENVS_DIR), name);
+    return { dir, label: shortenHomePath(dir, input.home) };
+  }
+
+  // Своя папка: путь как есть, `~` раскрываем, относительный считаем от проекта.
+  const raw = (input.path ?? '').trim();
+  if (!raw) return { error: 'Укажите папку для окружения' };
+  const expanded = raw === '~' || /^~[/\\]/.test(raw) ? joinPath(input.home, raw.replace(/^~[/\\]?/, '')) : raw;
+  const dir = isAbsolutePath(expanded) ? expanded : joinPath(input.root, expanded);
+  if (!isAbsolutePath(dir)) return { error: `Не удалось понять путь: ${raw}` };
+  return { dir, label: shortenHomePath(dir, input.home) };
 }

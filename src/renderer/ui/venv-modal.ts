@@ -2,9 +2,11 @@ import { VenvEvent, type VenvProgressPayload } from '../../shared/api';
 import {
   DEFAULT_VENV_DIR,
   VENV_INSTALL_OPTIONS,
+  VENV_LOCATIONS,
   type PythonEnvironment,
   type PythonInterpreter,
   type VenvInstallPreset,
+  type VenvLocation,
 } from '../../shared/python-env';
 import { envList } from '../core/python-view';
 import type { RpcClient } from '../core/rpc';
@@ -28,8 +30,11 @@ export interface VenvModalDeps {
   rpc: RpcClient;
   /** Корень проекта: окружения ищем в нём. */
   root: () => string | null;
-  /** Окружение создано: запуск, подсказки и статусбар должны увидеть его сразу. */
-  onCreated?: () => void;
+  /**
+   * Окружение создано. Место могло быть и вне проекта — тогда вызывающий назначает его
+   * интерпретатором проекта: поиск окружений в проекте такое окружение не найдёт никогда.
+   */
+  onCreated?: (environment: PythonEnvironment) => void;
 }
 
 export interface VenvModalView {
@@ -65,6 +70,33 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
   const baseSelect = createSelect({ title: 'Каким интерпретатором создавать окружение' });
   baseSelect.setOptions([{ value: '', label: 'Как в системе (по умолчанию)' }]);
 
+  // Где создавать: рядом с кодом (обычный случай) или вне проекта — в `~/.venvs` либо
+  // в своей папке. Общее окружение на несколько проектов внутри одного из них не сделать.
+  const locationSelect = createSelect({ title: 'Где создать окружение' });
+  locationSelect.setOptions(VENV_LOCATIONS.map((option) => ({ value: option.id, label: option.label })));
+  locationSelect.setValue('project');
+  const locationHint = h('div', { class: 'venv-hint' });
+
+  const nameField = h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Каталог'), nameInput);
+
+  const pathInput = h('input', {
+    class: 'field-input',
+    type: 'text',
+    spellcheck: 'false',
+    placeholder: 'например, ~/.venvs/общий или /opt/venvs/проект',
+  });
+  const pickPathButton = h(
+    'button',
+    { class: 'btn btn-small', type: 'button', title: 'Выбрать папку на диске', onClick: () => void pickPath() },
+    'Выбрать…',
+  );
+  const pathField = h(
+    'div',
+    { class: 'venv-field', hidden: true },
+    h('label', { class: 'venv-label' }, 'Папка'),
+    h('div', { class: 'venv-path-row' }, pathInput, pickPathButton),
+  );
+
   const presetHint = h('div', { class: 'venv-hint' });
 
   const requirementsRow = h('label', { class: 'venv-check', hidden: true });
@@ -96,7 +128,10 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
       'section',
       { class: 'venv-section' },
       h('h3', { class: 'venv-heading' }, 'Создать новое'),
-      h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Каталог'), nameInput),
+      h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Где'), locationSelect.element),
+      locationHint,
+      nameField,
+      pathField,
       h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Интерпретатор'), baseSelect.element),
       h('div', { class: 'venv-field' }, h('label', { class: 'venv-label' }, 'Пакеты'), presetSelect.element),
       presetHint,
@@ -107,6 +142,8 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
 
   presetSelect.onChange(() => updatePresetHint());
   updatePresetHint();
+  locationSelect.onChange(() => updateLocation());
+  updateLocation();
 
   /* ── инфраструктура окна ───────────────────────────────────────────────── */
 
@@ -117,6 +154,26 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
   function updatePresetHint(): void {
     const option = VENV_INSTALL_OPTIONS.find((item) => item.id === presetSelect.value);
     presetHint.textContent = option?.hint ?? '';
+  }
+
+  /**
+   * Показывает только то, что относится к выбранному месту: имя каталога — для проекта
+   * и `~/.venvs`, путь — для своей папки. Подсказка объясняет, что будет с окружением
+   * после создания (найдут ли его запуск и подсказки сами).
+   */
+  function updateLocation(): void {
+    const location = locationSelect.value as VenvLocation;
+    const option = VENV_LOCATIONS.find((item) => item.id === location);
+    locationHint.textContent = option?.hint ?? '';
+    pathField.hidden = location !== 'custom';
+    nameField.hidden = location === 'custom';
+  }
+
+  /** Выбрать папку окружения на диске — тот же диалог, что у стартового окна. */
+  async function pickPath(): Promise<void> {
+    const picked = await deps.rpc.request('dialog.pickFolder', { title: 'Где создать окружение' }).catch(() => null);
+    if (!picked?.path) return;
+    pathInput.value = picked.path;
   }
 
   /** Варианты интерпретаторов: найденные в системе плюс «как по умолчанию». */
@@ -193,7 +250,9 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
     createButton.toggleAttribute('disabled', busy);
     cancelButton.hidden = !busy;
     nameInput.toggleAttribute('disabled', busy);
+    pathInput.toggleAttribute('disabled', busy);
     baseSelect.setDisabled(busy);
+    locationSelect.setDisabled(busy);
   }
 
   function cancel(): void {
@@ -217,6 +276,9 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
         'python.createVenv',
         {
           name: nameInput.value.trim() || DEFAULT_VENV_DIR,
+          location: locationSelect.value as VenvLocation,
+          // Пусто — создаём в проекте рядом с кодом.
+          path: locationSelect.value === 'custom' ? pathInput.value.trim() : undefined,
           // Пусто — создаём тем, что в системе по умолчанию (`python3`), иначе — выбранной версией.
           base: baseSelect.value || undefined,
           preset: presetSelect.value as VenvInstallPreset,
@@ -234,7 +296,8 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
       // Новое окружение становится основным — закрываем окно, работа продолжается в нём.
       close();
       // Окружение появилось: запуск, статусбар и языковой сервер должны увидеть его сразу.
-      deps.onCreated?.();
+      // Вне проекта его ещё надо назначить интерпретатором проекта — это решает вызывающий.
+      deps.onCreated?.(result.environment);
     } catch (error) {
       if (cancelRequested) {
         showToast('Создание окружения отменено', 'info');

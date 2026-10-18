@@ -2,11 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   comparePythonVersions,
   DEFAULT_VENV_DIR,
+  HOME_VENVS_DIR,
   installPackages,
+  isAbsolutePath,
   isValidVenvName,
   parsePyvenvCfg,
   parsePythonVersion,
   pythonInterpreterLabel,
+  resolveVenvTarget,
+  shortenHomePath,
+  VENV_LOCATIONS,
   venvActivateCommand,
   venvActivatePath,
   venvPythonPath,
@@ -104,6 +109,70 @@ describe('isValidVenvName', () => {
   it('запрещённые символы — нет', () => {
     expect(isValidVenvName('ve*nv')).toBe(false);
     expect(isValidVenvName('venv|x')).toBe(false);
+  });
+});
+
+describe('место создания окружения', () => {
+  const root = '/work/demo';
+  const home = '/home/user';
+
+  it('по умолчанию создаётся в проекте, как было до выбора места', () => {
+    expect(resolveVenvTarget({ root, home })).toEqual({ dir: '/work/demo/.venv', label: DEFAULT_VENV_DIR });
+    expect(resolveVenvTarget({ root, home, location: 'project', name: 'venv42' })).toEqual({
+      dir: '/work/demo/venv42',
+      label: 'venv42',
+    });
+  });
+
+  it('в домашнем каталоге — в ~/.venvs, и подпись с ~', () => {
+    const target = resolveVenvTarget({ root, home, location: 'home', name: 'общий' });
+    expect(target).toEqual({ dir: `/home/user/${HOME_VENVS_DIR}/общий`, label: '~/.venvs/общий' });
+  });
+
+  it('своя папка: абсолютный путь берётся как есть', () => {
+    const target = resolveVenvTarget({ root, home, location: 'custom', path: '/opt/venvs/demo' });
+    expect(target).toEqual({ dir: '/opt/venvs/demo', label: '/opt/venvs/demo' });
+  });
+
+  it('своя папка: ~ раскрывается, путь в домашнем каталоге показывается с ~', () => {
+    const target = resolveVenvTarget({ root, home, location: 'custom', path: '~/venvs/общий' });
+    expect(target).toEqual({ dir: '/home/user/venvs/общий', label: '~/venvs/общий' });
+  });
+
+  it('своя папка: относительный путь считается от проекта', () => {
+    expect(resolveVenvTarget({ root, home, location: 'custom', path: '../shared-env' })).toEqual({
+      dir: '/work/demo/../shared-env',
+      label: '/work/demo/../shared-env',
+    });
+  });
+
+  it('пустой путь в своей папке — ошибка, а не окружение вслепую', () => {
+    const target = resolveVenvTarget({ root, home, location: 'custom', path: '   ' });
+    expect('error' in target && target.error).toContain('папку');
+  });
+
+  it('плохое имя в проекте и в ~/.venvs — ошибка', () => {
+    for (const location of ['project', 'home'] as const) {
+      const target = resolveVenvTarget({ root, home, location, name: 'sub/venv' });
+      expect('error' in target).toBe(true);
+    }
+  });
+
+  it('в списке мест есть все три варианта', () => {
+    expect(VENV_LOCATIONS.map((option) => option.id)).toEqual(['project', 'home', 'custom']);
+  });
+
+  it('absolute path распознаётся на обеих платформах', () => {
+    expect(isAbsolutePath('/opt/venvs')).toBe(true);
+    expect(isAbsolutePath('C:\\venvs')).toBe(true);
+    expect(isAbsolutePath('venvs')).toBe(false);
+    expect(isAbsolutePath('.venv')).toBe(false);
+  });
+
+  it('домашний каталог показывается как ~, чужой путь — как есть', () => {
+    expect(shortenHomePath('/home/user/.venvs/a', home)).toBe('~/.venvs/a');
+    expect(shortenHomePath(home, home)).toBe('~');
+    expect(shortenHomePath('/opt/venvs/a', home)).toBe('/opt/venvs/a');
   });
 });
 

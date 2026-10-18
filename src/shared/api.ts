@@ -47,7 +47,7 @@ import type { GitWorktree } from './git-worktrees';
 import type { ThemeFile } from './theme-file';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { NodeTestSuite } from './node-tests';
-import type { PythonEnvironment, PythonInterpreter } from './python-env';
+import type { PythonEnvironment, PythonInterpreter, VenvLocation } from './python-env';
 import type { InstalledPackage } from './python-packages';
 import type { CollectedSuite } from './python-tests';
 import type { EnvironmentHealth } from './python-health';
@@ -963,8 +963,12 @@ export interface LayoutSettings {
 export type VenvInstallPreset = 'empty' | 'pytest' | 'full';
 
 export interface CreateVenvOptions {
-  /** Имя каталога окружения от корня проекта. По умолчанию `.venv`. */
+  /** Имя каталога окружения. По умолчанию `.venv`. */
   name?: string;
+  /** Где создать: в проекте (по умолчанию), в `~/.venvs` или в своей папке. */
+  location?: VenvLocation;
+  /** Своя папка для `location: 'custom'`: абсолютный путь, `~` или путь от корня проекта. */
+  path?: string;
   /** Базовый интерпретатор для создания окружения, если задан явно. */
   base?: string;
   /** Доустановить pytest, pylsp, ruff — одним из готовых профилей. */
