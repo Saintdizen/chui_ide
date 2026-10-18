@@ -75,7 +75,9 @@
      а не от всего окна, поэтому окно встаёт прямо над кольцом «4%». */
   right: 5px;
   bottom: calc(100% + 6px);
-  z-index: 30;
+  /* Окно поднимается над полотном редактора и над вкладкой чата в нём: та
+     занимает область редактора на `--layer_view` (см. `--layer_status_popup`). */
+  z-index: var(--layer_status_popup);
   width: 262px;
   padding: 10px;
   border: 1px solid var(--border_color);

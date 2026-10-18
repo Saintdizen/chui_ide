@@ -393,6 +393,100 @@ app.whenReady().then(async () => {
     toolbar && { endRight: toolbar.endRight, barRight: toolbar.barRight },
   );
 
+  /* ── «Информация о сессии» поверх области редактора ─────────────────────── */
+
+  // Окно «Информация о сессии» живёт в полосе статуса и раскрывается ВВЕРХ —
+  // то есть над полотном редактора. Когда чат перенесён в редактор, вкладка чата
+  // лежит там же и своим слоем (`--layer_view`) закрывала окно: кнопка «кольцо»
+  // нажималась, а окна не было видно. Проверяем не «открылось ли», а что окно
+  // оказалось сверху — точкой в его центре.
+  const popupState = () =>
+    ask(
+      ide,
+      `(() => {
+        const popup = document.querySelector('.session-info');
+        if (!popup || popup.hidden) return { открыто: false };
+        const box = popup.getBoundingClientRect();
+        const top = document.elementFromPoint(Math.round(box.left + box.width / 2), Math.round(box.top + 8));
+        return {
+          открыто: true,
+          сверху: popup.contains(top),
+          чейСлой: top ? (top.closest('.chat-editor') ? 'чат в редакторе' : top.className || top.tagName) : null,
+        };
+      })()`,
+    );
+
+  const clickRing = () =>
+    ask(
+      ide,
+      `(async () => {
+        const ring = document.querySelector('.context-ring');
+        if (!ring) return 'нет кольца';
+        ring.click();
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return 'нажато';
+      })()`,
+    );
+
+  const runCommand = (title) =>
+    ask(
+      ide,
+      `(async () => {
+        const button = [...document.querySelectorAll('.icon-btn')].find((item) =>
+          (item.getAttribute('title') ?? '').startsWith('Палитра команд'),
+        );
+        if (!button) return 'нет кнопки палитры';
+        button.click();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const input = document.querySelector('.palette-input');
+        if (!input) return 'нет поля палитры';
+        input.value = ${JSON.stringify(title)};
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const item = [...document.querySelectorAll('.palette-item')].find((node) =>
+          (node.textContent ?? '').includes(${JSON.stringify(title)}),
+        );
+        if (!item) return 'пункта нет';
+        item.click();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        return 'выполнено';
+      })()`,
+    );
+
+  await clickRing();
+  const popupInPanel = await popupState();
+  check(
+    'окно «Информация о сессии» видно над панелью ассистента',
+    popupInPanel.открыто === true && popupInPanel.сверху === true,
+    popupInPanel,
+  );
+  await clickRing();
+
+  const moved = await runCommand('Перенести чат в окно редактора');
+  check('чат перенесён в область редактора', moved === 'выполнено', moved);
+  const inEditor = await ask(
+    ide,
+    `(() => {
+      const panel = document.querySelector('.chat-editor .chat');
+      const box = panel?.getBoundingClientRect();
+      return Boolean(box && box.width > 0 && box.height > 0);
+    })()`,
+  );
+  check('чат в редакторе занимает область', inEditor === true, inEditor);
+
+  await clickRing();
+  const popupInEditor = await popupState();
+  check(
+    'окно «Информация о сессии» видно и поверх чата в редакторе',
+    popupInEditor.открыто === true && popupInEditor.сверху === true,
+    popupInEditor,
+  );
+  console.log(`  снимок окна поверх чата в редакторе: ${await shot(ide, 'session-info')}`);
+  await clickRing();
+
+  const back = await runCommand('Вернуть чат в боковую панель');
+  check('чат вернулся в боковую панель', back === 'выполнено', back);
+
   /* ── сохранение и восстановление ───────────────────────────────────────── */
 
   // Вторая беседа: к этому месту в пробе одна закрыта, так что проверяем на двух.
