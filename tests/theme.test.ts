@@ -145,11 +145,8 @@ describe('vivid', () => {
  * Порог 4.5:1 берём для всего, что красится в CSS через `color:`: подписи,
  * ссылки, состояния git и значки файлов — это текст и мелкие глифы, а не
  * крупная графика. Ступени `--text_color_secondary`, `--text_color_disabled`,
- * `--text_color_tertiary` и `--placeholder_text_color` исключены из ЭТОГО порога
- * намеренно — это тихие тона, и требовать от них 4.5:1 значит ломать замысел
- * (см. `main.css` про `reasoning-text`). Но пол снизу обязателен: у tertiary и
- * placeholder он 3:1, иначе «тихо» превращается в «не видно». Порядок ступеней
- * держит отдельный сторож про иерархию.
+ * `--text_color_tertiary` и `--placeholder_text_color` проверяются отдельно и
+ * МЯГЧЕ — но тоже проверяются: тихий тон не значит нечитаемый (см. ниже).
  */
 const THEME_CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles/theme.css'), 'utf8').replace(
   /\/\*[\s\S]*?\*\//g,
@@ -312,16 +309,26 @@ describe('контраст палитры (WCAG AA)', () => {
 /* ── Пол для тихих ступеней текста ──────────────────────────────────────── */
 
 /**
- * Тихие ступени — tertiary и placeholder — держат пол ниже прочего текста: 3:1.
- * Это не «открытая дверь»: ещё ниже начинается «не видно» — ступень читается
- * как грязь, а не как тишина. Проверяем на всех поверхностях, где
+ * Тихие ступени — tertiary, placeholder и выключенный текст — читаются как обычный
+ * текст: порог тот же, 4.5:1 (WCAG AA). Тише прочего основного они остаются
+ * (это держит сторож про иерархию), но «тихо» не значит «не видно».
+ *
+ * Порог поднят с 3:1 не из вредности: при 0.45 и 0.40 (прежние значения) подписи,
+ * счётчики и подсказки полей давали 4.4:1 на полотне и 4.1:1 на всплывающем слое —
+ * то есть формально проходили пол 3:1 и всё равно читались с трудом, особенно на
+ * попапе, который светлее прочих поверхностей. Проверяем на всех трёх фонах, где
  * такой текст встречается: карточка содержимого, окно и всплывающий слой.
  */
-const QUIET_TEXT: readonly string[] = ['--text_color_tertiary', '--placeholder_text_color'];
+const QUIET_TEXT: readonly string[] = [
+  '--text_color_secondary',
+  '--text_color_tertiary',
+  '--placeholder_text_color',
+  '--text_color_disabled',
+];
 const QUIET_BACKGROUNDS: readonly string[] = ['--element_background_2', '--main_background', '--popup_background'];
 
-describe('контраст тихих ступеней текста (пол 3:1)', () => {
-  it('tertiary и placeholder — не ниже 3:1', () => {
+describe('контраст тихих ступеней текста (порог 4.5:1)', () => {
+  it('secondary, tertiary, placeholder и disabled — не ниже 4.5:1', () => {
     const tokens = schemeTokens();
     const color = (name: string): Rgba => {
       const raw = tokens.get(name.slice(2));
@@ -331,7 +338,7 @@ describe('контраст тихих ступеней текста (пол 3:1)
 
     for (const fg of QUIET_TEXT) {
       for (const bg of QUIET_BACKGROUNDS) {
-        expect(contrast(color(fg), color(bg)), `${fg} на ${bg}`).toBeGreaterThanOrEqual(3);
+        expect(contrast(color(fg), color(bg)), `${fg} на ${bg}`).toBeGreaterThanOrEqual(4.5);
       }
     }
   });

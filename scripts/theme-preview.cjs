@@ -48,6 +48,8 @@ const TOKENS = [
   'text_color',
   'text_color_secondary',
   'text_color_tertiary',
+  'placeholder_text_color',
+  'text_color_disabled',
   'border_color',
   'separator_color',
   'blue_prime_background',

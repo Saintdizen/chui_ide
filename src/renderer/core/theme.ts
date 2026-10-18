@@ -340,7 +340,8 @@ const DARK_CHROME: Chrome = {
   // тёмной плитой на более светлом фоне окна #252526.
   background: '1e1e1e',
   foreground: 'd4d4d4',
-  lineNumber: '858585',
+  // Номера строк — тише кода, но читаемо: #858585 из таблицы давал 4.5:1, на грани.
+  lineNumber: '919191',
   lineNumberActive: 'c6c6c6',
   cursor: 'aeafad',
   selection: '264f78',
@@ -363,11 +364,14 @@ const DARK_CHROME: Chrome = {
   sunken: '00000033',
   tint: '78788052',
   tintHover: '7878805c',
+  // Ступени текста — те же плотности, что `--text_color_*` в `styles/theme.css`
+  // (0.74 / 0.58 / 0.48 и 0.55 у выключенного): виджеты редактора стоят в одном окне
+  // с нашими панелями, и подпись в них не должна быть тише подписи рядом.
   text: 'd4d4d4',
-  textSecondary: 'ffffffb3',
-  textTertiary: 'ffffff85',
-  placeholder: 'ffffff7a',
-  textDisabled: 'ffffffb3',
+  textSecondary: 'ffffffbd',
+  textTertiary: 'ffffff94',
+  placeholder: 'ffffff80',
+  textDisabled: 'ffffff8c',
   // Та же заливка, что у выделенной строки дерева и пункта списка (#264F78);
   // активная вкладка ею больше не красится — у неё своя ступень в `styles/chrome.css`.
   selectionFill: '264f78',
