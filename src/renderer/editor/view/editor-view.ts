@@ -30,7 +30,7 @@ import { LineHighlighter } from '../highlight/highlighter';
 import { sharedTokens } from '../highlight/token-cache';
 import { grammarFor } from '../highlight/registry';
 import type { Token } from '../highlight/tokens';
-import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
+import { paletteOf, roleOfToken } from '../highlight/style';
 import { overlayRanges, type RoleRange } from '../highlight/overlay';
 import { semanticTokenRole, type SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import type { CursorStyle } from '../../../shared/cursor-style';
@@ -64,7 +64,6 @@ export interface EditorViewOptions {
   /** Язык подсветки (идентификатор из реестра языков). Без него текст показывается как простой. */
   language?: string;
   /** Схема оформления: от неё зависят цвета токенов. */
-  scheme?: Scheme;
   /** Ширина поля значков (точек останова, запуска, тестов) в пикселях. */
   glyphWidth?: number;
   /** Показывать ли невидимые знаки (пробелы точками, табуляции стрелкой). */
@@ -162,7 +161,6 @@ export class EditorView {
   private readonly highlighter: LineHighlighter;
   /** Вложенность скобок по строкам — для радужных скобок (см. `bracket-rainbow.ts`). */
   private readonly bracketDepth: BracketDepth;
-  private scheme: Scheme;
   /** Сколько строк было в документе: по смене числа понимаем, сдвинулись ли строки. */
   private lineCount = 0;
   /** Совпадения поиска и номер текущего: перерисовываются вместе со строками. */
@@ -239,7 +237,6 @@ export class EditorView {
     this.buffer = buffer;
     this.overscan = options.overscan ?? 2;
     this.selections = [caret(0)];
-    this.scheme = options.scheme ?? 'dark';
     this.whitespace = options.whitespace ?? 'none';
     this.lineCount = buffer.lineCount;
     // Текст строки подсветка берёт сама — ей довольно функции: так её можно проверить
@@ -756,8 +753,7 @@ export class EditorView {
   }
 
   /** Сменить схему оформления: цвета токенов берутся из темы и её надо переставить. */
-  setScheme(scheme: Scheme): void {
-    this.scheme = scheme;
+  refreshTheme(): void {
     this.applyTheme();
     this.rerender();
   }
@@ -1982,7 +1978,7 @@ export class EditorView {
    * они не менялись бы вместе со схемой.
    */
   private applyTheme(): void {
-    const palette = paletteOf(this.scheme);
+    const palette = paletteOf();
     for (const [role, color] of Object.entries(palette)) {
       this.root.style.setProperty(`--own-token-${role}`, color);
     }

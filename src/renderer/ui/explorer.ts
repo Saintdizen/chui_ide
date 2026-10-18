@@ -1570,7 +1570,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     element.appendChild(
       h(
         'div',
-        { class: 'panel-header' },
+        {
+          class: 'panel-header',
+          // Отступ шапки — только у проводника: снизу его нет вовсе (панель начинается
+          // сразу с дерева), сверху 3 px, а слева 10 px под значок — колонка заголовка
+          // совпадает с колонкой строк дерева. Общий `.panel-header` этот отступ задаёт
+          // под шапку вкладок беседы, поэтому здесь он перекрыт.
+          style: { padding: '3px 3px 0 10px' },
+        },
         // Вместо слова «Проект» — имя папки: заголовок говорит, что открыто,
         // а полный путь лежит в подсказке, чтобы длинное имя не резало кнопки.
         h('span', { class: 'panel-title', title: `${info.name} · ${info.root}` }, info.name),

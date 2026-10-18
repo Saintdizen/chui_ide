@@ -15,8 +15,7 @@
  * обеих схемах.
  */
 
-import type { Scheme } from '../../core/theme';
-import { TERMINAL_THEMES } from '../../core/theme';
+import { TERMINAL_THEME } from '../../core/theme';
 import { measureFont, type GlyphMetrics } from '../../editor/view/glyph-metrics';
 import { visibleLines } from '../../editor/view/viewport';
 import type { Attr } from '../core/attrs';
@@ -39,7 +38,6 @@ const ROOT_CLASS = 'own-term';
 const OVERSCAN = 3;
 
 export interface TermViewOptions {
-  scheme: Scheme;
   /** Включать ли лигатуры шрифта — то же правило, что у редактора (настройка общая). */
   ligatures?: boolean;
   /**
@@ -68,7 +66,6 @@ export class TermView {
   private readonly searchLayer: HTMLElement;
   private readonly cursor: HTMLElement;
   private metrics: GlyphMetrics;
-  private scheme: Scheme;
   private ligatures: boolean;
   private focused = false;
   private disposed = false;
@@ -87,7 +84,6 @@ export class TermView {
     private readonly term: TermModel,
     private readonly options: TermViewOptions,
   ) {
-    this.scheme = options.scheme;
     this.ligatures = options.ligatures ?? false;
 
     this.root = document.createElement('div');
@@ -118,7 +114,7 @@ export class TermView {
     // вставленный узел — у узла вне DOM вычисленный стиль пуст (как в редакторе).
     this.metrics = this.measure();
 
-    this.applyScheme(this.scheme);
+    this.applyTheme();
     this.applyLigatures();
     this.applyMetrics();
 
@@ -207,9 +203,8 @@ export class TermView {
     this.render();
   }
 
-  setScheme(scheme: Scheme): void {
-    this.scheme = scheme;
-    this.applyScheme(scheme);
+  refreshTheme(): void {
+    this.applyTheme();
     this.render();
   }
 
@@ -582,8 +577,8 @@ export class TermView {
    * темы (`core/theme.ts`) — единый источник цвета консоли. Фон совпадает с полотном
    * редактора.
    */
-  private applyScheme(scheme: Scheme): void {
-    const palette = paletteFor(scheme);
+  private applyTheme(): void {
+    const palette = paletteFor();
     for (let i = 0; i < 16; i += 1) {
       this.root.style.setProperty(`--own-term-c${i}`, palette.ansi[i] ?? '#000000');
     }
@@ -622,12 +617,12 @@ function sameAttr(a: Attr, b: Attr): boolean {
 }
 
 /**
- * Палитра для схемы: источник — `TERMINAL_THEMES` (`core/theme.ts`). Цвета приходят
+ * Палитра консоли: источник — `TERMINAL_THEME` (`core/theme.ts`). Цвета приходят
  * типом `TerminalTheme` со всеми обязательными полями, но подстановки ниже оставлены
  * как страховка: вид не должен остаться без значения переменной.
  */
-export function paletteFor(scheme: Scheme): TerminalPalette {
-  const theme = TERMINAL_THEMES[scheme];
+export function paletteFor(): TerminalPalette {
+  const theme = TERMINAL_THEME;
   const white = theme.white ?? '#ffffff';
   return {
     ansi: [

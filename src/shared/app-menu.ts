@@ -61,6 +61,9 @@ const FILE: MenuNode = {
     { label: 'Обновить дерево', command: 'workspace.refresh' },
     { label: 'Быстрое открытие файла…', accelerator: 'Ctrl+Shift+O', command: 'file.quickOpen' },
     { separator: true },
+    // Настройки — только здесь: кнопки в шапке нет, это редкое действие, а не работа.
+    { label: 'Настройки…', accelerator: 'Ctrl+,', command: 'settings.open' },
+    { separator: true },
     { label: 'Выход', role: 'quit' },
   ],
 };
@@ -108,10 +111,6 @@ const VIEW: MenuNode = {
     { separator: true },
     { label: 'Палитра команд…', accelerator: 'Ctrl+Shift+P', command: 'palette.open' },
     { separator: true },
-    { label: 'Тема: тёмная', command: 'view.theme.dark' },
-    { label: 'Тема: светлая', command: 'view.theme.light' },
-    { label: 'Тема: как в системе', command: 'view.theme.system' },
-    { separator: true },
     { label: 'Перезагрузить', accelerator: 'Ctrl+R', role: 'reload' },
     { label: 'Инструменты разработчика', accelerator: 'Ctrl+Shift+I', role: 'toggleDevTools' },
     { separator: true },
@@ -156,17 +155,13 @@ export const MENU_TOGGLES = {
   sidebar: 'view.toggleSidebar',
   aiPanel: 'view.toggleRight',
   terminal: 'view.showTerminal',
-  themeDark: 'view.theme.dark',
-  themeLight: 'view.theme.light',
-  themeSystem: 'view.theme.system',
 } as const;
 
-/** Что включено прямо сейчас: про панели и тему меню иначе молчит. */
+/** Что включено прямо сейчас: про панели меню иначе молчит. */
 export interface MenuState {
   sidebar: boolean;
   aiPanel: boolean;
   terminal: boolean;
-  theme: 'dark' | 'light' | 'system';
 }
 
 /**
@@ -178,9 +173,6 @@ export function menuChecks(state: MenuState): Record<string, boolean> {
     [MENU_TOGGLES.sidebar]: state.sidebar,
     [MENU_TOGGLES.aiPanel]: state.aiPanel,
     [MENU_TOGGLES.terminal]: state.terminal,
-    [MENU_TOGGLES.themeDark]: state.theme === 'dark',
-    [MENU_TOGGLES.themeLight]: state.theme === 'light',
-    [MENU_TOGGLES.themeSystem]: state.theme === 'system',
   };
 }
 

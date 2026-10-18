@@ -1,16 +1,16 @@
 /**
- * Проба-меню вариантов темы: одно живое окно IDE, а в нём по очереди — несколько
- * наборов поверхностей, и на каждый свой снимок.
+ * Проба-меню перекрасок темы: одно живое окно IDE, а в нём по очереди — несколько
+ * вариантов палитры, и на каждый свой снимок.
  *
  *   npx electron scripts/theme-variants.cjs
  *
- * Так «на глаз» видно, какая ступень подъёма комфортнее, без правки исходников
- * и пересборки: токены подставляются на корень документа (`:root`) прямо в окне —
- * компоненты берут их переменными и перекрашиваются сами.
+ * Так «на глаз» видно, какой оттенок поверхностей и акцента комфортнее, без правки
+ * исходников и пересборки: токены подставляются на корень документа (`:root`) прямо
+ * в окне — компоненты берут их переменными и перекрашиваются сами.
  *
  * Снимки — `.chui_ide/probe-shots/theme-variant-<имя>.png`, сводка — в консоль.
  */
-const { app, nativeTheme } = require('electron');
+const { app } = require('electron');
 const { promises: fs } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -33,18 +33,103 @@ const step = (text) => console.log(`[проба] ${text}`);
 
 registerAppScheme();
 
-/** Лестница высоты: окно → содержимое/полотно → попап. */
+/**
+ * Перекраски: не «чуть холоднее / чуть теплее», а своя краска у всего сразу.
+ * Поверхности получают оттенок, акцент едет вместе с ними, и подсветка кода
+ * переезжает в ту же гамму: код занимает большую часть кадра, и если оставить
+ * его прежним, перекраска видна только в углу окна.
+ *
+ * Роли токенов те же, что в `core/theme.ts`: comment, string, number, keyword,
+ * keywordControl, identifier, function, type, constant, tag, attribute. Цвета здесь
+ * уже итоговые (в исходниках их дополнительно поднимает `vivid()`), поэтому
+ * контраст каждой пары «токен на полотне» считается тут же и идёт в сводку.
+ *
+ * `base` — то, что в исходниках сейчас: поверхности и код без правок, для сравнения.
+ */
 const VARIANTS = [
-  ['ramp-dark-0', 'dark', { window: '#161618', content: '#1e1e1e' }],
-  ['ramp-dark-1', 'dark', { window: '#19191c', content: '#212125' }],
-  ['ramp-dark-2', 'dark', { window: '#1d1d20', content: '#252528' }],
-  ['ramp-dark-3', 'dark', { window: '#202024', content: '#28282d' }],
-  ['ramp-dark-4', 'dark', { window: '#242429', content: '#2c2c32' }],
-  ['ramp-light-0', 'light', { window: '#ececec', content: '#ffffff' }],
-  ['ramp-light-1', 'light', { window: '#e8e8eb', content: '#f9f9fb' }],
-  ['ramp-light-2', 'light', { window: '#e4e4e7', content: '#f5f5f7' }],
-  ['ramp-light-3', 'light', { window: '#e0e0e3', content: '#f3f3f5' }],
-  ['ramp-light-4', 'light', { window: '#dcdce0', content: '#f1f1f3' }],
+  {
+    name: 'dark-base',
+    label: 'сейчас — установленная версия',
+    window: '#252526',
+    content: '#1e1e1e',
+    popup: '#2d2d30',
+    accent: '#0a84ff',
+    link: '#0098ff',
+    fill: '#0a6edc',
+  },
+  {
+    // Фиолетово-чёрное полотно, код — розовый, сиреневый и циан: цвет не
+    // «тонирует серое», а заменяет его.
+    name: 'dark-neon',
+    label: 'неон — фиолетовый мрак, розовый код',
+    window: '#120e1c',
+    content: '#1a1526',
+    popup: '#241d33',
+    accent: '#ff5ec4',
+    link: '#ff8ad8',
+    fill: '#b02a83',
+    code: {
+      comment: '#8f89bb',
+      string: '#ff9ed2',
+      number: '#ffcf7a',
+      keyword: '#c39bff',
+      keywordControl: '#ff7ad1',
+      identifier: '#b9d7ff',
+      function: '#6ee7ff',
+      type: '#7cf0c3',
+      constant: '#ffa96b',
+      tag: '#f0a0ff',
+      attribute: '#ffc4a3',
+    },
+  },
+  {
+    // Морская глубина: бирюзовые поверхности, код — аква, мята и песок.
+    name: 'dark-ocean',
+    label: 'океан — бирюзовые поверхности, аква и песок',
+    window: '#0d1a1c',
+    content: '#142529',
+    popup: '#1c3136',
+    accent: '#22d3c5',
+    link: '#6ce9df',
+    fill: '#0b7d75',
+    code: {
+      comment: '#86a9a3',
+      string: '#ffd79a',
+      number: '#a9e5b0',
+      keyword: '#58d6f0',
+      keywordControl: '#7fe3ff',
+      identifier: '#cfe9e4',
+      function: '#63e6c9',
+      type: '#8fd0ff',
+      constant: '#ffb98a',
+      tag: '#7fe3ff',
+      attribute: '#d7f2ea',
+    },
+  },
+  {
+    // Вино и янтарь: тёплое полотно, но не «бежевая бумага», а насыщенный тон.
+    name: 'dark-sunset',
+    label: 'закат — вино и янтарь',
+    window: '#1a1013',
+    content: '#241519',
+    popup: '#301e23',
+    accent: '#ff8a5c',
+    link: '#ffb197',
+    fill: '#c04a24',
+    code: {
+      comment: '#b08a92',
+      string: '#ffb08f',
+      number: '#ffd27a',
+      keyword: '#ff7f9e',
+      keywordControl: '#ff98b8',
+      identifier: '#ffd9c9',
+      function: '#ffc46b',
+      type: '#d9a2ff',
+      constant: '#a8f0c0',
+      tag: '#ff98b8',
+      attribute: '#ffd9c9',
+    },
+  },
 ];
 
 async function writeDemoProject(dir) {
@@ -82,13 +167,50 @@ const SET_TOKENS = (tokens) => `(() => {
 const TOKENS_FOR = (v) => ({
   '--surface_window': v.window,
   '--surface_content': v.content,
+  '--surface_popup': v.popup,
   '--main_background': v.window,
   '--element_background_2': v.content,
+  '--panel_background': v.content,
   '--editor_background': v.content,
   '--editor_terminal_background': v.content,
+  // Акцент вместе с поверхностями: `--selection_background` и кольцо фокуса
+  // считаются от него через `color-mix`, поэтому едут за ним сами.
+  '--blue_prime_background': v.accent,
+  '--link_color': v.link,
+  '--accent_fill': v.fill,
 });
 
+/**
+ * Краска токенов живёт не в переменных темы, а на корне редактора: вид ставит
+ * `--own-token-<роль>` инлайном (`editor-view.ts`, `applyTheme`). Поэтому ищем узлы,
+ * у которых эти переменные уже стоят, и переписываем их — иначе перекрасились бы
+ * одни панели.
+ */
+const SET_CODE = (code) => `(() => {
+  const t = ${JSON.stringify(code)};
+  let nodes = 0;
+  for (const node of document.querySelectorAll('div')) {
+    if (!node.style.getPropertyValue('--own-token-comment')) continue;
+    for (const [role, color] of Object.entries(t)) node.style.setProperty('--own-token-' + role, color);
+    nodes += 1;
+  }
+  return nodes;
+})()`;
+
 const hex = (r, g, b) => '#' + [r, g, b].map((x) => x.toString(16).padStart(2, '0')).join('');
+
+/** Каналы цвета, относительная яркость и контраст по WCAG: токен обязан читаться на полотне. */
+const channelsOf = (value) => [1, 3, 5].map((index) => Number.parseInt(value.slice(index, index + 2), 16));
+const linear = (channel) =>
+  channel / 255 <= 0.03928 ? channel / 255 / 12.92 : ((channel / 255 + 0.055) / 1.055) ** 2.4;
+const luminanceOf = (value) => {
+  const [r, g, b] = channelsOf(value);
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+};
+const contrastOf = (one, other) => {
+  const [lighter, darker] = [luminanceOf(one), luminanceOf(other)].sort((a, b) => b - a);
+  return (lighter + 0.05) / (darker + 0.05);
+};
 
 /** Средняя яркость и цвет зоны кадра. */
 function zone(bitmap, width, x0, y0, x1, y1) {
@@ -130,36 +252,57 @@ app.whenReady().then(async () => {
   await wait(3500);
 
   const rows = [];
-  for (const [name, scheme, surf] of VARIANTS) {
-    nativeTheme.themeSource = scheme;
+  for (const variant of VARIANTS) {
     await wait(500);
-    await ide.webContents.executeJavaScript(SET_TOKENS(TOKENS_FOR(surf))).catch(() => undefined);
+    await ide.webContents.executeJavaScript(SET_TOKENS(TOKENS_FOR(variant))).catch(() => undefined);
+    if (variant.code) {
+      const nodes = await ide.webContents.executeJavaScript(SET_CODE(variant.code)).catch(() => 0);
+      if (!nodes) step(`${variant.name}: корень редактора не найден — код остался прежним`);
+    }
     await ide.webContents
       .executeJavaScript('new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true))))')
       .catch(() => undefined);
     const image = await ide.capturePage();
-    const file = path.join(SHOTS, `theme-variant-${name}.png`);
+    const file = path.join(SHOTS, `theme-variant-${variant.name}.png`);
     await fs.writeFile(file, image.toPNG());
     const { width, height } = image.getSize();
     const bmp = image.toBitmap();
     rows.push({
-      name,
-      scheme,
-      окно: surf.window,
-      полотно: surf.content,
+      name: variant.name,
+      label: variant.label,
+      окно: variant.window,
+      полотно: variant.content,
       шапка: zone(bmp, width, 0, 0, width, 36),
       панель: zone(bmp, width, 0, 40, 260, height - 30),
       редактор: zone(bmp, width, 280, 60, width - 20, height - 60),
+      контраст: variant.code
+        ? Math.min(...Object.values(variant.code).map((color) => contrastOf(color, variant.content)))
+        : null,
+      провалы: variant.code
+        ? Object.entries(variant.code)
+            .map(([role, color]) => [role, contrastOf(color, variant.content)])
+            .filter(([, ratio]) => ratio < 4.5)
+            .map(([role, ratio]) => `${role} ${ratio.toFixed(2)}`)
+        : [],
       file,
     });
-    step(`${name} снят`);
+    step(`${variant.name} снят`);
   }
 
-  console.log('\nвариант   схема  окно      полотно   шапка     панель    редактор');
+  console.log('\nвариант        окно      полотно   шапка     панель    редактор  контраст  подпись');
   for (const r of rows) {
+    const ratio = r.контраст === null ? '—       ' : `${r.контраст.toFixed(2)}     `;
     console.log(
-      `${r.name.padEnd(9)} ${r.scheme.padEnd(6)} ${r.окно}  ${r.полотно}  ${r.шапка}  ${r.панель}  ${r.редактор}`,
+      `${r.name.padEnd(14)} ${r.окно}  ${r.полотно}  ${r.шапка}  ${r.панель}  ${r.редактор}  ${ratio} ${r.label}`,
     );
+  }
+
+  // Токен ниже 4.5:1 на полотне — не вкусовщина, а провал чтения: такой вариант
+  // в исходники не идёт, краску надо поднимать.
+  const failures = rows.filter((r) => r.провалы.length > 0);
+  if (failures.length > 0) {
+    console.log('\nниже 4.5:1:');
+    for (const r of failures) console.log(`  ${r.name}: ${r.провалы.join(', ')}`);
   }
   console.log(`\nСнимки: ${SHOTS}`);
 

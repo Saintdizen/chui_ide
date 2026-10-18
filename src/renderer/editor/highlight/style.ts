@@ -12,9 +12,7 @@
  */
 
 import type { TokenKey } from '../../../shared/theme-file';
-import { tokenKeyFor, tokenPalette, type Scheme } from '../../core/theme';
-
-export type { Scheme } from '../../core/theme';
+import { tokenKeyFor, tokenPalette } from '../../core/theme';
 
 /** Роль палитры для типа токена. `null` — тип бесцветный. */
 export function roleOfToken(type: string): TokenKey | null {
@@ -22,9 +20,9 @@ export function roleOfToken(type: string): TokenKey | null {
 }
 
 /**
- * Цвета ролей для текущей схемы. Представление ставит их переменными на свой корень,
+ * Цвета ролей. Представление ставит их переменными на свой корень,
  * а классы токенов в оформлении (`styles/editor.css`) берут значения оттуда.
  */
-export function paletteOf(scheme: Scheme): Record<TokenKey, string> {
-  return tokenPalette(scheme);
+export function paletteOf(): Record<TokenKey, string> {
+  return tokenPalette();
 }

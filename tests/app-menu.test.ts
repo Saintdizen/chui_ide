@@ -66,25 +66,10 @@ describe('меню приложения', () => {
   });
 
   it('отметки переключателей идут за состоянием', () => {
-    const checks = menuChecks({ sidebar: true, aiPanel: false, terminal: true, theme: 'light' });
+    const checks = menuChecks({ sidebar: true, aiPanel: false, terminal: true });
     expect(checks[MENU_TOGGLES.sidebar]).toBe(true);
     expect(checks[MENU_TOGGLES.aiPanel]).toBe(false);
     expect(checks[MENU_TOGGLES.terminal]).toBe(true);
-    expect(checks[MENU_TOGGLES.themeLight]).toBe(true);
-    expect(checks[MENU_TOGGLES.themeDark]).toBe(false);
-    expect(checks[MENU_TOGGLES.themeSystem]).toBe(false);
-  });
-
-  it('ровно одна тема отмечена при любом выборе', () => {
-    for (const theme of ['dark', 'light', 'system'] as const) {
-      const checks = menuChecks({ sidebar: false, aiPanel: false, terminal: false, theme });
-      const themes = [
-        checks[MENU_TOGGLES.themeDark],
-        checks[MENU_TOGGLES.themeLight],
-        checks[MENU_TOGGLES.themeSystem],
-      ];
-      expect(themes.filter(Boolean)).toHaveLength(1);
-    }
   });
 
   it('каждая команда-переключатель есть в шаблоне меню', () => {

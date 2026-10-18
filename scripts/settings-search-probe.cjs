@@ -79,12 +79,20 @@ app.whenReady().then(async () => {
   const opened = await ask(
     ide,
     `(async () => {
-      const button = [...document.querySelectorAll('*')].find(
-        (node) => node.getAttribute && node.getAttribute('title') === 'Настройки',
-      );
-      if (!button) return 'кнопки настроек нет';
-      button.click();
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const items = () => [...document.querySelectorAll('.context-menu [role="menuitem"]')];
+      // Кнопки настроек в шапке нет: они живут в меню приложения (Файл → Настройки…),
+      // открываем их тем же путём, что и человек.
+      document.querySelector('.topbar-left .icon-btn')?.click();
+      await wait(300);
+      const file = items().find((node) => (node.textContent || '').trim().startsWith('Файл'));
+      if (!file) return 'меню не открылось';
+      file.click();
+      await wait(300);
+      const settings = items().find((node) => (node.textContent || '').trim().startsWith('Настройки'));
+      if (!settings) return 'пункта настроек нет';
+      settings.click();
+      await wait(600);
       return document.querySelector('.modal-search') ? 'открыт' : 'поля поиска нет';
     })()`,
   );

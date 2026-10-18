@@ -8,7 +8,6 @@ import type {
   RunSettings,
   Settings,
   SettingsPatch,
-  ThemeChoice,
 } from '../../shared/api';
 import type { AiProviderPatch, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
@@ -33,7 +32,6 @@ import {
 import { DEFAULT_KEYBINDINGS } from '../core/default-keybindings';
 import { comboFromEvent, isModifierKey } from '../core/keybindings';
 import type { RpcClient } from '../core/rpc';
-import type { ThemeService } from '../core/theme-service';
 import { themeTemplate } from '../core/theme';
 import { type Child, append, clear, h, svgIcon } from './dom';
 import { createModal } from './modal';
@@ -43,7 +41,6 @@ import { showToast } from './toast';
 export interface SettingsModalDeps {
   rpc: RpcClient;
   commands: CommandRegistry;
-  theme: ThemeService;
   /**
    * Проектные настройки из `.chui_ide`: `kind` — вид проекта для фильтрации
    * секций, `patch` — сохранить правку проектных секций (editor/explorer/run/lsp).
@@ -95,12 +92,6 @@ const SECTIONS: ReadonlyArray<{
   { id: 'lsp', title: 'Языки (LSP)', icon: 'command' },
   { id: 'mcp', title: 'Внешние инструменты (MCP)', icon: 'sparkle' },
   { id: 'project', title: 'Проект', icon: 'panel' },
-];
-
-const THEME_OPTIONS: ReadonlyArray<{ value: ThemeChoice; label: string }> = [
-  { value: 'system', label: 'Как в системе' },
-  { value: 'dark', label: 'Тёмная' },
-  { value: 'light', label: 'Светлая' },
 ];
 
 /**
@@ -1461,7 +1452,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     const exportButton = h('button', { class: 'btn btn-small', type: 'button' }, 'Сохранить шаблон…');
     exportButton.addEventListener('click', async () => {
       try {
-        const contents = serializeThemeFile(themeTemplate(deps.theme.resolved));
+        const contents = serializeThemeFile(themeTemplate());
         const result = await deps.rpc.request('theme.export', { contents, name: 'chui-theme.json' });
         if (result.path) showToast(`Шаблон сохранён: ${result.path}`);
       } catch (error) {
@@ -1485,8 +1476,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     }
 
     const hint = current
-      ? `Активна тема «${current.name}» (${current.scheme === 'dark' ? 'тёмная' : 'светлая'}). ` +
-        'Она задаёт фон, текст, акценты и подсветку кода; выбор схемы выше на неё не влияет.'
+      ? `Активна тема «${current.name}». Она задаёт фон, текст, акценты и подсветку кода.`
       : 'JSON с частью ролей (фон, текст, акценты, подсветка кода). «Сохранить шаблон…» кладёт файл, из которого удобно начать свою тему.';
 
     return [
@@ -1531,17 +1521,6 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
 
   function renderAppearance(): Child[] {
     return [
-      field(
-        'Тема',
-        selectInput(
-          THEME_OPTIONS.map((item) => ({ value: item.value, label: item.label })),
-          settings!.appearance.theme,
-          (value) => {
-            void deps.theme.set(value as ThemeChoice);
-          },
-        ),
-      ),
-      h('div', { class: 'field-hint' }, '«Как в системе» переключает палитру вслед за схемой рабочего стола.'),
       field(
         'Масштаб интерфейса',
         selectInput(

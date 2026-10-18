@@ -9,42 +9,36 @@ const HEX = /^#[0-9a-f]{6}$/i;
 
 describe('tokenColor', () => {
   it('известный токен даёт цвет-HEX', () => {
-    expect(tokenColor('dark', 'keyword')).toMatch(HEX);
-    expect(tokenColor('light', 'keyword')).toMatch(HEX);
+    expect(tokenColor('keyword')).toMatch(HEX);
   });
 
   it('частное правило важнее общего', () => {
     // keyword.control красится иначе, чем keyword.
-    expect(tokenColor('dark', 'keyword.control')).not.toBe(tokenColor('dark', 'keyword'));
+    expect(tokenColor('keyword.control')).not.toBe(tokenColor('keyword'));
   });
 
   it('токен с уточнением использует правило родителя', () => {
     // string.escape и string — один ключ палитры.
-    expect(tokenColor('dark', 'string.escape')).toBe(tokenColor('dark', 'string'));
+    expect(tokenColor('string.escape')).toBe(tokenColor('string'));
   });
 
   it('неизвестный токен → null (цвет текста по умолчанию)', () => {
-    expect(tokenColor('dark', 'operator.weird')).toBeNull();
-    expect(tokenColor('dark', '')).toBeNull();
-  });
-
-  it('тёмная и светлая схемы дают разные цвета', () => {
-    expect(tokenColor('dark', 'keyword')).not.toBe(tokenColor('light', 'keyword'));
+    expect(tokenColor('operator.weird')).toBeNull();
+    expect(tokenColor('')).toBeNull();
   });
 
   it('роль function окрашена и отличается от идентификатора', () => {
     // В тёмной палитре функции — жёлтые (#DCDCAA), идентификаторы — голубые.
-    expect(tokenColor('dark', 'function')).toMatch(HEX);
-    expect(tokenColor('dark', 'function')).not.toBe(tokenColor('dark', 'identifier'));
-    expect(tokenColor('light', 'function')).not.toBe(tokenColor('light', 'identifier'));
+    expect(tokenColor('function')).toMatch(HEX);
+    expect(tokenColor('function')).not.toBe(tokenColor('identifier'));
   });
 
   it('роль variable окрашена как идентификатор', () => {
     // Своей краски у переменных нет — тот же цвет, но правило нужно:
     // иначе `variable` из грамматик Makefile/shell остаётся неокрашенным.
-    expect(tokenColor('dark', 'variable')).toMatch(HEX);
-    expect(tokenColor('dark', 'variable')).toBe(tokenColor('dark', 'identifier'));
-    expect(tokenColor('dark', 'variable.parameter')).toBe(tokenColor('dark', 'identifier'));
+    expect(tokenColor('variable')).toMatch(HEX);
+    expect(tokenColor('variable')).toBe(tokenColor('identifier'));
+    expect(tokenColor('variable.parameter')).toBe(tokenColor('identifier'));
   });
 });
 
@@ -59,24 +53,22 @@ describe('tokenColor', () => {
  */
 describe('подсветка различает роли и без цвета', () => {
   it('комментарий — курсив, ключевое слово — полужирное', () => {
-    expect(tokenStyle('dark', 'comment').italic).toBe(true);
-    expect(tokenStyle('light', 'comment').italic).toBe(true);
-    expect(tokenStyle('dark', 'keyword').bold).toBe(true);
-    expect(tokenStyle('light', 'keyword').bold).toBe(true);
+    expect(tokenStyle('comment').italic).toBe(true);
+    expect(tokenStyle('keyword').bold).toBe(true);
     // Управляющие конструкции — тоже ключевые слова.
-    expect(tokenStyle('dark', 'keyword.control').bold).toBe(true);
+    expect(tokenStyle('keyword.control').bold).toBe(true);
   });
 
   it('начертание не мешает цвету: обе части оформления на месте', () => {
-    const style = tokenStyle('dark', 'keyword');
+    const style = tokenStyle('keyword');
     expect(style.color).toMatch(HEX);
     expect(style.bold).toBe(true);
     // Оформление и цвет берутся из одного правила — цвет совпадает с tokenColor.
-    expect(style.color).toBe(tokenColor('dark', 'keyword'));
+    expect(style.color).toBe(tokenColor('keyword'));
   });
 
   it('токен без правила — без оформления', () => {
-    expect(tokenStyle('dark', 'operator.weird')).toEqual({ color: null, italic: false, bold: false });
+    expect(tokenStyle('operator.weird')).toEqual({ color: null, italic: false, bold: false });
   });
 });
 
@@ -110,40 +102,34 @@ const CODE_TOKEN_TYPES: readonly string[] = [
 ];
 
 describe('контраст подсветки кода (WCAG AA)', () => {
-  for (const scheme of ['dark', 'light'] as const) {
-    it(`${scheme}: цвет токена на полотне — не ниже 4.5:1`, () => {
-      const tokens = schemeTokens(scheme);
-      const background = parseColor(tokens.get('editor_background') ?? '#000000');
+  it('цвет токена на полотне — не ниже 4.5:1', () => {
+    const tokens = schemeTokens();
+    const background = parseColor(tokens.get('editor_background') ?? '#000000');
 
-      for (const type of CODE_TOKEN_TYPES) {
-        const color = tokenColor(scheme, type);
-        expect(color, `${scheme}: ${type} должен быть окрашен`).not.toBeNull();
-        expect(contrast(parseColor(color!), background), `${scheme}: ${type}`).toBeGreaterThanOrEqual(4.5);
-      }
-    });
-  }
+    for (const type of CODE_TOKEN_TYPES) {
+      const color = tokenColor(type);
+      expect(color, `${type} должен быть окрашен`).not.toBeNull();
+      expect(contrast(parseColor(color!), background), type).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 
   it('комментарий не бледнее прочего текста кода', () => {
     // Бледный комментарий — ошибка. Сторож брал бы и так, но здесь это
     // названо прямо: комментарий — самая частая причина провала.
-    for (const scheme of ['dark', 'light'] as const) {
-      const tokens = schemeTokens(scheme);
-      const background = parseColor(tokens.get('editor_background') ?? '#000000');
-      const comment = contrast(parseColor(tokenColor(scheme, 'comment')!), background);
-      expect(comment, `${scheme}: comment`).toBeGreaterThanOrEqual(4.5);
-    }
+    const tokens = schemeTokens();
+    const background = parseColor(tokens.get('editor_background') ?? '#000000');
+    expect(contrast(parseColor(tokenColor('comment')!), background), 'comment').toBeGreaterThanOrEqual(4.5);
   });
 });
 
 describe('vivid', () => {
   it('возвращает корректный HEX (вход — без решётки)', () => {
-    expect(vivid('569cd6', 'dark')).toMatch(HEX);
-    expect(vivid('0000ff', 'light')).toMatch(HEX);
+    expect(vivid('569cd6')).toMatch(HEX);
   });
 
   it('цвет не остаётся прежним (сдвиг есть)', () => {
-    expect(vivid('569cd6', 'dark')).not.toBe('#569cd6');
-    expect(vivid('569cd6', 'dark').slice(1)).not.toBe('569cd6');
+    expect(vivid('569cd6')).not.toBe('#569cd6');
+    expect(vivid('569cd6').slice(1)).not.toBe('569cd6');
   });
 });
 
@@ -153,8 +139,8 @@ describe('vivid', () => {
  * Сторож читает `styles/theme.css` — тот же файл, из которого цвета берут
  * компоненты, — и проверяет пары «цветной текст на фоне» на контраст не ниже
  * 4.5:1 (WCAG AA для обычного текста). Правка палитры, уводящая цвет за норму,
- * падает здесь, а не обнаруживается глазом: светлая схема прощает такое дольше,
- * чем тёмная.
+ * падает здесь, а не обнаруживается глазом: на тёмном фоне бледный оттенок
+ * теряет контраст незаметно для того, кто его подбирал.
  *
  * Порог 4.5:1 берём для всего, что красится в CSS через `color:`: подписи,
  * ссылки, состояния git и значки файлов — это текст и мелкие глифы, а не
@@ -162,8 +148,8 @@ describe('vivid', () => {
  * `--text_color_tertiary` и `--placeholder_text_color` исключены из ЭТОГО порога
  * намеренно — это тихие тона, и требовать от них 4.5:1 значит ломать замысел
  * (см. `main.css` про `reasoning-text`). Но пол снизу обязателен: у tertiary и
- * placeholder он 3:1, иначе «тихо» превращается в «не видно» — в светлой схеме
- * так и было (1.9:1). Порядок ступеней держит отдельный сторож про иерархию.
+ * placeholder он 3:1, иначе «тихо» превращается в «не видно». Порядок ступеней
+ * держит отдельный сторож про иерархию.
  */
 const THEME_CSS = readFileSync(resolve(process.cwd(), 'src/renderer/styles/theme.css'), 'utf8').replace(
   /\/\*[\s\S]*?\*\//g,
@@ -236,14 +222,10 @@ function resolveToken(value: string, tokens: Map<string, string>, depth = 0): st
   return next === undefined ? value : resolveToken(next.trim(), tokens, depth + 1);
 }
 
-/** Тёмная схема — базовый `:root`; светлая — `:root` в `@media` поверх базовых значений. */
-function schemeTokens(scheme: 'dark' | 'light'): Map<string, string> {
+/** Токены единственной (тёмной) схемы — из базового `:root`. */
+function schemeTokens(): Map<string, string> {
   const base = THEME_CSS.match(/^:root\s*\{([\s\S]*?)^\}/m)?.[1] ?? '';
   const tokens = readTokens(base);
-  if (scheme === 'light') {
-    const light = THEME_CSS.match(/@media\s*\(prefers-color-scheme:\s*light\)\s*\{([\s\S]*?)^\}/m)?.[1] ?? '';
-    for (const [name, value] of readTokens(light)) tokens.set(name, value);
-  }
   for (const [name, value] of tokens) tokens.set(name, resolveToken(value, tokens));
   return tokens;
 }
@@ -293,73 +275,66 @@ const ON_CARD: readonly string[] = [
 ];
 
 describe('контраст палитры (WCAG AA)', () => {
-  for (const scheme of ['dark', 'light'] as const) {
-    it(`${scheme}: цветной текст и значки — не ниже 4.5:1`, () => {
-      const tokens = schemeTokens(scheme);
-      const color = (name: string): Rgba => {
-        const raw = tokens.get(name.slice(2));
-        expect(raw, `токен ${name} не объявлен в theme.css`).toBeDefined();
-        return parseColor(raw!);
-      };
+  it('цветной текст и значки — не ниже 4.5:1', () => {
+    const tokens = schemeTokens();
+    const color = (name: string): Rgba => {
+      const raw = tokens.get(name.slice(2));
+      expect(raw, `токен ${name} не объявлен в theme.css`).toBeDefined();
+      return parseColor(raw!);
+    };
 
-      const pairs: Array<readonly [string, Rgba, Rgba]> = [
-        ...ON_BACKGROUND.map(([fg, bg]) => [fg, color(fg), color(bg)] as const),
-        ...ON_CARD.map((token) => [token, color(token), color('--element_background_2')] as const),
-      ];
+    const pairs: Array<readonly [string, Rgba, Rgba]> = [
+      ...ON_BACKGROUND.map(([fg, bg]) => [fg, color(fg), color(bg)] as const),
+      ...ON_CARD.map((token) => [token, color(token), color('--element_background_2')] as const),
+    ];
 
-      for (const [name, fg, bg] of pairs) {
-        expect(contrast(fg, bg), `${scheme}: ${name}`).toBeGreaterThanOrEqual(4.5);
-      }
-    });
+    for (const [name, fg, bg] of pairs) {
+      expect(contrast(fg, bg), name).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 
-    it(`${scheme}: белый текст на заливке кнопки и опасного действия — не ниже 4.5:1`, () => {
-      const tokens = schemeTokens(scheme);
-      const color = (name: string): Rgba => {
-        const raw = tokens.get(name.slice(2));
-        expect(raw, `токен ${name} не объявлен в theme.css`).toBeDefined();
-        return parseColor(raw!);
-      };
+  it('белый текст на заливке кнопки и опасного действия — не ниже 4.5:1', () => {
+    const tokens = schemeTokens();
+    const color = (name: string): Rgba => {
+      const raw = tokens.get(name.slice(2));
+      expect(raw, `токен ${name} не объявлен в theme.css`).toBeDefined();
+      return parseColor(raw!);
+    };
 
-      // Заливки — свой токен (`--accent_fill`, `--danger_fill`), а не сам акцент:
-      // под белым текстом акцент не проходит (см. доккомментарий в theme.css).
-      for (const fill of ['--accent_fill', '--danger_fill']) {
-        expect(
-          contrast(color('--text_color_hover'), color(fill)),
-          `${scheme}: текст на ${fill}`,
-        ).toBeGreaterThanOrEqual(4.5);
-      }
-    });
-  }
+    // Заливки — свой токен (`--accent_fill`, `--danger_fill`), а не сам акцент:
+    // под белым текстом акцент не проходит (см. доккомментарий в theme.css).
+    for (const fill of ['--accent_fill', '--danger_fill']) {
+      expect(contrast(color('--text_color_hover'), color(fill)), `текст на ${fill}`).toBeGreaterThanOrEqual(4.5);
+    }
+  });
 });
 
 /* ── Пол для тихих ступеней текста ──────────────────────────────────────── */
 
 /**
  * Тихие ступени — tertiary и placeholder — держат пол ниже прочего текста: 3:1.
- * Это не «открытая дверь»: ещё ниже начинается «не видно» (в светлой схеме
- * tertiary был 1.9:1 и читался как грязь). Проверяем на всех поверхностях, где
+ * Это не «открытая дверь»: ещё ниже начинается «не видно» — ступень читается
+ * как грязь, а не как тишина. Проверяем на всех поверхностях, где
  * такой текст встречается: карточка содержимого, окно и всплывающий слой.
  */
 const QUIET_TEXT: readonly string[] = ['--text_color_tertiary', '--placeholder_text_color'];
 const QUIET_BACKGROUNDS: readonly string[] = ['--element_background_2', '--main_background', '--popup_background'];
 
 describe('контраст тихих ступеней текста (пол 3:1)', () => {
-  for (const scheme of ['dark', 'light'] as const) {
-    it(`${scheme}: tertiary и placeholder — не ниже 3:1`, () => {
-      const tokens = schemeTokens(scheme);
-      const color = (name: string): Rgba => {
-        const raw = tokens.get(name.slice(2));
-        expect(raw, `токен ${name} не объявлен в theme.css`).toBeDefined();
-        return parseColor(raw!);
-      };
+  it('tertiary и placeholder — не ниже 3:1', () => {
+    const tokens = schemeTokens();
+    const color = (name: string): Rgba => {
+      const raw = tokens.get(name.slice(2));
+      expect(raw, `токен ${name} не объявлен в theme.css`).toBeDefined();
+      return parseColor(raw!);
+    };
 
-      for (const fg of QUIET_TEXT) {
-        for (const bg of QUIET_BACKGROUNDS) {
-          expect(contrast(color(fg), color(bg)), `${scheme}: ${fg} на ${bg}`).toBeGreaterThanOrEqual(3);
-        }
+    for (const fg of QUIET_TEXT) {
+      for (const bg of QUIET_BACKGROUNDS) {
+        expect(contrast(color(fg), color(bg)), `${fg} на ${bg}`).toBeGreaterThanOrEqual(3);
       }
-    });
-  }
+    }
+  });
 });
 
 /* ── Белый текст — только на цветной заливке ────────────────────────────── */
@@ -408,57 +383,45 @@ describe('уровни текста убывают по значимости', (
     '--placeholder_text_color',
   ] as const;
 
-  for (const scheme of ['dark', 'light'] as const) {
-    it(`${scheme}: ступени идут по порядку и не сходятся`, () => {
-      const tokens = schemeTokens(scheme);
-      const alpha = LADDER.map((name) => {
-        const raw = tokens.get(name.slice(2));
-        expect(raw, `токен ${name} не объявлен в theme.css`).toBeDefined();
-        return parseColor(raw!).a;
-      });
-
-      for (let i = 1; i < alpha.length; i += 1) {
-        expect(alpha[i]!, `${scheme}: ${LADDER[i]} не должен быть ярче ${LADDER[i - 1]}`).toBeLessThan(alpha[i - 1]!);
-      }
-
-      // `disabled` — состояние, а не ступень: он не громче вторичного текста.
-      const disabled = parseColor(tokens.get('text_color_disabled')!).a;
-      expect(disabled, `${scheme}: disabled не должен быть ярче secondary`).toBeLessThanOrEqual(alpha[1]!);
+  it('ступени идут по порядку и не сходятся', () => {
+    const tokens = schemeTokens();
+    const alpha = LADDER.map((name) => {
+      const raw = tokens.get(name.slice(2));
+      expect(raw, `токен ${name} не объявлен в theme.css`).toBeDefined();
+      return parseColor(raw!).a;
     });
-  }
+
+    for (let i = 1; i < alpha.length; i += 1) {
+      expect(alpha[i]!, `${LADDER[i]} не должен быть ярче ${LADDER[i - 1]}`).toBeLessThan(alpha[i - 1]!);
+    }
+
+    // `disabled` — состояние, а не ступень: он не громче вторичного текста.
+    const disabled = parseColor(tokens.get('text_color_disabled')!).a;
+    expect(disabled, 'disabled не должен быть ярче secondary').toBeLessThanOrEqual(alpha[1]!);
+  });
 });
 
 /**
- * Поверхности образуют лестницу высоты: окно → содержимое → всплывающий слой.
- * Сторож требует, чтобы всплывающий слой БЫЛ отдельной ступенью, а не копией
- * содержимого: именно так и было — `--popup_background` повторял цвет карточки,
- * хотя заголовок палитры обещал приподнятую поверхность. В светлой
- * схеме ступень совпадает с содержимым: выше белого подниматься некуда, и слой
- * отделяет тень.
+ * Поверхности образуют лестницу высоты, но она НЕ монотонна по светлоте: острова
+ * (панели и редактор) лежат в тени окна — фон окна светлее, шов между островами
+ * читается светлой линией, а сами острова утоплены. Над всем — только всплывающий
+ * слой. Сторож держит два свойства сразу: попап обязан быть светлее островов
+ * (иначе подъём теряется — так и было, `--popup_background` повторял цвет карточки),
+ * а острова — темнее окна, иначе швы пропадают и окно выглядит провалом.
  */
 describe('поверхности — лестница высоты', () => {
-  it('тёмная схема: всплывающий слой светлее содержимого', () => {
-    const tokens = schemeTokens('dark');
+  it('всплывающий слой светлее содержимого', () => {
+    const tokens = schemeTokens();
     const content = luminance(parseColor(tokens.get('surface_content')!));
     const popup = luminance(parseColor(tokens.get('surface_popup')!));
     expect(popup).toBeGreaterThan(content);
   });
 
-  it('светлая схема: всплывающий слой не темнее содержимого', () => {
-    const tokens = schemeTokens('light');
+  it('острова темнее окна (фон окна — светлый шов между панелями)', () => {
+    const tokens = schemeTokens();
+    const window = luminance(parseColor(tokens.get('surface_window')!));
     const content = luminance(parseColor(tokens.get('surface_content')!));
-    const popup = luminance(parseColor(tokens.get('surface_popup')!));
-    expect(popup).toBeGreaterThanOrEqual(content);
-  });
-
-  it('окно темнее содержимого в обеих схемах (слой ниже лежит под слоем выше)', () => {
-    for (const scheme of ['dark', 'light'] as const) {
-      const tokens = schemeTokens(scheme);
-      const window = luminance(parseColor(tokens.get('surface_window')!));
-      const content = luminance(parseColor(tokens.get('surface_content')!));
-      // Тёмная схема: содержимое светлее окна. Светлая: содержимое светлее (окно — серое).
-      expect(content, `${scheme}: содержимое`).toBeGreaterThan(window);
-    }
+    expect(content).toBeLessThan(window);
   });
 
   /**
@@ -468,12 +431,10 @@ describe('поверхности — лестница высоты', () => {
    * починили, а материал остался на цвете карточки; сторож не даёт повторить.
    */
   it('стеклянный материал стоит на ступени попапа, а не карточки', () => {
-    for (const scheme of ['dark', 'light'] as const) {
-      const material = schemeTokens(scheme).get('popup_material')!;
-      expect(material, `${scheme}: база материала`).toMatch(/var\(--(popup_background|surface_popup)\)/);
-      expect(material, `${scheme}: материал не должен строиться на карточке`).not.toMatch(
-        /var\(--element_background_2\)/,
-      );
+    {
+      const material = schemeTokens().get('popup_material')!;
+      expect(material, 'база материала').toMatch(/var\(--(popup_background|surface_popup)\)/);
+      expect(material, 'материал не должен строиться на карточке').not.toMatch(/var\(--element_background_2\)/);
     }
     // Плотная поверхность под «уменьшить прозрачность» — на той же ступени попапа.
     const reduced = THEME_CSS.match(/@media\s*\(prefers-reduced-transparency:\s*reduce\)\s*\{[\s\S]*?\n\}/)?.[0] ?? '';
@@ -488,17 +449,13 @@ describe('поверхности — лестница высоты', () => {
 /**
  * `BrowserWindow` красит себя до отрисовки страницы, поэтому его фон задаётся
  * в main-процессе (`shared/colors.ts`), а не в CSS. Значение обязано совпадать с
- * токенами `theme.css`, иначе при смене палитры окно мигало бы чужим цветом.
- * Сторож связывает две копии одного цвета — тёмную с `--element_background_2`,
- * светлую с `--main_background` — и падает, если их разведут.
+ * токеном `theme.css`, иначе при смене палитры окно мигало бы чужим цветом.
+ * Сторож связывает две копии одного цвета — константу и `--surface_window`
+ * (фон окна; он же фон панелей и полотна редактора).
  */
 describe('фон окна совпадает с палитрой', () => {
-  it('тёмная схема — как --element_background_2', () => {
-    expect(WINDOW_BACKGROUND.dark.toLowerCase()).toBe(schemeTokens('dark').get('element_background_2')?.toLowerCase());
-  });
-
-  it('светлая схема — как --main_background', () => {
-    expect(WINDOW_BACKGROUND.light.toLowerCase()).toBe(schemeTokens('light').get('main_background')?.toLowerCase());
+  it('совпадает с --surface_window', () => {
+    expect(WINDOW_BACKGROUND.toLowerCase()).toBe(schemeTokens().get('surface_window')?.toLowerCase());
   });
 });
 
@@ -512,17 +469,15 @@ describe('фон окна совпадает с палитрой', () => {
 describe('доли контекста различимы', () => {
   const KEYS = ['system', 'tools', 'messages', 'results', 'files'] as const;
 
-  for (const scheme of ['dark', 'light'] as const) {
-    it(`${scheme}: пять долей — пять разных цветов`, () => {
-      const tokens = schemeTokens(scheme);
-      const colors = KEYS.map((key) => {
-        const raw = tokens.get(`context_seg_${key}`);
-        expect(raw, `токен --context_seg_${key} не объявлен в theme.css`).toBeDefined();
-        return raw!.trim().toLowerCase();
-      });
-      expect(new Set(colors).size).toBe(KEYS.length);
+  it('пять долей — пять разных цветов', () => {
+    const tokens = schemeTokens();
+    const colors = KEYS.map((key) => {
+      const raw = tokens.get(`context_seg_${key}`);
+      expect(raw, `токен --context_seg_${key} не объявлен в theme.css`).toBeDefined();
+      return raw!.trim().toLowerCase();
     });
-  }
+    expect(new Set(colors).size).toBe(KEYS.length);
+  });
 });
 
 /* ── Каждый токен объявлен ──────────────────────────────────────────────── */

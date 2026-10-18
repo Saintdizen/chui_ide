@@ -1,7 +1,5 @@
 import { TOKEN_KEYS, type ChromeKey, type ThemeFile, type TokenKey } from '../../shared/theme-file';
 
-export type Scheme = 'dark' | 'light';
-
 /**
  * Палитра консоли: цвета ANSI и служебные цвета полотна. Раньше этот тип давал xterm;
  * теперь он живёт здесь, вместе с данными палитры: терминал у нас свой, а консольная
@@ -59,13 +57,25 @@ export function setThemeOverrides(theme: ThemeFile | null): void {
 }
 
 /**
- * Подсветка кода — привычная палитра (тёмная и светлая).
+ * Подсветка кода — привычная палитра Dark+.
+ *
+ * Подсветка живёт по своей шкале, а не по цветам обвязки: код должен читаться
+ * как код. Перекраска обвязки (поверхности, попапы, значки) сюда не переносится.
  *
  * Здесь лежат ИСХОДНЫЕ значения палитры: перед применением их прогоняет `vivid()`,
  * который поднимает насыщенность и яркость. Так и редактор, и чат в одном проекте
- * получают один и тот же цвет, а таблица остаётся узнаваемой.
+ * получают один и тот же цвет, а таблица остаётся узнаваемой. Исключение — роли
+ * из `PINNED_TOKENS`: они берутся точно как в таблице.
  */
 type TokenRules = Record<TokenKey, string>;
+
+/**
+ * Роли, которые берутся ровно как заданы, без усиления `vivid`. Комментарий —
+ * первая из них: в таблице палитры он #6A9955, и человек сверяет его с ней
+ * глазом, а не с оттенком после правки HSL (#6A9955 на полотне #1E1E1E даёт
+ * 5:1 — запас есть, усиление ему не нужно).
+ */
+const PINNED_TOKENS: ReadonlyArray<keyof TokenRules> = ['comment'];
 
 const DARK_TOKENS: TokenRules = {
   comment: '6a9955',
@@ -79,28 +89,6 @@ const DARK_TOKENS: TokenRules = {
   constant: '4fc1ff',
   tag: '569cd6',
   attribute: '9cdcfe',
-};
-
-/**
- * Светлая палитра. От исходной светлой отличается тремя значениями — `number`,
- * `type` и `attribute`: их оригинальные тона (#098658, #267F99, #E50000) на
- * СВЕТЛОМ полотне (а оно у нас не чистый белый, а off-white `#F5F5F7`, и на
- * `vivid` насыщенность ещё поднята) дают ниже 4.5:1 (WCAG AA для обычного
- * текста). Взяты те же оттенки на ступень темнее — это не своя палитра, а
- * починка контраста; ступени стережёт тест `tests/theme.test.ts`.
- */
-const LIGHT_TOKENS: TokenRules = {
-  comment: '008000',
-  string: 'a31515',
-  number: '086e45',
-  keyword: '0000ff',
-  keywordControl: 'af00db',
-  identifier: '001080',
-  function: '795e26',
-  type: '1d6a7f',
-  constant: '0070c1',
-  tag: '800000',
-  attribute: 'd40000',
 };
 
 /* ── насыщенность и яркость ─────────────────────────────────────────────── */
@@ -167,21 +155,19 @@ function toHex(hue: number, saturation: number, lightness: number): string {
 }
 
 /**
- * Цвет одной ступенью ярче и насыщеннее. На белом «ярче» означает
- * «глубже», поэтому в светлой схеме светлота не меняется — только насыщенность,
- * иначе светлые тона вымывались бы в пастель.
+ * Цвет одной ступенью ярче и насыщеннее.
  */
-export function vivid(hex: string, scheme: Scheme): string {
+export function vivid(hex: string): string {
   const [hue, saturation, lightness] = toHsl(hex);
   const nextSaturation = Math.min(1, saturation * VIVID_SATURATION + VIVID_SATURATION_STEP);
-  const nextLightness = scheme === 'dark' ? lightness + (1 - lightness) * VIVID_LIGHTNESS : lightness;
+  const nextLightness = lightness + (1 - lightness) * VIVID_LIGHTNESS;
   return toHex(hue, nextSaturation, nextLightness);
 }
 
-function vividTokens(source: TokenRules, scheme: Scheme): TokenRules {
+function vividTokens(source: TokenRules): TokenRules {
   const out = {} as TokenRules;
   for (const key of Object.keys(source) as Array<keyof TokenRules>) {
-    out[key] = vivid(source[key], scheme).slice(1);
+    out[key] = PINNED_TOKENS.includes(key) ? source[key] : vivid(source[key]).slice(1);
   }
   return out;
 }
@@ -235,15 +221,12 @@ const TOKEN_RULES: readonly TokenRule[] = [
  * `vivid()`. Одно значение на две задачи — держать две таблицы рядом с
  * одинаковыми числами верный способ их развести.
  */
-const VIVID_TOKENS: Record<Scheme, TokenRules> = {
-  dark: vividTokens(DARK_TOKENS, 'dark'),
-  light: vividTokens(LIGHT_TOKENS, 'light'),
-};
+const VIVID_TOKENS: TokenRules = vividTokens(DARK_TOKENS);
 
-function tokensFor(scheme: Scheme): TokenRules {
+function tokensFor(): TokenRules {
   // На тему из файла правило накладывается поверх: её цвета берём как заданы,
   // без усиления `vivid` — человек назвал их сам.
-  return { ...VIVID_TOKENS[scheme], ...tokenOverrides };
+  return { ...VIVID_TOKENS, ...tokenOverrides };
 }
 
 /** Правило токена: частное (`keyword.control`) важнее общего (`keyword`). */
@@ -268,19 +251,19 @@ export interface TokenStyle {
   bold: boolean;
 }
 
-export function tokenStyle(scheme: Scheme, tokenType: string): TokenStyle {
+export function tokenStyle(tokenType: string): TokenStyle {
   const rule = ruleFor(tokenType);
   if (!rule) return { color: null, italic: false, bold: false };
   return {
-    color: `#${tokensFor(scheme)[rule.key]}`,
+    color: `#${tokensFor()[rule.key]}`,
     italic: rule.italic === true,
     bold: rule.bold === true,
   };
 }
 
 /** Цвет токена — то же оформление без начертания (см. `tokenStyle`). */
-export function tokenColor(scheme: Scheme, tokenType: string): string | null {
-  return tokenStyle(scheme, tokenType).color;
+export function tokenColor(tokenType: string): string | null {
+  return tokenStyle(tokenType).color;
 }
 
 /**
@@ -293,8 +276,8 @@ export function tokenKeyFor(tokenType: string): TokenKey | null {
 }
 
 /** Цвета всех ролей подсветки в текущей схеме — с учётом переопределений из файла. */
-export function tokenPalette(scheme: Scheme): Record<TokenKey, string> {
-  const rules = tokensFor(scheme);
+export function tokenPalette(): Record<TokenKey, string> {
+  const rules = tokensFor();
   const out = {} as Record<TokenKey, string>;
   for (const key of TOKEN_KEYS) out[key] = `#${rules[key]}`;
   return out;
@@ -353,7 +336,9 @@ interface Chrome extends Record<ChromeKey, string> {
 }
 
 const DARK_CHROME: Chrome = {
-  background: '252528',
+  // Полотно редактора — #1E1E1E (та же ступень, что `--editor_background`): код лежит
+  // тёмной плитой на более светлом фоне окна #252526.
+  background: '1e1e1e',
   foreground: 'd4d4d4',
   lineNumber: '858585',
   lineNumberActive: 'c6c6c6',
@@ -371,23 +356,25 @@ const DARK_CHROME: Chrome = {
   // блюр наших попапов сюда не переносятся — виджет редактора лежит над живым кодом, и
   // размытие пришлось бы пересчитывать на каждой правке.
   popover: '2d2d30',
-  // Границы — полупрозрачный тон текста: те же значения, что `--border_color`
-  // и `--separator_color` в `styles/theme.css` (менять нужно в обоих местах).
-  border: 'ffffff0f',
-  separator: '54545866',
+  // Границы — сплошной #3E3E42: те же значения, что `--border_color` и
+  // `--separator_color` в `styles/theme.css` (менять нужно в обоих местах).
+  border: '3e3e42',
+  separator: '3e3e42b3',
   sunken: '00000033',
   tint: '78788052',
   tintHover: '7878805c',
-  text: 'ffffffeb',
+  text: 'd4d4d4',
   textSecondary: 'ffffffb3',
   textTertiary: 'ffffff85',
   placeholder: 'ffffff7a',
   textDisabled: 'ffffffb3',
-  // color-mix(синий 30 %, карточка): та же заливка, что у строки дерева и вкладки.
-  selectionFill: '154162',
-  accent: '0091ff',
-  accentFill: '0a63e6',
-  accentText: '4da6ff',
+  // Та же заливка, что у выделенной строки дерева и пункта списка (#264F78);
+  // активная вкладка ею больше не красится — у неё своя ступень в `styles/chrome.css`.
+  selectionFill: '264f78',
+  accent: '0a84ff',
+  // Заливка под белым текстом — шаг того же синего потемнее: белый на #0A84FF даёт 3.7:1.
+  accentFill: '0a6edc',
+  accentText: '0098ff',
   textOnFill: 'ffffff',
   purple: 'db34f2',
   error: 'ff4245',
@@ -404,56 +391,9 @@ const DARK_CHROME: Chrome = {
   shadow: '00000073',
 };
 
-const LIGHT_CHROME: Chrome = {
-  background: 'f5f5f7',
-  foreground: '000000',
-  lineNumber: '237893',
-  lineNumberActive: '0b216f',
-  cursor: '000000',
-  selection: 'add6ff',
-  selectionInactive: 'e5ebf1',
-  lineHighlight: 'f5f5f5',
-  indentGuide: 'e3e3e3',
-  indentGuideActive: 'a0a0a0',
-  whitespace: '33333333',
-
-  // Карточка интерфейса — та же поверхность, что у наших попапов: без прозрачности.
-  popover: 'ffffff',
-  // Те же роли, что `--border_color` и `--separator_color` светлой схемы.
-  border: '00000014',
-  separator: '3c3c432e',
-  sunken: '0000000d',
-  tint: '78788029',
-  tintHover: '7878803d',
-  text: '000000d9',
-  textSecondary: '000000ad',
-  textTertiary: '00000094',
-  placeholder: '0000008c',
-  textDisabled: '00000080',
-  // color-mix(синий 14 %, карточка): на белом доля акцента меньше.
-  selectionFill: 'dbeeff',
-  accent: '0088ff',
-  accentFill: '0066cc',
-  accentText: '0066cc',
-  textOnFill: 'ffffff',
-  purple: 'cb30e0',
-  error: 'ff383c',
-  warning: 'ffcc00',
-  highlight: 'ffcc0052',
-  highlightStrong: 'ffcc0080',
-  // Светлая схема — те же роли темнее: #007F2E, #966300, #D91429.
-  added: '007f2e', // --git_added
-  modified: 'A16A00', // --git_modified
-  deleted: 'E9152D', // --git_deleted
-  scrollbar: '64646466',
-  scrollbarHover: '646464b3',
-  scrollbarActive: '00000099',
-  shadow: '00000026',
-};
-
-/** Роли обвязки схемы с наложенной темой из файла. */
-function chromeFor(scheme: Scheme): Chrome {
-  return { ...(scheme === 'dark' ? DARK_CHROME : LIGHT_CHROME), ...chromeOverrides };
+/** Роли обвязки с наложенной темой из файла. */
+function chromeFor(): Chrome {
+  return { ...DARK_CHROME, ...chromeOverrides };
 }
 
 /** `RRGGBB` / `RRGGBBAA` (без `#`) → цвет CSS. */
@@ -465,8 +405,8 @@ const cssHex = (value: string): string => `#${value}`;
  * трогать их из кода незачем. Фоном окна и содержимого становится один цвет —
  * тема из файла задаёт плоскую поверхность, а не нашу лестницу высоты.
  */
-export function themeCssVariables(scheme: Scheme): Record<string, string> {
-  const chrome = chromeFor(scheme);
+export function themeCssVariables(): Record<string, string> {
+  const chrome = chromeFor();
   return {
     '--surface_window': cssHex(chrome.background),
     '--surface_content': cssHex(chrome.background),
@@ -508,7 +448,7 @@ export function themeCssVariables(scheme: Scheme): Record<string, string> {
  * Полный файл встроенной схемы — заготовка для правки: человек сохраняет её,
  * меняет цвета и импортирует обратно. Схему берём без активной темы из файла.
  */
-export function themeTemplate(scheme: Scheme): ThemeFile {
+export function themeTemplate(): ThemeFile {
   const withHash = (value: string): string => `#${value}`;
   const fill = <K extends string>(source: Record<K, string>): Record<K, string> => {
     const out = {} as Record<K, string>;
@@ -516,59 +456,33 @@ export function themeTemplate(scheme: Scheme): ThemeFile {
     return out;
   };
   return {
-    name: scheme === 'dark' ? 'Моя тёмная тема' : 'Моя светлая тема',
-    scheme,
-    chrome: fill(scheme === 'dark' ? DARK_CHROME : LIGHT_CHROME),
-    tokens: fill(VIVID_TOKENS[scheme]),
+    name: 'Моя тёмная тема',
+    chrome: fill(DARK_CHROME),
+    tokens: fill(VIVID_TOKENS),
   };
 }
 
 /** Палитра консоли; фон тот же, что у редактора, поэтому панели не спорят. */
-export const TERMINAL_THEMES: Record<Scheme, TerminalTheme> = {
-  dark: {
-    background: '#252528',
-    foreground: '#d4d4d4',
-    cursor: '#d4d4d4',
-    cursorAccent: '#252528',
-    selectionBackground: '#264f78',
-    black: '#000000',
-    red: '#cd3131',
-    green: '#0dbc79',
-    yellow: '#e5e510',
-    blue: '#2472c8',
-    magenta: '#bc3fbc',
-    cyan: '#11a8cd',
-    white: '#e5e5e5',
-    brightBlack: '#666666',
-    brightRed: '#f14c4c',
-    brightGreen: '#23d18b',
-    brightYellow: '#f5f543',
-    brightBlue: '#3b8eea',
-    brightMagenta: '#d670d6',
-    brightCyan: '#29b8db',
-    brightWhite: '#e5e5e5',
-  },
-  light: {
-    background: '#f5f5f7',
-    foreground: '#333333',
-    cursor: '#333333',
-    cursorAccent: '#f5f5f7',
-    selectionBackground: '#add6ff',
-    black: '#000000',
-    red: '#cd3131',
-    green: '#00bc00',
-    yellow: '#949800',
-    blue: '#0451a5',
-    magenta: '#bc05bc',
-    cyan: '#0598bc',
-    white: '#555555',
-    brightBlack: '#666666',
-    brightRed: '#cd3131',
-    brightGreen: '#14ce14',
-    brightYellow: '#b5ba00',
-    brightBlue: '#0451a5',
-    brightMagenta: '#bc05bc',
-    brightCyan: '#0598bc',
-    brightWhite: '#a5a5a5',
-  },
+export const TERMINAL_THEME: TerminalTheme = {
+  background: '#1e1e1e',
+  foreground: '#d4d4d4',
+  cursor: '#d4d4d4',
+  cursorAccent: '#1e1e1e',
+  selectionBackground: '#264f78',
+  black: '#000000',
+  red: '#cd3131',
+  green: '#0dbc79',
+  yellow: '#e5e510',
+  blue: '#2472c8',
+  magenta: '#bc3fbc',
+  cyan: '#11a8cd',
+  white: '#e5e5e5',
+  brightBlack: '#666666',
+  brightRed: '#f14c4c',
+  brightGreen: '#23d18b',
+  brightYellow: '#f5f543',
+  brightBlue: '#3b8eea',
+  brightMagenta: '#d670d6',
+  brightCyan: '#29b8db',
+  brightWhite: '#e5e5e5',
 };

@@ -269,8 +269,6 @@ const DEFAULT_SETTINGS: StoredSettings = {
     pythonByRoot: {},
   },
   appearance: {
-    // «Системная» — разумная точка входа: IDE подстраивается под схему рабочего стола.
-    theme: 'system',
     // Масштаб 1 — оболочка как задумана; крупнее/плотнее человек выбирает сам.
     uiScale: 1,
     // Встроенная палитра: тему из файла человек приносит сам.
@@ -844,11 +842,10 @@ function loadSettings(filePath: string): StoredSettings {
     },
     run: sanitizeRun({ ...DEFAULT_SETTINGS.run, ...(parsed.run ?? {}) }),
     appearance: {
-      ...DEFAULT_SETTINGS.appearance,
-      ...(parsed.appearance ?? {}),
-      // Масштаб — число из файла: поджимаем к допустимым ступеням.
+      // Ключи перечислены поимённо, а не размазаны из файла: старый `theme`
+      // (выбор схемы, которой больше нет) так отсеивается при чтении и не
+      // возвращается в файл при следующем сохранении.
       uiScale: sanitizeUiScale(parsed.appearance?.uiScale),
-      // Тему из файла могли править руками: принимаем только корректную.
       customTheme: sanitizeThemeFile(parsed.appearance?.customTheme),
     },
     layout: sanitizeLayout({ ...DEFAULT_SETTINGS.layout, ...(parsed.layout ?? {}) }),

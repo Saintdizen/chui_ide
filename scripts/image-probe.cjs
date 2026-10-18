@@ -11,7 +11,7 @@
  * состояние вьюера (виден ли он, что в шапке, какой размер у картинки) и кладёт
  * снимок — `.chui_ide/probe-shots/image-<формат>.png`.
  */
-const { app, BrowserWindow, nativeTheme } = require('electron');
+const { app, BrowserWindow } = require('electron');
 const { promises: fs } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -231,8 +231,6 @@ app.whenReady().then(async () => {
   ];
   step(`образцы: ${cases.map(([name]) => name).join(', ')}`);
 
-  // Светлая схема: картинка читается и на ней, а «шахматку» под прозрачностью видно лучше.
-  nativeTheme.themeSource = 'dark';
   serveRenderer();
 
   const settings = new SettingsStore(path.join(dir, 'settings.json'));

@@ -1,5 +1,3 @@
-export type ColorScheme = 'dark' | 'light';
-
 /**
  * Цвет фона окна — единственное значение палитры, которое нужно main-процессу.
  *
@@ -8,17 +6,10 @@ export type ColorScheme = 'dark' | 'light';
  * (`createAppWindow` и `applyTheme`) — верный способ развести их при смене
  * палитры, поэтому значение живёт здесь и импортируется обоими.
  *
- * Это ЗЕРКАЛО токенов `styles/theme.css`, а не второй источник правды: тёмное
- * значение повторяет `--element_background_2` (полотно и карточка, #252528),
- * светлое — `--main_background` (фон окна, #E4E4E7). Правка палитры — правка и
- * здесь; расхождение ловит тест `tests/theme.test.ts`.
+ * Это ЗЕРКАЛО токенов `styles/theme.css`, а не второй источник правды: значение
+ * повторяет `--surface_window` (фон окна, #252526) — светлый шов между островами,
+ * которые сами темнее (#1E1E1E). Схема у приложения одна, поэтому и значение одно.
+ *
+ * Правка палитры — правка и здесь; расхождение ловит тест `tests/theme.test.ts`.
  */
-export const WINDOW_BACKGROUND: Record<ColorScheme, string> = {
-  dark: '#252528',
-  light: '#e4e4e7',
-};
-
-/** Фон окна под текущую схему системы. */
-export function windowBackground(scheme: ColorScheme): string {
-  return WINDOW_BACKGROUND[scheme];
-}
+export const WINDOW_BACKGROUND = '#252526';

@@ -1,7 +1,7 @@
 import { LineHighlighter } from '../editor/highlight/highlighter';
 import { grammarFor } from '../editor/highlight/registry';
 import { sharedTokens } from '../editor/highlight/token-cache';
-import { tokenStyle, type Scheme } from './theme';
+import { tokenStyle } from './theme';
 
 /**
  * Подсветка кода вне редактора — для блоков кода в чате.
@@ -53,11 +53,10 @@ interface Target {
   label: string;
 }
 
-/** Что уже подсвечено: при смене схемы цвета надо пересчитать. */
+/** Что уже подсвечено: при смене темы цвета надо пересчитать. */
 const live = new Set<Target>();
 /** Реестр растёт во время стрима (лента пересобирает блоки на каждом кадре). */
 const PRUNE_AT = 64;
-let scheme: Scheme = 'dark';
 
 /** Убираем узлы, которых уже нет в документе: держать их незачем. */
 function prune(): void {
@@ -84,7 +83,7 @@ function escapeHtml(text: string): string {
  * Границы токенов и тексты экранируем: разметку собираем строкой, значит тексту
  * нужны HTML-сущности.
  */
-function buildHtml(code: string, language: string, current: Scheme): string {
+function buildHtml(code: string, language: string): string {
   const source = code.split('\n');
   const grammar = grammarFor(language);
   // Языка без грамматики показываем как простой текст — это честнее, чем красить
@@ -108,7 +107,7 @@ function buildHtml(code: string, language: string, current: Scheme): string {
     for (const token of tokens) {
       if (token.start > cursor) rendered += escapeHtml(line.slice(cursor, token.start));
       const text = escapeHtml(line.slice(token.start, token.end));
-      const style = tokenStyle(current, token.type);
+      const style = tokenStyle(token.type);
       // Начертание идёт вместе с цветом: в редакторе комментарий курсивный, а
       // ключевое слово полужирное — чат рисует тот же код и не должен отличаться.
       const css = [
@@ -134,7 +133,7 @@ function buildHtml(code: string, language: string, current: Scheme): string {
  */
 function build(code: string, language: string): string | null {
   if (!grammarFor(language)) return null;
-  return buildHtml(code, language, scheme);
+  return buildHtml(code, language);
 }
 
 /**
@@ -143,7 +142,7 @@ function build(code: string, language: string): string | null {
  */
 function render(target: Target): void {
   const id = languageId(target.label);
-  const key = `${scheme}|${id}|${target.code}`;
+  const key = `${id}|${target.code}`;
   const cached = cache.get(key);
 
   if (cached !== undefined) {
@@ -182,11 +181,8 @@ export function highlightInto(node: HTMLElement, code: string, label: string): v
   render(target);
 }
 
-/** Смена схемы: цвета в кеше посчитаны по старой палитре. */
-export function setHighlightScheme(next: Scheme): void {
-  // Не выходим, если схема та же: вместе с ней могла смениться тема из файла,
-  // и цвета в кеше посчитаны по старой палитре.
-  scheme = next;
+/** Смена темы: цвета в кеше посчитаны по старым краскам. */
+export function refreshHighlight(): void {
   cache.clear();
   prune();
 
@@ -209,7 +205,7 @@ export function diagnoseHighlighting(): string {
     ['json', '{ "name": "chui" }'],
   ];
 
-  const report: string[] = [`схема: ${scheme}`];
+  const report: string[] = [];
   for (const [label, sample] of samples) {
     const id = languageId(label);
     const grammar = grammarFor(id);
@@ -224,7 +220,7 @@ export function diagnoseHighlighting(): string {
     for (let index = 0; index < lines.length; index += 1) {
       for (const token of highlighter.tokensFor(index)) {
         total += 1;
-        if (tokenStyle(scheme, token.type).color !== null) colored += 1;
+        if (tokenStyle(token.type).color !== null) colored += 1;
       }
     }
     report.push(`${label} → ${id}: токенов ${total}, с цветом ${colored}`);

@@ -916,10 +916,7 @@ export interface GitSettings {
   saveBeforeCommit: boolean;
 }
 
-/** Схема приложения: светлая, тёмная или системная. */
-export type ThemeChoice = 'dark' | 'light' | 'system';
 export interface AppearanceSettings {
-  theme: ThemeChoice;
   /** Масштаб интерфейса: 1 — как есть. Редактора не касается (у него свой кегль). */
   uiScale: number;
   /** Тема из файла: `null`/не задано — встроенная палитра. */
@@ -1087,10 +1084,8 @@ export interface LspDiagnosticsPayload {
   diagnostics: LspDiagnostic[];
 }
 
-/** Полезная нагрузка события `PushTopic.ThemeChanged`: выбор и фактическая схема. */
+/** Полезная нагрузка события `PushTopic.ThemeChanged`: сменилась тема из файла. */
 export interface ThemeChangedPayload {
-  theme: ThemeChoice;
-  scheme: 'dark' | 'light';
   /** Активная тема из файла — или `null`, если работает встроенная палитра. */
   customTheme?: ThemeFile | null;
 }

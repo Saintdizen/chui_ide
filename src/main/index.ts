@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, shell } from 'electron';
 import { statSync } from 'node:fs';
 import path from 'node:path';
 import { PushTopic } from '../shared/api';
@@ -20,7 +20,7 @@ import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
 import { SandboxService } from './sandbox/sandbox';
 import { registerAppScheme, serveRenderer } from './protocol';
-import { windowBackground } from '../shared/colors';
+import { WINDOW_BACKGROUND } from '../shared/colors';
 import { activateCommand, findEnvironments, pythonInterpreterFor } from './python/environments';
 import { SessionStore } from './session-store';
 import { ProjectConfigStore } from './project-config';
@@ -136,29 +136,18 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(async () => {
     const settings = new SettingsStore();
 
-    // Схему выбирает main: после смены themeSource Chromium сам присылает renderer'у
-    // новое значение prefers-color-scheme, и CSS переключается без правок в DOM.
-    // А для того, что CSS не описать (редактор, терминал), main шлёт resolved-схему
-    // отдельным событием — полагаться на событие matchMedia в renderer нельзя.
+    // Схема в приложении одна — тёмная, поэтому `nativeTheme.themeSource` не трогаем:
+    // остаётся только тема из файла, и о её смене сообщаем renderer'у.
     const pushTheme = (): void => {
       const { appearance } = settings.get();
-      pushToRenderers(PushTopic.ThemeChanged, {
-        theme: appearance.theme,
-        scheme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
-        customTheme: appearance.customTheme ?? null,
-      });
+      pushToRenderers(PushTopic.ThemeChanged, { customTheme: appearance.customTheme ?? null });
     };
 
     const applyTheme = (): void => {
-      const { appearance } = settings.get();
-      // Тема из файла задаёт схему сама: выбранное «как в системе» тут не решает.
-      nativeTheme.themeSource = appearance.customTheme?.scheme ?? appearance.theme;
-      const background = windowBackground(nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
-      for (const window of BrowserWindow.getAllWindows()) window.setBackgroundColor(background);
+      for (const window of BrowserWindow.getAllWindows()) window.setBackgroundColor(WINDOW_BACKGROUND);
       pushTheme();
     };
 
-    nativeTheme.on('updated', pushTheme);
     settings.onDidChange(applyTheme);
     applyTheme();
 

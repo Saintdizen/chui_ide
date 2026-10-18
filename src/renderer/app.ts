@@ -35,7 +35,7 @@ import { SpellCheck } from './core/spellcheck';
 import { ProjectPackagesModel } from './core/project-packages';
 import { parseCoverageJson } from '../shared/coverage-json';
 import { parseNodeCoverage } from '../shared/node-coverage';
-import { diagnoseHighlighting, setHighlightScheme } from './core/highlight';
+import { diagnoseHighlighting, refreshHighlight } from './core/highlight';
 import { KeybindingService } from './core/keybindings';
 import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
 import { languageFromPath, languageLabel, languageIndent } from './core/languages';
@@ -98,7 +98,7 @@ import { createChatPanel, type ChatView } from './ui/chat';
 import { createDock } from './ui/dock';
 import { createConflictView } from './ui/conflict-view';
 import { createDiffView } from './ui/diff-view';
-import { basename, clear, h, svgIcon, type IconName } from './ui/dom';
+import { basename, h, svgIcon, type IconName } from './ui/dom';
 import { createEmptyState } from './ui/empty-state';
 import { createImageView } from './ui/image-view';
 import { createBrowserView } from './ui/browser-view';
@@ -303,8 +303,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     `· Node ${info.node} · ${info.platform}`,
   );
 
-  // Тема: main — источник истины, сервис знает и выбор пользователя, и фактическую схему.
-  const theme = new ThemeService(rpc, settings.appearance.theme, settings.appearance.customTheme ?? null);
+  // Тема: схема одна — тёмная, сервис держит активную тему из файла.
+  const theme = new ThemeService(rpc, settings.appearance.customTheme ?? null);
 
   // Языковой сервер: наведение, определение, ссылки, подсказки, переименование.
   // Сервер живёт в main — здесь только мост, который уходит швами в рабочее место.
@@ -334,7 +334,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * у рабочего места для каждого из них есть шов.
    */
   const editors = new EditorWorkspace(layout.editorHost, new DocumentRegistry(documents), {
-    scheme: theme.resolved,
     tabSize: settings.editor.tabSize,
     fontSize: settings.editor.fontSize,
     lineHeight: settings.editor.lineHeight,
@@ -839,7 +838,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const settingsModal = createSettingsModal({
     rpc,
     commands,
-    theme,
     project: {
       kind: () => projectScan?.kind.id ?? null,
       patch: (value) => saveSettingsPatch(value),
@@ -1092,7 +1090,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const terminalPanel = createTerminalPanel({
     rpc,
     cwd: () => workspace.root,
-    scheme: theme.resolved,
     // Лигатуры консоли — те же, что у кода: единый вид обоих полотен.
     ligatures: () => settings.editor.fontLigatures,
     // Ссылка из вывода терминала: локальный адрес — вкладкой в IDE, чужой — системным.
@@ -2034,20 +2031,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   layout.topBarLeft.appendChild(menuButton);
   // Отдельного виджета проекта в шапке нет: имя проекта показывает заголовок
   // панели проекта, а открыть другую папку можно из меню (Ctrl+O).
-  // Действия шапки. Слева — то, что показывает содержимое: файлы, поиск. Дальше,
-  // за разделителем, — переключатели панелей окна и разделение редактора.
-  // Справа — служебное: ассистент, палитра, настройки, тема.
-  addTopButton(layout.topBarLeft, 'save', 'save', 'Сохранить всё (Ctrl+Shift+S)', 'file.saveAll');
+  // Слева — действия над содержимым: сохранить, поиск, страница рядом с кодом.
+  addTopButton(layout.topBarLeft, 'save', 'save', 'Сохранить всё (Ctrl+Alt+S)', 'file.saveAll');
   addTopButton(layout.topBarLeft, 'search', 'search', 'Поиск по проекту (Ctrl+Shift+F)', 'search.project');
-  // Разделитель отделяет действия над содержимым от переключателей раскладки.
-  layout.topBarLeft.appendChild(h('span', { class: 'topbar-sep' }));
-  // Переключатель боковой панели: он про то же — что открыто слева.
-  addTopButton(layout.topBarLeft, 'project', 'panel', 'Боковая панель (Ctrl+B)', 'view.toggleSidebar');
-  // Нижний остров (терминал, поиск, задачи): кнопка целиком включает и выключает его,
-  // а значок — та же рамка с полосой, что у боковой панели, только полоса снизу.
-  addTopButton(layout.topBarLeft, 'dock', 'panelBottom', 'Нижняя панель (Alt+F12)', 'view.toggleDock');
-  // Разделение области редактора: два файла рядом. Кнопка помнит состояние.
-  addTopButton(layout.topBarLeft, 'split', 'split', 'Разделить редактор (Ctrl+\\)', 'view.splitEditor');
   // Встроенный браузер: страница вкладкой рядом с кодом. Своим разделителем — это
   // не раскладка окна, а ещё один способ открыть содержимое рядом с редактором.
   layout.topBarLeft.appendChild(h('span', { class: 'topbar-sep' }));
@@ -2057,33 +2043,31 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // открытого файла (см. syncRunControl). Одно сменяет другое, пустоты не бывает.
   layout.topBarTitle.append(topBarName, runControl.element);
 
+  // Переключатели раскладки — справа, у кнопок окна: они меняют вид окна, а не
+  // содержимое, и в ряду действий над файлами им не место.
+  // Переключатель боковой панели: он про то же — что открыто слева.
+  addTopButton(layout.topBarRight, 'project', 'panel', 'Боковая панель (Ctrl+B)', 'view.toggleSidebar');
+  // Нижний остров (терминал, поиск, задачи): кнопка целиком включает и выключает его,
+  // а значок — та же рамка с полосой, что у боковой панели, только полоса снизу.
+  addTopButton(layout.topBarRight, 'dock', 'panelBottom', 'Нижняя панель (Alt+F12)', 'view.toggleDock');
+  // Разделение области редактора: два файла рядом. Кнопка помнит состояние.
+  addTopButton(layout.topBarRight, 'split', 'split', 'Разделить редактор (Ctrl+\\)', 'view.splitEditor');
+  // Служебное — за разделителем. Палитры команд и настроек в шапке больше нет:
+  // палитра живёт на Ctrl+Shift+P и в меню «Вид», настройки — в меню «Файл».
+  layout.topBarRight.appendChild(h('span', { class: 'topbar-sep' }));
+  // Палитра живёт на Ctrl+Shift+P и в меню «Вид»: кнопку в шапке человек попросил
+  // убрать с глаз. Из разметки она не удалена — скрыта: на неё опираются живые
+  // пробы (palette-probe и соседние), а места в полосе `hidden` не занимает.
+  addTopButton(layout.topBarRight, 'palette', 'command', 'Палитра команд (Ctrl+Shift+P)', 'palette.open');
+  const paletteButton = viewButtons.get('palette');
+  if (paletteButton) paletteButton.hidden = true;
   // Ассистент носит знак приложения, а не звезду-искру: тот же знак, что
   // в пустом состоянии редактора, — кнопка и экран говорят одно и то же.
   addTopButton(layout.topBarRight, 'ai', 'sparkle', 'AI Assistant (Ctrl+Shift+A)', 'view.toggleRight', logoMark(13));
-  addTopButton(layout.topBarRight, 'palette', 'command', 'Палитра команд (Ctrl+Shift+P)', 'palette.open');
-  addTopButton(layout.topBarRight, 'settings', 'settings', 'Настройки', 'settings.open');
-
-  const themeButton = h('button', {
-    class: 'icon-btn',
-    type: 'button',
-    onClick: () => void commands.execute('view.toggleTheme'),
-  });
-  layout.topBarRight.appendChild(themeButton);
 
   // Своя рамка создаётся последней: кнопки окна должны стоять с краю шапки,
   // а не перед кнопками действий.
   const windowFrame = new WindowFrame(rpc, layout.topBarRight, layout.topBar);
-
-  const syncThemeButton = (): void => {
-    const scheme = theme.resolved;
-    const name = scheme === 'dark' ? 'тёмная' : 'светлая';
-    themeButton.title =
-      theme.selected === 'system'
-        ? `Тема: системная (сейчас ${name}) — нажмите, чтобы переключить`
-        : `Тема: ${name} — нажмите, чтобы переключить`;
-    clear(themeButton);
-    themeButton.appendChild(svgIcon(scheme === 'dark' ? 'moon' : 'sun', 16));
-  };
 
   /* ── вспомогательные действия ──────────────────────────────────────────── */
 
@@ -5090,7 +5074,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           sidebar: layout.sidebarVisible,
           aiPanel: aiEnabled() && chatVisible(),
           terminal: layout.dockVisible && dock.activeId === 'terminal',
-          theme: theme.selected,
         }),
       },
       () => menuButton.classList.remove('is-menu-open'),
@@ -5583,15 +5566,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       showToast(`Тест создан: ${testRelative}`);
     },
   );
-
-  define({ id: 'view.toggleTheme', title: 'Переключить тему', category: 'Вид' }, async () => {
-    await theme.toggle();
-    showToast(`Тема: ${theme.resolved === 'dark' ? 'тёмная' : 'светлая'}`);
-  });
-
-  define({ id: 'view.theme.dark', title: 'Тема: тёмная', category: 'Вид' }, () => theme.set('dark'));
-  define({ id: 'view.theme.light', title: 'Тема: светлая', category: 'Вид' }, () => theme.set('light'));
-  define({ id: 'view.theme.system', title: 'Тема: как в системе', category: 'Вид' }, () => theme.set('system'));
 
   /* ── реакция на события ────────────────────────────────────────────────── */
 
@@ -6268,11 +6242,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (dock.visible && dock.activeId === 'problems') problemPanel.refresh();
   });
 
-  theme.onDidChange((scheme) => {
-    editors.setTheme(scheme);
-    terminalPanel.setScheme(scheme);
-    setHighlightScheme(scheme);
-    syncThemeButton();
+  theme.onDidChange(() => {
+    editors.refreshTheme();
+    terminalPanel.refreshTheme();
+    refreshHighlight();
   });
   theme.apply();
   // Полоски изменений для уже открытых файлов — если при старте что-то открыто.
@@ -6323,7 +6296,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       sourceControl,
       diffView,
       git,
-      theme,
       tools,
     };
   }

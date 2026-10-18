@@ -89,7 +89,7 @@ document.body.append(scrollRoot);
 const scrollBuffer = new TextBuffer(
   Array.from({ length: 2000 }, (_, index) => `const line${index} = ${index};`).join('\n'),
 );
-const scrollView = new EditorView(scrollRoot, scrollBuffer, { language: 'typescript', scheme: 'dark' });
+const scrollView = new EditorView(scrollRoot, scrollBuffer, { language: 'typescript' });
 // Ввод на этом же полотне: макросы проверяются живыми клавишами, а текст тут
 // предсказуемый (2000 одинаковых строк) — видно, что макрос повторил то же действие.
 const scrollController = new EditorController(scrollBuffer);
@@ -97,7 +97,7 @@ const scrollInput = new EditorInputBinding(scrollView, scrollController, {});
 
 const buffer = new TextBuffer(sampleDocument());
 // Язык и схема заданы — значит, строки собираются из токенов с цветами темы.
-const view = new EditorView(root, buffer, { language: 'typescript', scheme: 'dark' });
+const view = new EditorView(root, buffer, { language: 'typescript' });
 // Контроллер держит текст, курсор и историю; ввод — связка DOM с ним. Так же, как
 // будет в приложении: представление, контроллер и ввод — три разных слоя.
 const controller = new EditorController(buffer);
@@ -250,7 +250,6 @@ const registry = new DocumentRegistry(store);
 /** Куда пробе записываются вызовы быстрых исправлений (Ctrl+.). */
 const codeActionCalls: Array<{ path: string; position: { line: number; column: number } }> = [];
 const host = new EditorHost(hostRoot, registry, {
-  scheme: 'dark',
   // Подсказка о параметрах вызова: подставной источник — пробе важно не «откуда сигнатура»,
   // а что карточка показывается, подсвечивает активный довод и листает перегрузки.
   signatureFromLanguage: async () => ({
@@ -300,7 +299,7 @@ document.body.append(workspaceRoot);
 
 const workspaceStore = new DocumentStore();
 const workspaceRegistry = new DocumentRegistry(workspaceStore);
-const workspace = new EditorWorkspace(workspaceRoot, workspaceRegistry, { scheme: 'dark' });
+const workspace = new EditorWorkspace(workspaceRoot, workspaceRegistry, {});
 const leftDoc = workspaceStore.open('/probe/left.ts', 'const left = 1;\nconst two = 2;\n', {
   languageId: 'typescript',
 });
@@ -326,7 +325,7 @@ const diffRoot = document.createElement('div');
 diffRoot.id = 'probe-diff';
 diffRoot.style.cssText = 'position: absolute; left: -4000px; top: 0; width: 700px; height: 360px';
 document.body.append(diffRoot);
-const diff = new OwnDiffEditor(diffRoot, { scheme: 'dark' });
+const diff = new OwnDiffEditor(diffRoot);
 
 declare global {
   interface Window {
@@ -372,7 +371,6 @@ function linkedRangesIn(text: string): { line: number; startColumn: number; endC
 }
 
 const symbolsWorkspace = new EditorWorkspace(symbolsRoot, symbolsRegistry, {
-  scheme: 'dark',
   symbols: {
     definition: async () => symbolAnswers.definition,
     references: async () => symbolAnswers.references,
@@ -438,7 +436,6 @@ const surroundStore = new DocumentStore();
 const surroundRegistry = new DocumentRegistry(surroundStore);
 const surroundRequests: string[] = [];
 const surroundWorkspace = new EditorWorkspace(surroundRoot, surroundRegistry, {
-  scheme: 'dark',
   surroundWith: () => surroundRequests.push(surroundWorkspace.activeLanguage()),
 });
 const surroundDoc = surroundStore.open('/probe/surround.ts', 'const total = a + b;\n', { languageId: 'typescript' });
@@ -474,7 +471,6 @@ document.body.append(foldsRoot);
 const foldsStore = new DocumentStore();
 const foldsRegistry = new DocumentRegistry(foldsStore);
 const foldsWorkspace = new EditorWorkspace(foldsRoot, foldsRegistry, {
-  scheme: 'dark',
   foldRanges: async (_path, text) =>
     mergeFoldRanges([...semanticFoldRanges(text, 'typescript'), ...indentFoldRanges(text, 4)]),
 });
@@ -512,7 +508,6 @@ const formatRequests: Array<{
 }> = [];
 const formatControl = { onPaste: true };
 const formatWorkspace = new EditorWorkspace(formatRoot, formatRegistry, {
-  scheme: 'dark',
   formatRange: (path, range) => formatRequests.push({ path, ...range }),
   formatOnPaste: () => formatControl.onPaste,
 });
@@ -560,7 +555,6 @@ const peekAnswers: { definition: SymbolLocation[] } = { definition: [] };
 const peekReads: string[] = [];
 
 const peekWorkspace = new EditorWorkspace(peekRoot, peekRegistry, {
-  scheme: 'dark',
   symbols: {
     definition: async () => peekAnswers.definition,
     references: async () => [],
@@ -627,7 +621,6 @@ const inlineRegistry = new DocumentRegistry(inlineStore);
 const inlineCalls: Array<{ path: string; language: string; prefix: string; suffix: string }> = [];
 const inlineControl = { enabled: true, answer: ' + 42' };
 const inlineWorkspace = new EditorWorkspace(inlineRoot, inlineRegistry, {
-  scheme: 'dark',
   inlineCompletion: {
     enabled: () => inlineControl.enabled,
     debounceMs: () => 40,
@@ -671,7 +664,6 @@ document.body.append(linkedRoot);
 const linkedStore = new DocumentStore();
 const linkedRegistry = new DocumentRegistry(linkedStore);
 const linkedWorkspace = new EditorWorkspace(linkedRoot, linkedRegistry, {
-  scheme: 'dark',
   linkedEditing: async () => linkedRangesIn(linkedDoc.value),
 });
 const linkedDoc = linkedStore.open('/probe/linked.html', '<div></div>\n', { languageId: 'html' });
@@ -695,7 +687,6 @@ document.body.append(emmetRoot);
 const emmetStore = new DocumentStore();
 const emmetRegistry = new DocumentRegistry(emmetStore);
 const emmetWorkspace = new EditorWorkspace(emmetRoot, emmetRegistry, {
-  scheme: 'dark',
   emmetEnabled: () => true,
 });
 const emmetDoc = emmetStore.open('/probe/index.html', '', { languageId: 'html' });
@@ -720,7 +711,6 @@ const spellRegistry = new DocumentRegistry(spellStore);
 const spellLexicon = new SpellCheck();
 spellLexicon.setDictionary(['const', 'value', 'world', 'the', 'is']);
 const spellWorkspace = new EditorWorkspace(spellRoot, spellRegistry, {
-  scheme: 'dark',
   spellcheck: spellLexicon,
   spellcheckEnabled: () => true,
 });
@@ -754,7 +744,6 @@ const problemsRegistry = new DocumentRegistry(problemsStore);
 const problemSpots: Array<{ path: string; line: number; column: number }> = [];
 const problemNotices: string[] = [];
 const problemsWorkspace = new EditorWorkspace(problemsRoot, problemsRegistry, {
-  scheme: 'dark',
   // Переход: записываем место и — как это делает приложение — ставим туда курсор,
   // иначе «следующая пометка» всегда считалась бы от одной и той же строки.
   revealLocation: (path, line, column) => {
@@ -845,7 +834,6 @@ document.body.append(selectionRoot);
 const selectionStore = new DocumentStore();
 const selectionRegistry = new DocumentRegistry(selectionStore);
 const selectionWorkspace = new EditorWorkspace(selectionRoot, selectionRegistry, {
-  scheme: 'dark',
   // Цепочка фиксирована: имя «a» (15–16) внутри «a + b» (15–20) внутри строки (1–21).
   selectionRanges: async () => [
     { startLine: 1, startColumn: 15, endLine: 1, endColumn: 16 },

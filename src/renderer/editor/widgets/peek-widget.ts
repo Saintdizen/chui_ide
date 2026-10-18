@@ -20,7 +20,7 @@ import { placePopup } from '../../core/popup-placement';
 import { grammarFor } from '../highlight/registry';
 import { LineHighlighter } from '../highlight/highlighter';
 import { sharedTokens } from '../highlight/token-cache';
-import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
+import { paletteOf, roleOfToken } from '../highlight/style';
 import { peekCounter, peekStepIndex, peekWindow } from '../host/peek-model';
 
 /** Где показать копию: низ строки в системе окна (левый край, верх и низ). */
@@ -61,7 +61,6 @@ export class PeekWidget {
   private readonly body: HTMLElement;
   private readonly code: HTMLElement;
 
-  private scheme: Scheme;
   private visible = false;
   /** Текст окна и границы — нужны при перерисовке (смена схемы, размер). */
   private lines: string[] = [];
@@ -77,9 +76,7 @@ export class PeekWidget {
   /** Закрыть копию. */
   onClose: (() => void) | null = null;
 
-  constructor(host: HTMLElement, scheme: Scheme) {
-    this.scheme = scheme;
-
+  constructor(host: HTMLElement) {
     this.root = document.createElement('div');
     this.root.className = ROOT_CLASS;
     this.root.hidden = true;
@@ -125,8 +122,7 @@ export class PeekWidget {
   }
 
   /** Сменить схему оформления: цвета копии переставляются, текст остаётся. */
-  setScheme(scheme: Scheme): void {
-    this.scheme = scheme;
+  refreshTheme(): void {
     if (this.visible) this.render();
   }
 
@@ -281,7 +277,7 @@ export class PeekWidget {
 
   /** Цвета токенов — переменными на корне копии: как у редактора (см. `editor-view.ts`). */
   private applyTheme(): void {
-    const palette = paletteOf(this.scheme);
+    const palette = paletteOf();
     for (const [role, color] of Object.entries(palette)) {
       this.root.style.setProperty(`--own-token-${role}`, color);
     }

@@ -1,18 +1,15 @@
 /**
- * Проба вида темы: поднимаем НАСТОЯЩЕЕ окно IDE и снимаем кадр в тёмной
- * и светлой схеме.
+ * Проба вида темы: поднимаем НАСТОЯЩЕЕ окно IDE и снимаем кадр.
  *
  *   npx electron scripts/theme-preview.cjs
  *
  * Зачем: цвета правятся вслепую, а «как это выглядит вместе» видно только на
  * живом окне — лестница поверхностей, подсветка кода, значки файлов, панели.
- * Проба открывает демонстрационный проект (маленький, но с кодом), переключает
- * схему через `nativeTheme.themeSource` (её читает `prefers-color-scheme` в CSS)
- * и кладёт два PNG.
+ * Проба открывает демонстрационный проект (маленький, но с кодом) и кладёт PNG.
  *
- * Снимки — `.chui_ide/probe-shots/theme-<схема>.png`, отчёт — `.chui_ide/probe-theme.txt`.
+ * Снимок — `.chui_ide/probe-shots/theme-dark.png`, отчёт — `.chui_ide/probe-theme.txt`.
  */
-const { app, nativeTheme } = require('electron');
+const { app } = require('electron');
 const { promises: fs } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -46,12 +43,16 @@ const TOKENS = [
   'main_background',
   'element_background_2',
   'editor_background',
+  'panel_background',
+  'tab_active_background',
   'text_color',
   'text_color_secondary',
   'text_color_tertiary',
   'border_color',
   'separator_color',
   'blue_prime_background',
+  'accent_fill',
+  'selection_background',
   'git_added',
   'git_modified',
   'git_deleted',
@@ -124,10 +125,46 @@ const READ_TOKENS = `(() => {
   return out;
 })()`;
 
-async function capture(ide, scheme) {
-  nativeTheme.themeSource = scheme;
-  // Смена схемы перекрашивает через media-query — даём ей отрисоваться.
-  await wait(1200);
+/**
+ * Как выкрашены ключевые места. Токена в `:root` мало: правило могло не взяться,
+ * и тогда панель или активная вкладка остаются того же тона, что полотно.
+ */
+const READ_PAINT = `(() => {
+  const paint = (selector) => {
+    const node = document.querySelector(selector);
+    return node ? getComputedStyle(node).backgroundColor : 'нет узла';
+  };
+  // Цвета подсветки редактор ставит переменными на свой корень.
+  const editor = document.querySelector('.own-editor');
+  const token = (name) => (editor ? getComputedStyle(editor).getPropertyValue(name).trim() : 'нет редактора');
+  return {
+    'боковая панель': paint('.sidebar'),
+    'полотно редактора': paint('.editor-host'),
+    'полоса вкладок': paint('.tabs-host'),
+    'активная вкладка': paint('.tab.is-active'),
+    'комментарий': token('--own-token-comment'),
+    'ключевое слово': token('--own-token-keyword'),
+  };
+})()`;
+
+/** Открыть файл из дерева: без открытой вкладки её заливку не с чем сверить. */
+const openFile = (ide, name) =>
+  ide.webContents
+    .executeJavaScript(
+      `(async () => {
+        const row = [...document.querySelectorAll('.tree-row')].find(
+          (item) => item.querySelector('.tree-name')?.textContent === ${JSON.stringify(name)},
+        );
+        if (!row) return 'нет строки';
+        row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        return 'открыт';
+      })()`,
+    )
+    .catch((error) => `ошибка: ${error.message}`);
+
+async function capture(ide) {
   await ide.webContents
     .executeJavaScript(
       'new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))',
@@ -135,10 +172,11 @@ async function capture(ide, scheme) {
     .catch(() => undefined);
   step('кадр отрисован');
   const image = await ide.capturePage();
-  const file = path.join(SHOTS, `theme-${scheme}.png`);
+  const file = path.join(SHOTS, 'theme-dark.png');
   await fs.writeFile(file, image.toPNG());
   const tokens = await ide.webContents.executeJavaScript(READ_TOKENS).catch(() => null);
-  return { file, tokens };
+  const paint = await ide.webContents.executeJavaScript(READ_PAINT).catch(() => null);
+  return { file, tokens, paint };
 }
 
 app.whenReady().then(async () => {
@@ -169,13 +207,15 @@ app.whenReady().then(async () => {
   await wait(3500);
   step('ждём отрисовку');
 
+  step('открываю README.md — иначе полосы вкладок на снимке нет');
+  step(`файл: ${await openFile(ide, 'README.md')}`);
+  await wait(600);
+
   const lines = [];
-  for (const scheme of ['dark', 'light']) {
-    step(`снимаем ${scheme}`);
-    const { file, tokens } = await capture(ide, scheme);
-    lines.push(`\n[${scheme}] снимок: ${file}`);
-    if (tokens) for (const name of TOKENS) lines.push(`  --${name} = ${tokens[name]}`);
-  }
+  const { file, tokens, paint } = await capture(ide);
+  lines.push(`снимок: ${file}`);
+  if (tokens) for (const name of TOKENS) lines.push(`  --${name} = ${tokens[name]}`);
+  if (paint) for (const [name, value] of Object.entries(paint)) lines.push(`  ${name} = ${value}`);
 
   await fs.writeFile(REPORT, lines.join('\n') + '\n', 'utf8');
   console.log(lines.join('\n'));

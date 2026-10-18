@@ -365,8 +365,7 @@ module.exports = [
     git: { pullMode: 'default', saveBeforeCommit: true },
     // Изменённые горячие клавиши: по умолчанию пусто — сочетания берутся из кода.
     keybindings: { overrides: [] },
-    // «Системная» — чтобы схему в проверке задавал Playwright (`emulateMedia`).
-    appearance: { theme: 'system', uiScale: 1, customTheme: null },
+    appearance: { uiScale: 1, customTheme: null },
     // Макет рабочей области: размеры и видимость панелей (общий для всех проектов).
     layout: {
       sidebarSize: 260,
@@ -1129,17 +1128,10 @@ module.exports = [
         settings.ai.providers = settings.ai.providers.filter((item) => item.id !== removeProviderId);
       }
 
-      // Схему main сообщает push-событием: от неё зависят редактор, терминал и
-      // подсветка кода в чате, поэтому мок обязан её отдавать так же.
-      if (params.appearance?.theme) {
-        const chosen = settings.appearance.theme;
-        const scheme =
-          chosen === 'system' ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : chosen;
-        push('theme:changed', {
-          theme: chosen,
-          scheme,
-          customTheme: settings.appearance.customTheme ?? null,
-        });
+      // Тему из файла main сообщает push-событием: от неё зависят редактор, терминал
+      // и подсветка кода в чате, поэтому мок обязан её отдавать так же.
+      if (params.appearance && 'customTheme' in params.appearance) {
+        push('theme:changed', { customTheme: settings.appearance.customTheme ?? null });
       }
 
       const snapshot = structuredClone(settings);
@@ -1153,15 +1145,10 @@ module.exports = [
     'theme.import': () => {
       settings.appearance.customTheme = {
         name: 'Мок-тема',
-        scheme: 'dark',
         chrome: { background: '#101418', accent: '#7c5cff' },
         tokens: { keyword: '#ff79c6' },
       };
-      push('theme:changed', {
-        theme: settings.appearance.theme,
-        scheme: 'dark',
-        customTheme: settings.appearance.customTheme,
-      });
+      push('theme:changed', { customTheme: settings.appearance.customTheme });
       const snapshot = structuredClone(settings);
       push('settings:changed', snapshot);
       return { settings: snapshot, name: settings.appearance.customTheme.name };
@@ -1198,8 +1185,7 @@ module.exports = [
     },
     'theme.clear': () => {
       settings.appearance.customTheme = null;
-      const scheme = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      push('theme:changed', { theme: settings.appearance.theme, scheme, customTheme: null });
+      push('theme:changed', { customTheme: null });
       const snapshot = structuredClone(settings);
       push('settings:changed', snapshot);
       return snapshot;

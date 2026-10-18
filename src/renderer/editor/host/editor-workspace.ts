@@ -28,7 +28,6 @@ import type { BreakpointInput } from '../../core/debug';
 import type { Snippet } from '../../../shared/snippets';
 import type { TextDocument } from '../../core/document';
 import { Emitter } from '../../core/events';
-import type { Scheme } from '../highlight/style';
 import type { DiagnosticItem, LspDiagnostic } from '../../../shared/api';
 import { DiagnosticsStore } from './diagnostics';
 import { OwnDiffEditor, type OwnDiffHandle } from './diff-editor';
@@ -118,7 +117,6 @@ export interface EditorWorkspaceOptions {
   spellcheckEnabled?: () => boolean;
   spellSaveWord?: (word: string) => void;
   /** Схема оформления: цвета токенов и обвязки. */
-  scheme?: Scheme;
   /** Сниппеты всех языков: их показывают подсказки по триггеру. */
   snippets?: () => readonly Snippet[];
   /** Форматировать файл (инструмент языка спрашивает app, у редактора его нет). */
@@ -235,7 +233,6 @@ export class EditorWorkspace {
   /** Что открыто по путям: при разделении новый панели нужно то же самое. */
   private readonly documents = new Map<string, TextDocument>();
   private activeIndex = 0;
-  private scheme: Scheme;
   private readonly tabSize: number | undefined;
   private readonly fontSize: number | undefined;
   private readonly lineHeight: number | undefined;
@@ -359,7 +356,6 @@ export class EditorWorkspace {
 
   constructor(container: HTMLElement, registry: DocumentRegistry, options: EditorWorkspaceOptions = {}) {
     this.registry = registry;
-    this.scheme = options.scheme ?? 'dark';
     this.tabSize = options.tabSize;
     this.fontSize = options.fontSize;
     this.lineHeight = options.lineHeight;
@@ -486,7 +482,6 @@ export class EditorWorkspace {
       spellcheckEnabled: this.spellEnabled,
       spellSaveWord: this.spellSaveWord,
       ligatures: this.ligatures,
-      scheme: this.scheme,
       snippets: this.snippets,
       hoverFromLanguage: this.hoverFromLanguage,
       completionFromLanguage: this.completionFromLanguage,
@@ -826,13 +821,12 @@ export class EditorWorkspace {
    * не меняясь. Схему берём текущую: сравнение должно следовать за темой приложения.
    */
   createDiff(container: HTMLElement): OwnDiffHandle {
-    return new OwnDiffEditor(container, { scheme: this.scheme });
+    return new OwnDiffEditor(container);
   }
 
   /** Сменить схему оформления на всех панелях. */
-  setTheme(scheme: Scheme): void {
-    this.scheme = scheme;
-    for (const pane of this.panes) pane.setScheme(scheme);
+  refreshTheme(): void {
+    for (const pane of this.panes) pane.refreshTheme();
   }
 
   /** Пересчитать проверку орфографии во всех панелях (её включили или выключили). */

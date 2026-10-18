@@ -13,7 +13,6 @@
 
 import { PushTopic, type TerminalDataPayload, type TerminalExitPayload, type TerminalSession } from '../../shared/api';
 import type { RpcClient } from '../core/rpc';
-import type { Scheme } from '../core/theme';
 import { Terminal } from '../terminal/core/screen';
 import { searchBuffer, stepMatch } from '../terminal/core/search';
 import { encodeKey, encodeMouse, encodePaste } from '../terminal/input/keys';
@@ -41,7 +40,8 @@ export interface TerminalPanelView {
   /** Пересчитать размер: вызывать, когда панель стала видимой. */
   fit(): void;
   /** Сменить палитру консоли вместе с темой приложения. */
-  setScheme(scheme: Scheme): void;
+  /** Перечитать палитру консоли после смены темы. */
+  refreshTheme(): void;
   /** Включить или выключить лигатуры — по общей настройке редактора. */
   setLigatures(on: boolean): void;
 }
@@ -67,14 +67,11 @@ const DEFAULT_ROWS = 24;
 export function createTerminalPanel(deps: {
   rpc: RpcClient;
   cwd: () => string | null;
-  scheme: Scheme;
   /** Включать ли лигатуры шрифта — то же значение, что у редактора кода. */
   ligatures: () => boolean;
   /** Ссылка из консоли: решает вызывающий — вкладкой в IDE или системным браузером. */
   openLink: (url: string) => void;
 }): TerminalPanelView {
-  let scheme = deps.scheme;
-
   const tabsHost = h('div', { class: 'term-tabs' });
   const body = h('div', { class: 'term-body' });
 
@@ -215,7 +212,6 @@ export function createTerminalPanel(deps: {
     // Идентификатор сессии появится после ответа main — до тех пор мышь молчит.
     let sessionId: string | null = null;
     const view = new TermView(container, term, {
-      scheme,
       ligatures: deps.ligatures(),
       // Мышь: координаты отдаём в SGR-формате, если программа о нём просила.
       onMouse: (event) => {
@@ -509,9 +505,8 @@ export function createTerminalPanel(deps: {
       const entry = active();
       if (entry) fitSession(entry);
     },
-    setScheme(next: Scheme) {
-      scheme = next;
-      for (const entry of sessions.values()) entry.view.setScheme(next);
+    refreshTheme() {
+      for (const entry of sessions.values()) entry.view.refreshTheme();
     },
     setLigatures(on: boolean) {
       for (const entry of sessions.values()) entry.view.setLigatures(on);

@@ -53,7 +53,7 @@ function pageHtml(styles) {
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="color-scheme" content="dark" />
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:"

@@ -80,12 +80,19 @@ app.whenReady().then(async () => {
   const opened = await ask(
     ide,
     `(async () => {
-      const settingsButton = [...document.querySelectorAll('*')].find(
-        (node) => node.getAttribute && node.getAttribute('title') === 'Настройки',
-      );
-      if (!settingsButton) return 'кнопки настроек нет';
+      const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const items = () => [...document.querySelectorAll('.context-menu [role="menuitem"]')];
+      // Кнопки настроек в шапке нет: они живут в меню приложения (Файл → Настройки…).
+      document.querySelector('.topbar-left .icon-btn')?.click();
+      await wait(300);
+      const file = items().find((node) => (node.textContent || '').trim().startsWith('Файл'));
+      if (!file) return 'меню не открылось';
+      file.click();
+      await wait(300);
+      const settingsButton = items().find((node) => (node.textContent || '').trim().startsWith('Настройки'));
+      if (!settingsButton) return 'пункта настроек нет';
       settingsButton.click();
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      await wait(600);
 
       const item = [...document.querySelectorAll('.modal-nav *')].find(
         (node) => (node.textContent || '').includes('Внешние инструменты'),

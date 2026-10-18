@@ -25,7 +25,7 @@ import type { Token } from '../highlight/tokens';
 import { LineHighlighter } from '../highlight/highlighter';
 import { sharedTokens } from '../highlight/token-cache';
 import { grammarFor } from '../highlight/registry';
-import { paletteOf, roleOfToken, type Scheme } from '../highlight/style';
+import { paletteOf, roleOfToken } from '../highlight/style';
 import { buildDiff, type DiffHunk, type DiffRow } from './diff-model';
 import { clamp, contentHeight, maxScrollTop, revealLine, visibleLines } from '../view/viewport';
 
@@ -76,11 +76,6 @@ export interface OwnDiffHandle {
   dispose(): void;
 }
 
-export interface OwnDiffEditorOptions {
-  /** Схема оформления: цвета токенов берутся из темы. */
-  scheme?: Scheme;
-}
-
 export class OwnDiffEditor implements OwnDiffHandle {
   private readonly root: HTMLElement;
   private readonly body: HTMLElement;
@@ -88,7 +83,6 @@ export class OwnDiffEditor implements OwnDiffHandle {
   private readonly rowsLayer: HTMLElement;
   private readonly actionsLayer: HTMLElement;
 
-  private scheme: Scheme;
   private lineHeight = 20;
 
   private rows: readonly DiffRow[] = [];
@@ -110,9 +104,7 @@ export class OwnDiffEditor implements OwnDiffHandle {
   private rendered = { first: -1, last: -1 };
   private disposed = false;
 
-  constructor(container: HTMLElement, options: OwnDiffEditorOptions = {}) {
-    this.scheme = options.scheme ?? 'dark';
-
+  constructor(container: HTMLElement) {
     this.root = document.createElement('div');
     this.root.className = ROOT_CLASS;
     this.body = document.createElement('div');
@@ -392,7 +384,7 @@ export class OwnDiffEditor implements OwnDiffHandle {
   }
 
   private applyTheme(): void {
-    const palette = paletteOf(this.scheme);
+    const palette = paletteOf();
     for (const [role, color] of Object.entries(palette)) {
       this.root.style.setProperty(`--own-token-${role}`, color);
     }

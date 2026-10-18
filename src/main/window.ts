@@ -1,7 +1,7 @@
-import { BrowserWindow, nativeTheme, shell } from 'electron';
+import { BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { PushTopic, type WindowState } from '../shared/api';
-import { windowBackground } from '../shared/colors';
+import { WINDOW_BACKGROUND } from '../shared/colors';
 import { pushToRenderers } from './ipc/push';
 import { APP_ORIGIN } from './protocol';
 import { isSafeExternalUrl, isSameUrlOrigin } from '../shared/url';
@@ -112,7 +112,7 @@ function createAppWindow(options: WindowOptions): BrowserWindow {
     minWidth: options.minWidth,
     minHeight: options.minHeight,
     show: false,
-    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+    backgroundColor: WINDOW_BACKGROUND,
     title: DEV_SERVER_URL ? 'chui_iDE (dev)' : 'chui_iDE',
     // Своя рамка. На macOS оставляем системные «светофоры» — без них окно
     // теряет привычные кнопки, — а на Linux и Windows рамку рисует renderer.

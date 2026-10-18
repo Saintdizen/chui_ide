@@ -46,7 +46,6 @@ import { SignatureAssistant } from '../complete/signature';
 import { TextBuffer } from '../core/text-buffer';
 import { wordAt } from '../core/graphemes';
 import { COMMENT, STRING } from '../highlight/tokens';
-import type { Scheme } from '../highlight/style';
 import { type EditorChange, EditorController } from '../input/editor-controller';
 import { type CommandName, EditorInputBinding, type KeyInterceptor } from '../input/editor-input';
 import type { CaseStyle } from '../input/case-convert';
@@ -188,7 +187,6 @@ export interface EditorHostOptions {
    */
   inlayHints?: (path: string, text: string) => Promise<readonly InlayHint[]>;
   /** Схема оформления: цвета токенов и обвязки. */
-  scheme?: Scheme;
   /** Сниппеты всех языков: к текущему языку отберёт подсказка. */
   snippets?: () => readonly Snippet[];
   /**
@@ -431,7 +429,6 @@ export class EditorHost {
   /** Поле прокрутки: на нём слушаем Ctrl+Click по слову (переход к определению). */
   private readonly viewport: HTMLElement | null;
 
-  private scheme: Scheme;
   private path: string | null = null;
   /** Открытый файл — только для чтения (большой файл): ввод и правки не проходят. */
   private readOnly = false;
@@ -528,7 +525,6 @@ export class EditorHost {
 
   constructor(container: HTMLElement, registry: DocumentRegistry, options: EditorHostOptions = {}) {
     this.registry = registry;
-    this.scheme = options.scheme ?? 'dark';
     this.openPalette = options.openPalette ?? null;
     this.contextMenu = options.contextMenu;
     this.codeActions = options.codeActions;
@@ -553,7 +549,6 @@ export class EditorHost {
     // пустая вкладка — нормальное состояние панели, пока файл не открыт.
     const buffer = new TextBuffer('');
     this.view = new EditorView(container, buffer, {
-      scheme: this.scheme,
       whitespace: normalizeWhitespaceMode(options.whitespace),
       minimap: options.minimap,
       ligatures: options.ligatures,
@@ -642,7 +637,7 @@ export class EditorHost {
     this.locations = options.symbols ? new LocationsWidget(container) : null;
     // Копия «на месте»: нужен текст файла (чтение). Места определения — от сервера;
     // без него заглядывание в определение недоступно, а просмотр файла работает.
-    this.peekWidget = options.readText ? new PeekWidget(container, this.scheme) : null;
+    this.peekWidget = options.readText ? new PeekWidget(container) : null;
     this.peek =
       options.readText && this.peekWidget
         ? new PeekController({
@@ -1023,11 +1018,10 @@ export class EditorHost {
   }
 
   /** Сменить схему оформления: цвета токенов переставляются на слое вида. */
-  setScheme(scheme: Scheme): void {
-    this.scheme = scheme;
-    this.view.setScheme(scheme);
+  refreshTheme(): void {
+    this.view.refreshTheme();
     // Копия красится той же палитрой — переставляем и её цвета.
-    this.peekWidget?.setScheme(scheme);
+    this.peekWidget?.refreshTheme();
   }
 
   /** Поставить фокус в редактор — после команд палитры и переходов. */

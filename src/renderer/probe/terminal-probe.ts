@@ -7,7 +7,6 @@
  * а не тот, что видит человек. Проба приносит свой размер контейнера, движок подгоняет
  * под него сетку — ровно как в панели (`ui/terminal.ts`).
  */
-import type { Scheme } from '../core/theme';
 import { Terminal } from '../terminal/core/screen';
 import { searchBuffer, stepMatch } from '../terminal/core/search';
 import { TermView } from '../terminal/view/term-view';
@@ -28,7 +27,7 @@ declare global {
       clearFind(): void;
       /** Показать образец с гиперссылками (OSC 8) — проба смотрит на них. */
       showLinks(): void;
-      setScheme(scheme: Scheme): void;
+      refreshTheme(): void;
       setLigatures(on: boolean): void;
     };
   }
@@ -45,7 +44,6 @@ root.append(container);
 const term = new Terminal(80, 24);
 const mouseEvents: unknown[] = [];
 const view = new TermView(container, term, {
-  scheme: 'dark',
   ligatures: false,
   onMouse: (event) => mouseEvents.push(event),
 });
@@ -111,6 +109,6 @@ window.probeTerm = {
   findStep,
   clearFind: () => view.clearSearch(),
   showLinks,
-  setScheme: (scheme) => view.setScheme(scheme),
+  refreshTheme: () => view.refreshTheme(),
   setLigatures: (on) => view.setLigatures(on),
 };

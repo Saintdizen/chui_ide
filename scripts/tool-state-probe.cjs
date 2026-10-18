@@ -41,7 +41,7 @@ function pageHtml(styles) {
 <html lang="ru">
   <head>
     <meta charset="utf-8" />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="color-scheme" content="dark" />
     <style>${styles}</style>
     <style>
       html, body { margin: 0; height: 100%; background: var(--surface_window); color: var(--text_color); }

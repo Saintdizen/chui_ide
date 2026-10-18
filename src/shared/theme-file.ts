@@ -1,7 +1,7 @@
 /**
  * Тема из файла: формат, разбор и проверка.
  *
- * Формат — свой, но нарочно простой: JSON с именем, схемой и ЧАСТИЧНЫМИ
+ * Формат — свой, но нарочно простой: JSON с именем и ЧАСТИЧНЫМИ
  * переопределениями наших ролей. Полный файл даёт «Сохранить шаблон…»: человек
  * берёт рабочую тему, правит цвета и импортирует обратно.
  *
@@ -12,8 +12,6 @@
  * Цвета задаются как `#RGB`, `#RRGGBB` или `#RRGGBBAA` — как их пишут руками.
  * Внутри палитры (`core/theme.ts`) значения живут без `#`, и разбор снимает его сам.
  */
-
-export type ThemeScheme = 'dark' | 'light';
 
 /** Роли обвязки: поверхности, текст, акценты, git. Порядок — как в `core/theme.ts`. */
 export const CHROME_KEYS = [
@@ -78,8 +76,6 @@ export type TokenKey = (typeof TOKEN_KEYS)[number];
 export interface ThemeFile {
   /** Имя для интерфейса. */
   name: string;
-  /** Какую схему берёт тема. Она жёстко задаёт светлую или тёмную основу. */
-  scheme: ThemeScheme;
   /** Частичные переопределения ролей обвязки. */
   chrome: Partial<Record<ChromeKey, string>>;
   /** Частичные переопределения ролей подсветки кода. */
@@ -139,9 +135,11 @@ export function parseThemeObject(input: unknown): ThemeParseResult {
   if (!name) return { ok: false, error: 'не задано имя темы («name»)' };
   if (name.length > MAX_NAME) return { ok: false, error: `имя темы длиннее ${MAX_NAME} символов` };
 
+  // Схема в приложении одна — тёмная. Старый файл со `"scheme": "dark"` читаем
+  // (поле лишнее, но безвредное), а светлую схему отвергаем: её больше нет.
   const { scheme } = source;
-  if (scheme !== 'dark' && scheme !== 'light') {
-    return { ok: false, error: '«scheme» должен быть «dark» или «light»' };
+  if (scheme !== undefined && scheme !== 'dark') {
+    return { ok: false, error: 'светлой схемы нет: приложение работает в тёмной, «scheme» — только «dark»' };
   }
 
   const chromeSource = asObject(source.chrome, 'chrome');
@@ -154,7 +152,7 @@ export function parseThemeObject(input: unknown): ThemeParseResult {
   const tokens = readColors(tokensSource.value, TOKEN_KEYS, 'tokens');
   if (!tokens.ok) return { ok: false, error: tokens.error };
 
-  return { ok: true, theme: { name, scheme, chrome: chrome.value, tokens: tokens.value } };
+  return { ok: true, theme: { name, chrome: chrome.value, tokens: tokens.value } };
 }
 
 /** Разбор текста файла темы. */
@@ -176,7 +174,11 @@ export function parseThemeFile(text: string): ThemeParseResult {
 export function sanitizeThemeFile(value: unknown): ThemeFile | null {
   if (value === null || value === undefined) return null;
   const result = parseThemeObject(value);
-  return result.ok ? result.theme : null;
+  if (!result.ok) return null;
+  // Тема без единой роли ничего не задаёт: считаем её отсутствующей, а не активной.
+  const { chrome, tokens } = result.theme;
+  if (Object.keys(chrome).length === 0 && Object.keys(tokens).length === 0) return null;
+  return result.theme;
 }
 
 export function serializeThemeFile(theme: ThemeFile): string {

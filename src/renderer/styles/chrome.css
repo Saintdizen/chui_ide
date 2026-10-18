@@ -3,8 +3,7 @@
    терминал и поиск по проекту. Часть одной таблицы стилей: порядок частей задан
    в `main.css`, и менять его нельзя — правила перекрывают друг друга по порядку. */
 /**
- * Раскладка и компоненты. Цветов здесь нет — только токены из `theme.css`,
- * которые переключаются вместе со схемой (`prefers-color-scheme`).
+ * Раскладка и компоненты. Цветов здесь нет — только токены из `theme.css`.
  * Геометрия и движение — тоже токены: `--radius_*`, `--control_height`, `--motion_*`.
  */
 
@@ -193,14 +192,22 @@ textarea {
   display: none;
 }
 
-/* «Остров»: содержимое окна светлее самого окна, поэтому панель читается карточкой. */
+/* «Остров»: панель темнее фона окна (см. `--panel_background` и `--editor_background`), поэтому она читается утопленной плитой, а шов между островами — светлой линией. */
 .island {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_md);
-  background: var(--element_background_2);
+  background: var(--main_background);
+}
+
+/* Панели (боковая, нижняя, правая) — тот же тон, что у редактора: все острова лежат
+   тёмными плитами на светлом фоне окна. */
+.sidebar,
+.dock,
+.right-panel {
+  background: var(--panel_background);
 }
 
 .topbar {
@@ -450,6 +457,9 @@ textarea {
 .editor-island {
   display: flex;
   flex-direction: column;
+  /* Остров редактора — светлее фона окна, как и прочие панели: код лежит карточкой.
+     Фон нужен самому острову — по нему видны скруглённые углы и зазоры. */
+  background: var(--editor_background);
 }
 
 .right-panel {
@@ -480,11 +490,10 @@ textarea {
 .panel-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 3px;
   flex: 0 0 auto;
-  height: 34px;
+  height: max-content;
   padding: 0 var(--space_sm) 0 var(--space_lg);
-  border-bottom: 1px solid var(--separator_color);
   color: var(--text_color_tertiary);
 }
 
@@ -544,18 +553,22 @@ textarea {
   background: var(--editor_background);
 }
 
+/* Лестница полосы: 4 px отступ полосы и 4 px между вкладками — полоса дышит
+   тем же шагом, что и прочие зазоры интерфейса. Внутри вкладки свои 3–6 px.
+   Высоту вкладки не задаём числом — её даёт самый высокий элемент строки
+   (крестик 16 px), поэтому полоса идёт за масштабом интерфейса. */
 .tabs {
   display: flex;
   align-items: center;
-  gap: 2px;
-  height: 36px;
-  padding: 0 3px;
+  gap: 4px;
+  height: max-content;
   /* Прокрутка доводит вкладку до того же зазора, что и отступ полосы: иначе
      последняя вкладка встаёт вплотную к краю и он выглядит срезанным. */
-  scroll-padding-inline: 3px;
+  scroll-padding-inline: 4px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: none;
+  padding: 4px;
 }
 
 .tabs::-webkit-scrollbar {
@@ -580,10 +593,9 @@ textarea {
 .tab {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 28px;
+  gap: 4px;
   max-width: 200px;
-  padding: 0 6px 0 9px;
+  padding: 3px 3px 3px 6px;
   border-radius: var(--radius_sm);
   background: transparent;
   color: var(--text_color_secondary);
@@ -592,15 +604,25 @@ textarea {
      подсветка должна вставать мгновенно, а не проявляться переходом. */
 }
 
+/* Значки вкладки не сжимаются: подпись ужимается сама (многоточие), а значок
+   вида, кнопка режима и крестик держат свой размер — иначе в длинной вкладке
+   они тихо утоньшались (13 → 11, 16 → 14). */
+.tab > svg,
+.tab-action,
+.tab-close {
+  flex: 0 0 auto;
+}
+
 .tab:hover {
   background: var(--element_background_hover);
   color: var(--text_color);
 }
 
-/* Активная вкладка залита тем же выделением, что выбранная строка дерева:
-   одно состояние читается одинаково в любом списке интерфейса. */
+/* Активная вкладка — ступень попапа: приподнята над полосой, которая остаётся на
+   тоне полотна. Заливкой выделения вкладка больше не красится: синие чипы во всю
+   полосу спорили с подсветкой кода (выделение живёт в списках — дерево, палитра). */
 .tab.is-active {
-  background: var(--selection_background);
+  background: var(--tab_active_background);
   color: var(--text_color);
 }
 
@@ -618,12 +640,17 @@ textarea {
 
 .tab-label {
   overflow: hidden;
+  /* Строка подписи — 16 px, а не 17.4 от междустрочного обвязки: иначе подпись
+     была самым высоким ребёнком вкладки и раздувала её без пользы. */
+  line-height: 1.2;
   text-overflow: ellipsis;
 }
 
 /* Крестик показывается на наведении, у активной и у изменённой вкладки:
    так полоса не забита одинаковыми значками закрытия. */
 .tab-close {
+  /* Якорь точки правки: она лежит поверх крестика, а не рядом с ним. */
+  position: relative;
   display: grid;
   place-items: center;
   width: 16px;
@@ -651,10 +678,12 @@ textarea {
 /* Кнопка режима вкладки (просмотр разметки у .md): как крестик — прячется до
    наведения, но остаётся видна, пока режим включён (`aria-pressed`). */
 .tab-action {
+  /* Тот же размер, что у крестика: два разных числа в одной строке делали её
+     рваной по высоте. */
   display: grid;
   place-items: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: var(--radius_xs);
   color: var(--text_color_tertiary);
   opacity: 0;
@@ -679,12 +708,28 @@ textarea {
   color: var(--text_color);
 }
 
+/* Точка правки стоит ВМЕСТО крестика: два значка в одну кнопку не влезают
+   (7 + 11 больше 16) и стопкой разъезжались — точка сверху, крестик на 7 px
+   ниже центра. На наведении точка уступает крестику: закрыть изменённую
+   вкладку можно тем же местом, без второго контрола в строке. */
 .tab-dirty {
+  position: absolute;
   width: 7px;
   height: 7px;
-  margin-right: -2px;
   border-radius: var(--radius_circle);
   background: var(--blue_prime_background);
+}
+
+.tab.is-dirty .tab-close svg {
+  opacity: 0;
+}
+
+.tab.is-dirty .tab-close:hover svg {
+  opacity: 1;
+}
+
+.tab.is-dirty .tab-close:hover .tab-dirty {
+  opacity: 0;
 }
 
 /* ── хлебные крошки ─────────────────────────────────────────────────────── */
@@ -1831,10 +1876,10 @@ textarea {
   color: var(--text_color);
 }
 
-/* Активная вкладка дока — та же заливка выделения, что у вкладки редактора,
-   выбранной строки дерева и пункта списков. */
+/* Активная вкладка дока — та же ступень, что у вкладки редактора: вкладка
+   приподнята над панелью, а не залита выделением. */
 .dock-tab.is-active {
-  background: var(--selection_background);
+  background: var(--tab_active_background);
   color: var(--text_color);
 }
 
@@ -1903,7 +1948,7 @@ textarea {
 }
 
 .term-tab.is-active {
-  background: var(--selection_background);
+  background: var(--tab_active_background);
   color: var(--text_color);
 }
 
