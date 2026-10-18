@@ -45,6 +45,8 @@ export interface PythonEnvPopoverDeps {
   onSelect: (command: string) => void;
   /** Открыть окно создания окружения. */
   onCreate: () => void;
+  /** Указать уже созданное окружение на диске (своё, вне проекта). */
+  onPickExisting: () => void;
   /** Поставить зависимости из requirements.txt. */
   onInstallRequirements: () => void;
 }
@@ -198,6 +200,10 @@ export function createPythonEnvPopover(deps: PythonEnvPopoverDeps): PythonEnvPop
         list,
         ...envActions,
         button('Создать окружение…', () => deps.onCreate()),
+        // Список выше — только окружения ПРОЕКТА. Взять готовое с диска нужно уметь
+        // и без создания: оно может быть общим на несколько проектов или лежать
+        // там, где о нём не догадается поиск (см. `python.venvAt`).
+        button('Указать существующее…', () => deps.onPickExisting()),
       ),
     );
 

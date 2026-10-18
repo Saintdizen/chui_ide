@@ -35,6 +35,11 @@ export interface VenvModalDeps {
    * интерпретатором проекта: поиск окружений в проекте такое окружение не найдёт никогда.
    */
   onCreated?: (environment: PythonEnvironment) => void;
+  /**
+   * Указать уже созданное окружение на диске. Окно для этого закрывается: диалог
+   * папок — отдельное системное окно поверх IDE.
+   */
+  onPickExisting?: () => void;
 }
 
 export interface VenvModalView {
@@ -123,7 +128,27 @@ export function createVenvModal(deps: VenvModalDeps): VenvModalView {
   });
   modal.body.classList.add('venv-body');
   modal.body.append(
-    h('section', { class: 'venv-section' }, h('h3', { class: 'venv-heading' }, 'Найдено в проекте'), list),
+    h(
+      'section',
+      { class: 'venv-section' },
+      h('h3', { class: 'venv-heading' }, 'Найдено в проекте'),
+      list,
+      // Список — только окружения проекта. Своё, созданное раньше и, может быть, общее
+      // на несколько проектов, тут не появится: его указывают вручную (см. `python.venvAt`).
+      h(
+        'button',
+        {
+          class: 'btn btn-small venv-pick',
+          type: 'button',
+          title: 'Взять окружение, которое уже есть на диске',
+          onClick: () => {
+            close();
+            deps.onPickExisting?.();
+          },
+        },
+        'Указать существующее…',
+      ),
+    ),
     h(
       'section',
       { class: 'venv-section' },

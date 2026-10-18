@@ -12,6 +12,7 @@ import {
   venvPythonPath,
   venvActivateCommand,
   type PythonEnvironment,
+  type VenvLookup,
 } from '../../shared/python-env';
 import { isInsidePath } from '../../shared/paths';
 import {
@@ -195,6 +196,80 @@ export function activateCommand(root: string, venvPath: string, platform: string
   // человеку ничего не говорит и разваливается, если оболочка сменила каталог.
   const relative = isInsidePath(root, venvPath) ? toPosix(path.relative(root, venvPath)) || '.' : toPosix(venvPath);
   return venvActivateCommand(relative, platform);
+}
+
+/**
+ * Окружение по папке, которую указал человек: своё, созданное раньше и, может быть,
+ * не в этом проекте. Такого не находит поиск окружений в проекте (`findEnvironments`)
+ * — его указывают руками, а нам остаётся проверить, что это правда окружение.
+ *
+ * Признак окружения — `pyvenv.cfg` рядом с интерпретатором. Одного каталога `bin`
+ * мало: он бывает и у системного питона, и активировать там нечего.
+ *
+ * Папку могли указать и «на уровень выше» (`~/.venvs`, `~/projects`): в ней смотрим
+ * подпапки и берём окружение, если оно там одно. Несколько — это выбор человека, а
+ * не наш: перечисляем их в `candidates`, чтобы он указал конкретное.
+ */
+export async function lookupVenv(
+  dir: string,
+  root: string | null,
+  home: string,
+  platform: string,
+): Promise<VenvLookup> {
+  const target = path.resolve(dir);
+  if (!(await exists(target))) {
+    return { environment: null, candidates: [], reason: `Папка не найдена: ${shortenHomePath(target, home)}` };
+  }
+
+  const found = await environmentAt(target, root, home, platform);
+  if (found) return { environment: found, candidates: [], reason: null };
+
+  const candidates: PythonEnvironment[] = [];
+  for (const child of await safeDirs(target)) {
+    const environment = await environmentAt(child.path, root, home, platform);
+    if (environment) candidates.push(environment);
+  }
+
+  if (candidates.length === 1) return { environment: candidates[0]!, candidates: [], reason: null };
+  if (candidates.length > 1) {
+    const labels = candidates.map((environment) => environment.label).join(', ');
+    return {
+      environment: null,
+      candidates,
+      reason: `В этой папке несколько окружений (${labels}) — выберите папку конкретного`,
+    };
+  }
+
+  return {
+    environment: null,
+    candidates: [],
+    reason: 'В папке нет виртуального окружения: нужен каталог с pyvenv.cfg и bin/python',
+  };
+}
+
+/** Окружение в этом самом каталоге; `null` — не окружение. */
+async function environmentAt(
+  dir: string,
+  root: string | null,
+  home: string,
+  platform: string,
+): Promise<PythonEnvironment | null> {
+  const python = venvPythonPath(dir, platform);
+  if (!(await isFile(python))) return null;
+  if (!(await isFile(path.join(dir, 'pyvenv.cfg')))) return null;
+
+  const inside = root !== null && isInsidePath(root, dir);
+  return {
+    path: dir,
+    // Вне проекта путь от корня не считается: `../../..` человеку ничего не говорит.
+    relative: inside ? toPosix(path.relative(root!, dir)) : shortenHomePath(dir, home),
+    python,
+    label: inside ? toPosix(path.relative(root!, dir)) : shortenHomePath(dir, home),
+    version: await readVenvVersion(dir),
+    // Основным окружение становится только внутри проекта: внешнее поиск не увидит,
+    // его назначают интерпретатором проекта (см. `onCreated` в окне создания).
+    primary: inside,
+  };
 }
 
 /**

@@ -47,7 +47,7 @@ import type { GitWorktree } from './git-worktrees';
 import type { ThemeFile } from './theme-file';
 import type { NodeEnvironmentHealth, NodeInfo, NodePackage } from './node-env';
 import type { NodeTestSuite } from './node-tests';
-import type { PythonEnvironment, PythonInterpreter, VenvLocation } from './python-env';
+import type { PythonEnvironment, PythonInterpreter, VenvLocation, VenvLookup } from './python-env';
 import type { InstalledPackage } from './python-packages';
 import type { CollectedSuite } from './python-tests';
 import type { EnvironmentHealth } from './python-health';
@@ -1852,6 +1852,11 @@ export interface ChuiMethods {
   'python.interpreters': { params: void; result: PythonInterpreter[] };
   /** Создать окружение, при желании поставив в него пакеты. Долгий вызов со событиями. */
   'python.createVenv': { params: CreateVenvOptions; result: CreateVenvResult };
+  /**
+   * Окружение по папке, которую указал человек: своё, созданное раньше, возможно вне
+   * проекта. Возвращает окружение либо объяснение, почему папка не подошла.
+   */
+  'python.venvAt': { params: { path: string }; result: VenvLookup };
   /** Команда активации главного окружения для терминала; null — окружения нет. */
   'python.activateCommand': { params: void; result: { command: string | null } };
   /** Установленные пакеты главного окружения: имя и версия. */

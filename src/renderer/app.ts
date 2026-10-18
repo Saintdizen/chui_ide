@@ -861,6 +861,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       }
       reloadPythonEnvironment();
     },
+    onPickExisting: () => void pickExistingVenv(),
   });
   document.body.appendChild(venvModal.element);
 
@@ -954,6 +955,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         onCreate: () => {
           pythonEnvPopover?.close();
           void venvModal.open();
+        },
+        onPickExisting: () => {
+          pythonEnvPopover?.close();
+          void pickExistingVenv();
         },
         onInstallRequirements: () => {
           pythonEnvPopover?.close();
@@ -2839,6 +2844,36 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     await rpc.request('settings.update', { run: { pythonByRoot } });
     // Инструменты и кнопка запуска пересчитываются сами по push-событию настроек
     // (см. `applySettings`): здесь это делать не нужно.
+  };
+
+  /**
+   * Указать уже созданное окружение на диске: своё, вне проекта, общее на несколько
+   * проектов. Поиск в проекте такое не находит (`findEnvironments`), поэтому папку
+   * выбирает человек, а main проверяет, окружение ли это, и отдаёт интерпретатор.
+   *
+   * Проверка обязательна: в диалоге папок легко указать соседнюю — и проект тихо
+   * остался бы на прежнем питоне, а причину искали бы в коде.
+   */
+  const pickExistingVenv = async (): Promise<void> => {
+    const picked = await rpc.request('dialog.pickFolder', { title: 'Папка виртуального окружения' });
+    if (!picked.path) return;
+    const found = await rpc.request('python.venvAt', { path: picked.path });
+    const environment = found.environment;
+    if (!environment) {
+      showToast(found.reason ?? 'В выбранной папке нет виртуального окружения', 'error');
+      return;
+    }
+    if (workspace.root) {
+      await setProjectInterpreter(environment.python);
+    } else {
+      // Проекта нет — интерпретатор остаётся общим: выбирать «для проекта» нечего.
+      await rpc.request('settings.update', { run: { pythonPath: environment.python } });
+    }
+    showToast(`Интерпретатор: ${environment.label}`);
+    // Подсказки подняты со старым интерпретатором — перезапускаем: у нового окружения
+    // может найтись и свой pylsp.
+    refreshLsp();
+    void pythonEnvView?.refresh();
   };
 
   /* ── реестр команд ─────────────────────────────────────────────────────── */

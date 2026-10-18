@@ -33,7 +33,13 @@ import { lintProject } from '../project/lint';
 import { scanProject } from '../project/scan';
 import { findPackages } from '../project/packages';
 import { testCommand } from '../project/tests';
-import { activationForInterpreter, createVenv, findEnvironments, pythonInterpreterFor } from '../python/environments';
+import {
+  activationForInterpreter,
+  createVenv,
+  findEnvironments,
+  lookupVenv,
+  pythonInterpreterFor,
+} from '../python/environments';
 import { missingPackages } from '../node/packages';
 import { missingLocalImports } from '../project/local-imports';
 import {
@@ -496,6 +502,12 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
       (payload) => ctx.emit(VenvEvent.Progress, payload),
       ctx.signal,
     ),
+  );
+
+  // Окружение по папке, выбранной человеком: своё, созданное раньше и, может быть,
+  // вне проекта. Корень не обязателен — взять чужое окружение можно и без проекта.
+  router.register('python.venvAt', (params) =>
+    lookupVenv(params.path, deps.workspace.rootPath(), app.getPath('home'), process.platform),
   );
 
   router.register('python.activateCommand', () => {

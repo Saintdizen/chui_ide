@@ -20,7 +20,7 @@
  *
  * Нужен собранный renderer (npm run build). Отчёт — вывод в консоль.
  */
-const { app } = require('electron');
+const { app, dialog } = require('electron');
 const { spawnSync } = require('node:child_process');
 const { promises: fs } = require('node:fs');
 const os = require('node:os');
@@ -261,6 +261,76 @@ app.whenReady().then(async () => {
     typeof chip === 'string' && chip.includes('shared-demo'),
     chip,
   );
+
+  /* ── указать уже созданное окружение ────────────────────────────────────── */
+
+  // Теперь главный случай: окружение УЖЕ есть на диске, и человек указывает его
+  // вручную. Для этого снимаем запись интерпретатора и подставляем системный диалог
+  // папок — окно с выбором пути в пробе открывать некому.
+  await settings.update({ run: { pythonByRoot: {} } });
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [outside] });
+
+  const pickedExisting = await ask(
+    ide,
+    `(async () => {
+        const command = [...document.querySelectorAll('.icon-btn')].find((item) =>
+          (item.getAttribute('title') ?? '').startsWith('Палитра команд'),
+        );
+        command.click();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const input = document.querySelector('.palette-input');
+        input.value = 'Python: виртуальные окружения';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const item = [...document.querySelectorAll('.palette-item')].find((node) =>
+          (node.textContent ?? '').includes('Python: виртуальные окружения'),
+        );
+        if (!item) return 'нет пункта палитры';
+        item.click();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const pick = document.querySelector('.venv-modal .venv-pick');
+        if (!pick) return 'нет кнопки «Указать существующее»';
+        pick.click();
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        return 'нажато';
+      })()`,
+  );
+  check('кнопка «Указать существующее…» есть и нажимается', pickedExisting === 'нажато', pickedExisting);
+
+  const chosen = settings.get().run.pythonByRoot[project] ?? '';
+  check('выбранное окружение стало интерпретатором проекта', chosen === path.join(outside, 'bin', 'python'), {
+    записано: chosen,
+  });
+
+  // Мусор вместо окружения не должен тихо подменять интерпретатор: человек выбирает
+  // папку в диалоге и легко промахивается. Ответ обязан сказать, что не так.
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] });
+  await ask(
+    ide,
+    `(async () => {
+        const command = [...document.querySelectorAll('.icon-btn')].find((item) =>
+          (item.getAttribute('title') ?? '').startsWith('Палитра команд'),
+        );
+        command.click();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const input = document.querySelector('.palette-input');
+        input.value = 'Python: виртуальные окружения';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const item = [...document.querySelectorAll('.palette-item')].find((node) =>
+          (node.textContent ?? '').includes('Python: виртуальные окружения'),
+        );
+        item?.click();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        document.querySelector('.venv-modal .venv-pick')?.click();
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        return 'нажато';
+      })()`,
+  );
+  const afterGarbage = settings.get().run.pythonByRoot[project] ?? '';
+  check('папка без окружения не подменила интерпретатор', afterGarbage === path.join(outside, 'bin', 'python'), {
+    записано: afterGarbage,
+  });
 
   terminals.dispose();
   workspace.dispose();
