@@ -30,9 +30,13 @@ jobs:
       - name: Убрать прошлый черновик и создать новый
         env:
           GH_TOKEN: ${{ github.token }}
+        # `--repo` обязателен: в этой задаче нет checkout, и без него gh не
+        # понимает, о каком репозитории речь («fatal: not a git repository»), —
+        # а с `|| true` это проходило молча, и черновик не готовился вовсе.
+        # `--cleanup-tag` не ставим: тег трогать нельзя, по нему идёт сборка.
         run: |
-          gh release delete "${{ github.ref_name }}" --yes || true
-          gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" --generate-notes
+          gh release delete "${{ github.ref_name }}" --yes --repo "${{ github.repository }}" || true
+          gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" --generate-notes --repo "${{ github.repository }}"
 
   build:
     name: ${{ matrix.label }}
