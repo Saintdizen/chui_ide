@@ -194,6 +194,53 @@ app.whenReady().then(async () => {
   );
   check('полоса вкладок не уехала в прокрутку', tab?.прокруткаПолосы === false, tab?.прокруткаПолосы);
 
+  /* ── шаг полосы дока ──────────────────────────────────────────────────── */
+
+  // Шапка дока и тулбар терминала живут в одной полосе: у обоих шаг 3 px и отступ 3 px,
+  // а высоту даёт содержимое, а не число. Иначе тулбар выпирал из шапки, а вкладки
+  // терминала сидели на пиксель иначе, чем вкладки дока.
+  const strip = await ask(
+    ide,
+    `(() => {
+      const header = document.querySelector('.dock-header');
+      const toolbar = document.querySelector('.term-toolbar');
+      if (!header || !toolbar) return null;
+      const h = getComputedStyle(header);
+      const t = getComputedStyle(toolbar);
+      return {
+        шапкаВысота: Math.round(header.getBoundingClientRect().height),
+        тулбарВысота: Math.round(toolbar.getBoundingClientRect().height),
+        шапкаHeight: h.height,
+        шапкаОтступ: h.padding,
+        тулбарОтступ: t.padding,
+        шапкаШаг: h.gap,
+        тулбарШаг: t.gap,
+      };
+    })()`,
+  );
+  check(
+    'шапка дока и тулбар терминала — один шаг 3 px',
+    strip !== null &&
+      strip.шапкаШаг === '3px' &&
+      strip.тулбарШаг === '3px' &&
+      strip.шапкаОтступ === '3px' &&
+      strip.тулбарОтступ === '3px',
+    strip && {
+      шапкаШаг: strip.шапкаШаг,
+      тулбарШаг: strip.тулбарШаг,
+      шапкаОтступ: strip.шапкаОтступ,
+      тулбарОтступ: strip.тулбарОтступ,
+    },
+  );
+  // Высота не задана числом: computed `height` у элемента в раскладке всё равно
+  // вернётся в пикселях, поэтому проверяем факт — шапка и тулбар одной высоты
+  // (кроме пикселя рамки под шапкой).
+  check(
+    'высота шапки — по содержимому, как у тулбара',
+    strip !== null && Math.abs(strip.шапкаВысота - strip.тулбарВысота - 1) <= 1,
+    strip && { шапка: strip.шапкаВысота, тулбар: strip.тулбарВысота },
+  );
+
   console.log(`  снимок: ${await shot(ide, 'tab')}`);
 
   terminals.dispose();

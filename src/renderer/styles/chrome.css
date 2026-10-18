@@ -1844,10 +1844,14 @@ textarea {
 .dock-header {
   display: flex;
   align-items: center;
-  gap: 2px;
+  /* Шаг 3 px — тот же, что у тулбара терминала и у самих вкладок дока: полоса,
+     тулбар и вкладки живут в одном острове и должны дышать одинаково. */
+  gap: 3px;
   flex: 0 0 auto;
-  height: 32px;
-  padding: 0 6px 0 8px;
+  /* Высоту не задаём числом: её даёт самый высокий элемент полосы, как у вкладок
+     редактора и у полосы вкладок терминала. */
+  height: max-content;
+  padding: 3px;
   border-bottom: 1px solid var(--separator_color);
 }
 
@@ -1917,9 +1921,10 @@ textarea {
 .term-toolbar {
   display: flex;
   align-items: center;
-  gap: 2px;
+  /* Шаг 3 px и отступ 3 px — как у шапки дока: тулбар живёт в той же полосе. */
+  gap: 3px;
   flex: 0 0 auto;
-  padding: 3px 6px;
+  padding: 3px;
 }
 
 .term-tabs {
