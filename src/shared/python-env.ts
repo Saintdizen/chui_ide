@@ -9,7 +9,7 @@
  * (сервер языка ставится в venv) и терминалу — там окружение активируется само.
  */
 
-import { isInsidePath, joinPath, pathAfter } from './paths';
+import { isInsidePath, joinPath, pathAfter, separatorOf } from './paths';
 
 /** Одно виртуальное окружение проекта. */
 export interface PythonEnvironment {
@@ -45,14 +45,28 @@ export const VENV_CANDIDATES: ReadonlyArray<readonly [dir: string, relativePytho
 /** Каталоги окружений: нужны, чтобы не искать venv внутри самого venv. */
 export const VENV_DIR_NAMES: ReadonlyArray<string> = ['.venv', 'venv', 'env', '.python-venv'];
 
+/**
+ * Подпуть окружения — тем же разделителем, что и сам путь.
+ *
+ * Каталог приходит из `path.join`, то есть на Windows с обратными слэшами. Жёсткий
+ * `«/»` давал бы там смешанный путь (`C:\\...\\shared/Scripts/python.exe`): файл
+ * находился (Node понимает оба разделителя), но в отчёте и на экране это выглядело
+ * поломанным путём. Хвостовой разделитель не удваиваем.
+ */
+function venvSubpath(venvDir: string, subpath: string): string {
+  const sep = separatorOf(venvDir);
+  const base = venvDir.replace(/[/\\]+$/, '');
+  return `${base}${sep}${subpath.split('/').join(sep)}`;
+}
+
 /** Путь к интерпретатору окружения по его каталогу: платформа решает подпапку. */
 export function venvPythonPath(venvDir: string, platform: string): string {
-  return platform === 'win32' ? `${venvDir}/Scripts/python.exe` : `${venvDir}/bin/python`;
+  return venvSubpath(venvDir, platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 }
 
 /** Путь к скрипту активации: `source` для POSIX, `.ps1` для Windows. */
 export function venvActivatePath(venvDir: string, platform: string): string {
-  return platform === 'win32' ? `${venvDir}/Scripts/Activate.ps1` : `${venvDir}/bin/activate`;
+  return venvSubpath(venvDir, platform === 'win32' ? 'Scripts/Activate.ps1' : 'bin/activate');
 }
 
 /**
@@ -61,12 +75,13 @@ export function venvActivatePath(venvDir: string, platform: string): string {
  * сломаться на пробелах в пути.
  */
 export function venvActivateCommand(venvRelative: string, platform: string): string {
-  const quoted = /[\s'"]/.test(venvRelative) ? `"${venvRelative}"` : venvRelative;
   // Путь к скрипту строит venvActivatePath — чтобы правило «bin/activate или
-  // Scripts/Activate.ps1» жило в одном месте.
-  const script = venvActivatePath(quoted, platform);
+  // Scripts/Activate.ps1» жило в одном месте. Кавычки ставим на ЦЕЛЫЙ путь, а не
+  // на каталог: иначе разделитель подпути оказался бы за кавычкой.
+  const script = venvActivatePath(venvRelative, platform);
+  const quoted = /[\s'"]/.test(script) ? `"${script}"` : script;
   // PowerShell: политика выполнения у поставляемого скрипта — ByPass.
-  return platform === 'win32' ? `. ${script}` : `source ${script}`;
+  return platform === 'win32' ? `. ${quoted}` : `source ${quoted}`;
 }
 
 /**

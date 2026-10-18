@@ -25,6 +25,16 @@ describe('venvPythonPath', () => {
   it('на Windows — Scripts/python.exe', () => {
     expect(venvPythonPath('C:/p/.venv', 'win32')).toBe('C:/p/.venv/Scripts/python.exe');
   });
+
+  // Каталог из `path.join` приходит на Windows с обратными слэшами: подпуть должен
+  // идти тем же разделителем, а не мешать оба в одной строке (`...\\shared/Scripts`).
+  it('на Windows native-путь остаётся целиком с обратными слэшами', () => {
+    expect(venvPythonPath('C:\\p\\.venv', 'win32')).toBe('C:\\p\\.venv\\Scripts\\python.exe');
+  });
+
+  it('хвостовой разделитель не удваивается', () => {
+    expect(venvPythonPath('/p/.venv/', 'linux')).toBe('/p/.venv/bin/python');
+  });
 });
 
 describe('venvActivatePath', () => {
@@ -35,6 +45,10 @@ describe('venvActivatePath', () => {
   it('на Windows — Scripts/Activate.ps1', () => {
     expect(venvActivatePath('C:/p/.venv', 'win32')).toBe('C:/p/.venv/Scripts/Activate.ps1');
   });
+
+  it('хвостовой разделитель не удваивается', () => {
+    expect(venvActivatePath('/p/.venv/', 'linux')).toBe('/p/.venv/bin/activate');
+  });
 });
 
 describe('venvActivateCommand', () => {
@@ -42,8 +56,14 @@ describe('venvActivateCommand', () => {
     expect(venvActivateCommand('.venv', 'linux')).toBe('source .venv/bin/activate');
   });
 
+  // Кавычки — на целом пути к скрипту, а не на каталоге: иначе разделитель подпути
+  // оказался бы за кавычкой (`"my env"/bin` → `"my env\bin`).
   it('путь с пробелом оборачивается в кавычки', () => {
-    expect(venvActivateCommand('my env', 'linux')).toBe('source "my env"/bin/activate');
+    expect(venvActivateCommand('my env', 'linux')).toBe('source "my env/bin/activate"');
+  });
+
+  it('на Windows путь с пробелом в кавычках не ломается', () => {
+    expect(venvActivateCommand('C:\\p\\my env', 'win32')).toBe('. "C:\\p\\my env\\Scripts\\Activate.ps1"');
   });
 
   it('вложенное окружение — путь целиком', () => {
