@@ -358,6 +358,57 @@ app.whenReady().then(async () => {
     toggled.подсказка,
   );
 
+  /* ── чип приложенного изображения ────────────────────────────────────────── */
+
+  // Чип-картинка: слева в нём миниатюра, дальше имя, размер и крестик. Отступ
+  // миниатюры от краёв чипа должен быть одинаков слева и сверху: иначе квадрат
+  // «висит» в углу и читается как сбитая вёрстка (поле — только с одной стороны).
+  // Второй замер — от края карточки композера: ряд чипов с нулевым верхним
+  // отступом лип к её рамке (6 px сверху против 11 px слева).
+  const chip = await ask(
+    ide,
+    `(async () => {
+      const input = document.querySelector('.chat-input');
+      if (!input) return 'нет поля ввода';
+      const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+      const data = new DataTransfer();
+      data.items.add(new File([bytes], 'image.png', { type: 'image/png' }));
+      input.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const node = document.querySelector('.composer-chips .chip-image');
+      if (!node) return 'чипа нет';
+      const card = document.querySelector('.composer-box').getBoundingClientRect();
+      const thumb = node.querySelector('.chip-thumb');
+      const box = node.getBoundingClientRect();
+      const inner = thumb.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        padding: style.padding,
+        подпись: node.textContent?.trim(),
+        слева: Math.round(inner.left - box.left),
+        сверху: Math.round(inner.top - box.top),
+        высота: Math.round(box.height),
+        миниатюра: Math.round(inner.width),
+        отКарточкиСлева: Math.round(box.left - card.left),
+        отКарточкиСверху: Math.round(box.top - card.top),
+      };
+    })()`,
+  );
+  check('чип приложенного изображения собран', chip !== null && typeof chip === 'object', chip);
+  check(
+    'миниатюра отступает от левого и верхнего края чипа одинаково',
+    chip !== null && typeof chip === 'object' && chip.слева === chip.сверху,
+    chip,
+  );
+  check(
+    'чип стоит на одинаковом расстоянии от левого и верхнего края карточки',
+    chip !== null && typeof chip === 'object' && chip.отКарточкиСлева === chip.отКарточкиСверху,
+    chip,
+  );
+  console.log(`  снимок чипа контекста: ${await shot(ide, 'chip')}`);
+  // Чип снимаем: проба ниже сверяет уже другое состояние композера.
+  await ask(ide, `(() => { document.querySelector('.composer-chips .chip-remove')?.click(); return true; })()`);
+
   /* ── вёрстка тулбара композера ──────────────────────────────────────────── */
 
   // Панель ассистента узкая: все контролы в один ряд не встают. Регрессия:
