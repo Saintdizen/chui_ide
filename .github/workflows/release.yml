@@ -66,6 +66,12 @@ jobs:
         with:
           name: chui-ide-${{ matrix.artifact }}
           if-no-files-found: error
+          # Артефакт — перевалочный пункт: следующим job'ом файлы уходят в релиз,
+          # и дальше он не нужен. Без срока они жили 90 дней: сборочный набор — это
+          # ~540 МБ (AppImage+deb+exe+dmg), и несколько релизов подряд выбирали
+          # хранилище артефактов до отказа — создание нового падало с
+          # «Artifact storage quota has been hit».
+          retention-days: 1
           path: |
             release/*.exe
             release/*.AppImage
