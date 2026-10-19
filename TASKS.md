@@ -55,6 +55,7 @@
 | Session title по сути | `shared/chat-title` + запрос названия после ответа |
 | Web search | инструмент `web_search`, `main/ai/web-search.ts`, `shared/web-search.ts` |
 | Чтение страницы (`web_fetch`) | `shared/web-fetch.ts` + `main/ai/web-fetch.ts`, настройка `ai.webFetch.enabled` |
+| Картинка с уменьшением (`read_image`) | `shared/read-image.ts` + `main/ai/read-image.ts`, инструмент `read_image` |
 | Ключ не показывается в окне | ключи живут в main, в renderer не уезжают |
 
 ---
@@ -325,4 +326,7 @@ DSH можно поднять профилем `headless` или `acp` и гон
 Каждый новый инструмент проходит один и тот же путь: схема в `src/shared/tools.ts` → исполнение
 в `src/main/ai/agent-tools.ts` → решение о правах (`READ_ONLY_TOOLS`, `PLAN_MODE_TOOLS`,
 `isDangerousCommand`) → тест → раздел в пробе. Новый RPC — ещё и в `scripts/ui-mock.js`,
-иначе покраснеет `tests/ui-mock-contract.test.ts`.
+иначе покраснеет `tests/ui-mock-contract.test.ts`. Если инструмент отдаёт модели что-то кроме
+текста (картинку, вложение) — это `ToolOutcome.images` и отдельное сообщение прогона; тогда
+его надо ещё и запретить внутри `run_code` (`DENIED_IN_PROGRAM`), иначе программа получит
+текст про картинку, которой модель не видит.
