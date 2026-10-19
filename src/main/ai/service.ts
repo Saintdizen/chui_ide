@@ -126,6 +126,13 @@ import { assertChatImages } from './images';
 import { createReadImageRunner } from './read-image';
 import { OpenAiCompatibleProvider } from './openai-compatible';
 import type { AiProvider } from './provider';
+import {
+  sanitizeToolPreset,
+  toolPresetAllows,
+  toolPresetNote,
+  toolPresetSpec,
+  type ToolPresetId,
+} from '../../shared/tool-presets';
 
 /**
  * Файлы с правилами проекта — подмешиваются в системный промпт. Читаются все,
@@ -777,6 +784,10 @@ export class AiService {
     const provider = this.createProvider(request.providerId);
     const useTools = request.useTools ?? false;
     const planMode = request.planMode ?? false;
+    // Набор инструментов: запрос может сузить его сам (пробы, скрипты), иначе — из
+    // настроек. Набор только сужает: кого вообще можно позвать, решают canRun,
+    // режим плана и права.
+    const toolPreset = sanitizeToolPreset(request.toolPreset ?? settings.ai.toolPreset);
     // В режиме плана менять ничего нельзя, поэтому права не в счёт: там «спрашивать».
     const permission = planMode
       ? 'ask'
@@ -834,6 +845,12 @@ export class AiService {
           .join('\n'),
       });
     else messages.push({ role: 'system', content: ASK_PROMPT });
+    // Суженный набор называется вслух: иначе агент ищет обходной путь там, где
+    // нужно попросить человека вернуть инструмент.
+    if (useTools && !planMode) {
+      const presetNote = toolPresetNote(toolPreset);
+      if (presetNote) messages.push({ role: 'system', content: presetNote });
+    }
     // Цель — часть рамки запроса, а не текущего вопроса: она едет в системном
     // сообщении, чтобы модель отличала «чего от меня хотят вообще» от «о чём
     // спросили сейчас». В «Вопросе» и «Плане» её нет: там нечего доводить до конца.
@@ -855,7 +872,10 @@ export class AiService {
     const hasSkills = useTools && (await skills.list()).length > 0;
     const available = useTools
       ? AGENT_TOOLS.filter(
-          (tool) => this.canRun(tool, host, hasSkills) && (!planMode || PLAN_MODE_TOOLS.has(tool.name)),
+          (tool) =>
+            this.canRun(tool, host, hasSkills) &&
+            toolPresetAllows(toolPreset, tool.name) &&
+            (!planMode || PLAN_MODE_TOOLS.has(tool.name)),
         )
       : [];
 
@@ -1082,6 +1102,8 @@ export class AiService {
           windowTokens,
           // Подзадача видит тот же контекст (с каталогом навыков) и может читать тело.
           skills,
+          // Набор тот же, что у основного агента: сужение не расширяется подзадачей.
+          toolPreset,
         });
         runUsage = addUsage(runUsage, sub.usage);
         runSteps += sub.steps;
@@ -1277,15 +1299,29 @@ export class AiService {
           continue;
         }
 
-        // Режим плана: исполняем только чтение. Если модель всё же позовёт
-        // изменяющий инструмент — он не выполнится, отвечаем ей отказом.
-        if (planMode && !PLAN_MODE_TOOLS.has(call.name)) {
+        // Отказ до исполнения: режим плана и суженный набор. Модель могла позвать
+        // инструмент, которого ей не предлагали, — по памяти прошлых ходов или по
+        // совету из чужого текста. Он не выполнится, и об этом надо сказать прямо:
+        // молчаливый отказ читается как «такого не бывает» и уводит в тупик.
+        const denied =
+          planMode && !PLAN_MODE_TOOLS.has(call.name)
+            ? {
+                content: `Режим плана: инструмент «${call.name}» недоступен. Ничего не меняй — составь план доступными средствами чтения.`,
+                summary: 'режим плана: изменение недоступно',
+              }
+            : !toolPresetAllows(toolPreset, call.name)
+              ? {
+                  content: `Набор инструментов «${toolPresetSpec(toolPreset).label}»: «${call.name}» в него не входит. Скажи человеку, какой инструмент нужен, — он сменит набор в композере.`,
+                  summary: `набор «${toolPresetSpec(toolPreset).label}»: инструмент недоступен`,
+                }
+              : undefined;
+        if (denied) {
           emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
           const refused: ChatMessage = {
             role: 'tool',
             toolCallId: call.id,
             name: call.name,
-            content: `Режим плана: инструмент «${call.name}» недоступен. Ничего не меняй — составь план доступными средствами чтения.`,
+            content: denied.content,
           };
           messages.push(refused);
           produced.push(refused);
@@ -1293,14 +1329,14 @@ export class AiService {
             id: call.id,
             name: call.name,
             ok: false,
-            summary: 'режим плана: изменение недоступно',
+            summary: denied.summary,
           });
           logCall({
             id: call.id,
             name: call.name,
             args: clampRunText(call.arguments),
             ok: false,
-            summary: 'режим плана: изменение недоступно',
+            summary: denied.summary,
             note: 'не исполнялся',
           });
           continue;
@@ -1587,6 +1623,8 @@ export class AiService {
     windowTokens: number;
     /** Навыки прогона: каталог подзадача видит, тело читает инструментом. */
     skills?: SkillTools;
+    /** Набор инструментов прогона: подзадача может лишь сузить его (см. tool-presets). */
+    toolPreset: ToolPresetId;
   }): Promise<{ outcome: ToolOutcome; steps: number; toolCalls: number; usage: ChatUsage }> {
     const settings = this.settings.get();
     const compressOutput = settings.ai.compressOutput !== false;
@@ -1598,7 +1636,10 @@ export class AiService {
     messages.push({ role: 'user', content: `Подзадача «${params.description}»:\n\n${params.prompt}` });
 
     const available = AGENT_TOOLS.filter(
-      (tool) => SUBAGENT_TOOLS.has(tool.name) && this.canRun(tool, params.host, params.skills !== undefined),
+      (tool) =>
+        SUBAGENT_TOOLS.has(tool.name) &&
+        toolPresetAllows(params.toolPreset, tool.name) &&
+        this.canRun(tool, params.host, params.skills !== undefined),
     );
     const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
     const toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;

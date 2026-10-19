@@ -817,6 +817,45 @@ app.whenReady().then(async () => {
       run.toolNames,
     );
 
+    /* 1и. набор инструментов сужается выбором: схемы едут в КАЖДОМ запросе,
+       и задаче «прочитай и объясни» не нужны ни терминал, ни браузер. */
+    requested = { name: 'read_file', args: { path: file } };
+    const fullRun = await chat(externalHost);
+    const readRun = await chat(externalHost, true, false, undefined, { toolPreset: 'read' });
+    check('набор «только чтение» предлагает чтение', readRun.toolNames.includes('read_file'), readRun.toolNames);
+    for (const name of ['run_terminal', 'apply_edit', 'git_commit', 'web_search']) {
+      check(`набор «только чтение» не предлагает ${name}`, !readRun.toolNames.includes(name), readRun.toolNames);
+    }
+    check('суженный набор дешевле полного', readRun.done.trace?.toolsTokens < fullRun.done.trace?.toolsTokens, {
+      полный: fullRun.done.trace?.toolsTokens,
+      чтение: readRun.done.trace?.toolsTokens,
+    });
+    const presetSystem = (readRun.bodies[0]?.messages ?? [])
+      .filter((message) => message.role === 'system')
+      .map((message) => String(message.content ?? ''))
+      .join('\n');
+    check(
+      'модели сказано, что набор сужен',
+      presetSystem.includes('Набор инструментов сужен'),
+      presetSystem.slice(-200),
+    );
+    check(
+      'при полном наборе такого не говорят',
+      !(fullRun.bodies[0]?.messages ?? []).some(
+        (message) => message.role === 'system' && String(message.content ?? '').includes('Набор инструментов сужен'),
+      ),
+    );
+    // Вызов мимо набора не исполняется: иначе выбор был бы только советом.
+    requested = { name: 'run_terminal', args: { command: 'echo chui-preset' } };
+    const deniedRun = await chat(externalHost, true, false, undefined, { toolPreset: 'read' });
+    check('вызов инструмента вне набора — отказ', deniedRun.results[0]?.ok === false, deniedRun.results[0]);
+    check(
+      'в отказе назван набор и путь к человеку',
+      /набор/i.test(String(deniedRun.results[0]?.summary ?? '')) &&
+        sentToModel(deniedRun.bodies[deniedRun.bodies.length - 1]).includes('сменит набор'),
+      deniedRun.results[0],
+    );
+
     /* 2. правки приняты */
     const recorded = [];
     const accepted = {

@@ -10,6 +10,7 @@ import {
   type ReasoningEffort,
   type Settings,
 } from '../../shared/api';
+import { sanitizeToolPreset, toolPresetSpec, type ToolPresetId } from '../../shared/tool-presets';
 import type { ApplyFailure, FileEdit } from '../../shared/edits';
 import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
 import { sessionAttachment } from '../../shared/session-context';
@@ -218,6 +219,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     onContext: () => menu.toggleContext(),
     onPasteImages: (files) => void attachments.attachFiles(files),
     onEffortChange: (effort) => void saveEffort(effort),
+    // Набор меняется и во время беседы: следующее действие увидит новый набор.
+    onToolPresetChange: (preset) => void saveToolPreset(preset),
   });
   const input = composer.input;
 
@@ -1021,6 +1024,21 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
   }
 
+  /** Набор инструментов — из настроек: он общий для всех бесед и переживает перезапуск. */
+  function syncToolPreset(): void {
+    composer.setToolPreset(sanitizeToolPreset(settings.ai.toolPreset));
+  }
+
+  async function saveToolPreset(preset: ToolPresetId): Promise<void> {
+    try {
+      settings = await deps.rpc.request('settings.update', { ai: { toolPreset: preset } });
+      syncToolPreset();
+      showToast(`Набор инструментов: ${toolPresetSpec(preset).label}`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error');
+    }
+  }
+
   /** Отрисовать панель изменений по активной беседе. */
   function renderChanges(): void {
     const session = active();
@@ -1816,6 +1834,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   void loadProjectCommands();
   syncProviderFields();
   syncEffort();
+  syncToolPreset();
   attachments.render();
   renderChanges();
 
@@ -1860,6 +1879,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       settings = next;
       syncProviderFields();
       syncEffort();
+      syncToolPreset();
       // Размер контекстного окна тоже в настройках: кольцо должно пересчитаться
       // сразу, а не после следующего ответа модели.
       syncSessionInfo();

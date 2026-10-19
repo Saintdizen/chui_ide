@@ -28,6 +28,7 @@ import { normalizeRulers } from '../shared/rulers';
 import { normalizeCursorStyle, normalizeLineHeight } from '../shared/cursor-style';
 import { normalizeWhitespaceMode } from '../shared/whitespace';
 import { normalizeSpellWords } from '../shared/spellcheck';
+import { DEFAULT_TOOL_PRESET, sanitizeToolPreset, type ToolPresetId } from '../shared/tool-presets';
 import { normalizePullMode } from '../shared/git-pull';
 import { normalizeRootOverrides } from '../shared/explorer-settings';
 import { sanitizeBadgeRules } from '../shared/icon-badges';
@@ -71,6 +72,8 @@ interface StoredSettings {
     maxSteps: number;
     /** То же при полном доступе. */
     maxAutopilotSteps: number;
+    /** Набор инструментов агента: что предлагать модели в каждом запросе. */
+    toolPreset: ToolPresetId;
     /** Страховка полного доступа: спрашивать перед необратимыми командами. */
     confirmDangerous: boolean;
     /** Проверять безобидные команды моделью, не спрашивая человека. */
@@ -156,6 +159,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     maxSteps: 8,
     // При полном доступе задача длиннее: шагов нужно больше.
     maxAutopilotSteps: 24,
+    // Набор инструментов — полный: сужение отнимает возможность, а это выбор человека.
+    toolPreset: DEFAULT_TOOL_PRESET,
     // Полный доступ по умолчанию не напролом: перед необратимыми командами
     // (sudo, rm, git push --force) спрашиваем, пока человек сам не отключит
     // страховку. Лишний вопрос дешевле одного пропущенного `rm -rf`.
@@ -383,6 +388,7 @@ export class SettingsStore {
         reasoningEffort: ai.reasoningEffort ?? 'off',
         maxSteps: ai.maxSteps,
         maxAutopilotSteps: ai.maxAutopilotSteps,
+        toolPreset: sanitizeToolPreset(ai.toolPreset),
         confirmDangerous: ai.confirmDangerous,
         approvalReview: ai.approvalReview === true,
         reviewModel: ai.reviewModel,
@@ -632,6 +638,7 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
   }
   if (patch.systemPrompt !== undefined) target.systemPrompt = patch.systemPrompt;
   if (patch.reasoningEffort !== undefined) target.reasoningEffort = patch.reasoningEffort;
+  if (patch.toolPreset !== undefined) target.toolPreset = sanitizeToolPreset(patch.toolPreset);
   if (patch.maxSteps !== undefined) target.maxSteps = clampSteps(patch.maxSteps, target.maxSteps);
   if (patch.maxAutopilotSteps !== undefined) {
     target.maxAutopilotSteps = clampSteps(patch.maxAutopilotSteps, target.maxAutopilotSteps);

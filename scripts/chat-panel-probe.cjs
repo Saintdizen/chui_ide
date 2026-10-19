@@ -570,6 +570,68 @@ app.whenReady().then(async () => {
     permPicked.подсказка,
   );
 
+  /* ── набор инструментов ─────────────────────────────────────────────────── */
+
+  // Схемы инструментов едут в КАЖДОМ запросе, поэтому набор сужается выбором.
+  // Здесь проверяем сам выбор: четыре варианта, выбранный виден снаружи (подсветка),
+  // а полный возвращается без следа.
+  const presetPicked = await ask(
+    ide,
+    `(async () => {
+      const preset = document.querySelector('.composer-preset');
+      if (!preset) return { нет: 'выбора набора' };
+      const былоДоступен = !preset.disabled;
+      let labels = [];
+      const pick = async (label) => {
+        preset.click();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        labels = [...document.querySelectorAll('.select-popup .select-item-label')].map((n) => n.textContent ?? '');
+        const item = [...document.querySelectorAll('.select-popup .select-item')].find(
+          (node) => (node.querySelector('.select-item-label')?.textContent ?? '') === label,
+        );
+        if (!item) return false;
+        item.click();
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return true;
+      };
+      const выбралось = await pick('Только чтение');
+      const выбранный = {
+        подпись: preset.querySelector('.select-value')?.textContent ?? null,
+        активна: preset.classList.contains('is-active'),
+        подсказка: preset.getAttribute('title'),
+      };
+      // Возвращаем полный: проба не должна уносить за собой суженный набор.
+      await pick('Все инструменты');
+      return {
+        былоДоступен,
+        labels,
+        выбралось,
+        ...выбранный,
+        послеВозврата: preset.querySelector('.select-value')?.textContent ?? null,
+        подсветкаСнята: !preset.classList.contains('is-active'),
+      };
+    })()`,
+  );
+  check('в «Агенте» набор инструментов доступен', presetPicked.былоДоступен === true, presetPicked);
+  check(
+    'в выборе набора четыре варианта — от полного к минимуму',
+    Array.isArray(presetPicked.labels) &&
+      presetPicked.labels.join('|') === 'Все инструменты|Правка|Только чтение|Минимум',
+    presetPicked.labels,
+  );
+  check('набор переключился на «Только чтение»', presetPicked.подпись === 'Только чтение', presetPicked);
+  check('суженный набор подсвечен', presetPicked.активна === true, presetPicked);
+  check(
+    'подсказка набора перечисляет, что в нём нет',
+    typeof presetPicked.подсказка === 'string' && presetPicked.подсказка.includes('изменений нет'),
+    presetPicked.подсказка,
+  );
+  check(
+    'полный набор вернулся',
+    presetPicked.послеВозврата === 'Все инструменты' && presetPicked.подсветкаСнята,
+    presetPicked,
+  );
+
   /* ── чип приложенного изображения ────────────────────────────────────────── */
 
   // Чип-картинка: слева в нём миниатюра, дальше имя, размер и крестик. Отступ

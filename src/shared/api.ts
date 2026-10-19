@@ -35,6 +35,7 @@ import type { ProjectPackage } from './monorepo';
 import type { ProjectCommand } from './commands';
 import type { ChatTitleParts } from './chat-title';
 import type { PermissionPreset } from './permissions';
+import type { ToolPresetId } from './tool-presets';
 import type { ForgeComment, ForgeInfo, ForgeIssue, ForgeNotification, ForgePipeline } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
 import type { GitStashEntry } from './git-stash';
@@ -786,6 +787,12 @@ export interface AiSettings {
   webFetch: AiWebFetchSettings;
   /** Браузерная автоматизация: выключена по умолчанию, как и веб-поиск. */
   browser: AiBrowserSettings;
+  /**
+   * Набор инструментов по умолчанию (см. `shared/tool-presets.ts`). Схемы
+   * инструментов едут в каждом запросе, поэтому набор собирается под задачу:
+   * полный — всё, что может сборка, узкий — только чтение или даже минимум.
+   */
+  toolPreset: ToolPresetId;
   /** Песочница: команды агента идут в контейнер, а не на машину пользователя. */
   sandbox: AiSandboxSettings;
   /**
@@ -1364,6 +1371,8 @@ export interface AiSettingsPatch {
   reviewModel?: string;
   /** Сжимать ли вывод инструментов перед отправкой модели. */
   compressOutput?: boolean;
+  /** Набор инструментов по умолчанию (см. `shared/tool-presets.ts`). */
+  toolPreset?: ToolPresetId;
   /** Настройки веб-поиска: ключ задаётся отдельным вызовом `ai.setWebSearchKey`. */
   webSearch?: { enabled?: boolean; provider?: WebSearchProvider; endpoint?: string };
   /** Чтение страниц по ссылке: только включение. */
@@ -1584,6 +1593,12 @@ export interface ChatRequest {
    * Не заданы — считаем по `autoApprove`, как в старых запросах.
    */
   permission?: PermissionPreset;
+  /**
+   * Набор инструментов на этот запрос (см. `shared/tool-presets.ts`). Не задан —
+   * берём из настроек (`ai.toolPreset`). Набор только сужает то, что разрешено
+   * сборкой и правами, и ничего не расширяет.
+   */
+  toolPreset?: ToolPresetId;
   /**
    * Устаревшее: `true` — это «полный доступ». Оставлено для проб и скриптов,
    * которые шлют запрос напрямую; настоящий выбор теперь в `permission`.

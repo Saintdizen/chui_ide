@@ -1,5 +1,6 @@
 import type { ReasoningEffort } from '../../shared/api';
 import { PERMISSION_PRESETS, permissionSpec, type PermissionPreset } from '../../shared/permissions';
+import { DEFAULT_TOOL_PRESET, TOOL_PRESETS, toolPresetSpec, type ToolPresetId } from '../../shared/tool-presets';
 import type { RpcClient } from '../core/rpc';
 import { clear, h, svgIcon, type IconName } from './dom';
 import { createSelect } from './select';
@@ -32,6 +33,8 @@ export interface ChatComposerDeps {
   onPasteImages(files: File[]): void;
   /** Сменили усилие размышления. */
   onEffortChange(effort: ReasoningEffort): void;
+  /** Сменили набор инструментов: какие схемы уедут модели в запросе. */
+  onToolPresetChange(preset: ToolPresetId): void;
 }
 
 /** Режим и права: их читает прогон ответа, чтобы решить, какими инструментами пользоваться. */
@@ -63,6 +66,8 @@ export interface ChatComposerView {
   setModel(providerLabel: string, model: string): void;
   /** Доступность усилия размышления — по возможностям выбранной модели. */
   setEffort(effort: ReasoningEffort, disabled: boolean, title: string): void;
+  /** Набор инструментов: хранят его настройки, композер только показывает выбор. */
+  setToolPreset(preset: ToolPresetId): void;
 }
 
 export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
@@ -72,6 +77,8 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
   let planMode = false;
   // Права: выбор в композере. По умолчанию спрашиваем обо всём — как и было у тумблера.
   let permission: PermissionPreset = 'ask';
+  // Набор инструментов: по умолчанию полный — как и в настройках.
+  let toolPreset: ToolPresetId = DEFAULT_TOOL_PRESET;
   let busy = false;
 
   const input = h('textarea', {
@@ -194,6 +201,41 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
       : `Права доступа: ${permissionSpec(permission).hint}`;
   }
 
+  /**
+   * Набор инструментов: схемы едут в КАЖДОМ запросе, и полный набор — это 11 000
+   * токенов. Задаче «прочитай и объясни» нет причин платить за терминал, браузер и
+   * git-push. Устроено как права: отдельный выбор рядом, действует в «Агенте».
+   */
+  const presetSelect = createSelect({ class: 'composer-select composer-preset' });
+  presetSelect.setOptions(
+    TOOL_PRESETS.map((item) => ({
+      value: item.id,
+      label: item.label,
+      icon: item.icon as IconName,
+      hint: item.hint,
+    })),
+  );
+  presetSelect.onChange((value) => {
+    toolPreset = value as ToolPresetId;
+    syncPreset();
+    deps.onToolPresetChange(toolPreset);
+  });
+
+  /**
+   * Состояние выбора набора: подсказка и вид — по режиму. В «Вопросе» инструментов
+   * нет, в «Плане» набор и так сужен до чтения — выбирать нечего.
+   */
+  function syncPreset(): void {
+    const canChoose = mode === 'agent';
+    presetSelect.setDisabled(!canChoose);
+    presetSelect.setValue(toolPreset);
+    // Суженный набор видно не раскрыв список: это важное состояние, а не мелочь.
+    presetSelect.element.classList.toggle('is-active', canChoose && toolPreset !== 'full');
+    presetSelect.element.title = !canChoose
+      ? 'Набор инструментов: доступен в режиме «Агент»'
+      : `Набор инструментов: ${toolPresetSpec(toolPreset).hint}`;
+  }
+
   /** Скрепка открывает тот же список контекста, что и «#»: его видно и без подсказки. */
   const contextButton = h(
     'button',
@@ -243,6 +285,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
           ? 'Инструменты разрешены'
           : 'Инструменты выключены';
     syncPerm();
+    syncPreset();
   }
 
   function setBusy(value: boolean): void {
@@ -263,6 +306,12 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     effortField.title = title;
   }
 
+  /** Набор пришёл из настроек: его мог сменить и композер, и другое окно. */
+  function setToolPreset(preset: ToolPresetId): void {
+    toolPreset = preset;
+    syncPreset();
+  }
+
   /**
    * Слот над полем ввода: панель плана, изменённые файлы и чипы приложенного
    * контекста. Всё это относится к ВОПРОСУ, который человек набирает, а не к ленте
@@ -280,7 +329,15 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     h(
       'div',
       { class: 'composer-toolbar' },
-      h('div', { class: 'composer-group' }, modeSelect.element, permSelect.element, modelButton, effortField),
+      h(
+        'div',
+        { class: 'composer-group' },
+        modeSelect.element,
+        permSelect.element,
+        presetSelect.element,
+        modelButton,
+        effortField,
+      ),
       h('div', { class: 'composer-group composer-group-end' }, contextButton, actionButton),
     ),
   );
@@ -298,5 +355,6 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     setBusy,
     setModel,
     setEffort,
+    setToolPreset,
   };
 }
