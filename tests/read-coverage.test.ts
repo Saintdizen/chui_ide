@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coveredRequest, isCovered, rememberRead } from '../src/shared/read-coverage';
+import { coveredRequest, forgetChangedFiles, isCovered, rememberRead, touchedPaths } from '../src/shared/read-coverage';
 
 /**
  * Учёт уже прочитанных диапазонов в агентном цикле.
@@ -114,5 +114,105 @@ describe('rememberRead', () => {
       { from: 10, to: 20 },
     ]);
     expect(reads.get('/b.ts')).toEqual([{ from: 1, to: 3 }]);
+  });
+});
+
+describe('touchedPaths', () => {
+  const edit = (path: string) =>
+    JSON.stringify({
+      edits: [{ path, edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'x' }] }],
+    });
+
+  it('путь правки берётся из аргументов apply_edit', () => {
+    expect([...(touchedPaths('apply_edit', edit('/proj/a.ts')) ?? [])]).toEqual(['/proj/a.ts']);
+  });
+
+  it('одиночный файл без обёртки в массив — тоже путь', () => {
+    const args = JSON.stringify({
+      path: '/proj/b.ts',
+      edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'x' }],
+    });
+    expect([...(touchedPaths('apply_edit', args) ?? [])]).toEqual(['/proj/b.ts']);
+  });
+
+  it('пути из патчей по якорю', () => {
+    const args = JSON.stringify({ patches: [{ path: '/proj/c.ts', patches: [{ oldText: 'a', newText: 'b' }] }] });
+    expect([...(touchedPaths('apply_patch', args) ?? [])]).toEqual(['/proj/c.ts']);
+  });
+
+  it('создание, удаление и перенос', () => {
+    expect([...(touchedPaths('create_file', JSON.stringify({ path: '/proj/n.ts', contents: '' })) ?? [])]).toEqual([
+      '/proj/n.ts',
+    ]);
+    expect([...(touchedPaths('delete_file', JSON.stringify({ path: '/proj/d.ts' })) ?? [])]).toEqual(['/proj/d.ts']);
+    const moved = touchedPaths('move_file', JSON.stringify({ from: '/proj/old.ts', to: '/proj/new.ts' })) ?? new Set();
+    expect([...moved].sort()).toEqual(['/proj/new.ts', '/proj/old.ts']);
+  });
+
+  it('пути из результата тоже считаются (создание и перенос)', () => {
+    const touched = touchedPaths('move_file', '{}', [{ path: '/proj/new.ts', from: '/proj/old.ts' }]) ?? new Set();
+    expect([...touched].sort()).toEqual(['/proj/new.ts', '/proj/old.ts']);
+  });
+
+  it('разделители пути не мешают совпадению', () => {
+    const args = JSON.stringify({ path: 'C:\\proj\\a.ts', contents: '' });
+    expect([...(touchedPaths('create_file', args) ?? [])]).toEqual(['C:/proj/a.ts']);
+  });
+
+  it('команда и массовая замена: задетое назвать нельзя — null', () => {
+    expect(touchedPaths('run_terminal', JSON.stringify({ command: 'rm -rf build' }))).toBeNull();
+    expect(touchedPaths('replace_in_files', JSON.stringify({ query: 'a', replacement: 'b' }))).toBeNull();
+    expect(touchedPaths('apply_edit', '{битый json')).toBeNull();
+  });
+});
+
+describe('forgetChangedFiles', () => {
+  /** Кеши как в агентном цикле: что исполнялось и какие диапазоны прочитаны. */
+  const caches = () => ({
+    executed: new Map<string, { ok: boolean }>([
+      ['read_file:{"path":"/proj/a.ts"}', { ok: true }],
+      ['read_file:{"path":"/proj/b.ts","endLine":9}', { ok: true }],
+    ]),
+    coveredReads: new Map([
+      ['/proj/a.ts', [{ from: 1, to: 100 }]],
+      ['/proj/b.ts', [{ from: 1, to: 9 }]],
+    ]),
+  });
+
+  it('правка одного файла не стирает память о других', () => {
+    const state = caches();
+    forgetChangedFiles(state, 'create_file', JSON.stringify({ path: '/proj/a.ts', contents: 'x' }));
+    // Забыт только a.ts — и в обоих кешах.
+    expect(state.coveredReads.has('/proj/a.ts')).toBe(false);
+    expect(state.executed.has('read_file:{"path":"/proj/a.ts"}')).toBe(false);
+    // b.ts не трогали: модель не перечитывает его заново.
+    expect(state.coveredReads.has('/proj/b.ts')).toBe(true);
+    expect(state.executed.has('read_file:{"path":"/proj/b.ts","endLine":9}')).toBe(true);
+  });
+
+  it('команда в терминале по-прежнему забывает всё', () => {
+    const state = caches();
+    forgetChangedFiles(state, 'run_terminal', JSON.stringify({ command: 'npm install' }));
+    expect(state.executed.size).toBe(0);
+    expect(state.coveredReads.size).toBe(0);
+  });
+
+  it('обратный слэш в пути не мешает забыть нужный файл', () => {
+    // На Windows main отдаёт пути через `\\`. Сравниваем по единому виду, иначе
+    // правка не забыла бы ничего и модель читала бы изменённый файл из кеша.
+    const state = {
+      executed: new Map<string, { ok: boolean }>([['read_file:{"path":"C:/proj/x.ts"}', { ok: true }]]),
+      coveredReads: new Map([['C:/proj/x.ts', [{ from: 1, to: 5 }]]]),
+    };
+    forgetChangedFiles(state, 'create_file', JSON.stringify({ path: 'C:\\proj\\x.ts', contents: 'x' }));
+    expect(state.coveredReads.size).toBe(0);
+    expect(state.executed.size).toBe(0);
+  });
+
+  it('чужой путь кеш не задевает', () => {
+    const state = caches();
+    forgetChangedFiles(state, 'create_file', JSON.stringify({ path: '/other/c.ts', contents: 'x' }));
+    expect(state.coveredReads.size).toBe(2);
+    expect(state.executed.size).toBe(2);
   });
 });

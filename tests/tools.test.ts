@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, parseToolArguments, toOpenAiTools, type AgentToolName } from '../src/shared/tools';
 
 const byName = new Map(AGENT_TOOLS.map((tool) => [tool.name, tool]));
@@ -246,5 +247,34 @@ describe('parseToolArguments', () => {
     const result = parseToolArguments('{не json');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.message).toContain('разобрать');
+  });
+});
+
+describe('вес описаний — под присмотром', () => {
+  /**
+   * Описания уезжают модели в КАЖДОМ запросе, а прогон агента делает их десяток.
+   * Типичный набор — 51 схема, и до этой проверки одни описания весили около
+   * 6 200 токенов: половина из них повторяла правила из `AGENT_PROMPT`
+   * («прежде чем читать файл целиком — поищи», «context=2–3»).
+   *
+   * Правило теперь одно: в описании — что инструмент делает, что вернёт и жёсткое
+   * ограничение. Когда брать инструмент и что делать при промахе, живёт в
+   * системном промпте (`AGENT_PROMPT` в `src/main/ai/service.ts`), и только там.
+   */
+  it('ни одно описание не длиннее 400 символов', () => {
+    const long = AGENT_TOOLS.filter((tool) => tool.description.length > 400).map((tool) => ({
+      name: tool.name,
+      length: tool.description.length,
+    }));
+    expect(long).toEqual([]);
+  });
+
+  it('все описания вместе влезают в 5 200 токенов', () => {
+    // Меряем той же ставкой, что и main (`estimateTextTokens`): описания по-русски,
+    // а кириллица в токенах дороже латиницы примерно вдвое. Замер на момент
+    // проверки — около 4 900. Порог ловит не отдельную правку, а сползание:
+    // три-четыре «объясню подробнее» возвращают накопленное.
+    const tokens = estimateTextTokens(AGENT_TOOLS.map((tool) => tool.description).join(''));
+    expect(tokens).toBeLessThan(5200);
   });
 });
