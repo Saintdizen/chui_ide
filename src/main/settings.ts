@@ -79,6 +79,11 @@ interface StoredSettings {
     reviewModel?: string;
     /** Убирать шум из вывода инструментов перед отправкой модели. */
     compressOutput: boolean;
+    /**
+     * Чтение страниц по ссылке (`web_fetch`): тоже ход наружу, поэтому тоже
+     * выключено, пока человек не включит его сам.
+     */
+    webFetch: { enabled: boolean };
     /** Веб-поиск ассистента: выключен, пока человек не включит его сам. */
     webSearch: {
       enabled: boolean;
@@ -162,6 +167,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     compressOutput: true,
     // Веб-поиск выключен: агент не должен ходить в интернет без явного согласия.
     webSearch: { enabled: false, provider: 'searxng', endpoint: '' },
+    // Чтение страниц по ссылке — тот же ход наружу, значит тоже только осознанно.
+    webFetch: { enabled: false },
     // Браузер выключен: агент ходил бы по чужим страницам и нажимал там кнопки.
     // Включается осознанно — вместе с ним включаются и подтверждения действий.
     browser: { enabled: false, executable: '', headless: true, integrated: true },
@@ -380,6 +387,7 @@ export class SettingsStore {
         approvalReview: ai.approvalReview === true,
         reviewModel: ai.reviewModel,
         compressOutput: ai.compressOutput !== false,
+        webFetch: { enabled: ai.webFetch?.enabled === true },
         webSearch: {
           enabled: ai.webSearch?.enabled === true,
           provider: ai.webSearch?.provider ?? 'searxng',
@@ -640,6 +648,10 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
 
   // Веб-поиск: включение, вид сервиса и адрес. Ключ сюда не входит — он приходит
   // отдельным вызовом `ai.setWebSearchKey`, как ключи провайдеров.
+  if (patch.webFetch) {
+    target.webFetch.enabled = patch.webFetch.enabled === true;
+  }
+
   if (patch.webSearch) {
     const incoming = patch.webSearch;
     if (incoming.enabled !== undefined) target.webSearch.enabled = incoming.enabled === true;
@@ -757,6 +769,9 @@ function loadSettings(filePath: string): StoredSettings {
   // Модель проверки: строка без пробелов или ничего (тогда проверяет активная).
   ai.reviewModel =
     typeof storedAi.reviewModel === 'string' && storedAi.reviewModel.trim() ? storedAi.reviewModel.trim() : undefined;
+  // Чтение страниц по ссылке: единственное поле — включение.
+  ai.webFetch = { enabled: (storedAi.webFetch as { enabled?: unknown } | undefined)?.enabled === true };
+
   // Веб-поиск: файл правят и руками, поэтому берём только известные значения.
   const storedSearch = (storedAi.webSearch ?? {}) as Partial<StoredSettings['ai']['webSearch']>;
   ai.webSearch = {

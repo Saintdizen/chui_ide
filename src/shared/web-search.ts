@@ -133,6 +133,6 @@ export function formatWebResults(
 
   return {
     summary: `«${query}»: результатов ${hits.length} (${providerLabel})`,
-    detail: `${detail}\n\nИсточник: ${providerLabel}. Это поисковая выдача, а не проверенный факт: на страницу по ссылке агент не ходил.`,
+    detail: `${detail}\n\nИсточник: ${providerLabel}. Это поисковая выдача, а не проверенный факт: содержимое по ссылке читает web_fetch.`,
   };
 }

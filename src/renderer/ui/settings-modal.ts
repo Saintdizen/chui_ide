@@ -686,6 +686,20 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       webSearchKeyField,
       h('div', { class: 'settings-divider' }),
       switchRow(
+        'Чтение страниц по ссылке (инструмент web_fetch)',
+        ai.webFetch.enabled,
+        (value) => void patch({ ai: { webFetch: { enabled: value } } }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Даёт ассистенту открывать страницу из поисковой выдачи и читать её текстом — ' +
+          'с заголовком и ссылками, по которым можно пойти дальше. Выключено по умолчанию: ' +
+          'это ход наружу. Открывается только http и https, файлы (картинки, архивы, pdf) ' +
+          'инструмент не читает, а адрес проверяется до запроса.',
+      ),
+      h('div', { class: 'settings-divider' }),
+      switchRow(
         'Браузер (инструменты browser_*)',
         ai.browser.enabled,
         (value) => void patch({ ai: { browser: { enabled: value } } }),

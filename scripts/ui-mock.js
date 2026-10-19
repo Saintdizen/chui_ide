@@ -315,6 +315,8 @@ module.exports = [
       // Усилие размышления и веб-поиск: тумблеры композера читают их напрямую.
       reasoningEffort: 'off',
       webSearch: { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false },
+      // Чтение страниц по ссылке: как main — есть всегда, выключено по умолчанию.
+      webFetch: { enabled: false },
       // Браузер агента: как main — секция есть всегда, по умолчанию выключена.
       browser: { enabled: false, executable: '', headless: true },
       // Песочница агента: как main — выключена, образ по умолчанию.

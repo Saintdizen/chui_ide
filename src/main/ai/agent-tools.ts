@@ -19,6 +19,7 @@ import { formatDocsAnswer } from '../../shared/docs-index';
 import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
+import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
 import { parsePatchFiles, type PatchFile } from '../../shared/patch';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
@@ -166,6 +167,14 @@ export interface WebSearchRunner {
 }
 
 /**
+ * Чтение страницы по ссылке для инструмента `web_fetch`. Сеть живёт в
+ * `ai/web-fetch.ts`, а сюда приходит готовый вызов — тот же уговор, что у `web_search`.
+ */
+export interface WebFetchRunner {
+  fetch(url: string, options?: { signal?: AbortSignal; maxChars?: number }): Promise<FetchedPage>;
+}
+
+/**
  * Линтер проекта: проверка кода на замечания. Выбор движка и запуск живут в main
  * (`project/lint.ts`), сюда приходит готовый вызов — тот же уговор, что у `GitTools`
  * и `TerminalAgent`. Инструмент остаётся проверяемым без запуска линтеров.
@@ -303,6 +312,8 @@ export interface ToolContext {
   skills?: SkillTools;
   /** Веб-поиск: подключён только при включённой настройке. */
   webSearch?: WebSearchRunner;
+  /** Чтение страницы по ссылке: тоже только при включённой настройке. */
+  webFetch?: WebFetchRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
   mcp?: McpRunner;
   /** Подзадачи (инструмент `task`): запускает service — у него есть провайдер. */
@@ -327,6 +338,8 @@ export interface ToolContext {
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
 const MAX_OUTPUT_CHARS = 60_000;
+/** Больше этого одной страницы модели не отдаём: даже по просьбе. */
+const MAX_FETCH_CHARS = 60_000;
 const MAX_SEARCH_HITS = 200;
 /** Сколько разделов документации отдаём на один запрос `search_docs`. */
 const MAX_DOC_RESULTS = 12;
@@ -445,6 +458,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return runStop(ctx, parsed.value);
       case 'web_search':
         return await webSearch(ctx, parsed.value);
+      case 'web_fetch':
+        return await webFetch(ctx, parsed.value);
       case 'create_file':
         return await createFile(ctx.workspace, parsed.value);
       case 'delete_file':
@@ -2026,6 +2041,38 @@ async function webSearch(ctx: ToolContext, args: Record<string, unknown>): Promi
       ok: false,
       summary: `Веб-поиск недоступен: ${reason}`,
       detail: 'Поиск не выполнился. Не повторяй тот же запрос — ответь по тому, что известно из проекта.',
+    };
+  }
+}
+
+/**
+ * Чтение страницы по ссылке. Отказ объясняем причиной: «сайт не пускает без
+ * входа», «такой страницы нет» — это разные вещи, и дальше модель действует
+ * по-разному: в первом случае меняет источник, во втором — проверяет адрес.
+ *
+ * Чужое содержимое помечено в ответе как данные, а не как указания: текст
+ * страницы может содержать что угодно, включая просьбы выполнить команду.
+ */
+async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.webFetch) return { ok: false, summary: 'Чтение страниц не подключено' };
+
+  const url = requireString(args, 'url');
+  const requested = optionalInteger(args, 'maxChars');
+  const maxChars = requested === undefined ? undefined : Math.min(Math.max(requested, 1000), MAX_FETCH_CHARS);
+
+  try {
+    const page = await ctx.webFetch.fetch(url, { signal: ctx.signal, maxChars });
+    const shaped = formatFetchedPage(page);
+    return { ok: true, summary: shaped.summary, detail: shaped.detail };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      summary: `Страница не открылась: ${reason}`,
+      detail:
+        'Эта страница не прочиталась. Не повторяй тот же адрес: возьми другой источник ' +
+        'или ответь по тому, что уже известно. Если адрес ведёт на файл (картинку, архив, pdf), ' +
+        'его скачивают терминалом.',
     };
   }
 }

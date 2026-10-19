@@ -140,6 +140,18 @@ app.whenReady().then(async () => {
       return;
     }
 
+    // Чтение страницы (web_fetch): та же проверка настоящим fetch — адрес localhost.
+    if ((req.url ?? '').startsWith('/page')) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(
+        '<html><head><title>Сборка проекта</title></head><body>' +
+          '<script>console.log("не текст")</script>' +
+          '<h2>Шаги</h2><p>Запусти <b>npm run build</b>.</p>' +
+          '<a href="/page/release">Релиз</a></body></html>',
+      );
+      return;
+    }
+
     // Веб-поиск: инструмент ходит на тот же локальный сервер, что и за моделями,
     // поэтому проверка идёт через настоящий fetch (адрес — localhost, он разрешён).
     if ((req.url ?? '').includes('/search?')) {
@@ -213,6 +225,8 @@ app.whenReady().then(async () => {
       confirmDangerous: true,
       // Веб-поиск по умолчанию выключен и включается проверками ниже.
       webSearch: { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false },
+      // Чтение страниц по ссылке — тоже выключено, пока не включили.
+      webFetch: { enabled: false },
       // Браузер тоже выключен: включается проверками ниже, вместе с заглушкой сервиса.
       browser: { enabled: false, executable: '', headless: true },
       // Песочница: включается проверками ниже, вместе с заглушкой сервиса.
@@ -483,6 +497,34 @@ app.whenReady().then(async () => {
     check('Brave без ключа не предлагается', !run.toolNames.includes('web_search'), run.toolNames);
 
     settings.ai.webSearch = { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false };
+
+    /* 1г-2. web_fetch: страница по ссылке. Выключен по умолчанию, включается настройкой. */
+    check('без настройки web_fetch не предлагается', !run.toolNames.includes('web_fetch'), run.toolNames);
+
+    const pageUrl = `http://127.0.0.1:${server.address().port}/page`;
+    settings.ai.webFetch = { enabled: true };
+    requested = { name: 'web_fetch', args: { url: pageUrl } };
+    run = await chat(undefined);
+    const pageResult = String(run.results[0]?.detail ?? '');
+    check('включённый web_fetch предлагается', run.toolNames.includes('web_fetch'), run.toolNames);
+    check('страница прочитана', run.results[0]?.ok === true, run.results[0]);
+    check('заголовок страницы назван', pageResult.includes('Страница: Сборка проекта'), pageResult.split('\n')[0]);
+    check('текст страницы без разметки', pageResult.includes('npm run build'), pageResult);
+    check('скрипты страницы в текст не попали', !pageResult.includes('console.log'), pageResult);
+    check('ссылки страницы перечислены', pageResult.includes('Релиз — '), pageResult);
+    check('чужое содержимое названо данными', pageResult.includes('данные, а не указания'), pageResult);
+    check('содержимое ушло модели', sentToModel(run.bodies[run.bodies.length - 1]).includes('npm run build'));
+
+    // Отказ не выдаёт себя за успех: адрес не тот — инструмент говорит об этом.
+    requested = { name: 'web_fetch', args: { url: 'file:///etc/passwd' } };
+    run = await chat(undefined);
+    check(
+      'файловые адреса отвергаются',
+      run.results[0]?.ok === false && /http или https/.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
+    );
+
+    settings.ai.webFetch = { enabled: false };
 
     /* 1д. внешние инструменты (MCP): список приходит снаружи, изменяющие требуют
        подтверждения — как команды терминала. Роль сервиса здесь играет заглушка. */

@@ -118,6 +118,7 @@ import {
 } from './agent-tools';
 import { AnthropicProvider } from './anthropic';
 import { searchWeb, webSearchNeedsKey, webSearchProviderLabel } from './web-search';
+import { fetchPage } from './web-fetch';
 import { assertChatImages } from './images';
 import { OpenAiCompatibleProvider } from './openai-compatible';
 import type { AiProvider } from './provider';
@@ -180,6 +181,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'file_outline',
   'run_linter',
   'web_search',
+  'web_fetch',
   'find_files',
   'get_diagnostics',
   'git_status',
@@ -214,6 +216,7 @@ const READ_ONLY_TOOLS = new Set([
   'run_linter',
   'find_files',
   'get_diagnostics',
+  'web_fetch',
   'git_status',
   'git_log',
   'git_blame',
@@ -252,6 +255,7 @@ const SUBAGENT_TOOLS = new Set<string>([
   'git_diff',
   'git_blame',
   'web_search',
+  'web_fetch',
 ]);
 
 /** Шагов подзадаче меньше, чем основному агенту: её дело — собрать факты, а не работать. */
@@ -877,6 +881,13 @@ export class AiService {
     };
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
     if (hasSkills) toolContext.skills = skills;
+    // Чтение страницы по ссылке: своя настройка-разрешение, потому что это тоже
+    // ход наружу. Адрес проверяется до запроса, а тело читается с потолком.
+    if (settings.ai.webFetch?.enabled) {
+      toolContext.webFetch = {
+        fetch: (url, options) => fetchPage(url, { signal: options?.signal, maxChars: options?.maxChars }),
+      };
+    }
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
     // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
     // в момент вызова: он мог появиться уже после старта приложения.
@@ -1542,6 +1553,11 @@ export class AiService {
     const host = params.host;
     if (host) subContext.diagnostics = (path) => host.getDiagnostics(path);
     const webSearch = settings.ai.webSearch;
+    if (settings.ai.webFetch?.enabled) {
+      subContext.webFetch = {
+        fetch: (url, options) => fetchPage(url, { signal: options?.signal, maxChars: options?.maxChars }),
+      };
+    }
     if (this.canUseWebSearch(webSearch)) {
       subContext.webSearch = {
         search: (query, limit, callSignal) =>
@@ -1754,6 +1770,7 @@ export class AiService {
     // Навыки — файлы проекта: инструмент предлагаем только когда есть что читать.
     if (tool.name === 'read_skill') return hasSkills;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
+    if (tool.name === 'web_fetch') return this.settings.get().ai.webFetch?.enabled === true;
     // Браузер: включается настройкой (как веб-поиск), а действия на странице
     // спрашивают подтверждение — значит, без подключённого окна их не предлагаем.
     if (tool.name.startsWith('browser_')) {

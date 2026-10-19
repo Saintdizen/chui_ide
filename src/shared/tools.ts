@@ -38,6 +38,7 @@ export type AgentToolName =
   | 'run_output'
   | 'run_stop'
   | 'web_search'
+  | 'web_fetch'
   | 'create_file'
   | 'delete_file'
   | 'move_file'
@@ -609,6 +610,27 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         id: { type: 'string', description: 'Номер задания из run_background.' },
       },
       required: ['id'],
+    },
+  },
+  {
+    name: 'web_fetch',
+    side: 'main',
+    description:
+      'Открыть страницу по ссылке и прочитать её текстом. Поиск (web_search) отдаёт только выдачу — ' +
+      'содержимое проверяется здесь. Возвращает заголовок, текст без разметки и ссылки со страницы, ' +
+      'по которым можно пойти дальше. Только http и https; файлы (картинки, архивы, pdf) не читает.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'Полный адрес страницы: https://example.com/page' },
+        maxChars: {
+          type: 'number',
+          description:
+            'Сколько символов текста отдать (по умолчанию 20 000, не больше 60 000). Если обрезано — ' +
+            'на странице есть ссылки: иди по ним, а не тяни ту же страницу целиком.',
+        },
+      },
+      required: ['url'],
     },
   },
   {

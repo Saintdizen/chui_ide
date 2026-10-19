@@ -782,6 +782,8 @@ export interface AiSettings {
   compressOutput: boolean;
   /** Веб-поиск: выключен по умолчанию, инструмент предлагается только при включении. */
   webSearch: AiWebSearchSettings;
+  /** Чтение страниц по ссылке: отдельный выключатель, тоже выключен по умолчанию. */
+  webFetch: AiWebFetchSettings;
   /** Браузерная автоматизация: выключена по умолчанию, как и веб-поиск. */
   browser: AiBrowserSettings;
   /** Песочница: команды агента идут в контейнер, а не на машину пользователя. */
@@ -1364,6 +1366,8 @@ export interface AiSettingsPatch {
   compressOutput?: boolean;
   /** Настройки веб-поиска: ключ задаётся отдельным вызовом `ai.setWebSearchKey`. */
   webSearch?: { enabled?: boolean; provider?: WebSearchProvider; endpoint?: string };
+  /** Чтение страниц по ссылке: только включение. */
+  webFetch?: { enabled?: boolean };
   /** Браузерная автоматизация: включение, встроенный или отдельный Chromium. */
   browser?: { enabled?: boolean; executable?: string; headless?: boolean; integrated?: boolean };
   /** Песочница: включение, образ, рабочий каталог и сеть. */
@@ -1411,6 +1415,14 @@ export interface AiWebSearchSettings {
   endpoint: string;
   /** Ключ задан. Сам ключ наружу не отдаём — как и ключи провайдеров. */
   hasApiKey: boolean;
+}
+
+/**
+ * Чтение страниц по ссылке (`web_fetch`). Отдельно от поиска: поиск находит, а
+ * сюда агент идёт за содержимым. Выключено по умолчанию — это ход наружу.
+ */
+export interface AiWebFetchSettings {
+  enabled: boolean;
 }
 
 /**

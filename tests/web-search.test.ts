@@ -118,7 +118,8 @@ describe('formatWebResults', () => {
     expect(summary).toBe('«ffmpeg scale»: результатов 2 (Brave)');
     expect(detail).toContain('1. Документация\n   https://ffmpeg.org/scale\n   фильтр scale');
     expect(detail).toContain('2. Пример\n   https://ex.example');
-    expect(detail).toContain('на страницу по ссылке агент не ходил');
+    // Выдача — не проверенный факт: содержимое по ссылке читает отдельный инструмент.
+    expect(detail).toContain('содержимое по ссылке читает web_fetch');
   });
 
   it('пустая выдача — это не ошибка, но и не ответ', () => {
