@@ -119,6 +119,7 @@ import {
 import { AnthropicProvider } from './anthropic';
 import { searchWeb, webSearchNeedsKey, webSearchProviderLabel } from './web-search';
 import { fetchPage } from './web-fetch';
+import { canRunProgram, runProgram } from './run-code';
 import { assertChatImages } from './images';
 import { OpenAiCompatibleProvider } from './openai-compatible';
 import type { AiProvider } from './provider';
@@ -275,6 +276,7 @@ const AGENT_PROMPT = [
   'Вопрос о том, как проект устроен или как что-то сделать, сперва задай документации (search_docs): там готовый ответ, а не вывод по коду. Запрос можно писать словами.',
   'Устройство файла видно по скелету (file_outline): объявления с номерами строк. Дальше читай этим диапазоном, а не файл целиком.',
   'Большие файлы читай диапазоном строк и не перечитывай одно и то же много раз.',
+  'Когда вызовов много и они однотипны (прочитать десяток файлов, отфильтровать найденное, свести результаты), бери run_code: одна программа вместо десяти оборотов. Внутри неё инструменты — обычные функции: await tools.read_file({ path }) возвращает { ok, summary, text }.',
   'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу.',
   'Перед тем как чинить код, посмотри get_diagnostics — так видно настоящую ошибку, а не догадку.',
   'Для правок по умолчанию бери apply_patch: там не нужно называть строки и столбцы — ты даёшь точный фрагмент, который надо заменить, а позиции IDE считает сама. Позиционный apply_edit уместен, когда место уже посчитано тобой точно.',
@@ -888,6 +890,22 @@ export class AiService {
         fetch: (url, options) => fetchPage(url, { signal: options?.signal, maxChars: options?.maxChars }),
       };
     }
+    // Программа (run_code): запуск в отдельном процессе. Что ей можно звать,
+    // решает этот же контекст — правки и команды внутри программы идут тем же
+    // путём, что и снаружи, с подтверждениями и ревью.
+    const programAllowed = canRunProgram(Boolean(sandboxSettings.enabled));
+    if (programAllowed) {
+      toolContext.runCode = {
+        run: (source, options) =>
+          runProgram(source, {
+            root: this.workspace.rootPath() ?? process.cwd(),
+            timeoutMs: options.timeoutMs,
+            ...(options.signal ? { signal: options.signal } : {}),
+            onCall: options.onCall,
+          }),
+      };
+    }
+
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
     // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
     // в момент вызова: он мог появиться уже после старта приложения.
@@ -1771,6 +1789,9 @@ export class AiService {
     if (tool.name === 'read_skill') return hasSkills;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     if (tool.name === 'web_fetch') return this.settings.get().ai.webFetch?.enabled === true;
+    // Программа требует отдельного процесса: при включённой песочнице она шла бы
+    // на хосте, а это обход обещания песочницы — тогда инструмента не предлагаем.
+    if (tool.name === 'run_code') return canRunProgram(Boolean(this.settings.get().ai.sandbox?.enabled));
     // Браузер: включается настройкой (как веб-поиск), а действия на странице
     // спрашивают подтверждение — значит, без подключённого окна их не предлагаем.
     if (tool.name.startsWith('browser_')) {

@@ -526,6 +526,56 @@ app.whenReady().then(async () => {
 
     settings.ai.webFetch = { enabled: false };
 
+    /* 1г-3. run_code: программа вместо десятка вызовов. Инструменты внутри неё —
+       те же, что снаружи: программа читает файл и считает по нему строки. */
+    requested = {
+      name: 'run_code',
+      args: {
+        code: [
+          'const first = await tools.read_file({ path: process.env.PROBE_FILE });',
+          'const lines = first.text.split(String.fromCharCode(10));',
+          'console.log("строк:", lines.length);',
+          'return { ok: first.ok, строк: lines.length, есть_маркер: first.text.includes(process.env.PROBE_MARK) };',
+        ].join('\n'),
+      },
+    };
+    process.env.PROBE_FILE = file;
+    process.env.PROBE_MARK = MARKER;
+    run = await chat(undefined);
+    const program = String(run.results[0]?.detail ?? '');
+    check('run_code предложен модели', run.toolNames.includes('run_code'), run.toolNames);
+    check('программа исполнилась', run.results[0]?.ok === true, run.results[0]);
+    check('вызов внутри программы виден', program.includes('1. read_file —'), program);
+    check('результат программы вернулся модели', program.includes('есть_маркер'), program);
+    check('вывод console показан', program.includes('строк:'), program);
+    check(
+      'итог программы в сводке',
+      /run_code: 1 вызов/.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
+    );
+
+    // Ошибка программы — причина словами, а не пустой ответ.
+    requested = { name: 'run_code', args: { code: 'return undefinedVariable.length;' } };
+    run = await chat(undefined);
+    check(
+      'падение программы названо причиной',
+      run.results[0]?.ok === false && /run_code: ошибка/.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
+    );
+
+    // Себя программа не зовёт: вызов отклоняется ещё до исполнения.
+    requested = {
+      name: 'run_code',
+      args: { code: "const again = await tools.run_code({ code: 'return 1' });\nreturn again.ok;" },
+    };
+    run = await chat(undefined);
+    check(
+      'из программы run_code не зовётся',
+      String(run.results[0]?.detail ?? '').includes('недоступен из программы') ||
+        String(run.results[0]?.detail ?? '').includes('false'),
+      String(run.results[0]?.detail ?? '').slice(0, 200),
+    );
+
     /* 1д. внешние инструменты (MCP): список приходит снаружи, изменяющие требуют
        подтверждения — как команды терминала. Роль сервиса здесь играет заглушка. */
     const external = [];

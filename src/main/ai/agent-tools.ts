@@ -20,6 +20,7 @@ import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
+import { formatRunCode, runCodeToolAllowed, type RunCodeOutcome } from '../../shared/run-code';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
 import { parsePatchFiles, type PatchFile } from '../../shared/patch';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
@@ -175,6 +176,25 @@ export interface WebFetchRunner {
 }
 
 /**
+ * Вызов инструмента изнутри программы `run_code`: что вернуть самой программе.
+ * Это те же `ok`, `summary` и текст, что видит модель у обычного вызова, — иначе
+ * программе пришлось бы разбирать ещё один формат.
+ */
+export type RunCallHandler = (name: string, args: unknown) => Promise<{ ok: boolean; summary: string; text: string }>;
+
+/**
+ * Программа (`run_code`). Запуск, права и обрыв живут в `ai/run-code.ts`; main же
+ * решает, что программа может звать: `onCall` — это тот же `runTool` с тем же
+ * контекстом, поэтому подтверждения и запись правок идут обычным путём.
+ */
+export interface RunCodeRunner {
+  run(
+    source: string,
+    options: { signal?: AbortSignal; timeoutMs?: number; onCall: RunCallHandler },
+  ): Promise<RunCodeOutcome>;
+}
+
+/**
  * Линтер проекта: проверка кода на замечания. Выбор движка и запуск живут в main
  * (`project/lint.ts`), сюда приходит готовый вызов — тот же уговор, что у `GitTools`
  * и `TerminalAgent`. Инструмент остаётся проверяемым без запуска линтеров.
@@ -314,6 +334,8 @@ export interface ToolContext {
   webSearch?: WebSearchRunner;
   /** Чтение страницы по ссылке: тоже только при включённой настройке. */
   webFetch?: WebFetchRunner;
+  /** Программа вместо десятка вызовов: есть, когда её вообще можно запустить. */
+  runCode?: RunCodeRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
   mcp?: McpRunner;
   /** Подзадачи (инструмент `task`): запускает service — у него есть провайдер. */
@@ -460,6 +482,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await webSearch(ctx, parsed.value);
       case 'web_fetch':
         return await webFetch(ctx, parsed.value);
+      case 'run_code':
+        return await runCodeProgram(ctx, parsed.value);
       case 'create_file':
         return await createFile(ctx.workspace, parsed.value);
       case 'delete_file':
@@ -2075,6 +2099,48 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
         'его скачивают терминалом.',
     };
   }
+}
+
+/**
+ * Программа вместо десятка вызовов (`run_code`).
+ *
+ * Каждый `tools.<имя>(args)` внутри программы — это обычный вызов инструмента:
+ * он идёт через `ctx.runCode.onCall`, а тот — через `runTool` с тем же контекстом.
+ * Значит права, подтверждения, запись правок и учёт прочитанного работают как
+ * всегда, а меняется только число оборотов к модели: один вместо десяти.
+ *
+ * Запрет на часть инструментов живёт в `shared/run-code.ts`: `run_code` не зовёт
+ * себя, `ask` не ждёт человека из программы, а план и цель — состояние беседы,
+ * и из программы они всё равно ничего не поменяют.
+ */
+async function runCodeProgram(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.runCode) return { ok: false, summary: 'Программа недоступна: нет запуска' };
+
+  const code = requireString(args, 'code');
+  const timeoutMs = optionalInteger(args, 'timeoutMs');
+
+  const outcome = await ctx.runCode.run(code, {
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    onCall: async (name, callArgs) => {
+      if (!runCodeToolAllowed(name)) {
+        return {
+          ok: false,
+          summary: `инструмент «${name}» недоступен из программы`,
+          text: `«${name}» нельзя звать из программы: сделай это обычным вызовом после её окончания.`,
+        };
+      }
+      const result = await runTool(ctx, name, JSON.stringify(callArgs === undefined ? {} : callArgs));
+      return {
+        ok: result.ok,
+        summary: result.summary,
+        text: result.detail ?? result.summary,
+      };
+    },
+  });
+
+  const shaped = formatRunCode(outcome);
+  return { ok: !outcome.error && !outcome.timedOut, summary: shaped.summary, detail: shaped.detail };
 }
 
 /** История коммитов: read-only контекст «что тут менялось». */

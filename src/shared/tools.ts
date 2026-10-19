@@ -39,6 +39,7 @@ export type AgentToolName =
   | 'run_stop'
   | 'web_search'
   | 'web_fetch'
+  | 'run_code'
   | 'create_file'
   | 'delete_file'
   | 'move_file'
@@ -631,6 +632,33 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['url'],
+    },
+  },
+  {
+    name: 'run_code',
+    side: 'main',
+    description:
+      'Выполнить программу на JavaScript, где инструменты — обычные функции. Нужна там, где вызовов ' +
+      'много и они однотипны: прочитать десяток файлов, отфильтровать найденное, свести результаты. ' +
+      'Внутри программы `await tools.read_file({ path })` возвращает { ok, summary, text } — это тот же ' +
+      'вызов, что и снаружи, с теми же правами и подтверждениями. Программа — тело функции: доступны ' +
+      '`await` и `return`; импорты не нужны, типов TypeScript нет (это JavaScript). Читать можно проект, ' +
+      'писать напрямую только во временную папку — правки файлов делай инструментами. Пределы: ' +
+      '80 вызовов и 2 минуты на запуск.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Программа: тело асинхронной функции, где tools — вызовы инструментов.' },
+        description: {
+          type: 'string',
+          description: 'Что делает программа, коротко и в активном залоге (5–10 слов) — это видно в ленте.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Предел времени в миллисекундах (по умолчанию 120000, не больше 300000).',
+        },
+      },
+      required: ['code'],
     },
   },
   {
