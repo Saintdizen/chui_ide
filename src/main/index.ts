@@ -171,6 +171,10 @@ if (!app.requestSingleInstanceLock()) {
       refreshIndexSoon?.({ path: changed.path, ...(changed.many ? { many: true } : {}) });
     });
     const ai = new AiService(settings, workspace);
+    // Длинный вывод инструментов (сборка, тесты, чтение большого файла) не влезает
+    // в окно модели, но терять его нельзя: полная копия ложится рядом с настройками,
+    // а модели уходит путь к ней.
+    ai.attachSpillDir(path.join(app.getPath('userData'), 'ai-spill'));
     // Терминал сам активирует venv проекта: иначе pip, запуск и тесты работают
     // системным питоном, и человеку приходится вспоминать про `source`.
     const terminals = new TerminalService(

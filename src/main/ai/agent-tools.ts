@@ -26,12 +26,14 @@ import { formatLocations, type SymbolLocation } from '../../shared/lsp-locations
 import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
 import { isMcpToolName, type McpToolInfo } from '../../shared/mcp';
 import { compressToolOutput } from '../../shared/output-compress';
+import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
 import { parseToolArguments } from '../../shared/tools';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
 import type { WorkspaceService } from '../workspace/workspace';
 import { runShellCommand, type CommandResult, type RunOptions } from './run-command';
+import { createSpillStream, spillHint, spillText } from './spill';
 
 /**
  * Исполнение инструментов агента.
@@ -192,6 +194,15 @@ export interface MemoryTools {
 }
 
 /**
+ * Навыки проекта для инструмента read_skill. Каталог — тот же, что ушёл в промпт:
+ * иначе агент просил бы навык, которого нет, или пропускал бы новый.
+ */
+export interface SkillTools {
+  list(): Promise<readonly SkillEntry[]>;
+  read(name: string): Promise<{ entry: SkillEntry; body: string } | null>;
+}
+
+/**
  * Подзадача (`task`): отдельный агент со своим контекстом. Цикл подзадачи живёт
  * в `service.ts` — там есть провайдер и модель, которых здесь нет. Сюда приходит
  * готовый вызов: инструмент остаётся проверяемым без сети и Electron.
@@ -287,6 +298,8 @@ export interface ToolContext {
   tests?: TestRunner;
   /** Память проекта: нужна инструментам remember/forget. */
   memory?: MemoryTools;
+  /** Навыки проекта (`.chui/skills`): каталог идёт в промпт, тело — инструментом read_skill. */
+  skills?: SkillTools;
   /** Веб-поиск: подключён только при включённой настройке. */
   webSearch?: WebSearchRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
@@ -299,6 +312,11 @@ export interface ToolContext {
   confirmBrowser?(action: string): Promise<boolean>;
   /** Песочница: подключена только при включённой настройке. */
   sandbox?: SandboxRunner;
+  /**
+   * Куда складывать длинный вывод (см. `ai/spill.ts`). Не задано — обрезаем без
+   * копии, как раньше: путь к файлу, которого не появится, обещать нельзя.
+   */
+  spillDir?: string;
 }
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
@@ -376,15 +394,17 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       case 'list_dir':
         return await listDir(ctx.workspace, parsed.value);
       case 'read_file':
-        return await readFile(ctx.workspace, parsed.value);
+        return await readFile(ctx, parsed.value);
       case 'read_files':
-        return await readFiles(ctx.workspace, parsed.value);
+        return await readFiles(ctx, parsed.value);
       case 'search':
         return await search(ctx, parsed.value);
       case 'codebase_search':
         return await codebaseSearch(ctx, parsed.value);
       case 'search_docs':
         return await searchDocs(ctx, parsed.value);
+      case 'read_skill':
+        return await readSkill(ctx, parsed.value);
       case 'find_references':
         return await findReferences(ctx, parsed.value);
       case 'go_to_definition':
@@ -400,7 +420,7 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       case 'project_map':
         return await projectMap(ctx.workspace);
       case 'find_files':
-        return await findFiles(ctx.workspace, parsed.value);
+        return await findFiles(ctx, parsed.value);
       case 'get_diagnostics':
         return await diagnostics(ctx, parsed.value);
       case 'apply_edit':
@@ -693,7 +713,8 @@ async function listDir(workspace: WorkspaceService, args: Record<string, unknown
   };
 }
 
-async function readFile(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
+async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const { workspace } = ctx;
   const target = requireString(args, 'path');
   const content = await workspace.readFile(target);
   const rel = relative(target, workspace.rootPath());
@@ -725,7 +746,7 @@ async function readFile(workspace: WorkspaceService, args: Record<string, unknow
 
   // Без диапазона поведение прежнее: файл целиком с обрезкой по символам.
   if (startLine === undefined && endLine === undefined) {
-    const { text, truncated } = truncate(content.text);
+    const { text, truncated } = clipText(ctx, 'read_file', content.text);
     return {
       ok: true,
       summary: `${rel}: ${total} строк${truncated ? ' (обрезано)' : ''}`,
@@ -771,7 +792,7 @@ async function readFile(workspace: WorkspaceService, args: Record<string, unknow
   // Диапазон тоже режем по символам: 2000 строк по ~40 символов — это ~80 КБ,
   // вчетверо больше общего потолка вывода. Без этого одно чтение диапазона
   // съедало окно модели сильнее, чем чтение целого файла без диапазона.
-  const { text: trimmed } = truncate(body);
+  const { text: trimmed } = clipText(ctx, 'read_file', body);
   // Весь запрошенный кусок ушёл целиком — только тогда его можно считать прочитанным.
   const whole = trimmed === body;
 
@@ -792,7 +813,8 @@ const MAX_READ_FILES_TOTAL_CHARS = 60_000;
  * строк, что и `read_file`, но общий вывод ограничен — иначе пятёрка больших
  * файлов вытеснит из контекста всё остальное.
  */
-async function readFiles(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
+async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const { workspace } = ctx;
   const raw = args.paths;
   if (!Array.isArray(raw) || raw.length === 0) {
     throw new Error('Не задан аргумент «paths»: нужен непустой массив путей');
@@ -824,7 +846,7 @@ async function readFiles(workspace: WorkspaceService, args: Record<string, unkno
       const lines = content.text.length === 0 ? [] : content.text.split('\n');
       const width = String(lines.length).length;
       const body = lines.map((line, index) => `${String(index + 1).padStart(width, ' ')} | ${line}`).join('\n');
-      const { text, truncated } = truncate(body);
+      const { text, truncated } = clipText(ctx, 'read_files', body);
       const chunk = `### ${rel} (${lines.length} строк${truncated ? ', обрезано' : ''})\n${text || '(пустой файл)'}`;
       parts.push(chunk);
       total += chunk.length;
@@ -924,7 +946,7 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     return {
       ok: true,
       summary: `совпадения в файлах: ${files.length}${result.truncated ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
-      detail: files.length ? truncate(files.join('\n')).text : 'Ничего не найдено',
+      detail: files.length ? clipText(ctx, 'search', files.join('\n')).text : 'Ничего не найдено',
     };
   }
 
@@ -933,7 +955,7 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
   return {
     ok: true,
     summary: `${result.hits.length} совпадений${result.truncated ? ', список обрезан' : ''} · просканировано файлов: ${result.scanned}`,
-    detail: detail.length ? truncate(detail).text : 'Ничего не найдено',
+    detail: detail.length ? clipText(ctx, 'search', detail).text : 'Ничего не найдено',
   };
 }
 
@@ -1083,6 +1105,28 @@ async function searchDocs(ctx: ToolContext, args: Record<string, unknown>): Prom
   const root = ctx.workspace.rootPath();
   const { summary, detail } = formatDocsAnswer(result, (target) => relativePath(target, root));
   return { ok: true, summary, detail };
+}
+
+/**
+ * Прочитать навык целиком. Каталог (имя и одна строка) агент уже видел в промпте,
+ * поэтому здесь — тело и ничего больше.
+ *
+ * Ошибка возвращается с подсказкой, а не тупиком: модель должна суметь исправить
+ * вызов за один шаг — увидев, какие имена вообще есть.
+ */
+async function readSkill(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.skills) return { ok: false, summary: 'Навыки недоступны' };
+  const name = requireString(args, 'name');
+  const found = await ctx.skills.read(name);
+  if (!found) {
+    const known = (await ctx.skills.list()).map((skill) => skill.name);
+    return {
+      ok: false,
+      summary: `Навыка «${name}» нет`,
+      detail: known.length > 0 ? `Есть такие: ${known.join(', ')}` : 'В проекте нет ни одного навыка.',
+    };
+  }
+  return { ok: true, summary: `Навык ${found.entry.name}`, detail: found.body };
 }
 
 /* ── ссылки и переход к определению (языковой сервер) ───────────────────── */
@@ -1382,10 +1426,19 @@ async function runTests(ctx: ToolContext): Promise<ToolOutcome> {
   if (!root) return { ok: false, summary: 'Проект не открыт' };
 
   if (ctx.sandbox && !ctx.sandbox.available) return sandboxUnavailable(ctx.sandbox);
+  // Полная копия вывода: ниже остаётся только хвост, а отброшенное начало иначе
+  // не достать ничем, кроме повторного запуска — а он даёт уже другой вывод.
+  const spillStream = ctx.spillDir ? createSpillStream(ctx.spillDir, 'run_tests') : null;
+  const options: RunOptions = spillStream
+    ? { signal: ctx.signal, spill: (chunk) => spillStream.write(chunk) }
+    : { signal: ctx.signal };
   const result = ctx.sandbox
-    ? await ctx.sandbox.run(resolved.command, root, { signal: ctx.signal })
-    : await runShellCommand(resolved.command, root, { signal: ctx.signal });
-  const output = truncateTail(condenseOutput(result.output));
+    ? await ctx.sandbox.run(resolved.command, root, options)
+    : await runShellCommand(resolved.command, root, options);
+  // Файл оставляем только тогда, когда вывод действительно не поместился в потолок.
+  const full = spillStream?.close(result.truncated) ?? null;
+  const condensed = condenseOutput(result.output);
+  const output = full ? truncateTail(condensed) : clipTail(ctx, 'run_tests', condensed);
   const notes = [result.timedOut ? 'превышено время' : '', result.truncated ? 'вывод обрезан' : ''].filter(Boolean);
   // Ненулевой код — это упавшие тесты, а не ошибка инструмента: ответ ok, но с кодом.
   const passed = result.code === 0 && !result.timedOut;
@@ -1393,7 +1446,7 @@ async function runTests(ctx: ToolContext): Promise<ToolOutcome> {
   return {
     ok: passed,
     summary: `тесты (${resolved.label}): код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
-    detail: `${commandLine(ctx, resolved.command)}\n${output.length ? output : '(пустой вывод)'}`,
+    detail: `${commandLine(ctx, resolved.command)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
   };
 }
 
@@ -1425,7 +1478,8 @@ function sandboxUnavailable(sandbox: SandboxRunner): ToolOutcome {
  * Файлы по glob-маске. Отдельно от `search`: тут не читается содержимое,
  * поэтому обход дешёвый и результат — список путей.
  */
-async function findFiles(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
+async function findFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const { workspace } = ctx;
   const glob = optionalString(args, 'glob');
   const limit = optionalInteger(args, 'limit') ?? 200;
 
@@ -1433,7 +1487,7 @@ async function findFiles(workspace: WorkspaceService, args: Record<string, unkno
   return {
     ok: true,
     summary: `${glob ? `«${glob}»: ` : ''}файлов: ${files.length}${files.length >= limit ? ' (обрезано)' : ''}`,
-    detail: files.length ? truncate(files.join('\n')).text : 'Ничего не найдено',
+    detail: files.length ? clipText(ctx, 'find_files', files.join('\n')).text : 'Ничего не найдено',
   };
 }
 
@@ -1693,11 +1747,16 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   if (ctx.sandbox && !ctx.sandbox.available) return sandboxUnavailable(ctx.sandbox);
   // В песочнице та же команда идёт в контейнер: агент об этом не просит отдельно,
   // режим задаёт человек настройкой.
+  const spillStream = ctx.spillDir ? createSpillStream(ctx.spillDir, 'run_terminal') : null;
+  const options: RunOptions = spillStream ? { ...runOptions, spill: (chunk) => spillStream.write(chunk) } : runOptions;
   const result = ctx.sandbox
-    ? await ctx.sandbox.run(command, root, runOptions)
-    : await runShellCommand(command, root, runOptions);
+    ? await ctx.sandbox.run(command, root, options)
+    : await runShellCommand(command, root, options);
+  // Файл оставляем только тогда, когда вывод действительно не поместился в потолок.
+  const full = spillStream?.close(result.truncated) ?? null;
   // Причёсываем и держим хвост: один `npm install` иначе завалит контекст логом.
-  const output = truncateTail(condenseOutput(result.output));
+  const condensed = condenseOutput(result.output);
+  const output = full ? truncateTail(condensed) : clipTail(ctx, 'run_terminal', condensed);
   const notes: string[] = [];
   if (result.timedOut) notes.push('превышено время выполнения');
   if (result.truncated) notes.push('вывод обрезан');
@@ -1705,7 +1764,7 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   return {
     ok: result.code === 0 && !result.timedOut,
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
-    detail: `${commandLine(ctx, command)}\n${output.length ? output : '(пустой вывод)'}`,
+    detail: `${commandLine(ctx, command)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
   };
 }
 
@@ -1933,7 +1992,7 @@ async function gitDiff(ctx: ToolContext, args: Record<string, unknown>): Promise
     return { ok: true, summary: `${rel}: нет изменений`, detail: 'git не показал различий для этого файла.' };
   }
 
-  const { text } = truncate(diff);
+  const { text } = clipText(ctx, 'git_diff', diff);
   return { ok: true, summary: `diff ${rel}${staged ? ' (индекс)' : ''}`, detail: text };
 }
 
@@ -2267,7 +2326,7 @@ async function terminalStart(ctx: ToolContext, args: Record<string, unknown>): P
   const { data, offset, alive } = ctx.terminals.read(session.id, 0);
   // Причёсывание снимает пустые простыни, обрезка держит хвост: у сборки и логов
   // важен последний вывод, а один большой cat иначе съедает всё окно модели.
-  const output = truncateTail(condenseOutput(stripAnsi(data)));
+  const output = clipTail(ctx, 'terminal_start', condenseOutput(stripAnsi(data)));
 
   return {
     ok: true,
@@ -2290,7 +2349,7 @@ function terminalRead(ctx: ToolContext, args: Record<string, unknown>): ToolOutc
   const from = optionalInteger(args, 'from') ?? 0;
   const { data, offset, alive, exitCode } = ctx.terminals.read(id, from);
   // Как в terminal_start: хвост важнее начала, пустые простыни сжимаем.
-  const output = truncateTail(condenseOutput(stripAnsi(data)));
+  const output = clipTail(ctx, 'terminal_read', condenseOutput(stripAnsi(data)));
 
   return {
     ok: true,
@@ -2384,9 +2443,38 @@ function truncateTail(text: string, limit = MAX_OUTPUT_CHARS): string {
   return `… (отброшено символов в начале: ${dropped})\n${text.slice(dropped)}`;
 }
 
-function truncate(text: string): { text: string; truncated: boolean } {
+/**
+ * Обрезка с копией: отброшенное уходит в файл, модели — путь к нему.
+ *
+ * Пометка «вывод обрезан» без адреса была тупиком: агент знал, что чего-то не
+ * видит, но не мог это достать и перезапускал команду — а второй запуск даёт
+ * уже другой вывод. `read_file` с диапазоном умеет прочитать такой файл, поэтому
+ * достаточно назвать путь.
+ */
+function clipText(ctx: ToolContext, kind: string, text: string): { text: string; truncated: boolean } {
   if (text.length <= MAX_OUTPUT_CHARS) return { text, truncated: false };
-  return { text: `${text.slice(0, MAX_OUTPUT_CHARS)}\n… (вывод обрезан)`, truncated: true };
+  const file = spill(ctx, kind, text);
+  const note = file ? `… (вывод обрезан; ${spillHint(file)})` : '… (вывод обрезан)';
+  return { text: `${text.slice(0, MAX_OUTPUT_CHARS)}\n${note}`, truncated: true };
+}
+
+/** То же для хвостовой обрезки: начало отброшено, но его можно прочитать. */
+function clipTail(ctx: ToolContext, kind: string, text: string, limit = MAX_OUTPUT_CHARS): string {
+  if (text.length <= limit) return text;
+  const dropped = text.length - limit;
+  const file = spill(ctx, kind, text);
+  const note = file ? `, ${spillHint(file)}` : '';
+  return `… (отброшено символов в начале: ${dropped}${note})\n${text.slice(dropped)}`;
+}
+
+/** Положить текст в файл, если каталог задан. Без каталога поведение прежнее. */
+function spill(ctx: ToolContext, kind: string, text: string): string | null {
+  return ctx.spillDir ? spillText(ctx.spillDir, kind, text) : null;
+}
+
+/** Строка о полной копии вывода: дописывается к хвосту команды. */
+function spillNote(file: string | null): string {
+  return file ? `\n(${spillHint(file)})` : '';
 }
 
 /**

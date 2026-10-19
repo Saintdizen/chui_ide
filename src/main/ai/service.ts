@@ -328,6 +328,12 @@ export class AiService {
   /** Песочница: без неё команды и тесты идут на хосте, как раньше. */
   private sandbox?: SandboxService;
   /**
+   * Каталог для полных копий длинного вывода (`ai/spill.ts`). Не задан —
+   * обрезаем без копии, как раньше: обещать модели путь к файлу, которого не
+   * появится, нельзя.
+   */
+  private spillDir?: string;
+  /**
    * Права доступа текущего прогона (кнопка в композере). Храним на сервисе, а не
    * снимком в запросе: renderer может переключить их прямо во время ответа агента.
    * Сервис один на окно, а активный агентский прогон в окне один — этого хватает.
@@ -370,6 +376,14 @@ export class AiService {
   /** Подключить git рабочей папки: включает инструменты git_status и git_diff. */
   attachGit(git: GitTools): void {
     this.git = git;
+  }
+
+  /**
+   * Куда складывать полные копии длинного вывода. Каталог — рядом с настройками,
+   * в userData: файлы переживают перезапуск, но и не мешают проекту.
+   */
+  attachSpillDir(dir: string): void {
+    this.spillDir = dir;
   }
 
   /** Подключить терминалы: включает инструменты terminal_start/read/write/stop. */
@@ -715,6 +729,7 @@ export class AiService {
     // Песочница: команды и тесты идут в контейнер. Подключена она или нет, решает
     // настройка: агент этот режим не переключает и не может «выйти» из него.
     if (sandboxSettings.enabled && this.sandbox) toolContext.sandbox = this.sandbox;
+    if (this.spillDir) toolContext.spillDir = this.spillDir;
     if (host) {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.applyPatches = (patches, auto) => host.applyPatches(patches, auto);

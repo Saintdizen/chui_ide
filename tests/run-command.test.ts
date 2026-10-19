@@ -42,6 +42,23 @@ describe('runProcess', () => {
     expect(result.output).not.toContain('отброшено');
   });
 
+  it('полный вывод уходит в копию, даже когда результат обрезан', async () => {
+    // Обрезка держит голову и хвост, а середину выбрасывает. Копия — единственный
+    // способ достать эту середину: повторный запуск даёт уже другой вывод.
+    const chunks: string[] = [];
+    const result = await runProcess(node, ['-e', NOISY], process.cwd(), {
+      spill: (chunk) => chunks.push(chunk),
+    });
+
+    expect(result.truncated).toBe(true);
+    const full = chunks.join('');
+    expect(full.startsWith('__HEAD__')).toBe(true);
+    expect(full.trimEnd().endsWith('__TAIL__')).toBe(true);
+    // В самом результате середины нет — а в копии есть.
+    expect(result.output).toContain('отброшено символов');
+    expect(full.length).toBeGreaterThan(result.output.length);
+  });
+
   it('превышение предела времени помечает результат', async () => {
     const result = await runProcess(node, ['-e', 'setTimeout(() => console.log("поздно"), 60000)'], process.cwd(), {
       timeoutMs: 700,

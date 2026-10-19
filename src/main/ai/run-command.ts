@@ -39,6 +39,12 @@ export interface RunOptions {
   signal?: AbortSignal;
   /** Предел времени в миллисекундах; по умолчанию `DEFAULT_TIMEOUT_MS`. */
   timeoutMs?: number;
+  /**
+   * Куда писать полный вывод, если он перестал помещаться в потолок.
+   * Копия делается ДО обрезки: без неё отброшенную середину не достать ничем,
+   * кроме повторного запуска команды (а он даёт уже другой вывод).
+   */
+  spill?: (chunk: string) => void;
 }
 
 export function runShellCommand(command: string, cwd: string, options: RunOptions = {}): Promise<CommandResult> {
@@ -82,9 +88,22 @@ export function runProcess(
     let timedOut = false;
     let settled = false;
 
+    // Копия для файла включается в тот момент, когда вывод перестаёт помещаться
+    // в голову: с этого места середина уже может быть отброшена, и всё, что
+    // пришло раньше (голова целиком), дописывается первым куском.
+    let spilling = false;
     const collect = (chunk: Buffer): void => {
       const text = chunk.toString('utf8');
       total += text.length;
+      if (options.spill) {
+        if (!spilling && head.length + text.length > HEAD_CHARS) {
+          spilling = true;
+          if (head.length > 0) options.spill(head);
+          options.spill(text);
+        } else if (spilling) {
+          options.spill(text);
+        }
+      }
       if (head.length < HEAD_CHARS) {
         const room = HEAD_CHARS - head.length;
         head += text.slice(0, room);
