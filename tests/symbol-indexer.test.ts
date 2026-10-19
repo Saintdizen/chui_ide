@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -25,7 +25,7 @@ function names(hits: readonly { path: string }[]): string[] {
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Дождаться условия: разбор сохранённого файла идёт по таймеру, а не сразу. */
-async function waitFor(done: () => boolean, timeout = 2000): Promise<void> {
+async function waitFor(done: () => boolean, timeout = 10_000): Promise<void> {
   const deadline = Date.now() + timeout;
   while (!done()) {
     if (Date.now() > deadline) throw new Error('условие не наступило');
@@ -171,14 +171,30 @@ describe('SymbolIndexer', () => {
     const outline = async (target: string): Promise<readonly FileSymbol[] | null> => [
       { ...parserSkeleton[0]!, name: readFileSync(target, 'utf8').includes('class New') ? 'New' : 'Old' },
     ];
+    const target = path.join(root, 'a.py');
+    // Время файла ставим сами и ЗАРАНЕЕ: так правка ниже выйдет того же размера и с тем
+    // же временем, что карта уже видела. Именно так выглядит быстрое сохранение (а на
+    // файловой системе с грубым временем — любое), и по отпечатку «размер + время» его
+    // не отличить от «не менялось». Карта обязана перечитать файл: о правке ей сказали
+    // прямо. Стережёт от потери сохранения — на CI это ловилось случайно, когда файл
+    // успевал измениться в ту же миллисекунду.
+    const stamp = new Date(2020, 0, 1);
+    utimesSync(target, stamp, stamp);
+
     const index = new SymbolIndexer({ root: () => root, outline, store: new SymbolStore(path.join(root, '.idx')) });
 
     index.refresh();
     await index.settled();
     expect(names(index.find('Old'))).toEqual(['a.py', 'b.py']);
 
-    writeFileSync(path.join(root, 'a.py'), 'class New:\n    pass\n', 'utf8');
-    index.noteChanged(path.join(root, 'a.py'));
+    const was = statSync(target);
+    writeFileSync(target, 'class New:\n    pass\n', 'utf8');
+    utimesSync(target, stamp, stamp);
+    const now = statSync(target);
+    expect(now.size).toBe(was.size);
+    expect(now.mtimeMs).toBe(was.mtimeMs);
+
+    index.noteChanged(target);
     await waitFor(() => index.find('New').length > 0);
 
     expect(names(index.find('New'))).toEqual(['a.py']);

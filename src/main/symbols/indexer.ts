@@ -234,9 +234,13 @@ export class SymbolIndexer {
       return;
     }
 
+    // Отпечатка «размер + время» тут нет намеренно: сюда приходят только те файлы, о
+    // правке которых сказали прямо (`noteChanged`). Гадать по отпечатку нельзя: у
+    // сохранения того же размера (`Old` → `New`) размер тот же, а время в миллисекундах
+    // может совпасть — и на быстрой машине, и всегда на файловой системе с грубым
+    // временем. Тогда правка терялась бы молча: карта продолжала бы отдавать старое
+    // имя. Лишний разбор на шум наблюдателя дешевле потерянного объявления.
     const known = this.files.get(relative);
-    const mtime = Math.floor(stat.mtimeMs);
-    if (known && known.size === stat.size && known.mtime === mtime) return;
     if (stat.size > MAX_FILE_BYTES) {
       this.files.delete(relative);
       return;
@@ -260,7 +264,7 @@ export class SymbolIndexer {
       origin: known?.origin ?? 'project',
       package: known?.package ?? null,
       size: stat.size,
-      mtime,
+      mtime: Math.floor(stat.mtimeMs),
       decls: toIndexDecls(symbols, (line) => bases.get(line) ?? []),
     });
   }
