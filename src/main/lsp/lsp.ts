@@ -19,7 +19,13 @@ import {
   type SemanticLegend,
   type SemanticToken,
 } from '../../shared/lsp-semantic-tokens';
-import { toFileSymbols, toProjectSymbols, type FileSymbol, type ProjectSymbol } from '../../shared/lsp-symbols';
+import {
+  mergeSymbols,
+  toFileSymbols,
+  toProjectSymbols,
+  type FileSymbol,
+  type ProjectSymbol,
+} from '../../shared/lsp-symbols';
 import { toFormatEdits } from '../../shared/lsp-formatting';
 import type { TextEdit } from '../../shared/edits';
 import { mergeEnv } from '../project-env';
@@ -49,6 +55,26 @@ const INITIALIZE_TIMEOUT_MS = 15_000;
  * и мегабайты разбора ради того, что мы всё равно выбрасываем.
  */
 const PROJECT_SCAN_QUERY = 'chui-project-scan';
+
+/**
+ * Сколько ждать сервер в поиске символов, когда ответ уже есть в карте символов.
+ *
+ * Поиск идёт на каждой набранной букве, и ответ карты — мгновенный; ждать ещё
+ * секунды поднявшегося сервера значило бы держать перед человеком «ищу…» без причины.
+ */
+const INDEX_FIRST_WAIT_MS = 300;
+
+/**
+ * Второй источник объявлений — карта символов проекта (`main/symbols/indexer.ts`).
+ *
+ * Своего разбора у неё нет: объявления в неё кладёт тот же сервер, но собранные
+ * заранее и лежащие на диске. Поэтому карта отвечает мгновенно и тогда, когда
+ * сервера ещё нет (поднимается, не установлен, упал) — это и есть «глупый режим»,
+ * в котором поиск символов не молчит.
+ */
+export interface SymbolIndexSource {
+  find(query: string, limit?: number): ProjectSymbol[];
+}
 
 /**
  * Сколько ждать обхода проекта (`workspace/symbol`). Обход — это разбор всех файлов
@@ -393,6 +419,9 @@ export class LspService {
    */
   private readonly scanned = new Set<string>();
 
+  /** Карта символов проекта: второй источник объявлений (см. `SymbolIndexSource`). */
+  private indexSource: SymbolIndexSource | null = null;
+
   constructor(
     private readonly root: () => string | null,
     private readonly settings: () => LspSettings,
@@ -492,6 +521,14 @@ export class LspService {
         if (runtime) await this.scanProject(runtime);
       }),
     );
+  }
+
+  /**
+   * Подключить карту символов: её объявления домешиваются к ответу серверов.
+   * `null` — карты нет, поиск отвечает только сервером (как раньше).
+   */
+  attachIndex(source: SymbolIndexSource | null): void {
+    this.indexSource = source;
   }
 
   /**
@@ -1026,8 +1063,25 @@ export class LspService {
    * Символы проекта по запросу: классы, функции, переменные — по всем запущенным
    * серверам. Поиск не привязан к файлу, поэтому спрашиваем каждый сервер, у
    * которого это умеется: ответит тот, чей язык есть в проекте.
+   *
+   * Ждать сервер вечно нельзя, если ответ уже есть. Пока сервер поднимается, ответа
+   * нет секундами, а карта символов его уже знает — тогда отдаём её сразу, а ответ
+   * сервера дождётся следующего нажатия клавиши (поиск переспрашивает на каждой букве).
+   * Если карта пуста — ждём сервер как раньше: лучче подождать, чем ничего не найти.
    */
   async projectSymbols(query: string): Promise<ProjectSymbol[]> {
+    const indexed = this.indexSource?.find(query) ?? [];
+    const fromServers = this.serverSymbols(query);
+    const results =
+      indexed.length > 0
+        ? await withTimeout(fromServers, INDEX_FIRST_WAIT_MS, 'поиск символов').catch(() => [] as ProjectSymbol[])
+        : await fromServers;
+
+    return mergeSymbols(results, indexed);
+  }
+
+  /** Символы от всех поднятых серверов, умеющих искать по проекту. */
+  private async serverSymbols(query: string): Promise<ProjectSymbol[]> {
     const results: ProjectSymbol[] = [];
 
     for (const runtime of [...this.runtimes.values()]) {

@@ -23,6 +23,7 @@ import type { GitService } from '../git/git';
 import type { DebugService } from '../debug/debug';
 import type { BrowserPanel } from '../browser/panel';
 import type { LspService } from '../lsp/lsp';
+import type { SymbolIndexer } from '../symbols/indexer';
 import type { McpService } from '../mcp/mcp';
 import { performMenuRole } from '../menu';
 import type { SettingsStore } from '../settings';
@@ -62,6 +63,7 @@ import type { ReviewStore } from '../project/review-store';
 import type { HistoryStore } from '../project/history-store';
 import { mergeByPriority } from '../../shared/lsp-bundled';
 import { NO_LSP_STATUS } from '../../shared/lsp-status';
+import { EMPTY_INDEX_STATUS } from '../../shared/symbol-index';
 import { addressProblem, parseFsAddress, type FsAddress } from '../../shared/fs-address';
 import { MAX_OPEN_BYTES } from '../../shared/large-file';
 import { parseBadgeTheme } from '../../shared/icon-badges';
@@ -103,6 +105,8 @@ export interface AppDependencies {
   chatStore?: ChatStore;
   /** Языковые серверы. Необязательно: пробникам LSP не нужен. */
   lsp?: LspService;
+  /** Карта символов проекта: объявления всех файлов, собранные заранее. */
+  index?: SymbolIndexer;
   /** Внешние инструменты (MCP). Необязательно: без серверов их и нет. */
   mcp?: McpService;
   /** Отладчик (DAP). Необязательно: пробникам он не нужен. */
@@ -1032,6 +1036,9 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Прогрев: поднять серверы языков проекта, не дожидаясь открытия файлов.
   router.register('lsp.prewarm', async (params) => {
     await deps.lsp?.prewarm(params.languages);
+    // Заодно и карта символов: серверы уже подняты, а разбор файлов — та же работа,
+    // которую поиск символа ждал бы при первом запросе. В фоне: прогрев не ждёт её.
+    deps.index?.refresh();
   });
   // Прокси к серверу: подсказки, наведение, переход к определению. Сервера нет —
   // возвращаем null, и редактор просто не покажет подсказку.
@@ -1049,6 +1056,13 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   );
   // Символы проекта: сервер ищет по всему проекту, а не по открытому файлу.
   router.register('lsp.symbols', (params) => deps.lsp?.projectSymbols(params.query) ?? []);
+  // Карта символов: то, что уже разобрано и лежит на диске. Нужна двум вещам —
+  // быстрому поиску, пока сервер молчит, и пересборке после правок (её зовёт проба).
+  router.register('index.status', () => deps.index?.status() ?? EMPTY_INDEX_STATUS);
+  router.register('index.rebuild', () => {
+    deps.index?.refresh();
+    return deps.index?.status() ?? EMPTY_INDEX_STATUS;
+  });
   // Семантическая подсветка: точные роли от сервера. Ответ разобран в main (там легенда),
   // renderer получает готовые участки и накладывает их поверх своей грамматики.
   router.register('lsp.semanticTokens', (params) => deps.lsp?.semanticTokens(params.path) ?? []);

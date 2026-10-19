@@ -28,6 +28,8 @@ import { ProjectConfigStore } from './project-config';
 import { ReviewStore } from './project/review-store';
 import { HistoryStore } from './project/history-store';
 import { SettingsStore } from './settings';
+import { SymbolIndexer } from './symbols/indexer';
+import { SymbolStore } from './symbols/store';
 import { TerminalService } from './terminal/terminal';
 import { WorkspaceService } from './workspace/workspace';
 import { getIdeWindow, isWaylandSession, openWelcomeWindow } from './window';
@@ -234,6 +236,19 @@ if (!app.requestSingleInstanceLock()) {
       // (см. `LspService.scanProject`) — поиск символов оставался бы пустым.
       createSeedProvider(() => workspace.rootPath()),
     );
+    // Карта символов проекта: объявления всех файлов Python и Node без тел, собранные
+    // заранее и лежащие в пользовательских данных. Разбор делает тот же языковой сервер
+    // (своего парсера у нас нет), а карта лишь хранит ответ и переживает перезапуск:
+    // поиск символов перестаёт ждать первого прогрева, а пока сервер не поднялся —
+    // отвечает тем, что уже знает (см. `SymbolIndexer`).
+    const symbolIndex = new SymbolIndexer({
+      root: () => workspace.rootPath(),
+      outline: (target, languageId, text) => lsp.outline(target, languageId, text),
+      store: new SymbolStore(path.join(app.getPath('userData'), 'symbol-index')),
+    });
+    // Сервер отвечает точно и по всему проекту, карта — мгновенно и без него:
+    // в поиске символов они дополняют друг друга.
+    lsp.attachIndex(symbolIndex);
     // Отладчик: сессия debugpy по DAP. Интерпретатор тот же, что у запуска и тестов,
     // а `.env` проекта — тот же, что у терминала и языкового сервера.
     const debug = new DebugService(
@@ -298,6 +313,7 @@ if (!app.requestSingleInstanceLock()) {
       terminals,
       git,
       lsp,
+      index: symbolIndex,
       debug,
       sessions,
       projectConfig,

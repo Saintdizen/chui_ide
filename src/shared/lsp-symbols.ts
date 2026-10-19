@@ -292,6 +292,31 @@ function baseName(target: string): string {
 }
 
 /**
+ * Склеить два источника объявлений: ответ сервера и карту символов проекта.
+ *
+ * Первый важнее: сервер отвечает с учётом типов и точными позициями, и там, где он
+ * ответил, спорить не с чем. Второй добавляет то, чего в ответе нет — и именно он
+ * отвечает, когда сервера нет вовсе. Повторы (один символ из обоих источников)
+ * отбрасываются: в списке он один.
+ */
+export function mergeSymbols(primary: readonly ProjectSymbol[], extra: readonly ProjectSymbol[]): ProjectSymbol[] {
+  const seen = new Set(primary.map(symbolKey));
+  const merged = [...primary];
+  for (const symbol of extra) {
+    const key = symbolKey(symbol);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(symbol);
+  }
+  return merged;
+}
+
+/** По чему видно, что это тот же символ: имя, файл и строка. */
+function symbolKey(symbol: ProjectSymbol): string {
+  return `${symbol.name}|${symbol.path}|${symbol.line}`;
+}
+
+/**
  * Оставить символы, подходящие под запрос, и убрать лишние повторы.
  *
  * Фильтр по подстроке без учёта регистра: сервер уже отсортировал по релевантности,

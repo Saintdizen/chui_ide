@@ -24,6 +24,7 @@ import type { GitSparseInfo } from './git-sparse';
 import type { GitIdentity, GitSshKey } from './git-identity';
 import type { WorkspaceRoot } from './workspace-roots';
 import type { LspStatus } from './lsp-status';
+import type { SymbolIndexStatus } from './symbol-index';
 import type { LineProfile } from './line-profile';
 import type { SemanticToken } from './lsp-semantic-tokens';
 import type { FolderCompareResult } from './folder-compare';
@@ -2263,6 +2264,14 @@ export interface ChuiMethods {
   'lsp.prewarm': { params: { languages: string[] }; result: void };
   /** Символы проекта по запросу: классы, функции, переменные — «перейти к символу». */
   'lsp.symbols': { params: { query: string }; result: ProjectSymbol[] };
+  /**
+   * Состояние карты символов проекта (см. `main/symbols/indexer.ts`): собрана ли она,
+   * сколько файлов и объявлений. Карта собирается в фоне при открытии проекта, и по
+   * этому ответу видно, докуда она дошла. `warming` — поиск уже отвечает тем, что есть.
+   */
+  'index.status': { params: void; result: SymbolIndexStatus };
+  /** Пересобрать карту символов в фоне: изменившиеся файлы разберутся заново. */
+  'index.rebuild': { params: void; result: SymbolIndexStatus };
   /** Найти в PATH известные языковые серверы и вернуть готовые конфигурации. */
   'lsp.detect': { params: void; result: LspServerConfig[] };
   /**

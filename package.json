@@ -83,6 +83,7 @@
     "probe:lspstart": "npm run build && electron scripts/lsp-start-probe.cjs",
     "probe:lsprace": "npm run build:main && electron scripts/lsp-race-probe.cjs",
     "probe:lspscan": "npm run build:main && electron scripts/lsp-scan-probe.cjs",
+    "probe:symbols": "npm run build:main && electron scripts/symbol-index-probe.cjs",
     "probe:namedmembers": "electron scripts/named-members-probe.cjs",
     "probe:members": "npm run build:main && electron scripts/complete-members-probe.cjs",
     "probe:hoverproblems": "electron scripts/hover-problems-probe.cjs",

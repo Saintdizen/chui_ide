@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterSymbols, toProjectSymbols, type ProjectSymbol } from '../src/shared/lsp-symbols';
+import { filterSymbols, mergeSymbols, toProjectSymbols, type ProjectSymbol } from '../src/shared/lsp-symbols';
 
 /** Маппер ссылки в путь: в main это `fileURLToPath`, в тесте — простая замена. */
 const toPath = (uri: string): string => decodeURIComponent(uri.replace('file://', ''));
@@ -78,5 +78,36 @@ describe('filterSymbols', () => {
 
   it('уважает предел списка', () => {
     expect(filterSymbols(symbols, 's', 1)).toHaveLength(1);
+  });
+});
+
+describe('mergeSymbols', () => {
+  const fromServer: ProjectSymbol = {
+    name: 'Session',
+    kind: 'класс',
+    container: null,
+    path: 'a.py',
+    line: 3,
+    column: 1,
+  };
+  const fromIndex: ProjectSymbol = {
+    name: 'SessionData',
+    kind: 'класс',
+    container: null,
+    path: 'b.py',
+    line: 7,
+    column: 1,
+  };
+
+  it('ответ сервера идёт первым, карта добавляет недостающее', () => {
+    expect(mergeSymbols([fromServer], [fromIndex]).map((symbol) => symbol.name)).toEqual(['Session', 'SessionData']);
+  });
+
+  it('один и тот же символ из двух источников остаётся одним', () => {
+    expect(mergeSymbols([fromServer], [{ ...fromServer }])).toHaveLength(1);
+  });
+
+  it('пустой ответ сервера — это ответ карты', () => {
+    expect(mergeSymbols([], [fromIndex])).toEqual([fromIndex]);
   });
 });

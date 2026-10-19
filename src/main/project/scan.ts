@@ -16,6 +16,18 @@ const MAX_SCAN_FILES = 20_000;
 
 /** Свежая карта проекта: имена файлов и каталогов без чтения содержимого. */
 export async function scanProject(root: string): Promise<ProjectScan> {
+  const { files, dirCount } = await listProjectFiles(root);
+  return buildScan({ root, name: path.basename(root) || root, files, dirCount });
+}
+
+/**
+ * Все файлы проекта (относительные POSIX-пути) и число каталогов.
+ *
+ * Отдельно от сводки, потому что сводку видят и renderer, и агент, а полный список
+ * путей им не нужен и стоит тысяч строк в ответе. Здесь же его берёт карта символов:
+ * ей нужны файлы, а не сводка.
+ */
+export async function listProjectFiles(root: string): Promise<{ files: string[]; dirCount: number }> {
   const files: string[] = [];
   let dirCount = 0;
 
@@ -37,5 +49,5 @@ export async function scanProject(root: string): Promise<ProjectScan> {
   };
 
   await walk(root);
-  return buildScan({ root, name: path.basename(root) || root, files, dirCount });
+  return { files, dirCount };
 }
