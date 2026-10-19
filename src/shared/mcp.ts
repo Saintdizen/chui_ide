@@ -52,6 +52,37 @@ export interface McpToolInfo {
 export const MAX_MCP_TOOLS_PER_SERVER = 24;
 export const MAX_MCP_TOOLS = 64;
 
+/**
+ * Ресурс MCP-сервера. Это не действие, а документ: сервер объявляет у себя
+ * каталог адресов (`uri`), и их читают, а не вызывают. Инструменты MCP отвечают
+ * на «сделай», ресурсы — на «покажи, что у тебя есть».
+ */
+export interface McpResourceInfo {
+  serverId: string;
+  /** Человеческое имя ресурса: сервер может его и не дать. */
+  name: string;
+  /** Адрес ресурса: по нему же читают. */
+  uri: string;
+  description: string;
+  mimeType: string;
+  /**
+   * Это шаблон адреса (`resourceTemplates`), а не готовый ресурс: в нём есть
+   * подстановки `{...}`, и читать по нему нельзя — сначала подставь значения.
+   */
+  template: boolean;
+}
+
+/**
+ * Потолок каталога ресурсов и одного прочитанного ресурса.
+ *
+ * Каталог — тоже текст в контексте модели, и сервер вправе объявить сотни
+ * записей: схемы ресурсов в запрос не идут, но каталог модель читает целиком.
+ * А прочитанный ресурс — это документ, а не весь сервер, поэтому у него свой,
+ * более высокий потолок.
+ */
+export const MAX_MCP_RESOURCES = 200;
+export const MAX_MCP_RESOURCE_CHARS = 40_000;
+
 /** Итог отбора: что предложим модели и по сколько инструментов пропущено. */
 export interface McpToolSelection {
   offered: McpToolInfo[];
@@ -226,6 +257,130 @@ export function mcpToolResultText(payload: unknown): { text: string; isError: bo
   if (!text)
     return { text: isError ? 'Инструмент вернул ошибку без описания' : 'Инструмент не вернул текста', isError };
   return { text, isError };
+}
+
+/** Одна запись каталога — так сервер отдаёт и список ресурсов, и шаблоны. */
+function parseResourceItem(serverId: string, item: unknown, template: boolean): McpResourceInfo | null {
+  const record = asRecord(item);
+  if (!record) return null;
+  const uri = asString(template ? record.uriTemplate : record.uri).trim();
+  if (!uri) return null;
+  return {
+    serverId,
+    uri,
+    name: asString(record.name).trim() || uri,
+    description: asString(record.description).trim(),
+    mimeType: asString(record.mimeType).trim(),
+    template,
+  };
+}
+
+/**
+ * Разобрать ответ `resources/list`:
+ *
+ * Ответ сервера — `{ resources: [...] }`. Шаблонов адресов в нём нет: они
+ * отдельным методом, их разбирает `parseMcpResourceTemplates`. Одинаковые
+ * адреса отбрасываем: один uri — одна запись, иначе каталог двоится.
+ */
+export function parseMcpResources(serverId: string, payload: unknown): McpResourceInfo[] {
+  const items = asRecord(payload)?.resources;
+  if (!Array.isArray(items)) return [];
+
+  const seen = new Set<string>();
+  const parsed: McpResourceInfo[] = [];
+  for (const item of items) {
+    const resource = parseResourceItem(serverId, item, false);
+    if (!resource || seen.has(resource.uri)) continue;
+    seen.add(resource.uri);
+    parsed.push(resource);
+  }
+  return parsed;
+}
+
+/** Разобрать `resources/templates/list`: шаблоны адресов, читать их без подстановки нельзя. */
+export function parseMcpResourceTemplates(serverId: string, payload: unknown): McpResourceInfo[] {
+  const items = asRecord(payload)?.resourceTemplates;
+  if (!Array.isArray(items)) return [];
+
+  const seen = new Set<string>();
+  const parsed: McpResourceInfo[] = [];
+  for (const item of items) {
+    const template = parseResourceItem(serverId, item, true);
+    if (!template || seen.has(template.uri)) continue;
+    seen.add(template.uri);
+    parsed.push(template);
+  }
+  return parsed;
+}
+
+/**
+ * Каталог ресурсов текстом для модели: сначала готовые адреса, потом шаблоны.
+ *
+ * Пустой каталог — это не ошибка: сервер вправе не объявлять ресурсов вовсе,
+ * и сказать об этом надо словами, чтобы модель не искала «где-то ещё».
+ */
+export function formatMcpResources(resources: readonly McpResourceInfo[], limit = MAX_MCP_RESOURCES): string {
+  if (resources.length === 0) {
+    return 'Ни один MCP-сервер не объявил ресурсов: у них есть только инструменты.';
+  }
+
+  const shown = resources.slice(0, Math.max(1, limit));
+  const lines: string[] = [];
+  for (const resource of shown) {
+    const kind = resource.template ? 'шаблон' : 'ресурс';
+    const mime = resource.mimeType ? ` · ${resource.mimeType}` : '';
+    const note = resource.description ? ` — ${resource.description}` : '';
+    // Сервер называем всегда: адреса у серверов не пересекаются, а читать
+    // ресурс надо у того же, кто его объявил.
+    lines.push(`[${resource.serverId}] ${kind} ${resource.uri} · ${resource.name}${mime}${note}`);
+  }
+
+  const hidden = resources.length - shown.length;
+  if (hidden > 0) lines.push(`… ещё ${hidden}: каталог больше потолка ${shown.length}`);
+  return lines.join('\n');
+}
+
+/**
+ * Ответ `resources/read` → текст для модели.
+ *
+ * Содержимое приходит частями `contents`: текст — как есть, двоичное — пометкой
+ * (байты модели не нужны, а base64 съел бы окно). Длинный текст режется.
+ */
+export function mcpResourceContentText(
+  payload: unknown,
+  limit = MAX_MCP_RESOURCE_CHARS,
+): { text: string; isError: boolean } {
+  const result = asRecord(payload);
+  const contents = result?.contents;
+  if (!Array.isArray(contents)) {
+    return { text: 'Сервер не вернул содержимого ресурса', isError: false };
+  }
+
+  const parts: string[] = [];
+  for (const item of contents) {
+    const record = asRecord(item);
+    if (!record) continue;
+    const mime = asString(record.mimeType).trim();
+    if (typeof record.text === 'string') {
+      parts.push(mime ? `[${mime}]\n${record.text}` : record.text);
+      continue;
+    }
+    if (typeof record.blob === 'string') {
+      const bytes = Math.floor((record.blob.length * 3) / 4);
+      parts.push(`[двоичные данные: ${mime || 'без типа'}, ~${bytes} байт]`);
+      continue;
+    }
+    parts.push(`[пустая часть ресурса: ${asString(record.uri) || 'без адреса'}]`);
+  }
+
+  const text = parts.join('\n\n').trim();
+  if (!text) return { text: 'Сервер вернул пустой ресурс', isError: false };
+  if (text.length <= limit) return { text, isError: false };
+  // Обрезка по границе строки: разорванный символ ломает и чтение, и токены.
+  const cut = text.slice(0, limit);
+  const lineBreak = cut.lastIndexOf('\n');
+  const head = (lineBreak > limit / 2 ? cut.slice(0, lineBreak) : cut).trimEnd();
+  return { text: `${head}\n\n… ресурс длиннее ${limit} символов, показано начало`, isError: false };
 }
 
 /**

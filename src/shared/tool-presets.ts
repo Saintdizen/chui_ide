@@ -62,6 +62,8 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
       'search_docs',
       'read_skill',
       'read_image',
+      'list_mcp_resources',
+      'read_mcp_resource',
       'find_references',
       'go_to_definition',
       'file_outline',

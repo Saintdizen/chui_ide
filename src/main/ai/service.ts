@@ -195,6 +195,8 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'web_search',
   'web_fetch',
   'read_image',
+  'list_mcp_resources',
+  'read_mcp_resource',
   'find_files',
   'get_diagnostics',
   'git_status',
@@ -892,7 +894,11 @@ export class AiService {
     // Внешние инструменты (MCP) добавляем к нашим. В режиме плана их нет: что
     // делает чужой инструмент, мы не знаем, а план ничего менять не должен.
     const external = useTools && !planMode && this.mcp ? await this.externalTools(host) : [];
-    const offered = [...available, ...external];
+    // Ресурсы MCP — тоже чтение, поэтому они есть и в режиме плана: план и
+    // составляют по документам сервера. Список ресурсов знает только подключение,
+    // поэтому схемы добавляются здесь, а не статическим отбором.
+    const resourceTools = useTools && this.mcp ? await this.resourceTools() : [];
+    const offered = [...available, ...external, ...resourceTools];
     // `let`: набор схем пересобирается, если человек утвердил план посреди прогона
     // (см. `widen` ниже).
     let tools = offered.length > 0 ? toOpenAiTools(offered) : undefined;
@@ -1027,7 +1033,7 @@ export class AiService {
           this.canRun(tool, host, hasSkills) &&
           toolPresetAllows(toolPreset, tool.name),
       );
-      const next = [...widened, ...external];
+      const next = [...widened, ...external, ...resourceTools];
       tools = next.length > 0 ? toOpenAiTools(next) : undefined;
       toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;
     };
@@ -1896,6 +1902,26 @@ export class AiService {
   }
 
   /**
+   * Схемы инструментов ресурсов MCP — или пусто, если ни один сервер ресурсов не
+   * объявил.
+   *
+   * Пустой каталог не стоит ни одного лишнего токена: инструмент, который заведомо
+   * ответит «ресурсов нет», модели предлагать незачем. Цена вопроса — один запрос к
+   * уже поднятому серверу на прогон.
+   */
+  private async resourceTools(): Promise<ExposedToolSpec[]> {
+    if (!this.mcp) return [];
+    try {
+      if ((await this.mcp.resources()).length === 0) return [];
+    } catch {
+      return [];
+    }
+    return AGENT_TOOLS.filter((tool) => tool.name === 'list_mcp_resources' || tool.name === 'read_mcp_resource').map(
+      (tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }),
+    );
+  }
+
+  /**
    * Готов ли веб-поиск к работе: включён и обеспечен ключом, если тот нужен.
    * Brave без ключа — это инструмент, который заведомо ответит ошибкой, поэтому
    * модели он не предлагается.
@@ -1914,6 +1940,10 @@ export class AiService {
     // Чтение заданий окна ничего не меняет и живёт в main.
     if (tool.name === 'run_output' || tool.name === 'run_stop') return true;
     if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
+    // Ресурсы MCP предлагаются только тогда, когда серверы их объявили, — это
+    // знает лишь подключение, а `canRun` синхронный. Схемы добавляет
+    // `resourceTools` ниже, поэтому в статическом отборе их нет.
+    if (tool.name === 'list_mcp_resources' || tool.name === 'read_mcp_resource') return false;
     // Вопрос человеку живёт в ленте чата: без окна задать его негде.
     if (tool.name === 'ask') return host?.ask !== undefined;
     // Утверждать план некому без окна: карточка живёт в ленте чата.

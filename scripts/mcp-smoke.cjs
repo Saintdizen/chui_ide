@@ -52,6 +52,23 @@ const main = async () => {
       tools.find((tool) => tool.toolName === 'write_note')?.readOnly === false,
   );
 
+  /* 1б. ресурсы: каталог, чтение, отказ на неизвестный адрес */
+  const resources = await mcp.resources();
+  check(
+    'каталог ресурсов получен',
+    resources.length === 2,
+    resources.map((item) => item.uri),
+  );
+  check('шаблон адреса помечен', resources.find((item) => item.uri === 'file:///{path}')?.template === true);
+  const doc = await mcp.readResource('file:///guide.md');
+  check('ресурс прочитан по адресу', doc.isError === false && doc.text.includes('Гайд'), doc);
+  const missing = await mcp.readResource('file:///нет-такого');
+  check(
+    'неизвестный адрес — понятный отказ',
+    missing.isError === true && missing.text.includes('не объявлен'),
+    missing,
+  );
+
   /* 2. вызов инструмента */
   // Этот вызов заодно доказывает, что клиент отвечает на запросы сервера: фейковый
   // сервер отказывает в вызове, если не получил ответ на свой `roots/list`.
@@ -77,6 +94,12 @@ const main = async () => {
     withBroken.length === 3,
     withBroken.map((tool) => tool.serverId),
   );
+
+  /* 4б. сервер без ресурсов: пустой каталог, а не поломка всего */
+  configs = [server({ args: [SERVER, '--no-resources'] })];
+  mcp.dispose();
+  check('сервер без ресурсов даёт пустой каталог', (await mcp.resources()).length === 0);
+  check('инструменты у него при этом есть', (await mcp.list()).length === 3);
 
   /* 5. выключенный сервер не поднимается */
   configs = [server({ enabled: false })];

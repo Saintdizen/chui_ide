@@ -13,6 +13,20 @@ function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
+/** Есть ли у этого запуска ресурсы: `--no-resources` даёт сервер без каталога. */
+const NO_RESOURCES = process.argv.includes('--no-resources');
+
+const RESOURCES = [
+  {
+    uri: 'file:///guide.md',
+    name: 'Гайд',
+    description: 'Как собрать проект',
+    mimeType: 'text/markdown',
+  },
+];
+
+const RESOURCE_TEMPLATES = [{ uriTemplate: 'file:///{path}', name: 'Файл по пути', mimeType: 'text/plain' }];
+
 const TOOLS = [
   {
     name: 'echo',
@@ -53,7 +67,7 @@ function handle(message) {
         id: message.id,
         result: {
           protocolVersion: '2024-11-05',
-          capabilities: { tools: {} },
+          capabilities: NO_RESOURCES ? { tools: {} } : { tools: {}, resources: {} },
           serverInfo: { name: 'fake-mcp', version: '1.0.0' },
         },
       });
@@ -62,6 +76,43 @@ function handle(message) {
 
     case 'notifications/initialized':
       return;
+
+    case 'resources/list':
+      if (NO_RESOURCES) {
+        send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'ресурсы не поддерживаются' } });
+        return;
+      }
+      send({ jsonrpc: '2.0', id: message.id, result: { resources: RESOURCES } });
+      return;
+
+    case 'resources/templates/list':
+      if (NO_RESOURCES) {
+        send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'шаблоны не поддерживаются' } });
+        return;
+      }
+      send({ jsonrpc: '2.0', id: message.id, result: { resourceTemplates: RESOURCE_TEMPLATES } });
+      return;
+
+    case 'resources/read': {
+      const uri = message.params?.uri;
+      const found = RESOURCES.find((item) => item.uri === uri);
+      if (NO_RESOURCES || !found) {
+        send({
+          jsonrpc: '2.0',
+          id: message.id,
+          error: { code: -32602, message: `нет ресурса ${uri}` },
+        });
+        return;
+      }
+      send({
+        jsonrpc: '2.0',
+        id: message.id,
+        result: {
+          contents: [{ uri, mimeType: found.mimeType, text: `# ${found.name}\nкак собрать проект` }],
+        },
+      });
+      return;
+    }
 
     case 'tools/list':
       send({ jsonrpc: '2.0', id: message.id, result: { tools: TOOLS } });

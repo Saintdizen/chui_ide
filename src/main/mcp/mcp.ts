@@ -1,9 +1,13 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import type { McpServerTools } from '../../shared/api';
 import {
+  mcpResourceContentText,
   mcpToolResultText,
+  parseMcpResourceTemplates,
+  parseMcpResources,
   parseMcpTools,
   selectMcpTools,
+  type McpResourceInfo,
   type McpServerConfig,
   type McpToolInfo,
 } from '../../shared/mcp';
@@ -46,6 +50,8 @@ class McpConnection {
   private seq = 0;
   private readonly pending = new Map<number, PendingCall>();
   private toolList: McpToolInfo[] = [];
+  /** Каталог ресурсов (лениво): спрашиваем один раз на подключение. */
+  private resourceList: McpResourceInfo[] | null = null;
   private connecting: Promise<void> | null = null;
 
   constructor(
@@ -72,6 +78,44 @@ class McpConnection {
       });
     }
     return this.connecting;
+  }
+
+  /**
+   * Каталог ресурсов сервера: готовые адреса и шаблоны адресов.
+   *
+   * Спрашиваем лениво и только когда ресурс действительно понадобился: у сервера
+   * их может не быть вовсе, и лишний запрос на каждом старте был бы платой ни за
+   * что. «Метод неизвестен» — не поломка, а обычный ответ сервера без ресурсов.
+   */
+  async listResources(): Promise<McpResourceInfo[]> {
+    if (this.resourceList !== null) return this.resourceList;
+
+    const all: McpResourceInfo[] = [];
+    try {
+      const listed = await this.request('resources/list', {}, REQUEST_TIMEOUT_MS);
+      all.push(...parseMcpResources(this.config.id, listed));
+    } catch {
+      /* сервер без ресурсов: говорим об этом пустым списком, а не ошибкой */
+    }
+    try {
+      const templates = await this.request('resources/templates/list', {}, REQUEST_TIMEOUT_MS);
+      all.push(...parseMcpResourceTemplates(this.config.id, templates));
+    } catch {
+      /* шаблонов ещё меньше, чем ресурсов: их отсутствие — правило, а не беда */
+    }
+
+    this.resourceList = all;
+    return all;
+  }
+
+  /** Прочитать ресурс по адресу: ошибка протокола возвращается текстом, как у вызовов. */
+  async readResource(uri: string): Promise<McpCallResult> {
+    try {
+      const result = await this.request('resources/read', { uri }, REQUEST_TIMEOUT_MS);
+      return mcpResourceContentText(result);
+    } catch (error) {
+      return { text: error instanceof Error ? error.message : String(error), isError: true };
+    }
   }
 
   private async handshake(): Promise<void> {
@@ -236,6 +280,7 @@ export class McpService {
   private readonly connections = new Map<string, McpConnection>();
   private readonly index = new Map<string, { serverId: string; toolName: string }>();
   private cached: McpToolInfo[] | null = null;
+  private cachedResources: McpResourceInfo[] | null = null;
   private signature = '';
 
   constructor(
@@ -310,6 +355,56 @@ export class McpService {
     return out;
   }
 
+  /**
+   * Ресурсы всех включённых серверов — то, чем MCP отдаёт документы, а не действия.
+   *
+   * Список собирается один раз на подключение и переживает шаги прогона: за это
+   * время он не меняется, а обход серверов стоит запросов. Смена настроек чистит
+   * кеш вместе с соединениями (см. `list`).
+   */
+  async resources(): Promise<McpResourceInfo[]> {
+    if (this.cachedResources !== null) return this.cachedResources;
+    // Поднимаем серверы тем же путём, что `list`: соединения и подпись настроек
+    // живут там, а ресурсы без поднятого сервера взять неоткуда.
+    await this.list();
+
+    const all: McpResourceInfo[] = [];
+    for (const config of this.servers()) {
+      if (!config.enabled) continue;
+      const connection = this.connections.get(config.id);
+      if (!connection) continue;
+      try {
+        all.push(...(await connection.listResources()));
+      } catch {
+        /* один сервер без ресурсов не отменяет остальные */
+      }
+    }
+
+    this.cachedResources = all;
+    return all;
+  }
+
+  /**
+   * Прочитать ресурс по адресу из каталога. `serverId` нужен, когда один и тот же
+   * uri объявили два сервера: тогда решает настройка, а не порядок обхода.
+   */
+  async readResource(uri: string, serverId?: string): Promise<McpCallResult> {
+    const all = await this.resources();
+    const target = all.find(
+      (item) => item.uri === uri && !item.template && (serverId === undefined || item.serverId === serverId),
+    );
+    if (!target) {
+      return {
+        text: `Ресурс «${uri}» не объявлен ни одним MCP-сервером. Возьми адрес из list_mcp_resources и не придумывай uri сам.`,
+        isError: true,
+      };
+    }
+
+    const connection = this.connections.get(target.serverId);
+    if (!connection) return { text: `Сервер «${target.serverId}» не подключён`, isError: true };
+    return connection.readResource(uri);
+  }
+
   /** Вызвать внешний инструмент по имени, которое видела модель. */
   async call(exposedName: string, args: Record<string, unknown>): Promise<McpCallResult> {
     const target = this.index.get(exposedName);
@@ -351,6 +446,7 @@ export class McpService {
     this.connections.clear();
     this.index.clear();
     this.cached = null;
+    this.cachedResources = null;
   }
 
   dispose(): void {

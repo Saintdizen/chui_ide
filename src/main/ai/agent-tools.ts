@@ -29,7 +29,7 @@ import { parsePatchFiles, type PatchFile } from '../../shared/patch';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
 import { formatLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
-import { isMcpToolName, type McpToolInfo } from '../../shared/mcp';
+import { formatMcpResources, isMcpToolName, type McpResourceInfo, type McpToolInfo } from '../../shared/mcp';
 import { compressToolOutput } from '../../shared/output-compress';
 import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
@@ -175,6 +175,10 @@ export interface SymbolSearch {
 export interface McpRunner {
   list(): Promise<readonly McpToolInfo[]>;
   call(exposedName: string, args: Record<string, unknown>): Promise<{ text: string; isError: boolean }>;
+  /** Каталог ресурсов: то, чем серверы отдают документы, а не действия. */
+  resources(): Promise<readonly McpResourceInfo[]>;
+  /** Прочитать ресурс по адресу из каталога. */
+  readResource(uri: string, serverId?: string): Promise<{ text: string; isError: boolean }>;
 }
 
 export interface WebSearchRunner {
@@ -590,6 +594,10 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await ask(ctx, parsed.value);
       case 'task':
         return await task(ctx, parsed.value);
+      case 'list_mcp_resources':
+        return await listMcpResources(ctx, parsed.value);
+      case 'read_mcp_resource':
+        return await readMcpResource(ctx, parsed.value);
       case 'browser_open':
         return await browserOpen(ctx, parsed.value);
       case 'browser_snapshot':
@@ -3065,4 +3073,66 @@ function optionalBoolean(args: Record<string, unknown>, key: string): boolean | 
  */
 function optionalInteger(args: Record<string, unknown>, key: string): number | undefined {
   return integerArg(args[key]);
+}
+
+/**
+ * `list_mcp_resources` — каталог ресурсов MCP: адреса, имена, типы.
+ *
+ * Ресурс — не действие, а документ: сервер объявляет у себя адреса, и их читают.
+ * Каталог отдаём целиком (с потолком внутри `formatMcpResources`): модель иначе
+ * придумывает uri по аналогии, а сервер отвечает «нет такого ресурса».
+ */
+async function listMcpResources(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.mcp) return { ok: false, summary: 'MCP-серверы не подключены' };
+
+  const only = (optionalString(args, 'server') ?? '').trim();
+  let all: readonly McpResourceInfo[];
+  try {
+    all = await ctx.mcp.resources();
+  } catch (error) {
+    return { ok: false, summary: 'Каталог ресурсов недоступен', detail: describeValue(error) };
+  }
+
+  const items = only ? all.filter((item) => item.serverId === only) : all;
+  const where = only ? `у сервера «${only}»` : 'ни у одного MCP-сервера';
+  if (items.length === 0) {
+    return {
+      ok: true,
+      summary: `${where} ресурсов нет`,
+      detail:
+        'Серверы объявили только инструменты. Работай ими и не ищи ресурсы повторно: каталог не' +
+        ' появится от ещё одного вызова.',
+    };
+  }
+
+  return {
+    ok: true,
+    summary: `ресурсов: ${items.length}${only ? ` (сервер ${only})` : ''}`,
+    detail: formatMcpResources(items),
+  };
+}
+
+/**
+ * `read_mcp_resource` — прочитать один ресурс по адресу из каталога.
+ *
+ * Подтверждения не спрашиваем: это чтение чужого документа, а не действие. Адрес
+ * проверяем по каталогу — так опечатка модели превращается в понятный отказ, а не
+ * в вопрос к серверу «что ты об этом думаешь».
+ */
+async function readMcpResource(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.mcp) return { ok: false, summary: 'MCP-серверы не подключены' };
+
+  const uri = (optionalString(args, 'uri') ?? '').trim();
+  if (!uri) {
+    return { ok: false, summary: 'Не задан адрес ресурса', detail: 'Инструменту нужен непустой аргумент uri.' };
+  }
+  const server = (optionalString(args, 'server') ?? '').trim() || undefined;
+
+  const result = await ctx.mcp.readResource(uri, server);
+  const first = result.text.split('\n')[0] ?? '';
+  return {
+    ok: !result.isError,
+    summary: result.isError ? `${uri}: ошибка — ${first.slice(0, 120)}` : `${uri}: прочитан`,
+    detail: result.text,
+  };
 }

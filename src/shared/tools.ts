@@ -30,6 +30,8 @@ export type AgentToolName =
   | 'run_linter'
   | 'run_tests'
   | 'find_files'
+  | 'list_mcp_resources'
+  | 'read_mcp_resource'
   | 'get_diagnostics'
   | 'apply_edit'
   | 'apply_patch'
@@ -384,6 +386,34 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
         limit: { type: 'number', description: 'Максимум путей (по умолчанию 200, максимум 2000).' },
       },
+    },
+  },
+  {
+    name: 'list_mcp_resources',
+    side: 'main',
+    description:
+      'Каталог ресурсов MCP-серверов: адреса (uri), имена и типы. Ресурс — документ, который отдаёт ' +
+      'сервер, а не действие. Зови перед read_mcp_resource: адрес бери отсюда, а не из головы.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        server: { type: 'string', description: 'Только этот сервер (id из настроек).' },
+      },
+    },
+  },
+  {
+    name: 'read_mcp_resource',
+    side: 'main',
+    description:
+      'Прочитать ресурс MCP по адресу uri из каталога. Возвращает текст; двоичное показывается ' +
+      'пометкой, длинное режется. Адрес-шаблон сначала заполни значениями.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        uri: { type: 'string', description: 'Адрес ресурса из list_mcp_resources.' },
+        server: { type: 'string', description: 'Сервер, если такой uri объявили несколько.' },
+      },
+      required: ['uri'],
     },
   },
   {

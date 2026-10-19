@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   exposedToolName,
+  formatMcpResources,
   isMcpToolName,
+  MAX_MCP_RESOURCES,
   MAX_MCP_TOOLS,
+  MAX_MCP_RESOURCE_CHARS,
+  mcpResourceContentText,
   mcpToolResultText,
+  parseMcpResourceTemplates,
+  parseMcpResources,
   normalizeMcpServers,
   parseMcpTools,
   selectMcpTools,
@@ -235,5 +241,127 @@ describe('selectMcpTools', () => {
     expect(MAX_MCP_TOOLS).toBeGreaterThanOrEqual(32);
     const typical = Array.from({ length: 20 }, (_, index) => tool('files', `t${index}`));
     expect(selectMcpTools(typical).skipped).toBe(0);
+  });
+});
+
+describe('parseMcpResources', () => {
+  it('берёт адрес, имя, описание и тип', () => {
+    const resources = parseMcpResources('docs', {
+      resources: [{ uri: 'file:///guide.md', name: 'Гайд', description: 'Как собрать', mimeType: 'text/markdown' }],
+    });
+
+    expect(resources).toEqual([
+      {
+        serverId: 'docs',
+        uri: 'file:///guide.md',
+        name: 'Гайд',
+        description: 'Как собрать',
+        mimeType: 'text/markdown',
+        template: false,
+      },
+    ]);
+  });
+
+  it('безымянный ресурс называется своим адресом', () => {
+    const resources = parseMcpResources('docs', { resources: [{ uri: 'chui://note/1' }] });
+    expect(resources[0]!.name).toBe('chui://note/1');
+    expect(resources[0]!.description).toBe('');
+    expect(resources[0]!.mimeType).toBe('');
+  });
+
+  it('запись без адреса пропускаем, мусор не роняет разбор', () => {
+    expect(parseMcpResources('x', { resources: [{ name: 'без адреса' }, null, 'строка'] })).toEqual([]);
+    expect(parseMcpResources('x', null)).toEqual([]);
+    expect(parseMcpResources('x', { resources: 'нет' })).toEqual([]);
+  });
+
+  it('один адрес — одна запись: каталог не двоится', () => {
+    const resources = parseMcpResources('x', {
+      resources: [
+        { uri: 'a://1', name: 'первый' },
+        { uri: 'a://1', name: 'второй' },
+      ],
+    });
+    expect(resources).toHaveLength(1);
+    expect(resources[0]!.name).toBe('первый');
+  });
+
+  it('шаблоны адресов разбираются отдельно и помечены', () => {
+    const templates = parseMcpResourceTemplates('x', {
+      resourceTemplates: [{ uriTemplate: 'file:///{path}', name: 'Файл по пути' }],
+    });
+    expect(templates).toHaveLength(1);
+    expect(templates[0]!.uri).toBe('file:///{path}');
+    expect(templates[0]!.template).toBe(true);
+    // В списке ресурсов шаблонов быть не может: у них другой метод.
+    expect(parseMcpResources('x', { resourceTemplates: [{ uriTemplate: 'a://{x}' }] })).toEqual([]);
+  });
+});
+
+describe('formatMcpResources', () => {
+  it('пустой каталог объясняется словами', () => {
+    expect(formatMcpResources([])).toContain('не объявил ресурсов');
+  });
+
+  it('строка называет сервер, вид, адрес, имя и тип', () => {
+    const text = formatMcpResources([
+      {
+        serverId: 'docs',
+        uri: 'file:///guide.md',
+        name: 'Гайд',
+        description: 'как собрать',
+        mimeType: 'text/markdown',
+        template: false,
+      },
+      { serverId: 'docs', uri: 'file:///{p}', name: 'любой', description: '', mimeType: '', template: true },
+    ]);
+
+    expect(text).toContain('[docs] ресурс file:///guide.md · Гайд · text/markdown — как собрать');
+    expect(text).toContain('[docs] шаблон file:///{p} · любой');
+  });
+
+  it('потолок каталога виден: сколько ещё есть', () => {
+    const many = Array.from({ length: MAX_MCP_RESOURCES + 5 }, (_, index) => ({
+      serverId: 'docs',
+      uri: `a://${index}`,
+      name: `r${index}`,
+      description: '',
+      mimeType: '',
+      template: false,
+    }));
+    const text = formatMcpResources(many);
+    expect(text.split('\n')).toHaveLength(MAX_MCP_RESOURCES + 1);
+    expect(text).toContain('ещё 5');
+  });
+});
+
+describe('mcpResourceContentText', () => {
+  it('склеивает текстовые части и подписывает тип', () => {
+    const result = mcpResourceContentText({
+      contents: [
+        { uri: 'a://1', mimeType: 'text/markdown', text: '# Заголовок' },
+        { uri: 'a://2', text: 'вторая часть' },
+      ],
+    });
+    expect(result.isError).toBe(false);
+    expect(result.text).toBe('[text/markdown]\n# Заголовок\n\nвторая часть');
+  });
+
+  it('двоичное показываем пометкой, а не base64', () => {
+    const result = mcpResourceContentText({ contents: [{ uri: 'a://png', mimeType: 'image/png', blob: 'AAAA' }] });
+    expect(result.text).toContain('двоичные данные: image/png');
+    expect(result.text).not.toContain('AAAA');
+  });
+
+  it('длинный ресурс режется по потолку с пояснением', () => {
+    const long = 'строка\n'.repeat(MAX_MCP_RESOURCE_CHARS);
+    const result = mcpResourceContentText({ contents: [{ uri: 'a://big', text: long }] });
+    expect(result.text.length).toBeLessThan(MAX_MCP_RESOURCE_CHARS + 200);
+    expect(result.text).toContain('показано начало');
+  });
+
+  it('пустой ответ — словами, а не пустой строкой', () => {
+    expect(mcpResourceContentText({ contents: [] }).text).toBe('Сервер вернул пустой ресурс');
+    expect(mcpResourceContentText(null).text).toBe('Сервер не вернул содержимого ресурса');
   });
 });
