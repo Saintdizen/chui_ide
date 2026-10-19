@@ -1,6 +1,7 @@
 import { RpcErrorCode, type ChatMessage, type ChatStreamDone, type ChatToolCall } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
 import { fetchWithRetry } from '../../shared/retry';
+import { netFetch } from '../net/proxy';
 import { describeHttpError, safeText } from './openai-compatible';
 import type { AiProvider, StreamChatHandlers, StreamChatParams } from './provider';
 
@@ -55,7 +56,7 @@ export class AnthropicProvider implements AiProvider {
   }
 
   async listModels(signal?: AbortSignal): Promise<string[]> {
-    const response = await fetchWithRetry(`${this.url()}/v1/models`, { headers: this.headers() }, signal);
+    const response = await fetchWithRetry(`${this.url()}/v1/models`, { headers: this.headers() }, signal, netFetch);
     if (!response.ok) {
       const detail = await safeText(response);
       throw new RpcFailure(
@@ -112,6 +113,7 @@ export class AnthropicProvider implements AiProvider {
         `${this.url()}/v1/messages`,
         { method: 'POST', headers: this.headers(), body: JSON.stringify(buildBody(withCache)) },
         signal,
+        netFetch,
       );
 
     let response = await post(useCache);

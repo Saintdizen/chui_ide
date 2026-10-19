@@ -17,6 +17,7 @@ import { LspService } from './lsp/lsp';
 import { detectLspSources } from './lsp/detect';
 import { createSeedProvider } from './lsp/seed';
 import { McpService } from './mcp/mcp';
+import { installProxyFromEnv } from './net/proxy';
 import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
 import { SandboxService } from './sandbox/sandbox';
@@ -138,6 +139,9 @@ if (!app.requestSingleInstanceLock()) {
     askToOpenFolder(asked.folder);
   });
   void app.whenReady().then(async () => {
+    // Прокси из окружения — до первого сетевого вызова: провайдеры, веб-поиск и
+    // чтение страниц ходят в сеть сразу, как только человек задаст вопрос.
+    installProxyFromEnv();
     const settings = new SettingsStore();
 
     // Схема в приложении одна — тёмная, поэтому `nativeTheme.themeSource` не трогаем:

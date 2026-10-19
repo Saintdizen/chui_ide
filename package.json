@@ -108,7 +108,8 @@
     "dist": "npm run build && electron-builder --publish never",
     "dist:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
     "dist:win": "npm run build && electron-builder --win nsis --publish never",
-    "dist:mac": "npm run build && electron-builder --mac dmg --publish never"
+    "dist:mac": "npm run build && electron-builder --mac dmg --publish never",
+    "smoke:proxy": "npm run build:main && node scripts/proxy-smoke.cjs"
   },
   "engines": {
     "node": ">=20"
@@ -129,6 +130,7 @@
     "pyright": "^1.1.414",
     "typescript-bundled": "npm:typescript@^5.9.3",
     "typescript-language-server": "^6.0.2",
+    "undici": "^7.30.1",
     "vscode-langservers-extracted": "^4.10.0",
     "yaml-language-server": "^1.25.0"
   }

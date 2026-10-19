@@ -7,6 +7,7 @@ import {
   normalizeFetchUrl,
   type FetchedPage,
 } from '../../shared/web-fetch';
+import { netFetch } from '../net/proxy';
 
 /**
  * Загрузка страницы по ссылке для инструмента `web_fetch`.
@@ -50,7 +51,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
 
   const timeout = AbortSignal.timeout(options.timeoutMs ?? TIMEOUT_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-  const doFetch = options.fetchImpl ?? fetch;
+  const doFetch = options.fetchImpl ?? netFetch;
 
   let response: Response;
   try {

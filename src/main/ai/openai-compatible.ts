@@ -3,6 +3,7 @@ import { RpcFailure } from '../ipc/router';
 import type { AiProvider, StreamChatHandlers, StreamChatParams } from './provider';
 import { isContextOverflow } from '../../shared/context-fit';
 import { fetchWithRetry } from '../../shared/retry';
+import { netFetch } from '../net/proxy';
 
 export interface OpenAiCompatibleOptions {
   id: string;
@@ -54,7 +55,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
   }
 
   async listModels(signal?: AbortSignal): Promise<string[]> {
-    const response = await fetchWithRetry(this.url('/models'), { headers: this.headers() }, signal);
+    const response = await fetchWithRetry(this.url('/models'), { headers: this.headers() }, signal, netFetch);
     if (!response.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -103,6 +104,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
         this.url('/chat/completions'),
         { method: 'POST', headers: this.headers(), body: JSON.stringify(body) },
         signal,
+        netFetch,
       );
 
     let response = await post(buildBody(true));

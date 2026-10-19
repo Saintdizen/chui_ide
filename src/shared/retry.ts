@@ -49,11 +49,17 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * Повтор запроса на временных сбоях сети и состояниях 429/5xx. Повторяется
  * только сам fetch — до чтения тела потока, поэтому стрим не дублируется.
  */
-export async function fetchWithRetry(url: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
+export async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  signal?: AbortSignal,
+  /** Чем делать запрос: в main это `netFetch` — он знает про прокси из окружения. */
+  fetchImpl: typeof fetch = fetch,
+): Promise<Response> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      const response = await fetch(url, { ...init, signal });
+      const response = await fetchImpl(url, { ...init, signal });
       if (response.ok || !RETRYABLE_STATUS.has(response.status) || attempt === MAX_ATTEMPTS) {
         return response;
       }

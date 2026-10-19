@@ -5,6 +5,7 @@ import {
   type WebSearchHit,
   type WebSearchProvider,
 } from '../../shared/web-search';
+import { netFetch } from '../net/proxy';
 
 /**
  * Обращение к сервису веб-поиска.
@@ -70,7 +71,7 @@ export async function searchWeb(
   const timeout = AbortSignal.timeout(TIMEOUT_MS);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
-  const response = await fetch(url, { headers: webSearchHeaders(config), signal: combined });
+  const response = await netFetch(url, { headers: webSearchHeaders(config), signal: combined });
   if (!response.ok) {
     throw new Error(`Поиск ответил кодом ${response.status}${response.status === 401 ? ' — проверьте ключ' : ''}`);
   }
