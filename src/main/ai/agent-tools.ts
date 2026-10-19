@@ -31,6 +31,7 @@ import { formatLocations, type SymbolLocation } from '../../shared/lsp-locations
 import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
 import { formatMcpResources, isMcpToolName, type McpResourceInfo, type McpToolInfo } from '../../shared/mcp';
 import { compressToolOutput } from '../../shared/output-compress';
+import type { ToolPresentedFile } from '../../shared/api';
 import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
@@ -68,6 +69,11 @@ export interface ToolOutcome {
   images?: readonly string[];
   /** Файловые операции (создание/удаление/перенос): их показывает панель изменений чата. */
   changes?: ToolFileChange[];
+  /**
+   * Файлы-результаты (`present`): в ленте это карточка с кнопками «Открыть».
+   * Не `changes`: там «что изменилось», а здесь «вот что я сделал, посмотри».
+   */
+  presented?: ToolPresentedFile[];
   /**
    * Тела правок этого вызова уже в файле: в истории их можно заменить пометкой
    * (см. `condenseAppliedCalls`). Ставится только там, где запись действительно
@@ -545,6 +551,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await searchDocs(ctx, parsed.value);
       case 'session_search':
         return await sessionSearch(ctx, parsed.value);
+      case 'present':
+        return await presentFiles(ctx, parsed.value);
       case 'read_skill':
         return await readSkill(ctx, parsed.value);
       case 'read_image':
@@ -3174,3 +3182,75 @@ async function sessionSearch(ctx: ToolContext, args: Record<string, unknown>): P
     detail: formatSessionSearch(report),
   };
 }
+
+/**
+ * `present` — объявить готовый результат.
+ *
+ * Агент и раньше писал «файл готов, он лежит в docs/тз.md», и человек шёл искать
+ * его в дереве. Карточка в ленте делает то же самое одним нажатием: путь и кнопка
+ * «Открыть». Файл при этом не читается и не меняется — инструмент только объявляет.
+ *
+ * Проверяем существование: объявить несуществующий файл — это ложь, на которую
+ * человек потратит время. Пути идут через `WorkspaceService`, поэтому за пределы
+ * проекта карточка не выведет.
+ */
+async function presentFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const raw = Array.isArray(args.paths) ? args.paths : typeof args.path === 'string' ? [args.path] : [];
+  const paths = raw.filter((item): item is string => typeof item === 'string' && item.trim() !== '');
+  if (paths.length === 0) {
+    return {
+      ok: false,
+      summary: 'Не указаны файлы',
+      detail: 'Инструменту нужен непустой список paths — файлы, которые человек должен открыть.',
+    };
+  }
+
+  const note = (optionalString(args, 'note') ?? '').trim();
+  const presented: ToolPresentedFile[] = [];
+  const missing: string[] = [];
+
+  for (const item of paths.slice(0, MAX_PRESENTED_FILES)) {
+    try {
+      const stat = await ctx.workspace.stat(item);
+      if (stat.kind === 'directory') {
+        missing.push(`${item} (это папка, а не файл)`);
+        continue;
+      }
+      presented.push({ path: stat.path, ...(note ? { note } : {}) });
+    } catch {
+      // Файла нет или путь вне проекта: говорим прямо, а не показываем кнопку-обманку.
+      missing.push(item);
+    }
+  }
+
+  const skipped =
+    paths.length > MAX_PRESENTED_FILES
+      ? ` Ещё ${paths.length - MAX_PRESENTED_FILES} не показаны: потолок ${MAX_PRESENTED_FILES}.`
+      : '';
+  if (presented.length === 0) {
+    return {
+      ok: false,
+      summary: 'Нечего показать: файлов не нашлось',
+      detail:
+        `Не нашлись: ${missing.join(', ')}. Проверь пути — объявлять надо существующие файлы внутри проекта.` + skipped,
+    };
+  }
+
+  const names = presented.map((file) => file.path);
+  return {
+    ok: true,
+    summary: presented.length === 1 ? `результат: ${path.basename(names[0]!)}` : `результатов: ${presented.length}`,
+    detail: [
+      `Готово, показано человеку в ленте: ${names.join(', ')}`,
+      missing.length > 0 ? `Не нашлись (не показаны): ${missing.join(', ')}` : '',
+      skipped,
+      'Ссылки в тексте ответа не нужны: файлы уже перед человеком кнопками.',
+    ]
+      .filter(Boolean)
+      .join('\n'),
+    presented,
+  };
+}
+
+/** Сколько файлов объявляем за раз: это «вот результат», а не список всего проекта. */
+const MAX_PRESENTED_FILES = 8;

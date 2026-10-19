@@ -49,6 +49,7 @@ const TOOL_LABELS: Record<string, string> = {
   git_diff: 'Diff git',
   git_log: 'История git',
   open_file: 'Открытие файла',
+  present: 'Результат',
   terminal_list: 'Список терминалов',
   terminal_start: 'Запуск в терминале',
   terminal_read: 'Чтение терминала',
@@ -87,6 +88,7 @@ const TOOL_ICONS: Record<string, IconName> = {
   git_diff: 'branch',
   git_log: 'command',
   open_file: 'file',
+  present: 'checkCircle',
   terminal_list: 'terminal',
   terminal_start: 'terminal',
   terminal_read: 'terminal',
@@ -292,7 +294,18 @@ interface ToolGroupView {
   seal(): void;
 }
 
-function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?: () => void): ToolGroupView {
+/**
+ * Чем открыть файл-результат (`present`). Клику в ленте мало одного `editors.reveal`:
+ * среди открытых документа может и не быть — агент только что его создал.
+ */
+type OpenFileHandler = (path: string) => Promise<void>;
+
+function createToolGroup(
+  container: HTMLElement,
+  anchor: Node | null,
+  onUpdate: (() => void) | undefined,
+  onOpenFile: OpenFileHandler | undefined,
+): ToolGroupView {
   let count = 0;
   let pending = 0;
   let failed = 0;
@@ -470,6 +483,37 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
     const label = toolLabel(call.name);
     if (!names.includes(label)) names.push(label);
 
+    /**
+     * Файлы-результаты («вот что я сделал»). Это не раздел внутри раскрытия: если
+     * человеку нужно нажать «Открыть», он не должен сперва догадаться раскрыть
+     * карточку. Путь и кнопка — по строке на файл; имя показываем, полный путь —
+     * в подсказке, чтобы узкая панель не рвалась по слогам.
+     */
+    const presentBlock = (items: ChatToolResultPayload['presented']): HTMLElement => {
+      const list = h('div', { class: 'tool-present' });
+      for (const item of items ?? []) {
+        const name = item.path.split(/[\\/]/).pop() ?? item.path;
+        const open = h(
+          'button',
+          { class: 'btn btn-small tool-present-open', type: 'button', title: `Открыть ${item.path}` },
+          svgIcon('file', 12),
+          h('span', { class: 'tool-present-name' }, item.note ? `${name} — ${item.note}` : name),
+        );
+        open.addEventListener('click', () => {
+          // Без обработчика кнопка не притворяется рабочей: подсказка говорит, чего нет.
+          if (!onOpenFile) {
+            showToast('Открыть файл здесь нечем', 'error');
+            return;
+          }
+          void onOpenFile(item.path).catch(() => showToast('Не удалось открыть файл', 'error'));
+        });
+        open.disabled = onOpenFile === undefined;
+        if (!onOpenFile) open.title = item.path;
+        list.appendChild(open);
+      }
+      return list;
+    };
+
     const cardState = toolStateElement();
     const panel = h('div', { class: 'tool-panel', hidden: true });
     const card = h('div', { class: 'tool-card' });
@@ -547,6 +591,12 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
       finish: (result) => {
         outcome = result;
         setToolState(cardState, result.ok);
+        // Файлы-результаты показываем сразу и вне раскрытия: это то, ради чего
+        // вызов и делался. Место — между шапкой и панелью, чтобы кнопки были видны.
+        if (result.ok && result.presented?.length) {
+          const block = presentBlock(result.presented);
+          card.insertBefore(block, panel);
+        }
         card.classList.toggle('tool-failed', !result.ok);
         // Сколько шло: у долгой сборки это главное, что можно сказать о вызове.
         const spent = result.ms !== undefined && result.ms > 0 ? formatCallTime(result.ms) : '';
@@ -601,13 +651,15 @@ export function createToolFeed(
   container: HTMLElement,
   anchor: Node | null = null,
   onUpdate?: () => void,
+  /** Чем открыть файл-результат: см. `OpenFileHandler`. */
+  onOpenFile?: OpenFileHandler,
 ): {
   add(call: ChatToolStartPayload): ToolCardView;
   reasoning(): ReasoningRowView;
   seal(): void;
 } {
   let current: ToolGroupView | null = null;
-  const ensure = (): ToolGroupView => (current ??= createToolGroup(container, anchor, onUpdate));
+  const ensure = (): ToolGroupView => (current ??= createToolGroup(container, anchor, onUpdate, onOpenFile));
 
   return {
     add: (call) => ensure().add(call),

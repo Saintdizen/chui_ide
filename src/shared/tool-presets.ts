@@ -83,6 +83,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
       'delete_file',
       'move_file',
       'open_file',
+      'present',
     ],
   },
   {

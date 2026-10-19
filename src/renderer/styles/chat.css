@@ -1363,6 +1363,37 @@
   object-fit: contain;
 }
 
+/* ── файлы-результаты агента (present) ──────────────────────────────────── */
+
+/* Ряд кнопок «Открыть» под шапкой карточки вызова. Это не раздел внутри
+   раскрытия: если человеку надо нажать, он не должен сперва догадаться
+   раскрыть карточку. Кнопки идут строками во всю ширину: имя файла — фраза,
+   и в узкой панели (250 px) рваный ряд читается хуже, чем список. */
+.tool-present {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 8px 6px;
+  border-top: 1px solid var(--separator_color);
+}
+
+.tool-present-open {
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+/* Имя файла может быть длинным: многоточие вместо переноса — путь всё равно
+   виден целиком в подсказке кнопки. */
+.tool-present-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* ── решение принято: от карточки остаётся одна строка ──────────────────── */
 
 .decision-line {

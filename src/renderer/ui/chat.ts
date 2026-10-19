@@ -696,7 +696,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
           el.appendChild(content);
         }
         if (message.toolCalls?.length) {
-          const feed = createToolFeed(el);
+          const feed = createToolFeed(el, null, undefined, async (path) => {
+            await revealFile(path);
+          });
           for (const call of message.toolCalls) {
             cards.set(call.id, feed.add({ id: call.id, name: call.name, args: call.arguments }));
           }
@@ -1792,6 +1794,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         feedbackFor(session, session.history.length - 1),
       ),
     continueAnswer: () => void send('Продолжи ответ с того места, где остановился.'),
+    // Файлы-результаты (present) открываются тем же путём, что клик по файлу в дереве.
+    openFile: async (path) => {
+      await revealFile(path);
+    },
     openRunLog: (session) => {
       runInspector.open(session.run ?? null, session.title ? `беседа: ${session.title}` : undefined);
     },

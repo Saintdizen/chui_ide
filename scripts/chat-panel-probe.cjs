@@ -67,6 +67,10 @@ app.whenReady().then(async () => {
   const other = path.join(dir, 'other');
   await fs.mkdir(other, { recursive: true });
   await fs.writeFile(path.join(project, 'README.md'), '# demo\n', 'utf8');
+  // Файл-результат для инструмента present: кнопка «Открыть» должна открыть
+  // настоящий файл, поэтому он лежит в проекте до старта окна.
+  const RESULT = path.join(project, 'итог.txt');
+  await fs.writeFile(RESULT, 'итог пробы\n', 'utf8');
   await fs.mkdir(SHOTS, { recursive: true });
 
   // Свои команды проекта (`.chui/commands`): их читает main и отдаёт меню
@@ -110,6 +114,17 @@ app.whenReady().then(async () => {
       summary: 'probe.txt: 2 строки',
       detail: '1 | первая\n2 | вторая',
       ms: 7,
+    });
+    // Файл-результат (present): в ленте карточка с кнопкой «Открыть» — проверяем,
+    // что она появляется и открывает файл тем же путём, что клик по файлу в дереве.
+    emit('tool_start', { id: 'call_present', name: 'present', args: JSON.stringify({ paths: [RESULT] }) });
+    emit('tool_result', {
+      id: 'call_present',
+      name: 'present',
+      ok: true,
+      summary: 'результат: итог.txt',
+      presented: [{ path: RESULT, note: 'итог пробы' }],
+      ms: 3,
     });
     emit('delta', { text });
     // Цель с продолжением: main поставил её и продолжил прогон сам. Событие идёт
@@ -992,6 +1007,33 @@ app.whenReady().then(async () => {
   // иначе промолчал бы, и проверка гадала бы, почему карточка не обновилась.
   check('в окне нет ошибок страницы', (inspector.ошибки ?? []).length === 0, inspector.ошибки);
   check('в консоли окна нет ошибок', consoleErrors.length === 0, consoleErrors.slice(0, 3));
+
+  /* ── файл-результат (present): карточка с кнопкой «Открыть» ─────────────── */
+
+  // Агент объявил результат — в ленте должна быть кнопка, а не путь в тексте.
+  // Клик открывает файл настоящей вкладкой: проверяем по подписи вкладки.
+  const presentCard = await ask(
+    ide,
+    `(async () => {
+      const block = [...document.querySelectorAll('.tool-present')].pop();
+      const button = block?.querySelector('.tool-present-open');
+      if (!button) return { есть: false };
+      const подпись = button.textContent ?? '';
+      const путь = button.title ?? '';
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const tabs = [...document.querySelectorAll('.tab-label')].map((tab) => tab.textContent ?? '');
+      return { есть: true, подпись, путь, вкладки: tabs };
+    })()`,
+  );
+  check('файл-результат виден карточкой в ленте', presentCard.есть === true, presentCard);
+  check('в кнопке имя файла и пояснение агента', (presentCard.подпись ?? '').includes('итог.txt'), presentCard.подпись);
+  check('полный путь лежит в подсказке кнопки', (presentCard.путь ?? '').includes('итог.txt'), presentCard.путь);
+  check(
+    'кнопка открыла файл вкладкой',
+    (presentCard.вкладки ?? []).some((label) => label.includes('итог.txt')),
+    presentCard.вкладки,
+  );
 
   /* ── цель работы ───────────────────────────────────────────────────────── */
 

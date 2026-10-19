@@ -74,6 +74,7 @@ export type AgentToolName =
   | 'git_pull'
   | 'git_push'
   | 'open_file'
+  | 'present'
   | 'terminal_list'
   | 'terminal_start'
   | 'terminal_read'
@@ -407,8 +408,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'list_mcp_resources',
     side: 'main',
     description:
-      'Каталог ресурсов MCP-серверов: адреса (uri), имена и типы. Ресурс — документ, который отдаёт ' +
-      'сервер, а не действие. Зови перед read_mcp_resource: адрес бери отсюда, а не из головы.',
+      'Каталог ресурсов MCP: адреса (uri), имена и типы — это документы сервера, а не действия. ' +
+      'Зови перед read_mcp_resource: адрес бери отсюда.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -420,8 +421,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'read_mcp_resource',
     side: 'main',
     description:
-      'Прочитать ресурс MCP по адресу uri из каталога. Возвращает текст; двоичное показывается ' +
-      'пометкой, длинное режется. Адрес-шаблон сначала заполни значениями.',
+      'Прочитать ресурс MCP по адресу из каталога. Двоичное — пометкой, длинное режется. ' +
+      'Адрес-шаблон сначала заполни значениями.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1138,6 +1139,28 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         setUpstream: { type: 'boolean', description: 'true — привязать ветку к origin (git push -u).' },
         force: { type: 'boolean', description: 'true — принудительно (--force-with-lease).' },
       },
+    },
+  },
+  {
+    name: 'present',
+    side: 'main',
+    description:
+      'Объявить результат: файлы, которые человек откроет кнопкой в ленте. Зови вместо «файл ' +
+      'лежит там-то» в тексте.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        paths: {
+          type: 'array',
+          description: 'Файлы результата (абсолютные пути внутри проекта). Один-пять.',
+          items: { type: 'string', description: 'Путь к файлу.' },
+        },
+        note: {
+          type: 'string',
+          description: 'Одна строка, что это за результат: «ТЗ в двух форматах», «собрано в dist».',
+        },
+      },
+      required: ['paths'],
     },
   },
   {

@@ -1776,6 +1776,11 @@ export interface ChatToolResultPayload {
    * человек должен видеть, на что именно смотрел агент, а не только путь.
    */
   images?: string[];
+  /**
+   * Файлы, которые агент объявил результатом (`present`). В ленте это карточка
+   * с кнопками «Открыть»: человек не ищет путь в тексте ответа.
+   */
+  presented?: ToolPresentedFile[];
 }
 
 /**
@@ -1783,6 +1788,17 @@ export interface ChatToolResultPayload {
  * Правки документов едут отдельным путём (apply_edit → ревью), а это —
  * создание, удаление и перенос: они меняют диск, но не буфер редактора.
  */
+/**
+ * Файл, который агент объявил результатом (инструмент `present`). В отличие от
+ * `ToolFileChange` это не «что изменилось», а «вот что я сделал, открой»: панель
+ * изменений считает правки, а карточка в ленте — то, что человек должен увидеть.
+ */
+export interface ToolPresentedFile {
+  path: string;
+  /** Строка от агента: что это за файл. Не задана — показываем имя. */
+  note?: string;
+}
+
 export interface ToolFileChange {
   path: string;
   kind: 'created' | 'deleted' | 'moved' | 'modified';

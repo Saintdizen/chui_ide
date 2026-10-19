@@ -80,6 +80,8 @@ export interface StreamHost {
   continueAnswer(): void;
   /** Пост-обработка конца потока: вкладки, инфо о сессии, сохранение. */
   afterStream(session: ChatSession): void;
+  /** Открыть файл-результат агента (инструмент `present`) — как клик по файлу. */
+  openFile(path: string): Promise<void>;
   /** Открыть окно «Прогон» с трассой последнего прогона этой беседы. */
   openRunLog(session: ChatSession): void;
   /** Текущий режим (вопрос / агент / план) — уходит провайдеру. */
@@ -160,7 +162,12 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     messageEl.appendChild(activity.element);
     activity.state('думает…');
     // Подряд идущие вызовы инструментов живут одной группой — см. createToolFeed.
-    const tools = createToolFeed(messageEl, activity.element, () => host.scrollToEnd(session));
+    const tools = createToolFeed(
+      messageEl,
+      activity.element,
+      () => host.scrollToEnd(session),
+      (path) => host.openFile(path),
+    );
     /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
     let reasoningView: ReasoningRowView | null = null;
     const toolCards = new Map<string, ToolCardView>();
