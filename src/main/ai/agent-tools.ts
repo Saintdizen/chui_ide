@@ -20,6 +20,8 @@ import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import { formatReadImageReply, formatReadImageSummary } from '../../shared/read-image';
+import { testTargetProblem } from '../../shared/test-target';
+import { limitPerFile, MAX_HITS_PER_FILE } from '../../shared/search-limit';
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import { formatRunCode, runCodeToolAllowed, type RunCodeOutcome } from '../../shared/run-code';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
@@ -80,7 +82,8 @@ export interface ToolOutcome {
  */
 export interface GitTools {
   status(): Promise<GitStatus>;
-  diffText(path: string, staged?: boolean): Promise<string>;
+  /** Diff файла; без пути — весь рабочий diff целиком («что я наменял»). */
+  diffText(path?: string, staged?: boolean): Promise<string>;
   /** История коммитов текстом: hash, дата, автор, заголовок. */
   logText(limit?: number, path?: string): Promise<string>;
   /** Происхождение строк файла: кто, когда и каким коммитом их менял. */
@@ -225,7 +228,12 @@ export interface Linter {
  * «команда не найдена». `null` — тестов нет или запускать нечем.
  */
 export interface TestRunner {
-  command(): Promise<{ command: string; label: string } | null>;
+  /**
+   * Команда запуска тестов. `target` — файл тестов или имя теста: прогон всего
+   * набора на большом проекте стоит десятки тысяч строк вывода, а агент обычно
+   * правил одну функцию. Не задано — весь набор, как раньше.
+   */
+  command(target?: string): Promise<{ command: string; label: string } | null>;
 }
 
 /**
@@ -396,20 +404,59 @@ export interface ToolContext {
    * копии, как раньше: путь к файлу, которого не появится, обещать нельзя.
    */
   spillDir?: string;
+  /**
+   * Остаток бюджета вывода на шаг. Заводит агентный цикл на каждый шаг и
+   * расходуют все инструменты шага вместе (см. `STEP_OUTPUT_CHARS`).
+   *
+   * Предел на вызов этой задаче не отвечает: три `read_file` в одном шаге честно
+   * укладываются в свои 60 000 символов каждый и дают 180 000 — контекст уже
+   * переполнен, а обрезка срабатывает только следующим шагом и выбрасывает ходы
+   * целиком. Поэтому шаг платит из общего бюджета, а исчерпанное называется вслух.
+   */
+  stepBudget?: { left: number };
 }
 
 /** Ограничение вывода: без него один файл на 2 МБ съест весь контекст модели. */
 const MAX_OUTPUT_CHARS = 60_000;
+
+/**
+ * Сколько символов вывода шаг отдаёт модели всего. Предела на вызов мало: агент
+ * читает по три файла за шаг, и это 180 000 символов — половина скромного окна,
+ * после чего обрезка истории выбрасывает ходы целиком. Бюджет шага делает цену
+ * шага предсказуемой, а `MIN_OUTPUT_CHARS` не даёт инструменту ответить пустотой.
+ */
+export const STEP_OUTPUT_CHARS = 80_000;
+
+/**
+ * Минимум на один вызов, даже когда бюджет шага уже исчерпан. Пустой ответ модель
+ * поймёт как «инструмент ничего не вернул» и позовёт его снова; честнее отдать
+ * начало (или хвост) с пометкой, что текст лежит в файле.
+ */
+const MIN_OUTPUT_CHARS = 1_500;
 /** Больше этого одной страницы модели не отдаём: даже по просьбе. */
 const MAX_FETCH_CHARS = 60_000;
 const MAX_SEARCH_HITS = 200;
 /** Сколько разделов документации отдаём на один запрос `search_docs`. */
 const MAX_DOC_RESULTS = 12;
+/**
+ * Во сколько раз просим больше совпадений, чем отдадим. Потолок на файл
+ * отбирает уже после поиска: без запаса шумный файл занял бы весь список, и
+ * других файлов в выдаче не было бы вовсе.
+ */
+const SEARCH_OVERFETCH = 3;
 /** Потолок для режима «только файлы»: там на файл одна строка, поэтому можно больше. */
 const MAX_FIND_FILES = 2000;
 const MAX_DIR_ENTRIES = 500;
 /** Сколько строк отдаёт read_file за один диапазонный вызов. */
 const MAX_READ_LINES = 2000;
+/**
+ * Файл длиннее — читается не целиком, а головой и оглавлением. Отдать 60 000
+ * символов начала — это ~15 000 токенов вслепую: конец файла всё равно не виден,
+ * и модель просит следующие диапазоны наугад.
+ */
+const WHOLE_FILE_MAX_LINES = 400;
+/** Сколько строк показываем из длинного файла и с какой просить продолжение. */
+const LONG_FILE_HEAD_LINES = 200;
 
 /** Максимум правок за один вызов: защита от вырожденного ответа модели. */
 const MAX_EDITED_FILES = 50;
@@ -499,7 +546,7 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       case 'run_linter':
         return await runLinter(ctx, parsed.value);
       case 'run_tests':
-        return await runTests(ctx);
+        return await runTests(ctx, parsed.value);
       case 'project_map':
         return await projectMap(ctx.workspace);
       case 'find_files':
@@ -810,6 +857,38 @@ async function listDir(workspace: WorkspaceService, args: Record<string, unknown
   };
 }
 
+/**
+ * Строки с номерами — в том виде, в каком их видит модель: номер, черта, текст.
+ * Один и тот же вид у диапазонного чтения и у головы длинного файла: номера
+ * должны годиться в `apply_edit` без пересчёта.
+ */
+function numberedLines(lines: readonly string[], from: number): string {
+  const width = String(from + lines.length - 1).length;
+  return lines.map((line, index) => `${String(from + index).padStart(width, ' ')} | ${line}`).join('\n');
+}
+
+/**
+ * Оглавление длинного файла от языкового сервера: объявления с номерами строк.
+ * Нет сервера или он не разобрал — пустая строка: голова файла всё равно полезна,
+ * а выдумывать оглавление нельзя.
+ */
+async function fileOutlineText(ctx: ToolContext, target: string, text: string): Promise<string> {
+  const symbols = ctx.symbols;
+  if (!symbols?.outline) return '';
+  const language = symbols.languageFor?.(target);
+  if (!language) return '';
+  try {
+    const outline = await symbols.outline(target, language, text);
+    if (!outline || outline.length === 0) return '';
+    return formatOutline(relative(target, ctx.workspace.rootPath()), outline, {
+      totalLines: text.length === 0 ? 0 : text.split('\n').length,
+    }).detail;
+  } catch {
+    // Сервер не ответил — это не повод отказывать в чтении.
+    return '';
+  }
+}
+
 async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const { workspace } = ctx;
   const target = requireString(args, 'path');
@@ -841,8 +920,27 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
     throw new Error(`endLine: нужен целый номер строки, получено ${describeValue(args.endLine)}`);
   }
 
-  // Без диапазона поведение прежнее: файл целиком с обрезкой по символам.
+  // Без диапазона: небольшой файл — целиком, длинный — головой и оглавлением.
+  // Отдать 60 000 символов начала длинного файла — это ~15 000 токенов вслепую:
+  // конец всё равно не виден, а модель просит диапазоны наугад.
   if (startLine === undefined && endLine === undefined) {
+    if (total > WHOLE_FILE_MAX_LINES) {
+      const head = allLines.slice(0, LONG_FILE_HEAD_LINES);
+      const outline = await fileOutlineText(ctx, target, content.text);
+      const tail =
+        `… (файл длинный: строк всего ${total}, показаны первые ${head.length}). ` +
+        `Дальше — read_file с startLine с ${head.length + 1}` +
+        `${outline ? ' или нужный раздел из оглавления выше' : ' или file_outline для оглавления'}.`;
+      const body = `${numberedLines(head, 1)}\n\n${outline ? `Оглавление:\n${outline}\n\n` : ''}${tail}`;
+      const { text } = clipText(ctx, 'read_file', body);
+      return {
+        ok: true,
+        summary: `${rel}: ${total} строк, показаны первые ${head.length}`,
+        detail: text,
+        // Прочитанным считается только показанное: остальное модель не видела.
+        read: { path: target, from: 1, to: head.length },
+      };
+    }
     const { text, truncated } = clipText(ctx, 'read_file', content.text);
     return {
       ok: true,
@@ -882,8 +980,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
   // Диапазон тоже ограничиваем: модель может попросить «весь файл» через 1–∞.
   const last = Math.min(to, from + MAX_READ_LINES - 1);
   const slice = allLines.slice(from - 1, last);
-  const width = String(last).length;
-  const body = slice.map((line, index) => `${String(from + index).padStart(width, ' ')} | ${line}`).join('\n');
+  const body = numberedLines(slice, from);
   const clipped = last < to ? `\n… (показаны строки ${from}–${last} из ${to}; продолжай с ${last + 1})` : '';
 
   // Диапазон тоже режем по символам: 2000 строк по ~40 символов — это ~80 КБ,
@@ -1031,7 +1128,10 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
       glob,
       path: scope,
       context,
-      maxResults: filesOnly ? MAX_FIND_FILES : MAX_SEARCH_HITS,
+      // Просим с запасом: потолок на файл отбирает уже потом, и без запаса один
+      // шумный файл (`package-lock.json`) занял бы весь список, а до остальных
+      // файлов поиск бы даже не дошёл.
+      maxResults: filesOnly ? MAX_FIND_FILES : MAX_SEARCH_HITS * SEARCH_OVERFETCH,
     },
     ctx.signal,
   );
@@ -1047,11 +1147,19 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     };
   }
 
-  const detail = formatSearchHits(result.hits, root, context);
+  // Потолок на файл: десяток строк из одного места полезнее двухсот, а по числу
+  // скрытых видно, что файл шумный, — и модель сузит запрос вместо вывода
+  // «больше нигде нет».
+  const limited = limitPerFile(result.hits, MAX_HITS_PER_FILE, MAX_SEARCH_HITS);
+  const detail = formatSearchHits(limited.hits, root, context);
+  const truncated = result.truncated || limited.truncated;
+  const notes = [truncated ? 'список обрезан' : '', limited.hidden > 0 ? `на файл до ${MAX_HITS_PER_FILE}` : ''].filter(
+    Boolean,
+  );
 
   return {
     ok: true,
-    summary: `${result.hits.length} совпадений${result.truncated ? ', список обрезан' : ''} · просканировано файлов: ${result.scanned}`,
+    summary: `${limited.hits.length} совпадений${notes.length ? ` (${notes.join(', ')})` : ''} · просканировано файлов: ${result.scanned}`,
     detail: detail.length ? clipText(ctx, 'search', detail).text : 'Ничего не найдено',
   };
 }
@@ -1519,11 +1627,16 @@ async function runLinter(ctx: ToolContext, args: Record<string, unknown>): Promi
  * и `run_terminal`: тесты выполняют код проекта. Вывод отдаём хвостом — он важнее
  * начала, а падение (упавший тест — код выхода не 0) это результат, а не сбой.
  */
-async function runTests(ctx: ToolContext): Promise<ToolOutcome> {
+async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): Promise<ToolOutcome> {
+  const target = optionalString(args, 'target')?.trim();
+  if (target) {
+    const problem = testTargetProblem(target);
+    if (problem) return { ok: false, summary: problem };
+  }
   if (!ctx.tests) return { ok: false, summary: 'Запуск тестов недоступен' };
   if (!ctx.confirmCommand) return { ok: false, summary: 'Запуск тестов недоступен: окно редактора не подключено' };
 
-  const resolved = await ctx.tests.command();
+  const resolved = await ctx.tests.command(target);
   if (!resolved) {
     return {
       ok: false,
@@ -1561,7 +1674,7 @@ async function runTests(ctx: ToolContext): Promise<ToolOutcome> {
   // Файл оставляем только тогда, когда вывод действительно не поместился в потолок.
   const full = spillStream?.close(result.truncated) ?? null;
   const condensed = condenseOutput(result.output);
-  const output = full ? truncateTail(condensed) : clipTail(ctx, 'run_tests', condensed);
+  const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'run_tests', condensed);
   const notes = [result.timedOut ? 'превышено время' : '', result.truncated ? 'вывод обрезан' : ''].filter(Boolean);
   // Ненулевой код — это упавшие тесты, а не ошибка инструмента: ответ ok, но с кодом.
   const passed = result.code === 0 && !result.timedOut;
@@ -1885,7 +1998,7 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   const full = spillStream?.close(result.truncated) ?? null;
   // Причёсываем и держим хвост: один `npm install` иначе завалит контекст логом.
   const condensed = condenseOutput(result.output);
-  const output = full ? truncateTail(condensed) : clipTail(ctx, 'run_terminal', condensed);
+  const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'run_terminal', condensed);
   const notes: string[] = [];
   if (result.timedOut) notes.push('превышено время выполнения');
   if (result.truncated) notes.push('вывод обрезан');
@@ -2347,21 +2460,32 @@ async function gitStatus(ctx: ToolContext): Promise<ToolOutcome> {
   };
 }
 
-/** Diff файла в формате git: `+`/`-` строки, как в терминале. */
+/**
+ * Diff в формате git: `+`/`-` строки, как в терминале. Без пути — весь рабочий
+ * diff целиком: «покажи, что я наменял» иначе превращалось в перебор файлов по
+ * одному, а это вызов и шаг на каждый.
+ */
 async function gitDiff(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
 
-  const target = requireString(args, 'path');
+  const target = optionalString(args, 'path')?.trim();
   const staged = optionalBoolean(args, 'staged') ?? false;
   const diff = await ctx.git.diffText(target, staged);
-  const rel = relative(target, ctx.workspace.rootPath());
+  const where = target ? relative(target, ctx.workspace.rootPath()) : 'рабочее дерево';
+  const scope = staged ? ' (индекс)' : '';
 
   if (!diff.trim()) {
-    return { ok: true, summary: `${rel}: нет изменений`, detail: 'git не показал различий для этого файла.' };
+    return { ok: true, summary: `${where}: нет изменений${scope}`, detail: 'git не показал различий.' };
   }
 
-  const { text } = clipText(ctx, 'git_diff', diff);
-  return { ok: true, summary: `diff ${rel}${staged ? ' (индекс)' : ''}`, detail: text };
+  const { text, truncated } = clipText(ctx, 'git_diff', diff);
+  // Без пути diff бывает большим: сводку строим по числу файлов, а не по одному.
+  const files = target ? '' : ` · файлов: ${new Set(diff.matchAll(/^diff --git a\/(.+?) b\//gm)).size}`;
+  return {
+    ok: true,
+    summary: `diff ${where}${scope}${files}${truncated ? ' (обрезано)' : ''}`,
+    detail: text,
+  };
 }
 
 /**
@@ -2812,6 +2936,21 @@ function truncateTail(text: string, limit = MAX_OUTPUT_CHARS): string {
 }
 
 /**
+ * Хвостовая обрезка вывода команды с учётом бюджета шага. Копия вывода пишется
+ * потоком (`spillStream`), поэтому второй файл не нужен — но бюджет шага общий,
+ * и команда с мегабайтом лога не должна обходить его только потому, что копию ей
+ * сделали заранее.
+ */
+function trimCommandTail(ctx: ToolContext, text: string, full: string | null): string {
+  const room = outputRoom(ctx);
+  const tail = text.length <= room ? text : truncateTail(text, room);
+  spendRoom(ctx, Math.min(text.length, room));
+  return tail.length < text.length && ctx.stepBudget !== undefined && ctx.stepBudget.left <= 0
+    ? `… (бюджет вывода на шаг исчерпан${full ? `, ${spillHint(full)}` : ''})\n${tail}`
+    : tail;
+}
+
+/**
  * Обрезка с копией: отброшенное уходит в файл, модели — путь к нему.
  *
  * Пометка «вывод обрезан» без адреса была тупиком: агент знал, что чего-то не
@@ -2820,19 +2959,51 @@ function truncateTail(text: string, limit = MAX_OUTPUT_CHARS): string {
  * достаточно назвать путь.
  */
 function clipText(ctx: ToolContext, kind: string, text: string): { text: string; truncated: boolean } {
-  if (text.length <= MAX_OUTPUT_CHARS) return { text, truncated: false };
+  const room = outputRoom(ctx);
+  if (text.length <= room) {
+    spendRoom(ctx, text.length);
+    return { text, truncated: false };
+  }
   const file = spill(ctx, kind, text);
-  const note = file ? `… (вывод обрезан; ${spillHint(file)})` : '… (вывод обрезан)';
-  return { text: `${text.slice(0, MAX_OUTPUT_CHARS)}\n${note}`, truncated: true };
+  spendRoom(ctx, room);
+  return { text: `${text.slice(0, room)}\n${clipNote(ctx, file, 'вывод обрезан')}`, truncated: true };
 }
 
 /** То же для хвостовой обрезки: начало отброшено, но его можно прочитать. */
 function clipTail(ctx: ToolContext, kind: string, text: string, limit = MAX_OUTPUT_CHARS): string {
-  if (text.length <= limit) return text;
-  const dropped = text.length - limit;
+  const room = Math.min(limit, outputRoom(ctx, limit));
+  if (text.length <= room) {
+    spendRoom(ctx, text.length);
+    return text;
+  }
+  const dropped = text.length - room;
   const file = spill(ctx, kind, text);
+  spendRoom(ctx, room);
   const note = file ? `, ${spillHint(file)}` : '';
-  return `… (отброшено символов в начале: ${dropped}${note})\n${text.slice(dropped)}`;
+  const spent = ctx.stepBudget !== undefined && ctx.stepBudget.left <= 0 ? ' — бюджет вывода на шаг исчерпан' : '';
+  return `… (отброшено символов в начале: ${dropped}${note}${spent})\n${text.slice(dropped)}`;
+}
+
+/**
+ * Сколько символов этот вызов может отдать модели: свой предел, но не больше
+ * остатка бюджета шага. Без бюджета (проверки, одиночный вызов) — просто предел.
+ */
+function outputRoom(ctx: ToolContext, wanted = MAX_OUTPUT_CHARS): number {
+  if (!ctx.stepBudget) return wanted;
+  const left = Math.max(ctx.stepBudget.left, MIN_OUTPUT_CHARS);
+  return Math.max(MIN_OUTPUT_CHARS, Math.min(wanted, left));
+}
+
+/** Списать отданное из бюджета шага. */
+function spendRoom(ctx: ToolContext, chars: number): void {
+  if (!ctx.stepBudget) return;
+  ctx.stepBudget.left = Math.max(0, ctx.stepBudget.left - chars);
+}
+
+/** Пометка «обрезано» с адресом копии и признаком исчерпанного бюджета шага. */
+function clipNote(ctx: ToolContext, file: string | null, what: string): string {
+  const spent = ctx.stepBudget !== undefined && ctx.stepBudget.left <= 0 ? ' — бюджет вывода на шаг исчерпан' : '';
+  return file ? `… (${what}${spent}; ${spillHint(file)})` : `… (${what}${spent})`;
 }
 
 /** Положить текст в файл, если каталог задан. Без каталога поведение прежнее. */

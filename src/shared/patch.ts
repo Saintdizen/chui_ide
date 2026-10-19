@@ -44,6 +44,49 @@ function cut(value: string, limit = 80): string {
   return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
 }
 
+/**
+ * Ближайшее к якорю место в файле: где нашлась его первая содержательная строка.
+ *
+ * Якорь обычно не сходится из-за отступа, кавычек или одной изменённой буквы, и
+ * «перечитай файл целиком» — дорогой ответ на дешёвый вопрос. Ищем по первой
+ * непустой строке якоря (без отступа, обрезанной до разумной длины) и отдаём
+ * саму строку с двумя соседними: по ним видно, что не так, и можно скопировать
+ * текст в якорь.
+ *
+ * `null` — ничего похожего: значит, якорь из другого файла или место уже переписано.
+ */
+export function nearestPlace(text: string, anchor: string): { line: number; snippet: string } | null {
+  const first = anchor.split('\n').find((row) => row.trim().length >= 3);
+  if (!first) return null;
+  const needle = first.trim().slice(0, 80);
+  if (needle.length < 3) return null;
+
+  const rows = text.split('\n');
+  // Ищем по обрезанной строке: отступ в якоре — самая частая причина промаха.
+  // Строка могла разойтись и в конце (опечатка, другой регистр) — тогда пробуем
+  // всё более короткие её начала. Короче шести символов не берём: такой префикс
+  // совпадёт где угодно и подсказка будет врать.
+  let at = -1;
+  for (const length of [needle.length, 40, 20, 12, 8, 6]) {
+    if (length > needle.length || length < 6) continue;
+    const prefix = needle.slice(0, length);
+    // Нужны буквы или цифры: префикс из скобок и отступов ничего не значит.
+    if (!/[\p{L}\p{N}]{3}/u.test(prefix)) continue;
+    at = rows.findIndex((row) => row.trim().includes(prefix));
+    if (at >= 0) break;
+  }
+  if (at < 0) return null;
+
+  const from = Math.max(0, at - 2);
+  const to = Math.min(rows.length - 1, at + 2);
+  const width = String(to + 1).length;
+  const snippet = rows
+    .slice(from, to + 1)
+    .map((row, index) => `${String(from + index + 1).padStart(width, ' ')} | ${row}`)
+    .join('\n');
+  return { line: at + 1, snippet };
+}
+
 /** Сколько раз якорь встречается в тексте (неперекрывающиеся вхождения). */
 export function countOccurrences(text: string, needle: string): number {
   if (!needle) return 0;
@@ -84,12 +127,19 @@ export function resolvePatches(text: string, patches: readonly PatchHunk[]): Pat
 
     const found = countOccurrences(text, patch.oldText);
     if (found === 0) {
+      // Ближайшее место вместо «перечитай файл»: полное чтение стоит до 60 000
+      // символов контекста, а подсказка с номером строки и соседними строками
+      // отвечает на тот же вопрос за пару строк.
+      const near = nearestPlace(text, patch.oldText);
+      const hint = near
+        ? `\nПохожее место — строка ${near.line}:\n${near.snippet}\n` +
+          'Возьми якорь отсюда дословно: важен каждый пробел и перевод строки.'
+        : '\nПохожего места в файле нет — возможно, фрагмент из другого файла или его уже переписали.';
       return {
         ok: false,
         message:
-          `${where}текст «${cut(patch.oldText)}» в файле не найден. ` +
-          'Перечитай файл (read_file) и возьми якорь дословно: важен каждый пробел и перевод строки. ' +
-          'Если место уже заменено другой правкой этого вызова — учти, что каждая правка ищется в исходном тексте.',
+          `${where}текст «${cut(patch.oldText)}» в файле не найден.${hint}` +
+          ' Если место уже заменено другой правкой этого вызова — учти, что каждая правка ищется в исходном тексте.',
       };
     }
     if (found > 1) {

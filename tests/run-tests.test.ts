@@ -58,6 +58,45 @@ describe('run_tests', () => {
     expect(outcome.summary).toContain('код выхода 3');
   });
 
+  it('цель доходит до резолвера: гоняется часть, а не весь набор', async () => {
+    // Весь набор на большом проекте — десятки тысяч строк вывода. Агент обычно
+    // правил одну функцию, поэтому цель называется прямо в вызове.
+    const seen: Array<string | undefined> = [];
+    const tests: TestRunner = {
+      command: async (target) => {
+        seen.push(target);
+        return { command: 'echo x', label: 'vitest' };
+      },
+    };
+    await runTool(context(tests, { allowAll: true }), 'run_tests', JSON.stringify({ target: 'src/app.test.ts' }));
+    expect(seen).toEqual(['src/app.test.ts']);
+  });
+
+  it('без цели резолвер зовётся без неё — весь набор, как раньше', async () => {
+    const seen: Array<string | undefined> = [];
+    const tests: TestRunner = {
+      command: async (target) => {
+        seen.push(target);
+        return { command: 'echo x', label: 'vitest' };
+      },
+    };
+    await runTool(context(tests, { allowAll: true }), 'run_tests', '{}');
+    expect(seen).toEqual([undefined]);
+  });
+
+  it('кривая цель — отказ до запуска, а не команда в оболочке', async () => {
+    const confirmCommand = vi.fn(async () => true);
+    const tests: TestRunner = { command: async () => ({ command: 'echo x', label: 'vitest' }) };
+    const outcome = await runTool(
+      context(tests, { confirmCommand }),
+      'run_tests',
+      JSON.stringify({ target: 'src/a.ts\nrm -rf /' }),
+    );
+    expect(outcome.ok).toBe(false);
+    // До подтверждения и запуска дело не дошло.
+    expect(confirmCommand).not.toHaveBeenCalled();
+  });
+
   it('при полном доступе запуск не спрашивает разрешения', async () => {
     const confirmCommand = vi.fn(async () => true);
     const tests: TestRunner = { command: async () => ({ command: 'echo x', label: 'pytest' }) };

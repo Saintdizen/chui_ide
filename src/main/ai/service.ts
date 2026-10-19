@@ -106,6 +106,7 @@ import type { WorkspaceService } from '../workspace/workspace';
 import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
 import {
   runTool,
+  STEP_OUTPUT_CHARS,
   type BrowserTools,
   type GitTools,
   type Linter,
@@ -1209,6 +1210,10 @@ export class AiService {
       let didNewWork = false;
       /** Вызовы, чьи правки уже в файлах: тела правок из истории можно убрать. */
       const appliedCalls = new Set<string>();
+      // Бюджет вывода на шаг, общий для всех его вызовов: предел на вызов этой
+      // задачи не отвечает — три чтения подряд дают 180 000 символов, и обрезка
+      // истории выбрасывает уже потраченный шаг целиком.
+      toolContext.stepBudget = { left: STEP_OUTPUT_CHARS };
       for (const call of calls) {
         // План — не вызов инструмента в привычном смысле, а обновление чек-листа:
         // рисуем его отдельным событием, но модели всё равно отвечаем role:'tool'.
@@ -1668,6 +1673,9 @@ export class AiService {
         messages.push({ role: 'assistant', content: done.text, toolCalls: calls });
 
         let didNewWork = false;
+        // Тот же бюджет шага, что у основного агента: отчёт подзадачи — выжимка,
+        // и мегабайт прочитанного в её контексте всё равно не переживёт сжатие.
+        subContext.stepBudget = { left: STEP_OUTPUT_CHARS };
         for (const call of calls) {
           const key = `${call.name}:${call.arguments}`;
           let content: string;

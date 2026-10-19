@@ -98,12 +98,26 @@ describe('resolvePatches: обычный случай', () => {
 });
 
 describe('resolvePatches: отказы', () => {
-  it('якоря нет — говорим прямо и советуем перечитать файл', () => {
+  it('якоря нет — говорим прямо', () => {
     const result = resolvePatches(FILE, [{ oldText: 'нет такого текста', newText: 'x' }]);
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.message).toContain('не найден');
-    expect(result.message).toContain('read_file');
+    // Похожего места в файле нет — так и говорим, а не советуем читать всё заново.
+    expect(result.message).toContain('Похожего места');
+  });
+
+  it('якорь с опечаткой — подсказка с настоящей строкой, а не «перечитай файл»', () => {
+    // Отступ разошёлся — самая частая причина промаха. Вместо полного чтения
+    // модели отдаётся номер строки и она сама с двумя соседними.
+    const result = resolvePatches(FILE, [{ oldText: 'if not txet:', newText: 'x' }]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toContain('Похожее место');
+    expect(result.message).toMatch(/строка \d+/);
+    expect(result.message).toContain('    if not text:');
+    // Полного текста файла в ответе нет: подсказка короткая.
+    expect(result.message.length).toBeLessThan(600);
   });
 
   it('якорь встречается дважды — просим взять шире, а не угадываем', () => {

@@ -343,11 +343,20 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'run_tests',
     side: 'main',
     description:
-      'Запустить тесты проекта: чем — определяет IDE (pytest у Python, vitest, jest или `node --test` ' +
-      'у Node), гадать о команде не нужно. Возвращает вывод и код выхода: ненулевой — упавшие ' +
-      'тесты. Запуск подтверждает пользователь. Вызывай после правок, чтобы убедиться, что ничего ' +
-      'не сломал.',
-    inputSchema: { type: 'object', properties: {} },
+      'Запустить тесты проекта: чем — определяет IDE (pytest, vitest, jest, `node --test`), гадать ' +
+      'о команде не нужно. Ненулевой код выхода — упавшие тесты. target — файл или имя теста: ' +
+      'весь набор на большом проекте даёт десятки тысяч строк вывода.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        target: {
+          type: 'string',
+          description:
+            'Что прогнать: путь к файлу тестов или имя теста. Без него — весь набор. ' +
+            'После правки одного места гоняй его тест, а не всё.',
+        },
+      },
+    },
   },
   {
     name: 'project_map',
@@ -910,15 +919,15 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'git_diff',
     side: 'main',
     description:
-      'Diff файла по git: рабочее дерево против индекса, а с staged=true — индекс против HEAD. ' +
-      'Контекст — 3 строки вокруг правок, независимо от настроек git.',
+      'Diff по git: рабочее дерево против индекса, а с staged=true — индекс против HEAD. ' +
+      'Контекст — 3 строки вокруг правок, независимо от настроек git. Без path — весь ' +
+      'рабочий diff целиком.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Абсолютный путь файла.' },
+        path: { type: 'string', description: 'Абсолютный путь файла. Без него — все изменённые файлы.' },
         staged: { type: 'boolean', description: 'true — сравнить индекс с HEAD.' },
       },
-      required: ['path'],
     },
   },
   {

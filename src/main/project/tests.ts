@@ -2,6 +2,7 @@ import { scanProject } from './scan';
 import { declaredDependencyNames, nodeRuntime } from '../node/environment';
 import { resolvePackageBin } from '../node/bin';
 import { detectNodeTestRunner, nodeTestRunnerFrom, nodeTestRunnerLabel } from '../../shared/node-tests';
+import { testTargetArgs, testTargetLabel, type TestRunnerKind } from '../../shared/test-target';
 
 /**
  * Команда запуска тестов проекта: чем и как гонять тесты, не спрашивая об этом
@@ -30,18 +31,27 @@ export interface TestCommand {
  * мы уже знаем из карты проекта. Node — раннер по зависимостям (vitest/jest) или
  * встроенный `node --test`, если тестовые файлы есть, а раннера нет.
  */
-export async function testCommand(root: string, python: string): Promise<TestCommand | null> {
+export async function testCommand(root: string, python: string, target?: string): Promise<TestCommand | null> {
   const scan = await scanProject(root);
 
   if (scan.kind.id === 'python') {
     // Тестов pytest нет — запускать нечего: пустой прогон не ответ, а шум.
     if (!scan.testFiles.some((file) => file.endsWith('.py'))) return null;
-    return { command: `${quote(python)} -m pytest`, label: 'pytest' };
+    return {
+      command: [`${quote(python)} -m pytest`, ...quotedArgs('pytest', target)].join(' '),
+      label: testTargetLabel('pytest', target),
+    };
   }
 
   const runner = detectNodeTestRunner(nodeTestRunnerFrom(await declaredDependencyNames(root)), scan.testFiles);
   if (!runner) return null;
-  if (runner === 'node') return { command: `${quote((await nodeRuntime()).command)} --test`, label: 'node --test' };
+  if (runner === 'node') {
+    const node = quote((await nodeRuntime()).command);
+    return {
+      command: [`${node} --test`, ...quotedArgs('node', target)].join(' '),
+      label: testTargetLabel('node --test', target),
+    };
+  }
 
   // Раннер зовём его скриптом из `node_modules` тем же Node, что и проект, — как
   // форматтер и линтер: так берётся версия проекта, а не что-то из PATH.
@@ -55,9 +65,17 @@ export async function testCommand(root: string, python: string): Promise<TestCom
   // завершаться сам, иначе агентский шаг повиснет до таймаута.
   const args = runner === 'vitest' ? ['run'] : [];
   return {
-    command: [node, quote(script), ...args].join(' '),
-    label: nodeTestRunnerLabel(runner),
+    command: [node, quote(script), ...args, ...quotedArgs(runner, target)].join(' '),
+    label: testTargetLabel(nodeTestRunnerLabel(runner), target),
   };
+}
+
+/**
+ * Аргументы цели с кавычками: путь с пробелом и имя теста с пробелом должны
+ * дойти до раннера одним куском, а не развалиться на части.
+ */
+function quotedArgs(runner: TestRunnerKind, target?: string): string[] {
+  return testTargetArgs(runner, target).map((arg) => quote(arg));
 }
 
 /**

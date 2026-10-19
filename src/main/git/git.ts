@@ -490,10 +490,14 @@ export class GitService {
    * Контекст здесь всегда 3 строки, как git показывает в терминале по умолчанию, —
    * не зависит от `diff.context` в настройках git (почему — в теле метода).
    */
-  async diffText(filePath: string, staged = false): Promise<string> {
+  async diffText(filePath?: string, staged = false): Promise<string> {
     const status = await this.status();
     const repoRoot = status.repository?.root;
     if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+
+    // Путь не задан — весь рабочий diff: «покажи, что я наменял» одним вызовом.
+    // Без него агент перебирал бы файлы по одному, а это шаг и вызов на каждый.
+    if (!filePath) return this.rawDiff('', repoRoot, { staged });
 
     const known = status.files.find((file) => file.path === path.resolve(filePath));
     if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
@@ -626,11 +630,14 @@ export class GitService {
     repoRoot: string,
     target: { staged: boolean; commit?: string },
   ): Promise<string> {
+    // Пустая строка — «без ограничения по пути»: так просят весь diff. Маркер `--`
+    // обязателен, иначе git примет имя файла за ссылку.
+    const scope = relative ? ['--', relative] : [];
     const args = target.commit
-      ? ['diff', target.commit, '-U3', '--no-color', '--no-ext-diff', '--', relative]
+      ? ['diff', target.commit, '-U3', '--no-color', '--no-ext-diff', ...scope]
       : target.staged
-        ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff', '--', relative]
-        : ['diff', '-U3', '--no-color', '--no-ext-diff', '--', relative];
+        ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff', ...scope]
+        : ['diff', '-U3', '--no-color', '--no-ext-diff', ...scope];
     const result = await this.exec(args, repoRoot, { allowFailure: true });
     return result.stdout;
   }

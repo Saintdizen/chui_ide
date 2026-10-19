@@ -172,9 +172,9 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Команда запуска тестов — инструмент run_tests. Резолвер общий с панелью
   // тестов по логике; здесь в main, потому что агент работает в main.
   deps.ai.attachTests({
-    command: () => {
+    command: (target) => {
       const root = requireRoot();
-      return testCommand(root, resolvePython(root));
+      return testCommand(root, resolvePython(root), target);
     },
   });
   // Внешние инструменты (MCP): список ведут серверы из настроек, а запускает их
