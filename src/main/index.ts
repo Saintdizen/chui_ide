@@ -24,6 +24,7 @@ import { SandboxService } from './sandbox/sandbox';
 import { ScheduleService } from './schedules/schedules';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { WINDOW_BACKGROUND } from '../shared/colors';
+import { MAX_VIEW_PDF_BYTES, isPdfPath } from '../shared/pdf';
 import { activationForInterpreter, pythonInterpreterFor, venvDirOfPython } from './python/environments';
 import { SessionStore } from './session-store';
 import { ProjectConfigStore } from './project-config';
@@ -337,6 +338,19 @@ if (!app.requestSingleInstanceLock()) {
       window: () => getIdeWindow(),
       notify: (topic, payload) => pushToRenderers(topic, payload),
       openExternal: (url) => void shell.openExternal(url).catch(() => undefined),
+      // PDF показывается вкладкой-страницей: право на `file:` выдаёт рабочая папка,
+      // а не панель. Проверяем ровно важное: путь внутри области, файл есть, это PDF
+      // и он влезает в предел просмотрщика.
+      localFile: async (target) => {
+        const entry = await workspace.stat(target).catch(() => null);
+        if (!entry || entry.kind !== 'file') return `Файл не найден: ${path.basename(target)}`;
+        if (!isPdfPath(entry.path)) return 'Вкладкой-страницей открывается только PDF';
+        if (entry.size > MAX_VIEW_PDF_BYTES) {
+          const limit = MAX_VIEW_PDF_BYTES / 1024 / 1024;
+          return `${path.basename(entry.path)}: ${Math.round(entry.size / 1024 / 1024)} МБ больше предела ${limit} МБ`;
+        }
+        return null;
+      },
     });
     // Что из двух достанется агенту, решает настройка: встроенный браузер (по умолчанию)
     // или отдельный Chromium. Разница между ними — в `agent-browser.ts`.

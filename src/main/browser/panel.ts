@@ -8,6 +8,7 @@ import {
   type BrowserZoomMode,
 } from '../../shared/api';
 import { normalizeBrowserUrl, sanitizePickedElement } from '../../shared/browser';
+import { isPdfPath, pathFromFileUrl, pdfTabTitle } from '../../shared/pdf';
 import { isWebPageUrl, isSafeExternalUrl } from '../../shared/url';
 
 /**
@@ -49,6 +50,15 @@ export interface BrowserPanelDeps {
   notify(topic: string, payload: unknown): void;
   /** Отдать адрес браузеру системы: всплывающие окна с чужой схемой. */
   openExternal(url: string): void;
+  /**
+   * Можно ли показать локальный файл: путь внутри проекта, это PDF, размер в
+   * пределах. `null` — можно, строка — причина отказа словами.
+   *
+   * Проверка живёт снаружи, потому что только рабочая папка знает свои корни и
+   * правила ссылок. Панель спрашивает её ПЕРЕД загрузкой: `file:` иначе показал
+   * бы любой файл машины мимо дерева и прав.
+   */
+  localFile?(filePath: string): Promise<string | null>;
 }
 
 /** Одна вкладка: вложение и то, что мы о ней знаем. */
@@ -343,16 +353,30 @@ export class BrowserPanel {
   }
 
   /**
-   * Завести вложение для вкладки. Адрес приходит нормализованным, но проверяем
-   * ещё раз: схему мы пускаем только сетевую, а вход сюда — из renderer.
+   * Завести вложение для вкладки.
+   *
+   * Адрес приходит нормализованным, но проверяется ещё раз: вход сюда — из
+   * renderer. Исключение одно — PDF проекта: его рисует встроенный просмотрщик
+   * движка, то есть та же вкладка, только `file:` и с включёнными плагинами.
+   * Право на такой адрес проверяет рабочая папка (`localFile` в зависимостях),
+   * а не панель: корни области знает только она.
    */
-  create(id: string, rawUrl: string, partition = HUMAN_PARTITION): { ok: boolean; reason?: string } {
+  async create(id: string, rawUrl: string, partition = HUMAN_PARTITION): Promise<{ ok: boolean; reason?: string }> {
     const window = this.deps.window();
     if (!window || window.isDestroyed()) return { ok: false, reason: 'Окно редактора не открыто' };
 
-    const normalized = normalizeBrowserUrl(rawUrl);
-    if (!normalized.ok) return { ok: false, reason: normalized.reason };
-    if (!isWebPageUrl(normalized.url)) return { ok: false, reason: 'Открываю только http и https' };
+    const filePath = localPathOf(rawUrl);
+    let url: string;
+    if (filePath !== null) {
+      const problem = await this.localFileProblem(filePath);
+      if (problem !== null) return { ok: false, reason: problem };
+      url = rawUrl;
+    } else {
+      const normalized = normalizeBrowserUrl(rawUrl);
+      if (!normalized.ok) return { ok: false, reason: normalized.reason };
+      if (!isWebPageUrl(normalized.url)) return { ok: false, reason: 'Открываю только http и https' };
+      url = normalized.url;
+    }
 
     const existing = this.views.get(id);
     if (existing) {
@@ -370,6 +394,9 @@ export class BrowserPanel {
         contextIsolation: true,
         nodeIntegration: false,
         spellcheck: false,
+        // Просмотрщик PDF — плагин движка. Включаем ровно для своего файла: странице
+        // сети он не нужен и только расширял бы её возможности.
+        plugins: filePath !== null,
       },
     });
     this.views.set(id, { view, console: [], zoom: 1 });
@@ -386,8 +413,19 @@ export class BrowserPanel {
     view.webContents.setZoomMode('manual');
     this.wire(window, id, view);
     if (this.rect) view.setBounds(this.rect);
-    void view.webContents.loadURL(normalized.url).catch(() => undefined);
+    void view.webContents.loadURL(url).catch(() => undefined);
     return { ok: true };
+  }
+
+  /**
+   * Можно ли показать этот файл. Правило одно на всё: путь внутри проекта, это
+   * PDF и размер в пределах. Спрашиваем рабочую папку, потому что своё правило
+   * пути есть только у неё; панель добавляет лишь «мы умеем показывать PDF».
+   */
+  private async localFileProblem(filePath: string): Promise<string | null> {
+    if (!isPdfPath(filePath)) return 'Вкладкой-страницей открывается только PDF';
+    if (!this.deps.localFile) return 'Показ файлов недоступен';
+    return this.deps.localFile(filePath);
   }
 
   /**
@@ -581,7 +619,7 @@ export class BrowserPanel {
    * о ней узнаёт событием `opened`. Сессия — временная: страница агента не должна
    * добираться до того, где человек вошёл в свой аккаунт (см. `AGENT_PARTITION`).
    */
-  openForAgent(rawUrl: string): { ok: boolean; id?: string; reason?: string } {
+  async openForAgent(rawUrl: string): Promise<{ ok: boolean; id?: string; reason?: string }> {
     const normalized = normalizeBrowserUrl(rawUrl);
     if (!normalized.ok) return { ok: false, reason: normalized.reason };
 
@@ -594,7 +632,7 @@ export class BrowserPanel {
 
     this.agentSeq += 1;
     const id = `agent-${this.agentSeq}`;
-    const created = this.create(id, normalized.url, AGENT_PARTITION);
+    const created = await this.create(id, normalized.url, AGENT_PARTITION);
     if (!created.ok) return created;
     this.agentId = id;
     this.deps.notify(PushTopic.BrowserNav, { kind: 'opened', id, url: normalized.url });
@@ -678,7 +716,9 @@ export class BrowserPanel {
     return {
       id,
       url: contents.getURL(),
-      title: contents.getTitle() || contents.getURL(),
+      // У PDF своего заголовка нет — `getTitle()` пуст, и в полосе оказался бы
+      // адрес `file:///...`. Имя файла — то, что человек ждёт увидеть.
+      title: contents.getTitle() || localTitleOf(contents.getURL()),
       loading: contents.isLoading(),
       canGoBack: canGo(contents, -1),
       canGoForward: canGo(contents, 1),
@@ -821,6 +861,21 @@ export class BrowserPanel {
       this.attached = false;
     });
   }
+}
+
+/** Подпись локального адреса: имя файла, а у сетевого адреса — он сам. */
+function localTitleOf(url: string): string {
+  const filePath = localPathOf(url);
+  return filePath === null ? url : pdfTabTitle(filePath);
+}
+
+/**
+ * Локальный путь из `file:`-адреса. `null` — адрес сетевой (или разобрать нечего,
+ * и тогда им займётся `normalizeBrowserUrl` со своим отказом).
+ */
+function localPathOf(rawUrl: string): string | null {
+  if (!/^file:/i.test(rawUrl.trim())) return null;
+  return pathFromFileUrl(rawUrl.trim());
 }
 
 /**

@@ -120,7 +120,7 @@ export class AgentBrowser implements BrowserTools {
       return session.snapshot();
     }
 
-    const opened = this.panel.openForAgent(normalized.url);
+    const opened = await this.panel.openForAgent(normalized.url);
     if (!opened.ok || !opened.id) throw new Error(opened.reason ?? 'Не удалось открыть страницу');
 
     const session = this.attach(opened.id);

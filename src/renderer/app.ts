@@ -46,6 +46,7 @@ import { DEFAULT_KEYBINDINGS } from './core/default-keybindings';
 import { languageFromPath, languageLabel, languageIndent } from './core/languages';
 import { normalizeBrowserUrl, isLocalUrl } from '../shared/browser';
 import { imageFormatLabel, isImagePath } from '../shared/images';
+import { fileUrlFor, isPdfPath, pdfTabTitle } from '../shared/pdf';
 import { BrowserTabs } from './core/browser-tabs';
 import { ImportChecker } from './core/import-check';
 import { LspClient } from './core/lsp';
@@ -2284,7 +2285,24 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── вспомогательные действия ──────────────────────────────────────────── */
 
+  /**
+   * Показать PDF вкладкой-страницей. Адрес `file:` строим здесь, потому что вкладку
+   * заводит renderer, а право на такой адрес проверит main (рабочая папка): он же
+   * откажет, если файл вне проекта или больше предела просмотрщика.
+   */
+  const openPdfTab = (path: string): void => {
+    browserTabs.open(fileUrlFor(path), pdfTabTitle(path));
+    explorer.reveal(path);
+  };
+
   const openPath = async (path: string, options: { preview?: boolean } = {}): Promise<void> => {
+    // PDF — тоже не текст, и показывать его умеет сам движок: вкладка-страница со
+    // встроенным просмотрщиком (см. `shared/pdf.ts`). Документ ему не нужен:
+    // открывать в редакторе нечего, а вкладку ведёт `BrowserTabs`.
+    if (isPdfPath(path)) {
+      openPdfTab(path);
+      return;
+    }
     // Картинка — не текст: бинарь открывать редактором нельзя. Заводим документ-заглушку
     // (он нужен вкладке, дереву и статусбару), а полотно покажет вьюер (см. `syncImage`).
     if (isImagePath(path)) {

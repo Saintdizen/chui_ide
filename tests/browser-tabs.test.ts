@@ -16,6 +16,15 @@ describe('BrowserTabs', () => {
     expect(tabs.active?.title).toBe('https://example.com/');
   });
 
+  it('заголовок можно задать сразу: у документа это имя файла', () => {
+    const tabs = new BrowserTabs();
+    tabs.open('file:///p/%D0%B4%D0%BE%D0%BA.pdf', 'док.pdf');
+
+    // До первого события от вложения в полосе стоит заданный заголовок, а не адрес.
+    expect(tabs.active?.title).toBe('док.pdf');
+    expect(tabs.active?.url).toBe('file:///p/%D0%B4%D0%BE%D0%BA.pdf');
+  });
+
   it('повторный адрес не заводит вторую вкладку, а показывает прежнюю', () => {
     const tabs = new BrowserTabs();
     const first = tabs.open('https://example.com/');

@@ -56,7 +56,7 @@ export class BrowserTabs {
    * Открыть адрес. Уже открытый — не дублируем, а показываем: в браузере так и
    * ждут, а второй вкладки с той же страницей человек не просил.
    */
-  open(url: string): string {
+  open(url: string, title?: string): string {
     const existing = this.pages.find((page) => page.url === url);
     if (existing) {
       this.activeId = existing.id;
@@ -65,7 +65,9 @@ export class BrowserTabs {
     }
 
     this.sequence += 1;
-    const page: BrowserPage = { id: `page-${this.sequence}`, url, title: url };
+    // Заголовок знает вызывающий (у документа это имя файла): до первого события
+    // от вложения в полосе иначе стоял бы адрес целиком.
+    const page: BrowserPage = { id: `page-${this.sequence}`, url, title: title ?? url };
     this.pages.push(page);
     this.activeId = page.id;
     this.changeEmitter.fire();

@@ -43,7 +43,7 @@
  * у вложения, а снимок нужен для шапки и полосы вкладок.
  * Нужен собранный код: `npm run build` (скрипт делает это сам).
  */
-const { app, Menu } = require('electron');
+const { app, BrowserWindow, Menu } = require('electron');
 const http = require('node:http');
 const { mkdtempSync, promises: fs } = require('node:fs');
 const os = require('node:os');
@@ -61,6 +61,7 @@ const { WorkspaceService } = require('../dist/main/workspace/workspace.js');
 const { getIdeWindow, openIdeWindow } = require('../dist/main/window.js');
 const { BrowserPanel } = require('../dist/main/browser/panel.js');
 const { AgentBrowser } = require('../dist/main/browser/agent-browser.js');
+const { MAX_VIEW_PDF_BYTES, isPdfPath } = require('../dist/shared/pdf.js');
 
 const PROJECT = path.join(__dirname, '..');
 const SHOTS = path.join(PROJECT, '.chui_ide', 'probe-shots');
@@ -163,6 +164,17 @@ app.whenReady().then(async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
   step(`сайт поднят: ${base}`);
 
+  // Настоящий PDF для проверки: печатаем страницу сайта в файл проекта. Именно ДО
+  // открытия проекта — дерево читает папку при открытии и иначе файла не покажет.
+  const pdfPath = path.join(project, 'отчёт.pdf');
+  {
+    const maker = new BrowserWindow({ show: false, width: 600, height: 500 });
+    await maker.loadURL(`${base}/about`);
+    await fs.writeFile(pdfPath, await maker.webContents.printToPDF({}));
+    maker.destroy();
+    step(`PDF создан: ${pdfPath}`);
+  }
+
   serveRenderer();
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
@@ -179,6 +191,15 @@ app.whenReady().then(async () => {
     window: () => getIdeWindow(),
     notify: (topic, payload) => pushToRenderers(topic, payload),
     openExternal: () => undefined,
+    // Право на `file:` в пробе такое же, как в приложении (см. `main/index.ts`):
+    // путь внутри проекта, это PDF и файл влезает в предел просмотрщика.
+    localFile: async (target) => {
+      const entry = await workspace.stat(target).catch(() => null);
+      if (!entry || entry.kind !== 'file') return 'Файл не найден';
+      if (!isPdfPath(entry.path)) return 'Вкладкой-страницей открывается только PDF';
+      if (entry.size > MAX_VIEW_PDF_BYTES) return 'Файл больше предела просмотрщика';
+      return null;
+    },
   });
   registerIpc({ settings, workspace, ai, terminals, git, host: new HostClient(), browserPanel: panel });
   await workspace.open(project);
@@ -1192,6 +1213,78 @@ app.whenReady().then(async () => {
     })()`,
   );
   check('сцена без зазора — страница во всю область', stageStyle?.снизу === '0px', stageStyle);
+
+  /* --- PDF проекта: вкладка-страница со встроенным просмотрщиком ---------------- */
+
+  step('PDF вкладкой-страницей');
+  // Закрываем страницы сайта: дальше в полосе должен остаться только документ.
+  ask(ide, `[...document.querySelectorAll('.tab-page .tab-close')].forEach((node) => node.click())`);
+  await wait(600);
+  const openedPdf = await ask(
+    ide,
+    `(() => {
+      const row = [...document.querySelectorAll('.tree-row')].find(
+        (item) => item.querySelector('.tree-name')?.textContent === 'отчёт.pdf',
+      );
+      if (!row) return 'нет файла';
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      return 'открыт';
+    })()`,
+  );
+  check('двойной клик по PDF в дереве открывает документ', openedPdf === 'открыт', openedPdf);
+
+  const pdfUi = await waitFor(async () => {
+    const state = await ask(
+      ide,
+      `(() => {
+        const tab = [...document.querySelectorAll('.tab-page')].find(
+          (item) => (item.querySelector('.tab-label')?.textContent ?? '') === 'отчёт.pdf',
+        );
+        const address = document.querySelector('.browser-address');
+        return {
+          вкладка: Boolean(tab),
+          активна: tab?.classList.contains('is-active') ?? false,
+          полотно: document.querySelector('.editor-island')?.classList.contains('is-browser') ?? false,
+          адрес: address ? address.value : null,
+          толькоЧтение: address ? address.readOnly : null,
+        };
+      })()`,
+    );
+    return state?.вкладка && state?.активна ? state : null;
+  });
+  check('PDF встаёт в полосу вкладкой-страницей', pdfUi?.активна === true, pdfUi);
+  check('полотно редактора уступает документу', pdfUi?.полотно === true, pdfUi?.полотно);
+  check('в адресной строке имя файла, а не адрес', pdfUi?.адрес === 'отчёт.pdf', pdfUi?.адрес);
+  check('адресную строку документа не правят', pdfUi?.толькоЧтение === true, pdfUi?.толькоЧтение);
+
+  // Смотрим в само вложение: так проверка не верит интерфейсу на слово.
+  const pdfGuest = guests().find((item) => item.getURL().startsWith('file:'));
+  check('вложение открыло file-адрес проекта', pdfGuest !== undefined, pdfGuest?.getURL());
+  if (pdfGuest) {
+    const contentType = await pdfGuest.executeJavaScript('document.contentType');
+    check('движок понял файл как PDF', contentType === 'application/pdf', contentType);
+    const still = await pdfGuest.capturePage();
+    check('страница документа нарисована, а не пуста', !still.isEmpty(), still.getSize());
+  } else {
+    check('движок понял файл как PDF', false);
+    check('страница документа нарисована, а не пуста', false);
+  }
+
+  // Закрытие вкладки уносит вложение: документ не остаётся жить процессом.
+  const pdfId = pdfGuest ? panel.ids().find((id) => panel.contents(id) === pdfGuest) : null;
+  await ask(
+    ide,
+    `(() => {
+      const tab = [...document.querySelectorAll('.tab-page')].find(
+        (item) => (item.querySelector('.tab-label')?.textContent ?? '') === 'отчёт.pdf',
+      );
+      tab?.querySelector('.tab-close')?.click();
+      return true;
+    })()`,
+  );
+  await wait(700);
+  check('закрытие вкладки убирает вложение документа', pdfId !== null && panel.contents(pdfId) === null, pdfId);
 
   const shot = await ide.capturePage();
   await fs.writeFile(path.join(SHOTS, 'browser-view.png'), shot.toPNG());

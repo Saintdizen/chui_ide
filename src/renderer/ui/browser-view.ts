@@ -7,6 +7,7 @@ import type {
   PickedImage,
 } from '../../shared/api';
 import { formatPickedElement, normalizeBrowserUrl } from '../../shared/browser';
+import { pathFromFileUrl, pdfTabTitle } from '../../shared/pdf';
 import type { BrowserPage } from '../core/browser-tabs';
 import type { RpcClient } from '../core/rpc';
 import { showContextMenu } from './context-menu';
@@ -381,8 +382,15 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
     reloadButton.title = loading ? 'Остановить загрузку' : 'Обновить';
     reloadButton.replaceChildren(svgIcon(loading ? 'close' : 'refresh', 14));
     element.classList.toggle('is-loading', loading);
+    // У документа из проекта сетевого адреса нет: в строке стоит имя файла, и
+    // править его нельзя — уйти с PDF вводом адреса всё равно некуда.
+    const local = pathFromFileUrl(currentUrl);
+    address.readOnly = local !== null;
+    address.title = local !== null ? 'Документ открыт из проекта' : 'Адрес страницы';
     // Адресную строку не трогаем, пока её правят: иначе навигация вырвала бы ввод.
-    if (document.activeElement !== address) address.value = currentUrl;
+    if (document.activeElement !== address) {
+      address.value = local === null ? currentUrl : pdfTabTitle(local);
+    }
   };
 
   /** Переставить вложение: сцена переехала или изменилась. Вызовы схлопываем по кадру. */
