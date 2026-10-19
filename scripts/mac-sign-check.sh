@@ -88,11 +88,36 @@ for dmg in "${dmgs[@]}"; do
     fail "приложение не подписано вовсе (identity: null?)"
   fi
 
-  # 3. Все исполняемые файлы внутри подписаны. Одной проверки --deep мало: она
-  #    смотрит то, что объявлено в бандле, а распакованные нативные модули и
-  #    языковые серверы (node_modules) в него не входят.
+  # 3. Все ДВОИЧНЫЕ файлы внутри подписаны. Одной проверки --deep мало: она смотрит
+  #    то, что объявлено в бандле, а распакованные нативные модули и языковые
+  #    серверы (node_modules) в него не входят.
+  #
+  #    Подпись требуем только от МАШИННОГО КОДА: её проверяет ядро, и только у Mach-O.
+  #    `bin/vscode-*-language-server` — текстовые node-скрипты с битом выполнения
+  #    (`#!/usr/bin/env node`): кода в них нет, запускает их уже подписанный Electron
+  #    (см. `nodeRuntime` в `src/main/lsp/bundled.ts`), и codesign такие файлы не
+  #    подписывает вовсе. Требовать с них подпись значило валить верную сборку на
+  #    пяти «неподписанных» текстовых файлах.
+  #
+  #    Вид файла определяем по магическим байтам, а не по `file`: её ответ зависит от
+  #    версии и базы типов, а отсутствие команды молча пропустило бы ВСЁ — проверка
+  #    зелёная при неподписанных бинарниках. Байты читает `od`, он есть всегда.
+  #    Магия Mach-O: тонкий бинарник (FEEDFACE/FEEDFACF и обратный порядок) и
+  #    universal (CAFEBABE/CAFEBABF — те же числа, что у Java-класса, но здесь это
+  #    признак «толстого» файла: заголовок архитектур).
+  is_macho() {
+    magic=$(od -An -tx1 -N4 "$1" 2>/dev/null | tr -d ' \n')
+    case "$magic" in
+      feedface | feedfacf | cefaedfe | cffaedfe | cafebabe | bebafeca | cafebabf | fbfa) return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+
   unsigned=0
+  binary=0
   while IFS= read -r file; do
+    is_macho "$file" || continue
+    binary=$((binary + 1))
     if ! codesign --verify --strict "$file" >/dev/null 2>&1; then
       unsigned=$((unsigned + 1))
       [ "$unsigned" -le 3 ] && fail "не подписан или подпись битая: ${file#"$copy/"}"
@@ -101,7 +126,7 @@ for dmg in "${dmgs[@]}"; do
     find "$copy/Contents/Frameworks" "$copy/Contents/MacOS" "$copy/Contents/Resources" -type f \
       \( -name '*.node' -o -name '*.dylib' -o -perm -u+x \) 2>/dev/null
   )
-  [ "$unsigned" -eq 0 ] && ok "все исполняемые файлы подписаны"
+  [ "$unsigned" -eq 0 ] && ok "все двоичные файлы подписаны (проверено Mach-O: $binary)"
 
   # 4. Архитектура. Имя файла обещает её человеку, а фактическая — та, что внутри.
   exec_name=$(plutil -extract CFBundleExecutable raw "$copy/Contents/Info.plist" 2>/dev/null)
