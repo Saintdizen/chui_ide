@@ -965,6 +965,40 @@ app.whenReady().then(async () => {
   const viewBack = await waitFor(() => (panel.isShown(menuPage) ? true : null));
   check('после закрытия меню страница вернулась', viewBack === true, { наЭкране: drawn() });
 
+  /* --- 15. Попапы тоже прячут страницу -------------------------------------------- */
+  // Попапы (`.popover`: выпадающие списки, статус серверов) и «Информация о сессии»
+  // всплывают вверх от своих кнопок и накрывают область редактора. Страница — слой
+  // окна поверх DOM, поэтому без утайки они оказались бы ПОД ней.
+  step('попап и слой страницы');
+  check('страница показана', (await waitFor(async () => ((await ask(ide, UI_STATE)).полотно ? true : null))) === true);
+  const popoverPage = drawn()[0] ?? null;
+  check('видно ровно вложение этой страницы', popoverPage !== null, { наЭкране: drawn() });
+
+  // Открываем попап напрямую: в стенде пробы ассистент может быть выключен, а
+  // проверяем мы правило «что-то всплыло над сценой — страницу спрятать», а не то,
+  // как открывается конкретное окно. Наблюдатель следит за `hidden`, этого довольно.
+  await ask(
+    ide,
+    `(() => {
+      const popover = document.querySelector('.popover') ?? (() => {
+        const node = document.createElement('div');
+        node.className = 'popover';
+        document.body.appendChild(node);
+        return node;
+      })();
+      popover.hidden = false;
+      return 'попап открыт';
+    })()`,
+  );
+  const popoverHidesView = await waitFor(() =>
+    popoverPage !== null && panel.isShown(popoverPage) === false ? true : null,
+  );
+  check('пока попап открыт, страница спрятана', popoverHidesView === true, { наЭкране: drawn() });
+
+  await ask(ide, "(() => { document.querySelector('.popover').hidden = true; return 'закрыт'; })()");
+  const popoverBack = await waitFor(() => (popoverPage !== null && panel.isShown(popoverPage) ? true : null));
+  check('после закрытия попапа страница вернулась', popoverBack === true, { наЭкране: drawn() });
+
   /* --- 14. Агент на странице: видно, что это он ----------------------------------- */
   // Страница меняется не от мыши человека — нажатия и переходы приходят от ассистента.
   // Без метки это неотличимо от собственной ошибки. Проверяем оба места (шапка вкладки

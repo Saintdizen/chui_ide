@@ -65,6 +65,17 @@ export interface BrowserViewDeps {
   attachContext(item: ChatAttachment): void;
 }
 
+/**
+ * Что рисуется в DOM поверх сцены и потому требует спрятать страницу.
+ *
+ * Оверлеи и модалки (палитра, окна), панели-меню (`.context-menu`), попапы
+ * (`.popover`: выпадающие списки, статус языковых серверов) и «Информация о сессии».
+ * Список один на всех: разбирать «кто там сверху» по каждому окну значило бы
+ * забывать новые попапы по одному.
+ */
+const OCCLUDERS =
+  '.overlay:not([hidden]), .modal-backdrop:not([hidden]), .context-menu, .popover:not([hidden]), .session-info:not([hidden])';
+
 export function createBrowserView(deps: BrowserViewDeps): BrowserView {
   const address = h('input', {
     class: 'browser-address',
@@ -387,10 +398,12 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
    * разных местах, и не забыть ни одного проще с одной стороны.
    */
   const syncOcclusion = (): void => {
-    // Панели-меню (`.context-menu`) тоже лежат в DOM и тоже всплывают поверх
-    // сцены: без них выпадающее меню уходило бы ПОД страницу и не читалось.
-    const next =
-      document.querySelector('.overlay:not([hidden]), .modal-backdrop:not([hidden]), .context-menu') !== null;
+    // Всё, что рисуется в DOM поверх сцены. Кроме оверлеев и меню это ещё и попапы
+    // (`.popover`: выпадающие списки, статус серверов) и «Информация о сессии» —
+    // они всплывают вверх от своих кнопок и запросто накрывают область редактора.
+    // Не спрячь мы страницу — они оказались бы ПОД ней: страница это слой окна,
+    // и никакой `z-index` её не перебьёт.
+    const next = document.querySelector(OCCLUDERS) !== null;
     if (next === occluded) return;
     occluded = next;
     if (!open) return;
