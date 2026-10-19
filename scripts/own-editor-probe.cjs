@@ -580,6 +580,7 @@ async function assistCheck(win) {
         видно: Boolean(panel) && !panel.hidden,
         строк: rows.length,
         подписи: rows.slice(0, 5).map((row) => row.querySelector('.own-editor-suggest-label').textContent),
+        все: rows.map((row) => row.querySelector('.own-editor-suggest-label').textContent),
         выбор: rows.findIndex((row) => row.classList.contains('is-active')),
         // Рамка попапа: по ней видно, куда он встал и попадает ли вообще в кадр.
         рамка: box ? { left: Math.round(box.left), top: Math.round(box.top), width: Math.round(box.width) } : null,
@@ -646,6 +647,34 @@ async function assistCheck(win) {
   const scopeDependencies = await suggestState();
   await key('Escape');
   const scopeClosed = await suggestState();
+
+  // «Умное» дополнение: Ctrl+Shift+Space. В позиции значения имя типа не годится и
+  // должно исчезнуть, после `:` — наоборот, остаются типы. Проверяем оба места.
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: 'value = ' }]);
+    const end = buffer.length;
+    controller.selectRange(end, end);
+    window.probe.input.focus();
+    return true;
+  })()`);
+  await wait(120);
+  await key(' ', ['control', 'shift']);
+  const smartValue = await suggestState();
+  await key('Escape');
+
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: 'value: ' }]);
+    const end = buffer.length;
+    controller.selectRange(end, end);
+    window.probe.input.focus();
+    return true;
+  })()`);
+  await wait(120);
+  await key(' ', ['control', 'shift']);
+  const smartType = await suggestState();
+  await key('Escape');
 
   // Подсказка после точки: в классе печатаем `this.` — попап обязан показать поля и
   // методы ЭТОГО класса. Здесь нет языкового сервера (подставной молчит), поэтому
@@ -760,6 +789,14 @@ async function assistCheck(win) {
     ширина_зависимости: scopeDependencies,
     ширина_закрыт: scopeClosed,
     // Итог одной строкой: каждое нажатие добавляет к списку, Escape убирает попап.
+    умное_значение: smartValue,
+    умное_тип: smartType,
+    // Итог: в позиции значения тип исчез, после `:` — исчезла переменная.
+    умное_работает:
+      smartValue.все.includes('ValueOnlyName') &&
+      !smartValue.все.includes('TypeOnlyName') &&
+      smartType.все.includes('TypeOnlyName') &&
+      !smartType.все.includes('ValueOnlyName'),
     ширина_растёт:
       scopeFile.видно &&
       scopeProject.строк > scopeFile.строк &&

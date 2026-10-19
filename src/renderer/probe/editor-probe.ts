@@ -118,19 +118,26 @@ const assistant = new CompletionAssistant(view, controller, buffer, suggest, {
   // Подставной языковой сервер: одна подсказка с авто-импортом — так проба проверяет,
   // что дополнительные правки (строка import) применяются вместе со вставкой.
   lsp: async (prefix) =>
-    prefix === 'Path'
+    prefix === ''
       ? [
-          {
-            label: 'Path',
-            kind: 'external' as const,
-            detail: 'класс',
-            insert: 'Path',
-            additionalEdits: [
-              { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1, newText: 'from pathlib import Path\n' },
-            ],
-          },
+          // Вид у элементов разный — на нём проверяется «умное» дополнение: в позиции
+          // значения класс не годится, а функция годится.
+          { label: 'TypeOnlyName', kind: 'external' as const, detail: 'класс' },
+          { label: 'ValueOnlyName', kind: 'external' as const, detail: 'функция' },
         ]
-      : [],
+      : prefix === 'Path'
+        ? [
+            {
+              label: 'Path',
+              kind: 'external' as const,
+              detail: 'класс',
+              insert: 'Path',
+              additionalEdits: [
+                { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1, newText: 'from pathlib import Path\n' },
+              ],
+            },
+          ]
+        : [],
 });
 // Наведение с двумя источниками ПО ПРИОРИТЕТУ: отладочная подсказка (значение из
 // остановленного кадра) идёт раньше языковой. Переключатель `debugHoverControl.on`

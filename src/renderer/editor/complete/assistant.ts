@@ -10,7 +10,10 @@
  *   • уводит курсор, ставит пробел или знак препинания — список закрывается сам, потому
  *     что набранное перестало быть началом слова;
  *   • Ctrl+Space — показать всё, что есть, даже без набранного;
- *   • повторное Ctrl+Space расширяет список: файл → проект → зависимости.
+ *   • повторное Ctrl+Space расширяет список: файл → проект → зависимости;
+ *   • Ctrl+Shift+Space — только то, что подходит к месту: в позиции значения не
+ *     предлагать имена типов, после `:` — только типы (первый шаг «умного» дополнения;
+ *     сравнивать по ожидаемому типу мы не умеем — модели типов в клиенте нет).
  *
  * Внутри строк и комментариев подсказки не показываются: там слова не имеют отношения к
  * делу, а попап закрывает текст ровно там, где человек читает. Роль токена под курсором
@@ -27,6 +30,7 @@ import { snippetsForLanguage, type Snippet } from '../../../shared/snippets';
 import type { EditorController, EditorChange } from '../input/editor-controller';
 import type { EditorView } from '../view/editor-view';
 import { allCompletions, buildCompletions, DEFAULT_LIMIT, type CompletionItem } from './completions';
+import { expectedAt, filterByExpectation, type Expectation } from './expectation';
 import { EXTERNAL_BONUS, matchScore } from './fuzzy';
 import { expandSnippet } from './snippet';
 import { memberAccessAt, membersOf, type MemberAccess } from './member-access';
@@ -219,6 +223,13 @@ export class CompletionAssistant {
    * списку, а не двигают курсор, и нажатие не попадает в текст.
    */
   handleKey(event: KeyboardEvent): boolean {
+    // Ctrl+Shift+Space — «умное»: только подходящее к месту. Проверяем раньше обычного
+    // Ctrl+Space, иначе сочетание перехватит оно.
+    if (event.key === ' ' && (event.ctrlKey || event.metaKey) && event.shiftKey) {
+      event.preventDefault();
+      this.showSmart();
+      return true;
+    }
     // Ctrl+Space — показать всё: и слова языка, и имена из файла.
     if (event.key === ' ' && (event.ctrlKey || event.metaKey)) {
       event.preventDefault();
@@ -303,6 +314,46 @@ export class CompletionAssistant {
     const caret = this.controller.caret;
     this.widget.show(items, this.anchor(caret), prefix.length);
     this.askServer(prefix, caret);
+  }
+
+  /**
+   * «Умное» дополнение — Ctrl+Shift+Space.
+   *
+   * От обычного отличается тем, что список сужен по месту: в позиции значения не
+   * предлагаются имена типов, после `:` — переменные. Полноценного сравнения по
+   * ожидаемому типу тут нет: модель типов живёт в языковом сервере, и он сам сужает
+   * свой ответ. Здесь то, что видно по тексту.
+   *
+   * Если после сужения не осталось ничего — отдаём полный список: пустой попап в ответ
+   * на нажатие читается как «подсказок нет вовсе».
+   */
+  private showSmart(): void {
+    const caret = this.controller.caret;
+    const line = this.buffer.lineAt(caret);
+    const text = this.buffer.lineText(line);
+    const column = caret - this.buffer.lineStart(line);
+    const member = memberAccessAt(text, column);
+    if (member) {
+      this.scope = 'file';
+      this.showMembers(member);
+      return;
+    }
+
+    const expectation = expectedAt(text.slice(0, column));
+    const prefix = prefixAt(text, column);
+    this.fillIndex();
+    const all = allCompletions(this.index, this.language, {
+      limit: DEFAULT_LIMIT,
+      external: this.external(),
+      snippets: snippetsForLanguage(this.snippets(), this.language),
+    });
+    const fitting = filterByExpectation(all, expectation);
+    this.scope = 'file';
+    this.askedAll = true;
+    this.widget.show(fitting.length > 0 ? fitting : all, this.anchor(caret), prefix.length);
+    // Серверу говорим, чего ждёт место: иначе его элементы придут без отбора, и
+    // «умный» список снова наполнится тем, что тут не нужно.
+    this.askServer(prefix, caret, 0, expectation === 'any' ? null : expectation);
   }
 
   /**
@@ -418,7 +469,7 @@ export class CompletionAssistant {
    * когда ответят. Свои слова никуда не уходят: ответ сервера идёт впереди, но при
    * неудаче список остаётся прежним — молчание сервера не должно гасить подсказки.
    */
-  private askServer(prefix: string, caret: number, attempt = 0): void {
+  private askServer(prefix: string, caret: number, attempt = 0, only: Expectation | null = null): void {
     this.clearRetry();
     const lsp = this.lsp;
     if (!lsp) return;
@@ -433,10 +484,16 @@ export class CompletionAssistant {
         // и у наших слов, чтобы `gT` находил `getTitle` и у серверных подсказок).
         const local = this.widget.allItems;
         const known = new Set(local.map((item) => item.label));
-        const fresh = extra.filter((item) => !known.has(item.label) && hasMatch(item, prefix));
+        let fresh = extra.filter((item) => !known.has(item.label) && hasMatch(item, prefix));
+        // «Умное» дополнение режет и ответ сервера: имена типов в позиции значения
+        // бесполезны, откуда бы они ни пришли. Пусто после отбора — не повод гасить
+        // список: слова файла уже показаны, и они остаются.
+        if (only) fresh = filterByExpectation(fresh, only);
         if (fresh.length === 0) {
           // Пусто — сервер ещё греется. Повторяем один раз, если курсор не уехал.
-          if (attempt === 0) this.lspRetry = window.setTimeout(() => this.askServer(prefix, caret, 1), LSP_RETRY_MS);
+          if (attempt === 0) {
+            this.lspRetry = window.setTimeout(() => this.askServer(prefix, caret, 1, only), LSP_RETRY_MS);
+          }
           return; // подтвердить нечего — список остаётся прежним
         }
         // Сервер впереди: он знает типы, а словарь — только имена. Оценку совпадения
