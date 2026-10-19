@@ -265,7 +265,12 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         // дело: даже с пустым текстом это часть хода, и без них история разойдётся
         // с лентой, которая карточки показывает.
         const messages = done.agentMessages ?? [{ role: 'assistant' as const, content: done.text }];
-        if (messages.some((message) => message.content || message.toolCalls?.length)) session.history.push(...messages);
+        if (messages.some((message) => message.content || message.toolCalls?.length)) {
+          // Контекст и переписка пополняются одним и тем же: разойдутся они только
+          // при сжатии — тогда контекст заменится резюме, а переписка останется.
+          session.history.push(...messages);
+          session.transcript.push(...messages);
+        }
         session.usage = done.usage;
         // След прогона копим в беседе: расход и число шагов видны за всё время,
         // а не только за последний шаг (см. «Информацию о сессии»).

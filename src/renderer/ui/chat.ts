@@ -5,6 +5,7 @@ import {
   type ApplyPatchesHostParams,
   type ChatAttachment,
   type ChatDeltaPayload,
+  type ChatMessage,
   type PickedImage,
   type ReasoningEffort,
   type Settings,
@@ -348,6 +349,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       title: `Беседа ${nextId}`,
       thread: h('div', { class: 'chat-thread' }),
       history: [],
+      transcript: [],
       touched: new Map(),
       files: [],
       attachments: [],
@@ -442,7 +444,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       for (const conversation of history.conversations) {
         const session = createSession(conversation.uid);
         session.title = conversation.title;
-        session.history = [...conversation.messages];
+        // Лента — из переписки, контекст — из сжатой части, если беседа сжималась.
+        session.transcript = [...conversation.messages];
+        session.history = [...(conversation.context ?? conversation.messages)];
+        // Сжатый контекст пришёл из файла — отметку в ленте тоже восстанавливаем,
+        // иначе после перезапуска непонятно, почему ответы не растут в контексте.
+        session.compacted = Boolean(conversation.context);
         session.usage = conversation.usage;
         session.trace = conversation.trace;
         renderHistory(session);
@@ -478,14 +485,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   function renderHistory(session: ChatSession): void {
     clear(session.thread);
-    if (session.history.length === 0) {
+    if (session.transcript.length === 0) {
       renderIntro(session);
       return;
     }
 
     const cards = new Map<string, ToolCardView>();
-    const lastIndex = session.history.length - 1;
-    session.history.forEach((message, index) => {
+    const lastIndex = session.transcript.length - 1;
+    session.transcript.forEach((message, index) => {
       if (message.role === 'user') {
         // Служебный дострой обрезанного ответа — не вопрос человека: в ленте не показываем.
         if (message.content === CONTINUE_PROMPT) return;
@@ -542,6 +549,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         });
       }
     });
+    // Сжатая беседа: отметка после переписки — видно, что модель работает по резюме.
+    if (session.compacted) appendCompactedNote(session);
     scrollToEnd(session);
   }
 
@@ -684,6 +693,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       }
 
       const before = session.history.length;
+      // Меняем ТОЛЬКО контекст: `transcript` (то, что человек читает) остаётся целым,
+      // и после перезапуска лента соберётся из него же.
       session.history = [
         { role: 'user', content: `Контекст сжатой беседы:\n\n${summary}` },
         { role: 'assistant', content: 'Принято, продолжаем с этим контекстом.' },
@@ -748,23 +759,55 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     return compactSession(session);
   }
 
-  /** После сжатия в ленте остаётся отметка и само резюме — его стоит видеть. */
+  /**
+   * После сжатия в ленте остаётся отметка и само резюме.
+   *
+   * Ленту при этом НЕ очищаем. Сжимается контекст для модели — история, которую
+   * пошлём в следующий раз, — а не то, что человек читает: раньше сжатие стирало
+   * переписку целиком и оставляло вместо неё сводку, и это выглядело как
+   * «текст обрезался» ровно в тот момент, когда беседа стала длинной. Своё
+   * прочитанное человек вправе перечитать и скопировать.
+   */
   function renderCompacted(session: ChatSession, before: number, summary: string): void {
-    clear(session.thread);
+    const note = h(
+      'details',
+      { class: 'thread-summary', open: true },
+      h(
+        'summary',
+        { class: 'thread-summary-head' },
+        svgIcon('collapse', 12),
+        `Контекст беседы сжат · было сообщений: ${before}`,
+      ),
+      h(
+        'div',
+        { class: 'thread-summary-text' },
+        'Выше — вся переписка, её можно перечитать. Модель дальше получает только это резюме:',
+        h('div', { class: 'thread-summary-body' }, summary),
+      ),
+    );
+    session.thread.appendChild(note);
+    session.compacted = true;
+    // Прокручиваем к отметке: новый вопрос встанет ниже неё. Прыжка в начало
+    // ленты (как было) нет — человек продолжает читать с того же места.
+    if (session.id === activeId) note.scrollIntoView({ block: 'nearest' });
+  }
+
+  /** Отметка о сжатии для восстановленной беседы: резюме берём из её контекста. */
+  function appendCompactedNote(session: ChatSession): void {
+    const summary = session.history[0]?.content ?? '';
     session.thread.appendChild(
       h(
         'details',
-        { class: 'thread-summary', open: true },
+        { class: 'thread-summary' },
+        h('summary', { class: 'thread-summary-head' }, svgIcon('collapse', 12), 'Контекст беседы сжат'),
         h(
-          'summary',
-          { class: 'thread-summary-head' },
-          svgIcon('collapse', 12),
-          `Беседа сжата · было сообщений: ${before}`,
+          'div',
+          { class: 'thread-summary-text' },
+          'Выше — вся переписка, её можно перечитать. Модель дальше получает только это резюме:',
+          h('div', { class: 'thread-summary-body' }, summary),
         ),
-        h('div', { class: 'thread-summary-text' }, summary),
       ),
     );
-    if (session.id === activeId) body.scrollTop = 0;
   }
 
   /** Подпись кнопки модели — «Провайдер - Модель»: где и чем спрашиваем, видно сразу. */
@@ -1253,7 +1296,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // На провод их отдаёт не история, а вложения — см. `chat-stream.ts`.
     const images = sent.filter((item) => item.kind === 'image' && item.dataUrl).map((item) => item.dataUrl!);
 
-    session.history.push({ role: 'user', content: text, ...(images.length > 0 ? { images } : {}) });
+    const question: ChatMessage = { role: 'user', content: text, ...(images.length > 0 ? { images } : {}) };
+    session.history.push(question);
+    session.transcript.push(question);
     if (session.history.length === 1) {
       // Первый вопрос убирает приветствие: беседа началась, подсказка больше не нужна.
       clear(session.thread);

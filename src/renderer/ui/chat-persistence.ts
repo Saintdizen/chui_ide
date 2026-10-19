@@ -35,18 +35,24 @@ export function newChatUid(): string {
  * сохраняем только то, что имеет смысл показать после перезапуска.
  */
 export function serializeSession(session: ChatSession): ChatConversation {
+  const copy = (message: ChatMessage): ChatMessage => {
+    const item: ChatMessage = { role: message.role, content: message.content };
+    if (message.name) item.name = message.name;
+    if (message.toolCallId) item.toolCallId = message.toolCallId;
+    if (message.rating) item.rating = message.rating;
+    if (message.toolCalls?.length) item.toolCalls = message.toolCalls.map((call) => ({ ...call }));
+    return item;
+  };
+  // Сжатие контекста не должно стирать переписку: `messages` — то, что читают,
+  // `context` — то, что уйдёт модели. Пишем сжатый контекст только тогда, когда он
+  // и правда отличается от переписки, иначе файл распух бы вдвое без причины.
+  const compacted = session.history.length !== session.transcript.length;
   return {
     uid: session.uid,
     title: session.title,
     updatedAt: Date.now(),
-    messages: session.history.map((message) => {
-      const copy: ChatMessage = { role: message.role, content: message.content };
-      if (message.name) copy.name = message.name;
-      if (message.toolCallId) copy.toolCallId = message.toolCallId;
-      if (message.rating) copy.rating = message.rating;
-      if (message.toolCalls?.length) copy.toolCalls = message.toolCalls.map((call) => ({ ...call }));
-      return copy;
-    }),
+    messages: session.transcript.map(copy),
+    ...(compacted || session.transcript.length === 0 ? { context: session.history.map(copy) } : {}),
     ...(session.usage ? { usage: { ...session.usage } } : {}),
     ...(session.trace ? { trace: { ...session.trace, usage: { ...session.trace.usage } } } : {}),
   };

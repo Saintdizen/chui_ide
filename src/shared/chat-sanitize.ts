@@ -67,6 +67,13 @@ export function sanitizeConversations(raw: unknown): ChatConversation[] {
       messages,
     };
 
+    // Сжатый контекст: та же проверка, что и у переписки, но своей пачкой.
+    // Нет его или он пуст — значит беседа не сжималась, и модель получит `messages`.
+    if (Array.isArray(value.context)) {
+      const context = sanitizeMessages(value.context);
+      if (context.length > 0) conversation.context = context;
+    }
+
     const usage = sanitizeUsage(value.usage);
     if (usage) conversation.usage = usage;
     const trace = sanitizeTrace(value.trace);

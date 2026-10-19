@@ -14,14 +14,19 @@ import type { ChatSession } from '../src/renderer/ui/chat-session';
  * загрузки для уже покинутого проекта не подменяет беседы текущего.
  */
 
-/** Беседа панели: всё, кроме истории, для сохранения не нужно, но должно быть на месте. */
+/**
+ * Беседа панели: всё, кроме истории, для сохранения не нужно, но должно быть на месте.
+ * Переписка по умолчанию повторяет контекст: так выглядит беседа, которую не сжимали.
+ */
 function makeSession(over: Partial<ChatSession> = {}): ChatSession {
+  const history = over.history ?? [];
   return {
     id: 1,
     uid: 'chat_base',
     title: 'Беседа 1',
     thread: null as unknown as HTMLElement,
-    history: [],
+    history,
+    transcript: history,
     touched: new Map(),
     files: [],
     attachments: [],
@@ -91,6 +96,26 @@ describe('serializeSession', () => {
     expect(conversation.usage).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15 });
     expect(conversation.usage).not.toBe(session.usage);
     expect(conversation.trace?.usage).not.toBe(session.trace?.usage);
+  });
+
+  it('сжатая беседа пишет и переписку, и сжатый контекст', () => {
+    const conversation = serializeSession(
+      makeSession({
+        // Переписка — три сообщения, контекст — резюме: так выглядит сжатая беседа.
+        transcript: [user('вопрос'), { role: 'assistant', content: 'ответ' }, user('ещё вопрос')],
+        history: [{ role: 'user', content: 'Контекст сжатой беседы:\n\nрезюме' }],
+      }),
+    );
+
+    // Лента после перезапуска собирается из переписки: прочитанное не пропадает.
+    expect(conversation.messages.map((message) => message.content)).toEqual(['вопрос', 'ответ', 'ещё вопрос']);
+    // Модель получит резюме, а не всю переписку.
+    expect(conversation.context).toEqual([{ role: 'user', content: 'Контекст сжатой беседы:\n\nрезюме' }]);
+  });
+
+  it('без сжатия отдельного контекста нет — файл не дублируется', () => {
+    const conversation = serializeSession(makeSession({ history: [user('привет')] }));
+    expect('context' in conversation).toBe(false);
   });
 
   it('без расхода и следа в отчёте нет пустых полей', () => {
