@@ -34,6 +34,7 @@ import { type SelectionSpan, type SelectionStep, stepSelection } from '../../../
 import type { SemanticToken } from '../../../shared/lsp-semantic-tokens';
 import type { RunnableTest } from '../../../shared/python-tests';
 import type { Snippet } from '../../../shared/snippets';
+import { completeStatement } from '../complete/statement';
 import type { TestOutcome } from '../../../shared/test-model';
 import { spellProblemsInLine, type CharRange, type SpellProblem } from '../../../shared/spellcheck';
 import type { BreakpointInput } from '../../core/debug';
@@ -1159,6 +1160,28 @@ export class EditorHost {
     this.controller.insertLineAbove();
   }
 
+  /**
+   * Ctrl+Alt+Enter — закончить текущий оператор: закрыть скобки, поставить двоеточие
+   * у заголовка блока Python или точку с запятой у JS и перейти на новую строку.
+   *
+   * Выделение не трогаем: закончить оператор можно только там, где стоит одна каретка.
+   */
+  completeStatement(): void {
+    const { anchor, active } = this.controller.selection;
+    if (anchor !== active) return;
+    const file = this.path;
+    if (file === null) return;
+    const text = this.currentText(file);
+    if (text === null) return;
+    const done = completeStatement(text, active, this.languageId, ' '.repeat(this.indentSize));
+    if (!done) return;
+    const caret = active + (done.caret ?? done.insert.length);
+    this.controller.applyEdits([{ start: active, removed: '', inserted: done.insert }], {
+      anchor: caret,
+      active: caret,
+    });
+  }
+
   /** Переставить два знака вокруг каретки (по графемам). */
   transpose(): void {
     this.controller.transpose();
@@ -1862,6 +1885,7 @@ export class EditorHost {
     else if (command === 'formatSelection') this.formatSelection();
     else if (command === 'expandSelection') this.expandSelection();
     else if (command === 'shrinkSelection') this.shrinkSelection();
+    else if (command === 'completeStatement') this.completeStatement();
     else this.find.show(command === 'replace' ? 'replace' : 'find');
   }
 

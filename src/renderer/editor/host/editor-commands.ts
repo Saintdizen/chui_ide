@@ -59,6 +59,8 @@ export interface EditorCommandContext {
   insertLineBelow(): void;
   /** Вставить строку выше текущей. */
   insertLineAbove(): void;
+  /** Закончить текущий оператор: скобки, двоеточие или `;` и переход на новую строку. */
+  completeStatement(): void;
   /** Переставить два знака вокруг каретки. */
   transpose(): void;
   /** Сменить стиль имени (camelCase, snake_case, …) у выделения или слова под кареткой. */
@@ -345,6 +347,16 @@ export const EDITOR_COMMANDS: readonly EditorCommand[] = [
     keybinding: 'Ctrl+Shift+Enter',
     category: CATEGORY,
     run: (context) => context.insertLineAbove(),
+  },
+  {
+    id: 'editor.completeStatement',
+    label: 'Закончить оператор',
+    alias: 'completeStatement',
+    // В больших IDE это Ctrl+Shift+Enter, но у нас он занят вставкой строки выше —
+    // привычку новой команды не ломаем ради чужого сочетания.
+    keybinding: 'Ctrl+Alt+Enter',
+    category: CATEGORY,
+    run: (context) => context.completeStatement(),
   },
   {
     id: 'editor.transpose',

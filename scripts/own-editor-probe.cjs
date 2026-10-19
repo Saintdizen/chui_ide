@@ -703,6 +703,23 @@ async function assistCheck(win) {
   const importPaths = await suggestState();
   await key('Escape');
 
+  // «Закончить оператор»: печатаем заголовок без скобок и двоеточия и жмём сочетание.
+  // Проверяем то, ради чего действие есть: дописалась скобка и каретка ушла внутрь.
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: 'if (ready' }]);
+    const end = buffer.length;
+    controller.selectRange(end, end);
+    window.probe.input.focus();
+    return true;
+  })()`);
+  await wait(120);
+  await key('Return', ['control', 'alt']);
+  const statementDone = await script(`(() => ({
+    текст: window.probe.buffer.text,
+    курсор: window.probe.controller.caret,
+  }))()`);
+
   // Подсказка после точки: в классе печатаем `this.` — попап обязан показать поля и
   // методы ЭТОГО класса. Здесь нет языкового сервера (подставной молчит), поэтому
   // работает запасной разбор файла — тот, что нужен, когда сервера нет вовсе.
@@ -842,6 +859,9 @@ async function assistCheck(win) {
     postfix_предложен: postfixOffer.видно && postfixOffer.все.includes('items.if'),
     postfix_результат: postfixDone,
     postfix_работает: postfixDone.startsWith('if (items)'),
+    // Закончить оператор: незакрытая скобка дописана, каретка осталась в конце.
+    закончить_оператор: statementDone.текст,
+    закончить_оператор_работает: statementDone.текст === 'if (ready)',
     // Итог одной строкой: каждое нажатие добавляет к списку, Escape убирает попап.
     умное_значение: smartValue,
     умное_тип: smartType,

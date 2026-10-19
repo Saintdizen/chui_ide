@@ -160,6 +160,14 @@ describe('ввод символов', () => {
     expect(resolveKey({ key: 'k', ctrl: true })).toEqual({ kind: 'swallow' });
   });
 
+  it('Ctrl+Alt+Enter — закончить оператор, и это не перевод строки', () => {
+    // Единственное сочетание Enter с Alt, у которого есть дело: остальные отданы приложению.
+    expect(resolveKey({ key: 'Enter', ctrl: true, alt: true })).toEqual({
+      kind: 'edit',
+      edit: 'completeStatement',
+    });
+  });
+
   it('Alt+Enter не переводит строку (его слушает приложение)', () => {
     expect(resolveKey({ key: 'Enter', alt: true })).toBeNull();
   });

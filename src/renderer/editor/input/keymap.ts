@@ -95,6 +95,8 @@ export type EditCommand =
   | 'joinLines'
   | 'insertLineBelow'
   | 'insertLineAbove'
+  /** Ctrl+Alt+Enter — закончить оператор: скобки, двоеточие или `;` и новая строка. */
+  | 'completeStatement'
   /** F1 — палитра команд. */
   | 'palette'
   /** Ctrl+. — быстрые исправления под курсором (список показывает приложение). */
@@ -142,6 +144,9 @@ export function resolveKey(chord: KeyChord): KeyAction | null {
 
   // Разделители строк: разные раскладки и системы дают разные имена.
   if (key === 'Enter' || key === '\r' || key === '\n') {
+    // Ctrl+Alt+Enter — закончить оператор. Проверяем до общего отказа от Alt: это
+    // единственное сочетание Enter с Alt, которое у нас что-то значит.
+    if (control && chord.alt && !extend) return { kind: 'edit', edit: 'completeStatement' };
     if (chord.alt) return null;
     // Ctrl+Enter вставляет строку НИЖЕ, Ctrl+Shift+Enter — ВЫШЕ. Без Ctrl — обычный перевод.
     if (control) return { kind: 'edit', edit: extend ? 'insertLineAbove' : 'insertLineBelow' };

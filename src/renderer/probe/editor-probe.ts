@@ -14,6 +14,7 @@ import { EditorController } from '../editor/input/editor-controller';
 import { EditorInputBinding } from '../editor/input/editor-input';
 import { EditorView } from '../editor/view/editor-view';
 import { CompletionAssistant } from '../editor/complete/assistant';
+import { completeStatement } from '../editor/complete/statement';
 import { FindWidget } from '../editor/widgets/find-widget';
 import { GotoLineWidget } from '../editor/widgets/goto-widget';
 import { HoverWidget } from '../editor/widgets/hover-widget';
@@ -181,7 +182,17 @@ const hover = new HoverWidget(view, buffer, {
 const input = new EditorInputBinding(view, controller, {
   onCommand: (command) => {
     if (command === 'gotoLine') goto.show();
-    else find.show(command === 'replace' ? 'replace' : 'find');
+    else if (command === 'completeStatement') {
+      // То же, что делает хозяин редактора: у пробы нет панели, но правило одно и то же.
+      const done = completeStatement(buffer.text, controller.caret, 'typescript', '    ');
+      if (done) {
+        const caret = controller.caret + (done.caret ?? done.insert.length);
+        controller.applyEdits([{ start: controller.caret, removed: '', inserted: done.insert }], {
+          anchor: caret,
+          active: caret,
+        });
+      }
+    } else find.show(command === 'replace' ? 'replace' : 'find');
   },
   // Порядок перехватчиков = приоритет: подсказки забирают клавишу раньше наведения.
   interceptors: [assistant],

@@ -58,7 +58,9 @@ export type CommandName =
   | 'formatSelection'
   /** Выделить по структуре шире/уже — участки берёт вызывающий у сервера. */
   | 'expandSelection'
-  | 'shrinkSelection';
+  | 'shrinkSelection'
+  /** Закончить текущий оператор: скобки, двоеточие или `;` — язык знает вызывающий. */
+  | 'completeStatement';
 
 /**
  * Кто может забрать клавишу себе раньше редактора. Так устроены попапы: при видимом
@@ -670,6 +672,10 @@ export class EditorInputBinding {
         break;
       case 'shrinkSelection':
         this.onCommand?.('shrinkSelection');
+        break;
+      // Ctrl+Alt+Enter: чем закончить оператор, знает хозяин редактора (язык и отступ).
+      case 'completeStatement':
+        this.onCommand?.('completeStatement');
         break;
       // Мультикурсор: вхождения слова, каретки по столбцу и сброс к главной.
       case 'selectNextOccurrence':

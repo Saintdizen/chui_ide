@@ -729,6 +729,7 @@ export class EditorWorkspace {
       duplicateSelection: () => this.pane.duplicateSelection(),
       insertLineBelow: () => this.pane.insertLineBelow(),
       insertLineAbove: () => this.pane.insertLineAbove(),
+      completeStatement: () => this.pane.completeStatement(),
       transpose: () => this.pane.transpose(),
       convertCase: (style) => this.pane.convertCase(style),
       // Свёртка — состояние самой панели: она знает и диапазоны, и что сложено.
