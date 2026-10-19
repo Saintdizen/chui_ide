@@ -234,7 +234,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       showToast('Это текущая беседа — она уже в контексте');
       return;
     }
-    const context = sessionAttachment({ title: found.title, messages: found.history });
+    const context = sessionAttachment({ uid: found.uid, title: found.title, messages: found.history });
     // Пустая беседа — прикладывать нечего; об этом говорим прямо, иначе нажатие
     // выглядит как «ничего не произошло».
     if (!context) {

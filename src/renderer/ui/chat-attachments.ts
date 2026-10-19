@@ -110,9 +110,11 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
         'span',
         {
           class: `chip chip-static${image ? ' chip-image' : ''}${isNew ? ' is-new' : ''}`,
+          // У справки из беседы в подсказке видна ссылка на источник: по ней понятно,
+          // из какого разговора приложен текст и что он ушёл отдельным блоком.
           title: image
             ? `${item.title} · ${formatBytes(item.bytes ?? 0)}`
-            : `${item.title}\n\n${item.text.slice(0, 300)}`,
+            : `${item.title}${item.uri ? ` · ${item.uri}` : ''}\n\n${item.text.slice(0, 300)}`,
         },
         // У картинки вместо значка — она сама: по миниатюре видно, что приложено,
         // и не приходится открывать файл, чтобы это проверить.

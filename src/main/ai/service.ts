@@ -69,6 +69,7 @@ import {
 } from '../../shared/chat-title';
 import { sandboxNote } from '../../shared/sandbox';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
+import { renderSessionReferences } from '../../shared/session-context';
 import {
   permissionFlags,
   permissionFromAutoApprove,
@@ -720,7 +721,17 @@ export class AiService {
     const attachments = request.attachments ?? [];
     const images = attachments.filter((item) => item.kind === 'image' && item.dataUrl);
     const texts = attachments.filter((item) => item.kind !== 'image');
-    if (texts.length > 0) messages.push({ role: 'system', content: renderAttachments(texts) });
+    // Справка из прошлой беседы едет отдельным сообщением и размеченным блоком:
+    // внутри может стоять текст, который человек получил от модели, — включая
+    // «забудь предыдущие указания». Отдельная разметка (`session-reference` с
+    // trust="untrusted", ссылкой и байтами) отличает её от присланного файла,
+    // который человек приложил осознанно и как задание.
+    const notes = texts.filter((item) => item.kind !== 'session');
+    const references = texts.filter((item) => item.kind === 'session');
+    if (notes.length > 0) messages.push({ role: 'system', content: renderAttachments(notes) });
+    if (references.length > 0) {
+      messages.push({ role: 'system', content: renderSessionReferences(references) });
+    }
     if (images.length > 0) {
       messages.push({ role: 'system', content: renderImageNote(images) });
     }

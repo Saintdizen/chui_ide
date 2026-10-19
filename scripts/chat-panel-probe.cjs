@@ -290,16 +290,30 @@ app.whenReady().then(async () => {
       const value = input.value;
       const label = chip?.querySelector('.chip-name')?.textContent ?? null;
       const icon = chip?.querySelector('svg')?.dataset.icon ?? null;
+      // В подсказке чипа видна ссылка на источник: по ней понятно, из какого
+      // разговора приложен текст, и что он уйдёт отдельным блоком справки.
+      const hint = chip?.getAttribute('title') ?? '';
       // Убираем чип и закрываем заведённую ради проверки беседу: дальше проба
       // считает вкладки и не должна унаследовать лишнюю.
       chip?.querySelector('.chip-remove')?.click();
       document.querySelector('.chat-tab.is-active .tab-close')?.click();
       await new Promise((resolve) => setTimeout(resolve, 250));
-      return { чип: label, значок: icon, поле: value, вкладок: document.querySelectorAll('.chat-tab-list .chat-tab').length };
+      return {
+        чип: label,
+        значок: icon,
+        подсказка: hint,
+        поле: value,
+        вкладок: document.querySelectorAll('.chat-tab-list .chat-tab').length,
+      };
     })()`,
   );
   check('выбор беседы приложил её к вопросу', attached.чип === 'беседа «Разбор сборки»', attached);
   check('чип беседы отмечен значком разговора', attached.значок === 'chat', attached.значок);
+  check(
+    'подсказка чипа называет источник ссылкой на беседу',
+    typeof attached.подсказка === 'string' && attached.подсказка.includes('chui://chat/'),
+    attached.подсказка?.slice(0, 120),
+  );
   check('набранный символ из поля убран', attached.поле === '', attached.поле);
   check('вкладок снова одна', attached.вкладок === 1, attached.вкладок);
 
