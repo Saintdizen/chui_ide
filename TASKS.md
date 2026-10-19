@@ -53,7 +53,8 @@
 | Spill больших выводов | `toolContext.spillDir`, `main/ai/spill.ts` |
 | Session reference (`@` прошлая беседа) | `shared/session-context.ts` |
 | Session title по сути | `shared/chat-title` + запрос названия после ответа |
-| Web search | инструмент `web_search`, `main/ai/web-search.ts` |
+| Web search | инструмент `web_search`, `main/ai/web-search.ts`, `shared/web-search.ts` |
+| Чтение страницы (`web_fetch`) | `shared/web-fetch.ts` + `main/ai/web-fetch.ts`, настройка `ai.webFetch.enabled` |
 | Ключ не показывается в окне | ключи живут в main, в renderer не уезжают |
 
 ---
@@ -305,7 +306,7 @@ DSH можно поднять профилем `headless` или `acp` и гон
 
 ## Порядок, который предлагаю
 
-1. `web_fetch` (P1.1) — сразу снимает «агент не может открыть ссылку».
+1. ~~`web_fetch` (P1.1) — сразу снимает «агент не может открыть ссылку».~~ Сделано.
 2. `read_image` (P1.2) — скриншоты и макеты в проекте.
 3. Прокси (P1.3) — без него половина возможностей недоступна там, где есть корпоративная сеть.
 4. «Утвердить план» (P1.4) и ресурсы MCP (P1.5) — мелкие, закрывают неудобства каждый день.
