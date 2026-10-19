@@ -13,6 +13,9 @@ import { menuChecks } from '../shared/app-menu';
 import { lspLanguagesForKind, lspPrimaryLanguagesForKind, mergeLspServers } from '../shared/lsp-presets';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
 import { symbolIndexChip } from '../shared/symbol-index';
+import { toOffset } from '../shared/edits';
+import { classMembers } from './editor/complete/member-access';
+import { declarationOf, enclosingClassAt, overrideSnippet, paramsOf } from './editor/complete/override';
 import type { FileOperation } from '../shared/lsp-workspace-edit';
 import { progressLabel, type LspProgress, type WorkProgress } from '../shared/lsp-progress';
 import { DEFAULT_SNIPPETS } from '../shared/snippets';
@@ -4976,6 +4979,94 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       showToast('Не удалось пересобрать карту символов', 'error');
     }
   };
+
+  /**
+   * Переопределить методы предка: выбрать из списка и получить заготовку.
+   *
+   * Наследование уже разобрано картой символов (`index.inherited`), поэтому искать
+   * предков не нужно: карта знает и цепочку, и членов каждого предка. Открываем её,
+   * убираем то, что в этом классе уже объявлено, и на выбранное имя вставляем
+   * заготовку — с параметрами предка и вызовом `super`: самое частое, что пишут при
+   * переопределении, а забыть его значит получить метод, который молча ничего не делает.
+   */
+  const overrideMembers = async (): Promise<void> => {
+    const path = editors.currentPath;
+    if (!path) {
+      showToast('Откройте файл', 'error');
+      return;
+    }
+    const text = editors.currentText(path) ?? '';
+    const position = editors.cursor();
+    const owner = enclosingClassAt(text, toOffset(text, position.line, position.column));
+    if (!owner) {
+      showToast('Поставьте курсор внутрь класса', 'info');
+      return;
+    }
+
+    const result = await rpc.request('index.inherited', { name: owner.name }).catch(() => null);
+    if (!result) {
+      showToast('Не удалось спросить карту символов', 'error');
+      return;
+    }
+    // Своё уже объявлено — переопределять нечего: берём только унаследованное.
+    const own = new Set(classMembers(text, 'self').map((member) => member.name));
+    const candidates = result.members.filter((member) => member.from !== owner.name && !own.has(member.name));
+    if (candidates.length === 0) {
+      showToast(
+        result.phase === 'warming'
+          ? `${owner.name}: карта символов ещё собирается — повторите через минуту`
+          : `${owner.name}: переопределять нечего — предков с методами не нашлось`,
+      );
+      return;
+    }
+
+    /** Взять заготовку из предка и вставить её в конец тела класса. */
+    const insertOverride = async (name: string, origin: string): Promise<void> => {
+      // Параметры — из строки объявления в файле предка: карта хранит только номер
+      // строки, а сигнатура нужна целиком (типы, значения по умолчанию).
+      const source = await rpc.request('workspace.readFile', { path: origin }).catch(() => null);
+      const declaration = source ? declarationOf(source.text, name) : null;
+      const params = declaration ? paramsOf(declaration) : '';
+      const snippet = overrideSnippet({
+        language: owner.language,
+        name,
+        params,
+        // Отступ члена — на ступень глубже класса: у Python четыре пробела, у JS два.
+        indent: owner.indent + (owner.language === 'python' ? 4 : 2),
+      });
+
+      // Вставляем в конец тела класса, а не в каретку: она могла стоять где угодно
+      // внутри класса, а новый метод должен встать рядом с остальными.
+      const lines = (editors.currentText(path) ?? text).split('\n');
+      const endColumn = (lines[owner.endLine - 1]?.length ?? 0) + 1;
+      editors.reveal(path, owner.endLine, endColumn);
+      editors.insertAtCursor(snippet);
+      showToast(`Переопределён ${name}`);
+    };
+
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(
+      candidates.map((member) => ({
+        label: `${member.kind} ${member.name}`,
+        // Одноимённый метод бывает у нескольких предков — важно знать, чей это.
+        hint: `от ${member.from}`,
+        onSelect: () => void insertOverride(member.name, member.path),
+      })),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+  };
+
+  define(
+    {
+      id: 'editor.overrideMembers',
+      title: 'Переопределить методы предка',
+      category: 'Навигация',
+      keywords: ['override', 'переопределить', 'наслед', 'super'],
+    },
+    () => void overrideMembers(),
+  );
 
   define(
     {

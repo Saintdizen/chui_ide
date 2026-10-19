@@ -55,6 +55,7 @@
     "probe:todo": "npm run build && electron scripts/todo-panel-probe.cjs",
     "probe:chat": "npm run build && electron scripts/chat-panel-probe.cjs",
     "probe:chatcompact": "npm run build && electron scripts/chat-compact-probe.cjs",
+    "probe:override": "npm run build && electron scripts/override-probe.cjs",
     "probe:coverage": "npm run build && electron scripts/node-coverage-probe.cjs",
     "probe:forge": "npm run build:main && node scripts/git-forge-probe.cjs",
     "probe:hot-exit": "npm run build && bash scripts/hot-exit-probe.sh",
