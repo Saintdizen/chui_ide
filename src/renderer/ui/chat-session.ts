@@ -1,4 +1,5 @@
 import type { ChatAttachment, ChatGoal, ChatMessage, ChatRunTrace, ChatUsage, ToolFileChange } from '../../shared/api';
+import type { ChatRunLog } from '../../shared/run-log';
 import type { ToggledFile } from './chat-changes';
 
 /**
@@ -47,6 +48,12 @@ export interface ChatSession {
    * прогоном и переживает перезапуск — по нему видно, во сколько обошлась беседа.
    */
   trace?: ChatRunTrace;
+  /**
+   * Трасса последнего прогона в этой беседе: что ушло модели, шаги, время.
+   * Живёт только в памяти — это диагностика, а не часть переписки: в файл беседы
+   * она не едет, иначе история распухла бы выводами инструментов.
+   */
+  run?: ChatRunLog;
   /**
    * Цель работы: то, что агент доводит до конца, а не отвечает за один ход.
    * Живёт в беседе, а не в прогоне, — поэтому переживает и ход, и перезапуск.

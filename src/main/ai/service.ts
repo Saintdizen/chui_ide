@@ -78,6 +78,15 @@ import {
 } from '../../shared/permissions';
 import { MAX_GOAL_CONTINUES, goalContinuePrompt, goalPrompt, parseGoalUpdate, sanitizeGoal } from '../../shared/goal';
 import {
+  MAX_RUN_CALLS_PER_STEP,
+  MAX_RUN_STEPS,
+  clampRunText,
+  type ChatRunLog,
+  type RunCallLog,
+  type RunStepLog,
+  type RunSubagentLog,
+} from '../../shared/run-log';
+import {
   REVIEW_SYSTEM_PROMPT,
   REVIEW_TIMEOUT_MS,
   buildReviewPrompt,
@@ -946,6 +955,14 @@ export class AiService {
     let runSteps = 0;
     let runToolCalls = 0;
     /**
+     * Трасса прогона: шаги, их вызовы и время. Собирается здесь, потому что только
+     * main знает настоящие системные сообщения, состав инструментов и сколько
+     * заняла каждая остановка модели. Renderer покажет её окном «Прогон».
+     */
+    const runStartedAt = Date.now();
+    const runStepLogs: RunStepLog[] = [];
+    const runSubagents: RunSubagentLog[] = [];
+    /**
      * След прогона для наблюдаемости: сколько шагов, вызовов и токенов он стоил.
      * Вес описаний инструментов отдаём здесь же — renderer без него оценивал бы
      * по всему списку и ошибался бы в обе стороны (лишние выключенные плюс
@@ -956,6 +973,34 @@ export class AiService {
       toolCalls: runToolCalls,
       usage: runUsage,
       toolsTokens,
+    });
+
+    /**
+     * Трасса на момент окончания. `finished` — почему прогон кончился: ответом,
+     * лимитом шагов или обрывом. Без этого «почему в ленте нет ответа» пришлось бы
+     * выяснять по последней строке текста.
+     */
+    const runLog = (finished: ChatRunLog['finished']): ChatRunLog => ({
+      startedAt: runStartedAt,
+      ms: Date.now() - runStartedAt,
+      steps: runStepLogs,
+      system: {
+        ...(systemPrompt.trim() ? { instructions: clampRunText(systemPrompt) } : {}),
+        ...(context ? { context: clampRunText(context) } : {}),
+        ...(attachments.length > 0
+          ? { attachments: attachments.map((item) => `${item.kind}: ${item.title}`.trim()) }
+          : {}),
+        provider: request.providerId,
+        model: request.model,
+        mode: planMode ? 'plan' : useTools ? 'agent' : 'question',
+        permission,
+        tools: tools?.length ?? 0,
+        toolsTokens,
+        ...(requestGoal ? { goal: requestGoal } : {}),
+      },
+      ...(runSubagents.length > 0 ? { subagents: runSubagents } : {}),
+      finished,
+      trace: trace(),
     });
 
     // Дедупликация вызовов в рамках одной ветки: одинаковый read-only вызов
@@ -988,6 +1033,9 @@ export class AiService {
         runUsage = addUsage(runUsage, sub.usage);
         runSteps += sub.steps;
         runToolCalls += sub.toolCalls;
+        // Подзадача идёт своим контекстом: её шаги в общий список не подмешать,
+        // поэтому в трассе она — отдельная строка с числом шагов и вызовов.
+        runSubagents.push({ description, steps: sub.steps, toolCalls: sub.toolCalls });
         return sub.outcome;
       },
     };
@@ -1009,6 +1057,24 @@ export class AiService {
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
 
+      // Шаг трассы: время, текст модели и её вызовы. `commit` один на шаг —
+      // вызывается на каждом выходе из итерации, повторный вызов ничего не делает.
+      const stepStartedAt = Date.now();
+      const stepLog: RunStepLog = { index: runStepLogs.length + 1, ms: 0, calls: [] };
+      let stepCommitted = false;
+      const commitStep = (note?: string): void => {
+        if (stepCommitted) return;
+        stepCommitted = true;
+        stepLog.ms = Date.now() - stepStartedAt;
+        if (note) stepLog.note = note;
+        if (runStepLogs.length < MAX_RUN_STEPS) runStepLogs.push(stepLog);
+      };
+      /** Вызов в трассу: сверх потолка считаем числом, а не копим. */
+      const logCall = (call: RunCallLog): void => {
+        if (stepLog.calls.length < MAX_RUN_CALLS_PER_STEP) stepLog.calls.push(call);
+        else stepLog.hiddenCalls = (stepLog.hiddenCalls ?? 0) + 1;
+      };
+
       // Каждый шаг сверяемся с окном: результаты инструментов копятся, и
       // длинный прогон легко переполняет контекст. Режем старые ходы целиком,
       // не трогая ни рамку запроса, ни пару «вызов → результат». Промах оценки
@@ -1026,10 +1092,12 @@ export class AiService {
         calibrationKey: `${request.providerId}::${request.model}`,
         onDelta: (delta) => {
           text += delta;
+          stepLog.text = ((stepLog.text ?? '') + delta).slice(0, 20_000);
           emit(ChatStreamEvent.Delta, { text: delta });
         },
         onReasoning: (delta) => {
           reasoning += delta;
+          stepLog.reasoning = ((stepLog.reasoning ?? '') + delta).slice(0, 20_000);
           emit(ChatStreamEvent.Reasoning, { text: delta });
         },
       });
@@ -1061,13 +1129,19 @@ export class AiService {
             continued: goalContinues,
             limit: MAX_GOAL_CONTINUES,
           });
+          // Шаг кончился ответом, но прогон идёт дальше ради цели: в трассе это
+          // не финал, а шаг с пометкой — иначе показалось бы, что модель дважды
+          // ответила на один вопрос без причины.
+          commitStep('продолжение по цели');
           continue;
         }
+        commitStep();
         return {
           text,
           finishReason,
           usage,
           trace: trace(),
+          run: runLog('answer'),
           agentMessages: produced,
           ...(reasoning ? { reasoning } : {}),
         };
@@ -1095,6 +1169,14 @@ export class AiService {
           messages.push(toolMessage);
           produced.push(toolMessage);
           didNewWork = true;
+          logCall({
+            id: call.id,
+            name: call.name,
+            args: clampRunText(call.arguments),
+            ok: steps.length > 0,
+            summary: steps.length > 0 ? `план: шагов — ${steps.length}` : 'план не изменён',
+            note: 'служебный: меняет чек-лист, а не проект',
+          });
           continue;
         }
 
@@ -1124,6 +1206,14 @@ export class AiService {
           messages.push(toolMessage);
           produced.push(toolMessage);
           didWork = true;
+          logCall({
+            id: call.id,
+            name: call.name,
+            args: clampRunText(call.arguments),
+            ok: true,
+            summary: clampRunText(note, 200),
+            note: 'служебный: ставит или закрывает цель',
+          });
           continue;
         }
 
@@ -1144,6 +1234,14 @@ export class AiService {
             name: call.name,
             ok: false,
             summary: 'режим плана: изменение недоступно',
+          });
+          logCall({
+            id: call.id,
+            name: call.name,
+            args: clampRunText(call.arguments),
+            ok: false,
+            summary: 'режим плана: изменение недоступно',
+            note: 'не исполнялся',
           });
           continue;
         }
@@ -1188,6 +1286,7 @@ export class AiService {
           didNewWork = true;
           didWork = true;
         }
+        const callMs = Date.now() - startedAt;
         emit(ChatStreamEvent.ToolResult, {
           id: call.id,
           name: call.name,
@@ -1195,7 +1294,19 @@ export class AiService {
           summary: outcome.summary,
           detail: outcome.detail,
           changes: outcome.changes,
-          ms: Date.now() - startedAt,
+          ms: callMs,
+        });
+        // В трассу попадает тот же вызов, что видит человек в карточке, плюс
+        // время: по нему и понятно, на что ушла минута прогона.
+        logCall({
+          id: call.id,
+          name: call.name,
+          args: clampRunText(call.arguments),
+          ok: outcome.ok,
+          summary: clampRunText(outcome.summary, 400),
+          ...(outcome.detail ? { detail: clampRunText(outcome.detail) } : {}),
+          ms: callMs,
+          ...(repeated ? { note: 'повтор: не исполнялся' } : covered ? { note: 'диапазон уже прочитан' } : {}),
         });
 
         const result = outcome.ok ? (outcome.detail ?? outcome.summary) : `Ошибка: ${outcome.summary}`;
@@ -1211,6 +1322,8 @@ export class AiService {
         produced.push(toolMessage);
       }
 
+      commitStep();
+
       // Целый шаг из повторов — модель ходит по кругу. После двух таких шагов
       // останавливаемся: дальше это только сожжёт токены без прогресса.
       stallSteps = didNewWork ? 0 : stallSteps + 1;
@@ -1219,11 +1332,13 @@ export class AiService {
         text += note;
         emit(ChatStreamEvent.Delta, { text: note });
         produced.push({ role: 'assistant', content: note.trim() });
+        commitStep('остановлен: повторяющиеся вызовы');
         return {
           text,
           finishReason,
           usage,
           trace: trace(),
+          run: runLog('limit'),
           agentMessages: produced,
           ...(reasoning ? { reasoning } : {}),
         };
@@ -1239,6 +1354,7 @@ export class AiService {
         finishReason,
         usage,
         trace: trace(),
+        run: runLog('aborted'),
         agentMessages: produced,
         ...(reasoning ? { reasoning } : {}),
       };
@@ -1248,7 +1364,15 @@ export class AiService {
     text += note;
     emit(ChatStreamEvent.Delta, { text: note });
     produced.push({ role: 'assistant', content: note.trim() });
-    return { text, finishReason, usage, trace: trace(), agentMessages: produced, ...(reasoning ? { reasoning } : {}) };
+    return {
+      text,
+      finishReason,
+      usage,
+      trace: trace(),
+      run: runLog('limit'),
+      agentMessages: produced,
+      ...(reasoning ? { reasoning } : {}),
+    };
   }
 
   /**

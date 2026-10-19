@@ -2358,3 +2358,249 @@
   margin-top: 1px;
   color: var(--yellow_prime_background);
 }
+
+/* ── прогон агента: строка итога и окно трассы ───────────────────────────── */
+
+/* Итог под ответом: «заняло 5 м 24 с · 6 шагов · 14 вызовов». Строка-кнопка —
+   из неё виден порядок цифр, а подробности открываются окном. Стоит ниже текста
+   и выше кнопок сообщения, тем же серым, что и служебные строки. */
+.run-summary {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  margin: 4px 0 2px;
+  padding: 2px 6px 2px 4px;
+  border: 0;
+  border-radius: var(--radius_sm);
+  background: none;
+  color: var(--text_color_tertiary);
+  font: inherit;
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+}
+
+.run-summary:hover {
+  background: var(--element_background_hover);
+  color: var(--text_color_secondary);
+}
+
+/* Слово «прогон» — подсказка, что строка нажимается: само число не даёт понять,
+   что за ним есть экран. */
+.run-summary-more {
+  color: var(--text_color_tertiary);
+  text-decoration: underline dotted;
+}
+
+.run-summary:hover .run-summary-more {
+  color: var(--text_color_secondary);
+}
+
+/* Окно трассы: шире прочих — строки вызовов длинные (аргументы, итоги). */
+.run-modal {
+  width: min(760px, 94vw);
+}
+
+.run-total {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.run-total-text {
+  color: var(--text_color);
+  font-weight: 600;
+}
+
+.run-total-finish,
+.run-total-note,
+.run-subagent {
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+/* Заголовок раздела: без него шапка сливается со списком шагов. */
+.run-section-title {
+  margin: 8px 0 4px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.run-frame {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.run-frame-goal {
+  margin: 4px 0 0;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.run-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.run-attachment {
+  padding: 0 5px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+}
+
+/* Свёрнутые блоки (инструкции, контекст, аргументы): без рамок и фона — это
+   документ, а не карточка. Открытие показывает текст целиком. */
+.run-fold {
+  margin-top: 4px;
+}
+
+.run-fold-head,
+.run-step-head {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  padding: 3px 4px;
+  border-radius: var(--radius_sm);
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-fold-head::-webkit-details-marker,
+.run-step-head::-webkit-details-marker {
+  display: none;
+}
+
+.run-fold-head:hover,
+.run-step-head:hover {
+  background: var(--element_background_hover);
+}
+
+.run-fold[open] > .run-fold-head .icon,
+.run-step[open] > .run-step-head .icon {
+  transform: rotate(90deg);
+}
+
+.run-fold-body {
+  padding: 2px 4px 4px 18px;
+}
+
+/* Текст без разметки: переносы значимы, длинные строки переносятся. */
+.run-text {
+  max-height: 260px;
+  margin: 2px 0 0;
+  padding: 4px 6px;
+  overflow: auto;
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+  color: var(--text_color_secondary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.run-step {
+  margin-top: 4px;
+  border-top: 1px solid var(--separator_color);
+}
+
+.run-step-head {
+  font-size: var(--font_labels_size);
+}
+
+.run-step-index {
+  color: var(--text_color);
+}
+
+.run-step-time {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-step-calls {
+  color: var(--text_color_tertiary);
+}
+
+.run-step-note {
+  margin: 2px 0 0 14px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.run-step-body {
+  padding: 2px 0 6px 14px;
+}
+
+.run-step-text .run-text {
+  background: none;
+  padding: 0;
+}
+
+/* Вызов внутри шага: имя, время и итог. Значок слева — тот же, что у карточки
+   в ленте: галочка или крест. */
+.run-call {
+  margin-top: 4px;
+}
+
+.run-call-head {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.run-call-head.is-fail,
+.run-call-head.is-fail .run-call-name {
+  color: var(--text_color_error);
+}
+
+.run-call-name {
+  color: var(--text_color);
+  font-family: var(--font_mono);
+}
+
+.run-call-note {
+  color: var(--text_color_tertiary);
+  font-style: italic;
+}
+
+.run-call-time {
+  margin-left: auto;
+  color: var(--text_color_tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-call-summary {
+  margin: 1px 0 0 16px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.run-call .run-fold-head {
+  margin-left: 16px;
+}
+
+.run-call .run-fold-body {
+  padding-left: 34px;
+}
+
+.run-empty {
+  margin: 6px 0;
+  color: var(--text_color_tertiary);
+}

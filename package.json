@@ -53,6 +53,7 @@
     "probe:menu": "npm run build:main && electron scripts/menu-probe.cjs",
     "probe:schedule": "npm run build && electron scripts/schedule-probe.cjs",
     "probe:approval": "npm run build && electron scripts/approval-review-probe.cjs",
+    "probe:runlog": "npm run build && electron scripts/run-log-probe.cjs",
     "probe:keybindings": "npm run build:main && electron scripts/keybindings-probe.cjs",
     "probe:keyleak": "npm run build:main && electron scripts/key-leak-probe.cjs",
     "probe:todo": "npm run build && electron scripts/todo-panel-probe.cjs",

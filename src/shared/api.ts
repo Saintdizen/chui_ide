@@ -63,6 +63,7 @@ import type { WhitespaceMode } from './whitespace';
 import type { KeybindingSettings } from './keybindings';
 import type { ProjectKind } from './project-kinds';
 import type { ScheduleResult, TaskSchedule } from './scheduling';
+import type { ChatRunLog } from './run-log';
 import type { ReviewVerdict } from './approval-review';
 
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
@@ -1644,6 +1645,12 @@ export interface ChatStreamDone {
   usage?: ChatUsage;
   /** След прогона: шаги, вызовы и суммарный расход за все шаги (для наблюдаемости). */
   trace?: ChatRunTrace;
+  /**
+   * Подробная трасса этого прогона: что ушло модели, каждый шаг с его вызовами,
+   * временем и итог. По ней разбирают, «почему это заняло минуту», — в отличие от
+   * `trace`, где только итоговые числа.
+   */
+  run?: ChatRunLog;
   /** Размышления reasoning-моделей: ответу не принадлежат, но их полезно видеть. */
   reasoning?: string;
   /** Вызовы инструментов из последнего шага модели (если модель их запросила). */

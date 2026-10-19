@@ -46,6 +46,7 @@ import {
 import { mergePatchResult } from './chat-patches';
 import { countLines, plural, snippetFor, titleFrom } from './chat-text';
 import { createChatTabs, type ChatSearchHit } from './chat-tabs';
+import { createRunInspector } from './run-inspector';
 import { createChatPersistence, newChatUid } from './chat-persistence';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
@@ -79,6 +80,8 @@ export interface ChatView {
    * хода, что идёт сейчас: молча выполненное действие должно быть видно.
    */
   noteApprovalReview(command: string, reason: string): void;
+  /** Открыть окно «Прогон» для активной беседы (трасса последнего хода). */
+  openRunLog(): void;
   askAboutSelection(mode: 'explain' | 'fix'): Promise<void>;
   applySettings(settings: Settings): void;
   /**
@@ -302,6 +305,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     onSave: () => void saveTouched(),
   });
   const planPanel = createPlanPanel();
+  /**
+   * Окно «Прогон»: трасса последнего прогона этой беседы. Одна на панель —
+   * открывается из строки под ответом и командой «Прогон агента».
+   */
+  const runInspector = createRunInspector();
+  // Окно живёт в корне документа, как и остальные модалки: панель чата может быть
+  // в боковой колонке, и подложка окна не должна обрезаться её границами.
+  document.body.appendChild(runInspector.element);
   /**
    * Цель работы. В отличие от плана не прячется по концу прогона: открытая цель
    * остаётся над композером, пока её не закроют модель или человек — иначе
@@ -1752,6 +1763,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         feedbackFor(session, session.history.length - 1),
       ),
     continueAnswer: () => void send('Продолжи ответ с того места, где остановился.'),
+    openRunLog: (session) => {
+      runInspector.open(session.run ?? null, session.title ? `беседа: ${session.title}` : undefined);
+    },
     afterStream: () => {
       renderTabs();
       renderChanges();
@@ -1829,6 +1843,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     stop,
     askAboutSelection,
     sendPrompt,
+    openRunLog: () => {
+      // Трасса есть только у прогонов этого запуска: она живёт в памяти беседы,
+      // а не в файле истории — выводы инструментов там заняли бы мегабайты.
+      runInspector.open(active().run ?? null, active().title ? `беседа: ${active().title}` : undefined);
+    },
     noteApprovalReview: (command, reason) => {
       // Тот же адрес, что у карточек решений: лента идущего хода, а если он уже
       // закончился — активная вкладка. Ход не прерываем и ничего не ждём.

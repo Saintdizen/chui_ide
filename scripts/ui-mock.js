@@ -1395,7 +1395,12 @@ module.exports = [
         await sleep(60);
         const summary = 'Просили разобрать панель; правили package.json; раскладка ассистента проверена.';
         emit(id, 'delta', { text: summary });
-        return { text: summary, finishReason: 'stop', usage: { promptTokens: 9, completionTokens: 12 } };
+        return {
+          text: summary,
+          finishReason: 'stop',
+          usage: { promptTokens: 9, completionTokens: 12 },
+          run: mockRun(false),
+        };
       }
 
       // Размышления reasoning-моделей приходят отдельным полем — показываем их блоком.
@@ -1496,7 +1501,12 @@ module.exports = [
       // вкладки до секунды, и поток по словам длился бы минуты.
       if (FAST) {
         emit(id, 'delta', { text: answer });
-        return { text: answer, finishReason: 'stop', usage: { promptTokens: 12, completionTokens: 24 } };
+        return {
+          text: answer,
+          finishReason: 'stop',
+          usage: { promptTokens: 12, completionTokens: 24 },
+          run: mockRun(Boolean(params.useTools)),
+        };
       }
 
       let text = '';
@@ -1510,8 +1520,82 @@ module.exports = [
         text += `${word} `;
         emit(id, 'delta', { text: `${word} ` });
       }
-      return { text, finishReason: 'stop', usage: { promptTokens: 12, completionTokens: 24 } };
+      return {
+        text,
+        finishReason: 'stop',
+        usage: { promptTokens: 12, completionTokens: 24 },
+        run: mockRun(Boolean(params.useTools)),
+      };
     },
+  };
+
+  /**
+   * Трасса прогона для мока. Настоящую собирает main (он один знает системные
+   * сообщения и состав инструментов), поэтому здесь — правдоподобный образец:
+   * два шага, повтор чтения, вызов команды и время у каждого.
+   */
+  const mockRun = (usedTools) => {
+    const steps = usedTools
+      ? [
+          {
+            index: 1,
+            ms: 2400,
+            reasoning: 'Сначала посмотрю на файлы проекта, потом проверю линтер.',
+            calls: [
+              {
+                id: 'mock-dir-0',
+                name: 'list_dir',
+                args: JSON.stringify({ path: `${ROOT}/src` }),
+                ok: true,
+                summary: 'элементов: 6',
+                ms: 12,
+              },
+              {
+                id: 'mock-call-0',
+                name: 'run_terminal',
+                args: JSON.stringify({ command: 'npm run lint' }),
+                ok: true,
+                summary: 'код выхода 0',
+                ms: 1840,
+              },
+            ],
+          },
+          {
+            index: 2,
+            ms: 1500,
+            text: 'Проверка панели: ответ приходит потоком.',
+            calls: [
+              {
+                id: 'mock-call-1',
+                name: 'read_file',
+                args: JSON.stringify({ path: `${ROOT}/src/main/ai/service.ts` }),
+                ok: true,
+                summary: 'строки 1–40 уже прочитаны',
+                note: 'диапазон уже прочитан',
+              },
+            ],
+          },
+        ]
+      : [{ index: 1, ms: 1200, text: 'Ответ без инструментов.', calls: [] }];
+    const calls = steps.reduce((sum, step) => sum + step.calls.length, 0);
+    return {
+      startedAt: Date.now() - 4000,
+      ms: 4000,
+      steps,
+      system: {
+        instructions: 'Ты — встроенный ассистент chui_iDE. Отвечай кратко и по делу.',
+        context: 'Проект: chui-ide (Node.js, TypeScript). Тесты: vitest, каталог tests.',
+        attachments: ['file: src/renderer/ui/chat.ts'],
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        mode: usedTools ? 'agent' : 'question',
+        permission: 'ask',
+        tools: usedTools ? 24 : 0,
+        toolsTokens: usedTools ? 4200 : 0,
+      },
+      finished: 'answer',
+      trace: { steps: steps.length, toolCalls: calls, usage: { promptTokens: 12, completionTokens: 24 } },
+    };
   };
 
   /** Разбор имени метода: ищем точное совпадение, иначе ошибка контракта. */

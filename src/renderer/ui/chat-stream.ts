@@ -12,6 +12,7 @@ import {
 } from '../../shared/api';
 import type { PermissionPreset } from '../../shared/permissions';
 import { addRunTrace } from '../../shared/usage';
+import { describeRun, type ChatRunLog } from '../../shared/run-log';
 import type { RpcClient } from '../core/rpc';
 import { RpcError } from '../core/rpc';
 import type { createMarkdownRenderer } from './chat-markdown';
@@ -79,6 +80,8 @@ export interface StreamHost {
   continueAnswer(): void;
   /** Пост-обработка конца потока: вкладки, инфо о сессии, сохранение. */
   afterStream(session: ChatSession): void;
+  /** Открыть окно «Прогон» с трассой последнего прогона этой беседы. */
+  openRunLog(session: ChatSession): void;
   /** Текущий режим (вопрос / агент / план) — уходит провайдеру. */
   modes(): StreamModes;
 }
@@ -350,6 +353,17 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         );
       }
 
+      // Трасса прогона — в беседу, а под ответом короткая строка о нём: сколько
+      // шло и из чего состояло. Подробности открываются окном «Прогон», но сама
+      // строка отвечает на вопрос «почему так долго» без единого клика.
+      if (done.run) {
+        session.run = done.run;
+        messageEl.insertBefore(
+          runSummaryLine(done.run, () => host.openRunLog(session)),
+          activity.element,
+        );
+      }
+
       host.attachActions(messageEl, session);
       host.scrollToEnd(session);
       outcome = 'done';
@@ -381,6 +395,22 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     }
 
     return outcome;
+  }
+
+  /**
+   * Строка «заняло 5 м 24 с · 6 шагов · 14 вызовов» под ответом.
+   *
+   * Кнопка, а не просто текст: из строки видно порядок, а из окна — подробности.
+   * Ведёт себя как остальные строки действий: та же высота, тот же кегль.
+   */
+  function runSummaryLine(run: ChatRunLog, open: () => void): HTMLElement {
+    return h(
+      'button',
+      { class: 'run-summary', type: 'button', title: 'Показать прогон: шаги, вызовы и время', onClick: open },
+      svgIcon('sparkle', 11),
+      h('span', {}, describeRun(run)),
+      h('span', { class: 'run-summary-more' }, 'прогон'),
+    );
   }
 
   function scheduleRender(target: HTMLElement, session: ChatSession): void {

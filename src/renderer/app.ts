@@ -5940,6 +5940,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     () => void scheduleModal.open(),
   );
 
+  define(
+    {
+      id: 'ai.runLog',
+      title: 'Прогон агента: трасса',
+      category: 'AI',
+      keywords: ['прогон', 'run', 'trace', 'диагностика'],
+    },
+    () => chat.openRunLog(),
+  );
+
   define({ id: 'ai.stop', title: 'Остановить генерацию', category: 'AI' }, () => chat.stop());
 
   define(
