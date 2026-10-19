@@ -48,7 +48,7 @@ export function utf8Bytes(text: string): number {
 }
 
 /** Обрезать по байтам, не разрезая символ: половина буквы в JSON — битый текст. */
-function clipToBytes(text: string, limit: number): { text: string; clipped: boolean } {
+export function clipToBytes(text: string, limit: number): { text: string; clipped: boolean } {
   if (utf8Bytes(text) <= limit) return { text, clipped: false };
   let spent = 0;
   let cut = 0;

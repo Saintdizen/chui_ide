@@ -33,6 +33,7 @@ import { formatMcpResources, isMcpToolName, type McpResourceInfo, type McpToolIn
 import { compressToolOutput } from '../../shared/output-compress';
 import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
+import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
 import { parseToolArguments } from '../../shared/tools';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
@@ -179,6 +180,11 @@ export interface McpRunner {
   resources(): Promise<readonly McpResourceInfo[]>;
   /** Прочитать ресурс по адресу из каталога. */
   readResource(uri: string, serverId?: string): Promise<{ text: string; isError: boolean }>;
+}
+
+export interface SessionSearchRunner {
+  /** Найти беседы по словам: разбор и форма ответа — `shared/session-search.ts`. */
+  search(query: string): Promise<SessionSearchReport>;
 }
 
 export interface WebSearchRunner {
@@ -376,6 +382,8 @@ export interface ToolContext {
   linter?: Linter;
   /** Команда запуска тестов: нужна инструменту run_tests. */
   tests?: TestRunner;
+  /** Прошлые беседы проекта: нужен инструменту `session_search`. */
+  sessions?: SessionSearchRunner;
   /** Память проекта: нужна инструментам remember/forget. */
   memory?: MemoryTools;
   /** Навыки проекта (`.chui/skills`): каталог идёт в промпт, тело — инструментом read_skill. */
@@ -535,6 +543,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await codebaseSearch(ctx, parsed.value);
       case 'search_docs':
         return await searchDocs(ctx, parsed.value);
+      case 'session_search':
+        return await sessionSearch(ctx, parsed.value);
       case 'read_skill':
         return await readSkill(ctx, parsed.value);
       case 'read_image':
@@ -3134,5 +3144,33 @@ async function readMcpResource(ctx: ToolContext, args: Record<string, unknown>):
     ok: !result.isError,
     summary: result.isError ? `${uri}: ошибка — ${first.slice(0, 120)}` : `${uri}: прочитан`,
     detail: result.text,
+  };
+}
+
+/**
+ * `session_search` — что уже обсуждали в прошлых беседах проекта.
+ *
+ * Без ответа «ничего не нашлось» на этот вопрос агент начинает выдумывать, что
+ * было в прошлом разговоре, или повторяет поиск другими словами. Поэтому пустой
+ * результат говорит словами, что искали и где, и советует попросить человека
+ * приложить беседу через `@`.
+ */
+async function sessionSearch(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.sessions) return { ok: false, summary: 'Прошлые беседы недоступны: хранилища нет' };
+
+  const query = (optionalString(args, 'query') ?? '').trim();
+  if (!query) {
+    return {
+      ok: false,
+      summary: 'Не задан запрос',
+      detail: 'Инструменту нужны слова для поиска — например, "отпечаток indexer" или "сборка macOS".',
+    };
+  }
+
+  const report: SessionSearchReport = await ctx.sessions.search(query);
+  return {
+    ok: true,
+    summary: report.hits.length > 0 ? `бесед по запросу: ${report.hits.length}` : 'в прошлых беседах не нашлось',
+    detail: formatSessionSearch(report),
   };
 }

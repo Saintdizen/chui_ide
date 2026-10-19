@@ -116,6 +116,7 @@ import {
   type SkillTools,
   type TerminalAgent,
   type TestRunner,
+  type SessionSearchRunner,
   type ToolContext,
   type ToolOutcome,
 } from './agent-tools';
@@ -186,6 +187,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'search',
   'codebase_search',
   'search_docs',
+  'session_search',
   'read_skill',
   'find_references',
   'go_to_definition',
@@ -225,6 +227,7 @@ const READ_ONLY_TOOLS = new Set([
   'search',
   'codebase_search',
   'search_docs',
+  'session_search',
   'read_skill',
   'find_references',
   'go_to_definition',
@@ -260,6 +263,7 @@ const SUBAGENT_TOOLS = new Set<string>([
   'search',
   'codebase_search',
   'search_docs',
+  'session_search',
   'read_skill',
   'find_references',
   'go_to_definition',
@@ -389,6 +393,8 @@ export class AiService {
   private tests?: TestRunner;
   /** Внешние инструменты (MCP): нет сервиса — внешних инструментов не предлагаем. */
   private mcp?: McpRunner;
+  /** Прошлые беседы проекта: без хранилища инструмент session_search не предлагаем. */
+  private sessions?: SessionSearchRunner;
   /** Браузер: без него инструменты `browser_*` не предлагаем. */
   private browser?: BrowserTools;
   /** Песочница: без неё команды и тесты идут на хосте, как раньше. */
@@ -494,6 +500,14 @@ export class AiService {
    */
   attachMcp(mcp: McpRunner): void {
     this.mcp = mcp;
+  }
+
+  /**
+   * Подключить поиск по прошлым беседам — включает инструмент `session_search`.
+   * Хранилище бесед знает рабочие папки, поэтому поиск приходит готовым.
+   */
+  attachSessions(sessions: SessionSearchRunner): void {
+    this.sessions = sessions;
   }
 
   /**
@@ -921,6 +935,7 @@ export class AiService {
     if (this.symbols) toolContext.symbols = this.symbols;
     if (this.linter) toolContext.linter = this.linter;
     if (this.tests) toolContext.tests = this.tests;
+    if (this.sessions) toolContext.sessions = this.sessions;
     toolContext.memory = {
       remember: (text, scope) => this.memory.remember(this.workspace.rootPath(), text, scope),
       forget: (query, scope) => this.memory.forget(this.workspace.rootPath(), query, scope),
@@ -1979,6 +1994,8 @@ export class AiService {
     if (tool.name === 'remember' || tool.name === 'forget') return true;
     // Навыки — файлы проекта: инструмент предлагаем только когда есть что читать.
     if (tool.name === 'read_skill') return hasSkills;
+    // Прошлые беседы: без хранилища искать негде.
+    if (tool.name === 'session_search') return this.sessions !== undefined;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     if (tool.name === 'web_fetch') return this.settings.get().ai.webFetch?.enabled === true;
     // Программа требует отдельного процесса: при включённой песочнице она шла бы

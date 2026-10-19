@@ -21,6 +21,7 @@ import { isDangerousCommand } from '../ai/agent-tools';
 import { shouldReview, type ReviewVerdict } from '../../shared/approval-review';
 import { sanitizePlanExitDecision } from '../../shared/plan-exit';
 import { ChatStore } from '../ai/chat-store';
+import { searchSessions } from '../../shared/session-search';
 import { loadCommands } from '../ai/commands';
 import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
 import type { GitService } from '../git/git';
@@ -1279,6 +1280,18 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // История бесед: renderer её собирает, main только хранит. Каталог — рядом
   // с настройками, по одному файлу на рабочую папку.
   const chatStore = deps.chatStore ?? new ChatStore();
+
+  // Поиск по прошлым беседам (инструмент session_search): файлы читает хранилище,
+  // а разбор запроса и форма ответа — общие (shared/session-search.ts), поэтому
+  // проверяются тестами без окна. Ищем только по открытому проекту: это правда,
+  // а не поломка, и так и написано в ответе инструмента.
+  deps.ai.attachSessions({
+    search: async (query) => {
+      // Проекта нет — бесед тоже: хранилище ответит пустой историей.
+      const history = await chatStore.load(deps.workspace.rootPath() ?? '');
+      return searchSessions(history.conversations, query);
+    },
+  });
   router.register('ai.chats.load', (params) => chatStore.load(params.root));
   router.register('ai.chats.save', async (params) => {
     await chatStore.save(params.root, { conversations: params.conversations, activeUid: params.activeUid });
