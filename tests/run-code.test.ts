@@ -64,13 +64,20 @@ describe('какая программа годится', () => {
 });
 
 describe('файл программы', () => {
-  it('тело заворачивается в функцию с tools и возвращает значение', () => {
+  it('тело заворачивается в функцию с контекстом и возвращает значение', () => {
     const file = programModule('return 1 + 1;');
-    expect(file).toContain('export default async function (tools) {');
+    expect(file).toContain('export default async function (context) {');
+    // В контексте два имени: tools для run_code и agents для workflow.
+    expect(file).toContain('const { tools, agents } = context;');
     expect(file).toContain('return 1 + 1;');
-    // `return` на верхнем уровне модуля был бы синтаксической ошибкой — проверяем,
+    // return на верхнем уровне модуля был бы синтаксической ошибкой — проверяем,
     // что он оказался внутри функции.
     expect(file.trimEnd().endsWith('}')).toBe(true);
+  });
+
+  it('сценарий подписан по-своему: видно, что исполняется', () => {
+    expect(programModule('return 1;', 'workflow')).toContain('инструмента workflow');
+    expect(programModule('return 1;')).toContain('инструмента run_code');
   });
 });
 
@@ -81,8 +88,9 @@ describe('что программа может звать', () => {
     expect(runCodeToolAllowed('apply_patch')).toBe(true);
   });
 
-  it('себя, вопрос человеку и состояние беседы — нет', () => {
+  it('себя, сценарий с агентами, вопрос человеку и состояние беседы — нет', () => {
     expect(runCodeToolAllowed('run_code')).toBe(false);
+    expect(runCodeToolAllowed('workflow')).toBe(false);
     expect(runCodeToolAllowed('ask')).toBe(false);
     expect(runCodeToolAllowed('update_plan')).toBe(false);
     expect(runCodeToolAllowed('update_goal')).toBe(false);

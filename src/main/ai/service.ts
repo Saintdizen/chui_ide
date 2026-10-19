@@ -27,7 +27,13 @@ import type { PatchFile } from '../../shared/patch';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
-import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
+import {
+  AGENT_TOOLS,
+  SUBAGENT_TOOLS,
+  toOpenAiTools,
+  type AgentToolSpec,
+  type ExposedToolSpec,
+} from '../../shared/tools';
 import {
   condenseAppliedCalls,
   estimateMessagesTokens,
@@ -127,6 +133,7 @@ import { AnthropicProvider } from './anthropic';
 import { searchWeb, webSearchNeedsKey, webSearchProviderLabel } from './web-search';
 import { fetchPage } from './web-fetch';
 import { canRunProgram, runProgram } from './run-code';
+import { WORKFLOW_DEFAULT_TIMEOUT_MS, WORKFLOW_MAX_AGENTS } from '../../shared/workflow';
 import { assertChatImages } from './images';
 import { createReadImageRunner } from './read-image';
 import { OpenAiCompatibleProvider } from './openai-compatible';
@@ -256,35 +263,6 @@ const READ_ONLY_TOOLS = new Set([
   'run_output',
 ]);
 
-/**
- * Инструменты подзадачи (`task`): только чтение. Правки и команды остаются за
- * основным агентом — он показывает ревью и спрашивает пользователя. Так подзадача
- * выходит дешёвой и безопасной: контекст тратится на чтение, а назад едет выжимка.
- */
-const SUBAGENT_TOOLS = new Set<string>([
-  'list_dir',
-  'read_file',
-  'read_files',
-  'search',
-  'codebase_search',
-  'search_docs',
-  'session_search',
-  'read_skill',
-  'find_references',
-  'go_to_definition',
-  'project_map',
-  'file_outline',
-  'run_linter',
-  'find_files',
-  'get_diagnostics',
-  'git_status',
-  'git_log',
-  'git_diff',
-  'git_blame',
-  'web_search',
-  'web_fetch',
-]);
-
 /** Шагов подзадаче меньше, чем основному агенту: её дело — собрать факты, а не работать. */
 const SUBAGENT_MAX_STEPS = 16;
 
@@ -303,6 +281,7 @@ const AGENT_PROMPT = [
   'Устройство файла даёт file_outline: дальше читай диапазоном по номерам, а не файл целиком. Большие файлы — тоже диапазоном, и не перечитывай одно и то же.',
   'Скриншот, макет или схему смотри read_image: read_file на картинке откажет — она не текст. SVG — наоборот, текст, его читай read_file.',
   'Когда вызовов много и они однотипны — run_code: одна программа вместо десяти оборотов.',
+  'Работу, которую надо раздать агентам и разветвить по их отчётам, собирай сценарием workflow: в нём есть if и Promise.all.',
   'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу.',
   'Перед тем как чинить код, посмотри get_diagnostics: там настоящая ошибка, а не догадка.',
   'Для правок по умолчанию бери apply_patch: позиции считает IDE, тебе нужен только точный фрагмент. apply_edit — когда место посчитано тобой точно.',
@@ -1245,6 +1224,34 @@ export class AiService {
       },
     };
 
+    /**
+     * Сценарий с агентами (`workflow`).
+     *
+     * Движок тот же, что у `run_code` (отдельный процесс, обрыв по времени), но в
+     * контексте сценария `agents` вместо `tools`: инструментов у него нет вовсе.
+     * Агента запускает `runOne` — общий путь подзадачи, поэтому расход и шаги
+     * агентов прибавляются к прогону и видны в трассе отдельными строками.
+     * Предел числа агентов и очередь на одновременность держит движок.
+     */
+    toolContext.workflow = {
+      run: (source, options) =>
+        runProgram(source, {
+          program: 'workflow',
+          root: this.workspace.rootPath() ?? process.cwd(),
+          maxAgents: WORKFLOW_MAX_AGENTS,
+          timeoutMs: options.timeoutMs ?? WORKFLOW_DEFAULT_TIMEOUT_MS,
+          ...(options.signal ? { signal: options.signal } : {}),
+          onAgent: async (request) => {
+            const sub = await runOne({ description: request.description, prompt: request.prompt });
+            return {
+              ok: sub.outcome.ok,
+              summary: sub.outcome.summary,
+              text: sub.outcome.detail ?? sub.outcome.summary,
+            };
+          },
+        }),
+    };
+
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
     const coveredReads = new Map<string, Array<{ from: number; to: number }>>();
 
@@ -2082,9 +2089,11 @@ export class AiService {
     if (tool.name === 'session_search') return this.sessions !== undefined;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     if (tool.name === 'web_fetch') return this.settings.get().ai.webFetch?.enabled === true;
-    // Программа требует отдельного процесса: при включённой песочнице она шла бы
-    // на хосте, а это обход обещания песочницы — тогда инструмента не предлагаем.
-    if (tool.name === 'run_code') return canRunProgram(Boolean(this.settings.get().ai.sandbox?.enabled));
+    // Программа и сценарий требуют отдельного процесса (а сценарию ещё и агентов):
+    // при включённой песочнице они шли бы на хосте, а это обход обещания песочницы.
+    if (tool.name === 'run_code' || tool.name === 'workflow') {
+      return canRunProgram(Boolean(this.settings.get().ai.sandbox?.enabled));
+    }
     // Браузер: включается настройкой (как веб-поиск), а действия на странице
     // спрашивают подтверждение — значит, без подключённого окна их не предлагаем.
     if (tool.name.startsWith('browser_')) {

@@ -1,10 +1,10 @@
 /**
- * Исходник обвязки для программы агента (`run_code`).
+ * Исходник обвязки для чужого кода: программы (`run_code`) и сценария (`workflow`).
  *
- * Обвязка исполняется отдельным процессом: программа может упасть, зависнуть или
+ * Обвязка исполняется отдельным процессом: код может упасть, зависнуть или
  * напечатать что угодно, а беседа и окно продолжают работать. В самом процессе
- * нет ничего, кроме канала к родителю: инструменты живут в main, и каждый вызов
- * уходит туда сообщением, а назад приходит ответ.
+ * нет ничего, кроме канала к родителю: инструменты и агенты живут в main, и
+ * каждый вызов уходит туда сообщением, а назад приходит ответ.
  *
  * Почему строкой, а не файлом: файл пришлось бы класть рядом с приложением, а в
  * собранном виде код лежит в asar — оттуда чужой процесс запустить нельзя.
@@ -14,11 +14,16 @@
  * Правки этого текста — обычный JavaScript: типов, импортов и шаблонных строк
  * здесь нет намеренно (шаблон внутри шаблона читать невозможно).
  */
-export const HARNESS_SOURCE = `// Обвязка run_code: инструменты по каналу к main, вывод программы — пачкой.
+export const HARNESS_SOURCE = `// Обвязка run_code и workflow: инструменты и агенты — по каналу к main.
 import { pathToFileURL } from 'node:url';
 
 const MAX_LOGS = 400;
 const MAX_LOG_CHARS = 20000;
+
+// Режим запуска: программа с инструментами (run_code) или сценарий с агентами
+// (workflow). Второе имя в контексте всегда undefined — так опечатка в сценарии
+// падает сразу и понятно, а не зовёт инструмент, которого в этом запуске нет.
+const MODE = process.argv[3] === 'workflow' ? 'workflow' : 'code';
 
 const logs = [];
 let logChars = 0;
@@ -82,7 +87,7 @@ function callTool(name, args) {
 
 // tools.<имя>(args) — любой инструмент сессии. Прокси, а не готовый объект:
 // список инструментов зависит от настроек, и знать его здесь незачем.
-const tools = new Proxy(
+const toolProxy = new Proxy(
   {},
   {
     get(_target, name) {
@@ -94,6 +99,34 @@ const tools = new Proxy(
     },
   },
 );
+
+const tools = MODE === 'code' ? toolProxy : undefined;
+
+// Сценарий раздаёт работу агентам: agents.run({ prompt, description }) — один,
+// agents.parallel([...]) — пачка разом (порядок ответов — порядок заданий).
+// Можно ли ещё одного, решает main: здесь только канал.
+function requestAgent(request) {
+  const payload = typeof request === 'string' ? { prompt: request } : request || {};
+  const id = ++seq;
+  const promise = new Promise((resolve) => pending.set(id, resolve));
+  void send({
+    kind: 'agent',
+    id,
+    prompt: String(payload.prompt === undefined ? '' : payload.prompt),
+    description: payload.description === undefined ? undefined : String(payload.description),
+  });
+  return promise;
+}
+
+const agentApi =
+  MODE === 'workflow'
+    ? {
+        run: (request) => requestAgent(request),
+        spawn: (request) => requestAgent(request),
+        parallel: (list) =>
+          Promise.all((Array.isArray(list) ? list : []).map((item) => requestAgent(item))),
+      }
+    : undefined;
 
 function describeError(error) {
   if (error instanceof Error) {
@@ -129,7 +162,7 @@ async function main() {
     await finish({ kind: 'error', message: 'Программа не экспортирует функцию: обёртка ожидает её тело.' });
     return;
   }
-  const value = await run(tools);
+  const value = await run({ tools, agents: agentApi });
   await finish({ kind: 'done', value: asText(value), logs });
 }
 

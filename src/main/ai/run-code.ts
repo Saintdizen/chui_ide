@@ -10,18 +10,28 @@ import {
   clampProgramText,
   programModule,
   programProblem,
+  type ProgramMode,
+  type RunCodeAgentCall,
   type RunCodeCall,
   type RunCodeOutcome,
 } from '../../shared/run-code';
+import { clipDescription } from '../../shared/subagents';
+import { WORKFLOW_MAX_AGENTS, WORKFLOW_MAX_PARALLEL, createAgentGate, workflowProblem } from '../../shared/workflow';
 import { HARNESS_SOURCE } from './run-code-harness';
 
 /**
- * Запуск программы агента (`run_code`).
+ * Запуск программы агента (`run_code`) и сценария с агентами (`workflow`).
  *
- * Программа исполняется отдельным процессом, а не в main: она чужая и может
- * зависнуть, упасть или напечатать мегабайты. Инструменты остаются в main и
- * зовутся по каналу IPC — значит права, подтверждения и запись правок идут тем
- * же путём, что у обычных вызовов.
+ * Оба режима идут одним путём: отдельный процесс, канал IPC в main, обрыв по
+ * времени. Разница в том, что видит исполняемый код: программе даны `tools` —
+ * вызовы инструментов сессии, а сценарию — `agents` — подчинённые агенты (см.
+ * `shared/workflow.ts`). Один движок на два инструмента: второго такого места,
+ * где чужой код ждёт ответа от main, быть не должно.
+ *
+ * Чужой код идёт отдельным процессом, а не в main: он может зависнуть, упасть или
+ * напечатать мегабайты. Инструменты остаются в main и зовутся по каналу IPC —
+ * значит права, подтверждения и запись правок идут тем же путём, что у обычных
+ * вызовов.
  *
  * Три ограничения, без которых это было бы опасно:
  *
@@ -32,7 +42,8 @@ import { HARNESS_SOURCE } from './run-code-harness';
  * 2. **Потомки.** Модель прав по умолчанию запрещает `child_process` и воркеры:
  *    запустить что-то ещё из программы нельзя. Для команд есть инструменты.
  * 3. **Время и число вызовов.** Предел времени и предел вызовов: программа
- *    может уйти в бесконечный цикл, и агент не должен ждать её вечно.
+ *    может уйти в бесконечный цикл, и агент не должен ждать её вечно. У сценария
+ *    к пределу вызовов добавляется предел агентов: каждый — прогон модели.
  *
  * Песочница контейнера сюда не подмешивается: программа Node в контейнере без
  * инструментов бесполезна, а запускать её на хосте при включённой песочнице —
@@ -58,12 +69,30 @@ export function canRunProgram(sandboxEnabled: boolean): boolean {
 export interface RunCodeRunOptions {
   /** Корень проекта: что программе разрешено читать. */
   root: string;
+  /**
+   * Что исполняем: программу с инструментами (`code`) или сценарий с агентами
+   * (`workflow`). От режима зависят проверка исходника, имена в контексте и то,
+   * какой канал работает — `tools` или `agents`.
+   */
+  program?: ProgramMode;
   /** Отмена прогона («Стоп»). */
   signal?: AbortSignal;
   timeoutMs?: number;
   maxCalls?: number;
   /** Вызов инструмента. Здесь живёт вся политика прав — main решает сам. */
-  onCall: (name: string, args: unknown) => Promise<{ ok: boolean; summary: string; text: string }>;
+  onCall?: (name: string, args: unknown) => Promise<{ ok: boolean; summary: string; text: string }>;
+  /**
+   * Запуск подчинённого агента из сценария. Кто такой агент и сколько их можно —
+   * решает тот, кто передал вызов; здесь только счёт и очередь.
+   */
+  onAgent?: (request: {
+    description: string;
+    prompt: string;
+  }) => Promise<{ ok: boolean; summary: string; text: string }>;
+  /** Сколько агентов сценарий может запустить за раз. */
+  maxAgents?: number;
+  /** Сколько агентов идут одновременно. */
+  maxParallel?: number;
   /** Подмена запуска в тестах: путь к исполняемому файлу node. */
   execPath?: string;
   /** Версия рантайма — от неё зависит имя флага модели прав. */
@@ -102,7 +131,8 @@ interface Reply {
 }
 
 export async function runProgram(source: string, options: RunCodeRunOptions): Promise<RunCodeOutcome> {
-  const problem = programProblem(source);
+  const program: ProgramMode = options.program ?? 'code';
+  const problem = program === 'workflow' ? workflowProblem(source) : programProblem(source);
   if (problem) return failed(problem);
 
   const startedAt = Date.now();
@@ -112,6 +142,9 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
   );
   const maxCalls = options.maxCalls ?? RUN_CODE_MAX_CALLS;
   const maxLogs = options.maxLogs ?? RUN_CODE_MAX_LOGS;
+  const maxAgents = options.maxAgents ?? WORKFLOW_MAX_AGENTS;
+  /** Очередь на одновременность: `Promise.all` сценария не должен упираться в предел провайдера. */
+  const throughGate = createAgentGate(options.maxParallel ?? WORKFLOW_MAX_PARALLEL);
 
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-run-code-'));
   const programPath = path.join(dir, 'program.mjs');
@@ -120,6 +153,10 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
   let child: ChildProcess | undefined;
   let timer: NodeJS.Timeout | undefined;
   const calls: RunCodeCall[] = [];
+  const agents: RunCodeAgentCall[] = [];
+  /** Занятые места под агентов: занимаем до `await`, иначе пачка разом обошла бы предел. */
+  let agentSlots = 0;
+  let agentsExceeded = false;
   let callsExceeded = false;
   let timedOut = false;
   let settled = false;
@@ -130,7 +167,7 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
   };
 
   try {
-    await fs.writeFile(programPath, programModule(source), 'utf8');
+    await fs.writeFile(programPath, programModule(source, program), 'utf8');
     await fs.writeFile(harnessPath, HARNESS_SOURCE, 'utf8');
 
     const roots = await allowedPaths(options.root, dir);
@@ -140,7 +177,7 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
       const version = options.runtimeVersion ?? process.versions.node;
       const stdio: Array<'ignore' | 'pipe' | 'ipc'> = ['ignore', 'pipe', 'pipe', 'ipc'];
 
-      const started = fork(harnessPath, [programPath], {
+      const started = fork(harnessPath, [programPath, program], {
         execPath,
         // Свой набор флагов: чужие (например, от vitest) в чужом процессе не нужны.
         execArgv: runtimePermissionArgs(version, roots),
@@ -190,8 +227,15 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
           timedOut: false,
           truncated: false,
           error: 'прогон прерван',
+          ...agentFields(),
         });
       };
+
+      /** Поля сценария в итоге: агенты и отметка о том, что предел сработал. */
+      const agentFields = (): Partial<RunCodeOutcome> => ({
+        ...(agents.length > 0 ? { agents } : {}),
+        ...(agentsExceeded ? { agentsExceeded: true } : {}),
+      });
 
       timer = setTimeout(() => {
         timedOut = true;
@@ -206,6 +250,8 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
           id?: number;
           name?: string;
           args?: unknown;
+          prompt?: string;
+          description?: string;
           value?: string;
           logs?: string[];
           message?: string;
@@ -215,6 +261,11 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
 
         if (data.kind === 'call') {
           void handleCall(data.id ?? 0, String(data.name ?? ''), data.args);
+          return;
+        }
+
+        if (data.kind === 'agent') {
+          void handleAgent(data.id ?? 0, String(data.prompt ?? ''), data.description);
           return;
         }
 
@@ -228,6 +279,7 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
             ms: Date.now() - startedAt,
             timedOut: false,
             truncated: logs.truncated || value.truncated,
+            ...agentFields(),
             ...(callsExceeded ? { callsExceeded: true } : {}),
           });
           kill();
@@ -244,6 +296,7 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
             truncated: logs.truncated,
             error: String(data.message ?? 'неизвестная ошибка'),
             ...(data.stack ? { stack: String(data.stack).split('\n').slice(0, 6).join('\n') } : {}),
+            ...agentFields(),
             ...(callsExceeded ? { callsExceeded: true } : {}),
           });
           kill();
@@ -264,6 +317,14 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
 
         const callStartedAt = Date.now();
         let result: Reply;
+        if (!options.onCall) {
+          reply(id, {
+            ok: false,
+            summary: 'инструменты недоступны',
+            text: 'В сценарии инструментов нет: читать и править проект умеют run_code и агенты.',
+          });
+          return;
+        }
         try {
           result = await options.onCall(name, args);
         } catch (error) {
@@ -275,6 +336,57 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
           summary: result.summary,
           ms: Date.now() - callStartedAt,
         });
+        reply(id, result);
+      }
+
+      /**
+       * Агент из сценария (`workflow`): считаем, ограничиваем, запускаем.
+       *
+       * Место под агента занимаем сразу, до первого `await`: пачка из
+       * `agents.parallel` приходит одним залпом, и проверка «сколько уже запущено»
+       * после ожидания пропустила бы всю пачку целиком.
+       */
+      async function handleAgent(id: number, prompt: string, description?: string): Promise<void> {
+        const text = prompt.trim();
+        if (!options.onAgent) {
+          reply(id, {
+            ok: false,
+            summary: 'агенты недоступны',
+            text: 'Агентов запускает только сценарий (workflow): в программе их нет.',
+          });
+          return;
+        }
+        if (!text) {
+          reply(id, {
+            ok: false,
+            summary: 'пустое задание агенту',
+            text: 'У агента нет задания: в agents.run нужен непустой prompt — что именно он должен выяснить.',
+          });
+          return;
+        }
+        if (agentSlots >= maxAgents) {
+          agentsExceeded = true;
+          reply(id, {
+            ok: false,
+            summary: `предел агентов в сценарии: ${maxAgents}`,
+            text:
+              `Сценарий уже запустил ${maxAgents} агентов — предел на один запуск. ` +
+              'Каждый агент — отдельный прогон модели, поэтому работай с теми отчётами, что уже есть, ' +
+              'и верни результат, а остальное сделай следующим вызовом workflow.',
+          });
+          return;
+        }
+
+        agentSlots += 1;
+        const label = clipDescription(description ?? text, 'агент');
+        const agentStartedAt = Date.now();
+        let result: Reply;
+        try {
+          result = await throughGate(() => options.onAgent!({ description: label, prompt: text }));
+        } catch (error) {
+          result = { ok: false, summary: `отказ: ${describe(error)}`, text: describe(error) };
+        }
+        agents.push({ description: label, ok: result.ok, summary: result.summary, ms: Date.now() - agentStartedAt });
         reply(id, result);
       }
 
@@ -302,6 +414,7 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
           truncated: false,
           error: reason,
           ...(stderr.trim() ? { stack: stderr.trim().split('\n').slice(0, 6).join('\n') } : {}),
+          ...agentFields(),
           ...(callsExceeded ? { callsExceeded: true } : {}),
         });
       });
@@ -314,6 +427,7 @@ export async function runProgram(source: string, options: RunCodeRunOptions): Pr
           timedOut: false,
           truncated: false,
           error: `программу не удалось запустить: ${error.message}`,
+          ...agentFields(),
         });
       });
     }).finally(async () => {

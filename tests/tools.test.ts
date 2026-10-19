@@ -44,6 +44,7 @@ describe('набор инструментов агента', () => {
       'apply_edit',
       'apply_patch',
       'replace_in_files',
+      'workflow',
       'run_terminal',
       'run_background',
       'run_output',

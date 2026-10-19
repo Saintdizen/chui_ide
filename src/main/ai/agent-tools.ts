@@ -38,6 +38,7 @@ import { formatSessionSearch, type SessionSearchReport } from '../../shared/sess
 import type { TaskSchedule } from '../../shared/scheduling';
 import { scheduleCreate, scheduleDelete, scheduleList, scheduleUpdate } from './schedule-tools';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
+import { formatWorkflow } from '../../shared/workflow';
 import { parseToolArguments } from '../../shared/tools';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
@@ -232,6 +233,15 @@ export interface RunCodeRunner {
 }
 
 /**
+ * Сценарий с агентами (`workflow`). Движок тот же (`ai/run-code.ts`), но в
+ * контексте сценария `agents` вместо `tools`, а что такое агент, решает service
+ * — там есть провайдер и модель. Инструмент остаётся проверяемым без сети.
+ */
+export interface WorkflowRunner {
+  run(source: string, options: { signal?: AbortSignal; timeoutMs?: number }): Promise<RunCodeOutcome>;
+}
+
+/**
  * Линтер проекта: проверка кода на замечания. Выбор движка и запуск живут в main
  * (`project/lint.ts`), сюда приходит готовый вызов — тот же уговор, что у `GitTools`
  * и `TerminalAgent`. Инструмент остаётся проверяемым без запуска линтеров.
@@ -423,6 +433,8 @@ export interface ToolContext {
   webFetch?: WebFetchRunner;
   /** Программа вместо десятка вызовов: есть, когда её вообще можно запустить. */
   runCode?: RunCodeRunner;
+  /** Сценарий с агентами (`workflow`): тот же движок, но вместо tools — agents. */
+  workflow?: WorkflowRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
   mcp?: McpRunner;
   /** Подзадачи (инструмент `task`): запускает service — у него есть провайдер. */
@@ -616,6 +628,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await webFetch(ctx, parsed.value);
       case 'run_code':
         return await runCodeProgram(ctx, parsed.value);
+      case 'workflow':
+        return await workflowScript(ctx, parsed.value);
       case 'create_file':
         return await createFile(ctx.workspace, parsed.value);
       case 'delete_file':
@@ -2389,6 +2403,33 @@ async function runCodeProgram(ctx: ToolContext, args: Record<string, unknown>): 
   });
 
   const shaped = formatRunCode(outcome);
+  return { ok: !outcome.error && !outcome.timedOut, summary: shaped.summary, detail: shaped.detail };
+}
+
+/**
+ * Сценарий с агентами (`workflow`).
+ *
+ * Инструмент сам ничего не исполняет: запуск — тот же отдельный процесс, что у
+ * `run_code`, а агента запускает service (там провайдер и модель). Здесь только
+ * форма ответа: сводка по агентам для карточки и текст для модели.
+ *
+ * Почему это отдельный инструмент, а не `run_code` с `tools.task`: у сценария
+ * нет ни одного инструмента вовсе. Он умеет одно — раздать работу агентам и
+ * разветвить её по отчётам, и именно это ограничение нужно модели: правку
+ * проекта делает не вид сценария, а тот, кому её поручили.
+ */
+async function workflowScript(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.workflow) return { ok: false, summary: 'Сценарий недоступен: нет запуска' };
+
+  const code = requireString(args, 'code');
+  const timeoutMs = optionalInteger(args, 'timeoutMs');
+
+  const outcome = await ctx.workflow.run(code, {
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  });
+
+  const shaped = formatWorkflow(outcome);
   return { ok: !outcome.error && !outcome.timedOut, summary: shaped.summary, detail: shaped.detail };
 }
 

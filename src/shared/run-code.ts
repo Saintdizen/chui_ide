@@ -36,9 +36,18 @@ export const RUN_CODE_MAX_LOGS = 8_000;
  * а не действие: его разбирает service, и из программы оно ничего не поменяет.
  * `read_image` — картинка уходит модели отдельным сообщением прогона, а из
  * программы такого сообщения нет: она получила бы текст «картинку отправили»,
- * которой модель не видит.
+ * которой модель не видит. `workflow` — сценарий с агентами: у него свой запуск и
+ * свои пределы (`shared/workflow.ts`), внутри программы ему делать нечего.
  */
-const DENIED_IN_PROGRAM = new Set(['run_code', 'ask', 'update_plan', 'update_goal', 'exit_plan_mode', 'read_image']);
+const DENIED_IN_PROGRAM = new Set([
+  'run_code',
+  'workflow',
+  'ask',
+  'update_plan',
+  'update_goal',
+  'exit_plan_mode',
+  'read_image',
+]);
 
 /** Можно ли звать этот инструмент изнутри программы. */
 export function runCodeToolAllowed(name: string): boolean {
@@ -66,20 +75,38 @@ export function programProblem(source: string): string | null {
   return null;
 }
 
+/** Что исполняется в отдельном процессе: программа с инструментами или сценарий с агентами. */
+export type ProgramMode = 'code' | 'workflow';
+
 /**
- * Файл программы: тело функции с `tools` в параметрах.
+ * Файл программы: тело функции, которому обвязка отдаёт контекст.
  *
  * Обёртка даёт то, что модели привычно: `await` на верхнем уровне и `return`
- * результата. Разметку `tools` не описываем типами — это JavaScript, и лишняя
- * строка в файле только сдвигала бы номера в стеке ошибки.
+ * результата. В контексте два имени: `tools` (вызовы инструментов в `run_code`) и
+ * `agents` (подчинённые агенты в `workflow`). Одно из них всегда `undefined`:
+ * сценарий не зовёт инструментов, а программа не раздаёт работу агентам. Разметку
+ * контекста типами не описываем — это JavaScript, и лишняя строка в файле только
+ * сдвигала бы номера в стеке ошибки.
  */
-export function programModule(source: string): string {
-  return `// Сгенерировано chui_iDE для инструмента run_code: тело программы агента.\nexport default async function (tools) {\n${source}\n}\n`;
+export function programModule(source: string, program: ProgramMode = 'code'): string {
+  const title =
+    program === 'workflow'
+      ? '// Сгенерировано chui_iDE для инструмента workflow: тело сценария агента.'
+      : '// Сгенерировано chui_iDE для инструмента run_code: тело программы агента.';
+  return `${title}\nexport default async function (context) {\nconst { tools, agents } = context;\n${source}\n}\n`;
 }
 
 /** Один вызов инструмента из программы: что звали, чем кончилось, сколько заняло. */
 export interface RunCodeCall {
   name: string;
+  ok: boolean;
+  summary: string;
+  ms: number;
+}
+
+/** Один агент, которого запустил сценарий (`workflow`): кто, чем кончилось, сколько заняло. */
+export interface RunCodeAgentCall {
+  description: string;
   ok: boolean;
   summary: string;
   ms: number;
@@ -103,6 +130,10 @@ export interface RunCodeOutcome {
   stack?: string;
   /** Вызовов больше предела: остальные получили отказ. */
   callsExceeded?: boolean;
+  /** Сценарий (`workflow`): запущенные агенты по порядку. */
+  agents?: readonly RunCodeAgentCall[];
+  /** Агентов больше предела: остальные не запускались. */
+  agentsExceeded?: boolean;
 }
 
 /** Текст под потолок — без разрезания символа (кириллица, эмодзи). */

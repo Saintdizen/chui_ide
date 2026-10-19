@@ -44,6 +44,7 @@ export type AgentToolName =
   | 'web_search'
   | 'web_fetch'
   | 'run_code'
+  | 'workflow'
   | 'create_file'
   | 'delete_file'
   | 'move_file'
@@ -713,6 +714,30 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
+    name: 'workflow',
+    side: 'main',
+    description:
+      'Сценарий на JavaScript, который сам раздаёт работу агентам и ветвит по отчётам: ' +
+      '`const a = await agents.run({ prompt, description })` возвращает { ok, summary, text }, ' +
+      '`agents.parallel([...])` — пачка разом. Тело функции: есть `await` и `return`, инструментов ' +
+      '(`tools`) в нём нет. Пределы: 6 агентов и 5 минут.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Сценарий: тело асинхронной функции, где agents — запуск агентов.' },
+        description: {
+          type: 'string',
+          description: 'Что делает сценарий, коротко и в активном залоге (5–10 слов) — это видно в ленте.',
+        },
+        timeoutMs: {
+          type: 'number',
+          description: 'Предел времени в миллисекундах (по умолчанию 300000, не больше 600000).',
+        },
+      },
+      required: ['code'],
+    },
+  },
+  {
     name: 'create_file',
     side: 'main',
     description:
@@ -1328,6 +1353,39 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
 ];
+
+/**
+ * Инструменты подзадачи (`task`) — и тем самым предел глубины работы агентов.
+ *
+ * Только чтение: правки и команды остаются за основным агентом, который показывает
+ * ревью и спрашивает человека. Здесь же лежит ответ на «а может ли агент запустить
+ * агента»: ни `task`, ни `workflow` в списке нет, поэтому глубина всегда 1 (см.
+ * `WORKFLOW_MAX_DEPTH`). Иначе один вопрос человека превращался бы в дерево
+ * прогонов модели, за которое никто не считал.
+ */
+export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set([
+  'list_dir',
+  'read_file',
+  'read_files',
+  'search',
+  'codebase_search',
+  'search_docs',
+  'session_search',
+  'read_skill',
+  'find_references',
+  'go_to_definition',
+  'project_map',
+  'file_outline',
+  'run_linter',
+  'find_files',
+  'get_diagnostics',
+  'git_status',
+  'git_log',
+  'git_diff',
+  'git_blame',
+  'web_search',
+  'web_fetch',
+]);
 
 /** Описание инструмента в том виде, в каком его ждёт OpenAI-совместимый API. */
 export interface OpenAiFunctionTool {
