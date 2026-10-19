@@ -37,6 +37,7 @@ import { normalizeKeybindingOverrides, type KeybindingSettings } from '../shared
 import { sanitizeThemeFile, type ThemeFile } from '../shared/theme-file';
 import { sanitizeUiScale } from '../shared/ui-scale';
 import { isWebSearchProvider, type WebSearchProvider } from '../shared/web-search';
+import { CredentialsStore, credentialsPathFor, takeKeys } from './credentials';
 import { RpcFailure } from './ipc/router';
 
 interface StoredProvider {
@@ -346,12 +347,22 @@ const ENV_KEYS: Record<string, string> = {
  */
 export class SettingsStore {
   private readonly filePath: string;
+  /**
+   * Секреты (ключи провайдеров и поиска) лежат отдельно от настроек:
+   * `credentials.json` рядом, права 0600. В `settings.json` их больше нет.
+   */
+  private readonly credentials: CredentialsStore;
   private data: StoredSettings;
   private readonly listeners = new Set<(settings: Settings) => void>();
 
   constructor(filePath?: string) {
     this.filePath = filePath ?? path.join(app.getPath('userData'), 'settings.json');
+    this.credentials = new CredentialsStore(credentialsPathFor(this.filePath));
     this.data = loadSettings(this.filePath);
+    // Перенос из прежней версии: ключи лежали в `ai.providers[].apiKey` и в
+    // `ai.webSearch.apiKey`. Забираем их в отдельный файл и убираем из настроек —
+    // иначе бэкап настроек продолжит возить пароли.
+    this.migrateSecrets();
   }
 
   file(): string {
@@ -550,50 +561,70 @@ export class SettingsStore {
   }
 
   setApiKey(providerId: string, apiKey: string): Settings {
-    const provider = this.requireProvider(providerId);
-    const trimmed = apiKey.trim();
-    if (trimmed) provider.apiKey = trimmed;
-    else delete provider.apiKey;
+    this.requireProvider(providerId);
+    // В настройки ключ не пишется вовсе: только в отдельный файл секретов.
+    this.credentials.set(providerId, apiKey);
     this.persist();
     return this.get();
   }
 
   clearApiKey(providerId: string): Settings {
-    const provider = this.requireProvider(providerId);
-    delete provider.apiKey;
+    this.requireProvider(providerId);
+    this.credentials.remove(providerId);
     this.persist();
     return this.get();
   }
 
   /** Ключ сервиса веб-поиска: не провайдер модели, поэтому хранится отдельно. */
   setWebSearchKey(apiKey: string): Settings {
-    const trimmed = apiKey.trim();
-    if (trimmed) this.data.ai.webSearch.apiKey = trimmed;
-    else delete this.data.ai.webSearch.apiKey;
+    this.credentials.setWebSearch(apiKey);
     this.persist();
     return this.get();
   }
 
   clearWebSearchKey(): Settings {
-    delete this.data.ai.webSearch.apiKey;
+    this.credentials.setWebSearch('');
     this.persist();
     return this.get();
   }
 
-  /** Ключ веб-поиска: settings.json → CHUI_WEB_SEARCH_KEY → BRAVE_API_KEY. */
+  /** Ключ веб-поиска: credentials.json → CHUI_WEB_SEARCH_KEY → BRAVE_API_KEY. */
   resolveWebSearchKey(): string | undefined {
-    const stored = this.data.ai.webSearch?.apiKey;
+    const stored = this.credentials.getWebSearch();
     if (stored) return stored;
     return process.env.CHUI_WEB_SEARCH_KEY ?? process.env.BRAVE_API_KEY;
   }
 
-  /** Порядок поиска: settings.json → специфичная переменная окружения → CHUI_API_KEY. */
+  /** Порядок поиска: credentials.json → специфичная переменная окружения → CHUI_API_KEY. */
   resolveApiKey(providerId: string): string | undefined {
-    const provider = this.data.ai.providers.find((item) => item.id === providerId);
-    if (provider?.apiKey) return provider.apiKey;
+    const stored = this.credentials.get(providerId);
+    if (stored) return stored;
     const specific = ENV_KEYS[providerId];
     if (specific && process.env[specific]) return process.env[specific];
     return process.env.CHUI_API_KEY;
+  }
+
+  /**
+   * Перенести ключи из старого `settings.json` в отдельный файл секретов.
+   *
+   * Зовётся один раз в конструкторе. Если переносить было нечего, файл настроек
+   * не перезаписывается: лишняя запись на старте — лишний шанс потерять правку,
+   * сделанную руками, пока IDE была закрыта.
+   */
+  private migrateSecrets(): void {
+    const { secrets, found } = takeKeys({
+      providers: this.data.ai.providers,
+      webSearch: this.data.ai.webSearch?.apiKey,
+    });
+    if (!found) return;
+
+    for (const provider of this.data.ai.providers) delete provider.apiKey;
+    delete this.data.ai.webSearch.apiKey;
+    // Сначала кладём ключи в отдельный файл, потом убираем из настроек: если
+    // между этими шагами что-то случится, ключ потеряется в одном месте, а не в
+    // обоих сразу (и его можно будет найти в старом файле).
+    this.credentials.adopt(secrets);
+    this.persist();
   }
 
   private requireProvider(providerId: string): StoredProvider {

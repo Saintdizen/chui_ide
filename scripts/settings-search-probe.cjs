@@ -58,7 +58,55 @@ app.whenReady().then(async () => {
   await fs.writeFile(path.join(project, 'src', 'index.js'), 'console.log(1);\n', 'utf8');
 
   serveRenderer();
-  const settings = new SettingsStore(path.join(dir, 'settings.json'));
+
+  /* ── секреты отдельно от настроек ───────────────────────────────────────── */
+
+  // Прежняя версия держала ключ провайдера и ключ поиска прямо в settings.json.
+  // Проверяем перенос: ключи должны уехать в credentials.json (права 0600), а из
+  // настроек исчезнуть — иначе бэкап настроек продолжит возить пароли.
+  const settingsFile = path.join(dir, 'settings.json');
+  const credentialsFile = path.join(dir, 'credentials.json');
+  await fs.writeFile(
+    settingsFile,
+    JSON.stringify(
+      {
+        ai: {
+          providers: [
+            {
+              id: 'openai',
+              label: 'OpenAI',
+              baseUrl: 'https://api.openai.com/v1',
+              models: ['gpt-4o'],
+              apiKey: 'sk-старый',
+            },
+          ],
+          webSearch: { enabled: true, provider: 'brave', apiKey: 'brave-старый' },
+        },
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
+
+  const settings = new SettingsStore(settingsFile);
+
+  const migrated = JSON.parse(await fs.readFile(credentialsFile, 'utf8')).providers?.openai;
+  check('ключ провайдера переехал в отдельный файл', migrated === 'sk-старый', migrated);
+  check(
+    'ключ поиска переехал туда же',
+    JSON.parse(await fs.readFile(credentialsFile, 'utf8')).webSearch === 'brave-старый',
+  );
+  const keptSettings = JSON.parse(await fs.readFile(settingsFile, 'utf8'));
+  check('в настройках ключа провайдера больше нет', keptSettings.ai?.providers?.[0]?.apiKey === undefined);
+  check('в настройках ключа поиска больше нет', keptSettings.ai?.webSearch?.apiKey === undefined);
+  check('ключ по-прежнему работает', settings.resolveApiKey('openai') === 'sk-старый');
+  check('ключ поиска по-прежнему работает', settings.resolveWebSearchKey() === 'brave-старый');
+  check('панель видит, что ключ есть', settings.get().ai.providers[0]?.hasApiKey === true);
+  if (process.platform !== 'win32') {
+    const mode = (await fs.stat(credentialsFile)).mode & 0o777;
+    check('файл ключей открыт только владельцу', mode === 0o600, mode.toString(8));
+  }
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
   const git = new GitService(
     () => workspace.rootPath(),
