@@ -3,6 +3,7 @@ import {
   RPC_CALL_CHANNEL,
   RPC_CANCEL_CHANNEL,
   RPC_EVENT_CHANNEL,
+  RPC_EVENT_END,
   RpcErrorCode,
   type MethodName,
   type ParamsOf,
@@ -79,6 +80,9 @@ export class RpcRouter {
 
     const runner = this.runners.get(call.method);
     if (!runner) {
+      // Стрим не состоится, но renderer ждёт метку конца событий — иначе вызов
+      // с неизвестным методом подвесил бы его до страховочного срока.
+      sendStreamEnd(event.sender, call);
       return {
         id: call.id,
         ok: false,
@@ -110,8 +114,25 @@ export class RpcRouter {
       // Снимаем только свою запись: с тем же id может идти другой вызов, и снести
       // его controller — значит оставить этот вызов без отмены.
       if (this.running.get(call.id) === controller) this.running.delete(call.id);
+      // Метка идёт после всех `ctx.emit`: в одном канале порядок сохраняется.
+      sendStreamEnd(sender, call);
     }
   }
+}
+
+/**
+ * Метка «событий вызова больше не будет».
+ *
+ * События и ответ на вызов идут разными каналами, и порядок между ними не
+ * обещан: ответ через `invoke` нередко обгоняет последние `send`. Renderer,
+ * который считает стрим законченным по ответу, теряет хвост событий — а вместе
+ * с ним последний кусок ответа модели в ленте беседы. Поэтому конец объявляет
+ * сам main, и объявляет его в том же канале, что и события.
+ */
+function sendStreamEnd(sender: WebContents, call: RpcCall): void {
+  if (!call.stream || sender.isDestroyed()) return;
+  const message: RpcEventMessage = { id: call.id, event: RPC_EVENT_END, payload: null };
+  sender.send(RPC_EVENT_CHANNEL, message);
 }
 
 /** Проверка того, что пришло по каналу: без неё мусор в полях — это TypeError. */

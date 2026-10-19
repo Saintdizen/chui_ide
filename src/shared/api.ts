@@ -70,6 +70,17 @@ export const RPC_EVENT_CHANNEL = 'chui:rpc:event';
 export const RPC_CANCEL_CHANNEL = 'chui:rpc:cancel';
 export const PUSH_CHANNEL = 'chui:push';
 
+/**
+ * Служебное событие стрима: все события вызова уже отправлены.
+ *
+ * События идут отдельным каналом от ответа на вызов, и порядок между ними
+ * не обещан: ответ на `invoke` нередко обгоняет последние `send`. Без метки
+ * «больше ничего не будет» renderer не отличит «ответ пришёл, событий больше
+ * нет» от «ответ пришёл, а события ещё в пути» — и последний кусок ответа
+ * модели терялся в ленте.
+ */
+export const RPC_EVENT_END = '__end__';
+
 /** Обратный вызов: main просит renderer выполнить действие и ждёт ответа. */
 export const HOST_REQUEST_CHANNEL = 'chui:host:request';
 export const HOST_REPLY_CHANNEL = 'chui:host:reply';
@@ -99,6 +110,8 @@ export interface RpcCall {
   id: string;
   method: string;
   params: unknown;
+  /** Долгий вызов с событиями: main отметит конец событий меткой `RPC_EVENT_END`. */
+  stream?: boolean;
 }
 
 export interface RpcError {

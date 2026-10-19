@@ -1,4 +1,5 @@
 import {
+  RPC_EVENT_END,
   RpcErrorCode,
   type MethodName,
   type ParamsOf,
@@ -65,12 +66,28 @@ export class RpcClient {
     params: ParamsOf<M>,
     onEvent: (event: string, payload: unknown) => void,
   ): Promise<ResultOf<M>> {
-    const call: RpcCall = { id: this.nextId(), method, params };
-    this.streams.set(call.id, onEvent);
+    const call: RpcCall = { id: this.nextId(), method, params, stream: true };
+    /** Конец событий объявляет main: ответ на вызов приходит раньше них. */
+    let endEvents: () => void = () => undefined;
+    const ended = new Promise<void>((resolve) => {
+      endEvents = resolve;
+    });
+    this.streams.set(call.id, (event, payload) => {
+      if (event === RPC_EVENT_END) {
+        endEvents();
+        return;
+      }
+      onEvent(event, payload);
+    });
     this.activeStreamId = call.id;
     this.streamingEmitter.fire(true);
     try {
-      return unwrap<M>(await this.bridge.call(call));
+      const result = await this.bridge.call(call);
+      // Ответ и события идут разными каналами, и ответ их обгоняет: без этого
+      // ожидания последний `delta` приходил уже после того, как слушатель снят, —
+      // и ответ модели обрывался на середине (видно в ленте беседы).
+      await waitForEnd(ended);
+      return unwrap<M>(result);
     } finally {
       this.streams.delete(call.id);
       if (this.activeStreamId === call.id) this.activeStreamId = null;
@@ -92,6 +109,26 @@ export class RpcClient {
     this.sequence += 1;
     return `r${this.sequence.toString(36)}-${Date.now().toString(36)}`;
   }
+}
+
+/**
+ * Сколько ждать метку конца событий после ответа.
+ *
+ * Метку main отправляет в том же обработчике, что и ответ, поэтому ждать
+ * приходится ровно на пересылку. Срок — страховка от зависания панели: без него
+ * потерянная метка оставила бы чат «занятым» навсегда, а так он оживает без
+ * хвоста событий.
+ */
+const STREAM_END_TIMEOUT = 1000;
+
+function waitForEnd(ended: Promise<void>): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, STREAM_END_TIMEOUT);
+    void ended.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 
 function unwrap<M extends MethodName>(result: RpcResult): ResultOf<M> {

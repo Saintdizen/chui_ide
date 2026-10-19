@@ -97,11 +97,12 @@ app.whenReady().then(async () => {
   // Всё остальное (поток событий, история, вкладки, запись в файл) — настоящее.
   ai.chat = async (_request, emit) => {
     const text = 'Ответ на вопрос пробы.';
+    // События идут одним тактом, без паузы: инструмент, который ответил сразу
+    // (чтение кэша, готовый снимок), отвечает именно так. Порядок доставки с
+    // ответом на вызов при этом не обещан — ответ обгоняет события, — и лента
+    // обязана это переживать: иначе карточка остаётся крутиться, а ответ
+    // обрывается. Стережёт tests/rpc-stream-end.test.ts.
     emit('tool_start', { id: 'call_probe', name: 'read_file', args: JSON.stringify({ path: '/tmp/probe.txt' }) });
-    // Паузы как у настоящего вызова: между началом и результатом инструмент
-    // работает, и события приходят в разные такты. Один такт на всё — это не наш
-    // случай, и лента такого не обещает.
-    await new Promise((resolve) => setTimeout(resolve, 120));
     emit('tool_result', {
       id: 'call_probe',
       name: 'read_file',
@@ -110,7 +111,6 @@ app.whenReady().then(async () => {
       detail: '1 | первая\n2 | вторая',
       ms: 7,
     });
-    await new Promise((resolve) => setTimeout(resolve, 120));
     emit('delta', { text });
     return {
       text,
