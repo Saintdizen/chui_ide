@@ -118,6 +118,14 @@ interface RootState {
   watchRetries: number;
 }
 
+/**
+ * Сколько разных файлов в одном окне схлопывания считать «массовым изменением».
+ *
+ * Порог нужен, чтобы отличить правку от переключения ветки. Пять — с запасом:
+ * «Сохранить всё» на открытых вкладках столько и даёт, а `git checkout` — десятки.
+ */
+const MASS_CHANGE_LIMIT = 5;
+
 export class WorkspaceService {
   /**
    * Корни рабочей области: у обычного проекта он один, но их может быть несколько —
@@ -129,6 +137,11 @@ export class WorkspaceService {
   /** Схлопывание потока изменений в одно уведомление — общее для всей области. */
   private watchTimer: NodeJS.Timeout | null = null;
   private pendingChange: string | null = null;
+  /**
+   * Сколько РАЗНЫХ путей изменилось в текущем окне. Один путь в уведомлении — это
+   * «правка файла», а десяток — «переключили ветку»: потребителям нужно разное.
+   */
+  private pendingCount = 0;
   /**
    * Содержимое прочитанных файлов. Чтение — самая дорогая часть поиска (на дереве
    * в 7,5 тысяч файлов это 788 мс из 875), поэтому повторный поиск читает только
@@ -1199,19 +1212,30 @@ export class WorkspaceService {
   /**
    * Сообщить об изменении дерева. Один путь с задержкой: поток событий схлопывается
    * в одно уведомление, а дерево перечитывается один раз, как бы часто ни писали.
+   *
+   * Отдельно считается, сколько РАЗНЫХ путей успело измениться: `path` несёт только
+   * последний, и по нему нельзя понять, была это одна правка или переключение ветки.
+   * Для второго случая ставим `many` и отдаём корень — потребитель (карта символов)
+   * по нему делает общий пересчёт вместо точечного.
    */
   private scheduleChange(changedPath: string): void {
+    if (this.pendingChange !== changedPath) this.pendingCount += 1;
     this.pendingChange = changedPath;
     if (this.watchTimer) return;
     this.watchTimer = setTimeout(() => {
       this.watchTimer = null;
       const changed = this.pendingChange ?? this.active;
+      const many = this.pendingCount > MASS_CHANGE_LIMIT;
       this.pendingChange = null;
+      this.pendingCount = 0;
       if (!this.active) return;
       // Уведомление несёт корень, к которому относится правка: дерево перечитывает
       // именно его ветку, а не всю область.
       const owner = changed ? this.ownerOf(changed) : null;
-      const payload: WorkspaceChangedPayload = { root: owner?.root ?? this.active, path: changed ?? this.active };
+      const root = owner?.root ?? this.active;
+      const payload: WorkspaceChangedPayload = many
+        ? { root, path: root, many: true }
+        : { root, path: changed ?? this.active };
       this.onChange(PushTopic.WorkspaceChanged, payload);
     }, 120);
   }

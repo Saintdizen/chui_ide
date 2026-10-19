@@ -203,6 +203,25 @@ app.whenReady().then(async () => {
     saved.map((hit) => hit.path),
   );
 
+  // Переключение ветки: файлы меняются пачкой, а путь в уведомлении остаётся один.
+  // Поэтому такое изменение ведёт к общему прогону (`index.refresh`), а не к разбору
+  // одного файла — иначе в карте остались бы объявления прошлой ветки.
+  await fs.writeFile(path.join(root, 'app.py'), 'class ParserAfterSwitch:\n    pass\n', 'utf8');
+  await fs.writeFile(path.join(root, 'base.py'), 'class BaseAfterSwitch:\n    pass\n', 'utf8');
+  index.refresh();
+  await index.settled();
+  check(
+    'после пачки правок общий прогон убирает старые объявления',
+    index.find('AppAfterSave').length === 0 &&
+      index.find('ParserAfterSwitch').length === 1 &&
+      index.find('BaseAfterSwitch').length === 1,
+    {
+      старое: index.find('AppAfterSave').length,
+      новое: index.find('ParserAfterSwitch').length,
+      базовое: index.find('BaseAfterSwitch').length,
+    },
+  );
+
   noServers.dispose();
   lsp.dispose();
   await fs.rm(root, { recursive: true, force: true }).catch(() => undefined);

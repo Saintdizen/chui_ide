@@ -162,12 +162,13 @@ if (!app.requestSingleInstanceLock()) {
     let refreshGitSoon: (() => void) | null = null;
     // То же и для карты символов: сохранили файл — его объявления устарели. Сборщик
     // появится ниже, а поток правок уже идёт — поэтому вызов отложенный.
-    let refreshIndexSoon: ((changed: string) => void) | null = null;
+    let refreshIndexSoon: ((change: { path: string; many?: boolean }) => void) | null = null;
     const workspace = new WorkspaceService((topic, payload) => {
       pushToRenderers(topic, payload);
       if (topic !== PushTopic.WorkspaceChanged) return;
       refreshGitSoon?.();
-      refreshIndexSoon?.((payload as WorkspaceChangedPayload).path);
+      const changed = payload as WorkspaceChangedPayload;
+      refreshIndexSoon?.({ path: changed.path, ...(changed.many ? { many: true } : {}) });
     });
     const ai = new AiService(settings, workspace);
     // Терминал сам активирует venv проекта: иначе pip, запуск и тесты работают
@@ -267,7 +268,15 @@ if (!app.requestSingleInstanceLock()) {
     // Сохранение и чужая правка в рабочей папке приходят одним потоком
     // (`WorkspaceChanged`): без этого карта отставала бы от кода до следующего
     // открытия проекта и находила бы удалённые объявления.
-    refreshIndexSoon = (changed) => symbolIndex.noteChanged(changed);
+    //
+    // Массовое изменение — это не «файл сохранили», а «переключили ветку»: в потоке
+    // событий остаётся ОДИН путь, остальные схлопываются, и точечный разбор оставил бы
+    // в карте объявления прошлой ветки. Поэтому здесь общий прогон: не изменившиеся
+    // файлы он берёт из кэша, и на большом проекте это доли секунды.
+    refreshIndexSoon = (changed) => {
+      if (changed.many) symbolIndex.refresh();
+      else symbolIndex.noteChanged(changed.path);
+    };
     // Отладчик: сессия debugpy по DAP. Интерпретатор тот же, что у запуска и тестов,
     // а `.env` проекта — тот же, что у терминала и языкового сервера.
     const debug = new DebugService(
