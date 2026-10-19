@@ -115,8 +115,14 @@ app.whenReady().then(async () => {
         остаток: (() => {
           const s = getComputedStyle(pane);
           const inner = pane.clientWidth - parseFloat(s.paddingLeft) - parseFloat(s.paddingRight);
+          const first = pane.querySelector('.field');
+          // Поля живут с боковыми отступами (см. правило .field в chrome.css): их и
+          // учитываем, иначе «пустым местом» считался бы собственный отступ поля.
+          const margins = first
+            ? parseFloat(getComputedStyle(first).marginLeft) + parseFloat(getComputedStyle(first).marginRight)
+            : 0;
           const max = Math.max(...widths('.field'), 0);
-          return Math.round(inner - max);
+          return Math.round(inner - max - margins);
         })(),
       };
     })()`,
