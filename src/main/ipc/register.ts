@@ -19,6 +19,7 @@ import {
 import type { AiService } from '../ai/service';
 import { isDangerousCommand } from '../ai/agent-tools';
 import { shouldReview, type ReviewVerdict } from '../../shared/approval-review';
+import { sanitizePlanExitDecision } from '../../shared/plan-exit';
 import { ChatStore } from '../ai/chat-store';
 import { loadCommands } from '../ai/commands';
 import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
@@ -1240,6 +1241,12 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
             .then((decision) => decision.allowed),
         ask: (question, options) =>
           deps.host.request(ctx.sender, 'ai.ask', { question, options }, ctx.signal).then((result) => result.answer),
+        // Утверждение плана: решение принимает renderer (он же переключает режим), а
+        // сюда оно возвращается уже проверенным — «да» только при явном `approved`.
+        exitPlan: (plan) =>
+          deps.host
+            .request(ctx.sender, 'ai.exitPlan', { plan }, ctx.signal)
+            .then((result) => sanitizePlanExitDecision(result)),
         getDiagnostics: (path) => deps.host.request(ctx.sender, 'ai.getDiagnostics', { path }, ctx.signal),
         openFile: (path, line, column) =>
           deps.host.request(ctx.sender, 'ai.openFile', { path, line, column }, ctx.signal).then((result) => result.ok),

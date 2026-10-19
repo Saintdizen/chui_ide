@@ -141,7 +141,10 @@ app.whenReady().then(async () => {
       },
     ],
   });
-  registerIpc({ settings, workspace, ai, terminals, git, chatStore, host: new HostClient() });
+  // Хост оставляем себе: проверка «утвердить план» вызывает рендерер из main —
+  // ровно тем же путём, каким это делает прогон агента.
+  const host = new HostClient();
+  registerIpc({ settings, workspace, ai, terminals, git, chatStore, host });
   await workspace.open(project);
 
   const ide = openIdeWindow();
@@ -1121,6 +1124,38 @@ app.whenReady().then(async () => {
   check('в беседе без цели панели нет', restoredGoal.вПустойНет === true, restoredGoal);
   check('цель пережила переоткрытие окна', restoredGoal.уСвоейБеседы === 'Довести сборку до зелёного', restoredGoal);
   check('значок закрывает цель', restoredGoal.скрылась === true, restoredGoal);
+
+  /* ── «Утвердить план» ──────────────────────────────────────────────────── */
+  // Агент в режиме «План» отдаёт план человеку вызовом `exit_plan_mode`: в ленте
+  // появляется карточка с планом и решением. Утверждение переводит композер в
+  // «Агента» — режим обещал чтение без изменений, и оставлять его после согласия
+  // значило бы врать, — а отказ уносит замечание обратно модели результатом вызова.
+  const planAsk = (plan) =>
+    host
+      .request(second.webContents, 'ai.exitPlan', { plan }, new AbortController().signal)
+      .catch((error) => ({ error: String(error?.message ?? error) }));
+
+  // Режим композера: у селекта режима — класс `is-mode-<имя>` (см. `syncMode`).
+  const modeState = () =>
+    ask(
+      second,
+      `(() => {
+        const select = document.querySelector('.composer-select');
+        return {
+          агент: select?.classList.contains('is-mode-agent') === true,
+          план: select?.classList.contains('is-mode-plan') === true,
+          подпись: select?.textContent ?? '',
+        };
+      })()`,
+    );
+
+  const approvePending = planAsk('Прочитать индексатор и поправить отпечаток');
+  await wait(400);
+  await ask(second, `document.querySelector('.plan-exit .btn-primary').click(), true`);
+  const approved = await approvePending;
+  check('утверждение плана вернулось в main', approved?.approved === true, approved);
+  const afterApprove = await modeState();
+  check('утверждение переключило композер в «Агента»', afterApprove.агент === true, afterApprove);
 
   console.log(`\n[проба] снимок: ${shotFile}`);
 

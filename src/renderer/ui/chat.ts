@@ -41,6 +41,7 @@ import {
   approvalReviewNote,
   createAskPrompt,
   createCommandApproval,
+  createPlanApproval,
   createEditReview,
   type ApprovalHost,
 } from './chat-approvals';
@@ -1614,6 +1615,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const editReview = createEditReview(approvals);
   const commandApproval = createCommandApproval(approvals);
   const askPrompt = createAskPrompt(approvals);
+  const planApproval = createPlanApproval(approvals);
 
   deps.host.handle('ai.confirmCommand', async (params) => ({
     // `review` приходит, только если проверка модели не решилась разрешить сама:
@@ -1637,6 +1639,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   deps.host.handle('ai.ask', async (params) => ({
     answer: await askPrompt.ask(params.question, params.options),
   }));
+
+  // «Утвердить план»: карточка с планом и решением. Утверждение переводит композер
+  // в «Агента» — режим обещал чтение без изменений, и дальше он уже врёт. Режим
+  // меняется здесь, а не в main: композер живёт в renderer.
+  deps.host.handle('ai.exitPlan', async (params) => {
+    const decision = await planApproval.ask(params.plan);
+    if (decision.approved) composer.setMode('agent');
+    return decision;
+  });
 
   deps.host.handle('ai.applyEdits', async (params) => applyAgentEdits(params));
 

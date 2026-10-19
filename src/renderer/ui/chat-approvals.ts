@@ -1,4 +1,5 @@
 import type { FileEdit } from '../../shared/edits';
+import type { PlanExitDecision } from '../../shared/plan-exit';
 import { fileWord } from './chat-text';
 import { h, svgIcon, type IconName } from './dom';
 
@@ -405,6 +406,95 @@ export function createAskPrompt(host: ApprovalHost): AskPrompt {
     host.mount(block);
     host.scrollToEnd();
     input.focus();
+
+    return decision;
+  }
+
+  return { ask };
+}
+
+/**
+ * Утверждение плана (инструмент `exit_plan_mode`).
+ *
+ * Режим «План» — обещание «только читаю». Закончить его человек должен одним нажатием
+ * здесь же, в ленте, где видит план: переключение селекта — это не ответ на план.
+ * Утверждение переводит режим в «Агента» (делает панель), отказ уносит замечание
+ * обратно модели — с ним она поправит план. Замечание поэтому поле карточки, а не
+ * отдельный вопрос: два клика вместо одного — это уже ссора с человеком.
+ */
+export interface PlanApproval {
+  /** Отдать план на решение. «Да» — только явное нажатие «Утвердить». */
+  ask(plan: string): Promise<PlanExitDecision>;
+}
+
+export function createPlanApproval(host: ApprovalHost): PlanApproval {
+  function ask(plan: string): Promise<PlanExitDecision> {
+    const block = h('div', { class: 'ask plan-exit' });
+    block.appendChild(
+      h('div', { class: 'approval-head' }, svgIcon('checklist', 13), h('span', {}, 'План готов — утвердить?')),
+    );
+
+    const text = plan.trim();
+    if (text) block.appendChild(h('div', { class: 'ask-question' }, text));
+
+    const note = h('input', {
+      class: 'field-input',
+      type: 'text',
+      spellcheck: 'false',
+      placeholder: 'Замечание к плану (необязательно)',
+    }) as HTMLInputElement;
+    const noteText = (): string => note.value.trim();
+
+    let settle: (decision: PlanExitDecision) => void = () => undefined;
+    const decision = new Promise<PlanExitDecision>((resolve) => {
+      settle = resolve;
+    });
+
+    /** Решение принято: карточка сворачивается в строку итога с тем, что решили. */
+    function finish(approved: boolean): void {
+      unregister();
+      block.classList.add('decision-done');
+      block.replaceChildren(
+        h(
+          'div',
+          { class: 'decision-line' },
+          svgIcon('checklist', 12),
+          h('span', {}, approved ? 'План утверждён — работаю' : 'План отправлен на доработку'),
+          h('span', { class: 'decision-status' }, approved ? 'режим Агент' : noteText() || 'без замечания'),
+        ),
+      );
+      block.scrollIntoView({ block: 'nearest' });
+      settle({ approved, note: approved ? '' : noteText() });
+    }
+
+    note.addEventListener('keydown', (event) => {
+      // Enter — согласие, но только когда замечания нет: с замечанием человек явно
+      // просит переделать, и Enter не должен читаться как «утверждаю».
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      finish(noteText() === '');
+    });
+
+    const approveButton = h(
+      'button',
+      { class: 'btn btn-small btn-primary', type: 'button', onClick: () => finish(true) },
+      'Утвердить',
+    );
+    const reworkButton = h(
+      'button',
+      { class: 'btn btn-small', type: 'button', onClick: () => finish(false) },
+      'Продолжить планировать',
+    );
+
+    // Прогон прервали — утверждать больше нечего: план уходит на доработку без замечаний.
+    const abort = (): void => finish(false);
+    const unregister = host.register(abort);
+
+    block.appendChild(h('div', { class: 'ask-input' }, note));
+    block.appendChild(h('div', { class: 'approval-actions' }, approveButton, reworkButton));
+    host.mount(block);
+    host.scrollToEnd();
+    note.focus();
 
     return decision;
   }

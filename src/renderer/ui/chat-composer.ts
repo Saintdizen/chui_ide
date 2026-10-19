@@ -60,6 +60,11 @@ export interface ChatComposerView {
   modeBadge: HTMLElement;
   /** Текущие режим и права. */
   modes(): ComposerModes;
+  /**
+   * Переключить режим снаружи: так «утвердить план» переводит панель в «Агента».
+   * Селект и значок статуса обновляются вместе — правду о режиме хранит композер.
+   */
+  setMode(mode: ChatMode): void;
   /** Идёт генерация: кнопка отправки превращается в «стоп», поле гаснет. */
   setBusy(busy: boolean): void;
   /** Подпись кнопки модели — «Провайдер - Модель». */
@@ -294,6 +299,17 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     syncActionButton();
   }
 
+  /**
+   * Сменить режим не пальцем по селекту, а по ходу дела: «утвердить план» переводит
+   * панель из «Плана» в «Агента». Идём через тот же `syncMode`, что и селект, — иначе
+   * значки и подписи разошлись бы с правдой.
+   */
+  function setMode(next: ChatMode): void {
+    if (next === mode) return;
+    mode = next;
+    syncMode();
+  }
+
   /** Подпись кнопки модели — «Провайдер - Модель»: где и чем спрашиваем, видно сразу. */
   function setModel(providerLabel: string, model: string): void {
     modelLabel.textContent = `${providerLabel} - ${model}`;
@@ -352,6 +368,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     input,
     modeBadge,
     modes: () => ({ mode, useTools, planMode, permission }),
+    setMode,
     setBusy,
     setModel,
     setEffort,

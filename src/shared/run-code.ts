@@ -38,7 +38,7 @@ export const RUN_CODE_MAX_LOGS = 8_000;
  * программы такого сообщения нет: она получила бы текст «картинку отправили»,
  * которой модель не видит.
  */
-const DENIED_IN_PROGRAM = new Set(['run_code', 'ask', 'update_plan', 'update_goal', 'read_image']);
+const DENIED_IN_PROGRAM = new Set(['run_code', 'ask', 'update_plan', 'update_goal', 'exit_plan_mode', 'read_image']);
 
 /** Можно ли звать этот инструмент изнутри программы. */
 export function runCodeToolAllowed(name: string): boolean {

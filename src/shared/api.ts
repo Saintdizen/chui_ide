@@ -1880,6 +1880,19 @@ export interface AskHostResult {
   answer: string;
 }
 
+/** Аргументы `ai.exitPlan`: план, который агент отдаёт человеку на утверждение. */
+export interface ExitPlanHostParams {
+  /** План словами. Пусто — человек видит только чек-лист шагов. */
+  plan: string;
+}
+
+export interface ExitPlanHostResult {
+  /** `true` — план утверждён, режим переключён на «Агент». */
+  approved: boolean;
+  /** Замечание при отказе: что поправить в плане. */
+  note: string;
+}
+
 /** Одна пометка языка: ошибка, предупреждение, подсказка. */
 export interface DiagnosticItem {
   path: string;
@@ -1925,6 +1938,8 @@ export interface HostMethods {
   'ai.confirmBrowser': { params: ConfirmBrowserHostParams; result: ConfirmBrowserHostResult };
   /** Вопрос человеку с ожиданием ответа: инструмент `ask`. */
   'ai.ask': { params: AskHostParams; result: AskHostResult };
+  /** Утверждение плана: инструмент `exit_plan_mode` (режим переключает renderer). */
+  'ai.exitPlan': { params: ExitPlanHostParams; result: ExitPlanHostResult };
   /** Пометки языка живут в renderer (в редакторе), а не на диске. */
   'ai.getDiagnostics': { params: DiagnosticsHostParams; result: DiagnosticsHostResult };
   /** Показать файл в редакторе: открытие вкладки — тоже дело renderer. */

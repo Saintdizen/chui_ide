@@ -155,7 +155,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     // Не действия над проектом, а разговор о них: план, цель, вопрос человеку,
     // подзадача, память. Эти инструменты нужны в любом наборе — без `ask` агент
     // не сможет ничего уточнить, а без `update_plan` не покажет, что задумал.
-    names: ['update_plan', 'update_goal', 'ask', 'task', 'remember', 'forget'],
+    names: ['update_plan', 'update_goal', 'exit_plan_mode', 'ask', 'task', 'remember', 'forget'],
   },
 ];
 

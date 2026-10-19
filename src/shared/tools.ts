@@ -46,6 +46,7 @@ export type AgentToolName =
   | 'move_file'
   | 'update_plan'
   | 'update_goal'
+  | 'exit_plan_mode'
   | 'ask'
   | 'task'
   | 'browser_open'
@@ -736,6 +737,22 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         done: {
           type: 'boolean',
           description: 'true — цель достигнута. false или пусто — работа продолжается.',
+        },
+      },
+    },
+  },
+  {
+    name: 'exit_plan_mode',
+    side: 'main',
+    description:
+      'Отдать план человеку на утверждение. Утверждение переключает режим на «Агент», отказ возвращается ' +
+      'замечанием. Вызывай, когда план готов, — не вместо update_plan, а после него.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        plan: {
+          type: 'string',
+          description: 'План кратко: что собираешься сделать. Пусто — человек увидит только чек-лист.',
         },
       },
     },

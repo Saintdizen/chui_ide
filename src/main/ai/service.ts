@@ -78,6 +78,7 @@ import {
   type PermissionPreset,
 } from '../../shared/permissions';
 import { MAX_GOAL_CONTINUES, goalContinuePrompt, goalPrompt, parseGoalUpdate, sanitizeGoal } from '../../shared/goal';
+import { parsePlanExitArgs, planExitResult, type PlanExitDecision } from '../../shared/plan-exit';
 import {
   MAX_RUN_CALLS_PER_STEP,
   MAX_RUN_STEPS,
@@ -202,6 +203,8 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'git_blame',
   'open_file',
   'update_plan',
+  // Выход из плана — единственное, что здесь меняет состояние: режим.
+  'exit_plan_mode',
   'ask',
   'task',
   // Дочитать уже запущенное задание — чтение; сам запуск в план не входит.
@@ -311,7 +314,8 @@ const AUTO_APPROVE_PROMPT = [
 const PLAN_PROMPT = [
   'Режим плана: сначала изучи проект доступными инструментами чтения, затем составь план через update_plan.',
   'Ничего не меняй: правки файлов и запуск команд в этом режиме недоступны и не выполнятся.',
-  'В конце объясни план словами: что предлагаешь сделать, в каком порядке и почему. Жди решения пользователя.',
+  'План готов — заверши его вызовом exit_plan_mode: человек утвердит его или вернёт замечание.',
+  'В конце объясни план словами: что предлагаешь сделать, в каком порядке и почему.',
 ].join('\n');
 
 /**
@@ -353,6 +357,11 @@ export interface ChatHostBridge {
   confirmBrowser(action: string): Promise<boolean>;
   /** Задать человеку вопрос и дождаться ответа: инструмент `ask`. Пустая строка — ответа не будет. */
   ask(question: string, options?: readonly string[]): Promise<string>;
+  /**
+   * Отдать план на утверждение (инструмент `exit_plan_mode`). Режим переключает
+   * renderer: только он знает, что человек выбрал в композере.
+   */
+  exitPlan(plan: string): Promise<PlanExitDecision>;
   /** Пометки языка: они живут в renderer (в редакторе). */
   getDiagnostics(path?: string): Promise<DiagnosticsHostResult>;
   /** Показать файл в редакторе на нужной позиции. */
@@ -875,7 +884,8 @@ export class AiService {
           (tool) =>
             this.canRun(tool, host, hasSkills) &&
             toolPresetAllows(toolPreset, tool.name) &&
-            (!planMode || PLAN_MODE_TOOLS.has(tool.name)),
+            // Вне плана «утвердить план» нечего: инструмент живёт только в нём.
+            (planMode ? PLAN_MODE_TOOLS.has(tool.name) : tool.name !== 'exit_plan_mode'),
         )
       : [];
 
@@ -883,7 +893,11 @@ export class AiService {
     // делает чужой инструмент, мы не знаем, а план ничего менять не должен.
     const external = useTools && !planMode && this.mcp ? await this.externalTools(host) : [];
     const offered = [...available, ...external];
-    const tools = offered.length > 0 ? toOpenAiTools(offered) : undefined;
+    // `let`: набор схем пересобирается, если человек утвердил план посреди прогона
+    // (см. `widen` ниже).
+    let tools = offered.length > 0 ? toOpenAiTools(offered) : undefined;
+    /** План утверждён человеком посреди прогона: ограничения плана больше не действуют. */
+    let planApproved = false;
     // Полный доступ: и правки, и команды без подтверждений.
     // Страховка — из настроек: по умолчанию выключена, включает пользователь.
     const toolContext: ToolContext = {
@@ -984,7 +998,7 @@ export class AiService {
     // Состав строки важен: описания инструментов — кириллица, а она в токенах
     // дороже латиницы примерно вдвое. estimateTokens видит только длину и занижал
     // вес схем на четверть — предохранитель пропускал то, что провайдер отвергнет.
-    const toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;
+    let toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;
 
     // Отказ вместо пустого прогона: если описания инструментов (или вместе с
     // запасом под ответ) уже не влезают в окно, шага не получится вовсе —
@@ -1000,6 +1014,23 @@ export class AiService {
           'либо выключите лишние наборы инструментов: браузер, веб-поиск или серверы MCP.',
       );
     }
+
+    /**
+     * План утвердили посреди прогона: ограничений плана больше нет — набор схем
+     * пересобирается, чтобы модель могла выполнить одобренное. Внешние (MCP) в
+     * пересчёт не входят: в плане их не было.
+     */
+    const widenTools = (): void => {
+      const widened = AGENT_TOOLS.filter(
+        (tool) =>
+          tool.name !== 'exit_plan_mode' &&
+          this.canRun(tool, host, hasSkills) &&
+          toolPresetAllows(toolPreset, tool.name),
+      );
+      const next = [...widened, ...external];
+      tools = next.length > 0 ? toOpenAiTools(next) : undefined;
+      toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;
+    };
 
     // Вся ветка, порождённая этим вызовом. Renderer дописывает её в историю —
     // поэтому в следующем вопросе модель помнит, что успела прочитать.
@@ -1299,12 +1330,48 @@ export class AiService {
           continue;
         }
 
+        // «Утвердить план»: человек решает, работать ли по нему. Ответ переключает
+        // режим в renderer (он один знает композер), а прогон продолжается уже без
+        // ограничений плана — иначе одобренное было бы нечем выполнить.
+        if (call.name === 'exit_plan_mode') {
+          emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
+          const asked = parsePlanExitArgs(call.arguments);
+          const decision: PlanExitDecision = host
+            ? await host.exitPlan(asked)
+            : { approved: false, note: 'окно чата не подключено — утвердить план некому' };
+          if (decision.approved) {
+            planApproved = true;
+            widenTools();
+          }
+          const content = planExitResult(decision);
+          const toolMessage: ChatMessage = { role: 'tool', toolCallId: call.id, name: call.name, content };
+          messages.push(toolMessage);
+          produced.push(toolMessage);
+          didNewWork = true;
+          logCall({
+            id: call.id,
+            name: call.name,
+            args: clampRunText(call.arguments),
+            ok: decision.approved,
+            summary: decision.approved ? 'план утверждён' : 'план не утверждён',
+            note: 'служебный: меняет режим работы, а не проект',
+          });
+          emit(ChatStreamEvent.ToolResult, {
+            id: call.id,
+            name: call.name,
+            ok: decision.approved,
+            summary: decision.approved ? 'план утверждён' : 'план не утверждён',
+            detail: content,
+          });
+          continue;
+        }
+
         // Отказ до исполнения: режим плана и суженный набор. Модель могла позвать
         // инструмент, которого ей не предлагали, — по памяти прошлых ходов или по
         // совету из чужого текста. Он не выполнится, и об этом надо сказать прямо:
         // молчаливый отказ читается как «такого не бывает» и уводит в тупик.
         const denied =
-          planMode && !PLAN_MODE_TOOLS.has(call.name)
+          planMode && !planApproved && !PLAN_MODE_TOOLS.has(call.name)
             ? {
                 content: `Режим плана: инструмент «${call.name}» недоступен. Ничего не меняй — составь план доступными средствами чтения.`,
                 summary: 'режим плана: изменение недоступно',
@@ -1344,7 +1411,8 @@ export class AiService {
 
         // Права перечитываем перед каждым действием: человек мог сменить их
         // выбором в композере, пока агент отвечал. В «Плане» менять нечего.
-        const liveFlags = permissionFlags(planMode ? 'ask' : this.livePermission);
+        // Утвердив план, человек одобрил и работу: дальше права — обычные.
+        const liveFlags = permissionFlags(planMode && !planApproved ? 'ask' : this.livePermission);
         toolContext.autoApprove = liveFlags.autoApprove;
         toolContext.allowAll = liveFlags.allowAll;
 
@@ -1848,6 +1916,8 @@ export class AiService {
     if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
     // Вопрос человеку живёт в ленте чата: без окна задать его негде.
     if (tool.name === 'ask') return host?.ask !== undefined;
+    // Утверждать план некому без окна: карточка живёт в ленте чата.
+    if (tool.name === 'exit_plan_mode') return host?.exitPlan !== undefined;
     if (tool.name === 'open_file') return host?.openFile !== undefined;
     if (
       tool.name === 'git_status' ||
