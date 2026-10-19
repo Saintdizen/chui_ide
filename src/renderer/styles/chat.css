@@ -2338,7 +2338,8 @@
 }
 
 .schedule-time,
-.schedule-date {
+.schedule-date,
+.schedule-every {
   width: auto;
   min-width: 120px;
 }

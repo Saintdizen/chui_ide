@@ -313,6 +313,13 @@ if (!app.requestSingleInstanceLock()) {
       aiEnabled: () => settings.get().ai.enabled,
     });
     schedules.start();
+    // Расписание агенту: те же список и запись, что у окна. Задача, которую
+    // поставил ассистент, ничем не отличается от заведённой руками.
+    ai.attachSchedules({
+      list: () => schedules.list(),
+      save: (schedule) => schedules.save(schedule),
+      remove: (id) => schedules.remove(id),
+    });
 
     // Браузер агента: свой Chromium под управлением CDP. Процесс поднимается
     // лениво — только когда настройка включена и агент позвал инструмент. Профиль

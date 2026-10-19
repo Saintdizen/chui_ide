@@ -63,6 +63,10 @@ describe('набор инструментов агента', () => {
       'browser_close',
       'remember',
       'forget',
+      'schedule_create',
+      'schedule_list',
+      'schedule_update',
+      'schedule_delete',
       'git_status',
       'git_diff',
       'git_log',
@@ -269,12 +273,13 @@ describe('вес описаний — под присмотром', () => {
     expect(long).toEqual([]);
   });
 
-  it('все описания вместе влезают в 5 200 токенов', () => {
+  it('все описания вместе влезают в 5 600 токенов', () => {
     // Меряем той же ставкой, что и main (`estimateTextTokens`): описания по-русски,
     // а кириллица в токенах дороже латиницы примерно вдвое. Замер на момент
-    // проверки — около 4 900. Порог ловит не отдельную правку, а сползание:
+    // проверки — около 5 320 (вместе с четырьмя `schedule_*`: расписание ставится
+    // из чата, п. 14 TASKS). Порог ловит не отдельную правку, а сползание:
     // три-четыре «объясню подробнее» возвращают накопленное.
     const tokens = estimateTextTokens(AGENT_TOOLS.map((tool) => tool.description).join(''));
-    expect(tokens).toBeLessThan(5200);
+    expect(tokens).toBeLessThan(5600);
   });
 });

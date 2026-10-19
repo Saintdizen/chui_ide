@@ -3,6 +3,7 @@ import {
   MAX_SCHEDULES,
   describeSchedule,
   dueSchedules,
+  intervalLabel,
   nextRunAt,
   parseScheduleDate,
   parseScheduleTime,
@@ -190,5 +191,86 @@ describe('подписи и проверки формы', () => {
     });
     expect(problems).toHaveLength(5);
     expect(scheduleProblems({ title: 'a', prompt: 'b', time: '09:00', timezone: 'UTC', repeat: 'daily' })).toEqual([]);
+  });
+});
+
+describe('интервал: каждые N минут', () => {
+  /** Интервальная задача: времени суток у неё нет, зато есть минуты. */
+  const every = { ...base, repeat: 'interval' as const, time: undefined, intervalMinutes: 15 };
+
+  it('считается от прошлого запуска, а не от часов на стене', () => {
+    const next = nextRunAt({ ...every, lastRunAt: TUESDAY_9_MSK }, TUESDAY_9_MSK);
+    expect(next).toBe(TUESDAY_9_MSK + 15 * 60_000);
+  });
+
+  it('без прошлого запуска отсчёт идёт от заведения задачи', () => {
+    const created = TUESDAY_9_MSK - 5 * 60_000;
+    expect(nextRunAt({ ...every, createdAt: created }, TUESDAY_9_MSK)).toBe(created + 15 * 60_000);
+  });
+
+  it('простой не догоняется: пропущенное срабатывание одно, а не сотня', () => {
+    // Задача не запускалась сутки: «каждые 15 минут» — это одно срабатывание сейчас.
+    const next = nextRunAt({ ...every, lastRunAt: TUESDAY_9_MSK - 24 * 3_600_000 }, TUESDAY_9_MSK);
+    expect(next).toBe(TUESDAY_9_MSK);
+  });
+
+  it('выключенная и сломанная задача не срабатывает', () => {
+    expect(nextRunAt({ ...every, enabled: false }, TUESDAY_9_MSK)).toBeNull();
+    for (const intervalMinutes of [0, -15, 7 * 24 * 60 + 1, 1.5]) {
+      expect(nextRunAt({ ...every, intervalMinutes }, TUESDAY_9_MSK), String(intervalMinutes)).toBeNull();
+    }
+    expect(nextRunAt({ ...every, intervalMinutes: undefined }, TUESDAY_9_MSK)).toBeNull();
+  });
+
+  it('подпись называет интервал по-человечески', () => {
+    expect(describeSchedule({ ...every, intervalMinutes: 15 })).toBe('каждые 15 минут');
+    expect(describeSchedule({ ...every, intervalMinutes: 1 })).toBe('каждую минуту');
+    expect(describeSchedule({ ...every, intervalMinutes: 60 })).toBe('каждый час');
+    expect(describeSchedule({ ...every, intervalMinutes: 180 })).toBe('каждые 3 часа');
+    expect(describeSchedule({ ...every, intervalMinutes: 2880 })).toBe('каждые 2 дня');
+    expect(intervalLabel(5)).toBe('каждые 5 минут');
+  });
+
+  it('чтение файла разбирает интервал и не требует времени суток', () => {
+    const [schedule] = sanitizeSchedules([
+      {
+        id: 'i-1',
+        title: 'Пинг',
+        prompt: 'Проверь сборку',
+        repeat: 'interval',
+        intervalMinutes: 20,
+        timezone: 'UTC',
+        enabled: true,
+        createdAt: 1,
+      },
+    ]);
+    expect(schedule?.intervalMinutes).toBe(20);
+    expect(schedule?.time).toBeUndefined();
+  });
+
+  it('интервал без минут и с минутами вне пределов выбрасывается', () => {
+    const bad = [
+      { id: 'i-2', title: 'Пинг', prompt: 'П', repeat: 'interval', timezone: 'UTC', createdAt: 1 },
+      { id: 'i-3', title: 'Пинг', prompt: 'П', repeat: 'interval', intervalMinutes: 0, timezone: 'UTC', createdAt: 1 },
+      {
+        id: 'i-4',
+        title: 'Пинг',
+        prompt: 'П',
+        repeat: 'interval',
+        intervalMinutes: 99999,
+        timezone: 'UTC',
+        createdAt: 1,
+      },
+    ];
+    expect(sanitizeSchedules(bad)).toEqual([]);
+  });
+
+  it('форма просит минуты у интервала и время у остальных', () => {
+    const common = { title: 'т', prompt: 'п', timezone: 'UTC' };
+    expect(scheduleProblems({ ...common, repeat: 'interval', intervalMinutes: 15 })).toEqual([]);
+    expect(scheduleProblems({ ...common, repeat: 'interval' })).toContain(
+      'Для интервала нужно число минут — например 15',
+    );
+    expect(scheduleProblems({ ...common, repeat: 'daily' })).toContain('Время — в виде ЧЧ:ММ, например 09:00');
   });
 });

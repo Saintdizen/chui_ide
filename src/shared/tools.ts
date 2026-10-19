@@ -61,6 +61,10 @@ export type AgentToolName =
   | 'browser_close'
   | 'remember'
   | 'forget'
+  | 'schedule_create'
+  | 'schedule_list'
+  | 'schedule_update'
+  | 'schedule_delete'
   | 'git_status'
   | 'git_diff'
   | 'git_log'
@@ -975,6 +979,80 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'schedule_list',
+    side: 'main',
+    description: 'Задачи расписания: id, правило, следующий запуск, прошлый итог.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'schedule_create',
+    side: 'main',
+    description:
+      'Завести задачу: запрос уйдёт ассистенту сам. repeat — daily, weekly, once (time, weekdays, date) ' +
+      'или interval (intervalMinutes).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Название: по нему задача видна в списке.' },
+        prompt: { type: 'string', description: 'Запрос целиком — то, что уйдёт ассистенту как вопрос.' },
+        repeat: {
+          type: 'string',
+          enum: ['daily', 'weekly', 'once', 'interval'],
+          description: 'Правило: daily, weekly, once или interval.',
+        },
+        time: { type: 'string', description: 'Время ЧЧ:ММ для daily, weekly и once.' },
+        timezone: { type: 'string', description: 'Пояс IANA, например Europe/Moscow. Без него — местный.' },
+        weekdays: {
+          type: 'array',
+          items: { type: 'number', description: 'День недели: 0 — воскресенье.' },
+          description: 'Для weekly: дни 0—6, 0 — воскресенье.',
+        },
+        date: { type: 'string', description: 'Для once: дата ГГГГ-ММ-ДД.' },
+        intervalMinutes: { type: 'number', description: 'Для interval: через сколько минут — от 1 до 10080.' },
+      },
+      required: ['title', 'prompt', 'repeat'],
+    },
+  },
+  {
+    name: 'schedule_update',
+    side: 'main',
+    description: 'Изменить задачу по id: только меняющиеся поля; id и история запусков сохраняются.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Идентификатор задачи из schedule_list.' },
+        title: { type: 'string', description: 'Новое название.' },
+        prompt: { type: 'string', description: 'Новый запрос.' },
+        repeat: {
+          type: 'string',
+          enum: ['daily', 'weekly', 'once', 'interval'],
+          description: 'Новое правило.',
+        },
+        time: { type: 'string', description: 'Новое время ЧЧ:ММ.' },
+        timezone: { type: 'string', description: 'Новый пояс IANA.' },
+        weekdays: {
+          type: 'array',
+          items: { type: 'number', description: 'День недели: 0 — воскресенье.' },
+          description: 'Новые дни для weekly.',
+        },
+        date: { type: 'string', description: 'Новая дата для once: ГГГГ-ММ-ДД.' },
+        intervalMinutes: { type: 'number', description: 'Новый интервал в минутах.' },
+        enabled: { type: 'boolean', description: 'false — приостановить, true — снова запускать.' },
+      },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'schedule_delete',
+    side: 'main',
+    description: 'Удалить задачу расписания по id.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Идентификатор задачи из schedule_list.' } },
+      required: ['id'],
     },
   },
   {

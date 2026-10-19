@@ -35,6 +35,8 @@ import type { ToolPresentedFile } from '../../shared/api';
 import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
+import type { TaskSchedule } from '../../shared/scheduling';
+import { scheduleCreate, scheduleDelete, scheduleList, scheduleUpdate } from './schedule-tools';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
 import { parseToolArguments } from '../../shared/tools';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
@@ -264,6 +266,17 @@ export interface MemoryTools {
 }
 
 /**
+ * Расписание задач для инструментов `schedule_*`. Файл и часы живут в main
+ * (`schedules/schedules.ts`), сюда приходит готовый вызов: инструменты остаются
+ * проверяемыми без диска и Electron.
+ */
+export interface ScheduleTools {
+  list(): Promise<TaskSchedule[]>;
+  save(schedule: TaskSchedule): Promise<TaskSchedule[]>;
+  remove(id: string): Promise<TaskSchedule[]>;
+}
+
+/**
  * Навыки проекта для инструмента read_skill. Каталог — тот же, что ушёл в промпт:
  * иначе агент просил бы навык, которого нет, или пропускал бы новый.
  */
@@ -398,6 +411,8 @@ export interface ToolContext {
   sessions?: SessionSearchRunner;
   /** Память проекта: нужна инструментам remember/forget. */
   memory?: MemoryTools;
+  /** Расписание задач: нужно инструментам schedule_*. */
+  schedules?: ScheduleTools;
   /** Навыки проекта (`.chui/skills`): каталог идёт в промпт, тело — инструментом read_skill. */
   skills?: SkillTools;
   /** Картинки для модели (`read_image`): чтение и уменьшение живут в main (`ai/read-image.ts`). */
@@ -640,6 +655,14 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await remember(ctx, parsed.value);
       case 'forget':
         return await forget(ctx, parsed.value);
+      case 'schedule_list':
+        return await scheduleList(ctx);
+      case 'schedule_create':
+        return await scheduleCreate(ctx, parsed.value);
+      case 'schedule_update':
+        return await scheduleUpdate(ctx, parsed.value);
+      case 'schedule_delete':
+        return await scheduleDelete(ctx, parsed.value);
       case 'git_status':
         return await gitStatus(ctx);
       case 'git_diff':

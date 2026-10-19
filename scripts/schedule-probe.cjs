@@ -24,6 +24,7 @@ const { promises: fs } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { AiService } = require('../dist/main/ai/service.js');
+const { runTool } = require('../dist/main/ai/agent-tools.js');
 const { ChatStore } = require('../dist/main/ai/chat-store.js');
 const { GitService } = require('../dist/main/git/git.js');
 const { HostClient } = require('../dist/main/ipc/host.js');
@@ -306,6 +307,126 @@ app
     );
     check('удаление убирает задачу из списка', afterRemove?.задач === 0 && afterRemove?.пусто === true, afterRemove);
     check('и из файла', (await readFile())?.length === 0, await readFile());
+
+    /* ── 3б. интервал в форме и инструменты агента ────────────────────────── */
+
+    // Форма умеет интервал: время суток прячется, появляются минуты.
+    await ask(
+      ide,
+      `(() => {
+      const modal = document.querySelector('.schedule-modal');
+      [...modal.querySelectorAll('button')].find((node) => (node.textContent ?? '').trim() === 'Новая задача').click();
+      return true;
+    })()`,
+    );
+    await wait(400);
+    // Список правила — свой (не системный <select>): открываем кнопку и жмём пункт.
+    await ask(
+      ide,
+      `(() => {
+      document.querySelector('.schedule-modal .schedule-form .select').click();
+      return true;
+    })()`,
+    );
+    await wait(300);
+    const picked = await ask(
+      ide,
+      `(() => {
+      const item = [...document.querySelectorAll('.select-popup .select-item')].find((node) =>
+        (node.textContent ?? '').includes('минут'),
+      );
+      if (!item) return 'нет пункта';
+      item.click();
+      return true;
+    })()`,
+    );
+    check('в списке правил есть интервал', picked === true, picked);
+    await wait(300);
+    const intervalForm = await ask(
+      ide,
+      `(() => {
+      const form = document.querySelector('.schedule-modal .schedule-form');
+      const rowOf = (node) => node.closest('.field-row');
+      return {
+        времяСкрыто: rowOf(form.querySelector('.schedule-time')).hidden,
+        минутыВидны: !rowOf(form.querySelector('.schedule-every')).hidden,
+        днейНет: rowOf(form.querySelector('.schedule-weekdays')).hidden,
+      };
+    })()`,
+    );
+    check(
+      'у интервала вместо времени суток — минуты',
+      intervalForm?.времяСкрыто === true && intervalForm?.минутыВидны === true,
+      intervalForm,
+    );
+    check('и дни недели ему не нужны', intervalForm?.днейНет === true, intervalForm?.днейНет);
+    await ask(
+      ide,
+      `(() => {
+      const modal = document.querySelector('.schedule-modal');
+      [...modal.querySelectorAll('button')].find((node) => (node.textContent ?? '').trim() === 'Отмена').click();
+      return true;
+    })()`,
+    );
+
+    // Инструменты агента ходят в тот же сервис, что и окно: расписание ставится из чата.
+    const agentCtx = {
+      workspace,
+      schedules: {
+        list: () => schedules.list(),
+        save: (schedule) => schedules.save(schedule),
+        remove: (id) => schedules.remove(id),
+      },
+    };
+    const createdByAgent = await runTool(
+      agentCtx,
+      'schedule_create',
+      JSON.stringify({
+        title: 'Пинг сборки',
+        prompt: 'Проверь, не сломалась ли сборка',
+        repeat: 'interval',
+        intervalMinutes: 20,
+      }),
+    );
+    check('агент завёл задачу расписания', createdByAgent.ok === true, createdByAgent.summary);
+
+    const agentStored = await readFile();
+    check(
+      'правило интервала легло в файл',
+      agentStored?.[0]?.repeat === 'interval' && agentStored?.[0]?.intervalMinutes === 20,
+      agentStored?.[0],
+    );
+    check('времени суток у интервала в файле нет', agentStored?.[0]?.time === undefined, agentStored?.[0]?.time);
+    check(
+      'следующее срабатывание рассчитано вперёд',
+      agentStored?.[0]?.nextRunAt > Date.now(),
+      agentStored?.[0]?.nextRunAt,
+    );
+
+    const listed = await runTool(agentCtx, 'schedule_list', '{}');
+    check(
+      'список отдаёт id задачи',
+      listed.ok === true && (listed.detail ?? '').includes(agentStored[0].id),
+      listed.summary,
+    );
+
+    const pausedByAgent = await runTool(
+      agentCtx,
+      'schedule_update',
+      JSON.stringify({ id: agentStored[0].id, enabled: false }),
+    );
+    check(
+      'правка из чата приостанавливает задачу',
+      pausedByAgent.ok === true && (await readFile())?.[0]?.enabled === false,
+      pausedByAgent.summary,
+    );
+
+    const droppedByAgent = await runTool(agentCtx, 'schedule_delete', JSON.stringify({ id: agentStored[0].id }));
+    check(
+      'удаление из чата очищает файл',
+      droppedByAgent.ok === true && (await readFile())?.length === 0,
+      droppedByAgent.summary,
+    );
 
     /* ── 4. часы отдают задачу окну ───────────────────────────────────────── */
 

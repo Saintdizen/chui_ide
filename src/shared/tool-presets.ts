@@ -34,7 +34,8 @@ export type ToolGroupId =
   | 'web'
   | 'browser'
   | 'program'
-  | 'work';
+  | 'work'
+  | 'schedule';
 
 /** Выбор набора. Идентификатор хранится в настройках и едет по RPC. */
 export type ToolPresetId = 'full' | 'edit' | 'read' | 'minimal';
@@ -161,6 +162,13 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     // не сможет ничего уточнить, а без `update_plan` не покажет, что задумал.
     names: ['update_plan', 'update_goal', 'exit_plan_mode', 'ask', 'task', 'remember', 'forget'],
   },
+  {
+    id: 'schedule',
+    label: 'Расписание',
+    // Задача живёт в файле проекта (`.chui/schedules.json`) и запускает агента сама:
+    // в «только чтение» и «минимуме» её нет — там ничего не меняют.
+    names: ['schedule_list', 'schedule_create', 'schedule_update', 'schedule_delete'],
+  },
 ];
 
 export interface ToolPresetSpec {
@@ -193,7 +201,7 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     label: 'Правка',
     icon: 'pencil',
     hint: 'Чтение, правки и проверки; без терминала, сети и браузера',
-    groups: ['core', 'read', 'edit', 'verify', 'git-read', 'work'],
+    groups: ['core', 'read', 'edit', 'verify', 'git-read', 'work', 'schedule'],
   },
   {
     id: 'read',

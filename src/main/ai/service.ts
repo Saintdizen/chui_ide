@@ -118,6 +118,7 @@ import {
   type TerminalAgent,
   type TestRunner,
   type SessionSearchRunner,
+  type ScheduleTools,
   type ToolContext,
   type ToolOutcome,
 } from './agent-tools';
@@ -207,6 +208,8 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'git_diff',
   'git_blame',
   'open_file',
+  // Расписание в плане — только чтение: заводить и править задачи будет исполнение.
+  'schedule_list',
   'update_plan',
   // Выход из плана — единственное, что здесь меняет состояние: режим.
   'exit_plan_mode',
@@ -305,6 +308,7 @@ const AGENT_PROMPT = [
   'Если якорь не найден, их несколько или правка «не совпала» — перечитай файл и возьми фрагмент дословно и шире (с соседней строкой или именем функции), а не меняй формулировку наугад.',
   'Правки и команды пользователь подтверждает — не считай их сделанными, пока не получил ответ инструмента.',
   'Договорённости, важные надолго, записывай в память проекта (`remember`). Разовый контекст не пиши.',
+  'Просьба «каждый день в 9:00…» или «каждые 15 минут…» — это расписание (`schedule_create`), а не ответ в чате: правило ставится один раз и работает само.',
 ].join('\n');
 
 /** Дописывается, когда включён полный доступ: подтверждения не нужны. */
@@ -396,6 +400,8 @@ export class AiService {
   private mcp?: McpRunner;
   /** Прошлые беседы проекта: без хранилища инструмент session_search не предлагаем. */
   private sessions?: SessionSearchRunner;
+  /** Расписание задач: без него инструменты `schedule_*` не предлагаем. */
+  private schedules?: ScheduleTools;
   /** Браузер: без него инструменты `browser_*` не предлагаем. */
   private browser?: BrowserTools;
   /** Песочница: без неё команды и тесты идут на хосте, как раньше. */
@@ -509,6 +515,14 @@ export class AiService {
    */
   attachSessions(sessions: SessionSearchRunner): void {
     this.sessions = sessions;
+  }
+
+  /**
+   * Подключить расписание задач: включает инструменты `schedule_*`. Файл и часы
+   * живут в main (`schedules/schedules.ts`) — сервис получает готовый вызов.
+   */
+  attachSchedules(schedules: ScheduleTools): void {
+    this.schedules = schedules;
   }
 
   /**
@@ -937,6 +951,7 @@ export class AiService {
     if (this.linter) toolContext.linter = this.linter;
     if (this.tests) toolContext.tests = this.tests;
     if (this.sessions) toolContext.sessions = this.sessions;
+    if (this.schedules) toolContext.schedules = this.schedules;
     toolContext.memory = {
       remember: (text, scope) => this.memory.remember(this.workspace.rootPath(), text, scope),
       forget: (query, scope) => this.memory.forget(this.workspace.rootPath(), query, scope),
@@ -2030,6 +2045,9 @@ export class AiService {
     // Память проекта живёт в main и доступна всегда — подтверждений не требует:
     // заметка обратима (её снимает `forget`).
     if (tool.name === 'remember' || tool.name === 'forget') return true;
+    // Расписание — тоже файл проекта: действие обратимо (задачу снимает
+    // schedule_delete), а часы без окна и так молчат.
+    if (tool.name.startsWith('schedule_')) return this.schedules !== undefined;
     // Навыки — файлы проекта: инструмент предлагаем только когда есть что читать.
     if (tool.name === 'read_skill') return hasSkills;
     // Прошлые беседы: без хранилища искать негде.

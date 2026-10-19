@@ -16,8 +16,10 @@
  * он без всего этого — см. `tests/scheduling.test.ts`.
  */
 
+import { plural } from './review';
+
 /** Как часто повторяется задача. */
-export type ScheduleRepeat = 'once' | 'daily' | 'weekly';
+export type ScheduleRepeat = 'once' | 'daily' | 'weekly' | 'interval';
 
 /** Чем кончился последний запуск: ответ пришёл, отказ, не начинали или оборвали. */
 export type ScheduleResult = 'ok' | 'failed' | 'skipped' | 'stopped';
@@ -31,14 +33,22 @@ export interface TaskSchedule {
   /** Запрос, который уйдёт ассистенту как обычный вопрос. */
   prompt: string;
   repeat: ScheduleRepeat;
-  /** Время в зоне `timezone`: `HH:MM`. */
-  time: string;
+  /**
+   * Время в зоне `timezone`: `HH:MM`. У правила `interval` его нет: интервал
+   * считается от прошлого запуска, а не от часов на стене.
+   */
+  time?: string;
   /** Зона IANA, например `Europe/Moscow`. */
   timezone: string;
   /** Дни недели для `weekly`: 0 — воскресенье, 1 — понедельник. */
   weekdays?: number[];
   /** Дата для `once`: `YYYY-MM-DD` в той же зоне. */
   date?: string;
+  /**
+   * Через сколько минут повторять для `interval`. Минимум — минута (секунд у
+   * правил нет), максимум — неделя: реже человек ставит уже календарную дату.
+   */
+  intervalMinutes?: number;
   /** Выключенная задача остаётся в списке, но не запускается. */
   enabled: boolean;
   /** Когда задачу завели: по этому списку стабильный порядок. */
@@ -56,6 +66,9 @@ export interface TaskSchedule {
 
 /** Больше задач — это уже не расписание, а список дел: за ним не уследить. */
 export const MAX_SCHEDULES = 20;
+/** Интервал: чаще раза в минуту не бывает, а реже недели — это уже календарь. */
+export const MIN_INTERVAL_MINUTES = 1;
+export const MAX_INTERVAL_MINUTES = 7 * 24 * 60;
 /** Потолок названия: в строке списка оно и так обрезается. */
 export const MAX_SCHEDULE_TITLE = 80;
 /** Запрос — это вопрос, а не сочинение; длиннее модель всё равно обрежет по смыслу. */
@@ -227,6 +240,23 @@ function addDays(day: DayParts, offset: number): DayParts {
 const SEARCH_DAYS = { daily: 8, weekly: 15 } as const;
 
 /**
+ * Срабатывание правила `interval`: отсчёт от прошлого запуска, а если его не было —
+ * от заведения задачи.
+ *
+ * Простой приложения не догоняем: «каждые 15 минут» после недели отпуска — это не
+ * три тысячи запусков подряд, а одно срабатывание. Поэтому момент в прошлом
+ * поднимается до `from`, и задача срабатывает один раз, когда её снова видно.
+ */
+function intervalRunAt(schedule: TaskSchedule, from: number): number | null {
+  const every = schedule.intervalMinutes;
+  if (typeof every !== 'number' || !Number.isInteger(every)) return null;
+  if (every < MIN_INTERVAL_MINUTES || every > MAX_INTERVAL_MINUTES) return null;
+  const base = schedule.lastRunAt ?? schedule.createdAt;
+  const at = base + every * 60_000;
+  return at > from ? at : from;
+}
+
+/**
  * Когда задача сработает в следующий раз — или `null`, если уже никогда:
  * выключена, разовая и прошедшая, или правило сломано.
  *
@@ -236,9 +266,11 @@ const SEARCH_DAYS = { daily: 8, weekly: 15 } as const;
  */
 export function nextRunAt(schedule: TaskSchedule, from: number): number | null {
   if (!schedule.enabled) return null;
-  const time = parseScheduleTime(schedule.time);
-  if (!time) return null;
   if (!isValidTimezone(schedule.timezone)) return null;
+  // Интервал не привязан к часам на стене: у него нет `time`.
+  if (schedule.repeat === 'interval') return intervalRunAt(schedule, from);
+  const time = schedule.time ? parseScheduleTime(schedule.time) : null;
+  if (!time) return null;
   const minutes = time.hours * 60 + time.minutes;
 
   const today = zonedParts(from, schedule.timezone);
@@ -301,13 +333,29 @@ export function weekdaysLabel(days: readonly number[]): string {
     .join(', ');
 }
 
-/**
- * Подпись правила одной строкой: «ежедневно в 09:00 · Europe/Moscow».
- * Живёт здесь, а не в интерфейсе, чтобы список и уведомление говорили одинаково.
- */
+/** «каждые 15 минут», «каждый час», «каждые 2 дня» — так интервал читается вслух. */
+export function intervalLabel(minutes: number): string {
+  const day = 24 * 60;
+  if (minutes % day === 0) {
+    const days = minutes / day;
+    return days === 1 ? 'каждый день' : `каждые ${days} ${plural(days, 'день', 'дня', 'дней')}`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? 'каждый час' : `каждые ${hours} ${plural(hours, 'час', 'часа', 'часов')}`;
+  }
+  return minutes === 1 ? 'каждую минуту' : `каждые ${minutes} ${plural(minutes, 'минуту', 'минуты', 'минут')}`;
+}
+
+/** Подпись правила одной строкой: «ежедневно в 09:00 · Europe/Moscow». */
 export function describeSchedule(schedule: TaskSchedule): string {
-  const time = parseScheduleTime(schedule.time);
-  const at = time ? formatScheduleTime(time) : schedule.time;
+  // Интервал не привязан к зоне: он отсчитывается от запуска, а не от часов на стене.
+  if (schedule.repeat === 'interval') {
+    const every = schedule.intervalMinutes;
+    return typeof every === 'number' && every > 0 ? intervalLabel(every) : 'интервал не задан';
+  }
+  const time = schedule.time ? parseScheduleTime(schedule.time) : null;
+  const at = time ? formatScheduleTime(time) : (schedule.time ?? '');
   let rule: string;
   if (schedule.repeat === 'once') {
     rule = schedule.date ? `${schedule.date} в ${at}` : `разово в ${at}`;
@@ -357,14 +405,26 @@ export function sanitizeSchedules(raw: unknown): TaskSchedule[] {
     const title = typeof value.title === 'string' ? value.title.trim().slice(0, MAX_SCHEDULE_TITLE) : '';
     const prompt = typeof value.prompt === 'string' ? value.prompt.trim().slice(0, MAX_SCHEDULE_PROMPT) : '';
     const repeat =
-      value.repeat === 'daily' || value.repeat === 'weekly' || value.repeat === 'once' ? value.repeat : null;
+      value.repeat === 'daily' || value.repeat === 'weekly' || value.repeat === 'once' || value.repeat === 'interval'
+        ? value.repeat
+        : null;
     const time = typeof value.time === 'string' ? value.time.trim() : '';
     const timezone = typeof value.timezone === 'string' ? value.timezone.trim() : '';
     // Задача без идентификатора, названия, запроса или правила — не задача:
     // запускать нечего, а в списке она выглядела бы рабочей.
     if (!id || seen.has(id)) continue;
     if (!title || !prompt || !repeat) continue;
-    if (!parseScheduleTime(time) || !isValidTimezone(timezone)) continue;
+    if (!isValidTimezone(timezone)) continue;
+    // У интервала нет времени суток, зато есть минуты; у остальных правил наоборот.
+    const every =
+      typeof value.intervalMinutes === 'number' && Number.isInteger(value.intervalMinutes)
+        ? value.intervalMinutes
+        : null;
+    if (repeat === 'interval') {
+      if (every === null || every < MIN_INTERVAL_MINUTES || every > MAX_INTERVAL_MINUTES) continue;
+    } else if (!parseScheduleTime(time)) {
+      continue;
+    }
     if (repeat === 'once' && !(typeof value.date === 'string' && parseScheduleDate(value.date))) continue;
 
     const weekdays =
@@ -384,8 +444,9 @@ export function sanitizeSchedules(raw: unknown): TaskSchedule[] {
       title,
       prompt,
       repeat,
-      time,
+      ...(time ? { time } : {}),
       timezone,
+      ...(repeat === 'interval' && every !== null ? { intervalMinutes: every } : {}),
       ...(weekdays ? { weekdays } : {}),
       ...(typeof value.date === 'string' && repeat === 'once' ? { date: value.date } : {}),
       enabled: value.enabled !== false,
@@ -416,22 +477,34 @@ export function sanitizeSchedules(raw: unknown): TaskSchedule[] {
 export function scheduleProblems(draft: {
   title: string;
   prompt: string;
-  time: string;
+  time?: string;
   timezone: string;
   repeat: ScheduleRepeat;
   weekdays?: readonly number[];
   date?: string;
+  intervalMinutes?: number;
 }): string[] {
   const problems: string[] = [];
   if (!draft.title.trim()) problems.push('Нужно название — по нему задача видна в списке');
   if (!draft.prompt.trim()) problems.push('Нужен запрос — это то, что уйдёт ассистенту');
-  if (!parseScheduleTime(draft.time)) problems.push('Время — в виде ЧЧ:ММ, например 09:00');
+  // Интервал не спрашивает времени суток: он отсчитывается от запуска.
+  if (draft.repeat !== 'interval' && !(draft.time && parseScheduleTime(draft.time))) {
+    problems.push('Время — в виде ЧЧ:ММ, например 09:00');
+  }
   if (!isValidTimezone(draft.timezone)) problems.push('Неизвестный часовой пояс — например Europe/Moscow');
   if (draft.repeat === 'weekly' && (draft.weekdays ?? []).length === 0) {
     problems.push('Для недельного правила выберите хотя бы один день');
   }
   if (draft.repeat === 'once' && !(draft.date && parseScheduleDate(draft.date))) {
     problems.push('Для разовой задачи нужна дата в виде ГГГГ-ММ-ДД');
+  }
+  if (draft.repeat === 'interval') {
+    const every = draft.intervalMinutes;
+    if (typeof every !== 'number' || !Number.isInteger(every)) {
+      problems.push('Для интервала нужно число минут — например 15');
+    } else if (every < MIN_INTERVAL_MINUTES || every > MAX_INTERVAL_MINUTES) {
+      problems.push(`Интервал — от ${MIN_INTERVAL_MINUTES} до ${MAX_INTERVAL_MINUTES} минут`);
+    }
   }
   return problems;
 }

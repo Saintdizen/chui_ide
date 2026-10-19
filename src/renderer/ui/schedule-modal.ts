@@ -36,6 +36,7 @@ const REPEAT_OPTIONS: { value: ScheduleRepeat; label: string }[] = [
   { value: 'daily', label: 'Каждый день' },
   { value: 'weekly', label: 'По дням недели' },
   { value: 'once', label: 'Один раз' },
+  { value: 'interval', label: 'Каждые несколько минут' },
 ];
 
 /** Порядок дней в форме начинается с понедельника: так неделю читают, а не как `getDay`. */
@@ -83,6 +84,15 @@ export function createScheduleModal(deps: ScheduleModalDeps): ScheduleModalView 
   repeatSelect.setValue('weekly');
   const timeInput = h('input', { class: 'field-input schedule-time', type: 'time', value: '09:00' });
   const dateInput = h('input', { class: 'field-input schedule-date', type: 'date' });
+  // Интервал — минуты, а не время суток: он отсчитывается от прошлого запуска.
+  const everyInput = h('input', {
+    class: 'field-input schedule-every',
+    type: 'number',
+    min: '1',
+    max: '10080',
+    step: '1',
+    value: '30',
+  });
   const zoneInput = h('input', {
     class: 'field-input',
     type: 'text',
@@ -97,7 +107,14 @@ export function createScheduleModal(deps: ScheduleModalDeps): ScheduleModalView 
     weekdayBoxes.set(day, box);
     weekdayRow.append(h('label', { class: 'schedule-weekday', title: weekdayName(day) }, box, weekdayName(day, true)));
   }
+  const timeRow = h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Время'), timeInput);
   const dateRow = h('div', { class: 'field-row', hidden: true }, h('span', { class: 'field-name' }, 'Дата'), dateInput);
+  const everyRow = h(
+    'div',
+    { class: 'field-row', hidden: true },
+    h('span', { class: 'field-name' }, 'Минут'),
+    everyInput,
+  );
   const weekdayField = h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Дни'), weekdayRow);
 
   const problemsBox = h('div', { class: 'schedule-problems' });
@@ -115,9 +132,11 @@ export function createScheduleModal(deps: ScheduleModalDeps): ScheduleModalView 
     h('div', { class: 'field-label' }, 'Новая задача'),
     titleInput,
     promptInput,
-    h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Когда'), repeatSelect.element, timeInput),
+    h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Когда'), repeatSelect.element),
+    timeRow,
     weekdayField,
     dateRow,
+    everyRow,
     h('div', { class: 'field-row' }, h('span', { class: 'field-name' }, 'Пояс'), zoneInput),
     h(
       'div',
@@ -153,6 +172,9 @@ export function createScheduleModal(deps: ScheduleModalDeps): ScheduleModalView 
     const repeat = repeatSelect.value as ScheduleRepeat;
     weekdayField.hidden = repeat !== 'weekly';
     dateRow.hidden = repeat !== 'once';
+    // У интервала вместо времени суток — минуты.
+    timeRow.hidden = repeat === 'interval';
+    everyRow.hidden = repeat !== 'interval';
   };
   repeatSelect.onChange(syncFormKind);
 
@@ -170,9 +192,10 @@ export function createScheduleModal(deps: ScheduleModalDeps): ScheduleModalView 
     titleInput.value = schedule?.title ?? '';
     promptInput.value = schedule?.prompt ?? '';
     repeatSelect.setValue(schedule?.repeat ?? 'weekly');
-    timeInput.value = schedule
+    timeInput.value = schedule?.time
       ? formatScheduleTime(parseScheduleTime(schedule.time) ?? { hours: 9, minutes: 0 })
       : '09:00';
+    everyInput.value = String(schedule?.intervalMinutes ?? 30);
     zoneInput.value = schedule?.timezone ?? systemTimezone();
     dateInput.value = schedule?.date ?? '';
     const days = new Set(schedule?.weekdays ?? []);
@@ -201,8 +224,11 @@ export function createScheduleModal(deps: ScheduleModalDeps): ScheduleModalView 
       title: titleInput.value.trim(),
       prompt: promptInput.value.trim(),
       repeat,
-      time: timeInput.value || '09:00',
       timezone: zoneInput.value.trim(),
+      // Интервалу время суток не нужно, а правилам по часам не нужны минуты.
+      ...(repeat === 'interval'
+        ? { intervalMinutes: Number(everyInput.value) || 0 }
+        : { time: timeInput.value || '09:00' }),
       ...(repeat === 'weekly'
         ? { weekdays: [...weekdayBoxes].filter(([, box]) => box.checked).map(([day]) => day) }
         : {}),
