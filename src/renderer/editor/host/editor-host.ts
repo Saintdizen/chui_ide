@@ -208,7 +208,7 @@ export interface EditorHostOptions {
    * повторный Ctrl+Space показывает сначала свой проект, затем зависимости.
    * Не задано — расширять нечем, остаётся только файл.
    */
-  projectSymbols?: (query: string) => Promise<readonly ProjectCompletion[]>;
+  projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
   /**
    * Знаки-триггеры языкового сервера для файла (`@` в CSS, `:` в JSON, `.` в TS):
    * по ним попап открывается сразу после знака, а не только по набранным буквам.

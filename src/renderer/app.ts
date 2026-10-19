@@ -337,6 +337,37 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * на движок (подсказки LSP, inline-AI, сниппеты, Ctrl+Click), приходит сюда опциями:
    * у рабочего места для каждого из них есть шов.
    */
+  /**
+   * Подсказки из карты символов — для обычного набора. Карта отвечает мгновенно и без
+   * языковых серверов: она знает объявления проекта, даже когда сервер молчит,
+   * поднимается или языка в нём нет.
+   */
+  const symbolsFromIndex = async (query: string) =>
+    (await rpc.request('index.find', { query }).catch(() => [])).map((symbol) => ({
+      name: symbol.name,
+      kind: symbol.kind,
+      package: symbol.package ?? null,
+    }));
+
+  /**
+   * Подсказки из карты вместе с языковыми серверами — обычный ответ на запрос
+   * «символы проекта» (второй и третий уровень Ctrl+Space).
+   */
+  const symbolsFromProject = async (query: string) => {
+    const [found, status] = await Promise.all([
+      rpc.request('lsp.symbols', { query }).catch(() => []),
+      rpc.request('index.status').catch(() => null),
+    ]);
+    // Карта не собрана — расширять нечем, и молчим: пустой ответ не должен
+    // выглядеть как «в проекте ничего нет».
+    if (status && status.phase === 'idle') return [];
+    return found.map((symbol) => ({
+      name: symbol.name,
+      kind: symbol.kind,
+      package: symbol.package ?? null,
+    }));
+  };
+
   const editors = new EditorWorkspace(layout.editorHost, new DocumentRegistry(documents), {
     tabSize: settings.editor.tabSize,
     fontSize: settings.editor.fontSize,
@@ -374,20 +405,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Повторный Ctrl+Space расширяет список символами проекта: сначала свои объявления,
     // потом из зависимостей. Источник — карта символов: она отвечает мгновенно и без
     // языкового сервера, а `package` в ответе и есть признак чужого объявления.
-    projectSymbols: async (query) => {
-      const [found, status] = await Promise.all([
-        rpc.request('lsp.symbols', { query }).catch(() => []),
-        rpc.request('index.status').catch(() => null),
-      ]);
-      // Карта не собрана — расширять нечем, и молчим: пустой ответ не должен
-      // выглядеть как «в проекте ничего нет».
-      if (status && status.phase === 'idle') return [];
-      return found.map((symbol) => ({
-        name: symbol.name,
-        kind: symbol.kind,
-        package: symbol.package ?? null,
-      }));
-    },
+    // При наборе (`onlyIndex`) нужна только карта — серверы спрашивают свой путь.
+    projectSymbols: (query: string, onlyIndex?: boolean) =>
+      onlyIndex ? symbolsFromIndex(query) : symbolsFromProject(query),
     // Ссылки в коде: сервер помечает участки (пути в import, адреса) — их показываем
     // подчёркнутыми, а клик открывает адрес или файл (см. `openDocumentLink`).
     documentLinks: async (path) => {

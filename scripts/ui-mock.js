@@ -1253,6 +1253,7 @@ module.exports = [
       dependencyPackages: 0,
       skipped: 0,
     }),
+    'index.find': () => [],
     'index.rebuild': () => ({
       root: null,
       phase: 'idle',

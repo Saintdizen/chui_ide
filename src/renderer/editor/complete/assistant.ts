@@ -5,7 +5,8 @@
  * (`SuggestWidget`). Сам ответ на нажатие лежит в них; этот модуль решает, КОГДА что
  * делать, — а это и есть поведение подсказок, которое человек замечает:
  *
- *   • печатает букву — показываем список по набранному началу (простой автопоказ);
+ *   • печатает букву — показываем список по набранному началу: слова файла, а следом
+ *     объявления карты проекта (как индекс в больших IDE, который питает подсказки сам);
  *   • едет по списку стрелками, принимает Enter или Tab, отказывается Escape;
  *   • уводит курсор, ставит пробел или знак препинания — список закрывается сам, потому
  *     что набранное перестало быть началом слова;
@@ -48,6 +49,18 @@ const WORDS_AROUND = 400;
 const LSP_RETRY_MS = 300;
 
 /**
+ * Пауза перед вопросом к карте символов при обычном наборе.
+ *
+ * Печатают быстрее, чем отвечает мост, и спрашивать на каждую букву значило бы держать
+ * очередь запросов, обгоняющих друг друга. Пауза короткая: карта отвечает мгновенно,
+ * и человек не должен замечать, что список «дорос» уже после нажатия.
+ */
+const INDEX_DELAY_MS = 120;
+
+/** С какого набранного начала спрашивать карту: одна буква совпадёт с половиной проекта. */
+const INDEX_MIN_PREFIX = 2;
+
+/**
  * Откуда берутся подсказки: чем шире, тем больше список.
  *
  * Так же, как в больших IDE: первое нажатие Ctrl+Space даёт то, что рядом, повторное —
@@ -67,6 +80,11 @@ export function scopeLabel(scope: CompletionScope): string | null {
   if (scope === 'project') return 'из проекта';
   if (scope === 'dependencies') return 'из зависимости';
   return null;
+}
+
+/** Спрашивать ли карту символов по набранному началу: источник есть и набрано не меньше двух знаков. */
+export function worthAskingIndex(prefix: string, hasSource: boolean): boolean {
+  return hasSource && prefix.length >= INDEX_MIN_PREFIX;
 }
 
 /**
@@ -121,10 +139,15 @@ export interface CompletionAssistantOptions {
   lsp?: (prefix: string, position: { line: number; column: number }) => Promise<readonly CompletionItem[]>;
   /**
    * Символы проекта по имени — карта символов (`index` в main: объявления своего кода
-   * и зависимостей, собранные заранее). Нужны для повторного Ctrl+Space: второй и
-   * третий уровень показывают их. Не задано — расширять нечем, остаётся файл.
+   * и зависимостей, собранные заранее). Нужны в двух местах: повторный Ctrl+Space
+   * показывает их уровнями, а обычный набор подмешивает своё из карты — так индекс
+   * питает подсказки сам, не дожидаясь сервера.
+   *
+   * `onlyIndex` — «спроси только карту»: при наборе серверы не тревожим (их ответ
+   * придёт своим путём), а на Ctrl+Space нужен полный ответ вместе с ними.
+   * Не задано — расширять нечем, остаётся файл.
    */
-  projectSymbols?: (query: string) => Promise<readonly ProjectCompletion[]>;
+  projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
   /**
    * Довести подсказку опозданием (`completionItem/resolve`): на входе — исходный
    * элемент сервера из `CompletionItem.resolve`, на выходе — описание и уточнение.
@@ -139,8 +162,8 @@ export class CompletionAssistant {
   private buffer: TextBuffer;
   private readonly widget: SuggestWidget;
   private readonly index = new WordIndex();
-  /** Символы карты проекта — для расширения списка повторным Ctrl+Space. */
-  private readonly projectSymbols?: (query: string) => Promise<readonly ProjectCompletion[]>;
+  /** Символы карты проекта — для расширения списка повторным Ctrl+Space и при наборе. */
+  private readonly projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
   /** Текущая ширина списка Ctrl+Space: файл, проект, зависимости (см. `showAll`). */
   private scope: CompletionScope = 'file';
   /** Список открыт именно Ctrl+Space: только тогда повтор расширяет, а не начинает заново. */
@@ -158,6 +181,8 @@ export class CompletionAssistant {
   private triggers = new Set<string>();
   /** Отложенный повтор запроса к серверу — снимаем, если место/файл сменились. */
   private lspRetry: number | null = null;
+  /** Отложенный вопрос к карте символов при наборе (см. `scheduleIndex`). */
+  private indexTimer: number | null = null;
 
   constructor(
     view: EditorView,
@@ -192,11 +217,12 @@ export class CompletionAssistant {
   }
 
   /**
-   * Закрыть ассистент: снять отложенный повтор запроса к серверу. Без этого таймер
-   * (до 300 мс) держал бы ассистент закрытой вкладки и мог дёрнуть сервер вхолостую.
+   * Закрыть ассистент: снять отложенные запросы. Без этого таймеры (до 300 мс) держали бы
+   * ассистент закрытой вкладки и могли дёрнуть сервер или карту вхолостую.
    */
   dispose(): void {
     this.clearRetry();
+    this.clearIndexTimer();
     this.lspRequestId += 1;
   }
 
@@ -215,6 +241,7 @@ export class CompletionAssistant {
     this.resolveRequested.clear();
     this.lspRequestId += 1;
     this.clearRetry();
+    this.clearIndexTimer();
     this.widget.hide();
   }
 
@@ -253,6 +280,8 @@ export class CompletionAssistant {
    */
   onChange(change: EditorChange): void {
     this.changeCalls += 1;
+    // Место сменилось — отложенный вопрос к карте про прежнее место уже не к месту.
+    this.clearIndexTimer();
     // Начали печатать — уровни ширины больше не нужны: набранное начало точнее.
     if (change.kind !== 'selection') this.askedAll = false;
     if (change.kind === 'selection') {
@@ -314,6 +343,9 @@ export class CompletionAssistant {
     const caret = this.controller.caret;
     this.widget.show(items, this.anchor(caret), prefix.length);
     this.askServer(prefix, caret);
+    // Карта проекта отвечает следом и своим чередом: список уже виден, поэтому
+    // никакого ожидания сервера тут нет.
+    this.scheduleIndex(prefix, caret);
   }
 
   /**
@@ -400,6 +432,23 @@ export class CompletionAssistant {
   }
 
   /**
+   * Дополнить обычный список объявлениями карты — так индекс питает подсказки сам.
+   *
+   * Список по набранному началу раньше знал только слова файла и ответ сервера: если
+   * сервер молчит (не установлен, поднимается, язык ему незнаком), имя из соседнего
+   * файла проекта не предлагалось вовсе, хотя карта его знает. Спрашиваем карту после
+   * короткой паузы в наборе (см. `INDEX_DELAY_MS`) и только с двух знаков.
+   */
+  private scheduleIndex(prefix: string, caret: number): void {
+    this.clearIndexTimer();
+    if (!worthAskingIndex(prefix, this.projectSymbols !== undefined)) return;
+    this.indexTimer = window.setTimeout(() => {
+      this.indexTimer = null;
+      void this.extendFromIndex(prefix, caret);
+    }, INDEX_DELAY_MS);
+  }
+
+  /**
    * Добавить к списку символы карты — второй и третий уровень Ctrl+Space.
    *
    * Список уже показан (слова файла), поэтому ответ карты ДОПИСЫВАЕТСЯ к нему, а не
@@ -415,7 +464,29 @@ export class CompletionAssistant {
     const found = await source(prefix).catch(() => []);
     // Пока ходили, список могли закрыть, начать печатать или расширить ещё раз.
     if (!this.widget.isVisible || this.scope !== scope) return;
+    this.appendProject(scope, found);
+  }
 
+  /**
+   * Дописать в список то, что знает карта, — при обычном наборе (см. `scheduleIndex`).
+   *
+   * Ширина тут средняя (`project`): свои объявления проекта. Чужие из пакетов остаются
+   * за третьим уровнем Ctrl+Space — при наборе они только заслонили бы нужное.
+   */
+  private async extendFromIndex(prefix: string, caret: number): Promise<void> {
+    const source = this.projectSymbols;
+    if (!source) return;
+
+    // Только карта: серверы спрашивает `askServer`, и второй такой запрос на каждую
+    // паузу в наборе был бы лишней работой.
+    const found = await source(prefix, true).catch(() => []);
+    // Пока карта отвечала, человек мог уйти с этого места или начать печатать другое.
+    if (!this.widget.isVisible || this.controller.caret !== caret) return;
+    this.appendProject('project', found);
+  }
+
+  /** Дописать найденное в карте к показанному списку, не повторяя уже видимое. */
+  private appendProject(scope: CompletionScope, found: readonly ProjectCompletion[]): void {
     const items = extendItems(scope, found, new Set(this.widget.labels()));
     if (items.length === 0) return;
     this.widget.append(items);
@@ -510,6 +581,14 @@ export class CompletionAssistant {
     if (this.lspRetry !== null) {
       window.clearTimeout(this.lspRetry);
       this.lspRetry = null;
+    }
+  }
+
+  /** Снять отложенный вопрос к карте символов: он был про прежнее место. */
+  private clearIndexTimer(): void {
+    if (this.indexTimer !== null) {
+      window.clearTimeout(this.indexTimer);
+      this.indexTimer = null;
     }
   }
 

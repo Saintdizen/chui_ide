@@ -159,7 +159,7 @@ export interface EditorWorkspaceOptions {
     position: { line: number; column: number },
   ) => Promise<readonly CompletionItem[]>;
   /** Символы проекта из карты: ими расширяется список повторным Ctrl+Space. */
-  projectSymbols?: (query: string) => Promise<readonly ProjectCompletion[]>;
+  projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
   /** Знаки-триггеры сервера для файла: по ним попап открывается сразу после знака. */
   completionTriggers?: (path: string) => Promise<CompletionTriggers>;
   /** Дотягивание подсказки (см. `LspFeatures.resolveCompletion`). */

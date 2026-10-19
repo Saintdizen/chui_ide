@@ -648,6 +648,18 @@ async function assistCheck(win) {
   await key('Escape');
   const scopeClosed = await suggestState();
 
+  // Карта проекта при обычном наборе: попап открывается по буквам сразу, а объявления
+  // из карты дописываются следом — сервер в пробе молчит, поэтому раньше тут было пусто.
+  await script(
+    'window.probe.controller.applyEdits([{ start: 0, removed: window.probe.buffer.getText(), inserted: "" }]), ' +
+      'window.probe.input.focus(), true',
+  );
+  await wait(120);
+  await typeText('Pro');
+  await wait(250);
+  const typedFromIndex = await suggestState();
+  await key('Escape');
+
   // «Умное» дополнение: Ctrl+Shift+Space. В позиции значения имя типа не годится и
   // должно исчезнуть, после `:` — наоборот, остаются типы. Проверяем оба места.
   await script(`(() => {
@@ -788,6 +800,8 @@ async function assistCheck(win) {
     ширина_проект: scopeProject,
     ширина_зависимости: scopeDependencies,
     ширина_закрыт: scopeClosed,
+    // Карта при наборе: объявление проекта дописалось к словам файла без сервера.
+    карта_при_наборе: typedFromIndex.все.includes('ProjectOnlyRow'),
     // Итог одной строкой: каждое нажатие добавляет к списку, Escape убирает попап.
     умное_значение: smartValue,
     умное_тип: smartType,

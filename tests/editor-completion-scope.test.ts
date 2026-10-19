@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   extendItems,
   scopeLabel,
+  worthAskingIndex,
   type CompletionScope,
   type ProjectCompletion,
 } from '../src/renderer/editor/complete/assistant';
@@ -47,5 +48,17 @@ describe('уровни ширины', () => {
     const labels = (['file', 'project', 'dependencies'] as CompletionScope[]).map(scopeLabel);
     expect(new Set(labels).size).toBe(3);
     expect(labels[0]).toBeNull();
+  });
+});
+
+describe('карта при обычном наборе', () => {
+  it('двух знаков уже достаточно, одного — нет', () => {
+    expect(worthAskingIndex('Pr', true)).toBe(true);
+    expect(worthAskingIndex('P', true)).toBe(false);
+    expect(worthAskingIndex('', true)).toBe(false);
+  });
+
+  it('без источника не спрашиваем, сколько бы ни набрали', () => {
+    expect(worthAskingIndex('Parser', false)).toBe(false);
   });
 });

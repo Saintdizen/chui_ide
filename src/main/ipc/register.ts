@@ -1059,6 +1059,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Карта символов: то, что уже разобрано и лежит на диске. Нужна двум вещам —
   // быстрому поиску, пока сервер молчит, и пересборке после правок (её зовёт проба).
   router.register('index.status', () => deps.index?.status() ?? EMPTY_INDEX_STATUS);
+  // Поиск только по карте: им дополняются подсказки при наборе. Отдельный вход нужен
+  // потому, что `lsp.symbols` спрашивает ещё и серверы, а на каждую паузу в наборе это
+  // слишком дорого — карта отвечает мгновенно и без них.
+  router.register('index.find', (params) => deps.index?.find(params.query) ?? []);
   router.register('index.rebuild', () => {
     deps.index?.refresh();
     return deps.index?.status() ?? EMPTY_INDEX_STATUS;
