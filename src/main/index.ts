@@ -20,6 +20,7 @@ import { McpService } from './mcp/mcp';
 import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
 import { SandboxService } from './sandbox/sandbox';
+import { ScheduleService } from './schedules/schedules';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { WINDOW_BACKGROUND } from '../shared/colors';
 import { activationForInterpreter, pythonInterpreterFor, venvDirOfPython } from './python/environments';
@@ -296,6 +297,19 @@ if (!app.requestSingleInstanceLock()) {
       () => workspace.rootPath(),
     );
 
+    /**
+     * Расписание задач: часы живут в main, а ход запускает окно — цикл агента
+     * хотя и здесь, но правки, подтверждения и показ файлов — в renderer.
+     * Нет окна или ассистент выключен — задача ждёт следующего тика.
+     */
+    const schedules = new ScheduleService({
+      root: () => workspace.rootPath(),
+      notify: (schedule) => pushToRenderers(PushTopic.ScheduleDue, { schedule }),
+      canRun: () => BrowserWindow.getAllWindows().length > 0,
+      aiEnabled: () => settings.get().ai.enabled,
+    });
+    schedules.start();
+
     // Браузер агента: свой Chromium под управлением CDP. Процесс поднимается
     // лениво — только когда настройка включена и агент позвал инструмент. Профиль
     // живёт в temp и удаляется при закрытии: браузер не видит сессий человека.
@@ -352,6 +366,7 @@ if (!app.requestSingleInstanceLock()) {
       reviews,
       history,
       mcp,
+      schedules,
       browserPanel,
       host: new HostClient(),
     };
@@ -388,6 +403,7 @@ if (!app.requestSingleInstanceLock()) {
     else openWelcomeWindow();
 
     app.on('will-quit', () => {
+      schedules.dispose();
       terminals.dispose();
       lsp.dispose();
       debug.dispose();

@@ -44,6 +44,16 @@ import { createChatPersistence, newChatUid } from './chat-persistence';
 import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
 
+/**
+ * Чем кончился ход по готовому тексту (расписание).
+ *
+ * Не «получилось ли», а именно исход: `busy` — ассистент уже занят и вопрос не
+ * ушёл, `unavailable` — не выбраны провайдер или модель, `failed` — модель
+ * отказала, `stopped` — человек остановил генерацию. Список задач показывает это
+ * словами, и «готово» не должно стоять там, где ответа не было.
+ */
+export type PromptRun = 'started' | 'failed' | 'stopped' | 'busy' | 'unavailable';
+
 export interface ChatView {
   element: HTMLElement;
   /**
@@ -53,6 +63,11 @@ export interface ChatView {
   statusElement: HTMLElement;
   newChat(): void;
   stop(): void;
+  /**
+   * Начать ход по готовому тексту в новой беседе — вход для расписания: вопрос
+   * формулирует файл задачи, а не человек в поле ввода.
+   */
+  sendPrompt(text: string): Promise<PromptRun>;
   askAboutSelection(mode: 'explain' | 'fix'): Promise<void>;
   applySettings(settings: Settings): void;
   /**
@@ -1403,9 +1418,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     await stream.run(session, provider.id, model, []);
   }
 
-  async function send(raw: string): Promise<void> {
+  async function send(raw: string): Promise<PromptRun> {
     const written = raw.trim();
-    if (!written || busy) return;
+    if (!written || busy) return 'busy';
     // `/имя хвост` — это команда проекта, а не вопрос модели: подставляем её текст.
     const text = await expandProjectCommand(written);
 
@@ -1413,19 +1428,19 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const provider = currentProvider();
     if (!provider) {
       showToast('Провайдер не настроен', 'error');
-      return;
+      return 'unavailable';
     }
 
     const model = currentModel();
     if (!model) {
       showToast('Укажите модель в настройках', 'error');
-      return;
+      return 'unavailable';
     }
 
     // Не влезает в окно — сначала освобождаем контекст, потом спрашиваем.
     // Вес самого вопроса тоже учитываем: в историю он попадёт лишь ниже.
     // Сжать не вышло — не отправляем: иначе запрос уйдёт обрезанным.
-    if (!(await ensureContextFits(session, text))) return;
+    if (!(await ensureContextFits(session, text))) return 'failed';
 
     input.value = '';
     session.draft = '';
@@ -1452,10 +1467,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     autoScroll = true;
     jumpButton.hidden = true;
 
-    await stream.run(session, provider.id, model, sent);
+    const outcome = await stream.run(session, provider.id, model, sent);
     // Название — после ответа и не в очередь отправки: человек не должен ждать
     // лишний запрос, чтобы увидеть ответ.
     void maybeNameSession(session);
+    return outcome === 'done' ? 'started' : outcome;
   }
 
   function setBusy(value: boolean, _session: ChatSession = active()): void {
@@ -1492,6 +1508,18 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       body.scrollTop = 0;
       input.focus();
     });
+  }
+
+  /**
+   * Запустить ход по готовому тексту — так в беседу входит задача расписания.
+   *
+   * Возвращает не «получилось ли», а ПОЧЕМУ нет: расписание отмечает итог, и
+   * «ассистент занят» — это пропуск, а не ошибка настроек.
+   */
+  async function sendPrompt(text: string): Promise<PromptRun> {
+    if (busy) return 'busy';
+    if (!currentProvider() || !currentModel()) return 'unavailable';
+    return send(text);
   }
 
   async function askAboutSelection(mode: 'explain' | 'fix'): Promise<void> {
@@ -1787,6 +1815,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     newChat,
     stop,
     askAboutSelection,
+    sendPrompt,
     attachImage: (image: PickedImage) => attachments.attachImage(image),
     attachContext: (item: ChatAttachment) => attachments.attachContext(item),
     applySettings(next: Settings) {

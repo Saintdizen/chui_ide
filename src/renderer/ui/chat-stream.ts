@@ -83,9 +83,12 @@ export interface StreamHost {
   modes(): StreamModes;
 }
 
+/** Чем кончился прогон: ответ дошёл, модель отказала или человек остановил. */
+export type StreamOutcome = 'done' | 'failed' | 'stopped';
+
 export interface StreamRunner {
   /** Отрисовать ответ на текущую историю беседы. */
-  run(session: ChatSession, providerId: string, model: string, attachments: ChatAttachment[]): Promise<void>;
+  run(session: ChatSession, providerId: string, model: string, attachments: ChatAttachment[]): Promise<StreamOutcome>;
 }
 
 /**
@@ -142,7 +145,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     providerId: string,
     model: string,
     attachments: ChatAttachment[],
-  ): Promise<void> {
+  ): Promise<StreamOutcome> {
     // Ответ ассистента — это последовательность «текст → карточка инструмента →
     // текст», поэтому внутри одного сообщения живёт несколько текстовых сегментов.
     const messageEl = h('div', { class: 'msg msg-assistant' });
@@ -185,6 +188,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
 
     let continues = 0;
     let done: ChatStreamDone;
+    // Итог прогона наружу: расписание по нему отличает «ответ пришёл» от
+    // «модель отказала» и от «человек сам остановил».
+    let outcome: StreamOutcome = 'failed';
 
     try {
       for (;;) {
@@ -346,11 +352,13 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
 
       host.attachActions(messageEl, session);
       host.scrollToEnd(session);
+      outcome = 'done';
     } catch (error) {
       flushSegment();
       tools.seal();
       host.closeApprovals();
       if (error instanceof RpcError && error.cancelled) {
+        outcome = 'stopped';
         segment.appendChild(h('div', { class: 'field-hint' }, 'генерация остановлена'));
         // Оборвали с самого начала — текста нет, и пустой реплике в истории не место.
         if (buffer) session.history.push({ role: 'assistant', content: buffer });
@@ -371,6 +379,8 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         .request('settings.update', { ai: { activeProviderId: providerId, activeModel: model } })
         .catch(() => undefined);
     }
+
+    return outcome;
   }
 
   function scheduleRender(target: HTMLElement, session: ChatSession): void {

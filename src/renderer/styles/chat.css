@@ -2183,3 +2183,147 @@
   align-items: center;
   flex: 0 0 auto;
 }
+
+/* ── расписание задач ────────────────────────────────────────────────────── */
+
+/* Окно расписания: список задач и форма. Ширина — под строку задачи с
+   действиями справа; в узкой колонке «следующий запуск» переносился бы врознь. */
+.schedule-modal {
+  width: min(660px, 94vw);
+}
+
+.schedule-note:empty {
+  display: none;
+}
+
+.schedule-hint {
+  margin: 0 0 6px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.schedule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow: auto;
+}
+
+.schedule-empty {
+  margin: 4px 0;
+  color: var(--text_color_tertiary);
+}
+
+.schedule-item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--element_background);
+}
+
+/* Приостановленная задача остаётся на месте, но гаснет: она не исчезла, а ждёт. */
+.schedule-item.is-off .schedule-info {
+  opacity: 0.55;
+}
+
+.schedule-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.schedule-title {
+  color: var(--text_color);
+  font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.schedule-meta,
+.schedule-when,
+.schedule-last {
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.schedule-when {
+  color: var(--text_color_tertiary);
+}
+
+/* Действия строки — значки, как у сообщения в ленте: подписи тут не нужны,
+   смысл живёт в подсказке. */
+.schedule-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  align-items: center;
+}
+
+.schedule-check {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-right: 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  white-space: nowrap;
+}
+
+/* Форма задачи: поля идут столбиком внутри окна, ряд действий — свой, у нижнего
+   края формы, а не в подвале окна: подвал в это время спрятан. */
+.schedule-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.schedule-form .field-input {
+  width: 100%;
+}
+
+.schedule-prompt {
+  resize: vertical;
+  min-height: 58px;
+  font-family: inherit;
+}
+
+.schedule-time,
+.schedule-date {
+  width: auto;
+  min-width: 120px;
+}
+
+.schedule-weekdays {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.schedule-weekday {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  padding: 1px 5px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.schedule-problem {
+  margin: 0;
+  color: var(--text_color_error);
+  font-size: var(--font_small_size);
+}
+
+.schedule-form-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 2px;
+}

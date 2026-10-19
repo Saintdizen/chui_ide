@@ -62,6 +62,7 @@ import type { AiSandboxSettings } from './sandbox';
 import type { WhitespaceMode } from './whitespace';
 import type { KeybindingSettings } from './keybindings';
 import type { ProjectKind } from './project-kinds';
+import type { ScheduleResult, TaskSchedule } from './scheduling';
 
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
 
@@ -102,6 +103,8 @@ export const PushTopic = {
   DebugStopped: 'debug:stopped',
   DebugOutput: 'debug:output',
   BrowserNav: 'browser:nav',
+  /** Задача расписания дождалась своего времени: renderer начинает ход. */
+  ScheduleDue: 'schedule:due',
 } as const;
 
 /* ── Транспорт ──────────────────────────────────────────────────────────── */
@@ -2511,6 +2514,20 @@ export interface ChuiMethods {
    * Список нужен интерфейсу, а не модели — в промпт он не идёт.
    */
   'ai.commands': { params: void; result: ProjectCommand[] };
+
+  /**
+   * Расписание задач проекта (`.chui/schedules.json`): когда ассистент
+   * начинает ход сам. Список — источник истины для окна расписания.
+   */
+  'schedule.list': { params: void; result: TaskSchedule[] };
+  /**
+   * Завести или изменить задачу: `id` уже есть в списке — правка, иначе новая.
+   * Возвращается весь список: окно не должно собирать его из догадок.
+   */
+  'schedule.save': { params: { schedule: TaskSchedule }; result: TaskSchedule[] };
+  'schedule.remove': { params: { id: string }; result: TaskSchedule[] };
+  /** Итог запуска: main пересчитывает следующее срабатывание и пишет его в файл. */
+  'schedule.finish': { params: { id: string; result: ScheduleResult }; result: TaskSchedule[] };
 }
 
 export type MethodName = keyof ChuiMethods;
