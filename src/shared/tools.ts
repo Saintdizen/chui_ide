@@ -34,6 +34,9 @@ export type AgentToolName =
   | 'apply_patch'
   | 'replace_in_files'
   | 'run_terminal'
+  | 'run_background'
+  | 'run_output'
+  | 'run_stop'
   | 'web_search'
   | 'create_file'
   | 'delete_file'
@@ -553,6 +556,58 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['command'],
+    },
+  },
+  {
+    name: 'run_background',
+    side: 'main',
+    description:
+      'Запустить долгую команду в фоне (сборка, установка, прогон тестов) и сразу получить номер ' +
+      'задания. Нужна там, где run_terminal держал бы шаг минутами: сборка идёт, а ты уже читаешь ' +
+      'другое. Номер задания потом читается через run_output. Подтверждение — как у run_terminal.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Команда для запуска.' },
+        timeout: {
+          type: 'number',
+          description: 'Предел времени в секундах (по умолчанию и не больше 1800).',
+        },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'run_output',
+    side: 'main',
+    description:
+      'Дочитать вывод задания: состояние (идёт, готово, упало, код выхода) и то, что напечатано ' +
+      'с прошлого чтения. Смещение брать из ответа предыдущего чтения, тогда новый вывод не ' +
+      'повторится. Без id — список всех заданий.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Номер задания из run_background.' },
+        from: {
+          type: 'number',
+          description: 'С какого места читать. Не задано — с начала (то есть весь вывод, что есть).',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'run_stop',
+    side: 'main',
+    description:
+      'Остановить задание. Вызывай, когда стало ясно, что запуск не тот (ошибка в команде, ' +
+      'не та ветка): брошенная сборка продолжает занимать процессор.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Номер задания из run_background.' },
+      },
+      required: ['id'],
     },
   },
   {

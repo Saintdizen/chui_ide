@@ -34,6 +34,7 @@ import { scanProject } from '../project/scan';
 import type { WorkspaceService } from '../workspace/workspace';
 import { runShellCommand, type CommandResult, type RunOptions } from './run-command';
 import { createSpillStream, spillHint, spillText } from './spill';
+import type { JobHandle, JobRegistry, JobSnapshot } from './jobs';
 
 /**
  * Исполнение инструментов агента.
@@ -313,6 +314,11 @@ export interface ToolContext {
   /** Песочница: подключена только при включённой настройке. */
   sandbox?: SandboxRunner;
   /**
+   * Задания (`run_background`): долгие команды, которые не держат шаг.
+   * Реестр живёт в main на всё окно — по нему же видно, что уже запущено.
+   */
+  jobs?: JobRegistry;
+  /**
    * Куда складывать длинный вывод (см. `ai/spill.ts`). Не задано — обрезаем без
    * копии, как раньше: путь к файлу, которого не появится, обещать нельзя.
    */
@@ -431,6 +437,12 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await replaceInFiles(ctx.workspace, parsed.value);
       case 'run_terminal':
         return await runTerminal(ctx, parsed.value);
+      case 'run_background':
+        return await runBackground(ctx, parsed.value);
+      case 'run_output':
+        return runOutput(ctx, parsed.value);
+      case 'run_stop':
+        return runStop(ctx, parsed.value);
       case 'web_search':
         return await webSearch(ctx, parsed.value);
       case 'create_file':
@@ -1765,6 +1777,169 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
     ok: result.code === 0 && !result.timedOut,
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
     detail: `${commandLine(ctx, command)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
+  };
+}
+
+/* ── долгие команды: задания ─────────────────────────────────────────────── */
+
+/** Предел времени задания — тот же, что у `run_terminal`: больше 30 минут незачем. */
+const MAX_JOB_TIMEOUT_SECONDS = 1800;
+
+/**
+ * `run_background` — та же команда, что у `run_terminal`, но шаг она не держит.
+ *
+ * Возвращается номер задания, а не вывод: сборка на пять минут иначе держала бы
+ * агента всё это время, и он не мог бы даже сказать, что там происходит. Вывод
+ * читается через `run_output`.
+ */
+async function runBackground(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
+  if (!ctx.confirmCommand) {
+    return { ok: false, summary: 'Запуск команд недоступен: окно редактора не подключено' };
+  }
+
+  const command = requireString(args, 'command').trim();
+  if (command.length > MAX_COMMAND_CHARS) {
+    throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
+  }
+  const timeoutSeconds = optionalInteger(args, 'timeout');
+
+  const root = ctx.workspace.rootPath();
+  if (!root) return { ok: false, summary: 'Проект не открыт' };
+
+  // Подтверждение то же, что у обычного запуска: команда есть команда, и то, что
+  // она уходит в фон, ничего не смягчает.
+  if (needsConfirmation(ctx, command)) {
+    const allowed = await ctx.confirmCommand(command);
+    if (!allowed) {
+      return {
+        ok: false,
+        summary: 'Пользователь запретил выполнение команды',
+        detail: 'Пользователь не разрешил выполнить эту команду. Не повторяй её — предложи другое решение.',
+      };
+    }
+  }
+
+  // Задание — это процесс на хосте. В песочнице контейнер живёт на время команды,
+  // и «фон» в нём пришлось бы держать открытым, поэтому честно отказываем.
+  if (ctx.sandbox) {
+    return {
+      ok: false,
+      summary: 'В песочнице фоновая команда не поддерживается',
+      detail:
+        `Песочница включена (${ctx.sandbox.label}), а контейнер живёт ровно на время команды. ` +
+        'Запусти команду через run_terminal с бо́льшим пределом времени или выключи песочницу.',
+    };
+  }
+
+  const limitMs =
+    timeoutSeconds !== undefined ? Math.min(Math.max(timeoutSeconds, 1), MAX_JOB_TIMEOUT_SECONDS) * 1000 : undefined;
+
+  let job: JobHandle;
+  try {
+    job = ctx.jobs.start({
+      command,
+      cwd: root,
+      ...(ctx.spillDir ? { spillDir: ctx.spillDir } : {}),
+      ...(limitMs !== undefined ? { timeoutMs: limitMs } : {}),
+    });
+  } catch (error) {
+    return { ok: false, summary: error instanceof Error ? error.message : String(error) };
+  }
+
+  const snapshot = job.snapshot();
+  return {
+    ok: true,
+    summary: `задание ${snapshot.id}: ${command} (идёт в фоне)`,
+    detail: [
+      `id: ${snapshot.id}`,
+      `команда: ${command}`,
+      'состояние: идёт',
+      '',
+      `Читай вывод через run_output { id: "${snapshot.id}" }, остановить — run_stop.`,
+      'Не запускай эту же команду второй раз: задание уже работает.',
+    ].join('\n'),
+  };
+}
+
+/** Строка о состоянии задания: что с ним и чем кончилось. */
+function jobState(snapshot: JobSnapshot): string {
+  if (snapshot.status === 'running') return 'идёт';
+  if (snapshot.status === 'stopping') return 'останавливается';
+  const code = snapshot.code ?? '—';
+  const notes: string[] = [];
+  if (snapshot.timedOut) notes.push('превышено время');
+  if (snapshot.signal) notes.push(`сигнал ${snapshot.signal}`);
+  return `${snapshot.status === 'completed' ? 'готово' : 'упало'}, код ${code}${notes.length ? ` (${notes.join(', ')})` : ''}`;
+}
+
+/**
+ * `run_output` — состояние задания и новый вывод. Без `id` — список заданий:
+ * чтобы не гадать, что вообще запущено, после перезапуска хода.
+ */
+function runOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
+  if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
+
+  const id = optionalString(args, 'id')?.trim();
+  if (!id) {
+    const all = ctx.jobs.list();
+    if (all.length === 0) return { ok: true, summary: 'заданий нет', detail: 'Ни одного запуска в фоне не было.' };
+    const lines = all.map((snapshot) => `${snapshot.id}: ${jobState(snapshot)} — ${snapshot.command}`);
+    return { ok: true, summary: `заданий: ${all.length}`, detail: lines.join('\n') };
+  }
+
+  const job = ctx.jobs.get(id);
+  if (!job) {
+    return {
+      ok: false,
+      summary: `задание ${id} не найдено`,
+      detail:
+        'Такого задания нет: номер берётся из ответа run_background, а завершённые задания ' +
+        'убираются, когда набирается много новых. Запусти команду заново, если результат нужен.',
+    };
+  }
+
+  const from = optionalInteger(args, 'from');
+  const result = job.read(from);
+  const snapshot = result.snapshot;
+  const output = result.data.length > 0 ? clipTail(ctx, 'run_output', condenseOutput(result.data)) : '';
+  // Смещение отдаём всегда: по нему следующее чтение не повторит прочитанное.
+  const notes = [`offset: ${result.offset}`, `состояние: ${jobState(snapshot)}`];
+  if (snapshot.file) notes.push(`полностью — в файле ${snapshot.file}`);
+
+  const running = snapshot.status === 'running' || snapshot.status === 'stopping';
+  return {
+    ok: snapshot.status !== 'failed',
+    summary: `${snapshot.id}: ${jobState(snapshot)}${output ? ` · нового вывода: ${output.split('\n').length} строк` : ''}`,
+    detail: [
+      ...notes,
+      '',
+      output || (running ? '(пока ничего не напечатано)' : '(вывод пуст)'),
+      ...(running ? [`Потом дочитай: run_output { id: "${snapshot.id}", from: ${result.offset} }`] : []),
+    ].join('\n'),
+  };
+}
+
+/** `run_stop` — снять задание: брошенная сборка продолжает жечь процессор. */
+function runStop(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
+  if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
+  const id = requireString(args, 'id');
+  const job = ctx.jobs.get(id);
+  if (!job) return { ok: false, summary: `задание ${id} не найдено` };
+
+  const before = job.snapshot();
+  if (before.status !== 'running' && before.status !== 'stopping') {
+    return {
+      ok: true,
+      summary: `${id}: уже ${jobState(before)}`,
+      detail: 'Останавливать нечего — задание завершилось.',
+    };
+  }
+  job.stop();
+  return {
+    ok: true,
+    summary: `${id}: остановлено`,
+    detail: 'Процесс убит вместе с дочерними. Вывод, который успел прийти, можно дочитать через run_output.',
   };
 }
 

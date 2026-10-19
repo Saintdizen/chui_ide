@@ -747,6 +747,36 @@ app.whenReady().then(async () => {
       run.results[0]?.summary,
     );
 
+    /* 5а. долгая команда уходит в фон и читается по номеру */
+    requested = { name: 'run_background', args: { command: 'echo chui-job-ok' } };
+    run = await chat(shellHost);
+    check('с мостом run_background предлагается', run.toolNames.includes('run_background'), run.toolNames);
+    const jobSummary = String(run.results[0]?.summary ?? '');
+    const jobId = /job-\d+/.exec(jobSummary)?.[0] ?? '';
+    check('задание получило номер', jobId.startsWith('job-'), jobSummary);
+    check('подтверждение спросили и для фонового запуска', commands.includes('echo chui-job-ok'), commands);
+
+    // Дать процессу напечатать: проверка не должна зависеть от гонки.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    requested = { name: 'run_output', args: { id: jobId } };
+    run = await chat(shellHost);
+    check(
+      'вывод задания дочитан по номеру',
+      String(run.results[0]?.detail ?? '').includes('chui-job-ok') ||
+        String(run.results[0]?.summary ?? '').includes('готово'),
+      run.results[0],
+    );
+    check('чтение задания отдало смещение', /offset: \d+/.test(String(run.results[0]?.detail ?? '')), run.results[0]);
+
+    requested = { name: 'run_output', args: {} };
+    run = await chat(shellHost);
+    check('без номера задание перечисляются', String(run.results[0]?.detail ?? '').includes(jobId), run.results[0]);
+
+    // Снятие уже завершённого задания — не ошибка: останавливать нечего.
+    requested = { name: 'run_stop', args: { id: jobId } };
+    run = await chat(shellHost);
+    check('run_stop по завершённому заданию отвечает спокойно', run.results[0]?.ok === true, run.results[0]);
+
     /* 6. отказ в выполнении */
     const denied = [];
     requested = { name: 'run_terminal', args: { command: 'rm -rf /' } };

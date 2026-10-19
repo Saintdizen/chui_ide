@@ -78,6 +78,7 @@ import {
 import { addUsage } from '../../shared/usage';
 import { ProjectMemory } from './project-memory';
 import { createSkillLibrary, type SkillLibrary } from './skills';
+import { createJobRegistry, type JobRegistry } from './jobs';
 import type { SandboxService } from '../sandbox/sandbox';
 import { RpcFailure } from '../ipc/router';
 import { scanProject } from '../project/scan';
@@ -171,6 +172,8 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'update_plan',
   'ask',
   'task',
+  // Дочитать уже запущенное задание — чтение; сам запуск в план не входит.
+  'run_output',
 ]);
 
 /**
@@ -201,6 +204,9 @@ const READ_ONLY_TOOLS = new Set([
   // Снимок страницы читает её состояние. После действия (клик, переход, ввод)
   // кэш всё равно сбрасывается: те инструменты меняют мир.
   'browser_snapshot',
+  // Вывод задания читают по смещению: ответ зависит от того, сколько уже
+  // напечатано, поэтому это чтение, а не «повтор».
+  'run_output',
 ]);
 
 /**
@@ -341,6 +347,12 @@ export class AiService {
   private browser?: BrowserTools;
   /** Песочница: без неё команды и тесты идут на хосте, как раньше. */
   private sandbox?: SandboxService;
+  /**
+   * Задания (`run_background`): реестр один на окно, поэтому задание переживает
+   * шаг и даже ход — его можно дочитать следующим запросом.
+   */
+  private readonly jobs: JobRegistry = createJobRegistry();
+
   /**
    * Каталог для полных копий длинного вывода (`ai/spill.ts`). Не задан —
    * обрезаем без копии, как раньше: обещать модели путь к файлу, которого не
@@ -793,6 +805,7 @@ export class AiService {
     // настройка: агент этот режим не переключает и не может «выйти» из него.
     if (sandboxSettings.enabled && this.sandbox) toolContext.sandbox = this.sandbox;
     if (this.spillDir) toolContext.spillDir = this.spillDir;
+    toolContext.jobs = this.jobs;
     if (host) {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.applyPatches = (patches, auto) => host.applyPatches(patches, auto);
@@ -1418,6 +1431,10 @@ export class AiService {
     if (tool.name === 'apply_edit') return host?.applyEdits !== undefined;
     if (tool.name === 'apply_patch') return host?.applyPatches !== undefined;
     if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
+    // Задание — тот же запуск команды: без окна его не подтвердить.
+    if (tool.name === 'run_background') return host?.confirmCommand !== undefined;
+    // Чтение заданий окна ничего не меняет и живёт в main.
+    if (tool.name === 'run_output' || tool.name === 'run_stop') return true;
     if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
     // Вопрос человеку живёт в ленте чата: без окна задать его негде.
     if (tool.name === 'ask') return host?.ask !== undefined;
