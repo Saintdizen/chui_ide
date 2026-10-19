@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_RUN_FIELD,
+  callSharePercent,
   clampRunText,
   describeRun,
+  formatClock,
   formatDuration,
   plural,
+  prettyJson,
   runTruncated,
   type ChatRunLog,
 } from '../src/shared/run-log';
@@ -109,5 +112,49 @@ describe('потолки трассы', () => {
     expect(runTruncated(log())).toBe(false);
     expect(runTruncated(log({ steps: [{ index: 1, ms: 10, calls: [], hiddenCalls: 3 }] }))).toBe(true);
     expect(runTruncated(log({ steps: [{ index: 1, ms: 10, calls: [], text: 'обрезано…' }] }))).toBe(true);
+  });
+});
+
+describe('аргументы вызова по полям', () => {
+  it('одна строка JSON раскладывается по строкам', () => {
+    expect(prettyJson('{"path":"/p/a.ts","startLine":1}')).toBe('{\n  "path": "/p/a.ts",\n  "startLine": 1\n}');
+  });
+
+  it('пустые аргументы остаются пустыми, а не «{}»', () => {
+    expect(prettyJson('')).toBe('');
+    expect(prettyJson('   ')).toBe('');
+  });
+
+  it('неразобранный текст отдаётся как есть', () => {
+    // Модель иногда присылает обрезанный JSON: показать вместо него пустой объект — соврать.
+    expect(prettyJson('{"path": "/p/a.t')).toBe('{"path": "/p/a.t');
+    expect(prettyJson('не json')).toBe('не json');
+  });
+});
+
+describe('время вызова', () => {
+  it('время часов — без даты, с миллисекундами', () => {
+    const at = new Date(2026, 7, 12, 17, 30, 52, 637).getTime();
+    expect(formatClock(at)).toBe('17:30:52.637');
+    expect(formatClock(new Date(2026, 0, 1, 5, 4, 3, 9).getTime())).toBe('05:04:03.009');
+  });
+
+  it('без времени — прочерк, а не «01:00:00»', () => {
+    expect(formatClock(0)).toBe('—');
+    expect(formatClock(Number.NaN)).toBe('—');
+  });
+
+  it('доля шага считается в процентах', () => {
+    expect(callSharePercent(820, 1640)).toBe(50);
+    expect(callSharePercent(50, 1000)).toBe(5);
+    // Вызов может оказаться длиннее шага (шаг меряется по своим часам) — больше 100 % не бывает.
+    expect(callSharePercent(3000, 1000)).toBe(100);
+  });
+
+  it('неизмеренное время не превращается в ноль процентов', () => {
+    expect(callSharePercent(undefined, 1000)).toBeNull();
+    expect(callSharePercent(0, 1000)).toBeNull();
+    expect(callSharePercent(120, 0)).toBeNull();
+    expect(callSharePercent(120, undefined)).toBeNull();
   });
 });

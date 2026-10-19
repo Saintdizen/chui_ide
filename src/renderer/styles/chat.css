@@ -2587,17 +2587,66 @@
 }
 
 .run-call-summary {
-  margin: 1px 0 0 16px;
+  margin: 1px 0 0;
   color: var(--text_color_secondary);
   font-size: var(--font_small_size);
 }
 
-.run-call .run-fold-head {
-  margin-left: 16px;
+/* Вкладки вызова: сводка, аргументы, результат, схема и время. Ряд мелких
+   подписей — как у отладочных панелей; активная подчёркнута акцентом, иначе не
+   видно, какая из пяти открыта. */
+.run-call-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 2px 0 0 16px;
 }
 
-.run-call .run-fold-body {
-  padding-left: 34px;
+.run-call-tab {
+  padding: 1px 6px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: none;
+  color: var(--text_color_tertiary);
+  font-family: inherit;
+  font-size: var(--font_small_size);
+  cursor: pointer;
+}
+
+.run-call-tab:hover {
+  color: var(--text_color_secondary);
+}
+
+.run-call-tab.is-active {
+  border-bottom-color: var(--accent_fill);
+  color: var(--text_color);
+}
+
+.run-call-panel {
+  margin: 2px 0 0 16px;
+}
+
+/* Время вызова: ключ столбцом, значение рядом — цифры читаются по вертикали. */
+.run-timing-row {
+  display: flex;
+  gap: 8px;
+  font-size: var(--font_small_size);
+}
+
+.run-timing-key {
+  flex: 0 0 96px;
+  color: var(--text_color_tertiary);
+}
+
+.run-timing-value {
+  color: var(--text_color_secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.run-call-hint {
+  margin: 2px 0 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
 }
 
 .run-empty {

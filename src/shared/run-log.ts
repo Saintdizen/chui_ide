@@ -37,6 +37,12 @@ export interface RunCallLog {
   /** Сколько вызов работал, мс. */
   ms?: number;
   /**
+   * Когда вызов начался, время часов (epoch мс). Длительность говорит «34 мс», но
+   * не говорит «когда»: по времени начала вызов находится в журналах и в выводе
+   * команды, поэтому в трассе оно своё у каждого вызова.
+   */
+  startedAt?: number;
+  /**
    * Пометка «на самом деле не исполнялся»: повтор, уже прочитанный диапазон,
    * отказ режима плана. В трассе это важно: вызов был, а времени не занял.
    */
@@ -96,6 +102,13 @@ export interface ChatRunLog {
   steps: RunStepLog[];
   system: RunSystemLog;
   subagents?: RunSubagentLog[];
+  /**
+   * Схемы аргументов инструментов по имени — те самые, что ушли модели. Одной
+   * копией на инструмент, а не на вызов: схема за прогон не меняется, а копия
+   * в каждом вызове раздула бы трассу в разы. Внешние (MCP) здесь тоже есть —
+   * их схемы приходят из чужой программы, и человек их иначе не увидит.
+   */
+  schemas?: Record<string, string>;
   /** Чем кончилось: ответом, лимитом шагов или обрывом. */
   finished: 'answer' | 'limit' | 'aborted';
   trace: ChatRunTrace;
@@ -138,6 +151,44 @@ export function describeRun(log: ChatRunLog): string {
   const tokens = (log.trace.usage.promptTokens ?? 0) + (log.trace.usage.completionTokens ?? 0);
   if (tokens > 0) parts.push(`${formatThousands(tokens)} токенов`);
   return parts.join(' · ');
+}
+
+/**
+ * Время часов на момент события: «17:30:52.637». Местное, а не UTC: по нему
+ * человек ищет вызов в журналах и в выводе команды, а они местные.
+ */
+export function formatClock(epochMs: number): string {
+  if (!Number.isFinite(epochMs) || epochMs <= 0) return '—';
+  const date = new Date(epochMs);
+  const pad = (value: number, size = 2): string => String(value).padStart(size, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+}
+
+/**
+ * Аргументы для показа: тот же JSON, но с отступами. Модель присылает их одной
+ * строкой, и на экране такая строка читается хуже, чем те же поля столбиком.
+ * Не разобралось — отдаём как есть: показать «пустой объект» вместо настоящих
+ * аргументов значило бы соврать о том, что делал агент.
+ */
+export function prettyJson(text: string): string {
+  const trimmed = text.trim();
+  if (trimmed === '') return '';
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * Какую часть шага занял вызов, в процентах. `null` — когда время неизвестно
+ * (служебные вызовы и повторы не измеряются): ноль соврал бы, что вызов ничего
+ * не стоил.
+ */
+export function callSharePercent(callMs: number | undefined, stepMs: number | undefined): number | null {
+  if (callMs === undefined || !Number.isFinite(callMs) || callMs <= 0) return null;
+  if (stepMs === undefined || !Number.isFinite(stepMs) || stepMs <= 0) return null;
+  return Math.max(0, Math.min(100, Math.round((callMs / stepMs) * 100)));
 }
 
 /** Русское склонение: 1 шаг, 2 шага, 5 шагов. */

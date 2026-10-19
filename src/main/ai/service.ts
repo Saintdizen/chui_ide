@@ -963,6 +963,19 @@ export class AiService {
     const runStepLogs: RunStepLog[] = [];
     const runSubagents: RunSubagentLog[] = [];
     /**
+     * Схемы инструментов, которые ушли модели, по имени. Пишем при первом вызове
+     * инструмента: схема за прогон не меняется, а копия в каждом вызове раздула
+     * бы трассу в разы. Внешние (MCP) схемы тоже здесь — иначе человек не увидит
+     * нигде, с какой формой аргументов агент имел дело.
+     */
+    const runSchemas: Record<string, string> = {};
+    const rememberSchema = (name: string): void => {
+      if (runSchemas[name] !== undefined) return;
+      const spec = tools?.find((item) => item.function.name === name);
+      if (spec) runSchemas[name] = clampRunText(JSON.stringify(spec.function.parameters));
+    };
+
+    /**
      * След прогона для наблюдаемости: сколько шагов, вызовов и токенов он стоил.
      * Вес описаний инструментов отдаём здесь же — renderer без него оценивал бы
      * по всему списку и ошибался бы в обе стороны (лишние выключенные плюс
@@ -999,6 +1012,7 @@ export class AiService {
         ...(requestGoal ? { goal: requestGoal } : {}),
       },
       ...(runSubagents.length > 0 ? { subagents: runSubagents } : {}),
+      ...(Object.keys(runSchemas).length > 0 ? { schemas: runSchemas } : {}),
       finished,
       trace: trace(),
     });
@@ -1071,6 +1085,7 @@ export class AiService {
       };
       /** Вызов в трассу: сверх потолка считаем числом, а не копим. */
       const logCall = (call: RunCallLog): void => {
+        rememberSchema(call.name);
         if (stepLog.calls.length < MAX_RUN_CALLS_PER_STEP) stepLog.calls.push(call);
         else stepLog.hiddenCalls = (stepLog.hiddenCalls ?? 0) + 1;
       };
@@ -1306,6 +1321,7 @@ export class AiService {
           summary: clampRunText(outcome.summary, 400),
           ...(outcome.detail ? { detail: clampRunText(outcome.detail) } : {}),
           ms: callMs,
+          startedAt,
           ...(repeated ? { note: 'повтор: не исполнялся' } : covered ? { note: 'диапазон уже прочитан' } : {}),
         });
 

@@ -1,5 +1,13 @@
 import type { ChatRunLog, RunCallLog, RunStepLog } from '../../shared/run-log';
-import { describeRun, formatDuration, plural, runTruncated } from '../../shared/run-log';
+import {
+  callSharePercent,
+  describeRun,
+  formatClock,
+  formatDuration,
+  plural,
+  prettyJson,
+  runTruncated,
+} from '../../shared/run-log';
 import { permissionSpec } from '../../shared/permissions';
 import { clear, h, svgIcon } from './dom';
 import { createModal } from './modal';
@@ -37,12 +45,31 @@ const MODE_LABEL: Record<ChatRunLog['system']['mode'], string> = {
   plan: 'План',
 };
 
+/**
+ * Вкладки одного вызова. У вызова несколько разных сущностей: что он сделал,
+ * с чем его позвали, что он вернул, какая форма аргументов была разрешена и
+ * сколько это заняло. Сваленные в один список, они теряются; по вкладкам
+ * видно сразу и только нужное.
+ */
+const CALL_TABS = [
+  { id: 'summary', label: 'Сводка' },
+  { id: 'payload', label: 'Аргументы' },
+  { id: 'result', label: 'Результат' },
+  { id: 'schema', label: 'Схема' },
+  { id: 'timing', label: 'Время' },
+] as const;
+
+type CallTabId = (typeof CALL_TABS)[number]['id'];
+
 export function createRunInspector(): RunInspectorView {
   const modal = createModal({
     className: 'run-modal',
     title: 'Прогон агента',
     headerIcon: 'sparkle',
   });
+
+  /** Трасса, которую показываем сейчас: схемы инструментов лежат в ней. */
+  let currentRun: ChatRunLog | null = null;
 
   /** Итоговая строка: длительность, шаги, вызовы, токены. */
   const summary = h('div', { class: 'run-total' });
@@ -66,8 +93,41 @@ export function createRunInspector(): RunInspectorView {
   /** Текст без разметки: в трассе он нужен как есть, переносы важны. */
   const pre = (text: string, className = 'run-text'): HTMLElement => h('pre', { class: className }, text);
 
-  /** Один вызов: имя, время, аргументы, итог. */
-  const callRow = (call: RunCallLog): HTMLElement => {
+  /** Строка «ключ: значение» для вкладки времени. */
+  const timingRow = (key: string, value: string): HTMLElement =>
+    h(
+      'div',
+      { class: 'run-timing-row' },
+      h('span', { class: 'run-timing-key' }, key),
+      h('span', { class: 'run-timing-value' }, value),
+    );
+
+  /** Пояснение вместо содержимого: пустая вкладка без объяснения выглядит поломкой. */
+  const hint = (text: string): HTMLElement => h('p', { class: 'run-call-hint' }, text);
+
+  /** Вкладка «Время»: когда начался, сколько занял и какую часть шага составил. */
+  const timingPanel = (call: RunCallLog, step: RunStepLog, ordinal: number): HTMLElement => {
+    const rows: Node[] = [
+      timingRow('начало', call.startedAt ? formatClock(call.startedAt) : 'не записано'),
+      timingRow('длительность', call.ms !== undefined ? formatDuration(call.ms) : 'не измерена'),
+    ];
+    const share = callSharePercent(call.ms, step.ms);
+    if (share !== null && call.ms !== undefined) {
+      rows.push(timingRow('доля шага', `${share} % (весь шаг — ${formatDuration(step.ms)})`));
+    }
+    rows.push(timingRow('иерархия', `Шаг ${step.index} → вызов ${ordinal} из ${step.calls.length}`));
+    if (call.note) rows.push(timingRow('пометка', call.note));
+    return h('div', { class: 'run-call-panel' }, ...rows);
+  };
+
+  /**
+   * Один вызов: имя, время и вкладки с его содержимым.
+   *
+   * Сводка открыта сразу — по ней решают, лезть ли дальше. Остальные вкладки
+   * показывают то, чего в карточке ленты не было: аргументы по полям, полный
+   * результат, форму аргументов, которую разрешал инструмент, и разбор времени.
+   */
+  const callRow = (call: RunCallLog, step: RunStepLog, ordinal: number): HTMLElement => {
     const head = h(
       'div',
       { class: `run-call-head${call.ok ? '' : ' is-fail'}` },
@@ -77,11 +137,46 @@ export function createRunInspector(): RunInspectorView {
       call.ms !== undefined ? h('span', { class: 'run-call-time' }, formatDuration(call.ms)) : null,
     );
 
-    const body: Node[] = [h('div', { class: 'run-call-summary' }, call.summary)];
-    if (call.detail) body.push(fold('Результат', pre(call.detail)));
-    body.push(fold('Аргументы', pre(call.args)));
+    const schemaText = currentRun?.schemas?.[call.name];
+    const panels: Record<CallTabId, HTMLElement> = {
+      summary: h('div', { class: 'run-call-panel' }, h('div', { class: 'run-call-summary' }, call.summary)),
+      payload: h(
+        'div',
+        { class: 'run-call-panel' },
+        call.args.trim() === '' ? hint('Аргументов не было.') : pre(prettyJson(call.args)),
+      ),
+      result: h(
+        'div',
+        { class: 'run-call-panel' },
+        call.detail ? pre(call.detail) : hint('Подробностей не было: только сводка, она во вкладке «Сводка».'),
+      ),
+      schema: h(
+        'div',
+        { class: 'run-call-panel' },
+        schemaText
+          ? pre(prettyJson(schemaText))
+          : hint('Схема в трассу не попала: модель не получала её в этом прогоне.'),
+      ),
+      timing: timingPanel(call, step, ordinal),
+    };
 
-    return h('div', { class: 'run-call' }, head, ...body);
+    const strip = h('div', { class: 'run-call-tabs', role: 'tablist' });
+    const buttons = new Map<CallTabId, HTMLElement>();
+    const show = (tab: CallTabId): void => {
+      for (const { id } of CALL_TABS) {
+        panels[id].hidden = id !== tab;
+        buttons.get(id)?.classList.toggle('is-active', id === tab);
+      }
+    };
+    for (const { id, label } of CALL_TABS) {
+      const button = h('button', { class: 'run-call-tab', type: 'button' }, label);
+      button.addEventListener('click', () => show(id));
+      buttons.set(id, button);
+      strip.append(button);
+    }
+    show('summary');
+
+    return h('div', { class: 'run-call' }, head, strip, ...CALL_TABS.map(({ id }) => panels[id]));
   };
 
   /** Один шаг: номер, время, сводка, что модель говорила и что звала. */
@@ -100,7 +195,7 @@ export function createRunInspector(): RunInspectorView {
     if (step.hiddenCalls) {
       body.push(h('p', { class: 'run-step-note' }, `ещё вызовов не показано: ${step.hiddenCalls}`));
     }
-    for (const call of step.calls) body.push(callRow(call));
+    for (const [position, call] of step.calls.entries()) body.push(callRow(call, step, position + 1));
 
     // Шаг раскрыт, только если в нём что-то есть: пустой шаг — это строка и всё.
     const open = step.calls.length > 0 || Boolean(step.text?.trim());
@@ -145,6 +240,7 @@ export function createRunInspector(): RunInspectorView {
   }
 
   function render(log: ChatRunLog | null, title?: string): void {
+    currentRun = log;
     clear(summary);
     clear(systemBox);
     clear(stepsBox);

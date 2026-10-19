@@ -13,6 +13,8 @@
  *   2. она нажимается и открывает окно трассы, разложенное по шапке, телу и подвалу;
  *   3. в окне есть раздел «Что ушло модели» (системные инструкции и контекст
  *      проекта отдельными блоками) и шаги с вызовами — с временем и итогом;
+ *   3а. у вызова пять вкладок (сводка, аргументы, результат, схема, время),
+ *      и каждая показывает своё: поля аргументов, схему инструмента, разбор времени;
  *   4. пустой случай тоже честный: без прогона окно говорит, что прогонов не было.
  *
  * Модель подменена локальным OpenAI-совместимым сервером: он отвечает одним
@@ -58,7 +60,7 @@ const ask = (window, expression, timeoutMs = 30_000) =>
  * отвечает текстом. Так в трассе появляется ровно то, что нужно проверить:
  * шаг с вызовом и время у него.
  */
-function fakeProvider() {
+function fakeProvider(projectDir) {
   let calls = 0;
   const server = http.createServer((request, response) => {
     let raw = '';
@@ -80,7 +82,7 @@ function fakeProvider() {
                     index: 0,
                     id: 'probe-call-1',
                     type: 'function',
-                    function: { name: 'list_dir', arguments: JSON.stringify({ path: process.cwd() }) },
+                    function: { name: 'list_dir', arguments: JSON.stringify({ path: projectDir }) },
                   },
                 ],
               },
@@ -107,11 +109,12 @@ function fakeProvider() {
 app
   .whenReady()
   .then(async () => {
-    const provider = await fakeProvider();
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-runlog-'));
     const project = path.join(dir, 'demo');
     await fs.mkdir(project, { recursive: true });
     await fs.writeFile(path.join(project, 'main.py'), 'print(1)\n', 'utf8');
+    // Проект нужен раньше провайдера: вызов инструмента в пробе идёт по нему.
+    const provider = await fakeProvider(project);
     await fs.writeFile(
       path.join(dir, 'settings.json'),
       JSON.stringify({
@@ -161,6 +164,8 @@ app
     await wait(6000);
 
     // Права «Правки»: команды агента не спрашиваем, а list_dir — чтение, он и так проходит.
+    // Права «Спрашивать», но режим — «Агент»: инструменты должны быть предложены
+    // модели (без них вкладка «Схема» была бы пуста, и проверять её было бы не на чем).
     const opened = await ask(
       ide,
       `(async () => {
@@ -168,16 +173,29 @@ app
           document.querySelector('[title*="AI Assistant"]')?.click();
           await new Promise((r) => setTimeout(r, 600));
         }
+        const mode = [...document.querySelectorAll('.composer-select')].find((node) => {
+          const text = node.querySelector('.select-value')?.textContent ?? '';
+          return ['Вопрос', 'Агент', 'План'].includes(text);
+        });
+        if (mode) {
+          mode.click();
+          await new Promise((r) => setTimeout(r, 150));
+          [...document.querySelectorAll('.select-popup .select-item')]
+            .find((node) => (node.querySelector('.select-item-label')?.textContent ?? '') === 'Агент')
+            ?.click();
+          await new Promise((r) => setTimeout(r, 250));
+        }
         const input = document.querySelector('.chat-panel textarea, .chat-footer textarea');
         if (!input) return { error: 'нет поля ввода' };
         input.value = 'Покажи список файлов проекта';
         input.dispatchEvent(new Event('input', { bubbles: true }));
         input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
         await new Promise((r) => setTimeout(r, 4000));
-        return { отправлено: true };
+        return { отправлено: true, режим: mode?.querySelector('.select-value')?.textContent ?? null };
       })()`,
     );
     check('вопрос отправлен', opened?.отправлено === true, opened);
+    check('режим — «Агент»: инструменты предложены', opened?.режим === 'Агент', opened?.режим);
     check('модель ответила дважды: вызов и текст', provider.calls() >= 2, provider.calls());
 
     /* ── 1. строка итога под ответом ──────────────────────────────────────── */
@@ -249,6 +267,51 @@ app
     check('вызов назван по имени инструмента', dialog?.имяВызова === 'list_dir', dialog?.имяВызова);
     check('у вызова есть время', /(мс|с)$/.test(dialog?.времяВызова ?? ''), dialog?.времяВызова);
     check('в рамке видно модель и режим', (dialog?.модель ?? '').includes('probe-1'), dialog?.модель);
+    /* ── 2б. вкладки вызова ─────────────────────────────────────────────── */
+
+    const tabs = await ask(
+      ide,
+      `(async () => {
+        const call = document.querySelector('.run-call');
+        if (!call) return null;
+        const strip = [...call.querySelectorAll('.run-call-tab')];
+        const shown = () => {
+          const node = [...call.querySelectorAll('.run-call-panel')].find((panel) => !panel.hidden);
+          return (node?.textContent ?? '').replace(/\\s+/g, ' ').trim();
+        };
+        const pick = async (label) => {
+          strip.find((node) => node.textContent === label)?.click();
+          await new Promise((r) => setTimeout(r, 150));
+          return { текст: shown(), активно: strip.filter((node) => node.classList.contains('is-active')).length };
+        };
+        return {
+          подписи: strip.map((node) => node.textContent),
+          сводка: shown(),
+          аргументы: await pick('Аргументы'),
+          схема: await pick('Схема'),
+          время: await pick('Время'),
+        };
+      })()`,
+    );
+
+    check(
+      'у вызова пять вкладок',
+      JSON.stringify(tabs?.подписи) === JSON.stringify(['Сводка', 'Аргументы', 'Результат', 'Схема', 'Время']),
+      tabs?.подписи,
+    );
+    check('открыта сводка вызова', (tabs?.сводка ?? '').length > 0, tabs?.сводка);
+    check('в аргументах есть поля вызова', (tabs?.аргументы?.текст ?? '').includes('path'), tabs?.аргументы?.текст);
+    check('в схеме видны поля инструмента', (tabs?.схема?.текст ?? '').includes('properties'), tabs?.схема?.текст);
+    check(
+      'во времени есть начало и иерархия',
+      (tabs?.время?.текст ?? '').includes('начало') && (tabs?.время?.текст ?? '').includes('вызов 1 из'),
+      tabs?.время?.текст,
+    );
+    check(
+      'открыта ровно одна вкладка',
+      [tabs?.аргументы?.активно, tabs?.схема?.активно, tabs?.время?.активно].every((count) => count === 1),
+      [tabs?.аргументы?.активно, tabs?.схема?.активно, tabs?.время?.активно],
+    );
 
     /* ── 3. системные инструкции в окне ───────────────────────────────────── */
 
