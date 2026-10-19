@@ -1,7 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { statSync } from 'node:fs';
 import path from 'node:path';
-import { PushTopic } from '../shared/api';
+import { PushTopic, type WorkspaceChangedPayload } from '../shared/api';
 import { folderFromCommandLine, type CommandLineFolder } from '../shared/cli';
 import { AiService } from './ai/service';
 import { BrowserService } from './browser/browser';
@@ -160,9 +160,14 @@ if (!app.requestSingleInstanceLock()) {
     // инструмента, — а не только для операций, прошедших через `workspace.*`.
     // Сам пересчёт назначается ниже, когда появится сервис git.
     let refreshGitSoon: (() => void) | null = null;
+    // То же и для карты символов: сохранили файл — его объявления устарели. Сборщик
+    // появится ниже, а поток правок уже идёт — поэтому вызов отложенный.
+    let refreshIndexSoon: ((changed: string) => void) | null = null;
     const workspace = new WorkspaceService((topic, payload) => {
       pushToRenderers(topic, payload);
-      if (topic === PushTopic.WorkspaceChanged) refreshGitSoon?.();
+      if (topic !== PushTopic.WorkspaceChanged) return;
+      refreshGitSoon?.();
+      refreshIndexSoon?.((payload as WorkspaceChangedPayload).path);
     });
     const ai = new AiService(settings, workspace);
     // Терминал сам активирует venv проекта: иначе pip, запуск и тесты работают
@@ -249,6 +254,10 @@ if (!app.requestSingleInstanceLock()) {
     // Сервер отвечает точно и по всему проекту, карта — мгновенно и без него:
     // в поиске символов они дополняют друг друга.
     lsp.attachIndex(symbolIndex);
+    // Сохранение и чужая правка в рабочей папке приходят одним потоком
+    // (`WorkspaceChanged`): без этого карта отставала бы от кода до следующего
+    // открытия проекта и находила бы удалённые объявления.
+    refreshIndexSoon = (changed) => symbolIndex.noteChanged(changed);
     // Отладчик: сессия debugpy по DAP. Интерпретатор тот же, что у запуска и тестов,
     // а `.env` проекта — тот же, что у терминала и языкового сервера.
     const debug = new DebugService(

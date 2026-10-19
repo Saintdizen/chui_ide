@@ -1268,8 +1268,15 @@ export class LspService {
     await runtime.initialized.catch(() => undefined);
     const opened = this.runtimeForPath(path) === runtime;
     const uri = pathToFileURL(path).toString();
-    if (!opened)
+    if (opened) {
+      // Документ у сервера уже открыт, но его копия могла отстать: файл правили на
+      // диске (агент, внешний инструмент, сохранение без открытой вкладки), а `didChange`
+      // ему никто не слал. Тогда сервер отвечал по старому тексту — и скелет, и ссылки
+      // описывали код, которого в файле уже нет. Отдаём ему тот текст, который спросили.
+      this.change(path, text);
+    } else {
       runtime.connection.notify('textDocument/didOpen', { textDocument: { uri, languageId, version: 1, text } });
+    }
     try {
       return await run(uri);
     } finally {

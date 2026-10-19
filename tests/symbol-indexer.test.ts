@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,6 +16,17 @@ import type { FileSymbol } from '../src/shared/lsp-symbols';
  */
 
 const tempDirs: string[] = [];
+
+const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Дождаться условия: разбор сохранённого файла идёт по таймеру, а не сразу. */
+async function waitFor(done: () => boolean, timeout = 2000): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (!done()) {
+    if (Date.now() > deadline) throw new Error('условие не наступило');
+    await wait(20);
+  }
+}
 
 function project(files: Record<string, string>): string {
   const root = mkdtempSync(path.join(tmpdir(), 'chui-symbols-'));
@@ -147,6 +158,58 @@ describe('SymbolIndexer', () => {
     index.refresh();
     await index.settled();
     expect(index.status()).toMatchObject({ phase: 'idle', root: null, files: 0 });
+  });
+
+  it('сохранённый файл перечитывается, остальные не трогаются', async () => {
+    const root = project({ 'a.py': 'class Old:\n    pass\n', 'b.py': 'y = 2\n' });
+    // Скелет зависит от текста файла: так видно, что перечитался именно новый текст.
+    const outline = async (target: string): Promise<readonly FileSymbol[] | null> => [
+      { ...parserSkeleton[0]!, name: readFileSync(target, 'utf8').includes('class New') ? 'New' : 'Old' },
+    ];
+    const index = new SymbolIndexer({ root: () => root, outline, store: new SymbolStore(path.join(root, '.idx')) });
+
+    index.refresh();
+    await index.settled();
+    expect(index.find('Old').map((hit) => hit.path)).toEqual(['a.py', 'b.py']);
+
+    writeFileSync(path.join(root, 'a.py'), 'class New:\n    pass\n', 'utf8');
+    index.noteChanged(path.join(root, 'a.py'));
+    await waitFor(() => index.find('New').length > 0);
+
+    expect(index.find('New').map((hit) => hit.path)).toEqual(['a.py']);
+    expect(index.find('Old').map((hit) => hit.path)).toEqual(['b.py']);
+  });
+
+  it('удалённый файл уходит из карты', async () => {
+    const root = project({ 'a.py': 'x = 1\n' });
+    const { outline } = fakeOutline({ 'a.py': parserSkeleton });
+    const index = new SymbolIndexer({ root: () => root, outline, store: new SymbolStore(path.join(root, '.idx')) });
+
+    index.refresh();
+    await index.settled();
+    expect(index.find('Parser')).toHaveLength(1);
+
+    rmSync(path.join(root, 'a.py'));
+    index.noteChanged(path.join(root, 'a.py'));
+    await waitFor(() => index.find('Parser').length === 0);
+  });
+
+  it('чужой язык и путь вне проекта — не наше дело', async () => {
+    const root = project({ 'a.py': 'x = 1\n' });
+    const { outline, asked } = fakeOutline({ 'a.py': parserSkeleton });
+    const index = new SymbolIndexer({ root: () => root, outline, store: new SymbolStore(path.join(root, '.idx')) });
+
+    index.refresh();
+    await index.settled();
+    asked.length = 0;
+
+    writeFileSync(path.join(root, 'style.css'), 'a{}', 'utf8');
+    index.noteChanged(path.join(root, 'style.css'));
+    index.noteChanged(path.join(root, '..', 'outside.py'));
+    await wait(400);
+
+    // Сервер не звали ни разу: ни стили, ни файл вне корня в карту не входят.
+    expect(asked).toEqual([]);
   });
 });
 

@@ -146,6 +146,36 @@ app.whenReady().then(async () => {
     members,
   );
 
+  // Сохранение файла: карта должна догнать код без пересборки проекта. Пересобирает
+  // тот сборщик, у которого есть сервер: у «молчащего» из прошлого раздела скелета не будет.
+  const savedFile = path.join(root, 'app.py');
+  await fs.writeFile(
+    savedFile,
+    'from base import Base\n\n\nclass Parser(Base):\n    def run(self):\n        return 3\n\n\nclass AppAfterSave(Base):\n    pass\n',
+    'utf8',
+  );
+  silent.noteChanged(savedFile);
+  index.noteChanged(savedFile);
+  // Заодно проверяем то, на чём это спотыкалось: файл был открыт серверу затравкой, и
+  // без `didChange` сервер отвечал по СТАРОМУ тексту — нового класса в скелете не было.
+  const fresh = await lsp.outline(savedFile, 'python', await fs.readFile(savedFile, 'utf8'));
+  check(
+    'сервер отвечает по актуальному тексту, а не по открытому раньше',
+    (fresh ?? []).some((symbol) => symbol.name === 'AppAfterSave'),
+    (fresh ?? []).map((symbol) => symbol.name),
+  );
+  let saved = [];
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    saved = index.find('AppAfterSave');
+    if (saved.length > 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  check(
+    'сохранённый файл виден в карте без пересборки проекта',
+    saved.length === 1,
+    saved.map((hit) => hit.path),
+  );
+
   noServers.dispose();
   lsp.dispose();
   await fs.rm(root, { recursive: true, force: true }).catch(() => undefined);

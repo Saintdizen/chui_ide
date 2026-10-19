@@ -40,6 +40,16 @@ const MAX_FILE_BYTES = 512 * 1024;
 /** Как часто сохранять промежуточный результат: сбой посреди обхода не должен терять всё. */
 const SAVE_EVERY = 40;
 
+/**
+ * Пауза перед разбором сохранённого файла. Сохранения идут пачкой (сохранить всё,
+ * форматирование, массовая замена), и разбирать каждое по отдельности — значит
+ * спрашивать сервер несколько раз за долю секунды.
+ */
+const TOUCH_DELAY_MS = 250;
+
+/** Пауза перед записью кэша на диск: файл один и большой, а правки идут подряд. */
+const SAVE_DELAY_MS = 3000;
+
 export interface SymbolIndexDeps {
   /** Корень открытого проекта; `null` — проекта нет, карту собирать не по чему. */
   root(): string | null;
@@ -54,6 +64,12 @@ export class SymbolIndexer {
   private files = new Map<string, IndexedFile>();
   private skipped = 0;
   private running: Promise<void> | null = null;
+  /** Файлы, которые правили после сборки: их объявления уже устарели. */
+  private readonly touched = new Set<string>();
+  private touchTimer: NodeJS.Timeout | null = null;
+  private saveTimer: NodeJS.Timeout | null = null;
+  /** Идущий разбор сохранённых файлов: `settled` ждёт и его тоже. */
+  private applying: Promise<void> | null = null;
 
   constructor(private readonly deps: SymbolIndexDeps) {}
 
@@ -77,9 +93,15 @@ export class SymbolIndexer {
       });
   }
 
-  /** Дождаться текущей сборки — нужно проверкам и пробе, человеку не нужно никогда. */
+  /**
+   * Дождаться текущей работы — нужно проверкам и пробе, человеку не нужно никогда.
+   * Ждём и полный обход, и разбор сохранённых файлов: для спрашивающего это одно и то же
+   * «карта догнала диск».
+   */
   async settled(): Promise<void> {
-    while (this.running) await this.running;
+    for (let work = this.running ?? this.applying; work; work = this.running ?? this.applying) {
+      await work.catch(() => undefined);
+    }
   }
 
   /**
@@ -88,6 +110,106 @@ export class SymbolIndexer {
    */
   find(query: string, limit = 50): ProjectSymbol[] {
     return queryIndex(this.files.values(), query, limit);
+  }
+
+  /**
+   * Файл изменился: перечитать его объявления.
+   *
+   * Зовётся на каждое сохранение и на чужую правку в рабочей папке (наблюдатель за
+   * корнем). Пересобирать ради этого весь проект незачем: правка касается одного
+   * файла, и он же — единственный, кого надо переспросить у сервера. Карта поэтому не
+   * отстаёт от кода: поиск символа видит следом за сохранением, а не после смены проекта.
+   *
+   * Путь не из проекта и файл не нашего языка — не наше дело: молча мимо.
+   */
+  noteChanged(target: string): void {
+    const root = this.root ?? this.deps.root();
+    if (!root) return;
+    const relative = path.relative(root, target).split(path.sep).join('/');
+    // `..` в начале — файл вне проекта: его объявления к этой карте не относятся.
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
+    if (!isIndexedLanguage(languageInfoForPath(relative)?.id)) return;
+
+    this.touched.add(relative);
+    if (this.touchTimer) return;
+    this.touchTimer = setTimeout(() => {
+      this.touchTimer = null;
+      this.applying = this.applyTouched().finally(() => {
+        this.applying = null;
+      });
+    }, TOUCH_DELAY_MS);
+    // Таймер не держит процесс: карта — ускорение, а не причина не закрывать окно.
+    this.touchTimer.unref?.();
+  }
+
+  /** Разобрать накопившиеся правки по одной и отложить запись кэша. */
+  private async applyTouched(): Promise<void> {
+    const root = this.root;
+    if (!root) {
+      this.touched.clear();
+      return;
+    }
+    // Полный обход мог идти в этот момент: он перезапишет карту своим снимком,
+    // поэтому сперва ждём его, а потом правим — иначе правка потерялась бы. Ждём именно
+    // обход: `settled` ждёт и текущий разбор, то есть этот самый — было бы ожидание себя.
+    while (this.running) await this.running;
+    if (this.deps.root() !== root) {
+      this.touched.clear();
+      return;
+    }
+
+    const pending = [...this.touched];
+    this.touched.clear();
+    for (const relative of pending) await this.reindexFile(root, relative);
+    this.saveSoon();
+  }
+
+  /** Перечитать один файл. Тот же путь, что у полного обхода: стат, текст, скелет, предки. */
+  private async reindexFile(root: string, relative: string): Promise<void> {
+    const absolute = path.join(root, ...relative.split('/'));
+    const stat = await fs.stat(absolute).catch(() => null);
+    if (!stat?.isFile()) {
+      // Файл удалили или переименовали: объявлений по старому пути больше нет.
+      this.files.delete(relative);
+      return;
+    }
+
+    const known = this.files.get(relative);
+    const mtime = Math.floor(stat.mtimeMs);
+    if (known && known.size === stat.size && known.mtime === mtime) return;
+    if (stat.size > MAX_FILE_BYTES) {
+      this.files.delete(relative);
+      return;
+    }
+
+    const text = await fs.readFile(absolute, 'utf8').catch(() => null);
+    if (text === null) return;
+    const language = languageInfoForPath(relative)?.id ?? '';
+    const symbols = await this.deps.outline(absolute, language, text).catch(() => null);
+    // Сервер молчит — оставляем прежние объявления: пустая карта по файлу хуже
+    // устаревшей, потому что поиск перестал бы находить и то, что было.
+    if (symbols === null) return;
+
+    const bases = basesByLine(text, language);
+    this.files.set(relative, {
+      path: relative,
+      language,
+      size: stat.size,
+      mtime,
+      decls: toIndexDecls(symbols, (line) => bases.get(line) ?? []),
+    });
+  }
+
+  /** Записать карту с задержкой: несколько сохранений подряд дают одну запись. */
+  private saveSoon(): void {
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      const root = this.root;
+      if (!root) return;
+      void this.deps.store.save(root, [...this.files.values()]);
+    }, SAVE_DELAY_MS);
+    this.saveTimer.unref?.();
   }
 
   private async run(): Promise<void> {
