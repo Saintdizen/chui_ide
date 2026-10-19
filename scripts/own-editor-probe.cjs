@@ -720,6 +720,24 @@ async function assistCheck(win) {
     курсор: window.probe.controller.caret,
   }))()`);
 
+  // Именованные аргументы: у Python внутри вызова предлагаются имена параметров.
+  // Язык переключаем на время проверки — у TypeScript именованных аргументов нет.
+  await script(`(() => {
+    const { controller, buffer, assistant } = window.probe;
+    assistant.setLanguage('python');
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: 'def parse(text, strict=False):\\n    return text\\nparse(' }]);
+    const end = buffer.length;
+    controller.selectRange(end, end);
+    window.probe.input.focus();
+    return true;
+  })()`);
+  await wait(150);
+  await typeText('st');
+  await wait(300);
+  const namedState = await suggestState();
+  await key('Escape');
+  await script('window.probe.assistant.setLanguage("typescript")');
+
   // Подсказка после точки: в классе печатаем `this.` — попап обязан показать поля и
   // методы ЭТОГО класса. Здесь нет языкового сервера (подставной молчит), поэтому
   // работает запасной разбор файла — тот, что нужен, когда сервера нет вовсе.
@@ -862,6 +880,8 @@ async function assistCheck(win) {
     // Закончить оператор: незакрытая скобка дописана, каретка осталась в конце.
     закончить_оператор: statementDone.текст,
     закончить_оператор_работает: statementDone.текст === 'if (ready)',
+    // Именованные аргументы: в вызове предложено имя параметра, а не слово из файла.
+    аргументы_предложены: namedState.видно && namedState.все.includes('strict='),
     // Итог одной строкой: каждое нажатие добавляет к списку, Escape убирает попап.
     умное_значение: smartValue,
     умное_тип: smartType,

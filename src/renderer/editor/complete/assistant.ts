@@ -35,6 +35,7 @@ import { expectedAt, filterByExpectation, type Expectation } from './expectation
 import { EXTERNAL_BONUS, matchScore } from './fuzzy';
 import { importPathAt, importPathItems, type ImportPathContext } from './import-path';
 import { expandPostfix, postfixAt, postfixOffers } from './postfix';
+import { callContextAt, namedArgumentItems } from './named-args';
 import { expandSnippet } from './snippet';
 import { memberAccessAt, membersOf, type MemberAccess } from './member-access';
 import { prefixAt } from './prefix';
@@ -61,6 +62,9 @@ const INDEX_DELAY_MS = 120;
 
 /** С какого набранного начала спрашивать карту: одна буква совпадёт с половиной проекта. */
 const INDEX_MIN_PREFIX = 2;
+
+/** Сколько знаков до каретки просматривать в поисках вызова: длинный список аргументов. */
+const NAMED_ARGS_LOOKBACK = 2000;
 
 /** Через сколько перечитывать список файлов проекта для подсказок пути. */
 const FILE_LIST_TTL_MS = 5000;
@@ -378,6 +382,9 @@ export class CompletionAssistant {
       snippets: snippetsForLanguage(this.snippets(), this.language),
       exclude: this.contextWords(prefix),
     });
+    // Внутри вызова к словам добавляются имена параметров: `parse(te|` ждёт `text=`,
+    // а не слово из файла. Имена берутся из объявления этой же функции (`named-args.ts`).
+    items.push(...this.namedArguments(prefix));
     const caret = this.controller.caret;
     this.widget.show(items, this.anchor(caret), prefix.length);
     this.askServer(prefix, caret);
@@ -616,6 +623,24 @@ export class CompletionAssistant {
       member.replaces,
     );
     this.askServer(member.prefix, caret);
+  }
+
+  /**
+   * Имена параметров вызова, в котором стоит каретка, — подсказки вида `text=`.
+   *
+   * Пусто, если это не вызов, функции нет в файле или набрано уже значение: подсказка
+   * с чужим именем хуже, чем никакой.
+   */
+  private namedArguments(prefix: string): CompletionItem[] {
+    const caret = this.controller.caret;
+    // Вызов мог начаться выше (длинный список аргументов), поэтому смотрим назад с
+    // запасом: разбор идёт влево, пока не упрётся в конец оператора.
+    const before = this.buffer.getText(Math.max(0, caret - NAMED_ARGS_LOOKBACK), caret);
+    const context = callContextAt(before, before.length, this.language);
+    if (!context) return [];
+    // Набранное должно совпасть с тем, что видит разбор, — иначе это другое место.
+    if (context.typed !== prefix) return [];
+    return namedArgumentItems(this.buffer.text, context);
   }
 
   /**
