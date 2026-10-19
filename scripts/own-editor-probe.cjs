@@ -716,6 +716,25 @@ async function assistCheck(win) {
     return true;
   })()`);
   await wait(150);
+  // Postfix-шаблон: `items.if` в TypeScript превращается в `if (items) {`. Печатаем
+  // живьём (applyEdits не годится: перенос курсора после него закрывает попап), потом
+  // Enter — и проверяем, что переписался ВЕСЬ оборот, а не слово после точки.
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: 'items.' }]);
+    const end = buffer.length;
+    controller.selectRange(end, end);
+    window.probe.input.focus();
+    return true;
+  })()`);
+  await wait(150);
+  await typeText('if');
+  await wait(300);
+  const postfixOffer = await suggestState();
+  await key('Return');
+  const postfixDone = await script('window.probe.buffer.text');
+  await key('Escape');
+
   const memberState = await script(`(() => {
     const panel = document.querySelector('.own-editor-suggest');
     const rows = [...document.querySelectorAll('.own-editor-suggest-item')];
@@ -819,6 +838,10 @@ async function assistCheck(win) {
     карта_при_наборе: typedFromIndex.все.includes('ProjectOnlyRow'),
     // Путь в импорте: попап открылся на строке и предложил файл проекта.
     пути_в_импорте: importPaths.видно && importPaths.все.includes('./utils'),
+    // Postfix: шаблон предложен и переписал всё выражение, а не только слово после точки.
+    postfix_предложен: postfixOffer.видно && postfixOffer.все.includes('items.if'),
+    postfix_результат: postfixDone,
+    postfix_работает: postfixDone.startsWith('if (items)'),
     // Итог одной строкой: каждое нажатие добавляет к списку, Escape убирает попап.
     умное_значение: smartValue,
     умное_тип: smartType,

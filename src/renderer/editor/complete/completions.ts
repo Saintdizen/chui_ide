@@ -62,6 +62,12 @@ export interface CompletionItem {
   /** Описание символа (из `completionItem/resolve`): показывается под подписью. */
   readonly documentation?: string;
   /**
+   * Postfix-шаблон: что встанет вместо ВСЕГО выражения с точкой (`order.if` → `if order:`).
+   * У такой подсказки своё начало замены, поэтому вставка идёт не общим путём —
+   * `assistant.ts` правит участок от `from` до каретки (см. `postfix.ts`).
+   */
+  readonly postfix?: { readonly from: number; readonly text: string; readonly caret: number };
+  /**
    * Исходный элемент сервера — его отправляем назад на `completionItem/resolve`,
    * когда список выделил эту строку. Есть только у подсказок сервера.
    */

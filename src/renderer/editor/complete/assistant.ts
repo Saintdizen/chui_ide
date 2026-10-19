@@ -34,6 +34,7 @@ import { allCompletions, buildCompletions, DEFAULT_LIMIT, type CompletionItem } 
 import { expectedAt, filterByExpectation, type Expectation } from './expectation';
 import { EXTERNAL_BONUS, matchScore } from './fuzzy';
 import { importPathAt, importPathItems, type ImportPathContext } from './import-path';
+import { expandPostfix, postfixAt, postfixOffers } from './postfix';
 import { expandSnippet } from './snippet';
 import { memberAccessAt, membersOf, type MemberAccess } from './member-access';
 import { prefixAt } from './prefix';
@@ -607,12 +608,38 @@ export class CompletionAssistant {
     }
 
     ranked.sort((left, right) => right.score - left.score);
+    // Postfix-шаблоны (`order.if` → `if order:`) идут следом за членами, а не вместо
+    // них: если у объекта есть член с таким именем, он нужнее шаблона и стоит выше.
     this.widget.show(
-      ranked.map((entry) => entry.item),
+      [...ranked.map((entry) => entry.item), ...this.postfixItems()],
       this.anchor(caret),
       member.replaces,
     );
     this.askServer(member.prefix, caret);
+  }
+
+  /**
+   * Postfix-шаблоны для места под кареткой: `order.if` становится `if order:`.
+   *
+   * Подпись — всё выражение с шаблоном, а не одно слово: видно, что именно перепишется.
+   * Начало замены едет вместе с подсказкой (`postfix.from`), потому что общее правило
+   * «заменить набранное» тут не годится — заменяется весь оборот.
+   */
+  private postfixItems(): CompletionItem[] {
+    const caret = this.controller.caret;
+    const line = this.buffer.lineAt(caret);
+    const lineStart = this.buffer.lineStart(line);
+    const match = postfixAt(this.buffer.lineText(line), caret - lineStart, lineStart, this.language);
+    if (!match) return [];
+    return postfixOffers(match, this.language).map((template) => {
+      const expanded = expandPostfix(template, match.expression);
+      return {
+        label: `${match.expression}.${template.key}`,
+        kind: 'snippet' as const,
+        detail: `шаблон: ${template.detail}`,
+        postfix: { from: match.from, text: expanded.text, caret: expanded.caret },
+      };
+    });
   }
 
   /**
@@ -699,6 +726,17 @@ export class CompletionAssistant {
       return;
     }
     const caret = this.controller.caret;
+    // Postfix-шаблон заменяет не набранное слово, а весь оборот с точкой: у него своё
+    // начало, и оно пришло вместе с подсказкой (см. `postfix.ts`).
+    if (item.postfix) {
+      const { from, text, caret: at } = item.postfix;
+      this.widget.hide();
+      this.controller.applyEdits([{ start: from, removed: this.buffer.getText(from, caret), inserted: text }], {
+        anchor: from + at,
+        active: from + at,
+      });
+      return;
+    }
     const start = caret - this.widget.replaces;
     this.widget.hide();
     const removed = this.buffer.getText(start, caret);
