@@ -918,8 +918,11 @@ app.whenReady().then(async () => {
   check('страница от этого не закрылась', closedChat !== null && closedChat.видов.includes('page'), closedChat?.видов);
 
   /* --- 13. Меню не уходит под страницу -------------------------------------------- */
-  // Вложение — слой окна поверх DOM. Меню (`.context-menu`) рисуется в DOM и без
-  // утайки вложения оказалось бы ПОД страницей: её не видно и не нажать.
+  // Вложение — слой окна поверх DOM. Меню (`.context-menu`), которое НАКРЫВАЕТ сцену,
+  // без утайки вложения оказалось бы ПОД страницей: его не видно и не нажать. Меню в
+  // стороне (дерево файлов, полоса вкладок, панель чата) до сцены не достаёт, и там
+  // страницу не трогаем: иначе она мигала бы на каждый правый клик по дереву. Место
+  // меню задаём сами: так проверка не зависит от ширины окна пробы.
   step('меню-панель и слой страницы');
   check('страница показана перед меню', (await clickPageTab()) === 'нажата');
   const shownForMenu = await waitFor(async () => {
@@ -930,14 +933,42 @@ app.whenReady().then(async () => {
   const menuPage = drawn()[0] ?? null;
   check('видно ровно вложение этой страницы', menuPage !== null, { наЭкране: drawn() });
 
-  // Меню открываем правым кликом по вкладке файла — это то же меню, что и везде.
+  // Меню в стороне от сцены: маленькая панель под деревом файлов.
+  const farMenu = await ask(
+    ide,
+    `(() => {
+      const node = document.createElement('div');
+      node.className = 'context-menu';
+      node.style.cssText = 'position: fixed; left: 8px; top: 8px; width: 60px; height: 60px';
+      document.body.appendChild(node);
+      const box = document.querySelector('.browser-stage')?.getBoundingClientRect();
+      return box && node.getBoundingClientRect().right <= box.left ? 'вне сцены' : 'задевает сцену';
+    })()`,
+  );
+  check('меню стоит в стороне от сцены', farMenu === 'вне сцены', farMenu);
+  await wait(500);
+  check('меню в стороне страницу не прячет', panel.isShown(menuPage) === true, { наЭкране: drawn() });
+  await ask(ide, "(() => { document.querySelector('.context-menu')?.remove(); return 'убрано'; })()");
+
+  // Меню поверх сцены: настоящий правый клик по вкладке файла, только поставленный
+  // над страницей — clientX/clientY меню служат местом появления.
+  const menuSpot = await ask(
+    ide,
+    `(() => {
+      const box = document.querySelector('.browser-stage')?.getBoundingClientRect();
+      return box ? { x: Math.round(box.x + 40), y: Math.round(box.y + 40) } : null;
+    })()`,
+  );
+  check('сцена найдена', menuSpot !== null, menuSpot);
   await ask(
     ide,
     `(() => {
       const files = [...document.querySelectorAll('.tab')].filter((t) => !t.classList.contains('tab-page'));
       const tab = files.find((t) => (t.querySelector('.tab-label')?.textContent ?? '') === 'note.txt') ?? files[0];
       if (!tab) return 'нет вкладки';
-      tab.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 160, clientY: 160 }));
+      tab.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, clientX: ${menuSpot?.x ?? 300}, clientY: ${menuSpot?.y ?? 300} }),
+      );
       return 'меню открыто';
     })()`,
   );
@@ -946,7 +977,7 @@ app.whenReady().then(async () => {
     return menus > 0 && panel.isShown(menuPage) === false ? { menus, наЭкране: drawn() } : null;
   });
   check(
-    'пока меню открыто, страница спрятана',
+    'пока меню над сценой, страница спрятана',
     menuHidesView !== null,
     menuHidesView ?? {
       меню: await ask(ide, "document.querySelectorAll('.context-menu').length"),
@@ -954,7 +985,18 @@ app.whenReady().then(async () => {
     },
   );
 
-  // Esc закрывает меню — страница обязана вернуться на место.
+  // Спрятанная страница оставляет на своём месте замороженный кадр: без него на месте
+  // страницы была бы пустая полоса — «при открытии меню окно браузера пропадает».
+  const frozen = await waitFor(async () => {
+    const src = await ask(
+      ide,
+      "(() => { const shot = document.querySelector('.browser-snapshot'); return shot && !shot.hidden ? String(shot.src ?? '').slice(0, 22) : null; })()",
+    );
+    return src === 'data:image/png;base64,' ? src : null;
+  });
+  check('на месте страницы остался её кадр', frozen === 'data:image/png;base64,', frozen);
+
+  // Esc закрывает меню — страница обязана вернуться на место, а кадр исчезнуть.
   await ask(
     ide,
     `(() => {
@@ -962,8 +1004,15 @@ app.whenReady().then(async () => {
       return 'esc';
     })()`,
   );
-  const viewBack = await waitFor(() => (panel.isShown(menuPage) ? true : null));
-  check('после закрытия меню страница вернулась', viewBack === true, { наЭкране: drawn() });
+  const viewBack = await waitFor(async () => {
+    if (!panel.isShown(menuPage)) return null;
+    const hidden = await ask(
+      ide,
+      "(() => { const shot = document.querySelector('.browser-snapshot'); return !shot || shot.hidden; })()",
+    );
+    return hidden === true ? true : null;
+  });
+  check('после закрытия меню страница вернулась, кадр убран', viewBack === true, { наЭкране: drawn() });
 
   /* --- 15. Попапы тоже прячут страницу -------------------------------------------- */
   // Попапы (`.popover`: выпадающие списки, статус серверов) и «Информация о сессии»
@@ -975,27 +1024,35 @@ app.whenReady().then(async () => {
   check('видно ровно вложение этой страницы', popoverPage !== null, { наЭкране: drawn() });
 
   // Открываем попап напрямую: в стенде пробы ассистент может быть выключен, а
-  // проверяем мы правило «что-то всплыло над сценой — страницу спрятать», а не то,
-  // как открывается конкретное окно. Наблюдатель следит за `hidden`, этого довольно.
-  await ask(
+  // проверяем мы правило «что-то всплыло НАД СЦЕНОЙ — страницу спрятать», а не то,
+  // как открывается конкретное окно. Место ставим над страницей сами: попап в стороне
+  // (у своей кнопки в другой панели) страницу не закрывает, и прятать её незачем.
+  const popoverSpot = await ask(
     ide,
     `(() => {
-      const popover = document.querySelector('.popover') ?? (() => {
-        const node = document.createElement('div');
-        node.className = 'popover';
-        document.body.appendChild(node);
-        return node;
-      })();
-      popover.hidden = false;
+      const box = document.querySelector('.browser-stage')?.getBoundingClientRect();
+      if (!box) return null;
+      const node = document.createElement('div');
+      node.className = 'popover';
+      node.style.cssText =
+        'position: fixed; width: 180px; height: 120px; left: ' +
+        Math.round(box.x + 60) +
+        'px; top: ' +
+        Math.round(box.y + 60) +
+        'px';
+      document.body.appendChild(node);
       return 'попап открыт';
     })()`,
   );
+  check('попап открыт над сценой', popoverSpot === 'попап открыт', popoverSpot);
   const popoverHidesView = await waitFor(() =>
     popoverPage !== null && panel.isShown(popoverPage) === false ? true : null,
   );
   check('пока попап открыт, страница спрятана', popoverHidesView === true, { наЭкране: drawn() });
 
-  await ask(ide, "(() => { document.querySelector('.popover').hidden = true; return 'закрыт'; })()");
+  // Свой попап убираем последним: в приложении `.popover` есть и свои (скрытые), а
+  // снять чужой — значит оставить над сценой накрывшую её панель.
+  await ask(ide, "(() => { [...document.querySelectorAll('.popover')].at(-1)?.remove(); return 'закрыт'; })()");
   const popoverBack = await waitFor(() => (popoverPage !== null && panel.isShown(popoverPage) ? true : null));
   check('после закрытия попапа страница вернулась', popoverBack === true, { наЭкране: drawn() });
 
@@ -1056,6 +1113,85 @@ app.whenReady().then(async () => {
 
   check('подсказка у кнопки шапки появилась', typeof hint?.текст === 'string' && hint.текст.length > 0, hint);
   check('подсказка не заходит на страницу', hint?.пересекаетСцену === false, hint);
+
+  /* --- 16. Неудачная загрузка: одно уведомление на одну неудачу ------------------- */
+  // Состояние вкладки рассылается на каждый чих (начало и конец загрузки, масштаб,
+  // переход внутри страницы), а ошибка загрузки хранилась до следующего удачного
+  // перехода — то есть ехала в каждом таком событии. На три события — три одинаковых
+  // уведомления на одну неудачу. Теперь ошибка одноразовая: проверим это счётом.
+  step('неудачная загрузка: сколько уведомлений');
+  const uiBeforeFail = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.полотно === true ? state : null;
+  });
+  check('страница показана перед неудачей', uiBeforeFail !== null, uiBeforeFail?.полотно);
+
+  // Порт занимаем и тут же освобождаем: адрес гарантированно отвечает отказом,
+  // а не провалом имени в DNS (сеть в прогоне не нужна).
+  const deadServer = http.createServer(() => undefined);
+  await new Promise((resolve) => deadServer.listen(0, '127.0.0.1', resolve));
+  const deadPort = deadServer.address().port;
+  await new Promise((resolve) => deadServer.close(resolve));
+  await ask(
+    ide,
+    `(() => {
+      const field = document.querySelector('.browser-address');
+      field.value = 'http://127.0.0.1:${deadPort}/';
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return 'набрано';
+    })()`,
+  );
+  const failureCountExpr = `[...document.querySelectorAll('.toast-text')].filter((t) =>
+    t.textContent.includes('Страница не загрузилась')).length`;
+  const failure = await waitFor(async () => {
+    const count = await ask(ide, failureCountExpr);
+    return typeof count === 'number' && count > 0 ? count : null;
+  });
+  check('про неудачу сказано', failure !== null, failure);
+  // Ждём дольше, чем идёт вся загрузка: лишние уведомления успели бы появиться.
+  await wait(2500);
+  const failureTotal = await ask(ide, failureCountExpr);
+  check('на одну неудачу одно уведомление', failureTotal === 1, failureTotal);
+
+  // Возвращаем живой адрес: дальше пробе нужна открывающаяся страница.
+  await ask(
+    ide,
+    `(() => {
+      const field = document.querySelector('.browser-address');
+      field.value = ${JSON.stringify(`${base}/`)};
+      field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return 'набрано';
+    })()`,
+  );
+  const homeBack = await waitFor(async () => {
+    const state = await ask(ide, UI_STATE);
+    return state.активная === 'Домашняя страница' ? state : null;
+  });
+  check('страница снова открывается', homeBack !== null, homeBack?.активная);
+  await ask(
+    ide,
+    "(() => { for (const toast of document.querySelectorAll('.toast')) toast.click(); return 'закрыты'; })()",
+  );
+
+  /* --- 17. Углы страницы скруглены ----------------------------------------------- */
+  // Вложение — прямоугольник отдельного слоя окна: CSS острова его не обрезает, поэтому
+  // углы срезает маска самого слоя (`setBorderRadius` в main/browser/panel.ts).
+  // Сверить это картинкой нельзя: `capturePage` окна содержимое вложений НЕ захватывает —
+  // слой окна в неё не попадает (на снимке на месте страницы фон редактора). Поэтому
+  // проверяем, что маска поставлена; глазами — в живом окне.
+  step('углы страницы');
+  check('маска углов поставлена', panel.cornerRadius(menuPage) === 8, panel.cornerRadius(menuPage));
+  // Зазора у сцены нет: страница занимает её целиком, край в край с островом.
+  const stageStyle = await ask(
+    ide,
+    `(() => {
+      const stage = document.querySelector('.browser-stage');
+      if (!stage) return null;
+      const style = getComputedStyle(stage);
+      return { справа: style.marginRight, снизу: style.marginBottom };
+    })()`,
+  );
+  check('сцена без зазора — страница во всю область', stageStyle?.снизу === '0px', stageStyle);
 
   const shot = await ide.capturePage();
   await fs.writeFile(path.join(SHOTS, 'browser-view.png'), shot.toPNG());

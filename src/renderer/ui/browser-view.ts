@@ -162,7 +162,12 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
 
   // Сцена — это «дырка», которую занимает вложение. Своей высоты у неё нет: она
   // тянется под шапкой, а вложение встаёт ровно по её прямоугольнику.
-  const stage = h('div', { class: 'browser-stage' });
+  //
+  // Внутри сцены лежит замороженный кадр страницы (`snapshot`): пока над сценой висит
+  // меню или попап, вложение приходится прятать, и без кадра на его месте осталась бы
+  // пустая полоса — «окно браузера пропало». Со снимком страница не исчезает, а замирает.
+  const snapshot = h('img', { class: 'browser-snapshot', alt: '', hidden: true }) as HTMLImageElement;
+  const stage = h('div', { class: 'browser-stage' }, snapshot);
   const element = h(
     'div',
     { class: 'browser-view', hidden: true },
@@ -392,29 +397,77 @@ export function createBrowserView(deps: BrowserViewDeps): BrowserView {
   }
 
   /**
+   * Накрывает ли всплывающее окно сцену. Спрашивать одно лишь «есть ли в документе
+   * `.context-menu`» мало: меню проводника, вкладок и панели чата стоят в своих
+   * углах и до области редактора не достают — гасить под ними страницу значило
+   * мигать ею на каждый правый клик по дереву файлов.
+   */
+  const coversStage = (node: Element): boolean => {
+    const box = node.getBoundingClientRect();
+    if (box.width <= 0 || box.height <= 0) return false;
+    const stageBox = stage.getBoundingClientRect();
+    return (
+      box.left < stageBox.right && box.right > stageBox.left && box.top < stageBox.bottom && box.bottom > stageBox.top
+    );
+  };
+
+  /** Есть ли над сценой хоть что-то из DOM — то, что слой вложения перекроет собой. */
+  const hiddenUnder = (): boolean => {
+    // Всё, что рисуется в DOM поверх сцены. Кроме оверлеев и меню это ещё и попапы
+    // (`.popover`: выпадающие списки, статус серверов) и «Информация о сессии» —
+    // они всплывают вверх от своих кнопок и запросто накрывают область редактора.
+    // Не спрячь мы страницу — они оказались бы ПОД ней: страница это слой окна,
+    // и никакой `z-index` её не перебьёт.
+    for (const node of document.querySelectorAll(OCCLUDERS)) if (coversStage(node)) return true;
+    return false;
+  };
+
+  /**
    * Оверлеи (палитра, окна) лежат в DOM, а вложение — слоем поверх DOM: пока
    * оверлей открыт, страницу нужно спрятать. Следим за появлением и снятием
    * оверлеев наблюдателем, а не просьбами из каждого окна: окна заводятся в
    * разных местах, и не забыть ни одного проще с одной стороны.
    */
   const syncOcclusion = (): void => {
-    // Всё, что рисуется в DOM поверх сцены. Кроме оверлеев и меню это ещё и попапы
-    // (`.popover`: выпадающие списки, статус серверов) и «Информация о сессии» —
-    // они всплывают вверх от своих кнопок и запросто накрывают область редактора.
-    // Не спрячь мы страницу — они оказались бы ПОД ней: страница это слой окна,
-    // и никакой `z-index` её не перебьёт.
-    const next = document.querySelector(OCCLUDERS) !== null;
+    const next = hiddenUnder();
     if (next === occluded) return;
     occluded = next;
     if (!open) return;
-    if (occluded) void deps.rpc.request('browser.viewHide', undefined).catch(() => undefined);
-    else applyVisibility();
+    if (occluded) void freezeStage();
+    else thawStage();
   };
+
+  /**
+   * Спрятать вложение, оставив на его месте последний кадр страницы.
+   *
+   * Кадр снимается ДО утайки: спрятанное вложение отдаёт пустое полотно. Утайка
+   * идёт сразу за снимком, потому что до неё меню целиком закрыто страницей (она —
+   * слой окна), а снимок без утайки ничего бы не дал: его закрывает тот же слой.
+   */
+  async function freezeStage(): Promise<void> {
+    const id = activeId;
+    const shot = id ? await deps.rpc.request('browser.viewCapture', { id }).catch(() => null) : null;
+    // Пока снимали, меню могли закрыть или человек — сменить вкладку: тогда и прятать нечего.
+    if (!occluded || !open || !id || activeId !== id) return;
+    if (shot?.ok && shot.dataUrl) {
+      snapshot.src = shot.dataUrl;
+      snapshot.hidden = false;
+    }
+    void deps.rpc.request('browser.viewHide', undefined).catch(() => undefined);
+  }
+
+  /** Всплывающее окно ушло: убираем кадр и возвращаем на место живое вложение. */
+  function thawStage(): void {
+    snapshot.hidden = true;
+    snapshot.removeAttribute('src');
+    applyVisibility();
+  }
+
   const observer = new MutationObserver(syncOcclusion);
   observer.observe(document.body, {
     childList: true,
     subtree: true,
-    attributeFilter: ['hidden', 'class'],
+    attributeFilter: ['hidden', 'class', 'style'],
   });
 
   const resizeObserver = new ResizeObserver(scheduleLayout);
