@@ -11,6 +11,7 @@ import {
   type Settings,
 } from '../../shared/api';
 import type { ApplyFailure, FileEdit } from '../../shared/edits';
+import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
 import { resolvePatches } from '../../shared/patch';
 import { compactionBudgetChars, contextUsage, splitTranscript } from '../../shared/context-fit';
 import { contextWindow, modelCapabilities } from '../../shared/providers';
@@ -188,6 +189,45 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   });
   const input = composer.input;
 
+  /* ── команды проекта (`.chui/commands`) ───────────────────────────────────── */
+
+  /**
+   * Готовые запросы этого проекта: файлы лежат на диске, поэтому список приходит
+   * из main. Кэш на панель — он пересобирается при смене папки и когда человек
+   * нажимает `/`, а своих команд ещё нет.
+   */
+  let projectCommandList: ProjectCommand[] = [];
+  let commandsPending = false;
+  /** Список уже спросили: повторять на каждую букву после слэша незачем. */
+  let commandsLoaded = false;
+
+  async function loadProjectCommands(): Promise<void> {
+    // Два нажатия `/` подряд не должны дать два запроса: второй ждёт первый.
+    if (commandsPending) return;
+    commandsPending = true;
+    try {
+      projectCommandList = await deps.rpc.request('ai.commands');
+    } catch {
+      // Проекта нет или каталог не читается — своих команд просто нет.
+      projectCommandList = [];
+    } finally {
+      commandsPending = false;
+      commandsLoaded = true;
+    }
+  }
+
+  /**
+   * `/имя хвост` → текст запроса. Неизвестное имя возвращается как есть: пусть
+   * модель увидит написанное, чем поле молча очистится.
+   */
+  async function expandProjectCommand(written: string): Promise<string> {
+    const invocation = parseCommandInvocation(written);
+    if (!invocation) return written;
+    if (projectCommandList.length === 0) await loadProjectCommands();
+    const command = findCommand(projectCommandList, invocation.name);
+    return command ? expandCommandPrompt(command, invocation.tail) : written;
+  }
+
   /* ── панель изменений, план агента и контекст к вопросу ──────────────────── */
 
   /**
@@ -234,6 +274,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     onMention: (path) => attachments.attachMention(path),
     mentionPaths: () => attachments.mentionPaths(),
     requestMentions: () => attachments.requestMentions(),
+    projectCommands: () => projectCommandList,
+    requestCommands: () => {
+      // Спрашиваем один раз: иначе каждая буква после слэша шла бы в main.
+      if (!commandsLoaded) void loadProjectCommands();
+    },
   });
 
   // Перетаскивание файла на панель чата: тот же результат, что вставка из буфера.
@@ -460,8 +505,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       activeId = (restored ?? sessions[0]!).id;
       syncActiveView();
     },
-    // Корень сменился после старта: список путей для `@` собираем заново.
-    onRootChanged: () => attachments.requestMentions(),
+    // Корень сменился после старта: список путей для `@` собираем заново, а
+    // команды проекта — уже другие файлы.
+    onRootChanged: () => {
+      attachments.requestMentions();
+      // Другая папка — другие файлы: список команд собираем заново.
+      commandsLoaded = false;
+      void loadProjectCommands();
+    },
   });
 
   /** Записать беседы с задержкой: пачка правок даёт один файл. */
@@ -1265,8 +1316,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   async function send(raw: string): Promise<void> {
-    const text = raw.trim();
-    if (!text || busy) return;
+    const written = raw.trim();
+    if (!written || busy) return;
+    // `/имя хвост` — это команда проекта, а не вопрос модели: подставляем её текст.
+    const text = await expandProjectCommand(written);
 
     const session = active();
     const provider = currentProvider();
@@ -1606,6 +1659,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
   // Список путей для `@` собираем заранее: подсказка должна открыться мгновенно.
   attachments.requestMentions();
+  // Команды проекта — тоже заранее: первое `/` покажет их сразу.
+  void loadProjectCommands();
   syncProviderFields();
   syncEffort();
   attachments.render();

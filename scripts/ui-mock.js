@@ -1345,6 +1345,17 @@ module.exports = [
         ...(params.activeUid ? { activeUid: params.activeUid } : {}),
       });
     },
+    // Команды проекта: мок отдаёт одну свою, чтобы меню композера было из чего собрать.
+    // Настоящие лежат в `.chui/commands` проекта — читает их main (`ai/commands.ts`).
+    'ai.commands': () => [
+      {
+        name: 'review',
+        description: 'Проверить diff и предложить правки',
+        prompt: 'Посмотри, что изменено в проекте, и предложи минимальные правки. $ARGUMENTS',
+        path: '/mock/.chui/commands/review.md',
+        scope: 'workspace',
+      },
+    ],
     // Inline-автодополнение: мок молча отдаёт короткую подсказку.
     'ai.complete': async () => ({ text: '// подсказка от мока' }),
     // Сообщение коммита: мок отвечает так, как это делает модель после очистки.

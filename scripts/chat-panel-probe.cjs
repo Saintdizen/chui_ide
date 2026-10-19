@@ -65,6 +65,21 @@ app.whenReady().then(async () => {
   await fs.writeFile(path.join(project, 'README.md'), '# demo\n', 'utf8');
   await fs.mkdir(SHOTS, { recursive: true });
 
+  // Свои команды проекта (`.chui/commands`): их читает main и отдаёт меню
+  // композера. Кладём ДО открытия проекта — список собирается при старте панели.
+  const commandsDir = path.join(project, '.chui', 'commands');
+  await fs.mkdir(commandsDir, { recursive: true });
+  await fs.writeFile(
+    path.join(commandsDir, 'demo.md'),
+    'Проверь демонстрационный проект и ответь одной строкой.',
+    'utf8',
+  );
+  await fs.writeFile(
+    path.join(commandsDir, 'argue.md'),
+    ['---', 'description: Разобрать случай с хвостом', '---', 'Разбери случай: $ARGUMENTS'].join('\n'),
+    'utf8',
+  );
+
   serveRenderer();
   const settings = new SettingsStore(path.join(dir, 'settings.json'));
   const workspace = new WorkspaceService((topic, payload) => pushToRenderers(topic, payload));
@@ -580,6 +595,54 @@ app.whenReady().then(async () => {
     'в футере осталась только карточка композера',
     Array.isArray(extras?.вФутере) && !extras.вФутере.some((name) => /composer-(plan|changes|chips)/.test(name)),
     extras?.вФутере,
+  );
+
+  /* ── свои команды в меню композера ─────────────────────────────────────── */
+
+  // Команда проекта — `.md`-файл в `.chui/commands`. Меню показывает их первыми:
+  // человек завёл их ради этого проекта, и искать их среди встроенных незачем.
+  const slash = await ask(
+    ide,
+    `(() => {
+      const input = document.querySelector('.chat-input');
+      if (!input) return { нет: 'поля' };
+      input.value = '/';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      const items = [...document.querySelectorAll('.composer-menu .composer-menu-item')].map((node) => ({
+        title: node.querySelector('.composer-menu-title')?.textContent ?? '',
+        hint: node.querySelector('.composer-menu-hint')?.textContent ?? '',
+      }));
+      const first = items[0] ?? { title: '', hint: '' };
+      return {
+        титулы: items.map((item) => item.title),
+        своиПервыми: first.hint === 'команда проекта' && first.title.startsWith('/argue'),
+        естьВстроенная: items.some((item) => item.title.startsWith('/explain')),
+      };
+    })()`,
+  );
+  check('меню `/` показывает команду проекта', Boolean(slash.титулы?.some((t) => t.startsWith('/argue'))), slash);
+  check('команда проекта стоит в меню первой', slash.своиПервыми === true, slash);
+  check('встроенные команды остались в меню', slash.естьВстроенная === true, slash);
+
+  const picked = await ask(
+    ide,
+    `(() => {
+      const item = [...document.querySelectorAll('.composer-menu .composer-menu-item')].find((node) =>
+        (node.querySelector('.composer-menu-title')?.textContent ?? '').startsWith('/demo'),
+      );
+      if (!item) return { нет: 'пункта' };
+      item.click();
+      const input = document.querySelector('.chat-input');
+      const value = input.value;
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return { value };
+    })()`,
+  );
+  check(
+    'выбор команды подставил её текст в поле',
+    picked.value === 'Проверь демонстрационный проект и ответь одной строкой.',
+    picked,
   );
 
   /* ── сохранение и восстановление ───────────────────────────────────────── */

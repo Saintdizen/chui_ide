@@ -18,6 +18,7 @@ import {
 } from '../../shared/api';
 import type { AiService } from '../ai/service';
 import { ChatStore } from '../ai/chat-store';
+import { loadCommands } from '../ai/commands';
 import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
 import type { GitService } from '../git/git';
 import type { DebugService } from '../debug/debug';
@@ -1229,6 +1230,11 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('ai.chats.save', async (params) => {
     await chatStore.save(params.root, { conversations: params.conversations, activeUid: params.activeUid });
   });
+
+  // Команды проекта (`.chui/commands`): готовые запросы для меню композера.
+  // Читаем на каждый запрос: файл мог появиться только что, а стоит это два
+  // чтения каталога — держать кэш и промахиваться мимо правки дороже.
+  router.register('ai.commands', () => loadCommands(deps.workspace.rootPath()));
 
   router.attach();
   deps.host.attach();

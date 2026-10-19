@@ -32,6 +32,7 @@ import type { StructuralProjectMatches, StructuralProjectOptions } from './struc
 import type { ExportsQuery, ExportsResult } from './symbol-exports';
 import type { InheritanceQuery, InheritanceResult } from './type-inheritance';
 import type { ProjectPackage } from './monorepo';
+import type { ProjectCommand } from './commands';
 import type { ForgeComment, ForgeInfo, ForgeIssue, ForgeNotification, ForgePipeline } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
 import type { GitStashEntry } from './git-stash';
@@ -2427,6 +2428,11 @@ export interface ChuiMethods {
   'ai.chats.load': { params: { root: string }; result: ChatHistory };
   /** Сохранение бесед: renderer — источник истины, main только пишет на диск. */
   'ai.chats.save': { params: { root: string; conversations: ChatConversation[]; activeUid?: string }; result: void };
+  /**
+   * Команды проекта (`.chui/commands`): готовые запросы для меню композера.
+   * Список нужен интерфейсу, а не модели — в промпт он не идёт.
+   */
+  'ai.commands': { params: void; result: ProjectCommand[] };
 }
 
 export type MethodName = keyof ChuiMethods;

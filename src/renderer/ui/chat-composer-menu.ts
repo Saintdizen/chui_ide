@@ -1,3 +1,5 @@
+import type { ProjectCommand } from '../../shared/commands';
+import { expandCommandPrompt } from '../../shared/commands';
 import { clear, h } from './dom';
 
 /**
@@ -71,6 +73,10 @@ export interface ComposerMenuDeps {
   mentionPaths(): readonly string[] | null;
   /** Попросить собрать список путей (зовётся, когда он ещё пуст). */
   requestMentions(): void;
+  /** Команды проекта (`.chui/commands`); пустой список — их нет или они ещё не пришли. */
+  projectCommands(): readonly ProjectCommand[];
+  /** Пересобрать команды проекта: при смене папки и при первом `/`. */
+  requestCommands(): void;
 }
 
 export interface ComposerMenuView {
@@ -159,18 +165,34 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
 
     if (value.startsWith('/')) {
       const query = value.slice(1).toLowerCase();
-      show(
-        SLASH_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map((item) => ({
-          title: `${item.id} — ${item.title}`,
-          hint: item.hint,
+      // Команды проекта — первыми: они про этот проект, и их ищут осознанно.
+      // Встроенные остаются ниже: пока своих не завели, список тот же, что раньше.
+      const own = deps
+        .projectCommands()
+        .filter((command) => command.name.startsWith(query))
+        .map((command) => ({
+          title: `/${command.name} — ${command.description}`,
+          hint: command.scope === 'global' ? 'команда — общая' : 'команда проекта',
           run: () => {
-            deps.input.value = item.prompt;
+            deps.input.value = expandCommandPrompt(command);
             deps.onAttachBest();
             sync();
             deps.input.focus();
           },
-        })),
-      );
+        }));
+      const builtin = SLASH_COMMANDS.filter((item) => item.id.slice(1).startsWith(query)).map((item) => ({
+        title: `${item.id} — ${item.title}`,
+        hint: item.hint,
+        run: () => {
+          deps.input.value = item.prompt;
+          deps.onAttachBest();
+          sync();
+          deps.input.focus();
+        },
+      }));
+      // Список ещё не пришёл — просим его: следующее нажатие `/` покажет команды.
+      if (own.length === 0) deps.requestCommands();
+      show([...own, ...builtin]);
       return;
     }
 
