@@ -79,6 +79,7 @@ import {
 } from '../../shared/permissions';
 import { MAX_GOAL_CONTINUES, goalContinuePrompt, goalPrompt, parseGoalUpdate, sanitizeGoal } from '../../shared/goal';
 import { parsePlanExitArgs, planExitResult, type PlanExitDecision } from '../../shared/plan-exit';
+import { formatSubagentReport, runWithLimit, subagentBatchSize, type SubagentFailure } from '../../shared/subagents';
 import {
   MAX_RUN_CALLS_PER_STEP,
   MAX_RUN_STEPS,
@@ -1137,35 +1138,70 @@ export class AiService {
     // Подзадача (`task`): отдельный агент со своим контекстом. Его расход и шаги
     // прибавляем к прогону — иначе наблюдаемость показала бы только шаги основного
     // агента, а токены подзадачи выпали бы из итога беседы.
+    /** Одна подзадача: общий путь для одиночного вызова и для пула. */
+    const runOne = async ({ description, prompt }: { description: string; prompt: string }) => {
+      const sub = await this.runSubAgent({
+        description,
+        prompt,
+        providerId: request.providerId,
+        provider,
+        model: request.model,
+        temperature,
+        maxTokens,
+        reasoningEffort,
+        signal,
+        host,
+        context,
+        windowTokens,
+        // Подзадача видит тот же контекст (с каталогом навыков) и может читать тело.
+        skills,
+        // Набор тот же, что у основного агента: сужение не расширяется подзадачей.
+        toolPreset,
+      });
+      // Счётчики общие на прогон: обновляются в одном потоке после `await`, гонки нет.
+      runUsage = addUsage(runUsage, sub.usage);
+      runSteps += sub.steps;
+      runToolCalls += sub.toolCalls;
+      // Подзадача идёт своим контекстом: её шаги в общий список не подмешать,
+      // поэтому в трассе она — отдельная строка с числом шагов и вызовов.
+      runSubagents.push({ description, steps: sub.steps, toolCalls: sub.toolCalls });
+      return sub;
+    };
+    /**
+     * Пул подзадач: запускаем не больше `MAX_PARALLEL` сразу.
+     *
+     * Подзадачи независимы по определению (зависимые надо звать отдельными
+     * вызовами), поэтому общий `signal` и общий провайдер — всё, что им нужно.
+     * Одна упавшая подзадача не отменяет остальные: отчёт собирается по каждой
+     * отдельно, а провал называется словами — иначе треть работы пропадёт молча.
+     */
     toolContext.subagent = {
-      run: async ({ description, prompt }) => {
-        const sub = await this.runSubAgent({
-          description,
-          prompt,
-          providerId: request.providerId,
-          provider,
-          model: request.model,
-          temperature,
-          maxTokens,
-          reasoningEffort,
-          signal,
-          host,
-          context,
-          windowTokens,
-          // Подзадача видит тот же контекст (с каталогом навыков) и может читать тело.
-          skills,
-          // Набор тот же, что у основного агента: сужение не расширяется подзадачей.
-          toolPreset,
-        });
-        runUsage = addUsage(runUsage, sub.usage);
-        runSteps += sub.steps;
-        runToolCalls += sub.toolCalls;
-        // Подзадача идёт своим контекстом: её шаги в общий список не подмешать,
-        // поэтому в трассе она — отдельная строка с числом шагов и вызовов.
-        runSubagents.push({ description, steps: sub.steps, toolCalls: sub.toolCalls });
-        return sub.outcome;
+      run: async ({ description, prompt }) => (await runOne({ description, prompt })).outcome,
+      runMany: async (tasks) => {
+        // Пул живёт в `shared/subagents.ts`: там же проверено, что он держит
+        // предел и что одна упавшая задача не отменяет остальные.
+        const pool = await runWithLimit(tasks, subagentBatchSize(tasks.length), (task) => runOne(task), { signal });
+
+        const results = pool.done.map((item) => ({
+          description: tasks[item.index]!.description,
+          text: item.value.outcome.detail ?? item.value.outcome.summary,
+        }));
+        const failures: SubagentFailure[] = pool.failed.map((item) => ({
+          description: tasks[item.index]!.description,
+          reason: describeFailure(item.error),
+        }));
+
+        return {
+          ok: results.length > 0,
+          summary:
+            failures.length === 0
+              ? `подзадач: ${results.length} — отчёты ниже`
+              : `подзадач: ${results.length}, не удалось: ${failures.length}`,
+          detail: formatSubagentReport(results, failures),
+        };
       },
     };
+
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
     const coveredReads = new Map<string, Array<{ from: number; to: number }>>();
 
@@ -2181,6 +2217,15 @@ function isLocalEndpoint(baseUrl: string): boolean {
 }
 
 /** Ошибку подключения объясняем словами: пользователь не должен читать стек. */
+/**
+ * Причина провала подзадачи словами. Обычно это `Error` с сообщением, но прийти
+ * может что угодно: `[object Object]` в отчёте модели бесполезен.
+ */
+function describeFailure(error: unknown): string {
+  const text = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  return text.trim() || 'подзадача завершилась с ошибкой без описания';
+}
+
 function describeConnectionError(error: unknown): string {
   // Node прячет причину в `cause`: у `fetch` в сообщении только «fetch failed»,
   // а настоящий код (ECONNREFUSED, ENOTFOUND) лежит уровнем глубже.

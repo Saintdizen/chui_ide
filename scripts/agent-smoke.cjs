@@ -1421,6 +1421,32 @@ app.whenReady().then(async () => {
         String(message.content ?? '').includes('строка один'),
       ),
     );
+    /* 14б. несколько подзадач разом (tasks): идут параллельно, отчёт сводный. */
+    subagentScript = true;
+    subTurn = 0;
+    requested = {
+      name: 'task',
+      args: {
+        tasks: [
+          { description: 'первая', prompt: 'Найди маркер в заметках' },
+          { description: 'вторая', prompt: 'Посмотри, что ещё есть' },
+        ],
+      },
+    };
+    run = await chat(undefined);
+    subagentScript = false;
+    check('пачка подзадач исполнилась', run.results[0]?.ok === true, run.results[0]?.summary);
+    check(
+      'в сводке названы обе подзадачи',
+      String(run.results[0]?.detail ?? '').includes('## первая') &&
+        String(run.results[0]?.detail ?? '').includes('## вторая'),
+      String(run.results[0]?.summary ?? ''),
+    );
+    check(
+      'сводный отчёт ушёл основному агенту',
+      sentToModel(run.bodies[run.bodies.length - 1]).includes('Отчёт подзадачи'),
+    );
+
     /* 15. браузер: выключен по умолчанию, включается настройкой.
        Сам Chromium здесь не поднимаем — вместо него заглушка с тем же
        контрактом: проверяем предложение инструментов, подтверждение и то,

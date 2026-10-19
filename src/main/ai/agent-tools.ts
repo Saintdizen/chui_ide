@@ -35,6 +35,7 @@ import type { ToolPresentedFile } from '../../shared/api';
 import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
+import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
 import { parseToolArguments } from '../../shared/tools';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
@@ -278,6 +279,11 @@ export interface SkillTools {
  */
 export interface SubagentRunner {
   run(params: { description: string; prompt: string }): Promise<ToolOutcome>;
+  /**
+   * Несколько подзадач разом. Одновременность ограничивает сервис (см.
+   * `MAX_PARALLEL`): каждая подзадача — свой прогон модели, то есть деньги.
+   */
+  runMany(tasks: readonly SubagentTask[]): Promise<ToolOutcome>;
 }
 
 /**
@@ -728,9 +734,16 @@ async function ask(ctx: ToolContext, args: Record<string, unknown>): Promise<Too
 async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.subagent) return { ok: false, summary: 'Подзадачи недоступны' };
 
-  const prompt = requireString(args, 'prompt').trim();
-  const description = optionalString(args, 'description')?.trim() || 'подзадача';
-  return ctx.subagent.run({ description, prompt });
+  const request = parseSubagentTasks(args);
+  if (request.error) return { ok: false, summary: 'Не заданы подзадачи', detail: request.error };
+
+  // Одна подзадача идёт прежним путём: лишний слой пула не нужен, а ответ
+  // остаётся ровно тем же, что и раньше, — отчётом одного агента.
+  if (request.tasks.length === 1) {
+    const only = request.tasks[0]!;
+    return ctx.subagent.run({ description: only.description, prompt: only.prompt });
+  }
+  return ctx.subagent.runMany(request.tasks);
 }
 
 /* ── браузер ────────────────────────────────────────────────────────────── */
