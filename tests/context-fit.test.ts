@@ -6,8 +6,11 @@ import {
   COMPACT_MAX_CHARS,
   COMPACT_MIN_CHARS,
   compactionBudgetChars,
+  condenseAppliedCalls,
   condenseCallArguments,
   contextUsage,
+  estimateTextTokens,
+  estimateTokens,
   estimateContextParts,
   estimateMessagesTokens,
   isContextOverflow,
@@ -405,5 +408,74 @@ describe('condenseCallArguments', () => {
 
   it('возвращает исходную строку для не-JSON', () => {
     expect(condenseCallArguments('не json', minChars)).toBe('не json');
+  });
+});
+
+describe('condenseAppliedCalls', () => {
+  const body = 'строка кода\n'.repeat(80);
+  const call = (id: string, name = 'apply_edit') => ({
+    id,
+    name,
+    arguments: JSON.stringify({ edits: [{ path: `src/${id}.ts`, edits: [{ newText: body }] }] }),
+  });
+  const turn = (...calls: ReturnType<typeof call>[]): ChatMessage => ({
+    role: 'assistant',
+    content: 'правлю',
+    toolCalls: calls,
+  });
+
+  it('отпускает тела правок только у исполненных вызовов', () => {
+    const message = turn(call('done'), call('later'));
+    const condensed = condenseAppliedCalls(message, new Set(['done']), 200);
+    const done = condensed.toolCalls?.[0]?.arguments ?? '';
+    const later = condensed.toolCalls?.[1]?.arguments ?? '';
+    expect(done).toContain('применено');
+    expect(done).not.toContain('строка кода');
+    // Второй вызов не применился — его аргументы остаются как были.
+    expect(later).toBe(message.toolCalls?.[1]?.arguments);
+    expect(later).toContain('строка кода');
+  });
+
+  it('путь и прочие поля переживают сжатие', () => {
+    const condensed = condenseAppliedCalls(turn(call('done')), new Set(['done']), 200);
+    expect(condensed.toolCalls?.[0]?.arguments).toContain('src/done.ts');
+    expect(condensed.toolCalls?.[0]?.name).toBe('apply_edit');
+  });
+
+  it('без применённых вызовов сообщение не меняется — и это тот же объект', () => {
+    const message = turn(call('done'));
+    expect(condenseAppliedCalls(message, new Set())).toBe(message);
+    // Вызов исполнен, но сжимать нечего (тело короткое) — тоже исходный объект.
+    const short: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      toolCalls: [{ id: 'a', name: 'create_file', arguments: JSON.stringify({ contents: 'x' }) }],
+    };
+    expect(condenseAppliedCalls(short, new Set(['a']), 200)).toBe(short);
+  });
+
+  it('не трогает сообщения не-ассистента', () => {
+    const tool: ChatMessage = { role: 'tool', content: body, toolCallId: 'x' };
+    expect(condenseAppliedCalls(tool, new Set(['x']))).toBe(tool);
+  });
+});
+
+describe('вес схем инструментов считается по составу строки', () => {
+  // Описания инструментов — кириллица, и в токенах она дороже латиницы примерно
+  // вдвое. Оценка по длине (chars/3.5) занижала вес набора на четверть, и
+  // предохранитель пропускал запрос, который провайдер потом отвергал.
+  const schema = JSON.stringify({
+    name: 'read_file',
+    description: 'Прочитать файл проекта с номерами строк',
+    parameters: { path: { description: 'Абсолютный путь к файлу' } },
+  });
+
+  it('кириллический текст дороже, чем та же длина латиницей', () => {
+    expect(estimateTextTokens(schema)).toBeGreaterThan(estimateTokens(schema.length));
+  });
+
+  it('на латинице обе оценки совпадают', () => {
+    const latin = 'read file with line numbers';
+    expect(estimateTextTokens(latin)).toBe(estimateTokens(latin.length));
   });
 });

@@ -240,7 +240,7 @@ export function trimMessagesToFit(
   }
 
   const marker: ChatMessage | undefined = options.marker ? { role: 'system', content: options.marker } : undefined;
-  const markerTokens = marker ? estimateTokens(marker.content.length) : 0;
+  const markerTokens = marker ? estimateTextTokens(marker.content) : 0;
   const keepRecent = Math.max(1, options.keepRecent ?? 1);
   const headTokens = estimateMessagesTokens(head) + markerTokens;
 
@@ -422,6 +422,12 @@ export class TokenCalibration {
 const CONDENSE_FIELDS = new Set(['newText', 'oldText', 'content', 'contents']);
 
 /**
+ * С какого размера тело правки стоит забывать. Ниже — это одна-две строки:
+ * пометка весит столько же и только мешает читать.
+ */
+export const CONDENSE_MIN_CHARS = 200;
+
+/**
  * Сжать аргументы уже применённого изменения: длинные тела правок заменяем
  * пометкой, путь и прочие поля оставляем. Возвращает исходную строку, если это
  * не JSON или сжимать нечего. `minChars` отсекает мелочь — короткая правка и так
@@ -447,4 +453,36 @@ export function condenseCallArguments(args: string, minChars: number): string {
   };
   const result = walk(parsed.value);
   return changed ? JSON.stringify(result) : args;
+}
+
+/**
+ * Отпустить тела правок уже исполненного хода: заменить их пометкой в тех
+ * вызовах, чьи правки действительно легли в файл.
+ *
+ * Зачем это делать сразу после шага, а не перед отправкой: аргументы прошлых
+ * ходов входят в префикс запроса, а префикс — то, что кеширует провайдер. Если
+ * сжимать задним числом, каждый шаг менял бы середину истории, и кеш слетал бы
+ * с этого места на каждом шаге. Сжали один раз — и дальше префикс стабилен.
+ *
+ * `appliedIds` — id вызовов, чьи правки записаны (см. `ToolOutcome.applied`).
+ * Остальные не трогаем: правку могли отклонить или она осталась в буфере, и
+ * текст ещё понадобится. Возвращаем исходное сообщение, если сжимать нечего —
+ * по ссылке, чтобы не плодить копии на каждом шаге.
+ */
+export function condenseAppliedCalls(
+  message: ChatMessage,
+  appliedIds: ReadonlySet<string>,
+  minChars = CONDENSE_MIN_CHARS,
+): ChatMessage {
+  if (message.role !== 'assistant' || appliedIds.size === 0) return message;
+  const calls = message.toolCalls ?? [];
+  let changed = false;
+  const toolCalls = calls.map((call) => {
+    if (!appliedIds.has(call.id)) return call;
+    const args = condenseCallArguments(call.arguments, minChars);
+    if (args === call.arguments) return call;
+    changed = true;
+    return { ...call, arguments: args };
+  });
+  return changed ? { ...message, toolCalls } : message;
 }

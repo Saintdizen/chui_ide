@@ -65,6 +65,13 @@ export interface ToolOutcome {
   images?: readonly string[];
   /** Файловые операции (создание/удаление/перенос): их показывает панель изменений чата. */
   changes?: ToolFileChange[];
+  /**
+   * Тела правок этого вызова уже в файле: в истории их можно заменить пометкой
+   * (см. `condenseAppliedCalls`). Ставится только там, где запись действительно
+   * состоялась — отклонённая правка или правка, оставшаяся в буфере редактора,
+   * ещё понадобится модели целиком.
+   */
+  applied?: boolean;
 }
 
 /**
@@ -1704,6 +1711,9 @@ async function applyEdit(ctx: ToolContext, args: Record<string, unknown>): Promi
     ok: outcome.ok,
     summary: `применено файлов: ${outcome.applied.length}${outcome.failed.length ? `, с ошибками: ${outcome.failed.length}` : ''}${outcome.tail}`,
     detail: outcome.detail,
+    // Тела правок можно забыть только когда они действительно легли в файлы:
+    // отклонённая или оставшаяся в буфере правка модели ещё понадобится.
+    ...(outcome.ok && (decision.unwritten?.length ?? 0) === 0 ? { applied: true } : {}),
   };
 }
 
@@ -1822,6 +1832,9 @@ async function applyPatch(ctx: ToolContext, args: Record<string, unknown>): Prom
     ok: outcome.ok,
     summary: `применено файлов: ${outcome.applied.length}${outcome.failed.length ? `, с ошибками: ${outcome.failed.length}` : ''}${outcome.tail}`,
     detail: outcome.detail,
+    // Тела правок можно забыть только когда они действительно легли в файлы:
+    // отклонённая или оставшаяся в буфере правка модели ещё понадобится.
+    ...(outcome.ok && (decision.unwritten?.length ?? 0) === 0 ? { applied: true } : {}),
   };
 }
 
@@ -2243,6 +2256,8 @@ async function createFile(workspace: WorkspaceService, args: Record<string, unkn
     summary: `создан ${relative(created, workspace.rootPath())} (${lines} строк)`,
     detail: `Создан файл ${created}.`,
     changes: [{ path: created, kind: 'created', lines }],
+    // Содержимое уже в файле: в истории его можно заменить пометкой.
+    applied: true,
   };
 }
 

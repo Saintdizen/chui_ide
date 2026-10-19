@@ -755,7 +755,15 @@ app.whenReady().then(async () => {
     check('след прогона несёт вес описаний инструментов', typeof tracked === 'number' && tracked > 0, tracked);
     // Больше одного инструмента, но меньше всего списка: значит это вес реально
     // предложенного набора, а не константа по всем 50 инструментам.
-    check('вес соответствует предложенному набору', tracked > 100 && tracked < 9000, tracked);
+    check('вес соответствует предложенному набору', tracked > 100 && tracked < 12000, tracked);
+    // Описания инструментов — кириллица, а она в токенах дороже латиницы примерно
+    // вдвое. Оценка по одной длине (chars/3.5) занижала вес набора на четверть, и
+    // предохранитель пропускал запрос, который провайдер потом отвергал.
+    const offerJson = JSON.stringify(run.bodies[0]?.tools ?? []);
+    check('вес схем считается по составу строки, а не по длине', tracked > Math.ceil(offerJson.length / 3.5), {
+      tracked,
+      по_длине: Math.ceil(offerJson.length / 3.5),
+    });
 
     /* 1ж. потолок на внешние инструменты: описание каждого уходит в КАЖДЫЙ
        запрос, поэтому сервер с сотней инструментов съел бы окно сам. */
@@ -1585,6 +1593,33 @@ app.whenReady().then(async () => {
       'успешная правка отчиталась числом файлов',
       /применено файлов: 1/.test(String(run.results[0]?.summary)),
       run.results[0]?.summary,
+    );
+
+    // Тело правки, легшее в файл, из истории убирается: в контексте оно висело бы
+    // до конца беседы и пересылалось на каждом шаге (правка на 200 строк — около
+    // двух тысяч токенов). В ветке беседы (её видит человек) текст остаётся.
+    const longBody = 'правка\n'.repeat(120);
+    requested = {
+      name: 'apply_patch',
+      args: { patches: [{ path: file, patches: [{ oldText: 'строка 3', newText: longBody }] }] },
+    };
+    run = await chat(patchHost);
+    const nextBody = run.bodies[run.bodies.length - 1] ?? {};
+    const toolArgs = (nextBody.messages ?? [])
+      .flatMap((message) => message.tool_calls ?? [])
+      .map((call) => String(call.function?.arguments ?? ''))
+      .join('\n');
+    check('тело применённой правки из контекста убрано', !toolArgs.includes('правка\nправка'), toolArgs.slice(0, 200));
+    check('на его месте пометка про файл', toolArgs.includes('применено'), toolArgs.slice(0, 200));
+    check('путь правки в контексте остался', toolArgs.includes(path.basename(file)), toolArgs.slice(0, 200));
+    const branchArgs = (run.done.agentMessages ?? [])
+      .flatMap((message) => message.toolCalls ?? [])
+      .map((call) => String(call.arguments))
+      .join('\n');
+    check(
+      'в ветке беседы тело правки целое — человек видит, что было',
+      branchArgs.includes('правка') && !branchArgs.includes('[применено'),
+      branchArgs.slice(0, 160),
     );
 
     // Отказ renderer (якорь не найден) приходит модели текстом, а не «применено 0».

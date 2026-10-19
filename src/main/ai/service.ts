@@ -29,8 +29,9 @@ import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
 import {
+  condenseAppliedCalls,
   estimateMessagesTokens,
-  estimateTokens,
+  estimateTextTokens,
   isContextOverflow,
   TokenCalibration,
   trimMessagesToFit,
@@ -961,7 +962,10 @@ export class AiService {
     // контекст перед отправкой, но шаги агента копят историю уже здесь, и
     // сжатие, которое живёт в renderer, до этого места не достаёт.
     const windowTokens = contextWindow(request.model, settings.ai.contextWindow);
-    const toolsTokens = tools ? estimateTokens(JSON.stringify(tools).length) : 0;
+    // Состав строки важен: описания инструментов — кириллица, а она в токенах
+    // дороже латиницы примерно вдвое. estimateTokens видит только длину и занижал
+    // вес схем на четверть — предохранитель пропускал то, что провайдер отвергнет.
+    const toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;
 
     // Отказ вместо пустого прогона: если описания инструментов (или вместе с
     // запасом под ответ) уже не влезают в окно, шага не получится вовсе —
@@ -1205,6 +1209,8 @@ export class AiService {
       produced.push(assistant);
 
       let didNewWork = false;
+      /** Вызовы, чьи правки уже в файлах: тела правок из истории можно убрать. */
+      const appliedCalls = new Set<string>();
       for (const call of calls) {
         // План — не вызов инструмента в привычном смысле, а обновление чек-листа:
         // рисуем его отдельным событием, но модели всё равно отвечаем role:'tool'.
@@ -1386,6 +1392,20 @@ export class AiService {
             images: outcome.images,
           });
         }
+        // Правки записаны — тела правок в контексте больше не нужны: текст лежит
+        // в файле, а в истории он висел бы до конца беседы и пересылался на каждом
+        // шаге (правка на 200 строк — это около двух тысяч токенов).
+        if (outcome.applied) appliedCalls.add(call.id);
+      }
+
+      // Меняем только сообщение, которое уходит провайдеру: в `produced` (его
+      // видит человек, и оно ложится в файл беседы) остаётся исходный текст.
+      // Делаем это сразу после шага, а не перед отправкой: аргументы прошлых
+      // ходов — часть префикса запроса, а префикс кеширует провайдер. Сжали один
+      // раз — и дальше префикс стабилен, кеш не слетает на каждом шаге.
+      if (appliedCalls.size > 0) {
+        const at = messages.lastIndexOf(assistant);
+        if (at >= 0) messages[at] = condenseAppliedCalls(assistant, appliedCalls);
       }
 
       commitStep();
@@ -1574,7 +1594,7 @@ export class AiService {
       (tool) => SUBAGENT_TOOLS.has(tool.name) && this.canRun(tool, params.host, params.skills !== undefined),
     );
     const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
-    const toolsTokens = tools ? estimateTokens(JSON.stringify(tools).length) : 0;
+    const toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;
 
     // Контекст исполнения подзадачи: те же сервисы, что у основного агента, но
     // без правок, подтверждений и памяти — подзадача ничего не меняет.
