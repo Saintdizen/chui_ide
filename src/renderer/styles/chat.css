@@ -1254,6 +1254,41 @@
   animation: msg-in var(--motion_fast) var(--motion_ease);
 }
 
+/* Секция раскрытой карточки: «Аргументы», «Результат». Заголовок — мелкий и
+   вторичный, чтобы не спорить с содержимым, а действие «Копировать» стоит у
+   правого края и появляется только при наведении на секцию (как под сообщением). */
+.tool-section + .tool-section {
+  margin-top: 8px;
+}
+
+.tool-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+}
+
+.tool-section-title {
+  flex: 1;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+
+.tool-section-head .icon-btn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  opacity: 0;
+  transition: opacity var(--motion_fast) var(--motion_ease);
+}
+
+.tool-section:hover .icon-btn,
+.tool-section-head .icon-btn:focus-visible {
+  opacity: 1;
+}
+
 .tool-summary {
   color: var(--text_color_secondary);
 }

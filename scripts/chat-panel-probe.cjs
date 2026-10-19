@@ -97,11 +97,25 @@ app.whenReady().then(async () => {
   // Всё остальное (поток событий, история, вкладки, запись в файл) — настоящее.
   ai.chat = async (_request, emit) => {
     const text = 'Ответ на вопрос пробы.';
+    emit('tool_start', { id: 'call_probe', name: 'read_file', args: JSON.stringify({ path: '/tmp/probe.txt' }) });
+    // Паузы как у настоящего вызова: между началом и результатом инструмент
+    // работает, и события приходят в разные такты. Один такт на всё — это не наш
+    // случай, и лента такого не обещает.
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    emit('tool_result', {
+      id: 'call_probe',
+      name: 'read_file',
+      ok: true,
+      summary: 'probe.txt: 2 строки',
+      detail: '1 | первая\n2 | вторая',
+      ms: 7,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 120));
     emit('delta', { text });
     return {
       text,
       agentMessages: [{ role: 'assistant', content: text }],
-      trace: { steps: 1, toolCalls: 0, usage: {} },
+      trace: { steps: 1, toolCalls: 1, usage: {} },
     };
   };
   ai.suggestTitle = async () => ({ title: 'Сборка падает на macOS' });
@@ -128,7 +142,25 @@ app.whenReady().then(async () => {
   await workspace.open(project);
 
   const ide = openIdeWindow();
+  // Ошибки консоли окна: слушатель событий RPC живёт в preload, и страница его
+  // ошибок не видит — упавший обработчик иначе промолчал бы.
+  const consoleErrors = [];
+  ide.webContents.on('console-message', (event) => {
+    const level = String(event?.level ?? '');
+    if (level === 'error' || level === '3') consoleErrors.push(String(event?.message ?? ''));
+  });
   await wait(6000);
+  // Ошибки страницы собираем в окно: упавший обработчик события иначе промолчит,
+  // и проверка будет гадать, почему карточка не обновилась.
+  await ask(
+    ide,
+    `(() => {
+      window.__probeErrors = [];
+      window.addEventListener('error', (event) => window.__probeErrors.push(String(event.message)));
+      window.addEventListener('unhandledrejection', (event) => window.__probeErrors.push(String(event.reason)));
+      return true;
+    })()`,
+  );
 
   // Панель ассистента открыта по умолчанию (layout.rightVisible). Если она всё же
   // скрыта — открываем командой из палитры, тем же путём, что и человек.
@@ -811,7 +843,9 @@ app.whenReady().then(async () => {
       return {
         было: before,
         стало: document.querySelector('.chat-tab.is-active .tab-label')?.textContent ?? null,
-        ответ: document.querySelector('.chat-thread .msg-assistant')?.textContent?.slice(0, 40) ?? null,
+        ответ: [...document.querySelectorAll('.chat-thread .msg-assistant')]
+          .map((node) => node.textContent ?? '')
+          .find((text) => text.includes('Ответ на вопрос пробы')) ?? null,
       };
     })()`,
   );
@@ -825,6 +859,57 @@ app.whenReady().then(async () => {
     renamed.стало,
   );
   check('ответ в ленте остался', typeof renamed.ответ === 'string' && renamed.ответ.includes('Ответ'), renamed.ответ);
+
+  /* ── инспектор вызова: аргументы и результат ───────────────────────────── */
+
+  // В строке карточки видно только подпись (путь, запрос, команда). Раскрытая
+  // карточка — разбор вызова: чем позвали и что получили, с копированием обоих.
+  const inspector = await ask(
+    ide,
+    `(async () => {
+      const head = document.querySelector('.tool-card .tool-head');
+      if (!head) return { нет: 'карточки вызова' };
+      head.click();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const card = head.closest('.tool-card');
+      const titles = [...card.querySelectorAll('.tool-section-title')].map((node) => node.textContent ?? '');
+      const args = card.querySelector('.tool-section .tool-raw code')?.textContent ?? '';
+      const sections = [...card.querySelectorAll('.tool-section')].map((node) => ({
+        заголовок: node.querySelector('.tool-section-title')?.textContent ?? '',
+        копирование: Boolean(node.querySelector('.tool-section-head .icon-btn[title="Копировать"]')),
+        естьВывод: Boolean(node.querySelector('.tool-raw')),
+      }));
+      return {
+        titles,
+        args,
+        sections,
+        время: card.querySelector('.tool-time')?.textContent ?? '',
+        ошибки: (window.__probeErrors ?? []).slice(0, 3),
+      };
+    })()`,
+  );
+  check('в карточке две секции: аргументы и результат', (inspector.titles ?? []).length === 2, inspector);
+  check(
+    'секции названы по-человечески',
+    JSON.stringify(inspector.titles) === JSON.stringify(['Аргументы', 'Результат']),
+    inspector.titles,
+  );
+  check(
+    'аргументы показаны развёрнуто, с отступами',
+    typeof inspector.args === 'string' && inspector.args.includes('"path"') && inspector.args.includes('\n'),
+    inspector.args,
+  );
+  check(
+    'у каждой секции есть копирование значком',
+    (inspector.sections ?? []).every((section) => section.копирование === true),
+    inspector.sections,
+  );
+  check('результат показывает вывод', (inspector.sections ?? [])[1]?.естьВывод === true, inspector.sections);
+  check('в строке карточки осталось время вызова', /мс|с$/.test(inspector.время ?? ''), inspector.время);
+  // Ошибки страницы собираются с самого старта окна: упавший обработчик события
+  // иначе промолчал бы, и проверка гадала бы, почему карточка не обновилась.
+  check('в окне нет ошибок страницы', (inspector.ошибки ?? []).length === 0, inspector.ошибки);
+  check('в консоли окна нет ошибок', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
   /* ── сохранение и восстановление ───────────────────────────────────────── */
 

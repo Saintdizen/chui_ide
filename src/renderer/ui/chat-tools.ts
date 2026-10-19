@@ -4,7 +4,8 @@ import { touchedFiles } from '../../shared/tool-files';
 import { highlightInto } from '../core/highlight';
 import { languageFromPath } from '../core/languages';
 import { fileWord, plural } from './chat-text';
-import { basename, h, svgIcon, type IconName } from './dom';
+import { basename, h, pulseOnClick, svgIcon, type IconName } from './dom';
+import { showToast } from './toast';
 import { fileIcon } from './file-icons';
 
 /**
@@ -153,6 +154,59 @@ function summarizeArgs(raw: string): string {
   } catch {
     return raw.trim().slice(0, 80);
   }
+}
+
+/**
+ * Секция раскрытой карточки: аргументы, результат. Заголовок с действием
+ * «Копировать» — значком-кнопкой, как под сообщением: подпись живёт в подсказке,
+ * ряд не шумит.
+ */
+function toolSection(title: string, text: string, body?: HTMLElement): HTMLElement {
+  const section = h('section', { class: 'tool-section' }, toolSectionHead(title, text));
+  if (body) section.appendChild(body);
+  return section;
+}
+
+/** Заголовок секции с действием «Копировать». */
+function toolSectionHead(title: string, text: string): HTMLElement {
+  const copy = h(
+    'button',
+    {
+      class: 'icon-btn',
+      type: 'button',
+      title: 'Копировать',
+      'aria-label': 'Копировать',
+      onClick: () => {
+        void navigator.clipboard.writeText(text).then(
+          () => showToast('Скопировано'),
+          () => showToast('Не удалось скопировать', 'error'),
+        );
+      },
+    },
+    svgIcon('copy', 12),
+  );
+  pulseOnClick(copy);
+  return h('div', { class: 'tool-section-head' }, h('span', { class: 'tool-section-title' }, title), copy);
+}
+
+/**
+ * Аргументы вызова как их видит человек: JSON с отступами. В строке карточки они
+ * сжаты до одной подписи (путь, запрос, маска), а здесь видно всё, включая то,
+ * что в подпись не попало, — иначе непонятно, почему инструмент сделал именно это.
+ * `null` — показывать нечего: пустой объект у инструмента без аргументов.
+ */
+function argsBlock(raw: string): { text: string; body: HTMLElement } | null {
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === '{}') return null;
+  let text = trimmed;
+  try {
+    text = JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    // Не JSON — значит уже текст; показать его честнее, чем молчать.
+  }
+  const code = h('code', {});
+  highlightInto(code, text, 'json');
+  return { text, body: h('pre', { class: 'tool-raw' }, code) };
 }
 
 /** Строка вызова инструмента и её обновление — в одном месте. */
@@ -425,16 +479,28 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
     let outcome: ChatToolResultPayload | null = null;
     const detailLanguage = toolDetailLanguage(call);
 
-    /** Подробности собираем по первому запросу: до ответа инструмента их нет. */
+    /**
+     * Раскрытая карточка — это разбор вызова, а не одна простыня: чем инструмент
+     * позвали, что он ответил и чем кончилось. У инструмента чтения и у команды
+     * одного взгляда мало: в подписи строки видно только путь или команду.
+     */
     const togglePanel = (): void => {
       if (!outcome) return;
       if (panel.childElementCount === 0) {
-        panel.appendChild(h('div', { class: 'tool-summary' }, outcome.summary));
+        const args = argsBlock(call.args);
+        if (args) panel.appendChild(toolSection('Аргументы', args.text, args.body));
+
+        const result = h('section', { class: 'tool-section' });
+        result.appendChild(
+          toolSectionHead('Результат', [outcome.summary, outcome.detail ?? ''].filter(Boolean).join('\n\n')),
+        );
+        result.appendChild(h('div', { class: 'tool-summary' }, outcome.summary));
         if (outcome.detail) {
           const raw = h('code', {});
           highlightInto(raw, outcome.detail, detailLanguage);
-          panel.appendChild(h('pre', { class: 'tool-raw' }, raw));
+          result.appendChild(h('pre', { class: 'tool-raw' }, raw));
         }
+        panel.appendChild(result);
       }
       panel.hidden = !panel.hidden;
       card.classList.toggle('is-open', !panel.hidden);
