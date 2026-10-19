@@ -63,7 +63,7 @@ import type { ReviewStore } from '../project/review-store';
 import type { HistoryStore } from '../project/history-store';
 import { mergeByPriority } from '../../shared/lsp-bundled';
 import { NO_LSP_STATUS } from '../../shared/lsp-status';
-import { EMPTY_INDEX_STATUS } from '../../shared/symbol-index';
+import { EMPTY_INDEX_STATUS, type InheritedResult } from '../../shared/symbol-index';
 import { addressProblem, parseFsAddress, type FsAddress } from '../../shared/fs-address';
 import { MAX_OPEN_BYTES } from '../../shared/large-file';
 import { parseBadgeTheme } from '../../shared/icon-badges';
@@ -1063,6 +1063,19 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     deps.index?.refresh();
     return deps.index?.status() ?? EMPTY_INDEX_STATUS;
   });
+  // Что тип умеет и от кого это унаследовано — по карте, без языкового сервера.
+  // Сервер отвечает на это только для символа под курсором открытого файла.
+  router.register(
+    'index.inherited',
+    (params): InheritedResult =>
+      deps.index?.inherited(params.name) ?? {
+        name: params.name,
+        declared: null,
+        ancestors: [],
+        members: [],
+        phase: 'idle',
+      },
+  );
   // Семантическая подсветка: точные роли от сервера. Ответ разобран в main (там легенда),
   // renderer получает готовые участки и накладывает их поверх своей грамматики.
   router.register('lsp.semanticTokens', (params) => deps.lsp?.semanticTokens(params.path) ?? []);

@@ -17,6 +17,11 @@ import type { FileSymbol } from '../src/shared/lsp-symbols';
 
 const tempDirs: string[] = [];
 
+/** Имена файлов из выдачи: `find` отдаёт абсолютные пути — так по ним открывается файл. */
+function names(hits: readonly { path: string }[]): string[] {
+  return hits.map((hit) => path.basename(hit.path));
+}
+
 const wait = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Дождаться условия: разбор сохранённого файла идёт по таймеру, а не сразу. */
@@ -78,7 +83,7 @@ describe('SymbolIndexer', () => {
     await index.settled();
 
     expect(index.status()).toMatchObject({ phase: 'ready', files: 1, decls: 2 });
-    expect(index.find('Parser')[0]).toMatchObject({ name: 'Parser', path: 'main.py', line: 1 });
+    expect(index.find('Parser')[0]).toMatchObject({ name: 'Parser', path: path.join(root, 'main.py'), line: 1 });
     // Файл другого языка в карту не попал: объявлений в CSS нет, а сервера — тоже.
     expect(index.find('zzz')).toEqual([]);
   });
@@ -143,12 +148,12 @@ describe('SymbolIndexer', () => {
 
     index.refresh();
     await index.settled();
-    expect(index.find('Parser').map((hit) => hit.path)).toEqual(['a.py']);
+    expect(names(index.find('Parser'))).toEqual(['a.py']);
 
     root = two;
     index.refresh();
     await index.settled();
-    expect(index.find('Parser').map((hit) => hit.path)).toEqual(['b.py']);
+    expect(names(index.find('Parser'))).toEqual(['b.py']);
     expect(index.status().root).toBe(two);
   });
 
@@ -170,14 +175,14 @@ describe('SymbolIndexer', () => {
 
     index.refresh();
     await index.settled();
-    expect(index.find('Old').map((hit) => hit.path)).toEqual(['a.py', 'b.py']);
+    expect(names(index.find('Old'))).toEqual(['a.py', 'b.py']);
 
     writeFileSync(path.join(root, 'a.py'), 'class New:\n    pass\n', 'utf8');
     index.noteChanged(path.join(root, 'a.py'));
     await waitFor(() => index.find('New').length > 0);
 
-    expect(index.find('New').map((hit) => hit.path)).toEqual(['a.py']);
-    expect(index.find('Old').map((hit) => hit.path)).toEqual(['b.py']);
+    expect(names(index.find('New'))).toEqual(['a.py']);
+    expect(names(index.find('Old'))).toEqual(['b.py']);
   });
 
   it('удалённый файл уходит из карты', async () => {
@@ -192,6 +197,43 @@ describe('SymbolIndexer', () => {
     rmSync(path.join(root, 'a.py'));
     index.noteChanged(path.join(root, 'a.py'));
     await waitFor(() => index.find('Parser').length === 0);
+  });
+
+  it('объявления зависимостей попадают в карту, но ниже своих', async () => {
+    const root = project({
+      'app.py': 'class Saved:\n    pass\n',
+      'node_modules/lib/index.d.ts': 'export declare class Saved {}\nexport declare function libOnly(): void;\n',
+    });
+    // Скелет по языку: так же отвечает сервер — объявления из текста файла.
+    const outline = async (target: string, language: string): Promise<readonly FileSymbol[]> => {
+      const text = readFileSync(target, 'utf8');
+      const names = [...text.matchAll(/(?:class|function)\s+(\w+)/g)].map((match) => match[1]!);
+      return names.map((name) => ({
+        name,
+        kind: language === 'python' ? 'класс' : 'класс',
+        line: 1,
+        endLine: 1,
+        children: [],
+      }));
+    };
+    const dirs: string[][] = [];
+    const index = new SymbolIndexer({
+      root: () => root,
+      outline,
+      store: new SymbolStore(path.join(root, '.idx')),
+      onDependencyDirs: (list) => dirs.push([...list]),
+    });
+
+    index.refresh();
+    await index.settled();
+
+    expect(index.status()).toMatchObject({ files: 2, dependencyFiles: 1, dependencyPackages: 1 });
+    // Одноимённое своё объявление идёт первым: `Saved` есть и в пакете, и в проекте.
+    expect(names(index.find('Saved'))).toEqual(['app.py', 'index.d.ts']);
+    const [lib] = index.find('libOnly');
+    expect(lib).toMatchObject({ name: 'libOnly', origin: 'dependency', package: 'lib' });
+    // Каталог зависимости назван рабочей папке: оттуда файл можно открыть.
+    expect(dirs[0]).toEqual([path.join(root, 'node_modules', 'lib')]);
   });
 
   it('чужой язык и путь вне проекта — не наше дело', async () => {

@@ -76,13 +76,18 @@ export function createSymbolPicker(deps: SymbolPickerDeps): SymbolPickerView {
 
     matches.forEach((symbol, index) => {
       const dir = symbol.path.slice(0, Math.max(symbol.path.length - basename(symbol.path).length - 1, 0));
+      // У символа из зависимости вместо пути проекта — пакет: `requests` говорит о месте
+      // больше, чем `…/site-packages/requests/sessions.py`.
+      const category = symbol.package
+        ? `${symbol.package}${symbol.container ? ` · ${symbol.container}` : ''}`
+        : (symbol.container ?? dir);
       const item = h(
         'button',
         { class: `palette-item${index === cursor ? ' is-active' : ''}`, type: 'button' },
         svgIcon('file', 13),
         h('span', { class: 'palette-item-title' }, symbol.name),
         h('span', { class: 'palette-item-kind' }, symbol.kind),
-        h('span', { class: 'palette-item-category' }, symbol.container ?? dir),
+        h('span', { class: 'palette-item-category' }, category),
       );
       item.addEventListener('click', () => run(symbol));
       item.addEventListener('mousemove', () => {

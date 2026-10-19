@@ -24,7 +24,7 @@ import type { GitSparseInfo } from './git-sparse';
 import type { GitIdentity, GitSshKey } from './git-identity';
 import type { WorkspaceRoot } from './workspace-roots';
 import type { LspStatus } from './lsp-status';
-import type { SymbolIndexStatus } from './symbol-index';
+import type { InheritedResult, SymbolIndexStatus } from './symbol-index';
 import type { LineProfile } from './line-profile';
 import type { SemanticToken } from './lsp-semantic-tokens';
 import type { FolderCompareResult } from './folder-compare';
@@ -2272,6 +2272,12 @@ export interface ChuiMethods {
   'index.status': { params: void; result: SymbolIndexStatus };
   /** Пересобрать карту символов в фоне: изменившиеся файлы разберутся заново. */
   'index.rebuild': { params: void; result: SymbolIndexStatus };
+  /**
+   * Что тип умеет и от кого это унаследовано: члены самого типа и предков, без тел
+   * и без языкового сервера. Ответ собирается по карте символов (см. `index.status`),
+   * поэтому приходит сразу, а `phase` говорит, стоит ли переспросить позже.
+   */
+  'index.inherited': { params: { name: string }; result: InheritedResult };
   /** Найти в PATH известные языковые серверы и вернуть готовые конфигурации. */
   'lsp.detect': { params: void; result: LspServerConfig[] };
   /**

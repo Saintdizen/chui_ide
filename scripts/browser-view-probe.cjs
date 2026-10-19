@@ -504,7 +504,7 @@ app.whenReady().then(async () => {
   // Агент теперь работает в поделённой странице и НЕ заводит свою.
   const sharedAgent = new AgentBrowser(panel, externalStub, () => true);
   const beforeCount = panel.ids().length;
-  const viaShared = await sharedAgent.open(base + '/third').catch((error) => ({ error: String(error) }));
+  const viaShared = await sharedAgent.open(`${base}/third`).catch((error) => ({ error: String(error) }));
   check(
     'агент получил страницу через общий доступ',
     viaShared.title === 'Третья страница',

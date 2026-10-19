@@ -137,8 +137,32 @@ export class WorkspaceService {
   private readonly contents = new ContentCache();
   /** Есть ли ripgrep в системе: `null` — ещё не выяснили. */
   private ripgrepFound: boolean | null = null;
+  /**
+   * Каталоги установленных зависимостей (`node_modules`, `site-packages`).
+   *
+   * Лежат они, как правило, внутри проекта, но окружение Python бывает и вне его
+   * (`~/.venvs`) — и тогда файл пакета, найденный картой символов, не открывался:
+   * проверка пути отвечала «вне рабочей папки». Читать оттуда нужно (в IDE приходят
+   * смотреть исходники библиотеки), писать — нет: запись по-прежнему только в корни.
+   */
+  private dependencyDirs: string[] = [];
 
   constructor(private readonly onChange: (topic: string, payload: unknown) => void) {}
+
+  /** Каталоги зависимостей: по ним разрешено ЧТЕНИЕ (см. `dependencyDirs`). */
+  setDependencyDirs(dirs: readonly string[]): void {
+    const normalized = dirs.map((dir) => path.resolve(dir));
+    if (
+      normalized.length === this.dependencyDirs.length &&
+      normalized.every((dir, i) => dir === this.dependencyDirs[i])
+    ) {
+      return;
+    }
+    this.dependencyDirs = normalized;
+    // Содержимое прочитанных файлов зависит от набора каталогов: после `npm install`
+    // часть путей могла исчезнуть, и старый кэш ответил бы содержимым, которого нет.
+    this.contents.clear();
+  }
 
   /**
    * Снимок файла перед перезаписью (`save`) или удалением (`delete`) — для
@@ -349,7 +373,8 @@ export class WorkspaceService {
    * подмена одного другим сдвинула бы позиции правок.
    */
   async readFile(filePath: string): Promise<FileContent> {
-    const file = await this.safePath(filePath);
+    // Читать из зависимостей можно (исходники библиотек), писать — нет (см. `safePath`).
+    const file = await this.safePath(filePath, { allowDependency: true });
     const stat = await fs.stat(file).catch(() => null);
     if (!stat?.isFile()) throw new RpcFailure(RpcErrorCode.NotFound, `Файл не найден: ${file}`);
     if (!withinOpenLimit(stat.size)) {
@@ -416,7 +441,7 @@ export class WorkspaceService {
     // Метаданные — единственное, что читаем, поэтому симлинк наружу не запрещаем:
     // так устроены виртуальные окружения (`.venv/bin/python` ссылается на системный
     // интерпретатор), и по этой проверке IDE решает, каким питоном запускать код.
-    const file = await this.safePath(filePath, { allowOutsideSymlink: true });
+    const file = await this.safePath(filePath, { allowOutsideSymlink: true, allowDependency: true });
     const stat = await fs.stat(file).catch(() => null);
     if (!stat) throw new RpcFailure(RpcErrorCode.NotFound, `Путь не найден: ${file}`);
     const kind = stat.isDirectory() ? 'directory' : stat.isSymbolicLink() ? 'symlink' : 'file';
@@ -1139,23 +1164,36 @@ export class WorkspaceService {
    * `allowOutsideSymlink` снимает запрет там, где наружу уходит лишь чтение
    * метаданных (см. `stat`): виртуальные окружения устроены именно так.
    */
-  private async safePath(target: string, options: { allowOutsideSymlink?: boolean } = {}): Promise<string> {
+  private async safePath(
+    target: string,
+    options: { allowOutsideSymlink?: boolean; allowDependency?: boolean } = {},
+  ): Promise<string> {
     this.requireRoot();
     const resolved = path.resolve(target);
     const owner = this.ownerOf(resolved);
-    if (!owner) {
+    // Зависимость разрешена только на чтение и только внутри каталогов, которые назвала
+    // карта символов: иначе открыть исходник библиотеки из списка символов было бы нельзя.
+    const dependency = options.allowDependency ? this.isDependencyPath(resolved) : false;
+    if (!owner && !dependency) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Путь вне рабочей папки');
     }
 
     if (!options.allowOutsideSymlink) {
       const real = await fs.realpath(resolved).catch(() => null);
-      // Симлинк обязан остаться внутри ХОТЯ БЫ ОДНОГО корня области.
-      const inside = this.roots.some((state) => !escapesRoot(state.rootReal, real));
+      // Симлинк обязан остаться внутри ХОТЯ БЫ ОДНОГО корня области (или каталога зависимостей).
+      const inside =
+        this.roots.some((state) => !escapesRoot(state.rootReal, real)) ||
+        (dependency && real !== null && this.isDependencyPath(real));
       if (!inside) {
         throw new RpcFailure(RpcErrorCode.InvalidParams, 'Путь вне рабочей папки (симлинк)');
       }
     }
     return resolved;
+  }
+
+  /** Путь лежит внутри каталога зависимости (или равен ему): оттуда читать можно. */
+  private isDependencyPath(target: string): boolean {
+    return this.dependencyDirs.some((dir) => !escapesRoot(dir, target));
   }
 
   /**

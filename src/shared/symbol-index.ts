@@ -21,7 +21,16 @@ import type { FileSymbol, ProjectSymbol } from './lsp-symbols';
 import { typeDeclarations } from './type-inheritance';
 
 /** Версия формата файла карты: сменили форму записи — старый кэш читаем как пустой. */
-export const INDEX_FORMAT = 1;
+export const INDEX_FORMAT = 2;
+
+/**
+ * Откуда объявление: из кода проекта или из установленной зависимости.
+ *
+ * Разница нужна в показе: свою функцию человек ищет чаще, чем чужую, и в списке она
+ * должна быть выше. Кроме того, чужой файл открывается только на чтение — об этом лучше
+ * знать заранее.
+ */
+export type IndexOrigin = 'project' | 'dependency';
 
 /**
  * Языки, для которых карта собирается. Список короткий намеренно: это два языка,
@@ -56,10 +65,18 @@ export interface IndexDecl {
 
 /** Объявления одного файла вместе с отпечатком его содержимого. */
 export interface IndexedFile {
-  /** Относительный POSIX-путь от корня проекта. */
+  /**
+   * Путь к файлу: у кода проекта — относительный POSIX-путь от корня, у зависимости —
+   * абсолютный. Так потому, что чужие пакеты лежат и вне проекта (окружение в `~/.venvs`),
+   * и относительного пути для них просто нет.
+   */
   path: string;
   /** Язык файла (id из `shared/languages`). */
   language: string;
+  /** Откуда файл: проект или установленная зависимость. */
+  origin: IndexOrigin;
+  /** Пакет, из которого файл (`requests`, `express`); у кода проекта — `null`. */
+  package: string | null;
   /** Размер в байтах: первый признак, что файл изменился. */
   size: number;
   /** Время изменения в миллисекундах: второй признак. */
@@ -80,12 +97,23 @@ export interface SymbolIndexStatus {
   files: number;
   /** Сколько объявлений в карте. */
   decls: number;
+  /** Сколько файлов зависимостей в карте и из скольких пакетов. */
+  dependencyFiles: number;
+  dependencyPackages: number;
   /** Сколько файлов языка осталось вне карты: сервер не ответил или файл слишком велик. */
   skipped: number;
 }
 
 /** Пустая карта: проекта нет. */
-export const EMPTY_INDEX_STATUS: SymbolIndexStatus = { root: null, phase: 'idle', files: 0, decls: 0, skipped: 0 };
+export const EMPTY_INDEX_STATUS: SymbolIndexStatus = {
+  root: null,
+  phase: 'idle',
+  files: 0,
+  decls: 0,
+  dependencyFiles: 0,
+  dependencyPackages: 0,
+  skipped: 0,
+};
 
 /* ── сборка записи по скелету файла ─────────────────────────────────────── */
 
@@ -163,8 +191,10 @@ function simpleBase(base: string): string {
  * Где объявлено имя — все файлы разом, без сервера.
  *
  * Порядок — по тому, насколько имя похоже на запрос: точное совпадение, затем начало
- * имени, затем вхождение. Дальше решают длина имени и путь: короткое имя ближе к тому,
- * что человек имел в виду, а путь делает порядок воспроизводимым.
+ * имени, затем вхождение. Одинаково похожие идут сначала свои, потом из зависимостей:
+ * `run` из проекта человек ищет чаще, чем `run` из чужого пакета. Дальше решают длина
+ * имени и путь: короткое имя ближе к тому, что человек имел в виду, а путь делает
+ * порядок воспроизводимым.
  */
 export function queryIndex(files: Iterable<IndexedFile>, query: string, limit = 50): ProjectSymbol[] {
   const needle = query.trim().toLowerCase();
@@ -174,10 +204,11 @@ export function queryIndex(files: Iterable<IndexedFile>, query: string, limit = 
   for (const file of files) {
     for (const decl of file.decls) {
       const name = decl.name.toLowerCase();
-      const score = name === needle ? 0 : name.startsWith(needle) ? 1 : name.includes(needle) ? 2 : -1;
-      if (score < 0) continue;
+      const match = name === needle ? 0 : name.startsWith(needle) ? 1 : name.includes(needle) ? 2 : -1;
+      if (match < 0) continue;
       found.push({
-        score,
+        // Своё — на шаг выше чужого при той же степени совпадения.
+        score: match * 2 + (file.origin === 'dependency' ? 1 : 0),
         symbol: {
           name: decl.name,
           kind: decl.kind,
@@ -185,6 +216,8 @@ export function queryIndex(files: Iterable<IndexedFile>, query: string, limit = 
           path: file.path,
           line: decl.line,
           column: 1,
+          origin: file.origin,
+          package: file.package,
         },
       });
     }
@@ -296,6 +329,41 @@ export function inheritedMembers(files: Iterable<IndexedFile>, name: string): In
   return result;
 }
 
+/**
+ * Ответ на «что тип умеет и откуда это взялось» — то, что показывают списком.
+ *
+ * Одного списка членов мало: человеку нужно видеть, от кого тип это получил, и уметь
+ * перейти к предку. Поэтому здесь и цепочка предков, и место объявления самого типа.
+ */
+export interface InheritedResult {
+  /** Имя, про которое спросили. */
+  name: string;
+  /** Где объявлен сам тип; `null` — в карте его нет (опечатка, чужой язык, не собран). */
+  declared: IndexType | null;
+  /** Предки по цепочке: прямые, затем их предки. */
+  ancestors: string[];
+  /** Своё и унаследованное, без повторов: своё перекрывает родительское. */
+  members: IndexMember[];
+  /** Состояние карты: по нему видно, стоит ли ждать и спросить снова. */
+  phase: SymbolIndexStatus['phase'];
+}
+
+/** Собрать ответ про наследование типа по карте. */
+export function inheritedFor(
+  files: Iterable<IndexedFile>,
+  name: string,
+  phase: SymbolIndexStatus['phase'] = 'ready',
+): InheritedResult {
+  const all = [...files];
+  return {
+    name,
+    declared: findTypes(all, name)[0] ?? null,
+    ancestors: ancestorsOf(all, name),
+    members: inheritedMembers(all, name),
+    phase,
+  };
+}
+
 /* ── чтение кэша ───────────────────────────────────────────────────────── */
 
 /**
@@ -307,6 +375,8 @@ export function sanitizeIndexedFile(raw: unknown): IndexedFile | null {
   const value = raw as {
     path?: unknown;
     language?: unknown;
+    origin?: unknown;
+    package?: unknown;
     size?: unknown;
     mtime?: unknown;
     decls?: unknown;
@@ -325,6 +395,8 @@ export function sanitizeIndexedFile(raw: unknown): IndexedFile | null {
   return {
     path: value.path,
     language: typeof value.language === 'string' ? value.language : '',
+    origin: value.origin === 'dependency' ? 'dependency' : 'project',
+    package: typeof value.package === 'string' && value.package ? value.package : null,
     size: value.size,
     mtime: value.mtime,
     decls,

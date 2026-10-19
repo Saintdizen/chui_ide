@@ -5,13 +5,16 @@ import type { FileSymbol, ProjectSymbol } from '../../shared/lsp-symbols';
 import { findEntryPoints, isTestFile } from '../../shared/project-scan';
 import {
   basesByLine,
+  inheritedFor,
   isIndexedLanguage,
   queryIndex,
   toIndexDecls,
   type IndexedFile,
+  type InheritedResult,
   type SymbolIndexStatus,
 } from '../../shared/symbol-index';
 import { listProjectFiles } from '../project/scan';
+import { findDependencyRoots, listDependencyFiles } from './dependencies';
 import type { SymbolStore } from './store';
 
 /**
@@ -37,6 +40,9 @@ const MAX_PARSE_PER_RUN = 2000;
 /** Файл крупнее этого в карту не берём: объявлений там мало, а чтение дорогое. */
 const MAX_FILE_BYTES = 512 * 1024;
 
+/** Сколько файлов зависимостей разбираем за один прогон: проект важнее чужих пакетов. */
+const MAX_DEPENDENCY_PARSE_PER_RUN = 600;
+
 /** Как часто сохранять промежуточный результат: сбой посреди обхода не должен терять всё. */
 const SAVE_EVERY = 40;
 
@@ -56,6 +62,17 @@ export interface SymbolIndexDeps {
   /** Скелет файла у языкового сервера: `null` — сервера нет или он не умеет. */
   outline(path: string, languageId: string, text: string): Promise<readonly FileSymbol[] | null>;
   store: SymbolStore;
+  /**
+   * Окружение Python проекта: интерпретатор и каталог окружения. Окружение бывает и вне
+   * проекта (общее в `~/.venvs`), поэтому путь нужен отдельно, а не выводится из корня.
+   */
+  python?: () => { venvDir: string | null };
+  /**
+   * Каталоги зависимостей (пакеты `node_modules`, `site-packages`). Рабочая папка по ним
+   * разрешает чтение: без этого щелчок по символу из пакета упирался бы в «путь вне
+   * рабочей папки» — в том числе у окружения, лежащего вне проекта.
+   */
+  onDependencyDirs?: (dirs: readonly string[]) => void;
 }
 
 export class SymbolIndexer {
@@ -73,11 +90,26 @@ export class SymbolIndexer {
 
   constructor(private readonly deps: SymbolIndexDeps) {}
 
-  /** Что карта знает сейчас. */
+  /** Что карта знает сейчас: проект и зависимости считаются отдельно. */
   status(): SymbolIndexStatus {
     let decls = 0;
-    for (const file of this.files.values()) decls += file.decls.length;
-    return { root: this.root, phase: this.phase, files: this.files.size, decls, skipped: this.skipped };
+    let dependencyFiles = 0;
+    const packages = new Set<string>();
+    for (const file of this.files.values()) {
+      decls += file.decls.length;
+      if (file.origin !== 'dependency') continue;
+      dependencyFiles += 1;
+      if (file.package) packages.add(file.package);
+    }
+    return {
+      root: this.root,
+      phase: this.phase,
+      files: this.files.size,
+      decls,
+      dependencyFiles,
+      dependencyPackages: packages.size,
+      skipped: this.skipped,
+    };
   }
 
   /**
@@ -109,7 +141,25 @@ export class SymbolIndexer {
    * ответ неполный — но он есть, и это лучше пустого списка.
    */
   find(query: string, limit = 50): ProjectSymbol[] {
-    return queryIndex(this.files.values(), query, limit);
+    const symbols = queryIndex(this.files.values(), query, limit);
+    const root = this.root;
+    if (!root) return symbols;
+    // Код проекта хранится относительно корня, зависимость — абсолютным путём: по нему
+    // открывается файл, и для чужого пакета вне проекта другого пути нет.
+    return symbols.map((symbol) =>
+      path.isAbsolute(symbol.path) ? symbol : { ...symbol, path: path.join(root, ...symbol.path.split('/')) },
+    );
+  }
+
+  /**
+   * Что тип умеет и от кого это унаследовано — по карте, без сервера.
+   *
+   * Иерархию типов умеет и сервер, но только для символа под курсором открытого файла
+   * и только у части серверов. Карта отвечает на тот же вопрос по всему проекту сразу
+   * и мгновенно: имя взято из текста, а не из позиции в открытом документе.
+   */
+  inherited(name: string): InheritedResult {
+    return inheritedFor(this.files.values(), name, this.phase);
   }
 
   /**
@@ -194,6 +244,11 @@ export class SymbolIndexer {
     this.files.set(relative, {
       path: relative,
       language,
+      // Правленый файл мог быть и чужим: `node_modules` лежит внутри проекта, и
+      // наблюдатель за корнем сообщает о правках в нём так же. Признак берём из старой
+      // записи — иначе пакет стал бы «кодом проекта» и поднялся бы в выдаче.
+      origin: known?.origin ?? 'project',
+      package: known?.package ?? null,
       size: stat.size,
       mtime,
       decls: toIndexDecls(symbols, (line) => bases.get(line) ?? []),
@@ -288,6 +343,8 @@ export class SymbolIndexer {
       next.set(relative, {
         path: relative,
         language,
+        origin: 'project',
+        package: null,
         size: stat.size,
         mtime,
         decls: toIndexDecls(symbols, (line) => bases.get(line) ?? []),
@@ -301,10 +358,81 @@ export class SymbolIndexer {
       }
     }
 
+    // Зависимости — вторым заходом: проект уже в карте, и если обход прервётся здесь,
+    // потеряются только чужие объявления, а не свои.
+    const dependencies = await this.dependencyPass(root, cached, next);
+    skipped += dependencies.skipped;
+
     this.files = next;
     this.skipped = skipped;
     this.phase = 'ready';
     await this.deps.store.save(root, [...next.values()]);
+  }
+
+  /**
+   * Обход зависимостей: пакеты `node_modules` и `site-packages` окружения Python.
+   *
+   * Границы заданы в `dependencies.ts` — файлов на пакет и всего; здесь только разбор.
+   * Зависимости кэшируются по абсолютному пути: они лежат и вне проекта, а обновляются
+   * реже своего кода (`npm install`), поэтому второй прогон читает их с диска кэша.
+   */
+  private async dependencyPass(
+    root: string,
+    cached: Map<string, IndexedFile>,
+    next: Map<string, IndexedFile>,
+  ): Promise<{ skipped: number }> {
+    const roots = await findDependencyRoots({ root, venvDir: this.deps.python?.().venvDir ?? null });
+    // Чужой файл должен открываться по щелчку в списке символов — даже если окружение
+    // лежит вне проекта. Рабочей папке говорим, где такие каталоги: чтение по ним
+    // разрешается, запись — нет.
+    this.deps.onDependencyDirs?.(roots.map((entry) => entry.dir));
+
+    let skipped = 0;
+    let parsed = 0;
+    for (const file of await listDependencyFiles(roots)) {
+      if (this.deps.root() !== root) return { skipped };
+      const stat = await fs.stat(file.path).catch(() => null);
+      if (!stat?.isFile()) continue;
+
+      const mtime = Math.floor(stat.mtimeMs);
+      const known = cached.get(file.path);
+      if (known && known.size === stat.size && known.mtime === mtime) {
+        next.set(file.path, known);
+        continue;
+      }
+      // Бюджет зависимостей свой и скромный: свои объявления нужнее чужих.
+      if (parsed >= MAX_DEPENDENCY_PARSE_PER_RUN) {
+        if (known) next.set(file.path, known);
+        continue;
+      }
+      if (stat.size > MAX_FILE_BYTES) {
+        skipped += 1;
+        continue;
+      }
+
+      const text = await fs.readFile(file.path, 'utf8').catch(() => null);
+      if (text === null) continue;
+      parsed += 1;
+
+      const symbols = await this.deps.outline(file.path, file.language, text).catch(() => null);
+      if (symbols === null) {
+        skipped += 1;
+        continue;
+      }
+
+      const bases = basesByLine(text, file.language);
+      next.set(file.path, {
+        path: file.path,
+        language: file.language,
+        origin: 'dependency',
+        package: file.package,
+        size: stat.size,
+        mtime,
+        decls: toIndexDecls(symbols, (line) => bases.get(line) ?? []),
+      });
+    }
+
+    return { skipped };
   }
 }
 

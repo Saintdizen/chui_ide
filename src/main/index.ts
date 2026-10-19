@@ -22,7 +22,7 @@ import { projectEnv } from './project-env';
 import { SandboxService } from './sandbox/sandbox';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { WINDOW_BACKGROUND } from '../shared/colors';
-import { activationForInterpreter, pythonInterpreterFor } from './python/environments';
+import { activationForInterpreter, pythonInterpreterFor, venvDirOfPython } from './python/environments';
 import { SessionStore } from './session-store';
 import { ProjectConfigStore } from './project-config';
 import { ReviewStore } from './project/review-store';
@@ -250,6 +250,16 @@ if (!app.requestSingleInstanceLock()) {
       root: () => workspace.rootPath(),
       outline: (target, languageId, text) => lsp.outline(target, languageId, text),
       store: new SymbolStore(path.join(app.getPath('userData'), 'symbol-index')),
+      // Окружение Python нужно карте, чтобы найти `site-packages`: оно бывает и вне
+      // проекта (общее в `~/.venvs`), и от корня путь к нему не выводится.
+      python: () => {
+        const root = workspace.rootPath();
+        const interpreter = pythonInterpreterFor(root, settings.get().run.pythonPath);
+        return { venvDir: interpreter ? venvDirOfPython(interpreter) : null };
+      },
+      // По этим каталогам рабочая папка разрешает чтение: щелчок по символу из пакета
+      // открывает исходник библиотеки, даже если пакет лежит вне проекта.
+      onDependencyDirs: (dirs) => workspace.setDependencyDirs(dirs),
     });
     // Сервер отвечает точно и по всему проекту, карта — мгновенно и без него:
     // в поиске символов они дополняют друг друга.

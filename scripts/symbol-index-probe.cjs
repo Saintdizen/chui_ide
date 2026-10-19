@@ -56,6 +56,14 @@ async function demoProject() {
     'export class PageView {\n  render(): string {\n    return "x";\n  }\n}\n',
     'utf8',
   );
+  // Зависимость в node_modules: объявления берутся из неё, а не из своего кода.
+  await fs.mkdir(path.join(dir, 'node_modules', 'widget-kit', 'lib'), { recursive: true });
+  await fs.writeFile(path.join(dir, 'node_modules', 'widget-kit', 'package.json'), '{ "name": "widget-kit" }', 'utf8');
+  await fs.writeFile(
+    path.join(dir, 'node_modules', 'widget-kit', 'lib', 'index.d.ts'),
+    'export declare class DependencyWidget {\n  draw(): void;\n}\n',
+    'utf8',
+  );
   return dir;
 }
 
@@ -87,10 +95,14 @@ app.whenReady().then(async () => {
 
   const dir = path.join(root, '.chui_ide', 'symbol-index');
   const store = new SymbolStore(dir);
+  let dependencyDirs = [];
   const index = new SymbolIndexer({
     root: () => root,
     outline: (target, languageId, text) => lsp.outline(target, languageId, text),
     store,
+    onDependencyDirs: (dirs) => {
+      dependencyDirs = dirs;
+    },
   });
 
   const started = Date.now();
@@ -98,7 +110,22 @@ app.whenReady().then(async () => {
   await index.settled();
   const status = index.status();
   console.log(`  сборка карты заняла ${Date.now() - started} мс`);
-  check('карта собрана по обоим языкам', status.phase === 'ready' && status.files >= 3 && status.decls >= 4, status);
+  check('карта собрана по обоим языкам', status.phase === 'ready' && status.files >= 4 && status.decls >= 5, status);
+  check('зависимости в карте: файлы и пакеты', status.dependencyFiles >= 1 && status.dependencyPackages >= 1, {
+    files: status.dependencyFiles,
+    packages: status.dependencyPackages,
+  });
+  const fromPackage = index.find('DependencyWidget');
+  check(
+    'объявление из node_modules найдено и знает свой пакет',
+    fromPackage.length === 1 && fromPackage[0].package === 'widget-kit' && fromPackage[0].origin === 'dependency',
+    fromPackage,
+  );
+  check(
+    'каталог пакета назван рабочей папке — оттуда можно открыть файл',
+    dependencyDirs.some((dir) => dir.endsWith(path.join('node_modules', 'widget-kit'))),
+    dependencyDirs,
+  );
   check(
     'объявления Python и TypeScript в карте',
     index.find('Parser').length > 0 && index.find('PageView').length > 0,
