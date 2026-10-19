@@ -33,6 +33,7 @@ describe('набор инструментов агента', () => {
       'search',
       'codebase_search',
       'search_docs',
+      'read_skill',
       'find_references',
       'go_to_definition',
       'rename_symbol',

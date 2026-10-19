@@ -35,6 +35,7 @@ import {
   trimMessagesToFit,
 } from '../../shared/context-fit';
 import { formatMemory } from '../../shared/memory';
+import { formatSkillCatalog } from '../../shared/skills';
 import {
   cleanCompletion,
   INLINE_MAX_CHARS,
@@ -62,6 +63,7 @@ import { sandboxNote } from '../../shared/sandbox';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
 import { addUsage } from '../../shared/usage';
 import { ProjectMemory } from './project-memory';
+import { createSkillLibrary, type SkillLibrary } from './skills';
 import type { SandboxService } from '../sandbox/sandbox';
 import { RpcFailure } from '../ipc/router';
 import { scanProject } from '../project/scan';
@@ -75,6 +77,7 @@ import {
   type Linter,
   type McpRunner,
   type SymbolSearch,
+  type SkillTools,
   type TerminalAgent,
   type TestRunner,
   type ToolContext,
@@ -137,6 +140,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'search',
   'codebase_search',
   'search_docs',
+  'read_skill',
   'find_references',
   'go_to_definition',
   'project_map',
@@ -167,8 +171,7 @@ const READ_ONLY_TOOLS = new Set([
   'search',
   'codebase_search',
   'search_docs',
-  'codebase_search',
-  'search_docs',
+  'read_skill',
   'find_references',
   'go_to_definition',
   'project_map',
@@ -198,6 +201,7 @@ const SUBAGENT_TOOLS = new Set<string>([
   'search',
   'codebase_search',
   'search_docs',
+  'read_skill',
   'find_references',
   'go_to_definition',
   'project_map',
@@ -616,7 +620,9 @@ export class AiService {
 
     // Карта проекта нужна там, где агент работает с проектом; в «Вопросе»
     // инструментов нет, и обход дерева за наши деньги был бы лишним.
-    const context = await this.buildWorkspaceContext(useTools || planMode);
+    // Навыки читаются один раз на прогон: каталог нужен и в промпте, и инструменту.
+    const skills = createSkillLibrary(this.workspace.rootPath());
+    const context = await this.buildWorkspaceContext(useTools || planMode, skills);
     if (context) messages.push({ role: 'system', content: context });
     // Контекст, который пользователь приложил сам (выделение, файл, ошибки),
     // едет отдельным сообщением: в самом вопросе он мешал бы его читать.
@@ -653,8 +659,12 @@ export class AiService {
       );
 
     // Предлагаем модели только то, что реально может исполнить эта сборка.
+    // Навыки спрашиваем заранее: read_skill без единого навыка — шаг впустую.
+    const hasSkills = useTools && (await skills.list()).length > 0;
     const available = useTools
-      ? AGENT_TOOLS.filter((tool) => this.canRun(tool, host) && (!planMode || PLAN_MODE_TOOLS.has(tool.name)))
+      ? AGENT_TOOLS.filter(
+          (tool) => this.canRun(tool, host, hasSkills) && (!planMode || PLAN_MODE_TOOLS.has(tool.name)),
+        )
       : [];
 
     // Внешние инструменты (MCP) добавляем к нашим. В режиме плана их нет: что
@@ -684,6 +694,7 @@ export class AiService {
       forget: (query, scope) => this.memory.forget(this.workspace.rootPath(), query, scope),
     };
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
+    if (hasSkills) toolContext.skills = skills;
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
     // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
     // в момент вызова: он мог появиться уже после старта приложения.
@@ -796,6 +807,8 @@ export class AiService {
           host,
           context,
           windowTokens,
+          // Подзадача видит тот же контекст (с каталогом навыков) и может читать тело.
+          skills,
         });
         runUsage = addUsage(runUsage, sub.usage);
         runSteps += sub.steps;
@@ -1115,6 +1128,8 @@ export class AiService {
     host: ChatHostBridge | undefined;
     context: string | null;
     windowTokens: number;
+    /** Навыки прогона: каталог подзадача видит, тело читает инструментом. */
+    skills?: SkillTools;
   }): Promise<{ outcome: ToolOutcome; steps: number; toolCalls: number; usage: ChatUsage }> {
     const settings = this.settings.get();
     const compressOutput = settings.ai.compressOutput !== false;
@@ -1125,7 +1140,9 @@ export class AiService {
     if (params.context) messages.push({ role: 'system', content: params.context });
     messages.push({ role: 'user', content: `Подзадача «${params.description}»:\n\n${params.prompt}` });
 
-    const available = AGENT_TOOLS.filter((tool) => SUBAGENT_TOOLS.has(tool.name) && this.canRun(tool, params.host));
+    const available = AGENT_TOOLS.filter(
+      (tool) => SUBAGENT_TOOLS.has(tool.name) && this.canRun(tool, params.host, params.skills !== undefined),
+    );
     const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
     const toolsTokens = tools ? estimateTokens(JSON.stringify(tools).length) : 0;
 
@@ -1141,6 +1158,7 @@ export class AiService {
     if (this.git) subContext.git = this.git;
     if (this.symbols) subContext.symbols = this.symbols;
     if (this.linter) subContext.linter = this.linter;
+    if (params.skills) subContext.skills = params.skills;
     const host = params.host;
     if (host) subContext.diagnostics = (path) => host.getDiagnostics(path);
     const webSearch = settings.ai.webSearch;
@@ -1313,7 +1331,7 @@ export class AiService {
     return !webSearchNeedsKey(search.provider) || Boolean(this.settings.resolveWebSearchKey());
   }
 
-  private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined): boolean {
+  private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined, hasSkills = false): boolean {
     if (tool.name === 'apply_edit') return host?.applyEdits !== undefined;
     if (tool.name === 'apply_patch') return host?.applyPatches !== undefined;
     if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
@@ -1349,6 +1367,8 @@ export class AiService {
     // Память проекта живёт в main и доступна всегда — подтверждений не требует:
     // заметка обратима (её снимает `forget`).
     if (tool.name === 'remember' || tool.name === 'forget') return true;
+    // Навыки — файлы проекта: инструмент предлагаем только когда есть что читать.
+    if (tool.name === 'read_skill') return hasSkills;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     // Браузер: включается настройкой (как веб-поиск), а действия на странице
     // спрашивают подтверждение — значит, без подключённого окна их не предлагаем.
@@ -1405,7 +1425,7 @@ export class AiService {
     }
   }
 
-  private async buildWorkspaceContext(withMap: boolean): Promise<string | null> {
+  private async buildWorkspaceContext(withMap: boolean, skills?: SkillLibrary): Promise<string | null> {
     const root = this.workspace.rootPath();
     if (!root) return null;
 
@@ -1440,6 +1460,11 @@ export class AiService {
         // файла нет — это нормально
       }
     }
+    // Навыки — после правил: правила действуют всегда, а навык подгружается по
+    // надобности. Здесь только каталог: тело агент просит инструментом read_skill.
+    // Без инструментов каталог не нужен: прочитать навык будет нечем.
+    const catalog = formatSkillCatalog(withMap && skills ? await skills.list() : []);
+    if (catalog) parts.push(catalog);
     return parts.join('\n\n');
   }
 }

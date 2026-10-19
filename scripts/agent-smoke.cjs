@@ -21,8 +21,10 @@
  * 15. браузер (browser_*): выключен по умолчанию, действия спрашивают подтверждение,
  *     снимок страницы доезжает до модели текстом;
  * 16. песочница: команды и тесты идут в контейнер, а без движка — отказ, не откат на хост;
- * 17. правки по якорю (apply_patch): позиций не требуется, но нужен renderer, который их считает;
- * 18. вес описаний инструментов в следе прогона, потолок на внешние инструменты
+ * 17. навыки (read_skill): в промпте только каталог (имя и строка), тело — по вызову;
+ *     без навыков инструмент не предлагается вовсе;
+ * 18. правки по якорю (apply_patch): позиций не требуется, но нужен renderer, который их считает;
+ * 19. вес описаний инструментов в следе прогона, потолок на внешние инструменты
  *     и отказ вместо пустого прогона, когда инструменты не влезают в окно.
  *
  *   npm run smoke:agent
@@ -1209,7 +1211,40 @@ app.whenReady().then(async () => {
 
     settings.ai.browser = { enabled: false, executable: '', headless: true };
 
-    /* 17. правки по якорю (apply_patch): позиций нет, фрагмент ищет документ.
+    /* 17. навыки: в промпте только каталог, тело — по требованию.
+       Правила проекта читаются целиком в каждый запрос, и файл про выпуск версии
+       съедал бы контекст даже при правке одной строки. Навык платит за себя
+       тогда, когда он нужен: имя и одна строка в промпте, тело — инструментом. */
+    await fs.mkdir(path.join(dir, '.chui', 'skills', 'release'), { recursive: true });
+    await fs.writeFile(
+      path.join(dir, '.chui', 'skills', 'release', 'SKILL.md'),
+      ['---', 'description: Как выпускать версию', '---', `Шаги выпуска: проверь ${MARKER}`].join('\n'),
+      'utf8',
+    );
+
+    requested = { name: 'read_skill', args: { name: 'release' } };
+    run = await chat(undefined);
+    check('с навыком read_skill предложен модели', run.toolNames.includes('read_skill'), run.toolNames);
+    const firstPrompt = (run.bodies[0]?.messages ?? [])
+      .filter((message) => message.role === 'system')
+      .map((message) => String(message.content ?? ''))
+      .join('\n');
+    check('каталог навыков ушёл в промпт', firstPrompt.includes('- release — Как выпускать версию'));
+    // Главное отличие от правил проекта: тело в промпт НЕ попадает.
+    check('тело навыка в промпт не попало', !firstPrompt.includes('Шаги выпуска'));
+    check(
+      'тело навыка ушло модели только после вызова',
+      String(run.results[0]?.detail ?? '').includes(`Шаги выпуска: проверь ${MARKER}`),
+      run.results[0]?.detail,
+    );
+
+    // Без навыков инструмент не предлагается: лишний инструмент стоит токенов в каждом запросе.
+    await fs.rm(path.join(dir, '.chui'), { recursive: true, force: true });
+    requested = { name: 'read_file', args: { path: file } };
+    run = await chat(undefined);
+    check('без навыков read_skill не предлагается', !run.toolNames.includes('read_skill'), run.toolNames);
+
+    /* 18. правки по якорю (apply_patch): позиций нет, фрагмент ищет документ.
        Само разрешение якорей живёт в renderer и проверено юнит-тестами
        (tests/patch.test.ts); здесь — маршрутизация инструмента: когда он
        предлагается, что уходит в renderer и как виден отказ. */

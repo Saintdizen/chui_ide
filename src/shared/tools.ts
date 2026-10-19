@@ -20,6 +20,7 @@ export type AgentToolName =
   | 'search'
   | 'codebase_search'
   | 'search_docs'
+  | 'read_skill'
   | 'find_references'
   | 'go_to_definition'
   | 'rename_symbol'
@@ -217,6 +218,21 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         limit: { type: 'number', description: 'Сколько разделов вернуть (по умолчанию 6, максимум 20).' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'read_skill',
+    side: 'main',
+    description:
+      'Прочитать навык проекта целиком: сценарий работы, который в списке навыков виден ' +
+      'только одной строкой. Вызывай, когда задача совпала с описанием навыка (выпуск версии, ' +
+      'проверки, свой порядок работы), — а не на всякий случай и не дважды.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Имя навыка из списка, например `release`.' },
+      },
+      required: ['name'],
     },
   },
   {
