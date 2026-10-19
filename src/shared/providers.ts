@@ -103,6 +103,56 @@ export function findProviderPreset(id: string): ProviderPreset | undefined {
   return PROVIDER_PRESETS.find((preset) => preset.id === id);
 }
 
+/* ── список моделей у провайдера ─────────────────────────────────────────── */
+
+/**
+ * Разобрать ответ эндпоинта моделей. Форматов в жизни больше одного:
+ *
+ *   OpenAI-совместимый:    { data: [{ id: "gpt-4o" }, …] }
+ *   Anthropic:             { data: [{ id: "claude-…", display_name: … }] }
+ *   Ollama и часть шлюзов: { models: [{ name: "llama3" }, …] } или просто ["a", "b"]
+ *
+ * Раньше разбор был зашит в провайдерах и понимал только первый вид: сервер вроде
+ * Ollama отвечал нормально, а в настройках было «список пуст» — и человек решал,
+ * что дело в ключе или адресе. Непонятное — пустой список, а не выдуманная модель.
+ */
+export function parseModelIds(payload: unknown): string[] {
+  const pick = (item: unknown): string => {
+    if (typeof item === 'string') return item.trim();
+    if (typeof item !== 'object' || item === null) return '';
+    const record = item as Record<string, unknown>;
+    // `id` — OpenAI и Anthropic, `name` — Ollama, `model` — часть шлюзов.
+    for (const key of ['id', 'name', 'model']) {
+      const value = record[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+  };
+
+  let list: unknown[] = [];
+  if (Array.isArray(payload)) list = payload;
+  else if (typeof payload === 'object' && payload !== null) {
+    const record = payload as Record<string, unknown>;
+    for (const key of ['data', 'models']) {
+      if (Array.isArray(record[key])) {
+        list = record[key] as unknown[];
+        break;
+      }
+    }
+  }
+
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const item of list) {
+    const id = pick(item);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  // По алфавиту: список в настройках не должен прыгать между проверками.
+  return ids.sort((a, b) => a.localeCompare(b));
+}
+
 /* ── возможности модели ─────────────────────────────────────────────────── */
 
 /**

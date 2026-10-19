@@ -1,6 +1,7 @@
 import { RpcErrorCode, type ChatMessage, type ChatStreamDone, type ChatToolCall } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
 import { fetchWithRetry } from '../../shared/retry';
+import { parseModelIds } from '../../shared/providers';
 import { netFetch } from '../net/proxy';
 import { describeHttpError, safeText } from './openai-compatible';
 import type { AiProvider, StreamChatHandlers, StreamChatParams } from './provider';
@@ -65,11 +66,8 @@ export class AnthropicProvider implements AiProvider {
         detail,
       );
     }
-    const payload = (await response.json()) as { data?: Array<{ id?: unknown }> };
-    return (payload.data ?? [])
-      .map((item) => item.id)
-      .filter((id): id is string => typeof id === 'string')
-      .sort((a, b) => a.localeCompare(b));
+    // Формы ответа у серверов разные (см. parseModelIds), поэтому разбор общий.
+    return parseModelIds(await response.json());
   }
 
   async streamChat(

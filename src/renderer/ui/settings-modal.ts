@@ -395,17 +395,42 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       statusText,
     );
 
-    // Модель выбирается из списка, а не вводится руками: меньше опечаток.
+    // Модель выбирается из списка: меньше опечаток, чем при ручном вводе.
     const models = [...new Set([...(provider?.models ?? []), ...testedModels])];
     const currentModel = ai.activeModel ?? provider?.defaultModel ?? models[0] ?? '';
     const modelOptions = models.map((model) => ({ value: model, label: model }));
     if (currentModel && !models.includes(currentModel))
       modelOptions.unshift({ value: currentModel, label: currentModel });
 
-    const modelField: Child =
+    // Модель выбирается из списка, а рядом можно вписать id руками: сервер может
+    // не ответить на /models (старая сборка, шлюз, закрытый эндпоинт), и тогда
+    // список пуст — но работать с моделью всё равно надо. Ручной ввод сохраняет
+    // ту же настройку, что и выбор из списка, поэтому модель одна, а не «две».
+    const manualModel = h('input', {
+      class: 'field-input',
+      type: 'text',
+      spellcheck: 'false',
+      placeholder: 'или впишите id модели вручную — например gpt-4o-mini',
+    }) as HTMLInputElement;
+    manualModel.value = models.includes(currentModel) ? '' : currentModel;
+    manualModel.addEventListener('change', () => {
+      const value = manualModel.value.trim();
+      if (value) void patch({ ai: { activeModel: value } });
+    });
+
+    const modelField: Child = h(
+      'div',
+      // Столбик: список и поле ручного ввода стоят друг под другом, как в .field.
+      { class: 'field-row is-column' },
       modelOptions.length > 0
         ? selectInput(modelOptions, currentModel, (value) => void patch({ ai: { activeModel: value } }))
-        : h('div', { class: 'field-hint' }, 'Список пуст — нажмите «Проверить подключение»');
+        : h(
+            'div',
+            { class: 'field-hint' },
+            'Список пуст: сервер не отдал модели. Впишите id вручную — или нажмите «Проверить подключение».',
+          ),
+      manualModel,
+    );
 
     /** Проверка = единственное действие, которое и ключ сохранит, и модели подтянет. */
     async function runTest(): Promise<void> {
