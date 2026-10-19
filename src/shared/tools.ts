@@ -42,6 +42,7 @@ export type AgentToolName =
   | 'delete_file'
   | 'move_file'
   | 'update_plan'
+  | 'update_goal'
   | 'ask'
   | 'task'
   | 'browser_open'
@@ -667,6 +668,28 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['steps'],
+    },
+  },
+  {
+    name: 'update_goal',
+    side: 'main',
+    description:
+      'Поставить или закрыть цель работы — то, что нужно довести до конца, а не ответить за один ход. ' +
+      'Поставь её, когда задача многошаговая и её стоит помнить весь разговор; цель переживает ход ' +
+      'и уходит в каждый следующий запрос. Закрой её вызовом с done: true, когда достигнута: ' +
+      'пока цель открыта, прогон продолжается сам.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goal: {
+          type: 'string',
+          description: 'Цель одной фразой: что должно получиться. Не задано — текст цели не меняется.',
+        },
+        done: {
+          type: 'boolean',
+          description: 'true — цель достигнута. false или пусто — работа продолжается.',
+        },
+      },
     },
   },
   {

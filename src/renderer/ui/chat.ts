@@ -33,6 +33,7 @@ import { createChatComposer } from './chat-composer';
 import { createComposerMenu } from './chat-composer-menu';
 import { createChangesPanel } from './chat-changes';
 import { createPlanPanel } from './chat-plan';
+import { createGoalPanel } from './chat-goal';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
 import { createAskPrompt, createCommandApproval, createEditReview, type ApprovalHost } from './chat-approvals';
@@ -275,6 +276,20 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     onSave: () => void saveTouched(),
   });
   const planPanel = createPlanPanel();
+  /**
+   * Цель работы. В отличие от плана не прячется по концу прогона: открытая цель
+   * остаётся над композером, пока её не закроют модель или человек — иначе
+   * непонятно, почему следующее действие агента началось само.
+   */
+  const goalPanel = createGoalPanel({
+    onClose: () => {
+      const session = active();
+      if (!session.goal) return;
+      session.goal = { ...session.goal, done: true };
+      goalPanel.hide();
+      scheduleSave();
+    },
+  });
 
   // Контекст, который пользователь прикладывает к вопросу (выделение, файл,
   // пометки, картинки, `@`-упоминания), и полоса чипов живут в отдельном модуле.
@@ -457,6 +472,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     input.value = next.draft;
     attachments.render();
     renderChanges();
+    goalPanel.render(next.goal ?? null);
     renderTabs();
     syncSessionInfo();
 
@@ -565,6 +581,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         session.compacted = Boolean(conversation.context);
         session.usage = conversation.usage;
         session.trace = conversation.trace;
+        session.goal = conversation.goal;
         renderHistory(session);
       }
       if (sessions.length === 0) createSession();
@@ -593,6 +610,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     input.value = next.draft;
     attachments.render();
     renderChanges();
+    // Цель принадлежит беседе, а панель над полем одна — показываем цель той,
+    // что открыта: у соседней вкладки может быть своя, и путать их нельзя.
+    goalPanel.render(next.goal ?? null);
     renderTabs();
     syncSessionInfo();
   }
@@ -1104,7 +1124,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // План, изменённые файлы и приложенный контекст — ВНУТРИ карточки композера, над
   // полем ввода: они относятся к вопросу, который человек набирает, а не к беседе.
   // Порядок стопки — сверху вниз: план, изменения, чипы.
-  composer.extras.append(planPanel.element, changesPanel.element, attachments.element);
+  composer.extras.append(goalPanel.element, planPanel.element, changesPanel.element, attachments.element);
 
   const element = h('div', { class: 'chat' }, tabs.element, tabs.searchBar, body, footer);
 
@@ -1669,6 +1689,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     messageHost: (session) => currentTurn(session),
     scrollToEnd: (session) => scrollToEnd(session),
     renderPlan: (steps) => planPanel.render(steps),
+    setGoal: (goal, session) => {
+      // Цель пишем в СВОЮ беседу: прогон мог идти в фоновой вкладке, а панель
+      // показывает активную. Перерисовываем только если она и есть активная.
+      session.goal = goal ?? undefined;
+      if (session.id === activeId) goalPanel.render(goal);
+      scheduleSave();
+    },
     hidePlan: () => planPanel.hide(),
     renderChanges,
     setBusy,

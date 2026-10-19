@@ -819,6 +819,44 @@
   margin-bottom: 0;
 }
 
+.composer-goal .goal-card {
+  margin-bottom: 0;
+}
+
+/* Строка цели: то, ради чего идёт разговор. В отличие от плана она не
+   сворачивается — это одна фраза, и она объясняет, почему агент не закончил. */
+.goal-card {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 5px 6px 5px 8px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+}
+
+.goal-card > .icon {
+  flex: 0 0 auto;
+  color: var(--accent_fill);
+}
+
+/* Текст цели — одна строка с многоточием: длинная цель иначе съела бы композер.
+   Полный текст виден в подсказке, а правят его модель или новая постановка. */
+.goal-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.goal-close {
+  flex: 0 0 auto;
+}
+
 /* Чек-лист плана агента. */
 .plan-card {
   margin-bottom: 6px;
@@ -1549,11 +1587,13 @@
 /* Панели изменений и плана внутри карточки не несут своего внешнего отступа:
    его даёт слот, а рамку/подложку — они сами. */
 .composer-box > .composer-extras > .composer-changes,
-.composer-box > .composer-extras > .composer-plan {
+.composer-box > .composer-extras > .composer-plan,
+.composer-box > .composer-extras > .composer-goal {
   padding: 0;
 }
 
 /* Появление панелей в футере — мягкий подъём снизу: они вырастают из композера. */
+.composer-goal:not([hidden]),
 .composer-plan:not([hidden]),
 .composer-changes:not([hidden]) {
   animation: msg-in var(--motion_base) var(--motion_ease);

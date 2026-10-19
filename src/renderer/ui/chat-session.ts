@@ -1,4 +1,4 @@
-import type { ChatAttachment, ChatMessage, ChatRunTrace, ChatUsage, ToolFileChange } from '../../shared/api';
+import type { ChatAttachment, ChatGoal, ChatMessage, ChatRunTrace, ChatUsage, ToolFileChange } from '../../shared/api';
 import type { ToggledFile } from './chat-changes';
 
 /**
@@ -47,4 +47,10 @@ export interface ChatSession {
    * прогоном и переживает перезапуск — по нему видно, во сколько обошлась беседа.
    */
   trace?: ChatRunTrace;
+  /**
+   * Цель работы: то, что агент доводит до конца, а не отвечает за один ход.
+   * Живёт в беседе, а не в прогоне, — поэтому переживает и ход, и перезапуск.
+   * Закрытая цель остаётся здесь же: по ней видно, ради чего шла работа.
+   */
+  goal?: ChatGoal;
 }

@@ -454,6 +454,10 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       case 'update_plan':
         // План не исполняется здесь: его показывает service отдельным событием.
         return { ok: true, summary: 'план обновлён' };
+      case 'update_goal':
+        // Цель — состояние беседы, а не действие: её разбирает service, чтобы
+        // закрытие цели и продолжение прогона шли одним путём.
+        return { ok: true, summary: 'цель обновлена' };
       case 'ask':
         return await ask(ctx, parsed.value);
       case 'task':

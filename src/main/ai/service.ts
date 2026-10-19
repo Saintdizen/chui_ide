@@ -75,6 +75,7 @@ import {
   sanitizePermission,
   type PermissionPreset,
 } from '../../shared/permissions';
+import { MAX_GOAL_CONTINUES, goalContinuePrompt, goalPrompt, parseGoalUpdate, sanitizeGoal } from '../../shared/goal';
 import { addUsage } from '../../shared/usage';
 import { ProjectMemory } from './project-memory';
 import { createSkillLibrary, type SkillLibrary } from './skills';
@@ -698,6 +699,9 @@ export class AiService {
         ? sanitizePermission(request.permission)
         : permissionFromAutoApprove(request.autoApprove);
     const flags = permissionFlags(permission);
+    // Цель работы приходит из беседы, а не от модели: это то, что человек поручил.
+    // Пустая — цели нет; длинную обрезаем, она едет в каждый запрос.
+    const requestGoal = sanitizeGoal(request.goal);
     // Текущие права запоминаем на сервисе: дальше их можно менять на лету.
     this.livePermission = permission;
 
@@ -735,6 +739,10 @@ export class AiService {
           .join('\n'),
       });
     else messages.push({ role: 'system', content: ASK_PROMPT });
+    // Цель — часть рамки запроса, а не текущего вопроса: она едет в системном
+    // сообщении, чтобы модель отличала «чего от меня хотят вообще» от «о чём
+    // спросили сейчас». В «Вопросе» и «Плане» её нет: там нечего доводить до конца.
+    if (requestGoal && useTools && !planMode) messages.push({ role: 'system', content: goalPrompt(requestGoal) });
 
     messages.push(...request.messages);
 
@@ -910,6 +918,18 @@ export class AiService {
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
     const coveredReads = new Map<string, Array<{ from: number; to: number }>>();
 
+    /**
+     * Цель прогона: ставится человеком (в запросе) или моделью (`update_goal`)
+     * и живёт дольше одного хода. Пока она открыта, законченный ход — не финал:
+     * прогон продолжает сам, но не больше `MAX_GOAL_CONTINUES` раз, иначе
+     * недостижимая цель жгла бы токены в петле.
+     */
+    let goalText = requestGoal ?? '';
+    let goalDone = false;
+    let goalContinues = 0;
+    /** Работа в этом прогоне шла: без неё продолжать нечего. */
+    let didWork = false;
+
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
 
@@ -948,7 +968,25 @@ export class AiService {
       const calls = done.toolCalls ?? [];
       runToolCalls += calls.length;
       if (calls.length === 0) {
-        produced.push({ role: 'assistant', content: done.text });
+        const answer: ChatMessage = { role: 'assistant', content: done.text };
+        produced.push(answer);
+        // Цель открыта, а ход кончился без инструментов: модель решила, что
+        // закончила. Цель — это условие окончания, а не пожелание, поэтому
+        // говорим прямо, что работа не закрыта, и даём следующий шаг. Человека
+        // в историю не подмешиваем: это служебная реплика прогона, а не его ход.
+        // Шаг напоследок не тратим: продолжение без запаса шагов кончилось бы
+        // обрывом «достигнут лимит шагов», а не работой.
+        if (goalText && !goalDone && didWork && !planMode && goalContinues < MAX_GOAL_CONTINUES && step + 1 < steps) {
+          goalContinues += 1;
+          messages.push(answer);
+          messages.push({ role: 'user', content: goalContinuePrompt(goalText, goalContinues, MAX_GOAL_CONTINUES) });
+          emit(ChatStreamEvent.Goal, {
+            goal: { text: goalText, done: false },
+            continued: goalContinues,
+            limit: MAX_GOAL_CONTINUES,
+          });
+          continue;
+        }
         return {
           text,
           finishReason,
@@ -981,6 +1019,35 @@ export class AiService {
           messages.push(toolMessage);
           produced.push(toolMessage);
           didNewWork = true;
+          continue;
+        }
+
+        // Цель — не вызов инструмента, а состояние беседы (как план). Модель
+        // может поставить её сама, когда задача оказалась многошаговой, и закрыть,
+        // когда работа кончилась: закрытие видит человек, и оно останавливает
+        // автопродолжение.
+        if (call.name === 'update_goal') {
+          const update = parseGoalUpdate(call.arguments);
+          let note = 'Цель не изменена: нечего применять.';
+          if (update?.text) {
+            goalText = update.text;
+            goalDone = update.done === true;
+            note = goalDone ? `Цель закрыта: ${goalText}` : `Цель поставлена: ${goalText}`;
+            emit(ChatStreamEvent.Goal, { goal: { text: goalText, done: goalDone } });
+          } else if (update?.done !== undefined && goalText) {
+            goalDone = update.done;
+            note = goalDone ? `Цель закрыта: ${goalText}` : `Цель снова открыта: ${goalText}`;
+            emit(ChatStreamEvent.Goal, { goal: { text: goalText, done: goalDone } });
+          }
+          const toolMessage: ChatMessage = {
+            role: 'tool',
+            toolCallId: call.id,
+            name: call.name,
+            content: note,
+          };
+          messages.push(toolMessage);
+          produced.push(toolMessage);
+          didWork = true;
           continue;
         }
 
@@ -1043,6 +1110,7 @@ export class AiService {
             coveredReads.clear();
           }
           didNewWork = true;
+          didWork = true;
         }
         emit(ChatStreamEvent.ToolResult, {
           id: call.id,

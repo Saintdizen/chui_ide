@@ -265,6 +265,9 @@ app.whenReady().then(async () => {
     return {
       streamed,
       done,
+      // Все события прогона как есть: часть проверок смотрит не на отдельный
+      // вид события, а на их последовательность (например, продолжения по цели).
+      events,
       bodies: bodies.map((body) => ({ ...body })),
       starts: events.filter(([event]) => event === 'tool_start').map(([, payload]) => payload),
       results: events.filter(([event]) => event === 'tool_result').map(([, payload]) => payload),
@@ -1363,6 +1366,57 @@ app.whenReady().then(async () => {
       'несшедшийся якорь виден модели с причиной',
       run.results[0]?.ok === false && String(run.results[0]?.detail ?? '').includes('не найден'),
       run.results[0]?.detail,
+    );
+    /* 19. цель с продолжением: пока цель открыта, законченный ход — не финал.
+       Прогон продолжает сам, но не больше MAX_GOAL_CONTINUES раз, а закрытая
+       цель останавливает продолжение сразу. */
+    requested = { name: 'read_file', args: { path: file } };
+    run = await chat(undefined, true, false, undefined, { goal: 'Довести сборку до зелёного' });
+    check(
+      'цель ушла модели системной строкой',
+      (run.bodies[0]?.messages ?? []).some(
+        (message) => message.role === 'system' && String(message.content).includes('Довести сборку до зелёного'),
+      ),
+    );
+    // Первый ход — инструмент, дальше модель отвечает текстом, не закрывая цель:
+    // каждый такой ответ продолжается сам.
+    check('открытая цель продолжает прогон сама', run.bodies.length > 2, run.bodies.length);
+    check(
+      'в продолжении модель видит, что цель не закрыта',
+      (run.bodies.at(-1)?.messages ?? []).some(
+        (message) => message.role === 'user' && /Цель ещё не закрыта/.test(String(message.content)),
+      ),
+    );
+    const continues = run.events.filter(([event]) => event === 'goal').map(([, payload]) => payload.continued);
+    check(
+      'событий продолжения не больше потолка',
+      continues.every((value) => value > 0 && value <= 3) && new Set(continues).size === continues.length,
+      continues,
+    );
+    check('продолжений не больше трёх', continues.length <= 3 && run.bodies.length <= 1 + 3 + 1, {
+      продолжений: continues.length,
+      запросов: run.bodies.length,
+    });
+
+    // Без цели тот же сценарий кончается первым ответом: «шаг и ответ».
+    requested = { name: 'read_file', args: { path: file } };
+    run = await chat(undefined);
+    check('без цели прогон не продолжается сам', run.bodies.length === 2, run.bodies.length);
+
+    // Цель закрыта моделью — продолжения нет, а событие говорит, что она закрыта.
+    requested = { name: 'update_goal', args: { goal: 'Довести сборку до зелёного', done: true } };
+    run = await chat(undefined, true, false, undefined, { goal: 'Довести сборку до зелёного' });
+    const goals = run.events.filter(([event]) => event === 'goal').map(([, payload]) => payload);
+    check(
+      'закрытие цели видно событием',
+      goals.some((payload) => payload.goal?.done === true),
+      goals,
+    );
+    check('закрытая цель не продолжает прогон', run.bodies.length === 2, run.bodies.length);
+    check(
+      'модели сказано, что цель закрыта',
+      /Цель закрыта/.test(String(run.bodies.at(-1)?.messages?.at(-1)?.content ?? '')),
+      run.bodies.at(-1)?.messages?.at(-1)?.content,
     );
   } catch (error) {
     failed = true;

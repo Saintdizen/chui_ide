@@ -55,6 +55,9 @@ export function serializeSession(session: ChatSession): ChatConversation {
     ...(compacted || session.transcript.length === 0 ? { context: session.history.map(copy) } : {}),
     ...(session.usage ? { usage: { ...session.usage } } : {}),
     ...(session.trace ? { trace: { ...session.trace, usage: { ...session.trace.usage } } } : {}),
+    // Цель переживает перезапуск: иначе окно, закрытое посреди работы, теряло бы
+    // условие, ради которого она шла, и агент начинал бы следующий ход с нуля.
+    ...(session.goal ? { goal: { ...session.goal } } : {}),
   };
 }
 

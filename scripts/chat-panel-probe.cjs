@@ -112,6 +112,9 @@ app.whenReady().then(async () => {
       ms: 7,
     });
     emit('delta', { text });
+    // Цель с продолжением: main поставил её и продолжил прогон сам. Событие идёт
+    // после текста — как в настоящем прогоне, где ход кончился, а цель осталась.
+    emit('goal', { goal: { text: 'Довести сборку до зелёного', done: false }, continued: 1, limit: 3 });
     return {
       text,
       agentMessages: [{ role: 'assistant', content: text }],
@@ -911,6 +914,38 @@ app.whenReady().then(async () => {
   check('в окне нет ошибок страницы', (inspector.ошибки ?? []).length === 0, inspector.ошибки);
   check('в консоли окна нет ошибок', consoleErrors.length === 0, consoleErrors.slice(0, 3));
 
+  /* ── цель работы ───────────────────────────────────────────────────────── */
+
+  // Цель виднее плана и живёт дольше: она остаётся над полем, пока её не закроют.
+  const goal = await ask(
+    ide,
+    `(() => {
+      const card = document.querySelector('.composer-goal');
+      const text = card?.querySelector('.goal-text');
+      const close = card?.querySelector('.goal-close');
+      return {
+        есть: Boolean(card) && card.hidden === false,
+        текст: text?.textContent ?? '',
+        подсказка: card?.querySelector('.goal-card')?.getAttribute('title') ?? '',
+        кнопкаЗакрыть: close?.tagName === 'BUTTON' && close.classList.contains('icon-btn') === true,
+        подсказкаКнопки: close?.getAttribute('title') ?? '',
+        надПолем: card ? card.getBoundingClientRect().bottom <= (document.querySelector('.chat-input')?.getBoundingClientRect().top ?? 0) : false,
+      };
+    })()`,
+  );
+  check('цель показана над полем ввода', goal.есть === true && goal.надПолем === true, goal);
+  check('текст цели виден', goal.текст === 'Довести сборку до зелёного', goal.текст);
+  check(
+    'у цели есть своя подсказка',
+    typeof goal.подсказка === 'string' && goal.подсказка.toLowerCase().includes('цель'),
+    goal.подсказка,
+  );
+  check(
+    'закрыть цель можно значком с подсказкой',
+    goal.кнопкаЗакрыть === true && goal.подсказкаКнопки === 'Закрыть цель',
+    { кнопка: goal.кнопкаЗакрыть, подсказка: goal.подсказкаКнопки },
+  );
+
   /* ── сохранение и восстановление ───────────────────────────────────────── */
 
   // Вторая беседа: к этому месту в пробе вкладок ровно одна, так что проверяем на двух.
@@ -980,6 +1015,36 @@ app.whenReady().then(async () => {
     было: before.активная,
     стало: restored.активная,
   });
+
+  // Цель живёт в беседе, а не в прогоне: после перезапуска она на месте.
+  check(
+    'цель записана в файл беседы',
+    saved.conversations.some((item) => item.goal?.text === 'Довести сборку до зелёного'),
+    saved.conversations.map((item) => item.goal ?? null),
+  );
+  // Активной поднялась вторая беседа, а цель была у первой: переключаемся на неё.
+  const restoredGoal = await ask(
+    second,
+    `(async () => {
+      const tabs = [...document.querySelectorAll('.chat-tab-list .chat-tab')];
+      const вПустойНет = document.querySelector('.composer-goal')?.hidden === true;
+      tabs[0]?.click();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const card = document.querySelector('.composer-goal');
+      const text = card?.querySelector('.goal-text')?.textContent ?? '';
+      card?.querySelector('.goal-close')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return {
+        уСвоейБеседы: text,
+        вПустойНет,
+        скрылась: document.querySelector('.composer-goal')?.hidden === true,
+      };
+    })()`,
+  );
+  // Цель принадлежит беседе, а не окну: у второй вкладки её нет и быть не должно.
+  check('в беседе без цели панели нет', restoredGoal.вПустойНет === true, restoredGoal);
+  check('цель пережила переоткрытие окна', restoredGoal.уСвоейБеседы === 'Довести сборку до зелёного', restoredGoal);
+  check('значок закрывает цель', restoredGoal.скрылась === true, restoredGoal);
 
   console.log(`\n[проба] снимок: ${shotFile}`);
 

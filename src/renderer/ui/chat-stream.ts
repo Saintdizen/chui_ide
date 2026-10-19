@@ -2,6 +2,7 @@ import {
   ChatStreamEvent,
   type ChatAttachment,
   type ChatDeltaPayload,
+  type ChatGoalPayload,
   type ChatMessage,
   type ChatPlanPayload,
   type ChatReasoningPayload,
@@ -60,6 +61,8 @@ export interface StreamHost {
   scrollToEnd(session: ChatSession): void;
   /** Показать шаги плана агента. */
   renderPlan(steps: ChatPlanPayload['steps']): void;
+  /** Показать цель работы (или спрятать, когда она закрыта). */
+  setGoal(goal: ChatGoalPayload['goal'], session: ChatSession): void;
   /** Спрятать план (генерация кончилась). */
   hidePlan(): void;
   /** Перерисовать панель изменений после файловых операций инструмента. */
@@ -195,6 +198,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             useTools: modes.useTools,
             permission: modes.permission,
             planMode: modes.planMode,
+            // Открытая цель едет с каждым шагом прогона: агент мог поставить её
+            // сам на первом шаге, и продолжение обязано её видеть.
+            ...(session.goal && !session.goal.done ? { goal: session.goal.text } : {}),
             attachments,
           },
           (event, payload) => {
@@ -206,6 +212,24 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             if (event === ChatStreamEvent.Plan) {
               host.renderPlan((payload as ChatPlanPayload).steps);
               activity.state('строит план…');
+              return;
+            }
+            if (event === ChatStreamEvent.Goal) {
+              const update = payload as ChatGoalPayload;
+              host.setGoal(update.goal, session);
+              // Продолжение по цели: ответ уже был, но работа не закрыта —
+              // индикатор говорит, что это не новый вопрос, а тот же.
+              if (update.continued && update.limit) {
+                activity.state(`продолжаю · ${update.continued}/${update.limit}`);
+                // Текст продолжения — отдельный сегмент: иначе два ответа
+                // слипнутся в один абзац, и будет не видно, где модель
+                // останавливалась.
+                flushSegment();
+                buffer = '';
+                segment = h('div', { class: 'msg-body' });
+                messageEl.insertBefore(segment, activity.element);
+                host.scrollToEnd(session);
+              }
               return;
             }
             if (event === ChatStreamEvent.Delta) {

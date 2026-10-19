@@ -100,6 +100,21 @@ describe('sanitizeConversations', () => {
     expect(result[2]?.trace).toBeUndefined();
   });
 
+  // Цель переживает перезапуск вместе с беседой, поэтому она часть файла. Текст
+  // проверяем общим правилом, а флаг — строго: «да» строкой это не «закрыто».
+  it('цель переносим только с непустым текстом, флаг — настоящим boolean', () => {
+    const result = sanitizeConversations([
+      { goal: { text: '  Довести   сборку до зелёного ', done: true } },
+      { goal: { text: 'Собрать релиз', done: 'да' } },
+      { goal: { text: '   ', done: false } },
+      { goal: 'нет' },
+    ]);
+    expect(result[0]?.goal).toEqual({ text: 'Довести сборку до зелёного', done: true });
+    expect(result[1]?.goal).toEqual({ text: 'Собрать релиз', done: false });
+    expect(result[2]?.goal).toBeUndefined();
+    expect(result[3]?.goal).toBeUndefined();
+  });
+
   it('число бесед ограничено', () => {
     const many = Array.from({ length: MAX_CONVERSATIONS + 5 }, () => ({}));
     expect(sanitizeConversations(many)).toHaveLength(MAX_CONVERSATIONS);

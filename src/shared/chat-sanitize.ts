@@ -1,5 +1,6 @@
 import type {
   ChatConversation,
+  ChatGoal,
   ChatHistory,
   ChatMessage,
   ChatRole,
@@ -7,6 +8,7 @@ import type {
   ChatToolCall,
   ChatUsage,
 } from './api';
+import { sanitizeGoal } from './goal';
 
 /**
  * Проверка прочитанной истории бесед.
@@ -78,12 +80,26 @@ export function sanitizeConversations(raw: unknown): ChatConversation[] {
     if (usage) conversation.usage = usage;
     const trace = sanitizeTrace(value.trace);
     if (trace) conversation.trace = trace;
+    // Цель — часть беседы: без неё незакрытая работа после перезапуска теряла бы
+    // своё условие окончания. Текст проверяем общим правилом (`shared/goal.ts`),
+    // а флаг читаем строго: строка «да» — это не «закрыто».
+    const goal = sanitizeGoalFromFile(value.goal);
+    if (goal) conversation.goal = goal;
 
     used += conversationSize(messages);
     result.push(conversation);
   }
 
   return result;
+}
+
+/** Цель из файла беседы: нужен непустой текст, флаг — только настоящий boolean. */
+function sanitizeGoalFromFile(raw: unknown): ChatGoal | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const value = raw as { text?: unknown; done?: unknown };
+  const text = sanitizeGoal(value.text);
+  if (!text) return undefined;
+  return { text, done: value.done === true };
 }
 
 export function sanitizeMessages(raw: unknown): ChatMessage[] {
