@@ -37,6 +37,7 @@ import type { SymbolSource } from './symbol-navigation';
 import type { HoverExternalInfo } from '../widgets/hover-widget';
 import type { PeekAnchor } from '../widgets/peek-widget';
 import type { CompletionItem } from '../complete/completions';
+import type { ProjectCompletion } from '../complete/assistant';
 import type { CompletionTriggers } from './lsp-features';
 import type { SignatureHelp } from '../../../shared/lsp-signature';
 import type { FoldRange } from '../../../shared/fold-ranges';
@@ -157,6 +158,8 @@ export interface EditorWorkspaceOptions {
     path: string,
     position: { line: number; column: number },
   ) => Promise<readonly CompletionItem[]>;
+  /** Символы проекта из карты: ими расширяется список повторным Ctrl+Space. */
+  projectSymbols?: (query: string) => Promise<readonly ProjectCompletion[]>;
   /** Знаки-триггеры сервера для файла: по ним попап открывается сразу после знака. */
   completionTriggers?: (path: string) => Promise<CompletionTriggers>;
   /** Дотягивание подсказки (см. `LspFeatures.resolveCompletion`). */
@@ -264,6 +267,8 @@ export class EditorWorkspace {
     | undefined;
   /** Подсказки языкового сервера — тот же шов, но для дополнений. */
   private readonly completionFromLanguage: EditorWorkspaceOptions['completionFromLanguage'];
+  /** Символы карты проекта — второй и третий уровень Ctrl+Space. */
+  private readonly projectSymbols: EditorWorkspaceOptions['projectSymbols'];
   /** Знаки-триггеры сервера — тот же шов: попап открывается по ним. */
   private readonly completionTriggers: EditorWorkspaceOptions['completionTriggers'];
   /** Дотягивание подсказки — тот же шов. */
@@ -388,6 +393,7 @@ export class EditorWorkspace {
     this.semanticTokens = options.semanticTokens;
     this.hoverFromLanguage = options.hoverFromLanguage;
     this.completionFromLanguage = options.completionFromLanguage;
+    this.projectSymbols = options.projectSymbols;
     this.completionTriggers = options.completionTriggers;
     this.resolveCompletionItem = options.resolveCompletionItem;
     this.signatureFromLanguage = options.signatureFromLanguage;
@@ -485,6 +491,7 @@ export class EditorWorkspace {
       snippets: this.snippets,
       hoverFromLanguage: this.hoverFromLanguage,
       completionFromLanguage: this.completionFromLanguage,
+      projectSymbols: this.projectSymbols,
       completionTriggers: this.completionTriggers,
       resolveCompletionItem: this.resolveCompletionItem,
       signatureFromLanguage: this.signatureFromLanguage,

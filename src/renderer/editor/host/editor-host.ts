@@ -41,6 +41,7 @@ import type { EditSource, TextDocument } from '../../core/document';
 import { Emitter } from '../../core/events';
 import type { SpellCheck } from '../../core/spellcheck';
 import { CompletionAssistant } from '../complete/assistant';
+import type { ProjectCompletion } from '../complete/assistant';
 import type { CompletionItem } from '../complete/completions';
 import { SignatureAssistant } from '../complete/signature';
 import { TextBuffer } from '../core/text-buffer';
@@ -202,6 +203,12 @@ export interface EditorHostOptions {
     path: string,
     position: { line: number; column: number },
   ) => Promise<readonly CompletionItem[]>;
+  /**
+   * Символы проекта по имени — карта символов. Ими расширяется список подсказок:
+   * повторный Ctrl+Space показывает сначала свой проект, затем зависимости.
+   * Не задано — расширять нечем, остаётся только файл.
+   */
+  projectSymbols?: (query: string) => Promise<readonly ProjectCompletion[]>;
   /**
    * Знаки-триггеры языкового сервера для файла (`@` в CSS, `:` в JSON, `.` в TS):
    * по ним попап открывается сразу после знака, а не только по набранным буквам.
@@ -583,6 +590,7 @@ export class EditorHost {
     this.assistant = new CompletionAssistant(this.view, this.controller, buffer, this.suggest, {
       snippets: options.snippets,
       // Подсказки сервера: путь берём активный — панель о нём знает, ассистент нет.
+      projectSymbols: options.projectSymbols,
       lsp: options.completionFromLanguage
         ? (_prefix, position) => {
             const path = this.activePath;

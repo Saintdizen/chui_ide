@@ -9,7 +9,8 @@
  *   • едет по списку стрелками, принимает Enter или Tab, отказывается Escape;
  *   • уводит курсор, ставит пробел или знак препинания — список закрывается сам, потому
  *     что набранное перестало быть началом слова;
- *   • Ctrl+Space — показать всё, что есть, даже без набранного.
+ *   • Ctrl+Space — показать всё, что есть, даже без набранного;
+ *   • повторное Ctrl+Space расширяет список: файл → проект → зависимости.
  *
  * Внутри строк и комментариев подсказки не показываются: там слова не имеют отношения к
  * делу, а попап закрывает текст ровно там, где человек читает. Роль токена под курсором
@@ -42,6 +43,65 @@ const WORDS_AROUND = 400;
  */
 const LSP_RETRY_MS = 300;
 
+/**
+ * Откуда берутся подсказки: чем шире, тем больше список.
+ *
+ * Так же, как в больших IDE: первое нажатие Ctrl+Space даёт то, что рядом, повторное —
+ * шире. Порядок именно такой, потому что ближнее нужнее: слово из этого файла человек
+ * ищет чаще, чем класс из чужого пакета.
+ */
+export type CompletionScope = 'file' | 'project' | 'dependencies';
+
+/** Следующий уровень ширины — для повторного Ctrl+Space. */
+function widerScope(scope: CompletionScope): CompletionScope {
+  if (scope === 'file') return 'project';
+  return 'dependencies';
+}
+
+/** Подпись уровня в списке: по ней видно, откуда взялись новые имена. */
+export function scopeLabel(scope: CompletionScope): string | null {
+  if (scope === 'project') return 'из проекта';
+  if (scope === 'dependencies') return 'из зависимости';
+  return null;
+}
+
+/**
+ * Что добавить из карты символов на этом уровне ширины.
+ *
+ * Уровни — вложенные: второй (`project`) показывает объявления своего кода, третий
+ * (`dependencies`) добавляет к ним чужие. Так и должно быть: «шире» значит «не меньше,
+ * чем было». Обратное (третий уровень только из пакетов) выглядело бы потерей — свои
+ * имена исчезали бы при расширении.
+ *
+ * Уже показанное не повторяем — список не должен двоиться, — а подпись говорит, откуда
+ * имя: у чужого ещё и пакет.
+ */
+export function extendItems(
+  scope: CompletionScope,
+  found: readonly ProjectCompletion[],
+  shown: ReadonlySet<string>,
+): CompletionItem[] {
+  if (scope === 'file') return [];
+  const items: CompletionItem[] = [];
+  for (const symbol of found) {
+    const fromDependency = Boolean(symbol.package);
+    // Второй уровень — только своё: чужое появится на третьем.
+    if (scope === 'project' && fromDependency) continue;
+    if (shown.has(symbol.name)) continue;
+    const detail = fromDependency ? `из зависимости: ${symbol.package}` : 'из проекта';
+    items.push({ label: symbol.name, kind: 'word', detail });
+  }
+  return items;
+}
+
+/** Символ из карты: имя, вид и откуда взят — из проекта или из установленной зависимости. */
+export interface ProjectCompletion {
+  name: string;
+  kind: string;
+  /** Пакет, из которого символ (`requests`, `express`); пусто — своё объявление. */
+  package?: string | null;
+}
+
 export interface CompletionAssistantOptions {
   /** Идентификатор языка: по нему берутся слова языка для подсказок. */
   language?: string;
@@ -56,6 +116,12 @@ export interface CompletionAssistantOptions {
    */
   lsp?: (prefix: string, position: { line: number; column: number }) => Promise<readonly CompletionItem[]>;
   /**
+   * Символы проекта по имени — карта символов (`index` в main: объявления своего кода
+   * и зависимостей, собранные заранее). Нужны для повторного Ctrl+Space: второй и
+   * третий уровень показывают их. Не задано — расширять нечем, остаётся файл.
+   */
+  projectSymbols?: (query: string) => Promise<readonly ProjectCompletion[]>;
+  /**
    * Довести подсказку опозданием (`completionItem/resolve`): на входе — исходный
    * элемент сервера из `CompletionItem.resolve`, на выходе — описание и уточнение.
    * Не задано — список показывает только то, что пришло в первом ответе.
@@ -69,6 +135,12 @@ export class CompletionAssistant {
   private buffer: TextBuffer;
   private readonly widget: SuggestWidget;
   private readonly index = new WordIndex();
+  /** Символы карты проекта — для расширения списка повторным Ctrl+Space. */
+  private readonly projectSymbols?: (query: string) => Promise<readonly ProjectCompletion[]>;
+  /** Текущая ширина списка Ctrl+Space: файл, проект, зависимости (см. `showAll`). */
+  private scope: CompletionScope = 'file';
+  /** Список открыт именно Ctrl+Space: только тогда повтор расширяет, а не начинает заново. */
+  private askedAll = false;
   private readonly external: () => readonly string[];
   private readonly snippets: () => readonly Snippet[];
   private readonly lsp: CompletionAssistantOptions['lsp'];
@@ -98,6 +170,7 @@ export class CompletionAssistant {
     this.external = options.external ?? (() => []);
     this.snippets = options.snippets ?? (() => []);
     this.lsp = options.lsp;
+    this.projectSymbols = options.projectSymbols;
     this.resolve = options.resolve;
     widget.onAccept = () => this.accept();
     // Список выделил строку — доводим её до полного вида (описание, подробность).
@@ -169,6 +242,8 @@ export class CompletionAssistant {
    */
   onChange(change: EditorChange): void {
     this.changeCalls += 1;
+    // Начали печатать — уровни ширины больше не нужны: набранное начало точнее.
+    if (change.kind !== 'selection') this.askedAll = false;
     if (change.kind === 'selection') {
       // Курсор переехал без правки: список про прежнее место, показывать его нельзя.
       if (this.widget.isVisible) this.widget.hide();
@@ -230,19 +305,35 @@ export class CompletionAssistant {
     this.askServer(prefix, caret);
   }
 
-  /** Показать всё без набранного начала — по Ctrl+Space. */
+  /**
+   * Показать всё без набранного начала — по Ctrl+Space.
+   *
+   * Повторное нажатие расширяет список: файл → проект → зависимости. Так же ведут себя
+   * большие IDE, и это единственный способ добраться до имени, которого нет в открытом
+   * файле, но которое есть в проекте: печатать его начало человек не хочет (он его не
+   * помнит), а знать — хочет.
+   *
+   * Уровень помнится только пока список открыт по Ctrl+Space: стоит начать печатать, и
+   * подсказки снова узкие — набранное начало точнее любого уровня.
+   */
   private showAll(): void {
     const caret = this.controller.caret;
     const line = this.buffer.lineAt(caret);
     const text = this.buffer.lineText(line);
     const column = caret - this.buffer.lineStart(line);
 
-    // После точки Ctrl+Space значит «все члены этого объекта», а не «все слова файла».
+    // После точки Ctrl+Space значит «все члены этого объекта», а не «все слова файла»:
+    // уровни ширины тут ни при чём, членов у объекта ровно столько, сколько есть.
     const member = memberAccessAt(text, column);
     if (member) {
+      this.scope = 'file';
       this.showMembers(member);
       return;
     }
+
+    // Попап уже открыт этим же нажатием — значит просят шире; иначе начинаем с файла.
+    this.scope = this.widget.isVisible && this.askedAll ? widerScope(this.scope) : 'file';
+    this.askedAll = true;
 
     this.fillIndex();
     const items = allCompletions(this.index, this.language, {
@@ -254,6 +345,29 @@ export class CompletionAssistant {
     const prefix = prefixAt(text, column);
     this.widget.show(items, this.anchor(caret), prefix.length);
     this.askServer(prefix, caret);
+    if (this.scope !== 'file') void this.extendWithProject(prefix);
+  }
+
+  /**
+   * Добавить к списку символы карты — второй и третий уровень Ctrl+Space.
+   *
+   * Список уже показан (слова файла), поэтому ответ карты ДОПИСЫВАЕТСЯ к нему, а не
+   * заменяет: файл остаётся первым, добавленное идёт следом с подписью, откуда взято.
+   * Карта отвечает без языкового сервера и мгновенно — ждать тут нечего, но запрос
+   * всё равно асинхронный, и человек успевает увидеть список до ответа.
+   */
+  private async extendWithProject(prefix: string): Promise<void> {
+    const source = this.projectSymbols;
+    if (!source) return;
+    const scope = this.scope;
+
+    const found = await source(prefix).catch(() => []);
+    // Пока ходили, список могли закрыть, начать печатать или расширить ещё раз.
+    if (!this.widget.isVisible || this.scope !== scope) return;
+
+    const items = extendItems(scope, found, new Set(this.widget.labels()));
+    if (items.length === 0) return;
+    this.widget.append(items);
   }
 
   /**

@@ -109,6 +109,12 @@ const suggest = new SuggestWidget(root);
 const assistant = new CompletionAssistant(view, controller, buffer, suggest, {
   language: 'typescript',
   snippets: () => DEFAULT_SNIPPETS,
+  // Подставная карта символов: своё объявление проекта и чужое из пакета. По ней проба
+  // проверяет расширение списка повторным Ctrl+Space (проект → зависимости).
+  projectSymbols: async () => [
+    { name: 'ProjectOnlyRow', kind: 'класс', package: null },
+    { name: 'DependencyOnlyRow', kind: 'класс', package: 'requests' },
+  ],
   // Подставной языковой сервер: одна подсказка с авто-импортом — так проба проверяет,
   // что дополнительные правки (строка import) применяются вместе со вставкой.
   lsp: async (prefix) =>

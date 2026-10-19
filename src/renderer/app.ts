@@ -368,6 +368,23 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     // Подсказки от сервера подмешиваются к словам языка и документа.
     completionFromLanguage: (path, position) => lsp.completion(path, position),
+    // Повторный Ctrl+Space расширяет список символами проекта: сначала свои объявления,
+    // потом из зависимостей. Источник — карта символов: она отвечает мгновенно и без
+    // языкового сервера, а `package` в ответе и есть признак чужого объявления.
+    projectSymbols: async (query) => {
+      const [found, status] = await Promise.all([
+        rpc.request('lsp.symbols', { query }).catch(() => []),
+        rpc.request('index.status').catch(() => null),
+      ]);
+      // Карта не собрана — расширять нечем, и молчим: пустой ответ не должен
+      // выглядеть как «в проекте ничего нет».
+      if (status && status.phase === 'idle') return [];
+      return found.map((symbol) => ({
+        name: symbol.name,
+        kind: symbol.kind,
+        package: symbol.package ?? null,
+      }));
+    },
     // Ссылки в коде: сервер помечает участки (пути в import, адреса) — их показываем
     // подчёркнутыми, а клик открывает адрес или файл (см. `openDocumentLink`).
     documentLinks: async (path) => {

@@ -626,6 +626,27 @@ async function assistCheck(win) {
   await key('Escape');
   const afterEscape = await suggestState();
 
+  // Повторный Ctrl+Space расширяет список: файл → проект → зависимости. Подставная
+  // карта в странице пробы отдаёт по одному символу каждого вида, поэтому видно, что
+  // уровни не повторяют друг друга.
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: 'const value = 0;\\n' }]);
+    const end = buffer.length;
+    controller.selectRange(end, end);
+    window.probe.input.focus();
+    return true;
+  })()`);
+  await wait(120);
+  await key(' ', ['control']);
+  const scopeFile = await suggestState();
+  await key(' ', ['control']);
+  const scopeProject = await suggestState();
+  await key(' ', ['control']);
+  const scopeDependencies = await suggestState();
+  await key('Escape');
+  const scopeClosed = await suggestState();
+
   // Подсказка после точки: в классе печатаем `this.` — попап обязан показать поля и
   // методы ЭТОГО класса. Здесь нет языкового сервера (подставной молчит), поэтому
   // работает запасной разбор файла — тот, что нужен, когда сервера нет вовсе.
@@ -732,6 +753,18 @@ async function assistCheck(win) {
     хвост_до_вставки: beforeAccept,
     после_Enter: afterAccept,
     после_Ctrl_Space: afterCtrlSpace,
+    // Повторный Ctrl+Space: файл → проект → зависимости. Подписи уровней видно
+    // в подсказках строк, поэтому проверяем, что каждый шаг добавляет своё.
+    ширина_файл: scopeFile,
+    ширина_проект: scopeProject,
+    ширина_зависимости: scopeDependencies,
+    ширина_закрыт: scopeClosed,
+    // Итог одной строкой: каждое нажатие добавляет к списку, Escape убирает попап.
+    ширина_растёт:
+      scopeFile.видно &&
+      scopeProject.строк > scopeFile.строк &&
+      scopeDependencies.строк > scopeProject.строк &&
+      !scopeClosed.видно,
     после_Escape: afterEscape,
     после_точки: memberState,
     снимок_членов: shotMembers,

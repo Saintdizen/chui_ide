@@ -111,6 +111,22 @@ export class SuggestWidget {
     this.items = [];
   }
 
+  /** Подписи текущего списка: по ним вызывающий не добавляет то, что уже показано. */
+  labels(): string[] {
+    return this.items.map((item) => item.label);
+  }
+
+  /**
+   * Дописать элементы в конец списка. Выбор и место не меняются: список расширяют,
+   * когда человек просит шире (повторный Ctrl+Space), — и он не должен терять строку,
+   * на которой стоял, из-за пришедшего ответа.
+   */
+  append(items: readonly CompletionItem[]): void {
+    if (items.length === 0) return;
+    this.items = [...this.items, ...items];
+    if (this.visible) this.render();
+  }
+
   /** Передвинуть выбор. По краям не заворачиваем: конец списка должен быть заметен. */
   move(delta: number): void {
     if (!this.visible || this.items.length === 0) return;
