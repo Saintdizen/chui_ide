@@ -86,12 +86,37 @@ deb:
     - libsecret-1-0
 
 mac:
+  # Обе архитектуры сразу: мака проверяющего мы не видим и какая у него платформа —
+  # не знаем. Файлы различаются суффиксом `arm64`/`x64` в имени (`artifactName`).
   target:
-    - dmg
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+    - target: zip
+      arch:
+        - arm64
+        - x64
   icon: build/icon.png
   category: public.app-category.developer-tools
-  # Подписи нет: без сертификата сборка выходит неподписанной, и это ожидаемо.
-  identity: null
+  # ── подпись ────────────────────────────────────────────────────────────────
+  # Было `identity: null` — «пропустить подпись целиком». На Intel такой файл ещё
+  # запускался, а на Apple Silicon нет: ядро не принимает неподписанный код, и
+  # система говорит «файл повреждён, переместите в Корзину». Это не карантин и не
+  # «неизвестный разработчик» — файл действительно считается битым.
+  #
+  # `'-'` — ad-hoc подпись: сертификата Apple нет, но подпись есть, и приложение
+  # запускается. Разрешение спрашивается обычным порядком (Открыть правым кликом),
+  # а не отказом.
+  identity: '-'
+  hardenedRuntime: true
+  # Права нужны: без них ad-hoc вместе с hardened runtime не запускают Electron на
+  # arm64 (V8 собирает код на ходу, а нативные модули подписаны не нами).
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  # Оценку Gatekeeper при сборке не делаем: с ad-hoc она всегда «rejected», и
+  # сборщик падал бы на ней. Подпись проверяется явно — см. шаг в release.yml.
+  gatekeeperAssess: false
 
 dmg:
   title: chui_iDE

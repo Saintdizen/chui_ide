@@ -99,8 +99,10 @@ jobs:
             label: Windows (NSIS)
             target: --win nsis
           - os: macos-latest
-            label: macOS (dmg)
-            target: --mac dmg
+            label: macOS (dmg, zip)
+            # dmg и zip, обе архитектуры (arch — из electron-builder.yml). zip нужен
+            # не «на всякий случай»: если dmg не монтируется, человек скачивает архив.
+            target: --mac dmg zip
 
     steps:
       - uses: actions/checkout@v4
@@ -128,6 +130,14 @@ jobs:
       - name: Упаковать
         # --publish never: публикацию делает шаг ниже, одним местом.
         run: npx electron-builder ${{ matrix.target }} --publish never
+
+      # Проверка mac-сборки ДО того, как файл попадёт в релиз. Без неё неподписанный
+      # dmg уезжал к человеку, и тот видел «файл повреждён»: на Apple Silicon система
+      # не запускает неподписанный код. Здесь это ловит маковый раннер — тот же, что
+      # собрал, — и валит сборку, а не выпуск.
+      - name: Проверить mac-сборку (подпись, архитектура, запуск)
+        if: runner.os == 'macOS'
+        run: bash scripts/mac-sign-check.sh release
 
       # Файлы идут в релиз прямо отсюда, без промежуточного хранилища артефактов:
       # прогон через `upload-artifact`/`download-artifact` стоил ~540 МБ на релиз

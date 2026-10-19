@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Права для подписи приложения на macOS.
+
+  Подпись у нас ad-hoc (сертификата Apple Developer нет), а на arm64 такой подписи
+  мало: система запускает только подписанный код, и ему нужны права на те вещи,
+  которые делает Electron.
+
+  allow-jit и allow-unsigned-executable-memory — V8 собирает машинный код на ходу;
+  без этих прав приложение падает сразу при старте на Apple Silicon.
+  disable-library-validation — приложение грузит нативные модули, подписанные не нами
+  (node-pty, языковые серверы в node_modules), и проверка «все библиотеки от одного
+  подписанта» их отвергает.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
