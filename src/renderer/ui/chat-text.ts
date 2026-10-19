@@ -1,4 +1,5 @@
 import type { FileEdit } from '../../shared/edits';
+import { titleFromQuestion } from '../../shared/chat-title';
 
 /**
  * Текстовые и числовые помощники панели чата. Вынесены из `chat.ts`: это чистые
@@ -42,11 +43,13 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
 }
 
-/** Заголовок вкладки — по первому вопросу: в списке видно, о чём беседа. */
+/**
+ * Заголовок вкладки — по первому вопросу: в списке видно, о чём беседа.
+ * Правило живёт в `shared/chat-title.ts`: по нему же видно, поставлен заголовок
+ * автоматически или его уже дала модель (`isAutoTitle`).
+ */
 export function titleFrom(text: string): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  if (!flat) return 'Новая беседа';
-  return flat.length > 24 ? `${flat.slice(0, 23)}…` : flat;
+  return titleFromQuestion(text);
 }
 
 /**

@@ -1217,6 +1217,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     return deps.ai.commitMessage(params, ctx.signal);
   });
 
+  // Название беседы: тот же вид запроса — одна строка, без истории и инструментов.
+  // Пустое название не ошибка: вкладка останется с заголовком по первому вопросу.
+  router.register('ai.chatTitle', (params, ctx) => deps.ai.suggestTitle(params, ctx.signal));
+
   // Тест к выделенному коду: тоже один запрос без истории и инструментов.
   router.register('ai.generateTest', (params, ctx) => {
     requireAiEnabled();

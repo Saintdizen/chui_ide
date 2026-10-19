@@ -13,6 +13,7 @@ import {
 import type { ApplyFailure, FileEdit } from '../../shared/edits';
 import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
 import { sessionAttachment } from '../../shared/session-context';
+import { isAutoTitle } from '../../shared/chat-title';
 import { resolvePatches } from '../../shared/patch';
 import { compactionBudgetChars, contextUsage, splitTranscript } from '../../shared/context-fit';
 import { contextWindow, modelCapabilities } from '../../shared/providers';
@@ -496,6 +497,39 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   function syncTabTitle(session: ChatSession, text: string): void {
     session.title = titleFrom(text);
+    renderTabs();
+    scheduleSave();
+  }
+
+  /**
+   * Беседы, про которые название уже спрашивали. Спрашиваем один раз: заголовок
+   * по первому вопросу («проверь, что тут слома…») в полосе из пяти вкладок не
+   * различается, а название по сути разговора — различается.
+   */
+  const namedSessions = new Set<string>();
+
+  /**
+   * Переименовать беседу по первому обмену. Спрашиваем после первого ответа:
+   * до него у модели нет ничего, кроме вопроса, а название нужно про разговор.
+   *
+   * Молчание модели — не ошибка: останется заголовок по вопросу, он рабочий.
+   * Заголовок, который уже дала модель (или пришедший из файла), не трогаем.
+   */
+  async function maybeNameSession(session: ChatSession): Promise<void> {
+    if (namedSessions.has(session.uid)) return;
+    const question = session.history.find((message) => message.role === 'user')?.content ?? '';
+    const answer = session.history.find((message) => message.role === 'assistant')?.content ?? '';
+    // Ответа ещё нет — попробуем на следующем ходе, отметку не ставим.
+    if (!question.trim() || !answer.trim()) return;
+    namedSessions.add(session.uid);
+    if (!isAutoTitle(session.title, question)) return;
+
+    const result = await deps.rpc.request('ai.chatTitle', { question, answer }).catch(() => null);
+    const title = result?.title.trim() ?? '';
+    if (!title) return;
+    // Пока модель думала, человек мог переключить вкладку: заголовок принадлежит
+    // СВОЕЙ беседе, поэтому пишем в неё, а не в активную.
+    session.title = title;
     renderTabs();
     scheduleSave();
   }
@@ -1399,6 +1433,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     jumpButton.hidden = true;
 
     await stream.run(session, provider.id, model, sent);
+    // Название — после ответа и не в очередь отправки: человек не должен ждать
+    // лишний запрос, чтобы увидеть ответ.
+    void maybeNameSession(session);
   }
 
   function setBusy(value: boolean, _session: ChatSession = active()): void {

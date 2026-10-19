@@ -33,6 +33,7 @@ import type { ExportsQuery, ExportsResult } from './symbol-exports';
 import type { InheritanceQuery, InheritanceResult } from './type-inheritance';
 import type { ProjectPackage } from './monorepo';
 import type { ProjectCommand } from './commands';
+import type { ChatTitleParts } from './chat-title';
 import type { PermissionPreset } from './permissions';
 import type { ForgeComment, ForgeInfo, ForgeIssue, ForgeNotification, ForgePipeline } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
@@ -539,6 +540,14 @@ export interface CommitMessageResult {
 /** Ответ «тест к выделенному коду»: код теста, готовый лечь в файл. */
 export interface TestGenerationResult {
   code: string;
+}
+
+/**
+ * Название беседы от модели. Пустая строка — названия нет: вкладка останется с
+ * заголовком по первому вопросу, и это нормальный вид, а не сбой.
+ */
+export interface ChatTitleResult {
+  title: string;
 }
 
 /**
@@ -2425,6 +2434,11 @@ export interface ChuiMethods {
    * коммита. Промпт и очистка ответа — в `shared/test-generation.ts`.
    */
   'ai.generateTest': { params: TestPromptParts; result: TestGenerationResult };
+  /**
+   * Название беседы по первому обмену: один короткий запрос без истории и
+   * инструментов, как у сообщения коммита. Пустое название — не ошибка.
+   */
+  'ai.chatTitle': { params: ChatTitleParts; result: ChatTitleResult };
   /**
    * Права доступа агента (кнопка в композере). Меняются и во время ответа:
    * main перечитывает их перед каждым действием, а не только в начале прогона.

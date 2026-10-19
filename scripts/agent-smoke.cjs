@@ -157,6 +157,15 @@ app.whenReady().then(async () => {
     const body = await readBody(req);
     bodies.push(body);
 
+    // Название беседы (ai.chatTitle) — отдельный короткий запрос без инструментов.
+    const isTitle = (body.messages ?? []).some(
+      (message) => message.role === 'system' && String(message.content ?? '').includes('название для беседы'),
+    );
+    if (isTitle) {
+      sendSse(res, textSse('«Сборка падает на macOS».'));
+      return;
+    }
+
     // Подзадача (task): её запросы отличаются системной инструкцией с «(sub-agent)».
     // Отвечаем своим сценарием «прочитать файл → отчёт», чтобы основной агент
     // получил готовую выжимку, не видя самого чтения.
@@ -190,6 +199,10 @@ app.whenReady().then(async () => {
     ai: {
       enabled: true,
       providers: [{ id: 'local', label: 'Локальный', baseUrl, models: ['test'], hasApiKey: false }],
+      // Активная модель нужна тем запросам, что идут мимо беседы: название беседы,
+      // подсказка в редакторе, сообщение коммита. Здесь это тот же тестовый сервер.
+      activeProviderId: 'local',
+      activeModel: 'test',
       temperature: 0,
       maxTokens: 256,
       compactAtTokens: 100_000,
@@ -786,6 +799,31 @@ app.whenReady().then(async () => {
       !refused.ok && refused.message.includes('не отвечает'),
       refused.message,
     );
+
+    /* 9а. название беседы: один запрос, ответ очищен до подписи вкладки */
+    const titled = await ai.suggestTitle({ question: 'почему падает сборка?', answer: 'ошибка линковки openssl' });
+    check('название беседы пришло очищенным', titled.title === 'Сборка падает на macOS', titled.title);
+
+    // Модели не выбрано — названия нет, и это не ошибка: вкладка останется с
+    // заголовком по первому вопросу. Проверяем на сервисе без модели.
+    const noModelSettings = {
+      ai: { ...settings.ai, activeProviderId: undefined, activeModel: undefined },
+      get() {
+        return this;
+      },
+      file() {
+        return path.join(dir, 'settings-no-model.json');
+      },
+      resolveApiKey() {
+        return undefined;
+      },
+      resolveWebSearchKey() {
+        return undefined;
+      },
+    };
+    const noModelAi = new AiService(noModelSettings, workspace, memory);
+    const noTitle = await noModelAi.suggestTitle({ question: 'вопрос', answer: 'ответ' });
+    check('без модели названия нет, но и ошибки нет', noTitle.title === '', noTitle.title);
 
     /* 10. полный доступ */
     const autoCalls = [];

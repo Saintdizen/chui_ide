@@ -92,6 +92,19 @@ app.whenReady().then(async () => {
     (topic, payload) => pushToRenderers(topic, payload),
   );
   const ai = new AiService(settings, workspace);
+  // Провайдера у пробы нет, а проверить переименование беседы нужно в живом окне.
+  // Поэтому подменяем два ответа сервиса: обычный ответ беседы и название по ней.
+  // Всё остальное (поток событий, история, вкладки, запись в файл) — настоящее.
+  ai.chat = async (_request, emit) => {
+    const text = 'Ответ на вопрос пробы.';
+    emit('delta', { text });
+    return {
+      text,
+      agentMessages: [{ role: 'assistant', content: text }],
+      trace: { steps: 1, toolCalls: 0, usage: {} },
+    };
+  };
+  ai.suggestTitle = async () => ({ title: 'Сборка падает на macOS' });
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
   // Беседы пишем в свой каталог: проверка не трогает настоящий userData.
   const chatStore = new ChatStore(path.join(dir, 'chats'));
@@ -779,6 +792,39 @@ app.whenReady().then(async () => {
     picked.value === 'Проверь демонстрационный проект и ответь одной строкой.',
     picked,
   );
+
+  /* ── название беседы от модели ─────────────────────────────────────────── */
+
+  // Заголовок вкладки ставится по первому вопросу («проверь, что тут слома…»), и в
+  // полосе из пяти вкладок такие подписи не различаются. После первого ответа
+  // панель спрашивает у модели название по сути разговора и меняет подпись.
+  const renamed = await ask(
+    ide,
+    `(async () => {
+      const input = document.querySelector('.chat-input');
+      if (!input) return { нет: 'поля' };
+      const before = document.querySelector('.chat-tab.is-active .tab-label')?.textContent ?? null;
+      input.value = 'Проверь, что тут сломалось в сборке на маке';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return {
+        было: before,
+        стало: document.querySelector('.chat-tab.is-active .tab-label')?.textContent ?? null,
+        ответ: document.querySelector('.chat-thread .msg-assistant')?.textContent?.slice(0, 40) ?? null,
+      };
+    })()`,
+  );
+  // Заголовок по вопросу ставится в момент отправки, поэтому «до» здесь — ещё
+  // заводское «Беседа N»; важно, что после ответа подпись не осталась ни заводской,
+  // ни обрезанным вопросом.
+  check('после ответа беседа названа моделью', renamed.стало === 'Сборка падает на macOS', renamed);
+  check(
+    'подпись перестала быть обрезанным вопросом',
+    typeof renamed.стало === 'string' && !renamed.стало.startsWith('Проверь'),
+    renamed.стало,
+  );
+  check('ответ в ленте остался', typeof renamed.ответ === 'string' && renamed.ответ.includes('Ответ'), renamed.ответ);
 
   /* ── сохранение и восстановление ───────────────────────────────────────── */
 

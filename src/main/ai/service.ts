@@ -20,6 +20,7 @@ import {
   type PlanStepStatus,
   type ReasoningEffort,
   type TestGenerationResult,
+  type ChatTitleResult,
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
 import type { PatchFile } from '../../shared/patch';
@@ -59,6 +60,13 @@ import {
   TEST_SYSTEM_PROMPT,
   type TestPromptParts,
 } from '../../shared/test-generation';
+import {
+  buildTitlePrompt,
+  cleanChatTitle,
+  CHAT_TITLE_MAX_TOKENS,
+  CHAT_TITLE_SYSTEM_PROMPT,
+  type ChatTitleParts,
+} from '../../shared/chat-title';
 import { sandboxNote } from '../../shared/sandbox';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
 import {
@@ -615,6 +623,48 @@ export class AiService {
     );
 
     return { code: cleanTestCode(text) };
+  }
+
+  /**
+   * Название беседы по первому обмену.
+   *
+   * Один короткий запрос без истории, инструментов и карты проекта — как у
+   * подсказок, сообщения коммита и генерации теста: название это строка, а не
+   * разговор. Модель берём активную (выбранную в панели AI), отдельной настройки
+   * для названий не заводим.
+   *
+   * Ошибку наверх не отдаём: не получилось — вкладка останется с заголовком по
+   * вопросу, и это нормальный вид, а не сбой.
+   */
+  async suggestTitle(request: ChatTitleParts, signal: AbortSignal): Promise<ChatTitleResult> {
+    const ai = this.settings.get().ai;
+    const providerId = ai.activeProviderId;
+    const model = ai.activeModel;
+    if (!providerId || !model) return { title: '' };
+
+    let text = '';
+    try {
+      const provider = this.createProvider(providerId);
+      const messages: ChatMessage[] = [
+        { role: 'system', content: CHAT_TITLE_SYSTEM_PROMPT },
+        { role: 'user', content: buildTitlePrompt(request) },
+      ];
+      await provider.streamChat(
+        { model, messages, temperature: 0.2, maxTokens: CHAT_TITLE_MAX_TOKENS },
+        {
+          onDelta: (piece) => {
+            // Потолок по символам: `maxTokens` — просьба, а не гарантия.
+            if (text.length < 400) text += piece;
+          },
+        },
+        signal,
+      );
+    } catch {
+      // Молча: название — украшение, а не работа. Отменённый прогон тоже здесь.
+      return { title: '' };
+    }
+
+    return { title: cleanChatTitle(text) };
   }
 
   async chat(
