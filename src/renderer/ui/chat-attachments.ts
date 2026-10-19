@@ -28,6 +28,12 @@ import { showToast } from './toast';
 /** Больше в промпт не влезет: файл целиком нужен редко, а место занимает всегда. */
 const MAX_ATTACHMENT_CHARS = 40_000;
 
+/** Значок чипа по виду вложения: ошибки — предупреждение, беседа — реплика. */
+const CHIP_ICON: Partial<Record<ChatAttachment['kind'], 'warning' | 'chat'>> = {
+  problems: 'warning',
+  session: 'chat',
+};
+
 /** Каталоги, которые в `@`-подсказку не попадают: шум и вес обхода. */
 const MENTION_SKIP = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '__pycache__', '.venv', 'release']);
 const MAX_MENTIONS = 4000;
@@ -112,7 +118,7 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
         // и не приходится открывать файл, чтобы это проверить.
         image
           ? h('img', { class: 'chip-thumb', src: image.dataUrl!, alt: item.label })
-          : svgIcon(item.kind === 'problems' ? 'warning' : 'file', 12),
+          : svgIcon(CHIP_ICON[item.kind] ?? 'file', 12),
         h('span', { class: 'chip-name' }, item.label),
         image ? h('span', { class: 'chip-hint' }, formatBytes(item.bytes ?? 0)) : null,
         h(

@@ -12,6 +12,7 @@ import {
 } from '../../shared/api';
 import type { ApplyFailure, FileEdit } from '../../shared/edits';
 import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
+import { sessionAttachment } from '../../shared/session-context';
 import { resolvePatches } from '../../shared/patch';
 import { compactionBudgetChars, contextUsage, splitTranscript } from '../../shared/context-fit';
 import { contextWindow, modelCapabilities } from '../../shared/providers';
@@ -217,6 +218,31 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /**
+   * Приложить прошлую беседу к вопросу: сослаться на разговор, а не пересказывать
+   * его. Берём `history` — то, что видит модель (после сжатия там резюме), а не
+   * ленту: в ленте карточки инструментов и картинки, для справки они лишние.
+   */
+  function mentionSession(uid: string): void {
+    const found = sessions.find((item) => item.uid === uid);
+    if (!found) {
+      showToast('Беседа не найдена', 'error');
+      return;
+    }
+    if (found === active()) {
+      showToast('Это текущая беседа — она уже в контексте');
+      return;
+    }
+    const context = sessionAttachment({ title: found.title, messages: found.history });
+    // Пустая беседа — прикладывать нечего; об этом говорим прямо, иначе нажатие
+    // выглядит как «ничего не произошло».
+    if (!context) {
+      showToast('В этой беседе ещё нет разговора — прикладывать нечего');
+      return;
+    }
+    attachments.attachContext(context);
+  }
+
+  /**
    * `/имя хвост` → текст запроса. Неизвестное имя возвращается как есть: пусть
    * модель увидит написанное, чем поле молча очистится.
    */
@@ -274,6 +300,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     onMention: (path) => attachments.attachMention(path),
     mentionPaths: () => attachments.mentionPaths(),
     requestMentions: () => attachments.requestMentions(),
+    // Текущую беседу в подсказку не отдаём: приложить разговор к нему же
+    // самому — это удвоить контекст без пользы. Пустые тоже: в них нечего читать,
+    // и выбор такой беседы выглядел бы как «ничего не произошло».
+    sessions: () =>
+      sessions
+        .filter((item) => item.id !== activeId && item.history.length > 0)
+        .map((item) => ({ uid: item.uid, title: item.title })),
+    onMentionSession: (uid) => mentionSession(uid),
     projectCommands: () => projectCommandList,
     requestCommands: () => {
       // Спрашиваем один раз: иначе каждая буква после слэша шла бы в main.

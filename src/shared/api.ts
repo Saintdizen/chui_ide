@@ -1439,7 +1439,7 @@ export interface ChatMessage {
  * Так работают `#selection`, `#file` и `#problems` в панели ассистента.
  */
 export interface ChatAttachment {
-  kind: 'file' | 'selection' | 'problems' | 'note' | 'image';
+  kind: 'file' | 'selection' | 'problems' | 'note' | 'image' | 'session';
   /** Короткая подпись для чипа в композере. */
   label: string;
   /** Заголовок блока в промпте: путь файла или описание. */

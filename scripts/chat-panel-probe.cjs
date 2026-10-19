@@ -62,6 +62,10 @@ app.whenReady().then(async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-chat-probe-'));
   const project = path.join(dir, 'demo');
   await fs.mkdir(project, { recursive: true });
+  // Вторая папка нужна, чтобы переключить корень и заставить панель перечитать
+  // историю бесед (она грузится при смене папки, а не по команде).
+  const other = path.join(dir, 'other');
+  await fs.mkdir(other, { recursive: true });
   await fs.writeFile(path.join(project, 'README.md'), '# demo\n', 'utf8');
   await fs.mkdir(SHOTS, { recursive: true });
 
@@ -91,6 +95,22 @@ app.whenReady().then(async () => {
   const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
   // Беседы пишем в свой каталог: проверка не трогает настоящий userData.
   const chatStore = new ChatStore(path.join(dir, 'chats'));
+  // Прошлая беседа с настоящими репликами: она нужна как контекст, который
+  // прикладывают к вопросу. Провайдера у пробы нет, поэтому отправлять вопрос
+  // нельзя — кладём разговор прямо в хранилище, будто он был раньше.
+  await chatStore.save(project, {
+    conversations: [
+      {
+        uid: 'chat_past_1',
+        title: 'Разбор сборки',
+        updatedAt: Date.now(),
+        messages: [
+          { role: 'user', content: 'Как собрать проект?' },
+          { role: 'assistant', content: 'Через npm run build.' },
+        ],
+      },
+    ],
+  });
   registerIpc({ settings, workspace, ai, terminals, git, chatStore, host: new HostClient() });
   await workspace.open(project);
 
@@ -111,6 +131,19 @@ app.whenReady().then(async () => {
   check('панель ассистента есть в окне', visible === true, visible);
 
   /* ── пустое состояние ─────────────────────────────────────────────────── */
+
+  // Подсказку смотрим в НОВОЙ беседе: в восстановленной уже есть разговор.
+  await ask(
+    ide,
+    `(async () => {
+      const button = [...document.querySelectorAll('.icon-btn')].find(
+        (node) => node.getAttribute('title') === 'Новая беседа',
+      );
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return true;
+    })()`,
+  );
 
   // Подсказка пустой беседы стоит по центру области: строкой в левом верхнем углу
   // она читалась как обрезанное сообщение, а в панели на 400 px липла к краю.
@@ -151,6 +184,77 @@ app.whenReady().then(async () => {
   });
   console.log(`  снимок пустой беседы: ${await shot(ide, 'intro')}`);
 
+  // Закрываем заведённую ради замера беседу: дальше проба считает вкладки.
+  await ask(
+    ide,
+    `(async () => {
+      document.querySelector('.chat-tab.is-active .tab-close')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return true;
+    })()`,
+  );
+
+  /* ── прошлая беседа как контекст (`@`) ────────────────────────────────── */
+
+  // Ссылка на прошлый разговор: человек спрашивает «а как мы это решали?», и
+  // прикладывать беседу должно быть так же просто, как файл. Текущая беседа в
+  // подсказку не попадает (прикладывать разговор к нему же — удвоение контекста),
+  // поэтому сначала заводим новую: старая становится «прошлой».
+  const mention = await ask(
+    ide,
+    `(async () => {
+      const create = [...document.querySelectorAll('.icon-btn')].find(
+        (node) => node.getAttribute('title') === 'Новая беседа',
+      );
+      create.click();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      const input = document.querySelector('.chat-input');
+      input.value = '@';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const items = [...document.querySelectorAll('.composer-menu .composer-menu-item')].map((node) => ({
+        title: node.querySelector('.composer-menu-title')?.textContent ?? '',
+        hint: node.querySelector('.composer-menu-hint')?.textContent ?? '',
+      }));
+      const chat = items.find((item) => item.hint === 'разговор — приложить как справку');
+      return { items: items.slice(0, 3), естьБеседа: Boolean(chat), беседа: chat?.title ?? null, всего: items.length };
+    })()`,
+  );
+  check('в `@`-подсказке есть прошлая беседа', mention.естьБеседа === true, mention);
+  check(
+    'беседа названа в подсказке своим заголовком',
+    typeof mention.беседа === 'string' && mention.беседа === 'беседа «Разбор сборки»',
+    mention.беседа,
+  );
+  check('файлы проекта в подсказке остались', (mention.всего ?? 0) > 1, mention.всего);
+
+  const attached = await ask(
+    ide,
+    `(async () => {
+      const item = [...document.querySelectorAll('.composer-menu .composer-menu-item')].find(
+        (node) => (node.querySelector('.composer-menu-hint')?.textContent ?? '') === 'разговор — приложить как справку',
+      );
+      if (!item) return { нет: 'пункта' };
+      item.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const chip = document.querySelector('.composer-chips .chip');
+      const input = document.querySelector('.chat-input');
+      const value = input.value;
+      const label = chip?.querySelector('.chip-name')?.textContent ?? null;
+      const icon = chip?.querySelector('svg')?.dataset.icon ?? null;
+      // Убираем чип и закрываем заведённую ради проверки беседу: дальше проба
+      // считает вкладки и не должна унаследовать лишнюю.
+      chip?.querySelector('.chip-remove')?.click();
+      document.querySelector('.chat-tab.is-active .tab-close')?.click();
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return { чип: label, значок: icon, поле: value, вкладок: document.querySelectorAll('.chat-tab-list .chat-tab').length };
+    })()`,
+  );
+  check('выбор беседы приложил её к вопросу', attached.чип === 'беседа «Разбор сборки»', attached);
+  check('чип беседы отмечен значком разговора', attached.значок === 'chat', attached.значок);
+  check('набранный символ из поля убран', attached.поле === '', attached.поле);
+  check('вкладок снова одна', attached.вкладок === 1, attached.вкладок);
+
   /* ── вкладки бесед ─────────────────────────────────────────────────────── */
 
   const tabsState = () =>
@@ -168,7 +272,8 @@ app.whenReady().then(async () => {
 
   const initial = await tabsState();
   check('при старте одна беседа', initial.всего === 1, initial);
-  check('подпись первой беседы — «Беседа 1»', initial.подписи[0] === 'Беседа 1', initial.подписи);
+  // В хранилище лежит посеянная беседа: панель обязана поднять её, а не завести пустую.
+  check('поднялась сохранённая беседа', initial.подписи[0] === 'Разбор сборки', initial.подписи);
 
   const created = await ask(
     ide,
@@ -188,7 +293,10 @@ app.whenReady().then(async () => {
     })()`,
   );
   check('кнопка «Новая беседа» добавила вкладку', created.всего === 2, created);
-  check('новая беседа стала активной', created.активная === 'Беседа 2', created.активная);
+  // Номер в названии растёт с каждой заведённой беседой, а до этой кнопку уже
+  // нажимали (пустое состояние смотрели в новой вкладке). Поэтому сверяем с
+  // подписью новой вкладки, а не с литералом.
+  check('новая беседа стала активной', created.активная === created.подписи.at(-1), created);
 
   // Черновик живёт у беседы: переключение вкладок его сохраняет и возвращает.
   const draft = await ask(
@@ -674,7 +782,7 @@ app.whenReady().then(async () => {
 
   /* ── сохранение и восстановление ───────────────────────────────────────── */
 
-  // Вторая беседа: к этому месту в пробе одна закрыта, так что проверяем на двух.
+  // Вторая беседа: к этому месту в пробе вкладок ровно одна, так что проверяем на двух.
   await ask(
     ide,
     `(async () => {

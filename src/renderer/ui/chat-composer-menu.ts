@@ -21,6 +21,12 @@ export interface ComposerItem {
   run(): void;
 }
 
+/** Беседа в `@`-подсказке: подпись и uid, по которому её приложат. */
+export interface MentionSession {
+  uid: string;
+  title: string;
+}
+
 /** Вид контекста, который прикладывают: им же помечен `#`-пункт. */
 export type ContextKind = 'selection' | 'file' | 'problems';
 
@@ -52,6 +58,9 @@ const SLASH_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string; p
   },
 ];
 
+/** Сколько бесед показываем в `@`-подсказке: больше — и файл уже не найти. */
+const MAX_MENTION_SESSIONS = 5;
+
 const CONTEXT_COMMANDS: ReadonlyArray<{ id: string; title: string; hint: string; kind: ContextKind }> = [
   { id: '#selection', title: 'Выделение', hint: 'Фрагмент из редактора', kind: 'selection' },
   { id: '#file', title: 'Открытый файл', hint: 'Содержимое целиком', kind: 'file' },
@@ -75,6 +84,10 @@ export interface ComposerMenuDeps {
   requestMentions(): void;
   /** Команды проекта (`.chui/commands`); пустой список — их нет или они ещё не пришли. */
   projectCommands(): readonly ProjectCommand[];
+  /** Беседы окна: их тоже можно приложить к вопросу — как `@`-файл. */
+  sessions(): readonly MentionSession[];
+  /** Приложить беседу по её uid (разговор целиком — как справку). */
+  onMentionSession(uid: string): void;
   /** Пересобрать команды проекта: при смене папки и при первом `/`. */
   requestCommands(): void;
 }
@@ -214,27 +227,47 @@ export function createComposerMenu(deps: ComposerMenuDeps): ComposerMenuView {
       return;
     }
 
-    // `@` — файл или папка проекта: так контекст прикладывается точнее всего.
+    // `@` — файл, папка проекта или прошлая беседа: так контекст прикладывается
+    // точнее всего. Беседы идут первыми, но их немного (см. `MAX_MENTION_SESSIONS`):
+    // набравший `@` чаще хочет файл, и очередь из разговоров оттеснила бы его.
     const at = value.lastIndexOf('@');
     if (at >= 0 && /(^|\s)@[\w./-]*$/.test(value)) {
       const query = value.slice(at + 1).toLowerCase();
       const paths = deps.mentionPaths();
       const candidates = (paths ?? []).filter((path) => path.toLowerCase().includes(query)).slice(0, 30);
       if (candidates.length === 0 && paths === null) deps.requestMentions();
-      show(
-        candidates.map((path) => {
+      const clearMention = (): void => {
+        deps.input.value = `${value.slice(0, at).trimEnd()} `.trimStart();
+      };
+      const chats = deps
+        .sessions()
+        // Ссылка на саму себя бессмысленна: разговор уже в контексте.
+        .filter((session) => session.title.toLowerCase().includes(query))
+        .slice(0, MAX_MENTION_SESSIONS)
+        .map((session) => ({
+          title: `беседа «${session.title}»`,
+          hint: 'разговор — приложить как справку',
+          run: () => {
+            clearMention();
+            deps.onMentionSession(session.uid);
+            deps.input.focus();
+          },
+        }));
+      show([
+        ...chats,
+        ...candidates.map((path) => {
           const isDir = path.endsWith('/');
           return {
             title: path,
             hint: isDir ? 'папка — список файлов' : 'файл — содержимое',
             run: () => {
-              deps.input.value = `${value.slice(0, at).trimEnd()} `.trimStart();
+              clearMention();
               deps.onMention(path);
               deps.input.focus();
             },
           };
         }),
-      );
+      ]);
       return;
     }
 
