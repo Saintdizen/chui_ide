@@ -1,6 +1,7 @@
 import type { ReasoningEffort } from '../../shared/api';
+import { PERMISSION_PRESETS, permissionSpec, type PermissionPreset } from '../../shared/permissions';
 import type { RpcClient } from '../core/rpc';
-import { clear, h, svgIcon } from './dom';
+import { clear, h, svgIcon, type IconName } from './dom';
 import { createSelect } from './select';
 
 /**
@@ -38,7 +39,8 @@ export interface ComposerModes {
   mode: ChatMode;
   useTools: boolean;
   planMode: boolean;
-  autoApprove: boolean;
+  /** Права одним выбором: что спрашивать у человека, а что делать сразу. */
+  permission: PermissionPreset;
 }
 
 export interface ChatComposerView {
@@ -68,8 +70,8 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
   let mode: ChatMode = 'ask';
   let useTools = false;
   let planMode = false;
-  // Права доступа: кнопка в композере. Включено — команды и правки без вопросов.
-  let autoApprove = false;
+  // Права: выбор в композере. По умолчанию спрашиваем обо всём — как и было у тумблера.
+  let permission: PermissionPreset = 'ask';
   let busy = false;
 
   const input = h('textarea', {
@@ -157,34 +159,39 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
   const modeBadge = h('span', { class: 'composer-status-item' }, modeIcon);
 
   /**
-   * Права доступа — отдельный тумблер, а не часть режима: включён — команды и правки
-   * выполняются без вопросов, выключен — на каждое действие спрашиваем. В «Вопросе»
-   * и «Плане» смысла не имеет: там менять нечего, поэтому кнопка недоступна.
+   * Права — свой выбор, а не часть режима: «Агент» только разрешает инструменты, а
+   * что из их действий делать без вопросов — отдельное решение. Пунктов три, потому
+   * что рычагов два (правки и команды) и середина между ними нужнее всего: правки
+   * видно в панели изменений и можно отменить, а `npm install` отменять нечем.
+   * В «Вопросе» и «Плане» менять нечего — выбор недоступен.
    */
-  const permButton = h('button', {
-    class: 'icon-btn composer-perm',
-    type: 'button',
-    onClick: () => {
-      autoApprove = !autoApprove;
-      syncPermButton();
-      // Сообщаем main: если агент уже работает, следующее действие возьмёт новые права.
-      void deps.rpc.request('ai.setPermission', { autoApprove }).catch(() => undefined);
-    },
+  const permSelect = createSelect({ class: 'composer-select composer-perm' });
+  permSelect.setOptions(
+    PERMISSION_PRESETS.map((item) => ({
+      value: item.id,
+      label: item.label,
+      icon: item.icon as IconName,
+      hint: item.hint,
+    })),
+  );
+  permSelect.onChange((value) => {
+    permission = value as PermissionPreset;
+    syncPerm();
+    // Сообщаем main: если агент уже работает, следующее действие возьмёт новые права.
+    void deps.rpc.request('ai.setPermission', { permission }).catch(() => undefined);
   });
 
-  /** Состояние кнопки прав: значок, подпись и активный вид — по текущему режиму. */
-  function syncPermButton(): void {
+  /** Состояние выбора прав: подсказка и вид — по текущему режиму. */
+  function syncPerm(): void {
     // Только в «Агенте» есть что разрешать: в «Вопросе» и «Плане» изменений нет.
-    const canToggle = mode === 'agent';
-    permButton.disabled = !canToggle;
-    clear(permButton);
-    permButton.appendChild(svgIcon(canToggle && autoApprove ? 'unlock' : 'lock', 14));
-    permButton.classList.toggle('is-active', canToggle && autoApprove);
-    permButton.title = !canToggle
+    const canChoose = mode === 'agent';
+    permSelect.setDisabled(!canChoose);
+    permSelect.setValue(permission);
+    // Подсветка у всего, что снимает вопрос; «Спрашивать» — обычный вид.
+    permSelect.element.classList.toggle('is-active', canChoose && permission !== 'ask');
+    permSelect.element.title = !canChoose
       ? 'Права доступа: доступно в режиме «Агент»'
-      : autoApprove
-        ? 'Полный доступ: команды и правки выполняются без подтверждений'
-        : 'Спрашивать разрешение на каждое действие';
+      : `Права доступа: ${permissionSpec(permission).hint}`;
   }
 
   /** Скрепка открывает тот же список контекста, что и «#»: его видно и без подсказки. */
@@ -235,7 +242,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
         : mode === 'agent'
           ? 'Инструменты разрешены'
           : 'Инструменты выключены';
-    syncPermButton();
+    syncPerm();
   }
 
   function setBusy(value: boolean): void {
@@ -273,7 +280,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     h(
       'div',
       { class: 'composer-toolbar' },
-      h('div', { class: 'composer-group' }, modeSelect.element, permButton, modelButton, effortField),
+      h('div', { class: 'composer-group' }, modeSelect.element, permSelect.element, modelButton, effortField),
       h('div', { class: 'composer-group composer-group-end' }, contextButton, actionButton),
     ),
   );
@@ -287,7 +294,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     extras,
     input,
     modeBadge,
-    modes: () => ({ mode, useTools, planMode, autoApprove }),
+    modes: () => ({ mode, useTools, planMode, permission }),
     setBusy,
     setModel,
     setEffort,

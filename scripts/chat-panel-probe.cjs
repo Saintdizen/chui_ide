@@ -288,7 +288,11 @@ app.whenReady().then(async () => {
         const text = node.querySelector('.select-value')?.textContent ?? '';
         return ['Вопрос', 'Агент', 'План'].includes(text);
       });
-      const effort = selects.find((node) => node !== mode);
+      // Усилие ищем по подписи: селектов в тулбаре три (режим, права, усилие),
+      // и «любой, кроме режима» теперь попал бы в права.
+      const effort = selects.find((node) =>
+        ['Без размышлений', 'Low', 'Medium', 'High'].includes(node.querySelector('.select-value')?.textContent ?? ''),
+      );
       return {
         есть_поле: Boolean(document.querySelector('.chat-input')),
         есть_скрепка: Boolean([...document.querySelectorAll('.icon-btn')].find(
@@ -297,6 +301,7 @@ app.whenReady().then(async () => {
         режим: mode ? mode.querySelector('.select-value')?.textContent : null,
         режим_заголовок: mode ? mode.getAttribute('title')?.slice(0, 24) : null,
         права_выключены: document.querySelector('.composer-perm')?.disabled ?? null,
+        права_подпись: document.querySelector('.composer-perm .select-value')?.textContent ?? null,
         модель: document.querySelector('.composer-model')?.textContent ?? null,
         усилие: effort ? effort.querySelector('.select-value')?.textContent : null,
         кнопка: document.querySelector('.composer-action')?.getAttribute('title') ?? null,
@@ -311,6 +316,8 @@ app.whenReady().then(async () => {
   check('скрепка «Приложить контекст» на месте', composer.есть_скрепка === true);
   check('режим по умолчанию — «Вопрос»', composer.режим === 'Вопрос', composer.режим);
   check('в «Вопросе» права недоступны', composer.права_выключены === true, composer.права_выключены);
+  // По умолчанию спрашиваем обо всём — тем же было и выключенное состояние тумблера.
+  check('права по умолчанию — «Спрашивать»', composer.права_подпись === 'Спрашивать', composer.права_подпись);
   check('усилие по умолчанию — без размышлений', composer.усилие === 'Без размышлений', composer.усилие);
   check('кнопка отправки подписана', composer.кнопка === 'Отправить (Enter)', composer.кнопка);
   // Отправка подписана клавишей Enter, а не стрелкой вверх: стрелка читалась как
@@ -351,26 +358,46 @@ app.whenReady().then(async () => {
   );
   check('в «Агенте» права доступны', modeSwitched.права_выключены === false, modeSwitched.права_выключены);
   check(
-    'подсказка прав объясняет действие',
-    typeof modeSwitched.права_подсказка === 'string' && modeSwitched.права_подсказка.includes('разрешение'),
+    'подсказка прав объясняет, что будет спрашиваться',
+    typeof modeSwitched.права_подсказка === 'string' && modeSwitched.права_подсказка.includes('ревью'),
     modeSwitched.права_подсказка,
   );
 
-  // Тумблер прав: клик меняет вид на «полный доступ».
-  const toggled = await ask(
+  // Права — выбор из трёх пунктов, а не тумблер: рычагов два (правки и команды),
+  // и середина («правки сразу, команды с вопросом») — самый нужный из них.
+  const permPicked = await ask(
     ide,
     `(async () => {
       const perm = document.querySelector('.composer-perm');
+      if (!perm) return { нет: 'выбора прав' };
       perm.click();
       await new Promise((resolve) => setTimeout(resolve, 150));
-      return { активна: perm.classList.contains('is-active'), подсказка: perm.getAttribute('title') };
+      const labels = [...document.querySelectorAll('.select-popup .select-item-label')].map((n) => n.textContent ?? '');
+      const item = [...document.querySelectorAll('.select-popup .select-item')].find(
+        (node) => (node.querySelector('.select-item-label')?.textContent ?? '') === 'Полный доступ',
+      );
+      if (!item) return { нет: 'пункта', labels };
+      item.click();
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return {
+        labels,
+        подпись: perm.querySelector('.select-value')?.textContent ?? null,
+        активна: perm.classList.contains('is-active'),
+        подсказка: perm.getAttribute('title'),
+      };
     })()`,
   );
-  check('тумблер прав включил полный доступ', toggled.активна === true, toggled);
+  check(
+    'в выборе прав три варианта — от «спрашивать» к полному доступу',
+    Array.isArray(permPicked.labels) && permPicked.labels.join('|') === 'Спрашивать|Правки|Полный доступ',
+    permPicked.labels,
+  );
+  check('выбор прав переключил режим на полный доступ', permPicked.подпись === 'Полный доступ', permPicked);
+  check('снятый вопрос подсвечен', permPicked.активна === true, permPicked);
   check(
     'подсказка прав сказала про полный доступ',
-    typeof toggled.подсказка === 'string' && toggled.подсказка.includes('без подтверждений'),
-    toggled.подсказка,
+    typeof permPicked.подсказка === 'string' && permPicked.подсказка.includes('без подтверждений'),
+    permPicked.подсказка,
   );
 
   /* ── чип приложенного изображения ────────────────────────────────────────── */

@@ -2018,6 +2018,11 @@
   color: var(--yellow_prime_background);
 }
 
+/* Выключенный выбор в «Вопросе» и «Плане» не горит жёлтым: разрешать там нечего. */
+.composer-perm.is-disabled.is-active {
+  color: var(--text_color_secondary);
+}
+
 .composer-model {
   max-width: 190px;
   min-width: 0;

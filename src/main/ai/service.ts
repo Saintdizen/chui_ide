@@ -61,6 +61,12 @@ import {
 } from '../../shared/test-generation';
 import { sandboxNote } from '../../shared/sandbox';
 import { coveredRequest, rememberRead } from '../../shared/read-coverage';
+import {
+  permissionFlags,
+  permissionFromAutoApprove,
+  sanitizePermission,
+  type PermissionPreset,
+} from '../../shared/permissions';
 import { addUsage } from '../../shared/usage';
 import { ProjectMemory } from './project-memory';
 import { createSkillLibrary, type SkillLibrary } from './skills';
@@ -334,11 +340,11 @@ export class AiService {
    */
   private spillDir?: string;
   /**
-   * Права доступа текущего прогона (кнопка в композере). Храним на сервисе, а не
-   * снимком в запросе: renderer может переключить их прямо во время ответа агента.
+   * Права доступа текущего прогона (выбор в композере). Храним на сервисе, а не
+   * снимком в запросе: renderer может сменить их прямо во время ответа агента.
    * Сервис один на окно, а активный агентский прогон в окне один — этого хватает.
    */
-  private liveAutoApprove = false;
+  private livePermission: PermissionPreset = 'ask';
 
   /**
    * Поправка к оценке токенов, выученная по `usage` провайдера: сколько наши
@@ -442,11 +448,11 @@ export class AiService {
   }
 
   /**
-   * Обновить права доступа агента. Вызывается кнопкой в композере — в том числе
-   * пока агент работает: следующее действие возьмёт уже новое значение.
+   * Обновить права доступа агента. Вызывается выбором в композере — в том числе
+   * пока агент работает: следующее действие возьмёт уже новые права.
    */
-  setAutoApprove(value: boolean): void {
-    this.liveAutoApprove = value;
+  setPermission(preset: PermissionPreset): void {
+    this.livePermission = sanitizePermission(preset);
   }
 
   /**
@@ -623,10 +629,15 @@ export class AiService {
     const provider = this.createProvider(request.providerId);
     const useTools = request.useTools ?? false;
     const planMode = request.planMode ?? false;
-    // В режиме плана менять ничего нельзя, поэтому полный доступ выключаем.
-    const autoApprove = !planMode && (request.autoApprove ?? false);
+    // В режиме плана менять ничего нельзя, поэтому права не в счёт: там «спрашивать».
+    const permission = planMode
+      ? 'ask'
+      : request.permission
+        ? sanitizePermission(request.permission)
+        : permissionFromAutoApprove(request.autoApprove);
+    const flags = permissionFlags(permission);
     // Текущие права запоминаем на сервисе: дальше их можно менять на лету.
-    this.liveAutoApprove = autoApprove;
+    this.livePermission = permission;
 
     const messages: ChatMessage[] = [];
     const systemPrompt = request.systemPrompt ?? settings.ai.systemPrompt;
@@ -657,7 +668,9 @@ export class AiService {
     else if (useTools)
       messages.push({
         role: 'system',
-        content: [AGENT_PROMPT, autoApprove ? AUTO_APPROVE_PROMPT : '', sandboxPrompt].filter(Boolean).join('\n'),
+        content: [AGENT_PROMPT, permission === 'full' ? AUTO_APPROVE_PROMPT : '', sandboxPrompt]
+          .filter(Boolean)
+          .join('\n'),
       });
     else messages.push({ role: 'system', content: ASK_PROMPT });
 
@@ -691,8 +704,8 @@ export class AiService {
     const toolContext: ToolContext = {
       workspace: this.workspace,
       signal,
-      autoApprove,
-      allowAll: autoApprove,
+      autoApprove: flags.autoApprove,
+      allowAll: flags.allowAll,
       confirmDangerous: settings.ai.confirmDangerous === true,
     };
     // Сжатие вывода — только для контекста модели: человек в карточке инструмента
@@ -741,8 +754,8 @@ export class AiService {
       toolContext.openFile = (path, line, column) => host.openFile(path, line, column);
     }
 
-    // Лимит шагов задаётся в настройках: человек может поднять его под длинную задачу.
-    const steps = autoApprove ? settings.ai.maxAutopilotSteps : settings.ai.maxSteps;
+    // Лимит шагов: у полного доступа свой, повышенный — он и есть «автопилот».
+    const steps = permission === 'full' ? settings.ai.maxAutopilotSteps : settings.ai.maxSteps;
 
     // Что из параметров генерации модель вообще принимает: o-серия отвергает
     // temperature, обычные модели не знают reasoning_effort. Лишнее поле в теле
@@ -929,10 +942,11 @@ export class AiService {
           continue;
         }
 
-        // Права перечитываем перед каждым действием: пользователь мог переключить
-        // их кнопкой, пока агент отвечал. В «Плане» менять нечего — всегда выключены.
-        toolContext.autoApprove = planMode ? false : this.liveAutoApprove;
-        toolContext.allowAll = planMode ? false : this.liveAutoApprove;
+        // Права перечитываем перед каждым действием: человек мог сменить их
+        // выбором в композере, пока агент отвечал. В «Плане» менять нечего.
+        const liveFlags = permissionFlags(planMode ? 'ask' : this.livePermission);
+        toolContext.autoApprove = liveFlags.autoApprove;
+        toolContext.allowAll = liveFlags.allowAll;
 
         const key = `${call.name}:${call.arguments}`;
         const repeated = READ_ONLY_TOOLS.has(call.name) ? executed.get(key) : undefined;

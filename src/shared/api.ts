@@ -33,6 +33,7 @@ import type { ExportsQuery, ExportsResult } from './symbol-exports';
 import type { InheritanceQuery, InheritanceResult } from './type-inheritance';
 import type { ProjectPackage } from './monorepo';
 import type { ProjectCommand } from './commands';
+import type { PermissionPreset } from './permissions';
 import type { ForgeComment, ForgeInfo, ForgeIssue, ForgeNotification, ForgePipeline } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
 import type { GitStashEntry } from './git-stash';
@@ -1509,8 +1510,13 @@ export interface ChatRequest {
   /** Включить агентный цикл: модель сможет вызывать инструменты из shared/tools.ts. */
   useTools?: boolean;
   /**
-   * Полный доступ: агент сам применяет правки и запускает команды, не спрашивая.
-   * Опасные команды всё равно могут требовать подтверждения — решает main, не renderer.
+   * Права ассистента: три состояния одним выбором (см. `shared/permissions.ts`).
+   * Не заданы — считаем по `autoApprove`, как в старых запросах.
+   */
+  permission?: PermissionPreset;
+  /**
+   * Устаревшее: `true` — это «полный доступ». Оставлено для проб и скриптов,
+   * которые шлют запрос напрямую; настоящий выбор теперь в `permission`.
    */
   autoApprove?: boolean;
   /**
@@ -2423,7 +2429,7 @@ export interface ChuiMethods {
    * Права доступа агента (кнопка в композере). Меняются и во время ответа:
    * main перечитывает их перед каждым действием, а не только в начале прогона.
    */
-  'ai.setPermission': { params: { autoApprove: boolean }; result: void };
+  'ai.setPermission': { params: { permission: PermissionPreset }; result: void };
   /** История бесед рабочей папки: renderer восстанавливает вкладки после запуска. */
   'ai.chats.load': { params: { root: string }; result: ChatHistory };
   /** Сохранение бесед: renderer — источник истины, main только пишет на диск. */

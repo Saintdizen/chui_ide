@@ -1162,7 +1162,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('ai.setApiKey', (params) => deps.settings.setApiKey(params.providerId, params.apiKey));
   // Права агента меняются и во время ответа: main хранит их и перечитывает перед действием.
   router.register('ai.setPermission', (params) => {
-    deps.ai.setAutoApprove(params.autoApprove);
+    deps.ai.setPermission(params.permission);
   });
   router.register('ai.clearApiKey', (params) => deps.settings.clearApiKey(params.providerId));
   // Проверка серверов MCP из настроек: поднимаем их и показываем инструменты.

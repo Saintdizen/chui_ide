@@ -9,6 +9,7 @@ import {
   type ChatToolResultPayload,
   type ChatToolStartPayload,
 } from '../../shared/api';
+import type { PermissionPreset } from '../../shared/permissions';
 import { addRunTrace } from '../../shared/usage';
 import type { RpcClient } from '../core/rpc';
 import { RpcError } from '../core/rpc';
@@ -41,7 +42,8 @@ export const CONTINUE_PROMPT =
 /** Режим отладки/инструментов на момент прогона: показываем его адаптеру как есть. */
 export interface StreamModes {
   useTools: boolean;
-  autoApprove: boolean;
+  /** Права одним выбором: что агент делает без вопросов, а о чём спрашивает. */
+  permission: PermissionPreset;
   planMode: boolean;
 }
 
@@ -191,7 +193,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             model,
             messages: session.history.map(toWireMessage),
             useTools: modes.useTools,
-            autoApprove: modes.autoApprove,
+            permission: modes.permission,
             planMode: modes.planMode,
             attachments,
           },

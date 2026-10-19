@@ -866,7 +866,8 @@ app.whenReady().then(async () => {
         confirmCommand(command) {
           permLog.push(command);
           // Пользователь включает полный доступ, пока агент ещё работает.
-          ai.setAutoApprove(true);
+          // Права теперь выбираются пресетом (`shared/permissions.ts`), а не флагом.
+          ai.setPermission('full');
           return Promise.resolve(true);
         },
       },
