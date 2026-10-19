@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   RpcErrorCode,
   type AiInlineCompletionSettings,
+  type AiTelemetrySettings,
   type AiSettingsPatch,
   type AppearanceSettings,
   type EditorSettings,
@@ -111,6 +112,8 @@ interface StoredSettings {
     mcpServers: McpServerConfig[];
     /** Inline-автодополнение: выключено, пока человек не включит его сам. */
     inlineCompletion: AiInlineCompletionSettings;
+    /** Журнал прогонов в файл: выключен, пока человек не включит его сам. */
+    telemetry: AiTelemetrySettings;
   };
   editor: EditorSettings;
   explorer: ExplorerSettings;
@@ -186,6 +189,8 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // Автодополнение выключено: каждый запрос — это обращение к модели (время и
     // деньги) на каждую паузу в наборе. Включается осознанно.
     inlineCompletion: { enabled: false, debounceMs: 350 },
+    // Журнал прогонов выключен: в записи лежат инструкции и ответы модели.
+    telemetry: { enabled: false },
   },
   editor: {
     tabSize: 4,
@@ -404,6 +409,7 @@ export class SettingsStore {
         approvalReview: ai.approvalReview === true,
         reviewModel: ai.reviewModel,
         compressOutput: ai.compressOutput !== false,
+        telemetry: { enabled: ai.telemetry?.enabled === true },
         webFetch: { enabled: ai.webFetch?.enabled === true },
         webSearch: {
           enabled: ai.webSearch?.enabled === true,
@@ -683,6 +689,8 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     else delete target.reviewModel;
   }
   if (patch.compressOutput !== undefined) target.compressOutput = patch.compressOutput === true;
+  // Журнал прогонов: включение только явным `true` — как у остальных ходов наружу.
+  if (patch.telemetry) target.telemetry.enabled = patch.telemetry.enabled === true;
 
   // Веб-поиск: включение, вид сервиса и адрес. Ключ сюда не входит — он приходит
   // отдельным вызовом `ai.setWebSearchKey`, как ключи провайдеров.
@@ -845,6 +853,10 @@ function loadSettings(filePath: string): StoredSettings {
     enabled: storedInline.enabled === true,
     debounceMs: Number.isFinite(debounce) && debounce > 0 ? Math.min(Math.max(debounce, 100), 5000) : 350,
   };
+
+  // Журнал прогонов включён только явным `true`: у тех, кто обновляется со старой
+  // версии, поля нет — и писать чужую переписку без спроса мы не начинаем.
+  ai.telemetry = { enabled: (storedAi.telemetry as { enabled?: unknown } | undefined)?.enabled === true };
 
   // Сжатие выключено только явным `false`: отсутствие поля читаем как «включено» —
   // иначе настройка молча отключилась бы у всех, кто обновляется со старой версии.

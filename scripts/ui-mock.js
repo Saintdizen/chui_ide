@@ -1377,6 +1377,30 @@ module.exports = [
       return mockSchedules;
     },
     'schedule.finish': () => mockSchedules,
+    // Журнал прогонов: в браузере прогонов нет, поэтому мок отдаёт одну строку —
+    // по ней видно окно целиком (список, подписи, кнопки подвала).
+    'ai.telemetry': () => ({
+      enabled: true,
+      path: '/mock/userData/telemetry/runs.jsonl',
+      bytes: 2048,
+      records: [
+        {
+          version: 1,
+          at: Date.now() - 60_000,
+          startedAt: Date.now() - 61_200,
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          mode: 'agent',
+          permission: 'ask',
+          finished: 'answer',
+          ms: 1200,
+          trace: { steps: 2, toolCalls: 1, usage: { promptTokens: 900, completionTokens: 120 } },
+          system: { provider: 'openai', model: 'gpt-4o-mini', mode: 'agent', permission: 'ask', tools: 51 },
+          steps: [],
+        },
+      ],
+    }),
+    'ai.telemetryClear': () => ({ ok: true }),
     // Inline-автодополнение: мок молча отдаёт короткую подсказку.
     'ai.complete': async () => ({ text: '// подсказка от мока' }),
     // Сообщение коммита: мок отвечает так, как это делает модель после очистки.

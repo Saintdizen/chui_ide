@@ -90,6 +90,7 @@ import { parseThemeFile } from '../../shared/theme-file';
 import { isProjectKind, projectNameProblem } from '../../shared/project-kinds';
 import { starterFiles } from '../project/scaffold';
 import { unsavedClosePrompt } from '../../shared/unsaved';
+import type { TelemetryStore } from '../ai/telemetry';
 import type { TerminalService } from '../terminal/terminal';
 import { openIdeWindow, openWelcomeWindow, windowState } from '../window';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -127,6 +128,8 @@ export interface AppDependencies {
   history?: HistoryStore;
   /** Расписание задач (`.chui/schedules.json`). Необязательно: пробникам не нужно. */
   schedules?: ScheduleService;
+  /** Журнал прогонов (userData/telemetry). Необязательно: пробникам он не нужен. */
+  telemetry?: TelemetryStore;
 }
 
 /**
@@ -1291,6 +1294,19 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
       const history = await chatStore.load(deps.workspace.rootPath() ?? '');
       return searchSessions(history.conversations, query);
     },
+  });
+  // Журнал прогонов: файл лежит в пользовательских данных, то есть вне рабочей
+  // папки — открыть его вкладкой редактора нельзя. Поэтому читает main, а окно
+  // показывает последние записи и путь к файлу.
+  router.register('ai.telemetry', async () => {
+    const store = deps.telemetry;
+    if (!store) return { enabled: false, path: '', bytes: 0, records: [] };
+    const tail = await store.tail();
+    return { enabled: store.enabled, path: tail.path, bytes: tail.bytes, records: tail.records.slice(-50) };
+  });
+  router.register('ai.telemetryClear', async () => {
+    await deps.telemetry?.clear();
+    return { ok: true };
   });
   router.register('ai.chats.load', (params) => chatStore.load(params.root));
   router.register('ai.chats.save', async (params) => {

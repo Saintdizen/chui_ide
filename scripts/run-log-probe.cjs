@@ -27,6 +27,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { AiService } = require('../dist/main/ai/service.js');
+const { TelemetryStore } = require('../dist/main/ai/telemetry.js');
 const { ChatStore } = require('../dist/main/ai/chat-store.js');
 const { GitService } = require('../dist/main/git/git.js');
 const { HostClient } = require('../dist/main/ipc/host.js');
@@ -132,7 +133,9 @@ app
           ],
           activeProviderId: 'probe',
           activeModel: 'probe-1',
-          systemPrompt: 'ПРОБНЫЕ-ИНСТРУКЦИИ: отвечай кратко.',
+          // Ключ в инструкциях нарочно: в журнал он попасть не должен.
+          systemPrompt: 'ПРОБНЫЕ-ИНСТРУКЦИИ: отвечай кратко. sk-proj-probeprobeprobeprobeprobeprobe123',
+          telemetry: { enabled: true },
           maxSteps: 6,
         },
       }),
@@ -147,6 +150,13 @@ app
       (topic, payload) => pushToRenderers(topic, payload),
     );
     const ai = new AiService(settings, workspace);
+    // Журнал прогонов — как в приложении, только папка своя: записи не должны
+    // попасть в пользовательские данные разработчика. Настройка выше включает его.
+    const telemetry = new TelemetryStore({
+      dir: () => path.join(dir, 'telemetry'),
+      enabled: () => settings.get().ai.telemetry.enabled === true,
+    });
+    ai.attachTelemetry(telemetry);
     const terminals = new TerminalService((topic, payload) => pushToRenderers(topic, payload));
     const host = new HostClient();
     registerIpc({
@@ -157,6 +167,7 @@ app
       git,
       chatStore: new ChatStore(path.join(dir, 'chats')),
       host,
+      telemetry,
     });
     await workspace.open(project);
 
@@ -331,6 +342,47 @@ app
       String(instructions).includes('ПРОБНЫЕ-ИНСТРУКЦИИ'),
       instructions,
     );
+
+    /* ── 5. журнал прогонов ───────────────────────────────────────────────── */
+
+    // Прогон уже был — журнал должен был получить строку. Читаем файл сами:
+    // проверка не верит ни окну, ни сервису, а смотрит то, что легло на диск.
+    const journalFile = path.join(dir, 'telemetry', 'runs.jsonl');
+    const journalText = await fs.readFile(journalFile, 'utf8').catch(() => '');
+    const journalLines = journalText.split('\n').filter((line) => line.trim().startsWith('{'));
+    check('прогон лёг строкой в журнал', journalLines.length >= 1, journalLines.length);
+    check('секрет из инструкций в журнал не попал', !journalText.includes('probeprobeprobeprobe'));
+    check('а сами инструкции в журнале есть', journalText.includes('ПРОБНЫЕ-ИНСТРУКЦИИ'));
+
+    const journal = journalLines.length > 0 ? JSON.parse(journalLines[0]) : null;
+    check('в записи назван итог прогона', journal?.finished === 'answer', journal?.finished);
+    check(
+      'в записи есть шаги с вызовами',
+      (journal?.steps ?? []).some((step) => (step.calls ?? []).length > 0),
+    );
+    check('в записи названа беседа', typeof journal?.conversation === 'string', journal?.conversation);
+
+    // Окно «Журнал прогонов…»: открывается командой и показывает записи.
+    pushToRenderers('menu:command', { command: 'ai.telemetry' });
+    await wait(900);
+
+    const journalUi = await ask(
+      ide,
+      `(() => {
+        const modal = document.querySelector('.telemetry-modal');
+        if (!modal) return null;
+        return {
+          строк: modal.querySelectorAll('.telemetry-row').length,
+          текст: (modal.querySelector('.telemetry-note')?.textContent ?? '').trim(),
+          файл: (modal.textContent ?? '').includes('runs.jsonl'),
+        };
+      })()`,
+    );
+    check('окно журнала открылось', journalUi !== null, journalUi === null ? 'окна нет' : undefined);
+    check('в окне видна запись прогона', (journalUi?.строк ?? 0) >= 1, journalUi?.строк);
+    check('в окне назван файл журнала', journalUi?.файл === true, journalUi?.текст);
+    await ask(ide, `(() => { document.querySelector('.telemetry-modal .icon-btn')?.click(); return true; })()`);
+    await wait(300);
 
     /* ── 4. пустой случай ─────────────────────────────────────────────────── */
 

@@ -150,6 +150,7 @@ import { createRegexTester } from './ui/regex-tester';
 import { createStructuralSearch } from './ui/structural-search';
 import { createIdentityModal } from './ui/identity-modal';
 import { createScheduleModal } from './ui/schedule-modal';
+import { createTelemetryModal } from './ui/telemetry-modal';
 import { createForgeModal } from './ui/forge-modal';
 import { createIssuesModal } from './ui/issues-modal';
 import { createPipelinesModal } from './ui/pipelines-modal';
@@ -2514,6 +2515,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     runNow: (schedule) => startScheduledRun(schedule),
   });
   document.body.appendChild(scheduleModal.element);
+
+  /**
+   * Журнал прогонов: строки, которые main уже записал в файл. Трасса под ответом
+   * живёт до перезапуска, а журнал — в файле: его и смотрят, когда разбираются
+   * с прошлым днём.
+   */
+  const telemetryModal = createTelemetryModal({
+    rpc,
+    notify: (message, kind) => showToast(message, kind),
+    // Файл лежит в пользовательских данных, вне проекта: открывает проводник системы.
+    reveal: (path) => void rpc.request('shell.revealInOS', { path }).catch(() => undefined),
+  });
+  document.body.appendChild(telemetryModal.element);
 
   // Запросы на слияние (PR/MR): своя обёртка над клиентами `gh`/`glab`. Токены и вход
   // берёт клиент, IDE показывает список и зовёт его же на «создать» и «забрать ветку».
@@ -5966,6 +5980,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       keywords: ['прогон', 'run', 'trace', 'диагностика'],
     },
     () => chat.openRunLog(),
+  );
+
+  define(
+    {
+      id: 'ai.telemetry',
+      title: 'Журнал прогонов…',
+      category: 'AI',
+      keywords: ['телеметрия', 'telemetry', 'журнал', 'прогоны', 'диагностика'],
+    },
+    () => void telemetryModal.open(),
   );
 
   define({ id: 'ai.stop', title: 'Остановить генерацию', category: 'AI' }, () => chat.stop());

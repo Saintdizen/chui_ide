@@ -35,6 +35,7 @@ import type { ProjectPackage } from './monorepo';
 import type { ProjectCommand } from './commands';
 import type { ChatTitleParts } from './chat-title';
 import type { PermissionPreset } from './permissions';
+import type { RunTelemetryRecord } from './telemetry';
 import type { ToolPresetId } from './tool-presets';
 import type { ForgeComment, ForgeInfo, ForgeIssue, ForgeNotification, ForgePipeline } from './git-platform';
 import type { GitReflogEntry } from './git-reflog';
@@ -802,6 +803,12 @@ export interface AiSettings {
   mcpServers: McpServerConfig[];
   /** Подсказка «допиши за меня» (inline-автодополнение). Выключена по умолчанию. */
   inlineCompletion: AiInlineCompletionSettings;
+  /**
+   * Журнал прогонов в файл: что ушло модели, шаги и вызовы — для разбора «почему
+   * ушло не туда» уже после перезапуска. Выключен по умолчанию: в записи лежат
+   * инструкции и ответы модели.
+   */
+  telemetry: AiTelemetrySettings;
 }
 
 /**
@@ -813,6 +820,23 @@ export interface AiInlineCompletionSettings {
   enabled: boolean;
   /** Пауза после последнего ввода перед запросом, мс: на каждую букву не спрашиваем. */
   debounceMs: number;
+}
+
+/** Телеметрия прогонов: единственное поле — писать журнал или нет. */
+export interface AiTelemetrySettings {
+  enabled: boolean;
+}
+
+/** Что отдаёт журнал прогонов: путь, размер и последние записи. */
+export interface AiTelemetrySnapshot {
+  /** Включена ли запись: выключенная — окно объясняет, где её включить. */
+  enabled: boolean;
+  /** Путь к файлу журнала: по нему его находят в проводнике и открывают. */
+  path: string;
+  /** Размер файла в байтах. */
+  bytes: number;
+  /** Последние записи, самые новые в конце (как они лежат в файле). */
+  records: RunTelemetryRecord[];
 }
 
 /**
@@ -1385,6 +1409,8 @@ export interface AiSettingsPatch {
   mcpServers?: McpServerConfig[];
   /** Настройка inline-автодополнения: включение и задержка. */
   inlineCompletion?: Partial<AiInlineCompletionSettings>;
+  /** Журнал прогонов в файл: включение и выключение. */
+  telemetry?: Partial<AiTelemetrySettings>;
   /** Добавить провайдера или обновить существующего по `id`. */
   provider?: AiProviderPatch;
   /** Убрать провайдера из списка. */
@@ -1611,6 +1637,11 @@ export interface ChatRequest {
   planMode?: boolean;
   /** Дополнительный контекст от renderer: выделение, файл, ошибки. */
   attachments?: ChatAttachment[];
+  /**
+   * Беседа, в которой идёт прогон. Нужна журналу прогонов (`ai.telemetry`): по ней
+   * строки одного разговора собираются вместе. На сам запрос к модели не влияет.
+   */
+  conversationUid?: string;
   /**
    * Цель работы (см. `shared/goal.ts`): что агент должен довести до конца.
    *
@@ -2610,6 +2641,14 @@ export interface ChuiMethods {
    * Список нужен интерфейсу, а не модели — в промпт он не идёт.
    */
   'ai.commands': { params: void; result: ProjectCommand[] };
+  /**
+   * Журнал прогонов (`ai.telemetry` в настройках): путь к файлу, его размер и
+   * последние записи. Читает main — файл лежит вне рабочей папки, и открыть его
+   * вкладкой редактора нельзя.
+   */
+  'ai.telemetry': { params: void; result: AiTelemetrySnapshot };
+  /** Очистить журнал прогонов. */
+  'ai.telemetryClear': { params: void; result: { ok: boolean } };
 
   /**
    * Расписание задач проекта (`.chui/schedules.json`): когда ассистент

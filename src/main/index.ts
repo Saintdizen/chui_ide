@@ -22,6 +22,7 @@ import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
 import { SandboxService } from './sandbox/sandbox';
 import { ScheduleService } from './schedules/schedules';
+import { TelemetryStore, telemetryDir } from './ai/telemetry';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { WINDOW_BACKGROUND } from '../shared/colors';
 import { MAX_VIEW_PDF_BYTES, isPdfPath } from '../shared/pdf';
@@ -316,6 +317,14 @@ if (!app.requestSingleInstanceLock()) {
     schedules.start();
     // Расписание агенту: те же список и запись, что у окна. Задача, которую
     // поставил ассистент, ничем не отличается от заведённой руками.
+    // Журнал прогонов: пишется только при включённой настройке и только на этой
+    // машине. Читает настройку на каждый прогон — её могли включить посреди работы.
+    const telemetry = new TelemetryStore({
+      dir: () => telemetryDir(app.getPath('userData')),
+      enabled: () => settings.get().ai.telemetry.enabled === true,
+    });
+    ai.attachTelemetry(telemetry);
+
     ai.attachSchedules({
       list: () => schedules.list(),
       save: (schedule) => schedules.save(schedule),
@@ -392,6 +401,7 @@ if (!app.requestSingleInstanceLock()) {
       history,
       mcp,
       schedules,
+      telemetry,
       browserPanel,
       host: new HostClient(),
     };

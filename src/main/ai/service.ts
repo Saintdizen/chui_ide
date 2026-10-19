@@ -98,6 +98,7 @@ import {
 } from '../../shared/approval-review';
 import { addUsage } from '../../shared/usage';
 import { ProjectMemory } from './project-memory';
+import type { TelemetryStore } from './telemetry';
 import { createSkillLibrary, type SkillLibrary } from './skills';
 import { createJobRegistry, type JobRegistry } from './jobs';
 import type { SandboxService } from '../sandbox/sandbox';
@@ -402,6 +403,8 @@ export class AiService {
   private sessions?: SessionSearchRunner;
   /** Расписание задач: без него инструменты `schedule_*` не предлагаем. */
   private schedules?: ScheduleTools;
+  /** Журнал прогонов в файл: пишет только при включённой настройке. */
+  private telemetry?: TelemetryStore;
   /** Браузер: без него инструменты `browser_*` не предлагаем. */
   private browser?: BrowserTools;
   /** Песочница: без неё команды и тесты идут на хосте, как раньше. */
@@ -515,6 +518,14 @@ export class AiService {
    */
   attachSessions(sessions: SessionSearchRunner): void {
     this.sessions = sessions;
+  }
+
+  /**
+   * Подключить журнал прогонов (`ai/telemetry.ts`). Без него трасса живёт только в
+   * памяти беседы, как и раньше; с ним — ещё и строкой в файле.
+   */
+  attachTelemetry(telemetry: TelemetryStore): void {
+    this.telemetry = telemetry;
   }
 
   /**
@@ -1144,6 +1155,23 @@ export class AiService {
       trace: trace(),
     });
 
+    /**
+     * Трасса на выходе и запись в журнал: одно место на все концы прогона (ответ,
+     * лимит шагов, обрыв), поэтому журнал не может разойтись с тем, что человек
+     * видит в ленте. Ошибку записи никто не ждёт: журнал — диагностика.
+     */
+    const finishRun = (finished: ChatRunLog['finished']): ChatRunLog => {
+      const log = runLog(finished);
+      const project = this.workspace.rootPath();
+      void this.telemetry
+        ?.record(log, {
+          ...(request.conversationUid ? { conversation: request.conversationUid } : {}),
+          ...(project ? { project } : {}),
+        })
+        .catch(() => undefined);
+      return log;
+    };
+
     // Дедупликация вызовов в рамках одной ветки: одинаковый read-only вызов
     // не исполняется дважды, а если шаг целиком состоит из повторов — цикл
     // останавливается. Правка/команда сбрасывает кэш: состояние могло измениться.
@@ -1320,7 +1348,7 @@ export class AiService {
           finishReason,
           usage,
           trace: trace(),
-          run: runLog('answer'),
+          run: finishRun('answer'),
           agentMessages: produced,
           ...(reasoning ? { reasoning } : {}),
         };
@@ -1609,7 +1637,7 @@ export class AiService {
           finishReason,
           usage,
           trace: trace(),
-          run: runLog('limit'),
+          run: finishRun('limit'),
           agentMessages: produced,
           ...(reasoning ? { reasoning } : {}),
         };
@@ -1625,7 +1653,7 @@ export class AiService {
         finishReason,
         usage,
         trace: trace(),
-        run: runLog('aborted'),
+        run: finishRun('aborted'),
         agentMessages: produced,
         ...(reasoning ? { reasoning } : {}),
       };
@@ -1640,7 +1668,7 @@ export class AiService {
       finishReason,
       usage,
       trace: trace(),
-      run: runLog('limit'),
+      run: finishRun('limit'),
       agentMessages: produced,
       ...(reasoning ? { reasoning } : {}),
     };

@@ -2699,3 +2699,54 @@
   margin: 6px 0;
   color: var(--text_color_tertiary);
 }
+
+/* ── журнал прогонов ──────────────────────────────────────────────────────── */
+
+.telemetry-note {
+  margin: 0 0 8px;
+  color: var(--text_color_secondary);
+  font-size: var(--font_small_size);
+}
+
+.telemetry-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Строка журнала — одна строка таблицы: время слева, итог справа. Подписи
+   мелкие и без рамок: записей бывает много, и рамка на каждой превратила бы
+   список в решётку. */
+.telemetry-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 3px 6px;
+  border-radius: var(--radius_sm);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.telemetry-row:nth-child(odd) {
+  background: var(--element_background);
+}
+
+.telemetry-when {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text_color);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.telemetry-what {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+}
+
+.telemetry-empty {
+  margin: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}

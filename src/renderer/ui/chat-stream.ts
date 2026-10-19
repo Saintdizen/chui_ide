@@ -218,6 +218,8 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             // сам на первом шаге, и продолжение обязано её видеть.
             ...(session.goal && !session.goal.done ? { goal: session.goal.text } : {}),
             attachments,
+            // Беседа — для журнала прогонов: по ней строки одного разговора собираются вместе.
+            conversationUid: session.uid,
           },
           (event, payload) => {
             if (event === ChatStreamEvent.Reasoning) {
