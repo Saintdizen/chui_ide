@@ -2327,3 +2327,34 @@
   justify-content: flex-end;
   margin-top: 2px;
 }
+
+/* ── проверка подтверждений моделью ──────────────────────────────────────── */
+
+/* Строка о том, что команду разрешила проверка: тот же вид, что у закрытого
+   решения, но со значком искры — видно, что решил не человек. */
+.decision-line.is-review {
+  padding: 4px 8px;
+  color: var(--text_color_tertiary);
+}
+
+.decision-line.is-review .decision-status {
+  color: var(--text_color_tertiary);
+  font-style: italic;
+}
+
+/* Причина проверки в карточке подтверждения: модель не решилась — и говорит,
+   что именно её смутило. Стоит под подсказкой, тем же кеглем, но со значком. */
+.approval-review-note {
+  display: flex;
+  gap: 5px;
+  align-items: flex-start;
+  margin-top: 4px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+}
+
+.approval-review-note .icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--yellow_prime_background);
+}

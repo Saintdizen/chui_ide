@@ -17,6 +17,8 @@ import {
   type SettingsPatch,
 } from '../../shared/api';
 import type { AiService } from '../ai/service';
+import { isDangerousCommand } from '../ai/agent-tools';
+import { shouldReview, type ReviewVerdict } from '../../shared/approval-review';
 import { ChatStore } from '../ai/chat-store';
 import { loadCommands } from '../ai/commands';
 import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
@@ -1162,6 +1164,26 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     }
   };
 
+  /**
+   * Второе мнение перед подтверждением команды. `null` — проверять нечего или
+   * незачем: проверка выключена, команда необратима, ассистент выключен, сети нет.
+   * Во всех этих случаях решение остаётся за человеком.
+   */
+  const reviewCommand = async (
+    command: string,
+    cwd: string | null,
+    signal: AbortSignal,
+  ): Promise<ReviewVerdict | null> => {
+    const settings = deps.settings.get();
+    if (!settings.ai.enabled) return null;
+    if (
+      !shouldReview(command, { enabled: settings.ai.approvalReview === true, dangerous: isDangerousCommand(command) })
+    ) {
+      return null;
+    }
+    return deps.ai.reviewCommand(command, cwd, signal);
+  };
+
   router.register('ai.setApiKey', (params) => deps.settings.setApiKey(params.providerId, params.apiKey));
   // Права агента меняются и во время ответа: main хранит их и перечитывает перед действием.
   router.register('ai.setPermission', (params) => {
@@ -1189,10 +1211,27 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
           deps.host.request(ctx.sender, 'ai.applyEdits', { edits, autoApprove }, ctx.signal),
         applyPatches: (patches, autoApprove) =>
           deps.host.request(ctx.sender, 'ai.applyPatches', { patches, autoApprove }, ctx.signal),
-        confirmCommand: (command) =>
-          deps.host
-            .request(ctx.sender, 'ai.confirmCommand', { command }, ctx.signal)
-            .then((decision) => decision.allowed),
+        // Команду сперва смотрит модель (если человек включил проверку), и только
+        // если она не решилась — спрашиваем человека. Необратимые команды идут к
+        // человеку сразу: `rm -rf` — не тот случай, где модель судья.
+        confirmCommand: async (command) => {
+          const verdict = await reviewCommand(command, deps.workspace.rootPath(), ctx.signal);
+          if (verdict?.decision === 'allow') {
+            // Молча выполненное действие всё равно должно быть видно: строка в ленте
+            // говорит, что команду разрешила проверка и почему.
+            pushToRenderers(PushTopic.ApprovalReview, { command, reason: verdict.reason });
+            return true;
+          }
+          // Проверка не решилась — её причина едет в карточку подсказкой: человеку
+          // полезно знать, что именно смутило модель.
+          const decision = await deps.host.request(
+            ctx.sender,
+            'ai.confirmCommand',
+            { command, review: verdict ?? undefined },
+            ctx.signal,
+          );
+          return decision.allowed;
+        },
         confirmGit: (action) =>
           deps.host.request(ctx.sender, 'ai.confirmGit', { action }, ctx.signal).then((decision) => decision.allowed),
         confirmBrowser: (action) =>

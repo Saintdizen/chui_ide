@@ -73,6 +73,10 @@ interface StoredSettings {
     maxAutopilotSteps: number;
     /** Страховка полного доступа: спрашивать перед необратимыми командами. */
     confirmDangerous: boolean;
+    /** Проверять безобидные команды моделью, не спрашивая человека. */
+    approvalReview: boolean;
+    /** Модель для проверки; не задана — активная. */
+    reviewModel?: string;
     /** Убирать шум из вывода инструментов перед отправкой модели. */
     compressOutput: boolean;
     /** Веб-поиск ассистента: выключен, пока человек не включит его сам. */
@@ -151,6 +155,9 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // (sudo, rm, git push --force) спрашиваем, пока человек сам не отключит
     // страховку. Лишний вопрос дешевле одного пропущенного `rm -rf`.
     confirmDangerous: true,
+    // Проверка команд моделью выключена: она тратит токены и решает за человека.
+    // Включается осознанно — тем, кто устал подтверждать `ls` и `git status`.
+    approvalReview: false,
     // Сжатие включено: оно снимает оформление, а не содержание.
     compressOutput: true,
     // Веб-поиск выключен: агент не должен ходить в интернет без явного согласия.
@@ -370,6 +377,8 @@ export class SettingsStore {
         maxSteps: ai.maxSteps,
         maxAutopilotSteps: ai.maxAutopilotSteps,
         confirmDangerous: ai.confirmDangerous,
+        approvalReview: ai.approvalReview === true,
+        reviewModel: ai.reviewModel,
         compressOutput: ai.compressOutput !== false,
         webSearch: {
           enabled: ai.webSearch?.enabled === true,
@@ -620,6 +629,13 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     target.maxAutopilotSteps = clampSteps(patch.maxAutopilotSteps, target.maxAutopilotSteps);
   }
   if (patch.confirmDangerous !== undefined) target.confirmDangerous = patch.confirmDangerous === true;
+  if (patch.approvalReview !== undefined) target.approvalReview = patch.approvalReview === true;
+  // Модель проверки: пусто — проверяет активная модель беседы.
+  if (patch.reviewModel !== undefined) {
+    const value = patch.reviewModel.trim();
+    if (value) target.reviewModel = value;
+    else delete target.reviewModel;
+  }
   if (patch.compressOutput !== undefined) target.compressOutput = patch.compressOutput === true;
 
   // Веб-поиск: включение, вид сервиса и адрес. Ключ сюда не входит — он приходит
@@ -737,6 +753,10 @@ function loadSettings(filePath: string): StoredSettings {
   ai.maxAutopilotSteps = clampSteps(storedAi.maxAutopilotSteps, DEFAULT_SETTINGS.ai.maxAutopilotSteps);
   // Флаг могли записать чем угодно: оставляем строго булево значение.
   ai.confirmDangerous = ai.confirmDangerous === true;
+  ai.approvalReview = ai.approvalReview === true;
+  // Модель проверки: строка без пробелов или ничего (тогда проверяет активная).
+  ai.reviewModel =
+    typeof storedAi.reviewModel === 'string' && storedAi.reviewModel.trim() ? storedAi.reviewModel.trim() : undefined;
   // Веб-поиск: файл правят и руками, поэтому берём только известные значения.
   const storedSearch = (storedAi.webSearch ?? {}) as Partial<StoredSettings['ai']['webSearch']>;
   ai.webSearch = {

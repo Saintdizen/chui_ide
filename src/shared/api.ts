@@ -63,6 +63,7 @@ import type { WhitespaceMode } from './whitespace';
 import type { KeybindingSettings } from './keybindings';
 import type { ProjectKind } from './project-kinds';
 import type { ScheduleResult, TaskSchedule } from './scheduling';
+import type { ReviewVerdict } from './approval-review';
 
 /* ── Каналы IPC ─────────────────────────────────────────────────────────── */
 
@@ -105,6 +106,8 @@ export const PushTopic = {
   BrowserNav: 'browser:nav',
   /** Задача расписания дождалась своего времени: renderer начинает ход. */
   ScheduleDue: 'schedule:due',
+  /** Проверка модели разрешила команду без человека: в ленте строка «разрешено проверкой». */
+  ApprovalReview: 'approval:review',
 } as const;
 
 /* ── Транспорт ──────────────────────────────────────────────────────────── */
@@ -756,6 +759,20 @@ export interface AiSettings {
    */
   confirmDangerous: boolean;
   /**
+   * Спрашивать модель перед подтверждением команды.
+   *
+   * Работает в режимах, где подтверждение вообще бывает: безобидные команды
+   * (`ls`, `git status`, сборка) выполняются сами, а всё остальное — сомнительное,
+   * меняющее файлы, ходящее в сеть — по-прежнему спрашивает человека. Необратимые
+   * команды проверка не трогает вообще.
+   */
+  approvalReview: boolean;
+  /**
+   * Модель для проверки команд. Не задана — проверяет активная модель беседы.
+   * Отдельная нужна потому, что здесь достаточно дешёвой.
+   */
+  reviewModel?: string;
+  /**
    * Сжимать вывод инструментов перед отправкой модели: убрать прогресс-бары,
    * служебные последовательности терминала, повторы одинаковых строк и простыни
    * пустых строк. Содержание — код, диффы, ошибки — не трогается: в карточке
@@ -1338,6 +1355,10 @@ export interface AiSettingsPatch {
   maxAutopilotSteps?: number;
   /** Спрашивать ли при полном доступе перед необратимыми командами. */
   confirmDangerous?: boolean;
+  /** Проверять ли команду моделью перед карточкой подтверждения. */
+  approvalReview?: boolean;
+  /** Модель для проверки команд; пусто — активная модель беседы. */
+  reviewModel?: string;
   /** Сжимать ли вывод инструментов перед отправкой модели. */
   compressOutput?: boolean;
   /** Настройки веб-поиска: ключ задаётся отдельным вызовом `ai.setWebSearchKey`. */
@@ -1779,6 +1800,11 @@ export interface ApplyPatchesHostParams {
 /** Аргументы `ai.confirmCommand`: команда, которую просит выполнить агент. */
 export interface ConfirmCommandHostParams {
   command: string;
+  /**
+   * Что сказала проверка модели, если она не решилась разрешить сама. Причина
+   * показывается в карточке подсказкой: человеку полезно видеть, что её смутило.
+   */
+  review?: ReviewVerdict;
 }
 
 export interface ConfirmCommandHostResult {

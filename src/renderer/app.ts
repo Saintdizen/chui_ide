@@ -6306,6 +6306,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         if (dock.visible && dock.activeId === 'todo') todoPanel.schedule();
         break;
       }
+      case PushTopic.ApprovalReview: {
+        // Проверка модели разрешила команду сама: строка в ленте говорит, что
+        // спрашивать было некого, и почему команда прошла без карточки.
+        const payload = message.payload as { command?: string; reason?: string };
+        if (payload?.command) chat.noteApprovalReview(payload.command, payload.reason ?? '');
+        break;
+      }
       case PushTopic.ScheduleDue: {
         // Время задачи пришло: ход начинаем здесь, в окне, — часы живут в main.
         const payload = message.payload as { schedule?: TaskSchedule };

@@ -196,11 +196,16 @@ interface ApprovalRequest {
   done: string;
   /** Иконка карточки и строки итога. */
   icon: IconName;
+  /** Что сказала проверка модели, если она не разрешила сама. */
+  review?: string;
 }
 
 export interface CommandApproval {
-  /** Спросить разрешение на запуск команды; `true` — выполнять. */
-  confirm(command: string): Promise<boolean>;
+  /**
+   * Спросить разрешение на запуск команды; `true` — выполнять.
+   * `review` — причина, по которой проверка модели не разрешила команду сама.
+   */
+  confirm(command: string, review?: string): Promise<boolean>;
   /** Спросить разрешение на действие git (коммит, отправка, ветка, откат). */
   confirmGit(action: string): Promise<boolean>;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
@@ -214,6 +219,13 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
     block.appendChild(h('div', { class: 'approval-head' }, svgIcon('warning', 13), h('span', {}, request.title)));
     block.appendChild(h('pre', { class: 'approval-command' }, request.body));
     block.appendChild(h('div', { class: 'field-hint' }, request.hint));
+    // Проверка модели не решилась — её причина стоит здесь, а не в отдельном
+    // уведомлении: человек читает её в тот момент, когда принимает решение.
+    if (request.review) {
+      block.appendChild(
+        h('div', { class: 'approval-review-note' }, svgIcon('sparkle', 12), h('span', {}, request.review)),
+      );
+    }
 
     let settle: (allowed: boolean) => void = () => undefined;
     const decision = new Promise<boolean>((resolve) => {
@@ -258,13 +270,14 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
   }
 
   return {
-    confirm: (command) =>
+    confirm: (command, review) =>
       show({
         title: 'Ассистент просит выполнить команду',
         body: command,
         hint: 'Команда выполнится в папке проекта от вашего имени.',
         done: 'Выполняется скрипт',
         icon: 'terminal',
+        ...(review ? { review: `Проверка не решилась: ${review}` } : {}),
       }),
     confirmGit: (action) =>
       show({
@@ -283,6 +296,26 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
         icon: 'search',
       }),
   };
+}
+
+/**
+ * Строка ленты о том, что команду разрешила проверка модели, а не человек.
+ *
+ * Молча выполненное действие — это то, ради чего проверку и включают, но видеть
+ * его всё равно нужно: иначе в ленте команда просто «появилась и сработала», и
+ * непонятно, спрашивали ли кого-нибудь. Вид — как у закрытого решения: значок,
+ * фраза и причина сбоку.
+ */
+export function approvalReviewNote(command: string, reason: string): HTMLElement {
+  const first = command.trim().split('\n')[0] ?? '';
+  const short = first.length > 80 ? `${first.slice(0, 77)}…` : first;
+  return h(
+    'div',
+    { class: 'decision-line is-review' },
+    svgIcon('sparkle', 12),
+    h('span', {}, `Разрешено проверкой: ${short}`),
+    h('span', { class: 'decision-status' }, reason),
+  );
 }
 
 /**

@@ -77,6 +77,13 @@ import {
   type PermissionPreset,
 } from '../../shared/permissions';
 import { MAX_GOAL_CONTINUES, goalContinuePrompt, goalPrompt, parseGoalUpdate, sanitizeGoal } from '../../shared/goal';
+import {
+  REVIEW_SYSTEM_PROMPT,
+  REVIEW_TIMEOUT_MS,
+  buildReviewPrompt,
+  parseReviewVerdict,
+  type ReviewVerdict,
+} from '../../shared/approval-review';
 import { addUsage } from '../../shared/usage';
 import { ProjectMemory } from './project-memory';
 import { createSkillLibrary, type SkillLibrary } from './skills';
@@ -564,6 +571,64 @@ export class AiService {
     }
 
     return { text: cleanCompletion(text) };
+  }
+
+  /**
+   * Проверка команды перед подтверждением: второе мнение модели.
+   *
+   * Обычный режим прав спрашивает обо всём, и на безобидных командах человек
+   * начинает нажимать не читая. Этот запрос отвечает на один вопрос: можно ли
+   * выполнить команду без спроса. Разбор ответа — в `shared/approval-review.ts`,
+   * и он склонён к вопросу: непонятный ответ, таймаут и ошибка сети означают
+   * «спросить человека», а не «разрешить».
+   *
+   * `null` — проверять нечем или незачем (нет провайдера, нет модели, не
+   * дождались). Это не отказ и не разрешение: решение остаётся за человеком,
+   * и вызывающий просто показывает карточку.
+   */
+  async reviewCommand(command: string, cwd: string | null, signal: AbortSignal): Promise<ReviewVerdict | null> {
+    const ai = this.settings.get().ai;
+    const providerId = ai.activeProviderId;
+    // Модель проверки: своя из настроек, иначе активная. Отдельная нужна потому,
+    // что эту работу делает дешёвая модель, а беседует человек с сильной.
+    const model = ai.reviewModel || ai.activeModel;
+    if (!providerId || !model) return null;
+    const provider = this.createProvider(providerId);
+
+    const messages: ChatMessage[] = [
+      { role: 'system', content: REVIEW_SYSTEM_PROMPT },
+      { role: 'user', content: buildReviewPrompt(command, cwd ?? undefined) },
+    ];
+
+    // Свой предел времени поверх отмены прогона: проверка, которая думает дольше
+    // человека, бесполезна — он уже нажал бы сам.
+    const local = new AbortController();
+    const abort = (): void => local.abort();
+    signal.addEventListener('abort', abort, { once: true });
+    const timer = setTimeout(abort, REVIEW_TIMEOUT_MS);
+    timer.unref?.();
+
+    let text = '';
+    try {
+      await provider.streamChat(
+        { model, messages, temperature: 0, maxTokens: 60 },
+        {
+          onDelta: (piece) => {
+            // Потолок и здесь: `maxTokens` — просьба, а не гарантия.
+            if (text.length < 400) text += piece;
+          },
+        },
+        local.signal,
+      );
+    } catch {
+      // Сеть, таймаут, отказ провайдера — ни одного повода разрешить молча.
+      return null;
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+    }
+
+    return parseReviewVerdict(text);
   }
 
   /**

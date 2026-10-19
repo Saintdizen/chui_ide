@@ -36,7 +36,13 @@ import { createPlanPanel } from './chat-plan';
 import { createGoalPanel } from './chat-goal';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
-import { createAskPrompt, createCommandApproval, createEditReview, type ApprovalHost } from './chat-approvals';
+import {
+  approvalReviewNote,
+  createAskPrompt,
+  createCommandApproval,
+  createEditReview,
+  type ApprovalHost,
+} from './chat-approvals';
 import { mergePatchResult } from './chat-patches';
 import { countLines, plural, snippetFor, titleFrom } from './chat-text';
 import { createChatTabs, type ChatSearchHit } from './chat-tabs';
@@ -68,6 +74,11 @@ export interface ChatView {
    * формулирует файл задачи, а не человек в поле ввода.
    */
   sendPrompt(text: string): Promise<PromptRun>;
+  /**
+   * Проверка модели разрешила команду без человека. Строка ложится в ленту того
+   * хода, что идёт сейчас: молча выполненное действие должно быть видно.
+   */
+  noteApprovalReview(command: string, reason: string): void;
   askAboutSelection(mode: 'explain' | 'fix'): Promise<void>;
   applySettings(settings: Settings): void;
   /**
@@ -1576,7 +1587,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   const askPrompt = createAskPrompt(approvals);
 
   deps.host.handle('ai.confirmCommand', async (params) => ({
-    allowed: await commandApproval.confirm(params.command),
+    // `review` приходит, только если проверка модели не решилась разрешить сама:
+    // её причина нужна человеку в карточке.
+    allowed: await commandApproval.confirm(params.command, params.review?.reason),
   }));
 
   // Действия git спрашивают тем же способом, что и команды: карточка в ленте.
@@ -1816,6 +1829,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     stop,
     askAboutSelection,
     sendPrompt,
+    noteApprovalReview: (command, reason) => {
+      // Тот же адрес, что у карточек решений: лента идущего хода, а если он уже
+      // закончился — активная вкладка. Ход не прерываем и ничего не ждём.
+      approvals.mount(approvalReviewNote(command, reason));
+      approvals.scrollToEnd();
+    },
     attachImage: (image: PickedImage) => attachments.attachImage(image),
     attachContext: (item: ChatAttachment) => attachments.attachContext(item),
     applySettings(next: Settings) {
