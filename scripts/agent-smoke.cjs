@@ -25,13 +25,14 @@
  *     без навыков инструмент не предлагается вовсе;
  * 18. правки по якорю (apply_patch): позиций не требуется, но нужен renderer, который их считает;
  * 19. вес описаний инструментов в следе прогона, потолок на внешние инструменты
- *     и отказ вместо пустого прогона, когда инструменты не влезают в окно.
+ *     и отказ вместо пустого прогона, когда инструменты не влезают в окно;
+ * 20. картинки (read_image): небольшая уходит модели как есть, крупная — уменьшенной.
  *
  *   npm run smoke:agent
  *
  * Нужен собранный main (npm run build:main). Сеть и API-ключ не требуются.
  */
-const { app } = require('electron');
+const { app, nativeImage } = require('electron');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
@@ -119,6 +120,50 @@ function textSse(content) {
 /** Размышления приходят отдельным полем, до и вместе с ответом. */
 function reasoningSse(thoughts) {
   return thoughts.split(' ').map((word) => ({ choices: [{ delta: { reasoning_content: `${word} ` } }] }));
+}
+
+/** Маленькая настоящая картинка (2×2): read_image отдаёт её без уменьшения. */
+function smallImage() {
+  const bitmap = Buffer.alloc(2 * 2 * 4);
+  for (let i = 0; i < bitmap.length; i += 4) {
+    bitmap[i] = 200;
+    bitmap[i + 1] = 60;
+    bitmap[i + 2] = 30;
+    bitmap[i + 3] = 255;
+  }
+  return nativeImage.createFromBitmap(bitmap, { width: 2, height: 2 });
+}
+
+/** Крупный кадр с плавным переходом цвета: длинная сторона больше 1568. */
+function bigImage(width, height) {
+  const bitmap = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      bitmap[i] = Math.floor((x * 255) / width);
+      bitmap[i + 1] = Math.floor((y * 255) / height);
+      bitmap[i + 2] = Math.floor(((x + y) * 255) / (width + height));
+      bitmap[i + 3] = 255;
+    }
+  }
+  return nativeImage.createFromBitmap(bitmap, { width, height });
+}
+
+/** Картинки в теле запроса к модели: части `image_url` любого сообщения. */
+function imageParts(body) {
+  const parts = [];
+  for (const message of body?.messages ?? []) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (part?.type === 'image_url') parts.push({ url: part.image_url?.url, role: message.role });
+    }
+  }
+  return parts;
+}
+
+/** Есть ли картинка в конкретном сообщении: по этому видно, ГДЕ она едет. */
+function imageOf(message) {
+  return Array.isArray(message?.content) && message.content.some((part) => part?.type === 'image_url');
 }
 
 app.whenReady().then(async () => {
@@ -574,6 +619,59 @@ app.whenReady().then(async () => {
       String(run.results[0]?.detail ?? '').includes('недоступен из программы') ||
         String(run.results[0]?.detail ?? '').includes('false'),
       String(run.results[0]?.detail ?? '').slice(0, 200),
+    );
+
+    /* 1г-4. read_image: картинка уходит модели отдельным сообщением (в tool его
+       не положить), а крупная — ещё и уменьшенной: иначе один скриншот весит
+       больше всего остального контекста. */
+    const smallPng = path.join(dir, 'mark.png');
+    await fs.writeFile(smallPng, smallImage().toPNG());
+    requested = { name: 'read_image', args: { path: smallPng } };
+    run = await chat(undefined);
+    check('read_image предложен модели', run.toolNames.includes('read_image'), run.toolNames);
+    check('картинка прочитана', run.results[0]?.ok === true, run.results[0]);
+    check(
+      'сводка называет формат и размеры',
+      /PNG 2×2 · /.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
+    );
+    const smallBody = run.bodies[run.bodies.length - 1];
+    let picture = imageParts(smallBody)[0];
+    check('картинка ушла модели', Boolean(picture), imageParts(smallBody).length);
+    check('картинка — data-URL', /^data:image\/png;base64,/.test(String(picture?.url ?? '')));
+    check(
+      'картинка идёт сообщением пользователя, а не результатом вызова',
+      (smallBody.messages ?? []).some((message) => message.role === 'user' && imageOf(message)) &&
+        !(smallBody.messages ?? []).some((message) => message.role === 'tool' && imageOf(message)),
+    );
+    check('карточка получила картинку', (run.results[0]?.images ?? []).length === 1);
+
+    // Крупный кадр: 2400×1600. Длинная сторона больше предела, поэтому модели он
+    // уходит уменьшенным, и в ответе сказано, с какого размера.
+    const bigPng = path.join(dir, 'screenshot.png');
+    await fs.writeFile(bigPng, bigImage(2400, 1600).toPNG());
+    requested = { name: 'read_image', args: { path: bigPng } };
+    run = await chat(undefined);
+    const shrunkReply = String(run.results[0]?.detail ?? '');
+    check('крупный кадр прочитан', run.results[0]?.ok === true, run.results[0]);
+    check(
+      'уменьшение названо в сводке',
+      /уменьшено/.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
+    );
+    check('в ответе есть исходный размер', shrunkReply.includes('исходник — PNG 2400×1600'), shrunkReply);
+    picture = imageParts(run.bodies[run.bodies.length - 1])[0];
+    const shrunkWidth = Number(/(\d+)×\d+/.exec(String(run.results[0]?.summary ?? ''))?.[1] ?? 0);
+    check('длинная сторона уложилась в 1568', shrunkWidth > 0 && shrunkWidth <= 1568, run.results[0]?.summary);
+    check('уменьшенная ушла модели', Boolean(picture) && String(picture.url).length < 2_400_000);
+
+    // Не картинка — отказ словами, а не пустой результат.
+    requested = { name: 'read_image', args: { path: file } };
+    run = await chat(undefined);
+    check(
+      'текстовый файл отвергнут со объяснением',
+      run.results[0]?.ok === false && /не изображение/i.test(String(run.results[0]?.summary ?? '')),
+      run.results[0]?.summary,
     );
 
     /* 1д. внешние инструменты (MCP): список приходит снаружи, изменяющие требуют

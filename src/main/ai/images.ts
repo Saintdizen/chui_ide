@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { MAX_CHAT_IMAGES, MAX_IMAGE_BYTES, RpcErrorCode, type PickedImage } from '../../shared/api';
-import { IMAGE_MIME_BY_EXTENSION } from '../../shared/images';
+import { formatBytes, IMAGE_MIME_BY_EXTENSION } from '../../shared/images';
 import { RpcFailure } from '../ipc/router';
 
 /**
@@ -76,9 +76,5 @@ export function assertChatImages(images: readonly string[]): void {
   }
 }
 
-/** Размер по-человечески: «2.4 МБ» вместо «2516582». */
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} Б`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
-}
+/** Размер по-человечески — общий с остальными картинками (`shared/images.ts`). */
+export { formatBytes };

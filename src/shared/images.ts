@@ -72,6 +72,33 @@ export function isImagePath(filePath: string): boolean {
   return imageMimeType(filePath) !== null;
 }
 
+/** Подпись формата по типу содержимого: «PNG», «JPEG», «WebP». */
+const MIME_LABELS: Record<string, string> = {
+  'image/png': 'PNG',
+  'image/jpeg': 'JPEG',
+  'image/gif': 'GIF',
+  'image/webp': 'WebP',
+  'image/svg+xml': 'SVG',
+  'image/bmp': 'BMP',
+  'image/x-icon': 'ICO',
+  'image/avif': 'AVIF',
+  'image/tiff': 'TIFF',
+  'image/heic': 'HEIC',
+  'image/heif': 'HEIF',
+};
+
+/** Подпись формата по типу содержимого. Незнакомый тип — своим именем, а не пусто. */
+export function imageMimeLabel(mime: string): string {
+  return MIME_LABELS[mime] ?? mime.replace(/^image\//, '').toUpperCase();
+}
+
+/** Размер по-человечески: «2.4 МБ» вместо «2516582». */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} Б`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} КБ`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+}
+
 /** Короткая подпись формата для интерфейса: «PNG», «JPEG», «SVG». */
 export function imageFormatLabel(filePath: string): string {
   const extension = imageExtension(filePath);

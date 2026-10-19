@@ -23,6 +23,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_dir: 'Просмотр папки',
   read_file: 'Чтение файла',
   read_files: 'Чтение файлов',
+  read_image: 'Просмотр картинки',
   search: 'Поиск по проекту',
   project_map: 'Карта проекта',
   file_outline: 'Скелет файла',
@@ -60,6 +61,7 @@ const TOOL_ICONS: Record<string, IconName> = {
   list_dir: 'folder',
   read_file: 'file',
   read_files: 'file',
+  read_image: 'file',
   search: 'search',
   project_map: 'panel',
   file_outline: 'checklist',
@@ -501,6 +503,19 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
           result.appendChild(h('pre', { class: 'tool-raw' }, raw));
         }
         panel.appendChild(result);
+        // Картинка, которую посмотрел агент: без неё карточка говорит «смотрел
+        // макет», а человек не знает, какой. Ссылку на подпись не даём — data-URL
+        // в заголовке читался бы простынёй, копировать надо путь из аргументов.
+        if (outcome.images?.length) {
+          const gallery = h('section', { class: 'tool-section' });
+          gallery.appendChild(toolSectionHead('Изображение', outcome.summary));
+          for (const src of outcome.images) {
+            const picture = h('img', { class: 'tool-image', alt: 'Изображение, которое посмотрел агент' });
+            picture.src = src;
+            gallery.appendChild(picture);
+          }
+          panel.appendChild(gallery);
+        }
       }
       panel.hidden = !panel.hidden;
       card.classList.toggle('is-open', !panel.hidden);

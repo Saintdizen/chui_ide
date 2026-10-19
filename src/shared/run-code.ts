@@ -34,8 +34,11 @@ export const RUN_CODE_MAX_LOGS = 8_000;
  * вопрос человеку: программа ждала бы ответа, а человек в этот момент видел бы
  * только крутящуюся карточку. `update_plan` и `update_goal` — состояние беседы,
  * а не действие: его разбирает service, и из программы оно ничего не поменяет.
+ * `read_image` — картинка уходит модели отдельным сообщением прогона, а из
+ * программы такого сообщения нет: она получила бы текст «картинку отправили»,
+ * которой модель не видит.
  */
-const DENIED_IN_PROGRAM = new Set(['run_code', 'ask', 'update_plan', 'update_goal']);
+const DENIED_IN_PROGRAM = new Set(['run_code', 'ask', 'update_plan', 'update_goal', 'read_image']);
 
 /** Можно ли звать этот инструмент изнутри программы. */
 export function runCodeToolAllowed(name: string): boolean {

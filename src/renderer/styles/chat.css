@@ -1349,6 +1349,20 @@
   color: inherit;
 }
 
+/* Картинка, которую посмотрел агент: в раскрытой карточке — уменьшенный кадр,
+   а не картинка во всю ширину ленты. Клик по ней не открывает ничего своего:
+   вьюер живёт во вкладке, а здесь нужен ответ на вопрос «что он смотрел». */
+.tool-image {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  margin-top: 4px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_xs);
+  background: var(--panel_background);
+  object-fit: contain;
+}
+
 /* ── решение принято: от карточки остаётся одна строка ──────────────────── */
 
 .decision-line {

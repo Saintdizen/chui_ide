@@ -21,6 +21,7 @@ export type AgentToolName =
   | 'codebase_search'
   | 'search_docs'
   | 'read_skill'
+  | 'read_image'
   | 'find_references'
   | 'go_to_definition'
   | 'rename_symbol'
@@ -239,6 +240,22 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         name: { type: 'string', description: 'Имя навыка из списка, например `release`.' },
       },
       required: ['name'],
+    },
+  },
+  {
+    name: 'read_image',
+    side: 'main',
+    description:
+      'Посмотреть картинку из проекта: скриншот, макет, диаграмму. Файл уходит модели изображением ' +
+      'следующим сообщением — с описанием того, что на нём, можно работать. read_file на картинке ' +
+      'откажет: она не текст. Крупные файлы уменьшаются автоматически. Для иконок и логотипов в SVG ' +
+      'бери read_file — это текст.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Абсолютный путь к изображению (PNG, JPEG, WebP, GIF).' },
+      },
+      required: ['path'],
     },
   },
   {

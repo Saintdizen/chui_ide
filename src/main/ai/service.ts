@@ -121,6 +121,7 @@ import { searchWeb, webSearchNeedsKey, webSearchProviderLabel } from './web-sear
 import { fetchPage } from './web-fetch';
 import { canRunProgram, runProgram } from './run-code';
 import { assertChatImages } from './images';
+import { createReadImageRunner } from './read-image';
 import { OpenAiCompatibleProvider } from './openai-compatible';
 import type { AiProvider } from './provider';
 
@@ -183,6 +184,7 @@ const PLAN_MODE_TOOLS = new Set<string>([
   'run_linter',
   'web_search',
   'web_fetch',
+  'read_image',
   'find_files',
   'get_diagnostics',
   'git_status',
@@ -218,6 +220,7 @@ const READ_ONLY_TOOLS = new Set([
   'find_files',
   'get_diagnostics',
   'web_fetch',
+  'read_image',
   'git_status',
   'git_log',
   'git_blame',
@@ -276,6 +279,7 @@ const AGENT_PROMPT = [
   'Вопрос о том, как проект устроен или как что-то сделать, сперва задай документации (search_docs): там готовый ответ, а не вывод по коду. Запрос можно писать словами.',
   'Устройство файла видно по скелету (file_outline): объявления с номерами строк. Дальше читай этим диапазоном, а не файл целиком.',
   'Большие файлы читай диапазоном строк и не перечитывай одно и то же много раз.',
+  'Скриншот, макет или схему в проекте смотри read_image: read_file на картинке откажет — она не текст. SVG — наоборот, текст, его читай read_file.',
   'Когда вызовов много и они однотипны (прочитать десяток файлов, отфильтровать найденное, свести результаты), бери run_code: одна программа вместо десяти оборотов. Внутри неё инструменты — обычные функции: await tools.read_file({ path }) возвращает { ok, summary, text }.',
   'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу.',
   'Перед тем как чинить код, посмотри get_diagnostics — так видно настоящую ошибку, а не догадку.',
@@ -883,6 +887,9 @@ export class AiService {
     };
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
     if (hasSkills) toolContext.skills = skills;
+    // Картинки для модели: чтение и уменьшение файлов живут в main, инструмент
+    // только просит. Права не спрашиваем — это чтение внутри проекта.
+    toolContext.readImage = createReadImageRunner(this.workspace);
     // Чтение страницы по ссылке: своя настройка-разрешение, потому что это тоже
     // ход наружу. Адрес проверяется до запроса, а тело читается с потолком.
     if (settings.ai.webFetch?.enabled) {
@@ -1339,6 +1346,8 @@ export class AiService {
           detail: outcome.detail,
           changes: outcome.changes,
           ms: callMs,
+          // Картинка и в карточке: человек видит, что именно смотрел агент.
+          ...(outcome.images?.length ? { images: outcome.images } : {}),
         });
         // В трассу попадает тот же вызов, что видит человек в карточке, плюс
         // время: по нему и понятно, на что ушла минута прогона.
@@ -1365,6 +1374,18 @@ export class AiService {
         };
         messages.push(toolMessage);
         produced.push(toolMessage);
+        // Картинку из результата положить в tool-сообщение нельзя (у OpenAI там
+        // допустим только текст), поэтому она едет следующим сообщением
+        // пользователя. Живёт оно только внутри прогона: в ветку беседы не идёт —
+        // иначе base64 висел бы в истории каждого следующего запроса, а картинку
+        // всегда можно прочитать заново.
+        if (outcome.images?.length) {
+          messages.push({
+            role: 'user',
+            content: `Изображение из «${call.name}»: ${outcome.summary}`,
+            images: outcome.images,
+          });
+        }
       }
 
       commitStep();

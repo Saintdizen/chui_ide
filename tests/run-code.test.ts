@@ -87,6 +87,10 @@ describe('что программа может звать', () => {
     expect(runCodeToolAllowed('update_plan')).toBe(false);
     expect(runCodeToolAllowed('update_goal')).toBe(false);
   });
+
+  it('картинка — нет: она уходит модели отдельным сообщением, а у программы его нет', () => {
+    expect(runCodeToolAllowed('read_image')).toBe(false);
+  });
 });
 
 describe('сводка по вызовам', () => {

@@ -19,6 +19,7 @@ import { formatDocsAnswer } from '../../shared/docs-index';
 import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
+import { formatReadImageReply, formatReadImageSummary } from '../../shared/read-image';
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import { formatRunCode, runCodeToolAllowed, type RunCodeOutcome } from '../../shared/run-code';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
@@ -55,6 +56,13 @@ export interface ToolOutcome {
   detail?: string;
   /** Фактически прочитанный диапазон строк (1-based, включительно): повтор не нужен. */
   read?: { path: string; from: number; to: number };
+  /**
+   * Картинки (data-URL), которые надо положить модели отдельным сообщением
+   * прогона: в текст результата их положить нельзя — у OpenAI в `tool`-сообщении
+   * допустим только текст. Поэтому они едут следующим сообщением пользователя
+   * и только внутри прогона (см. `service.ts`).
+   */
+  images?: readonly string[];
   /** Файловые операции (создание/удаление/перенос): их показывает панель изменений чата. */
   changes?: ToolFileChange[];
 }
@@ -242,6 +250,29 @@ export interface SubagentRunner {
 }
 
 /**
+ * Картинка, которую агент посмотрел (`read_image`). Готовит её main: путь
+ * проверен рабочим каталогом, крупные файлы уменьшены, тип — тот, который
+ * провайдер принимает. Инструмент остаётся проверяемым без Electron.
+ */
+export interface ReadImageResult {
+  /** Тип содержимого ровно такой, каким он уйдёт модели (после уменьшения может смениться). */
+  mime: string;
+  /** Готовый data-URL: в таком виде картинку понимает и провайдер, и `<img>` в ленте. */
+  dataUrl: string;
+  /** Размеры в пикселях; 0 — определить не удалось (формат движок не разбирает). */
+  width: number;
+  height: number;
+  /** Вес того, что уйдёт модели. */
+  bytes: number;
+  /** Исходник, если пришлось уменьшать; `null` — отправлен файл как есть. */
+  source: { mime: string; width: number; height: number; bytes: number } | null;
+}
+
+export interface ReadImageRunner {
+  load(filePath: string): Promise<ReadImageResult>;
+}
+
+/**
  * Браузер для инструментов `browser_*`: свой Chromium, управляемый по CDP.
  * Запуск и подключение живут в main (`browser/browser.ts`), сюда приходит готовый
  * вызов — инструменты остаются проверяемыми без браузера.
@@ -330,6 +361,8 @@ export interface ToolContext {
   memory?: MemoryTools;
   /** Навыки проекта (`.chui/skills`): каталог идёт в промпт, тело — инструментом read_skill. */
   skills?: SkillTools;
+  /** Картинки для модели (`read_image`): чтение и уменьшение живут в main (`ai/read-image.ts`). */
+  readImage?: ReadImageRunner;
   /** Веб-поиск: подключён только при включённой настройке. */
   webSearch?: WebSearchRunner;
   /** Чтение страницы по ссылке: тоже только при включённой настройке. */
@@ -446,6 +479,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await searchDocs(ctx, parsed.value);
       case 'read_skill':
         return await readSkill(ctx, parsed.value);
+      case 'read_image':
+        return await readImage(ctx, parsed.value);
       case 'find_references':
         return await findReferences(ctx, parsed.value);
       case 'go_to_definition':
@@ -1182,6 +1217,32 @@ async function readSkill(ctx: ToolContext, args: Record<string, unknown>): Promi
     };
   }
   return { ok: true, summary: `Навык ${found.entry.name}`, detail: found.body };
+}
+
+/**
+ * Посмотреть картинку (`read_image`). Саму картинку в текст результата не положить:
+ * у OpenAI в `tool`-сообщении допустим только текст, поэтому она едет в
+ * `images` — отдельным сообщением прогона (см. `service.ts`). Здесь — вызов main,
+ * который читает и при необходимости уменьшает файл, и слова для модели.
+ */
+async function readImage(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.readImage) return { ok: false, summary: 'Картинки недоступны: нет доступа к проекту' };
+  const target = requireString(args, 'path');
+  const image = await ctx.readImage.load(target);
+  const rel = relative(target, ctx.workspace.rootPath());
+  const report = {
+    mime: image.mime,
+    width: image.width,
+    height: image.height,
+    bytes: image.bytes,
+    source: image.source,
+  };
+  return {
+    ok: true,
+    summary: `${rel}: ${formatReadImageSummary(report)}`,
+    detail: formatReadImageReply(rel, report),
+    images: [image.dataUrl],
+  };
 }
 
 /* ── ссылки и переход к определению (языковой сервер) ───────────────────── */
