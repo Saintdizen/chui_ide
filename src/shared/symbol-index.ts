@@ -115,6 +115,33 @@ export const EMPTY_INDEX_STATUS: SymbolIndexStatus = {
   skipped: 0,
 };
 
+/**
+ * Чем показать карту символов в строке состояния. `null` — показывать нечего:
+ * карта готова (молчим, как только индекс досчитан) или её нет вовсе.
+ *
+ * Показываем только сборку: это единственное состояние, в котором человеку полезно
+ * знать, что поиск по структуре ещё неполон. Готовая карта — рабочий фон, а не событие.
+ */
+export function symbolIndexChip(status: SymbolIndexStatus): { text: string; title: string } | null {
+  if (status.phase !== 'warming') return null;
+  const parts = [`${status.files} ${declinations(status.files, 'файл', 'файла', 'файлов')}`];
+  if (status.dependencyFiles > 0) parts.push(`из них ${status.dependencyFiles} из зависимостей`);
+  if (status.skipped > 0) parts.push(`${status.skipped} пропущено`);
+  return {
+    text: `Символы: ${status.files}…`,
+    title: `Карта символов собирается: ${parts.join(', ')}. Поиск по структуре отвечает уже сейчас, но пока неполно.`,
+  };
+}
+
+/** Русское склонение по числу: 1 файл, 2 файла, 5 файлов. */
+function declinations(count: number, one: string, few: string, many: string): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
 /* ── сборка записи по скелету файла ─────────────────────────────────────── */
 
 /** Виды объявлений, у которых бывают базовые классы. */

@@ -52,6 +52,11 @@ export interface StatusState {
    */
   progress: { label: string; percentage: number | null } | null;
   /**
+   * Карта символов собирается: подпись и подсказка. `null` — карта готова или её нет,
+   * и виджета тогда тоже нет (см. `symbolIndexChip`).
+   */
+  symbols: { text: string; title: string } | null;
+  /**
    * Идёт запись макроса: сколько действий уже записано. `null` — записи нет.
    * Показываем точкой и числом: забыть про идущую запись легко.
    */
@@ -129,6 +134,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     env: null,
     lsp: null,
     progress: null,
+    symbols: null,
     macro: null,
     vim: null,
     problems: { errors: 0, warnings: 0 },
@@ -187,6 +193,9 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
     h('span', { class: 'status-progress-label' }),
   );
   const progressLabel = progressItem.querySelector<HTMLElement>('.status-progress-label')!;
+  // Карта символов собирается: «Символы: 812…». Как и прогресс сервера, это признак
+  // идущей работы, поэтому стоит рядом с ним.
+  const symbolsItem = h('span', { class: 'status-item status-symbols' });
   // Идёт запись макроса: точка и число действий. Молчит, когда записи нет.
   const macroItem = h(
     'span',
@@ -226,6 +235,7 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
       { class: 'status-group' },
       vimItem,
       progressItem,
+      symbolsItem,
       macroItem,
       problemsItem,
       versionItem,
@@ -267,6 +277,10 @@ export function createStatusBar(deps: StatusBarDeps): StatusBarView {
           ? progress.label
           : `${progress.label} ${Math.round(progress.percentage)}%`;
     progressItem.title = progress ? `Языковой сервер: ${progress.label}` : '';
+    const symbols = state.symbols;
+    symbolsItem.hidden = symbols === null;
+    symbolsItem.textContent = symbols?.text ?? '';
+    symbolsItem.title = symbols?.title ?? '';
     const macro = state.macro;
     macroItem.hidden = macro === null;
     macroCount.textContent = macro ? `МАКРО ${macro.steps}` : '';

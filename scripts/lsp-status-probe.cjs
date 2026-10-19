@@ -29,6 +29,26 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const ask = (window, expression, timeoutMs = 20000) =>
   Promise.race([window.webContents.executeJavaScript(expression), wait(timeoutMs).then(() => 'нет ответа')]);
 
+/**
+ * Подставная карта символов: она «собирается». Настоящая сборка читает весь проект
+ * и поднимает серверы — здесь проверяется только показ состояния, поэтому ответ готовый.
+ */
+function fakeIndex() {
+  return {
+    status: () => ({
+      root: null,
+      phase: 'warming',
+      files: 812,
+      decls: 4000,
+      dependencyFiles: 120,
+      dependencyPackages: 9,
+      skipped: 0,
+    }),
+    refresh: () => undefined,
+    inherited: (name) => ({ name, declared: null, ancestors: [], members: [], phase: 'warming' }),
+  };
+}
+
 /** Подставной сервис серверов: состояние отдаём готовым, процессы не запускаем. */
 function fakeLsp(status) {
   return {
@@ -39,6 +59,8 @@ function fakeLsp(status) {
     status: () => status,
     request: async () => null,
     projectSymbols: () => [],
+    // Прогрев зовётся renderer'ом при открытии проекта: подставному сервису он ни к чему.
+    prewarm: async () => undefined,
     outline: async () => null,
     completionTriggers: () => ({ triggerCharacters: [], allCommitCharacters: [], resolveProvider: false }),
   };
@@ -68,6 +90,7 @@ app.whenReady().then(async () => {
     terminals,
     git,
     host: new HostClient(),
+    index: fakeIndex(),
     // Статус для чипа: python поднят из поставки, go — не поднялся.
     lsp: fakeLsp({
       running: ['python'],
@@ -116,6 +139,8 @@ app.whenReady().then(async () => {
         failedRows: document.querySelectorAll('.lsp-status-row.is-failed').length,
         actions: [...document.querySelectorAll('.lsp-status-action')].map((button) => button.textContent.trim()),
         popoverFits: rect ? rect.top >= 0 && rect.bottom <= window.innerHeight && rect.left >= 0 : null,
+        symbolsText: document.querySelector('.status-symbols')?.textContent.trim() ?? null,
+        symbolsHidden: document.querySelector('.status-symbols')?.hidden ?? null,
         window: { width: window.innerWidth, height: window.innerHeight },
       };
     })()`,
@@ -141,6 +166,9 @@ app.whenReady().then(async () => {
     ok('не поднявшийся сервер показан отдельно', report.failedRows >= 1, String(report.failedRows));
     ok('в попапе есть действия', report.actions.length === 2, report.actions.join(', '));
     ok('попап помещается в окно', report.popoverFits === true, JSON.stringify(report.window));
+    // Карта символов собирается — в полосе состояния видно, сколько уже разобрано.
+    ok('виджет карты символов показывает сборку', report.symbolsText === 'Символы: 812…', report.symbolsText);
+    ok('виджет карты символов виден', report.symbolsHidden === false, String(report.symbolsHidden));
   }
 
   const shot = path.join(process.env.TMPDIR ?? '/tmp', 'chui-lsp-status-probe.png');

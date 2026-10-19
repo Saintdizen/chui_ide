@@ -8,8 +8,10 @@ import {
   membersOf,
   queryIndex,
   sanitizeIndexPayload,
+  symbolIndexChip,
   toIndexDecls,
   INDEX_FORMAT,
+  EMPTY_INDEX_STATUS,
   type IndexedFile,
 } from '../src/shared/symbol-index';
 
@@ -211,5 +213,32 @@ describe('кэш карты', () => {
     expect(isIndexedLanguage('javascript')).toBe(true);
     expect(isIndexedLanguage('css')).toBe(false);
     expect(isIndexedLanguage(null)).toBe(false);
+  });
+});
+
+describe('виджет карты в строке состояния', () => {
+  it('пока карта собирается — видно, сколько уже разобрано', () => {
+    const chip = symbolIndexChip({ ...EMPTY_INDEX_STATUS, phase: 'warming', files: 812, decls: 4000 });
+    expect(chip?.text).toBe('Символы: 812…');
+    expect(chip?.title).toContain('812 файлов');
+  });
+
+  it('готовая карта молчит: это фон, а не событие', () => {
+    expect(symbolIndexChip({ ...EMPTY_INDEX_STATUS, phase: 'ready', files: 812 })).toBeNull();
+    expect(symbolIndexChip(EMPTY_INDEX_STATUS)).toBeNull();
+  });
+
+  it('зависимости и пропуски названы в подсказке', () => {
+    const chip = symbolIndexChip({
+      ...EMPTY_INDEX_STATUS,
+      phase: 'warming',
+      files: 2,
+      dependencyFiles: 1,
+      skipped: 3,
+    });
+    // 2 файла, а не 2 «файлов»: склонение считается по числу.
+    expect(chip?.title).toContain('2 файла');
+    expect(chip?.title).toContain('1 из зависимостей');
+    expect(chip?.title).toContain('3 пропущено');
   });
 });

@@ -159,7 +159,17 @@ export class SymbolIndexer {
    * и мгновенно: имя взято из текста, а не из позиции в открытом документе.
    */
   inherited(name: string): InheritedResult {
-    return inheritedFor(this.files.values(), name, this.phase);
+    const result = inheritedFor(this.files.values(), name, this.phase);
+    const root = this.root;
+    if (!root) return result;
+    // Абсолютные пути, как и у поиска: по ним открывается файл (см. `find`).
+    const absolute = (target: string): string =>
+      path.isAbsolute(target) ? target : path.join(root, ...target.split('/'));
+    return {
+      ...result,
+      declared: result.declared ? { ...result.declared, path: absolute(result.declared.path) } : null,
+      members: result.members.map((member) => ({ ...member, path: absolute(member.path) })),
+    };
   }
 
   /**

@@ -236,6 +236,47 @@ describe('SymbolIndexer', () => {
     expect(dirs[0]).toEqual([path.join(root, 'node_modules', 'lib')]);
   });
 
+  it('что умеет тип: по карте, без сервера, с абсолютными путями', async () => {
+    const root = project({
+      'base.py': 'class Base:\n    def reset(self):\n        pass\n',
+      'app.py': 'class Parser(Base):\n    def run(self):\n        pass\n',
+    });
+    const skeletons: Record<string, FileSymbol[]> = {
+      'base.py': [
+        {
+          name: 'Base',
+          kind: 'класс',
+          line: 1,
+          endLine: 3,
+          children: [{ name: 'reset', kind: 'метод', line: 2, endLine: 3, children: [] }],
+        },
+      ],
+      'app.py': [
+        {
+          name: 'Parser',
+          kind: 'класс',
+          line: 1,
+          endLine: 3,
+          children: [{ name: 'run', kind: 'метод', line: 2, endLine: 3, children: [] }],
+        },
+      ],
+    };
+    const index = new SymbolIndexer({
+      root: () => root,
+      outline: async (target) => skeletons[path.basename(target)] ?? [],
+      store: new SymbolStore(path.join(root, '.idx')),
+    });
+
+    index.refresh();
+    await index.settled();
+
+    const result = index.inherited('Parser');
+    expect(result.ancestors).toEqual(['Base']);
+    expect(result.members.map((member) => `${member.from}:${member.name}`)).toEqual(['Parser:run', 'Base:reset']);
+    expect(result.declared?.path).toBe(path.join(root, 'app.py'));
+    expect(result.members.every((member) => path.isAbsolute(member.path))).toBe(true);
+  });
+
   it('чужой язык и путь вне проекта — не наше дело', async () => {
     const root = project({ 'a.py': 'x = 1\n' });
     const { outline, asked } = fakeOutline({ 'a.py': parserSkeleton });

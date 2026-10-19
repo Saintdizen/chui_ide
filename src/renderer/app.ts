@@ -12,6 +12,7 @@ import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../s
 import { menuChecks } from '../shared/app-menu';
 import { lspLanguagesForKind, lspPrimaryLanguagesForKind, mergeLspServers } from '../shared/lsp-presets';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
+import { symbolIndexChip } from '../shared/symbol-index';
 import type { FileOperation } from '../shared/lsp-workspace-edit';
 import { progressLabel, type LspProgress, type WorkProgress } from '../shared/lsp-progress';
 import { DEFAULT_SNIPPETS } from '../shared/snippets';
@@ -1934,6 +1935,37 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void rpc
       .request('lsp.prewarm', { languages })
       .then(() => refreshLspStatus())
+      // Прогрев заодно запускает сборку карты символов в main — начинаем за ней следить.
+      .then(() => refreshSymbolIndex())
+      .catch(() => undefined);
+  }
+
+  /**
+   * Карта символов: сколько уже разобрано.
+   *
+   * Собирается она в main в фоне, а здесь виден только итог опроса. Пока идёт сборка
+   * (`warming`), спрашиваем раз в секунду и показываем «Символы: N…» в полосе состояния:
+   * поиск по структуре в это время работает, но неполно, и человек должен это видеть.
+   * Как только карта готова — опрос прекращается, виджет гаснет.
+   */
+  let symbolPoll: number | null = null;
+
+  function refreshSymbolIndex(): void {
+    void rpc
+      .request('index.status')
+      .then((status) => {
+        statusBar.update({ symbols: symbolIndexChip(status) });
+        if (status.phase !== 'warming') {
+          if (symbolPoll !== null) window.clearTimeout(symbolPoll);
+          symbolPoll = null;
+          return;
+        }
+        if (symbolPoll !== null) return;
+        symbolPoll = window.setTimeout(() => {
+          symbolPoll = null;
+          refreshSymbolIndex();
+        }, 1000);
+      })
       .catch(() => undefined);
   }
 
@@ -4846,6 +4878,66 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   );
 
   /**
+   * Что тип умеет: свои методы и поля вместе с унаследованными.
+   *
+   * Отличие от «кто наследует» выше: там ищут наследников в тексте проекта, а здесь —
+   * сам список членов типа с указанием, кто из предков их дал. Считается по карте
+   * символов (`index.inherited`), поэтому отвечает без языкового сервера и сразу, а
+   * `phase` говорит, стоит ли переспросить пока карта собирается.
+   */
+  const openTypeMembers = async (): Promise<void> => {
+    if (!editors.currentPath) {
+      showToast('Откройте файл', 'error');
+      return;
+    }
+    const name = editors.selectedText().trim() || editors.wordAtCursor() || '';
+    if (!name) {
+      showToast('Поставьте курсор на имя типа', 'info');
+      return;
+    }
+
+    const result = await rpc.request('index.inherited', { name }).catch(() => null);
+    if (!result) {
+      showToast('Не удалось спросить карту символов', 'error');
+      return;
+    }
+    if (result.members.length === 0) {
+      // Пустой ответ при собирающейся карте — это «ещё не знаю», а не «нет такого».
+      showToast(
+        result.phase === 'warming'
+          ? `${name}: карта символов ещё собирается — повторите через минуту`
+          : `${name}: членов не найдено`,
+      );
+      return;
+    }
+
+    const rect = layout.editorHost.getBoundingClientRect();
+    showPopupMenu(
+      result.members.map((member) => ({
+        label: `${member.kind} ${member.name}`,
+        // От кого метод: своё объявление — сам тип, унаследованное — предок.
+        hint: member.from === name ? 'свой' : `от ${member.from}`,
+        onSelect: () => void openPath(member.path).then(() => editors.reveal(member.path, member.line, 1)),
+      })),
+      rect.left + 40,
+      rect.top + 40,
+      { anchor: layout.editorHost },
+    );
+    const inherited = result.members.filter((member) => member.from !== name).length;
+    showToast(`${name}: ${result.members.length}, из них унаследовано ${inherited}`);
+  };
+
+  define(
+    {
+      id: 'search.typeMembers',
+      title: 'Что умеет тип: свои и унаследованные члены',
+      category: 'Навигация',
+      keywords: ['методы', 'members', 'унаследованные'],
+    },
+    () => void openTypeMembers(),
+  );
+
+  /**
    * Моникер символа под курсором: устойчивое имя, по которому символ связывается с тем же
    * символом в других инструментах. Показываем список (схем бывает несколько), а первый
    * сразу копируем в буфер — чаще всего его и нужно вставить в другой инструмент.
@@ -6421,6 +6513,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // И греем серверы языков проекта, не дожидаясь открытия файлов: подсказки,
   // переходы и поиск по символам готовы сразу (см. `prewarmLsp`).
   prewarmLsp();
+  // Карта символов могла начать собираться ещё до окна (проект открыли раньше) — спросим
+  // о ней сразу, не дожидаясь прогрева серверов: виджет в полосе состояния не должен
+  // появляться только по счастливой случайности.
+  refreshSymbolIndex();
   syncRunControl();
   // Окружение читаем тут же: к первому клику по чипу попап уже наполнен.
   preloadEnvironment();

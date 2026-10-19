@@ -1242,6 +1242,33 @@ module.exports = [
       return null;
     },
     'lsp.symbols': () => [],
+    // Карта символов в моке пуста: в браузере нет ни файлов проекта, ни языкового
+    // сервера, который их разбирает. Пустой ответ — честное «ещё не собрана».
+    'index.status': () => ({
+      root: null,
+      phase: 'idle',
+      files: 0,
+      decls: 0,
+      dependencyFiles: 0,
+      dependencyPackages: 0,
+      skipped: 0,
+    }),
+    'index.rebuild': () => ({
+      root: null,
+      phase: 'idle',
+      files: 0,
+      decls: 0,
+      dependencyFiles: 0,
+      dependencyPackages: 0,
+      skipped: 0,
+    }),
+    'index.inherited': (params) => ({
+      name: params?.name ?? '',
+      declared: null,
+      ancestors: [],
+      members: [],
+      phase: 'idle',
+    }),
     // Ссылок и иерархии типов в моке нет: пустые ответы — как у сервера без них.
     // Триггеров у мока нет: попап в нём открывается только по своим словам.
     'lsp.capabilities': () => ({ triggerCharacters: [], allCommitCharacters: [], resolveProvider: false }),
