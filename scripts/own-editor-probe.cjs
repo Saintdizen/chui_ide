@@ -688,6 +688,21 @@ async function assistCheck(win) {
   const smartType = await suggestState();
   await key('Escape');
 
+  // Путь в импорте: внутри строки подсказок нет, а путь — есть. Список файлов проекта
+  // в пробе подставной (см. `projectFiles` в editor-probe.ts), поэтому проверяем, что
+  // на строку `from './ut` попап открылся и предложил именно путь.
+  await script(`(() => {
+    const { controller, buffer } = window.probe;
+    controller.applyEdits([{ start: 0, removed: buffer.getText(), inserted: 'import { parse } from "./ut' }]);
+    const end = buffer.length;
+    controller.selectRange(end, end);
+    window.probe.input.focus();
+    return true;
+  })()`);
+  await wait(300);
+  const importPaths = await suggestState();
+  await key('Escape');
+
   // Подсказка после точки: в классе печатаем `this.` — попап обязан показать поля и
   // методы ЭТОГО класса. Здесь нет языкового сервера (подставной молчит), поэтому
   // работает запасной разбор файла — тот, что нужен, когда сервера нет вовсе.
@@ -802,6 +817,8 @@ async function assistCheck(win) {
     ширина_закрыт: scopeClosed,
     // Карта при наборе: объявление проекта дописалось к словам файла без сервера.
     карта_при_наборе: typedFromIndex.все.includes('ProjectOnlyRow'),
+    // Путь в импорте: попап открылся на строке и предложил файл проекта.
+    пути_в_импорте: importPaths.видно && importPaths.все.includes('./utils'),
     // Итог одной строкой: каждое нажатие добавляет к списку, Escape убирает попап.
     умное_значение: smartValue,
     умное_тип: smartType,

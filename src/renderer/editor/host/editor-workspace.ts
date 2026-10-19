@@ -160,6 +160,8 @@ export interface EditorWorkspaceOptions {
   ) => Promise<readonly CompletionItem[]>;
   /** Символы проекта из карты: ими расширяется список повторным Ctrl+Space. */
   projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
+  /** Файлы проекта (относительные пути) — для подсказок пути внутри импорта. */
+  projectFiles?: () => Promise<readonly string[]>;
   /** Знаки-триггеры сервера для файла: по ним попап открывается сразу после знака. */
   completionTriggers?: (path: string) => Promise<CompletionTriggers>;
   /** Дотягивание подсказки (см. `LspFeatures.resolveCompletion`). */
@@ -269,6 +271,8 @@ export class EditorWorkspace {
   private readonly completionFromLanguage: EditorWorkspaceOptions['completionFromLanguage'];
   /** Символы карты проекта — второй и третий уровень Ctrl+Space. */
   private readonly projectSymbols: EditorWorkspaceOptions['projectSymbols'];
+  /** Файлы проекта — третий шов для подсказок пути в импорте. */
+  private readonly projectFiles: EditorWorkspaceOptions['projectFiles'];
   /** Знаки-триггеры сервера — тот же шов: попап открывается по ним. */
   private readonly completionTriggers: EditorWorkspaceOptions['completionTriggers'];
   /** Дотягивание подсказки — тот же шов. */
@@ -394,6 +398,7 @@ export class EditorWorkspace {
     this.hoverFromLanguage = options.hoverFromLanguage;
     this.completionFromLanguage = options.completionFromLanguage;
     this.projectSymbols = options.projectSymbols;
+    this.projectFiles = options.projectFiles;
     this.completionTriggers = options.completionTriggers;
     this.resolveCompletionItem = options.resolveCompletionItem;
     this.signatureFromLanguage = options.signatureFromLanguage;
@@ -492,6 +497,7 @@ export class EditorWorkspace {
       hoverFromLanguage: this.hoverFromLanguage,
       completionFromLanguage: this.completionFromLanguage,
       projectSymbols: this.projectSymbols,
+      projectFiles: this.projectFiles,
       completionTriggers: this.completionTriggers,
       resolveCompletionItem: this.resolveCompletionItem,
       signatureFromLanguage: this.signatureFromLanguage,

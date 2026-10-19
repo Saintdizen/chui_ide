@@ -408,6 +408,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // При наборе (`onlyIndex`) нужна только карта — серверы спрашивают свой путь.
     projectSymbols: (query: string, onlyIndex?: boolean) =>
       onlyIndex ? symbolsFromIndex(query) : symbolsFromProject(query),
+    // Файлы проекта — для подсказок пути внутри импорта: `from './ut'` просит файл,
+    // а не слово. Пути приходят относительными — так их и пишут в импорте.
+    projectFiles: () => rpc.request('workspace.listFiles').catch(() => []),
     // Ссылки в коде: сервер помечает участки (пути в import, адреса) — их показываем
     // подчёркнутыми, а клик открывает адрес или файл (см. `openDocumentLink`).
     documentLinks: async (path) => {

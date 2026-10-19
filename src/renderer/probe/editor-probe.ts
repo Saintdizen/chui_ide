@@ -115,6 +115,10 @@ const assistant = new CompletionAssistant(view, controller, buffer, suggest, {
     { name: 'ProjectOnlyRow', kind: 'класс', package: null },
     { name: 'DependencyOnlyRow', kind: 'класс', package: 'requests' },
   ],
+  // Подставной список файлов проекта: по нему проба проверяет пути в импорте (в
+  // приложении его отдаёт main — обход дерева в renderer невозможен).
+  projectFiles: async () => ['src/app.ts', 'src/utils.ts', 'src/widgets/index.ts', 'src/widgets/button.ts'],
+  currentPath: () => 'src/app.ts',
   // Подставной языковой сервер: одна подсказка с авто-импортом — так проба проверяет,
   // что дополнительные правки (строка import) применяются вместе со вставкой.
   lsp: async (prefix) =>

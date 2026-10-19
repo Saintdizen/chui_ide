@@ -33,6 +33,7 @@ import type { EditorView } from '../view/editor-view';
 import { allCompletions, buildCompletions, DEFAULT_LIMIT, type CompletionItem } from './completions';
 import { expectedAt, filterByExpectation, type Expectation } from './expectation';
 import { EXTERNAL_BONUS, matchScore } from './fuzzy';
+import { importPathAt, importPathItems, type ImportPathContext } from './import-path';
 import { expandSnippet } from './snippet';
 import { memberAccessAt, membersOf, type MemberAccess } from './member-access';
 import { prefixAt } from './prefix';
@@ -59,6 +60,9 @@ const INDEX_DELAY_MS = 120;
 
 /** С какого набранного начала спрашивать карту: одна буква совпадёт с половиной проекта. */
 const INDEX_MIN_PREFIX = 2;
+
+/** Через сколько перечитывать список файлов проекта для подсказок пути. */
+const FILE_LIST_TTL_MS = 5000;
 
 /**
  * Откуда берутся подсказки: чем шире, тем больше список.
@@ -149,6 +153,17 @@ export interface CompletionAssistantOptions {
    */
   projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
   /**
+   * Файлы проекта относительными путями (`src/app.ts`, `pkg/core.py`). По ним строятся
+   * подсказки пути внутри импорта — там человек ищет не имя, а файл, и слова ему не
+   * помогут. Список берётся из проекта, а не из открытого файла: импортируют всегда чужое.
+   */
+  projectFiles?: () => Promise<readonly string[]>;
+  /**
+   * Путь открытого файла: от него считаются относительные спецификаторы (`./utils`).
+   * Не задан — подсказки путей не работают, остаются слова.
+   */
+  currentPath?: () => string | null;
+  /**
    * Довести подсказку опозданием (`completionItem/resolve`): на входе — исходный
    * элемент сервера из `CompletionItem.resolve`, на выходе — описание и уточнение.
    * Не задано — список показывает только то, что пришло в первом ответе.
@@ -164,6 +179,16 @@ export class CompletionAssistant {
   private readonly index = new WordIndex();
   /** Символы карты проекта — для расширения списка повторным Ctrl+Space и при наборе. */
   private readonly projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
+  /** Файлы проекта для подсказок пути в импорте и путь открытого файла. */
+  private readonly projectFiles?: () => Promise<readonly string[]>;
+  private readonly currentPath?: () => string | null;
+  /**
+   * Прочитанный список файлов проекта. Держим его здесь, а не забираем на каждый знак:
+   * обход дерева на каждую букву был бы дороже самих подсказок. Свежесть — по времени:
+   * созданный файл появится в списке через несколько секунд (см. `FILE_LIST_TTL_MS`).
+   */
+  private fileList: readonly string[] | null = null;
+  private fileListAt = 0;
   /** Текущая ширина списка Ctrl+Space: файл, проект, зависимости (см. `showAll`). */
   private scope: CompletionScope = 'file';
   /** Список открыт именно Ctrl+Space: только тогда повтор расширяет, а не начинает заново. */
@@ -200,6 +225,8 @@ export class CompletionAssistant {
     this.snippets = options.snippets ?? (() => []);
     this.lsp = options.lsp;
     this.projectSymbols = options.projectSymbols;
+    this.projectFiles = options.projectFiles;
+    this.currentPath = options.currentPath;
     this.resolve = options.resolve;
     widget.onAccept = () => this.accept();
     // Список выделил строку — доводим её до полного вида (описание, подробность).
@@ -296,6 +323,16 @@ export class CompletionAssistant {
     const text = this.buffer.lineText(line);
     const column = caret - this.buffer.lineStart(line);
 
+    // Спецификатор импорта — не текст, а путь: подсказывать надо файлы проекта
+    // (`from './ut'` — человек ищет файл, а не слово). Проверяем ДО строки: внутри
+    // строки подсказки выключены, но путь — как раз то исключение, ради которого всё.
+    const importContext = importPathAt(text, column, this.language);
+    if (importContext) {
+      this.widget.hide();
+      void this.showImportPaths(importContext, caret);
+      return;
+    }
+
     // В строке или комментарии не подсказываем: там слова — это текст, а не код.
     const tokenType = this.view.tokenTypeAt(caret);
     this.lastToken = tokenType;
@@ -364,6 +401,12 @@ export class CompletionAssistant {
     const line = this.buffer.lineAt(caret);
     const text = this.buffer.lineText(line);
     const column = caret - this.buffer.lineStart(line);
+    // В импорте «умное» сужение ни к чему: подходящее тут ровно одно — путь.
+    const importContext = importPathAt(text, column, this.language);
+    if (importContext) {
+      void this.showImportPaths(importContext, caret);
+      return;
+    }
     const member = memberAccessAt(text, column);
     if (member) {
       this.scope = 'file';
@@ -405,6 +448,13 @@ export class CompletionAssistant {
     const text = this.buffer.lineText(line);
     const column = caret - this.buffer.lineStart(line);
 
+    // В импорте Ctrl+Space значит «покажи пути», а не «все слова»: место просит файл.
+    const importContext = importPathAt(text, column, this.language);
+    if (importContext) {
+      void this.showImportPaths(importContext, caret);
+      return;
+    }
+
     // После точки Ctrl+Space значит «все члены этого объекта», а не «все слова файла»:
     // уровни ширины тут ни при чём, членов у объекта ровно столько, сколько есть.
     const member = memberAccessAt(text, column);
@@ -429,6 +479,36 @@ export class CompletionAssistant {
     this.widget.show(items, this.anchor(caret), prefix.length);
     this.askServer(prefix, caret);
     if (this.scope !== 'file') void this.extendWithProject(prefix);
+  }
+
+  /**
+   * Подсказать путь внутри импорта: файлы и каталоги проекта.
+   *
+   * Список файлов приходит через мост (обход дерева в renderer невозможен) и
+   * запоминается на несколько секунд: печатают быстрее, чем обходится дерево, а
+   * созданный только что файл появится в подсказках после короткой паузы.
+   */
+  private async showImportPaths(context: ImportPathContext, caret: number): Promise<void> {
+    const files = await this.loadProjectFiles();
+    if (files.length === 0) return;
+    const from = this.currentPath?.() ?? null;
+    if (!from) return;
+    // Пока читали список, человек мог уйти с этого места — старый ответ не к месту.
+    if (this.controller.caret !== caret) return;
+    const items = importPathItems(files, from, this.language, context);
+    this.widget.show(items, this.anchor(caret), context.prefix.length);
+  }
+
+  /** Файлы проекта: из памяти, пока список свежий, иначе — у проекта. */
+  private async loadProjectFiles(): Promise<readonly string[]> {
+    const source = this.projectFiles;
+    if (!source) return [];
+    if (this.fileList !== null && Date.now() - this.fileListAt < FILE_LIST_TTL_MS) return this.fileList;
+    const files = await source().catch(() => null);
+    if (!files) return this.fileList ?? [];
+    this.fileList = files;
+    this.fileListAt = Date.now();
+    return files;
   }
 
   /**

@@ -210,6 +210,11 @@ export interface EditorHostOptions {
    */
   projectSymbols?: (query: string, onlyIndex?: boolean) => Promise<readonly ProjectCompletion[]>;
   /**
+   * Файлы проекта относительными путями — по ним подсказываются пути внутри импорта.
+   * Не задано — в импорте подсказок нет, остаются слова.
+   */
+  projectFiles?: () => Promise<readonly string[]>;
+  /**
    * Знаки-триггеры языкового сервера для файла (`@` в CSS, `:` в JSON, `.` в TS):
    * по ним попап открывается сразу после знака, а не только по набранным буквам.
    * Не задано — работает только наш путь (точка и буквы).
@@ -591,6 +596,9 @@ export class EditorHost {
       snippets: options.snippets,
       // Подсказки сервера: путь берём активный — панель о нём знает, ассистент нет.
       projectSymbols: options.projectSymbols,
+      // Пути в импорте считаются от открытого файла — по той же причине.
+      projectFiles: options.projectFiles,
+      currentPath: () => this.activePath,
       lsp: options.completionFromLanguage
         ? (_prefix, position) => {
             const path = this.activePath;
