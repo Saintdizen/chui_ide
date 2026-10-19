@@ -1185,6 +1185,19 @@
   font-size: var(--font_small_size);
 }
 
+/* Время вызова: цифры одним столбиком и не спорят с именем — это справка,
+   а не состояние. Появляется только вместе с результатом (см. `chat-tools.ts`). */
+.tool-time {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_small_size);
+  font-variant-numeric: tabular-nums;
+}
+
+.tool-time:empty {
+  display: none;
+}
+
 /* Состояние — ЗНАЧОК, а не подпись: галочка в круге, крест в круге или круг «идёт».
    Форма читается быстрее слова, а цвет дублирует её (зелёный — готово, красный —
    ошибка). Слово живёт в подсказке значка (см. `paintToolState`). */

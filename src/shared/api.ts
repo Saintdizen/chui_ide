@@ -1635,6 +1635,8 @@ export interface ChatToolResultPayload {
   ok: boolean;
   summary: string;
   detail?: string;
+  /** Сколько инструмент работал, мс: видно, что шаг ушёл на сборку, а не на чтение. */
+  ms?: number;
   /** Файлы, которых коснулся инструмент без правки документа (создание, удаление, перенос). */
   changes?: ToolFileChange[];
 }

@@ -941,6 +941,9 @@ export class AiService {
 
         emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
         let outcome: ToolOutcome;
+        // Замер шага: карточка показывает имена и аргументы, а стоило ли это
+        // секунду или пять минут — раньше видно не было.
+        const startedAt = Date.now();
         if (repeated) {
           outcome = {
             ok: false,
@@ -971,6 +974,7 @@ export class AiService {
           summary: outcome.summary,
           detail: outcome.detail,
           changes: outcome.changes,
+          ms: Date.now() - startedAt,
         });
 
         const result = outcome.ok ? (outcome.detail ?? outcome.summary) : `Ошибка: ${outcome.summary}`;

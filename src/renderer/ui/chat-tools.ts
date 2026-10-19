@@ -1,4 +1,5 @@
 import type { ChatToolResultPayload, ChatToolStartPayload } from '../../shared/api';
+import { formatCallTime } from '../../shared/duration';
 import { touchedFiles } from '../../shared/tool-files';
 import { highlightInto } from '../core/highlight';
 import { languageFromPath } from '../core/languages';
@@ -416,6 +417,8 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
     const cardState = toolStateElement();
     const panel = h('div', { class: 'tool-panel', hidden: true });
     const card = h('div', { class: 'tool-card' });
+    // Время вызова появляется вместе с результатом: до него говорить нечего.
+    const time = h('span', { class: 'tool-time' });
     const rowChevron = svgIcon('chevronDown', 12);
     rowChevron.classList.add('tool-chevron');
 
@@ -449,6 +452,7 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
         toolIconNode(call.name, call.args),
         h('span', { class: 'tool-name' }, label),
         h('span', { class: 'tool-args' }, summarizeArgs(call.args)),
+        time,
         cardState,
         rowChevron,
       ),
@@ -463,6 +467,10 @@ function createToolGroup(container: HTMLElement, anchor: Node | null, onUpdate?:
         outcome = result;
         setToolState(cardState, result.ok);
         card.classList.toggle('tool-failed', !result.ok);
+        // Сколько шло: у долгой сборки это главное, что можно сказать о вызове.
+        const spent = result.ms !== undefined && result.ms > 0 ? formatCallTime(result.ms) : '';
+        time.textContent = spent;
+        time.title = spent ? `Выполнялось ${spent}` : '';
         pending -= 1;
         if (!result.ok) failed += 1;
         // Ряд файлов появляется только у удачного вызова: под ошибкой список
