@@ -484,7 +484,7 @@ export function condenseCallArguments(args: string, minChars: number): string {
     const record = value as Record<string, unknown>;
     for (const [key, inner] of Object.entries(record)) {
       if (typeof inner === 'string' && CONDENSE_FIELDS.has(key) && inner.length >= minChars) {
-        record[key] = `[применено: ${inner.split('\n').length} стр. — текст в файле]`;
+        record[key] = `[применено: ${inner.split('\n').length} стр. — текст в файле, не копировать]`;
         changed = true;
       } else {
         record[key] = walk(inner);
@@ -494,6 +494,21 @@ export function condenseCallArguments(args: string, minChars: number): string {
   };
   const result = walk(parsed.value);
   return changed ? JSON.stringify(result) : args;
+}
+
+/**
+ * Пометка, которой `condenseCallArguments` заменяет тело правки в истории.
+ *
+ * Сжатие идёт только по копии для провайдера, и в норме в инструмент она не
+ * попадает. Но если попадёт — файл получит эту строку вместо текста, а
+ * инструмент отчитается «создан». Молчаливая порча хуже отказа, поэтому
+ * `runTool` узнаёт пометку и не исполняет такой вызов.
+ */
+const CONDENSE_MARKER = /^\[применено: \d+ стр\. — текст в файле(, не копировать)?\]$/;
+
+/** Аргумент — ровно пометка сжатия, а не текст, который модель написала сама. */
+export function isCondenseMarker(value: unknown): boolean {
+  return typeof value === 'string' && CONDENSE_MARKER.test(value.trim());
 }
 
 /**
@@ -510,6 +525,7 @@ export function condenseCallArguments(args: string, minChars: number): string {
  * текст ещё понадобится. Возвращаем исходное сообщение, если сжимать нечего —
  * по ссылке, чтобы не плодить копии на каждом шаге.
  */
+
 export function condenseAppliedCalls(
   message: ChatMessage,
   appliedIds: ReadonlySet<string>,

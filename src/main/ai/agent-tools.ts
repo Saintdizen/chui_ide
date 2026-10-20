@@ -53,6 +53,7 @@ import {
 import type { AgentWaitResult } from './agents';
 import { formatWorkflow } from '../../shared/workflow';
 import { parseToolArguments } from '../../shared/tools';
+import { isCondenseMarker } from '../../shared/context-fit';
 import { missingArguments, toolSpec } from '../../shared/tool-schema';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
@@ -726,7 +727,65 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     }
   }
 
+  // Тело правки или команда, пришедшая пометкой сжатия, — не текст модели, а
+  // остаток истории: файл получил бы эту строку, а инструмент отчитался бы
+  // «создан». Отказ с объяснением дешевле молчаливой порчи и лечится повтором.
+  const stale = staleCondensedBody(parsed.value);
+  if (stale) {
+    return {
+      ok: false,
+      summary:
+        `Аргумент «${stale}» пришёл пометкой сжатия вместо текста — в файл она не пойдёт. ` +
+        'Повтори вызов с настоящим содержимым.',
+    };
+  }
+
   return clipOutcome(ctx, name, await dispatchTool(ctx, name, parsed.value));
+}
+
+/**
+ * Поля, в которых пометка сжатия означает испорченный вызов, а не текст.
+ * Список — только тела правок и команд: остальные аргументы короткие и в
+ * историю не сжимаются.
+ */
+const BODY_FIELDS = [
+  'contents',
+  'content',
+  'newText',
+  'oldText',
+  'text',
+  'command',
+  'code',
+  'script',
+  'replacement',
+] as const;
+
+/** Имя поля, где вместо содержимого стоит пометка сжатия, или `null`. */
+function staleCondensedBody(args: Record<string, unknown>): string | null {
+  // Тела правок лежат вложенно: `edit` присылает `edits[].edits[].newText`,
+  // `create_file` — плоский `contents`. Обход общий, глубина ограничена: схемы
+  // инструментов не глубже четырёх уровней, а бесконечный обход тут не нужен.
+  const walk = (value: unknown, path: string, depth: number): string | null => {
+    if (depth > 4) return null;
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i += 1) {
+        const found = walk(value[i], `${path}[${i}]`, depth + 1);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (typeof value !== 'object' || value === null) return null;
+    for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+      const where = path ? `${path}.${key}` : key;
+      if ((BODY_FIELDS as readonly string[]).includes(key) && isCondenseMarker(inner)) {
+        return where;
+      }
+      const found = walk(inner, where, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  };
+  return walk(args, '', 0);
 }
 
 /**
