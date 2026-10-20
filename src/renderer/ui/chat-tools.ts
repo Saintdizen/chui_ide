@@ -38,23 +38,13 @@ const TOOL_LABELS: Record<string, string> = {
   update_plan: 'План',
   ask: 'Вопрос агента',
   task: 'Подзадача',
-  browser_open: 'Открытие страницы',
-  browser_snapshot: 'Снимок страницы',
-  browser_click: 'Клик на странице',
-  browser_type: 'Ввод на странице',
-  browser_evaluate: 'Скрипт на странице',
-  browser_zoom: 'Масштаб страницы',
-  browser_close: 'Закрытие браузера',
+  browser: 'Браузер',
   git_status: 'Состояние git',
   git_diff: 'Diff git',
   git_log: 'История git',
   open_file: 'Открытие файла',
   present: 'Результат',
-  terminal_list: 'Список терминалов',
-  terminal_start: 'Запуск в терминале',
-  terminal_read: 'Чтение терминала',
-  terminal_write: 'Ввод в терминал',
-  terminal_stop: 'Остановка терминала',
+  terminal: 'Терминал',
 };
 
 /** У инструмента свой значок: строка читается без чтения подписи. */
@@ -77,26 +67,46 @@ const TOOL_ICONS: Record<string, IconName> = {
   update_plan: 'command',
   ask: 'bubble',
   task: 'sparkle',
-  browser_open: 'search',
-  browser_snapshot: 'file',
-  browser_click: 'chevron',
-  browser_type: 'pencil',
-  browser_evaluate: 'command',
-  browser_zoom: 'fit',
-  browser_close: 'close',
+  browser: 'search',
   git_status: 'branch',
   git_diff: 'branch',
   git_log: 'command',
   open_file: 'file',
   present: 'checkCircle',
-  terminal_list: 'terminal',
-  terminal_start: 'terminal',
-  terminal_read: 'terminal',
-  terminal_write: 'terminal',
-  terminal_stop: 'terminal',
+  terminal: 'terminal',
 };
 
-export function toolLabel(name: string): string {
+/** Подписи действий у слитых инструментов: карточка говорит, что именно случилось. */
+const TOOL_ACTION_LABELS: Record<string, Record<string, string>> = {
+  browser: {
+    open: 'Открытие страницы',
+    snapshot: 'Снимок страницы',
+    click: 'Клик на странице',
+    type: 'Ввод на странице',
+    evaluate: 'Скрипт на странице',
+    zoom: 'Масштаб страницы',
+    close: 'Закрытие браузера',
+  },
+  terminal: {
+    list: 'Список терминалов',
+    start: 'Запуск в терминале',
+    read: 'Чтение терминала',
+    write: 'Ввод в терминал',
+    stop: 'Остановка терминала',
+  },
+  schedule: { create: 'Новая задача по расписанию', update: 'Правка задачи', delete: 'Удаление задачи' },
+};
+
+export function toolLabel(name: string, raw?: string): string {
+  const actions = TOOL_ACTION_LABELS[name];
+  if (actions && raw) {
+    try {
+      const action = (JSON.parse(raw) as { action?: unknown }).action;
+      if (typeof action === 'string' && actions[action]) return actions[action];
+    } catch {
+      // не JSON — останется общая подпись инструмента
+    }
+  }
   return TOOL_LABELS[name] ?? name;
 }
 
@@ -480,7 +490,7 @@ function createToolGroup(
   const add = (call: ChatToolStartPayload): ToolCardView => {
     count += 1;
     pending += 1;
-    const label = toolLabel(call.name);
+    const label = toolLabel(call.name, call.args);
     if (!names.includes(label)) names.push(label);
 
     /**

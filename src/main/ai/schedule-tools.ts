@@ -10,18 +10,18 @@ import {
 import type { ToolContext, ToolOutcome } from './agent-tools';
 
 /**
- * Инструменты расписания: `schedule_create`, `schedule_list`, `schedule_update`,
- * `schedule_delete`.
+ * Инструменты расписания: `schedule` (action create, update, delete) и `schedule_list`.
  *
  * Расписание до сих пор ставилось только окном: человек открывал «Расписание
  * задач…» и заполнял форму. Отсюда же задачу ставит сам агент — одной фразой
  * «каждый будний день к 9:00 собери сводку по вчерашним коммитам».
  *
- * У каждого действия свой инструмент, а не один `schedule` с полем `action`:
- * так модель видит четыре коротких описания вместо одного длинного, а промах
- * («забыл id») чинится по названию инструмента. Правка идёт на месте: id и
- * история запусков сохраняются — иначе правка одного поля начинала бы задачу
- * заново, со сброшенным «прошлый запуск: ошибка».
+ * Сначала на каждое действие был свой инструмент — четыре коротких описания,
+ * и промах («забыл id») чинился по названию. Но описания едут в каждом запросе,
+ * а `create` и `update` повторяют друг друга семью полями из восьми. Теперь
+ * меняющие действия — один `schedule` с `action`, а чтение осталось отдельным:
+ * только оно allowed в режиме «План». Правка идёт на месте: id и история
+ * запусков сохраняются — иначе правка одного поля начинала бы задачу заново.
  *
  * Модуль знает только про `ScheduleTools` (файл и часы живут в main), поэтому
  * проверяется без диска — см. `tests/schedule-tools.test.ts`.
@@ -59,7 +59,7 @@ export function findSchedule(
   if (partial.length > 1) {
     return { problem: `Под «${raw}» подходит несколько задач: ${partial.map((item) => item.id).join(', ')}` };
   }
-  if (list.length === 0) return { problem: 'Расписание пустое: сначала schedule_create' };
+  if (list.length === 0) return { problem: 'Расписание пустое: сначала schedule (action create)' };
   return { problem: `Задачи с id «${raw}» нет. Есть: ${list.map((item) => item.id).join(', ')}` };
 }
 
@@ -83,6 +83,19 @@ function text(value: unknown): string | undefined {
 
 /** Правило не поняли — подсказываем сразу все четыре, иначе модель гадает. */
 const REPEAT_HINT = 'repeat: daily, weekly, once или interval.';
+
+/** Действия расписания одним инструментом: `action` вместо трёх имён. */
+export async function scheduleAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = text(args.action);
+  if (action === 'create') return await scheduleCreate(ctx, args);
+  if (action === 'update') return await scheduleUpdate(ctx, args);
+  if (action === 'delete') return await scheduleDelete(ctx, args);
+  return {
+    ok: false,
+    summary: `Неизвестное действие расписания: ${action ?? '(пусто)'}`,
+    detail: 'Допустимые: create, update, delete. Список задач — schedule_list.',
+  };
+}
 
 /** Завести задачу. Пустое имя или сломанное правило — отказ словами, а не запись наугад. */
 export async function scheduleCreate(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -126,7 +139,7 @@ export async function scheduleList(ctx: ToolContext): Promise<ToolOutcome> {
 
   const list = await ctx.schedules.list();
   if (list.length === 0) {
-    return { ok: true, summary: 'расписание пустое', detail: 'Задач нет. Завести — schedule_create.' };
+    return { ok: true, summary: 'расписание пустое', detail: 'Задач нет. Завести — schedule (action create).' };
   }
   return { ok: true, summary: `задач: ${list.length}`, detail: list.map(scheduleLine).join('\n') };
 }

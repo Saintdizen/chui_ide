@@ -209,7 +209,7 @@ const AGENT_PROMPT = [
   'Если якорь не найден, их несколько или правка «не совпала» — перечитай файл и возьми фрагмент дословно и шире (с соседней строкой или именем функции), а не меняй формулировку наугад.',
   'Правки и команды пользователь подтверждает — не считай их сделанными, пока не получил ответ инструмента.',
   'Договорённости, важные надолго, записывай в память проекта (`remember`). Разовый контекст не пиши.',
-  'Просьба «каждый день в 9:00…» или «каждые 15 минут…» — это расписание (`schedule_create`), а не ответ в чате: правило ставится один раз и работает само.',
+  'Просьба «каждый день в 9:00…» или «каждые 15 минут…» — это расписание (`schedule` с `action: create`), а не ответ в чате: правило ставится один раз и работает само.',
 ].join('\n');
 
 /** Дописывается, когда включён полный доступ: подтверждения не нужны. */
@@ -2140,7 +2140,7 @@ export class AiService {
     }
     // Записи в репозиторий спрашивают подтверждение: без моста подтверждений их не предлагаем.
     if (tool.name.startsWith('git_')) return this.git !== undefined && host?.confirmGit !== undefined;
-    if (tool.name.startsWith('terminal_')) return this.terminals !== undefined;
+    if (tool.name === 'terminal') return this.terminals !== undefined;
     // Оба инструмента символов живут на языковом сервере: без него их не предлагаем.
     if (
       tool.name === 'codebase_search' ||
@@ -2162,7 +2162,7 @@ export class AiService {
     if (tool.name === 'spawn_agent') return this.agents !== undefined;
     // Расписание — тоже файл проекта: действие обратимо (задачу снимает
     // schedule_delete), а часы без окна и так молчат.
-    if (tool.name.startsWith('schedule_')) return this.schedules !== undefined;
+    if (tool.name === 'schedule' || tool.name === 'schedule_list') return this.schedules !== undefined;
     // Навыки — файлы проекта: инструмент предлагаем только когда есть что читать.
     if (tool.name === 'read_skill') return hasSkills;
     // Прошлые беседы: без хранилища искать негде.
@@ -2176,14 +2176,14 @@ export class AiService {
     }
     // Браузер: включается настройкой (как веб-поиск), а действия на странице
     // спрашивают подтверждение — значит, без подключённого окна их не предлагаем.
-    if (tool.name.startsWith('browser_')) {
+    // Действия разные по правам (снимок ничего не меняет, масштаб не спрашивает
+    // подтверждения), но ограничение у них общее: остальные всё равно пойдут
+    // спрашивать, а действие без своей возможности откажет словами в обработчике.
+    if (tool.name === 'browser') {
       if (!this.browser || !this.settings.get().ai.browser.enabled) return false;
-      if (tool.name === 'browser_snapshot' || tool.name === 'browser_close') return true;
-      // Масштаб страницу не меняет и отменяется одной кнопкой — спрашивать нечего.
-      // Зато он есть только у встроенного браузера: без него инструмент не предлагаем.
-      if (tool.name === 'browser_zoom') return this.browser.zoom !== undefined;
-      return host?.confirmBrowser !== undefined;
+      return host?.confirmBrowser !== undefined || this.browser.zoom !== undefined;
     }
+
     // Всё прочее — только по явному признаку. Новый инструмент без условия в
     // этой проверке модели не предлагается вовсе (это видно в пробе), а не
     // открывается ей сам собой: раньше дефолт был «main — значит можно».

@@ -206,7 +206,7 @@ describe('schedule_delete', () => {
     const { ctx } = harness([]);
     const outcome = await scheduleDelete(ctx, { id: existing.id });
     expect(outcome.ok).toBe(false);
-    expect(outcome.detail).toContain('schedule_create');
+    expect(outcome.detail).toContain('schedule');
   });
 
   it('без подключённого расписания инструмент честно отказывает', async () => {

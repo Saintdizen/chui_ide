@@ -281,7 +281,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
               // ляжет отдельным абзацем в ту же строку ленты.
               reasoningView?.part();
               toolCards.set(call.id, tools.add(call));
-              activity.state(`выполняю: ${toolLabel(call.name)}`);
+              activity.state(`выполняю: ${toolLabel(call.name, call.args)}`);
               segment = h('div', { class: 'msg-body' });
               messageEl.insertBefore(segment, activity.element);
               host.scrollToEnd(session);

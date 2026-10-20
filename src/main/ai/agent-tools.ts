@@ -36,7 +36,7 @@ import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
 import type { TaskSchedule } from '../../shared/scheduling';
-import { scheduleCreate, scheduleDelete, scheduleList, scheduleUpdate } from './schedule-tools';
+import { scheduleAction, scheduleList } from './schedule-tools';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
 import {
   formatAgentList,
@@ -759,32 +759,18 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await listMcpResources(ctx, parsed.value);
       case 'read_mcp_resource':
         return await readMcpResource(ctx, parsed.value);
-      case 'browser_open':
-        return await browserOpen(ctx, parsed.value);
-      case 'browser_snapshot':
-        return await browserSnapshot(ctx);
-      case 'browser_click':
-        return await browserClick(ctx, parsed.value);
-      case 'browser_type':
-        return await browserType(ctx, parsed.value);
-      case 'browser_evaluate':
-        return await browserEvaluate(ctx, parsed.value);
-      case 'browser_zoom':
-        return await browserZoom(ctx, parsed.value);
-      case 'browser_close':
-        return await browserClose(ctx);
+      // Три семейства ниже — одним инструментом с `action`: семь схем браузера и
+      // пять терминала стоили модели дороже, чем их различие по смыслу.
+      case 'browser':
+        return await browserAction(ctx, parsed.value);
       case 'remember':
         return await remember(ctx, parsed.value);
       case 'forget':
         return await forget(ctx, parsed.value);
       case 'schedule_list':
         return await scheduleList(ctx);
-      case 'schedule_create':
-        return await scheduleCreate(ctx, parsed.value);
-      case 'schedule_update':
-        return await scheduleUpdate(ctx, parsed.value);
-      case 'schedule_delete':
-        return await scheduleDelete(ctx, parsed.value);
+      case 'schedule':
+        return await scheduleAction(ctx, parsed.value);
       case 'git_status':
         return await gitStatus(ctx);
       case 'git_diff':
@@ -811,16 +797,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await gitPush(ctx, parsed.value);
       case 'open_file':
         return await openFile(ctx, parsed.value);
-      case 'terminal_list':
-        return terminalList(ctx);
-      case 'terminal_start':
-        return await terminalStart(ctx, parsed.value);
-      case 'terminal_read':
-        return terminalRead(ctx, parsed.value);
-      case 'terminal_write':
-        return await terminalWrite(ctx, parsed.value);
-      case 'terminal_stop':
-        return terminalStop(ctx, parsed.value);
+      case 'terminal':
+        return await terminalAction(ctx, parsed.value);
       default:
         return { ok: false, summary: `Инструмент недоступен: ${name}` };
     }
@@ -1006,6 +984,60 @@ function snapshotOutcome(snapshot: BrowserSnapshot, summary: string): ToolOutcom
 function pageSummary(snapshot: BrowserSnapshot): string {
   const title = snapshot.title.trim() || snapshot.url;
   return `${title} · элементов: ${snapshot.elements.length}`;
+}
+
+/**
+ * Отказ, если для действия не хватает аргументов.
+ *
+ * Схема сверяет только поля, общие для всех действий (`action`), а `url` нужен
+ * одному `open`, `ref` — `click`. Проверяем до обработчика: ответ называет место,
+ * как и у остальных инструментов, а не «не задан аргумент» из глубины.
+ */
+function missingForAction(args: Record<string, unknown>, keys: readonly string[]): ToolOutcome | null {
+  for (const key of keys) {
+    const value = args[key];
+    if (typeof value !== 'string' || value.trim().length === 0) {
+      return {
+        ok: false,
+        summary: `Действию «${String(args.action)}» нужен аргумент «${key}»`,
+        detail: `${String(args.action)} требует: ${keys.join(', ')}.`,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Действия браузера одним инструментом.
+ *
+ * Семь отдельных имён стоили семи схем в каждом запросе, а различались только
+ * первой строкой описания. Разбор аргументов остался в прежних функциях —
+ * здесь только выбор по `action` и отказ на незнакомое действие.
+ */
+async function browserAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  switch (action) {
+    case 'snapshot':
+      return await browserSnapshot(ctx);
+    case 'close':
+      return await browserClose(ctx);
+    case 'zoom':
+      return missingForAction(args, ['mode']) ?? (await browserZoom(ctx, args));
+    case 'open':
+      return missingForAction(args, ['url']) ?? (await browserOpen(ctx, args));
+    case 'click':
+      return missingForAction(args, ['ref']) ?? (await browserClick(ctx, args));
+    case 'type':
+      return missingForAction(args, ['ref', 'text']) ?? (await browserType(ctx, args));
+    case 'evaluate':
+      return missingForAction(args, ['expression']) ?? (await browserEvaluate(ctx, args));
+    default:
+      return {
+        ok: false,
+        summary: `Неизвестное действие браузера: ${action}`,
+        detail: 'Допустимые: open, snapshot, click, type, evaluate, zoom, close.',
+      };
+  }
 }
 
 async function browserOpen(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -3114,11 +3146,38 @@ function sandboxRefusesTerminal(ctx: ToolContext): ToolOutcome | null {
   };
 }
 
+/** Действия терминала одним инструментом: разбор аргументов — в прежних функциях. */
+async function terminalAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  switch (action) {
+    case 'list':
+      return terminalList(ctx);
+    case 'start':
+      return await terminalStart(ctx, args);
+    case 'read':
+      return missingForAction(args, ['id']) ?? terminalRead(ctx, args);
+    case 'write':
+      return missingForAction(args, ['id', 'data']) ?? (await terminalWrite(ctx, args));
+    case 'stop':
+      return missingForAction(args, ['id']) ?? terminalStop(ctx, args);
+    default:
+      return {
+        ok: false,
+        summary: `Неизвестное действие терминала: ${action}`,
+        detail: 'Допустимые: list, start, read, write, stop.',
+      };
+  }
+}
+
 function terminalList(ctx: ToolContext): ToolOutcome {
   if (!ctx.terminals) return { ok: false, summary: 'Терминал недоступен' };
   const sessions = ctx.terminals.list();
   if (sessions.length === 0) {
-    return { ok: true, summary: 'открытых терминалов нет', detail: 'Список пуст. Открой сессию через terminal_start.' };
+    return {
+      ok: true,
+      summary: 'открытых терминалов нет',
+      detail: 'Список пуст. Открой сессию через terminal (action start).',
+    };
   }
   const lines = sessions.map((session) => `${session.id} · ${session.shell} · ${session.cwd} (pid ${session.pid})`);
   return { ok: true, summary: `терминалов: ${sessions.length}`, detail: lines.join('\n') };
@@ -3206,7 +3265,7 @@ async function terminalWrite(ctx: ToolContext, args: Record<string, unknown>): P
   return {
     ok: true,
     summary: `отправлено в ${id}`,
-    detail: `В сессию ${id} отправлено символов: ${data.length}. Прочитай вывод через terminal_read.`,
+    detail: `В сессию ${id} отправлено символов: ${data.length}. Прочитай вывод через terminal (action read).`,
   };
 }
 

@@ -28,7 +28,7 @@ import { PageSession, type CdpChannel } from './session';
  * не одно и то же, и расхождение движков иногда и есть то, что ищут.
  */
 export class AgentBrowser implements BrowserTools {
-  /** Вкладка агента: одна на сессию, чтобы `browser_open` не плодил вкладки. */
+  /** Вкладка агента: одна на сессию, чтобы `browser` (action open) не плодил вкладки. */
   private pageId: string | null = null;
   private channel: CdpChannel | null = null;
   private session: PageSession | null = null;
@@ -81,7 +81,7 @@ export class AgentBrowser implements BrowserTools {
     // В какой вкладке работает агент — решает общий доступ: поделённая страница
     // человека важнее собственной вкладки агента.
     const id = this.panel.sharedPageId ?? this.pageId;
-    if (!id) return { ok: false, reason: 'Страница ещё не открыта: сначала browser_open' };
+    if (!id) return { ok: false, reason: 'Страница ещё не открыта: сначала browser (action open)' };
     this.note('zoom');
     return this.panel.zoom(id, mode);
   }
@@ -131,11 +131,11 @@ export class AgentBrowser implements BrowserTools {
 
   /**
    * Сессия для действий. Поделился человек вкладкой — работаем в ней; иначе — в своей
-   * (`pageId`), заведённой `browser_open`.
+   * (`pageId`), заведённой `browser` (action open).
    */
   private async integratedSession(): Promise<PageSession> {
     const id = this.panel.sharedPageId ?? this.pageId;
-    if (!id) throw new Error('Страница ещё не открыта: сначала browser_open');
+    if (!id) throw new Error('Страница ещё не открыта: сначала browser (action open)');
     return this.attach(id);
   }
 

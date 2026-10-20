@@ -251,7 +251,7 @@ export function formatFetchedPage(page: FetchedPage): { summary: string; detail:
   if (page.text && page.text.length < THIN_PAGE_CHARS) {
     parts.push(
       '',
-      'Текста совсем мало: скорее всего, содержимое собирает скрипт. Тогда страницу смотрит браузер (browser_open и browser_snapshot).',
+      'Текста совсем мало: скорее всего, содержимое собирает скрипт. Тогда страницу смотрит браузер (browser: action open и snapshot).',
     );
   }
 

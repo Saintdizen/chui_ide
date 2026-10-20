@@ -126,7 +126,7 @@ describe('песочница', () => {
     const term = terminals();
     const box = sandbox();
     const ctx = { workspace: workspace(), terminals: term, sandbox: box } as ToolContext;
-    const outcome = await runTool(ctx, 'terminal_start', JSON.stringify({ command: 'npm test' }));
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'start', command: 'npm test' }));
 
     expect(outcome.ok).toBe(false);
     expect(outcome.detail).toContain('контейнер обрезка');
@@ -137,7 +137,7 @@ describe('песочница', () => {
     const term = terminals();
     const box = sandbox();
     const ctx = { workspace: workspace(), terminals: term, sandbox: box } as ToolContext;
-    const outcome = await runTool(ctx, 'terminal_write', JSON.stringify({ id: 't1', data: 'rm -rf /' }));
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'write', id: 't1', data: 'rm -rf /' }));
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('песочниц');
@@ -153,8 +153,8 @@ describe('отказ — одним словом', () => {
     const base = { workspace: workspace(), terminals: term, confirmCommand: deny } as ToolContext;
 
     const viaRun = await runTool(base, 'run_terminal', JSON.stringify({ command: 'npm test' }));
-    const viaSession = await runTool(base, 'terminal_start', JSON.stringify({ command: 'npm test' }));
-    const viaTyping = await runTool(base, 'terminal_write', JSON.stringify({ id: 't1', data: 'npm test' }));
+    const viaSession = await runTool(base, 'terminal', JSON.stringify({ action: 'start', command: 'npm test' }));
+    const viaTyping = await runTool(base, 'terminal', JSON.stringify({ action: 'write', id: 't1', data: 'npm test' }));
 
     expect(viaRun.summary).toBe(viaSession.summary);
     expect(viaSession.summary).toBe(viaTyping.summary);
@@ -201,7 +201,7 @@ describe('отказ — одним словом', () => {
   it('в непесочной папке папка запуска берётся из cwd', async () => {
     const term = terminals();
     const ctx = { workspace: workspace(), terminals: term, confirmCommand: async () => true } as ToolContext;
-    await runTool(ctx, 'terminal_start', JSON.stringify({ cwd: `${ROOT}/packages/core` }));
+    await runTool(ctx, 'terminal', JSON.stringify({ action: 'start', cwd: `${ROOT}/packages/core` }));
 
     expect(term.created).toEqual([`${ROOT}/packages/core`]);
   });

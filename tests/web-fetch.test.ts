@@ -191,7 +191,7 @@ describe('ответ инструмента', () => {
   });
 
   it('мало текста — подсказка про браузер: страница собрана скриптом', () => {
-    expect(formatFetchedPage(page({ text: 'Загрузка…' })).detail).toContain('browser_open');
+    expect(formatFetchedPage(page({ text: 'Загрузка…' })).detail).toContain('browser');
   });
 });
 

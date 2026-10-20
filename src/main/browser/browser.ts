@@ -63,7 +63,7 @@ export class BrowserService implements BrowserTools {
   private profileDir: string | null = null;
   /** Сессия страницы: снимок, нажатия, ввод, выражения. Логика — в `session.ts`. */
   private page: PageSession | null = null;
-  /** Запуск идёт прямо сейчас: два `browser_open` не должны поднять два браузера. */
+  /** Запуск идёт прямо сейчас: два `browser` (action open) не должны поднять два браузера. */
   private starting: Promise<void> | null = null;
 
   constructor(private readonly options: () => BrowserLaunchOptions) {}

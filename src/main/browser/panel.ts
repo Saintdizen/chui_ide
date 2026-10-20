@@ -318,7 +318,7 @@ export class BrowserPanel {
   private readonly views = new Map<string, Entry>();
   /** Какое вложение сейчас прикреплено к окну: остальные живут, но не показаны. */
   private activeId: string | null = null;
-  /** Вкладка агента: одна на сессию, чтобы `browser_open` не плодил вкладки. */
+  /** Вкладка агента: одна на сессию, чтобы `browser` (action open) не плодил вкладки. */
   private agentId: string | null = null;
   /** Вкладка, которой человек поделился с агентом: `null` — не делились. */
   private sharedId: string | null = null;
@@ -623,7 +623,7 @@ export class BrowserPanel {
     const normalized = normalizeBrowserUrl(rawUrl);
     if (!normalized.ok) return { ok: false, reason: normalized.reason };
 
-    // Вкладка агента живёт до `closeAgent`: второй `browser_open` идёт в неё же.
+    // Вкладка агента живёт до `closeAgent`: второй `browser` (action open) идёт в неё же.
     if (this.agentId && this.views.has(this.agentId)) {
       const id = this.agentId;
       const moved = this.command(id, 'navigate', normalized.url);

@@ -54,19 +54,13 @@ describe('набор инструментов агента', () => {
       'update_plan',
       'ask',
       'task',
-      'browser_open',
-      'browser_snapshot',
-      'browser_click',
-      'browser_type',
-      'browser_evaluate',
-      'browser_zoom',
-      'browser_close',
+      'browser',
+
       'remember',
       'forget',
-      'schedule_create',
+      'schedule',
       'schedule_list',
-      'schedule_update',
-      'schedule_delete',
+
       'git_status',
       'git_diff',
       'git_log',
@@ -80,11 +74,7 @@ describe('набор инструментов агента', () => {
       'git_pull',
       'git_push',
       'open_file',
-      'terminal_list',
-      'terminal_start',
-      'terminal_read',
-      'terminal_write',
-      'terminal_stop',
+      'terminal',
     ];
     for (const name of dispatched) expect(byName.has(name)).toBe(true);
   });

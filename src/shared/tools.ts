@@ -57,19 +57,11 @@ export type AgentToolName =
   | 'wait_agent'
   | 'send_message'
   | 'interrupt_agent'
-  | 'browser_open'
-  | 'browser_snapshot'
-  | 'browser_click'
-  | 'browser_type'
-  | 'browser_evaluate'
-  | 'browser_zoom'
-  | 'browser_close'
+  | 'browser'
   | 'remember'
   | 'forget'
-  | 'schedule_create'
+  | 'schedule'
   | 'schedule_list'
-  | 'schedule_update'
-  | 'schedule_delete'
   | 'git_status'
   | 'git_diff'
   | 'git_log'
@@ -84,11 +76,7 @@ export type AgentToolName =
   | 'git_push'
   | 'open_file'
   | 'present'
-  | 'terminal_list'
-  | 'terminal_start'
-  | 'terminal_read'
-  | 'terminal_write'
-  | 'terminal_stop';
+  | 'terminal';
 
 export interface JsonSchemaProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -601,7 +589,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       'Run a shell command in the workspace and return its output. The user confirms every ' +
       'run, so keep it to one command on purpose. background: true returns a job id instead ' +
       'of output: use it for long runs (build, install, tests); read with run_output, stop ' +
-      'with run_stop. For a session visible to the user (dev server, watch, REPL) use terminal_start.',
+      'with run_stop. For a session visible to the user (dev server, watch, REPL) use terminal (action start).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -925,96 +913,29 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'browser_open',
+    name: 'browser',
     side: 'main',
     description:
-      'Open a URL in the browser (own Chromium driven over CDP). Starts the browser if ' +
-      'needed and navigates. Inspect the page with browser_snapshot. Requires the Browser ' +
-      'setting and http or https only.',
+      'Own Chromium over CDP; http or https only, needs the Browser setting. action: open (url), ' +
+      'snapshot, click (ref), type (ref, text, submit), evaluate (expression), zoom (mode), ' +
+      'close. Take a snapshot after each action: the page changes and old refs expire.',
     inputSchema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'Page address; no scheme means https.' },
-      },
-      required: ['url'],
-    },
-  },
-  {
-    name: 'browser_snapshot',
-    side: 'main',
-    description:
-      'Snapshot of the open page: title, URL, interactive elements with numbers and visible ' +
-      'text. The numbers are refs for browser_click and browser_type. Call it after each ' +
-      'action: the page changes and old numbers expire.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'browser_click',
-    side: 'main',
-    description:
-      'Click a page element by the number from the snapshot (browser_snapshot). A number ' +
-      'lives until the snapshot is refreshed.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        ref: { type: 'string', description: 'Element number from the snapshot, for example "3".' },
-      },
-      required: ['ref'],
-    },
-  },
-  {
-    name: 'browser_type',
-    side: 'main',
-    description:
-      'Type text into a field by the number from the snapshot. For a site search box or an ' +
-      'address field the form submits on Enter: pass submit=true.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        ref: { type: 'string', description: 'Field number from the snapshot.' },
-        text: { type: 'string', description: 'What to type.' },
-        submit: { type: 'boolean', description: 'Press Enter after typing (submit the form).' },
-      },
-      required: ['ref', 'text'],
-    },
-  },
-  {
-    name: 'browser_evaluate',
-    side: 'main',
-    description:
-      'Evaluate a JavaScript expression on the open page and return the result. Use it for ' +
-      'state the snapshot does not show. The result is converted to text; clicking and ' +
-      'typing are more reliable because they are visible and repeatable.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        expression: { type: 'string', description: 'Expression or JS code. Return the value with return.' },
-      },
-      required: ['expression'],
-    },
-  },
-  {
-    name: 'browser_zoom',
-    side: 'main',
-    description:
-      'Change page zoom: smaller, larger, fit to width or 1:1. Zoom is per tab, not per ' +
-      'page: the user sees it in the toolbar.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        mode: {
+        action: {
           type: 'string',
-          description: 'in | out | fit | actual (1:1).',
+          enum: ['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close'],
+          description: 'What to do.',
         },
+        url: { type: 'string', description: 'open: page address; no scheme means https.' },
+        ref: { type: 'string', description: 'click, type: element number from snapshot.' },
+        text: { type: 'string', description: 'type: what to type.' },
+        submit: { type: 'boolean', description: 'type: press Enter to submit the form.' },
+        expression: { type: 'string', description: 'evaluate: JS expression; return the value.' },
+        mode: { type: 'string', description: 'zoom: in | out | fit | actual (1:1).' },
       },
-      required: ['mode'],
+      required: ['action'],
     },
-  },
-  {
-    name: 'browser_close',
-    side: 'main',
-    description: 'Close the controlled browser: process and profile are removed. Use it when ' + 'inspection is over.',
-    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'remember',
@@ -1062,71 +983,36 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'schedule_create',
+    name: 'schedule',
     side: 'main',
     description:
-      'Create a scheduled task: the prompt is sent to the assistant automatically. repeat ' +
-      'is daily, weekly, once (time, weekdays, date) or interval (intervalMinutes).',
+      'Change the schedule: action create (prompt is sent to the assistant automatically; repeat ' +
+      'is daily, weekly, once or interval), update (only the changed fields; id and run history ' +
+      'are kept), delete. Ids come from schedule_list.',
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'Title: the task is listed under it.' },
-        prompt: { type: 'string', description: 'Full prompt, sent to the assistant as a question.' },
+        action: { type: 'string', enum: ['create', 'update', 'delete'], description: 'What to do.' },
+        id: { type: 'string', description: 'update, delete: task id from schedule_list.' },
+        title: { type: 'string', description: 'create, update: title, the task is listed under it.' },
+        prompt: { type: 'string', description: 'create, update: full prompt, sent as a question.' },
         repeat: {
           type: 'string',
           enum: ['daily', 'weekly', 'once', 'interval'],
           description: 'Rule: daily, weekly, once or interval.',
         },
-        time: { type: 'string', description: 'Time HH:MM for daily, weekly and once.' },
-        timezone: { type: 'string', description: 'IANA zone, for example Europe/Moscow. Defaults to local.' },
+        time: { type: 'string', description: 'HH:MM for daily, weekly and once.' },
+        timezone: { type: 'string', description: 'IANA zone, e.g. Europe/Moscow; local by default.' },
         weekdays: {
           type: 'array',
           items: { type: 'number', description: 'Weekday: 0 is Sunday.' },
           description: 'For weekly: days 0-6, 0 is Sunday.',
         },
-        date: { type: 'string', description: 'For once: date as YYYY-MM-DD.' },
-        intervalMinutes: { type: 'number', description: 'For interval: minutes between runs, 1 to 10080.' },
+        date: { type: 'string', description: 'For once: YYYY-MM-DD.' },
+        intervalMinutes: { type: 'number', description: 'For interval: minutes, 1 to 10080.' },
+        enabled: { type: 'boolean', description: 'update: false pauses, true resumes.' },
       },
-      required: ['title', 'prompt', 'repeat'],
-    },
-  },
-  {
-    name: 'schedule_update',
-    side: 'main',
-    description: 'Update a task by id: only the changed fields; id and run history are kept.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Task id from schedule_list.' },
-        title: { type: 'string', description: 'New title.' },
-        prompt: { type: 'string', description: 'New prompt.' },
-        repeat: {
-          type: 'string',
-          enum: ['daily', 'weekly', 'once', 'interval'],
-          description: 'New rule.',
-        },
-        time: { type: 'string', description: 'New time HH:MM.' },
-        timezone: { type: 'string', description: 'New IANA zone.' },
-        weekdays: {
-          type: 'array',
-          items: { type: 'number', description: 'Weekday: 0 is Sunday.' },
-          description: 'New days for weekly.',
-        },
-        date: { type: 'string', description: 'New date for once: YYYY-MM-DD.' },
-        intervalMinutes: { type: 'number', description: 'New interval in minutes.' },
-        enabled: { type: 'boolean', description: 'false pauses the task, true resumes it.' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'schedule_delete',
-    side: 'main',
-    description: 'Delete a scheduled task by id.',
-    inputSchema: {
-      type: 'object',
-      properties: { id: { type: 'string', description: 'Task id from schedule_list.' } },
-      required: ['id'],
+      required: ['action'],
     },
   },
   {
@@ -1339,65 +1225,27 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'terminal_list',
-    side: 'main',
-    description: 'Open terminal sessions (id, cwd, pid) for long-running processes.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'terminal_start',
+    name: 'terminal',
     side: 'main',
     description:
-      'Open a REAL terminal (pty) and return its id. Unlike run_terminal the session lives ' +
-      'between steps: start a long process (server, watch) and read its output later. The ' +
-      'command may be omitted and typed later with terminal_write. For one command whose output ' +
-      'you need right now use run_terminal.',
+      'REAL terminal (pty) that lives between steps: start a long process and read its output ' +
+      'later. For one command whose output you need now use run_terminal. action: list, start ' +
+      '(command, cwd), read (id, from), write (id, data), stop (id).',
     inputSchema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'Optional command typed right after start.' },
-        cwd: { type: 'string', description: 'Working folder (project root by default).' },
+        action: {
+          type: 'string',
+          enum: ['list', 'start', 'read', 'write', 'stop'],
+          description: 'What to do.',
+        },
+        id: { type: 'string', description: 'read, write, stop: session id from list.' },
+        command: { type: 'string', description: 'start: command typed right after start.' },
+        cwd: { type: 'string', description: 'start: working folder (project root by default).' },
+        data: { type: 'string', description: 'write: what to type; end with a newline for Enter.' },
+        from: { type: 'number', description: 'read: offset from the previous read.' },
       },
-    },
-  },
-  {
-    name: 'terminal_read',
-    side: 'main',
-    description:
-      'Read NEW session output. Pass from, the offset from the previous answer; without it ' +
-      'you get the whole buffer (up to 60 000 characters).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Session id from terminal_start or terminal_list.' },
-        from: { type: 'number', description: 'Offset from the previous read.' },
-      },
-      required: ['id'],
-    },
-  },
-  {
-    name: 'terminal_write',
-    side: 'main',
-    description: 'Send input to a session, as if the user typed it. End the line with a newline to ' + 'press Enter.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Session id.' },
-        data: { type: 'string', description: 'What to type into the terminal.' },
-      },
-      required: ['id', 'data'],
-    },
-  },
-  {
-    name: 'terminal_stop',
-    side: 'main',
-    description: 'Stop a terminal session (kill the process).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Session id.' },
-      },
-      required: ['id'],
+      required: ['action'],
     },
   },
 ];

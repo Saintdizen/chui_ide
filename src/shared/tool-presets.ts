@@ -101,16 +101,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
   {
     id: 'shell',
     label: 'Терминал',
-    names: [
-      'run_terminal',
-      'run_output',
-      'run_stop',
-      'terminal_list',
-      'terminal_start',
-      'terminal_read',
-      'terminal_write',
-      'terminal_stop',
-    ],
+    names: ['run_terminal', 'run_output', 'run_stop', 'terminal'],
   },
   {
     id: 'git-read',
@@ -139,15 +130,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
   {
     id: 'browser',
     label: 'Браузер',
-    names: [
-      'browser_open',
-      'browser_snapshot',
-      'browser_click',
-      'browser_type',
-      'browser_evaluate',
-      'browser_zoom',
-      'browser_close',
-    ],
+    names: ['browser'],
   },
   {
     id: 'program',
@@ -183,7 +166,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     label: 'Расписание',
     // Задача живёт в файле проекта (`.chui/schedules.json`) и запускает агента сама:
     // в «только чтение» и «минимуме» её нет — там ничего не меняют.
-    names: ['schedule_list', 'schedule_create', 'schedule_update', 'schedule_delete'],
+    names: ['schedule_list', 'schedule'],
   },
 ];
 

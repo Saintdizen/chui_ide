@@ -1,0 +1,68 @@
+import { describe, expect, it } from 'vitest';
+import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
+import { AGENT_TOOLS } from '../src/shared/tools';
+
+/**
+ * Слитые инструменты: `browser`, `terminal`, `schedule` с полем `action`.
+ *
+ * Семь схем браузера и пять терминала стоили дороже, чем их различие по смыслу:
+ * описания едут в каждом запросе. Проверяем то, что могло сломаться при слиянии:
+ * схема обещает те действия, которые разбирает код, промах по действию называет
+ * допустимые, а недостающий аргумент возвращается отказом с именем поля, а не
+ * «не задан аргумент» из глубины обработчика.
+ */
+
+const spec = (name: string) => AGENT_TOOLS.find((tool) => tool.name === name)!;
+
+describe('слитые инструменты: схема', () => {
+  it('объявленные действия совпадают с разобранными', () => {
+    const actions = (name: string): string[] => {
+      const property = spec(name).inputSchema.properties.action as { enum?: string[] };
+      return property.enum ?? [];
+    };
+    expect(actions('browser')).toEqual(['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close']);
+    expect(actions('terminal')).toEqual(['list', 'start', 'read', 'write', 'stop']);
+    expect(actions('schedule')).toEqual(['create', 'update', 'delete']);
+    // Старых имён в наборе больше нет: иначе схема и обработчик разъехались бы.
+    for (const old of ['browser_open', 'browser_click', 'terminal_start', 'schedule_create']) {
+      expect(AGENT_TOOLS.some((tool) => tool.name === old)).toBe(false);
+    }
+  });
+
+  it('обязателен только action: остальные поля зависят от действия', () => {
+    for (const name of ['browser', 'terminal', 'schedule']) {
+      expect(spec(name).inputSchema.required).toEqual(['action']);
+    }
+  });
+
+  it('schedule_list остался отдельным: его видно в режиме плана', () => {
+    expect(spec('schedule_list').inputSchema.required).toBeUndefined();
+    expect(spec('schedule').name).toBe('schedule');
+  });
+});
+
+describe('слитые инструменты: разбор', () => {
+  const ctx = { workspace: {} } as unknown as ToolContext;
+
+  it('незнакомое действие называет допустимые', async () => {
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'взмахнуть' }));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('взмахнуть');
+    expect(outcome.detail).toContain('list, start, read, write, stop');
+  });
+
+  it('недостающий аргумент назван по имени поля', async () => {
+    const outcome = await runTool(ctx, 'browser', JSON.stringify({ action: 'click' }));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('ref');
+  });
+
+  it('без действия вызов тоже объясняется', async () => {
+    // Расписание подключено: иначе отказ был бы «инструмент недоступен», а не про форму.
+    const withSchedule = { workspace: {}, schedules: { list: async () => [] } } as unknown as ToolContext;
+    const outcome = await runTool(withSchedule, 'schedule', JSON.stringify({}));
+    expect(outcome.ok).toBe(false);
+    // Отказ приходит до обработчика: схема требует action, и это названо прямо.
+    expect(outcome.summary).toContain('action');
+  });
+});

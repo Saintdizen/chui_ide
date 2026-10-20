@@ -84,11 +84,7 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   run_terminal: {},
   run_output: { readOnly: true, plan: true },
   run_stop: {},
-  terminal_list: {},
-  terminal_start: {},
-  terminal_read: {},
-  terminal_write: {},
-  terminal_stop: {},
+  terminal: {},
 
   /* ── программа и сценарий ───────────────────────────────────────────── */
   run_code: { deniedInProgram: true },
@@ -124,26 +120,21 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   git_push: {},
 
   /* ── расписание ─────────────────────────────────────────────────────── */
-  // В плане — только чтение: заводить и править задачи будет исполнение.
+  // В плане — только чтение: `schedule` меняет расписание (create, update,
+  // delete), `schedule_list` его только показывает. Именно поэтому они не слиты
+  // в один: слитое пришлось бы либо запретить в плане целиком — и там не
+  // посмотреть расписание, — либо разрешить, и в плане заводились бы задачи.
   schedule_list: { plan: true },
-  schedule_create: {},
-  schedule_update: {},
-  schedule_delete: {},
+  schedule: {},
 
   /* ── память проекта: заметка обратима, спрашивать не у кого ─────────── */
   remember: { alwaysAvailable: true },
   forget: { alwaysAvailable: true },
 
-  /* ── встроенный браузер ─────────────────────────────────────────────── */
-  // Снимок читает состояние страницы; после действия (клик, переход, ввод)
-  // кэш всё равно сбрасывается — те инструменты меняют мир.
-  browser_snapshot: { readOnly: true },
-  browser_open: {},
-  browser_click: {},
-  browser_type: {},
-  browser_evaluate: {},
-  browser_zoom: {},
-  browser_close: {},
+  /* ── браузер ────────────────────────────────────────────────────────── */
+  // Одно имя на все действия: снимок читает состояние страницы, но остальные
+  // действия её меняют — повторы такого инструмента не глушим.
+  browser: {},
 
   /* ── окно редактора ─────────────────────────────────────────────────── */
   open_file: { plan: true },
