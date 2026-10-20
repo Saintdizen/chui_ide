@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../../shared/api';
 import { IMAGE_TOKENS, estimateTextTokens } from '../../shared/context-fit';
-import { spillText } from './spill';
+import { AGED_KIND, spillText } from './spill';
 
 /**
  * Свёртка старых результатов инструментов — вместо выбрасывания целых ходов.
@@ -105,7 +105,7 @@ function foldPicked(messages: ChatMessage[], picked: readonly number[], spillDir
     blocks.push('');
     line += 3 + content.split('\n').length;
   }
-  const file = spillText(spillDir, 'svernutye-rezultaty', blocks.join('\n'));
+  const file = spillText(spillDir, AGED_KIND, blocks.join('\n'));
 
   for (const index of picked) {
     const message = messages[index]!;

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createSpillStream, MAX_SPILL_FILES, prune, spillHint, spillName, spillText } from '../src/main/ai/spill';
+import { AGED_KIND, createSpillStream, MAX_AGED_FILES, MAX_SPILL_FILES, prune, spillHint, spillName, spillText } from '../src/main/ai/spill';
 
 /**
  * Копия длинного вывода.
@@ -89,6 +89,23 @@ describe('prune', () => {
 
     prune(dir);
     expect(fs.readdirSync(dir)).toHaveLength(MAX_SPILL_FILES);
+  });
+
+  it('свёртка не вытесняет хвосты команд', () => {
+    const dir = tempDir();
+    // Свёртка пишет копию на каждый проход — их много; хвост команды один.
+    for (let index = 0; index < MAX_SPILL_FILES + 10; index += 1) {
+      fs.writeFileSync(path.join(dir, spillName(AGED_KIND, new Date(1_700_000_000_000 + index * 1000))), 'x');
+    }
+    const terminal = spillName('terminal', new Date(1_700_000_000_000));
+    fs.writeFileSync(path.join(dir, terminal), 'x');
+
+    prune(dir);
+
+    // Хвост команды жив: у свёртки свой потолок.
+    expect(fs.existsSync(path.join(dir, terminal))).toBe(true);
+    const aged = fs.readdirSync(dir).filter((name) => name.includes(AGED_KIND));
+    expect(aged).toHaveLength(MAX_AGED_FILES);
   });
 });
 

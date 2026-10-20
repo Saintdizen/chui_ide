@@ -25,6 +25,17 @@ export const MAX_SPILL_CHARS = 4_000_000;
 export const MAX_SPILL_FILES = 40;
 
 /**
+ * Потолок для свёрнутых результатов — отдельно от хвостов команд.
+ *
+ * Свёртка пишет копию на каждый проход, и общий счётчик вытеснял хвосты
+ * настоящих команд: в живом каталоге было 38 копий свёртки против 2 хвостов, —
+ * а хвост `terminal` нужен модели и человеку, когда сама команда давно забыта.
+ * Перечитать свёртку почти не надо (её текст и так не нужен целиком), а хвост
+ * нужен — значит и лимиты у них разные.
+ */
+export const MAX_AGED_FILES = 8;
+
+/**
  * Имя файла: время и инструмент. Время первым — по нему же сортируется уборка,
  * а человеку по имени видно, к какому вызову относится файл.
  */
@@ -115,7 +126,14 @@ export function spillText(dir: string, kind: string, text: string): string | nul
   return stream.close(true);
 }
 
-/** Убрать старые файлы: держим последние `MAX_SPILL_FILES` по имени (в нём время). */
+/** Своё имя у свёртки: по нему уборка и отличает её от хвостов команд. */
+export const AGED_KIND = 'svernutye-rezultaty';
+
+/**
+ * Убрать старые файлы. Счёт у каждого вида свой: свёртка живёт по
+ * `MAX_AGED_FILES`, всё остальное — по `MAX_SPILL_FILES`. Имя начинается со
+ * времени, поэтому сортировка режет именно старое.
+ */
 export function prune(dir: string, keep: number = MAX_SPILL_FILES): void {
   let names: string[];
   try {
@@ -123,9 +141,13 @@ export function prune(dir: string, keep: number = MAX_SPILL_FILES): void {
   } catch {
     return;
   }
-  if (names.length <= keep) return;
-  names.sort();
-  for (const name of names.slice(0, names.length - keep)) removeQuiet(path.join(dir, name));
+  const aged = names.filter((name) => name.includes(`-${AGED_KIND}.txt`));
+  const rest = names.filter((name) => !name.includes(`-${AGED_KIND}.txt`));
+  for (const [list, limit] of [[aged, Math.min(keep, MAX_AGED_FILES)], [rest, keep]] as const) {
+    if (list.length <= limit) continue;
+    list.sort();
+    for (const name of list.slice(0, list.length - limit)) removeQuiet(path.join(dir, name));
+  }
 }
 
 function removeQuiet(file: string): void {
