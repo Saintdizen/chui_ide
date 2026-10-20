@@ -3,6 +3,8 @@ import type { ChatMessage } from '../src/shared/api';
 import { utf8Bytes } from '../src/shared/session-context';
 import {
   MAX_REPORT_BYTES,
+  MAX_SESSION_HITS,
+  MAX_SESSION_HITS_CAP,
   formatSessionSearch,
   matchSnippet,
   parseSessionQuery,
@@ -155,6 +157,20 @@ describe('formatSessionSearch', () => {
     );
     const text = formatSessionSearch(searchSessions(fat, 'тесты', { limit: 6 }));
     expect(utf8Bytes(text)).toBeLessThanOrEqual(MAX_REPORT_BYTES + 2_000);
+  });
+
+  // Пять бесед по умолчанию — это «где искали», а не дамп файла. Но когда поиск
+  // промахнулся по слову, пустая выдача читается как «такого разговора не было»:
+  // поэтому потолок можно поднять, и только до разумного предела.
+  it('потолок бесед поднимается по просьбе и ограничен сверху', () => {
+    const many = Array.from({ length: MAX_SESSION_HITS_CAP + 10 }, (_, at) =>
+      conversation(`chat_${at}`, `Тесты ${at}`, 1_700_000_000_000 - at, [say('user', 'тесты падают')]),
+    );
+    expect(searchSessions(many, 'тесты').hits).toHaveLength(MAX_SESSION_HITS);
+    expect(searchSessions(many, 'тесты', { limit: 10 }).hits).toHaveLength(10);
+    // Просьба «всё» упирается в потолок, а не отдаёт файл целиком.
+    expect(searchSessions(many, 'тесты', { limit: 999 }).hits).toHaveLength(MAX_SESSION_HITS_CAP);
+    expect(searchSessions(many, 'тесты', { limit: 0 }).hits).toHaveLength(1);
   });
 
   it('беседа с битым uid остаётся без uri, но не теряется', () => {

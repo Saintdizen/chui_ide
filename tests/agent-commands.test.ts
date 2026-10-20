@@ -96,6 +96,29 @@ describe('где выполняется команда', () => {
   });
 });
 
+// Пустой вызов — ошибка вызова, а не «сервер не подключён». Раньше порядок проверок
+// был обратный, и модель шла чинить сервер вместо аргументов.
+describe('переход к определению', () => {
+  it('без аргументов говорит про аргументы, а не про языковой сервер', async () => {
+    const ctx = { workspace: workspace() } as ToolContext;
+    const empty = await runTool(ctx, 'go_to_definition', '{}');
+    expect(empty.ok).toBe(false);
+    expect(empty.summary).toContain('symbol');
+    expect(empty.summary).not.toContain('сервер');
+
+    // Половина формы — тоже ошибка вызова: путь без строки не «позиция».
+    const half = await runTool(ctx, 'go_to_definition', JSON.stringify({ path: `${ROOT}/a.ts` }));
+    expect(half.summary).toBe(empty.summary);
+  });
+
+  it('с именем символа идёт к серверу, а без него честно отказывает', async () => {
+    const ctx = { workspace: workspace() } as ToolContext;
+    const outcome = await runTool(ctx, 'go_to_definition', JSON.stringify({ symbol: 'runTool' }));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('сервер');
+  });
+});
+
 describe('песочница', () => {
   it('терминальная сессия при включённой песочнице не открывается', async () => {
     // Сессия — процесс на хосте, а контейнер живёт ровно на время команды.

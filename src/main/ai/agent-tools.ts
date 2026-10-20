@@ -207,8 +207,12 @@ export interface McpRunner {
 }
 
 export interface SessionSearchRunner {
-  /** Найти беседы по словам: разбор и форма ответа — `shared/session-search.ts`. */
-  search(query: string): Promise<SessionSearchReport>;
+  /**
+   * Найти беседы по словам: разбор и форма ответа — `shared/session-search.ts`.
+   * `limit` — сколько бесед вернуть: по умолчанию пять, потолок задаёт
+   * `MAX_SESSION_HITS_CAP`. Нужен, когда поиск промахнулся и есть что посмотреть.
+   */
+  search(query: string, options?: { limit?: number }): Promise<SessionSearchReport>;
 }
 
 export interface WebSearchRunner {
@@ -1737,6 +1741,18 @@ async function findReferences(ctx: ToolContext, args: Record<string, unknown>): 
  * курсора, а позицию он берёт из тех же ссылок.
  */
 async function goToDefinition(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  // Аргументы проверяем ДО сервера: пустой вызов без них — это ошибка вызова, а не
+  // «языковой сервер не подключён». Раньше ответ говорил про сервер, и модель шла
+  // чинить не то.
+  const hasName = (optionalString(args, 'symbol') ?? '').trim().length > 0;
+  const hasPosition = args.path !== undefined && args.line !== undefined;
+  if (!hasName && !hasPosition) {
+    return {
+      ok: false,
+      summary: 'Нужен symbol или path вместе с line',
+      detail: 'Передай имя символа (`symbol`) либо файл и строку с использованием (`path` и `line`).',
+    };
+  }
   if (!ctx.symbols) {
     return { ok: false, summary: 'Языковой сервер не подключён: переход к определению недоступен' };
   }
@@ -3467,7 +3483,8 @@ async function sessionSearch(ctx: ToolContext, args: Record<string, unknown>): P
     };
   }
 
-  const report: SessionSearchReport = await ctx.sessions.search(query);
+  const limit = optionalInteger(args, 'limit');
+  const report: SessionSearchReport = await ctx.sessions.search(query, limit !== undefined ? { limit } : undefined);
   return {
     ok: true,
     summary: report.hits.length > 0 ? `бесед по запросу: ${report.hits.length}` : 'в прошлых беседах не нашлось',

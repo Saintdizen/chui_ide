@@ -176,7 +176,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     description:
       'Search project files for a substring or a regular expression. Returns path, line ' +
       'number and matched text. filesOnly=true returns file names only; context adds ' +
-      'surrounding lines, like grep -A/-B.',
+      'surrounding lines, like grep -A/-B. For a declaration use codebase_search; for paths ' +
+      'by name pattern use find_files.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -203,7 +204,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Where a symbol is declared: language server declarations first, then text matches ' +
-      'grouped by file. Names may be written in words. For an exact string use search.',
+      'grouped by file. Names may be written in words. For an exact string use search; for ' +
+      'paths by name pattern use find_files.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -240,6 +242,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search words: one or two, as in a file search.' },
+        limit: {
+          type: 'number',
+          description: 'How many conversations to return (default 5, max 20).',
+        },
       },
       required: ['query'],
     },
@@ -299,8 +305,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'go_to_definition',
     side: 'main',
     description:
-      'Go to a symbol declaration. Either by name (symbol), or from a usage position (path ' +
-      '+ line), when the language server does the lookup. Requires a language server.',
+      'Go to a symbol declaration. Two alternative forms, pass one of them: by name (symbol), ' +
+      'or from a usage position (path + line) when the language server does the lookup. ' +
+      'Requires a language server.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -395,7 +402,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Files matching a path glob (**/*.py, src/**). Service folders (node_modules, .git, ' +
-      'dist) are skipped. Returns paths, not contents.',
+      'dist) are skipped. Returns paths, not contents: for text inside files use search.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -599,9 +606,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Run a shell command in the workspace and return its output. The user confirms every ' +
-      'run, so keep it to one command on purpose. With background: true you get a job id ' +
-      'instead of output: use it for long runs (build, install, tests) that would hold the ' +
-      'step; read the job with run_output and stop it with run_stop.',
+      'run, so keep it to one command on purpose. background: true returns a job id instead ' +
+      'of output: use it for long runs (build, install, tests); read with run_output, stop ' +
+      'with run_stop. For a session visible to the user (dev server, watch, REPL) use terminal_start.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1306,7 +1313,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Announce results: files the user opens with a button in the feed. Use it instead of ' +
-      'writing the file path in prose.',
+      'writing the file path in prose. To just open a file in the editor use open_file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1331,7 +1338,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'renderer',
     description:
       'Open a file in the editor at a line, so the user sees the place being discussed. ' +
-      'Call it when referring to specific code.',
+      'Call it when referring to specific code. To offer files as result buttons use present.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1354,7 +1361,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     description:
       'Open a REAL terminal (pty) and return its id. Unlike run_terminal the session lives ' +
       'between steps: start a long process (server, watch) and read its output later. The ' +
-      'command may be omitted and typed later with terminal_write.',
+      'command may be omitted and typed later with terminal_write. For one command whose output ' +
+      'you need right now use run_terminal.',
     inputSchema: {
       type: 'object',
       properties: {

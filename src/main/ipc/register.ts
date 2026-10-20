@@ -1300,10 +1300,10 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // проверяются тестами без окна. Ищем только по открытому проекту: это правда,
   // а не поломка, и так и написано в ответе инструмента.
   deps.ai.attachSessions({
-    search: async (query) => {
+    search: async (query, options) => {
       // Проекта нет — бесед тоже: хранилище ответит пустой историей.
       const history = await chatStore.load(deps.workspace.rootPath() ?? '');
-      return searchSessions(history.conversations, query);
+      return searchSessions(history.conversations, query, options);
     },
   });
   // Журнал прогонов: файл лежит в пользовательских данных, то есть вне рабочей

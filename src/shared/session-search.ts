@@ -24,8 +24,14 @@ import { clipToBytes, sessionUri, utf8Bytes } from './session-context';
  * юнит-тестами.
  */
 
-/** Сколько бесед показываем: больше — уже не «где искали», а дамп файла. */
+/** Сколько бесед показываем по умолчанию: больше — уже не «где искали», а дамп файла. */
 export const MAX_SESSION_HITS = 5;
+/**
+ * Потолок на просьбу «покажи больше». Нужен там, где поиск промахнулся по слову:
+ * пустая выдача читается как «такого разговора не было», хотя он есть. Двадцати
+ * хватает, чтобы найти нужное руками, и мало, чтобы ответ стал дампом файла.
+ */
+export const MAX_SESSION_HITS_CAP = 20;
 /** Сколько фрагментов берём из одной беседы. */
 export const MAX_MATCHES_PER_SESSION = 3;
 /** Потолок одного фрагмента в байтах UTF-8: это выдержка, а не реплика целиком. */
@@ -188,7 +194,7 @@ export function searchSessions(
   options: { limit?: number; matches?: number } = {},
 ): SessionSearchReport {
   const terms = parseSessionQuery(query);
-  const limit = Math.max(1, options.limit ?? MAX_SESSION_HITS);
+  const limit = Math.min(MAX_SESSION_HITS_CAP, Math.max(1, Math.floor(options.limit ?? MAX_SESSION_HITS)));
   const perSession = Math.max(1, options.matches ?? MAX_MATCHES_PER_SESSION);
   if (terms.length === 0) return { terms, scanned: sources.length, mode: 'all', hits: [], hidden: 0 };
 
