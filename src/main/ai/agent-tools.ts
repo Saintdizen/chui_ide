@@ -735,20 +735,14 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
 
 /**
  * Поля, в которых пометка сжатия означает испорченный вызов, а не текст.
- * Список — только тела правок и команд: остальные аргументы короткие и в
- * историю не сжимаются.
+ *
+ * Ровно те поля, которые сжимает `CONDENSE_FIELDS`: тела правок (`oldText`,
+ * `newText`, `contents`, `content`, `code`). `command`, `script` и
+ * `replacement` убраны вместе со сжатием команд: такие аргументы в историю
+ * больше не превращаются в пометку, а проверка на мёртвом поле только
+ * вводила бы в заблуждение — будто повтор `terminal` ломается.
  */
-const BODY_FIELDS = [
-  'contents',
-  'content',
-  'newText',
-  'oldText',
-  'text',
-  'command',
-  'code',
-  'script',
-  'replacement',
-] as const;
+const BODY_FIELDS = ['contents', 'content', 'newText', 'oldText', 'code'] as const;
 
 /** Имя поля, где вместо содержимого стоит пометка сжатия, или `null`. */
 function staleCondensedBody(args: Record<string, unknown>): string | null {
