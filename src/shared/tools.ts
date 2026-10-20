@@ -148,7 +148,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         isRegex: { type: 'boolean', description: 'Regex (default: substring).' },
         caseSensitive: { type: 'boolean', description: 'Match case.' },
         filesOnly: { type: 'boolean', description: 'Names only.' },
-        glob: { type: 'string', description: 'Mask, e.g. **/*.ts' },
+        glob: { type: 'string', description: 'Mask.' },
         path: {
           type: 'string',
           description: 'Scope; glob from here.',
@@ -171,7 +171,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Skill name, e.g. `release`.' },
+        name: { type: 'string', description: 'Skill name.' },
       },
       required: ['name'],
     },
@@ -205,7 +205,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'string',
           enum: ['references', 'definition', 'outline'],
         },
-        symbol: { type: 'string', description: 'Name, e.g. `saveCalibration`.' },
+        symbol: { type: 'string', description: 'Symbol name.' },
         path: {
           type: 'string',
           description: 'references: narrow to a file. definition: file with the usage. outline: that file.',
@@ -357,7 +357,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: { type: 'string', enum: ['search', 'fetch'] },
         query: { type: 'string', description: 'search: query.' },
         limit: { type: 'number', description: 'search: how many.' },
-        url: { type: 'string', description: 'fetch: page address, e.g. https://example.com/page' },
+        url: { type: 'string', description: 'fetch: page address.' },
         maxChars: { type: 'number', description: 'fetch: text characters (8 000; max 60 000).' },
       },
       required: ['action'],
@@ -374,8 +374,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           // Сессия и команда — два разных дела в одном имени: `enum` называет
-          // действия, но не говорит, к какому из них относится `id`.
-          description: 'Sessions (id) or commands (job id): start/write/stop | run/output/cancel.',
+          // действия, но не говорит, к какому из них относится `id`. Перечень
+          // действий не повторяем — он в `enum` рядом.
+          description: 'start/write/stop: sessions; run/output/cancel: jobs.',
           enum: ['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel'],
         },
         id: { type: 'string', description: 'read/write/stop: session id. output/cancel: job id.' },
@@ -407,7 +408,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         replacement: { type: 'string', description: 'replace: empty deletes.' },
         isRegex: { type: 'boolean', description: 'replace: regex; $1 works.' },
         caseSensitive: { type: 'boolean', description: 'replace: default off.' },
-        glob: { type: 'string', description: 'replace: file mask, e.g. **/*.ts' },
+        glob: { type: 'string', description: 'replace: file mask.' },
       },
       required: ['action'],
     },
