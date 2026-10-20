@@ -29,7 +29,7 @@ const TOOL_LABELS: Record<string, string> = {
   file_outline: 'Скелет файла',
   find_files: 'Поиск файлов',
   get_diagnostics: 'Диагностика',
-  apply_edit: 'Правка файлов',
+  edit: 'Правка файлов',
   replace_in_files: 'Замена по проекту',
   create_file: 'Создание файла',
   delete_file: 'Удаление',
@@ -56,7 +56,7 @@ const TOOL_ICONS: Record<string, IconName> = {
   file_outline: 'checklist',
   find_files: 'folder',
   get_diagnostics: 'warning',
-  apply_edit: 'wrench',
+  edit: 'wrench',
   replace_in_files: 'refresh',
   create_file: 'filePlus',
   delete_file: 'trash',
@@ -93,6 +93,7 @@ const TOOL_ACTION_LABELS: Record<string, Record<string, string>> = {
     output: 'Вывод задания',
     cancel: 'Остановка задания',
   },
+  edit: { patch: 'Правка по якорю', position: 'Правка по позициям' },
   schedule: { create: 'Новая задача по расписанию', update: 'Правка задачи', delete: 'Удаление задачи' },
   git_read: {
     status: 'Состояние git',
@@ -168,9 +169,11 @@ function summarizeArgs(raw: string): string {
     if (typeof value.data === 'string') parts.push(`«${value.data.replace(/\n/g, '⏎').slice(0, 40)}»`);
     if (typeof value.question === 'string') parts.push(`«${value.question.replace(/\s+/g, ' ').trim().slice(0, 80)}»`);
     if (Array.isArray(value.steps)) parts.push(`${value.steps.length} шагов`);
-    // apply_edit: в карточке нужны имена файлов, а не сырой JSON на 80 символов.
-    if (Array.isArray(value.edits)) {
-      for (const file of value.edits) {
+    // edit: в карточке нужны имена файлов, а не сырой JSON на 80 символов.
+    // Файлы лежат в `edits` (по позициям) или в `patches` (по якорю).
+    const batch = Array.isArray(value.edits) ? value.edits : value.patches;
+    if (Array.isArray(batch)) {
+      for (const file of batch) {
         if (file && typeof file === 'object' && typeof (file as { path?: unknown }).path === 'string') {
           parts.push(basename((file as { path: string }).path));
         }

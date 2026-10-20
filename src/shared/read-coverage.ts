@@ -112,13 +112,13 @@ export function touchedPaths(
   const parsed = parseToolArguments(rawArguments);
   if (parsed.ok) {
     const args = parsed.value;
-    if (name === 'apply_edit') {
-      // Одиночный файл без обёртки в массив — законная форма (см. разбор в agent-tools):
-      // тогда `path` лежит прямо в аргументах, а не в `edits[]`.
+    if (name === 'edit') {
+      // Форма зависит от действия: по позициям файлы в `edits[]`, по якорю — в
+      // `patches[]`. Одиночный файл без обёртки в массив — тоже законная форма
+      // (см. разбор в agent-tools): тогда `path` лежит прямо в аргументах.
       const own = pathOf(args.path);
       if (own) paths.add(pathKey(own));
       for (const path of pathsOf(args.edits)) paths.add(pathKey(path));
-    } else if (name === 'apply_patch') {
       for (const path of pathsOf(args.patches)) paths.add(pathKey(path));
     } else if (name === 'create_file' || name === 'delete_file') {
       const path = pathOf(args.path);

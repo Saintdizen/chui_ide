@@ -9,7 +9,7 @@
 
 import type { ToolFileChange } from './api';
 
-/** Вид операции. `edited` — правка через `apply_edit`: своего вида у неё нет. */
+/** Вид операции. `edited` — правка через `edit`: своего вида у неё нет. */
 export type ChangeKind = ToolFileChange['kind'] | 'edited';
 
 /** Файл, которого коснулся вызов: путь и что с ним сделали. */
@@ -29,7 +29,7 @@ export function changeKindLabel(kind: ChangeKind): string {
 
 /** Инструменты, у которых файлы видно только в аргументах вызова. */
 const ARGUMENT_KINDS: Record<string, ChangeKind> = {
-  apply_edit: 'edited',
+  edit: 'edited',
   create_file: 'created',
   delete_file: 'deleted',
   move_file: 'moved',
@@ -43,7 +43,7 @@ export function fileName(target: string): string {
 
 /**
  * Файлы, которых коснулся вызов. Инструмент возвращает их в `changes`
- * (создание, удаление, перенос, замена по проекту). У `apply_edit` такого списка
+ * (создание, удаление, перенос, замена по проекту). У `edit` такого списка
  * нет — файлы берём из аргументов: иначе правки не видны и после перезапуска,
  * когда результата инструмента в беседе уже нет.
  */
@@ -54,13 +54,15 @@ export function touchedFiles(name: string, args: string, changes?: readonly Tool
   if (!kind) return [];
 
   try {
-    const value = JSON.parse(args) as { path?: unknown; to?: unknown; edits?: unknown };
+    const value = JSON.parse(args) as { path?: unknown; to?: unknown; edits?: unknown; patches?: unknown };
     // У переноса файл — в `to`: `path` в его аргументах и не значится.
     const single = name === 'move_file' ? value.to : value.path;
-    // apply_edit правит пачкой: файлы лежат в `edits[].path`, и один файл может
+    // `edit` правит пачкой, и форма зависит от действия: по якорю файлы лежат в
+    // `patches[].path`, по позициям — в `edits[].path`. Один файл может
     // встретиться дважды — в ряду он должен быть один раз.
-    const raw = Array.isArray(value.edits)
-      ? value.edits.map((file) => (file && typeof file === 'object' ? (file as { path?: unknown }).path : undefined))
+    const batch = Array.isArray(value.edits) ? value.edits : value.patches;
+    const raw = Array.isArray(batch)
+      ? batch.map((file) => (file && typeof file === 'object' ? (file as { path?: unknown }).path : undefined))
       : [single];
     const paths = raw.filter((path): path is string => typeof path === 'string' && !!path);
     return [...new Set(paths)].map((path) => ({ path, kind }));

@@ -25,7 +25,7 @@ import { limitPerFile, MAX_HITS_PER_FILE } from '../../shared/search-limit';
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import { formatRunCode, runCodeToolAllowed, type RunCodeOutcome } from '../../shared/run-code';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
-import { parsePatchFiles, type PatchFile } from '../../shared/patch';
+import type { PatchFile, PatchHunk } from '../../shared/patch';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
 import { formatLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
@@ -66,7 +66,7 @@ import type { JobHandle, JobRegistry, JobSnapshot } from './jobs';
  *
  * Чтение (list_dir, read_file, search) и запуск команд делаются здесь же:
  * все пути проходят через `WorkspaceService`, а значит ограничены рабочей
- * папкой (включая проверку симлинков). Правки (`apply_edit`) уходят в renderer
+ * папкой (включая проверку симлинков). Правки (`edit`) уходят в renderer
  * хостовым вызовом — там документная модель, undo и ревью пользователя.
  */
 
@@ -566,9 +566,10 @@ const MAX_EDITS_PER_FILE = 500;
 /** Команда длиннее — это уже не команда, а попытка спрятать скрипт. */
 const MAX_COMMAND_CHARS = 2000;
 
-/** Форма аргумента `apply_edit`: её называем в ошибках, чтобы вызов чинился за один шаг. */
+/** Форма аргумента правки: её называем в ошибках — вызов чинится за один шаг. */
 const EDITS_SHAPE =
-  'нужен [{ path: "/абсолютный/путь/файл", edits: [{ startLine, startColumn, endLine, endColumn, newText }] }]';
+  'нужен [{ path: "/абсолютный/путь/файл", edits: [{ oldText, newText }] }] — ' +
+  'вместо старого текста можно четыре позиции: startLine, startColumn, endLine, endColumn';
 
 /**
  * Необратимые команды — на них и срабатывает страховка полного доступа
@@ -702,10 +703,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await findFiles(ctx, parsed.value);
       case 'get_diagnostics':
         return await diagnostics(ctx, parsed.value);
-      case 'apply_edit':
-        return await applyEdit(ctx, parsed.value);
-      case 'apply_patch':
-        return await applyPatch(ctx, parsed.value);
+      case 'edit':
+        return await editFiles(ctx, parsed.value);
       case 'replace_in_files':
         return await replaceInFiles(ctx.workspace, parsed.value);
       case 'web_search':
@@ -969,8 +968,13 @@ function missingForAction(args: Record<string, unknown>, keys: readonly string[]
     const value = args[key];
     // `git_write` называет списком не только строки: `paths` — массив, и пустой
     // массив значит «аргумента нет», а не «проиндексировать всё».
+    // Элемент массива — не всегда строка: у `edit` это объект (`patches[]`,
+    // `edits[]`), и он тоже считается аргументом, иначе вызов с готовым
+    // аргументом получал бы «нужен аргумент patches».
     const present = Array.isArray(value)
-      ? value.some((item) => typeof item === 'string' && item.trim().length > 0)
+      ? value.some((item) =>
+          typeof item === 'string' ? item.trim().length > 0 : typeof item === 'object' && item !== null,
+        )
       : typeof value === 'string' && value.trim().length > 0;
     if (!present) {
       return {
@@ -1134,7 +1138,7 @@ async function listDir(workspace: WorkspaceService, args: Record<string, unknown
 /**
  * Строки с номерами — в том виде, в каком их видит модель: номер, черта, текст.
  * Один и тот же вид у диапазонного чтения и у головы длинного файла: номера
- * должны годиться в `apply_edit` без пересчёта.
+ * должны годиться в правку по позициям без пересчёта.
  */
 function numberedLines(lines: readonly string[], from: number): string {
   const width = String(from + lines.length - 1).length;
@@ -1814,7 +1818,7 @@ async function goToDefinition(ctx: ToolContext, args: Record<string, unknown>): 
 /**
  * Переименование символа с учётом семантики: сервер находит объявление по имени,
  * возвращает правки во всех местах использования (включая другие файлы) — их
- * применяет документная модель renderer, тем же путём, что `apply_edit`, поэтому
+ * применяет документная модель renderer, тем же путём, что правка по позициям, поэтому
  * работает undo и ревью. Это не `replace_in_files`: та бьёт по подстроке и не
  * знает границ символа, а здесь имя меняется только там, где оно — этот символ.
  */
@@ -2124,17 +2128,43 @@ function readEditsOutcome(
   };
 }
 
-/** `apply_edit` едет в renderer: там документная модель, undo и ревью. */
-async function applyEdit(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.applyEdits) {
-    return { ok: false, summary: 'Правки сейчас недоступны: окно редактора не подключено' };
+/** Найденные правки: по якорю и по позициям — дальше это два разных моста renderer. */
+interface ParsedEdits {
+  anchors: PatchFile[];
+  positions: FileEdit[];
+}
+
+const EDITOR_MISSING: ToolOutcome = {
+  ok: false,
+  summary: 'Правки сейчас недоступны: окно редактора не подключено',
+};
+
+/**
+ * `edit` — правка файлов одним инструментом и одной формой входа. Место
+ * называется либо якорем (`oldText`: точный фрагмент, единственный в файле),
+ * либо четырьмя позициями в стиле LSP; замену несёт `newText`. Адресаций две,
+ * потому что первая не может промахнуться, а вторая не требует искать текст
+ * вовсе, — но форма входа одна: иначе в каждом запросе ехали бы две схемы.
+ *
+ * Дальше пути прежние: якоря разрешает renderer (только у него есть текст
+ * документа, в том числе несохранённый), позиции применяет документная модель.
+ * Ревью, undo и панель изменений у обоих одни и те же.
+ */
+async function editFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const parsed = parseEdits(args.edits);
+  const names = [...parsed.anchors, ...parsed.positions].map((file) => path.basename(file.path));
+
+  const decisions: ApplyEditsHostResult[] = [];
+  if (parsed.anchors.length > 0) {
+    if (!ctx.applyPatches) return EDITOR_MISSING;
+    decisions.push(await ctx.applyPatches(parsed.anchors, ctx.autoApprove === true));
+  }
+  if (parsed.positions.length > 0) {
+    if (!ctx.applyEdits) return EDITOR_MISSING;
+    decisions.push(await ctx.applyEdits(parsed.positions, ctx.autoApprove === true));
   }
 
-  const edits = parseFileEdits(args.edits);
-  const names = edits.map((file) => path.basename(file.path));
-  const decision = await ctx.applyEdits(edits, ctx.autoApprove === true);
-
-  if (decision.rejected) {
+  if (decisions.some((decision) => decision.rejected)) {
     return {
       ok: false,
       summary: `Пользователь отклонил правки: ${names.join(', ')}`,
@@ -2142,7 +2172,9 @@ async function applyEdit(ctx: ToolContext, args: Record<string, unknown>): Promi
     };
   }
 
-  const outcome = readEditsOutcome(decision, (file) => path.basename(file));
+  const merged = mergeDecisions(decisions);
+  const outcome = readEditsOutcome(merged, (file) => path.basename(file));
+  const unwritten = merged.unwritten?.length ?? 0;
 
   return {
     ok: outcome.ok,
@@ -2150,18 +2182,19 @@ async function applyEdit(ctx: ToolContext, args: Record<string, unknown>): Promi
     detail: outcome.detail,
     // Тела правок можно забыть только когда они действительно легли в файлы:
     // отклонённая или оставшаяся в буфере правка модели ещё понадобится.
-    ...(outcome.ok && (decision.unwritten?.length ?? 0) === 0 ? { applied: true } : {}),
+    ...(outcome.ok && unwritten === 0 ? { applied: true } : {}),
   };
 }
 
 /**
- * Разбор аргументов `apply_edit`. Модель — недоверенный источник, поэтому
- * структура проверяется вручную: битый FileEdit дальше в документную модель
- * попасть не должен.
+ * Разбор аргумента `edit`. Модель — недоверенный источник, поэтому структура
+ * проверяется вручную: битая правка дальше в документную модель попасть не
+ * должна. Форму выбирает сама правка: все четыре позиции — правка по позициям
+ * (`oldText` рядом с ними остаётся сверкой), иначе нужен якорь `oldText`.
  */
-function parseFileEdits(value: unknown): FileEdit[] {
-  // Одиночный файл без обёртки в массив — та же правка: ронять вызов из-за лишних
-  // квадратных скобок незачем (так же ведёт себя разбор `apply_patch`).
+function parseEdits(value: unknown): ParsedEdits {
+  // Одиночный файл без обёртки в массив — та же правка: ронять вызов из-за
+  // лишних квадратных скобок незачем.
   const single = typeof value === 'object' && value !== null && !Array.isArray(value);
   const list: unknown = single ? [value] : value;
   if (!Array.isArray(list)) throw new Error(`Аргумент «edits» должен быть массивом: ${EDITS_SHAPE}`);
@@ -2170,19 +2203,37 @@ function parseFileEdits(value: unknown): FileEdit[] {
     throw new Error(`Слишком много файлов за один вызов: ${list.length} (максимум ${MAX_EDITED_FILES})`);
   }
 
-  return list.map((item, index) => parseFileEdit(item, index));
+  const parsed: ParsedEdits = { anchors: [], positions: [] };
+  list.forEach((item, index) => {
+    const file = parseEditFile(item, index);
+    if (file.anchor) parsed.anchors.push(file.anchor);
+    if (file.position) parsed.positions.push(file.position);
+  });
+  return parsed;
 }
 
-function parseFileEdit(value: unknown, index: number): FileEdit {
+/** Правка внутри файла: либо якорь, либо диапазон — вместе они не ходят. */
+type EditItem = { anchor: PatchHunk } | { position: TextEdit };
+
+/**
+ * Один файл. Якоря и позиции в одном файле — это два разных пути правки (якоря
+ * разрешает renderer, позиции применяет документная модель), поэтому файл
+ * отдаётся одному из них целиком: смесь чинится разделением вызова.
+ */
+function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; position?: FileEdit } {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error(`edits[${index}]: ожидался объект — ${EDITS_SHAPE}`);
   }
 
   const raw = value as Record<string, unknown>;
   const filePath = raw.path;
+  // Форму называем прямо: «не задан path» само по себе не говорит, куда его класть.
+  // Самая частая ошибка — замена вместо файла: в элементе oldText и newText, а
+  // обёртки с путём нет. Об этом и говорим, иначе модель пришлёт то же снова.
   if (typeof filePath !== 'string' || filePath.trim().length === 0) {
-    // Форму называем прямо: «не задан path» само по себе не говорит, куда его класть.
-    throw new Error(`edits[${index}]: не задан path. ${EDITS_SHAPE}`);
+    const hunk = typeof raw.oldText === 'string' || typeof raw.newText === 'string';
+    const hint = hunk ? ' В элементе лежат сами замены (oldText/newText), а не файл.' : '';
+    throw new Error(`edits[${index}]: не задан path.${hint} ${EDITS_SHAPE}`);
   }
   if (!path.isAbsolute(filePath)) {
     throw new Error(`edits[${index}].path: нужен абсолютный путь, получено «${filePath}»`);
@@ -2196,82 +2247,79 @@ function parseFileEdit(value: unknown, index: number): FileEdit {
     throw new Error(`edits[${index}].edits: слишком много правок (${edits.length}), максимум ${MAX_EDITS_PER_FILE}`);
   }
 
-  const fileEdit: FileEdit = {
-    path: filePath,
-    edits: edits.map((edit, editIndex) => parseTextEdit(edit, index, editIndex)),
-  };
-  if (typeof raw.expectedVersion === 'number') fileEdit.expectedVersion = raw.expectedVersion;
-  return fileEdit;
+  const items = edits.map((edit, editIndex) => parseEditItem(edit, index, editIndex));
+  const anchors = items.filter((item): item is { anchor: PatchHunk } => 'anchor' in item);
+  const positions = items.filter((item): item is { position: TextEdit } => 'position' in item);
+
+  if (anchors.length > 0 && positions.length > 0) {
+    throw new Error(`edits[${index}]: в одном файле и якоря (oldText), и позиции — раздели на два вызова`);
+  }
+  if (positions.length > 0) {
+    const fileEdit: FileEdit = { path: filePath, edits: positions.map((item) => item.position) };
+    if (typeof raw.expectedVersion === 'number') fileEdit.expectedVersion = raw.expectedVersion;
+    return { position: fileEdit };
+  }
+  return { anchor: { path: filePath, patches: anchors.map((item) => item.anchor) } };
 }
 
-function parseTextEdit(value: unknown, fileIndex: number, editIndex: number): TextEdit {
+/** Одна правка: `newText` и адрес — якорь или все четыре позиции. */
+function parseEditItem(value: unknown, fileIndex: number, editIndex: number): EditItem {
   const where = `edits[${fileIndex}].edits[${editIndex}]`;
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error(`${where}: ожидался объект`);
   }
 
   const raw = value as Record<string, unknown>;
-  const position = (key: string): number => {
-    const number = raw[key];
-    if (typeof number !== 'number' || !Number.isInteger(number) || number < 1) {
-      throw new Error(`${where}.${key}: нужно целое число ≥ 1`);
-    }
-    return number;
-  };
-
   const newText = raw.newText;
   if (typeof newText !== 'string') throw new Error(`${where}.newText: нужна строка`);
 
-  const edit: TextEdit = {
-    startLine: position('startLine'),
-    startColumn: position('startColumn'),
-    endLine: position('endLine'),
-    endColumn: position('endColumn'),
-    newText,
-  };
+  const oldText = raw.oldText;
+  if (oldText !== undefined && typeof oldText !== 'string') throw new Error(`${where}.oldText: нужна строка`);
 
-  // Необязательный якорь: с ним правка сверяется с документом и не может
-  // «попасть» в другое место из-за сбитой позиции.
-  if (raw.oldText !== undefined) {
-    if (typeof raw.oldText !== 'string') throw new Error(`${where}.oldText: нужна строка`);
-    edit.oldText = raw.oldText;
+  const keys = ['startLine', 'startColumn', 'endLine', 'endColumn'] as const;
+  const given = keys.filter((key) => raw[key] !== undefined);
+  if (given.length === keys.length) {
+    const edit: TextEdit = {
+      startLine: editPosition(raw, 'startLine', where),
+      startColumn: editPosition(raw, 'startColumn', where),
+      endLine: editPosition(raw, 'endLine', where),
+      endColumn: editPosition(raw, 'endColumn', where),
+      newText,
+    };
+    // Якорь рядом с позициями — сверка, а не адрес: промах по номеру строки
+    // тогда просто не пройдёт.
+    if (typeof oldText === 'string') edit.oldText = oldText;
+    return { position: edit };
   }
-
-  return edit;
+  if (given.length > 0) {
+    throw new Error(`${where}: позиции заданы не все — нужны startLine, startColumn, endLine, endColumn`);
+  }
+  if (typeof oldText !== 'string' || oldText.length === 0) {
+    throw new Error(`${where}: нужен oldText (якорь) или все четыре позиции. ${EDITS_SHAPE}`);
+  }
+  return { anchor: { oldText, newText } };
 }
 
-/**
- * Правка по якорю (`apply_patch`). Разбор аргументов — здесь, а сами якоря
- * разрешает renderer: только у него есть текст документа (в том числе ещё не
- * сохранённый). Дальше правки идут тем же путём, что `apply_edit`, — ревью, undo
- * и панель изменений работают как обычно.
- */
-async function applyPatch(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.applyPatches) {
-    return { ok: false, summary: 'Правки сейчас недоступны: окно редактора не подключено' };
+/** Позиция правки: целое число ≥ 1, как в LSP. */
+function editPosition(raw: Record<string, unknown>, key: string, where: string): number {
+  const number = raw[key];
+  if (typeof number !== 'number' || !Number.isInteger(number) || number < 1) {
+    throw new Error(`${where}.${key}: нужно целое число ≥ 1`);
   }
+  return number;
+}
 
-  const patches = parsePatchFiles(args.patches);
-  const names = patches.map((file) => path.basename(file.path));
-  const decision = await ctx.applyPatches(patches, ctx.autoApprove === true);
-
-  if (decision.rejected) {
-    return {
-      ok: false,
-      summary: `Пользователь отклонил правки: ${names.join(', ')}`,
-      detail: 'Пользователь отклонил правки. Не повторяй этот вызов — предложи другое решение.',
-    };
-  }
-
-  const outcome = readEditsOutcome(decision, (file) => path.basename(file));
-
+/** Ответы двух мостов — один: отчёт о файлах складывается, «не записано» тоже. */
+function mergeDecisions(decisions: readonly ApplyEditsHostResult[]): ApplyEditsHostResult {
+  const [only] = decisions;
+  if (decisions.length === 1 && only) return only;
   return {
-    ok: outcome.ok,
-    summary: `применено файлов: ${outcome.applied.length}${outcome.failed.length ? `, с ошибками: ${outcome.failed.length}` : ''}${outcome.tail}`,
-    detail: outcome.detail,
-    // Тела правок можно забыть только когда они действительно легли в файлы:
-    // отклонённая или оставшаяся в буфере правка модели ещё понадобится.
-    ...(outcome.ok && (decision.unwritten?.length ?? 0) === 0 ? { applied: true } : {}),
+    rejected: decisions.some((decision) => decision.rejected),
+    result: {
+      reports: decisions.flatMap((decision) => decision.result?.reports ?? []),
+      failed: decisions.flatMap((decision) => decision.result?.failed ?? []),
+    },
+    unwritten: decisions.flatMap((decision) => decision.unwritten ?? []),
   };
 }
 
@@ -2693,7 +2741,7 @@ async function gitLog(ctx: ToolContext, args: Record<string, unknown>): Promise<
 
 /* ── создание, удаление и перемещение ───────────────────────────────────── */
 
-/** Новый файл. Существующий не перетираем — для этого есть apply_edit. */
+/** Новый файл. Существующий не перетираем — для этого есть правка. */
 async function createFile(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
   const target = requireString(args, 'path');
   // Пустая строка — законное содержимое, а вот ОТСУТСТВИЕ поля — нет: раньше оно

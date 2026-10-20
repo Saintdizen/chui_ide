@@ -28,7 +28,7 @@ export function missingArguments(schema: JsonSchema, args: Record<string, unknow
     const value = args[name];
     if (value === undefined || value === null) missing.push(`${prefix}${name}`);
   }
-  // Вложенные объекты (`apply_patch`, `apply_edit`): обязательные поля элементов
+  // Вложенные объекты (`edit`, обе формы): обязательные поля элементов
   // массива проверяются по их схеме — именно там терялся `path`.
   for (const [name, property] of Object.entries(schema.properties)) {
     const value = args[name];

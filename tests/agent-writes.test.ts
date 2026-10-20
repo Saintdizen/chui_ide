@@ -30,13 +30,13 @@ function bridge(result: ApplyEditsHostResult) {
   return vi.fn(async () => result);
 }
 
-describe('apply_edit: записан ли файл на диск', () => {
+describe('edit по позициям: записан ли файл на диск', () => {
   it('всё записано — о буфере не говорим', async () => {
     const applyEdits = bridge({
       rejected: false,
       result: { reports: [{ path: '/proj/a.ts', applied: 2, version: 3 }], failed: [] },
     });
-    const outcome = await runTool(context({ applyEdits }), 'apply_edit', EDITS_ARGS);
+    const outcome = await runTool(context({ applyEdits }), 'edit', EDITS_ARGS);
 
     expect(outcome.ok).toBe(true);
     expect(outcome.summary).toBe('применено файлов: 1');
@@ -49,7 +49,7 @@ describe('apply_edit: записан ли файл на диск', () => {
       result: { reports: [{ path: '/proj/a.ts', applied: 2, version: 3 }], failed: [] },
       unwritten: ['/proj/a.ts'],
     });
-    const outcome = await runTool(context({ applyEdits }), 'apply_edit', EDITS_ARGS);
+    const outcome = await runTool(context({ applyEdits }), 'edit', EDITS_ARGS);
 
     expect(outcome.summary).toBe('применено файлов: 1, не записано на диск: 1');
     expect(outcome.detail).toContain('буфер a.ts');
@@ -57,14 +57,14 @@ describe('apply_edit: записан ли файл на диск', () => {
 
   it('отказ пользователя — про запись речи нет', async () => {
     const applyEdits = bridge({ rejected: true });
-    const outcome = await runTool(context({ applyEdits }), 'apply_edit', EDITS_ARGS);
+    const outcome = await runTool(context({ applyEdits }), 'edit', EDITS_ARGS);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('отклонил');
   });
 });
 
-describe('apply_patch: записан ли файл на диск', () => {
+describe('edit по якорю: записан ли файл на диск', () => {
   it('якорь разошёлся — файл не применён вовсе', async () => {
     const applyPatches = bridge({
       rejected: false,
@@ -75,8 +75,8 @@ describe('apply_patch: записан ли файл на диск', () => {
     });
     const outcome = await runTool(
       context({ applyPatches }),
-      'apply_patch',
-      '{"patches":[{"path":"/proj/a.ts","patches":[{"oldText":"x","newText":"y"}]}]}',
+      'edit',
+      '{"edits":[{"path":"/proj/a.ts","edits":[{"oldText":"x","newText":"y"}]}]}',
     );
 
     expect(outcome.ok).toBe(false);
@@ -105,12 +105,56 @@ describe('apply_patch: записан ли файл на диск', () => {
     );
     const outcome = await runTool(
       context({ applyPatches }),
-      'apply_patch',
-      '{"patches":[{"path":"/proj/a.ts","patches":[{"oldText":"x","newText":"y"}]},{"path":"/proj/b.ts","patches":[{"oldText":"x","newText":"y"}]}]}',
+      'edit',
+      '{"edits":[{"path":"/proj/a.ts","edits":[{"oldText":"x","newText":"y"}]},{"path":"/proj/b.ts","edits":[{"oldText":"x","newText":"y"}]}]}',
     );
 
     expect(outcome.summary).toBe('применено файлов: 2, не записано на диск: 1');
     expect(outcome.detail).toContain('буфер b.ts');
     expect(outcome.detail).not.toContain('буфер a.ts');
+  });
+});
+
+describe('edit: две адресации в одном вызове', () => {
+  it('якоря и позиции уходят каждый своим мостом, а отчёт один', async () => {
+    // Правка одна, а путей два: якоря разрешает renderer по тексту документа,
+    // позиции применяет документная модель. Вызов с обоими — два моста, но для
+    // агента это один результат: считать «применено 1 из 2» он не должен.
+    const applyPatches = bridge({
+      rejected: false,
+      result: { reports: [{ path: '/proj/a.ts', applied: 1, version: 1 }], failed: [] },
+    });
+    const applyEdits = bridge({
+      rejected: false,
+      result: { reports: [{ path: '/proj/b.ts', applied: 1, version: 1 }], failed: [] },
+    });
+    const outcome = await runTool(
+      context({ applyPatches, applyEdits }),
+      'edit',
+      JSON.stringify({
+        edits: [
+          { path: '/proj/a.ts', edits: [{ oldText: 'x', newText: 'y' }] },
+          { path: '/proj/b.ts', edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'y' }] },
+        ],
+      }),
+    );
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.summary).toBe('применено файлов: 2');
+    expect(applyPatches).toHaveBeenCalledTimes(1);
+    expect(applyEdits).toHaveBeenCalledTimes(1);
+  });
+
+  it('отказ человека — решение, а не ошибка правки', async () => {
+    const applyPatches = bridge({ rejected: true });
+    const outcome = await runTool(
+      context({ applyPatches }),
+      'edit',
+      JSON.stringify({ edits: [{ path: '/proj/a.ts', edits: [{ oldText: 'x', newText: 'y' }] }] }),
+    );
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('отклонил');
+    expect(outcome.detail).toContain('Не повторяй');
   });
 });

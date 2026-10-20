@@ -41,8 +41,7 @@ describe('набор инструментов агента', () => {
       'run_tests',
       'find_files',
       'get_diagnostics',
-      'apply_edit',
-      'apply_patch',
+      'edit',
       'replace_in_files',
       'workflow',
       'create_file',
@@ -110,42 +109,33 @@ describe('replace_in_files', () => {
   });
 });
 
-describe('apply_patch', () => {
-  it('правки по якорю живут в renderer и не требуют позиций', () => {
-    const tool = byName.get('apply_patch')!;
+describe('edit', () => {
+  it('одна форма входа: адрес — якорь или позиции', () => {
+    const tool = byName.get('edit')!;
     expect(tool.side).toBe('renderer');
-    expect(tool.inputSchema.required).toEqual(['patches']);
-    // В схеме нет ни строк, ни столбцов: позиции считает документ.
-    expect(tool.inputSchema.properties).toEqual({
-      patches: expect.objectContaining({ type: 'array' }),
-    });
+    // Форму выбирает сама правка, поэтому обязателен только массив файлов:
+    // отдельное поле action означало бы выбор между двумя схемами.
+    expect(tool.inputSchema.required).toEqual(['edits']);
+    expect(tool.inputSchema.properties.action).toBeUndefined();
     // Описания схем — по-английски (их читает только модель), поэтому ищем смысл:
-    // якорная правка, а не правка по номерам строк.
-    expect(tool.description.toLowerCase()).toContain('anchor');
+    // якорь назван, а не только правка по номерам строк.
+    expect(tool.description.toLowerCase()).toContain('oldtext');
   });
 
   it('схема описывает поля элемента, а не только «объект вообще»', () => {
     // Здесь и был баг: элемент массива объявлялся без полей, разбор же требовал
-    // внутри path и patches. Модель, доверясь схеме, присылала замены без файла —
-    // и вызов падал на «patches[0]: не задан path».
-    const patches = byName.get('apply_patch')!.inputSchema.properties.patches!;
-    const file = patches.items!;
+    // внутри path и правки. Модель, доверясь схеме, присылала замены без файла —
+    // и вызов падал на «edits[0]: не задан path».
+    const file = byName.get('edit')!.inputSchema.properties.edits!.items!;
     expect(file.properties?.path?.type).toBe('string');
-    expect(file.properties?.patches?.type).toBe('array');
-    expect(file.required).toEqual(['path', 'patches']);
-    // Якорь — пара oldText/newText, обе обязательны.
-    expect(file.properties?.patches?.items?.required).toEqual(['oldText', 'newText']);
-    expect(file.properties?.patches?.items?.properties?.newText?.type).toBe('string');
-  });
-});
-
-describe('apply_edit', () => {
-  it('схема описывает и правку внутри файла — у них была та же дыра', () => {
-    const edits = byName.get('apply_edit')!.inputSchema.properties.edits!;
-    const file = edits.items!;
+    expect(file.properties?.edits?.type).toBe('array');
     expect(file.required).toEqual(['path', 'edits']);
-    expect(file.properties?.edits?.items?.required).toContain('newText');
-    expect(file.properties?.edits?.items?.properties?.startLine?.type).toBe('number');
+    // У правки обязательна только замена: адрес — якорь или четыре позиции.
+    const item = file.properties?.edits?.items?.properties;
+    expect(item?.newText?.type).toBe('string');
+    expect(item?.oldText?.type).toBe('string');
+    expect(item?.startLine?.type).toBe('number');
+    expect(item?.endColumn?.type).toBe('number');
   });
 });
 

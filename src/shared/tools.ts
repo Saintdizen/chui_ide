@@ -7,7 +7,7 @@
  * модель и undo). Мост между ними уже готов — это RPC + события.
  *
  * Реализованы все: list_dir, read_file, search и terminal — в main,
- * apply_edit — в renderer через хостовый вызов. Какие из них предложить модели,
+ * edit — в renderer через хостовый вызов. Какие из них предложить модели,
  * решает сборка: см. `canRun` в `src/main/ai/service.ts`.
  */
 
@@ -34,8 +34,7 @@ export type AgentToolName =
   | 'list_mcp_resources'
   | 'read_mcp_resource'
   | 'get_diagnostics'
-  | 'apply_edit'
-  | 'apply_patch'
+  | 'edit'
   | 'replace_in_files'
   | 'terminal'
   | 'web_search'
@@ -71,7 +70,7 @@ export interface JsonSchemaProperty {
   items?: JsonSchemaProperty;
   /**
    * Поля вложенного объекта. Нужны там, где элемент массива — объект со своими
-   * обязательными полями (`apply_patch`, `apply_edit`): без них схема обещает
+   * обязательными полями (обе формы `edit`): без них схема обещает
    * модели «объект неизвестной формы», а разбор аргументов ждёт конкретные поля —
    * и вызов падает на «не задан path» у формы, которую сама схема и разрешала.
    */
@@ -122,7 +121,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Read a file. For a large file read a line range instead of the whole thing. Output ' +
-      'lines are numbered from 1: use those numbers for apply_edit.',
+      'lines are numbered from 1: use those numbers for edit with action position.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -466,57 +465,20 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'apply_patch',
+    name: 'edit',
     side: 'renderer',
     description:
-      'Anchor edit: find an exact fragment in a file and replace it. The IDE computes ' +
-      'positions, so columns are not needed. The anchor must be unique; otherwise widen it ' +
-      'with a neighbouring line, indentation or function name.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        patches: {
-          type: 'array',
-          description: 'Array of { path, patches: [{ oldText, newText }] }.',
-          items: {
-            type: 'object',
-            description: 'One file: path and patches.',
-            properties: {
-              path: { type: 'string', description: 'Absolute path to the file.' },
-              patches: {
-                type: 'array',
-                description: 'Pairs of { oldText, newText }.',
-                items: {
-                  type: 'object',
-                  description: 'One replacement.',
-                  properties: {
-                    oldText: { type: 'string', description: 'Exact text from the file, must be unique.' },
-                    newText: { type: 'string', description: 'Replacement. An empty string removes the match.' },
-                  },
-                  required: ['oldText', 'newText'],
-                },
-              },
-            },
-            required: ['path', 'patches'],
-          },
-        },
-      },
-      required: ['patches'],
-    },
-  },
-  {
-    name: 'apply_edit',
-    side: 'renderer',
-    description:
-      'Position edit, 1-based as in LSP, absolute path. oldText is the exact replaced text ' +
-      'and is verified against the file. Use it for non-ASCII lines, where columns are easy ' +
-      'to miscount.',
+      'Change files: each edit is checked against the file, then shown for review with undo. ' +
+      'Give an anchor — oldText, an exact fragment unique in the file — and newText: the IDE ' +
+      'finds the place, so no positions are needed (widen the anchor with a neighbouring line ' +
+      'if it repeats). Or give all four 1-based positions as in LSP, for a place you counted ' +
+      'yourself.',
     inputSchema: {
       type: 'object',
       properties: {
         edits: {
           type: 'array',
-          description: 'Array of { path, expectedVersion, edits: [...] }.',
+          description: 'Array of { path, expectedVersion?, edits: [...] }.',
           items: {
             type: 'object',
             description: 'One file: path and edits.',
@@ -524,26 +486,23 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
               path: { type: 'string', description: 'Absolute path to the file.' },
               expectedVersion: {
                 type: 'number',
-                description: 'Optional: document version the agent saw. On mismatch the edit is rejected.',
+                description: 'Optional: document version the agent saw. On mismatch position edits are rejected.',
               },
               edits: {
                 type: 'array',
-                description: 'File edits: positions are 1-based, the range end is exclusive.',
+                description: 'Per edit: an anchor (oldText) or the four positions — not both.',
                 items: {
                   type: 'object',
-                  description: 'One edit: a range and the new text.',
+                  description: 'One edit: a fragment or a range, plus newText.',
                   properties: {
+                    newText: { type: 'string', description: 'Replacement. An empty string removes the match.' },
+                    oldText: { type: 'string', description: 'Anchor: exact text from the file, unique in it.' },
                     startLine: { type: 'number', description: 'Start line (1-based).' },
                     startColumn: { type: 'number', description: 'Start column (1-based).' },
                     endLine: { type: 'number', description: 'End line (inclusive).' },
                     endColumn: { type: 'number', description: 'End column (exclusive).' },
-                    newText: { type: 'string', description: 'Replacement text. An empty string deletes the range.' },
-                    oldText: {
-                      type: 'string',
-                      description: 'Exact range text, verified before the edit.',
-                    },
                   },
-                  required: ['startLine', 'startColumn', 'endLine', 'endColumn', 'newText'],
+                  required: ['newText'],
                 },
               },
             },
@@ -666,7 +625,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Create a new file with contents. An existing file is NOT overwritten: that returns ' +
-      'an error, use apply_edit to modify one. contents is required.',
+      'an error, use edit to modify one. contents is required.',
     inputSchema: {
       type: 'object',
       properties: {

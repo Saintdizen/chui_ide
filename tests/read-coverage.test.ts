@@ -123,8 +123,8 @@ describe('touchedPaths', () => {
       edits: [{ path, edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'x' }] }],
     });
 
-  it('путь правки берётся из аргументов apply_edit', () => {
-    expect([...(touchedPaths('apply_edit', edit('/proj/a.ts')) ?? [])]).toEqual(['/proj/a.ts']);
+  it('путь правки берётся из аргументов edit', () => {
+    expect([...(touchedPaths('edit', edit('/proj/a.ts')) ?? [])]).toEqual(['/proj/a.ts']);
   });
 
   it('одиночный файл без обёртки в массив — тоже путь', () => {
@@ -132,12 +132,12 @@ describe('touchedPaths', () => {
       path: '/proj/b.ts',
       edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'x' }],
     });
-    expect([...(touchedPaths('apply_edit', args) ?? [])]).toEqual(['/proj/b.ts']);
+    expect([...(touchedPaths('edit', args) ?? [])]).toEqual(['/proj/b.ts']);
   });
 
   it('пути из патчей по якорю', () => {
     const args = JSON.stringify({ patches: [{ path: '/proj/c.ts', patches: [{ oldText: 'a', newText: 'b' }] }] });
-    expect([...(touchedPaths('apply_patch', args) ?? [])]).toEqual(['/proj/c.ts']);
+    expect([...(touchedPaths('edit', args) ?? [])]).toEqual(['/proj/c.ts']);
   });
 
   it('создание, удаление и перенос', () => {
@@ -162,7 +162,7 @@ describe('touchedPaths', () => {
   it('команда и массовая замена: задетое назвать нельзя — null', () => {
     expect(touchedPaths('terminal', JSON.stringify({ action: 'run', command: 'rm -rf build' }))).toBeNull();
     expect(touchedPaths('replace_in_files', JSON.stringify({ query: 'a', replacement: 'b' }))).toBeNull();
-    expect(touchedPaths('apply_edit', '{битый json')).toBeNull();
+    expect(touchedPaths('edit', '{битый json')).toBeNull();
   });
 });
 

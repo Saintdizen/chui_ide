@@ -3,7 +3,7 @@ import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { AGENT_TOOLS } from '../src/shared/tools';
 
 /**
- * Слитые инструменты: `browser`, `terminal`, `schedule` с полем `action`.
+ * Слитые инструменты: `browser`, `terminal`, `edit`, `schedule` с полем `action`.
  *
  * Семь схем браузера и пять терминала стоили дороже, чем их различие по смыслу:
  * описания едут в каждом запросе. Проверяем то, что могло сломаться при слиянии:
@@ -35,7 +35,7 @@ describe('слитые инструменты: схема', () => {
       'push',
     ]);
     // Старых имён в наборе больше нет: иначе схема и обработчик разъехались бы.
-    const gone = ['browser_open', 'terminal_start', 'schedule_create', 'git_status', 'run_terminal'];
+    const gone = ['browser_open', 'terminal_start', 'schedule_create', 'git_status', 'run_terminal', 'apply_patch'];
     for (const old of gone) {
       expect(AGENT_TOOLS.some((tool) => tool.name === old)).toBe(false);
     }
@@ -78,6 +78,42 @@ describe('слитые инструменты: разбор', () => {
     );
     expect(jobs.ok).toBe(true);
     expect(jobs.summary).toContain('заданий');
+  });
+
+  it('edit: форму выбирает сама правка, а не отдельное поле', async () => {
+    // Адрес — якорь или четыре позиции. Промахи называются словами: «не хватает
+    // адреса», «позиций не все», «в одном файле обе формы» — по ним и чинят.
+    const neither = await runTool(
+      ctx,
+      'edit',
+      JSON.stringify({ edits: [{ path: '/p/a.ts', edits: [{ newText: 'x' }] }] }),
+    );
+    expect(neither.ok).toBe(false);
+    expect(neither.summary).toContain('oldText');
+
+    const partial = await runTool(
+      ctx,
+      'edit',
+      JSON.stringify({ edits: [{ path: '/p/a.ts', edits: [{ startLine: 1, newText: 'x' }] }] }),
+    );
+    expect(partial.summary).toContain('не все');
+
+    const mixed = await runTool(
+      ctx,
+      'edit',
+      JSON.stringify({
+        edits: [
+          {
+            path: '/p/a.ts',
+            edits: [
+              { oldText: 'a', newText: 'b' },
+              { startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'c' },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(mixed.summary).toContain('два вызова');
   });
 
   it('недостающий аргумент назван по имени поля', async () => {

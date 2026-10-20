@@ -85,7 +85,7 @@ describe('что программа может звать', () => {
   it('обычные инструменты — да', () => {
     expect(runCodeToolAllowed('read_file')).toBe(true);
     expect(runCodeToolAllowed('terminal')).toBe(true);
-    expect(runCodeToolAllowed('apply_patch')).toBe(true);
+    expect(runCodeToolAllowed('edit')).toBe(true);
   });
 
   it('себя, сценарий с агентами, вопрос человеку и состояние беседы — нет', () => {

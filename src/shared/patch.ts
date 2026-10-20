@@ -1,7 +1,7 @@
 /**
  * Правки по якорю — «найди этот текст, замени на этот».
  *
- * Зачем рядом с `apply_edit`: тот требует позиций (строка и столбец), и их надо
+ * Зачем рядом с правкой по позициям: та требует позиций (строка и столбец), и их надо
  * *назвать*. Для текста с кириллицей и для файла, который сдвинулся после чужой
  * правки, это главный источник промахов: модель считает столбцы на глаз. Здесь
  * позиции не называются вовсе — их считаем мы, найдя якорь в самом документе.
@@ -13,7 +13,7 @@
  * строкой, отступом, именем функции) — тогда он снова станет единственным.
  *
  * Модуль чистый: ни DOM, ни ФС. Разрешение якорей проверяется тестами, а
- * применение результата идёт обычным путём `apply_edit` (см. shared/edits.ts) —
+ * применение результата идёт обычным путём правки (см. shared/edits.ts) —
  * поэтому undo, ревью и пометки «не сохранён» работают как раньше.
  */
 
@@ -27,7 +27,7 @@ export interface PatchHunk {
   newText: string;
 }
 
-/** Патчи одного файла. Путь абсолютный — как у `apply_edit`. */
+/** Патчи одного файла. Путь абсолютный — как у правки по позициям. */
 export interface PatchFile {
   path: string;
   patches: PatchHunk[];
@@ -35,7 +35,7 @@ export interface PatchFile {
 
 export type PatchResolution = { ok: true; edits: TextEdit[] } | { ok: false; message: string };
 
-/** Потолок правок на файл: защита от вырожденного ответа модели, как у apply_edit. */
+/** Потолок правок на файл: защита от вырожденного ответа модели, как у правки по позициям. */
 const MAX_PATCHES = 200;
 
 /** Короткий вид фрагмента для сообщения об ошибке: многострочный текст не тащим. */
@@ -105,7 +105,7 @@ export function countOccurrences(text: string, needle: string): number {
  * Каждый якорь ищется в ИСХОДНОМ тексте файла и обязан быть там единственным.
  * Так патчи не зависят друг от друга и от порядка: набор — это набор мест одного
  * документа, а не сценарий из последовательных шагов. Позиции считаются тут же,
- * потому что дальше их ждёт `applyTextEdits` — тот же путь, что у `apply_edit`,
+ * потому что дальше их ждёт `applyTextEdits` — тот же путь, что у правки по позициям,
  * и, значит, то же ревью, undo и «документ изменён».
  */
 export function resolvePatches(text: string, patches: readonly PatchHunk[]): PatchResolution {
@@ -167,75 +167,4 @@ export function resolvePatches(text: string, patches: readonly PatchHunk[]): Pat
   }
 
   return { ok: true, edits };
-}
-
-/**
- * Форма аргумента. Её называем прямо в ошибке: по подсказке модель чинит вызов за
- * один шаг, а из «не задан path» не видно ни того, чего не хватает, ни того, что
- * файл должен быть обёрткой вокруг правок.
- */
-const SHAPE = 'нужен [{ path: "/абсолютный/путь/файл", patches: [{ oldText: "точный текст", newText: "замена" }] }]';
-
-/** Объект ли это (модель присылает что угодно: строки, массивы, null). */
-function asObject(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-/** Похоже ли на саму замену, а не на файл: есть oldText или newText. */
-function looksLikeHunk(raw: Record<string, unknown>): boolean {
-  return typeof raw.oldText === 'string' || typeof raw.newText === 'string';
-}
-
-/**
- * Разбор аргумента инструмента: модель — недоверенный источник, поэтому и
- * структура, и типы проверяются вручную. Проверка позиций не нужна — их здесь нет.
- *
- * Принимаем и одиночный файл без обёртки в массив: форма та же, а падать из-за
- * лишних квадратных скобок незачем. Остальные промахи называем словами — что
- * именно пришло и как должно быть.
- */
-export function parsePatchFiles(value: unknown): PatchFile[] {
-  const single = asObject(value);
-  const list: unknown = single && (typeof single.path === 'string' || Array.isArray(single.patches)) ? [single] : value;
-
-  if (!Array.isArray(list)) {
-    const hint = single && looksLikeHunk(single) ? ' Похоже, передана одна замена без файла.' : '';
-    throw new Error(`Аргумент «patches» должен быть массивом: ${SHAPE}.${hint}`);
-  }
-  if (list.length === 0) throw new Error('Не передано ни одной правки');
-
-  return list.map((item, index) => {
-    const raw = asObject(item);
-    if (!raw) throw new Error(`patches[${index}]: ожидался объект — ${SHAPE}`);
-
-    const filePath = raw.path;
-    if (typeof filePath !== 'string' || filePath.trim().length === 0) {
-      // Самая частая ошибка: в элемент положили сами замены, забыв файл-обёртку.
-      // Говорим об этом прямо — иначе модель снова пришлёт ту же форму.
-      const hint = looksLikeHunk(raw) ? ' В элементе лежат сами замены (oldText/newText), а не файл.' : '';
-      throw new Error(`patches[${index}]: не задан path.${hint} ${SHAPE}`);
-    }
-
-    const hunks = raw.patches;
-    if (!Array.isArray(hunks) || hunks.length === 0) {
-      throw new Error(`patches[${index}].patches: нужен непустой массив правок. ${SHAPE}`);
-    }
-
-    const patches = hunks.map((entry, patchIndex) => {
-      const hunk = asObject(entry);
-      if (!hunk) {
-        throw new Error(`patches[${index}].patches[${patchIndex}]: ожидался объект { oldText, newText }`);
-      }
-      if (typeof hunk.oldText !== 'string') {
-        throw new Error(`patches[${index}].patches[${patchIndex}].oldText: нужна строка`);
-      }
-      if (typeof hunk.newText !== 'string') {
-        throw new Error(`patches[${index}].patches[${patchIndex}].newText: нужна строка`);
-      }
-      return { oldText: hunk.oldText, newText: hunk.newText };
-    });
-
-    return { path: filePath, patches };
-  });
 }

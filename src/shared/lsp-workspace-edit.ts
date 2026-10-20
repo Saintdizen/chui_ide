@@ -47,7 +47,7 @@ export interface WorkspaceEdits {
   readonly operations: FileOperation[];
 }
 
-/** Правки, сгруппированные по файлам, — форма `apply_edit`. `null` — правок нет. */
+/** Правки, сгруппированные по файлам, — форма правки по позициям. `null` — правок нет. */
 export function toWorkspaceFileEdits(raw: unknown, toPath: (uri: string) => string): FileEdit[] | null {
   const parsed = parse(raw, toPath);
   if (!parsed || parsed.files.length === 0) return null;

@@ -121,7 +121,7 @@ export class LspFeatures {
   /**
    * Переименование символа под позицией. Сервер отвечает правками сразу в нескольких
    * файлах, поэтому отдаём `FileEdit[]` — их применяет документная модель renderer тем
-   * же путём, что и `apply_edit` (с undo). `null` — сервер правок не дал или отказался.
+   * же путём, что и правка по позициям (с undo). `null` — сервер правок не дал или отказался.
    */
   async rename(path: string, position: LspPosition, newName: string): Promise<FileEdit[] | null> {
     const result = await this.request(path, 'textDocument/rename', {

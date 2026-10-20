@@ -85,8 +85,9 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   create_file: { alwaysAvailable: true },
   delete_file: { alwaysAvailable: true },
   move_file: { alwaysAvailable: true },
-  apply_edit: {},
-  apply_patch: {},
+  // Правка файлов: две формы (по якорю и по позициям) — один инструмент.
+  // Права у форм одни: обе идут через ревью и undo в renderer.
+  edit: {},
 
   /* ── команды, задания, терминалы ────────────────────────────────────── */
   // Один инструмент на всё, что запускает процессы: команда, задание в фоне,

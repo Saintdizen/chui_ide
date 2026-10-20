@@ -63,7 +63,7 @@ describe('производные наборы', () => {
   });
 
   it('в плане нет ничего, что меняет мир', () => {
-    for (const name of ['apply_edit', 'apply_patch', 'create_file', 'delete_file', 'terminal']) {
+    for (const name of ['edit', 'create_file', 'delete_file', 'terminal']) {
       expect(PLAN_MODE_TOOLS.has(name)).toBe(false);
     }
   });
@@ -77,7 +77,7 @@ describe('производные наборы', () => {
   it('без моста окна не обещает работать', () => {
     // Эти инструменты живут в ленте чата и в документной модели: без окна их
     // не исполнить, и «всегда доступен» про них было бы неправдой.
-    for (const name of ['ask', 'exit_plan_mode', 'apply_patch', 'apply_edit', 'open_file', 'terminal']) {
+    for (const name of ['ask', 'exit_plan_mode', 'edit', 'open_file', 'terminal']) {
       expect(ALWAYS_AVAILABLE.has(name)).toBe(false);
     }
   });
@@ -98,7 +98,7 @@ describe('повтор чтения', () => {
     expect(isReadOnlyCall('terminal', 'не json')).toBe(false);
     // Обычные инструменты чтения работают как раньше.
     expect(isReadOnlyCall('read_file', JSON.stringify({ path: '/p/a.ts' }))).toBe(true);
-    expect(isReadOnlyCall('apply_edit', '{}')).toBe(false);
+    expect(isReadOnlyCall('edit', '{}')).toBe(false);
   });
 });
 

@@ -79,8 +79,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     id: 'edit',
     label: 'Правки',
     names: [
-      'apply_edit',
-      'apply_patch',
+      'edit',
       'replace_in_files',
       'rename_symbol',
       'create_file',

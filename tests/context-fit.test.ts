@@ -415,7 +415,7 @@ describe('condenseCallArguments', () => {
 
 describe('condenseAppliedCalls', () => {
   const body = 'строка кода\n'.repeat(80);
-  const call = (id: string, name = 'apply_edit') => ({
+  const call = (id: string, name = 'edit') => ({
     id,
     name,
     arguments: JSON.stringify({ edits: [{ path: `src/${id}.ts`, edits: [{ newText: body }] }] }),
@@ -441,7 +441,7 @@ describe('condenseAppliedCalls', () => {
   it('путь и прочие поля переживают сжатие', () => {
     const condensed = condenseAppliedCalls(turn(call('done')), new Set(['done']), 200);
     expect(condensed.toolCalls?.[0]?.arguments).toContain('src/done.ts');
-    expect(condensed.toolCalls?.[0]?.name).toBe('apply_edit');
+    expect(condensed.toolCalls?.[0]?.name).toBe('edit');
   });
 
   it('без применённых вызовов сообщение не меняется — и это тот же объект', () => {

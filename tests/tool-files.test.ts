@@ -6,7 +6,7 @@ import { changeKindLabel, fileName, touchedFiles } from '../src/shared/tool-file
  * Файлы вызова агента для ряда чипов в ленте чата.
  *
  * Проверяем два источника, потому что они разные по природе: файловые операции
- * приходят списком в результате инструмента, а правки документов (`apply_edit`)
+ * приходят списком в результате инструмента, а правки документов (`edit`)
  * в результате не значатся — их берём из аргументов. Второй путь особенно важно
  * проверить на истории: после перезапуска результата в беседе уже нет, и если
  * файлы не вычитать из аргументов, ряд чипов пропадёт.
@@ -31,7 +31,7 @@ describe('touchedFiles', () => {
   it('правки документов берутся из аргументов', () => {
     const args = JSON.stringify({ edits: [{ path: '/proj/src/a.ts' }, { path: '/proj/src/b.ts' }] });
 
-    expect(touchedFiles('apply_edit', args)).toEqual([
+    expect(touchedFiles('edit', args)).toEqual([
       { path: '/proj/src/a.ts', kind: 'edited' },
       { path: '/proj/src/b.ts', kind: 'edited' },
     ]);
@@ -43,7 +43,7 @@ describe('touchedFiles', () => {
       edits: [{ path: '/proj/src/a.ts' }, { path: '/proj/src/a.ts' }],
     });
 
-    expect(touchedFiles('apply_edit', args)).toEqual([{ path: '/proj/src/a.ts', kind: 'edited' }]);
+    expect(touchedFiles('edit', args)).toEqual([{ path: '/proj/src/a.ts', kind: 'edited' }]);
   });
 
   it('создание, удаление и перенос подписаны своим видом', () => {
@@ -56,9 +56,9 @@ describe('touchedFiles', () => {
 
   it('битые аргументы — пустой ряд, а не исключение', () => {
     // Лента чата не должна падать из-за того, что модель не собрала JSON.
-    expect(touchedFiles('apply_edit', 'не json')).toEqual([]);
+    expect(touchedFiles('edit', 'не json')).toEqual([]);
     expect(touchedFiles('create_file', '{"path":42}')).toEqual([]);
-    expect(touchedFiles('apply_edit', '{"edits":[]}')).toEqual([]);
+    expect(touchedFiles('edit', '{"edits":[]}')).toEqual([]);
   });
 
   it('инструмент без файлов файлов не приносит', () => {
@@ -69,7 +69,7 @@ describe('touchedFiles', () => {
   it('аргумент без пути игнорируется, остальные остаются', () => {
     const args = JSON.stringify({ edits: [{ path: '/p/a.ts' }, {}, { path: '' }] });
 
-    expect(touchedFiles('apply_edit', args)).toEqual([{ path: '/p/a.ts', kind: 'edited' }]);
+    expect(touchedFiles('edit', args)).toEqual([{ path: '/p/a.ts', kind: 'edited' }]);
   });
 });
 
