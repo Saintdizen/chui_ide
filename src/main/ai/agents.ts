@@ -186,7 +186,7 @@ export function createAgentRegistry(): AgentRegistry {
         return {
           error:
             `Живых агентов уже ${live}, а больше ${MAX_LIVE_AGENTS} разом не запускаем: ` +
-            'каждый — отдельный прогон модели. Дождись (wait_agent) или останови лишних (interrupt_agent).',
+            'каждый — отдельный прогон модели. Дождись (agents с action: "wait") или останови лишних (action: "interrupt").',
         };
       }
       counter += 1;
@@ -260,7 +260,7 @@ export function createAgentRegistry(): AgentRegistry {
           ok: false,
           reason:
             entry.status === 'done'
-              ? 'Агент уже закончил: его отчёт читается через wait_agent, сообщение ему не нужно'
+              ? 'Агент уже закончил: его отчёт читается через agents с action: "wait", сообщение ему не нужно'
               : 'Агент больше не работает — сообщение некуда доставить',
         };
       }

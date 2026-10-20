@@ -66,6 +66,14 @@ export interface RunStepLog {
   note?: string;
   /** Расход шага, если провайдер его сообщил. */
   usage?: ChatUsage;
+  /**
+   * Сколько заняли результаты инструментов этого шага — в оценке токенов.
+   *
+   * Схемы и промпт платятся один раз на запрос, а результаты — на КАЖДОМ шаге:
+   * прочитанный файл едет в контексте до конца прогона. Без этого числа в сводке
+   * виден только общий счёт провайдера, а что именно раздуло шаг — нет.
+   */
+  outputTokens?: number;
 }
 
 /** Что именно ушло модели: инструкции, контекст проекта, рамка запроса. */
@@ -140,6 +148,40 @@ export function formatDuration(ms: number): string {
   return restMinutes > 0 ? `${hours} ч ${String(restMinutes).padStart(2, '0')} м` : `${hours} ч`;
 }
 
+/**
+ * Цена прогона по двум разным статьям: постоянная часть и выводы инструментов.
+ *
+ * Разница важна: схемы и промпт уходят в префикс запроса, который провайдер
+ * кеширует, а результаты инструментов растут с каждым шагом и кешу не поддаются —
+ * они и есть то место, где прогон дорожает.
+ */
+export interface RunCost {
+  /** Схемы инструментов в одном запросе (оценка). */
+  toolsTokens: number;
+  /** Результаты инструментов за весь прогон (сумма по шагам). */
+  outputTokens: number;
+  /** Шагов, у которых вывод посчитан. */
+  steps: number;
+  /** Вывод в среднем на шаг: `null`, когда считать нечего. */
+  perStep: number | null;
+}
+
+export function runCost(log: ChatRunLog): RunCost {
+  let outputTokens = 0;
+  let steps = 0;
+  for (const step of log.steps) {
+    if (step.outputTokens === undefined) continue;
+    outputTokens += step.outputTokens;
+    steps += 1;
+  }
+  return {
+    toolsTokens: log.system.toolsTokens ?? 0,
+    outputTokens,
+    steps,
+    perStep: steps > 0 ? Math.round(outputTokens / steps) : null,
+  };
+}
+
 /** Итог прогона одной строкой: «5 м 24 с · 6 шагов · 14 вызовов · 41 тыс. токенов». */
 export function describeRun(log: ChatRunLog): string {
   // Шаги берём из следа, а не из списка трассы: подзадача идёт своим контекстом и
@@ -201,7 +243,7 @@ export function plural(count: number, one: string, few: string, many: string): s
 }
 
 /** Тысячи с неразрывным пробелом: число читается, а не считается по разрядам. */
-function formatThousands(value: number): string {
+export function formatThousands(value: number): string {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
 }
 

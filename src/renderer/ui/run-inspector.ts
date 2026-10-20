@@ -1,11 +1,13 @@
-import type { ChatRunLog, RunCallLog, RunStepLog } from '../../shared/run-log';
+import type { ChatRunLog, RunCallLog, RunCost, RunStepLog } from '../../shared/run-log';
 import {
   callSharePercent,
   describeRun,
   formatClock,
   formatDuration,
+  formatThousands,
   plural,
   prettyJson,
+  runCost,
   runTruncated,
 } from '../../shared/run-log';
 import { permissionSpec } from '../../shared/permissions';
@@ -207,6 +209,19 @@ export function createRunInspector(): RunInspectorView {
     );
   };
 
+  /**
+   * Две статьи расхода одной строкой: схемы заплачены один раз и лежат в кеше
+   * префикса, а результаты инструментов едут в контексте до конца прогона — они и
+   * делают длинный прогон дорогим. Показываем рядом, чтобы это было видно.
+   */
+  function costLine(cost: RunCost): string {
+    const per = cost.perStep === null ? '' : ` (в среднем ${formatThousands(cost.perStep)} на шаг)`;
+    return (
+      `схемы: ${formatThousands(cost.toolsTokens)} ток. · выводы: ` +
+      `${formatThousands(cost.outputTokens)} ток. за ${cost.steps} шаг.${per}`
+    );
+  }
+
   function renderSystem(log: ChatRunLog): void {
     const system = log.system;
     const rows: Node[] = [
@@ -234,6 +249,11 @@ export function createRunInspector(): RunInspectorView {
     if (system.instructions) rows.push(fold('Системные инструкции', pre(system.instructions)));
     else rows.push(h('p', { class: 'run-step-note' }, 'Системных инструкций не было.'));
     if (system.context) rows.push(fold('Контекст проекта', pre(system.context)));
+
+    // Разделение важнее самих чисел: схемы дальше в префиксе запроса (их кеширует
+    // провайдер), а выводы растут с каждым шагом. Здесь видно, что именно дорого.
+    const cost = runCost(log);
+    if (cost.outputTokens > 0) rows.push(h('p', { class: 'run-step-note' }, costLine(cost)));
 
     clear(systemBox);
     systemBox.append(h('div', { class: 'run-section-title' }, 'Что ушло модели'), ...rows);

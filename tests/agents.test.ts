@@ -55,7 +55,7 @@ describe('номер агента в аргументах', () => {
   it('неизвестный номер объясняется, а не угадывается', () => {
     const found = findAgentId('agent-9', KNOWN);
     expect(found.id).toBeNull();
-    expect(found.error).toContain('list_agents');
+    expect(found.error).toContain('agents');
   });
 
   it('пустой номер — свой отказ', () => {
@@ -86,7 +86,7 @@ describe('разбор wait_agent', () => {
 
   it('без номеров и с чужим номером — отказы словами', () => {
     expect(parseWaitRequest({}, KNOWN).error).toContain('Нужны номера');
-    expect(parseWaitRequest({ id: 'agent-99' }, KNOWN).error).toContain('list_agents');
+    expect(parseWaitRequest({ id: 'agent-99' }, KNOWN).error).toContain('agents');
   });
 });
 
@@ -107,7 +107,7 @@ describe('разбор send_message', () => {
   });
 });
 
-describe('разбор spawn_agent и interrupt_agent', () => {
+describe('разбор spawn и interrupt', () => {
   it('без задания агент не запускается', () => {
     expect(parseSpawnRequest({}).error).toContain('prompt');
   });
@@ -124,7 +124,7 @@ describe('разбор spawn_agent и interrupt_agent', () => {
 
   it('остановить можно только названного агента', () => {
     expect(parseInterruptRequest({ id: 'agent-12' }, KNOWN).id).toBe('agent-12');
-    expect(parseInterruptRequest({ id: 'agent-77' }, KNOWN).error).toContain('list_agents');
+    expect(parseInterruptRequest({ id: 'agent-77' }, KNOWN).error).toContain('agents');
   });
 });
 
@@ -318,7 +318,7 @@ describe('текст для модели', () => {
   it('пустой список объясняется словами, а не пустотой', () => {
     const text = formatAgentList([]);
     expect(text).toContain('Агентов нет');
-    expect(text).toContain('spawn_agent');
+    expect(text).toContain('agents');
   });
 
   it('в строке агента видно номер, состояние и счётчики', () => {

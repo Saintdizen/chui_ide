@@ -8,7 +8,7 @@
  * ищет обходной путь вместо того, чтобы работать тем, что есть.
  */
 
-import { presetToolNames, toolPresetSpec, type ToolPresetId } from './tool-presets';
+import { presetToolNames, rosterNames, toolPresetSpec, type ToolPresetId } from './tool-presets';
 
 /**
  * Советы агенту — по одному на мысль, с указанием инструментов, без которых
@@ -30,18 +30,22 @@ interface AgentHint {
 
 const AGENT_HINTS: readonly AgentHint[] = [
   {
-    text: 'Работай инструментами, а не по догадке: назначение и аргументы описаны у каждого.',
+    // Одна строка вместо тринадцати: раньше «Absolute path…» повторялось в схеме
+    // каждого инструмента с путём, и это стоило дороже самого совета.
+    text: 'Пути в аргументах — абсолютные и внутри проекта.',
   },
   {
-    text: 'Не выдумывай содержимое файлов: чего не знаешь — читай инструментами.',
+    // Два совета были об одном и том же: «не догадывайся» и «не выдумывай». Один
+    // из них — повторение другого, а платится он в каждом запросе каждого шага.
+    text: 'Не выдумывай содержимое файлов: чего не знаешь — читай инструментами, а не по памяти.',
     needs: ['read_file'],
   },
   {
-    text: 'Проект виден по карте в начале беседы: дерево не обходи, манифесты не читай. Подробнее — project_map.',
+    text: 'Проект виден по карте: дерево не обходи, манифесты не читай (project_map).',
     needs: ['project_map'],
   },
   {
-    text: 'Сначала найди место, потом читай: codebase_search — объявление символа, find_references — применения, search — текст, find_files — имена файлов.',
+    text: 'Сначала найди место, потом читай: codebase_search — объявление, find_references — применения, search — текст, find_files — имена.',
     needs: ['codebase_search', 'find_references', 'search', 'find_files'],
   },
   {
@@ -53,11 +57,11 @@ const AGENT_HINTS: readonly AgentHint[] = [
     needs: ['search_docs'],
   },
   {
-    text: 'file_outline даёт скелет файла: дальше read_file диапазоном, не целиком и не дважды.',
+    text: 'file_outline — скелет файла; дальше read_file диапазоном, не целиком и не дважды.',
     needs: ['file_outline', 'read_file'],
   },
   {
-    text: 'Картинки — read_image (read_file на них откажет); SVG — наоборот, текст.',
+    text: 'Картинки — read_image (read_file откажет); SVG — наоборот, текст.',
     needs: ['read_image'],
   },
   {
@@ -69,7 +73,7 @@ const AGENT_HINTS: readonly AgentHint[] = [
     needs: ['workflow'],
   },
   {
-    text: 'Перечитать много файлов ради ответа — делегируй подзадаче (`task`).',
+    text: 'Перечитать много файлов ради ответа — `task`: его чтения не тратят твой контекст.',
     needs: ['task'],
   },
   {
@@ -81,24 +85,24 @@ const AGENT_HINTS: readonly AgentHint[] = [
     needs: ['get_diagnostics'],
   },
   {
-    text: 'Правку адресуй якорем oldText — точным фрагментом файла; позиции (startLine…endColumn) — когда место посчитано точно. Якорь не найден или не уникален — перечитай файл и возьми фрагмент дословно и шире, а не меняй его наугад.',
+    text: 'Правку адресуй якорем oldText — дословным куском файла (позиции — когда место посчитано точно); якорь не найден или не уникален — перечитай и возьми шире, а не меняй наугад.',
     needs: ['edit'],
   },
   {
-    text: 'Команда в терминале — шаг, а не объяснение: сперва прочитай, что есть, потом запускай, и разбирай вывод целиком, а не только код выхода.',
+    text: 'Команда в терминале — шаг, а не объяснение: сперва прочитай, что есть, потом запускай, и разбирай вывод целиком.',
     needs: ['terminal'],
   },
   {
-    text: 'Правки и команды пользователь подтверждает — не считай их сделанными, пока не получил ответ инструмента.',
+    text: 'Правки и команды пользователь подтверждает — не считай сделанными до ответа инструмента.',
     needs: ['edit', 'create_file', 'terminal', 'git_write', 'delete_file', 'move_file'],
     aboutApproval: true,
   },
   {
-    text: 'Договорённости надолго — в память проекта (`remember`); разовый контекст не пиши.',
+    text: 'Договорённости надолго — remember; разовый контекст не пиши.',
     needs: ['remember'],
   },
   {
-    text: '«Каждый день в 9:00» и «каждые 15 минут» — это `schedule` с action create, а не ответ в чате: правило ставится один раз и работает само.',
+    text: '«Каждый день в 9:00», «каждые 15 минут» — schedule с action create, а не ответ в чате: правило ставится один раз и работает само.',
     needs: ['schedule'],
   },
 ];
@@ -112,7 +116,11 @@ const AGENT_HINTS: readonly AgentHint[] = [
  */
 export function agentPrompt(preset: ToolPresetId, options: { confirm: boolean }): string {
   const spec = toolPresetSpec(preset);
-  const allowed = spec.widen ? null : presetToolNames(preset);
+  const names = presetToolNames(preset);
+  // «Нет» — только про права. Скрытое в ростере тоже зовётся по имени, и совет про
+  // него нужнее всего: схемы с его описанием не едет. Считать набор без ростера
+  // значило бы выкинуть из промпта единственное слово о скрытых.
+  const allowed = spec.widen || names === null ? null : new Set<string>([...names, ...rosterNames(preset)]);
   const hints = AGENT_HINTS.filter((hint) => {
     if (hint.aboutApproval && !options.confirm) return false;
     if (!hint.needs || allowed === null) return true;

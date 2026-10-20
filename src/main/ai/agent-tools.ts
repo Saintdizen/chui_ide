@@ -329,16 +329,15 @@ export interface SubagentRunner {
    */
   runMany(tasks: readonly SubagentTask[]): Promise<ToolOutcome>;
   /**
-   * Агент в фоне (`spawn_agent`): запустить и вернуть номер, не дожидаясь отчёта.
-   * Дальше с ним работают `list_agents`, `wait_agent`, `send_message` и
-   * `interrupt_agent` — через реестр (`ctx.agents`).
+   * Агент в фоне (`action: "spawn"`): запустить и вернуть номер, не дожидаясь отчёта.
+   * Дальше с ним работают `list`, `wait`, `send` и `interrupt` — через реестр (`ctx.agents`).
    */
   spawn?(params: { description: string; prompt: string }): ToolOutcome;
 }
 
 /**
- * Живые агенты для инструментов (`list_agents`, `wait_agent`, `send_message`,
- * `interrupt_agent`). Реестр живёт в main (`ai/agents.ts`), сюда приходит его
+ * Живые агенты для инструмента `agents` (действия `list`, `wait`, `send`,
+ * `interrupt`). Реестр живёт в main (`ai/agents.ts`), сюда приходит его
  * видимая часть: по ней инструменты проверяются без модели и без окна.
  */
 export interface AgentTools {
@@ -883,18 +882,11 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await ask(ctx, args);
       case 'task':
         return await task(ctx, args);
-      // Агенты в фоне. Запуск — `spawn_agent`, остальные четыре говорят с уже
-      // запущенными: без них фоновый агент был бы бросанием денег на ветер.
-      case 'spawn_agent':
-        return await spawnAgent(ctx, args);
-      case 'list_agents':
-        return listAgents(ctx);
-      case 'wait_agent':
-        return await waitAgents(ctx, args);
-      case 'send_message':
-        return sendToAgent(ctx, args, 'agent');
-      case 'interrupt_agent':
-        return interruptAgent(ctx, args, 'model');
+      // Агенты в фоне одним инструментом: запуск и ожидание — `agents`, действия по
+      // имени. Пять схем стоили дороже одной с `action`, а повторный вызов по одному
+      // имени всё равно выполняется сразу.
+      case 'agents':
+        return await agentsAction(ctx, args);
       case 'list_mcp_resources':
         return await listMcpResources(ctx, args);
       case 'read_mcp_resource':
@@ -992,7 +984,8 @@ async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<To
 
 /* ── живые агенты ────────────────────────────────────────────────────────
  *
- * Агент в фоне (`spawn_agent`) и работа с уже запущенными: список, ожидание,
+ * Агент в фоне (`agents` с `action: "spawn"`) и работа с уже запущенными: список,
+ * ожидание,
  * сообщение, остановка. Сами агенты и почта живут в реестре main (`ai/agents.ts`),
  * а цикл прогона — в `service.ts`; здесь только разбор аргументов и текст ответа.
  * Поэтому эти инструменты проверяются без модели и без окна.
@@ -1003,7 +996,7 @@ function knownAgentIds(ctx: ToolContext): string[] {
   return (ctx.agents?.list() ?? []).map((agent) => agent.id);
 }
 
-/** Агент в фоне: запустить и отдать номер. Отчёт заберут `wait_agent` или человек. */
+/** Агент в фоне: запустить и отдать номер. Отчёт заберут `agents` с `action: "wait"` или человек. */
 async function spawnAgent(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.subagent?.spawn) return { ok: false, summary: 'Агенты в фоне недоступны' };
   const request = parseSpawnRequest(args);
@@ -1066,10 +1059,43 @@ function interruptAgent(ctx: ToolContext, args: Record<string, unknown>, by: Age
     return {
       ok: false,
       summary: 'Агент уже не работает',
-      detail: 'Останавливать нечего: агент уже закончил. Его отчёт читается через wait_agent.',
+      detail: 'Останавливать нечего: агент уже закончил. Его отчёт читается через agents с action: "wait".',
     };
   }
   return { ok: true, summary: `агент ${request.id} остановлен` };
+}
+
+/**
+ * Живые агенты одним инструментом с `action`.
+ *
+ * Пять отдельных имён (`spawn_agent` и четыре спутника) стоили пяти схем в каждом
+ * запросе, а различались только первой
+ * строкой описания. Разбор аргументов остался в прежних функциях — здесь только
+ * выбор по действию, проверка обязательных полей и отказ на незнакомое.
+ *
+ * Ждущий агент не занимает прогон: `wait` блокирует только этот шаг, и таймаут — не
+ * ошибка, а «ещё работают» (об этом говорит сам ответ).
+ */
+async function agentsAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  switch (action) {
+    case 'spawn':
+      return missingForAction(args, ['prompt']) ?? (await spawnAgent(ctx, args));
+    case 'list':
+      return listAgents(ctx);
+    case 'wait':
+      return await waitAgents(ctx, args);
+    case 'send':
+      return missingForAction(args, ['id', 'text']) ?? sendToAgent(ctx, args, 'agent');
+    case 'interrupt':
+      return missingForAction(args, ['id']) ?? interruptAgent(ctx, args, 'model');
+    default:
+      return {
+        ok: false,
+        summary: `Неизвестное действие с агентами: ${action}`,
+        detail: 'Допустимые: spawn, list, wait, send, interrupt.',
+      };
+  }
 }
 
 /* ── браузер ────────────────────────────────────────────────────────────── */

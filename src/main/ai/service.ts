@@ -321,7 +321,7 @@ export class AiService {
 
   /**
    * Живые агенты подзадач: один реестр на окно. Так их видят и панель, и
-   * инструменты (`list_agents`, `wait_agent`, `send_message`, `interrupt_agent`),
+   * инструменты (`agents` с действиями `list`, `wait`, `send`, `interrupt`),
    * а не только тот прогон, что их запустил: фоновый агент переживает ход.
    */
   private readonly agents: AgentRegistry = createAgentRegistry();
@@ -875,7 +875,12 @@ export class AiService {
       ? AGENT_TOOLS.filter(
           (tool) =>
             this.canRun(tool, host, hasSkills) &&
+            // Набор даёт права, а ростер — что из них едет схемой: имя из ростера
+            // разрешено, но в блок `tools` не попадает (его видно строкой).
+            // В плане ростер не действует: там схем и так мало (`PLAN_MODE_TOOLS`),
+            // и это ровно инструменты чтения, которыми план и собирается.
             toolPresetAllows(toolPreset, tool.name) &&
+            (planMode || !isRosterTool(toolPreset, tool.name)) &&
             // Вне плана «утвердить план» нечего: инструмент живёт только в нём.
             (planMode ? PLAN_MODE_TOOLS.has(tool.name) : tool.name !== 'exit_plan_mode'),
         )
@@ -1031,6 +1036,9 @@ export class AiService {
         (tool) =>
           tool.name !== 'exit_plan_mode' &&
           this.canRun(tool, host, hasSkills) &&
+          // Ростер отсекаем и здесь: расширение — про то, чего в наборе не было,
+          // а не про то, что нарочно спрятано в строку.
+          !isRosterTool(toolPreset, tool.name) &&
           (toolPresetAllows(toolPreset, tool.name) || onDemandTools.has(tool.name)),
       );
       const next = [...widened, ...external, ...resourceTools];
@@ -1155,7 +1163,7 @@ export class AiService {
     /** Одна подзадача: общий путь для одиночного вызова и для пула. */
     /**
      * Завести агента в реестре. Запись появляется ДО первого шага: иначе панель и
-     * `interrupt_agent` не видели бы агента как раз тогда, когда его и хочется
+     * `interrupt` не видели бы агента как раз тогда, когда его и хочется
      * снять. Сигнал агента — потомок сигнала прогона: остановка хода снимает всех,
      * остановка одного ход не трогает.
      */
@@ -1246,15 +1254,15 @@ export class AiService {
      * Одна упавшая подзадача не отменяет остальные: отчёт собирается по каждой
      * отдельно, а провал называется словами — иначе треть работы пропадёт молча.
      */
-    // Реестр живых агентов — тем же инструментам: `list_agents` и остальные
+    // Реестр живых агентов — тому же инструменту: `list` и остальные действия
     // смотрят на тот же список, что и панель окна.
     toolContext.agents = this.agents;
 
     toolContext.subagent = {
       run: async ({ description, prompt }) => (await runOne({ description, prompt })).outcome,
       /**
-       * Агент в фоне: работа идёт, а ход продолжается. Отчёт заберут `wait_agent`,
-       * следующий ход (через `list_agents`/`wait_agent`) или человек в панели.
+       * Агент в фоне: работа идёт, а ход продолжается. Отчёт заберут `agents` с
+       * `action: "wait"` — следующий ход или человек в панели.
        * Ошибку прогона здесь не бросаем наружу: она уже записана в реестр, а ход
        * из-за фонового агента падать не должен.
        */
@@ -1269,8 +1277,8 @@ export class AiService {
           summary: `агент ${opened.id} работает в фоне`,
           detail:
             `Агент ${opened.id} «${description}» запущен в фоне и работает, пока ты продолжаешь. ` +
-            'Состояние — list_agents, отчёт — wait_agent, поправить курс — send_message, ' +
-            'снять — interrupt_agent. Не жди его без нужды: работа может идти долго.',
+            'Состояние — agents с action: "list", отчёт — action: "wait", поправить курс — ' +
+            'action: "send", снять — action: "interrupt". Не жди его без нужды: работа может идти долго.',
         };
       },
       runMany: async (tasks) => {
@@ -1347,7 +1355,7 @@ export class AiService {
       // Шаг трассы: время, текст модели и её вызовы. `commit` один на шаг —
       // вызывается на каждом выходе из итерации, повторный вызов ничего не делает.
       const stepStartedAt = Date.now();
-      const stepLog: RunStepLog = { index: runStepLogs.length + 1, ms: 0, calls: [] };
+      const stepLog: RunStepLog = { index: runStepLogs.length + 1, ms: 0, calls: [], outputTokens: 0 };
       let stepCommitted = false;
       const commitStep = (note?: string): void => {
         if (stepCommitted) return;
@@ -1361,6 +1369,15 @@ export class AiService {
         rememberSchema(call.name);
         if (stepLog.calls.length < MAX_RUN_CALLS_PER_STEP) stepLog.calls.push(call);
         else stepLog.hiddenCalls = (stepLog.hiddenCalls ?? 0) + 1;
+      };
+      /**
+       * Сколько токенов шаг отдал модели результатами инструментов.
+       *
+       * Считаем там, где сообщение кладётся в `messages`, а не по трассе: в трассе
+       * поля обрезаны потолками и вышло бы заниженное число.
+       */
+      const countOutput = (content: string): void => {
+        stepLog.outputTokens = (stepLog.outputTokens ?? 0) + estimateTextTokens(content);
       };
 
       // Каждый шаг сверяемся с окном: результаты инструментов копятся, и
@@ -1717,6 +1734,7 @@ export class AiService {
           // текст без оформления, а человек в карточке (событие выше) видит полный.
           content: (compressOutput ? compressToolOutput(result) : result) + widenedNote,
         };
+        countOutput(toolMessage.content ?? '');
         messages.push(toolMessage);
         produced.push(toolMessage);
         // Картинку из результата положить в tool-сообщение нельзя (у OpenAI там
@@ -2234,8 +2252,10 @@ export class AiService {
     // Память проекта (remember/forget) — в ALWAYS_AVAILABLE: заметка обратима,
     // спрашивать не у кого.
     // Живые агенты: реестр живёт в main и есть всегда — спрашивать не у кого.
-    // Исключение — запуск в фоне: без окна его итог некому показать.
-    if (tool.name === 'spawn_agent') return this.agents !== undefined;
+    // Исключение — запуск в фоне: без окна его итог некому показать. Действия
+    // различает `action`, а `canRun` аргументов не видит, поэтому одно имя на
+    // всё: без реестра `spawn` ответит словами.
+    if (tool.name === 'agents') return this.agents !== undefined;
     // Расписание — тоже файл проекта: действие обратимо (задачу снимает
     // schedule_delete), а часы без окна и так молчат.
     if (tool.name === 'schedule' || tool.name === 'schedule_list') return this.schedules !== undefined;

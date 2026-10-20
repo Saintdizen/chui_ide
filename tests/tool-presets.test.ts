@@ -7,6 +7,7 @@ import {
   TOOL_PRESETS,
   isRosterTool,
   presetToolNames,
+  rosterNames,
   sanitizeToolPreset,
   toolPresetAllows,
   toolPresetNote,
@@ -24,10 +25,13 @@ import {
 
 const names = new Set(AGENT_TOOLS.map((tool) => tool.name));
 
-/** Вес схем набора — так же, как его считает service при отправке модели. */
+/** Вес схем набора — так же, как его считает service при отправке модели: ростер вычтён. */
 function presetTokens(preset: ToolPresetId): number {
   const allowed = presetToolNames(preset);
-  const tools = allowed === null ? AGENT_TOOLS : AGENT_TOOLS.filter((tool) => allowed.has(tool.name));
+  const tools = AGENT_TOOLS.filter(
+    (tool) =>
+      (allowed === null || allowed.has(tool.name)) && !isRosterTool(preset, tool.name),
+  );
   return estimateTextTokens(JSON.stringify(toOpenAiTools(tools)));
 }
 
@@ -118,10 +122,12 @@ describe('наборы инструментов агента', () => {
   });
 
   it('узкие наборы заметно дешевле полного', () => {
-    expect(tokens.read).toBeLessThan(tokens.full * 0.6);
-    expect(tokens.minimal).toBeLessThan(tokens.read * 0.6);
+    // Ростер сжал и полный набор: разрыв с «Только чтение» стал 0,74 вместо 0,54.
+    // Порог 0,8 держит именно это — иначе сторож молча пропустит рост схем.
+    expect(tokens.read).toBeLessThan(tokens.full * 0.8);
+    expect(tokens.minimal).toBeLessThan(tokens.read * 0.7);
     expect(tokens.edit).toBeLessThan(tokens.full);
-    // Абсолютный потолок чтения: ради этого выбор и заводился (замер — ≈4 600).
+    // Абсолютный потолок чтения: ради этого выбор и заводился (замер — ≈3 840).
     expect(tokens.read).toBeLessThan(6_500);
   });
 
@@ -169,9 +175,11 @@ describe('наборы инструментов агента', () => {
     const note = toolPresetNote('auto');
     for (const name of hidden) {
       // Ростера мало: без формы вызова первый вызов уйдёт наугад, и сэкономленные
-      // токены вернутся шагом переделки. Строка строится из самих схем.
+      // токены вернутся шагом переделки. Строка строится из самих схем; у `agents`
+      // первое поле — `action` со значениями `enum`, поэтому сверяем начало формы.
       const required = AGENT_TOOLS.find((tool) => tool.name === name)?.inputSchema.required ?? [];
-      expect(note, `в ростере нет формы ${name}`).toContain(`${name}(${required.join(', ')})`);
+      const head = required.length === 0 ? `${name}()` : `${name}(${required[0]}`;
+      expect(note, `в ростере нет формы ${name}`).toContain(head);
       expect(toolPresetAllows('auto', name), `${name} не должен входить в схемы`).toBe(false);
       // Полный набор не задет: исключение — про цену, а не про возможность.
       expect(toolPresetAllows('full', name)).toBe(true);
@@ -190,12 +198,39 @@ describe('наборы инструментов агента', () => {
       expect(isRosterTool('auto', name), `${name} должен считаться ростором`).toBe(true);
     }
     expect(isRosterTool('auto', 'read_file')).toBe(false);
-    // У наборов, выбранных человеком, ростера нет: там сужение осознанное.
-    expect(isRosterTool('read', 'forget')).toBe(false);
+    // Ростер есть у любого набора: вопрос не в правах, а в том, что едет схемой.
+    // В узком наборе он ограничен его группами — rename_symbol это правка, не чтение.
+    expect(isRosterTool('read', 'forget')).toBe(true);
+    expect(isRosterTool('read', 'rename_symbol')).toBe(false);
+    // Разрешённым от этого он не быть перестал: вызов по имени проходит.
+    expect(toolPresetAllows('read', 'forget')).toBe(true);
   });
 
-  it('модели говорят о сужении, а о полном наборе — нет', () => {
-    expect(toolPresetNote('full')).toBe('');
+  it('ростер обещает только то, что пройдёт', () => {
+    // Строка говорит модели: «вызови по имени — выполнится». Значит, каждое имя
+    // ростера в своём наборе обязано быть зовимым либо правом, либо расширением.
+    for (const preset of TOOL_PRESETS) {
+      for (const name of rosterNames(preset.id)) {
+        const callable = preset.widen === true || toolPresetAllows(preset.id, name);
+        expect(callable, `${name} спрятан, но в «${preset.label}» не зовётся`).toBe(true);
+        // И оно есть в описании: опечатка в ростере стоила бы целого шага.
+        expect(
+          AGENT_TOOLS.some((tool) => tool.name === name),
+          `${name} нет в AGENT_TOOLS`,
+        ).toBe(true);
+      }
+    }
+    // Ростер — цена, а не запрет: полный набор по-прежнему разрешает всё.
+    expect(toolPresetAllows('full', 'forget')).toBe(true);
+  });
+
+  it('модели говорят о скрытом — и в полном наборе тоже', () => {
+    // Полный набор больше не «всё схемами»: редкое и простое ушло в тот же ростер.
+    // Разрешение осталось полным, но без слова об этом инструментов для модели нет.
+    const full = toolPresetNote('full');
+    expect(full).toContain('по имени');
+    expect(full).toContain('forget');
+
     for (const preset of TOOL_PRESETS) {
       if (preset.id === 'full') continue;
       const note = toolPresetNote(preset.id);

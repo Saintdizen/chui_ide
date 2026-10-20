@@ -49,11 +49,7 @@ export type AgentToolName =
   | 'exit_plan_mode'
   | 'ask'
   | 'task'
-  | 'spawn_agent'
-  | 'list_agents'
-  | 'wait_agent'
-  | 'send_message'
-  | 'interrupt_agent'
+  | 'agents'
   | 'browser'
   | 'remember'
   | 'forget'
@@ -115,7 +111,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Absolute path to the folder.' },
+        path: { type: 'string', description: 'Path.' },
       },
       required: ['path'],
     },
@@ -127,7 +123,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Absolute path to the file.' },
+        path: { type: 'string', description: 'Path.' },
         startLine: {
           type: 'number',
           description: 'First line (1-based); default start.',
@@ -153,9 +149,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Pattern.' },
-        isRegex: { type: 'boolean' },
-        caseSensitive: { type: 'boolean' },
-        filesOnly: { type: 'boolean' },
+        isRegex: { type: 'boolean', description: 'Treat query as a regex (off: plain substring).' },
+        caseSensitive: { type: 'boolean', description: 'Case sensitive (off by default).' },
+        filesOnly: { type: 'boolean', description: 'Names only, no matching lines.' },
         glob: { type: 'string', description: 'Mask, e.g. **/*.ts' },
         path: {
           type: 'string',
@@ -241,7 +237,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Absolute path to the image (PNG, JPEG, WebP, GIF).' },
+        path: { type: 'string', description: 'Path (PNG, JPEG, WebP, GIF).' },
       },
       required: ['path'],
     },
@@ -258,7 +254,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         symbol: { type: 'string', description: 'Symbol name, for example `saveCalibration`.' },
         path: {
           type: 'string',
-          description: 'Narrow to this file when the symbol has several declarations.',
+          description: 'Narrow to this file; when a name is declared twice.',
         },
         includeDeclaration: {
           type: 'boolean',
@@ -279,7 +275,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         symbol: { type: 'string', description: 'Symbol name, when a name lookup is enough.' },
-        path: { type: 'string', description: 'File with the usage (absolute path).' },
+        path: { type: 'string', description: 'File with the usage.' },
         line: { type: 'number', description: 'Usage line in that file (1-based).' },
         column: { type: 'number', description: 'Column (1-based). Defaults to the start of the line.' },
       },
@@ -299,7 +295,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         newName: { type: 'string', description: 'New name.' },
         path: {
           type: 'string',
-          description: 'Narrow to this file when the symbol has several declarations.',
+          description: 'Narrow to this file; when a name is declared twice.',
         },
       },
       required: ['symbol', 'newName'],
@@ -314,7 +310,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Absolute path to the file.' },
+        path: { type: 'string', description: 'Path.' },
       },
       required: ['path'],
     },
@@ -331,7 +327,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         path: {
           type: 'string',
-          description: 'Folder or file; without it, the whole project.',
+          description: 'Folder or file (default: whole project).',
         },
       },
     },
@@ -413,8 +409,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         paths: {
           type: 'array',
-          description: 'Absolute file paths.',
-          items: { type: 'string', description: 'Path to the file.' },
+          description: 'File paths.',
+          items: { type: 'string' },
         },
       },
       required: ['paths'],
@@ -450,7 +446,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Limit to one file (absolute path).' },
+        path: { type: 'string', description: 'One file (default: all open files).' },
       },
     },
   },
@@ -468,7 +464,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           items: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: 'Absolute path.' },
+              path: { type: 'string', description: 'Path.' },
               expectedVersion: {
                 type: 'number',
                 description: 'Version the agent saw; a mismatch rejects position edits.',
@@ -607,7 +603,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Absolute path of the new file.' },
+        path: { type: 'string', description: 'Path.' },
         contents: { type: 'string', description: 'New file contents (required).' },
       },
       required: ['path', 'contents'],
@@ -621,7 +617,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Absolute path to the file or folder.' },
+        path: { type: 'string', description: 'Path.' },
       },
       required: ['path'],
     },
@@ -633,8 +629,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        from: { type: 'string', description: 'Current absolute path.' },
-        to: { type: 'string', description: 'New absolute path.' },
+        from: { type: 'string', description: 'Current path.' },
+        to: { type: 'string', description: 'New path.' },
       },
       required: ['from', 'to'],
     },
@@ -649,8 +645,17 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         steps: {
           type: 'array',
-          description: 'Steps: { text, status }, status pending | in_progress | done.',
-          items: { type: 'object', description: 'PlanStep' },
+          description: 'Steps.',
+          // Поля элемента называем явно: модель присылала шаги без `status` и
+          // получала отказ уже после вызова — а это целый шаг прогона.
+          items: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'What to do.' },
+              status: { type: 'string', description: 'pending | in_progress | done.' },
+            },
+            required: ['text', 'status'],
+          },
         },
       },
       required: ['steps'],
@@ -733,69 +738,33 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'spawn_agent',
+    name: 'agents',
     side: 'main',
     description:
-      'Start an agent in the background: returns an id at once. State via list_agents, ' +
-      'report via wait_agent. The agent only reads: edits stay with you.',
+      'Agents in the background: `spawn` starts one and returns an id at once, `list` shows who ' +
+      'works on what, `wait` gives their reports (a timeout means still working, not an error), ' +
+      '`send` reaches a running agent before its next step, `interrupt` stops one. The agent ' +
+      'only reads: edits stay with you.',
     inputSchema: {
       type: 'object',
       properties: {
-        description: { type: 'string', description: 'Short name, shown in the agents panel.' },
-        prompt: { type: 'string', description: 'Agent task: what to investigate and return.' },
-      },
-      required: ['prompt'],
-    },
-  },
-  {
-    name: 'list_agents',
-    side: 'main',
-    description: 'Who works and on what: id, state, steps, current activity.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'wait_agent',
-    side: 'main',
-    description:
-      'Wait for agents and get their reports. When time runs out it says so: they are still ' +
-      'working, that is not an error.',
-    inputSchema: {
-      type: 'object',
-      properties: {
+        action: {
+          type: 'string',
+          enum: ['spawn', 'list', 'wait', 'send', 'interrupt'],
+          description: 'What to do with agents.',
+        },
+        prompt: { type: 'string', description: 'spawn: the task — this is all the agent sees.' },
+        description: { type: 'string', description: 'spawn: short name for the agents panel.' },
         ids: {
           type: 'array',
-          description: 'Agent ids from list_agents or spawn_agent (up to five).',
-          items: { type: 'string', description: 'Id like agent-3.' },
+          items: { type: 'string' },
+          description: 'wait: agent ids (up to five); empty means all.',
         },
-        id: { type: 'string', description: 'A single id, when waiting for one agent.' },
-        timeout: { type: 'number', description: 'Seconds to wait (default 120, max 300).' },
+        id: { type: 'string', description: 'wait for one, send, interrupt: agent id.' },
+        text: { type: 'string', description: 'send: what to clarify or correct; short.' },
+        timeout: { type: 'number', description: 'wait: seconds (default 120, max 300).' },
       },
-    },
-  },
-  {
-    name: 'send_message',
-    side: 'main',
-    description:
-      'Send a message to a running agent: it arrives before its next step, no need to ' + 'interrupt the work.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Agent id from list_agents.' },
-        text: { type: 'string', description: 'What to clarify or correct; short.' },
-      },
-      required: ['id', 'text'],
-    },
-  },
-  {
-    name: 'interrupt_agent',
-    side: 'main',
-    description: 'Stop one agent without stopping the rest. Use it when the task turned out to be wrong.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Agent id from list_agents.' },
-      },
-      required: ['id'],
+      required: ['action'],
     },
   },
   {
@@ -898,7 +867,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['status', 'diff', 'log', 'blame'], description: 'What to read.' },
-        path: { type: 'string', description: 'diff, log, blame: one file (absolute).' },
+        path: { type: 'string', description: 'diff, log, blame: one file.' },
         staged: { type: 'boolean', description: 'diff: index against HEAD.' },
         limit: { type: 'number', description: 'log: how many (default 20, max 100).' },
         startLine: { type: 'number', description: 'blame: first line (1-based).' },
@@ -926,8 +895,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
         paths: {
           type: 'array',
-          description: 'stage, unstage, discard, commit: absolute files or folders.',
-          items: { type: 'string', description: 'Path.' },
+          description: 'stage, unstage, discard, commit: files or folders.',
+          items: { type: 'string' },
         },
         message: { type: 'string', description: 'commit: message.' },
         name: { type: 'string', description: 'checkout: branch name.' },
@@ -970,7 +939,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Absolute path to the file.' },
+        path: { type: 'string', description: 'Path.' },
         line: { type: 'number', description: 'Line (1-based).' },
         column: { type: 'number', description: 'Column (1-based).' },
       },

@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { agentPrompt } from '../src/shared/agent-prompt';
+import { formatThousands } from '../src/shared/run-log';
 import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from '../src/shared/tools';
 import {
+  ROSTER_TOOLS,
   TOOL_GROUPS,
   TOOL_PRESETS,
+  isRosterTool,
   presetToolNames,
   toolPresetNote,
   type ToolPresetId,
@@ -43,8 +46,12 @@ const rows = AGENT_TOOLS.map((tool) => ({
 })).sort((left, right) => right.tokens - left.tokens);
 
 function presetTokens(preset: ToolPresetId): number {
+  // Ростер вычтён — так же, как его вычитает service перед отправкой: иначе отчёт
+  // показывал бы цену схем, которых в запросе нет.
   const allowed = presetToolNames(preset);
-  const tools = allowed === null ? AGENT_TOOLS : AGENT_TOOLS.filter((tool) => allowed.has(tool.name));
+  const tools = AGENT_TOOLS.filter(
+    (tool) => (allowed === null || allowed.has(tool.name)) && !isRosterTool(preset, tool.name),
+  );
   return estimateTextTokens(JSON.stringify(toOpenAiTools(tools)));
 }
 
@@ -97,18 +104,42 @@ describe('бюджет схем', () => {
     // захода в том, что слияние с полем `action` почти ничего не даёт — тела схем
     // остаются оба, а общий у них только каркас.
     const candidates: ReadonlyArray<readonly [string, readonly string[]]> = [
-      ['фон-агенты', ['spawn_agent', 'list_agents', 'wait_agent', 'send_message', 'interrupt_agent']],
+      ['агенты', ['agents']],
       ['подзадачи', ['task', 'workflow']],
       ['поиск', ['search', 'codebase_search', 'search_docs']],
       ['чтение файла', ['read_file', 'read_files']],
       ['список файлов', ['list_dir', 'find_files', 'project_map']],
     ];
-    const lines = candidates.map(
-      ([label, names]) => `${label.padEnd(14)} ${String(sum(names)).padStart(5)} ток. / ${names.length}`,
-    );
+    // Имена из ростера в сумму не идут: они уже едут строкой, и слияние двух
+    // таких имён не сэкономит ни токена — только запутает. Считать надо то, что
+    // реально лежит схемами.
+    const hidden = new Set(ROSTER_TOOLS);
+    const lines = candidates.map(([label, names]) => {
+      const priced = names.filter((name) => !hidden.has(name));
+      const mark = priced.length < names.length ? ` (в ростере: ${names.length - priced.length})` : '';
+      return `${label.padEnd(14)} ${String(sum(priced)).padStart(5)} ток. / ${priced.length}${mark}`;
+    });
 
     console.log(['по группам:', ...groups, '', 'кандидаты на слияние:', ...lines].join('\n'));
     expect(groups.length).toBeGreaterThan(5);
+  });
+
+  it('отчёт: постоянная часть на шаг, а не только на запрос', () => {
+    // Схемы с промптом платятся на каждом шаге и лежат в кеше префикса, а выводы
+    // инструментов растут с каждым шагом и кешу не поддаются. Поэтому решать,
+    // где экономить, надо по обоим числам сразу: прогон в восемь шагов платит
+    // оглавление восемь раз. Их и печатаем рядом.
+    const steps = 8;
+    const table = TOOL_PRESETS.map((preset) => {
+      const fixed = presetTokens(preset.id) + estimateTextTokens(agentPrompt(preset.id, { confirm: true }));
+      return `${preset.id.padEnd(8)} шаг ${String(fixed).padStart(5)} ток. · прогон в ${steps}: ${formatThousands(fixed * steps)}`;
+    });
+    console.log(`цена постоянной части (выходы инструментов — отдельно, их считает трасса):\n${table.join('\n')}`);
+    for (const preset of TOOL_PRESETS) {
+      // Оглавление не должно стоить как полпрогона само по себе.
+      const fixed = presetTokens(preset.id) + estimateTextTokens(agentPrompt(preset.id, { confirm: true }));
+      expect(fixed).toBeLessThan(7_000);
+    }
   });
 
   it('отчёт: куда уходит вес схем', () => {
@@ -118,17 +149,21 @@ describe('бюджет схем', () => {
     expect(rows.length).toBeGreaterThan(40);
   });
 
-  it('отчёт: схемы и промпт по наборам', () => {
+  it('отчёт: схемы, промпт и строка ростера по наборам', () => {
     const table = TOOL_PRESETS.map((preset) => {
-      const ready = agentPrompt(preset.id, { confirm: true });
-      return `${preset.id.padEnd(8)} схемы ${String(presetTokens(preset.id)).padStart(5)} + промпт ${String(
-        estimateTextTokens(ready),
-      ).padStart(4)} = ${presetTokens(preset.id) + estimateTextTokens(ready)}`;
+      const ready = estimateTextTokens(agentPrompt(preset.id, { confirm: true }));
+      const note = estimateTextTokens(toolPresetNote(preset.id));
+      const schemas = presetTokens(preset.id);
+      return `${preset.id.padEnd(8)} схемы ${String(schemas).padStart(5)} + промпт ${String(ready).padStart(
+        4,
+      )} + ростер ${String(note).padStart(3)} = ${schemas + ready + note}`;
     });
     console.log(table.join('\n'));
     // Промпт — текст, а не механика: он не должен весить больше части схем.
     for (const preset of TOOL_PRESETS) {
       expect(estimateTextTokens(agentPrompt(preset.id, { confirm: true }))).toBeLessThan(presetTokens(preset.id));
+      // Ростер — цена скрытого: строка с именами не может стоить как схемы, которые прячет.
+      expect(estimateTextTokens(toolPresetNote(preset.id))).toBeLessThan(300);
     }
   });
 });

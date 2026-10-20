@@ -11,7 +11,7 @@ import { clipDescription } from './subagents';
  *
  *   1. Реестр. У каждого агента номер, описание, состояние, шаги и то, чем он занят
  *      прямо сейчас. По номеру к нему обращаются инструменты и панель.
- *   2. Агент в фоне (`spawn_agent`). Запустить и не ждать: пока он работает, можно
+ *   2. Агент в фоне (`agents` с `action: "spawn"`). Запустить и не ждать: пока он работает, можно
  *      читать, спрашивать и решать, нужен ли он вообще.
  *   3. Разговор с агентом. Сообщение (от человека или от ведущего агента) доезжает
  *      до него перед следующим шагом — длинную работу не надо обрывать, чтобы
@@ -45,7 +45,7 @@ export interface AgentMessage {
  * Что видно об агенте: панель и инструменты показывают одно и то же.
  *
  * Ни текста задания, ни отчёта целиком здесь нет: задание может быть длинным, а
- * отчёт уходит тому, кто его ждёт (`wait_agent`). Панели хватает описания и итога.
+ * отчёт уходит тому, кто его ждёт (`agents` с `action: "wait"`). Панели хватает описания и итога.
  */
 export interface AgentSnapshot {
   id: string;
@@ -89,7 +89,7 @@ export const MAX_MESSAGE_CHARS = 2000;
 /** Сколько завершённых агентов помним: панель — не архив прогонов. */
 export const MAX_KEPT_AGENTS = 12;
 
-/** Сколько ждём по умолчанию и максимум (`wait_agent`). */
+/** Сколько ждём по умолчанию и максимум (`action: "wait"`). */
 export const WAIT_DEFAULT_MS = 120_000;
 export const WAIT_MAX_MS = 300_000;
 
@@ -155,14 +155,14 @@ export function agentActivityLabel(agent: AgentSnapshot): string {
 }
 
 /**
- * Список для модели (`list_agents`).
+ * Список для модели (`agents` с `action: "list"`).
  *
  * Пустой ответ говорит словами, что агентов нет, — иначе модель читает пустоту как
  * «инструмент сломался» и пробует ещё раз.
  */
 export function formatAgentList(agents: readonly AgentSnapshot[], now = Date.now()): string {
   if (agents.length === 0) {
-    return 'Агентов нет: сейчас никто не работает. Запустить — spawn_agent, дождаться — wait_agent.';
+    return 'Агентов нет: сейчас никто не работает. Запустить — agents с action: "spawn", дождаться — action: "wait".';
   }
   const running = agents.filter((agent) => agent.status === 'running').length;
   const lines: string[] = [
@@ -188,7 +188,7 @@ export function formatAgentNotes(notes: readonly AgentMessage[]): string {
   ].join('\n');
 }
 
-/** Итог ожидания агента (`wait_agent`): отчёт или честное «ещё идёт». */
+/** Итог ожидания агента (`action: "wait"`): отчёт или честное «ещё идёт». */
 export interface AgentWaitOutcome {
   agent: AgentSnapshot;
   /** Отчёт: есть у завершённого, у идущего — `null`. */
@@ -196,7 +196,7 @@ export interface AgentWaitOutcome {
 }
 
 /**
- * Ответ инструмента `wait_agent`.
+ * Ответ действия `wait`.
  *
  * Идущий агент — не ошибка: время ожидания вышло, работа продолжается. Так и
  * говорим, вместе с тем, что уже известно, — иначе модель решает, что агент
@@ -209,14 +209,14 @@ export function formatAgentWaits(outcomes: readonly AgentWaitOutcome[], timedOut
     parts.push(outcome.report === null ? `## ${head}` : `## ${head}\n${outcome.report.trim()}`);
   }
   if (timedOut) {
-    parts.push('Ожидание истекло: эти агенты ещё работают. Их состояние — list_agents, отчёт — wait_agent позже.');
+    parts.push('Ожидание истекло: эти агенты ещё работают. Их состояние — agents с action: "list", отчёт — action: "wait" позже.');
   }
   return parts.join('\n\n');
 }
 
 /* ── разбор аргументов ──────────────────────────────────────────────────────
  *
- * Модель называет агентов по номеру из `list_agents`/`spawn_agent`. Номер бывает с
+ * Модель называет агентов по номеру из `agents` (`action: "list"` и `action: "spawn"`). Номер бывает с
  * опечаткой (длинный id сокращают), поэтому принимаем и точное совпадение, и
  * единственное совпадение по началу — но не «примерно этот»: остановить не того
  * агента хуже, чем сказать, что такого нет.
@@ -235,7 +235,7 @@ function agentIdOf(raw: unknown): string {
 
 /** Найти агента по названному номеру среди известных. */
 export function findAgentId(named: string, known: readonly string[]): { id: string | null; error?: string } {
-  if (!named) return { id: null, error: 'Нужен номер агента — он есть в list_agents.' };
+  if (!named) return { id: null, error: 'Нужен номер агента — он есть в agents с action: "list".' };
   if (known.includes(named)) return { id: named };
   const prefixed = known.filter((id) => id.startsWith(named));
   if (prefixed.length === 1) return { id: prefixed[0]! };
@@ -245,10 +245,10 @@ export function findAgentId(named: string, known: readonly string[]): { id: stri
       error: `Под «${named}» подходят сразу несколько агентов: ${prefixed.join(', ')}. Назови точный номер.`,
     };
   }
-  return { id: null, error: `Агента «${named}» нет. Кто есть — list_agents.` };
+  return { id: null, error: `Агента «${named}» нет. Кто есть — agents с action: "list".` };
 }
 
-/** Разбор `wait_agent`: номера и сколько ждать. Один номер тоже понимаем. */
+/** Разбор `action: "wait"`: номера и сколько ждать. Один номер тоже понимаем. */
 export interface WaitRequest {
   ids: string[];
   timeoutMs: number;
@@ -267,7 +267,7 @@ export function parseWaitRequest(args: Record<string, unknown>, known: readonly 
     }
   }
   if (named.length === 0) {
-    return { ids: [], timeoutMs: 0, error: 'Нужны номера агентов: id или ids — список номеров из list_agents.' };
+    return { ids: [], timeoutMs: 0, error: 'Нужны номера агентов: id или ids — список номеров из agents с action: "list".' };
   }
 
   const ids: string[] = [];
@@ -282,7 +282,7 @@ export function parseWaitRequest(args: Record<string, unknown>, known: readonly 
   return { ids, timeoutMs };
 }
 
-/** Разбор `send_message`: кому и что. */
+/** Разбор `action: "send"`: кому и что. */
 export interface MessageRequest {
   id: string | null;
   text: string;
@@ -300,7 +300,7 @@ export function parseMessageRequest(args: Record<string, unknown>, known: readon
   return { id: found.id, text };
 }
 
-/** Разбор `interrupt_agent`: чей номер. */
+/** Разбор `action: "interrupt"`: чей номер. */
 export function parseInterruptRequest(
   args: Record<string, unknown>,
   known: readonly string[],
@@ -308,7 +308,7 @@ export function parseInterruptRequest(
   return findAgentId(agentIdOf(args.id), known);
 }
 
-/** Разбор `spawn_agent`: описание и задание. */
+/** Разбор `action: "spawn"`: описание и задание. */
 export interface SpawnRequest {
   description: string;
   prompt: string;

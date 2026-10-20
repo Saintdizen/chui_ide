@@ -57,6 +57,16 @@ describe('промпт агентного режима', () => {
     expect(agentPrompt('full', { confirm: false })).not.toContain('подтверждает');
   });
 
+  it('совет о скрытом в ростере остаётся в любом наборе', () => {
+    // Скрытое в ростере зовётся по имени, но схемы с описанием у него нет: совет
+    // в промпте — единственное место, где модель о нём узнаёт. Считать набор без
+    // ростера значит выкинуть советы о `file_outline`, `get_diagnostics` и других.
+    const text = agentPrompt('read', { confirm: true });
+    for (const name of ['file_outline', 'get_diagnostics']) {
+      expect(text, `потерян совет про ${name}`).toContain(name);
+    }
+  });
+
   it('промпт короче, чем был бы без отбора', () => {
     const read = agentPrompt('read', { confirm: true });
     const full = agentPrompt('full', { confirm: true });

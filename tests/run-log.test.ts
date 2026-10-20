@@ -8,6 +8,7 @@ import {
   formatDuration,
   plural,
   prettyJson,
+  runCost,
   runTruncated,
   type ChatRunLog,
 } from '../src/shared/run-log';
@@ -87,6 +88,42 @@ describe('итог прогона одной строкой', () => {
       '22 шага',
       '25 шагов',
     ]);
+  });
+});
+
+describe('цена прогона по статьям', () => {
+  it('схемы и выводы считаются отдельно', () => {
+    // Ради этого числа и заведён учёт: схемы лежат в кеше префикса, а выводы
+    // растут с каждым шагом — без разделения виден только общий счёт провайдера.
+    const cost = runCost(
+      log({
+        steps: [
+          { index: 1, ms: 1000, calls: [], outputTokens: 4000 },
+          { index: 2, ms: 1000, calls: [], outputTokens: 6000 },
+          { index: 3, ms: 1000, calls: [] },
+        ],
+        system: {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          mode: 'agent',
+          permission: 'ask',
+          tools: 18,
+          toolsTokens: 2319,
+        },
+      }),
+    );
+    expect(cost.toolsTokens).toBe(2319);
+    expect(cost.outputTokens).toBe(10_000);
+    // Шаг без числа (старая трасса) в среднее не попадает — иначе оно врёт.
+    expect(cost.steps).toBe(2);
+    expect(cost.perStep).toBe(5000);
+  });
+
+  it('считать нечего — среднее не выдумываем', () => {
+    const cost = runCost(log());
+    expect(cost.outputTokens).toBe(0);
+    expect(cost.steps).toBe(0);
+    expect(cost.perStep).toBeNull();
   });
 });
 

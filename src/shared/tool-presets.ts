@@ -147,11 +147,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
       'exit_plan_mode',
       'ask',
       'task',
-      'spawn_agent',
-      'list_agents',
-      'wait_agent',
-      'send_message',
-      'interrupt_agent',
+      'agents',
       'remember',
       'forget',
     ],
@@ -203,10 +199,46 @@ export interface ToolPresetSpec {
  * брать из того же расчёта, что и всё остальное (`estimateTextTokens` по тем же
  * схемам, что уезжают модели). Округление до сотни — чтобы подсказка не дёргалась
  * от каждой переписанной фразы.
+ *
+ * Ростер вычитается: без этого подсказка врала бы на 1 900 токенов в полном
+ * наборе — ровно на то, что спрятано в имя.
  */
 function fullSetTokens(): number {
-  return Math.round(estimateTextTokens(JSON.stringify(toOpenAiTools(AGENT_TOOLS))) / 100) * 100;
+  const roster = new Set(ROSTER_TOOLS);
+  const tools = AGENT_TOOLS.filter((tool) => !roster.has(tool.name));
+  return Math.round(estimateTextTokens(JSON.stringify(toOpenAiTools(tools))) / 100) * 100;
 }
+
+/**
+ * Инструменты, у которых схема дороже вызова.
+ *
+ * Две причины попасть сюда, обе про цену, а не про права: редкие (зовут раз в
+ * несколько прогонов) и простые (форма вызова угадывается по имени — путь, имя
+ * символа, запрос). Из блока `tools` они убраны, но не запрещены: имя, форма
+ * вызова и значения `action` едут строкой ростера (замер — 14 токенов на имя), а вызов
+ * по имени выполняется сразу.
+ *
+ * Один список на два набора, «Авто» и «Все инструменты»: разница между ними —
+ * в группах, а не в том, стоит ли схема `forget` 138 токенов в каждом запросе.
+ * Замер — `tests/token-budget.test.ts`.
+ */
+export const ROSTER_TOOLS: readonly string[] = [
+  'rename_symbol',
+  'forget',
+  'session_search',
+  // Не редкие, а простые: вызов у них короткий и угадывается по имени.
+  'file_outline',
+  'open_file',
+  'get_diagnostics',
+  'go_to_definition',
+  'find_references',
+  'run_linter',
+  'codebase_search',
+  'replace_in_files',
+  'project_map',
+  'search_docs',
+  'read_skill',
+];
 
 /** Варианты от полного к самому узкому: в списке идут именно так. */
 export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
@@ -217,44 +249,27 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     hint: 'Чтение, правки и проверки; редкое — по имени, без схемы',
     groups: ['core', 'read', 'edit', 'verify', 'work'],
     widen: true,
-    // Редкие инструменты: схема каждого стоит 100–230 токенов в КАЖДОМ запросе,
-    // а нужны они раз в несколько прогонов. Из схемы убраны, но не запрещены:
-    // строка со всеми их именами (замер — 257 токенов) дешевле этих схем вместе, а
-    // вызов по имени выполнится сразу. Схема при этом в набор не вернётся: `widen`
-    // касается того, чего в этом списке нет.
-    except: [
-      'list_mcp_resources',
-      'read_mcp_resource',
-      'list_agents',
-      'send_message',
-      'interrupt_agent',
-      'rename_symbol',
-      'forget',
-      'session_search',
-      // Не редкие, а простые: вызов у них короткий и угадывается по имени
-      // (путь, имя символа), поэтому схема в каждом запросе дороже, чем
-      // повторный вызов по имени. 802 токена на запрос — цена шести схем.
-      'file_outline',
-      'open_file',
-      'get_diagnostics',
-      'go_to_definition',
-      'find_references',
-      'run_linter',
-      'codebase_search',
-      'replace_in_files',
-      'spawn_agent',
-      'wait_agent',
-      'project_map',
-      'search_docs',
-      'read_skill',
-    ],
+    // Редкие и простые инструменты — одной строкой вместо схем (см. `ROSTER_TOOLS`):
+    // схема каждого стоит 90–205 токенов в КАЖДОМ запросе, а вызов по имени
+    // выполняется сразу. Схема при этом в набор не вернётся: `widen` касается того,
+    // чего в этом списке нет.
+    //
+    // Сверх общего ростера — три инструмента с `action`: имя без действия не говорит
+    // ничего, а строка называет все значения (`agents(action: spawn|…)`).
+    // Ресурсы MCP тоже здесь: их схемы и так появляются только при живом сервере.
+    except: ['agents', 'list_mcp_resources', 'read_mcp_resource', ...ROSTER_TOOLS],
   },
   {
     id: 'full',
     label: 'Все инструменты',
     icon: 'wrench',
-    hint: `Всё, что может эта сборка (≈${fullSetTokens()} токенов схем в каждом запросе)`,
+    // «Без ограничения» — про права, а не про цену: группы берутся все (забытого
+    // в группе не потеряем), но редкое и простое уходит в тот же ростер, что и в
+    // «Авто». Способность остаётся: вызов по имени выполняется здесь сразу, без
+    // расширения набора.
+    hint: `Всё, что может эта сборка; редкое и простое — по имени (≈${fullSetTokens()} токенов схем в каждом запросе)`,
     groups: null,
+    except: ROSTER_TOOLS,
   },
   {
     id: 'edit',
@@ -325,7 +340,24 @@ export function presetToolNames(preset: ToolPresetId): ReadonlySet<string> | nul
  * схема, добавленная один раз, поедет в каждом следующем запросе прогона.
  */
 export function isRosterTool(preset: ToolPresetId, name: string): boolean {
-  return (toolPresetSpec(preset).except ?? []).includes(name);
+  return rosterNames(preset).includes(name);
+}
+
+/**
+ * Имена ростера для набора: разрешены, но едут строкой, а не схемой.
+ *
+ * Считается от групп, а не от `presetToolNames`: в «Авто» они из набора удалены (и
+ * исполняются расширением на месте), в узких наборах — разрешены, но скрыты из блока
+ * `tools`. Модели обе вещи выглядят одинаково: имя есть, схемы нет — зовётся по имени.
+ */
+export function rosterNames(preset: ToolPresetId): readonly string[] {
+  const spec = toolPresetSpec(preset);
+  const names = new Set<string>(spec.except ?? []);
+  for (const group of TOOL_GROUPS) {
+    if (spec.groups !== null && !spec.groups.includes(group.id)) continue;
+    for (const name of group.names) if (ROSTER_TOOLS.includes(name)) names.add(name);
+  }
+  return [...names];
 }
 
 /** Входит ли инструмент в набор. Имя не из наших — не входит: чужого мы не предлагаем. */
@@ -339,13 +371,21 @@ export function toolPresetAllows(preset: ToolPresetId, name: string): boolean {
  *
  * С обязательными аргументами, иначе первый вызов идёт наугад и экономия
  * уходит на шаг переделки. Аргументы берём из самих схем — список не разойдётся.
+ * У обязательного поля с `enum` печатаем допустимые значения (`agents(action: spawn|…)`):
+ * имя инструмента со `action` без них не говорит, какие действия бывают.
  */
 function rosterLine(names: readonly string[]): string {
   if (names.length === 0) return '';
   const items = names.map((name) => {
     const tool = AGENT_TOOLS.find((item) => item.name === name);
     const required = tool?.inputSchema.required ?? [];
-    return required.length > 0 ? `${name}(${required.join(', ')})` : `${name}()`;
+    // Допустимые значения обязательного поля — часть формы вызова: без них
+    // `agents(action)` не говорит, как называется действие.
+    const shown = required.map((key) => {
+      const values = tool?.inputSchema.properties?.[key]?.enum;
+      return values && values.length > 0 ? `${key}: ${values.join('|')}` : key;
+    });
+    return shown.length > 0 ? `${name}(${shown.join(', ')})` : `${name}()`;
   });
   return ` Скрыты ради цены, но есть — вызов по имени, аргументы в скобках: ${items.join(', ')}.`;
 }
@@ -353,11 +393,22 @@ function rosterLine(names: readonly string[]): string {
 /**
  * Строка для модели о том, что набор сужен. Без неё агент молча упирается в
  * «нет такого инструмента» и начинает выдумывать обходные пути вместо того,
- * чтобы сказать человеку, чего ему не хватает. Полному набору говорить нечего.
+ * чтобы сказать человеку, чего ему не хватает.
+ *
+ * Полному набору тоже есть что сказать с тех пор, как в нём есть ростер: групп
+ * не отнято, но часть схем скрыта по цене, и без строки эти инструменты для
+ * модели просто не существуют.
  */
 export function toolPresetNote(preset: ToolPresetId): string {
   const spec = toolPresetSpec(preset);
-  if (spec.groups === null) return '';
+  if (spec.groups === null) {
+    const roster = rosterLine(rosterNames(preset));
+    if (roster === '') return '';
+    return (
+      `Набор инструментов: «${spec.label}» — всё, что может эта сборка. Ничего не запрещено: ` +
+      `нужен инструмент, которого не видно в списке, — вызови его по имени, он выполнится.${roster}`
+    );
+  }
   const labels = TOOL_GROUPS.filter((group) => spec.groups?.includes(group.id))
     .map((group) => group.label)
     .join(', ');
@@ -365,16 +416,17 @@ export function toolPresetNote(preset: ToolPresetId): string {
   // упрётся в «нет такого инструмента» и пойдёт обходным путём там, где
   // достаточно назвать нужное.
   if (spec.widen) {
-    const roster = rosterLine(spec.except ?? []);
+    const roster = rosterLine(rosterNames(preset));
     return (
       `Набор инструментов: «${spec.label}» (${labels}). Скрытого в нём нет запрета: нужен ` +
       'инструмент, которого не видно в списке, — вызови его по имени, он выполнится, и ' +
       `спрашивать человека не нужно.${roster}`
     );
   }
+  const roster = rosterLine(rosterNames(preset));
   return (
     `Набор инструментов сужен человеком: «${spec.label}» (${labels}). Если для задачи нужен ` +
-    'инструмент, которого нет, — скажи об этом человеку и предложи сменить набор в композере, ' +
-    'а не ищи обходной путь.'
+    'инструмент, которого нет ни в списке, ни в ростере, — скажи об этом человеку и предложи ' +
+    `сменить набор в композере, а не ищи обходной путь.${roster}`
   );
 }

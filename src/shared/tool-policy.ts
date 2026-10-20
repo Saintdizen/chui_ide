@@ -108,11 +108,12 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   task: { readOnly: true, plan: true, alwaysAvailable: true },
 
   /* ── агенты в фоне: план они не меняют, они читают проект ───────────── */
-  spawn_agent: { plan: true },
-  list_agents: { plan: true, alwaysAvailable: true },
-  wait_agent: { plan: true, alwaysAvailable: true },
-  send_message: { plan: true, alwaysAvailable: true },
-  interrupt_agent: { plan: true, alwaysAvailable: true },
+  // Одно имя на все пять действий: `spawn` и три разговора с живым агентом
+  // различались только первой строкой описания, а стоили пяти схем (≈535 токенов
+  // в каждом запросе). `list` ничего не меняет — повтор в том же шаге не нужен.
+  // Шаб не в ALWAYS_AVAILABLE: в «Авто» он есть строкой ростера (имя, действие,
+  // аргументы), и схема 310 токенов в каждом запросе того не стоит.
+  agents: { plan: true, readOnlyActions: ['list'] },
 
   /* ── git ────────────────────────────────────────────────────────────── */
   // Два имени, а не одно: граница «чтение / запись» — то самое различие,
