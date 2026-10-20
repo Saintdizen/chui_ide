@@ -148,11 +148,8 @@ interface StoredSettings {
   keybindings: KeybindingSettings;
 }
 
-const DEFAULT_SYSTEM_PROMPT = [
-  'Ты — встроенный ассистент chui_iDE.',
-  'Отвечай кратко и по делу. Когда предлагаешь правку — давай минимальный диф, а не файл целиком.',
-  'Не выдумывай API: если не уверен в сигнатуре, попроси показать нужный файл.',
-].join('\n');
+const DEFAULT_SYSTEM_PROMPT =
+  'Ты — ассистент chui_iDE: кратко, правка — минимальный диф, API не выдумывай.';
 
 const DEFAULT_SETTINGS: StoredSettings = {
   ai: {

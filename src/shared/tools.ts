@@ -141,12 +141,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: {
-          type: 'string',
-          enum: ['text', 'code', 'docs', 'sessions'],
-          description:
-            'text (default): project files. code: where a symbol is declared. docs: project documentation. sessions: past conversations.',
-        },
+        // Значения перечислены в `enum` — второй раз их не печатаем: схема едет
+        // в каждом запросе, а модель читает `enum` и так.
+        action: { type: 'string', enum: ['text', 'code', 'docs', 'sessions'] },
         query: { type: 'string', description: 'Pattern.' },
         isRegex: { type: 'boolean', description: 'Treat query as a regex (off: plain substring).' },
         caseSensitive: { type: 'boolean', description: 'Case sensitive (off by default).' },
@@ -207,7 +204,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['references', 'definition', 'outline'],
-          description: 'What to look up.',
         },
         symbol: { type: 'string', description: 'Symbol name, for example `saveCalibration`.' },
         path: {
@@ -257,7 +253,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['diagnostics', 'lint'],
-          description: 'diagnostics: what the editor knows. lint: run the linter.',
         },
         path: {
           type: 'string',
@@ -301,7 +296,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'read'], description: 'list: the catalog. read: one document.' },
+        action: { type: 'string', enum: ['list', 'read'] },
         uri: { type: 'string', description: 'read: resource address from the catalog.' },
         server: { type: 'string', description: 'list: this server only. read: when several declare the uri.' },
       },
@@ -312,8 +307,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'edit',
     side: 'renderer',
     description:
-      'Change files: checked against the file, then shown for review with undo. Give oldText — ' +
-      'an exact fragment unique in the file — and newText; or all four 1-based LSP positions.',
+      'Change files: checked against the file, then shown for review with undo. Give oldText — an exact ' +
+      'fragment unique in the file — and newText; or all four 1-based LSP positions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -322,7 +317,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           items: {
             type: 'object',
             properties: {
-              path: { type: 'string', description: 'Path.' },
+              path: { type: 'string' },
               expectedVersion: {
                 type: 'number',
                 description: 'Version the agent saw; a mismatch rejects position edits.',
@@ -334,10 +329,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
                   properties: {
                     newText: { type: 'string', description: 'Replacement; empty removes.' },
                     oldText: { type: 'string', description: 'Anchor: exact text, unique in the file.' },
-                    startLine: { type: 'number', description: 'Start line (1-based).' },
-                    startColumn: { type: 'number', description: 'Start column (1-based).' },
-                    endLine: { type: 'number', description: 'End line (inclusive).' },
-                    endColumn: { type: 'number', description: 'End column (exclusive).' },
+                    startLine: { type: 'number', description: 'Start line, 1-based.' },
+                    startColumn: { type: 'number', description: 'Start column, 1-based.' },
+                    endLine: { type: 'number', description: 'End line, inclusive.' },
+                    endColumn: { type: 'number', description: 'End column, exclusive.' },
                   },
                   required: ['newText'],
                 },
@@ -360,7 +355,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['search', 'fetch'], description: 'search: the list. fetch: one page.' },
+        action: { type: 'string', enum: ['search', 'fetch'] },
         query: { type: 'string', description: 'search: search query.' },
         limit: { type: 'number', description: 'search: how many (default 10).' },
         url: { type: 'string', description: 'fetch: full page address: https://example.com/page' },
@@ -379,8 +374,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         action: {
           type: 'string',
+          // Сессия и команда — два разных дела в одном имени: `enum` называет
+          // действия, но не говорит, к какому из них относится `id`.
+          description: 'Sessions (id) or commands (job id): start/write/stop | run/output/cancel.',
           enum: ['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel'],
-          description: 'Sessions: list, start, read, write, stop. Commands: run, output, cancel.',
         },
         id: { type: 'string', description: 'read, write, stop: session id. output, cancel: job id.' },
         command: { type: 'string', description: 'start: typed once the session opens. run: the command.' },
@@ -397,22 +394,21 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'file',
     side: 'main',
     description:
-      'Files and folders: create — new file with contents (existing is NOT overwritten, use edit); ' +
-      'move — rename or move inside the workspace; delete — to the trash, undo is manual; replace — ' +
-      'every occurrence of a string or regex across the project, writes at once.',
+      'Files and folders. create writes a new file (an existing one is refused — use edit); move renames ' +
+      'inside the workspace; delete sends to the trash (no undo); replace rewrites every match in the project.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['create', 'move', 'delete', 'replace'], description: 'What to do.' },
+        action: { type: 'string', enum: ['create', 'move', 'delete', 'replace'] },
         path: { type: 'string', description: 'Path.' },
-        contents: { type: 'string', description: 'create: new file contents (required).' },
-        from: { type: 'string', description: 'Current path.' },
-        to: { type: 'string', description: 'New path.' },
-        query: { type: 'string', description: 'replace: what to replace (required).' },
+        contents: { type: 'string', description: 'create: file contents.' },
+        from: { type: 'string' },
+        to: { type: 'string' },
+        query: { type: 'string', description: 'replace: string or regex to find.' },
         replacement: { type: 'string', description: 'replace: replacement (empty deletes).' },
         isRegex: { type: 'boolean', description: 'replace: query is a regex; $1 works in the replacement.' },
-        caseSensitive: { type: 'boolean', description: 'replace: case sensitive (off by default).' },
-        glob: { type: 'string', description: 'replace: file mask, for example **/*.ts' },
+        caseSensitive: { type: 'boolean', description: 'replace: off by default.' },
+        glob: { type: 'string', description: 'replace: file mask, e.g. **/*.ts' },
       },
       required: ['action'],
     },
@@ -428,7 +424,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['steps', 'goal'],
-          description: 'steps: the checklist. goal: the goal.',
         },
         steps: {
           type: 'array',
@@ -536,7 +531,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['spawn', 'list', 'wait', 'send', 'interrupt'],
-          description: 'What to do with agents.',
         },
         prompt: { type: 'string', description: 'spawn: the task — this is all the agent sees.' },
         description: { type: 'string', description: 'spawn: short name for the agents panel.' },
@@ -565,7 +559,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close'],
-          description: 'Action.',
         },
         url: { type: 'string', description: 'open: page address; no scheme means https.' },
         ref: { type: 'string', description: 'click, type: element number from snapshot.' },
@@ -590,7 +583,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['remember', 'forget'],
-          description: 'remember: save a note. forget: drop stale notes or free up space.',
         },
         text: { type: 'string', description: 'remember: short note, one thought, a couple of lines at most.' },
         query: { type: 'string', description: 'forget: substring that identifies notes to remove.' },
@@ -610,7 +602,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['status', 'diff', 'log', 'blame'], description: 'What to read.' },
+        action: { type: 'string', enum: ['status', 'diff', 'log', 'blame'] },
         path: { type: 'string', description: 'diff, log, blame: one file.' },
         staged: { type: 'boolean', description: 'diff: index against HEAD.' },
         limit: { type: 'number', description: 'log: how many (default 20, max 100).' },
@@ -624,17 +616,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'git_write',
     side: 'main',
     description:
-      'Change the repository: stage, unstage, commit, checkout, discard, fetch, pull, push. ' +
-      'Checkout rewrites files and git may refuse uncommitted changes. Discard is irreversible: ' +
-      'ask the user first. Conflicts are resolved by hand, not by repeating pull.',
+      'The repository: stage, unstage, commit, checkout, discard, fetch, pull, push. Checkout rewrites files ' +
+      'and git may refuse uncommitted changes. Discard is irreversible — ask first. Resolve conflicts by hand.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          description:
-            'stage (git add), unstage (worktree stays), commit, checkout, discard, fetch, ' +
-            'pull, push (upstream on the first push; force only on request).',
+          // `enum` даёт имена, а не смысл: здесь единственное, что не читается из
+          // них — что `unstage` не трогает рабочее дерево и что `push` — на upstream.
+          description: 'unstage: worktree stays. push: upstream on the first push; force only on request.',
           enum: ['stage', 'unstage', 'commit', 'checkout', 'discard', 'fetch', 'pull', 'push'],
         },
         paths: {
@@ -643,9 +634,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           items: { type: 'string' },
         },
         message: { type: 'string', description: 'commit: message.' },
-        name: { type: 'string', description: 'checkout: branch name.' },
-        create: { type: 'boolean', description: 'checkout: create the branch and switch to it.' },
-        setUpstream: { type: 'boolean', description: 'push: set upstream to origin (-u).' },
+        name: { type: 'string', description: 'checkout: branch.' },
+        create: { type: 'boolean', description: 'checkout: create it first.' },
+        setUpstream: { type: 'boolean', description: 'push: origin -u.' },
         force: { type: 'boolean', description: 'push: --force-with-lease.' },
       },
       required: ['action'],
@@ -663,7 +654,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['open', 'present'],
-          description: 'open: jump to code. present: offer results.',
         },
         path: { type: 'string', description: 'Path.' },
         line: { type: 'number', description: 'open: line (1-based).' },
