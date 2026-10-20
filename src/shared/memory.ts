@@ -29,7 +29,15 @@ export type MemoryScope = 'workspace' | 'global';
 /** Сколько заметок держим: память — выжимка, а не дневник. За полем — отказ, не молчание. */
 export const MAX_NOTES = 40;
 /** Потолок одной заметки: длинная заметка — это уже не заметка, а простыня в промпте. */
-export const MAX_NOTE_CHARS = 500;
+export const MAX_NOTE_CHARS = 320;
+
+/**
+ * Сколько символов памяти уходит в промпт. Заметки лежат в файле все, но в
+ * каждый запрос едет только этот кусок: при потолке в 40 заметок по 320 символов
+ * память весила бы около 5 000 токенов на каждом шаге прогона — дороже схем
+ * инструментов. Режем по границе заметки и с конца: свежее важнее.
+ */
+export const MEMORY_PROMPT_CHARS = 4_000;
 
 /**
  * Разобрать файл памяти (.md). Заметки — строки, начинающиеся с дефиса и пробела;
@@ -107,9 +115,25 @@ const SCOPE_LABEL: Record<MemoryScope, string> = {
  */
 export function formatMemory(notes: readonly MemoryNote[], scope: MemoryScope = 'workspace'): string | null {
   if (notes.length === 0) return null;
-  const lines = notes.map((note) => '- ' + note.text);
+
+  // С конца: свежая заметка нужнее давней. Лишнее не теряется — оно остаётся в
+  // файле памяти, а в промпте остаётся видимая пометка, что память показана не вся:
+  // иначе агент записал бы уже записанное, приняв умолчание за чистый лист.
+  const shown: string[] = [];
+  let size = 0;
+  for (let at = notes.length - 1; at >= 0; at -= 1) {
+    const line = '- ' + notes[at]!.text;
+    if (shown.length > 0 && size + line.length > MEMORY_PROMPT_CHARS) break;
+    shown.push(line);
+    size += line.length + 1;
+  }
+  shown.reverse();
+
+  const hidden = notes.length - shown.length;
+  const tail = hidden > 0 ? [`(ещё ${hidden}: не показаны — не вместились в бюджет промпта)`] : [];
   return [
     'Память ' + SCOPE_LABEL[scope] + ' (заметки, которые ты оставил ранее; они переживают беседу):',
-    ...lines,
+    ...shown,
+    ...tail,
   ].join('\n');
 }

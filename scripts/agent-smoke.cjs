@@ -988,9 +988,9 @@ app.whenReady().then(async () => {
     );
 
     /* 5а. долгая команда уходит в фон и читается по номеру */
-    requested = { name: 'run_background', args: { command: 'echo chui-job-ok' } };
+    requested = { name: 'run_terminal', args: { command: 'echo chui-job-ok', background: true } };
     run = await chat(shellHost);
-    check('с мостом run_background предлагается', run.toolNames.includes('run_background'), run.toolNames);
+    check('с мостом фоновая команда предлагается', run.toolNames.includes('run_terminal'), run.toolNames);
     const jobSummary = String(run.results[0]?.summary ?? '');
     const jobId = /job-\d+/.exec(jobSummary)?.[0] ?? '';
     check('задание получило номер', jobId.startsWith('job-'), jobSummary);

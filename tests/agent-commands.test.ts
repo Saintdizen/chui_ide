@@ -3,8 +3,8 @@ import { runTool, type SandboxRunner, type TerminalAgent, type ToolContext } fro
 import type { WorkspaceService } from '../src/main/workspace/workspace';
 
 /**
- * Запуск команд ассистентом — четыре пути в одну дверь: run_terminal,
- * run_background, terminal_start и terminal_write. Проверяем то, что у них общее
+ * Запуск команд ассистентом — три пути в одну дверь: run_terminal (и он же с
+ * `background: true`), terminal_start и terminal_write. Проверяем то, что у них общее
  * и что раньше расходилось: где именно выполняется команда (проект, подпапка или
  * песочница) и каким словом отказывают — отказ обязан быть один, иначе модель
  * считает отказы разными и пробует снова.
@@ -85,7 +85,11 @@ describe('где выполняется команда', () => {
 
   it('cwd файла, а не папки — отказ словами', async () => {
     const ctx = { workspace: workspace(), jobs: {}, confirmCommand: async () => true } as unknown as ToolContext;
-    const outcome = await runTool(ctx, 'run_background', JSON.stringify({ command: 'npm test', cwd: `${ROOT}/a.ts` }));
+    const outcome = await runTool(
+      ctx,
+      'run_terminal',
+      JSON.stringify({ command: 'npm test', cwd: `${ROOT}/a.ts`, background: true }),
+    );
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('не папка');
@@ -140,7 +144,11 @@ describe('отказ — одним словом', () => {
     const base = { workspace: workspace() } as ToolContext;
     const withJobs = { workspace: workspace(), jobs: {} } as unknown as ToolContext;
     const viaRun = await runTool(base, 'run_terminal', JSON.stringify({ command: 'npm test' }));
-    const viaBackground = await runTool(withJobs, 'run_background', JSON.stringify({ command: 'npm test' }));
+    const viaBackground = await runTool(
+      withJobs,
+      'run_terminal',
+      JSON.stringify({ command: 'npm test', background: true }),
+    );
 
     expect(viaRun.ok).toBe(false);
     expect(viaRun.summary).toBe(viaBackground.summary);

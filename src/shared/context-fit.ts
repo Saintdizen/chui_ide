@@ -35,6 +35,34 @@ export const CHARS_PER_TOKEN_WIDE = 2;
  */
 const IMAGE_TOKENS = 1_000;
 
+/**
+ * Потолок резерва под ответ: больше этого модель за один ответ не напишет.
+ *
+ * «Не больше» — не догадка о среднем, а верхняя граница разумного: 32 000 токенов
+ * это десятки тысяч слов, то есть ответ на порядок длиннее всего, что человек
+ * читает в ленте. Всё, что настройка назначает сверх, остаётся потолком запроса
+ * (`max_tokens`), но в окне не резервируется.
+ */
+export const MAX_ANSWER_RESERVE = 32_000;
+
+/** Какую долю окна можно отдать под резерв ответа. */
+const ANSWER_RESERVE_SHARE = 0.25;
+
+/**
+ * Сколько окна резервировать под ответ модели.
+ *
+ * `maxTokens` из настроек — не «сколько ответ займёт», а предел, который провайдер
+ * обязан соблюдать; человек ставит его с запасом (бывает и 360 000). Резервировать
+ * весь этот запас нельзя: из миллиона токенов окна треть стояла бы пустой, и
+ * обрезка истории вместе с автосжатием срабатывали бы вдвое раньше, чем нужно.
+ * Поэтому резерв — не больше `MAX_ANSWER_RESERVE` и не больше четверти окна.
+ */
+export function answerReserve(maxTokens: number, windowTokens: number): number {
+  if (!Number.isFinite(maxTokens) || maxTokens <= 0) return 0;
+  const share = Math.floor(Math.max(1, windowTokens) * ANSWER_RESERVE_SHARE);
+  return Math.min(Math.floor(maxTokens), share, MAX_ANSWER_RESERVE);
+}
+
 /** Оценка по одной лишь длине строки: состав не разбирает, см. `estimateTextTokens`. */
 export function estimateTokens(chars: number): number {
   return Math.ceil(chars / CHARS_PER_TOKEN);

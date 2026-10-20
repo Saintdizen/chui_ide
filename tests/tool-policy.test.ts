@@ -62,7 +62,7 @@ describe('производные наборы', () => {
   });
 
   it('в плане нет ничего, что меняет мир', () => {
-    for (const name of ['apply_edit', 'apply_patch', 'create_file', 'delete_file', 'run_terminal', 'run_background']) {
+    for (const name of ['apply_edit', 'apply_patch', 'create_file', 'delete_file', 'run_terminal']) {
       expect(PLAN_MODE_TOOLS.has(name)).toBe(false);
     }
   });

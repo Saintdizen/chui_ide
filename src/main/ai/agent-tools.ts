@@ -484,7 +484,7 @@ export interface ToolContext {
   /** Песочница: подключена только при включённой настройке. */
   sandbox?: SandboxRunner;
   /**
-   * Задания (`run_background`): долгие команды, которые не держат шаг.
+   * Задания (`run_terminal` с `background: true`): долгие команды, которые не держат шаг.
    * Реестр живёт в main на всё окно — по нему же видно, что уже запущено.
    */
   jobs?: JobRegistry;
@@ -619,8 +619,8 @@ function commandDenied(): ToolOutcome {
 /**
  * Спросить разрешение на команду: null — можно выполнять.
  *
- * Путей запуска четыре — run_terminal, run_background, terminal_start,
- * terminal_write — и раньше каждый отвечал своими словами («запретил команду»,
+ * Путей запуска три — run_terminal (в том числе с `background: true`), terminal_start
+ * и terminal_write — и раньше каждый отвечал своими словами («запретил команду»,
  * «запретил ввод», «недоступен»). Модель не понимала, отличается ли отказ от
  * отказа, и пробовала снова. Теперь и вопрос, и отказ одни на всех.
  */
@@ -697,9 +697,11 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       case 'replace_in_files':
         return await replaceInFiles(ctx.workspace, parsed.value);
       case 'run_terminal':
-        return await runTerminal(ctx, parsed.value);
-      case 'run_background':
-        return await runBackground(ctx, parsed.value);
+        // Фон — не отдельный инструмент, а флаг: схемы у них совпадали один в
+        // один, а имя `run_background` занимало в промпте отдельное описание.
+        return optionalBoolean(parsed.value, 'background') === true
+          ? await runBackground(ctx, parsed.value)
+          : await runTerminal(ctx, parsed.value);
       case 'run_output':
         return runOutput(ctx, parsed.value);
       case 'run_stop':
@@ -2296,7 +2298,7 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
 const MAX_JOB_TIMEOUT_SECONDS = 1800;
 
 /**
- * `run_background` — та же команда, что у `run_terminal`, но шаг она не держит.
+ * Запуск с `background: true` в `run_terminal` — та же команда, но шаг она не держит.
  *
  * Возвращается номер задания, а не вывод: сборка на пять минут иначе держала бы
  * агента всё это время, и он не мог бы даже сказать, что там происходит. Вывод
@@ -2326,7 +2328,7 @@ async function runBackground(ctx: ToolContext, args: Record<string, unknown>): P
       summary: 'В песочнице фоновая команда не поддерживается',
       detail:
         `Песочница включена (${ctx.sandbox.label}), а контейнер живёт ровно на время команды. ` +
-        'Запусти команду через run_terminal с бо́льшим пределом времени или выключи песочницу.',
+        'Запусти команду через run_terminal без background и с бо́льшим пределом времени либо выключи песочницу.',
     };
   }
 
@@ -2392,7 +2394,7 @@ function runOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome
       ok: false,
       summary: `задание ${id} не найдено`,
       detail:
-        'Такого задания нет: номер берётся из ответа run_background, а завершённые задания ' +
+        'Такого задания нет: номер берётся из ответа run_terminal с background: true, а завершённые задания ' +
         'убираются, когда набирается много новых. Запусти команду заново, если результат нужен.',
     };
   }
@@ -3074,7 +3076,7 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  * команды, поэтому «интерактивный терминал в песочнице» не бывает. Пока
  * песочница включена, начинать сессию и печатать в неё нельзя — иначе команда
  * уходила бы на машину человека мимо песочницы (`run_terminal` и
- * `run_background` этот режим уже соблюдают). Остановить уже запущенную сессию
+ * `run_terminal` с `background: true` этот режим уже соблюдают). Остановить уже запущенную сессию
  * можно: `terminal_stop` команду не выполняет.
  */
 function sandboxRefusesTerminal(ctx: ToolContext): ToolOutcome | null {
@@ -3084,7 +3086,7 @@ function sandboxRefusesTerminal(ctx: ToolContext): ToolOutcome | null {
     summary: 'В песочнице терминальная сессия не поддерживается',
     detail:
       `Песочница включена (${ctx.sandbox.label}), а терминальная сессия — процесс на хосте. ` +
-      'Запускай команды через run_terminal (долгие — через run_background): они идут в контейнер.',
+      'Запускай команды через run_terminal (долгие — с background: true): они идут в контейнер.',
   };
 }
 

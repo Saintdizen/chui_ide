@@ -100,7 +100,6 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     label: 'Терминал',
     names: [
       'run_terminal',
-      'run_background',
       'run_output',
       'run_stop',
       'terminal_list',

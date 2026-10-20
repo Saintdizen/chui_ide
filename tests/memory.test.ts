@@ -4,6 +4,7 @@ import {
   formatMemory,
   MAX_NOTE_CHARS,
   MAX_NOTES,
+  MEMORY_PROMPT_CHARS,
   parseMemory,
   removeNotes,
   serializeMemory,
@@ -118,9 +119,25 @@ describe('formatMemory', () => {
     expect(text).toContain('- второе');
   });
 
-  it('глобальная область подписана иначе, чем память проекта', () => {
-    const text = formatMemory([{ text: 'язык ответов — русский' }], 'global');
-    expect(text).toContain('общая');
-    expect(text).not.toContain('Память проекта');
+  // Память едет в каждом шаге прогона, то есть дороже схем инструментов: при
+  // потолке в 40 заметок по 320 символов она весила бы тысячи токенов на шаг.
+  // В промпт идёт только видимая часть — и с пометкой, что она не вся: иначе
+  // агент записал бы уже записанное, приняв молчание за чистый лист.
+  it('в промпт идёт бюджет, а не вся память, и скрытое названо числом', () => {
+    const many = Array.from({ length: MAX_NOTES }, (_, at) => ({ text: `заметка ${at} `.padEnd(200, 'x') }));
+    const text = formatMemory(many)!;
+    const body = text.split('\n').filter((line) => line.startsWith('- '));
+
+    expect(text.length).toBeLessThan(MEMORY_PROMPT_CHARS + 400);
+    expect(body.length).toBeLessThan(many.length);
+    expect(text).toContain(`ещё ${many.length - body.length}`);
+  });
+
+  it('скрываются давние заметки, а свежие остаются', () => {
+    const many = Array.from({ length: 30 }, (_, at) => ({ text: `заметка ${at} `.padEnd(200, 'x') }));
+    const text = formatMemory(many)!;
+
+    expect(text).toContain('- заметка 29');
+    expect(text).not.toContain('- заметка 0 ');
   });
 });

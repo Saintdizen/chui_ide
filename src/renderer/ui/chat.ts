@@ -18,7 +18,7 @@ import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectC
 import { sessionAttachment } from '../../shared/session-context';
 import { isAutoTitle } from '../../shared/chat-title';
 import { resolvePatches } from '../../shared/patch';
-import { compactionBudgetChars, contextUsage, splitTranscript } from '../../shared/context-fit';
+import { answerReserve, compactionBudgetChars, contextUsage, splitTranscript } from '../../shared/context-fit';
 import { contextWindow, modelCapabilities } from '../../shared/providers';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
@@ -801,7 +801,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       // ответа не было — числа нет, и панель оценит по всему списку, честно
       // помечая «≈».
       ...(session.trace?.toolsTokens !== undefined ? { toolsTokens: session.trace.toolsTokens } : {}),
-      reservedTokens: settings.ai.maxTokens,
+      reservedTokens: answerReserve(settings.ai.maxTokens, contextWindow(currentModel(), settings.ai.contextWindow)),
       usage: session.usage,
       speed: session.speed,
       trace: session.trace,
@@ -845,7 +845,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Явный размер окна задан для активной модели; для отдельной модели сжатия
     // берём автоопределение по имени.
     const override = model === currentModel() ? settings.ai.contextWindow : undefined;
-    return compactionBudgetChars(contextWindow(model, override), settings.ai.maxTokens + 2_000);
+    return compactionBudgetChars(
+      contextWindow(model, override),
+      answerReserve(settings.ai.maxTokens, contextWindow(model, override)) + 2_000,
+    );
   }
 
   /**
@@ -954,7 +957,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   async function ensureContextFits(session: ChatSession, pending: string): Promise<boolean> {
     const usage = contextUsage(sessionInfoData(session, pending));
-    const nearWindow = usage.used + settings.ai.maxTokens > usage.limit * COMPACT_AT_RATIO;
+    // Резерв — не весь `maxTokens` из настроек, а разумная его часть (`answerReserve`).
+    const nearWindow = usage.used + answerReserve(settings.ai.maxTokens, usage.limit) > usage.limit * COMPACT_AT_RATIO;
     const absolute = settings.ai.compactAtTokens;
     const tooLong = absolute > 0 && usage.used > absolute;
     if (!nearWindow && !tooLong) return true;

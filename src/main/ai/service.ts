@@ -31,6 +31,7 @@ import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } 
 import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, READ_ONLY_TOOLS, SUBAGENT_TOOLS } from '../../shared/tool-policy';
 import {
   condenseAppliedCalls,
+  answerReserve,
   estimateMessagesTokens,
   estimateTextTokens,
   isContextOverflow,
@@ -309,7 +310,7 @@ export class AiService {
   /** Песочница: без неё команды и тесты идут на хосте, как раньше. */
   private sandbox?: SandboxService;
   /**
-   * Задания (`run_background`): реестр один на окно, поэтому задание переживает
+   * Задания (`run_terminal` с `background: true`): реестр один на окно, поэтому задание переживает
    * шаг и даже ход — его можно дочитать следующим запросом.
    */
   private readonly jobs: JobRegistry = createJobRegistry();
@@ -1779,7 +1780,7 @@ export class AiService {
       trimMessagesToFit(params.messages, {
         limitTokens: Math.floor(windowTokens * factor),
         overheadTokens: params.toolsTokens,
-        reserveTokens: params.maxTokens,
+        reserveTokens: answerReserve(params.maxTokens, windowTokens),
         keepRecent,
         marker: TRIM_MARKER,
       });
@@ -2115,9 +2116,8 @@ export class AiService {
   private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined, hasSkills = false): boolean {
     if (tool.name === 'apply_edit') return host?.applyEdits !== undefined;
     if (tool.name === 'apply_patch') return host?.applyPatches !== undefined;
+    // Команда — и обычная, и с `background: true`: без окна её не подтвердить.
     if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
-    // Задание — тот же запуск команды: без окна его не подтвердить.
-    if (tool.name === 'run_background') return host?.confirmCommand !== undefined;
     // Чтение заданий окна ничего не меняет и живёт в main.
     if (tool.name === 'run_output' || tool.name === 'run_stop') return true;
     if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;

@@ -82,7 +82,6 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
 
   /* ── команды, задания, терминалы ────────────────────────────────────── */
   run_terminal: {},
-  run_background: {},
   run_output: { readOnly: true, plan: true },
   run_stop: {},
   terminal_list: {},

@@ -38,7 +38,6 @@ export type AgentToolName =
   | 'apply_patch'
   | 'replace_in_files'
   | 'run_terminal'
-  | 'run_background'
   | 'run_output'
   | 'run_stop'
   | 'web_search'
@@ -157,19 +156,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         startLine: {
           type: 'number',
           description:
-            'Первая строка диапазона — целое число (1-based, включительно). Без него — с начала файла. ' +
-            'Строка за концом файла — отказ: сначала прочитай файл целиком или посмотри скелет.',
+            'Первая строка диапазона (1-based, включительно). Без неё — с начала файла. ' +
+            'Строка за концом файла — отказ.',
         },
         endLine: {
           type: 'number',
-          description:
-            'Последняя строка диапазона — целое число (включительно). Без него — до конца (с лимитом строк); ' +
-            'значение за концом файла зажимается до последней строки.',
+          description: 'Последняя строка диапазона (включительно). Без неё — до конца (с лимитом строк).',
         },
         force: {
           type: 'boolean',
-          description:
-            'Перечитать даже ранее прочитанное в этом ходе — на случай, если содержимое выпало из контекста.',
+          description: 'Перечитать даже прочитанное в этом ходе — если содержимое выпало из контекста.',
         },
       },
       required: ['path'],
@@ -191,15 +187,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         glob: { type: 'string', description: 'Маска файлов, например **/*.ts' },
         path: {
           type: 'string',
-          description:
-            'Искать только здесь (папка или файл, абсолютный путь). Без него — по всему проекту. ' +
-            'Маска glob при этом меряется от этой папки.',
+          description: 'Искать только здесь (папка или файл). Без него — по проекту; glob меряется отсюда.',
         },
         context: {
           type: 'number',
-          description:
-            'Строк до и после совпадения (0–5). Ставь 2–3, когда важно видеть окружение ' +
-            'совпадения, и 0 — когда нужен просто список мест.',
+          description: 'Строк до и после совпадения (0–5).',
         },
       },
       required: ['query'],
@@ -268,9 +260,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Посмотреть картинку из проекта: скриншот, макет, диаграмму. Файл уходит модели изображением ' +
-      'следующим сообщением — с описанием того, что на нём, можно работать. read_file на картинке ' +
-      'откажет: она не текст. Крупные файлы уменьшаются автоматически. Для иконок и логотипов в SVG ' +
-      'бери read_file — это текст.',
+      'следующим сообщением, крупные уменьшаются. SVG — текст, его читает read_file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -354,10 +344,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'run_linter',
     side: 'main',
     description:
-      'Проверить код линтером проекта: ruff у Python, eslint или biome у Node. Возвращает ' +
-      'найденные проблемы (файл, строка, правило, сообщение). Без пути проверяется весь проект, ' +
-      'с путём — файл или папка. Файлы не меняются: это только проверка. Вызывай после правок, ' +
-      'чтобы убедиться, что не внёс новых замечаний, и вместо догадок о качестве кода.',
+      'Проверить код линтером проекта: ruff у Python, eslint или biome у Node. Возвращает проблемы ' +
+      '(файл, строка, правило, сообщение); без path — весь проект, с ним — файл или папка. ' +
+      'Файлы не меняет.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -407,8 +396,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         glob: {
           type: 'string',
           description:
-            'Маска пути: `**` — любая глубина, `*` — в пределах сегмента. ' +
-            'Например **/*.py или src/renderer/**. Без маски вернутся все файлы проекта.',
+            'Маска пути: `**` — любая глубина, `*` — в пределах сегмента. Например **/*.py. ' +
+            'Без маски — все файлы проекта.',
         },
         limit: { type: 'number', description: 'Максимум путей (по умолчанию 200, максимум 2000).' },
       },
@@ -507,18 +496,18 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         patches: {
           type: 'array',
-          description: 'Правки по файлам: массив объектов { path, patches: [{ oldText, newText }] }.',
+          description: 'Массив { path, patches: [{ oldText, newText }] }.',
           items: {
             type: 'object',
-            description: 'Правки одного файла: path — абсолютный путь, patches — список замен.',
+            description: 'Один файл: path и patches.',
             properties: {
               path: { type: 'string', description: 'Абсолютный путь к файлу.' },
               patches: {
                 type: 'array',
-                description: 'Что заменить в файле: список пар { oldText, newText }.',
+                description: 'Пары { oldText, newText }.',
                 items: {
                   type: 'object',
-                  description: 'Одна замена: oldText — точный текст из файла, newText — чем заменить.',
+                  description: 'Одна замена.',
                   properties: {
                     oldText: { type: 'string', description: 'Точный текст из файла; обязан быть единственным.' },
                     newText: { type: 'string', description: 'Чем заменить. Пустая строка удаляет найденное.' },
@@ -546,10 +535,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         edits: {
           type: 'array',
-          description: 'Правки по файлам: массив объектов { path, expectedVersion, edits: [{ ... }] }.',
+          description: 'Массив { path, expectedVersion, edits: [...] }.',
           items: {
             type: 'object',
-            description: 'Правки одного файла: path — абсолютный путь, edits — список правок с позициями.',
+            description: 'Один файл: path и edits.',
             properties: {
               path: { type: 'string', description: 'Абсолютный путь к файлу.' },
               expectedVersion: {
@@ -558,10 +547,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
               },
               edits: {
                 type: 'array',
-                description: 'Список правок одного файла: позиции 1-based, конец диапазона — исключающий.',
+                description: 'Правки файла: позиции 1-based, конец диапазона — исключающий.',
                 items: {
                   type: 'object',
-                  description: 'Одна правка: диапазон (startLine/startColumn/endLine/endColumn) и новый текст.',
+                  description: 'Одна правка: диапазон и новый текст.',
                   properties: {
                     startLine: { type: 'number', description: 'Начальная строка (1-based).' },
                     startColumn: { type: 'number', description: 'Начальный столбец (1-based).' },
@@ -570,7 +559,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
                     newText: { type: 'string', description: 'Чем заменить диапазон. Пустая строка удаляет его.' },
                     oldText: {
                       type: 'string',
-                      description: 'Точный текст диапазона: документ сверит его перед правкой.',
+                      description: 'Точный текст диапазона: сверяется перед правкой.',
                     },
                   },
                   required: ['startLine', 'startColumn', 'endLine', 'endColumn', 'newText'],
@@ -588,9 +577,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'web_search',
     side: 'main',
     description:
-      'Найти информацию в интернете: ссылки, заголовки и краткие описания. Нужен для документации ' +
-      'и внешних сведений, которых нет в проекте. Это только поисковая выдача — по ссылкам агент ' +
-      'не переходит, поэтому сведения из неё стоит перепроверять, а не выдавать за факт.',
+      'Найти информацию в интернете: ссылки, заголовки и краткие описания. Это только выдача — по ' +
+      'ссылкам не переходит, поэтому сведения из неё проверяй, а не выдавай за факт.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -604,9 +592,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'run_terminal',
     side: 'main',
     description:
-      'Выполнить команду оболочки в рабочей папке и вернуть её вывод. ' +
-      'Каждый запуск подтверждает пользователь, поэтому команда должна быть одной и по делу. ' +
-      'У запуска есть предел времени: зависшая команда не держит агента вечно.',
+      'Выполнить команду оболочки в рабочей папке и вернуть её вывод. Запуск подтверждает ' +
+      'пользователь, поэтому команда — одна и по делу. С `background: true` возвращается ' +
+      'номер задания, а не вывод: так запускают долгое (сборка, установка, тесты), чтобы ' +
+      'не держать шаг; читать задание — `run_output`, останавливать — `run_stop`.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -618,31 +607,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         timeout: {
           type: 'number',
           description:
-            'Предел времени в секундах (по умолчанию 120). Ставь больше только для заведомо ' +
-            'долгого: сборка, установка зависимостей.',
+            'Предел времени в секундах (по умолчанию 120; в фоне — 1800). Больше ставь только ' +
+            'для заведомо долгого: сборка, установка зависимостей.',
         },
-      },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'run_background',
-    side: 'main',
-    description:
-      'Запустить долгую команду в фоне (сборка, установка, прогон тестов) и сразу получить номер ' +
-      'задания. Нужна там, где run_terminal держал бы шаг минутами: сборка идёт, а ты уже читаешь ' +
-      'другое. Номер задания потом читается через run_output. Подтверждение — как у run_terminal.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        command: { type: 'string', description: 'Команда для запуска.' },
-        cwd: {
-          type: 'string',
-          description: 'Папка запуска внутри проекта (по умолчанию — корень).',
-        },
-        timeout: {
-          type: 'number',
-          description: 'Предел времени в секундах (по умолчанию и не больше 1800).',
+        background: {
+          type: 'boolean',
+          description: 'Не ждать конца: вернуть номер задания сразу. Требует выключенной песочницы.',
         },
       },
       required: ['command'],
@@ -658,7 +628,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'Номер задания из run_background.' },
+        id: { type: 'string', description: 'Номер задания из run_terminal с background: true.' },
         from: {
           type: 'number',
           description: 'С какого места читать. Не задано — с начала (то есть весь вывод, что есть).',
@@ -676,7 +646,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        id: { type: 'string', description: 'Номер задания из run_background.' },
+        id: { type: 'string', description: 'Номер задания из run_terminal с background: true.' },
       },
       required: ['id'],
     },
@@ -685,18 +655,15 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'web_fetch',
     side: 'main',
     description:
-      'Открыть страницу по ссылке и прочитать её текстом. Поиск (web_search) отдаёт только выдачу — ' +
-      'содержимое проверяется здесь. Возвращает заголовок, текст без разметки и ссылки со страницы, ' +
-      'по которым можно пойти дальше. Только http и https; файлы (картинки, архивы, pdf) не читает.',
+      'Прочитать страницу по ссылке: заголовок, текст без разметки и ссылки со страницы. Только http ' +
+      'и https; файлы (картинки, архивы, pdf) не читает.',
     inputSchema: {
       type: 'object',
       properties: {
         url: { type: 'string', description: 'Полный адрес страницы: https://example.com/page' },
         maxChars: {
           type: 'number',
-          description:
-            'Сколько символов текста отдать (по умолчанию 20 000, не больше 60 000). Если обрезано — ' +
-            'на странице есть ссылки: иди по ним, а не тяни ту же страницу целиком.',
+          description: 'Сколько символов текста отдать (по умолчанию 20 000, не больше 60 000).',
         },
       },
       required: ['url'],
@@ -707,9 +674,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Программа на JavaScript, где инструменты — обычные функции: `await tools.read_file({ path })` ' +
-      'возвращает { ok, summary, text }, с теми же правами и подтверждениями. Это тело функции: есть ' +
-      '`await` и `return`, импортов и типов нет. Читать можно проект, писать — только во временную ' +
-      'папку. Пределы: 80 вызовов и 2 минуты.',
+      'возвращает { ok, summary, text }. Это тело функции: есть `await` и `return`, импортов нет. ' +
+      'Писать можно только во временную папку. Пределы: 80 вызовов и 2 минуты.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -730,10 +696,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'workflow',
     side: 'main',
     description:
-      'Сценарий на JavaScript, который сам раздаёт работу агентам и ветвит по отчётам: ' +
-      '`const a = await agents.run({ prompt, description })` возвращает { ok, summary, text }, ' +
-      '`agents.parallel([...])` — пачка разом. Тело функции: есть `await` и `return`, инструментов ' +
-      '(`tools`) в нём нет. Пределы: 6 агентов и 5 минут.',
+      'Сценарий на JavaScript, который раздаёт работу агентам: `agents.run({ prompt, description })` ' +
+      'возвращает { ok, summary, text }, `agents.parallel([...])` — пачка разом. Инструментов в нём ' +
+      'нет. Пределы: 6 агентов и 5 минут.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -754,9 +719,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'create_file',
     side: 'main',
     description:
-      'Создать новый файл с содержимым. Существующий файл НЕ перетирается — вернётся ошибка; ' +
-      'для правки существующего файла используй apply_edit. Поле contents обязательно: пустая ' +
-      'строка создаст пустой файл осознанно, а забытое содержимое — ошибка, а не тихий пустой файл.',
+      'Создать новый файл с содержимым. Существующий НЕ перетирает — вернёт ошибку; для правки есть ' +
+      'apply_edit. Поле contents обязательно.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -849,9 +813,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'ask',
     side: 'renderer',
     description:
-      'Задать человеку вопрос и дождаться ответа: прогон встаёт, ответ придёт результатом вызова. ' +
-      'Спрашивай, когда без решения человека нельзя продолжить. Не спрашивай о том, что видно ' +
-      'в проекте. Конечные варианты перечисли в options — человек ответит нажатием.',
+      'Задать человеку вопрос и дождаться ответа: прогон встаёт. Конечные варианты перечисли в ' +
+      'options — человек ответит нажатием.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1025,8 +988,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Изменить масштаб страницы: мельче, крупнее, вписать по ширине или 1:1. Масштаб — состояние ' +
-      'вкладки, а не страницы: он живёт до закрытия вкладки и его видит человек в шапке. Нужен, когда ' +
-      'проверяешь вёрстку в другой ширине окна или читаешь мелкий текст.',
+      'вкладки, не страницы: его видит человек в шапке.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1057,7 +1019,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         scope: {
           type: 'string',
           enum: ['workspace', 'global'],
-          description: 'workspace — заметки проекта (по умолчанию), global — общие для всех проектов.',
+          description: 'workspace — проект (по умолчанию), global — все проекты.',
         },
       },
       required: ['text'],
@@ -1076,7 +1038,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         scope: {
           type: 'string',
           enum: ['workspace', 'global'],
-          description: 'workspace — заметки проекта (по умолчанию), global — общие для всех проектов.',
+          description: 'workspace — проект (по умолчанию), global — все проекты.',
         },
       },
       required: ['query'],

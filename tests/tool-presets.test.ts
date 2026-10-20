@@ -83,7 +83,6 @@ describe('наборы инструментов агента', () => {
       'move_file',
       'replace_in_files',
       'run_terminal',
-      'run_background',
       'terminal_start',
       'git_commit',
       'git_push',

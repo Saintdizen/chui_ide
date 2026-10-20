@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '../src/shared/api';
 import {
+  answerReserve,
+  MAX_ANSWER_RESERVE,
   CALIBRATION_MAX,
   CALIBRATION_MIN,
   COMPACT_MAX_CHARS,
@@ -477,5 +479,29 @@ describe('вес схем инструментов считается по со�
   it('на латинице обе оценки совпадают', () => {
     const latin = 'read file with line numbers';
     expect(estimateTextTokens(latin)).toBe(estimateTokens(latin.length));
+  });
+});
+
+/**
+ * Резерв под ответ. `maxTokens` из настроек — предел запроса, а не обещание,
+ * что ответ столько и займёт; резервировать его целиком в окне значит держать
+ * пустой кусок контекста и сжимать беседу раньше времени.
+ */
+describe('answerReserve', () => {
+  it('обычный предел берём как есть', () => {
+    expect(answerReserve(4096, 128_000)).toBe(4096);
+  });
+
+  it('запас больше потолка не резервируем', () => {
+    expect(answerReserve(360_000, 1_000_000)).toBe(MAX_ANSWER_RESERVE);
+  });
+
+  it('на маленьком окне резерв — его четверть, а не весь предел', () => {
+    expect(answerReserve(32_000, 8_000)).toBe(2_000);
+  });
+
+  it('нулевой и мусорный предел — резерва нет', () => {
+    expect(answerReserve(0, 128_000)).toBe(0);
+    expect(answerReserve(Number.NaN, 128_000)).toBe(0);
   });
 });
