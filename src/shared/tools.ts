@@ -134,14 +134,18 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'search',
     side: 'main',
-    description:
-      'Four sources by action. text (default): project files — path, line, matched text (filesOnly names only). code: symbol declarations. docs: documentation sections. sessions: past conversations.',
+    description: 'Project search by action.',
     inputSchema: {
       type: 'object',
       properties: {
-        // Значения перечислены в `enum` — второй раз их не печатаем: схема едет
-        // в каждом запросе, а модель читает `enum` и так.
-        action: { type: 'string', enum: ['text', 'code', 'docs', 'sessions'] },
+        action: {
+          type: 'string',
+          enum: ['text', 'code', 'docs', 'sessions'],
+          // Смысл действий — здесь же, рядом с enum: в шапке он дублировался
+          // и стоил токенов в каждом запросе.
+          description:
+            'text: path, line, match; code: declarations; docs: documentation; sessions: past chats.',
+        },
         query: { type: 'string', description: 'Pattern.' },
         isRegex: { type: 'boolean', description: 'Regex (default: substring).' },
         caseSensitive: { type: 'boolean', description: 'Match case.' },
@@ -190,17 +194,17 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'lsp',
     side: 'main',
-    description:
-      'LSP: references — where the symbol is used in the project (no comments, no same-named vars); ' +
-      'definition — where declared; outline — file skeleton: declarations with line and nesting, no ' +
-      'bodies (numbers work in read). The name may be words, or path + line of a usage. rename ' +
-      'writes declaration and references, other files included. Needs a language server.',
+    description: 'LSP over a language server. The symbol may be words, or path + line of a usage.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['references', 'definition', 'outline', 'rename'],
+          description:
+            'references: usages in the project (no comments, no same-named vars); definition: ' +
+            'where declared; outline: file skeleton, declarations with line and nesting, no bodies; ' +
+            'rename: writes declaration and references, other files included.',
         },
         symbol: { type: 'string', description: 'Symbol name.' },
         newName: { type: 'string', description: 'rename: new name.' },
@@ -221,16 +225,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'checks',
     side: 'renderer',
-    description:
-      'Project checks, no writes. diagnostics — errors and warnings the editor knows (call before ' +
-      'fixing code); lint — the project linter: ruff, eslint or biome, findings by file, line, rule. ' +
-      'Both take path to narrow to one file or folder.',
+    description: 'Project checks, no writes. Both take path to narrow to one file or folder.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['diagnostics', 'lint'],
+          description:
+            'diagnostics: errors and warnings the editor knows (call before fixing code); ' +
+            'lint: the project linter (ruff, eslint, biome) — findings by file, line, rule.',
         },
         path: {
           type: 'string',
@@ -268,15 +272,18 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'mcp',
     side: 'main',
     description:
-      'MCP server documents, not actions: list — the catalog (uri, name, type) from settings; ' +
-      'read — one document at a uri. List first and take the address there; fill an address ' +
-      'template with values first, binary content is marked, long content is cut.',
+      'MCP server documents. Fill an address template with values first; binary content is ' +
+      'marked, long content is cut.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'read'] },
+        action: {
+          type: 'string',
+          enum: ['list', 'read'],
+          description: 'list: catalog from settings; read: one document.',
+        },
         uri: { type: 'string', description: 'read: address from the catalog.' },
-        server: { type: 'string', description: 'list: this server only. read: when several declare the uri.' },
+        server: { type: 'string', description: 'list: this server. read: when several share the uri.' },
       },
       required: ['action'],
     },
@@ -284,14 +291,13 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'edit',
     side: 'renderer',
-    description:
-      'Change files: checked, then shown for review with undo. Give oldText — exact fragment, unique ' +
-      'in the file — and newText; or all four 1-based LSP positions.',
+    description: 'Change files: give oldText — an exact fragment, unique in the file — or four positions.',
     inputSchema: {
       type: 'object',
       properties: {
         edits: {
           type: 'array',
+          description: 'oldText (exact, unique) + newText; or four 1-based positions.',
           items: {
             type: 'object',
             properties: {
@@ -326,14 +332,17 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'web',
     side: 'main',
-    description:
-      'The internet: action search — links, titles and short snippets (the list only, links are not ' +
-      'opened, so verify facts instead of stating them as true); action fetch — a page by url: title, ' +
-      'plain text and the links on it, http and https only, files are not read.',
+    description: 'The internet over http/https; files are not read.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['search', 'fetch'] },
+        action: {
+          type: 'string',
+          enum: ['search', 'fetch'],
+          description:
+            'search: links, titles, short snippets — the list only, links are not opened, so ' +
+            'verify facts instead of stating them; fetch: a page by url — title, plain text, links on it.',
+        },
         query: { type: 'string', description: 'search: query.' },
         limit: { type: 'number', description: 'search: how many.' },
         url: { type: 'string', description: 'fetch: page address.' },
@@ -345,8 +354,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'terminal',
     side: 'main',
-    description:
-      'Sessions: a real pty the user sees. run executes in the project (background: true returns a job id), output reads a job or lists them, cancel stops one. One command per call.',
+    description: 'A real pty the user sees. One command per call.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -372,13 +380,15 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'file',
     side: 'main',
-    description:
-      'Files and folders. create writes a new file (existing is refused — use edit); move renames inside ' +
-      'the workspace; delete sends to the trash (no undo); replace rewrites every match in the project.',
+    description: 'Files and folders; move stays inside the workspace.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['create', 'move', 'delete', 'replace'] },
+        action: {
+          type: 'string',
+          enum: ['create', 'move', 'delete', 'replace'],
+          description: 'create, move, delete (trash, no undo), replace (every match).',
+        },
         path: { type: 'string', description: 'Path.' },
         contents: { type: 'string', description: 'create: contents.' },
         from: { type: 'string', description: 'move: source.' },
@@ -395,18 +405,19 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'plan',
     side: 'main',
-    description:
-      'Work state. steps (default): the plan — call at the start and after each step; goal: survives the turn, done=true closes it, while open the run continues by itself.',
+    description: 'Work state: the plan and the goal.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['steps', 'goal'],
+          description:
+            'steps (default): the plan — call at the start and after each step; goal: survives the turn.',
         },
         steps: {
           type: 'array',
-          description: 'steps: steps.',
+          description: 'steps: what to do.',
           // Поля элемента называем явно: модель присылала шаги без `status` и
           // получала отказ уже после вызова — а это целый шаг прогона.
           items: {
@@ -498,16 +509,17 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'agents',
     side: 'main',
-    description:
-      'Agents in the background: spawn starts one and returns an id at once, list shows who works ' +
-      'on what, wait gives reports (a timeout means still working, not an error), send reaches a ' +
-      'running agent before its next step, interrupt stops one. The agent only reads: edits stay with you.',
+    description: 'Agents in the background. The agent only reads: edits stay with you.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['spawn', 'list', 'wait', 'send', 'interrupt'],
+          description:
+            'spawn: starts one, returns an id at once; list: who works on what; wait: reports (a ' +
+            'timeout means still working, not an error); send: reaches a running agent before its ' +
+            'next step; interrupt: stops one.',
         },
         prompt: { type: 'string', description: 'spawn: the task — all the agent sees.' },
         description: { type: 'string', description: 'spawn: short name for the agents panel.' },
@@ -526,15 +538,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'browser',
     side: 'main',
-    description:
-      'Own Chromium over CDP; http/https only, needs the Browser setting. snapshot after each action: ' +
-      'the page changes and old refs expire.',
+    description: 'Own Chromium over CDP; http/https only, needs the Browser setting.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close'],
+          description:
+            'open: a page; snapshot: the page in text — after each action, since the page changes ' +
+            'and old refs expire; click, type: by ref; evaluate: a JS expression; zoom; close.',
         },
         url: { type: 'string', description: 'open: page address; no scheme means https.' },
         ref: { type: 'string', description: 'click, type: element number from snapshot.' },
@@ -549,16 +562,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'mind',
     side: 'main',
-    description:
-      'Memory: notes that survive the conversation and are shown at the start of every answer. action ' +
-      'remember saves one (text); forget removes notes containing a substring (query). Only long-term ' +
-      'agreements; scope: workspace (default) or global.',
+    description: 'Memory: notes that survive the conversation. Only long-term agreements.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['remember', 'forget'],
+          description:
+            'remember: saves one note (text); forget: removes notes containing a substring (query). ' +
+            'Notes ride in every request; scope: workspace (default) or global.',
         },
         text: { type: 'string', description: 'remember: one thought, a couple of lines max.' },
         query: { type: 'string', description: 'forget: substring identifying the notes.' },
@@ -570,14 +583,18 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'git_read',
     side: 'main',
-    description:
-      'Read the repository: status (branch, ahead/behind, changed files), diff (worktree against the ' +
-      'index; staged against HEAD), log, blame (who changed which lines and when). Read-only: check ' +
-      'status and diff before committing, so the commit holds what you mean.',
+    description: 'Read the repository. Read-only.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['status', 'diff', 'log', 'blame'] },
+        action: {
+          type: 'string',
+          enum: ['status', 'diff', 'log', 'blame'],
+          description:
+            'status: branch, ahead/behind, changed files; diff: worktree against the index, staged ' +
+            '(with staged: true) against HEAD; log; blame: who changed which lines and when. ' +
+            'Check status and diff before committing.',
+        },
         path: { type: 'string', description: 'diff, log, blame: one file.' },
         staged: { type: 'boolean', description: 'diff: vs HEAD.' },
         limit: { type: 'number', description: 'log: how many.' },
@@ -591,9 +608,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'git_write',
     side: 'main',
     description:
-      'The repository: stage, unstage, commit, checkout, discard, fetch, pull, push. Checkout rewrites ' +
-      'files and git may refuse uncommitted changes. Discard is irreversible — ask first. Resolve ' +
-      'conflicts by hand.',
+      'The repository, writes. Checkout rewrites files and git may refuse uncommitted changes. ' +
+      'Discard is irreversible — ask first. Resolve conflicts by hand.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -601,7 +617,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'string',
           // `enum` даёт имена, а не смысл: здесь единственное, что не читается из
           // них — что `unstage` не трогает рабочее дерево и что `push` — на upstream.
-          description: 'unstage: worktree stays. push: upstream on the first push; force only on request.',
+          description:
+            'stage, unstage: the index only, the worktree stays. commit; checkout: a branch; ' +
+            'discard: drops changes for good; fetch, pull; push: upstream on the first push, ' +
+            'force only on request.',
           enum: ['stage', 'unstage', 'commit', 'checkout', 'discard', 'fetch', 'pull', 'push'],
         },
         paths: {
@@ -621,14 +640,14 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'show',
     side: 'main',
-    description:
-      'Show where to look: open — a file in the editor at a line; present — result files as buttons.',
+    description: 'Show where to look.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['open', 'present'],
+          description: 'open: a file in the editor at a line; present: result files as buttons.',
         },
         path: { type: 'string', description: 'Path.' },
         line: { type: 'number', description: 'open: line, 1-based.' },
