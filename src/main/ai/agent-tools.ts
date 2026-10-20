@@ -1,4 +1,4 @@
-import path from 'node:path';
+ import path from 'node:path';
 import type {
   ApplyEditsHostResult,
   BrowserZoomMode,
@@ -55,6 +55,7 @@ import { formatWorkflow } from '../../shared/workflow';
 import { parseToolArguments } from '../../shared/tools';
 import { isCondenseMarker } from '../../shared/context-fit';
 import { missingArguments, toolSpec } from '../../shared/tool-schema';
+import { canonicalCall } from '../../shared/tool-aliases';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -712,7 +713,11 @@ export function failureText(outcome: ToolOutcome): string {
 }
 
 export async function runTool(ctx: ToolContext, name: string, rawArguments: string): Promise<ToolOutcome> {
-  const parsed = parseToolArguments(rawArguments);
+  // Старое имя из сохранённой беседы (`read_file`, `spawn_agent`) не должно
+  // упираться в тупик: инструмент есть, он просто называется иначе.
+  const canonical = canonicalCall(name, rawArguments);
+  name = canonical.name;
+  const parsed = parseToolArguments(canonical.arguments);
   if (!parsed.ok) return { ok: false, summary: parsed.message };
 
   // Обязательные поля схемы — до исполнения: иначе забытый аргумент вернётся

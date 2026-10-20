@@ -31,6 +31,7 @@ import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
 import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, isReadOnlyCall } from '../../shared/tool-policy';
+import { canonicalCall } from '../../shared/tool-aliases';
 import {
   condenseAppliedCalls,
   answerReserve,
@@ -1475,7 +1476,11 @@ export class AiService {
       // задачи не отвечает — три чтения подряд дают 180 000 символов, и обрезка
       // истории выбрасывает уже потраченный шаг целиком.
       toolContext.stepBudget = { left: stepOutputChars(windowTokens) };
-      for (const call of calls) {
+      for (const raw of calls) {
+        // Старое имя из сохранённой беседы приводим к нынешнему ДО всех проверок:
+        // иначе набор скажет «такого нет», хотя инструмент есть под другим именем.
+        const mapped = canonicalCall(raw.name, raw.arguments);
+        const call = mapped.renamed ? { ...raw, name: mapped.name, arguments: mapped.arguments } : raw;
         // План — не вызов инструмента в привычном смысле, а обновление чек-листа:
         // рисуем его отдельным событием, но модели всё равно отвечаем role:'tool'.
         if (call.name === 'update_plan') {
@@ -2053,7 +2058,10 @@ export class AiService {
         // Тот же бюджет шага, что у основного агента: отчёт подзадачи — выжимка,
         // и мегабайт прочитанного в её контексте всё равно не переживёт сжатие.
         subContext.stepBudget = { left: STEP_OUTPUT_CHARS };
-        for (const call of calls) {
+        for (const raw of calls) {
+          // Старое имя — к нынешнему, как и у основного агента.
+          const mapped = canonicalCall(raw.name, raw.arguments);
+          const call = mapped.renamed ? { ...raw, name: mapped.name, arguments: mapped.arguments } : raw;
           const key = `${call.name}:${call.arguments}`;
           let content: string;
           if (executed.has(key)) {
