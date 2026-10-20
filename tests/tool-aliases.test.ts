@@ -68,6 +68,15 @@ describe('слияния с другим аргументом: языковой 
     expect(call.renamed).toBe(true);
     expect(JSON.parse(call.arguments)).toEqual({ path: '/a.ts', action: 'outline' });
   });
+
+  it('rename_symbol стал действием lsp с тем же смыслом', () => {
+    // Имя было отдельным только потому, что пишет код; теперь это `action`, а
+    // различие держит `writeActions` в политике. Старые вызовы не отваливаются.
+    const call = canonicalCall('rename_symbol', '{"symbol":"a","newName":"b"}');
+    expect(call.name).toBe('lsp');
+    expect(call.renamed).toBe(true);
+    expect(JSON.parse(call.arguments)).toEqual({ symbol: 'a', newName: 'b', action: 'rename' });
+  });
 });
 
 describe('что псевдоним не трогает', () => {

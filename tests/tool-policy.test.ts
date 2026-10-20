@@ -6,6 +6,7 @@ import {
   PLAN_MODE_TOOLS,
   READ_ONLY_TOOLS,
   isReadOnlyCall,
+  isWriteCall,
   SUBAGENT_TOOLS,
   TOOL_POLICIES,
 } from '../src/shared/tool-policy';
@@ -90,6 +91,15 @@ describe('повтор чтения', () => {
     // Обычные инструменты чтения работают как раньше.
     expect(isReadOnlyCall('read', JSON.stringify({ path: '/p/a.ts' }))).toBe(true);
     expect(isReadOnlyCall('edit', '{}')).toBe(false);
+  });
+
+  it('lsp пишет только действием rename', () => {
+    // Имя `lsp` записано как читающее — и для трёх действий это так.
+    expect(isReadOnlyCall('lsp', JSON.stringify({ action: 'references', symbol: 'x' }))).toBe(true);
+    expect(isReadOnlyCall('lsp', JSON.stringify({ action: 'outline', path: '/p/a.ts' }))).toBe(true);
+    expect(isReadOnlyCall('lsp', JSON.stringify({ action: 'rename', symbol: 'x', newName: 'y' }))).toBe(false);
+    expect(isWriteCall('lsp', JSON.stringify({ action: 'rename', symbol: 'x', newName: 'y' }))).toBe(true);
+    expect(isWriteCall('lsp', JSON.stringify({ action: 'references', symbol: 'x' }))).toBe(false);
   });
 });
 

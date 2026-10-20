@@ -212,7 +212,7 @@ describe('go_to_definition', () => {
   });
 });
 
-describe('rename_symbol', () => {
+describe('lsp rename', () => {
   const edits: FileEdit[] = [
     {
       path: `${ROOT}/src/a.ts`,
@@ -225,8 +225,8 @@ describe('rename_symbol', () => {
     const applyEdits = applySpy();
     const outcome = await runTool(
       context(symbols, { applyEdits }),
-      'rename_symbol',
-      '{"symbol":"saveCalibration","newName":"newName"}',
+      'lsp',
+      '{"action":"rename","symbol":"saveCalibration","newName":"newName"}',
     );
 
     expect(outcome.ok).toBe(true);
@@ -247,8 +247,8 @@ describe('rename_symbol', () => {
     const symbols = makeSymbols({ rename: vi.fn(async () => edits) });
     const outcome = await runTool(
       context(symbols, { applyEdits: applySpy(true) }),
-      'rename_symbol',
-      '{"symbol":"x","newName":"y"}',
+      'lsp',
+      '{"action":"rename","symbol":"x","newName":"y"}',
     );
 
     expect(outcome.ok).toBe(false);
@@ -259,8 +259,8 @@ describe('rename_symbol', () => {
     const symbols = makeSymbols({ rename: vi.fn(async () => null) });
     const outcome = await runTool(
       context(symbols, { applyEdits: applySpy() }),
-      'rename_symbol',
-      '{"symbol":"x","newName":"y"}',
+      'lsp',
+      '{"action":"rename","symbol":"x","newName":"y"}',
     );
 
     expect(outcome.ok).toBe(false);
@@ -270,8 +270,8 @@ describe('rename_symbol', () => {
   it('новое имя совпадает со старым — нечего делать', async () => {
     const outcome = await runTool(
       context(makeSymbols(), { applyEdits: applySpy() }),
-      'rename_symbol',
-      '{"symbol":"x","newName":"x"}',
+      'lsp',
+      '{"action":"rename","symbol":"x","newName":"x"}',
     );
 
     expect(outcome.ok).toBe(false);
@@ -281,8 +281,8 @@ describe('rename_symbol', () => {
   it('без моста правок инструмент недоступен', async () => {
     const outcome = await runTool(
       context(makeSymbols(), { applyEdits: undefined }),
-      'rename_symbol',
-      '{"symbol":"x","newName":"y"}',
+      'lsp',
+      '{"action":"rename","symbol":"x","newName":"y"}',
     );
 
     expect(outcome.ok).toBe(false);

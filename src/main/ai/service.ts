@@ -39,7 +39,7 @@ import {
 } from '../../shared/providers';
 import type { ModelInfo } from '../../shared/model-info';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
-import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, isReadOnlyCall } from '../../shared/tool-policy';
+import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, isReadOnlyCall, isWriteCall } from '../../shared/tool-policy';
 import { canonicalCall } from '../../shared/tool-aliases';
 import {
   condenseAppliedCalls,
@@ -1652,7 +1652,7 @@ export class AiService {
           }
         }
         const denied =
-          planMode && !planApproved && !PLAN_MODE_TOOLS.has(call.name)
+          planMode && !planApproved && (!PLAN_MODE_TOOLS.has(call.name) || isWriteCall(call.name, call.arguments))
             ? {
                 content: `Режим плана: инструмент «${call.name}» недоступен. Ничего не меняй — составь план доступными средствами чтения.`,
                 summary: 'режим плана: изменение недоступно',
@@ -2329,12 +2329,12 @@ export class AiService {
     // предлагаем. Условие общее на все действия, как у браузера: `stage` без моста
     // откажет словами в обработчике, но в списке инструмент есть.
     if (tool.name === 'git_write') return this.git !== undefined && host?.confirmGit !== undefined;
-    // Символы живут на языковом сервере: без него их не предлагаем.
+    // Символы живут на языковом сервере: без него их не предлагаем. Переименование
+    // меняет код через сервер: `canRun` аргументов не видит, поэтому условие
+    // общее на все действия — без окна с применением правок `lsp` не предлагается.
     if (tool.name === 'lsp') {
-      return this.symbols !== undefined;
+      return this.symbols !== undefined && host?.applyEdits !== undefined;
     }
-    // Переименование меняет код через сервер — нужен и сервер, и применение правок.
-    if (tool.name === 'rename_symbol') return this.symbols !== undefined && host?.applyEdits !== undefined;
     // Тесты выполняют код проекта: нужен и резолвер команды, и подтверждение.
     if (tool.name === 'run_tests') return this.tests !== undefined && host?.confirmCommand !== undefined;
     // Память проекта (mind) — в ALWAYS_AVAILABLE: заметка обратима,

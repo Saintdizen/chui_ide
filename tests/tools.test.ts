@@ -33,7 +33,6 @@ describe('набор инструментов агента', () => {
       'search',
       'read_skill',
       'lsp',
-      'rename_symbol',
       'run_tests',
       'checks',
       'edit',

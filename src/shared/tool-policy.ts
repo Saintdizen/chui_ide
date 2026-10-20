@@ -40,6 +40,16 @@ export interface ToolPolicy {
    * зацикливания на чтении вывода.
    */
   readonly readOnlyActions?: readonly string[];
+  /**
+   * Действия, которые ПИШУТ, хотя сам инструмент записан как читающий. Сейчас
+   * единственный случай — `lsp` действие `rename`: остальные три только смотрят
+   * в языковой сервер, а это меняет код. Отдельным именем такое действие стоило
+   * бы схемы в каждом запросе и лишнего слова в ростере, а разница все равно в
+   * действии. `isReadOnlyCall` возвращает false для них раньше проверки
+   * `readOnly`, а `isWriteCall` держит отказ в режиме плана и у подзадачи
+   * (`canRun` в service) — второго имени ради этого не надо.
+   */
+  readonly writeActions?: readonly string[];
 }
 
 export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
@@ -55,10 +65,9 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
 
   /* Символы и языковой сервер: без него эти инструменты не предлагаются. */
   // Одно имя на все запросы к серверу: ссылки, объявление и скелет файла читают
-  // одно и то же состояние, и прав у них одни. Переименование осталось отдельным:
-  // оно ПИШЕТ код, а лсп в плане, у подзадачи и в наборе «Только чтение».
-  lsp: { readOnly: true, plan: true, subagent: true },
-  rename_symbol: {},
+  // одно и то же состояние, и прав у них одни. Переименование живёт здесь же —
+  // действие `rename`: оно ПИШЕТ код, и его держит `writeActions`, а не имя.
+  lsp: { readOnly: true, plan: true, subagent: true, writeActions: ['rename'] },
 
   /* Проверки: мир не меняют, поэтому они и в плане, и у подзадачи. */
   run_tests: {},
@@ -145,16 +154,41 @@ const READ_ONLY_ACTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
 );
 
 /**
+ * Действия, которые пишут: имя инструмента → набор действий. Сейчас только
+ * `lsp` с действием `rename`.
+ */
+const WRITE_ACTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  (Object.entries(TOOL_POLICIES) as [AgentToolName, ToolPolicy][])
+    .filter(([, policy]) => (policy.writeActions?.length ?? 0) > 0)
+    .map(([name, policy]) => [name, new Set(policy.writeActions)]),
+);
+
+/**
  * Только ли читает этот вызов. Смотрит и на инструмент, и на его действие:
  * повтор `terminal` с `action: read` ничего нового не даст, а `action: run` —
- * это новая команда, и глушить её нельзя.
+ * это новая команда, и глушить её нельзя. Действие из `writeActions` пишет,
+ * даже если весь инструмент помечен как читающий.
  */
 export function isReadOnlyCall(name: string, rawArguments: string): boolean {
+  if (isWriteCall(name, rawArguments)) return false;
   if (READ_ONLY_TOOLS.has(name)) return true;
   const actions = READ_ONLY_ACTIONS.get(name);
   if (!actions) return false;
   const parsed = parseToolArguments(rawArguments);
   if (!parsed.ok) return false;
+  const action = parsed.value.action;
+  return typeof action === 'string' && actions.has(action);
+}
+
+/**
+ * Меняет ли вызов мир — по действию, а не только по имени. Нужно режиму плана,
+ * где даже такой инструмент по имени не исполнится.
+ */
+export function isWriteCall(name: string, rawArguments: string): boolean {
+  const actions = WRITE_ACTIONS.get(name);
+  if (!actions) return false;
+  const parsed = parseToolArguments(rawArguments);
+  if (!parsed.ok) return true;
   const action = parsed.value.action;
   return typeof action === 'string' && actions.has(action);
 }

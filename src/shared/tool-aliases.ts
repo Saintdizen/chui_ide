@@ -30,10 +30,13 @@ const NAME_ALIASES: Readonly<Record<string, string>> = {
   // Память: запись и уборку заметок различал только глагол.
   remember: 'mind',
   forget: 'mind',
-  // Языковой сервер: ссылки, объявление и скелет файла — вопросы к одному серверу.
+  // Языковой сервер: ссылки, объявление, скелет файла и переименование —
+  // вопросы к одному серверу. Переименование пишет код — его держит
+  // `writeActions` в политике, а не отдельное имя.
   find_references: 'lsp',
   go_to_definition: 'lsp',
   file_outline: 'lsp',
+  rename_symbol: 'lsp',
   // Сеть: поиск и чтение страницы — два шага одного пути.
   web_search: 'web',
   web_fetch: 'web',
@@ -74,6 +77,7 @@ const ACTION_ALIASES: Readonly<Record<string, string>> = {
   find_references: 'references',
   go_to_definition: 'definition',
   file_outline: 'outline',
+  rename_symbol: 'rename',
   web_search: 'search',
   web_fetch: 'fetch',
   get_diagnostics: 'diagnostics',

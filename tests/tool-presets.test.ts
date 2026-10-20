@@ -203,9 +203,9 @@ describe('наборы инструментов агента', () => {
     }
     expect(isRosterTool('auto', 'read_file')).toBe(false);
     // Ростер есть у любого набора: вопрос не в правах, а в том, что едет схемой.
-    // В узком наборе он ограничен его группами — rename_symbol это правка, не чтение.
+    // В узком наборе он ограничен его группами — `terminal` это команды, не чтение.
     expect(isRosterTool('read', 'checks')).toBe(true);
-    expect(isRosterTool('read', 'rename_symbol')).toBe(false);
+    expect(isRosterTool('read', 'terminal')).toBe(false);
     // `agents` — 285 токенов схемой в каждом запросе, а строка ростера (40 т.)
     // называет то же самое: action с его значениями. Схема едет только когда она
     // и есть смысл роста — «расширение» набора по имени.

@@ -821,8 +821,6 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await readImage(ctx, args);
       case 'lsp':
         return await lspAction(ctx, args);
-      case 'rename_symbol':
-        return await renameSymbol(ctx, args);
       case 'checks':
         return await checksAction(ctx, args);
       case 'run_tests':
@@ -3454,8 +3452,10 @@ async function lspAction(ctx: ToolContext, args: Record<string, unknown>): Promi
       return await goToDefinition(ctx, args);
     case 'outline':
       return missingForAction(args, ['path']) ?? (await fileOutline(ctx, args));
+    case 'rename':
+      return missingForAction(args, ['symbol', 'newName']) ?? (await renameSymbol(ctx, args));
     default:
-      return unknownAction(action, 'lsp: references, definition, outline.');
+      return unknownAction(action, 'lsp: references, definition, outline, rename.');
   }
 }
 

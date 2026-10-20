@@ -20,7 +20,7 @@ describe('слитые инструменты: схема', () => {
     };
     expect(actions('browser')).toEqual(['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close']);
     expect(actions('terminal')).toEqual(['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel']);
-    expect(actions('lsp')).toEqual(['references', 'definition', 'outline']);
+    expect(actions('lsp')).toEqual(['references', 'definition', 'outline', 'rename']);
     expect(actions('git_read')).toEqual(['status', 'diff', 'log', 'blame']);
     expect(actions('git_write')).toEqual([
       'stage',

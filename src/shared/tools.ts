@@ -20,8 +20,6 @@ export type AgentToolName =
   | 'read_skill'
   | 'read_image'
   | 'lsp'
-  | 'rename_symbol'
-  | 'rename_symbol'
   | 'project_map'
   | 'checks'
   | 'run_tests'
@@ -193,22 +191,22 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'lsp',
     side: 'main',
     description:
-      'Language server lookups: action references — where the symbol is used across the project ' +
-      '(no comments, no same-named variables); definition — where it is declared; outline — file ' +
-      'skeleton: declarations with line numbers and nesting, no bodies (the numbers work in read ' +
-      'ranges). For the first two the name may be written in words, or give path + line of a usage. ' +
-      'Requires a language server.',
+      'LSP: references — where the symbol is used in the project (no comments, no same-named vars); ' +
+      'definition — where declared; outline — file skeleton: declarations with line and nesting, no ' +
+      'bodies (numbers work in read). The name may be words, or path + line of a usage. rename ' +
+      'writes declaration and references, other files included. Needs a language server.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['references', 'definition', 'outline'],
+          enum: ['references', 'definition', 'outline', 'rename'],
         },
         symbol: { type: 'string', description: 'Symbol name.' },
+        newName: { type: 'string', description: 'rename: new name.' },
         path: {
           type: 'string',
-          description: 'references: narrow to a file. definition: file with the usage. outline: that file.',
+          description: 'references: narrow to a file. definition: the usage. outline: that file.',
         },
         line: { type: 'number', description: 'definition: usage line, 1-based.' },
         column: { type: 'number', description: 'definition: column, 1-based.' },
@@ -218,25 +216,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
       },
       required: ['action'],
-    },
-  },
-  {
-    name: 'rename_symbol',
-    side: 'main',
-    description:
-      'Rename a symbol semantically: declaration and all references, other files included. ' +
-      'Unlike file (action replace) it does not replace text blindly.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        symbol: { type: 'string', description: 'Current name.' },
-        newName: { type: 'string', description: 'New name.' },
-        path: {
-          type: 'string',
-          description: 'Narrow to a file; when the name is declared twice.',
-        },
-      },
-      required: ['symbol', 'newName'],
     },
   },
   {

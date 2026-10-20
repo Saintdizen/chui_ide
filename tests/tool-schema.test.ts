@@ -132,7 +132,7 @@ describe('описания аргументов', () => {
     'New path.',
     'Narrow to a file; when the name is declared twice.',
     '2-5 files instead; output capped.',
-    'references: narrow to a file. definition: file with the usage. outline: that file.',
+    'references: narrow to a file. definition: the usage. outline: that file.',,
     'One file or folder (diagnostics: open files; lint: whole project).',
     'One file (default: all open files).',
     'Folder or file (default: whole project).',

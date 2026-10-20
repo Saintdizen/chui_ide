@@ -66,7 +66,10 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
   {
     id: 'edit',
     label: 'Правки',
-    names: ['edit', 'rename_symbol', 'file', 'show'],
+    // Правки — без `lsp`: он живёт в «Чтении» одним именем на все действия,
+    // а `rename` разрешает уже политика (`writeActions`). Группа «Правки»
+    // отвечает на «что можно предложить», а не «что пишет».
+    names: ['edit', 'file', 'show'],
   },
   {
     id: 'verify',
@@ -176,7 +179,6 @@ function fullSetTokens(): number {
  * Замер — `tests/token-budget.test.ts`.
  */
 export const ROSTER_TOOLS: readonly string[] = [
-  'rename_symbol',
   // Не редкие, а простые: вызов у них короткий и угадывается по имени.
   'checks',
   'lsp',
