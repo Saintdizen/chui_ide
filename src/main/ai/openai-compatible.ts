@@ -320,5 +320,28 @@ export function describeHttpError(status: number, detail?: string): string {
   if (status === 404) return 'По этому адресу нет API — возможно, забыт суффикс /v1 (HTTP 404)';
   if (status === 429) return 'Провайдер ограничил частоту запросов (HTTP 429)';
   if (status >= 500) return `Провайдер недоступен (HTTP ${status})`;
-  return `Провайдер ответил ошибкой (HTTP ${status})`;
+  // Прочие отказы (400, 422) без текста провайдера бесполезны: причина у них
+  // каждый раз своя — «unknown field», «insufficient tool messages», плохое
+  // значение параметра. По одному коду HTTP этого не видно.
+  const note = providerNote(detail);
+  return `Провайдер ответил ошибкой (HTTP ${status})${note ? `: ${note}` : ''}`;
+}
+
+/**
+ * Причина отказа словами провайдера. Тело ошибки — обычно JSON вида
+ * `{ error: { message } }`, но совместимые серверы шлют и просто текст.
+ * Длинное режем: в ленте это строка, а не полотно.
+ */
+function providerNote(detail?: string): string {
+  if (!detail) return '';
+  let text = detail.trim();
+  try {
+    const parsed = JSON.parse(text) as { error?: { message?: unknown }; message?: unknown };
+    const nested = parsed.error?.message ?? parsed.message;
+    if (typeof nested === 'string') text = nested;
+  } catch {
+    // Не JSON — оставляем как есть: часть серверов отвечает обычным текстом.
+  }
+  const single = text.replace(/\s+/g, ' ').trim();
+  return single.length > 200 ? `${single.slice(0, 200)}…` : single;
 }

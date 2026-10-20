@@ -100,6 +100,7 @@ import {
   type ReviewVerdict,
 } from '../../shared/approval-review';
 import { addUsage } from '../../shared/usage';
+import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
 import type { TelemetryStore } from './telemetry';
 import { createSkillLibrary, type SkillLibrary } from './skills';
@@ -842,7 +843,11 @@ export class AiService {
     // спросили сейчас». В «Вопросе» и «Плане» её нет: там нечего доводить до конца.
     if (requestGoal && useTools && !planMode) messages.push({ role: 'system', content: goalPrompt(requestGoal) });
 
-    messages.push(...request.messages);
+    // История приходит из файла беседы, а там возможен обрыв пары вызов-ответ
+    // (приложение закрыли посреди прогона). Провайдер отвечает на такую пару
+    // HTTP 400, и беседа перестаёт работать целиком — поэтому чиним её здесь,
+    // на последнем рубеже перед проводом, а не надеемся на источник.
+    messages.push(...repairToolPairs(request.messages));
 
     // Сами картинки идут частями ПОСЛЕДНЕГО сообщения пользователя: отдельным
     // system-сообщением их не примет почти ни один провайдер — изображение

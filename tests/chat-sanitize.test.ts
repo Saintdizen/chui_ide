@@ -4,6 +4,8 @@ import {
   MAX_CONVERSATIONS,
   MAX_MESSAGES,
   MAX_TOOL_CALLS,
+  MISSING_TOOL_RESULT,
+  repairToolPairs,
   sanitizeConversations,
   sanitizeHistory,
   sanitizeMessages,
@@ -149,14 +151,17 @@ describe('sanitizeMessages', () => {
   });
 
   it('переносим name, toolCallId и оценку', () => {
+    // Ответ инструмента стоит после своего вызова: без вызова он осиротевший,
+    // и такая пара отбрасывается (см. `repairToolPairs`).
     const result = sanitizeMessages([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'read_file', arguments: '{}' }] },
       { role: 'tool', content: 'вывод', name: 'read_file', toolCallId: 'call_1' },
       { role: 'assistant', content: 'ок', rating: 'up' },
       { role: 'assistant', content: 'ок', rating: 'мимо' },
     ]);
-    expect(result[0]).toEqual({ role: 'tool', content: 'вывод', name: 'read_file', toolCallId: 'call_1' });
-    expect(result[1]?.rating).toBe('up');
-    expect(result[2]?.rating).toBeUndefined();
+    expect(result[1]).toEqual({ role: 'tool', content: 'вывод', name: 'read_file', toolCallId: 'call_1' });
+    expect(result[2]?.rating).toBe('up');
+    expect(result[3]?.rating).toBeUndefined();
   });
 
   it('нестроковый content → пустая строка', () => {
@@ -166,6 +171,71 @@ describe('sanitizeMessages', () => {
   it('число сообщений ограничено', () => {
     const many = Array.from({ length: MAX_MESSAGES + 3 }, () => ({ role: 'user', content: 'x' }));
     expect(sanitizeMessages(many)).toHaveLength(MAX_MESSAGES);
+  });
+
+  // Беседа — контекст для следующего вопроса, поэтому потолок обязан держать
+  // свежий хвост: раньше он оставлял первые 200 сообщений, и после перезапуска
+  // вся недавняя работа пропадала из истории.
+  it('потолок сообщений держит свежие, а не первые', () => {
+    const many = Array.from({ length: MAX_MESSAGES + 3 }, (_, index) => ({ role: 'user', content: `м${index}` }));
+    const result = sanitizeMessages(many);
+    expect(result).toHaveLength(MAX_MESSAGES);
+    expect(result.at(-1)).toEqual({ role: 'user', content: `м${MAX_MESSAGES + 2}` });
+    expect(result[0]).toEqual({ role: 'user', content: 'м3' });
+  });
+});
+
+describe('repairToolPairs', () => {
+  it('недостающий ответ инструмента дописываем заглушкой', () => {
+    const result = repairToolPairs([
+      { role: 'user', content: 'проверь' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'run_tests', arguments: '{}' }] },
+    ]);
+    expect(result).toHaveLength(3);
+    expect(result[2]).toEqual({ role: 'tool', toolCallId: 'call_1', name: 'run_tests', content: MISSING_TOOL_RESULT });
+  });
+
+  it('заглушка встаёт до следующей реплики человека, а не в конец', () => {
+    const result = repairToolPairs([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'read_file', arguments: '{}' }] },
+      { role: 'user', content: 'ладно, дальше' },
+      { role: 'assistant', content: 'ок' },
+    ]);
+    expect(result.map((message) => message.role)).toEqual(['assistant', 'tool', 'user', 'assistant']);
+  });
+
+  it('отвеченный вызов не трогаем, а лишний ответ убираем', () => {
+    const result = repairToolPairs([
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'read_file', arguments: '{}' }] },
+      { role: 'tool', content: 'вывод', name: 'read_file', toolCallId: 'call_1' },
+      { role: 'tool', content: 'чужой', name: 'read_file', toolCallId: 'call_2' },
+      { role: 'user', content: 'спасибо' },
+    ]);
+    expect(result.map((message) => message.toolCallId ?? message.role)).toEqual(['assistant', 'call_1', 'user']);
+  });
+
+  it('вызов без id и повтор id не пропускаем', () => {
+    const result = repairToolPairs([
+      {
+        role: 'assistant',
+        content: 'сейчас',
+        toolCalls: [
+          { id: '', name: 'read_file', arguments: '{}' },
+          { id: 'call_1', name: 'read_file', arguments: '{}' },
+          { id: 'call_1', name: 'run_tests', arguments: '{}' },
+        ],
+      },
+    ]);
+    expect(result[0]?.toolCalls).toHaveLength(1);
+    expect(result.map((message) => message.toolCallId)).toEqual([undefined, 'call_1']);
+  });
+
+  it('ассистент без вызовов и без текста из истории выпадает', () => {
+    const result = repairToolPairs([
+      { role: 'user', content: 'привет' },
+      { role: 'assistant', content: '', toolCalls: [{ id: '', name: 'read_file', arguments: '{}' }] },
+    ]);
+    expect(result).toEqual([{ role: 'user', content: 'привет' }]);
   });
 });
 

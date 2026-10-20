@@ -124,10 +124,88 @@ export function sanitizeMessages(raw: unknown): ChatMessage[] {
     if (toolCalls.length > 0) message.toolCalls = toolCalls;
 
     messages.push(message);
-    if (messages.length >= MAX_MESSAGES) break;
   }
 
-  return messages;
+  // Потолок держит СВЕЖИЕ сообщения, а не первые: беседа — это контекст для
+  // следующего вопроса, и начало ей нужно меньше, чем последний ход. Режем по
+  // индексу, а обрубок пары вызов-ответ после этого убирает `repairToolPairs`:
+  // провайдер отвергает такую пару ошибкой HTTP 400.
+  return repairToolPairs(messages.length > MAX_MESSAGES ? messages.slice(-MAX_MESSAGES) : messages);
+}
+
+/**
+ * Чем заканчивается вызов, ответ на который до истории не дошёл. Так бывает,
+ * когда приложение закрыли посреди прогона: вызов модели уже записан, а
+ * результата инструмента ещё нет.
+ */
+export const MISSING_TOOL_RESULT = 'Ошибка: ответ инструмента не получен — прогон прерван.';
+
+/**
+ * Привести историю к протоколу вызова инструментов.
+ *
+ * Провайдер требует строгой пары: сообщение ассистента с `toolCalls` обязано
+ * получить ответ на КАЖДЫЙ вызов, а `role: 'tool'` без такого вызова — уже
+ * нарушение. Иначе на любой запрос приходит HTTP 400 вида «An assistant message
+ * with 'tool_calls' must be followed by tool messages», и беседа перестаёт
+ * работать навсегда: сломанная пара лежит в файле и восстанавливается при
+ * каждом перезапуске.
+ *
+ * Поэтому чиним в обе стороны: недостающий ответ дописываем заглушкой (модель
+ * видит, что вызов был и чем кончился), а осиротевший ответ выбрасываем —
+ * восстановить по нему вызов невозможно.
+ */
+export function repairToolPairs(messages: readonly ChatMessage[]): ChatMessage[] {
+  const repaired: ChatMessage[] = [];
+  /** Вызовы, которые ещё ждут ответа: id → имя. `null` — ждать нечего. */
+  let waiting: Map<string, string> | null = null;
+
+  /** Закрыть ожидание: на неответившие вызовы дописываем заглушки. */
+  const flush = (): void => {
+    if (!waiting) return;
+    for (const [id, name] of waiting) {
+      repaired.push({ role: 'tool', toolCallId: id, name, content: MISSING_TOOL_RESULT });
+    }
+    waiting = null;
+  };
+
+  for (const message of messages) {
+    if (message.role === 'tool') {
+      // Ответ на вызов, которого не было перед ним, протокол ломает: убрать его —
+      // единственный выход, вызов из него не восстановить.
+      if (!waiting || !message.toolCallId || !waiting.has(message.toolCallId)) continue;
+      waiting.delete(message.toolCallId);
+      repaired.push(message);
+      continue;
+    }
+
+    flush();
+    if (message.role !== 'assistant' || !message.toolCalls?.length) {
+      repaired.push(message);
+      continue;
+    }
+
+    // Вызов без id или с повтором id тоже не пройдёт: id — единственное, чем
+    // ответ связывается с вызовом. Такой вызов убираем, его ответ отбросит
+    // проверка выше — как осиротевший.
+    const calls: ChatToolCall[] = [];
+    const ids = new Set<string>();
+    for (const call of message.toolCalls) {
+      if (!call.id || ids.has(call.id)) continue;
+      ids.add(call.id);
+      calls.push(call);
+    }
+    if (calls.length === 0) {
+      // Вызовов не осталось — сообщение остаётся обычной репликой, если в нём
+      // есть текст; пустую реплику модели в историю не тащим.
+      if (message.content.trim()) repaired.push({ role: 'assistant', content: message.content });
+      continue;
+    }
+    repaired.push({ ...message, toolCalls: calls });
+    waiting = new Map(calls.map((call) => [call.id, call.name]));
+  }
+
+  flush();
+  return repaired;
 }
 
 export function sanitizeToolCalls(raw: unknown): ChatToolCall[] {
