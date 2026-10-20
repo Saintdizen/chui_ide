@@ -437,6 +437,9 @@ const openAi = (input: number, output: number): ModelPricing => price(input, out
 
 const claude = (input: number, output: number): ModelPricing => price(input, output, input * 0.1, input * 1.25);
 
+// DeepSeek: кеш включён всегда, попадание дешевле промаха на два порядка ($0.003
+// против $0.15 за 1M в непик). 0.02 — чуть осторожнее реального отношения: если
+// кеш подорожает, оценка останется не в свою пользу.
 const deepSeek = (input: number, output: number): ModelPricing => price(input, output, input * 0.02);
 
 /**

@@ -176,8 +176,9 @@ describe('modelPricing: прайс по семействам', () => {
     expect(modelPricing('gpt-4o')).toMatchObject({ cachedInput: 1.25, cacheWrite: 2.5 });
     expect(modelPricing('claude-sonnet-4-5')?.cachedInput).toBeCloseTo(0.3, 10);
     expect(modelPricing('claude-sonnet-4-5')?.cacheWrite).toBe(3.75);
-    // У DeepSeek кеш-хит — 0.02× от промаха, а не 0.1×: впятеро дешевле, чем
-    // мы считали раньше.
+    // У DeepSeek попадание в кеш дешевле промаха на два порядка ($0.003 против
+    // $0.15 за 1M в непик), а не на порядок: цена держится с запасом в сторону
+    // осторожности, чтобы оценка не льстила счёту.
     expect(modelPricing('deepseek-flash')?.cachedInput).toBeCloseTo(0.006, 10);
   });
 
