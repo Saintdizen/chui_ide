@@ -106,21 +106,13 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
   {
     id: 'git-read',
     label: 'Git: чтение',
-    names: ['git_status', 'git_diff', 'git_log', 'git_blame'],
+    names: ['git_read'],
   },
   {
     id: 'git-write',
     label: 'Git: изменения',
-    names: [
-      'git_stage',
-      'git_unstage',
-      'git_commit',
-      'git_checkout',
-      'git_discard',
-      'git_fetch',
-      'git_pull',
-      'git_push',
-    ],
+    // Действия внутри: stage, unstage, commit, checkout, discard, fetch, pull, push.
+    names: ['git_write'],
   },
   {
     id: 'web',

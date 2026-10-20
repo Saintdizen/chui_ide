@@ -441,7 +441,7 @@ export interface ToolContext {
   confirmGit?(action: string): Promise<boolean>;
   /** Пометки языка из редактора. */
   diagnostics?(path?: string): Promise<DiagnosticsHostResult>;
-  /** Git рабочей папки: нужен инструментам git_status/git_diff. */
+  /** Git рабочей папки: нужен инструментам git_read/git_write. */
   git?: GitTools;
   /** Открыть файл в редакторе (renderer): нужен инструменту open_file. */
   openFile?(path: string, line?: number, column?: number): Promise<boolean>;
@@ -760,7 +760,8 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       case 'read_mcp_resource':
         return await readMcpResource(ctx, parsed.value);
       // Три семейства ниже — одним инструментом с `action`: семь схем браузера и
-      // пять терминала стоили модели дороже, чем их различие по смыслу.
+      // пять терминала стоили модели дороже, чем их различие по смыслу. У git
+      // имён два, а не одно: граница «чтение / запись» решает, где его позвать.
       case 'browser':
         return await browserAction(ctx, parsed.value);
       case 'remember':
@@ -771,30 +772,10 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await scheduleList(ctx);
       case 'schedule':
         return await scheduleAction(ctx, parsed.value);
-      case 'git_status':
-        return await gitStatus(ctx);
-      case 'git_diff':
-        return await gitDiff(ctx, parsed.value);
-      case 'git_log':
-        return await gitLog(ctx, parsed.value);
-      case 'git_blame':
-        return await gitBlame(ctx, parsed.value);
-      case 'git_stage':
-        return await gitStage(ctx, parsed.value);
-      case 'git_unstage':
-        return await gitUnstage(ctx, parsed.value);
-      case 'git_commit':
-        return await gitCommit(ctx, parsed.value);
-      case 'git_checkout':
-        return await gitCheckout(ctx, parsed.value);
-      case 'git_discard':
-        return await gitDiscard(ctx, parsed.value);
-      case 'git_fetch':
-        return await gitNetwork(ctx, 'fetch');
-      case 'git_pull':
-        return await gitNetwork(ctx, 'pull');
-      case 'git_push':
-        return await gitPush(ctx, parsed.value);
+      case 'git_read':
+        return await gitRead(ctx, parsed.value);
+      case 'git_write':
+        return await gitWrite(ctx, parsed.value);
       case 'open_file':
         return await openFile(ctx, parsed.value);
       case 'terminal':
@@ -996,7 +977,12 @@ function pageSummary(snapshot: BrowserSnapshot): string {
 function missingForAction(args: Record<string, unknown>, keys: readonly string[]): ToolOutcome | null {
   for (const key of keys) {
     const value = args[key];
-    if (typeof value !== 'string' || value.trim().length === 0) {
+    // `git_write` называет списком не только строки: `paths` — массив, и пустой
+    // массив значит «аргумента нет», а не «проиндексировать всё».
+    const present = Array.isArray(value)
+      ? value.some((item) => typeof item === 'string' && item.trim().length > 0)
+      : typeof value === 'string' && value.trim().length > 0;
+    if (!present) {
       return {
         ok: false,
         summary: `Действию «${String(args.action)}» нужен аргумент «${key}»`,
@@ -2777,6 +2763,64 @@ function gitLetter(change: GitStatus['files'][number]['change']): string {
 
 const MAX_GIT_FILES = 200;
 
+/* ── git: двенадцать действий под двумя именами ─────────────────────────── */
+
+/**
+ * Действия git — одним инструментом, но под двумя именами.
+ *
+ * Чтение и запись здесь не «два действия одного инструмента», а две степени
+ * доверия: от неё зависит, предложить ли инструмент в режиме «План», подзадаче и
+ * набору «Только чтение». Один `git` отдал бы `push` набору, который обещает
+ * ничего не менять, — поэтому имён два, а действия внутри.
+ */
+async function gitRead(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  switch (action) {
+    case 'status':
+      return await gitStatus(ctx);
+    case 'diff':
+      return await gitDiff(ctx, args);
+    case 'log':
+      return await gitLog(ctx, args);
+    case 'blame':
+      return missingForAction(args, ['path']) ?? (await gitBlame(ctx, args));
+    default:
+      return {
+        ok: false,
+        summary: `Неизвестное действие чтения git: ${action}`,
+        detail: 'Допустимые: status, diff, log, blame.',
+      };
+  }
+}
+
+async function gitWrite(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  switch (action) {
+    case 'stage':
+      return missingForAction(args, ['paths']) ?? (await gitStage(ctx, args));
+    case 'unstage':
+      return missingForAction(args, ['paths']) ?? (await gitUnstage(ctx, args));
+    case 'discard':
+      return missingForAction(args, ['paths']) ?? (await gitDiscard(ctx, args));
+    case 'commit':
+      return missingForAction(args, ['message']) ?? (await gitCommit(ctx, args));
+    case 'checkout':
+      return missingForAction(args, ['name']) ?? (await gitCheckout(ctx, args));
+    case 'fetch':
+      return await gitNetwork(ctx, 'fetch');
+    case 'pull':
+      return await gitNetwork(ctx, 'pull');
+    case 'push':
+      return await gitPush(ctx, args);
+    default:
+      return {
+        ok: false,
+        summary: `Неизвестное действие git: ${action}`,
+        detail: 'Допустимые: stage, unstage, commit, checkout, discard, fetch, pull, push.',
+      };
+  }
+}
+
 /** Состояние репозитория: ветка, синхронизация и список изменённых файлов. */
 async function gitStatus(ctx: ToolContext): Promise<ToolOutcome> {
   if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
@@ -2831,7 +2875,7 @@ async function gitDiff(ctx: ToolContext, args: Record<string, unknown>): Promise
     return { ok: true, summary: `${where}: нет изменений${scope}`, detail: 'git не показал различий.' };
   }
 
-  const { text, truncated } = clipText(ctx, 'git_diff', diff);
+  const { text, truncated } = clipText(ctx, 'git diff', diff);
   // Без пути diff бывает большим: сводку строим по числу файлов, а не по одному.
   const files = target ? '' : ` · файлов: ${new Set(diff.matchAll(/^diff --git a\/(.+?) b\//gm)).size}`;
   return {
@@ -2865,6 +2909,9 @@ async function gitBlame(ctx: ToolContext, args: Record<string, unknown>): Promis
  * спрашивает на каждое; при полном доступе — только на эти: откат теряет работу
  * безвозвратно, переключение ветки переписывает файлы, отправка и вливание
  * затрагивают удалённый репозиторий и чужие коммиты.
+ *
+ * Имена здесь — действия `git_write` (в вызовах `permitGit`), а не имена
+ * инструментов: спрашивать или нет, решает действие, а не инструмент.
  */
 const DANGEROUS_GIT_ACTIONS = new Set(['git_discard', 'git_push', 'git_pull', 'git_checkout']);
 

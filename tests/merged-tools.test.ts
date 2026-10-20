@@ -23,14 +23,25 @@ describe('слитые инструменты: схема', () => {
     expect(actions('browser')).toEqual(['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close']);
     expect(actions('terminal')).toEqual(['list', 'start', 'read', 'write', 'stop']);
     expect(actions('schedule')).toEqual(['create', 'update', 'delete']);
+    expect(actions('git_read')).toEqual(['status', 'diff', 'log', 'blame']);
+    expect(actions('git_write')).toEqual([
+      'stage',
+      'unstage',
+      'commit',
+      'checkout',
+      'discard',
+      'fetch',
+      'pull',
+      'push',
+    ]);
     // Старых имён в наборе больше нет: иначе схема и обработчик разъехались бы.
-    for (const old of ['browser_open', 'browser_click', 'terminal_start', 'schedule_create']) {
+    for (const old of ['browser_open', 'terminal_start', 'schedule_create', 'git_status', 'git_push']) {
       expect(AGENT_TOOLS.some((tool) => tool.name === old)).toBe(false);
     }
   });
 
   it('обязателен только action: остальные поля зависят от действия', () => {
-    for (const name of ['browser', 'terminal', 'schedule']) {
+    for (const name of ['browser', 'terminal', 'schedule', 'git_read', 'git_write']) {
       expect(spec(name).inputSchema.required).toEqual(['action']);
     }
   });
@@ -55,6 +66,21 @@ describe('слитые инструменты: разбор', () => {
     const outcome = await runTool(ctx, 'browser', JSON.stringify({ action: 'click' }));
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('ref');
+  });
+
+  it('git_write: аргумент спрашивается по действию', async () => {
+    const stage = await runTool(ctx, 'git_write', JSON.stringify({ action: 'stage' }));
+    expect(stage.summary).toContain('paths');
+    const commit = await runTool(ctx, 'git_write', JSON.stringify({ action: 'commit' }));
+    expect(commit.summary).toContain('message');
+    const checkout = await runTool(ctx, 'git_write', JSON.stringify({ action: 'checkout' }));
+    expect(checkout.summary).toContain('name');
+  });
+
+  it('git_read: незнакомое действие называет допустимые', async () => {
+    const outcome = await runTool(ctx, 'git_read', JSON.stringify({ action: 'stage' }));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.detail).toContain('status, diff, log, blame');
   });
 
   it('без действия вызов тоже объясняется', async () => {

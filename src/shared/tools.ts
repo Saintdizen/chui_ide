@@ -62,18 +62,8 @@ export type AgentToolName =
   | 'forget'
   | 'schedule'
   | 'schedule_list'
-  | 'git_status'
-  | 'git_diff'
-  | 'git_log'
-  | 'git_blame'
-  | 'git_stage'
-  | 'git_unstage'
-  | 'git_commit'
-  | 'git_checkout'
-  | 'git_discard'
-  | 'git_fetch'
-  | 'git_pull'
-  | 'git_push'
+  | 'git_read'
+  | 'git_write'
   | 'open_file'
   | 'present'
   | 'terminal';
@@ -1016,171 +1006,59 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'git_status',
+    name: 'git_read',
     side: 'main',
     description:
-      'Git state: current branch and changed files (index and worktree). Check it before ' + 'committing or reverting.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'git_diff',
-    side: 'main',
-    description:
-      'Git diff: worktree against the index, or with staged=true the index against HEAD. 3 ' +
-      'lines of context regardless of git settings. Without path: the whole working diff.',
+      'Read the repository: action status (branch, ahead/behind, changed files), diff (worktree ' +
+      'against the index, staged=true the index against HEAD), log (recent commits), blame (who ' +
+      'changed the lines of a file and when). Read-only. Check status and diff before committing ' +
+      'or reverting, so the commit holds exactly what you mean.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Absolute file path. Without it, all changed files.' },
-        staged: { type: 'boolean', description: 'true compares the index with HEAD.' },
+        action: {
+          type: 'string',
+          description: 'status, diff, log, blame.',
+          enum: ['status', 'diff', 'log', 'blame'],
+        },
+        path: { type: 'string', description: 'diff, log, blame: one file (absolute).' },
+        staged: { type: 'boolean', description: 'diff: index against HEAD.' },
+        limit: { type: 'number', description: 'log: how many (default 20, max 100).' },
+        startLine: { type: 'number', description: 'blame: first line (1-based).' },
+        endLine: { type: 'number', description: 'blame: last line (inclusive).' },
       },
+      required: ['action'],
     },
   },
   {
-    name: 'git_log',
+    name: 'git_write',
     side: 'main',
     description:
-      'Commit history: recent changes of the repository or of one file. Read-only. Returns ' +
-      'hash, date, author and subject of each commit.',
+      'Change the repository: stage, unstage, commit, checkout, discard, fetch, pull, push. ' +
+      'Checkout rewrites files and git may refuse uncommitted changes. Discard is irreversible: ' +
+      'ask the user first. Conflicts are resolved by hand, not by repeating pull.',
     inputSchema: {
       type: 'object',
       properties: {
-        limit: { type: 'number', description: 'How many (default 20, max 100).' },
-        path: { type: 'string', description: 'Limit the history to one file (absolute path).' },
-      },
-    },
-  },
-  {
-    name: 'git_blame',
-    side: 'main',
-    description:
-      'Who changed the lines of a file and when: author, commit, its message. Answers why ' +
-      'the code looks like this, since the message often keeps the intent that the code no ' +
-      'longer shows. startLine/endLine narrow the output. Read-only.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        path: { type: 'string', description: 'Absolute path to the file.' },
-        startLine: { type: 'number', description: 'First line (1-based); defaults to the start.' },
-        endLine: { type: 'number', description: 'Last line of the range (inclusive).' },
-      },
-      required: ['path'],
-    },
-  },
-  {
-    name: 'git_stage',
-    side: 'main',
-    description:
-      'Stage files (git add). Absolute paths. Staged changes go into the next commit. ' + 'Deletions are staged too.',
-    inputSchema: {
-      type: 'object',
-      properties: {
+        action: {
+          type: 'string',
+          description:
+            'stage (git add), unstage (worktree stays), commit, checkout, discard, fetch, ' +
+            'pull, push (upstream on the first push; force only on request).',
+          enum: ['stage', 'unstage', 'commit', 'checkout', 'discard', 'fetch', 'pull', 'push'],
+        },
         paths: {
           type: 'array',
-          description: 'Absolute paths of files or folders.',
+          description: 'stage, unstage, discard, commit: absolute files or folders.',
           items: { type: 'string', description: 'Path.' },
         },
+        message: { type: 'string', description: 'commit: message.' },
+        name: { type: 'string', description: 'checkout: branch name.' },
+        create: { type: 'boolean', description: 'checkout: create the branch and switch to it.' },
+        setUpstream: { type: 'boolean', description: 'push: set upstream to origin (-u).' },
+        force: { type: 'boolean', description: 'push: --force-with-lease.' },
       },
-      required: ['paths'],
-    },
-  },
-  {
-    name: 'git_unstage',
-    side: 'main',
-    description: 'Unstage files (git restore --staged). Worktree changes stay.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        paths: {
-          type: 'array',
-          description: 'Absolute paths of files or folders.',
-          items: { type: 'string', description: 'Path.' },
-        },
-      },
-      required: ['paths'],
-    },
-  },
-  {
-    name: 'git_commit',
-    side: 'main',
-    description:
-      'Commit staged changes. With paths it commits only those. The message is one ' +
-      'meaningful line about what changed and why. Check git_status and git_diff first, so ' +
-      'the commit holds exactly what you mean.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        message: { type: 'string', description: 'Commit message.' },
-        paths: {
-          type: 'array',
-          description: 'When set, commit only these paths (absolute).',
-          items: { type: 'string', description: 'Path.' },
-        },
-      },
-      required: ['message'],
-    },
-  },
-  {
-    name: 'git_checkout',
-    side: 'main',
-    description:
-      'Switch or create a branch. Switching rewrites files on disk to the branch content; ' +
-      'git may refuse when there are uncommitted changes, and that is its protection.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Branch name.' },
-        create: { type: 'boolean', description: 'true creates the branch and switches to it.' },
-      },
-      required: ['name'],
-    },
-  },
-  {
-    name: 'git_discard',
-    side: 'main',
-    description:
-      'Revert changes: tracked files go back to the last commit, new files go to the trash. ' +
-      'Irreversible: uncommitted work is lost. Call it only on an explicit request.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        paths: {
-          type: 'array',
-          description: 'Absolute file paths.',
-          items: { type: 'string', description: 'Path.' },
-        },
-      },
-      required: ['paths'],
-    },
-  },
-  {
-    name: 'git_fetch',
-    side: 'main',
-    description:
-      'Fetch remote changes without touching the worktree. Useful to compare local with ' +
-      'remote before work. The network may be unavailable and the answer will say so.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'git_pull',
-    side: 'main',
-    description:
-      'Merge remote changes into the current branch. On diverging paths git may report a ' +
-      'conflict: resolve it by hand instead of repeating pull.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'git_push',
-    side: 'main',
-    description:
-      'Push commits to the remote. On the first push upstream is set automatically ' +
-      '(origin). force pushes with --force-with-lease: only on an explicit request.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        setUpstream: { type: 'boolean', description: 'true sets the upstream to origin (git push -u).' },
-        force: { type: 'boolean', description: 'true forces the push (--force-with-lease).' },
-      },
+      required: ['action'],
     },
   },
   {

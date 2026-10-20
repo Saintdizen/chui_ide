@@ -18,6 +18,11 @@ const ROOT = path.resolve('/proj');
 
 const STATUS: GitStatus = { repository: null, files: [] };
 
+/* Вызовы `git_write` одним действием: инструмент один, а действий восемь. */
+const COMMIT = '{"action":"commit","message":"fix"}';
+const PUSH = '{"action":"push"}';
+const discard = (): string => JSON.stringify({ action: 'discard', paths: [path.join(ROOT, 'a.ts')] });
+
 /** Заглушка git: каждый метод считает вызовы, чтобы видеть, дошло ли до него действие. */
 function makeGit() {
   return {
@@ -50,7 +55,7 @@ describe('подтверждение git-действий', () => {
   it('в обычном режиме коммит спрашивает и без разрешения не выполняется', async () => {
     const git = makeGit();
     const confirmGit = approver(false);
-    const outcome = await runTool(context(git, { confirmGit }), 'git_commit', '{"message":"fix"}');
+    const outcome = await runTool(context(git, { confirmGit }), 'git_write', COMMIT);
 
     expect(outcome.ok).toBe(false);
     expect(confirmGit).toHaveBeenCalledOnce();
@@ -59,7 +64,7 @@ describe('подтверждение git-действий', () => {
 
   it('с разрешением коммит выполняется и отдаёт хеш', async () => {
     const git = makeGit();
-    const outcome = await runTool(context(git, { confirmGit: approver(true) }), 'git_commit', '{"message":"fix"}');
+    const outcome = await runTool(context(git, { confirmGit: approver(true) }), 'git_write', COMMIT);
 
     expect(outcome.ok).toBe(true);
     expect(outcome.summary).toContain('abc1234');
@@ -68,7 +73,7 @@ describe('подтверждение git-действий', () => {
 
   it('нет моста подтверждений — действие недоступно', async () => {
     const git = makeGit();
-    const outcome = await runTool(context(git), 'git_push', '{}');
+    const outcome = await runTool(context(git), 'git_write', PUSH);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('недоступн');
@@ -80,10 +85,10 @@ describe('подтверждение git-действий', () => {
     const confirmGit = approver(true);
     const ctx = context(git, { confirmGit, allowAll: true, confirmDangerous: true });
 
-    await runTool(ctx, 'git_commit', '{"message":"fix"}');
+    await runTool(ctx, 'git_write', COMMIT);
     expect(confirmGit).not.toHaveBeenCalled();
 
-    await runTool(ctx, 'git_discard', JSON.stringify({ paths: [path.join(ROOT, 'a.ts')] }));
+    await runTool(ctx, 'git_write', discard());
     expect(confirmGit).toHaveBeenCalledOnce();
   });
 
@@ -92,7 +97,7 @@ describe('подтверждение git-действий', () => {
     const confirmGit = approver(true);
     const ctx = context(git, { confirmGit, allowAll: true, confirmDangerous: false });
 
-    await runTool(ctx, 'git_discard', JSON.stringify({ paths: [path.join(ROOT, 'a.ts')] }));
+    await runTool(ctx, 'git_write', discard());
     expect(confirmGit).not.toHaveBeenCalled();
     expect(git.discard).toHaveBeenCalledOnce();
   });
@@ -102,7 +107,7 @@ describe('граница рабочей папки', () => {
   it('путь вне проекта отвергается, git не вызывается', async () => {
     const git = makeGit();
     const ctx = context(git, { confirmGit: approver(true) });
-    const outcome = await runTool(ctx, 'git_stage', '{"paths":["/etc/passwd"]}');
+    const outcome = await runTool(ctx, 'git_write', '{"action":"stage","paths":["/etc/passwd"]}');
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('вне рабочей папки');
@@ -111,7 +116,11 @@ describe('граница рабочей папки', () => {
 
   it('относительный путь считается от корня проекта и доходит до git', async () => {
     const git = makeGit();
-    const outcome = await runTool(context(git, { confirmGit: approver(true) }), 'git_stage', '{"paths":["src/a.ts"]}');
+    const outcome = await runTool(
+      context(git, { confirmGit: approver(true) }),
+      'git_write',
+      '{"action":"stage","paths":["src/a.ts"]}',
+    );
 
     expect(outcome.ok).toBe(true);
     expect(git.stage).toHaveBeenCalledWith([path.join(ROOT, 'src', 'a.ts')]);
@@ -119,7 +128,11 @@ describe('граница рабочей папки', () => {
 
   it('пустой список путей — ошибка, а не «всё проиндексировано»', async () => {
     const git = makeGit();
-    const outcome = await runTool(context(git, { confirmGit: approver(true) }), 'git_stage', '{"paths":[]}');
+    const outcome = await runTool(
+      context(git, { confirmGit: approver(true) }),
+      'git_write',
+      '{"action":"stage","paths":[]}',
+    );
 
     expect(outcome.ok).toBe(false);
     expect(git.stage).not.toHaveBeenCalled();
@@ -136,7 +149,11 @@ describe('git_blame', () => {
     // строке дал бы недопустимую escape-последовательность (`\p`) и `JSON.parse`
     // свалился бы до самого инструмента.
     const file = path.join(ROOT, 'a.ts');
-    const outcome = await runTool(context(git), 'git_blame', JSON.stringify({ path: file, startLine: 5, endLine: 5 }));
+    const outcome = await runTool(
+      context(git),
+      'git_read',
+      JSON.stringify({ action: 'blame', path: file, startLine: 5, endLine: 5 }),
+    );
 
     expect(outcome.ok).toBe(true);
     expect(git.blame).toHaveBeenCalledWith(file, { startLine: 5, endLine: 5 });
@@ -147,7 +164,7 @@ describe('git_blame', () => {
 describe('сетевые действия', () => {
   it('git_fetch отдаёт текст от git и не трогает рабочее дерево', async () => {
     const git = makeGit();
-    const outcome = await runTool(context(git, { confirmGit: approver(true) }), 'git_fetch', '{}');
+    const outcome = await runTool(context(git, { confirmGit: approver(true) }), 'git_write', '{"action":"fetch"}');
 
     expect(outcome.ok).toBe(true);
     expect(outcome.detail).toBe('fetched');
@@ -157,8 +174,8 @@ describe('сетевые действия', () => {
     const git = makeGit();
     const outcome = await runTool(
       context(git, { confirmGit: approver(true) }),
-      'git_push',
-      '{"force":true,"setUpstream":true}',
+      'git_write',
+      '{"action":"push","force":true,"setUpstream":true}',
     );
 
     expect(outcome.ok).toBe(true);

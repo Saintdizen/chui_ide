@@ -158,7 +158,7 @@ export async function openProjectFolder(
 export function registerIpc(deps: AppDependencies): RpcRouter {
   const router = new RpcRouter();
 
-  // Git нужен и агенту (инструменты git_status/git_diff) — отдаём ему тот же сервис.
+  // Git нужен и агенту (инструменты git_read/git_write) — отдаём ему тот же сервис.
   deps.ai.attachGit(deps.git);
   // Терминалы — тоже: агент работает с pty-сессиями, а не только разовыми командами.
   deps.ai.attachTerminals(deps.terminals);

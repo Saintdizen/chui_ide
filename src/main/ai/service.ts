@@ -368,7 +368,7 @@ export class AiService {
     this.calibration.load(readCalibration(this.settings.file()));
   }
 
-  /** Подключить git рабочей папки: включает инструменты git_status и git_diff. */
+  /** Подключить git рабочей папки: включает инструменты git_read и git_write. */
   attachGit(git: GitTools): void {
     this.git = git;
   }
@@ -2130,16 +2130,12 @@ export class AiService {
     // Утверждать план некому без окна: карточка живёт в ленте чата.
     if (tool.name === 'exit_plan_mode') return host?.exitPlan !== undefined;
     if (tool.name === 'open_file') return host?.openFile !== undefined;
-    if (
-      tool.name === 'git_status' ||
-      tool.name === 'git_diff' ||
-      tool.name === 'git_log' ||
-      tool.name === 'git_blame'
-    ) {
-      return this.git !== undefined;
-    }
-    // Записи в репозиторий спрашивают подтверждение: без моста подтверждений их не предлагаем.
-    if (tool.name.startsWith('git_')) return this.git !== undefined && host?.confirmGit !== undefined;
+    // Чтение репозитория ничего не меняет — нужен только git.
+    if (tool.name === 'git_read') return this.git !== undefined;
+    // Записи в репозиторий спрашивают подтверждение: без моста подтверждений их не
+    // предлагаем. Условие общее на все действия, как у браузера: `stage` без моста
+    // откажет словами в обработчике, но в списке инструмент есть.
+    if (tool.name === 'git_write') return this.git !== undefined && host?.confirmGit !== undefined;
     if (tool.name === 'terminal') return this.terminals !== undefined;
     // Оба инструмента символов живут на языковом сервере: без него их не предлагаем.
     if (

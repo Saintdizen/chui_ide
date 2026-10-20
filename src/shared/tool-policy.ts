@@ -106,18 +106,11 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   interrupt_agent: { plan: true, alwaysAvailable: true },
 
   /* ── git ────────────────────────────────────────────────────────────── */
-  git_status: { readOnly: true, plan: true, subagent: true },
-  git_diff: { readOnly: true, plan: true, subagent: true },
-  git_log: { readOnly: true, plan: true, subagent: true },
-  git_blame: { readOnly: true, plan: true, subagent: true },
-  git_stage: {},
-  git_unstage: {},
-  git_commit: {},
-  git_checkout: {},
-  git_discard: {},
-  git_fetch: {},
-  git_pull: {},
-  git_push: {},
+  // Два имени, а не одно: граница «чтение / запись» — то самое различие,
+  // от которого зависит, где инструмент можно позвать. Слить в один `git`
+  // значило бы отдать `push` набору «Только чтение».
+  git_read: { readOnly: true, plan: true, subagent: true },
+  git_write: {},
 
   /* ── расписание ─────────────────────────────────────────────────────── */
   // В плане — только чтение: `schedule` меняет расписание (create, update,

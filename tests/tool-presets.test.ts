@@ -84,9 +84,7 @@ describe('наборы инструментов агента', () => {
       'replace_in_files',
       'run_terminal',
       'terminal',
-      'git_commit',
-      'git_push',
-      'git_checkout',
+      'git_write',
       'browser',
       'schedule',
       'run_code',
@@ -113,7 +111,7 @@ describe('наборы инструментов агента', () => {
 
   it('полный набор ничего не ограничивает', () => {
     expect(presetToolNames('full')).toBeNull();
-    expect(toolPresetAllows('full', 'git_push')).toBe(true);
+    expect(toolPresetAllows('full', 'git_write')).toBe(true);
     // Чужое имя (внешний инструмент MCP) полный набор тоже пропускает: судить о
     // нём по нашему списку нельзя, решает это `canRun` и настройки MCP.
     expect(toolPresetAllows('full', 'mcp_что_то')).toBe(true);
@@ -130,9 +128,9 @@ describe('наборы инструментов агента', () => {
 
   it('полный набор не толстеет незаметно', () => {
     // Каждая лишняя фраза в описании аргумента платится в каждом запросе: замер
-    // на проводе — 9 204 токена. Сторож держит потолок с запасом в 1%: обычная
+    // на проводе — 8 458 токенов. Сторож держит потолок с запасом в 2%: обычная
     // правка пройдёт, а возврат «объясню подробнее» на десяток описаний — нет.
-    expect(tokens.full).toBeLessThan(9_400);
+    expect(tokens.full).toBeLessThan(8_650);
   });
 
   it('неизвестное значение набора считается полным', () => {

@@ -60,19 +60,8 @@ describe('набор инструментов агента', () => {
       'forget',
       'schedule',
       'schedule_list',
-
-      'git_status',
-      'git_diff',
-      'git_log',
-      'git_blame',
-      'git_stage',
-      'git_unstage',
-      'git_commit',
-      'git_checkout',
-      'git_discard',
-      'git_fetch',
-      'git_pull',
-      'git_push',
+      'git_read',
+      'git_write',
       'open_file',
       'terminal',
     ];
@@ -174,41 +163,38 @@ describe('create_file', () => {
   });
 });
 
-describe('git_log', () => {
-  it('главная сторона, read-only аргументы', () => {
-    const tool = byName.get('git_log')!;
+describe('git_read', () => {
+  it('главная сторона, действия чтения и необязательные аргументы', () => {
+    const tool = byName.get('git_read')!;
     expect(tool.side).toBe('main');
-    expect(Object.keys(tool.inputSchema.properties)).toEqual(['limit', 'path']);
+    expect(tool.inputSchema.required).toEqual(['action']);
+    expect(Object.keys(tool.inputSchema.properties)).toEqual([
+      'action',
+      'path',
+      'staged',
+      'limit',
+      'startLine',
+      'endLine',
+    ]);
   });
 });
 
-describe('git-записи', () => {
-  it('все меняют репозиторий и живут в main', () => {
-    const writes: AgentToolName[] = [
-      'git_stage',
-      'git_unstage',
-      'git_commit',
-      'git_checkout',
-      'git_discard',
-      'git_fetch',
-      'git_pull',
-      'git_push',
-    ];
-    for (const name of writes) {
-      const tool = byName.get(name)!;
-      expect(tool.side).toBe('main');
-    }
-  });
-
-  it('git_commit требует сообщение, git_stage — пути', () => {
-    expect(byName.get('git_commit')!.inputSchema.required).toEqual(['message']);
-    expect(byName.get('git_stage')!.inputSchema.required).toEqual(['paths']);
-  });
-
-  it('git_fetch и git_pull без аргументов, git_push — только флаги', () => {
-    expect(byName.get('git_fetch')!.inputSchema.required).toBeUndefined();
-    expect(byName.get('git_pull')!.inputSchema.required).toBeUndefined();
-    expect(Object.keys(byName.get('git_push')!.inputSchema.properties)).toEqual(['setUpstream', 'force']);
+describe('git_write', () => {
+  it('меняет репозиторий, живёт в main и требует только действие', () => {
+    const tool = byName.get('git_write')!;
+    expect(tool.side).toBe('main');
+    // Остальные аргументы зависят от действия: commit просит message, stage — paths.
+    // Их проверяет обработчик, поэтому в схеме обязателен только `action`.
+    expect(tool.inputSchema.required).toEqual(['action']);
+    expect(Object.keys(tool.inputSchema.properties)).toEqual([
+      'action',
+      'paths',
+      'message',
+      'name',
+      'create',
+      'setUpstream',
+      'force',
+    ]);
   });
 });
 
