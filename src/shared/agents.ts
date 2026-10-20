@@ -5,7 +5,8 @@ import { clipDescription } from './subagents';
  * Живые агенты: кто работает, что делает и как его остановить.
  *
  * Подзадача (`task`) ждёт отчёта: пока она идёт, человек видит только карточку
- * «выполняется» и итог в конце. С `workflow` агентов запускают пачкой, и это стало
+ * «выполняется» и итог в конце. Пачкой агентов запускают `task` с несколькими
+ * заданиями и `agents`, и это стало
  * заметно: три-четыре прогона модели работают разом, а в ленте — одна строка.
  * Отсюда три вещи, которых не было:
  *
@@ -209,7 +210,9 @@ export function formatAgentWaits(outcomes: readonly AgentWaitOutcome[], timedOut
     parts.push(outcome.report === null ? `## ${head}` : `## ${head}\n${outcome.report.trim()}`);
   }
   if (timedOut) {
-    parts.push('Ожидание истекло: эти агенты ещё работают. Их состояние — agents с action: "list", отчёт — action: "wait" позже.');
+    parts.push(
+      'Ожидание истекло: эти агенты ещё работают. Их состояние — agents с action: "list", отчёт — action: "wait" позже.',
+    );
   }
   return parts.join('\n\n');
 }
@@ -267,7 +270,11 @@ export function parseWaitRequest(args: Record<string, unknown>, known: readonly 
     }
   }
   if (named.length === 0) {
-    return { ids: [], timeoutMs: 0, error: 'Нужны номера агентов: id или ids — список номеров из agents с action: "list".' };
+    return {
+      ids: [],
+      timeoutMs: 0,
+      error: 'Нужны номера агентов: id или ids — список номеров из agents с action: "list".',
+    };
   }
 
   const ids: string[] = [];

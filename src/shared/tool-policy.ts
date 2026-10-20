@@ -5,8 +5,7 @@
  * Раньше одни и те же сведения были размазаны по пяти спискам в трёх файлах:
  * повтор вызова не исполнялся по `READ_ONLY_TOOLS` (service), режим плана
  * отбирал `PLAN_MODE_TOOLS` (service), подзадача ходила по `SUBAGENT_TOOLS`
- * (tools), программа не звала `DENIED_IN_PROGRAM` (run-code), а «доступен без
- * условий» решался дефолтом `canRun`. Новый инструмент надо было вспомнить в
+ * (tools), а «доступен без условий» решался дефолтом `canRun`. Новый инструмент надо было вспомнить в
  * каждом — и забыть хотя бы в одном было тихо: тесты этого не видели.
  *
  * Теперь сведения об одном инструменте лежат одной строкой, а наборы собираются
@@ -27,8 +26,6 @@ export interface ToolPolicy {
   readonly plan?: boolean;
   /** Доступен подзадаче (`task`) — и тем самым предел глубины: ни `task` здесь нет. */
   readonly subagent?: boolean;
-  /** Запрещён внутри программы (`run_code`): ей это не по силам или обманывает обещание. */
-  readonly deniedInProgram?: boolean;
   /**
    * Доступен всегда: ни настроек, ни моста окна не требует. Всё остальное
    * решает `canRun` — и по умолчанию отказывает, чтобы новый инструмент не
@@ -43,13 +40,6 @@ export interface ToolPolicy {
    * зацикливания на чтении вывода.
    */
   readonly readOnlyActions?: readonly string[];
-  /**
-   * Действия, законные в режиме «План», когда инструмент в целом его не
-   * заслуживает: `schedule` с `list` только показывает задачи, а `create` и
-   * `delete` их меняют. Без этого признака слияние оставляло бы выбор из двух
-   * зол — не видеть расписание в плане вовсе или разрешить заводить задачи.
-   */
-  readonly planActions?: readonly string[];
 }
 
 export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
@@ -60,39 +50,33 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   // Одно имя на один файл и на пачку (`path` | `paths`).
   read: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
   search: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
-  search_docs: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
   project_map: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
-  read_image: { readOnly: true, plan: true, alwaysAvailable: true, deniedInProgram: true },
+  read_image: { readOnly: true, plan: true, alwaysAvailable: true },
 
   /* Символы и языковой сервер: без него эти инструменты не предлагаются. */
-  codebase_search: { readOnly: true, plan: true, subagent: true },
-  find_references: { readOnly: true, plan: true, subagent: true },
-  go_to_definition: { readOnly: true, plan: true, subagent: true },
-  file_outline: { readOnly: true, plan: true, subagent: true },
+  // Одно имя на все запросы к серверу: ссылки, объявление и скелет файла читают
+  // одно и то же состояние, и прав у них одни. Переименование осталось отдельным:
+  // оно ПИШЕТ код, а лсп в плане, у подзадачи и в наборе «Только чтение».
+  lsp: { readOnly: true, plan: true, subagent: true },
   rename_symbol: {},
 
   /* Проверки: мир не меняют, поэтому они и в плане, и у подзадачи. */
-  run_linter: { readOnly: true, plan: true, subagent: true },
   run_tests: {},
 
   /*
-   * Сеть. `web_search` в повторах не кэшируется (выдача меняется и стоит
-   * денег), но подзадаче доступен: без сети разведка проекта неполна.
+   * Сеть: `search` в повторах не кэшируется (выдача меняется и стоит денег),
+   * а `fetch` только читает — отсюда `readOnlyActions`. Подзадаче нужен целиком.
    */
-  web_search: { plan: true, subagent: true },
-  web_fetch: { readOnly: true, plan: true, subagent: true },
+  web: { plan: true, subagent: true, readOnlyActions: ['fetch'] },
 
-  session_search: { readOnly: true, plan: true, subagent: true },
   read_skill: { readOnly: true, plan: true, subagent: true },
-  get_diagnostics: { readOnly: true, plan: true, subagent: true },
-  list_mcp_resources: { plan: true },
-  read_mcp_resource: { plan: true },
+  checks: { readOnly: true, plan: true, subagent: true },
+  mcp: { plan: true },
 
   /* ── правки файлов ──────────────────────────────────────────────────── */
-  replace_in_files: { alwaysAvailable: true },
-  create_file: { alwaysAvailable: true },
-  delete_file: { alwaysAvailable: true },
-  move_file: { alwaysAvailable: true },
+  // Одно имя на создание, перемещение, удаление и замену по проекту: все четыре
+  // меняют диск одинаково и прав у них одни.
+  file: { alwaysAvailable: true },
   // Правка файлов: две формы (по якорю и по позициям) — один инструмент.
   // Права у форм одни: обе идут через ревью и undo в renderer.
   edit: {},
@@ -103,15 +87,13 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   // чтение вывода и список — отдельные действия, и они тоже только читают.
   terminal: { readOnlyActions: ['list', 'read', 'output'] },
 
-  /* ── программа и сценарий ───────────────────────────────────────────── */
-  run_code: { deniedInProgram: true },
-
   /* ── состояние беседы ───────────────────────────────────────────────── */
-  update_plan: { plan: true, alwaysAvailable: true, deniedInProgram: true },
-  update_goal: { alwaysAvailable: true, deniedInProgram: true },
-  exit_plan_mode: { plan: true, deniedInProgram: true },
-  // Вопрос человеку: в плане законен, внутри программы — нет (она ждала бы ответа).
-  ask: { plan: true, deniedInProgram: true },
+  // План и цель — одно состояние беседы: `steps` рисует шаги, `goal` живёт
+  // дольше хода. В плане доступно и то, и другое: это не правка проекта.
+  plan: { plan: true, alwaysAvailable: true },
+  exit_plan_mode: { plan: true },
+  // Вопрос человеку: в плане законен.
+  ask: { plan: true },
   task: { readOnly: true, plan: true, alwaysAvailable: true },
 
   /* ── агенты в фоне: план они не меняют, они читают проект ───────────── */
@@ -129,15 +111,8 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   git_read: { readOnly: true, plan: true, subagent: true },
   git_write: {},
 
-  /* ── расписание ──────────────────────────────────────────────────────── */
-  // Одно имя на все действия: `list` только показывает список, остальные три
-  // его меняют. В плане законен только `list` — это оговорено действием, а не
-  // вторым именем инструмента (второе имя стоило схемы в каждом запросе).
-  schedule: { planActions: ['list'] },
-
   /* ── память проекта: заметка обратима, спрашивать не у кого ─────────── */
-  remember: { alwaysAvailable: true },
-  forget: { alwaysAvailable: true },
+  mind: { alwaysAvailable: true },
 
   /* ── браузер ────────────────────────────────────────────────────────── */
   // Одно имя на все действия: снимок читает состояние страницы, но остальные
@@ -145,8 +120,9 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   browser: {},
 
   /* ── окно редактора ─────────────────────────────────────────────────── */
-  open_file: { plan: true },
-  present: { alwaysAvailable: true },
+  // Открыть файл и предложить результат кнопками — одна вещь («вот здесь»).
+  // В плане законно, показывать же безопасно и без подключённого окна.
+  show: { plan: true, alwaysAvailable: true },
 };
 
 /** Имена инструментов, отмеченных признаком. */
@@ -190,58 +166,16 @@ export function isReadOnlyCall(name: string, rawArguments: string): boolean {
  */
 export const PLAN_MODE_TOOLS = namesWhere('plan');
 
-/** Действия, законные в плане: имя инструмента → набор действий. */
-const PLAN_ACTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
-  (Object.entries(TOOL_POLICIES) as [AgentToolName, ToolPolicy][])
-    .filter(([, policy]) => (policy.planActions?.length ?? 0) > 0)
-    .map(([name, policy]) => [name, new Set(policy.planActions)]),
-);
-
-/**
- * Инструменты, которые в плане предлагаются: целиком или отдельными действиями.
- * `schedule` попадает сюда из-за одного `list`, и без его схемы модель не знала
- * бы даже имени — поэтому предлагаем целиком, а решаем по действию.
- */
-export const PLAN_MODE_OFFERED: ReadonlySet<string> = new Set([...PLAN_MODE_TOOLS, ...PLAN_ACTIONS.keys()]);
-
-/**
- * Законен ли вызов в режиме плана. Смотрит и на инструмент, и на действие:
- * `schedule(list)` расписание только показывает, а `create` его меняет.
- * Без этого проверять пришлось бы целым инструментом — и слитое имя либо
- * пропадало бы из плана вместе с `list`, либо заводило задачи.
- */
-export function allowsInPlan(name: string, rawArguments: string): boolean {
-  const actions = PLAN_ACTIONS.get(name);
-  if (!actions) return PLAN_MODE_TOOLS.has(name);
-  const parsed = parseToolArguments(rawArguments);
-  if (!parsed.ok) return false;
-  const action = parsed.value.action;
-  return typeof action === 'string' && actions.has(action);
-}
-
 /**
  * Инструменты подзадачи (`task`) — и тем самым предел глубины работы агентов.
  *
  * Только чтение: правки и команды остаются за основным агентом, который
  * показывает ревью и спрашивает человека. Здесь же лежит ответ на «а может ли
  * агент запустить агента»: ни `task` в наборе нет, поэтому
- * глубина всегда 1 (см. `WORKFLOW_MAX_DEPTH`). Иначе один вопрос человека
+ * глубина всегда 1. Иначе один вопрос человека
  * превращался бы в дерево прогонов модели, за которое никто не считал.
  */
 export const SUBAGENT_TOOLS = namesWhere('subagent');
-
-/**
- * Инструменты, которые программа (`run_code`) не зовёт.
- *
- * `run_code` — сам себя (рекурсия съела бы и время, и контекст).
- * `ask` — вопрос человеку: программа ждала бы ответа, а человек видел бы только
- * крутящуюся карточку. `update_plan` и `update_goal` — состояние беседы, а не
- * действие: его разбирает service, и из программы оно ничего не поменяет.
- * `read_image` — картинка уходит модели отдельным сообщением прогона, а из
- * программы такого сообщения нет: она получила бы текст «картинку отправили»,
- * которой модель не видит.
- */
-export const DENIED_IN_PROGRAM = namesWhere('deniedInProgram');
 
 /**
  * Доступны всегда: ни настроек, ни моста подтверждений им не нужно. Всё

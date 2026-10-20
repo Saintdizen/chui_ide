@@ -8,7 +8,6 @@ import {
   type SettingsPatch,
   type WorkspaceChangedPayload,
 } from '../shared/api';
-import type { ScheduleResult, TaskSchedule } from '../shared/scheduling';
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
 import { lspLanguagesForKind, lspPrimaryLanguagesForKind, mergeLspServers } from '../shared/lsp-presets';
@@ -151,7 +150,6 @@ import { createSurroundModal } from './ui/surround-modal';
 import { createRegexTester } from './ui/regex-tester';
 import { createStructuralSearch } from './ui/structural-search';
 import { createIdentityModal } from './ui/identity-modal';
-import { createScheduleModal } from './ui/schedule-modal';
 import { createTelemetryModal } from './ui/telemetry-modal';
 import { createForgeModal } from './ui/forge-modal';
 import { createIssuesModal } from './ui/issues-modal';
@@ -1800,43 +1798,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // композер отдаёт готовую строку, статус-бар принимает её в свой слот.
   statusBar.chatSlot.appendChild(chat.statusElement);
 
-  /** Итог запуска задачи пишем в файл расписания: список показывает, чем кончился прошлый раз. */
-  async function finishSchedule(id: string, result: ScheduleResult): Promise<void> {
-    try {
-      await rpc.request('schedule.finish', { id, result });
-    } catch {
-      // Задачу могли удалить, пока шёл ход: это не повод шуметь тостом.
-    }
-  }
-
-  /**
-   * Запуск задачи расписания — по часам или кнопкой в окне расписания.
-   *
-   * Каждый запуск — НОВАЯ беседа: переписка прошлого раза в контекст не едет,
-   * и «сделай то же ещё раз» не превращается в продолжение старого ответа.
-   */
-  async function startScheduledRun(schedule: TaskSchedule): Promise<void> {
-    if (!aiEnabled()) {
-      showToast(`Ассистент выключен — «${schedule.title}» не запущена`, 'error');
-      await finishSchedule(schedule.id, 'skipped');
-      return;
-    }
-
-    revealChat();
-    chat.newChat();
-    showToast(`Расписание: «${schedule.title}»`);
-
-    const run = await chat.sendPrompt(schedule.prompt);
-    if (run === 'busy') {
-      showToast(`Ассистент занят — «${schedule.title}» пропущена`, 'error');
-      await finishSchedule(schedule.id, 'skipped');
-      return;
-    }
-    // Итог — тот же, что видел человек в ленте: «готово» только там, где ответ
-    // действительно пришёл. Отказ модели и остановка — разные записи в списке.
-    await finishSchedule(schedule.id, run === 'started' ? 'ok' : run === 'stopped' ? 'stopped' : 'failed');
-  }
-
   const tabs = createTabs({
     openEditors,
     documents,
@@ -2549,20 +2510,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     notify: (message, kind) => showToast(message, kind),
   });
   document.body.appendChild(identityModal.element);
-
-  /**
-   * Расписание задач: когда ассистент начинает ход сам.
-   *
-   * Часы живут в main, а сам ход — здесь: беседа, правки и подтверждения — всё
-   * в окне. Задача приходит двумя путями — по часам (`PushTopic.ScheduleDue`) и
-   * кнопкой «Выполнить сейчас» в окне, — и оба ведут в один и тот же запуск.
-   */
-  const scheduleModal = createScheduleModal({
-    rpc,
-    notify: (message, kind) => showToast(message, kind),
-    runNow: (schedule) => startScheduledRun(schedule),
-  });
-  document.body.appendChild(scheduleModal.element);
 
   /**
    * Журнал прогонов: строки, которые main уже записал в файл. Трасса под ответом
@@ -6016,11 +5963,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   define(
-    { id: 'ai.schedules', title: 'Расписание задач…', category: 'AI', keywords: ['расписание', 'schedule', 'cron'] },
-    () => void scheduleModal.open(),
-  );
-
-  define(
     {
       id: 'ai.runLog',
       title: 'Прогон агента: трасса',
@@ -6424,12 +6366,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         // спрашивать было некого, и почему команда прошла без карточки.
         const payload = message.payload as { command?: string; reason?: string };
         if (payload?.command) chat.noteApprovalReview(payload.command, payload.reason ?? '');
-        break;
-      }
-      case PushTopic.ScheduleDue: {
-        // Время задачи пришло: ход начинаем здесь, в окне, — часы живут в main.
-        const payload = message.payload as { schedule?: TaskSchedule };
-        if (payload?.schedule) void startScheduledRun(payload.schedule);
         break;
       }
       case PushTopic.SettingsChanged:

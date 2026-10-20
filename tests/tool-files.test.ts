@@ -47,9 +47,13 @@ describe('touchedFiles', () => {
   });
 
   it('создание, удаление и перенос подписаны своим видом', () => {
-    expect(touchedFiles('create_file', '{"path":"/p/new.ts"}')).toEqual([{ path: '/p/new.ts', kind: 'created' }]);
-    expect(touchedFiles('delete_file', '{"path":"/p/old.ts"}')).toEqual([{ path: '/p/old.ts', kind: 'deleted' }]);
-    expect(touchedFiles('move_file', '{"from":"/p/a.ts","to":"/p/b.ts"}')).toEqual([
+    expect(touchedFiles('file', '{"action":"create","path":"/p/new.ts"}')).toEqual([
+      { path: '/p/new.ts', kind: 'created' },
+    ]);
+    expect(touchedFiles('file', '{"action":"delete","path":"/p/old.ts"}')).toEqual([
+      { path: '/p/old.ts', kind: 'deleted' },
+    ]);
+    expect(touchedFiles('file', '{"action":"move","from":"/p/a.ts","to":"/p/b.ts"}')).toEqual([
       { path: '/p/b.ts', kind: 'moved' },
     ]);
   });
@@ -57,7 +61,7 @@ describe('touchedFiles', () => {
   it('битые аргументы — пустой ряд, а не исключение', () => {
     // Лента чата не должна падать из-за того, что модель не собрала JSON.
     expect(touchedFiles('edit', 'не json')).toEqual([]);
-    expect(touchedFiles('create_file', '{"path":42}')).toEqual([]);
+    expect(touchedFiles('file', '{"action":"create","path":42}')).toEqual([]);
     expect(touchedFiles('edit', '{"edits":[]}')).toEqual([]);
   });
 

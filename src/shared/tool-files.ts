@@ -27,13 +27,8 @@ export function changeKindLabel(kind: ChangeKind): string {
   return 'правка';
 }
 
-/** Инструменты, у которых файлы видно только в аргументах вызова. */
-const ARGUMENT_KINDS: Record<string, ChangeKind> = {
-  edit: 'edited',
-  create_file: 'created',
-  delete_file: 'deleted',
-  move_file: 'moved',
-};
+/** Вид изменения по действию слитого инструмента `file`. */
+const FILE_KINDS: Record<string, ChangeKind> = { create: 'created', delete: 'deleted', move: 'moved' };
 
 /** Имя файла без пути: пути приходят и с `/`, и с `\`. */
 export function fileName(target: string): string {
@@ -50,13 +45,20 @@ export function fileName(target: string): string {
 export function touchedFiles(name: string, args: string, changes?: readonly ToolFileChange[]): TouchedFile[] {
   if (changes?.length) return changes.map((change) => ({ path: change.path, kind: change.kind }));
 
-  const kind = ARGUMENT_KINDS[name];
-  if (!kind) return [];
+  if (name !== 'edit' && name !== 'file') return [];
 
   try {
-    const value = JSON.parse(args) as { path?: unknown; to?: unknown; edits?: unknown; patches?: unknown };
+    const value = JSON.parse(args) as {
+      action?: unknown;
+      path?: unknown;
+      to?: unknown;
+      edits?: unknown;
+      patches?: unknown;
+    };
+    const kind: ChangeKind | undefined = name === 'edit' ? 'edited' : FILE_KINDS[String(value.action)];
+    if (!kind) return [];
     // У переноса файл — в `to`: `path` в его аргументах и не значится.
-    const single = name === 'move_file' ? value.to : value.path;
+    const single = value.action === 'move' ? value.to : value.path;
     // `edit` правит пачкой, и форма зависит от действия: по якорю файлы лежат в
     // `patches[].path`, по позициям — в `edits[].path`. Один файл может
     // встретиться дважды — в ряду он должен быть один раз.

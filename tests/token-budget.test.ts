@@ -109,8 +109,6 @@ describe('бюджет схем', () => {
     // остаются оба, а общий у них только каркас.
     const candidates: ReadonlyArray<readonly [string, readonly string[]]> = [
       ['агенты', ['agents']],
-      // `workflow` больше не отдельный инструмент (это `run_code({kind})`):
-      // имя в списке давало `undefined → 0` и занижало вес семейства.
       ['подзадачи', ['task']],
       ['поиск', ['search', 'codebase_search', 'search_docs']],
       ['чтение файла', ['read']],
@@ -152,7 +150,8 @@ describe('бюджет схем', () => {
     console.log(
       rows.map((row) => `${row.name.padEnd(20)} ${String(row.tokens).padStart(5)} (аргументы ${row.args})`).join('\n'),
     );
-    expect(rows.length).toBeGreaterThan(40);
+    // Схемы печатаются целиком: отчёт не должен молча терять инструменты.
+    expect(rows.length).toBe(AGENT_TOOLS.length);
   });
 
   it('отчёт: схемы, промпт и строка ростера по наборам', () => {

@@ -128,7 +128,7 @@ describe('эхо команды в ответе', () => {
       const long = `echo ${'x'.repeat(2500)}`;
       const out = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: long }));
       // Пять шагов потеряно на heredoc в живом прогоне: ошибка обязана называть выход.
-      expect(out.summary).toContain('create_file');
+      expect(out.summary).toContain('`file` (action create)');
     } finally {
       workspace.dispose();
     }

@@ -31,30 +31,24 @@ describe('набор инструментов агента', () => {
       'list',
       'read',
       'search',
-      'codebase_search',
-      'search_docs',
       'read_skill',
-      'find_references',
-      'go_to_definition',
+      'lsp',
       'rename_symbol',
       'run_tests',
-      'get_diagnostics',
+      'checks',
       'edit',
-      'replace_in_files',
-      'create_file',
-      'delete_file',
-      'move_file',
-      'update_plan',
+      'file',
+      'plan',
       'ask',
       'task',
       'browser',
 
-      'remember',
-      'forget',
-      'schedule',
+      'mind',
+      'mcp',
+      'web',
       'git_read',
       'git_write',
-      'open_file',
+      'show',
       'terminal',
     ];
     for (const name of dispatched) expect(byName.has(name)).toBe(true);
@@ -87,6 +81,7 @@ describe('search', () => {
   it('принимает регистр, режим «только файлы», контекст и предел выдачи', () => {
     const props = byName.get('search')!.inputSchema.properties;
     expect(Object.keys(props)).toEqual([
+      'action',
       'query',
       'isRegex',
       'caseSensitive',
@@ -105,18 +100,15 @@ describe('search', () => {
   });
 });
 
-describe('replace_in_files', () => {
-  it('пишет в main и требует запрос и замену', () => {
-    const tool = byName.get('replace_in_files')!;
+describe('file: replace', () => {
+  it('замена идёт действием и говорит, чего ей не хватает', () => {
+    const tool = byName.get('file')!;
     expect(tool.side).toBe('main');
-    expect(tool.inputSchema.required).toEqual(['query', 'replacement']);
-    expect(Object.keys(tool.inputSchema.properties)).toEqual([
-      'query',
-      'replacement',
-      'isRegex',
-      'caseSensitive',
-      'glob',
-    ]);
+    // Обязательно только действие: остальное спрашивает само действие.
+    expect(tool.inputSchema.required).toEqual(['action']);
+    for (const name of ['query', 'replacement', 'isRegex', 'caseSensitive', 'glob']) {
+      expect(Object.keys(tool.inputSchema.properties)).toContain(name);
+    }
   });
 });
 
@@ -150,13 +142,13 @@ describe('edit', () => {
   });
 });
 
-describe('create_file', () => {
+describe('file', () => {
   it('требует и путь, и содержимое', () => {
     // Раньше `contents` было необязательным: забытое содержимое давало пустой
     // файл и отчёт «создан (0 строк)» — успех вместо ошибки.
-    const tool = byName.get('create_file')!;
+    const tool = byName.get('file')!;
     expect(tool.side).toBe('main');
-    expect(tool.inputSchema.required).toEqual(['path', 'contents']);
+    expect(tool.inputSchema.required).toEqual(['action']);
     expect(tool.inputSchema.properties.contents?.type).toBe('string');
   });
 });

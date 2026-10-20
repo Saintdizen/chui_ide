@@ -12,9 +12,7 @@ import { agentPrompt } from '../src/shared/agent-prompt';
 describe('промпт агентного режима', () => {
   it('полному набору достаются все советы', () => {
     const text = agentPrompt('full', { confirm: true });
-    expect(text).toContain('workflow');
     expect(text).toContain('read_image');
-    expect(text).toContain('schedule');
     expect(text).toContain('подтверждает');
   });
 
@@ -23,27 +21,25 @@ describe('промпт агентного режима', () => {
     expect(read).not.toContain('terminal');
     expect(read).not.toContain('Команда в терминале');
     // Чтение в нём есть — и советы про чтение остаются.
-    expect(read).toContain('file_outline');
+    expect(read).toContain('lsp');
     expect(read).toContain('search');
     // Правок нет: советы про `edit` врут и убраны.
     expect(read).not.toContain('action patch');
   });
 
-  it('минимум не обещает памяти, подзадач и расписания', () => {
+  it('минимум не обещает памяти и подзадач', () => {
     const minimal = agentPrompt('minimal', { confirm: true });
     // В «Минимуме» только ядро и ведение работы: поиск есть, правок нет.
-    expect(minimal).toContain('codebase_search');
+    expect(minimal).toContain('search');
     expect(minimal).not.toContain('read_image');
-    expect(minimal).not.toContain('run_code');
-    // `remember` и `task` в «Ведении работы» — они остаются.
-    expect(minimal).toContain('remember');
+    // `mind` и `task` в «Ведении работы» — они остаются.
+    expect(minimal).toContain('mind');
     expect(minimal).toContain('task');
   });
 
   it('«Авто» получает все советы: скрытое в нём подключается по имени', () => {
     const auto = agentPrompt('auto', { confirm: true });
     expect(auto).toContain('Команда в терминале');
-    expect(auto).toContain('schedule');
     expect(auto).toBe(agentPrompt('full', { confirm: true }));
   });
 
@@ -60,9 +56,9 @@ describe('промпт агентного режима', () => {
   it('совет о скрытом в ростере остаётся в любом наборе', () => {
     // Скрытое в ростере зовётся по имени, но схемы с описанием у него нет: совет
     // в промпте — единственное место, где модель о нём узнаёт. Считать набор без
-    // ростера значит выкинуть советы о `file_outline`, `get_diagnostics` и других.
+    // ростера значит выкинуть советы о `lsp`, `checks` и других.
     const text = agentPrompt('read', { confirm: true });
-    for (const name of ['file_outline', 'get_diagnostics']) {
+    for (const name of ['lsp', 'checks']) {
       expect(text, `потерян совет про ${name}`).toContain(name);
     }
   });

@@ -141,22 +141,26 @@ describe('touchedPaths', () => {
   });
 
   it('создание, удаление и перенос', () => {
-    expect([...(touchedPaths('create_file', JSON.stringify({ path: '/proj/n.ts', contents: '' })) ?? [])]).toEqual([
-      '/proj/n.ts',
+    expect([
+      ...(touchedPaths('file', JSON.stringify({ action: 'create', path: '/proj/n.ts', contents: '' })) ?? []),
+    ]).toEqual(['/proj/n.ts']);
+    expect([...(touchedPaths('file', JSON.stringify({ action: 'delete', path: '/proj/d.ts' })) ?? [])]).toEqual([
+      '/proj/d.ts',
     ]);
-    expect([...(touchedPaths('delete_file', JSON.stringify({ path: '/proj/d.ts' })) ?? [])]).toEqual(['/proj/d.ts']);
-    const moved = touchedPaths('move_file', JSON.stringify({ from: '/proj/old.ts', to: '/proj/new.ts' })) ?? new Set();
+    const moved =
+      touchedPaths('file', JSON.stringify({ action: 'move', from: '/proj/old.ts', to: '/proj/new.ts' })) ?? new Set();
     expect([...moved].sort()).toEqual(['/proj/new.ts', '/proj/old.ts']);
   });
 
   it('пути из результата тоже считаются (создание и перенос)', () => {
-    const touched = touchedPaths('move_file', '{}', [{ path: '/proj/new.ts', from: '/proj/old.ts' }]) ?? new Set();
+    const touched =
+      touchedPaths('file', '{"action":"move"}', [{ path: '/proj/new.ts', from: '/proj/old.ts' }]) ?? new Set();
     expect([...touched].sort()).toEqual(['/proj/new.ts', '/proj/old.ts']);
   });
 
   it('разделители пути не мешают совпадению', () => {
-    const args = JSON.stringify({ path: 'C:\\proj\\a.ts', contents: '' });
-    expect([...(touchedPaths('create_file', args) ?? [])]).toEqual(['C:/proj/a.ts']);
+    const args = JSON.stringify({ action: 'create', path: 'C:\\proj\\a.ts', contents: '' });
+    expect([...(touchedPaths('file', args) ?? [])]).toEqual(['C:/proj/a.ts']);
   });
 
   it('команда и массовая замена: задетое назвать нельзя — null', () => {
@@ -181,7 +185,7 @@ describe('forgetChangedFiles', () => {
 
   it('правка одного файла не стирает память о других', () => {
     const state = caches();
-    forgetChangedFiles(state, 'create_file', JSON.stringify({ path: '/proj/a.ts', contents: 'x' }));
+    forgetChangedFiles(state, 'file', JSON.stringify({ action: 'create', path: '/proj/a.ts', contents: 'x' }));
     // Забыт только a.ts — и в обоих кешах.
     expect(state.coveredReads.has('/proj/a.ts')).toBe(false);
     expect(state.executed.has('read:{"path":"/proj/a.ts"}')).toBe(false);
@@ -204,14 +208,14 @@ describe('forgetChangedFiles', () => {
       executed: new Map<string, { ok: boolean }>([['read:{"path":"C:/proj/x.ts"}', { ok: true }]]),
       coveredReads: new Map([['C:/proj/x.ts', [{ from: 1, to: 5 }]]]),
     };
-    forgetChangedFiles(state, 'create_file', JSON.stringify({ path: 'C:\\proj\\x.ts', contents: 'x' }));
+    forgetChangedFiles(state, 'file', JSON.stringify({ action: 'create', path: 'C:\\proj\\x.ts', contents: 'x' }));
     expect(state.coveredReads.size).toBe(0);
     expect(state.executed.size).toBe(0);
   });
 
   it('чужой путь кеш не задевает', () => {
     const state = caches();
-    forgetChangedFiles(state, 'create_file', JSON.stringify({ path: '/other/c.ts', contents: 'x' }));
+    forgetChangedFiles(state, 'file', JSON.stringify({ action: 'create', path: '/other/c.ts', contents: 'x' }));
     expect(state.coveredReads.size).toBe(2);
     expect(state.executed.size).toBe(2);
   });

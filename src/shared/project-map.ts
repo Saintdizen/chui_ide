@@ -110,7 +110,7 @@ export function formatProjectMap(scan: ProjectScan): { summary: string; detail: 
   lines.push(
     '',
     'Дальше: list — что в каталоге, а с glob — какие файлы есть по маске; ' +
-      'codebase_search — где объявлено имя. Содержимое читай точечно: read с startLine/endLine.',
+      'search (action code) — где объявлено имя. Содержимое читай точечно: read с startLine/endLine.',
   );
 
   const summary =

@@ -395,7 +395,7 @@ export class McpService {
     );
     if (!target) {
       return {
-        text: `Ресурс «${uri}» не объявлен ни одним MCP-сервером. Возьми адрес из list_mcp_resources и не придумывай uri сам.`,
+        text: `Ресурс «${uri}» не объявлен ни одним MCP-сервером. Возьми адрес из mcp (action list) и не придумывай uri сам.`,
         isError: true,
       };
     }

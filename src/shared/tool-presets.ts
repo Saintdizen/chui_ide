@@ -38,9 +38,7 @@ export type ToolGroupId =
   | 'git-write'
   | 'web'
   | 'browser'
-  | 'program'
-  | 'work'
-  | 'schedule';
+  | 'work';
 
 /** Выбор набора. Идентификатор хранится в настройках и едет по RPC. */
 export type ToolPresetId = 'auto' | 'full' | 'edit' | 'read' | 'minimal';
@@ -58,37 +56,17 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     label: 'Основа',
     // Самое необходимое, чтобы вообще найти нужное место: пять схем вместо
     // сорока. Столько стоит «просто спросил» — примерно вдесятеро дешевле полного.
-    names: ['list', 'read', 'search', 'codebase_search', 'project_map'],
+    names: ['list', 'read', 'search', 'project_map'],
   },
   {
     id: 'read',
     label: 'Чтение',
-    names: [
-      'search_docs',
-      'session_search',
-      'read_skill',
-      'read_image',
-      'list_mcp_resources',
-      'read_mcp_resource',
-      'find_references',
-      'go_to_definition',
-      'file_outline',
-      'get_diagnostics',
-    ],
+    names: ['read_skill', 'read_image', 'mcp', 'lsp'],
   },
   {
     id: 'edit',
     label: 'Правки',
-    names: [
-      'edit',
-      'replace_in_files',
-      'rename_symbol',
-      'create_file',
-      'delete_file',
-      'move_file',
-      'open_file',
-      'present',
-    ],
+    names: ['edit', 'rename_symbol', 'file', 'show'],
   },
   {
     id: 'verify',
@@ -96,7 +74,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     // Линтер и тесты мир не меняют (это прогон уже существующего кода),
     // поэтому они есть и в наборе «только чтение»: правильность чтения ими
     // и проверяют чаще всего.
-    names: ['run_linter', 'run_tests'],
+    names: ['checks', 'run_tests'],
   },
   {
     id: 'shell',
@@ -119,7 +97,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
   {
     id: 'web',
     label: 'Сеть',
-    names: ['web_search', 'web_fetch'],
+    names: ['web'],
   },
   {
     id: 'browser',
@@ -127,36 +105,12 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     names: ['browser'],
   },
   {
-    id: 'program',
-    label: 'Программа',
-    // run_code зовёт инструменты сам, то есть стоит столько же, сколько набор
-    // вокруг него, а в режиме `workflow` запускает по прогону модели на
-    // каждого агента. В узких наборах он не нужен: там и вызовов мало.
-    names: ['run_code'],
-  },
-  {
     id: 'work',
     label: 'Ведение работы',
     // Не действия над проектом, а разговор о них: план, цель, вопрос человеку,
     // подзадача, память. Эти инструменты нужны в любом наборе — без `ask` агент
     // не сможет ничего уточнить, а без `update_plan` не покажет, что задумал.
-    names: [
-      'update_plan',
-      'update_goal',
-      'exit_plan_mode',
-      'ask',
-      'task',
-      'agents',
-      'remember',
-      'forget',
-    ],
-  },
-  {
-    id: 'schedule',
-    label: 'Расписание',
-    // Задача живёт в файле проекта (`.chui/schedules.json`) и запускает агента сама:
-    // в «только чтение» и «минимуме» её нет — там ничего не меняют.
-    names: ['schedule'],
+    names: ['plan', 'exit_plan_mode', 'ask', 'task', 'agents', 'mind'],
   },
 ];
 
@@ -218,28 +172,18 @@ function fullSetTokens(): number {
  * по имени выполняется сразу.
  *
  * Один список на два набора, «Авто» и «Все инструменты»: разница между ними —
- * в группах, а не в том, стоит ли схема `forget` 138 токенов в каждом запросе.
+ * в группах, а не в том, стоит ли схема `mind` в каждом запросе.
  * Замер — `tests/token-budget.test.ts`.
  */
 export const ROSTER_TOOLS: readonly string[] = [
   'rename_symbol',
-  'forget',
-  'session_search',
   // Не редкие, а простые: вызов у них короткий и угадывается по имени.
-  'file_outline',
-  'open_file',
-  'get_diagnostics',
-  'go_to_definition',
-  'find_references',
-  'run_linter',
-  'codebase_search',
-  'replace_in_files',
+  'checks',
+  'lsp',
   'project_map',
-  'search_docs',
   'read_skill',
   // Редкие или простые в вызове: форма угадывается по имени.
   'task',
-  'present',
   'ask',
 ];
 
@@ -257,10 +201,10 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     // выполняется сразу. Схема при этом в набор не вернётся: `widen` касается того,
     // чего в этом списке нет.
     //
-    // Сверх общего ростера — три инструмента с `action`: имя без действия не говорит
+    // Сверх общего ростера — инструменты с `action`: имя без действия не говорит
     // ничего, а строка называет все значения (`agents(action: spawn|…)`).
-    // Ресурсы MCP тоже здесь: их схемы и так появляются только при живом сервере.
-    except: ['agents', 'list_mcp_resources', 'read_mcp_resource', ...ROSTER_TOOLS],
+    // Ресурсы MCP тоже здесь: их схема и так появляется только при живом сервере.
+    except: ['agents', 'mcp', ...ROSTER_TOOLS],
   },
   {
     id: 'full',
@@ -279,7 +223,7 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     label: 'Правка',
     icon: 'pencil',
     hint: 'Чтение, правки и проверки; без терминала, сети и браузера',
-    groups: ['core', 'read', 'edit', 'verify', 'git-read', 'work', 'schedule'],
+    groups: ['core', 'read', 'edit', 'verify', 'git-read', 'work'],
   },
   {
     id: 'read',
@@ -299,8 +243,7 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
 
 /**
  * Набор по умолчанию — «Авто»: полный набор стоит токенов в КАЖДОМ запросе
- * (≈7 300 — больше, чем сжатый вывод шага), и платить за терминал, браузер
- * и расписание в задаче «посмотри и поправь» незачем. Возможность не отнята:
+ * (≈7 300 — больше, чем сжатый вывод шага), и платить за терминал и браузер в задаче «посмотри и поправь» незачем. Возможность не отнята:
  * скрытое выполняется по имени, а кто хочет всего сразу — выбирает
  * «Все инструменты» в композере.
  */

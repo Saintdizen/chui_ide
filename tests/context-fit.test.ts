@@ -482,7 +482,7 @@ describe('condenseSupersededPlans', () => {
     toolCalls: [
       {
         id,
-        name: 'update_plan',
+        name: 'plan',
         arguments: JSON.stringify({ steps: steps.map((text) => ({ text, status: 'done' })) }),
       },
     ],

@@ -1,15 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
-import { allowsInPlan } from '../src/shared/tool-policy';
 import { AGENT_TOOLS } from '../src/shared/tools';
-import { canonicalCall } from '../src/shared/tool-aliases';
 
 /**
- * Слитые инструменты: `browser`, `terminal`, `edit`, `schedule` с полем `action`.
+ * Слитые инструменты: `browser`, `terminal`, `edit`, `git_*` с полем `action`.
  *
- * Семь схем браузера и пять терминала стоили дороже, чем их различие по смыслу:
- * описания едут в каждом запросе. Проверяем то, что могло сломаться при слиянии:
- * схема обещает те действия, которые разбирает код, промах по действию называет
+ * Схема обещает те действия, которые разбирает код, промах по действию называет
  * допустимые, а недостающий аргумент возвращается отказом с именем поля, а не
  * «не задан аргумент» из глубины обработчика.
  */
@@ -24,7 +20,7 @@ describe('слитые инструменты: схема', () => {
     };
     expect(actions('browser')).toEqual(['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close']);
     expect(actions('terminal')).toEqual(['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel']);
-    expect(actions('schedule')).toEqual(['list', 'create', 'update', 'delete']);
+    expect(actions('lsp')).toEqual(['references', 'definition', 'outline']);
     expect(actions('git_read')).toEqual(['status', 'diff', 'log', 'blame']);
     expect(actions('git_write')).toEqual([
       'stage',
@@ -37,25 +33,16 @@ describe('слитые инструменты: схема', () => {
       'push',
     ]);
     // Старых имён в наборе больше нет: иначе схема и обработчик разъехались бы.
-    const gone = ['browser_open', 'terminal_start', 'schedule_create', 'git_status', 'run_terminal', 'apply_patch'];
+    const gone = ['browser_open', 'terminal_start', 'git_status', 'run_terminal', 'apply_patch', 'file_outline'];
     for (const old of gone) {
       expect(AGENT_TOOLS.some((tool) => tool.name === old)).toBe(false);
     }
   });
 
   it('обязателен только action: остальные поля зависят от действия', () => {
-    for (const name of ['browser', 'terminal', 'schedule', 'git_read', 'git_write']) {
+    for (const name of ['browser', 'terminal', 'lsp', 'git_read', 'git_write']) {
       expect(spec(name).inputSchema.required).toEqual(['action']);
     }
-  });
-
-  it('schedule: list — действие, а не второе имя', () => {
-    // Раньше `schedule_list` было отдельным инструментом ради права быть видимым
-    // в плане. Теперь право задаёт признак действия в TOOL_POLICIES, и второй
-    // схемы (26 токенов в каждом запросе) больше нет.
-    expect(AGENT_TOOLS.some((tool) => tool.name === 'schedule_list')).toBe(false);
-    expect(allowsInPlan('schedule', '{"action":"list"}')).toBe(true);
-    expect(allowsInPlan('schedule', '{"action":"create"}')).toBe(false);
   });
 });
 
@@ -144,28 +131,23 @@ describe('слитые инструменты: разбор', () => {
   });
 
   it('без действия вызов тоже объясняется', async () => {
-    // Расписание подключено: иначе отказ был бы «инструмент недоступен», а не про форму.
-    const withSchedule = { workspace: {}, schedules: { list: async () => [] } } as unknown as ToolContext;
-    const outcome = await runTool(withSchedule, 'schedule', JSON.stringify({}));
+    const outcome = await runTool(ctx, 'git_read', JSON.stringify({}));
     expect(outcome.ok).toBe(false);
     // Отказ приходит до обработчика: схема требует action, и это названо прямо.
     expect(outcome.summary).toContain('action');
   });
-});
 
-describe('сценарий: режим программы, а не второй инструмент', () => {
-  it('отдельного workflow в наборе больше нет', () => {
-    expect(AGENT_TOOLS.some((tool) => tool.name === 'workflow')).toBe(false);
+  it('lsp: скелет файла спрашивает только path', async () => {
+    // Символ нужен ссылкам и объявлению, а оглавлению — файл. Общая схема
+    // проверяет лишь action, остальное называет отказ.
+    const outcome = await runTool(ctx, 'lsp', JSON.stringify({ action: 'outline' }));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('path');
   });
 
-  it('старое имя подмешивает kind к аргументам', () => {
-    const call = canonicalCall('workflow', '{"code":"return 1;"}');
-    expect(call.name).toBe('run_code');
-    expect(JSON.parse(call.arguments)).toEqual({ code: 'return 1;', kind: 'workflow' });
-  });
-
-  it('названный моделью kind важнее старого имени', () => {
-    const call = canonicalCall('workflow', '{"code":"return 1;","kind":"code"}');
-    expect(JSON.parse(call.arguments).kind).toBe('code');
+  it('lsp: незнакомое действие называет допустимые', async () => {
+    const outcome = await runTool(ctx, 'lsp', JSON.stringify({ action: 'hover' }));
+    expect(outcome.ok).toBe(false);
+    expect(outcome.detail).toContain('references, definition, outline');
   });
 });

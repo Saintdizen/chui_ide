@@ -40,6 +40,36 @@ describe('слияния с другим аргументом: агенты', ()
   });
 });
 
+describe('слияния с другим аргументом: память', () => {
+  it('remember и forget — два действия одного mind', () => {
+    // Заметки из старых бесед должны дойти: имена стали действиями.
+    const remember = canonicalCall('remember', '{"text":"pytest"}');
+    expect(remember.name).toBe('mind');
+    expect(remember.renamed).toBe(true);
+    expect(JSON.parse(remember.arguments)).toEqual({ text: 'pytest', action: 'remember' });
+    expect(JSON.parse(canonicalCall('forget', '{"query":"pytest"}').arguments)).toEqual({
+      query: 'pytest',
+      action: 'forget',
+    });
+  });
+
+  it('своё действие старое имя не отменяет', () => {
+    const mapped = canonicalCall('forget', '{"action":"remember","text":"x"}');
+    expect(mapped.name).toBe('mind');
+    expect(JSON.parse(mapped.arguments).action).toBe('remember');
+  });
+});
+
+describe('слияния с другим аргументом: языковой сервер', () => {
+  it('file_outline стал действием lsp', () => {
+    // Скелет файла — тот же сервер, что ссылки и объявление: имя ушло в action.
+    const call = canonicalCall('file_outline', '{"path":"/a.ts"}');
+    expect(call.name).toBe('lsp');
+    expect(call.renamed).toBe(true);
+    expect(JSON.parse(call.arguments)).toEqual({ path: '/a.ts', action: 'outline' });
+  });
+});
+
 describe('что псевдоним не трогает', () => {
   it('нынешнее имя возвращается как есть', () => {
     const call = canonicalCall('agents', '{"action":"list"}');
@@ -58,6 +88,12 @@ describe('что псевдоним не трогает', () => {
       expect(names.has(canonicalCall(old, '{}').name), old).toBe(true);
     }
     for (const old of ['spawn_agent', 'list_agents', 'wait_agent', 'send_message', 'interrupt_agent']) {
+      expect(names.has(canonicalCall(old, '{}').name), old).toBe(true);
+    }
+    for (const old of ['remember', 'forget']) {
+      expect(names.has(canonicalCall(old, '{}').name), old).toBe(true);
+    }
+    for (const old of ['file_outline', 'find_references', 'go_to_definition']) {
       expect(names.has(canonicalCall(old, '{}').name), old).toBe(true);
     }
   });

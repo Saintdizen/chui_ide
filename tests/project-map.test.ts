@@ -107,7 +107,7 @@ describe('formatProjectMap', () => {
     const map = formatProjectMap(NODE);
 
     expect(map.detail).toContain('list');
-    expect(map.detail).toContain('codebase_search');
+    expect(map.detail).toContain('action code');
     expect(map.detail).toContain('startLine');
   });
 

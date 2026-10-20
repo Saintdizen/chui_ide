@@ -21,7 +21,6 @@ import { installProxyFromEnv } from './net/proxy';
 import { createApplicationMenu } from './menu';
 import { projectEnv } from './project-env';
 import { SandboxService } from './sandbox/sandbox';
-import { ScheduleService } from './schedules/schedules';
 import { TelemetryStore, telemetryDir } from './ai/telemetry';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { WINDOW_BACKGROUND } from '../shared/colors';
@@ -307,20 +306,6 @@ if (!app.requestSingleInstanceLock()) {
       () => workspace.rootPath(),
     );
 
-    /**
-     * Расписание задач: часы живут в main, а ход запускает окно — цикл агента
-     * хотя и здесь, но правки, подтверждения и показ файлов — в renderer.
-     * Нет окна или ассистент выключен — задача ждёт следующего тика.
-     */
-    const schedules = new ScheduleService({
-      root: () => workspace.rootPath(),
-      notify: (schedule) => pushToRenderers(PushTopic.ScheduleDue, { schedule }),
-      canRun: () => BrowserWindow.getAllWindows().length > 0,
-      aiEnabled: () => settings.get().ai.enabled,
-    });
-    schedules.start();
-    // Расписание агенту: те же список и запись, что у окна. Задача, которую
-    // поставил ассистент, ничем не отличается от заведённой руками.
     // Журнал прогонов: пишется только при включённой настройке и только на этой
     // машине. Читает настройку на каждый прогон — её могли включить посреди работы.
     const telemetry = new TelemetryStore({
@@ -328,12 +313,6 @@ if (!app.requestSingleInstanceLock()) {
       enabled: () => settings.get().ai.telemetry.enabled === true,
     });
     ai.attachTelemetry(telemetry);
-
-    ai.attachSchedules({
-      list: () => schedules.list(),
-      save: (schedule) => schedules.save(schedule),
-      remove: (id) => schedules.remove(id),
-    });
 
     // Живые агенты: список меняется по ходу прогона, поэтому едет push-событием.
     // Панель в окне обновляется по нему, а не опрашивает сервис по таймеру.
@@ -408,7 +387,6 @@ if (!app.requestSingleInstanceLock()) {
       reviews,
       history,
       mcp,
-      schedules,
       telemetry,
       browserPanel,
       host: new HostClient(),
@@ -446,7 +424,6 @@ if (!app.requestSingleInstanceLock()) {
     else openWelcomeWindow();
 
     app.on('will-quit', () => {
-      schedules.dispose();
       terminals.dispose();
       lsp.dispose();
       debug.dispose();

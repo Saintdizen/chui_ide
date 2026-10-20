@@ -27,14 +27,41 @@ const NAME_ALIASES: Readonly<Record<string, string>> = {
   wait_agent: 'agents',
   send_message: 'agents',
   interrupt_agent: 'agents',
-  // Сценарий из агентов стал режимом программы: движок у них общий.
-  workflow: 'run_code',
+  // Память: запись и уборку заметок различал только глагол.
+  remember: 'mind',
+  forget: 'mind',
+  // Языковой сервер: ссылки, объявление и скелет файла — вопросы к одному серверу.
+  find_references: 'lsp',
+  go_to_definition: 'lsp',
+  file_outline: 'lsp',
+  // Сеть: поиск и чтение страницы — два шага одного пути.
+  web_search: 'web',
+  web_fetch: 'web',
+  // Проверки: пометки редактора и линтер — обе стороны «что не так с кодом».
+  get_diagnostics: 'checks',
+  run_linter: 'checks',
+  // Файлы: создание, перемещение, удаление и массовая замена — всё меняет диск.
+  create_file: 'file',
+  move_file: 'file',
+  delete_file: 'file',
+  replace_in_files: 'file',
+  // Показ: открыть файл и предложить результат — две стороны «вот здесь».
+  open_file: 'show',
+  present: 'show',
+  // Состояние беседы: чек-лист и цель — два поля одного инструмента.
+  update_plan: 'plan',
+  update_goal: 'plan',
+  // Поиск: четыре источника различались только первой строкой описания.
+  codebase_search: 'search',
+  search_docs: 'search',
+  session_search: 'search',
+  // Ресурсы MCP: каталог и чтение — две половины одного похода.
+  list_mcp_resources: 'mcp',
+  read_mcp_resource: 'mcp',
 };
 
-/** Старое имя → аргументы, которые оно подразумевало: `action` или `kind`. */
-const ARG_ALIASES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  workflow: { kind: 'workflow' },
-};
+/** Старое имя → аргументы, которые оно подразумевало: `action`. */
+const ARG_ALIASES: Readonly<Record<string, Readonly<Record<string, string>>>> = {};
 
 const ACTION_ALIASES: Readonly<Record<string, string>> = {
   spawn_agent: 'spawn',
@@ -42,6 +69,28 @@ const ACTION_ALIASES: Readonly<Record<string, string>> = {
   wait_agent: 'wait',
   send_message: 'send',
   interrupt_agent: 'interrupt',
+  remember: 'remember',
+  forget: 'forget',
+  find_references: 'references',
+  go_to_definition: 'definition',
+  file_outline: 'outline',
+  web_search: 'search',
+  web_fetch: 'fetch',
+  get_diagnostics: 'diagnostics',
+  run_linter: 'lint',
+  create_file: 'create',
+  move_file: 'move',
+  delete_file: 'delete',
+  list_mcp_resources: 'list',
+  read_mcp_resource: 'read',
+  replace_in_files: 'replace',
+  open_file: 'open',
+  present: 'present',
+  update_plan: 'steps',
+  update_goal: 'goal',
+  codebase_search: 'code',
+  search_docs: 'docs',
+  session_search: 'sessions',
 };
 
 /** Незнакомое имя возвращается как есть: чужие (MCP) не наше дело. */

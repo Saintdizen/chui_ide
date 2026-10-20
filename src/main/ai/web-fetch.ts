@@ -86,7 +86,7 @@ export async function fetchPage(rawUrl: string, options: FetchPageOptions = {}):
   }
   if (!textual) {
     throw new Error(
-      `По адресу лежит файл (${kind}), а не страница: web_fetch читает страницы и текст. ` +
+      `По адресу лежит файл (${kind}), а не страница: чтение страниц берёт только текст. ` +
         'Файл скачивается терминалом (curl) или смотрится браузером.',
     );
   }

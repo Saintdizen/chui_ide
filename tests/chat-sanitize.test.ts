@@ -3,6 +3,7 @@ import {
   clampString,
   MAX_CONVERSATIONS,
   MAX_MESSAGES,
+  MAX_REASONING_CHARS,
   MAX_TOOL_CALLS,
   MISSING_TOOL_RESULT,
   repairToolPairs,
@@ -176,6 +177,22 @@ describe('sanitizeMessages', () => {
 
   it('нестроковый content → пустая строка', () => {
     expect(sanitizeMessages([{ role: 'user', content: 5 }])).toEqual([{ role: 'user', content: '' }]);
+  });
+
+  // Размышления шага — часть протокола вызова инструментов (DeepSeek отвергает
+  // запрос с tools без них), поэтому переживают запись и чтение истории.
+  it('размышления шага сохраняются', () => {
+    const result = sanitizeMessages([
+      { role: 'assistant', content: '', reasoning: 'подумал', toolCalls: [{ id: 'c1', name: 'read', arguments: '{}' }] },
+      { role: 'tool', content: 'ok', toolCallId: 'c1' },
+    ]);
+    expect(result[0]?.reasoning).toBe('подумал');
+  });
+
+  it('размышления ограничены потолком', () => {
+    const long = 'я'.repeat(MAX_REASONING_CHARS + 100);
+    const result = sanitizeMessages([{ role: 'assistant', content: 'ок', reasoning: long }]);
+    expect(result[0]?.reasoning?.length).toBe(MAX_REASONING_CHARS);
   });
 
   it('число сообщений ограничено', () => {

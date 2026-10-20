@@ -69,7 +69,7 @@ describe('цель: что видит модель', () => {
   it('в системной строке есть текст цели и правило про закрытие', () => {
     const line = goalPrompt('Довести сборку до зелёного');
     expect(line).toContain('Довести сборку до зелёного');
-    expect(line).toContain('update_goal');
+    expect(line).toContain('plan');
     expect(line).toContain('done: true');
     // Главное отличие цели от вопроса — сказано словами.
     expect(line).toMatch(/не считай законченный ход поводом остановиться/);

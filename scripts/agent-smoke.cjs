@@ -12,7 +12,7 @@
  *     уходит текст без прогресса и повторов, а человек в карточке видит полный;
  *  7. ai.test объясняет удачу и неудачу словами;
  *  8. полный доступ: без подтверждений, но необратимые команды всё равно спрашивает;
- *  9. get_diagnostics — ошибки редактора доезжают до модели текстом;
+ *  9. checks (action diagnostics) — ошибки редактора доезжают до модели текстом;
  * 10. вложения контекста уходят в промпт отдельным сообщением;
  * 11. режим «Вопрос»: инструменты не предлагаются, моделе сказано об этом;
  * 12. режим «План»: только чтение, изменения не предлагаются и не исполняются;
@@ -370,10 +370,7 @@ app.whenReady().then(async () => {
 
     // Память проекта: инструменты предлагаются, а записанная заметка попадает
     // в системный промпт — значит переживёт беседу и её сжатие.
-    check(
-      'remember и forget предложены модели',
-      run.toolNames.includes('remember') && run.toolNames.includes('forget'),
-    );
+    check('mind предложен модели', run.toolNames.includes('mind'));
     await memory.remember(dir, 'В этом проекте договорились использовать pytest');
     run = await chat(undefined);
     check(
@@ -428,7 +425,7 @@ app.whenReady().then(async () => {
        Символы приходят от языкового сервера — в проверке его роль играет заглушка. */
     check('без языкового сервера codebase_search не предлагается', !run.toolNames.includes('codebase_search'));
 
-    check('без языкового сервера file_outline не предлагается', !run.toolNames.includes('file_outline'), run.toolNames);
+    check('без языкового сервера lsp не предлагается', !run.toolNames.includes('lsp'), run.toolNames);
 
     ai.attachSymbols({
       projectSymbols: async (query) =>
@@ -478,11 +475,11 @@ app.whenReady().then(async () => {
       run.results[0]?.summary,
     );
 
-    /* 1д. file_outline: скелет файла вместо чтения его целиком. */
-    requested = { name: 'file_outline', args: { path: script } };
+    /* 1д. lsp action outline: скелет файла вместо чтения его целиком. */
+    requested = { name: 'lsp', args: { action: 'outline', path: script } };
     run = await chat(undefined);
     const outline = String(run.results[0]?.detail ?? '');
-    check('file_outline предлагается с языковым сервером', run.toolNames.includes('file_outline'), run.toolNames);
+    check('lsp предлагается с языковым сервером', run.toolNames.includes('lsp'), run.toolNames);
     check('скелет содержит объявления с номерами строк', /3–40: класс Parser/.test(outline), outline);
     check('вложенный метод показан с отступом', outline.includes('  5–9: метод parse'), outline);
     check('скелет ушёл модели', sentToModel(run.bodies[run.bodies.length - 1]).includes('класс Parser'));
@@ -496,7 +493,7 @@ app.whenReady().then(async () => {
     // тоже считается строкой — иначе номера в скелете и в чтении разъедутся.
     check('скелет знает размер файла', outline.includes('из 4 строк'), outline.split('\n')[0]);
 
-    requested = { name: 'file_outline', args: { path: file } };
+    requested = { name: 'lsp', args: { action: 'outline', path: file } };
     run = await chat(undefined);
     check(
       'файл нераспознанного языка назван словами',
@@ -507,7 +504,7 @@ app.whenReady().then(async () => {
     // Сервер не умеет (или не поднят) — это другой случай, чем «объявлений нет»:
     // модели сказано сменить способ, а не искать символы в пустом файле.
     ai.attachSymbols({ projectSymbols: async () => [], languageFor: () => 'python', outline: async () => null });
-    requested = { name: 'file_outline', args: { path: script } };
+    requested = { name: 'lsp', args: { action: 'outline', path: script } };
     run = await chat(undefined);
     check(
       'недоступный сервер назван отдельно от пустого файла',
@@ -515,9 +512,9 @@ app.whenReady().then(async () => {
       run.results[0]?.summary,
     );
 
-    /* 1г. web_search: выключен по умолчанию, включается настройкой.
+    /* 1г. web (action search): выключен по умолчанию, включается настройкой.
        Адрес — тот же локальный сервер, поэтому проверяется настоящий fetch. */
-    check('без настройки web_search не предлагается', !run.toolNames.includes('web_search'), run.toolNames);
+    check('без настройки web не предлагается', !run.toolNames.includes('web'), run.toolNames);
 
     settings.ai.webSearch = {
       enabled: true,
@@ -525,10 +522,10 @@ app.whenReady().then(async () => {
       endpoint: `http://127.0.0.1:${server.address().port}`,
       hasApiKey: false,
     };
-    requested = { name: 'web_search', args: { query: 'ffmpeg scale' } };
+    requested = { name: 'web', args: { action: 'search', query: 'ffmpeg scale' } };
     run = await chat(undefined);
     const searchResult = String(run.results[0]?.detail ?? '');
-    check('включённый web_search предлагается', run.toolNames.includes('web_search'), run.toolNames);
+    check('включённый web предлагается', run.toolNames.includes('web'), run.toolNames);
     check('результаты поиска дошли до модели', searchResult.includes('https://docs.example/scale'), searchResult);
     check(
       'разметка в выдаче снята, а источник назван',
@@ -539,7 +536,7 @@ app.whenReady().then(async () => {
     // Brave без ключа — заведомо нерабочий инструмент: модели его не показываем.
     settings.ai.webSearch = { enabled: true, provider: 'brave', endpoint: '', hasApiKey: false };
     run = await chat(undefined);
-    check('Brave без ключа не предлагается', !run.toolNames.includes('web_search'), run.toolNames);
+    check('Brave без ключа не предлагается', !run.toolNames.includes('web'), run.toolNames);
 
     settings.ai.webSearch = { enabled: false, provider: 'searxng', endpoint: '', hasApiKey: false };
 
@@ -570,56 +567,6 @@ app.whenReady().then(async () => {
     );
 
     settings.ai.webFetch = { enabled: false };
-
-    /* 1г-3. run_code: программа вместо десятка вызовов. Инструменты внутри неё —
-       те же, что снаружи: программа читает файл и считает по нему строки. */
-    requested = {
-      name: 'run_code',
-      args: {
-        code: [
-          'const first = await tools.read_file({ path: process.env.PROBE_FILE });',
-          'const lines = first.text.split(String.fromCharCode(10));',
-          'console.log("строк:", lines.length);',
-          'return { ok: first.ok, строк: lines.length, есть_маркер: first.text.includes(process.env.PROBE_MARK) };',
-        ].join('\n'),
-      },
-    };
-    process.env.PROBE_FILE = file;
-    process.env.PROBE_MARK = MARKER;
-    run = await chat(undefined);
-    const program = String(run.results[0]?.detail ?? '');
-    check('run_code предложен модели', run.toolNames.includes('run_code'), run.toolNames);
-    check('программа исполнилась', run.results[0]?.ok === true, run.results[0]);
-    check('вызов внутри программы виден', program.includes('1. read_file —'), program);
-    check('результат программы вернулся модели', program.includes('есть_маркер'), program);
-    check('вывод console показан', program.includes('строк:'), program);
-    check(
-      'итог программы в сводке',
-      /run_code: 1 вызов/.test(String(run.results[0]?.summary ?? '')),
-      run.results[0]?.summary,
-    );
-
-    // Ошибка программы — причина словами, а не пустой ответ.
-    requested = { name: 'run_code', args: { code: 'return undefinedVariable.length;' } };
-    run = await chat(undefined);
-    check(
-      'падение программы названо причиной',
-      run.results[0]?.ok === false && /run_code: ошибка/.test(String(run.results[0]?.summary ?? '')),
-      run.results[0]?.summary,
-    );
-
-    // Себя программа не зовёт: вызов отклоняется ещё до исполнения.
-    requested = {
-      name: 'run_code',
-      args: { code: "const again = await tools.run_code({ code: 'return 1' });\nreturn again.ok;" },
-    };
-    run = await chat(undefined);
-    check(
-      'из программы run_code не зовётся',
-      String(run.results[0]?.detail ?? '').includes('недоступен из программы') ||
-        String(run.results[0]?.detail ?? '').includes('false'),
-      String(run.results[0]?.detail ?? '').slice(0, 200),
-    );
 
     /* 1г-4. read_image: картинка уходит модели отдельным сообщением (в tool его
        не положить), а крупная — ещё и уменьшенной: иначе один скриншот весит
@@ -1218,9 +1165,9 @@ app.whenReady().then(async () => {
         }),
     };
 
-    requested = { name: 'get_diagnostics', args: {} };
+    requested = { name: 'checks', args: { action: 'diagnostics' } };
     run = await chat(diagHost);
-    check('get_diagnostics предлагается с мостом', run.toolNames.includes('get_diagnostics'), run.toolNames);
+    check('checks (diagnostics) предлагается с мостом', run.toolNames.includes('checks'), run.toolNames);
     check(
       'диагностика вернулась модели',
       run.results[0]?.ok === true && String(run.results[0]?.summary).includes('ошибок: 1'),
@@ -1230,7 +1177,7 @@ app.whenReady().then(async () => {
 
     requested = { name: 'read_file', args: { path: file } };
     run = await chat({ applyEdits: () => Promise.resolve({ rejected: true }) });
-    check('без моста get_diagnostics не предлагается', !run.toolNames.includes('get_diagnostics'), run.toolNames);
+    check('без моста checks (diagnostics) не предлагается', !run.toolNames.includes('checks'), run.toolNames);
 
     /* 12. вложения контекста */
     requested = { name: 'read_file', args: { path: file } };

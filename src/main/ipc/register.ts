@@ -31,7 +31,6 @@ import type { LspService } from '../lsp/lsp';
 import type { SymbolIndexer } from '../symbols/indexer';
 import type { McpService } from '../mcp/mcp';
 import { performMenuRole } from '../menu';
-import type { ScheduleService } from '../schedules/schedules';
 import type { SettingsStore } from '../settings';
 import { detectLspSources, isOnPath } from '../lsp/detect';
 import { loadSpellDictionary } from '../spell/dictionary';
@@ -126,8 +125,6 @@ export interface AppDependencies {
   reviews?: ReviewStore;
   /** Локальная история файла (снимки в userData). Необязательно: пробникам не нужна. */
   history?: HistoryStore;
-  /** Расписание задач (`.chui/schedules.json`). Необязательно: пробникам не нужно. */
-  schedules?: ScheduleService;
   /** Журнал прогонов (userData/telemetry). Необязательно: пробникам он не нужен. */
   telemetry?: TelemetryStore;
 }
@@ -163,9 +160,9 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Терминалы — тоже: агент работает с pty-сессиями, а не только разовыми командами.
   deps.ai.attachTerminals(deps.terminals);
   // Языковой сервер умеет искать по символам («перейти к символу») — это и есть
-  // инструмент codebase_search. Нет сервера — инструмент модели не предлагаем.
+  // инструмент search (action code). Нет сервера — действие ищет только текстом.
   if (deps.lsp) deps.ai.attachSymbols(deps.lsp);
-  // Линтер проекта — инструмент run_linter. Движок и запуск живут в main
+  // Линтер проекта — действие lint инструмента checks. Движок и запуск живут в main
   // (`project/lint.ts`); корень и интерпретатор Python разрешает это окно, где
   // они уже собраны. Без подключения инструмент модели не предлагается.
   deps.ai.attachLinter({
@@ -1328,25 +1325,6 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // Читаем на каждый запрос: файл мог появиться только что, а стоит это два
   // чтения каталога — держать кэш и промахиваться мимо правки дороже.
   router.register('ai.commands', () => loadCommands(deps.workspace.rootPath()));
-
-  /* ── Расписание задач ─────────────────────────────────────────────────── */
-
-  /**
-   * Без сервиса (пробники) расписание пустое, а не ошибочное: окно тогда
-   * показывает «задач нет», и это правда — часов никто не завёл.
-   */
-  const requireSchedules = (): ScheduleService => {
-    if (!deps.schedules) throw new RpcFailure(RpcErrorCode.Internal, 'Расписание недоступно');
-    return deps.schedules;
-  };
-
-  router.register('schedule.list', () => requireSchedules().list());
-  router.register('schedule.save', (params) => {
-    requireAiEnabled();
-    return requireSchedules().save(params.schedule);
-  });
-  router.register('schedule.remove', (params) => requireSchedules().remove(params.id));
-  router.register('schedule.finish', (params) => requireSchedules().finish(params.id, params.result));
 
   router.attach();
   deps.host.attach();

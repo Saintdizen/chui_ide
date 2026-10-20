@@ -77,21 +77,21 @@ describe('missingArguments', () => {
 });
 
 /**
- * Значения `enum` до исполнения. Повод: `update_plan.status` был свободной строкой,
+ * Значения `enum` до исполнения. Повод: `plan` (action steps) — статус шага был свободной строкой,
  * и `closed` вместо `done` уезжало в разбор, который таких значений не знает.
  */
 describe('wrongArguments', () => {
   it('значение вне перечня названо вместе с допустимыми', () => {
-    const spec = toolSpec('update_plan')!;
-    const args = { steps: [{ text: 'шаг', status: 'closed' }] };
+    const spec = toolSpec('plan')!;
+    const args = { action: 'steps', steps: [{ text: 'шаг', status: 'closed' }] };
     expect(wrongArguments(spec.inputSchema, args)).toEqual([
       { path: 'steps[0].status', value: 'closed', allowed: ['pending', 'in_progress', 'done'] },
     ]);
   });
 
   it('значение из перечня проходит', () => {
-    const spec = toolSpec('update_plan')!;
-    const args = { steps: [{ text: 'шаг', status: 'done' }] };
+    const spec = toolSpec('plan')!;
+    const args = { action: 'steps', steps: [{ text: 'шаг', status: 'done' }] };
     expect(wrongArguments(spec.inputSchema, args)).toEqual([]);
   });
 
@@ -99,7 +99,8 @@ describe('wrongArguments', () => {
     // Элемент массива — строка, а не объект: пусть об этом говорит разбор.
     const spec = toolSpec('edit')!;
     expect(wrongArguments(spec.inputSchema, { edits: ['строка'] })).toEqual([]);
-  });});
+  });
+});
 
 /**
  * Описания аргументов — постоянная часть запроса: они едут на каждом шаге прогона.
@@ -128,7 +129,8 @@ describe('описания аргументов', () => {
     'Current path.',
     'New path.',
     'Narrow to this file; when a name is declared twice.',
-    'File with the usage.',
+    'references: narrow to this file. definition: file with the usage. outline: the file.',
+    'One file or folder (diagnostics: default all open files; lint: default whole project).',
     'One file (default: all open files).',
     'Folder or file (default: whole project).',
     'diff, log, blame: one file.',
@@ -146,7 +148,7 @@ describe('описания аргументов', () => {
     expect(notes.length).toBeGreaterThan(5);
     // Основная доля — один и тот же «Path.»; уточнения живут только там, где
     // действительно добавляют смысл (маска, диапазон, «один файл вместо списка»).
-    expect(notes.filter((note) => note.text === 'Path.').length).toBeGreaterThanOrEqual(4);
+    expect(notes.filter((note) => note.text === 'Path.').length).toBeGreaterThanOrEqual(3);
     for (const note of notes) {
       expect(CANONICAL.has(note.text), `${note.tool}.${note.name}: ${note.text}`).toBe(true);
     }

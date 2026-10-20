@@ -96,10 +96,7 @@ describe('usageCost и кеш промпта', () => {
 
   it('смешанный запрос не оплачивает кеш дважды', () => {
     // 1M всего: из них 600k из кеша (1.25), 100k записано (2.5), 300k обычных (2.5).
-    const cost = usageCost(
-      { promptTokens: 1_000_000, cachedTokens: 600_000, cacheCreationTokens: 100_000 },
-      'gpt-4o',
-    );
+    const cost = usageCost({ promptTokens: 1_000_000, cachedTokens: 600_000, cacheCreationTokens: 100_000 }, 'gpt-4o');
     expect(cost).toBeCloseTo((600_000 * 1.25 + 400_000 * 2.5) / 1_000_000, 5);
   });
 });

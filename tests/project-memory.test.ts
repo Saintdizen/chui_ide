@@ -134,7 +134,7 @@ describe('инструменты remember/forget', () => {
       remember: vi.fn(async () => ({ ok: true, notes: [{ text: 'x' }], added: true })),
       forget: vi.fn(),
     };
-    const outcome = await runTool(context(memory), 'remember', '{"text":"важное"}');
+    const outcome = await runTool(context(memory), 'mind', '{"action":"remember","text":"важное"}');
 
     expect(outcome.ok).toBe(true);
     expect(outcome.summary).toContain('записана');
@@ -147,7 +147,7 @@ describe('инструменты remember/forget', () => {
       remember: vi.fn(async () => ({ ok: true, notes: [{ text: 'x' }], added: true })),
       forget: vi.fn(),
     };
-    const outcome = await runTool(context(memory), 'remember', '{"text":"личное","scope":"global"}');
+    const outcome = await runTool(context(memory), 'mind', '{"action":"remember","text":"личное","scope":"global"}');
 
     expect(outcome.ok).toBe(true);
     expect(outcome.detail).toContain('глобальной');
@@ -159,11 +159,11 @@ describe('инструменты remember/forget', () => {
       remember: vi.fn(async () => ({ ok: false, reason: 'full' as const })),
       forget: vi.fn(),
     };
-    const outcome = await runTool(context(memory), 'remember', '{"text":"x"}');
+    const outcome = await runTool(context(memory), 'mind', '{"action":"remember","text":"x"}');
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('заполнена');
-    expect(outcome.detail).toContain('forget');
+    expect(outcome.detail).toContain('mind');
   });
 
   it('forget про «нечего удалять» — не ошибка', async () => {
@@ -171,15 +171,31 @@ describe('инструменты remember/forget', () => {
       remember: vi.fn(),
       forget: vi.fn(async () => ({ notes: [], removed: 0 })),
     };
-    const outcome = await runTool(context(memory), 'forget', '{"query":"нет такого"}');
+    const outcome = await runTool(context(memory), 'mind', '{"action":"forget","query":"нет такого"}');
 
     expect(outcome.ok).toBe(true);
     expect(outcome.summary).toContain('нет');
   });
 
-  it('без памяти инструменты недоступны', async () => {
-    expect((await runTool(context(undefined), 'remember', '{"text":"x"}')).ok).toBe(false);
-    expect((await runTool(context(undefined), 'forget', '{"query":"x"}')).ok).toBe(false);
+  it('без памяти инструмент недоступен', async () => {
+    expect((await runTool(context(undefined), 'mind', '{"action":"remember","text":"x"}')).ok).toBe(false);
+    expect((await runTool(context(undefined), 'mind', '{"action":"forget","query":"x"}')).ok).toBe(false);
+  });
+
+  it('незнакомое действие называет допустимые', async () => {
+    const memory: MemoryTools = { remember: vi.fn(), forget: vi.fn() };
+    const outcome = await runTool(context(memory), 'mind', '{"action":"list"}');
+    expect(outcome.ok).toBe(false);
+    expect(outcome.detail).toContain('remember, forget');
+  });
+
+  it('аргумент своего действия спрашивается по имени', async () => {
+    // Схема общая: `text` и `query` нужны разным действиям, и ответ говорит, какое.
+    const memory: MemoryTools = { remember: vi.fn(), forget: vi.fn() };
+    const lost = await runTool(context(memory), 'mind', '{"action":"forget"}');
+    expect(lost.ok).toBe(false);
+    expect(lost.summary).toContain('query');
+    expect(memory.forget).not.toHaveBeenCalled();
   });
 
   it('потолок заметок соблюдается хранилищем', async () => {

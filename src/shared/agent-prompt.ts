@@ -50,8 +50,8 @@ const AGENT_HINTS: readonly AgentHint[] = [
     needs: ['project_map'],
   },
   {
-    text: 'Сначала найди место, потом читай: codebase_search — объявление, find_references — применения, search — текст, list с glob — имена.',
-    needs: ['codebase_search', 'find_references', 'search', 'list'],
+    text: 'Сначала найди место, потом читай: search (action code) — объявление, search (action text) — текст, lsp (action references) — применения, list с glob — имена.',
+    needs: ['search', 'lsp', 'list'],
   },
   {
     // Замер (`tests/tool-output-budget.test.ts`): search без context — 1 347 ток.,
@@ -60,8 +60,8 @@ const AGENT_HINTS: readonly AgentHint[] = [
     needs: ['search'],
   },
   {
-    text: '«Как устроен проект» — сперва search_docs: там готовый ответ, а не вывод по коду.',
-    needs: ['search_docs'],
+    text: '«Как устроен проект» — сперва search (action docs): там готовый ответ, а не вывод по коду.',
+    needs: ['search'],
   },
   {
     // Пачка файлов целиком — самый дорогой вывод сборки: 4 629 токенов против
@@ -70,32 +70,24 @@ const AGENT_HINTS: readonly AgentHint[] = [
     needs: ['read'],
   },
   {
-    text: 'file_outline — скелет файла; дальше read диапазоном, не целиком и не дважды.',
-    needs: ['file_outline', 'read'],
+    text: 'lsp — ссылки, объявление и скелет файла (action outline); дальше read диапазоном, не целиком и не дважды.',
+    needs: ['lsp', 'read'],
   },
   {
     text: 'Картинки — read_image (read откажет); SVG — наоборот, текст.',
     needs: ['read_image'],
   },
   {
-    text: 'Много однотипных вызовов — run_code: одна программа вместо десяти оборотов.',
-    needs: ['run_code'],
-  },
-  {
-    text: 'Раздать работу агентам и свести отчёты — run_code с kind "workflow" (agents.run, Promise.all).',
-    needs: ['run_code'],
-  },
-  {
     text: 'Перечитать много файлов ради ответа — `task`: его чтения не тратят твой контекст.',
     needs: ['task'],
   },
   {
-    text: 'Задачу из шагов начинай с update_plan и обновляй план по ходу.',
-    needs: ['update_plan'],
+    text: 'Задачу из шагов начинай с plan (action steps) и обновляй план по ходу.',
+    needs: ['plan'],
   },
   {
-    text: 'Перед тем как чинить код — get_diagnostics: настоящая ошибка, а не догадка.',
-    needs: ['get_diagnostics'],
+    text: 'Перед тем как чинить код — checks (action diagnostics): настоящая ошибка, а не догадка.',
+    needs: ['checks'],
   },
   {
     text: 'Правку адресуй якорем oldText — дословным куском файла (позиции — когда место посчитано точно); якорь не найден или не уникален — перечитай и возьми шире, а не меняй наугад.',
@@ -107,16 +99,12 @@ const AGENT_HINTS: readonly AgentHint[] = [
   },
   {
     text: 'Правки и команды пользователь подтверждает — не считай сделанными до ответа инструмента.',
-    needs: ['edit', 'create_file', 'terminal', 'git_write', 'delete_file', 'move_file'],
+    needs: ['edit', 'file', 'terminal', 'git_write'],
     aboutApproval: true,
   },
   {
-    text: 'Договорённости надолго — remember; разовый контекст не пиши.',
-    needs: ['remember'],
-  },
-  {
-    text: '«Каждый день в 9:00», «каждые 15 минут» — schedule с action create, а не ответ в чате: правило ставится один раз и работает само.',
-    needs: ['schedule'],
+    text: 'Договорённости надолго — mind (action remember); разовый контекст не пиши.',
+    needs: ['mind'],
   },
 ];
 

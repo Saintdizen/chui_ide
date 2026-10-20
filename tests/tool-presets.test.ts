@@ -29,8 +29,7 @@ const names = new Set(AGENT_TOOLS.map((tool) => tool.name));
 function presetTokens(preset: ToolPresetId): number {
   const allowed = presetToolNames(preset);
   const tools = AGENT_TOOLS.filter(
-    (tool) =>
-      (allowed === null || allowed.has(tool.name)) && !isRosterTool(preset, tool.name),
+    (tool) => (allowed === null || allowed.has(tool.name)) && !isRosterTool(preset, tool.name),
   );
   return estimateTextTokens(JSON.stringify(toOpenAiTools(tools)));
 }
@@ -89,14 +88,12 @@ describe('наборы инструментов агента', () => {
       'terminal',
       'git_write',
       'browser',
-      'schedule',
-      'run_code',
     ];
     for (const name of mutating) {
       expect(allowed.has(name), `«чтение» не должно предлагать ${name}`).toBe(false);
     }
     // А читать и спрашивать — обязано: иначе набор бесполезен.
-    for (const name of ['read', 'search', 'file_outline', 'ask']) {
+    for (const name of ['read', 'search', 'lsp', 'ask']) {
       expect(allowed.has(name)).toBe(true);
     }
   });
@@ -156,7 +153,7 @@ describe('наборы инструментов агента', () => {
     // простая, а схема стоила 121 токен в каждом запросе.
     expect(rosterNames('auto')).toContain('ask');
     // А дорогое и редкое — спрятано: именно на нём и экономия.
-    for (const name of ['terminal', 'browser', 'git_write', 'schedule']) {
+    for (const name of ['terminal', 'browser', 'git_write']) {
       expect(presetToolNames('auto')?.has(name), `в «Авто» не должно быть ${name}`).toBe(false);
     }
     expect(tokens.auto).toBeLessThan(tokens.full);
@@ -205,10 +202,10 @@ describe('наборы инструментов агента', () => {
     expect(isRosterTool('auto', 'read_file')).toBe(false);
     // Ростер есть у любого набора: вопрос не в правах, а в том, что едет схемой.
     // В узком наборе он ограничен его группами — rename_symbol это правка, не чтение.
-    expect(isRosterTool('read', 'forget')).toBe(true);
+    expect(isRosterTool('read', 'checks')).toBe(true);
     expect(isRosterTool('read', 'rename_symbol')).toBe(false);
     // Разрешённым от этого он не быть перестал: вызов по имени проходит.
-    expect(toolPresetAllows('read', 'forget')).toBe(true);
+    expect(toolPresetAllows('read', 'checks')).toBe(true);
   });
 
   it('ростер обещает только то, что пройдёт', () => {
@@ -226,7 +223,7 @@ describe('наборы инструментов агента', () => {
       }
     }
     // Ростер — цена, а не запрет: полный набор по-прежнему разрешает всё.
-    expect(toolPresetAllows('full', 'forget')).toBe(true);
+    expect(toolPresetAllows('full', 'mind')).toBe(true);
   });
 
   it('модели говорят о скрытом — и в полном наборе тоже', () => {
@@ -234,7 +231,7 @@ describe('наборы инструментов агента', () => {
     // Разрешение осталось полным, но без слова об этом инструментов для модели нет.
     const full = toolPresetNote('full');
     expect(full).toContain('по имени');
-    expect(full).toContain('forget');
+    expect(full).toContain('lsp');
 
     for (const preset of TOOL_PRESETS) {
       if (preset.id === 'full') continue;

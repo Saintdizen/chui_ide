@@ -11,7 +11,7 @@
  */
 
 import type { ChatRunTrace, ChatUsage } from './api';
-import { modelPricing } from './providers';
+import { pricingAt } from './providers';
 
 /** Сложить два следа прогона: шаги, вызовы и расход. Нужен для накопления по беседе. */
 export function addRunTrace(a: ChatRunTrace | undefined, b: ChatRunTrace | undefined): ChatRunTrace | undefined {
@@ -43,9 +43,10 @@ export function addUsage(a: ChatUsage | undefined, b: ChatUsage | undefined): Ch
  * Считать всё по цене обычного ввода значит показывать цифру, по которой нельзя
  * решить, окупается ли кеш.
  */
-export function usageCost(usage: ChatUsage | undefined, model: string): number | null {
+export function usageCost(usage: ChatUsage | undefined, model: string, at?: Date): number | null {
   if (!usage) return null;
-  const pricing = modelPricing(model);
+  // Тариф зависит от времени: в непиковые часы DeepSeek берёт вдвое меньше.
+  const pricing = pricingAt(model, at);
   if (!pricing) return null;
   const total = usage.promptTokens ?? 0;
   const output = usage.completionTokens ?? 0;
@@ -58,10 +59,7 @@ export function usageCost(usage: ChatUsage | undefined, model: string): number |
   const plain = Math.max(0, total - cached - written);
 
   return (
-    (plain * pricing.input +
-      cached * pricing.cachedInput +
-      written * pricing.cacheWrite +
-      output * pricing.output) /
+    (plain * pricing.input + cached * pricing.cachedInput + written * pricing.cacheWrite + output * pricing.output) /
     1_000_000
   );
 }

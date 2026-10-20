@@ -3,7 +3,7 @@ import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
 import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from '../src/shared/tools';
-import { isRosterTool, presetToolNames, toolPresetAllows, toolPresetNote } from '../src/shared/tool-presets';
+import { isRosterTool, presetToolNames, toolPresetNote } from '../src/shared/tool-presets';
 
 describe('скрытое по имени: привычка не должна дорожать', () => {
   const offered = () => {
@@ -11,11 +11,10 @@ describe('скрытое по имени: привычка не должна д�
     return AGENT_TOOLS.filter((spec) => names?.has(spec.name));
   };
 
-  it('в запросе нет схемы codebase_search, но имя и аргумент — в ростере', () => {
+  it('в запросе нет схемы project_map, но имя — в ростере', () => {
     const wire = toOpenAiTools(offered()).map((tool) => tool.function.name);
-    expect(wire).not.toContain('codebase_search');
-    expect(wire).toHaveLength(13);
-    expect(toolPresetNote('auto')).toContain('codebase_search(query)');
+    expect(wire).not.toContain('project_map');
+    expect(toolPresetNote('auto')).toContain('project_map()');
   });
 
   it('подсказка обещает только то, что механизм делает', () => {
@@ -33,11 +32,10 @@ describe('скрытое по имени: привычка не должна д�
     await ws.open(process.cwd());
     try {
       const ctx = { workspace: ws, signal: new AbortController().signal } as ToolContext;
-      const r = await runTool(ctx, 'codebase_search', JSON.stringify({ query: 'readFile' }));
+      const r = await runTool(ctx, 'project_map', JSON.stringify({}));
       expect(r.ok).toBe(true);
-      // Из `except`: исполняется, но остаётся скрытым — схема не возвращается.
-      expect(isRosterTool('auto', 'codebase_search')).toBe(true);
-      expect(toolPresetAllows('auto', 'codebase_search')).toBe(false);
+      // Из ростера: исполняется, но остаётся скрытым — схема не возвращается.
+      expect(isRosterTool('auto', 'project_map')).toBe(true);
       expect(presetToolNames('auto')?.size ?? 0).toBe(before);
     } finally {
       ws.dispose();

@@ -31,6 +31,12 @@ export const MAX_MESSAGES = 200;
  * на сотни килобайт.
  */
 export const MAX_CONTENT_CHARS = 100_000;
+/**
+ * Потолок на размышления одного шага. Они уходят обратно провайдеру вместе с
+ * историей, так что это такое же тело запроса, как и текст: длинная цепочка
+ * рассуждений весит десятки килобайт, и без потолка файл истории пухнет.
+ */
+export const MAX_REASONING_CHARS = 40_000;
 export const MAX_TITLE_CHARS = 120;
 export const MAX_TOOL_CALLS = 64;
 /**
@@ -122,6 +128,8 @@ export function sanitizeMessages(raw: unknown): ChatMessage[] {
     };
     if (typeof value.name === 'string') message.name = value.name;
     if (typeof value.toolCallId === 'string') message.toolCallId = value.toolCallId;
+    const reasoning = clampString(value.reasoning, '', MAX_REASONING_CHARS);
+    if (reasoning) message.reasoning = reasoning;
     if (value.rating === 'up' || value.rating === 'down') message.rating = value.rating;
 
     const toolCalls = sanitizeToolCalls(value.toolCalls);

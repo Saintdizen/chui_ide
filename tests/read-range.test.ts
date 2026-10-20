@@ -71,7 +71,7 @@ describe('read: границы диапазона', () => {
     // Раньше здесь было «диапазон 99–6 вне файла» — начало больше конца, читать нечего.
     expect(outcome.summary).toContain('начало диапазона 99');
     expect(outcome.summary).toContain('строк: 6');
-    expect(outcome.detail).toContain('file_outline');
+    expect(outcome.detail).toContain('lsp, action: outline');
   });
 
   it('конец раньше начала — отдельный отказ, а не «вне файла»', async () => {

@@ -121,11 +121,9 @@ export function touchedPaths(
       if (own) paths.add(pathKey(own));
       for (const path of pathsOf(args.edits)) paths.add(pathKey(path));
       for (const path of pathsOf(args.patches)) paths.add(pathKey(path));
-    } else if (name === 'create_file' || name === 'delete_file') {
-      const path = pathOf(args.path);
-      if (path) paths.add(pathKey(path));
-    } else if (name === 'move_file') {
-      for (const key of ['from', 'to']) {
+    } else if (name === 'file') {
+      // Слияние: у переноса файлов два (откуда и куда), у остальных — один `path`.
+      for (const key of args.action === 'move' ? ['from', 'to'] : ['path']) {
         const path = pathOf(args[key]);
         if (path) paths.add(pathKey(path));
       }

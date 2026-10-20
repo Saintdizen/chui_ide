@@ -132,7 +132,6 @@ const AI: MenuNode = {
     { separator: true },
     { label: 'Объяснить выделение', command: 'ai.explainSelection' },
     { label: 'Исправить выделение', command: 'ai.fixSelection' },
-    { label: 'Расписание задач…', command: 'ai.schedules' },
   ],
 };
 

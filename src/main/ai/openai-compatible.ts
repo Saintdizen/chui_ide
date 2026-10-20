@@ -3,7 +3,9 @@ import { RpcFailure } from '../ipc/router';
 import type { AiProvider, StreamChatHandlers, StreamChatParams } from './provider';
 import { isContextOverflow } from '../../shared/context-fit';
 import { fetchWithRetry } from '../../shared/retry';
-import { parseModelIds } from '../../shared/providers';
+import { parseModelIds, wireEffort } from '../../shared/providers';
+import { parseModelInfos, type ModelInfo } from '../../shared/model-info';
+import { parseBalance, type AccountBalance } from '../../shared/balance';
 import { netFetch } from '../net/proxy';
 
 export interface OpenAiCompatibleOptions {
@@ -69,6 +71,51 @@ export class OpenAiCompatibleProvider implements AiProvider {
     return parseModelIds(await response.json());
   }
 
+  /**
+   * То же `/models`, но с паспортом: OpenAI-совместимые серверы кладут рядом с
+   * id ещё и `context_window`, `max_output_tokens`, модальности и уровни усилия.
+   * Отбрасывать это — значит угадывать числа по имени модели там, где сервер
+   * уже ответил точно.
+   */
+  async listModelInfos(signal?: AbortSignal): Promise<ModelInfo[]> {
+    const response = await fetchWithRetry(this.url('/models'), { headers: this.headers() }, signal, netFetch);
+    if (!response.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        `Не удалось получить список моделей (HTTP ${response.status})`,
+        await safeText(response),
+      );
+    }
+    return parseModelInfos(await response.json());
+  }
+
+  /**
+   * Счёт у провайдера. Адрес у DeepSeek лежит на корне (`/user/balance`), а не
+   * под `/v1`, поэтому путь собираем от хоста, а не от базового адреса.
+   */
+  async getBalance(signal?: AbortSignal): Promise<AccountBalance> {
+    const response = await fetchWithRetry(this.accountUrl('/user/balance'), { headers: this.headers() }, signal, netFetch);
+    if (!response.ok) {
+      throw new RpcFailure(
+        RpcErrorCode.Internal,
+        `Не удалось узнать баланс (HTTP ${response.status})`,
+        await safeText(response),
+      );
+    }
+    const balance = parseBalance(await response.json());
+    if (!balance) throw new RpcFailure(RpcErrorCode.Internal, 'Ответ о балансе непонятного вида');
+    return balance;
+  }
+
+  /** Адрес служебного вызова: у корня хоста, без `/v1` и `/beta`. */
+  private accountUrl(pathname: string): string {
+    const base = this.options.baseUrl.replace(/\/+$/, '');
+    const root = base
+      .replace(/\/(v1|beta)\/?$/i, '')
+      .replace(/\/+$/, '');
+    return `${root}${pathname}`;
+  }
+
   async streamChat(
     params: StreamChatParams,
     handlers: StreamChatHandlers,
@@ -87,7 +134,15 @@ export class OpenAiCompatibleProvider implements AiProvider {
       if (params.temperature !== undefined) body.temperature = params.temperature;
       if (params.maxTokens !== undefined) body.max_tokens = params.maxTokens;
       // Имя поля — из OpenAI-протокола; так же его понимают OpenRouter, Groq и шлюзы.
-      if (params.reasoningEffort) body.reasoning_effort = params.reasoningEffort;
+      // Шкала усилий у моделей своя: DeepSeek понимает только low/high/max, и
+      // наше `medium` для него — это `high`.
+      const effort = wireEffort(params.model, params.reasoningEffort);
+      if (effort) body.reasoning_effort = effort;
+      // У моделей, которые думают по умолчанию, «без размышлений» — это отдельный
+      // параметр, а не отсутствие усилия: молчание означает «думай как обычно».
+      if (params.thinking === false) body.thinking = { type: 'disabled' };
+      // Метка пользователя: по ней провайдер разделяет кеш и лимиты.
+      if (params.userId) body.user_id = params.userId;
       if (params.tools?.length) body.tools = params.tools;
       // Кеш промпта: только на официальном OpenAI — сторонние совместимые серверы
       // могут отвергнуть незнакомое поле. Ключ стабилен для одного префикса, поэтому
@@ -247,6 +302,10 @@ function toWireMessage(message: ChatMessage): Record<string, unknown> {
       role: 'assistant',
       // content обязан быть null, когда ответ целиком состоит из вызовов
       content: message.content.length > 0 ? message.content : null,
+      // DeepSeek требует вернуть размышления шага вместе с вызовами: без них
+      // запрос с `tools` отвергается ошибкой 400. Поле есть только у тех шагов,
+      // где провайдер сам его прислал, — чужим серверам оно не уходит.
+      ...(message.reasoning ? { reasoning_content: message.reasoning } : {}),
       tool_calls: message.toolCalls.map((call) => ({
         id: call.id,
         type: 'function',

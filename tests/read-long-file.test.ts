@@ -78,7 +78,7 @@ describe('read длинного файла', () => {
     expect(outcome.ok).toBe(true);
     expect(detail).toContain('1 | const value1');
     expect(detail).not.toContain('Оглавление');
-    expect(detail).toContain('file_outline');
+    expect(detail).toContain('lsp (action: outline)');
   });
 
   it('прочитанными считаются только показанные строки', async () => {

@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { AGENT_TOOLS, type AgentToolName } from '../src/shared/tools';
 import {
   ALWAYS_AVAILABLE,
-  DENIED_IN_PROGRAM,
   PLAN_MODE_TOOLS,
   READ_ONLY_TOOLS,
   isReadOnlyCall,
@@ -29,7 +28,7 @@ describe('таблица признаков', () => {
   it('у каждого признака есть хотя бы один носитель', () => {
     // Пустой набор — признак, который перестали ставить: тогда «повтор не
     // исполняется» или «в плане можно» молча не работает ни для кого.
-    for (const set of [READ_ONLY_TOOLS, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, DENIED_IN_PROGRAM, ALWAYS_AVAILABLE]) {
+    for (const set of [READ_ONLY_TOOLS, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, ALWAYS_AVAILABLE]) {
       expect(set.size).toBeGreaterThan(0);
     }
   });
@@ -37,25 +36,23 @@ describe('таблица признаков', () => {
 
 describe('производные наборы', () => {
   it('знают только инструменты из AGENT_TOOLS', () => {
-    for (const set of [READ_ONLY_TOOLS, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, DENIED_IN_PROGRAM, ALWAYS_AVAILABLE]) {
+    for (const set of [READ_ONLY_TOOLS, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, ALWAYS_AVAILABLE]) {
       for (const name of set) expect(names).toContain(name as AgentToolName);
     }
   });
 
   it('подзадача ходит только чтением', () => {
     // Правки и команды остаются за основным агентом: он показывает ревью и
-    // спрашивает человека. Исключение одно — web_search: выдача меняется и
+    // спрашивает человека. Исключение одно — web: выдача поиска меняется и
     // стоит денег, поэтому в повторах не кэшируется, но читать её можно.
     for (const name of SUBAGENT_TOOLS) {
-      if (name === 'web_search') continue;
+      if (name === 'web') continue;
       expect(READ_ONLY_TOOLS.has(name)).toBe(true);
     }
   });
 
-  it('подзадача не зовёт подзадачу и сценарий', () => {
+  it('подзадача не зовёт подзадачу', () => {
     expect(SUBAGENT_TOOLS.has('task')).toBe(false);
-    expect(SUBAGENT_TOOLS.has('workflow')).toBe(false);
-    expect(SUBAGENT_TOOLS.has('run_code')).toBe(false);
   });
 
   it('в плане всё, что доступно подзадаче', () => {
@@ -66,11 +63,6 @@ describe('производные наборы', () => {
     for (const name of ['edit', 'create_file', 'delete_file', 'terminal']) {
       expect(PLAN_MODE_TOOLS.has(name)).toBe(false);
     }
-  });
-
-  it('внутри программы нет самой программы и вопроса', () => {
-    expect(DENIED_IN_PROGRAM.has('run_code')).toBe(true);
-    expect(DENIED_IN_PROGRAM.has('ask')).toBe(true);
   });
 
   it('без моста окна не обещает работать', () => {

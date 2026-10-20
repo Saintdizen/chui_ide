@@ -105,9 +105,9 @@ describe('структурные инструменты', () => {
       { path: path.join(ROOT, 'src/main/ai/service.ts') },
       { path: path.join(ROOT, 'src/shared/tools.ts') },
     ]) {
-      const outcome = await runTool(context, 'file_outline', JSON.stringify(args));
+      const outcome = await runTool(context, 'lsp', JSON.stringify({ ...args, action: 'outline' }));
       const detail = outcome.detail ?? outcome.summary ?? '';
-      expect(detail.length, `file_outline: ${detail.length}`).toBeLessThanOrEqual(MAX_OUTPUT_CHARS + 500);
+      expect(detail.length, `lsp outline: ${detail.length}`).toBeLessThanOrEqual(MAX_OUTPUT_CHARS + 500);
     }
     const found = await runTool(context, 'codebase_search', JSON.stringify({ query: 'readFile' }));
     expect((found.detail ?? '').length).toBeLessThanOrEqual(MAX_OUTPUT_CHARS + 500);

@@ -36,7 +36,7 @@ interface AnthropicTool {
 }
 
 /** Бюджет размышлений для расширенного мышления Anthropic по «усилию». */
-const THINKING_BUDGET = { low: 1024, medium: 4096, high: 8192 } as const;
+const THINKING_BUDGET = { low: 1024, medium: 4096, high: 8192, max: 16_384 } as const;
 
 /**
  * Провайдер нативного Anthropic Messages API.

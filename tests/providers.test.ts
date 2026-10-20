@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   contextWindow,
   findProviderPreset,
+  maxOutputTokens,
   modelCapabilities,
   modelPricing,
   reasoningEffortFor,
@@ -14,10 +15,17 @@ describe('modelCapabilities', () => {
     expect(caps.temperature).toBe(false);
   });
 
-  it('deepseek-reasoner: ни усилия, ни температуры', () => {
-    const caps = modelCapabilities('deepseek-reasoner');
-    expect(caps.reasoningEffort).toBe(false);
-    expect(caps.temperature).toBe(false);
+  it('DeepSeek: усилие есть, температура в размышлении не действует', () => {
+    // Размышление у DeepSeek включено по умолчанию, и temperature в нём не
+    // работает — документация просит не ждать от неё эффекта.
+    for (const name of ['deepseek-flash', 'deepseek-v4-pro']) {
+      const caps = modelCapabilities(name);
+      expect(caps.reasoningEffort).toBe(true);
+      expect(caps.temperature).toBe(false);
+      expect(caps.note).toBeTruthy();
+    }
+    // Дистиллят R1 живёт на сторонних серверах: у него температура своя.
+    expect(modelCapabilities('deepseek-r1-distill-qwen').temperature).toBe(true);
   });
 
   it('обычная модель: temperature есть, усилия нет', () => {
@@ -115,8 +123,21 @@ describe('modelCapabilities: разбор имён', () => {
 
 describe('contextWindow: разбор имён', () => {
   it('deepseek и grok получают свои окна', () => {
-    expect(contextWindow('deepseek-chat')).toBe(64_000);
+    // Окно DeepSeek — 1M входных токенов; старое 64K занижало его в шестнадцать
+    // раз, и автосжатие срабатывало почти сразу.
+    expect(contextWindow('deepseek-flash')).toBe(1_000_000);
     expect(contextWindow('grok-4')).toBe(131_072);
+  });
+
+  it('предел ответа не путается с окном', () => {
+    // У DeepSeek вход 1M, а выход — 384K: это разные числа, и общая константа
+    // 4096 обрывала ответ там, где модель готова была писать дальше.
+    expect(maxOutputTokens('deepseek-flash')).toBe(384_000);
+    expect(maxOutputTokens('deepseek-v4-pro')).toBe(384_000);
+    expect(maxOutputTokens('claude-sonnet-4-5')).toBe(64_000);
+    // Явная настройка важнее догадки по имени, а 0 означает «сколько даст модель».
+    expect(maxOutputTokens('deepseek-flash', 8_192)).toBe(8_192);
+    expect(maxOutputTokens('deepseek-flash', 0)).toBe(384_000);
   });
 
   it('gpt-5 попадает в окно o-серии', () => {
@@ -137,8 +158,10 @@ describe('modelPricing: прайс по семействам', () => {
   });
 
   it('DeepSeek', () => {
-    expect(modelPricing('deepseek-reasoner')).toMatchObject({ input: 0.55, output: 2.19 });
-    expect(modelPricing('deepseek-chat')).toMatchObject({ input: 0.27, output: 1.1 });
+    // Peak-тарифы: в часы низкой нагрузки DeepSeek берёт вдвое меньше, но
+    // ошибиться в большую сторону честнее, чем показать заниженный счёт.
+    expect(modelPricing('deepseek-v4-pro')).toMatchObject({ input: 1.32, output: 3.96 });
+    expect(modelPricing('deepseek-flash')).toMatchObject({ input: 0.3, output: 1.2 });
   });
 
   it('Anthropic через шлюз', () => {
@@ -153,7 +176,9 @@ describe('modelPricing: прайс по семействам', () => {
     expect(modelPricing('gpt-4o')).toMatchObject({ cachedInput: 1.25, cacheWrite: 2.5 });
     expect(modelPricing('claude-sonnet-4-5')?.cachedInput).toBeCloseTo(0.3, 10);
     expect(modelPricing('claude-sonnet-4-5')?.cacheWrite).toBe(3.75);
-    expect(modelPricing('deepseek-chat')?.cachedInput).toBeCloseTo(0.027, 10);
+    // У DeepSeek кеш-хит — 0.02× от промаха, а не 0.1×: впятеро дешевле, чем
+    // мы считали раньше.
+    expect(modelPricing('deepseek-flash')?.cachedInput).toBeCloseTo(0.006, 10);
   });
 
   it('из пресетов и прочее', () => {

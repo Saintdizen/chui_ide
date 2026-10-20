@@ -1,4 +1,4 @@
- import path from 'node:path';
+import path from 'node:path';
 import type {
   ApplyEditsHostResult,
   BrowserZoomMode,
@@ -23,7 +23,6 @@ import { formatReadImageReply, formatReadImageSummary } from '../../shared/read-
 import { testTargetProblem } from '../../shared/test-target';
 import { limitPerFile, MAX_HITS_PER_FILE } from '../../shared/search-limit';
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
-import { formatRunCode, runCodeToolAllowed, type RunCodeOutcome } from '../../shared/run-code';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
 import type { PatchFile, PatchHunk } from '../../shared/patch';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
@@ -35,8 +34,6 @@ import type { ToolPresentedFile } from '../../shared/api';
 import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
-import type { TaskSchedule } from '../../shared/scheduling';
-import { scheduleAction } from './schedule-tools';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
 import {
   formatAgentList,
@@ -51,7 +48,6 @@ import {
   type AgentWaitOutcome,
 } from '../../shared/agents';
 import type { AgentWaitResult } from './agents';
-import { formatWorkflow } from '../../shared/workflow';
 import { parseToolArguments } from '../../shared/tools';
 import { isCondenseMarker } from '../../shared/context-fit';
 import { missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
@@ -90,15 +86,14 @@ export interface ToolOutcome {
   /** Файловые операции (создание/удаление/перенос): их показывает панель изменений чата. */
   changes?: ToolFileChange[];
   /**
-   * Файлы-результаты (`present`): в ленте это карточка с кнопками «Открыть».
+   * Файлы-результаты (`show` с action present): в ленте это карточка с кнопками «Открыть».
    * Не `changes`: там «что изменилось», а здесь «вот что я сделал, посмотри».
    */
   presented?: ToolPresentedFile[];
   /**
    * Тела этого вызова уже не нужны в истории: их можно заменить пометкой
    * (см. `condenseAppliedCalls`). Это текст, который лёг в файл (правка, новый
-   * файл), или программа, которая отработала (`run_code`, `workflow`) — её код
-   * остаётся в трассе прогона. Ставится только там, где тело действительно
+   * файл): он остаётся в трассе прогона. Ставится только там, где тело действительно
    * своё отработало: отклонённая правка или правка, оставшаяся в буфере
    * редактора, ещё понадобится модели целиком.
    */
@@ -193,7 +188,7 @@ export interface SymbolSearch {
 }
 
 /**
- * Веб-поиск для инструмента `web_search`. Настройки, ключ и сеть живут в
+ * Веб-поиск для действия `search` инструмента `web`. Настройки, ключ и сеть живут в
  * `ai/service.ts` и `ai/web-search.ts`: сюда приходит уже готовый вызов, поэтому
  * инструмент остаётся проверяемым без сети.
  */
@@ -228,39 +223,11 @@ export interface WebSearchRunner {
 }
 
 /**
- * Чтение страницы по ссылке для инструмента `web_fetch`. Сеть живёт в
- * `ai/web-fetch.ts`, а сюда приходит готовый вызов — тот же уговор, что у `web_search`.
+ * Чтение страницы по ссылке для действия `fetch` инструмента `web`. Сеть живёт в
+ * `ai/web-fetch.ts`, а сюда приходит готовый вызов — тот же уговор, что у `search`.
  */
 export interface WebFetchRunner {
   fetch(url: string, options?: { signal?: AbortSignal; maxChars?: number }): Promise<FetchedPage>;
-}
-
-/**
- * Вызов инструмента изнутри программы `run_code`: что вернуть самой программе.
- * Это те же `ok`, `summary` и текст, что видит модель у обычного вызова, — иначе
- * программе пришлось бы разбирать ещё один формат.
- */
-export type RunCallHandler = (name: string, args: unknown) => Promise<{ ok: boolean; summary: string; text: string }>;
-
-/**
- * Программа (`run_code`). Запуск, права и обрыв живут в `ai/run-code.ts`; main же
- * решает, что программа может звать: `onCall` — это тот же `runTool` с тем же
- * контекстом, поэтому подтверждения и запись правок идут обычным путём.
- */
-export interface RunCodeRunner {
-  run(
-    source: string,
-    options: { signal?: AbortSignal; timeoutMs?: number; onCall: RunCallHandler },
-  ): Promise<RunCodeOutcome>;
-}
-
-/**
- * Сценарий с агентами (`workflow`). Движок тот же (`ai/run-code.ts`), но в
- * контексте сценария `agents` вместо `tools`, а что такое агент, решает service
- * — там есть провайдер и модель. Инструмент остаётся проверяемым без сети.
- */
-export interface WorkflowRunner {
-  run(source: string, options: { signal?: AbortSignal; timeoutMs?: number }): Promise<RunCodeOutcome>;
 }
 
 /**
@@ -288,24 +255,13 @@ export interface TestRunner {
 }
 
 /**
- * Память проекта для инструментов `remember` и `forget`. Хранилище живёт в main
+ * Память проекта для инструмента `mind` (действия `remember` и `forget`). Хранилище живёт в main
  * (`ai/project-memory.ts`), сюда приходит готовый вызов: инструменты остаются
  * проверяемыми без файловой системы.
  */
 export interface MemoryTools {
   remember(text: string, scope?: MemoryScope): Promise<RememberResult>;
   forget(query: string, scope?: MemoryScope): Promise<{ notes: readonly MemoryNote[]; removed: number }>;
-}
-
-/**
- * Расписание задач для инструментов `schedule_*`. Файл и часы живут в main
- * (`schedules/schedules.ts`), сюда приходит готовый вызов: инструменты остаются
- * проверяемыми без диска и Electron.
- */
-export interface ScheduleTools {
-  list(): Promise<TaskSchedule[]>;
-  save(schedule: TaskSchedule): Promise<TaskSchedule[]>;
-  remove(id: string): Promise<TaskSchedule[]>;
 }
 
 /**
@@ -446,22 +402,20 @@ export interface ToolContext {
   diagnostics?(path?: string): Promise<DiagnosticsHostResult>;
   /** Git рабочей папки: нужен инструментам git_read/git_write. */
   git?: GitTools;
-  /** Открыть файл в редакторе (renderer): нужен инструменту open_file. */
+  /** Открыть файл в редакторе (renderer): действие open инструмента show. */
   openFile?(path: string, line?: number, column?: number): Promise<boolean>;
   /** Терминальные сессии (pty): нужны инструментам terminal_*. */
   terminals?: TerminalAgent;
-  /** Символы проекта и скелет файла (языковой сервер): codebase_search, file_outline. */
+  /** Символы проекта и скелет файла (языковой сервер): lsp (action references|definition|outline). */
   symbols?: SymbolSearch;
-  /** Линтер проекта: нужен инструменту run_linter. */
+  /** Линтер проекта: нужен действию lint инструмента checks. */
   linter?: Linter;
   /** Команда запуска тестов: нужна инструменту run_tests. */
   tests?: TestRunner;
   /** Прошлые беседы проекта: нужен инструменту `session_search`. */
   sessions?: SessionSearchRunner;
-  /** Память проекта: нужна инструментам remember/forget. */
+  /** Память проекта: нужна инструменту mind. */
   memory?: MemoryTools;
-  /** Расписание задач: нужно инструментам schedule_*. */
-  schedules?: ScheduleTools;
   /** Навыки проекта (`.chui/skills`): каталог идёт в промпт, тело — инструментом read_skill. */
   skills?: SkillTools;
   /** Картинки для модели (`read_image`): чтение и уменьшение живут в main (`ai/read-image.ts`). */
@@ -470,10 +424,6 @@ export interface ToolContext {
   webSearch?: WebSearchRunner;
   /** Чтение страницы по ссылке: тоже только при включённой настройке. */
   webFetch?: WebFetchRunner;
-  /** Программа вместо десятка вызовов: есть, когда её вообще можно запустить. */
-  runCode?: RunCodeRunner;
-  /** Сценарий с агентами (`workflow`): тот же движок, но вместо tools — agents. */
-  workflow?: WorkflowRunner;
   /** Внешние инструменты (MCP): есть только при настроенных серверах. */
   mcp?: McpRunner;
   /** Подзадачи (инструмент `task`): запускает service — у него есть провайдер. */
@@ -781,7 +731,7 @@ const BODY_FIELDS = [
 /** Имя поля, где вместо содержимого стоит пометка сжатия, или `null`. */
 function staleCondensedBody(args: Record<string, unknown>): string | null {
   // Тела правок лежат вложенно: `edit` присылает `edits[].edits[].newText`,
-  // `create_file` — плоский `contents`. Обход общий, глубина ограничена: схемы
+  // `file` (action create) — плоский `contents`. Обход общий, глубина ограничена: схемы
   // инструментов не глубже четырёх уровней, а бесконечный обход тут не нужен.
   const walk = (value: unknown, path: string, depth: number): string | null => {
     if (depth > 4) return null;
@@ -813,7 +763,7 @@ function staleCondensedBody(args: Record<string, unknown>): string | null {
  * Бюджет шага (`stepBudget`) и предел на вызов соблюдали только чтение файлов и
  * вывод команд — остальные инструменты отдавали как есть. Замер на живом
  * проекте: `search` с контекстом возвращал 45 000 символов (≈14 600 токенов за
- * один вызов), `search_docs`, `git_read`, `run_linter` и `codebase_search` не
+ * один вызов), `search` (docs), `git_read`, `checks` не
  * режутся вовсе. Пропустить потолок теперь не может ни один инструмент — в том
  * числе новый, который забыли об этом попросить.
  */
@@ -842,58 +792,33 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
       case 'read':
         return await readAction(ctx, args);
       case 'search':
-        return await search(ctx, args);
-      case 'codebase_search':
-        return await codebaseSearch(ctx, args);
-      case 'search_docs':
-        return await searchDocs(ctx, args);
-      case 'session_search':
-        return await sessionSearch(ctx, args);
-      case 'present':
-        return await presentFiles(ctx, args);
+        return await searchAction(ctx, args);
       case 'read_skill':
         return await readSkill(ctx, args);
       case 'read_image':
         return await readImage(ctx, args);
-      case 'find_references':
-        return await findReferences(ctx, args);
-      case 'go_to_definition':
-        return await goToDefinition(ctx, args);
+      case 'lsp':
+        return await lspAction(ctx, args);
       case 'rename_symbol':
         return await renameSymbol(ctx, args);
-      case 'file_outline':
-        return await fileOutline(ctx, args);
-      case 'run_linter':
-        return await runLinter(ctx, args);
+      case 'checks':
+        return await checksAction(ctx, args);
       case 'run_tests':
         return await runTests(ctx, args);
       case 'project_map':
         return await projectMap(ctx.workspace);
-      case 'get_diagnostics':
-        return await diagnostics(ctx, args);
+
       case 'edit':
         return await editFiles(ctx, args);
-      case 'replace_in_files':
-        return await replaceInFiles(ctx.workspace, args);
-      case 'web_search':
-        return await webSearch(ctx, args);
-      case 'web_fetch':
-        return await webFetch(ctx, args);
-      case 'run_code':
-        return await runCodeProgram(ctx, args);
-      case 'create_file':
-        return await createFile(ctx.workspace, args);
-      case 'delete_file':
-        return await deleteFile(ctx.workspace, args);
-      case 'move_file':
-        return await moveFile(ctx.workspace, args);
-      case 'update_plan':
-        // План не исполняется здесь: его показывает service отдельным событием.
-        return { ok: true, summary: 'план обновлён' };
-      case 'update_goal':
-        // Цель — состояние беседы, а не действие: её разбирает service, чтобы
-        // закрытие цели и продолжение прогона шли одним путём.
-        return { ok: true, summary: 'цель обновлена' };
+      case 'web':
+        return await webAction(ctx, args);
+      case 'file':
+        return await fileAction(ctx, args);
+      case 'plan':
+        return {
+          ok: true,
+          summary: requireString(args, 'action') === 'goal' ? 'цель обновлена' : 'план обновлён',
+        };
       case 'ask':
         return await ask(ctx, args);
       case 'task':
@@ -903,27 +828,21 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
       // имени всё равно выполняется сразу.
       case 'agents':
         return await agentsAction(ctx, args);
-      case 'list_mcp_resources':
-        return await listMcpResources(ctx, args);
-      case 'read_mcp_resource':
-        return await readMcpResource(ctx, args);
+      case 'mcp':
+        return await mcpAction(ctx, args);
       // Три семейства ниже — одним инструментом с `action`: семь схем браузера и
       // пять терминала стоили модели дороже, чем их различие по смыслу. У git
       // имён два, а не одно: граница «чтение / запись» решает, где его позвать.
       case 'browser':
         return await browserAction(ctx, args);
-      case 'remember':
-        return await remember(ctx, args);
-      case 'forget':
-        return await forget(ctx, args);
-      case 'schedule':
-        return await scheduleAction(ctx, args);
+      case 'mind':
+        return await mindAction(ctx, args);
       case 'git_read':
         return await gitRead(ctx, args);
       case 'git_write':
         return await gitWrite(ctx, args);
-      case 'open_file':
-        return await openFile(ctx, args);
+      case 'show':
+        return await showAction(ctx, args);
       case 'terminal':
         return await terminalAction(ctx, args);
       default:
@@ -1434,7 +1353,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
       const tail =
         `… (файл длинный: строк всего ${total}, показаны первые ${head.length}). ` +
         `Дальше — read с startLine с ${head.length + 1}` +
-        `${outline ? ' или нужный раздел из оглавления выше' : ' или file_outline для оглавления'}.`;
+        `${outline ? ' или нужный раздел из оглавления выше' : ' или lsp (action: outline)'}.`;
       const body = `${numberedLines(head, 1)}\n\n${outline ? `Оглавление:\n${outline}\n\n` : ''}${tail}`;
       const { text } = clipText(ctx, 'read', body);
       return {
@@ -1469,7 +1388,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
       summary: `${rel}: начало диапазона ${from} за концом файла (в файле строк: ${total})`,
       detail:
         `Строки ${from} нет: файл короче, чем ожидалось (в нём ${total}). ` +
-        `Перечитай файл целиком (read без диапазона) или посмотри скелет (file_outline) ` +
+        `Перечитай файл целиком (read без диапазона) или посмотри скелет (lsp, action: outline) ` +
         `и возьми существующий диапазон в пределах 1–${total}.`,
     };
   }
@@ -1640,6 +1559,27 @@ async function replaceInFiles(workspace: WorkspaceService, args: Record<string, 
     detail: lines.join('\n'),
     changes: result.files.map((file) => ({ path: file, kind: 'modified' as const, replaced: result.replaced })),
   };
+}
+
+/**
+ * Поиск одним именем: источники различались только первой строкой описания, а
+ * стоили своей схемы каждый. Действие по умолчанию — `text`: так старые вызовы и
+ * привычка «искать в проекте» остаются без лишнего слова.
+ */
+async function searchAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = (optionalString(args, 'action') ?? '').trim() || 'text';
+  switch (action) {
+    case 'text':
+      return await search(ctx, args);
+    case 'code':
+      return await codebaseSearch(ctx, args);
+    case 'docs':
+      return await searchDocs(ctx, args);
+    case 'sessions':
+      return await sessionSearch(ctx, args);
+    default:
+      return unknownAction(action, 'search: text, code, docs, sessions.');
+  }
 }
 
 async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -2047,7 +1987,7 @@ async function findReferences(ctx: ToolContext, args: Record<string, unknown>): 
       summary: `объявление «${name}» не найдено`,
       detail:
         'Языковой сервер не нашёл объявления с таким именем. Уточни имя (или напиши его словами, ' +
-        'например «read file») либо посмотри codebase_search.',
+        'например «read file») либо посмотри search с action code.',
     };
   }
 
@@ -2174,8 +2114,8 @@ async function renameSymbol(ctx: ToolContext, args: Record<string, unknown>): Pr
       ok: true,
       summary: `объявление «${name}» не найдено`,
       detail:
-        'Языковой сервер не нашёл объявления с таким именем. Уточни имя либо посмотри codebase_search. ' +
-        'Для массовой замены подстроки есть `replace_in_files`, но он не знает семантики.',
+        'Языковой сервер не нашёл объявления с таким именем. Уточни имя либо посмотри search (action code). ' +
+        'Для массовой замены подстроки есть `file` (action replace), но он не знает семантики.',
     };
   }
 
@@ -2188,7 +2128,7 @@ async function renameSymbol(ctx: ToolContext, args: Record<string, unknown>): Pr
       ok: false,
       summary: `${target.name}: сервер этого языка не умеет переименование`,
       detail:
-        'Языковой сервер не поддерживает `textDocument/rename`. Для замены подстроки используй `replace_in_files`.',
+        'Языковой сервер не поддерживает `textDocument/rename`. Для замены подстроки используй `file` (action replace).',
     };
   }
   if (edits.length === 0) {
@@ -2382,7 +2322,11 @@ function sandboxUnavailable(sandbox: SandboxRunner): ToolOutcome {
  * Файлы по glob-маске. Отдельно от `search`: тут не читается содержимое,
  * поэтому обход дешёвый и результат — список путей.
  */
-async function findFiles(workspace: WorkspaceService, ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+async function findFiles(
+  workspace: WorkspaceService,
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+): Promise<ToolOutcome> {
   const glob = optionalString(args, 'glob');
   const limit = optionalInteger(args, 'limit') ?? DEFAULT_FIND_FILES;
 
@@ -2699,7 +2643,7 @@ async function terminalRunForeground(ctx: ToolContext, args: Record<string, unkn
     // логика должна жить в файле, а не в команде.
     throw new Error(
       `Команда длиннее ${MAX_COMMAND_CHARS} символов (${command.length}): такое не проходит ` +
-        'через терминал. Положи текст в файл инструментом `create_file` или `edit` и запусти файл — ' +
+        'через терминал. Положи текст в файл инструментом `file` (action create) или `edit` и запусти файл — ' +
         'или сократи команду.',
     );
   }
@@ -3008,74 +2952,6 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
         'его скачивают терминалом.',
     };
   }
-}
-
-/**
- * Программа вместо десятка вызовов (`run_code`).
- *
- * Каждый `tools.<имя>(args)` внутри программы — это обычный вызов инструмента:
- * он идёт через `ctx.runCode.onCall`, а тот — через `runTool` с тем же контекстом.
- * Значит права, подтверждения, запись правок и учёт прочитанного работают как
- * всегда, а меняется только число оборотов к модели: один вместо десяти.
- *
- * Запрет на часть инструментов живёт в `shared/run-code.ts`: `run_code` не зовёт
- * себя, `ask` не ждёт человека из программы, а план и цель — состояние беседы,
- * и из программы они всё равно ничего не поменяют.
- */
-async function runCodeProgram(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  const code = requireString(args, 'code');
-  const timeoutMs = optionalInteger(args, 'timeoutMs');
-  const kind = optionalString(args, 'kind') ?? 'code';
-
-  // Сценарий: тот же движок, но в контексте только агенты. Два имени были бы
-  // дешевле только на вид — тела схем всё равно остались бы оба, а выбор между
-  // «программой» и «сценарием» модель делает по одному слову.
-  if (kind === 'workflow') {
-    if (!ctx.workflow) return { ok: false, summary: 'Сценарий недоступен: нет запуска' };
-    const scripted = await ctx.workflow.run(code, {
-      ...(ctx.signal ? { signal: ctx.signal } : {}),
-      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    });
-    const shaped = formatWorkflow(scripted);
-    return {
-      ok: !scripted.error && !scripted.timedOut,
-      summary: shaped.summary,
-      detail: shaped.detail,
-      applied: true,
-    };
-  }
-
-  if (!ctx.runCode) return { ok: false, summary: 'Программа недоступна: нет запуска' };
-
-  const outcome = await ctx.runCode.run(code, {
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
-    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-    onCall: async (name, callArgs) => {
-      if (!runCodeToolAllowed(name)) {
-        return {
-          ok: false,
-          summary: `инструмент «${name}» недоступен из программы`,
-          text: `«${name}» нельзя звать из программы: сделай это обычным вызовом после её окончания.`,
-        };
-      }
-      const result = await runTool(ctx, name, JSON.stringify(callArgs === undefined ? {} : callArgs));
-      return {
-        ok: result.ok,
-        summary: result.summary,
-        text: result.detail ?? result.summary,
-      };
-    },
-  });
-
-  const shaped = formatRunCode(outcome);
-  // Код программы уже отработал, и его текст лежит в трассе прогона: в истории
-  // он висел бы до конца беседы (сто строк — около тысячи токенов на каждом шаге).
-  return {
-    ok: !outcome.error && !outcome.timedOut,
-    summary: shaped.summary,
-    detail: shaped.detail,
-    applied: true,
-  };
 }
 
 /** История коммитов: read-only контекст «что тут менялось». */
@@ -3492,7 +3368,7 @@ async function remember(ctx: ToolContext, args: Record<string, unknown>): Promis
         ok: false,
         summary: 'Память заполнена',
         detail:
-          'Заметок стало слишком много. Убери устаревшие через `forget`, а затем запиши нужную снова — ' +
+          'Заметок стало слишком много. Убери устаревшие через `mind` (action: "forget"), а затем запиши нужную снова — ' +
           'иначе новая заметка потеряется среди старых.',
       };
     }
@@ -3529,6 +3405,88 @@ async function forget(ctx: ToolContext, args: Record<string, unknown>): Promise<
   };
 }
 
+/**
+ * Память одним инструментом: `remember` и `forget` — два глагола об одном
+ * хранилище, а стоили двух схем в каждом запросе. Поля у них разные, поэтому
+ * схема общая, а недостающее называется до обработчика — как у `git_write`.
+ */
+async function mindAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  switch (action) {
+    case 'remember':
+      return missingForAction(args, ['text']) ?? (await remember(ctx, args));
+    case 'forget':
+      return missingForAction(args, ['query']) ?? (await forget(ctx, args));
+    default:
+      return {
+        ok: false,
+        summary: `Неизвестное действие: ${action}`,
+        detail: 'mind: remember, forget.',
+      };
+  }
+}
+
+/** Языковой сервер: ссылки, объявление и скелет файла — одно состояние, одни права. */
+async function lspAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  switch (action) {
+    case 'references':
+      return missingForAction(args, ['symbol']) ?? (await findReferences(ctx, args));
+    case 'definition':
+      return await goToDefinition(ctx, args);
+    case 'outline':
+      return missingForAction(args, ['path']) ?? (await fileOutline(ctx, args));
+    default:
+      return unknownAction(action, 'lsp: references, definition, outline.');
+  }
+}
+
+/** Проверки: пометки редактора и линтер — оба про «что не так с кодом». */
+async function checksAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  switch (action) {
+    case 'diagnostics':
+      return await diagnostics(ctx, args);
+    case 'lint':
+      return await runLinter(ctx, args);
+    default:
+      return unknownAction(action, 'checks: diagnostics, lint.');
+  }
+}
+
+/** Сеть: поиск и чтение страницы — два шага одного пути. */
+async function webAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  if (action === 'search') return missingForAction(args, ['query']) ?? (await webSearch(ctx, args));
+  if (action === 'fetch') return missingForAction(args, ['url']) ?? (await webFetch(ctx, args));
+  return unknownAction(action, 'web: search, fetch.');
+}
+
+/** Файлы и папки: создание, перемещение, удаление и замела по проекту меняют диск одинаково. */
+async function fileAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  if (action === 'create') return missingForAction(args, ['path']) ?? (await createFile(ctx.workspace, args));
+  if (action === 'move') return missingForAction(args, ['from', 'to']) ?? (await moveFile(ctx.workspace, args));
+  if (action === 'delete') return missingForAction(args, ['path']) ?? (await deleteFile(ctx.workspace, args));
+  if (action === 'replace') {
+    return missingForAction(args, ['query']) ?? (await replaceInFiles(ctx.workspace, args));
+  }
+  return unknownAction(action, 'file: create, move, delete, replace.');
+}
+
+/** Ресурсы MCP: каталог и чтение — две половины одного похода. */
+async function mcpAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = requireString(args, 'action').trim();
+  if (action === 'list') return await listMcpResources(ctx, args);
+  if (action === 'read') return missingForAction(args, ['uri']) ?? (await readMcpResource(ctx, args));
+  return unknownAction(action, 'mcp: list, read.');
+}
+
+/** Незнакомое действие слитого инструмента: ответ называет допустимые. */
+function unknownAction(action: string, detail: string): ToolOutcome {
+  return { ok: false, summary: `Неизвестное действие: ${action}`, detail };
+}
+
 /** «1 файл», «2 файла», «5 файлов» — для подписи действия в подтверждении. */
 function pluralFiles(count: number): string {
   const mod10 = count % 10;
@@ -3539,6 +3497,15 @@ function pluralFiles(count: number): string {
 }
 
 /* ── открытие файла в редакторе ─────────────────────────────────────────── */
+
+async function showAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  // Показ одним именем: открыть файл и предложить результат кнопками — две
+  // стороны одного «вот здесь», а стоили двух схем каждая.
+  const action = requireString(args, 'action').trim();
+  if (action === 'open') return missingForAction(args, ['path']) ?? (await openFile(ctx, args));
+  if (action === 'present') return await presentFiles(ctx, args);
+  return unknownAction(action, 'show: open, present.');
+}
 
 /** Открывает файл в renderer: вкладка и позиция — дело интерфейса, не ФС. */
 async function openFile(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -3945,7 +3912,7 @@ function optionalInteger(args: Record<string, unknown>, key: string): number | u
 }
 
 /**
- * `list_mcp_resources` — каталог ресурсов MCP: адреса, имена, типы.
+ * `mcp` (action list) — каталог ресурсов MCP: адреса, имена, типы.
  *
  * Ресурс — не действие, а документ: сервер объявляет у себя адреса, и их читают.
  * Каталог отдаём целиком (с потолком внутри `formatMcpResources`): модель иначе
@@ -3982,7 +3949,7 @@ async function listMcpResources(ctx: ToolContext, args: Record<string, unknown>)
 }
 
 /**
- * `read_mcp_resource` — прочитать один ресурс по адресу из каталога.
+ * `mcp` (action read) — прочитать один ресурс по адресу из каталога.
  *
  * Подтверждения не спрашиваем: это чтение чужого документа, а не действие. Адрес
  * проверяем по каталогу — так опечатка модели превращается в понятный отказ, а не
@@ -4036,7 +4003,7 @@ async function sessionSearch(ctx: ToolContext, args: Record<string, unknown>): P
 }
 
 /**
- * `present` — объявить готовый результат.
+ * `present` — действие show: объявить готовый результат.
  *
  * Агент и раньше писал «файл готов, он лежит в docs/тз.md», и человек шёл искать
  * его в дереве. Карточка в ленте делает то же самое одним нажатием: путь и кнопка
