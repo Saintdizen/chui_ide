@@ -228,13 +228,24 @@ function declarations(count: number): string {
 }
 
 /** Строка скелета: номера строк, вид и имя. Диапазон — только если он не одна строка. */
-function outlineLine(symbol: FileSymbol, depth: number): string {
+function outlineLine(symbol: FileSymbol, depth: number, hidden = 0): string {
   const where = symbol.endLine > symbol.line ? `${symbol.line}–${symbol.endLine}` : String(symbol.line);
-  return `${'  '.repeat(depth)}${where}: ${symbol.kind} ${symbol.name}`;
+  // Свёрнутые ветки называем на строке родителя, а не отдельной строкой: так
+  // модель знает, что глубже есть ещё, и одной строкой меньше платит за это.
+  const rest = hidden > 0 ? ` · вложенных: ${hidden}` : '';
+  return `${'  '.repeat(depth)}${where}: ${symbol.kind} ${symbol.name}${rest}`;
 }
 
 /** Предел строк вывода: скелет огромного файла не должен вытеснить беседу. */
 const MAX_OUTLINE_LINES = 200;
+
+/**
+ * На сколько уровней вглубь печатаем объявления. Два — это «класс и его методы»:
+ * глубже идут замыкания и вложенные классы, которые агенту без нужды. На файле
+ * на 3 000 строк скелет без предела выдавал 200 строк по 30 символов совсем не
+ * тех объявлений — дешевле назвать число вложенных и дать диапазон.
+ */
+const MAX_OUTLINE_DEPTH = 2;
 
 /**
  * Скелет файла — то, чем агент узнаёт устройство файла, не читая его целиком:
@@ -244,7 +255,7 @@ const MAX_OUTLINE_LINES = 200;
 export function formatOutline(
   file: string,
   symbols: readonly FileSymbol[],
-  options: { maxLines?: number; totalLines?: number } = {},
+  options: { maxLines?: number; totalLines?: number; maxDepth?: number } = {},
 ): { summary: string; detail: string; total: number; lines: number } {
   const total = countFileSymbols(symbols);
   const name = baseName(file);
@@ -262,6 +273,7 @@ export function formatOutline(
   }
 
   const limit = options.maxLines ?? MAX_OUTLINE_LINES;
+  const maxDepth = options.maxDepth ?? MAX_OUTLINE_DEPTH;
   const out: string[] = [];
   let shown = 0;
   let cut = false;
@@ -272,8 +284,12 @@ export function formatOutline(
         cut = true;
         return;
       }
-      out.push(outlineLine(symbol, depth));
+      // Ветка глубже предела — вложенные не печатаем, а называем числом: так
+      // видно, что там что-то есть, и видно, откуда его взять (диапазон строк).
+      const deeper = depth + 1 >= maxDepth ? countFileSymbols(symbol.children) : 0;
+      out.push(outlineLine(symbol, depth, deeper));
       shown += 1;
+      if (deeper > 0) continue;
       walk(symbol.children, depth + 1);
     }
   };

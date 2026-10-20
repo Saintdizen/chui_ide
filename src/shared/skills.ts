@@ -48,6 +48,10 @@ export const MAX_SKILL_NAME = 64;
 export const MAX_SKILL_DESCRIPTION = 200;
 /** Сколько навыков видит агент. Дальше каталог сам становится простынёй. */
 export const MAX_SKILLS = 40;
+/** Потолок всего каталога в символах: сорок навыков по двести — это 8000 в каждом запросе. */
+export const MAX_SKILL_CATALOG_CHARS = 3_000;
+/** Описание в каталоге короче, чем в интерфейсе: в промпте нужен повод, а не суть. */
+const CATALOG_DESCRIPTION_CHARS = 110;
 /** Потолок тела навыка: сценарий — это инструкция, а не книга. */
 export const MAX_SKILL_BODY_CHARS = 24_000;
 
@@ -179,12 +183,45 @@ export function findSkill(skills: readonly SkillEntry[], name: string): SkillEnt
  *
  * `null` — навыков нет: пустой заголовок в промпте только занимает место.
  */
+/**
+ * Каталог навыков для системного промпта: имя и одна строка о каждом. Тела здесь
+ * нет — агент просит его инструментом, когда навык понадобился.
+ *
+ * Место в промпте ограничено дважды: потолок на описание (иначе один навык с
+ * абзацем вместо строки вытеснит десяток других) и общий потолок каталога —
+ * сорок навыков по двести символов это восемь тысяч символов в КАЖДОМ запросе,
+ * больше, чем весь агентный промпт. Что не влезло — называем числом, а не молча.
+ *
+ * `null` — навыков нет: пустой заголовок в промпте только занимает место.
+ */
 export function formatSkillCatalog(skills: readonly SkillEntry[]): string | null {
   if (skills.length === 0) return null;
-  const lines = skills.slice(0, MAX_SKILLS).map((skill) => `- ${skill.name} — ${skill.description}`);
+  const lines: string[] = [];
+  let spent = 0;
+  for (const skill of skills.slice(0, MAX_SKILLS)) {
+    const line = `- ${skill.name} — ${catalogDescription(skill.description)}`;
+    if (spent + line.length > MAX_SKILL_CATALOG_CHARS) break;
+    lines.push(line);
+    spent += line.length + 1;
+  }
+  const rest = skills.length - lines.length;
+  if (rest > 0) {
+    lines.push(`…ещё ${rest}: каталог длиннее, чем стоит держать в каждом запросе. Имена — в папках навыков.`);
+  }
   return [
     'Навыки — готовые сценарии работы в этом проекте. Здесь только их список: тело навыка',
     'прочитай инструментом read_skill, когда он действительно нужен, а не на всякий случай.',
     ...lines,
   ].join('\n');
+}
+
+/**
+ * Описание в строке каталога: первая фраза и потолок по длине. Полное описание
+ * нужно в интерфейсе, а в промпте важно только «когда этот навык берут».
+ */
+function catalogDescription(description: string): string {
+  const oneLine = description.replace(/\s+/g, ' ').trim();
+  const sentence = oneLine.split(/(?<=[.!?])\s/)[0] ?? oneLine;
+  if (sentence.length <= CATALOG_DESCRIPTION_CHARS) return sentence;
+  return `${sentence.slice(0, CATALOG_DESCRIPTION_CHARS - 1)}…`;
 }

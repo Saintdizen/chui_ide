@@ -8,6 +8,8 @@ import {
   normalizeSkillName,
   parseSkillFile,
   skillBody,
+  MAX_SKILLS,
+  MAX_SKILL_CATALOG_CHARS,
   MAX_SKILL_DESCRIPTION,
   type SkillEntry,
 } from '../src/shared/skills';
@@ -128,6 +130,24 @@ describe('formatSkillCatalog', () => {
     expect(text).toContain('- tests — Прогон проверок');
     // Тела в каталоге нет: его просят инструментом.
     expect(text).toContain('read_skill');
+  });
+
+  it('долгое описание укорачивается: в промпте нужен повод, а не абзац', () => {
+    const long = `${'Очень длинное пояснение о навыке. '.repeat(12)}Хвост, который уже не нужен.`;
+    const text = formatSkillCatalog([entry({ description: long })]) ?? '';
+    expect(text).toContain('- release — Очень длинное пояснение о навыке.');
+    expect(text).not.toContain('Хвост');
+  });
+
+  it('каталог не разрастается выше потолка, а остаток назван числом', () => {
+    // Сорок навыков с полными описаниями — это больше, чем весь агентный промпт.
+    const many = Array.from({ length: MAX_SKILLS }, (_, index) =>
+      entry({ name: `skill-${index}`, description: `${'подробное описание '.repeat(10)}` }),
+    );
+    const text = formatSkillCatalog(many) ?? '';
+    expect(text.length).toBeLessThan(MAX_SKILL_CATALOG_CHARS + 500);
+    // Что не влезло — числом, а не молча: иначе навык «есть, но невидим».
+    expect(text).toMatch(/…ещё \d+/);
   });
 });
 

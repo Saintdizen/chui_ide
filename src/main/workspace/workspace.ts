@@ -162,7 +162,27 @@ export class WorkspaceService {
    */
   private dependencyDirs: string[] = [];
 
+  /**
+   * Каталоги, откуда разрешено ЧТЕНИЕ, хотя они вне проекта: сейчас это копии
+   * длинного вывода инструментов (`ai/spill.ts`, лежат в userData).
+   *
+   * Без этого пометка «вывод обрезан — полностью в файле …» вела в тупик:
+   * `read_file` отвечал «путь вне рабочей папки», и агент либо перезапускал
+   * команду, либо бросал дело. Обещать адрес, по которому нельзя пройти, хуже,
+   * чем не обещать вовсе.
+   */
+  private readOnlyDirs: string[] = [];
+
   constructor(private readonly onChange: (topic: string, payload: unknown) => void) {}
+
+  /**
+   * Разрешить чтение из каталога вне проекта (копии длинного вывода). Запись
+   * туда по-прежнему запрещена: писать можно только в корни рабочей области.
+   */
+  allowReadDir(dir: string): void {
+    const resolved = path.resolve(dir);
+    if (!this.readOnlyDirs.includes(resolved)) this.readOnlyDirs.push(resolved);
+  }
 
   /** Каталоги зависимостей: по ним разрешено ЧТЕНИЕ (см. `dependencyDirs`). */
   setDependencyDirs(dirs: readonly string[]): void {
@@ -1214,7 +1234,11 @@ export class WorkspaceService {
     const owner = this.ownerOf(resolved);
     // Зависимость разрешена только на чтение и только внутри каталогов, которые назвала
     // карта символов: иначе открыть исходник библиотеки из списка символов было бы нельзя.
-    const dependency = options.allowDependency ? this.isDependencyPath(resolved) : false;
+    // `readOnlyDirs` — только для чтения: копии вывода инструментов лежат вне
+    // проекта, но адрес из пометки «обрезано» обязан открываться.
+    const dependency = options.allowDependency
+      ? this.isDependencyPath(resolved) || this.isReadOnlyPath(resolved)
+      : false;
     if (!owner && !dependency) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Путь вне рабочей папки');
     }
@@ -1224,12 +1248,18 @@ export class WorkspaceService {
       // Симлинк обязан остаться внутри ХОТЯ БЫ ОДНОГО корня области (или каталога зависимостей).
       const inside =
         this.roots.some((state) => !escapesRoot(state.rootReal, real)) ||
-        (dependency && real !== null && this.isDependencyPath(real));
+        (dependency && real !== null && this.isDependencyPath(real)) ||
+        (real !== null && this.isReadOnlyPath(real));
       if (!inside) {
         throw new RpcFailure(RpcErrorCode.InvalidParams, 'Путь вне рабочей папки (симлинк)');
       }
     }
     return resolved;
+  }
+
+  /** Путь внутри каталога, открытого только для чтения (копии длинного вывода). */
+  private isReadOnlyPath(target: string): boolean {
+    return this.readOnlyDirs.some((dir) => !escapesRoot(dir, target));
   }
 
   /** Путь лежит внутри каталога зависимости (или равен ему): оттуда читать можно. */

@@ -131,9 +131,31 @@ describe('наборы инструментов агента', () => {
     expect(tokens.full).toBeLessThan(8_000);
   });
 
+  it('набор «Авто» есть, он по умолчанию и расширяется сам', () => {
+    // Смысл набора — платить меньше за шаг, не отнимая возможность: скрытое
+    // подключается вызовом по имени (см. `widen` и `service`), поэтому цена
+    // падает без обещания « этого инструмента у меня нет».
+    const auto = toolPresetSpec('auto');
+    expect(DEFAULT_TOOL_PRESET).toBe('auto');
+    expect(auto.widen).toBe(true);
+    expect(auto.groups).not.toBeNull();
+    // Всё, что меняет проект, в нём есть: правки прятать нельзя — это работа.
+    for (const name of ['edit', 'read_file', 'ask', 'run_tests']) {
+      expect(presetToolNames('auto')?.has(name), `в «Авто» нет ${name}`).toBe(true);
+    }
+    // А дорогое и редкое — спрятано: именно на нём и экономия.
+    for (const name of ['terminal', 'browser', 'git_write', 'schedule']) {
+      expect(presetToolNames('auto')?.has(name), `в «Авто» не должно быть ${name}`).toBe(false);
+    }
+    expect(tokens.auto).toBeLessThan(tokens.full);
+  });
+
   it('неизвестное значение набора считается полным', () => {
     expect(sanitizeToolPreset('read')).toBe('read');
-    expect(sanitizeToolPreset(undefined)).toBe(DEFAULT_TOOL_PRESET);
+    expect(sanitizeToolPreset('auto')).toBe('auto');
+    // Умолчание для новых — `auto`, но чужое значение в старой настройке или
+    // беседе — «все»: сужение на угад отняло бы возможность, о которой не просили.
+    expect(sanitizeToolPreset(undefined)).toBe('full');
     expect(sanitizeToolPreset('nonsense')).toBe('full');
   });
 
@@ -143,8 +165,8 @@ describe('наборы инструментов агента', () => {
       if (preset.id === 'full') continue;
       const note = toolPresetNote(preset.id);
       expect(note).toContain(preset.label);
-      // Совет конкретный: сказать человеку, а не искать обходной путь.
-      expect(note).toContain('человеку');
+      if (preset.widen) expect(note).toContain('по имени');
+      else expect(note).toContain('человеку');
     }
   });
 

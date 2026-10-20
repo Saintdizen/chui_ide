@@ -75,12 +75,24 @@ describe('find_files', () => {
 });
 
 describe('search', () => {
-  it('принимает регистр, режим «только файлы» и контекст вокруг совпадения', () => {
+  it('принимает регистр, режим «только файлы», контекст и предел выдачи', () => {
     const props = byName.get('search')!.inputSchema.properties;
-    expect(Object.keys(props)).toEqual(['query', 'isRegex', 'caseSensitive', 'filesOnly', 'glob', 'path', 'context']);
+    expect(Object.keys(props)).toEqual([
+      'query',
+      'isRegex',
+      'caseSensitive',
+      'filesOnly',
+      'glob',
+      'path',
+      'context',
+      'limit',
+    ]);
     expect(byName.get('search')!.inputSchema.required).toEqual(['query']);
     // Контекст — как -A/-B у grep: без него результат остаётся одной строкой.
     expect(props.context?.type).toBe('number');
+    // Предел есть и в схеме: без него модель не могла попросить меньше двухсот
+    // совпадений, и поиск отдавал десятки тысяч символов на любой запрос.
+    expect(props.limit?.type).toBe('number');
   });
 });
 

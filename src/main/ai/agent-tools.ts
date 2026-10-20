@@ -514,7 +514,7 @@ export interface ToolContext {
  * контекст модели. 45 000 символов — это примерно 12 000 токенов, которых
  * хватает на средний модуль целиком.
  */
-const MAX_OUTPUT_CHARS = 45_000;
+export const MAX_OUTPUT_CHARS = 45_000;
 
 /**
  * Сколько символов вывода шаг отдаёт модели всего. Предела на вызов мало: агент
@@ -537,8 +537,17 @@ const MIN_OUTPUT_CHARS = 1_500;
 /** Больше этого одной страницы модели не отдаём: даже по просьбе. */
 const MAX_FETCH_CHARS = 60_000;
 const MAX_SEARCH_HITS = 200;
+/**
+ * Сколько совпадений отдаём, если модель не попросила иначе. Двести — потолок,
+ * а не умолчание: замер на живом проекте (‘export function’) давал 21 000
+ * символов ≈ 6 000 токенов за один вызов, и это при том, что первые десять
+ * строк уже отвечают на вопрос.
+ */
+const DEFAULT_SEARCH_HITS = 100;
+/** С контекстом умолчание ниже: каждое совпадение — это блок из пяти строк. */
+const DEFAULT_SEARCH_HITS_WITH_CONTEXT = 60;
 /** Сколько разделов документации отдаём на один запрос `search_docs`. */
-const MAX_DOC_RESULTS = 12;
+const MAX_DOC_RESULTS = 8;
 /**
  * Во сколько раз просим больше совпадений, чем отдадим. Потолок на файл
  * отбирает уже после поиска: без запаса шумный файл занял бы весь список, и
@@ -547,7 +556,25 @@ const MAX_DOC_RESULTS = 12;
 const SEARCH_OVERFETCH = 3;
 /** Потолок для режима «только файлы»: там на файл одна строка, поэтому можно больше. */
 const MAX_FIND_FILES = 2000;
+/**
+ * Сколько путей отдаём в `search filesOnly`, если модель не попросила иначе.
+ * Две тысячи строк — это около 11 900 символов (≈3 400 токенов) ради ответа
+ * «где встречается»: по сотне путей уже видно, где искать, остальное добирается
+ * сужением запроса или папки.
+ */
+const DEFAULT_FILES_ONLY_PATHS = 300;
 const MAX_DIR_ENTRIES = 500;
+/**
+ * С какого размера файл называем в `list_dir`. Мелкие размеры — шум: за вызов
+ * их бывает до 500, и «(412 Б)» у каждой записи стоит дороже, чем сообщает.
+ */
+const BIG_FILE_BYTES = 1024 * 1024;
+
+/** Размер крупного файла в удобных единицах — только для таких и зовётся. */
+function formatBigSize(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} ГБ` : `${mb.toFixed(1)} МБ`;
+}
 /** Сколько строк отдаёт read_file за один диапазонный вызов. */
 const MAX_READ_LINES = 2000;
 /**
@@ -659,68 +686,93 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     }
   }
 
+  return clipOutcome(ctx, name, await dispatchTool(ctx, name, parsed.value));
+}
+
+/**
+ * Потолок вывода, общий для всех инструментов: одно место вместо надежды на
+ * каждый.
+ *
+ * Бюджет шага (`stepBudget`) и предел на вызов соблюдали только чтение файлов и
+ * вывод команд — остальные инструменты отдавали как есть. Замер на живом
+ * проекте: `search` с контекстом возвращал 45 000 символов (≈14 600 токенов за
+ * один вызов), `search_docs`, `git_read`, `run_linter` и `codebase_search` не
+ * режутся вовсе. Пропустить потолок теперь не может ни один инструмент — в том
+ * числе новый, который забыли об этом попросить.
+ */
+function clipOutcome(ctx: ToolContext, name: string, outcome: ToolOutcome): ToolOutcome {
+  const detail = outcome.detail;
+  // Короткое не трогаем: лишний файл копии и пометка «обрезано» дороже самого
+  // ответа, а инструменты, которые сами блюдут бюджет, сюда просто не попадут.
+  if (typeof detail !== 'string' || detail.length <= MAX_OUTPUT_CHARS) return outcome;
+  const { text, truncated } = clipText(ctx, name, detail);
+  return truncated ? { ...outcome, detail: text } : outcome;
+}
+
+/** Аргументы уже разобраны: дальше — только исполнение и потолок вывода. */
+async function dispatchTool(ctx: ToolContext, name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
   try {
     // Внешние инструменты (MCP) идут мимо оператора `switch`: их имена приходят
     // из настроек и заранее неизвестны.
-    if (isMcpToolName(name)) return await runExternalTool(ctx, name, parsed.value);
+    if (isMcpToolName(name)) return await runExternalTool(ctx, name, args);
 
     switch (name) {
       case 'list_dir':
-        return await listDir(ctx.workspace, parsed.value);
+        return await listDir(ctx.workspace, args);
       case 'read_file':
-        return await readFile(ctx, parsed.value);
+        return await readFile(ctx, args);
       case 'read_files':
-        return await readFiles(ctx, parsed.value);
+        return await readFiles(ctx, args);
       case 'search':
-        return await search(ctx, parsed.value);
+        return await search(ctx, args);
       case 'codebase_search':
-        return await codebaseSearch(ctx, parsed.value);
+        return await codebaseSearch(ctx, args);
       case 'search_docs':
-        return await searchDocs(ctx, parsed.value);
+        return await searchDocs(ctx, args);
       case 'session_search':
-        return await sessionSearch(ctx, parsed.value);
+        return await sessionSearch(ctx, args);
       case 'present':
-        return await presentFiles(ctx, parsed.value);
+        return await presentFiles(ctx, args);
       case 'read_skill':
-        return await readSkill(ctx, parsed.value);
+        return await readSkill(ctx, args);
       case 'read_image':
-        return await readImage(ctx, parsed.value);
+        return await readImage(ctx, args);
       case 'find_references':
-        return await findReferences(ctx, parsed.value);
+        return await findReferences(ctx, args);
       case 'go_to_definition':
-        return await goToDefinition(ctx, parsed.value);
+        return await goToDefinition(ctx, args);
       case 'rename_symbol':
-        return await renameSymbol(ctx, parsed.value);
+        return await renameSymbol(ctx, args);
       case 'file_outline':
-        return await fileOutline(ctx, parsed.value);
+        return await fileOutline(ctx, args);
       case 'run_linter':
-        return await runLinter(ctx, parsed.value);
+        return await runLinter(ctx, args);
       case 'run_tests':
-        return await runTests(ctx, parsed.value);
+        return await runTests(ctx, args);
       case 'project_map':
         return await projectMap(ctx.workspace);
       case 'find_files':
-        return await findFiles(ctx, parsed.value);
+        return await findFiles(ctx, args);
       case 'get_diagnostics':
-        return await diagnostics(ctx, parsed.value);
+        return await diagnostics(ctx, args);
       case 'edit':
-        return await editFiles(ctx, parsed.value);
+        return await editFiles(ctx, args);
       case 'replace_in_files':
-        return await replaceInFiles(ctx.workspace, parsed.value);
+        return await replaceInFiles(ctx.workspace, args);
       case 'web_search':
-        return await webSearch(ctx, parsed.value);
+        return await webSearch(ctx, args);
       case 'web_fetch':
-        return await webFetch(ctx, parsed.value);
+        return await webFetch(ctx, args);
       case 'run_code':
-        return await runCodeProgram(ctx, parsed.value);
+        return await runCodeProgram(ctx, args);
       case 'workflow':
-        return await workflowScript(ctx, parsed.value);
+        return await workflowScript(ctx, args);
       case 'create_file':
-        return await createFile(ctx.workspace, parsed.value);
+        return await createFile(ctx.workspace, args);
       case 'delete_file':
-        return await deleteFile(ctx.workspace, parsed.value);
+        return await deleteFile(ctx.workspace, args);
       case 'move_file':
-        return await moveFile(ctx.workspace, parsed.value);
+        return await moveFile(ctx.workspace, args);
       case 'update_plan':
         // План не исполняется здесь: его показывает service отдельным событием.
         return { ok: true, summary: 'план обновлён' };
@@ -729,46 +781,46 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         // закрытие цели и продолжение прогона шли одним путём.
         return { ok: true, summary: 'цель обновлена' };
       case 'ask':
-        return await ask(ctx, parsed.value);
+        return await ask(ctx, args);
       case 'task':
-        return await task(ctx, parsed.value);
+        return await task(ctx, args);
       // Агенты в фоне. Запуск — `spawn_agent`, остальные четыре говорят с уже
       // запущенными: без них фоновый агент был бы бросанием денег на ветер.
       case 'spawn_agent':
-        return await spawnAgent(ctx, parsed.value);
+        return await spawnAgent(ctx, args);
       case 'list_agents':
         return listAgents(ctx);
       case 'wait_agent':
-        return await waitAgents(ctx, parsed.value);
+        return await waitAgents(ctx, args);
       case 'send_message':
-        return sendToAgent(ctx, parsed.value, 'agent');
+        return sendToAgent(ctx, args, 'agent');
       case 'interrupt_agent':
-        return interruptAgent(ctx, parsed.value, 'model');
+        return interruptAgent(ctx, args, 'model');
       case 'list_mcp_resources':
-        return await listMcpResources(ctx, parsed.value);
+        return await listMcpResources(ctx, args);
       case 'read_mcp_resource':
-        return await readMcpResource(ctx, parsed.value);
+        return await readMcpResource(ctx, args);
       // Три семейства ниже — одним инструментом с `action`: семь схем браузера и
       // пять терминала стоили модели дороже, чем их различие по смыслу. У git
       // имён два, а не одно: граница «чтение / запись» решает, где его позвать.
       case 'browser':
-        return await browserAction(ctx, parsed.value);
+        return await browserAction(ctx, args);
       case 'remember':
-        return await remember(ctx, parsed.value);
+        return await remember(ctx, args);
       case 'forget':
-        return await forget(ctx, parsed.value);
+        return await forget(ctx, args);
       case 'schedule_list':
         return await scheduleList(ctx);
       case 'schedule':
-        return await scheduleAction(ctx, parsed.value);
+        return await scheduleAction(ctx, args);
       case 'git_read':
-        return await gitRead(ctx, parsed.value);
+        return await gitRead(ctx, args);
       case 'git_write':
-        return await gitWrite(ctx, parsed.value);
+        return await gitWrite(ctx, args);
       case 'open_file':
-        return await openFile(ctx, parsed.value);
+        return await openFile(ctx, args);
       case 'terminal':
-        return await terminalAction(ctx, parsed.value);
+        return await terminalAction(ctx, args);
       default:
         return { ok: false, summary: `Инструмент недоступен: ${name}` };
     }
@@ -1141,8 +1193,10 @@ async function listDir(workspace: WorkspaceService, args: Record<string, unknown
  * должны годиться в правку по позициям без пересчёта.
  */
 function numberedLines(lines: readonly string[], from: number): string {
-  const width = String(from + lines.length - 1).length;
-  return lines.map((line, index) => `${String(from + index).padStart(width, ' ')} | ${line}`).join('\n');
+  // Без выравнивания: `padStart` добавляет пробелы к каждой строке файла, а
+  // модель читает числа, а не колонку. На двух тысячах строк это около 4 000
+  // символов на один вызов — больше, чем весит иное оглавление.
+  return lines.map((line, index) => `${from + index} | ${line}`).join('\n');
 }
 
 /**
@@ -1278,7 +1332,13 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
 
 /** Сколько файлов и сколько символов отдаёт `read_files` за один вызов. */
 const MAX_READ_FILES = 10;
-const MAX_READ_FILES_TOTAL_CHARS = 60_000;
+/**
+ * Общий потолок пачки. Пять файлов по 12 000 символов — это уже 30 000, половина
+ * бюджета шага на один вызов. При 60 000 пара больших файлов отдавала около
+ * 6 800 токенов за шаг и отбивала у модели охоту читать дальше: дешевле
+ * прочитать один, чем всю пачку сразу.
+ */
+const MAX_READ_FILES_TOTAL_CHARS = 30_000;
 
 /**
  * Пакетное чтение: 2–5 файлов за один шаг. Каждый файл получает те же номера
@@ -1316,8 +1376,7 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
         continue;
       }
       const lines = content.text.length === 0 ? [] : content.text.split('\n');
-      const width = String(lines.length).length;
-      const body = lines.map((line, index) => `${String(index + 1).padStart(width, ' ')} | ${line}`).join('\n');
+      const body = lines.map((line, index) => `${index + 1} | ${line}`).join('\n');
       const { text, truncated } = clipText(ctx, 'read_files', body);
       const chunk = `### ${rel} (${lines.length} строк${truncated ? ', обрезано' : ''})\n${text || '(пустой файл)'}`;
       parts.push(chunk);
@@ -1396,6 +1455,16 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
   // Контекст — как -A/-B у grep. Ограничиваем здесь, а не только в workspace:
   // инструмент должен вести себя предсказуемо и в проверках, и на глаз модели.
   const context = optionalInteger(args, 'context') ?? 0;
+  // Сколько совпадений отдать. Раньше выбора не было — всегда 200, и запрос вида
+  // «export function» отдавал 21 000 символов (≈6 000 токенов) даже когда модели
+  // хватало десятка. С контекстом умолчание ниже: там каждое совпадение — блок
+  // из пяти строк, и двести таких блоков не читает никто.
+  const wantedLimit = optionalInteger(args, 'limit');
+  const fallbackLimit = context > 0 ? DEFAULT_SEARCH_HITS_WITH_CONTEXT : DEFAULT_SEARCH_HITS;
+  const limit = Math.min(MAX_SEARCH_HITS, Math.max(1, wantedLimit ?? fallbackLimit));
+  // В режиме «только файлы» предел считает файлы, а не строки: одна строка на
+  // файл, и умолчание там своё (см. DEFAULT_FILES_ONLY_PATHS).
+  const fileLimit = Math.min(MAX_FIND_FILES, Math.max(1, wantedLimit ?? DEFAULT_FILES_ONLY_PATHS));
 
   const result = await workspace.search(
     {
@@ -1409,7 +1478,10 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
       // Просим с запасом: потолок на файл отбирает уже потом, и без запаса один
       // шумный файл (`package-lock.json`) занял бы весь список, а до остальных
       // файлов поиск бы даже не дошёл.
-      maxResults: filesOnly ? MAX_FIND_FILES : MAX_SEARCH_HITS * SEARCH_OVERFETCH,
+      // В режиме «только файлы» просим всё, что даст поиск: обход дешев, а число
+      // найденных файлов нужно, чтобы назвать остаток. Дорого было отдавать их
+      // модели — это решает `fileLimit` ниже.
+      maxResults: filesOnly ? MAX_FIND_FILES : limit * SEARCH_OVERFETCH,
     },
     ctx.signal,
   );
@@ -1417,18 +1489,21 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
 
   // Режим «только файлы»: одна строка на файл, без номера строки и текста.
   if (filesOnly) {
-    const files = [...new Set(result.hits.map((hit) => relativePath(hit.path, root)))];
+    const unique = [...new Set(result.hits.map((hit) => relativePath(hit.path, root)))];
+    const files = unique.slice(0, fileLimit);
+    const rest = unique.length - files.length;
+    const tail = rest > 0 ? `\n… ещё файлов: ${rest} — сузьте запрос или папку` : '';
     return {
       ok: true,
-      summary: `совпадения в файлах: ${files.length}${result.truncated ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
-      detail: files.length ? clipText(ctx, 'search', files.join('\n')).text : 'Ничего не найдено',
+      summary: `совпадения в файлах: ${unique.length}${result.truncated || rest > 0 ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
+      detail: files.length ? clipText(ctx, 'search', files.join('\n')).text + tail : 'Ничего не найдено',
     };
   }
 
   // Потолок на файл: десяток строк из одного места полезнее двухсот, а по числу
   // скрытых видно, что файл шумный, — и модель сузит запрос вместо вывода
   // «больше нигде нет».
-  const limited = limitPerFile(result.hits, MAX_HITS_PER_FILE, MAX_SEARCH_HITS);
+  const limited = limitPerFile(result.hits, MAX_HITS_PER_FILE, limit);
   const detail = formatSearchHits(limited.hits, root, context);
   const truncated = result.truncated || limited.truncated;
   const notes = [truncated ? 'список обрезан' : '', limited.hidden > 0 ? `на файл до ${MAX_HITS_PER_FILE}` : ''].filter(
@@ -1451,32 +1526,61 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
 function formatSearchHits(hits: readonly SearchHit[], root: string | null, context: number): string {
   if (hits.length === 0) return '';
   if (context <= 0) {
-    return hits.map((hit) => `${relativePath(hit.path, root)}:${hit.line}:${hit.column}: ${hit.text}`).join('\n');
+    // Столбец не печатаем: в следующий вызов его не передать (у `read_file` и
+    // `edit` границы задаются строками), а в выдаче на 200 совпадений он стоит
+    // пару сотен символов на каждой — тысячи на вызов.
+    return hits.map((hit) => `${relativePath(hit.path, root)}:${hit.line}: ${hit.text}`).join('\n');
   }
 
-  const blocks: string[] = [];
-  let lastPath: string | null = null;
+  // Блоки контекста у соседних совпадений перекрываются: два совпадения в двух
+  // строках друг от друга печатали одни и те же строки дважды. Собираем поэтому
+  // не список блоков, а объединение диапазонов по файлу — как `grep -C`.
+  interface Block {
+    path: string;
+    /** Строка → текст и признак «это совпадение» (совпадений в блоке может быть несколько). */
+    lines: Map<number, { text: string; match: boolean }>;
+    to: number;
+  }
+  const blocks: Block[] = [];
+  let current: Block | null = null;
+
   for (const hit of hits) {
     const before = hit.before ?? [];
     const after = hit.after ?? [];
-    // Ширину номера берём по самой большой строке блока: колонка цифр не «пляшет».
-    const last = hit.line + after.length;
-    const width = String(last).length;
-    const number = (value: number): string => String(value).padStart(width, ' ');
-
-    const lines = [
-      ...before.map((text, index) => `${number(hit.line - before.length + index)}- ${text}`),
-      `${number(hit.line)}: ${hit.text}`,
-      ...after.map((text, index) => `${number(hit.line + 1 + index)}- ${text}`),
-    ];
-
-    // Путь печатаем заголовком один раз на файл: в блоке он повторялся бы в
-    // каждой строке и съедал место, которого ради контекста и не хватало.
+    const from = hit.line - before.length;
+    const to = hit.line + after.length;
     const rel = relativePath(hit.path, root);
-    blocks.push(rel === lastPath ? lines.join('\n') : `${rel}\n${lines.join('\n')}`);
-    lastPath = rel;
+    // Продолжаем блок, если файл тот же и диапазоны соприкасаются: иначе между
+    // ними дыра, и её надо печатать отдельным блоком.
+    if (!current || current.path !== rel || from > current.to + 1) {
+      current = { path: rel, lines: new Map(), to };
+      blocks.push(current);
+    }
+    const block = current;
+    for (const [index, text] of before.entries()) block.lines.set(from + index, { text, match: false });
+    // Совпадение перекрывает контекст: его текст без отступов и с пометкой `:`.
+    block.lines.set(hit.line, { text: hit.text, match: true });
+    for (const [index, text] of after.entries()) {
+      const line = hit.line + 1 + index;
+      if (!block.lines.get(line)?.match) block.lines.set(line, { text, match: false });
+    }
+    block.to = Math.max(block.to, to);
   }
-  return blocks.join('\n\n');
+
+  let lastPath: string | null = null;
+  return blocks
+    .map((block) => {
+      const numbered = [...block.lines.entries()].sort((left, right) => left[0] - right[0]);
+      // Без выравнивания по ширине: пробелы на каждой строке контекста стоят
+      // дороже, чем дают, — модель читает числа, а не колонку.
+      const body = numbered.map(([line, entry]) => `${line}${entry.match ? ':' : '-'} ${entry.text}`);
+      // Путь — заголовком файла: в строках блока он повторялся бы на каждой и
+      // съедал место, которого ради контекста и не хватало.
+      const head = block.path === lastPath ? [] : [block.path];
+      lastPath = block.path;
+      return [...head, ...body].join('\n');
+    })
+    .join('\n\n');
 }
 
 /** Сколько объявлений вернуть по умолчанию и сколько файлов-сводок показать. */
@@ -2057,7 +2161,7 @@ async function findFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
 
 /* ── диагностика ────────────────────────────────────────────────────────── */
 
-const MAX_DIAGNOSTICS = 100;
+const MAX_DIAGNOSTICS = 60;
 
 /** Пометки языка собирает renderer: они живут в редакторе, а не на диске. */
 async function diagnostics(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -3384,7 +3488,11 @@ function terminalStop(ctx: ToolContext, args: Record<string, unknown>): ToolOutc
 
 function describe(entry: DirEntry, root: string | null): string {
   const suffix = entry.kind === 'directory' ? '/' : '';
-  const size = entry.kind === 'file' ? ` (${entry.size} Б)` : '';
+  // Размер печатаем только там, где он что-то решает: «(412 Б)» у каждой
+  // записи — это шум, который едет в контекст модели в каждом `list_dir` и
+  // ничего не сообщает (до 500 записей за вызов). Крупный файл — другое дело:
+  // по нему видно, что читать его целиком не стоит.
+  const size = entry.kind === 'file' && entry.size >= BIG_FILE_BYTES ? ` (${formatBigSize(entry.size)})` : '';
   // Ссылку видно отдельно: агент должен знать, что путь — не обычная запись, а
   // ссылка (и куда ведёт). Битую помечаем словом: по ней ничего не прочитать.
   const link = entry.symlink ? ` → ${entry.symlink.target}${entry.symlink.broken ? ' (битая)' : ''}` : '';

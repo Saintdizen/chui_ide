@@ -24,6 +24,8 @@ import {
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
 import type { PatchFile } from '../../shared/patch';
+import { ageToolResults } from './age-results';
+import { spillText } from './spill';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
@@ -38,7 +40,9 @@ import {
   TokenCalibration,
   trimMessagesToFit,
 } from '../../shared/context-fit';
+import { agentPrompt } from '../../shared/agent-prompt';
 import { formatMemory } from '../../shared/memory';
+import { formatInstructionFile } from '../../shared/instructions';
 import { formatSkillCatalog } from '../../shared/skills';
 import {
   cleanCompletion,
@@ -187,30 +191,13 @@ const TRIM_MARKER =
 /** Шагов подзадаче меньше, чем основному агенту: её дело — собрать факты, а не работать. */
 const SUBAGENT_MAX_STEPS = 16;
 
-/** Потолок отчёта подзадачи: это выжимка для основного агента, а не второй контекст. */
-const SUBAGENT_REPORT_CHARS = 8000;
-
-/** Дописывается в системный промпт, когда агентный режим включён. */
-const AGENT_PROMPT = [
-  'Когда ради одного ответа нужно перечитать много файлов — делегируй подзадаче (`task`).',
-  'Работай с проектом инструментами, а не по догадке: назначение и аргументы у каждого описаны в нём самом — читай их.',
-  'Устройство проекта видно по карте в начале беседы: не обходи дерево и не читай манифесты. Подробнее — project_map.',
-  'Не выдумывай содержимое файлов: то, чего не знаешь, читай инструментами.',
-  'Прежде чем читать файл целиком, найди место: codebase_search — где объявлен символ, find_references — где используется, search — где встречается текстом, find_files — какие файлы есть.',
-  'У search бери context=2–3: соседних строк часто хватает, и отдельный read_file не нужен.',
-  'Вопрос «как проект устроен» сперва задай документации (search_docs): там готовый ответ, а не вывод по коду.',
-  'Устройство файла даёт file_outline: дальше читай диапазоном по номерам, а не файл целиком. Большие файлы — тоже диапазоном, и не перечитывай одно и то же.',
-  'Скриншот, макет или схему смотри read_image: read_file на картинке откажет — она не текст. SVG — наоборот, текст, его читай read_file.',
-  'Когда вызовов много и они однотипны — run_code: одна программа вместо десяти оборотов.',
-  'Работу, которую надо раздать агентам и разветвить по их отчётам, собирай сценарием workflow: в нём есть if и Promise.all.',
-  'Задачу из нескольких шагов начинай с update_plan и обновляй план по ходу.',
-  'Перед тем как чинить код, посмотри get_diagnostics: там настоящая ошибка, а не догадка.',
-  'Для правок по умолчанию бери edit с action patch: позиции считает IDE, тебе нужен только точный фрагмент. action position — когда место посчитано тобой точно.',
-  'Если якорь не найден, их несколько или правка «не совпала» — перечитай файл и возьми фрагмент дословно и шире (с соседней строкой или именем функции), а не меняй формулировку наугад.',
-  'Правки и команды пользователь подтверждает — не считай их сделанными, пока не получил ответ инструмента.',
-  'Договорённости, важные надолго, записывай в память проекта (`remember`). Разовый контекст не пиши.',
-  'Просьба «каждый день в 9:00…» или «каждые 15 минут…» — это расписание (`schedule` с `action: create`), а не ответ в чате: правило ставится один раз и работает само.',
-].join('\n');
+/**
+ * Потолок отчёта подзадачи: это выжимка для основного агента, а не второй
+ * контекст. Восемь тысяч символов (≈2 300 токенов) платились за каждый вызов
+ * `task`, хотя отчёт читается один раз и по делу отвечает первая треть. Не
+ * влезло — остаётся в файле, адрес прилагается.
+ */
+const SUBAGENT_REPORT_CHARS = 4000;
 
 /** Дописывается, когда включён полный доступ: подтверждения не нужны. */
 const AUTO_APPROVE_PROMPT = [
@@ -824,11 +811,16 @@ export class AiService {
     const sandboxed = sandboxSettings.enabled && this.sandbox !== undefined;
     const sandboxPrompt = sandboxed ? sandboxNote(sandboxSettings, this.sandbox!.available) : '';
 
-    if (planMode) messages.push({ role: 'system', content: `${AGENT_PROMPT}\n${PLAN_PROMPT}` });
+    if (planMode)
+      messages.push({ role: 'system', content: `${agentPrompt(toolPreset, { confirm: false })}\n${PLAN_PROMPT}` });
     else if (useTools)
       messages.push({
         role: 'system',
-        content: [AGENT_PROMPT, permission === 'full' ? AUTO_APPROVE_PROMPT : '', sandboxPrompt]
+        content: [
+          agentPrompt(toolPreset, { confirm: permission !== 'full' }),
+          permission === 'full' ? AUTO_APPROVE_PROMPT : '',
+          sandboxPrompt,
+        ]
           .filter(Boolean)
           .join('\n'),
       });
@@ -1005,6 +997,14 @@ export class AiService {
     }
 
     /**
+     * Набор расширяется сам (пресет «Авто»). Скрытый инструмент скрыт ради
+     * токенов, а не ради прав: его вызов по имени открывает его в наборе.
+     * Список живёт весь прогон — открытое не закрывается назад.
+     */
+    const onDemandTools = new Set<string>();
+    const widensOnDemand = toolPresetSpec(toolPreset).widen === true;
+
+    /**
      * План утвердили посреди прогона: ограничений плана больше нет — набор схем
      * пересобирается, чтобы модель могла выполнить одобренное. Внешние (MCP) в
      * пересчёт не входят: в плане их не было.
@@ -1014,7 +1014,7 @@ export class AiService {
         (tool) =>
           tool.name !== 'exit_plan_mode' &&
           this.canRun(tool, host, hasSkills) &&
-          toolPresetAllows(toolPreset, tool.name),
+          (toolPresetAllows(toolPreset, tool.name) || onDemandTools.has(tool.name)),
       );
       const next = [...widened, ...external, ...resourceTools];
       tools = next.length > 0 ? toOpenAiTools(next) : undefined;
@@ -1534,13 +1534,26 @@ export class AiService {
         // инструмент, которого ей не предлагали, — по памяти прошлых ходов или по
         // совету из чужого текста. Он не выполнится, и об этом надо сказать прямо:
         // молчаливый отказ читается как «такого не бывает» и уводит в тупик.
+        //
+        // Набор «Авто» расширяется на месте: инструмент скрыт ради цены, а не
+        // ради прав — исполняем его и берём в набор со следующего шага.
+        let widenedNow = false;
+        const hiddenByPreset = !toolPresetAllows(toolPreset, call.name);
+        if (hiddenByPreset && widensOnDemand && (!planMode || planApproved)) {
+          const known = AGENT_TOOLS.find((tool) => tool.name === call.name);
+          if (known && this.canRun(known, host, hasSkills)) {
+            onDemandTools.add(call.name);
+            widenedNow = true;
+            widenTools();
+          }
+        }
         const denied =
           planMode && !planApproved && !PLAN_MODE_TOOLS.has(call.name)
             ? {
                 content: `Режим плана: инструмент «${call.name}» недоступен. Ничего не меняй — составь план доступными средствами чтения.`,
                 summary: 'режим плана: изменение недоступно',
               }
-            : !toolPresetAllows(toolPreset, call.name)
+            : hiddenByPreset && !onDemandTools.has(call.name)
               ? {
                   content: `Набор инструментов «${toolPresetSpec(toolPreset).label}»: «${call.name}» в него не входит. Скажи человеку, какой инструмент нужен, — он сменит набор в композере.`,
                   summary: `набор «${toolPresetSpec(toolPreset).label}»: инструмент недоступен`,
@@ -1650,13 +1663,16 @@ export class AiService {
         });
 
         const result = outcome.ok ? (outcome.detail ?? outcome.summary) : `Ошибка: ${outcome.summary}`;
+        // Подключение называем вслух: иначе модель не понимает, почему инструмент
+        // раньше не был виден, а человек — почему набор вырос.
+        const widenedNote = widenedNow ? `\n(«${call.name}» подключён в набор)` : '';
         const toolMessage: ChatMessage = {
           role: 'tool',
           toolCallId: call.id,
           name: call.name,
           // Единая точка сжатия для всех инструментов: в контекст модели уходит
           // текст без оформления, а человек в карточке (событие выше) видит полный.
-          content: compressOutput ? compressToolOutput(result) : result,
+          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote,
         };
         messages.push(toolMessage);
         produced.push(toolMessage);
@@ -1779,14 +1795,24 @@ export class AiService {
     const scale = this.calibration.scaleFor(params.calibrationKey);
     const windowTokens = Math.max(1, Math.floor(params.windowTokens / scale));
 
-    const budget = (factor: number, keepRecent: number): { messages: ChatMessage[]; dropped: number } =>
-      trimMessagesToFit(params.messages, {
-        limitTokens: Math.floor(windowTokens * factor),
+    const budget = (factor: number, keepRecent: number): { messages: ChatMessage[]; dropped: number } => {
+      // Сначала свёртка старых результатов, и только потом выбрасывание ходов:
+      // текст уходит в файл с адресом, а пара «вызов — ответ» остаётся целой.
+      const limitTokens = Math.floor(windowTokens * factor);
+      const reserveTokens = answerReserve(params.maxTokens, windowTokens);
+      ageToolResults(params.messages, {
+        keepRecent: keepRecent * 2 + 2,
+        needTokens: estimateMessagesTokens(params.messages) - (limitTokens - params.toolsTokens - reserveTokens),
+        ...(this.spillDir ? { spillDir: this.spillDir } : {}),
+      });
+      return trimMessagesToFit(params.messages, {
+        limitTokens,
         overheadTokens: params.toolsTokens,
-        reserveTokens: answerReserve(params.maxTokens, windowTokens),
+        reserveTokens,
         keepRecent,
         marker: TRIM_MARKER,
       });
+    };
 
     let wire = budget(1, 2);
     for (let attempt = 0; ; attempt += 1) {
@@ -2023,10 +2049,17 @@ export class AiService {
       };
     }
 
-    const clipped =
-      text.length > SUBAGENT_REPORT_CHARS
-        ? `${text.slice(0, SUBAGENT_REPORT_CHARS)}\n… (отчёт подзадачи обрезан)`
-        : text;
+    // Отчёт длиннее потолка: в основной контекст едет голова, а полный текст
+    // ложится в файл с адресом. Без адреса обрезка отчёта — это потеря работы
+    // подзадачи: перезапускать её дороже, чем прочитать остаток файла.
+    let clipped = text;
+    if (text.length > SUBAGENT_REPORT_CHARS) {
+      const file = this.spillDir ? spillText(this.spillDir, 'otchet-podzadachi', text) : null;
+      const rest = file
+        ? `… (отчёт обрезан: ${text.length} симв. — полностью в ${file}, читайте read_file с диапазоном строк)`
+        : `… (отчёт обрезан: ${text.length} симв. — попросите подзадачу вернуть выжимку поменьше)`;
+      clipped = `${text.slice(0, SUBAGENT_REPORT_CHARS)}\n${rest}`;
+    }
     return {
       outcome: { ok: true, summary: `подзадача «${params.description}»: готово`, detail: clipped },
       steps,
@@ -2255,14 +2288,12 @@ export class AiService {
         const text = await fs.readFile(path.join(root, name), 'utf8');
         if (!text.trim()) continue;
 
-        // Правила сверх общего потолка не добавляем: лучше показать часть, чем
-        // вытеснить беседу. Обрезка видна по пометке — модель должна знать,
-        // что прочитала не всё.
+        // Правила сверх общего потолка не теряем целиком: длинный файл едет
+        // головой и картой разделов — по ней видно, что дальше, и есть чем
+        // попросить продолжение (`read_file`/`search` по этому файлу).
         const room = Math.min(MAX_INSTRUCTIONS_BYTES, MAX_INSTRUCTIONS_TOTAL_BYTES - spent);
-        const trimmed = text.slice(0, room);
-        const cut = trimmed.length < text.length ? '\n… (правила обрезаны по размеру)' : '';
-        parts.push(`Инструкции из ${name}:\n${trimmed}${cut}`);
-        spent += trimmed.length;
+        parts.push(formatInstructionFile(name, text, room));
+        spent += Math.min(text.length, room);
       } catch {
         // файла нет — это нормально
       }

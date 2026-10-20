@@ -166,6 +166,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'number',
           description: 'Lines before and after a match (0-5).',
         },
+        limit: {
+          type: 'number',
+          description:
+            'How many results to return: matches (default 100, 60 with context) or files when filesOnly (default 300).',
+        },
       },
       required: ['query'],
     },
@@ -493,7 +498,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
                 description: 'Per edit: an anchor (oldText) or the four positions — not both.',
                 items: {
                   type: 'object',
-                  description: 'One edit: a fragment or a range, plus newText.',
+                  description: 'One edit: anchor or positions, plus newText.',
                   properties: {
                     newText: { type: 'string', description: 'Replacement. An empty string removes the match.' },
                     oldText: { type: 'string', description: 'Anchor: exact text from the file, unique in it.' },
@@ -532,10 +537,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'terminal',
     side: 'main',
     description:
-      'Sessions (a real pty the user sees): list, start (command, cwd), read (id, from), write ' +
-      '(id, data), stop (id). Commands: run (command, cwd, timeout; background: true returns a ' +
-      'job id, sandbox must be off), output (id, from) reads a job or lists them, cancel (id) ' +
-      'stops one. The user confirms every command, so keep it to one on purpose.',
+      'Sessions: a real pty the user sees. Commands: run in the project (background: true ' +
+      'returns a job id, sandbox must be off), output reads a job or lists them, cancel stops ' +
+      'one. The user confirms every command, so keep it to one on purpose.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -898,9 +902,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'schedule',
     side: 'main',
     description:
-      'Change the schedule: action create (prompt is sent to the assistant automatically; repeat ' +
-      'is daily, weekly, once or interval), update (only the changed fields; id and run history ' +
-      'are kept), delete. Ids come from schedule_list.',
+      'Change the schedule: create (the prompt is sent to the assistant automatically), update ' +
+      '(only the changed fields; id and run history are kept), delete. Ids come from schedule_list.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -181,7 +181,11 @@ if (!app.requestSingleInstanceLock()) {
     // Длинный вывод инструментов (сборка, тесты, чтение большого файла) не влезает
     // в окно модели, но терять его нельзя: полная копия ложится рядом с настройками,
     // а модели уходит путь к ней.
-    ai.attachSpillDir(path.join(app.getPath('userData'), 'ai-spill'));
+    const spillDir = path.join(app.getPath('userData'), 'ai-spill');
+    ai.attachSpillDir(spillDir);
+    // Каталог копий лежит вне проекта, поэтому read_file на него отвечал «путь вне
+    // рабочей папки»: пометка «вывод обрезан — полностью в файле …» вела в тупик.
+    workspace.allowReadDir(spillDir);
     // Терминал сам активирует venv проекта: иначе pip, запуск и тесты работают
     // системным питоном, и человеку приходится вспоминать про `source`.
     const terminals = new TerminalService(
