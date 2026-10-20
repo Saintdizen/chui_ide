@@ -38,12 +38,24 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
   function renderInto(container: HTMLElement, text: string, options: { streaming?: boolean } = {}): void {
     const blocks = text ? markdownBlocks(text, options.streaming === true) : [];
     const prev = rendered.get(container);
+    // Кэш годится, только пока в контейнере лежат ровно те узлы, что мы туда положили:
+    // подсказку или пустое состояние вставляют в тот же контейнер (`markdown-preview`),
+    // и без этой сверки ведущие блоки взялись бы «готовыми», не попав в разметку вовсе.
+    const cached = prev && prev.nodes.length === container.childNodes.length ? prev : undefined;
     // Сколько ведущих блоков не изменилось: у них тот же ключ — берём готовый узел.
     let same = 0;
-    if (prev) {
-      while (same < blocks.length && same < prev.nodes.length && prev.keys[same] === blocks[same]!.key) same += 1;
+    if (cached) {
+      while (
+        same < blocks.length &&
+        same < cached.nodes.length &&
+        // Узел в контейнере — тот самый, который мы запомнили: контейнер мог быть
+        // пересобран снаружи при том же числе детей.
+        container.childNodes[same] === cached.nodes[same] &&
+        cached.keys[same] === blocks[same]!.key
+      )
+        same += 1;
     }
-    const nodes = blocks.map((block, at) => (prev && at < same ? prev.nodes[at]! : block.node));
+    const nodes = blocks.map((block, at) => (cached && at < same ? cached.nodes[at]! : block.node));
     // Снимаем только изменившийся хвост, а общий префикс оставляем на месте: так
     // браузер не пересобирает уже показанные блоки.
     while (container.childNodes.length > same) container.lastChild?.remove();
@@ -62,7 +74,12 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
       // Ключ — исходник блока и режим отрисовки: у незакрытого во время стрима
       // блока кода вид другой, и переиспользовать его после закрытия нельзя.
       const emit = (node: HTMLElement, mode = ''): void => {
-        blocks.push({ key: `${mode}|${lines.slice(start, index).join('\n')}`, node });
+        // Срез берём не короче одной строки: если `index` ещё равен `start` (строку
+        // не забрали), срез вышел бы пустым, а ключ — одинаковым у всех таких блоков.
+        // Тогда кэш счёл бы их неизменными и оставил в ленте вид первого кадра
+        // стрима — то есть обрезанный на полуслове.
+        const source = lines.slice(start, Math.max(index, start + 1)).join('\n');
+        blocks.push({ key: `${mode}|${source}`, node });
       };
 
       // Формула отдельным блоком: `$$…$$`, в том числе записанная в несколько строк
@@ -138,8 +155,12 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
       const heading = /^(#{1,4})\s+(.*)$/.exec(line);
       if (heading) {
-        emit(h('div', { class: `md-heading md-h${heading[1]!.length}` }, ...inlineMarkdown(heading[2] ?? '')), 'h');
+        // Строку забираем ДО `emit`: ключ блока собирается из `lines.slice(start, index)`,
+        // и при `index`, равном `start`, он вышел бы одинаковым у всех заголовков (`h|`).
+        // Тогда кэш считал бы заголовок неизменным и оставлял в ленте тот его вид,
+        // который пришёл в первом кадре стрима, — обрезанный на полуслове.
         index += 1;
+        emit(h('div', { class: `md-heading md-h${heading[1]!.length}` }, ...inlineMarkdown(heading[2] ?? '')), 'h');
         continue;
       }
 
@@ -168,8 +189,9 @@ export function createMarkdownRenderer(deps: MarkdownDeps): {
 
       // Горизонтальная линия: `---`, `***` или `___` (от трёх знаков).
       if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
-        emit(h('hr', { class: 'md-hr' }), 'hr');
+        // Как и у заголовка: ключ собирается из уже взятых строк (см. выше).
         index += 1;
+        emit(h('hr', { class: 'md-hr' }), 'hr');
         continue;
       }
 
