@@ -186,6 +186,12 @@ export interface ToolPresetSpec {
    * выбранных человеком, флага нет — там сужение осознанное.
    */
   widen?: boolean;
+  /**
+   * Имена, вынутые из набора, хотя их группа входит. Работает только вместе с
+   * `widen`: иначе инструмент пропал бы совсем. Нужно для тех, что нужны редко:
+   * схема в каждом запросе дороже, чем вызов по имени в одном прогоне из многих.
+   */
+  except?: readonly string[];
 }
 
 /**
@@ -211,6 +217,20 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     hint: 'Чтение, правки и проверки; остальное подключится, когда понадобится',
     groups: ['core', 'read', 'edit', 'verify', 'work'],
     widen: true,
+    // Редкие инструменты: схема каждого стоит 100–230 токенов в КАЖДОМ запросе,
+    // а нужны они раз в несколько прогонов. Из схемы убраны, но не запрещены:
+    // строка с их именами дешевле всех восьми схем вместе, а вызов по имени
+    // выполнится и подключит схему со следующего шага (`widen`).
+    except: [
+      'list_mcp_resources',
+      'read_mcp_resource',
+      'list_agents',
+      'send_message',
+      'interrupt_agent',
+      'rename_symbol',
+      'forget',
+      'session_search',
+    ],
   },
   {
     id: 'full',
@@ -277,6 +297,7 @@ export function presetToolNames(preset: ToolPresetId): ReadonlySet<string> | nul
     if (!groups.includes(group.id)) continue;
     for (const name of group.names) names.add(name);
   }
+  for (const name of toolPresetSpec(preset).except ?? []) names.delete(name);
   return names;
 }
 
@@ -284,6 +305,22 @@ export function presetToolNames(preset: ToolPresetId): ReadonlySet<string> | nul
 export function toolPresetAllows(preset: ToolPresetId, name: string): boolean {
   const names = presetToolNames(preset);
   return names === null || names.has(name);
+}
+
+/**
+ * Строка-ростер: имена скрытых инструментов вместо их схем.
+ *
+ * С обязательными аргументами, иначе первый вызов идёт наугад и экономия
+ * уходит на шаг переделки. Аргументы берём из самих схем — список не разойдётся.
+ */
+function rosterLine(names: readonly string[]): string {
+  if (names.length === 0) return '';
+  const items = names.map((name) => {
+    const tool = AGENT_TOOLS.find((item) => item.name === name);
+    const required = tool?.inputSchema.required ?? [];
+    return required.length > 0 ? `${name}(${required.join(', ')})` : `${name}()`;
+  });
+  return ` Скрыты ради цены, но есть: ${items.join(', ')}.`;
 }
 
 /**
@@ -301,10 +338,11 @@ export function toolPresetNote(preset: ToolPresetId): string {
   // упрётся в «нет такого инструмента» и пойдёт обходным путём там, где
   // достаточно назвать нужное.
   if (spec.widen) {
+    const roster = rosterLine(spec.except ?? []);
     return (
       `Набор инструментов: «${spec.label}» (${labels}). Скрытого в нём нет запрета: если ` +
       'для задачи нужен инструмент, которого не видно в списке, — вызови его по имени, он ' +
-      'подключится и выполнится. Спрашивать человека не нужно.'
+      `подключится и выполнится. Спрашивать человека не нужно.${roster}`
     );
   }
   return (

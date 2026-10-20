@@ -166,11 +166,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'number',
           description: 'Lines before and after a match (0-5).',
         },
-        limit: {
-          type: 'number',
-          description:
-            'How many results to return: matches (default 100, 60 with context) or files when filesOnly (default 300).',
-        },
+        limit: { type: 'number', description: 'How many (default 100, 60 with context; 300 files).' },
       },
       required: ['query'],
     },
@@ -384,7 +380,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'string',
           description: 'Path mask: ** any depth, * one segment (e.g. **/*.py). Without it, all files.',
         },
-        limit: { type: 'number', description: 'How many (default 200, max 2000).' },
+        limit: { type: 'number', description: 'How many (default 100, max 2000).' },
       },
     },
   },
@@ -571,7 +567,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         url: { type: 'string', description: 'Full page address: https://example.com/page' },
         maxChars: {
           type: 'number',
-          description: 'Text characters (default 20 000, max 60 000).',
+          description: 'Text characters (default 8 000, max 60 000).',
         },
       },
       required: ['url'],
@@ -841,7 +837,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close'],
-          description: 'What to do.',
+          description: 'Action.',
         },
         url: { type: 'string', description: 'open: page address; no scheme means https.' },
         ref: { type: 'string', description: 'click, type: element number from snapshot.' },
@@ -864,11 +860,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         text: { type: 'string', description: 'Short note, one thought, a couple of lines at most.' },
-        scope: {
-          type: 'string',
-          enum: ['workspace', 'global'],
-          description: 'workspace (default) or global.',
-        },
+        scope: { type: 'string', enum: ['workspace', 'global'], description: 'Workspace unless global.' },
       },
       required: ['text'],
     },
@@ -883,11 +875,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Substring that identifies notes to remove.' },
-        scope: {
-          type: 'string',
-          enum: ['workspace', 'global'],
-          description: 'workspace (default) or global.',
-        },
+        scope: { type: 'string', enum: ['workspace', 'global'], description: 'Workspace unless global.' },
       },
       required: ['query'],
     },
@@ -907,15 +895,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['create', 'update', 'delete'], description: 'What to do.' },
+        action: { type: 'string', enum: ['create', 'update', 'delete'], description: 'Action.' },
         id: { type: 'string', description: 'update, delete: task id from schedule_list.' },
         title: { type: 'string', description: 'create, update: title, the task is listed under it.' },
         prompt: { type: 'string', description: 'create, update: full prompt, sent as a question.' },
-        repeat: {
-          type: 'string',
-          enum: ['daily', 'weekly', 'once', 'interval'],
-          description: 'Rule: daily, weekly, once or interval.',
-        },
+        repeat: { type: 'string', enum: ['daily', 'weekly', 'once', 'interval'], description: 'Repeat rule.' },
         time: { type: 'string', description: 'HH:MM for daily, weekly and once.' },
         timezone: { type: 'string', description: 'IANA zone, e.g. Europe/Moscow; local by default.' },
         weekdays: {
@@ -941,11 +925,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: {
-          type: 'string',
-          description: 'status, diff, log, blame.',
-          enum: ['status', 'diff', 'log', 'blame'],
-        },
+        action: { type: 'string', enum: ['status', 'diff', 'log', 'blame'], description: 'What to read.' },
         path: { type: 'string', description: 'diff, log, blame: one file (absolute).' },
         staged: { type: 'boolean', description: 'diff: index against HEAD.' },
         limit: { type: 'number', description: 'log: how many (default 20, max 100).' },

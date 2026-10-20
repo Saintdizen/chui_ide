@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { agentPrompt } from '../src/shared/agent-prompt';
 import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from '../src/shared/tools';
-import { TOOL_PRESETS, presetToolNames, type ToolPresetId } from '../src/shared/tool-presets';
+import { TOOL_GROUPS, TOOL_PRESETS, presetToolNames, type ToolPresetId } from '../src/shared/tool-presets';
 
 /**
  * Бюджет схем инструментов — с отчётом, а не только с порогом.
@@ -57,6 +57,34 @@ describe('бюджет схем', () => {
     const full = presetTokens('full');
     const preset = TOOL_PRESETS[0]!;
     expect(presetTokens(preset.id)).toBeLessThan(full * 0.85);
+  });
+
+  it('отчёт: вес по семействам и кандидаты на слияние', () => {
+    const byName = new Map(rows.map((row) => [row.name, row.tokens]));
+    const sum = (names: readonly string[]): number => names.reduce((total, name) => total + (byName.get(name) ?? 0), 0);
+
+    const groups = TOOL_GROUPS.map((group) => {
+      const items = group.names.filter((name) => byName.has(name));
+      return `${group.id.padEnd(9)} ${String(sum(items)).padStart(5)} ток. / ${items.length} инструм.`;
+    });
+
+    // Семейства, которые TASKS.md предлагает слить. Второе число — сколько это
+    // стоит СЕЙЧАС, а не сколько будет после слияния: главный урок шестого
+    // захода в том, что слияние с полем `action` почти ничего не даёт — тела схем
+    // остаются оба, а общий у них только каркас.
+    const candidates: ReadonlyArray<readonly [string, readonly string[]]> = [
+      ['фон-агенты', ['spawn_agent', 'list_agents', 'wait_agent', 'send_message', 'interrupt_agent']],
+      ['подзадачи', ['task', 'workflow']],
+      ['поиск', ['search', 'codebase_search', 'search_docs']],
+      ['чтение файла', ['read_file', 'read_files']],
+      ['список файлов', ['list_dir', 'find_files', 'project_map']],
+    ];
+    const lines = candidates.map(
+      ([label, names]) => `${label.padEnd(14)} ${String(sum(names)).padStart(5)} ток. / ${names.length}`,
+    );
+
+    console.log(['по группам:', ...groups, '', 'кандидаты на слияние:', ...lines].join('\n'));
+    expect(groups.length).toBeGreaterThan(5);
   });
 
   it('отчёт: куда уходит вес схем', () => {

@@ -38,7 +38,7 @@ export interface BrowserSnapshot {
 
 /** Сколько элементов и символов текста отдаём модели: снимок — выжимка, а не дамп. */
 export const MAX_SNAPSHOT_ELEMENTS = 120;
-export const MAX_SNAPSHOT_TEXT = 8000;
+export const MAX_SNAPSHOT_TEXT = 5000;
 
 /**
  * Имена исполняемых файлов Chromium, которые ищем в PATH, если путь не задан

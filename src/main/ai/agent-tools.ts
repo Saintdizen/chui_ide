@@ -93,10 +93,12 @@ export interface ToolOutcome {
    */
   presented?: ToolPresentedFile[];
   /**
-   * Тела правок этого вызова уже в файле: в истории их можно заменить пометкой
-   * (см. `condenseAppliedCalls`). Ставится только там, где запись действительно
-   * состоялась — отклонённая правка или правка, оставшаяся в буфере редактора,
-   * ещё понадобится модели целиком.
+   * Тела этого вызова уже не нужны в истории: их можно заменить пометкой
+   * (см. `condenseAppliedCalls`). Это текст, который лёг в файл (правка, новый
+   * файл), или программа, которая отработала (`run_code`, `workflow`) — её код
+   * остаётся в трассе прогона. Ставится только там, где тело действительно
+   * своё отработало: отклонённая правка или правка, оставшаяся в буфере
+   * редактора, ещё понадобится модели целиком.
    */
   applied?: boolean;
 }
@@ -564,6 +566,13 @@ const MAX_FIND_FILES = 2000;
  */
 const DEFAULT_FILES_ONLY_PATHS = 300;
 const MAX_DIR_ENTRIES = 500;
+/**
+ * Сколько путей отдаёт `find_files`, если модель не попросила иначе. Двести
+ * путей — это около 6 500 символов (≈1 850 токенов) на запрос «какие тут есть
+ * файлы»; сотни хватает, чтобы увидеть край дерева, а остальное берётся сужением
+ * маски.
+ */
+const DEFAULT_FIND_FILES = 100;
 /**
  * С какого размера файл называем в `list_dir`. Мелкие размеры — шум: за вызов
  * их бывает до 500, и «(412 Б)» у каждой записи стоит дороже, чем сообщает.
@@ -2149,12 +2158,12 @@ function sandboxUnavailable(sandbox: SandboxRunner): ToolOutcome {
 async function findFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const { workspace } = ctx;
   const glob = optionalString(args, 'glob');
-  const limit = optionalInteger(args, 'limit') ?? 200;
+  const limit = optionalInteger(args, 'limit') ?? DEFAULT_FIND_FILES;
 
   const files = await workspace.findFiles(glob, limit);
   return {
     ok: true,
-    summary: `${glob ? `«${glob}»: ` : ''}файлов: ${files.length}${files.length >= limit ? ' (обрезано)' : ''}`,
+    summary: `${glob ? `«${glob}»: ` : ''}файлов: ${files.length}${files.length >= limit ? ' (показаны первые: сузьте маску или увеличьте limit)' : ''}`,
     detail: files.length ? clipText(ctx, 'find_files', files.join('\n')).text : 'Ничего не найдено',
   };
 }
@@ -2793,7 +2802,14 @@ async function runCodeProgram(ctx: ToolContext, args: Record<string, unknown>): 
   });
 
   const shaped = formatRunCode(outcome);
-  return { ok: !outcome.error && !outcome.timedOut, summary: shaped.summary, detail: shaped.detail };
+  // Код программы уже отработал, и его текст лежит в трассе прогона: в истории
+  // он висел бы до конца беседы (сто строк — около тысячи токенов на каждом шаге).
+  return {
+    ok: !outcome.error && !outcome.timedOut,
+    summary: shaped.summary,
+    detail: shaped.detail,
+    applied: true,
+  };
 }
 
 /**
@@ -2820,7 +2836,12 @@ async function workflowScript(ctx: ToolContext, args: Record<string, unknown>): 
   });
 
   const shaped = formatWorkflow(outcome);
-  return { ok: !outcome.error && !outcome.timedOut, summary: shaped.summary, detail: shaped.detail };
+  return {
+    ok: !outcome.error && !outcome.timedOut,
+    summary: shaped.summary,
+    detail: shaped.detail,
+    applied: true,
+  };
 }
 
 /** История коммитов: read-only контекст «что тут менялось». */

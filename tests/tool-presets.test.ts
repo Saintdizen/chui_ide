@@ -159,6 +159,25 @@ describe('наборы инструментов агента', () => {
     expect(sanitizeToolPreset('nonsense')).toBe('full');
   });
 
+  it('скрытое в «Авто» названо в ростере и всё ещё зовётся по имени', () => {
+    // Схема скрыта ради цены, но не запрещена. Если имя не назвать в подсказке,
+    // инструмент пропадёт совсем: модель не узнает о нём ни из схемы, ни из промпта.
+    const auto = toolPresetSpec('auto');
+    const hidden = auto.except ?? [];
+    expect(hidden.length).toBeGreaterThan(0);
+    const note = toolPresetNote('auto');
+    for (const name of hidden) {
+      expect(note, `в ростере нет ${name}`).toContain(name);
+      expect(toolPresetAllows('auto', name), `${name} не должен входить в схемы`).toBe(false);
+      // Полный набор не задет: исключение — про цену, а не про возможность.
+      expect(toolPresetAllows('full', name)).toBe(true);
+      expect(
+        AGENT_TOOLS.some((tool) => tool.name === name),
+        `${name} нет в описании инструментов`,
+      ).toBe(true);
+    }
+  });
+
   it('модели говорят о сужении, а о полном наборе — нет', () => {
     expect(toolPresetNote('full')).toBe('');
     for (const preset of TOOL_PRESETS) {
