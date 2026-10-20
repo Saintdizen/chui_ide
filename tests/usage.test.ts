@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addRunTrace, addUsage, formatCost, formatTokens, usageCost } from '../src/shared/usage';
+import { addRunTrace, addUsage, formatCost, formatTokens, peakTariffHint, usageCost } from '../src/shared/usage';
 
 /**
  * Сложение расхода и подсчёт стоимости: правило, а не запуск. Цены берём из
@@ -98,5 +98,24 @@ describe('usageCost и кеш промпта', () => {
     // 1M всего: из них 600k из кеша (1.25), 100k записано (2.5), 300k обычных (2.5).
     const cost = usageCost({ promptTokens: 1_000_000, cachedTokens: 600_000, cacheCreationTokens: 100_000 }, 'gpt-4o');
     expect(cost).toBeCloseTo((600_000 * 1.25 + 400_000 * 2.5) / 1_000_000, 5);
+  });
+});
+
+describe('peakTariffHint', () => {
+  // Пик у DeepSeek — пн–пт 01–04 и 06–10 UTC; всё остальное время вдвое дешевле.
+  const peak = new Date('2026-10-20T02:00:00Z'); // вторник, пик
+  const offPeak = new Date('2026-10-20T12:00:00Z'); // вторник, непик
+
+  it('в дорогие часы говорит, что вдвое дешевле будет позже', () => {
+    expect(peakTariffHint('deepseek-flash', peak)).toMatch(/пик/);
+  });
+
+  it('в дешёвые часы молчит — подсказка бесполезна', () => {
+    expect(peakTariffHint('deepseek-flash', offPeak)).toBeNull();
+  });
+
+  it('у модели без дешёвых часов подсказки нет', () => {
+    expect(peakTariffHint('gpt-4o', peak)).toBeNull();
+    expect(peakTariffHint('некая-модель', peak)).toBeNull();
   });
 });

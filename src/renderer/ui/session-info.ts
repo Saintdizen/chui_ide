@@ -1,6 +1,6 @@
 import type { ChatAttachment, ChatMessage, ChatRunTrace, ChatUsage } from '../../shared/api';
 import { contextUsage, estimateContextParts, type ContextUsage } from '../../shared/context-fit';
-import { formatCost, formatTokens, usageCost } from '../../shared/usage';
+import { formatCost, formatTokens, peakTariffHint, usageCost } from '../../shared/usage';
 import { clear, h, svgIcon } from './dom';
 
 /**
@@ -213,6 +213,9 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
       // Стоимость — только когда модель есть в таблице цен: иначе это гадание.
       const cost = usageCost(data.usage, data.model);
       if (cost !== null) parts.push(`стоимость ≈ $${formatCost(cost)}`);
+      // Тариф зависит от часа: подсказка только тогда, когда это действительно дорого.
+      const peak = peakTariffHint(data.model);
+      if (peak) parts.push(peak);
       if (data.speed !== undefined && data.speed > 0) parts.push(`${data.speed.toFixed(1)} tok/s`);
       usageNote.textContent = `Последний обмен: ${parts.join(' · ')}`;
       usageNote.hidden = false;

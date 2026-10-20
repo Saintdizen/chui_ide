@@ -11,7 +11,7 @@
  */
 
 import type { ChatRunTrace, ChatUsage } from './api';
-import { pricingAt } from './providers';
+import { isPeakTariff, pricingAt } from './providers';
 
 /** Сложить два следа прогона: шаги, вызовы и расход. Нужен для накопления по беседе. */
 export function addRunTrace(a: ChatRunTrace | undefined, b: ChatRunTrace | undefined): ChatRunTrace | undefined {
@@ -62,6 +62,23 @@ export function usageCost(usage: ChatUsage | undefined, model: string, at?: Date
     (plain * pricing.input + cached * pricing.cachedInput + written * pricing.cacheWrite + output * pricing.output) /
     1_000_000
   );
+}
+
+/**
+ * Подсказка про тариф, если сейчас дорогая половина суток. `null` — модель в
+ * цену не входит или у неё нет дешёвых часов.
+ *
+ * Смысл не в том, чтобы что-то отложить (очереди задач у нас нет), а в том,
+ * чтобы человек, запускающий длинный прогон, видел цену своих часов: у DeepSeek
+ * тот же прогон вне 01–04 и 06–10 UTC стоит вдвое меньше.
+ */
+export function peakTariffHint(model: string, at: Date = new Date()): string | null {
+  // Только DeepSeek: у остальных провайдеров дешёвого тарифа нет, и
+  // `isPeakTariff` там врет по умолчанию («всегда пик»).
+  if (!model.trim().toLowerCase().startsWith('deepseek')) return null;
+  if (!pricingAt(model, at)) return null;
+  if (!isPeakTariff(model, at)) return null;
+  return 'сейчас пик, вне 01–04 и 06–10 UTC вдвое дешевле';
 }
 
 /** Короткая запись числа токенов: 1 200 → «1.2K». */
