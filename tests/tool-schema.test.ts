@@ -124,31 +124,36 @@ describe('описания аргументов', () => {
   /** Допустимые формулировки. Список закрытый: новое слово поймает тест. */
   const CANONICAL = new Set([
     'Path.',
-    'Path (PNG, JPEG, WebP, GIF).',
+    'PNG, JPEG, WebP, GIF.',
+    'Folder.',
+    'Path, one file.',
     'File paths.',
     'Current path.',
     'New path.',
-    'Narrow to this file; when a name is declared twice.',
-    'references: narrow to this file. definition: file with the usage. outline: the file.',
-    'One file or folder (diagnostics: default all open files; lint: default whole project).',
+    'Narrow to a file; when the name is declared twice.',
+    '2-5 files instead; output capped.',
+    'references: narrow to a file. definition: file with the usage. outline: that file.',
+    'One file or folder (diagnostics: open files; lint: whole project).',
     'One file (default: all open files).',
     'Folder or file (default: whole project).',
     'diff, log, blame: one file.',
     'One file instead of paths.',
     'One file.',
-    'Instead of path: 2-5 files, output capped.',
-    'Result files, one to five, inside the project.',
-    'stage, unstage, discard, commit: files or folders.',
-    'Scope; glob counts from here.',
-    'Path mask: ** any depth, * one segment (e.g. **/*.py). Without it, all files.',
+    'Instead of path: 2-5 files; output capped.',
+    'present: result files, 1–5, inside the project.',
+    'stage, unstage, discard, commit: files/folders.',
+    'Scope; glob from here.',
+    'Path mask: ** any depth, * one segment. Without it, all files.',
   ]);
 
   it('путь описан одинаково везде, где он есть', () => {
     const notes = pathNotes();
     expect(notes.length).toBeGreaterThan(5);
+    // Одно и то же описание — одна фраза: список закрытый, синоним — уже новое слово.
     // Основная доля — один и тот же «Path.»; уточнения живут только там, где
     // действительно добавляют смысл (маска, диапазон, «один файл вместо списка»).
-    expect(notes.filter((note) => note.text === 'Path.').length).toBeGreaterThanOrEqual(3);
+    // Путь часто и есть единственный аргумент (read, show): там он зовётся по-своему.
+    expect(notes.filter((note) => note.text === 'Path.').length).toBeGreaterThanOrEqual(2);
     for (const note of notes) {
       expect(CANONICAL.has(note.text), `${note.tool}.${note.name}: ${note.text}`).toBe(true);
     }

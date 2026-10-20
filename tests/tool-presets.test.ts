@@ -204,6 +204,11 @@ describe('наборы инструментов агента', () => {
     // В узком наборе он ограничен его группами — rename_symbol это правка, не чтение.
     expect(isRosterTool('read', 'checks')).toBe(true);
     expect(isRosterTool('read', 'rename_symbol')).toBe(false);
+    // `agents` — 285 токенов схемой в каждом запросе, а строка ростера (40 т.)
+    // называет то же самое: action с его значениями. Схема едет только когда она
+    // и есть смысл роста — «расширение» набора по имени.
+    expect(isRosterTool('auto', 'agents')).toBe(true);
+    expect(isRosterTool('read', 'agents')).toBe(true);
     // Разрешённым от этого он не быть перестал: вызов по имени проходит.
     expect(toolPresetAllows('read', 'checks')).toBe(true);
   });
