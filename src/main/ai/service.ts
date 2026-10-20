@@ -27,13 +27,8 @@ import type { PatchFile } from '../../shared/patch';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
-import {
-  AGENT_TOOLS,
-  SUBAGENT_TOOLS,
-  toOpenAiTools,
-  type AgentToolSpec,
-  type ExposedToolSpec,
-} from '../../shared/tools';
+import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
+import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, READ_ONLY_TOOLS, SUBAGENT_TOOLS } from '../../shared/tool-policy';
 import {
   condenseAppliedCalls,
   estimateMessagesTokens,
@@ -186,90 +181,6 @@ const TRIM_MARKER =
 
 // Лимиты шагов «модель → инструмент → модель» живут в настройках
 // (`ai.maxSteps` и `ai.maxAutopilotSteps`): значения по умолчанию — там же.
-
-/**
- * Инструменты режима «План»: только чтение проекта и ведение плана. Всё, что
- * меняет мир (правки, файловые операции, команды), здесь и не предлагается,
- * и не исполняется — даже если модель вызовет такой инструмент по имени.
- */
-const PLAN_MODE_TOOLS = new Set<string>([
-  'list_dir',
-  'read_file',
-  'read_files',
-  'search',
-  'codebase_search',
-  'search_docs',
-  'session_search',
-  'read_skill',
-  'find_references',
-  'go_to_definition',
-  'project_map',
-  'file_outline',
-  'run_linter',
-  'web_search',
-  'web_fetch',
-  'read_image',
-  'list_mcp_resources',
-  'read_mcp_resource',
-  'find_files',
-  'get_diagnostics',
-  'git_status',
-  'git_log',
-  'git_diff',
-  'git_blame',
-  'open_file',
-  // Расписание в плане — только чтение: заводить и править задачи будет исполнение.
-  'schedule_list',
-  'update_plan',
-  // Выход из плана — единственное, что здесь меняет состояние: режим.
-  'exit_plan_mode',
-  'ask',
-  'task',
-  // Агенты план не меняют: они читают проект, как и сам агент в режиме плана.
-  'spawn_agent',
-  'list_agents',
-  'wait_agent',
-  'send_message',
-  'interrupt_agent',
-  // Дочитать уже запущенное задание — чтение; сам запуск в план не входит.
-  'run_output',
-]);
-
-/**
- * Инструменты, которые только читают состояние. Их повтор без нового
- * результата — признак зацикливания, и повторный вызов можно не исполнять.
- * Правки и команды сюда не входят: они меняют мир, и повторить их бывает нужно.
- */
-const READ_ONLY_TOOLS = new Set([
-  'list_dir',
-  'read_file',
-  'read_files',
-  'search',
-  'codebase_search',
-  'search_docs',
-  'session_search',
-  'read_skill',
-  'find_references',
-  'go_to_definition',
-  'project_map',
-  'file_outline',
-  'run_linter',
-  'find_files',
-  'get_diagnostics',
-  'web_fetch',
-  'read_image',
-  'git_status',
-  'git_log',
-  'git_blame',
-  // Подзадача тоже только читает — а стоит дорого, поэтому повтор пропускаем.
-  'task',
-  // Снимок страницы читает её состояние. После действия (клик, переход, ввод)
-  // кэш всё равно сбрасывается: те инструменты меняют мир.
-  'browser_snapshot',
-  // Вывод задания читают по смещению: ответ зависит от того, сколько уже
-  // напечатано, поэтому это чтение, а не «повтор».
-  'run_output',
-]);
 
 /** Шагов подзадаче меньше, чем основному агенту: её дело — собрать факты, а не работать. */
 const SUBAGENT_MAX_STEPS = 16;
@@ -2239,20 +2150,11 @@ export class AiService {
     if (tool.name === 'run_linter') return this.linter !== undefined;
     // Тесты выполняют код проекта: нужен и резолвер команды, и подтверждение.
     if (tool.name === 'run_tests') return this.tests !== undefined && host?.confirmCommand !== undefined;
-    // Память проекта живёт в main и доступна всегда — подтверждений не требует:
-    // заметка обратима (её снимает `forget`).
-    if (tool.name === 'remember' || tool.name === 'forget') return true;
+    // Память проекта (remember/forget) — в ALWAYS_AVAILABLE: заметка обратима,
+    // спрашивать не у кого.
     // Живые агенты: реестр живёт в main и есть всегда — спрашивать не у кого.
     // Исключение — запуск в фоне: без окна его итог некому показать.
     if (tool.name === 'spawn_agent') return this.agents !== undefined;
-    if (
-      tool.name === 'list_agents' ||
-      tool.name === 'wait_agent' ||
-      tool.name === 'send_message' ||
-      tool.name === 'interrupt_agent'
-    ) {
-      return true;
-    }
     // Расписание — тоже файл проекта: действие обратимо (задачу снимает
     // schedule_delete), а часы без окна и так молчат.
     if (tool.name.startsWith('schedule_')) return this.schedules !== undefined;
@@ -2277,7 +2179,10 @@ export class AiService {
       if (tool.name === 'browser_zoom') return this.browser.zoom !== undefined;
       return host?.confirmBrowser !== undefined;
     }
-    return tool.side === 'main';
+    // Всё прочее — только по явному признаку. Новый инструмент без условия в
+    // этой проверке модели не предлагается вовсе (это видно в пробе), а не
+    // открывается ей сам собой: раньше дефолт был «main — значит можно».
+    return ALWAYS_AVAILABLE.has(tool.name);
   }
 
   private createProvider(providerId: string): AiProvider {

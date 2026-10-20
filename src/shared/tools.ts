@@ -1333,12 +1333,15 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'Файлы результата (абсолютные пути внутри проекта). Один-пять.',
           items: { type: 'string', description: 'Путь к файлу.' },
         },
+        path: {
+          type: 'string',
+          description: 'Один файл вместо списка: модель иногда присылает его так, и это принимается.',
+        },
         note: {
           type: 'string',
           description: 'Одна строка, что это за результат: «ТЗ в двух форматах», «собрано в dist».',
         },
       },
-      required: ['paths'],
     },
   },
   {
@@ -1421,39 +1424,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
 ];
-
-/**
- * Инструменты подзадачи (`task`) — и тем самым предел глубины работы агентов.
- *
- * Только чтение: правки и команды остаются за основным агентом, который показывает
- * ревью и спрашивает человека. Здесь же лежит ответ на «а может ли агент запустить
- * агента»: ни `task`, ни `workflow` в списке нет, поэтому глубина всегда 1 (см.
- * `WORKFLOW_MAX_DEPTH`). Иначе один вопрос человека превращался бы в дерево
- * прогонов модели, за которое никто не считал.
- */
-export const SUBAGENT_TOOLS: ReadonlySet<string> = new Set([
-  'list_dir',
-  'read_file',
-  'read_files',
-  'search',
-  'codebase_search',
-  'search_docs',
-  'session_search',
-  'read_skill',
-  'find_references',
-  'go_to_definition',
-  'project_map',
-  'file_outline',
-  'run_linter',
-  'find_files',
-  'get_diagnostics',
-  'git_status',
-  'git_log',
-  'git_diff',
-  'git_blame',
-  'web_search',
-  'web_fetch',
-]);
 
 /** Описание инструмента в том виде, в каком его ждёт OpenAI-совместимый API. */
 export interface OpenAiFunctionTool {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunCodeAgentCall, RunCodeOutcome } from '../src/shared/run-code';
-import { SUBAGENT_TOOLS } from '../src/shared/tools';
+import { SUBAGENT_TOOLS } from '../src/shared/tool-policy';
 import {
   WORKFLOW_MAX_AGENTS,
   WORKFLOW_MAX_CHARS,

@@ -53,6 +53,7 @@ import {
 import type { AgentWaitResult } from './agents';
 import { formatWorkflow } from '../../shared/workflow';
 import { parseToolArguments } from '../../shared/tools';
+import { missingArguments, toolSpec } from '../../shared/tool-schema';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
 import type { WorkspaceService } from '../workspace/workspace';
@@ -600,6 +601,17 @@ function needsConfirmation(ctx: ToolContext, command: string): boolean {
 export async function runTool(ctx: ToolContext, name: string, rawArguments: string): Promise<ToolOutcome> {
   const parsed = parseToolArguments(rawArguments);
   if (!parsed.ok) return { ok: false, summary: parsed.message };
+
+  // Обязательные поля схемы — до исполнения: иначе забытый аргумент вернётся
+  // глубокой ошибкой из реализации, и модель примется угадывать форму вызова.
+  // У внешних (MCP) схемы нет в `AGENT_TOOLS`, их проверяет сам сервер.
+  const spec = toolSpec(name);
+  if (spec) {
+    const missing = missingArguments(spec.inputSchema, parsed.value);
+    if (missing.length > 0) {
+      return { ok: false, summary: `Не хватает аргумента: ${missing.join(', ')}` };
+    }
+  }
 
   try {
     // Внешние инструменты (MCP) идут мимо оператора `switch`: их имена приходят
