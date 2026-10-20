@@ -24,24 +24,22 @@ const file = (label: string, text = 'const x = 1;'): ChatAttachment => ({
 }) as ChatAttachment;
 
 describe('takeSent', () => {
-  it('отдаёт вложения и оставляет их копию', () => {
-    const session = { attachments: [file('a.ts'), file('b.ts')], kept: undefined as ChatAttachment[] | undefined };
+  it('отдаёт вложения, но сам ничего не откладывает', () => {
+    // Что переживёт сжатие, решает пометка на чипе, а не факт отправки: иначе
+    // файл, про который давно забыли, ездил бы в каждом пересказе.
+    const session: { attachments: ChatAttachment[]; kept?: ChatAttachment[] } = {
+      attachments: [file('a.ts'), file('b.ts')],
+    };
     const sent = takeSent(session);
     expect(sent).toHaveLength(2);
     expect(session.attachments).toEqual([]);
-    expect(session.kept?.map((item) => item.label)).toEqual(['a.ts', 'b.ts']);
+    expect(session.kept).toBeUndefined();
   });
 
-  it('пустая отправка не стирает отложенное', () => {
-    const session = { attachments: [] as ChatAttachment[], kept: [file('old.ts')] };
+  it('отложенное пометкой отправка не трогает', () => {
+    const session = { attachments: [file('new.ts')], kept: [file('old.ts')] };
     takeSent(session);
     expect(session.kept?.map((item) => item.label)).toEqual(['old.ts']);
-  });
-
-  it('повторно приложенный файл не задваивается и становится последним', () => {
-    const session = { attachments: [file('a.ts')], kept: [file('a.ts'), file('b.ts')] };
-    takeSent(session);
-    expect(session.kept?.map((item) => item.label)).toEqual(['b.ts', 'a.ts']);
   });
 });
 

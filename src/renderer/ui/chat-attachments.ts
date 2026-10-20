@@ -6,7 +6,7 @@ import {
   type PickedImage,
 } from '../../shared/api';
 import { entryIsDirectory } from '../../shared/entry-kind';
-import { dropAttachment, takeSent } from '../../shared/chat-attachments';
+import { dropAttachment, keepLatest, takeSent } from '../../shared/chat-attachments';
 import type { DocumentStore } from '../core/document-store';
 import type { EditorApi } from '../core/editor-api';
 import { languageFromPath } from '../core/languages';
@@ -127,6 +127,20 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
         h(
           'button',
           {
+            class: `chip-keep${isKept(item.label) ? ' is-active' : ''}`,
+            type: 'button',
+            // Право решать — за человеком, и видно это прямо в чипе: иначе
+            // непонятно, почему файл вернулся после сжатия беседы.
+            title: isKept(item.label)
+              ? 'Останется после сжатия беседы — нажмите, чтобы не переносить'
+              : 'Оставить после сжатия беседы',
+            onClick: () => toggleKept(item),
+          },
+          svgIcon('pin', 10),
+        ),
+        h(
+          'button',
+          {
             class: 'chip-remove',
             type: 'button',
             title: 'Убрать из контекста',
@@ -172,6 +186,25 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     }
     chip.classList.add('is-leaving');
     chip.addEventListener('animationend', commit, { once: true });
+  }
+
+  /** Стоит ли пометка «оставить после сжатия» на этом чипе. */
+  function isKept(label: string): boolean {
+    return (deps.session().kept ?? []).some((item) => item.label === label);
+  }
+
+  /**
+   * Переключить пометку «оставить после сжатия беседы».
+   *
+   * Без неё файл живёт до первого пересказа: резюме не повторяет присланный код,
+   * и тащить его дальше без спроса незачем. С ней файл уезжает и после сжатия, то
+   * есть решает человек, а не догадка по свежести.
+   */
+  function toggleKept(item: ChatAttachment): void {
+    const session = deps.session();
+    if (isKept(item.label)) dropAttachment(session, item.label);
+    else session.kept = keepLatest([...(session.kept ?? []), item]);
+    render();
   }
 
   /** Файл из буфера или перетаскивания — в data-URL средствами браузера. */
@@ -405,6 +438,8 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
    */
   function takeForSend(): ChatAttachment[] {
     const session = deps.session();
+    // Копию для сжатия делает пометка на чипе, а не сама отправка: человек сам
+    // решает, что переживёт пересказ (см. `toggleKept`).
     const sent = takeSent(session);
     render();
     return sent;

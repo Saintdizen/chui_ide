@@ -11,10 +11,15 @@ import type { ChatAttachment } from './api';
 export const KEPT_MAX_ITEMS = 8;
 export const KEPT_MAX_CHARS = 48_000;
 
-/** Отдать приложенное к вопросу, а себе оставить копию для будущих сжатий. */
-export function takeSent(session: { attachments: ChatAttachment[]; kept?: ChatAttachment[] }): ChatAttachment[] {
+/**
+ * Отдать приложенное к вопросу.
+ *
+ * Копию для сжатия здесь НЕ делаем: что переживёт пересказ, решает человек
+ * пометкой на чипе (`toggleKept`). Неявное «всё, что отправили, поедет и дальше»
+ * залипало бы на файле, про который давно забыли.
+ */
+export function takeSent(session: { attachments: ChatAttachment[] }): ChatAttachment[] {
   const sent = session.attachments;
-  if (sent.length > 0) session.kept = keepLatest(mergeKept(session.kept ?? [], sent));
   session.attachments = [];
   return sent;
 }
@@ -58,8 +63,8 @@ export function keptContextMessage(kept: readonly ChatAttachment[] | undefined):
 /**
  * Свежие отложенные вложения в пределах потолков.
  *
- * Считаем в байтах, как у справки из прошлой беседы: символы и токены врут на
- * кириллице, а платим мы за байты и токены.
+ * Считаем в символах (так оно и хранится), но с запасом: на кириллице символ
+ * дороже латинского, и лучще отсечь чуть раньше, чем удивиться счёту.
  */
 export function keepLatest(items: readonly ChatAttachment[]): ChatAttachment[] {
   const kept: ChatAttachment[] = [];
@@ -75,8 +80,3 @@ export function keepLatest(items: readonly ChatAttachment[]): ChatAttachment[] {
   return kept;
 }
 
-/** Приложили тот же файл — он должен стать последним, а не задвоиться. */
-function mergeKept(previous: readonly ChatAttachment[], sent: readonly ChatAttachment[]): ChatAttachment[] {
-  const labels = new Set(sent.map((item) => item.label));
-  return [...previous.filter((item) => !labels.has(item.label)), ...sent];
-}
