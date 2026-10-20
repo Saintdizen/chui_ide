@@ -301,6 +301,16 @@ export function presetToolNames(preset: ToolPresetId): ReadonlySet<string> | nul
   return names;
 }
 
+/**
+ * Инструмент спрятан в ростер: он в наборе не значится, но зовётся по имени.
+ *
+ * Нужен там, где решают, расширять ли набор после вызова. Расширять не надо:
+ * схема, добавленная один раз, поедет в каждом следующем запросе прогона.
+ */
+export function isRosterTool(preset: ToolPresetId, name: string): boolean {
+  return (toolPresetSpec(preset).except ?? []).includes(name);
+}
+
 /** Входит ли инструмент в набор. Имя не из наших — не входит: чужого мы не предлагаем. */
 export function toolPresetAllows(preset: ToolPresetId, name: string): boolean {
   const names = presetToolNames(preset);

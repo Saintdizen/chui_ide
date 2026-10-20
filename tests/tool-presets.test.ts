@@ -5,6 +5,7 @@ import {
   DEFAULT_TOOL_PRESET,
   TOOL_GROUPS,
   TOOL_PRESETS,
+  isRosterTool,
   presetToolNames,
   sanitizeToolPreset,
   toolPresetAllows,
@@ -167,7 +168,10 @@ describe('наборы инструментов агента', () => {
     expect(hidden.length).toBeGreaterThan(0);
     const note = toolPresetNote('auto');
     for (const name of hidden) {
-      expect(note, `в ростере нет ${name}`).toContain(name);
+      // Ростера мало: без формы вызова первый вызов уйдёт наугад, и сэкономленные
+      // токены вернутся шагом переделки. Строка строится из самих схем.
+      const required = AGENT_TOOLS.find((tool) => tool.name === name)?.inputSchema.required ?? [];
+      expect(note, `в ростере нет формы ${name}`).toContain(`${name}(${required.join(', ')})`);
       expect(toolPresetAllows('auto', name), `${name} не должен входить в схемы`).toBe(false);
       // Полный набор не задет: исключение — про цену, а не про возможность.
       expect(toolPresetAllows('full', name)).toBe(true);
@@ -176,6 +180,18 @@ describe('наборы инструментов агента', () => {
         `${name} нет в описании инструментов`,
       ).toBe(true);
     }
+  });
+
+  it('инструмент ростера не расширяет набор после вызова', () => {
+    // Схема, добавленная в набор один раз, едет в каждом следующем запросе
+    // прогона (terminal — 344 токена на шаг) и меняет префикс, который кэширует
+    // провайдер. Поэтому вызов по имени выполняет инструмент, но набор не растёт.
+    for (const name of toolPresetSpec('auto').except ?? []) {
+      expect(isRosterTool('auto', name), `${name} должен считаться ростором`).toBe(true);
+    }
+    expect(isRosterTool('auto', 'read_file')).toBe(false);
+    // У наборов, выбранных человеком, ростера нет: там сужение осознанное.
+    expect(isRosterTool('read', 'forget')).toBe(false);
   });
 
   it('модели говорят о сужении, а о полном наборе — нет', () => {

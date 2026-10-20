@@ -96,3 +96,39 @@ describe('свёртка старых результатов', () => {
     expect(outcome.aged).toBeLessThan(messages.length);
   });
 });
+
+describe('свёртка по возрасту', () => {
+  it('сворачивает старое, не дожидаясь переполнения окна', async () => {
+    const { ageStaleResults } = await import('../src/main/ai/age-results');
+    const messages = [long(1), long(2), long(3), long(4), long(5)];
+    const outcome = ageStaleResults(messages, { keepRecent: 2, spillDir: spillDir(), minChars: 100 });
+    expect(outcome.aged).toBe(3);
+    // Свёрнуты первые три, последние два (окно keepRecent) целы.
+    expect(messages[2]?.content).toContain('свёрнуто');
+    expect(messages[3]?.content).toContain('строка 4-0');
+    expect(messages[4]?.content).toContain('строка 5-0');
+  });
+
+  it('одно сообщение на пачку файла не создаёт', async () => {
+    const { ageStaleResults } = await import('../src/main/ai/age-results');
+    const messages = [long(1), long(2)];
+    const outcome = ageStaleResults(messages, { keepRecent: 1, spillDir: spillDir() });
+    expect(outcome.aged).toBe(0);
+    expect(messages[0]?.content).toContain('строка 1-0');
+  });
+
+  it('повторная свёртка не трогает уже свёрнутое', async () => {
+    const { ageStaleResults } = await import('../src/main/ai/age-results');
+    const messages = [long(1), long(2), long(3), long(4)];
+    const first = ageStaleResults(messages, { keepRecent: 1, spillDir: spillDir(), minChars: 100 });
+    expect(first.aged).toBe(3);
+    const again = ageStaleResults(messages, { keepRecent: 1, spillDir: spillDir() });
+    expect(again.aged).toBe(0);
+  });
+
+  it('без каталога копий молчит', async () => {
+    const { ageStaleResults } = await import('../src/main/ai/age-results');
+    const messages = [long(1), long(2), long(3)];
+    expect(ageStaleResults(messages, { keepRecent: 0 }).aged).toBe(0);
+  });
+});

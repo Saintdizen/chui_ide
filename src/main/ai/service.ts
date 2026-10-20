@@ -24,7 +24,7 @@ import {
 } from '../../shared/api';
 import type { FileEdit } from '../../shared/edits';
 import type { PatchFile } from '../../shared/patch';
-import { ageToolResults } from './age-results';
+import { ageStaleResults, ageToolResults } from './age-results';
 import { spillText } from './spill';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
@@ -146,6 +146,7 @@ import {
   toolPresetAllows,
   toolPresetNote,
   toolPresetSpec,
+  isRosterTool,
   type ToolPresetId,
 } from '../../shared/tool-presets';
 
@@ -195,6 +196,15 @@ const TRIM_MARKER =
 
 /** Шагов подзадаче меньше, чем основному агенту: её дело — собрать факты, а не работать. */
 const SUBAGENT_MAX_STEPS = 16;
+
+/**
+ * Сколько последних сообщений не сворачиваем: свежий шаг нужен целиком.
+ *
+ * Дюжина — это примерно шесть шагов (вызов и ответ на каждый) плюс запас на
+ * размышления. Меньше — и агент примется перечитывать то, на что ещё опирается;
+ * больше — экономия начнётся слишком поздно, чтобы её заметить.
+ */
+const STALE_KEEP_RECENT = 12;
 
 /**
  * Потолок отчёта подзадачи: это выжимка для основного агента, а не второй
@@ -1355,6 +1365,16 @@ export class AiService {
       // длинный прогон легко переполняет контекст. Режем старые ходы целиком,
       // не трогая ни рамку запроса, ни пару «вызов → результат». Промах оценки
       // ловит сам `streamStep` — по настоящему отказу провайдера.
+      //
+      // Старые результаты уходят в копию с адресом до переполнения, а не после:
+      // иначе один прочитанный файл едет целиком на каждом шаге прогона, хотя он
+      // давно отработал. Граница по возрасту, а не «сколько надо освободить»:
+      // каждое сообщение пересекает её один раз, и префикс запроса не меняется
+      // задним числом — кэш провайдера цел.
+      ageStaleResults(messages, {
+        keepRecent: STALE_KEEP_RECENT,
+        ...(this.spillDir ? { spillDir: this.spillDir } : {}),
+      });
       const done = await this.streamStep(provider, {
         model: request.model,
         messages,
@@ -1544,12 +1564,21 @@ export class AiService {
         // ради прав — исполняем его и берём в набор со следующего шага.
         let widenedNow = false;
         const hiddenByPreset = !toolPresetAllows(toolPreset, call.name);
+        // Инструменты из ростера (`except`) выполняются по имени, но в набор не
+        // возвращаются. Причина — цена: схема, добавленная один раз, едет в
+        // КАЖДОМ следующем запросе прогона (у `terminal` это 344 токена на
+        // каждом шаге до конца), да ещё и меняет префикс, который кэширует
+        // провайдер. Ростер даёт имя и обязательные аргументы, свой вызов модель
+        // уже видела — повторный вызов по имени обойдётся дешевле.
+        const rosterOnly = isRosterTool(toolPreset, call.name);
         if (hiddenByPreset && widensOnDemand && (!planMode || planApproved)) {
           const known = AGENT_TOOLS.find((tool) => tool.name === call.name);
           if (known && this.canRun(known, host, hasSkills)) {
             onDemandTools.add(call.name);
-            widenedNow = true;
-            widenTools();
+            if (!rosterOnly) {
+              widenedNow = true;
+              widenTools();
+            }
           }
         }
         const denied =

@@ -73,3 +73,37 @@ describe('бюджет ответов инструментов', () => {
     expect(plain).toBeLessThan(30_000);
   });
 });
+
+describe('структурные инструменты', () => {
+  // Символы подставные, форма ответа настоящая: цена зависит от формы, а не от
+  // того, настоящий ли языковой сервер. Без этого `file_outline` и
+  // `codebase_search` (самые «многословные» из читающих) оставались вне сторожа.
+  const many = (n: number) =>
+    Array.from({ length: n }, (_, index) => ({
+      name: `symbol${index}`,
+      kind: 'функция',
+      line: index * 10 + 1,
+      endLine: index * 10 + 8,
+      children: [] as never[],
+    }));
+  const symbols = {
+    projectSymbols: async () =>
+      many(60).map((item, i) => ({ ...item, path: path.join(ROOT, `src/file${i}.ts`) })) as never,
+    languageFor: () => 'typescript',
+    outline: async () => many(120) as never,
+  };
+
+  it('скелет файла и поиск объявлений тоже укладываются в потолок', async () => {
+    const context = { workspace, symbols, signal: new AbortController().signal } as unknown as ToolContext;
+    for (const args of [
+      { path: path.join(ROOT, 'src/main/ai/service.ts') },
+      { path: path.join(ROOT, 'src/shared/tools.ts') },
+    ]) {
+      const outcome = await runTool(context, 'file_outline', JSON.stringify(args));
+      const detail = outcome.detail ?? outcome.summary ?? '';
+      expect(detail.length, `file_outline: ${detail.length}`).toBeLessThanOrEqual(MAX_OUTPUT_CHARS + 500);
+    }
+    const found = await runTool(context, 'codebase_search', JSON.stringify({ query: 'readFile' }));
+    expect((found.detail ?? '').length).toBeLessThanOrEqual(MAX_OUTPUT_CHARS + 500);
+  }, 180_000);
+});
