@@ -802,31 +802,28 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'schedule',
     side: 'main',
     description:
-      'Manage the schedule: list (id, rule, next run, last outcome; read-only), create (the prompt ' +
-      'is sent to the assistant automatically), update (only the changed fields; id and run history ' +
-      'are kept), delete.',
+      'list, create (the prompt runs on time), update, delete.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['list', 'create', 'update', 'delete'],
-          description: 'list needs nothing else; create, update, delete need the fields below.',
         },
-        id: { type: 'string', description: 'update, delete: task id from action list.' },
-        title: { type: 'string', description: 'create, update: title, the task is listed under it.' },
-        prompt: { type: 'string', description: 'create, update: full prompt, sent as a question.' },
-        repeat: { type: 'string', enum: ['daily', 'weekly', 'once', 'interval'], description: 'Repeat rule.' },
-        time: { type: 'string', description: 'HH:MM for daily, weekly and once.' },
-        timezone: { type: 'string', description: 'IANA zone, e.g. Europe/Moscow; local by default.' },
+        id: { type: 'string', description: 'update, delete: id from list.' },
+        title: { type: 'string', description: 'create, update.' },
+        prompt: { type: 'string', description: 'create, update: the question sent.' },
+        repeat: { type: 'string', enum: ['daily', 'weekly', 'once', 'interval'] },
+        time: { type: 'string', description: 'HH:MM (daily, weekly, once).' },
+        timezone: { type: 'string', description: 'IANA, e.g. Europe/Moscow.' },
         weekdays: {
           type: 'array',
-          items: { type: 'number', description: 'Weekday: 0 is Sunday.' },
-          description: 'For weekly: days 0-6, 0 is Sunday.',
+          items: { type: 'number' },
+          description: 'weekly: days 0-6, 0 = Sunday.',
         },
-        date: { type: 'string', description: 'For once: YYYY-MM-DD.' },
-        intervalMinutes: { type: 'number', description: 'For interval: minutes, 1 to 10080.' },
-        enabled: { type: 'boolean', description: 'update: false pauses, true resumes.' },
+        date: { type: 'string', description: 'once: YYYY-MM-DD.' },
+        intervalMinutes: { type: 'number', description: 'interval: 1-10080.' },
+        enabled: { type: 'boolean', description: 'update: false pauses.' },
       },
       required: ['action'],
     },
