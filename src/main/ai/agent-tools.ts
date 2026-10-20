@@ -698,6 +698,19 @@ async function confirmRun(ctx: ToolContext, command: string, prompt = command): 
   return allowed ? null : commandDenied();
 }
 
+/**
+ * Текст отказа для модели: не только «что не так», но и совет.
+ *
+ * Раньше брался один `summary`, а `detail` выбрасывался — при том что советы
+ * живут как раз в нём («это не текстовый файл — если нужны метаданные, возьми
+ * list_dir»). Модель видела «Ошибка: бинарный файл» и шла угадывать, а это не
+ * токены, а потерянный шаг.
+ */
+export function failureText(outcome: ToolOutcome): string {
+  const head = `Ошибка: ${outcome.summary}`;
+  return outcome.detail ? `${head}\n${outcome.detail}` : head;
+}
+
 export async function runTool(ctx: ToolContext, name: string, rawArguments: string): Promise<ToolOutcome> {
   const parsed = parseToolArguments(rawArguments);
   if (!parsed.ok) return { ok: false, summary: parsed.message };
@@ -1597,7 +1610,21 @@ function formatSearchHits(hits: readonly SearchHit[], root: string | null, conte
     // Столбец не печатаем: в следующий вызов его не передать (у `read_file` и
     // `edit` границы задаются строками), а в выдаче на 200 совпадений он стоит
     // пару сотен символов на каждой — тысячи на вызов.
-    return hits.map((hit) => `${relativePath(hit.path, root)}:${hit.line}: ${hit.text}`).join('\n');
+    // Путь — заголовком файла, как и в выдаче с контекстом. Раньше он повторялся
+    // в каждой строке: замер на этом проекте (50 совпадений в 27 файлах) дал
+    // 1 489 → 1 317 токенов, а выигрыш растёт там, где совпадений много в одном
+    // файле, — то есть в типичном случае «поиск символа в своём модуле».
+    const rows: string[] = [];
+    let previous: string | null = null;
+    for (const hit of hits) {
+      const file = relativePath(hit.path, root);
+      if (file !== previous) {
+        rows.push(file);
+        previous = file;
+      }
+      rows.push(`  ${hit.line}: ${hit.text}`);
+    }
+    return rows.join('\n');
   }
 
   // Блоки контекста у соседних совпадений перекрываются: два совпадения в двух
@@ -2519,6 +2546,19 @@ async function terminalRun(ctx: ToolContext, args: Record<string, unknown>): Pro
     : await terminalRunForeground(ctx, args);
 }
 
+/**
+ * Отпускать ли текст команды из истории после исполнения.
+ *
+ * Только у успешной и только у длинной: короткую модель перепишет по памяти, а
+ * у упавшей текст нужен целиком — по нему правят и её запускают заново. Порог
+ * в четыреста символов: heredoc на две тысячи в живом прогоне давал 40 663
+ * символа аргументов из 56 658 — треть всей истории.
+ */
+function didWork(result: { code: number | null; timedOut?: boolean }, command: string): boolean {
+  if (result.code !== 0 || result.timedOut) return false;
+  return command.length >= 400 || command.includes('\n');
+}
+
 /** Обычный запуск: шаг ждёт команду и возвращает её вывод. */
 async function terminalRunForeground(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const command = requireString(args, 'command').trim();
@@ -2567,6 +2607,7 @@ async function terminalRunForeground(ctx: ToolContext, args: Record<string, unkn
     ok: result.code === 0 && !result.timedOut,
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
     detail: `${commandLine(ctx, command, cwd.relative)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
+    ...(didWork(result, command) ? { applied: true } : {}),
   };
 }
 

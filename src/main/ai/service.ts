@@ -120,6 +120,7 @@ import {
   runTool,
   STEP_OUTPUT_CHARS,
   stepOutputChars,
+  failureText,
   type BrowserTools,
   type GitTools,
   type Linter,
@@ -1704,7 +1705,7 @@ export class AiService {
           ...(repeated ? { note: 'повтор: не исполнялся' } : covered ? { note: 'диапазон уже прочитан' } : {}),
         });
 
-        const result = outcome.ok ? (outcome.detail ?? outcome.summary) : `Ошибка: ${outcome.summary}`;
+        const result = outcome.ok ? (outcome.detail ?? outcome.summary) : failureText(outcome);
         // Подключение называем вслух: иначе модель не понимает, почему инструмент
         // раньше не был виден, а человек — почему набор вырос.
         const widenedNote = widenedNow ? `\n(«${call.name}» подключён в набор)` : '';
@@ -2047,7 +2048,7 @@ export class AiService {
             const outcome = await runTool(subContext, call.name, call.arguments);
             executed.set(key, outcome);
             didNewWork = true;
-            const result = outcome.ok ? (outcome.detail ?? outcome.summary) : `Ошибка: ${outcome.summary}`;
+            const result = outcome.ok ? (outcome.detail ?? outcome.summary) : failureText(outcome);
             content = compressOutput ? compressToolOutput(result) : result;
           }
           messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content });

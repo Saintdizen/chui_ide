@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runTool, STEP_OUTPUT_CHARS, type ToolContext } from '../src/main/ai/agent-tools';
+import { failureText, runTool, STEP_OUTPUT_CHARS, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
 
 /**
@@ -132,5 +132,63 @@ describe('эхо команды в ответе', () => {
     } finally {
       workspace.dispose();
     }
+  }, 60_000);
+});
+
+describe('отказ инструмента', () => {
+  it('совет из detail доходит до модели, а не выбрасывается', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-fail-text-'));
+    await fs.writeFile(path.join(dir, 'logo.bin'), Buffer.from([0, 1, 2, 0, 3]));
+    const workspace = new WorkspaceService(() => undefined);
+    await workspace.open(dir);
+    try {
+      const ctx = { workspace, signal: new AbortController().signal } as ToolContext;
+      const outcome = await runTool(ctx, 'read_file', JSON.stringify({ path: path.join(dir, 'logo.bin') }));
+      // Бинарный файл — отказ с советом в detail. Раньше в историю шёл только
+      // summary («бинарный файл»), и модель шла угадывать, что с этим делать.
+      expect(outcome.ok).toBe(false);
+      expect(failureText(outcome)).toContain('list_dir');
+    } finally {
+      workspace.dispose();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+describe('что остаётся в истории от команды', () => {
+  async function run(command: string) {
+    const workspace = new WorkspaceService(() => undefined);
+    await workspace.open(process.cwd());
+    try {
+      const ctx = {
+        workspace,
+        signal: new AbortController().signal,
+        confirmCommand: async () => true,
+      } as ToolContext;
+      return await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command }));
+    } finally {
+      workspace.dispose();
+    }
+  }
+
+  it('отработавшая длинная команда отпускает свой текст', async () => {
+    const outcome = await run(`echo ${'a'.repeat(500)}`);
+    // applied — сигнал сжать аргументы в истории. Вывод и голова команды
+    // остаются, поэтому переписать её можно и без тела.
+    expect(outcome.ok).toBe(true);
+    expect(outcome.applied).toBe(true);
+  }, 60_000);
+
+  it('упавшая команда остаётся целиком: по её тексту правят', async () => {
+    // Последняя команда задаёт код выхода: `false` в конце — отказ.
+    const outcome = await run('echo начало\nfalse');
+    expect(outcome.ok).toBe(false);
+    expect(outcome.applied).toBeUndefined();
+  }, 60_000);
+
+  it('короткая команда остаётся целиком', async () => {
+    const outcome = await run('echo привет');
+    expect(outcome.ok).toBe(true);
+    expect(outcome.applied).toBeUndefined();
   }, 60_000);
 });

@@ -1,5 +1,5 @@
 import type { ChatMessage } from '../../shared/api';
-import { estimateTextTokens } from '../../shared/context-fit';
+import { IMAGE_TOKENS, estimateTextTokens } from '../../shared/context-fit';
 import { spillText } from './spill';
 
 /**
@@ -69,8 +69,20 @@ export interface StaleOptions {
 }
 
 const MIN_AGE_CHARS = 1_500;
-/** По умолчанию: результат короче четырёх тысяч символов не стоит адреса в истории. */
-const STALE_MIN_CHARS = 4_000;
+/**
+ * По умолчанию: результат короче этого не стоит адреса в истории.
+ * Было 4 000 — рычаг почти не работал: из 95 ответов живого прогона порог
+ * переходил один (8% веса), а всё по 1–3 тысячи символов ехало на каждом шаге.
+ * При 1 500 сворачивается 17 из тех же 95 — 46%; пометка стоит ~130 символов,
+ * так что сделка выгодна уже с 500. Ниже не опускаем: свёрнутое придётся
+ * перечитать, а это шаг.
+ */
+const STALE_MIN_CHARS = 1_500;
+/**
+ * Сколько кандидатов нужно, чтобы стоил проход. Два, а не один: проход пишет один
+ * файл-копию, а уборка держит всего сорок (`MAX_SPILL_FILES`) — по копии на
+ * сообщение они вытеснили бы настоящие хвосты команд.
+ */
 const STALE_BATCH = 2;
 
 /** Свернуть выбранные сообщения в один файл и заменить их пометками с адресом. */
@@ -85,7 +97,7 @@ function foldPicked(messages: ChatMessage[], picked: readonly number[], spillDir
   for (const index of picked) {
     const message = messages[index]!;
     const content = typeof message.content === 'string' ? message.content : '';
-    freed += estimateTextTokens(content) - 12;
+    freed += tokensOf(message) - 12;
     const heading = `### ${message.name ?? 'tool'} · ${index + 1}`;
     starts.set(index, line + 1);
     blocks.push(heading);
@@ -99,9 +111,19 @@ function foldPicked(messages: ChatMessage[], picked: readonly number[], spillDir
     const message = messages[index]!;
     const size = typeof message.content === 'string' ? message.content.length : 0;
     const where = file ? `${file}:${starts.get(index) ?? 1}` : '';
-    const stub = where
-      ? `[свёрнуто: ${message.name ?? 'tool'}, ${size} симв. — текст в ${where}, читайте read_file с диапазоном]`
-      : `[свёрнуто: ${message.name ?? 'tool'}, ${size} симв. — перечитайте инструментом, если нужно]`;
+    // Картинка из истории снимается: её цена — тысяча токенов на каждом шаге до
+    // конца прогона, а вернуть её можно одним `read_image` по тому же пути.
+    // Текст пометки остаётся: в нём и лежит путь к файлу.
+    const images = message.images?.length ?? 0;
+    if (images > 0) {
+      const caption = typeof message.content === 'string' ? message.content : '';
+      messages[index] = { ...message, images: [], content: `[свёрнуто: картинка — ${caption}; вернёт read_image]` };
+      continue;
+    }
+    const reason = where
+      ? `${size} симв. — текст в ${where}, читайте read_file с диапазоном`
+      : `${size} симв. — перечитайте инструментом, если нужно`;
+    const stub = `[свёрнуто: ${message.name ?? 'tool'}, ${reason}]`;
     // Заменяем объект, а не содержимое: ту же ссылку держит `produced` — то,
     // что человек видит в карточке и что ложится в файл беседы.
     messages[index] = { ...message, content: stub };
@@ -110,17 +132,38 @@ function foldPicked(messages: ChatMessage[], picked: readonly number[], spillDir
   return { aged: picked.length, freedTokens: Math.max(0, freed), file };
 }
 
-/** Кандидаты на свёртку: результаты инструментов до `lastIndex`, длиннее `minChars`. */
+/**
+ * Кандидаты на свёртку: результаты инструментов до `lastIndex`, длиннее `minChars`,
+ * и любые сообщения с картинками.
+ *
+ * Картинку отбираем по её наличию, а не по длине текста: она стоит целую тысячу
+ * токенов (`IMAGE_TOKENS`), а текст при ней короткий («Изображение из read_image:
+ * путь»). По длине такое сообщение не проходит ни один разумный порог, и снимок
+ * оставался в истории до конца прогона — пять скриншотов это пять тысяч токенов
+ * на КАЖДОМ следующем шаге.
+ */
 function candidates(messages: ChatMessage[], lastIndex: number, minChars: number): number[] {
   const picked: number[] = [];
   for (let index = 0; index < lastIndex; index += 1) {
     const message = messages[index]!;
-    if (message.role !== 'tool') continue;
-    const content = message.content;
-    if (typeof content !== 'string' || content.length < minChars) continue;
+    if (!hasImages(message)) {
+      if (message.role !== 'tool') continue;
+      const content = message.content;
+      if (typeof content !== 'string' || content.length < minChars) continue;
+    }
     picked.push(index);
   }
   return picked;
+}
+
+/** Есть ли в сообщении картинки: у них своя цена, и считаем мы её, а не текст. */
+function hasImages(message: ChatMessage): boolean {
+  return (message.images?.length ?? 0) > 0;
+}
+
+/** Сколько стоит сообщение: текст плюс картинки по их цене, а не по длине base64. */
+function tokensOf(message: ChatMessage): number {
+  return estimateTextTokens(message.content ?? '') + (message.images?.length ?? 0) * IMAGE_TOKENS;
 }
 
 export function ageToolResults(messages: ChatMessage[], options: AgeOptions): AgeOutcome {
@@ -137,7 +180,10 @@ export function ageToolResults(messages: ChatMessage[], options: AgeOptions): Ag
   for (const index of all) {
     if (freed >= options.needTokens) break;
     picked.push(index);
-    freed += estimateTextTokens(messages[index]?.content ?? '') - 12;
+    // Цена картинки — тысяча токенов, а не длина её подписи: считаем так же,
+    // как считает оценка контекста, иначе свёртка «не окупается» на бумаге,
+    // оставаясь выгодной на деле.
+    freed += tokensOf(messages[index]!) - 12;
   }
   if (picked.length === 0) return { aged: 0, freedTokens: 0, file: null };
   return foldPicked(messages, picked, options.spillDir);

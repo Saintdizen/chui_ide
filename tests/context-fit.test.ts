@@ -403,6 +403,17 @@ describe('condenseCallArguments', () => {
     expect(parsed.contents).not.toContain('строка');
   });
 
+  it('сжимает текст отработавшей команды терминала', () => {
+    // Треть истории в разобранном прогоне — тексты команд (40 663 из 56 658
+    // символов аргументов): heredoc на две тысячи символов оставался в контексте
+    // до конца беседы, хотя вывод и голова команды уже в ответе.
+    const args = JSON.stringify({ action: 'run', command: `cat >> a.ts <<'EOF'\n${long}EOF` });
+    const parsed = JSON.parse(condenseCallArguments(args, minChars)) as { action: string; command: string };
+    expect(parsed.action).toBe('run');
+    expect(parsed.command).toContain('применено');
+    expect(parsed.command).not.toContain('строка');
+  });
+
   it('не трогает короткие тела и мелкие поля', () => {
     const args = JSON.stringify({ path: 'src/a.ts', contents: 'коротко' });
     expect(condenseCallArguments(args, minChars)).toBe(args);

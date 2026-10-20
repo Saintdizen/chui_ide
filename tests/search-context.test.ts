@@ -67,7 +67,9 @@ describe('search с контекстом', () => {
     const outcome = await runTool(context(), 'search', JSON.stringify({ query: 'throw new Error' }));
 
     expect(outcome.ok).toBe(true);
-    expect(String(outcome.detail)).toContain('src/loader.js:4:');
+    // Без контекста путь тоже идёт заголовком файла, а не в каждой строке:
+    // повтор пути на каждом совпадении стоил 11% выдачи.
+    expect(String(outcome.detail)).toContain('src/loader.js\n  4: ');
     // Соседних строк нет: без контекста вывод остаётся прежним.
     expect(String(outcome.detail)).not.toContain('readFile(path)');
   });

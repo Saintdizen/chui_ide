@@ -132,3 +132,52 @@ describe('свёртка по возрасту', () => {
     expect(ageStaleResults(messages, { keepRecent: 0 }).aged).toBe(0);
   });
 });
+
+describe('картинки в истории', () => {
+  it('снимок сворачивается, а путь остаётся', async () => {
+    const { ageStaleResults } = await import('../src/main/ai/age-results');
+    const shot = (index: number): ChatMessage => ({
+      role: 'user',
+      content: `Изображение из «read_image»: shots/${index}.png: png, 800x600`,
+      images: ['data:image/png;base64,AAAA'],
+    });
+    const messages = [shot(1), shot(2), long(3)];
+    const outcome = ageStaleResults(messages, { keepRecent: 1, spillDir: spillDir() });
+
+    // Тысяча токенов за снимок ехала на каждом шаге до конца прогона: длина
+    // подписи порог не переходила, и свёртка картинок не видела вовсе.
+    expect(outcome.aged).toBe(2);
+    expect(messages[0]?.images).toEqual([]);
+    expect(messages[0]?.content).toContain('shots/1.png');
+    expect(messages[0]?.content).toContain('read_image');
+  });
+
+  it('свёрнутая картинка считается по своей цене, а не по длине подписи', async () => {
+    const { ageStaleResults } = await import('../src/main/ai/age-results');
+    const messages: ChatMessage[] = [
+      { role: 'user', content: 'Изображение: a.png', images: ['data:image/png;base64,AAAA'] },
+      long(2),
+      long(3),
+    ];
+    const outcome = ageStaleResults(messages, { keepRecent: 1, spillDir: spillDir() });
+    // Подпись весит токенов двадцать, снимок — тысячу. Оценка идёт по снимку.
+    expect(outcome.freedTokens).toBeGreaterThan(900);
+  });
+});
+
+describe('порог давности', () => {
+  it('ответ на две тысячи символов сворачивается, а не живёт вечно', async () => {
+    const { ageStaleResults } = await import('../src/main/ai/age-results');
+    // Порог 4 000 сворачивал 1 ответ из 95 в живом прогоне: почти всё, что
+    // приходит от инструментов, короче и потому ехало на каждом шаге до конца.
+    const twoThousand = (index: number): ChatMessage => ({
+      role: 'tool',
+      name: 'read_file',
+      content: `файл ${index}\n${'строка текста '.repeat(140)}`,
+    });
+    const messages = [twoThousand(1), twoThousand(2), long(3)];
+    const outcome = ageStaleResults(messages, { keepRecent: 1, spillDir: spillDir() });
+    expect(outcome.aged).toBe(2);
+    expect(messages[0]?.content).toContain('свёрнуто');
+  });
+});

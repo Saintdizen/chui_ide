@@ -126,3 +126,17 @@ describe('общий потолок вывода', () => {
     expect((outcome.detail ?? '').length).toBeLessThanOrEqual(MAX_OUTPUT_CHARS + 400);
   });
 });
+
+describe('путь в выдаче search', () => {
+  it('без контекста путь идёт заголовком файла, а не в каждой строке', async () => {
+    const ws = await project(2, 5);
+    const out = await runTool(context(ws), 'search', JSON.stringify({ query: 'needle', limit: 10 }));
+    const detail = out.detail ?? '';
+    const lines = detail.split('\n');
+    const heads = lines.filter((line) => line.startsWith('f0.ts') || line.startsWith('f1.ts'));
+    // По одному заголовку на файл: повтор пути на каждом совпадении стоил 11%
+    // выдачи, а совпадений в одном файле обычно много.
+    expect(heads).toHaveLength(2);
+    expect(lines.filter((line) => line.startsWith('  '))).toHaveLength(hits(detail));
+  });
+});
