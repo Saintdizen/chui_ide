@@ -1,6 +1,12 @@
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { MAX_OUTPUT_CHARS, runTool, type ToolContext } from '../src/main/ai/agent-tools';
+import {
+  MAX_OUTPUT_CHARS,
+  STEP_OUTPUT_CHARS,
+  runTool,
+  stepOutputChars,
+  type ToolContext,
+} from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
 import { estimateTextTokens } from '../src/shared/context-fit';
 
@@ -106,4 +112,38 @@ describe('структурные инструменты', () => {
     const found = await runTool(context, 'codebase_search', JSON.stringify({ query: 'readFile' }));
     expect((found.detail ?? '').length).toBeLessThanOrEqual(MAX_OUTPUT_CHARS + 500);
   }, 180_000);
+});
+
+describe('новые пределы выдачи', () => {
+  it('хвост о неполном списке виден модели', async () => {
+    const context = { workspace, signal: new AbortController().signal } as ToolContext;
+    const out = await runTool(context, 'search', JSON.stringify({ query: 'export function' }));
+    // `summary` модель в контексте не видит: без этой строки обрезанный список
+    // читается как «больше нигде нет».
+    expect(out.detail ?? '').toContain('список неполный');
+    expect(out.detail ?? '').toContain('limit');
+  }, 60_000);
+
+  it('файл в пачке режется по границе строки и называет продолжение', async () => {
+    const context = { workspace, signal: new AbortController().signal } as ToolContext;
+    const out = await runTool(
+      context,
+      'read_files',
+      JSON.stringify({ paths: [path.join(ROOT, 'src/main/ai/service.ts'), path.join(ROOT, 'src/shared/tools.ts')] }),
+    );
+    const detail = out.detail ?? '';
+    expect(detail).toContain('дальше read_file с диапазоном');
+    expect(detail.length).toBeLessThan(20_000);
+  }, 60_000);
+});
+
+describe('бюджет шага под окно модели', () => {
+  it('полный потолок — только на большом окне', () => {
+    expect(stepOutputChars(200_000)).toBe(STEP_OUTPUT_CHARS);
+    // На окне 32k шаг больше не съедает половину контекста.
+    expect(stepOutputChars(32_000)).toBeLessThan(20_000);
+    expect(stepOutputChars(32_000)).toBeGreaterThanOrEqual(6_000);
+    // Совсем маленькое окно не обнуляет ответ инструмента.
+    expect(stepOutputChars(1_000)).toBe(6_000);
+  });
 });

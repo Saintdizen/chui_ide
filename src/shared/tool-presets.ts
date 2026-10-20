@@ -230,6 +230,15 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
       'rename_symbol',
       'forget',
       'session_search',
+      // Не редкие, а простые: вызов у них короткий и угадывается по имени
+      // (путь, имя символа), поэтому схема в каждом запросе дороже, чем
+      // повторный вызов по имени. 802 токена на запрос — цена шести схем.
+      'file_outline',
+      'open_file',
+      'get_diagnostics',
+      'go_to_definition',
+      'find_references',
+      'run_linter',
     ],
   },
   {

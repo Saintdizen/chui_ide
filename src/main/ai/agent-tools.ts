@@ -30,7 +30,7 @@ import { formatLintReport, type LintOutcome } from '../../shared/lint';
 import { formatLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
 import { formatMcpResources, isMcpToolName, type McpResourceInfo, type McpToolInfo } from '../../shared/mcp';
-import { compressToolOutput } from '../../shared/output-compress';
+import { collapsePassedTests, compressToolOutput, looksLikeTestRun } from '../../shared/output-compress';
 import type { ToolPresentedFile } from '../../shared/api';
 import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
@@ -536,6 +536,19 @@ export const STEP_OUTPUT_CHARS = 60_000;
  * начало (или хвост) с пометкой, что текст лежит в файле.
  */
 const MIN_OUTPUT_CHARS = 1_500;
+/**
+ * Бюджет вывода шага под окно модели.
+ *
+ * 60 000 символов — это около 17 000 токенов, и на окне 32k один шаг съедал
+ * половину: следующий же шаг упирался в переполнение, а промах стоит полного
+ * запроса заново плюс выброшенные ходы. Поэтому бюджет — доля окна (12%), но не
+ * больше прежнего потолка и не меньше 6 000 символов (иначе инструмент ответит
+ * пустотой, и модель позовёт его снова).
+ */
+export function stepOutputChars(windowTokens: number): number {
+  const share = Math.round(windowTokens * 0.12 * 3.5);
+  return Math.max(MIN_OUTPUT_CHARS * 4, Math.min(STEP_OUTPUT_CHARS, share));
+}
 /** Больше этого одной страницы модели не отдаём: даже по просьбе. */
 const MAX_FETCH_CHARS = 60_000;
 const MAX_SEARCH_HITS = 200;
@@ -545,9 +558,9 @@ const MAX_SEARCH_HITS = 200;
  * символов ≈ 6 000 токенов за один вызов, и это при том, что первые десять
  * строк уже отвечают на вопрос.
  */
-const DEFAULT_SEARCH_HITS = 100;
+const DEFAULT_SEARCH_HITS = 50;
 /** С контекстом умолчание ниже: каждое совпадение — это блок из пяти строк. */
-const DEFAULT_SEARCH_HITS_WITH_CONTEXT = 60;
+const DEFAULT_SEARCH_HITS_WITH_CONTEXT = 35;
 /** Сколько разделов документации отдаём на один запрос `search_docs`. */
 const MAX_DOC_RESULTS = 8;
 /**
@@ -564,7 +577,7 @@ const MAX_FIND_FILES = 2000;
  * «где встречается»: по сотне путей уже видно, где искать, остальное добирается
  * сужением запроса или папки.
  */
-const DEFAULT_FILES_ONLY_PATHS = 300;
+const DEFAULT_FILES_ONLY_PATHS = 80;
 const MAX_DIR_ENTRIES = 500;
 /**
  * Сколько путей отдаёт `find_files`, если модель не попросила иначе. Двести
@@ -1348,6 +1361,14 @@ const MAX_READ_FILES = 10;
  * прочитать один, чем всю пачку сразу.
  */
 const MAX_READ_FILES_TOTAL_CHARS = 30_000;
+/**
+ * Потолок на один файл в пачке. Десять файлов за раз инструмент и существует:
+ * если каждый отдаёт по 3 000 символов, пачка доходит до общего потолка ровно
+ * тогда, когда она ещё полезна. Цена пачки из двух больших файлов — 7 300
+ * токенов за вызов (замер), а вопрос обычно решает середина первого файла:
+ * остальное дешевле взять `read_file` с диапазоном по номеру строки.
+ */
+const READ_FILES_PER_FILE_CHARS = 6_000;
 
 /**
  * Пакетное чтение: 2–5 файлов за один шаг. Каждый файл получает те же номера
@@ -1385,9 +1406,30 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
         continue;
       }
       const lines = content.text.length === 0 ? [] : content.text.split('\n');
-      const body = lines.map((line, index) => `${index + 1} | ${line}`).join('\n');
+      // Потолок на файл режем по границе строки, а не посередине: обрывок
+      // строки в правку не годится, а по номеру последней видно, откуда читать
+      // дальше. Полный текст не пропадает — адрес назван в пометке.
+      let shown = lines.length;
+      let cut = false;
+      let body = lines.map((line, index) => `${index + 1} | ${line}`).join('\n');
+      if (body.length > READ_FILES_PER_FILE_CHARS) {
+        cut = true;
+        shown = 1;
+        let size = 0;
+        for (let index = 0; index < lines.length; index += 1) {
+          size += lines[index]!.length + 3;
+          if (size > READ_FILES_PER_FILE_CHARS) break;
+          shown = index + 1;
+        }
+        body = lines
+          .slice(0, shown)
+          .map((line, index) => `${index + 1} | ${line}`)
+          .join('\n');
+      }
       const { text, truncated } = clipText(ctx, 'read_files', body);
-      const chunk = `### ${rel} (${lines.length} строк${truncated ? ', обрезано' : ''})\n${text || '(пустой файл)'}`;
+      const rest = cut ? `\n… (показаны строки 1–${shown} из ${lines.length} — дальше read_file с диапазоном)` : '';
+      const marks = [truncated ? 'обрезано' : '', cut ? `первые ${shown}` : ''].filter(Boolean);
+      const chunk = `### ${rel} (${lines.length} строк${marks.length ? `, ${marks.join(', ')}` : ''})\n${text || '(пустой файл)'}${rest}`;
       parts.push(chunk);
       total += chunk.length;
       read += 1;
@@ -1501,7 +1543,10 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     const unique = [...new Set(result.hits.map((hit) => relativePath(hit.path, root)))];
     const files = unique.slice(0, fileLimit);
     const rest = unique.length - files.length;
-    const tail = rest > 0 ? `\n… ещё файлов: ${rest} — сузьте запрос или папку` : '';
+    const tail =
+      rest > 0
+        ? `\n… ещё файлов: ${rest} — сузьте запрос или папку, либо limit=${Math.min(MAX_FIND_FILES, fileLimit * 2)}`
+        : '';
     return {
       ok: true,
       summary: `совпадения в файлах: ${unique.length}${result.truncated || rest > 0 ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
@@ -1519,10 +1564,19 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     Boolean,
   );
 
+  // Хвост именно в `detail`: `summary` остаётся для карточки, а модель видит
+  // только `detail`. Без этой строки обрезанный список читается как «больше
+  // нигде нет», и агент делает вывод по половине ответа.
+  const tail =
+    truncated || limited.hidden > 0
+      ? `\n… (список неполный: ${limited.hits.length} из ${limit}, на файл до ${MAX_HITS_PER_FILE} — ` +
+        `поднимите limit или сузьте запрос)`
+      : '';
+
   return {
     ok: true,
     summary: `${limited.hits.length} совпадений${notes.length ? ` (${notes.join(', ')})` : ''} · просканировано файлов: ${result.scanned}`,
-    detail: detail.length ? clipText(ctx, 'search', detail).text : 'Ничего не найдено',
+    detail: detail.length ? clipText(ctx, 'search', detail).text + tail : 'Ничего не найдено',
   };
 }
 
@@ -2076,7 +2130,7 @@ async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): P
     : await runShellCommand(resolved.command, root, options);
   // Файл оставляем только тогда, когда вывод действительно не поместился в потолок.
   const full = spillStream?.close(result.truncated) ?? null;
-  const condensed = condenseOutput(result.output);
+  const condensed = foldPassedTests(ctx, 'run_tests', condenseOutput(result.output));
   const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'run_tests', condensed);
   const notes = [result.timedOut ? 'превышено время' : '', result.truncated ? 'вывод обрезан' : ''].filter(Boolean);
   // Ненулевой код — это упавшие тесты, а не ошибка инструмента: ответ ok, но с кодом.
@@ -2482,7 +2536,7 @@ async function terminalRunForeground(ctx: ToolContext, args: Record<string, unkn
   // Файл оставляем только тогда, когда вывод действительно не поместился в потолок.
   const full = spillStream?.close(result.truncated) ?? null;
   // Причёсываем и держим хвост: один `npm install` иначе завалит контекст логом.
-  const condensed = condenseOutput(result.output);
+  const condensed = foldPassedTests(ctx, 'terminal', condenseOutput(result.output));
   const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'terminal', condensed);
   const notes: string[] = [];
   if (result.timedOut) notes.push('превышено время выполнения');
@@ -3537,6 +3591,24 @@ function relativePath(target: string, root: string | null): string {
   if (!root) return target;
   const rel = path.relative(root, target);
   return rel.length === 0 ? '.' : rel.split(path.sep).join('/');
+}
+
+/**
+ * Свернуть перечисление прошедших тестов, положив полный вывод в файл-копию.
+ *
+ * Сотни строк `✓ имя теста 3ms` модели не сообщают ничего сверх итоговой строки,
+ * но платятся целиком: свежий ответ инструмента не попадает в кеш промпта, в
+ * отличие от префикса. Свёрнутое не теряется — адрес копии стоит в пометке.
+ * Применяется только там, где рядом есть итог прогона (`looksLikeTestRun`):
+ * в произвольном выводе команды строка с `✓` может быть данными.
+ */
+function foldPassedTests(ctx: ToolContext, kind: string, text: string): string {
+  if (!looksLikeTestRun(text)) return text;
+  const folded = collapsePassedTests(text);
+  if (folded.hidden === 0) return text;
+  const file = spill(ctx, kind, text);
+  const where = file ? `; ${spillHint(file)}` : '';
+  return `${folded.text}\n… (свёрнуто отметок о прошедших: ${folded.hidden}${where})`;
 }
 
 /**

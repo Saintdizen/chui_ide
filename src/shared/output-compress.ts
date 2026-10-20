@@ -107,3 +107,79 @@ export function compressToolOutput(text: string): string {
   if (compressed === '' && text.trim() !== '') return '(вывод — прогресс и служебные строки)';
   return compressed;
 }
+
+/**
+ * Строка «этот тест прошёл»: `✓ name 3ms` (vitest, jest), `✔ name (1.2ms)`
+ * (node --test), `ok 1 - name` (TAP), `PASSED` (pytest с `-v`).
+ */
+const PASSED_TEST_LINE = /^\s*(?:[✓✔√]\s|\d+\s*[✓✔√]\s|ok\s+\d+\s+-\s|PASSED\b)/;
+
+/**
+ * Строка точек pytest (`-q`): только точки и отметка процента. Если в строке есть
+ * `F`, `E` или `s`, это уже не «всё прошло» — такую строку не трогаем.
+ */
+const PYTEST_DOTS_LINE = /^[.\s]*\.{5,}[.\s]*(?:\[\s*\d{1,3}%\s*\])?$/;
+
+export interface TestOutputSummary {
+  text: string;
+  /** Сколько отметок о прошедших тестах свёрнуто. */
+  hidden: number;
+}
+
+/**
+ * Свернуть перечисление прошедших тестов в одну строку, оставив упавшие.
+ *
+ * Вывод зелёного прогона — сотни строк `✓ имя теста 3ms`: модели они не сообщают
+ * ничего сверх итогового «4715 passed», но стоят около восьми тысяч токенов на
+ * каждый прогон, и платятся целиком — свежий ответ инструмента в кеш промпта не
+ * попадает. Итог прогона, упавшие тесты и текст ошибок остаются дословно: это то,
+ * ради чего инструмент и звали. Свёрнутое не теряется — полный вывод уходит в
+ * файл-копию с адресом.
+ *
+ * Правила чистые (без Electron и без знания о конкретном раннере) и годятся
+ * только для вывода `run_tests`: в произвольном выводе команды строка с `✔`
+ * может быть данными.
+ */
+export function collapsePassedTests(text: string): TestOutputSummary {
+  const lines = text.split('\n');
+  const out: string[] = [];
+  let hidden = 0;
+  let at = 0;
+  while (at < lines.length) {
+    const passed = countPassed(lines[at]!);
+    if (passed === 0) {
+      out.push(lines[at]!);
+      at += 1;
+      continue;
+    }
+    // Подряд идущие «прошло» — одна строка: важно только их число.
+    let count = 0;
+    while (at < lines.length) {
+      const next = countPassed(lines[at]!);
+      if (next === 0) break;
+      count += next;
+      at += 1;
+    }
+    hidden += count;
+    out.push(`… прошло тестов: ${count}`);
+  }
+  return { text: out.join('\n'), hidden };
+}
+
+/** Сколько прошедших тестов отмечает строка; 0 — строка не про это. */
+function countPassed(line: string): number {
+  if (PYTEST_DOTS_LINE.test(line)) return line.match(/\./g)?.length ?? 0;
+  return PASSED_TEST_LINE.test(line) ? 1 : 0;
+}
+
+/**
+ * Признак прогона тестов по его итоговой строке: `4715 passed`, `# pass 7`,
+ * `Tests: 1 passed, 1 total`. Нужен, чтобы сворачивать перечисление прошедших
+ * в выводе произвольной команды (`npm test` через `terminal`) только тогда,
+ * когда итог рядом и ничего не теряется.
+ */
+const TEST_SUMMARY_LINE = /\b\d+\s+(?:passed|passing|прошло)\b|#\s*(?:pass|fail)\s+\d+/i;
+
+export function looksLikeTestRun(text: string): boolean {
+  return TEST_SUMMARY_LINE.test(text);
+}

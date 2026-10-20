@@ -166,7 +166,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'number',
           description: 'Lines before and after a match (0-5).',
         },
-        limit: { type: 'number', description: 'How many (default 100, 60 with context; 300 files).' },
+        limit: { type: 'number', description: 'How many (default 50, 35 with context; 80 files).' },
       },
       required: ['query'],
     },
@@ -479,10 +479,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         edits: {
           type: 'array',
-          description: 'Array of { path, expectedVersion?, edits: [...] }.',
+          description: 'One entry per file.',
           items: {
             type: 'object',
-            description: 'One file: path and edits.',
+            description: 'File: path and edits.',
             properties: {
               path: { type: 'string', description: 'Absolute path to the file.' },
               expectedVersion: {
@@ -491,10 +491,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
               },
               edits: {
                 type: 'array',
-                description: 'Per edit: an anchor (oldText) or the four positions — not both.',
+                description: 'Per file: the edits.',
                 items: {
                   type: 'object',
-                  description: 'One edit: anchor or positions, plus newText.',
+                  description: 'Anchor or positions, not both.',
                   properties: {
                     newText: { type: 'string', description: 'Replacement. An empty string removes the match.' },
                     oldText: { type: 'string', description: 'Anchor: exact text from the file, unique in it.' },

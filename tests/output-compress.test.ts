@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compressToolOutput } from '../src/shared/output-compress';
+import { collapsePassedTests, compressToolOutput, looksLikeTestRun } from '../src/shared/output-compress';
 
 /**
  * Сжатие вывода инструментов. Проверяем обе стороны: шум уходит, а содержание —
@@ -83,5 +83,41 @@ describe('compressToolOutput', () => {
   it('разделительная линия без слов уходит, а с подписью — нет', () => {
     expect(compressToolOutput('========\nвнимание\n========')).toBe('внимание');
     expect(compressToolOutput('---- итог ----')).toBe('---- итог ----');
+  });
+});
+
+describe('свёртка прошедших тестов', () => {
+  it('сотни ✓ сворачиваются в одну строку, итог и падения целы', () => {
+    const lines = [
+      ' ✓ tests/a.test.ts (3)',
+      '     ✓ первая проверка 3ms',
+      '     ✓ вторая проверка 1ms',
+      '',
+      ' FAIL  tests/b.test.ts > упавшая',
+      'AssertionError: expected 1 to be 2',
+      '      Tests  1 failed | 2 passed (3)',
+    ];
+    const folded = collapsePassedTests(lines.join('\n'));
+    expect(folded.hidden).toBe(3);
+    expect(folded.text).toContain('… прошло тестов: 3');
+    expect(folded.text).toContain('Tests  1 failed | 2 passed (3)');
+    expect(folded.text).toContain('AssertionError: expected 1 to be 2');
+  });
+
+  it('точечный вывод pytest: точки считаются, F не трогается', () => {
+    const folded = collapsePassedTests('............................  [100%]\n42 passed in 1.2s');
+    expect(folded.hidden).toBe(28);
+    expect(folded.text).toContain('42 passed in 1.2s');
+    // Строка с F — это уже не «всё прошло»: таких не трогаем.
+    const failed = collapsePassedTests('....F....  [ 50%]');
+    expect(failed.hidden).toBe(0);
+    expect(failed.text).toBe('....F....  [ 50%]');
+  });
+
+  it('признак прогона тестов узнаётся по итоговой строке', () => {
+    expect(looksLikeTestRun('Test Files  364 passed (364)')).toBe(true);
+    expect(looksLikeTestRun('# pass 7')).toBe(true);
+    expect(looksLikeTestRun('Tests:       1 passed, 1 total')).toBe(true);
+    expect(looksLikeTestRun('собрано 12 файлов')).toBe(false);
   });
 });

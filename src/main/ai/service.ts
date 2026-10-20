@@ -119,6 +119,7 @@ import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
 import {
   runTool,
   STEP_OUTPUT_CHARS,
+  stepOutputChars,
   type BrowserTools,
   type GitTools,
   type Linter,
@@ -1455,7 +1456,7 @@ export class AiService {
       // Бюджет вывода на шаг, общий для всех его вызовов: предел на вызов этой
       // задачи не отвечает — три чтения подряд дают 180 000 символов, и обрезка
       // истории выбрасывает уже потраченный шаг целиком.
-      toolContext.stepBudget = { left: STEP_OUTPUT_CHARS };
+      toolContext.stepBudget = { left: stepOutputChars(windowTokens) };
       for (const call of calls) {
         // План — не вызов инструмента в привычном смысле, а обновление чек-листа:
         // рисуем его отдельным событием, но модели всё равно отвечаем role:'tool'.
