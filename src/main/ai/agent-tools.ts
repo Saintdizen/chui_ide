@@ -504,6 +504,12 @@ export function stepOutputChars(windowTokens: number): number {
 const MAX_FETCH_CHARS = 60_000;
 const MAX_SEARCH_HITS = 200;
 /**
+ * Умолчания `limit`: в схеме только «сколько», а само число — здесь. Строчка
+ * «(50; 35 с контекстом; 80 файлов)» читалась моделью на каждом шаге и весила
+ * больше, чем весь остальной аргумент; поведение от этого не меняется — код и
+ * раньше брал то же число, когда модель молчала. Те же числа для людей — в `TOOLS.md`.
+ */
+/**
  * Сколько совпадений отдаём, если модель не попросила иначе. Двести — потолок,
  * а не умолчание: замер на живом проекте (‘export function’) давал 21 000
  * символов ≈ 6 000 токенов за один вызов, и это при том, что первые десять
@@ -512,8 +518,24 @@ const MAX_SEARCH_HITS = 200;
 const DEFAULT_SEARCH_HITS = 50;
 /** С контекстом умолчание ниже: каждое совпадение — это блок из пяти строк. */
 const DEFAULT_SEARCH_HITS_WITH_CONTEXT = 35;
+/**
+ * Сколько совпадений отдаём в `search code`, если модель не попросила иначе.
+ * Объявления символов — что и где: сорока строк с запасом хватает на «в каком
+ * файле это имя», и потолок тот же — это не выбор, а умолчание.
+ */
+const DEFAULT_CODE_SYMBOLS = 40;
 /** Сколько разделов документации отдаём на один запрос `search_docs`. */
-const MAX_DOC_RESULTS = 8;
+const DEFAULT_DOC_RESULTS = 8;
+const MAX_DOC_RESULTS = DEFAULT_DOC_RESULTS;
+/**
+ * Сколько результатов поиска в сети отдаём, если модель не попросила иначе.
+ * Десять ссылок — уже край: сколько дальше — решать по странице, а не по списку.
+ */
+const DEFAULT_WEB_RESULTS = 10;
+const MAX_WEB_RESULTS = DEFAULT_WEB_RESULTS;
+/** Сколько коммитов отдаёт `git_read log`, если модель не попросила иначе. */
+const DEFAULT_GIT_LOG = 20;
+const MAX_GIT_LOG = 100;
 /**
  * Во сколько раз просим больше совпадений, чем отдадим. Потолок на файл
  * отбирает уже после поиска: без запаса шумный файл занял бы весь список, и
@@ -1751,7 +1773,6 @@ function formatSearchHits(hits: readonly SearchHit[], root: string | null, conte
 }
 
 /** Сколько объявлений вернуть по умолчанию и сколько файлов-сводок показать. */
-const MAX_CODE_SYMBOLS = 40;
 const MAX_CODE_FILES = 25;
 
 /**
@@ -1803,7 +1824,7 @@ async function fileOutline(ctx: ToolContext, args: Record<string, unknown>): Pro
 
 async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const query = requireString(args, 'query');
-  const limit = Math.min(optionalInteger(args, 'limit') ?? MAX_CODE_SYMBOLS, MAX_CODE_SYMBOLS);
+  const limit = Math.min(optionalInteger(args, 'limit') ?? DEFAULT_CODE_SYMBOLS, DEFAULT_CODE_SYMBOLS);
   const root = ctx.workspace.rootPath();
 
   let found: readonly SearchSymbol[] = [];
@@ -1854,7 +1875,7 @@ async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): 
  */
 async function searchDocs(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const query = requireString(args, 'query');
-  const limit = Math.min(Math.max(optionalInteger(args, 'limit') ?? MAX_DOC_RESULTS, 1), MAX_DOC_RESULTS);
+  const limit = Math.min(Math.max(optionalInteger(args, 'limit') ?? DEFAULT_DOC_RESULTS, 1), MAX_DOC_RESULTS);
   const result = await ctx.workspace.searchDocs({ query, limit });
   const root = ctx.workspace.rootPath();
   const { summary, detail } = formatDocsAnswer(result, (target) => relativePath(target, root));
@@ -2894,9 +2915,6 @@ async function runExternalTool(
   };
 }
 
-/** Сколько результатов веб-поиска отдаём модели: больше — уже шум, а не ответ. */
-const MAX_WEB_RESULTS = 10;
-
 /**
  * Веб-поиск. Пустая выдача — не ошибка инструмента: модель должна узнать, что по
  * такому запросу ничего нет, и сменить формулировку. Ошибкой считаем только
@@ -2906,7 +2924,7 @@ async function webSearch(ctx: ToolContext, args: Record<string, unknown>): Promi
   if (!ctx.webSearch) return { ok: false, summary: 'Веб-поиск не подключён' };
 
   const query = requireString(args, 'query');
-  const limit = Math.min(Math.max(optionalInteger(args, 'limit') ?? MAX_WEB_RESULTS, 1), MAX_WEB_RESULTS);
+  const limit = Math.min(Math.max(optionalInteger(args, 'limit') ?? DEFAULT_WEB_RESULTS, 1), MAX_WEB_RESULTS);
 
   try {
     const { hits, providerLabel } = await ctx.webSearch.search(query, limit, ctx.signal);
@@ -2958,7 +2976,7 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
 async function gitLog(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
 
-  const limit = optionalInteger(args, 'limit') ?? 20;
+  const limit = Math.min(optionalInteger(args, 'limit') ?? DEFAULT_GIT_LOG, MAX_GIT_LOG);
   const target = optionalString(args, 'path');
   const text = (await ctx.git.logText(limit, target)).trim();
 
