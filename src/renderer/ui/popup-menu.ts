@@ -135,9 +135,17 @@ function position(menu: HTMLElement, x: number, y: number): void {
   menu.style.top = `${Math.max(Math.min(y, window.innerHeight - rect.height - EDGE), EDGE)}px`;
 }
 
+/** Открыто ли модальное окно (настройки, подтверждение): его `z-index` выше обычного слоя меню. */
+function withinModal(): boolean {
+  return document.querySelector('.modal-backdrop:not([hidden])') !== null;
+}
+
 function openLevel(items: readonly PopupMenuItem[], x: number, y: number, parent?: HTMLElement): Level {
   const level: Level = { menu: h('div', { class: 'context-menu', role: 'menu' }), parent, entries: [], items };
   buildLevel(level);
+  // Меню идёт в `body`, а его слой (200) ниже модального (300): открытое из настроек,
+  // оно оказалось бы под окном. Ту же задачу у списка селекта решает `--layer_select`.
+  if (withinModal()) level.menu.style.zIndex = 'var(--layer_menu_in_modal)';
   document.body.appendChild(level.menu);
   position(level.menu, x, y);
   levels.push(level);
