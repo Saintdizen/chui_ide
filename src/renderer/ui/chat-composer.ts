@@ -157,6 +157,8 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     { value: 'low', label: 'Low' },
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' },
+    // `max` понимают не все модели (DeepSeek — да); остальным он не уходит.
+    { value: 'max', label: 'Max' },
   ]);
   effortSelect.onChange((value) => deps.onEffortChange(value as ReasoningEffort));
 

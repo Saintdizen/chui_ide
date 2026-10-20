@@ -56,6 +56,9 @@ export function serializeSession(session: ChatSession): ChatConversation {
     // Набор инструментов — свойство беседы, а не общая настройка: иначе выбор в
     // одной вкладке менял бы поведение всех остальных.
     ...(session.toolPreset ? { toolPreset: session.toolPreset } : {}),
+    // Перенесённый через сжатие контекст: без него после перезапуска следующий
+    // пересказ потерял бы присланные файлы.
+    ...(session.kept && session.kept.length > 0 ? { keptAttachments: session.kept.map((item) => ({ ...item })) } : {}),
     ...(session.usage ? { usage: { ...session.usage } } : {}),
     ...(session.trace ? { trace: { ...session.trace, usage: { ...session.trace.usage } } } : {}),
     // Цель переживает перезапуск: иначе окно, закрытое посреди работы, теряло бы

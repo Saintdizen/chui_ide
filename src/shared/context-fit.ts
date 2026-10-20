@@ -91,6 +91,9 @@ function messageTokens(message: ChatMessage): number {
   let tokens = estimateTextTokens(message.content ?? '');
   if (message.name) tokens += estimateTextTokens(message.name);
   if (message.toolCallId) tokens += estimateTextTokens(message.toolCallId);
+  // Размышления уезжают обратно провайдеру вместе с вызовами инструментов:
+  // не считать их — значит врать о заполнении контекста.
+  if (message.reasoning) tokens += estimateTextTokens(message.reasoning);
   for (const call of message.toolCalls ?? []) {
     tokens += estimateTextTokens(call.id) + estimateTextTokens(call.name) + estimateTextTokens(call.arguments);
   }
@@ -315,7 +318,120 @@ export const COMPACT_MAX_CHARS = 400_000;
  * за одну беседу. Поэтому сжимаем ещё и когда история переросла этот предел, — так
  * размер одного запроса не зависит от модели. Человек может поднять его в настройках.
  */
-export const COMPACT_AT_TOKENS = 100_000;
+export const COMPACT_AT_TOKENS = 0;
+
+/**
+ * Через сколько ходов беседы сжимать по расписанию («сжимать чаще»). Ход — вопрос
+ * пользователя вместе с ответом агента, поэтому 12 ходов это два-три экрана переписки.
+ */
+export const COMPACT_EVERY_TURNS = 12;
+
+/**
+ * Доля окна, после которой сжимаем, не дожидаясь других признаков: с запасом, а не
+ * «в упор». Единственный порог, который действует всегда.
+ */
+export const COMPACT_AT_RATIO = 0.8;
+
+/** Ниже этой доли попаданий в кеш он считается промахнувшимся. */
+export const CACHE_MISS_RATIO = 0.3;
+
+
+/* ── когда сжимать ───────────────────────────────────────────────────────────
+ * Сжатие не бесплатное: это отдельный запрос к модели, а главное — оно
+ * перестраивает префикс беседы и тем самым обнуляет кеш промпта. Поэтому решаем
+ * не «по заполнению вообще», а по признакам того, что беседа стала дорогой:
+ * кеш перестал попадать либо вот-вот упрёмся в окно. Логика живёт здесь, а не в
+ * панели: так её видно тестами, а не только глазами в интерфейсе.
+ */
+
+/** Почему решили сжать — по нему видно, что сказать человеку. */
+export type CompactionReason = 'cache-miss' | 'window' | 'history' | 'turns';
+
+export interface CompactionInput {
+  /** Заполнение окна и его предел — как их считает `contextUsage`. */
+  used: number;
+  limit: number;
+  /** Резерв под ответ: его тоже надо вписать в окно. */
+  reserve: number;
+  /**
+   * Беседа дописана после сжатия: `usage` последнего ответа относится к другой
+   * истории. По нему промах кеша не судим.
+   */
+  usageFresh?: boolean;
+  /** Расход последнего ответа: по попаданию в кеш видно, пишется ли префикс. */
+  usage?: ChatUsage;
+  /**
+   * Абсолютный предел истории (`ai.compactAtTokens`); 0 — не сжимать по объёму.
+   * Оставлен для тех, кому нужен жёсткий потолок запроса независимо от окна.
+   */
+  compactAtTokens?: number;
+  /**
+   * Ходов с прошлого сжатия и порог расписания. Порог 0 — расписание выключено.
+   * Ход — вопрос пользователя вместе с ответом агента.
+   */
+  turnsSinceCompact?: number;
+  turnsEvery?: number;
+  /** Провайдер умеет компактное сжатие; не умеет — промах кеша не повод. */
+  compactCapable?: boolean;
+  /** Разрешено ли вообще сжимать по промаху кеша. */
+  compactOnCacheMiss?: boolean;
+}
+
+/**
+ * Пора ли сжимать и почему. Проверки идут от последнего рубежа к первому: окно,
+ * абсолютный потолок, расписание, кеш. Порядок важен только для сообщения
+ * человеку — решать всё равно достаточно любой причины.
+ *
+ * Промах кеша — основной сигнал: префикс перестал кешироваться, и каждый следующий
+ * запрос платится целиком. Сжатие перестраивает префикс один раз, и дальше
+ * кешируется уже новая, короткая история. Если провайдер не умеет компактного
+ * сжатия, переписывать префикс нечем — остаётся только окно.
+ */
+export function needsCompaction(input: CompactionInput): CompactionReason | null {
+  const used = Math.max(0, Math.floor(input.used));
+  const limit = Math.max(1, Math.floor(input.limit));
+  if (used + input.reserve > limit * COMPACT_AT_RATIO) return 'window';
+
+  const absolute = Math.floor(input.compactAtTokens ?? 0);
+  if (absolute > 0 && used > absolute) return 'history';
+
+  const every = Math.floor(input.turnsEvery ?? 0);
+  if (every > 0 && (input.turnsSinceCompact ?? 0) >= every) return 'turns';
+
+  if (input.compactOnCacheMiss !== false && input.compactCapable !== false && input.usageFresh !== false) {
+    if (isCacheMiss(input.usage)) return 'cache-miss';
+  }
+  return null;
+}
+
+/**
+ * Кеш промпта не сработал: попаданий почти нет при заметном входе.
+ *
+ * Маленький вход не считаем: на первых сообщениях кеш только пишется, и промах
+ * там нормален — сжатие вышло бы дороже самого запроса. Как и отсутствие числа от
+ * провайдера: локальные модели про кеш молчат, судить не по чему.
+ */
+export function isCacheMiss(usage: ChatUsage | undefined): boolean {
+  const prompt = usage?.promptTokens ?? 0;
+  if (prompt < 1_000) return false;
+  if (usage?.cachedTokens === undefined) return false;
+  return usage.cachedTokens / prompt < CACHE_MISS_RATIO;
+}
+
+/** Что сказать человеку о причине сжатия. */
+export function compactionMessage(reason: CompactionReason): string {
+  switch (reason) {
+    case 'window':
+      return 'Контекст подходит к концу — сжимаю беседу перед отправкой';
+    case 'history':
+      return 'Беседа слишком длинная — сжимаю перед отправкой';
+    case 'turns':
+      return 'Пора сжать беседу — сжимаю перед отправкой';
+    case 'cache-miss':
+      return 'Кеш контекста перестал попадать — сжимаю беседу, чтобы вернуть его';
+  }
+}
+
 
 /**
  * Бюджет одного прохода сжатия: сколько символов истории можно отдать модели за
@@ -452,10 +568,9 @@ export class TokenCalibration {
 /**
  * Тела, которые в истории больше не нужны после исполнения вызова.
  *
- * Это текст, который уже лёг в файл (правка, новый файл) или отработал
- * (программа `run_code`, сценарий `workflow`). Адрес у него есть — файл или
- * трасса прогона, — а в контексте он висит до конца беседы и пересылается на
- * каждом шаге. Пометка говорит, сколько строк было и что делать дальше.
+ * Это текст, который уже лёг в файл (правка, новый файл). Адрес у него есть —
+ * файл, — а в контексте он висит до конца беседы и пересылается на каждом
+ * шаге. Пометка говорит, сколько строк было и что делать дальше.
  */
 // `command` — текст уже отработавшей команды: вывод остался, голова команды
 // тоже (см. `commandLine`), а heredoc на две тысячи символов в истории — треть
@@ -547,11 +662,18 @@ export function condenseAppliedCalls(
 /**
  * Пометка для плана, который заменили более новым.
  *
- * `update_plan` присылает список шагов целиком и затирает прежний чек-лист,
+ * `plan` с action steps присылает список шагов целиком и затирает прежний чек-лист,
  * поэтому старая версия в истории — повтор того же текста, только длиннее:
  * актуальные `status` уже в последнем вызове. Файла за планом нет, терять нечего.
  */
 export const SUPERSEDED_PLAN_MARKER = '[план заменён: ниже актуальная версия]';
+
+/** План ли это: имя `plan` и действие `steps` (без действия — тоже оно). */
+function isPlanSteps(call: { name: string; arguments: string }): boolean {
+  if (call.name !== 'plan') return false;
+  const parsed = parseToolArguments(call.arguments);
+  return !parsed.ok || parsed.value.action !== 'goal';
+}
 
 /** Аргументы плана, который уже заменён: `steps` — пометка, остальное на месте. */
 function supersedePlan(args: string): string {
@@ -568,7 +690,7 @@ function supersedePlan(args: string): string {
 /**
  * Оставить в истории один актуальный план.
  *
- * `keepId` — вызов `update_plan`, который и есть текущая версия; у остальных
+ * `keepId` — вызов `plan` (action steps), который и есть текущая версия; у остальных
  * `steps` заменяются пометкой. План едет в контексте на каждом шаге, а обновляется
  * обычно много раз за прогон: отметил шаг — прислал весь список заново.
  *
@@ -579,7 +701,7 @@ export function condenseSupersededPlans(message: ChatMessage, keepId: string): C
   if (message.role !== 'assistant' || !message.toolCalls?.length) return message;
   let changed = false;
   const toolCalls = message.toolCalls.map((call) => {
-    if (call.name !== 'update_plan' || call.id === keepId) return call;
+    if (!isPlanSteps(call) || call.id === keepId) return call;
     const args = supersedePlan(call.arguments);
     if (args === call.arguments) return call;
     changed = true;

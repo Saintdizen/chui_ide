@@ -19,7 +19,7 @@ import {
   type WorkspaceSettings,
 } from '../shared/api';
 import { AUTO_SAVE_DELAY_MS, normalizeAutoSaveDelay, normalizeAutoSaveMode } from '../shared/auto-save';
-import { COMPACT_AT_TOKENS } from '../shared/context-fit';
+import { COMPACT_AT_TOKENS, COMPACT_EVERY_TURNS } from '../shared/context-fit';
 import { normalizeFavorites } from '../shared/favorites';
 import { parseFsAddress, formatFsAddress } from '../shared/fs-address';
 import { normalizeMcpServers, type McpServerConfig } from '../shared/mcp';
@@ -49,6 +49,26 @@ interface StoredProvider {
   defaultModel?: string;
   /** Как говорить с провайдером: OpenAI-совместимо или нативно (Anthropic). */
   protocol?: 'openai' | 'anthropic';
+  /**
+   * Параметры запроса — свои у каждого подключения: лимит ответа, температура и
+   * усилие размышления зависят от модели, а не от ассистента целиком. Не заданы —
+   * берётся общее значение из настроек, поэтому старый конфиг работает как раньше.
+   */
+  temperature?: number;
+  maxTokens?: number;
+  reasoningEffort?: ReasoningEffort;
+  /**
+   * Метка конечного пользователя для провайдера (`user_id` у DeepSeek).
+   *
+   * Нужна для изоляции: кеш контекста и лимиты считаются отдельно по каждому
+   * `user_id`, и двое за одной машиной иначе делят их между собой.
+   */
+  userId?: string;
+  /**
+   * Строгая схема инструментов (`strict: true`): провайдер обязан вернуть
+   * аргументы по JSON-схеме. У DeepSeek это beta-функция, требующая `/beta`.
+   */
+  strictTools?: boolean;
   /** Ключ лежит только в main-процессе и никогда не уходит в renderer. */
   apiKey?: string;
 }
@@ -64,8 +84,10 @@ interface StoredSettings {
     maxTokens: number;
     /** Не задано — окно определяется по имени модели. */
     contextWindow?: number;
-    /** Абсолютный предел истории для автосжатия; 0 — по окну модели. */
+    /** Абсолютный предел истории для автосжатия; 0 — не сжимать по объёму. */
     compactAtTokens: number;
+    /** «Сжимать чаще»: каждые N ходов; 0 — по промаху кеша и по окну. */
+    compactEveryTurns: number;
     /** Модель для сжатия беседы; не задана — активная. */
     compactModel?: string;
     systemPrompt: string;
@@ -85,7 +107,7 @@ interface StoredSettings {
     /** Убирать шум из вывода инструментов перед отправкой модели. */
     compressOutput: boolean;
     /**
-     * Чтение страниц по ссылке (`web_fetch`): тоже ход наружу, поэтому тоже
+     * Чтение страниц по ссылке (`web`, действие fetch): тоже ход наружу, поэтому тоже
      * выключено, пока человек не включит его сам.
      */
     webFetch: { enabled: boolean };
@@ -138,24 +160,21 @@ const DEFAULT_SETTINGS: StoredSettings = {
     enabled: true,
     providers: [
       {
-        id: 'openai',
-        label: 'OpenAI',
-        baseUrl: 'https://api.openai.com/v1',
-        models: ['gpt-4o', 'gpt-4o-mini'],
-        defaultModel: 'gpt-4o-mini',
-      },
-      {
-        id: 'ollama',
-        label: 'Ollama (локально)',
-        baseUrl: 'http://127.0.0.1:11434/v1',
-        models: ['qwen2.5-coder:7b', 'llama3.1:8b'],
-        defaultModel: 'qwen2.5-coder:7b',
+        id: 'deepseek',
+        label: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com/v1',
+        models: ['deepseek-flash', 'deepseek-v4-pro'],
+        defaultModel: 'deepseek-flash',
       },
     ],
     temperature: 0.2,
-    maxTokens: 4096,
-    // Предел автосжатия: история сверх этого числа сжимается, даже если окно ещё далеко.
+    // 0 — предел модели (см. `maxOutputTokens`). Общие 4096 токенов обрывали ответ
+    // там, где модель готова писать в сотню раз больше: предел ответа — свойство
+    // модели, а не ассистента.
+    maxTokens: 0,
+    // Предел автосжатия выключен: пороги — промах кеша и подход к окну.
     compactAtTokens: COMPACT_AT_TOKENS,
+    compactEveryTurns: COMPACT_EVERY_TURNS,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     // По умолчанию параметр не отправляем: не всякая модель его знает.
     reasoningEffort: 'off',
@@ -392,6 +411,11 @@ export class SettingsStore {
           models: [...provider.models],
           defaultModel: provider.defaultModel,
           protocol: provider.protocol,
+          temperature: provider.temperature,
+          maxTokens: provider.maxTokens,
+          reasoningEffort: provider.reasoningEffort,
+          userId: provider.userId,
+          strictTools: provider.strictTools === true,
           hasApiKey: Boolean(this.resolveApiKey(provider.id)),
         })),
         activeProviderId: ai.activeProviderId ?? ai.providers[0]?.id,
@@ -400,6 +424,7 @@ export class SettingsStore {
         maxTokens: ai.maxTokens,
         contextWindow: ai.contextWindow,
         compactAtTokens: ai.compactAtTokens,
+        compactEveryTurns: ai.compactEveryTurns,
         compactModel: ai.compactModel,
         systemPrompt: ai.systemPrompt,
         reasoningEffort: ai.reasoningEffort ?? 'off',
@@ -416,7 +441,11 @@ export class SettingsStore {
           enabled: ai.webSearch?.enabled === true,
           provider: ai.webSearch?.provider ?? 'searxng',
           endpoint: ai.webSearch?.endpoint ?? '',
-          hasApiKey: Boolean(this.resolveWebSearchKey()),
+          // Поиск DeepSeek обходится ключом подключения: показывать «ключа нет»,
+          // когда поиск при этом работает, — врать в настройках.
+          hasApiKey:
+            Boolean(this.resolveWebSearchKey()) ||
+            (ai.webSearch?.provider === 'deepseek' && Boolean(this.resolveApiKey('deepseek'))),
         },
         browser: {
           enabled: ai.browser?.enabled === true,
@@ -663,10 +692,15 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     if (Number.isFinite(value) && value > 0) target.contextWindow = value;
     else delete target.contextWindow;
   }
-  // Предел автосжатия: 0 — сжимать только по заполнению окна.
+  // Предел автосжатия: 0 — не сжимать по объёму (по умолчанию так).
   if (patch.compactAtTokens !== undefined) {
     const value = Math.round(patch.compactAtTokens);
     if (Number.isFinite(value) && value >= 0) target.compactAtTokens = value;
+  }
+  // «Сжимать чаще»: 0 — не сжимать по расписанию.
+  if (patch.compactEveryTurns !== undefined) {
+    const value = Math.round(patch.compactEveryTurns);
+    if (Number.isFinite(value) && value >= 0) target.compactEveryTurns = value;
   }
   // Модель сжатия: пусто — снова сжимаем активной моделью.
   if (patch.compactModel !== undefined) {
@@ -751,6 +785,16 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
       if (incoming.models !== undefined) existing.models = [...incoming.models];
       if (incoming.defaultModel !== undefined) existing.defaultModel = incoming.defaultModel;
       if (incoming.protocol !== undefined) existing.protocol = incoming.protocol;
+      if (incoming.temperature !== undefined) existing.temperature = incoming.temperature;
+      if (incoming.maxTokens !== undefined) existing.maxTokens = incoming.maxTokens;
+      if (incoming.reasoningEffort !== undefined) existing.reasoningEffort = incoming.reasoningEffort;
+      // Пустая строка — «стереть метку», а не «оставить как было».
+      if (incoming.userId !== undefined) {
+        const userId = incoming.userId.trim().slice(0, 128);
+        if (userId) existing.userId = userId;
+        else delete existing.userId;
+      }
+      if (incoming.strictTools !== undefined) existing.strictTools = incoming.strictTools;
     } else {
       const created: StoredProvider = {
         id: incoming.id,
@@ -759,6 +803,12 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
         models: [...(incoming.models ?? [])],
       };
       if (incoming.protocol) created.protocol = incoming.protocol;
+      if (incoming.temperature !== undefined) created.temperature = incoming.temperature;
+      if (incoming.maxTokens !== undefined) created.maxTokens = incoming.maxTokens;
+      if (incoming.reasoningEffort !== undefined) created.reasoningEffort = incoming.reasoningEffort;
+      const userId = incoming.userId?.trim().slice(0, 128);
+      if (userId) created.userId = userId;
+      if (incoming.strictTools !== undefined) created.strictTools = incoming.strictTools;
       const fallback = incoming.defaultModel ?? incoming.models?.[0];
       if (fallback) created.defaultModel = fallback;
       target.providers.push(created);
@@ -772,6 +822,32 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
       target.activeProviderId = target.providers[0]?.id;
       delete target.activeModel;
     }
+  }
+}
+
+/**
+ * Старые имена моделей DeepSeek: провайдер отказался от них 24.07.2026, но в
+ * settings.json они остались у всех, кто настроил подключение раньше — без
+ * переименования первый же запрос получил бы отказ. `reasoner` теперь не имя
+ * модели, а включённый режим размышления, поэтому он тоже становится flash:
+ * размышление у неё включено по умолчанию.
+ */
+const LEGACY_MODEL_NAMES: Record<string, string> = {
+  'deepseek-chat': 'deepseek-flash',
+  'deepseek-reasoner': 'deepseek-flash',
+};
+
+function migrateLegacyModelNames(providers: StoredProvider[]): void {
+  for (const provider of providers) {
+    if (provider.id !== 'deepseek') continue;
+    // Set сохраняет порядок вставки, поэтому список остаётся прежним по смыслу.
+    provider.models = [...new Set(provider.models.map((model) => LEGACY_MODEL_NAMES[model] ?? model))];
+    const current = provider.defaultModel;
+    if (current) provider.defaultModel = LEGACY_MODEL_NAMES[current] ?? current;
+    // Старое имя, ставшее новым, съест весь список: добавляем актуальные модели
+    // пресета, иначе выбрать v4-pro из селекта будет нельзя без ручного ввода.
+    const preset = DEFAULT_SETTINGS.ai.providers.find((item) => item.id === provider.id);
+    if (preset) provider.models = [...new Set([...provider.models, ...preset.models])];
   }
 }
 
@@ -789,17 +865,30 @@ function loadSettings(filePath: string): StoredSettings {
     Array.isArray(storedAi.providers) && storedAi.providers.length > 0
       ? storedAi.providers.map((provider) => ({ ...provider }))
       : DEFAULT_SETTINGS.ai.providers.map((provider) => ({ ...provider }));
+  migrateLegacyModelNames(providers);
 
   // Окно контекста мог задать человек в settings.json: держим только разумное число.
   const ai: StoredSettings['ai'] = { ...DEFAULT_SETTINGS.ai, ...storedAi, providers };
+  // Активная модель тоже могла остаться старой: без переименования запрос ушёл бы в никуда.
+  const activeAfterRename = ai.activeModel ? LEGACY_MODEL_NAMES[ai.activeModel] : undefined;
+  if (activeAfterRename) ai.activeModel = activeAfterRename;
   const storedWindow = Math.round(Number(storedAi.contextWindow));
   if (Number.isFinite(storedWindow) && storedWindow > 0) ai.contextWindow = storedWindow;
   else delete ai.contextWindow;
+  // Старый общий предел 4096 был значением по умолчанию, а не выбором: в settings.json
+  // он остался у всех.
+  if (ai.maxTokens === 4096) ai.maxTokens = 0;
 
-  // Предел автосжатия: 0 — по окну модели; побитое или отсутствующее — по умолчанию.
+  // Предел автосжатия: 0 — не сжимать по объёму (теперь так по умолчанию). Побитое
+  // или нулевое значение — как если бы его не было.
   const storedCompact = Math.round(Number(storedAi.compactAtTokens));
   ai.compactAtTokens =
-    Number.isFinite(storedCompact) && storedCompact >= 0 ? storedCompact : DEFAULT_SETTINGS.ai.compactAtTokens;
+    Number.isFinite(storedCompact) && storedCompact > 0 ? storedCompact : DEFAULT_SETTINGS.ai.compactAtTokens;
+
+  // «Сжимать чаще»: побитое или отсутствующее — по умолчанию; 0 — расписание выключено.
+  const storedEvery = Math.round(Number(storedAi.compactEveryTurns));
+  ai.compactEveryTurns =
+    Number.isFinite(storedEvery) && storedEvery >= 0 ? storedEvery : DEFAULT_SETTINGS.ai.compactEveryTurns;
 
   // Модель сжатия: строка без пробелов или ничего (тогда сжимаем активной моделью).
   ai.compactModel =

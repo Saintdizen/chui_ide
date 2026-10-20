@@ -28,9 +28,18 @@ import { ageStaleResults, ageToolResults } from './age-results';
 import { spillText } from './spill';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
-import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
+import {
+  modelCapabilities,
+  contextWindow,
+  findProviderPreset,
+  betaBaseUrl,
+  firstPositive,
+  maxOutputTokens,
+  reasoningEffortFor,
+} from '../../shared/providers';
+import type { ModelInfo } from '../../shared/model-info';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
-import { ALWAYS_AVAILABLE, PLAN_MODE_OFFERED, SUBAGENT_TOOLS, allowsInPlan, isReadOnlyCall } from '../../shared/tool-policy';
+import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, isReadOnlyCall } from '../../shared/tool-policy';
 import { canonicalCall } from '../../shared/tool-aliases';
 import {
   condenseAppliedCalls,
@@ -132,15 +141,12 @@ import {
   type TerminalAgent,
   type TestRunner,
   type SessionSearchRunner,
-  type ScheduleTools,
   type ToolContext,
   type ToolOutcome,
 } from './agent-tools';
 import { AnthropicProvider } from './anthropic';
 import { searchWeb, webSearchNeedsKey, webSearchProviderLabel } from './web-search';
 import { fetchPage } from './web-fetch';
-import { canRunProgram, runProgram } from './run-code';
-import { WORKFLOW_DEFAULT_TIMEOUT_MS, WORKFLOW_MAX_AGENTS } from '../../shared/workflow';
 import { assertChatImages } from './images';
 import { createReadImageRunner } from './read-image';
 import { OpenAiCompatibleProvider } from './openai-compatible';
@@ -230,7 +236,7 @@ const AUTO_APPROVE_PROMPT = [
  * не меняя. Правки и команды ему недоступны — не предлагай их и не вызывай.
  */
 const PLAN_PROMPT = [
-  'Режим плана: сначала изучи проект доступными инструментами чтения, затем составь план через update_plan.',
+  'Режим плана: сначала изучи проект доступными инструментами чтения, затем составь план через plan (action: steps).',
   'Ничего не меняй: правки файлов и запуск команд в этом режиме недоступны и не выполнятся.',
   'План готов — заверши его вызовом exit_plan_mode: человек утвердит его или вернёт замечание.',
   'В конце объясни план словами: что предлагаешь сделать, в каком порядке и почему.',
@@ -297,9 +303,9 @@ export class AiService {
   private git?: GitTools;
   /** Терминальные сессии тоже приходят снаружи: без них terminal_* не предлагаем. */
   private terminals?: TerminalAgent;
-  /** Поиск символов проекта: без него codebase_search ищет только текстом. */
+  /** Поиск символов проекта: без него search (action code) ищет только текстом. */
   private symbols?: SymbolSearch;
-  /** Линтер проекта: без него инструмент run_linter модели не предлагаем. */
+  /** Линтер проекта: без него действие lint инструмента checks модели не предлагаем. */
   private linter?: Linter;
   /** Команда тестов проекта: без неё инструмент run_tests модели не предлагаем. */
   private tests?: TestRunner;
@@ -307,8 +313,6 @@ export class AiService {
   private mcp?: McpRunner;
   /** Прошлые беседы проекта: без хранилища инструмент session_search не предлагаем. */
   private sessions?: SessionSearchRunner;
-  /** Расписание задач: без него инструменты `schedule_*` не предлагаем. */
-  private schedules?: ScheduleTools;
   /** Журнал прогонов в файл: пишет только при включённой настройке. */
   private telemetry?: TelemetryStore;
   /** Браузер: без него инструменты `browser_*` не предлагаем. */
@@ -347,6 +351,31 @@ export class AiService {
    * См. `TokenCalibration` и `streamStep`.
    */
   private readonly calibration = new TokenCalibration();
+  /**
+   * Паспорта моделей, полученные от сервера при проверке подключения
+   * (`GET /models`). Ключ — «провайдер:модель». Хранится в памяти окна: это
+   * подсказка для расчёта окна и предела ответа, а не настройка.
+   */
+  private readonly modelInfos = new Map<string, ModelInfo>();
+
+  /** Запомнить паспорта, полученные при проверке подключения. */
+  private rememberModelInfos(providerId: string | undefined, infos: readonly ModelInfo[]): void {
+    if (!providerId) return;
+    for (const info of infos) this.modelInfos.set(`${providerId}:${info.id}`, info);
+  }
+
+  /** Паспорт модели, если этот сервер его уже присылал. */
+  private modelInfo(providerId: string | undefined, model: string): ModelInfo | undefined {
+    if (!providerId) return undefined;
+    const known = this.modelInfos.get(`${providerId}:${model}`);
+    if (known) return known;
+    // Модель могли переименовать на стороне сервера — сверяем без учёта регистра.
+    const wanted = model.trim().toLowerCase();
+    for (const [key, info] of this.modelInfos) {
+      if (key.startsWith(`${providerId}:`) && info.id.trim().toLowerCase() === wanted) return info;
+    }
+    return undefined;
+  }
 
   /**
    * Карта проекта для промпта. Скан обходит дерево, поэтому держим результат до
@@ -394,7 +423,7 @@ export class AiService {
 
   /**
    * Подключить поиск символов (языковой сервер): включает инструмент
-   * codebase_search. Без него инструмент не предлагаем — текстовый поиск уже
+   * search (action code). Без него инструмент не предлагаем — текстовый поиск уже
    * есть отдельно (`search`), и дублировать его незачем.
    */
   attachSymbols(symbols: SymbolSearch): void {
@@ -402,7 +431,7 @@ export class AiService {
   }
 
   /**
-   * Подключить линтер проекта: включает инструмент `run_linter`. Движок и запуск
+   * Подключить линтер проекта: включает действие `lint` инструмента `checks`. Движок и запуск
    * живут в main (`project/lint.ts`) — сервису передаётся готовый вызов.
    */
   attachLinter(linter: Linter): void {
@@ -439,14 +468,6 @@ export class AiService {
    */
   attachTelemetry(telemetry: TelemetryStore): void {
     this.telemetry = telemetry;
-  }
-
-  /**
-   * Подключить расписание задач: включает инструменты `schedule_*`. Файл и часы
-   * живут в main (`schedules/schedules.ts`) — сервис получает готовый вызов.
-   */
-  attachSchedules(schedules: ScheduleTools): void {
-    this.schedules = schedules;
   }
 
   /* ── живые агенты ────────────────────────────────────────────────────────
@@ -528,10 +549,23 @@ export class AiService {
         ? new AnthropicProvider({ id: 'test', label: 'Проверка', baseUrl, apiKey })
         : new OpenAiCompatibleProvider({ id: 'test', label: 'Проверка', baseUrl, apiKey });
     try {
-      const models = await provider.listModels(signal);
+      // Заодно запоминаем паспорта моделей: сервер сам говорит, сколько у них
+      // окно и предел ответа, — и эти числа точнее догадок по имени модели.
+      const infos = provider.listModelInfos
+        ? await provider.listModelInfos(signal)
+        : (await provider.listModels(signal)).map((id) => ({ id }));
+      this.rememberModelInfos(params.providerId, infos);
+      const models = infos.map((info) => info.id);
+      // Баланс — отдельный вызов и необязательный: сервер может его не знать, а
+      // связь при этом рабочая. Ошибку молча превращаем в «нет данных».
+      const balance = await provider
+        .getBalance?.(signal)
+        .then((value) => value ?? null)
+        .catch(() => null);
       return {
         ok: true,
         models,
+        ...(balance ? { balance } : {}),
         message:
           models.length > 0
             ? `Подключение работает · доступно моделей: ${models.length}`
@@ -776,6 +810,9 @@ export class AiService {
     const webSearch = settings.ai.webSearch;
     const sandboxSettings = settings.ai.sandbox;
     const provider = this.createProvider(request.providerId);
+    // Подключение целиком нужно раньше сборки инструментов: от него зависят
+    // строгая схема, метка пользователя и параметры запроса.
+    const connection = settings.ai.providers.find((item) => item.id === request.providerId);
     const useTools = request.useTools ?? false;
     const planMode = request.planMode ?? false;
     // Набор инструментов: запрос может сузить его сам (пробы, скрипты), иначе — из
@@ -884,7 +921,7 @@ export class AiService {
             toolPresetAllows(toolPreset, tool.name) &&
             (planMode || !isRosterTool(toolPreset, tool.name)) &&
             // Вне плана «утвердить план» нечего: инструмент живёт только в нём.
-            (planMode ? PLAN_MODE_OFFERED.has(tool.name) : tool.name !== 'exit_plan_mode'),
+            (planMode ? PLAN_MODE_TOOLS.has(tool.name) : tool.name !== 'exit_plan_mode'),
         )
       : [];
 
@@ -898,7 +935,8 @@ export class AiService {
     const offered = [...available, ...external, ...resourceTools];
     // `let`: набор схем пересобирается, если человек утвердил план посреди прогона
     // (см. `widen` ниже).
-    let tools = offered.length > 0 ? toOpenAiTools(offered) : undefined;
+    let tools =
+      offered.length > 0 ? toOpenAiTools(offered, { strict: connection?.strictTools === true }) : undefined;
     /** План утверждён человеком посреди прогона: ограничения плана больше не действуют. */
     let planApproved = false;
     // Полный доступ: и правки, и команды без подтверждений.
@@ -919,7 +957,6 @@ export class AiService {
     if (this.linter) toolContext.linter = this.linter;
     if (this.tests) toolContext.tests = this.tests;
     if (this.sessions) toolContext.sessions = this.sessions;
-    if (this.schedules) toolContext.schedules = this.schedules;
     toolContext.memory = {
       remember: (text, scope) => this.memory.remember(this.workspace.rootPath(), text, scope),
       forget: (query, scope) => this.memory.forget(this.workspace.rootPath(), query, scope),
@@ -936,21 +973,6 @@ export class AiService {
         fetch: (url, options) => fetchPage(url, { signal: options?.signal, maxChars: options?.maxChars }),
       };
     }
-    // Программа (run_code): запуск в отдельном процессе. Что ей можно звать,
-    // решает этот же контекст — правки и команды внутри программы идут тем же
-    // путём, что и снаружи, с подтверждениями и ревью.
-    const programAllowed = canRunProgram(Boolean(sandboxSettings.enabled));
-    if (programAllowed) {
-      toolContext.runCode = {
-        run: (source, options) =>
-          runProgram(source, {
-            root: this.workspace.rootPath() ?? process.cwd(),
-            timeoutMs: options.timeoutMs,
-            ...(options.signal ? { signal: options.signal } : {}),
-            onCall: options.onCall,
-          }),
-      };
-    }
 
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
     // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
@@ -960,7 +982,7 @@ export class AiService {
         search: (query, limit, callSignal) =>
           searchWeb(
             query,
-            { provider: webSearch.provider, endpoint: webSearch.endpoint, apiKey: this.settings.resolveWebSearchKey() },
+            { provider: webSearch.provider, endpoint: webSearch.endpoint, apiKey: this.webSearchKey(webSearch) },
             limit,
             callSignal,
           ).then((hits) => ({ hits, providerLabel: webSearchProviderLabel(webSearch.provider) })),
@@ -992,14 +1014,42 @@ export class AiService {
     // temperature, обычные модели не знают reasoning_effort. Лишнее поле в теле
     // запроса — это либо 400, либо молча проигнорированная настройка.
     const capabilities = modelCapabilities(request.model);
-    const temperature = capabilities.temperature ? (request.temperature ?? settings.ai.temperature) : undefined;
-    const maxTokens = request.maxTokens ?? settings.ai.maxTokens;
-    const reasoningEffort = reasoningEffortFor(request.model, request.reasoningEffort ?? settings.ai.reasoningEffort);
+    // Порядок: явный запрос → параметры подключения → общее в разделе AI.
+    // Подключение важнее общего: температура и лимит ответа — свойства модели,
+    // и одно общее число не годится сразу и локальной 8K-модели, и облачной 128K.
+    const temperature = capabilities.temperature
+      ? (request.temperature ?? connection?.temperature ?? settings.ai.temperature)
+      : undefined;
+    // Паспорт от сервера точнее любой таблицы: он называет окно и предел ответа
+    // именно этой модели. Таблица остаётся запасным вариантом, пока подключение
+    // не проверяли и паспорта нет.
+    const passport = this.modelInfo(request.providerId, request.model);
+    // 0 или пусто — предел самой модели: ответ ограничивает модель, а не общая константа.
+    const maxTokens = maxOutputTokens(
+      request.model,
+      firstPositive(
+        request.maxTokens,
+        connection?.maxTokens,
+        settings.ai.maxTokens,
+        passport?.maxOutputTokens,
+      ),
+    );
+    const requestedEffort =
+      request.reasoningEffort ?? connection?.reasoningEffort ?? settings.ai.reasoningEffort;
+    const reasoningEffort = reasoningEffortFor(request.model, requestedEffort);
+    // У модели, которая думает всегда, «без размышлений» надо ещё и выключить —
+    // молчание в запросе означает «думай по умолчанию», а не «не думай».
+    const thinking = capabilities.thinkingToggle
+      ? reasoningEffort !== undefined || (requestedEffort !== undefined && requestedEffort !== 'off')
+      : undefined;
 
     // Предохранитель от переполнения окна посреди цикла: renderer проверил
     // контекст перед отправкой, но шаги агента копят историю уже здесь, и
     // сжатие, которое живёт в renderer, до этого места не достаёт.
-    const windowTokens = contextWindow(request.model, settings.ai.contextWindow);
+    const windowTokens = contextWindow(
+      request.model,
+      firstPositive(settings.ai.contextWindow, passport?.contextWindow),
+    );
     // Состав строки важен: описания инструментов — кириллица, а она в токенах
     // дороже латиницы примерно вдвое. estimateTokens видит только длину и занижал
     // вес схем на четверть — предохранитель пропускал то, что провайдер отвергнет.
@@ -1196,6 +1246,8 @@ export class AiService {
           temperature,
           maxTokens,
           reasoningEffort,
+          ...(thinking === undefined ? {} : { thinking }),
+          ...(connection?.userId ? { userId: connection.userId } : {}),
           // Агент идёт своим сигналом: человек может снять одного.
           signal: handle.signal,
           host,
@@ -1308,34 +1360,6 @@ export class AiService {
       },
     };
 
-    /**
-     * Сценарий с агентами (`workflow`).
-     *
-     * Движок тот же, что у `run_code` (отдельный процесс, обрыв по времени), но в
-     * контексте сценария `agents` вместо `tools`: инструментов у него нет вовсе.
-     * Агента запускает `runOne` — общий путь подзадачи, поэтому расход и шаги
-     * агентов прибавляются к прогону и видны в трассе отдельными строками.
-     * Предел числа агентов и очередь на одновременность держит движок.
-     */
-    toolContext.workflow = {
-      run: (source, options) =>
-        runProgram(source, {
-          program: 'workflow',
-          root: this.workspace.rootPath() ?? process.cwd(),
-          maxAgents: WORKFLOW_MAX_AGENTS,
-          timeoutMs: options.timeoutMs ?? WORKFLOW_DEFAULT_TIMEOUT_MS,
-          ...(options.signal ? { signal: options.signal } : {}),
-          onAgent: async (request) => {
-            const sub = await runOne({ description: request.description, prompt: request.prompt });
-            return {
-              ok: sub.outcome.ok,
-              summary: sub.outcome.summary,
-              text: sub.outcome.detail ?? sub.outcome.summary,
-            };
-          },
-        }),
-    };
-
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
     const coveredReads = new Map<string, Array<{ from: number; to: number }>>();
 
@@ -1403,6 +1427,8 @@ export class AiService {
         temperature,
         maxTokens,
         reasoningEffort,
+        ...(thinking === undefined ? {} : { thinking }),
+        ...(connection?.userId ? { userId: connection.userId } : {}),
         signal,
         windowTokens,
         toolsTokens,
@@ -1466,7 +1492,14 @@ export class AiService {
 
       // Модель попросила инструменты: сохраняем её ход, исполняем по очереди
       // и возвращаем результаты — иначе протокол вызова считается нарушенным.
-      const assistant: ChatMessage = { role: 'assistant', content: done.text, toolCalls: calls };
+      const assistant: ChatMessage = {
+        role: 'assistant',
+        content: done.text,
+        toolCalls: calls,
+        // Размышления шага едут вместе с вызовами: провайдер, который их прислал,
+        // ждёт их обратно (DeepSeek отвечает 400 на запрос с tools без них).
+        ...(done.reasoning ? { reasoning: done.reasoning } : {}),
+      };
       messages.push(assistant);
       produced.push(assistant);
 
@@ -1486,7 +1519,7 @@ export class AiService {
         const call = mapped.renamed ? { ...raw, name: mapped.name, arguments: mapped.arguments } : raw;
         // План — не вызов инструмента в привычном смысле, а обновление чек-листа:
         // рисуем его отдельным событием, но модели всё равно отвечаем role:'tool'.
-        if (call.name === 'update_plan') {
+        if (call.name === 'plan' && planActionOf(call.arguments) === 'steps') {
           const steps = parsePlanSteps(call.arguments);
           if (steps.length > 0) {
             emit(ChatStreamEvent.Plan, { steps });
@@ -1516,7 +1549,7 @@ export class AiService {
         // может поставить её сама, когда задача оказалась многошаговой, и закрыть,
         // когда работа кончилась: закрытие видит человек, и оно останавливает
         // автопродолжение.
-        if (call.name === 'update_goal') {
+        if (call.name === 'plan') {
           const update = parseGoalUpdate(call.arguments);
           let note = 'Цель не изменена: нечего применять.';
           if (update?.text) {
@@ -1619,7 +1652,7 @@ export class AiService {
           }
         }
         const denied =
-          planMode && !planApproved && !allowsInPlan(call.name, call.arguments)
+          planMode && !planApproved && !PLAN_MODE_TOOLS.has(call.name)
             ? {
                 content: `Режим плана: инструмент «${call.name}» недоступен. Ничего не меняй — составь план доступными средствами чтения.`,
                 summary: 'режим плана: изменение недоступно',
@@ -1862,6 +1895,10 @@ export class AiService {
       temperature: number | undefined;
       maxTokens: number;
       reasoningEffort: ReasoningEffort | undefined;
+      /** `false` — выключить размышление явно; `undefined` — не упоминать его. */
+      thinking?: boolean;
+      /** Метка пользователя для провайдера (`user_id`). */
+      userId?: string;
       signal: AbortSignal;
       windowTokens: number;
       toolsTokens: number;
@@ -1906,6 +1943,8 @@ export class AiService {
             temperature: params.temperature,
             maxTokens: params.maxTokens,
             reasoningEffort: params.reasoningEffort,
+            ...(params.thinking === undefined ? {} : { thinking: params.thinking }),
+            ...(params.userId ? { userId: params.userId } : {}),
             tools: params.tools,
           },
           { onDelta: params.onDelta, onReasoning: params.onReasoning },
@@ -1973,6 +2012,8 @@ export class AiService {
     temperature: number | undefined;
     maxTokens: number;
     reasoningEffort: ReasoningEffort | undefined;
+    thinking?: boolean;
+    userId?: string;
     signal: AbortSignal;
     host: ChatHostBridge | undefined;
     context: string | null;
@@ -2026,7 +2067,7 @@ export class AiService {
         search: (query, limit, callSignal) =>
           searchWeb(
             query,
-            { provider: webSearch.provider, endpoint: webSearch.endpoint, apiKey: this.settings.resolveWebSearchKey() },
+            { provider: webSearch.provider, endpoint: webSearch.endpoint, apiKey: this.webSearchKey(webSearch) },
             limit,
             callSignal,
           ).then((hits) => ({ hits, providerLabel: webSearchProviderLabel(webSearch.provider) })),
@@ -2059,6 +2100,8 @@ export class AiService {
           temperature: params.temperature,
           maxTokens: params.maxTokens,
           reasoningEffort: params.reasoningEffort,
+          ...(params.thinking === undefined ? {} : { thinking: params.thinking }),
+          ...(params.userId ? { userId: params.userId } : {}),
           signal: params.signal,
           windowTokens: params.windowTokens,
           toolsTokens,
@@ -2073,7 +2116,13 @@ export class AiService {
         const calls = done.toolCalls ?? [];
         if (calls.length === 0) break;
         toolCalls += calls.length;
-        messages.push({ role: 'assistant', content: done.text, toolCalls: calls });
+        messages.push({
+          role: 'assistant',
+          content: done.text,
+          toolCalls: calls,
+          // В подзадаче тот же протокол: размышления шага возвращаются с вызовами.
+          ...(done.reasoning ? { reasoning: done.reasoning } : {}),
+        });
 
         let didNewWork = false;
         // Тот же бюджет шага, что у основного агента: отчёт подзадачи — выжимка,
@@ -2224,9 +2273,11 @@ export class AiService {
     } catch {
       return [];
     }
-    return AGENT_TOOLS.filter((tool) => tool.name === 'list_mcp_resources' || tool.name === 'read_mcp_resource').map(
-      (tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema }),
-    );
+    return AGENT_TOOLS.filter((tool) => tool.name === 'mcp').map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+    }));
   }
 
   /**
@@ -2236,7 +2287,19 @@ export class AiService {
    */
   private canUseWebSearch(search: AiWebSearchSettings): boolean {
     if (!search.enabled) return false;
-    return !webSearchNeedsKey(search.provider) || Boolean(this.settings.resolveWebSearchKey());
+    return !webSearchNeedsKey(search.provider) || Boolean(this.webSearchKey(search));
+  }
+
+  /**
+   * Ключ для поиска. Свой ключ поиска главнее; у поиска DeepSeek запасной
+   * вариант — ключ самого подключения DeepSeek: это один и тот же аккаунт, и
+   * требовать вводить его второй раз незачем.
+   */
+  private webSearchKey(search: AiWebSearchSettings): string | undefined {
+    const own = this.settings.resolveWebSearchKey();
+    if (own) return own;
+    if (search.provider === 'deepseek') return this.settings.resolveApiKey('deepseek');
+    return undefined;
   }
 
   private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined, hasSkills = false): boolean {
@@ -2248,56 +2311,47 @@ export class AiService {
     // все действия, как у браузера: действие без своей возможности откажет
     // словами в обработчике, но в списке у модели инструмент есть.
     if (tool.name === 'terminal') return this.terminals !== undefined || host?.confirmCommand !== undefined;
-    if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
+    // Проверки: у действий разные возможности (пометки даёт окно, линтер — main),
+    // поэтому условие одно на оба, как у браузера и терминала.
+    if (tool.name === 'checks') return host?.getDiagnostics !== undefined || this.linter !== undefined;
     // Ресурсы MCP предлагаются только тогда, когда серверы их объявили, — это
     // знает лишь подключение, а `canRun` синхронный. Схемы добавляет
     // `resourceTools` ниже, поэтому в статическом отборе их нет.
-    if (tool.name === 'list_mcp_resources' || tool.name === 'read_mcp_resource') return false;
+    if (tool.name === 'mcp') return false;
     // Вопрос человеку живёт в ленте чата: без окна задать его негде.
     if (tool.name === 'ask') return host?.ask !== undefined;
     // Утверждать план некому без окна: карточка живёт в ленте чата.
     if (tool.name === 'exit_plan_mode') return host?.exitPlan !== undefined;
-    if (tool.name === 'open_file') return host?.openFile !== undefined;
+    if (tool.name === 'show') return host?.openFile !== undefined || host !== undefined;
     // Чтение репозитория ничего не меняет — нужен только git.
     if (tool.name === 'git_read') return this.git !== undefined;
     // Записи в репозиторий спрашивают подтверждение: без моста подтверждений их не
     // предлагаем. Условие общее на все действия, как у браузера: `stage` без моста
     // откажет словами в обработчике, но в списке инструмент есть.
     if (tool.name === 'git_write') return this.git !== undefined && host?.confirmGit !== undefined;
-    // Оба инструмента символов живут на языковом сервере: без него их не предлагаем.
-    if (
-      tool.name === 'codebase_search' ||
-      tool.name === 'file_outline' ||
-      tool.name === 'find_references' ||
-      tool.name === 'go_to_definition'
-    ) {
+    // Символы живут на языковом сервере: без него их не предлагаем.
+    if (tool.name === 'lsp') {
       return this.symbols !== undefined;
     }
     // Переименование меняет код через сервер — нужен и сервер, и применение правок.
     if (tool.name === 'rename_symbol') return this.symbols !== undefined && host?.applyEdits !== undefined;
-    if (tool.name === 'run_linter') return this.linter !== undefined;
     // Тесты выполняют код проекта: нужен и резолвер команды, и подтверждение.
     if (tool.name === 'run_tests') return this.tests !== undefined && host?.confirmCommand !== undefined;
-    // Память проекта (remember/forget) — в ALWAYS_AVAILABLE: заметка обратима,
+    // Память проекта (mind) — в ALWAYS_AVAILABLE: заметка обратима,
     // спрашивать не у кого.
     // Живые агенты: реестр живёт в main и есть всегда — спрашивать не у кого.
     // Исключение — запуск в фоне: без окна его итог некому показать. Действия
     // различает `action`, а `canRun` аргументов не видит, поэтому одно имя на
     // всё: без реестра `spawn` ответит словами.
     if (tool.name === 'agents') return this.agents !== undefined;
-    // Расписание — тоже файл проекта: действие обратимо (задачу снимает
-    // schedule_delete), а часы без окна и так молчат.
-    if (tool.name === 'schedule') return this.schedules !== undefined;
     // Навыки — файлы проекта: инструмент предлагаем только когда есть что читать.
     if (tool.name === 'read_skill') return hasSkills;
-    // Прошлые беседы: без хранилища искать негде.
-    if (tool.name === 'session_search') return this.sessions !== undefined;
-    if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
-    if (tool.name === 'web_fetch') return this.settings.get().ai.webFetch?.enabled === true;
-    // Программа (и её режим сценария) требует отдельного процесса: при включённой
-    // песочнице она шла бы на хосте, а это обход обещания песочницы.
-    if (tool.name === 'run_code') {
-      return canRunProgram(Boolean(this.settings.get().ai.sandbox?.enabled));
+    // Поиск одним именем: действия `code` и `sessions` без своей возможности
+    // откажут словами в обработчике, а текстовый и документация есть всегда.
+    if (tool.name === 'web') {
+      return (
+        this.canUseWebSearch(this.settings.get().ai.webSearch) || this.settings.get().ai.webFetch?.enabled === true
+      );
     }
     // Браузер: включается настройкой (как веб-поиск), а действия на странице
     // спрашивают подтверждение — значит, без подключённого окна их не предлагаем.
@@ -2336,7 +2390,9 @@ export class AiService {
     return new OpenAiCompatibleProvider({
       id: provider.id,
       label: provider.label,
-      baseUrl: provider.baseUrl,
+      // Строгая схема у DeepSeek живёт только в beta: адрес переписываем здесь,
+      // а не в настройках, чтобы человек не держал два адреса в голове.
+      baseUrl: betaBaseUrl(provider.baseUrl, provider.strictTools === true),
       apiKey,
     });
   }
@@ -2439,7 +2495,24 @@ function attachImages(messages: ChatMessage[], images: readonly string[]): void 
 }
 
 /**
- * Разбор аргументов `update_plan`. Модель — недоверенный источник, поэтому
+ * Что именно делает `plan`: `steps` (план) или `goal` (цель).
+ *
+ * План и цель — два состояния беседы, поэтому у них один инструмент с полем
+ * `action`. Действие решает, какой из двух разборов применить: без действия
+ * считаем шагами — так его звали всегда.
+ */
+function planActionOf(raw: string): 'steps' | 'goal' {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    const action = (value as { action?: unknown } | null)?.action;
+    return action === 'goal' ? 'goal' : 'steps';
+  } catch {
+    return 'steps';
+  }
+}
+
+/**
+ * Разбор аргументов плана. Модель — недоверенный источник, поэтому
  * шаги проверяем: пустые гасим, статус приводим к известному, длину ограничиваем.
  */
 function parsePlanSteps(raw: string): PlanStep[] {

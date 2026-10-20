@@ -306,7 +306,9 @@ module.exports = [
       activeModel: 'gpt-4o-mini',
       temperature: 0.2,
       maxTokens: 2048,
-      compactAtTokens: 100_000,
+      // Предел истории выключен, как и в main: пороги — окно и промах кеша.
+      compactAtTokens: 0,
+      compactEveryTurns: 12,
       systemPrompt: 'Ты ассистент внутри редактора.',
       maxSteps: 8,
       maxAutopilotSteps: 24,
@@ -630,9 +632,6 @@ module.exports = [
   // Беседы чата: мок держит их в памяти по корню проекта — смена папки и
   // обратная загрузка работают, а перезагрузка страницы их, как и в жизни, теряет.
   const savedChats = new Map();
-  // Расписание задач: настоящие живут в `.chui/schedules.json` и срабатывают по
-  // часам main, а здесь — только список для просмотра окна.
-  let mockSchedules = [];
 
   const methods = {
     'app.info': () => ({
@@ -1372,22 +1371,6 @@ module.exports = [
         scope: 'workspace',
       },
     ],
-    // Расписание задач: в браузере нет часов, поэтому мок держит список в памяти
-    // и отдаёт его же на save/remove — так окно можно смотреть целиком.
-    'schedule.list': () => mockSchedules,
-    'schedule.save': (params) => {
-      const schedule = params.schedule;
-      const index = mockSchedules.findIndex((item) => item.id === schedule.id && schedule.id);
-      const saved = { ...schedule, id: schedule.id || 'mock-schedule-1', enabled: schedule.enabled !== false };
-      if (index >= 0) mockSchedules[index] = saved;
-      else mockSchedules.push(saved);
-      return mockSchedules;
-    },
-    'schedule.remove': (params) => {
-      mockSchedules = mockSchedules.filter((item) => item.id !== params.id);
-      return mockSchedules;
-    },
-    'schedule.finish': () => mockSchedules,
     // Журнал прогонов: в браузере прогонов нет, поэтому мок отдаёт одну строку —
     // по ней видно окно целиком (список, подписи, кнопки подвала).
     'ai.telemetry': () => ({

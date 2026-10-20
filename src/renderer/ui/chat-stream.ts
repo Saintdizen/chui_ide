@@ -83,7 +83,7 @@ export interface StreamHost {
   continueAnswer(): void;
   /** Пост-обработка конца потока: вкладки, инфо о сессии, сохранение. */
   afterStream(session: ChatSession): void;
-  /** Открыть файл-результат агента (инструмент `present`) — как клик по файлу. */
+  /** Открыть файл-результат агента (show с action present) — как клик по файлу. */
   openFile(path: string): Promise<void>;
   /** Открыть окно «Прогон» с трассой последнего прогона этой беседы. */
   openRunLog(session: ChatSession): void;
@@ -201,8 +201,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
 
     let continues = 0;
     let done: ChatStreamDone;
-    // Итог прогона наружу: расписание по нему отличает «ответ пришёл» от
-    // «модель отказала» и от «человек сам остановил».
+    // Итог прогона наружу: отказ модели и остановка человека — разные исходы.
     let outcome: StreamOutcome = 'failed';
 
     try {
@@ -320,6 +319,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
           session.transcript.push(...messages);
         }
         session.usage = done.usage;
+        // Этот расход — про текущую историю: именно по нему судим, попадает ли
+        // кеш префикса, а не по прошлому ответу до сжатия.
+        session.usageFresh = true;
         // След прогона копим в беседе: расход и число шагов видны за всё время,
         // а не только за последний шаг (см. «Информацию о сессии»).
         session.trace = addRunTrace(session.trace, done.trace);

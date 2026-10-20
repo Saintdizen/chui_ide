@@ -9,9 +9,43 @@ import type {
   Settings,
   SettingsPatch,
 } from '../../shared/api';
-import type { AiProviderPatch, McpServerTools } from '../../shared/api';
+import type { AiProviderPatch, AiProviderView, McpServerTools } from '../../shared/api';
 import type { McpServerConfig } from '../../shared/mcp';
-import { PROVIDER_PRESETS, findProviderPreset } from '../../shared/providers';
+import { formatBalance } from '../../shared/balance';
+import {
+  findProviderPreset,
+  offeredProviderPresets,
+  providerConfigError,
+  providerConfigFields,
+  type ProviderConfigValues,
+  type ProviderPreset,
+} from '../../shared/providers';
+
+/** Сводка о подключении: состояние видно, не открывая окно. */
+function connectionSummary(provider: AiProviderView | undefined, activeModel: string | undefined): string {
+  if (!provider) return 'не выбрано';
+  const key = provider.hasApiKey ? 'ключ сохранён' : 'ключа нет';
+  return `${key} · ${activeModel ?? provider.defaultModel ?? 'модель не выбрана'}`;
+}
+
+/**
+ * Пресет для уже сохранённого провайдера: у своего подключения записи в списке может
+ * не быть (идентификатор правили руками), поэтому берём его же данные — окно должно
+ * открываться на любое подключение, а не только на известное.
+ */
+function presetOf(provider: AiProviderView): ProviderPreset {
+  const known = findProviderPreset(provider.id);
+  if (known) return known;
+  return {
+    id: provider.id,
+    label: provider.label,
+    baseUrl: provider.baseUrl,
+    needsKey: provider.hasApiKey !== false,
+    models: [...provider.models],
+    defaultModel: provider.defaultModel ?? provider.models[0] ?? '',
+    hint: 'Своё подключение: адрес, протокол и модели задаются вручную.',
+  };
+}
 import { AUTO_SAVE_LABELS, AUTO_SAVE_MODES, normalizeAutoSaveMode } from '../../shared/auto-save';
 import { CURSOR_STYLES, CURSOR_STYLE_LABELS, MAX_LINE_HEIGHT, normalizeCursorStyle } from '../../shared/cursor-style';
 import { serializeThemeFile } from '../../shared/theme-file';
@@ -107,10 +141,6 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
   /** Строка поиска по настройкам: пустая — обычный вид с разделом. */
   let query = '';
   let recent: RecentProject[] = [];
-  /** Итог последней проверки подключения: показываем прямо в панели. */
-  let testResult: { ok: boolean; message: string } | null = null;
-  /** Модели, которые отдал провайдер при проверке. */
-  let testedModels: string[] = [];
   /**
    * Языки, у которых сервер поднят сейчас. `null` — ещё не спрашивали: показываем
    * это состояние, чтобы не обещать «ничего не запущено» до ответа main.
@@ -319,30 +349,32 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     const providerSelect = createSelect({ title: 'Активный провайдер', placeholder: 'нет провайдера' });
     providerSelect.setOptions(ai.providers.map((item) => ({ value: item.id, label: item.label })));
     providerSelect.setValue(provider?.id ?? '');
-    providerSelect.onChange((value) => {
-      testedModels = [];
-      testResult = null;
-      void patch({ ai: { activeProviderId: value } }, true);
-    });
+    providerSelect.onChange((value) => void patch({ ai: { activeProviderId: value } }, true));
 
-    // Добавление: пресет сам подставляет адрес и стартовые модели.
-    const available = PROVIDER_PRESETS.filter(
-      (item) => item.id === 'custom' || !ai.providers.some((existing) => existing.id === item.id),
+    // Добавление — селект: выбор провайдера открывает окно его подключения, потому
+    // что настройки у всех разные (ключ, адрес, протокол, модели). Список — из
+    // `OFFERED_PROVIDER_IDS` (shared/providers.ts): новый провайдер — одна строка там.
+    const offered = offeredProviderPresets();
+    const addSelect = createSelect({ title: 'Добавить провайдера', placeholder: 'Выберите провайдера…' });
+    addSelect.setOptions(
+      offered.map((item) => ({
+        value: item.id,
+        label: item.label,
+        hint: ai.providers.some((existing) => existing.id === item.id) ? 'добавлен' : item.hint,
+      })),
     );
-    let presetId = available[0]?.id ?? 'custom';
-    const presetSelect = createSelect({ title: 'Готовые провайдеры' });
-    presetSelect.setOptions(available.map((item) => ({ value: item.id, label: item.label })));
-    presetSelect.setValue(presetId);
-    presetSelect.setDisabled(available.length === 0);
-    presetSelect.onChange((value) => {
-      presetId = value;
+    // Селект здесь — действие, а не текущее значение: `setOptions` сам ставит первую
+    // опцию, и без сброса селект показывал бы «DeepSeek», а клик по этому пункту
+    // ничего бы не делал — значение уже совпало с текущим.
+    addSelect.setValue('');
+    addSelect.setDisabled(offered.length === 0);
+    addSelect.onChange((value) => {
+      // Селект здесь — действие «подключить», а не текущее значение: после выбора
+      // возвращаем подсказку, иначе второй выбор того же провайдера не сработает.
+      addSelect.setValue('');
+      const preset = findProviderPreset(value);
+      if (preset) openProviderConfig(preset);
     });
-
-    const addButton = h(
-      'button',
-      { class: 'btn btn-small', type: 'button', onClick: () => void addProvider(presetId) },
-      'Добавить',
-    );
     const removeButton = h(
       'button',
       {
@@ -354,120 +386,21 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       'Удалить',
     );
 
-    const labelInput = textInput(provider?.label ?? '', (value) => {
-      if (provider && value) void patchProvider({ id: provider.id, label: value });
-    });
-    if (preset && preset.id !== 'custom') labelInput.placeholder = preset.label;
-
-    const baseUrlInput = textInput(provider?.baseUrl ?? '', (value) => {
-      if (provider && value) void patchProvider({ id: provider.id, baseUrl: value });
-    });
-    if (preset) baseUrlInput.placeholder = preset.baseUrl;
-
-    const keyInput = h('input', {
-      class: 'field-input',
-      type: 'password',
-      placeholder: preset?.needsKey === false ? 'Ключ не нужен' : 'Вставьте API-ключ',
-    });
-    const testButton = h(
+    // Провайдер правится в своём окне, а не в панели: у локального сервера нет ключа,
+    // у «Другого» важен протокол, у облачного — модель. Общий набор полей в панели
+    // спрашивал бы лишнее и молчал бы о том, что этому провайдеру всё же нужно.
+    const configButton = h(
       'button',
-      { class: 'btn btn-small', type: 'button', onClick: () => void runTest() },
-      'Проверить подключение',
+      {
+        class: 'btn btn-small',
+        type: 'button',
+        disabled: !provider,
+        onClick: () => {
+          if (provider) openProviderConfig(presetOf(provider));
+        },
+      },
+      'Настроить подключение…',
     );
-    // Ключ можно не только заменить, но и убрать: иначе сохранённый ключ не стереть,
-    // а он мешает, когда переходишь на переменную окружения или меняешь провайдера.
-    const clearKeyButton = h(
-      'button',
-      { class: 'btn btn-small', type: 'button', onClick: () => void clearKey() },
-      'Убрать ключ',
-    );
-
-    const statusText = testResult
-      ? testResult.message
-      : provider?.hasApiKey
-        ? 'Ключ сохранён'
-        : preset?.needsKey === false
-          ? 'Локальный сервер — ключ не нужен'
-          : 'Ключ не задан';
-    const status = h(
-      'div',
-      { class: `field-hint${testResult ? (testResult.ok ? ' is-ok' : ' is-error') : ''}` },
-      statusText,
-    );
-
-    // Модель выбирается из списка: меньше опечаток, чем при ручном вводе.
-    const models = [...new Set([...(provider?.models ?? []), ...testedModels])];
-    const currentModel = ai.activeModel ?? provider?.defaultModel ?? models[0] ?? '';
-    const modelOptions = models.map((model) => ({ value: model, label: model }));
-    if (currentModel && !models.includes(currentModel))
-      modelOptions.unshift({ value: currentModel, label: currentModel });
-
-    // Модель выбирается из списка, а рядом можно вписать id руками: сервер может
-    // не ответить на /models (старая сборка, шлюз, закрытый эндпоинт), и тогда
-    // список пуст — но работать с моделью всё равно надо. Ручной ввод сохраняет
-    // ту же настройку, что и выбор из списка, поэтому модель одна, а не «две».
-    const manualModel = h('input', {
-      class: 'field-input',
-      type: 'text',
-      spellcheck: 'false',
-      placeholder: 'или впишите id модели вручную — например gpt-4o-mini',
-    }) as HTMLInputElement;
-    manualModel.value = models.includes(currentModel) ? '' : currentModel;
-    manualModel.addEventListener('change', () => {
-      const value = manualModel.value.trim();
-      if (value) void patch({ ai: { activeModel: value } });
-    });
-
-    const modelField: Child = h(
-      'div',
-      // Столбик: список и поле ручного ввода стоят друг под другом, как в .field.
-      { class: 'field-row is-column' },
-      modelOptions.length > 0
-        ? selectInput(modelOptions, currentModel, (value) => void patch({ ai: { activeModel: value } }))
-        : h(
-            'div',
-            { class: 'field-hint' },
-            'Список пуст: сервер не отдал модели. Впишите id вручную — или нажмите «Проверить подключение».',
-          ),
-      manualModel,
-    );
-
-    /** Проверка = единственное действие, которое и ключ сохранит, и модели подтянет. */
-    async function runTest(): Promise<void> {
-      if (!provider) return;
-      testResult = { ok: true, message: 'Проверяем подключение…' };
-      render();
-
-      const apiKey = keyInput.value.trim();
-      try {
-        const result = await deps.rpc.request('ai.test', {
-          baseUrl: baseUrlInput.value.trim() || provider.baseUrl,
-          apiKey: apiKey || undefined,
-          providerId: provider.id,
-        });
-        testResult = { ok: result.ok, message: result.message };
-
-        if (result.ok) {
-          testedModels = result.models;
-          if (apiKey) settings = await deps.rpc.request('ai.setApiKey', { providerId: provider.id, apiKey });
-          const patchValue: AiProviderPatch = { id: provider.id, models: result.models };
-          if (result.models.length > 0 && !provider.defaultModel) patchValue.defaultModel = result.models[0];
-          settings = await deps.rpc.request('settings.update', { ai: { provider: patchValue } });
-        }
-      } catch (error) {
-        testResult = { ok: false, message: error instanceof Error ? error.message : String(error) };
-      }
-      render();
-    }
-
-    /** Убрать сохранённый ключ: подсказка вернётся к «Ключ не задан». */
-    async function clearKey(): Promise<void> {
-      if (!provider) return;
-      settings = await deps.rpc.request('ai.clearApiKey', { providerId: provider.id });
-      testResult = null;
-      testedModels = [];
-      render();
-    }
 
     // Ключ сервиса поиска сохраняется отдельной кнопкой, как ключ провайдера:
     // он не часть обычной правки настроек и обратно в renderer не возвращается.
@@ -534,58 +467,17 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
       h('div', { class: 'settings-divider' }),
       field('Провайдер', h('div', { class: 'field-row' }, providerSelect.element, removeButton)),
-      field('Добавить провайдера', h('div', { class: 'field-row' }, presetSelect.element, addButton)),
+      field('Добавить провайдера', h('div', { class: 'field-row' }, addSelect.element)),
       h('div', { class: 'settings-divider' }),
-      h('div', { class: 'field-label' }, `Подключение: ${provider?.label ?? 'не выбран'}`),
-      field('Название', labelInput),
-      field('Адрес API', baseUrlInput),
+      // Ключ, адрес, протокол и модель — свойства подключения, а не ассистента:
+      // у локального сервера ключа нет, у «Другого» важен протокол, список моделей
+      // у каждого свой. Всё это — в окне подключения; панель только называет
+      // текущее и даёт в него войти.
+      h('div', { class: 'field-label' }, `Подключение: ${provider?.label ?? 'не выбрано'}`),
+      h('div', { class: 'field-hint' }, connectionSummary(provider, ai.activeModel)),
+      h('div', { class: 'field-row' }, configButton),
       preset ? h('div', { class: 'field-hint' }, preset.hint) : null,
-      field(
-        'API-ключ',
-        h('div', { class: 'field-row' }, keyInput, testButton, provider?.hasApiKey ? clearKeyButton : null),
-      ),
-      status,
-      h('div', { class: 'field-hint' }, 'Ключ хранится в main-процессе и в renderer не попадает.'),
-      field('Модель', modelField),
       h('div', { class: 'settings-divider' }),
-      field(
-        'Усилие размышления',
-        selectInput(
-          [
-            { value: 'off', label: 'Без размышлений' },
-            { value: 'low', label: 'Low' },
-            { value: 'medium', label: 'Medium' },
-            { value: 'high', label: 'High' },
-          ],
-          ai.reasoningEffort ?? 'off',
-          (value) => void patch({ ai: { reasoningEffort: value as ReasoningEffort } }, true),
-        ),
-      ),
-      h(
-        'div',
-        { class: 'field-hint' },
-        'Сколько модель думает перед ответом. Отправляется только тем моделям, которые это понимают: ' +
-          'у остальных параметр не уходит, чтобы не ломать запрос.',
-      ),
-      field(
-        'Температура',
-        numberInput(ai.temperature, 0, 2, 0.1, (value) => void patch({ ai: { temperature: value } })),
-      ),
-      h(
-        'div',
-        { class: 'field-hint' },
-        'Температура не отправляется моделям с фиксированным размышлением (o-серия, deepseek-reasoner) — они её не принимают.',
-      ),
-      field(
-        'Максимум токенов ответа',
-        numberInput(ai.maxTokens, 256, 1_000_000, 256, (value) => void patch({ ai: { maxTokens: value } })),
-      ),
-      h(
-        'div',
-        { class: 'field-hint' },
-        'Сколько токенов модель может написать в ответе. Большие значения (вплоть до 1 000 000) ' +
-          'уместны для моделей с широким лимитом; если модель ответит ошибкой про лимит — уменьшите число.',
-      ),
       field(
         'Шагов агента',
         numberInput(ai.maxSteps, 1, 500, 1, (value) => void patch({ ai: { maxSteps: value } })),
@@ -689,7 +581,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'прогонов…» в палитре команд.',
       ),
       switchRow(
-        'Веб-поиск (инструмент web_search)',
+        'Веб-поиск (инструмент web, действие search)',
         ai.webSearch.enabled,
         (value) => void patch({ ai: { webSearch: { enabled: value } } }),
       ),
@@ -706,6 +598,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           [
             { value: 'searxng', label: 'SearxNG (свой сервер, ключ не нужен)' },
             { value: 'brave', label: 'Brave Search API (нужен ключ)' },
+            { value: 'deepseek', label: 'Поиск DeepSeek (ключ подключения)' },
           ],
           ai.webSearch.provider,
           (value) => void patch({ ai: { webSearch: { provider: value as WebSearchProvider } } }),
@@ -721,12 +614,15 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
         ai.webSearch.provider === 'searxng'
           ? 'Пусто — адрес по умолчанию http://localhost:8080 (своя установка SearxNG). ' +
               'Открытый http допускается только для localhost и частных адресов: остальное — по https.'
-          : 'Пусто — адрес по умолчанию https://api.search.brave.com/res/v1/web/search.',
+          : ai.webSearch.provider === 'deepseek'
+            ? 'Пусто — адрес по умолчанию https://api.deepseek.com/v1/tools/search. ' +
+                'Свой ключ не нужен: берётся ключ подключения DeepSeek.'
+            : 'Пусто — адрес по умолчанию https://api.search.brave.com/res/v1/web/search.',
       ),
       webSearchKeyField,
       h('div', { class: 'settings-divider' }),
       switchRow(
-        'Чтение страниц по ссылке (инструмент web_fetch)',
+        'Чтение страниц по ссылке (инструмент web, действие fetch)',
         ai.webFetch.enabled,
         (value) => void patch({ ai: { webFetch: { enabled: value } } }),
       ),
@@ -829,21 +725,21 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           '0 — определять автоматически по имени модели (например, Gemini ≈ 1 000 000, GPT-4o ≈ 128 000).',
       ),
       field(
-        'Сжимать беседу при (токенов)',
+        'Сжимать беседу чаще (ходов)',
         numberInput(
-          ai.compactAtTokens,
+          ai.compactEveryTurns,
           0,
-          2_000_000,
-          10_000,
-          (value) => void patch({ ai: { compactAtTokens: value } }),
+          200,
+          1,
+          (value) => void patch({ ai: { compactEveryTurns: value } }),
         ),
       ),
       h(
         'div',
         { class: 'field-hint' },
-        'Верхний предел истории: беседа длиннее него сжимается автоматически, даже если до конца окна далеко. ' +
-          'На моделях с огромным окном без этого предела контекст растёт слишком дорого. ' +
-          '0 — сжимать только при подходе к окну модели.',
+        'Ход — ваш вопрос вместе с ответом агента. 0 — не сжимать по расписанию: беседа сжимается сама, ' +
+          'когда кеш контекста перестаёт попадать (каждый следующий запрос идёт по полной цене) ' +
+          'или когда контекст подходит к концу окна модели.',
       ),
       field(
         'Модель для сжатия беседы',
@@ -861,28 +757,257 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
 
   /* ── провайдеры ────────────────────────────────────────────────────────── */
 
-  /** Пресет подставляется целиком: адрес и стартовый список моделей — без ручного ввода. */
-  async function addProvider(presetId: string): Promise<void> {
-    const preset = findProviderPreset(presetId);
-    if (!preset || settings === null) return;
+  /**
+   * Окно подключения провайдера: его открывает выбор в селекте «Добавить провайдера».
+   * Поля — из пресета (`providerConfigFields`): у провайдеров они разные (локальному
+   * серверу ключ не нужен, «Другому» важен протокол), поэтому спрашиваем только то,
+   * что этот провайдер требует. Окно только собирает значения — запись идёт тем же
+   * `patch`, что и из панели.
+   */
+  function openProviderConfig(preset: ProviderPreset): void {
+    if (settings === null) return;
+    const existing = settings.ai.providers.find((item) => item.id === preset.id);
+    const fields = providerConfigFields(preset);
 
-    const known = settings.ai.providers.some((item) => item.id === preset.id);
-    if (!known) {
-      const provider: AiProviderPatch = {
-        id: preset.id,
-        label: preset.label,
-        baseUrl: preset.baseUrl,
-        models: [...preset.models],
-      };
-      if (preset.defaultModel) provider.defaultModel = preset.defaultModel;
-      if (preset.protocol) provider.protocol = preset.protocol;
-      await patch({ ai: { provider } });
+    const plainInput = (value: string, placeholder = ''): HTMLInputElement => {
+      const input = h('input', { class: 'field-input', type: 'text', spellcheck: false, placeholder });
+      input.value = value;
+      return input;
+    };
+
+    const labelField = plainInput(existing?.label ?? preset.label);
+    const baseUrlField = plainInput(existing?.baseUrl ?? preset.baseUrl, 'https://…');
+    const keyField = h('input', {
+      class: 'field-input',
+      type: 'password',
+      spellcheck: false,
+      placeholder: existing?.hasApiKey ? 'ключ сохранён — пустое поле его не меняет' : 'вставьте ключ',
+    });
+
+    // Ключ убирается здесь же: это свойство подключения, а не ассистента.
+    const clearKeyButton = existing?.hasApiKey
+      ? h('button', { class: 'btn btn-small', type: 'button', onClick: () => void clearKey() }, 'Убрать ключ')
+      : null;
+
+    async function clearKey(): Promise<void> {
+      if (!existing) return;
+      settings = await deps.rpc.request('ai.clearApiKey', { providerId: existing.id });
+      keyField.placeholder = 'ключ удалён — вставьте новый, чтобы задать';
+      if (clearKeyButton) clearKeyButton.disabled = true;
+      status.textContent = 'Ключ удалён.';
     }
 
-    testedModels = [];
-    testResult = null;
-    await patch({ ai: { activeProviderId: preset.id } }, true);
-    showToast(known ? `«${preset.label}» уже в списке` : `Добавлен провайдер «${preset.label}»`);
+    const startModels = existing && existing.models.length > 0 ? existing.models : preset.models;
+    const modelSelect = createSelect({ title: 'Модель', placeholder: 'выберите модель' });
+    modelSelect.setOptions(startModels.map((model) => ({ value: model, label: model })));
+    modelSelect.setValue(existing?.defaultModel ?? preset.defaultModel);
+
+    const protocolSelect = createSelect({ title: 'Протокол' });
+    protocolSelect.setOptions([
+      { value: 'openai', label: 'OpenAI-совместимый' },
+      { value: 'anthropic', label: 'Anthropic' },
+    ]);
+    protocolSelect.setValue(existing?.protocol ?? preset.protocol ?? 'openai');
+
+    // Список моделей может прийти пустым (шлюз без `/models`, старая сборка), а работать
+    // надо. Поле рядом — запасной вход; выбор в списке его очищает, чтобы не осталось
+    // двух разных ответов на один вопрос.
+    const manualModel = plainInput(
+      existing?.defaultModel && !startModels.includes(existing.defaultModel) ? existing.defaultModel : '',
+      'например, deepseek-flash',
+    );
+    modelSelect.onChange(() => {
+      manualModel.value = '';
+    });
+
+    // Метка пользователя: провайдер считает по ней кеш контекста и лимиты, и без
+    // неё двое за одной машиной делят их между собой.
+    const userIdField = plainInput(existing?.userId ?? '', 'необязательно: имя или id пользователя');
+    // Строгая схема аргументов: провайдер обязан вернуть ровно эти поля.
+    const strictInput = h('input', { class: 'switch-input', type: 'checkbox' });
+    strictInput.checked = existing?.strictTools === true;
+
+    const status = h('div', { class: 'field-hint' }, preset.hint);
+
+    const read = (): ProviderConfigValues => ({
+      label: labelField.value.trim(),
+      baseUrl: baseUrlField.value.trim(),
+      apiKey: keyField.value.trim(),
+      model: manualModel.value.trim() || modelSelect.value,
+      protocol: protocolSelect.value === 'anthropic' ? 'anthropic' : 'openai',
+      userId: userIdField.value.trim(),
+      strictTools: strictInput.checked,
+    });
+
+    const checkButton = h('button', { class: 'btn', type: 'button' }, 'Проверить подключение');
+    checkButton.addEventListener('click', () => {
+      const current = read();
+      const complaint = providerConfigError(preset, current);
+      if (complaint !== null) {
+        status.textContent = complaint;
+        return;
+      }
+      checkButton.disabled = true;
+      status.textContent = 'Проверяем подключение…';
+      void deps.rpc
+        .request('ai.test', {
+          baseUrl: current.baseUrl,
+          apiKey: current.apiKey || undefined,
+          providerId: preset.id,
+        })
+        .then((result) => {
+          // Баланс показываем там же, где результат проверки: это ответ на вопрос
+          // «всё ли в порядке с подключением», а не отдельная страница.
+          const balance = result.balance ? ` · ${formatBalance(result.balance)}` : '';
+          status.textContent = result.ok
+            ? `${result.message} · моделей: ${result.models.length}${balance}`
+            : result.message;
+          // Сервер сам перечислил модели — берём их, а не список из пресета:
+          // человек должен выбирать из настоящих, а не набирать по памяти.
+          if (result.ok && result.models.length > 0) {
+            modelSelect.setOptions(result.models.map((model) => ({ value: model, label: model })));
+            const first = result.models[0];
+            if (first !== undefined && !result.models.includes(modelSelect.value)) modelSelect.setValue(first);
+          }
+        })
+        .catch((error: unknown) => {
+          status.textContent = error instanceof Error ? error.message : String(error);
+        })
+        .finally(() => {
+          checkButton.disabled = false;
+        });
+    });
+
+    // Параметры генерации — свои у каждого подключения, поэтому живут здесь, а не в
+    // разделе AI: общий лимит ответа не годится сразу и локальной 8K-модели, и облачной.
+    const aiNow = settings!.ai;
+    const temperatureInput = numberInput(existing?.temperature ?? aiNow.temperature, 0, 2, 0.1, () => undefined);
+    // 0 — «предел модели»: у DeepSeek это 384K, у локальной 8K — 8K. Одного числа
+    // на всех не бывает, а 256 в минимуме запрещало бы самое честное значение.
+    const maxTokensInput = numberInput(existing?.maxTokens ?? aiNow.maxTokens, 0, 1_000_000, 256, () => undefined);
+    const effortSelect = createSelect({ title: 'Усилие размышления' });
+    effortSelect.setOptions([
+      { value: 'off', label: 'Без размышлений' },
+      { value: 'low', label: 'Low' },
+      { value: 'medium', label: 'Medium' },
+      { value: 'high', label: 'High' },
+      // `max` есть только у части моделей (DeepSeek знает low/high/max):
+      // остальным он до провода не доедет, см. `wireEffort`.
+      { value: 'max', label: 'Max' },
+    ]);
+    effortSelect.setValue(existing?.reasoningEffort ?? aiNow.reasoningEffort ?? 'off');
+
+    const view = createModal({
+      className: 'provider-config-modal',
+      title: `Подключение: ${preset.label}`,
+      footer: h(
+        'footer',
+        { class: 'modal-footer' },
+        checkButton,
+        h('button', { class: 'btn', type: 'button', onClick: () => close() }, 'Отмена'),
+        h('button', { class: 'btn btn-primary', type: 'button', onClick: () => void submit() }, 'Сохранить'),
+      ),
+    });
+
+    function close(): void {
+      view.close();
+      view.element.remove();
+    }
+
+    async function submit(): Promise<void> {
+      const current = read();
+      const complaint = providerConfigError(preset, current);
+      if (complaint !== null) {
+        status.textContent = complaint;
+        return;
+      }
+
+      // Список моделей в конфиге: прежние (или стартовые из пресета) плюс выбранная —
+      // иначе селект модели в панели остался бы без выбранного значения.
+      const list = existing && existing.models.length > 0 ? [...existing.models] : [...preset.models];
+      if (current.model !== '' && !list.includes(current.model)) list.unshift(current.model);
+
+      const provider: AiProviderPatch = {
+        id: preset.id,
+        label: current.label || preset.label,
+        baseUrl: current.baseUrl,
+        models: list,
+        defaultModel: current.model,
+      };
+      if (fields.includes('protocol')) provider.protocol = current.protocol;
+      // Параметры запроса — часть подключения: вместе с адресом и моделью.
+      // Пустое поле и 0 значат одно — «предел модели»: такое значение не отправляем,
+      // чтобы не передавать в main явный ноль, который читается как «ответа не будет».
+      const temperatureValue = Number(temperatureInput.value);
+      if (temperatureInput.value.trim() !== '' && Number.isFinite(temperatureValue)) {
+        provider.temperature = temperatureValue;
+      }
+      const maxTokensValue = Number(maxTokensInput.value);
+      if (maxTokensInput.value.trim() !== '' && Number.isFinite(maxTokensValue) && maxTokensValue > 0) {
+        provider.maxTokens = maxTokensValue;
+      }
+      provider.reasoningEffort = effortSelect.value as ReasoningEffort;
+      // Пустое поле — «метки нет», поэтому отправляем пустую строку: main по ней стирает.
+      provider.userId = current.userId ?? '';
+      provider.strictTools = current.strictTools === true;
+
+      try {
+        await patch({ ai: { provider } });
+        if (current.apiKey !== '') {
+          settings = await deps.rpc.request('ai.setApiKey', { providerId: preset.id, apiKey: current.apiKey });
+        }
+        await patch({ ai: { activeProviderId: preset.id } }, true);
+        close();
+        showToast(existing ? `«${provider.label}» обновлён` : `Добавлен провайдер «${provider.label}»`);
+      } catch (error) {
+        status.textContent = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    const rows: (HTMLElement | null)[] = [
+      fields.includes('label') ? field('Название', labelField) : null,
+      fields.includes('baseUrl') ? field('Адрес API', baseUrlField) : null,
+      fields.includes('apiKey')
+        ? field('API-ключ', h('div', { class: 'field-row' }, keyField, clearKeyButton))
+        : null,
+      fields.includes('model') ? field('Модель', modelSelect.element) : null,
+      fields.includes('model') ? field('Или id модели вручную', manualModel) : null,
+      fields.includes('protocol') ? field('Протокол', protocolSelect.element) : null,
+      h('div', { class: 'settings-divider' }),
+      field('Метка пользователя', userIdField),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Уходит провайдеру как user_id: по нему разделяются кеш контекста и лимиты.',
+      ),
+      h(
+        'div',
+        { class: 'field field-between' },
+        h('span', {}, 'Строгая схема аргументов'),
+        h('label', { class: 'switch' }, strictInput, h('span', { class: 'switch-track' })),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Провайдер обязан вернуть аргументы инструментов строго по схеме. У DeepSeek это ' +
+          'beta-функция: адрес сам станет /beta, а часть схем (`minLength`) там не поддерживается.',
+      ),
+      h('div', { class: 'settings-divider' }),
+      field('Усилие размышления', effortSelect.element),
+      field('Температура', temperatureInput),
+      field('Максимум токенов ответа', maxTokensInput),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Отправляются только тем моделям, которые их принимают: temperature не уходит ' +
+          'o-серии и моделям с фиксированным размышлением, усилие — только тем, кто его понимает. ' +
+          'Максимум токенов 0 — «сколько даст модель» (у DeepSeek 384K, у локальной 8K — 8K).',
+      ),
+      status,
+    ];
+    view.body.append(...rows.filter((row): row is HTMLElement => row !== null));
+    document.body.append(view.element);
+    view.open();
   }
 
   async function removeProvider(providerId: string): Promise<void> {
@@ -897,13 +1022,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     });
     if (!confirmed) return;
 
-    testedModels = [];
-    testResult = null;
     await patch({ ai: { removeProviderId: providerId } }, true);
-  }
-
-  async function patchProvider(values: AiProviderPatch): Promise<void> {
-    await patch({ ai: { provider: values } }, true);
   }
 
   function renderEditor(): Child[] {

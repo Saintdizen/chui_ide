@@ -92,10 +92,27 @@ describe('isAllowedSearchEndpoint', () => {
   });
 });
 
+describe('поиск DeepSeek', () => {
+  it('результаты в корне, длинное описание важнее короткого', () => {
+    // У DeepSeek два описания: snippet (100–200 знаков, для показа) и summary
+    // (600–800, «для модели»). В контекст агента нужен второй.
+    const hits = parseSearchResponse('deepseek', {
+      results: [{ title: 'Документация', url: 'https://a.example/doc', snippet: 'коротко', summary: 'подробно' }],
+    });
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.snippet).toBe('подробно');
+  });
+
+  it('адрес по умолчанию — их собственный поиск', () => {
+    expect(defaultWebSearchEndpoint('deepseek')).toBe('https://api.deepseek.com/v1/tools/search');
+  });
+});
+
 describe('isWebSearchProvider', () => {
   it('знает только свои виды поиска', () => {
     expect(isWebSearchProvider('brave')).toBe(true);
     expect(isWebSearchProvider('searxng')).toBe(true);
+    expect(isWebSearchProvider('deepseek')).toBe(true);
     expect(isWebSearchProvider('google')).toBe(false);
     expect(isWebSearchProvider(undefined)).toBe(false);
   });
@@ -119,7 +136,7 @@ describe('formatWebResults', () => {
     expect(detail).toContain('1. Документация\n   https://ffmpeg.org/scale\n   фильтр scale');
     expect(detail).toContain('2. Пример\n   https://ex.example');
     // Выдача — не проверенный факт: содержимое по ссылке читает отдельный инструмент.
-    expect(detail).toContain('содержимое по ссылке читает web_fetch');
+    expect(detail).toContain('содержимое по ссылке читает web (action fetch)');
   });
 
   it('пустая выдача — это не ошибка, но и не ответ', () => {

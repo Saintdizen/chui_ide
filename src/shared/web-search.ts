@@ -6,20 +6,23 @@
  * проверяется без сети: ошибка в разборе выглядела бы как «поиск ничего не нашёл»,
  * то есть модель молча осталась бы без результатов.
  *
- * Поддерживаются два вида: свой или публичный **SearxNG** (JSON, ключ не нужен —
- * подходит локальному первому запуску) и **Brave Search API** (нужен ключ).
+ * Поддерживаются три вида: свой или публичный **SearxNG** (JSON, ключ не нужен —
+ * подходит локальному первому запуску), **Brave Search API** (нужен ключ) и
+ * **поиск DeepSeek** (`POST /v1/tools/search`, тот же ключ, что у подключения).
  */
 
-export const WEB_SEARCH_PROVIDERS = ['searxng', 'brave'] as const;
+export const WEB_SEARCH_PROVIDERS = ['searxng', 'brave', 'deepseek'] as const;
 export type WebSearchProvider = (typeof WEB_SEARCH_PROVIDERS)[number];
 
 export function isWebSearchProvider(value: unknown): value is WebSearchProvider {
   return typeof value === 'string' && (WEB_SEARCH_PROVIDERS as readonly string[]).includes(value);
 }
 
-/** Адрес по умолчанию: для SearxNG — своя установка на localhost, для Brave — их API. */
+/** Адрес по умолчанию: для SearxNG — своя установка на localhost, иначе — API вендора. */
 export function defaultWebSearchEndpoint(provider: WebSearchProvider): string {
-  return provider === 'brave' ? 'https://api.search.brave.com/res/v1/web/search' : 'http://localhost:8080';
+  if (provider === 'brave') return 'https://api.search.brave.com/res/v1/web/search';
+  if (provider === 'deepseek') return 'https://api.deepseek.com/v1/tools/search';
+  return 'http://localhost:8080';
 }
 
 /** Наружу отдаём только http(s): другой схемы у веб-поиска быть не может. */
@@ -88,7 +91,7 @@ export function parseSearchResponse(provider: WebSearchProvider, payload: unknow
   const root = asRecord(payload);
   if (!root) return [];
 
-  // SearxNG: результаты прямо в корне. Brave: внутри `web.results`.
+  // SearxNG и DeepSeek: результаты в корне. Brave: внутри `web.results`.
   const raw = provider === 'brave' ? asRecord(root.web)?.results : root.results;
   if (!Array.isArray(raw)) return [];
 
@@ -99,8 +102,12 @@ export function parseSearchResponse(provider: WebSearchProvider, payload: unknow
     const url = asString(record.url);
     if (!url) continue;
     const title = stripTags(asString(record.title)) || url;
-    // У SearxNG описание в `content`, у Brave — в `description`.
-    const snippet = stripTags(asString(record.content) || asString(record.description));
+    // У SearxNG описание в `content`, у Brave — в `description`. У DeepSeek есть и
+    // `snippet` (100–200 знаков, для показа), и `summary` (600–800, «для модели»):
+    // берём длинный, он полезнее в ответе модели.
+    const snippet = stripTags(
+      asString(record.content) || asString(record.description) || asString(record.summary) || asString(record.snippet),
+    );
     hits.push({ title, url, snippet });
   }
   return hits;
@@ -133,6 +140,6 @@ export function formatWebResults(
 
   return {
     summary: `«${query}»: результатов ${hits.length} (${providerLabel})`,
-    detail: `${detail}\n\nИсточник: ${providerLabel}. Это поисковая выдача, а не проверенный факт: содержимое по ссылке читает web_fetch.`,
+    detail: `${detail}\n\nИсточник: ${providerLabel}. Это поисковая выдача, а не проверенный факт: содержимое по ссылке читает web (action fetch).`,
   };
 }

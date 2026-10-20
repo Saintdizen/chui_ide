@@ -6,6 +6,7 @@
  */
 
 import type { MenuRole } from './app-menu';
+import type { AccountBalance } from './balance';
 import type { OfficePreview } from './office';
 import type { CursorStyle } from './cursor-style';
 import type { ApplyResult, FileEdit, TextEdit } from './edits';
@@ -66,7 +67,6 @@ import type { AiSandboxSettings } from './sandbox';
 import type { WhitespaceMode } from './whitespace';
 import type { KeybindingSettings } from './keybindings';
 import type { ProjectKind } from './project-kinds';
-import type { ScheduleResult, TaskSchedule } from './scheduling';
 import type { ChatRunLog } from './run-log';
 import type { ReviewVerdict } from './approval-review';
 
@@ -109,8 +109,6 @@ export const PushTopic = {
   DebugStopped: 'debug:stopped',
   DebugOutput: 'debug:output',
   BrowserNav: 'browser:nav',
-  /** Задача расписания дождалась своего времени: renderer начинает ход. */
-  ScheduleDue: 'schedule:due',
   /** Проверка модели разрешила команду без человека: в ленте строка «разрешено проверкой». */
   ApprovalReview: 'approval:review',
   /** Список живых агентов изменился: панель подзадач обновляется. */
@@ -711,7 +709,7 @@ export interface CloneProgressPayload {
  * `off` означает «параметр не отправлять»: у большинства моделей его нет вовсе,
  * и подставлять туда что-то своё было бы выдумкой.
  */
-export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'max';
 
 /** Провайдер в том виде, в каком его видит renderer: без ключа, только факт наличия. */
 export interface AiProviderView {
@@ -723,6 +721,14 @@ export interface AiProviderView {
   hasApiKey: boolean;
   /** Протокол общения: OpenAI-совместимый (по умолчанию) или нативный Anthropic. */
   protocol?: 'openai' | 'anthropic';
+  /** Параметры запроса у этого подключения; нет значения — действует общее из AI. */
+  temperature?: number;
+  maxTokens?: number;
+  reasoningEffort?: ReasoningEffort;
+  /** Метка пользователя для провайдера: изоляция кеша и лимитов (`user_id`). */
+  userId?: string;
+  /** Строгая схема аргументов инструментов (`strict: true`). */
+  strictTools?: boolean;
 }
 
 export interface AiSettings {
@@ -739,10 +745,16 @@ export interface AiSettings {
    */
   contextWindow?: number;
   /**
-   * Абсолютный предел истории в токенах: выше него беседа сжимается автоматически,
-   * даже если до конца окна ещё далеко. 0 — сжимать только при подходе к окну.
+   * Абсолютный предел истории в токенах. 0 (по умолчанию) — не сжимать по
+   * объёму: порогов два, окно и промах кеша. Поле оставлено для тех, кому нужен
+   * жёсткий потолок запроса; человеку токены не говорят ничего.
    */
   compactAtTokens: number;
+  /**
+   * «Сжимать чаще»: сжимать каждые N ходов беседы, не дожидаясь промаха кеша.
+   * 0 — никогда. Ход — вопрос пользователя вместе с ответом агента.
+   */
+  compactEveryTurns: number;
   /**
    * Модель для сжатия беседы. Не задана — сжимаем той же моделью, что и беседа.
    * Пересказ — задача простая: небольшая модель справится дешевле и не займёт
@@ -1370,6 +1382,13 @@ export interface AiProviderPatch {
   models?: string[];
   defaultModel?: string;
   protocol?: 'openai' | 'anthropic';
+  /** Свои параметры запроса: лимит ответа и температура зависят от модели, а не от ассистента. */
+  temperature?: number;
+  maxTokens?: number;
+  reasoningEffort?: ReasoningEffort;
+  /** Пустая строка стирает метку пользователя. */
+  userId?: string;
+  strictTools?: boolean;
 }
 
 export interface AiSettingsPatch {
@@ -1383,6 +1402,8 @@ export interface AiSettingsPatch {
   contextWindow?: number;
   /** Абсолютный предел истории для автосжатия в токенах; 0 — только по окну модели. */
   compactAtTokens?: number;
+  /** Сжимать каждые N ходов беседы; 0 — никогда (только по промаху кеша и по окну). */
+  compactEveryTurns?: number;
   /** Модель для сжатия беседы; пусто — активная модель. */
   compactModel?: string;
   systemPrompt?: string;
@@ -1426,6 +1447,12 @@ export interface AiConnectionTestResult {
   ok: boolean;
   models: string[];
   message: string;
+  /**
+   * Счёт у провайдера, если он его показывает. `null` — сервер баланса не знает
+   * (локальные модели денег не стоят), `undefined` — не спрашивали или не вышло.
+   * Ошибка баланса не делает проверку неудачной: связь-то есть.
+   */
+  balance?: AccountBalance | null;
 }
 
 /** Что ответил один сервер MCP: его инструменты или причина, по которой он не поднялся. */
@@ -1457,7 +1484,7 @@ export interface AiWebSearchSettings {
 }
 
 /**
- * Чтение страниц по ссылке (`web_fetch`). Отдельно от поиска: поиск находит, а
+ * Чтение страниц по ссылке (`web`, действие fetch). Отдельно от поиска: поиск находит, а
  * сюда агент идёт за содержимым. Выключено по умолчанию — это ход наружу.
  */
 export interface AiWebFetchSettings {
@@ -1528,6 +1555,15 @@ export interface ChatMessage {
   toolCalls?: ChatToolCall[];
   /** Для role='tool': id вызова, на который отвечает это сообщение. */
   toolCallId?: string;
+  /**
+   * Для role='assistant': размышления модели на этом шаге.
+   *
+   * Нужны не для показа, а для протокола: DeepSeek требует возвращать
+   * `reasoning_content` обратно, когда в запросе есть `tools` — без этого шаг с
+   * вызовом инструмента отвергается ошибкой 400. Держим ровно на тех сообщениях,
+   * где модель вызывала инструменты: в остальных провайдер это игнорирует.
+   */
+  reasoning?: string;
   /** Оценка ответа пользователем: помогает понять, какие ответы были полезны. */
   rating?: 'up' | 'down';
 }
@@ -1766,6 +1802,12 @@ export interface ChatConversation {
    * берётся общий из настроек. Поле есть в файле, иначе выбор терялся бы при записи.
    */
   toolPreset?: ToolPresetId;
+  /**
+   * Приложенный контекст, переживший сжатие (см. `shared/chat-attachments`).
+   * Нужен для следующего пересказа: резюме пересказывает разговор, но не код,
+   * который человек присылал.
+   */
+  keptAttachments?: ChatAttachment[];
 }
 
 /** Всё, что main хранит по одной рабочей папке. */
@@ -1829,7 +1871,7 @@ export interface ChatToolResultPayload {
    */
   images?: string[];
   /**
-   * Файлы, которые агент объявил результатом (`present`). В ленте это карточка
+   * Файлы, которые агент объявил результатом (`show` с action present). В ленте это карточка
    * с кнопками «Открыть»: человек не ищет путь в тексте ответа.
    */
   presented?: ToolPresentedFile[];
@@ -1841,7 +1883,7 @@ export interface ChatToolResultPayload {
  * создание, удаление и перенос: они меняют диск, но не буфер редактора.
  */
 /**
- * Файл, который агент объявил результатом (инструмент `present`). В отличие от
+ * Файл, который агент объявил результатом (действие present инструмента `show`). В отличие от
  * `ToolFileChange` это не «что изменилось», а «вот что я сделал, открой»: панель
  * изменений считает правки, а карточка в ленте — то, что человек должен увидеть.
  */
@@ -2629,6 +2671,7 @@ export interface ChuiMethods {
     params: { baseUrl: string; apiKey?: string; providerId?: string };
     result: AiConnectionTestResult;
   };
+
   'ai.chat': { params: ChatRequest; result: ChatStreamDone };
   /**
    * Живые агенты (подзадачи): кто работает и что делает. Панель спрашивает список
@@ -2681,20 +2724,6 @@ export interface ChuiMethods {
   'ai.telemetry': { params: void; result: AiTelemetrySnapshot };
   /** Очистить журнал прогонов. */
   'ai.telemetryClear': { params: void; result: { ok: boolean } };
-
-  /**
-   * Расписание задач проекта (`.chui/schedules.json`): когда ассистент
-   * начинает ход сам. Список — источник истины для окна расписания.
-   */
-  'schedule.list': { params: void; result: TaskSchedule[] };
-  /**
-   * Завести или изменить задачу: `id` уже есть в списке — правка, иначе новая.
-   * Возвращается весь список: окно не должно собирать его из догадок.
-   */
-  'schedule.save': { params: { schedule: TaskSchedule }; result: TaskSchedule[] };
-  'schedule.remove': { params: { id: string }; result: TaskSchedule[] };
-  /** Итог запуска: main пересчитывает следующее срабатывание и пишет его в файл. */
-  'schedule.finish': { params: { id: string; result: ScheduleResult }; result: TaskSchedule[] };
 }
 
 export type MethodName = keyof ChuiMethods;

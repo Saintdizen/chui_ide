@@ -6,6 +6,7 @@ import {
   type PickedImage,
 } from '../../shared/api';
 import { entryIsDirectory } from '../../shared/entry-kind';
+import { dropAttachment, takeSent } from '../../shared/chat-attachments';
 import type { DocumentStore } from '../core/document-store';
 import type { EditorApi } from '../core/editor-api';
 import { languageFromPath } from '../core/languages';
@@ -155,8 +156,11 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
 
   function removeAttachment(index: number): void {
     const session = deps.session();
+    const removed = session.attachments[index];
     const commit = (): void => {
       session.attachments = session.attachments.filter((_, position) => position !== index);
+      // Человек снял контекст до отправки — он не должен пережить сжатие беседы.
+      if (removed) dropAttachment(session, removed.label);
       render();
     };
     // Схлопываем чип перед перерисовкой: полоса пересобирается целиком, и без
@@ -392,11 +396,16 @@ export function createAttachments(deps: AttachmentsDeps): AttachmentsView {
     if (run === mentionRun) mentionCache = result;
   }
 
-  /** Вложения приложены к конкретному вопросу: при отправке их снимаем и отдаём. */
+  /**
+   * Вложения приложены к конкретному вопросу: при отправке их снимаем и отдаём.
+   *
+   * Копию оставляем в `session.kept`: после сжатия беседы модель получает одно
+   * резюме, и без этой копии она продолжала бы работу, не видя кода, о котором
+   * речь (см. `keptContextMessage`).
+   */
   function takeForSend(): ChatAttachment[] {
     const session = deps.session();
-    const sent = [...session.attachments];
-    session.attachments = [];
+    const sent = takeSent(session);
     render();
     return sent;
   }

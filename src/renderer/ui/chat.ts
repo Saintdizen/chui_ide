@@ -18,8 +18,17 @@ import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectC
 import { sessionAttachment } from '../../shared/session-context';
 import { isAutoTitle } from '../../shared/chat-title';
 import { resolvePatches } from '../../shared/patch';
-import { answerReserve, compactionBudgetChars, contextUsage, splitTranscript } from '../../shared/context-fit';
-import { contextWindow, modelCapabilities } from '../../shared/providers';
+import { turnsSinceCompact } from './compact-turns';
+import { keptContextMessage } from '../../shared/chat-attachments';
+import {
+  answerReserve,
+  compactionBudgetChars,
+  compactionMessage,
+  needsCompaction,
+  contextUsage,
+  splitTranscript,
+} from '../../shared/context-fit';
+import { contextWindow, maxOutputTokens, modelCapabilities } from '../../shared/providers';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
 import type { EditService } from '../core/edits';
@@ -57,12 +66,11 @@ import { showContextMenu } from './context-menu';
 import { showToast } from './toast';
 
 /**
- * Чем кончился ход по готовому тексту (расписание).
+ * Чем кончился ход.
  *
  * Не «получилось ли», а именно исход: `busy` — ассистент уже занят и вопрос не
  * ушёл, `unavailable` — не выбраны провайдер или модель, `failed` — модель
- * отказала, `stopped` — человек остановил генерацию. Список задач показывает это
- * словами, и «готово» не должно стоять там, где ответа не было.
+ * отказала, `stopped` — человек остановил генерацию.
  */
 export type PromptRun = 'started' | 'failed' | 'stopped' | 'busy' | 'unavailable';
 
@@ -75,13 +83,7 @@ export interface ChatView {
   statusElement: HTMLElement;
   newChat(): void;
   stop(): void;
-  /**
-   * Начать ход по готовому тексту в новой беседе — вход для расписания: вопрос
-   * формулирует файл задачи, а не человек в поле ввода.
-   */
-  sendPrompt(text: string): Promise<PromptRun>;
-  /**
-   * Проверка модели разрешила команду без человека. Строка ложится в ленту того
+  /** Проверка модели разрешила команду без человека. Строка ложится в ленту того
    * хода, что идёт сейчас: молча выполненное действие должно быть видно.
    */
   noteApprovalReview(command: string, reason: string): void;
@@ -148,16 +150,6 @@ const COMPACT_CONTINUE_PROMPT = [
   'добавь только то, что в резюме ещё нет: запросы пользователя, изменённые файлы,',
   'принятые решения, найденные ошибки, что осталось сделать. Пиши по пунктам, без кода целиком.',
 ].join('\n');
-
-/**
- * Доля окна, после которой освобождаем контекст заранее.
- *
- * Проверять «в упор» (used + ответ = всё окно) бесполезно: пока считаешь, история
- * успевает дорасти, а провайдер отклонить запрос. Поэтому сжимаем с запасом —
- * когда до предела остаётся 20%.
- */
-const COMPACT_AT_RATIO = 0.8;
-
 /**
  * Панель ассистента — правый «остров» в стиле панели инструментов.
  *
@@ -653,11 +645,19 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         // иначе после перезапуска непонятно, почему ответы не растут в контексте.
         session.compacted = Boolean(conversation.context);
         session.usage = conversation.usage;
+        // Из файла нельзя понять, к той ли истории относится расход: считаем его
+        // устаревшим, и про кеш судим только после первого нового ответа.
+        session.usageFresh = false;
+        session.turnsSinceCompact = 0;
         session.trace = conversation.trace;
         session.goal = conversation.goal;
         // Набор инструментов из файла — выбор этой беседы. Нет его — берётся общий
         // из настроек (см. `syncToolPreset`): так старые файлы читаются без миграции.
         session.toolPreset = conversation.toolPreset;
+        // Перенесённый через сжатие контекст: следующий пересказ не должен потерять
+        // присланные файлы.
+        session.kept = conversation.keptAttachments;
+
         renderHistory(session);
       }
       if (sessions.length === 0) createSession();
@@ -807,7 +807,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       // ответа не было — числа нет, и панель оценит по всему списку, честно
       // помечая «≈».
       ...(session.trace?.toolsTokens !== undefined ? { toolsTokens: session.trace.toolsTokens } : {}),
-      reservedTokens: answerReserve(settings.ai.maxTokens, contextWindow(currentModel(), settings.ai.contextWindow)),
+      reservedTokens: answerReserve(
+          maxOutputTokens(currentModel(), settings.ai.maxTokens),
+          contextWindow(currentModel(), settings.ai.contextWindow),
+        ),
       usage: session.usage,
       speed: session.speed,
       trace: session.trace,
@@ -853,7 +856,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     const override = model === currentModel() ? settings.ai.contextWindow : undefined;
     return compactionBudgetChars(
       contextWindow(model, override),
-      answerReserve(settings.ai.maxTokens, contextWindow(model, override)) + 2_000,
+      answerReserve(maxOutputTokens(model, settings.ai.maxTokens), contextWindow(model, override)) + 2_000,
     );
   }
 
@@ -922,7 +925,16 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         { role: 'user', content: `Контекст сжатой беседы:\n\n${summary}` },
         { role: 'assistant', content: 'Принято, продолжаем с этим контекстом.' },
       ];
+      // Резюме пересказывает разговор, но не присланные файлы. Вопрос снова
+      // прикладывает их сам (history его не несёт), поэтому кладём приложения
+      // служебным сообщением сразу за резюме — в конец, где кеш их и оставит.
+      const kept = keptContextMessage(session.kept);
+      if (kept) session.history.push(kept);
       session.usage = undefined;
+      // Сжатие само перестроило префикс: старое попадание в кеш больше ничего не
+      // говорит, а расписание начинается заново.
+      session.usageFresh = false;
+      session.turnsSinceCompact = 0;
       renderCompacted(session, before, summary);
       showToast(`Беседа сжата: ${before} ${plural(before, 'сообщение', 'сообщения', 'сообщений')} → краткое резюме`);
       return true;
@@ -953,31 +965,35 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   }
 
   /**
-   * Перед отправкой решаем, не пора ли освободить контекст. Триггеров два:
-   * заполнение подошло к пределу окна (`COMPACT_AT_RATIO`, с запасом, а не «в упор»)
-   * либо история переросла абсолютный предел — он выручает на моделях с огромным
-   * окном, где доля недостижима. Предел равен `COMPACT_AT_TOKENS` по умолчанию, но
-   * его можно поднять в настройках (`ai.compactAtTokens`); 0 — только по окну.
-   * Иначе провайдер обрежет запрос или вернёт ошибку лимита. Сжимать нечего —
-   * просто предупреждаем.
+   * Перед отправкой решаем, не пора ли освободить контекст.
+   *
+   * Причины и их порядок живут в `needsCompaction` (`shared/context-fit`):
+   * подход к окну модели, жёсткий потолок из настроек (по умолчанию выключен),
+   * расписание «сжимать чаще» и промах кеша — последний и есть основной повод,
+   * когда человек ничего не настраивал.
+   * Сжимать нечего — просто предупреждаем, что ответ может обрезаться.
    */
   async function ensureContextFits(session: ChatSession, pending: string): Promise<boolean> {
     const usage = contextUsage(sessionInfoData(session, pending));
-    // Резерв — не весь `maxTokens` из настроек, а разумная его часть (`answerReserve`).
-    const nearWindow = usage.used + answerReserve(settings.ai.maxTokens, usage.limit) > usage.limit * COMPACT_AT_RATIO;
-    const absolute = settings.ai.compactAtTokens;
-    const tooLong = absolute > 0 && usage.used > absolute;
-    if (!nearWindow && !tooLong) return true;
+    const reason = needsCompaction({
+      used: usage.used,
+      limit: usage.limit,
+      // Резерв — не весь `maxTokens` из настроек, а разумная его часть (`answerReserve`).
+      reserve: answerReserve(maxOutputTokens(currentModel(), settings.ai.maxTokens), usage.limit),
+      usage: session.usage,
+      usageFresh: session.usageFresh,
+      compactAtTokens: settings.ai.compactAtTokens,
+      turnsSinceCompact: session.turnsSinceCompact,
+      turnsEvery: settings.ai.compactEveryTurns,
+      compactCapable: modelCapabilities(currentModel()).compactCapable,
+    });
+    if (!reason) return true;
 
     if (session.history.length < 2) {
       showToast('Контекст переполнен, но сжимать почти нечего — ответ может обрезаться', 'error');
       return true;
     }
-    showToast(
-      nearWindow
-        ? 'Контекст переполнен — сжимаю беседу перед отправкой'
-        : 'Беседа слишком длинная — сжимаю перед отправкой',
-    );
+    showToast(compactionMessage(reason));
     // Сжатие не удалось — запрос не отправляем: иначе он уйдёт обрезанным, и
     // пользователь получит ошибку лимита вместо ответа.
     return compactSession(session);
@@ -1055,7 +1071,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       effort,
       !capabilities.reasoningEffort,
       capabilities.reasoningEffort
-        ? 'Усилие размышления: сколько модель думает перед ответом'
+        ? capabilities.note
+          ? `Усилие размышления: сколько модель думает перед ответом. ${capabilities.note}`
+          : 'Усилие размышления: сколько модель думает перед ответом'
         : `Модель не принимает усилие размышления: ${capabilities.note ?? 'параметр не поддерживается'}`,
     );
   }
@@ -1466,6 +1484,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     session.history = session.history.slice(0, index);
     session.usage = undefined;
+    // После обрезки продолжение другое: по старому расходу про кеш не судим.
+    session.usageFresh = false;
+    session.turnsSinceCompact = turnsSinceCompact(session.history);
     session.speed = undefined;
     renderHistory(session);
     syncSessionInfo();
@@ -1505,6 +1526,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
     session.history = session.history.slice(0, lastUser + 1);
     session.usage = undefined;
+    session.usageFresh = false;
+    session.turnsSinceCompact = turnsSinceCompact(session.history);
     session.speed = undefined;
     renderHistory(session);
     await stream.run(session, provider.id, model, []);
@@ -1600,18 +1623,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       body.scrollTop = 0;
       input.focus();
     });
-  }
-
-  /**
-   * Запустить ход по готовому тексту — так в беседу входит задача расписания.
-   *
-   * Возвращает не «получилось ли», а ПОЧЕМУ нет: расписание отмечает итог, и
-   * «ассистент занят» — это пропуск, а не ошибка настроек.
-   */
-  async function sendPrompt(text: string): Promise<PromptRun> {
-    if (busy) return 'busy';
-    if (!currentProvider() || !currentModel()) return 'unavailable';
-    return send(text);
   }
 
   async function askAboutSelection(mode: 'explain' | 'fix'): Promise<void> {
@@ -1927,7 +1938,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     newChat,
     stop,
     askAboutSelection,
-    sendPrompt,
     openRunLog: () => {
       // Трасса есть только у прогонов этого запуска: она живёт в памяти беседы,
       // а не в файле истории — выводы инструментов там заняли бы мегабайты.
