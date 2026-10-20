@@ -68,9 +68,8 @@ describe('производные наборы', () => {
     }
   });
 
-  it('внутри программы нет самой программы, сценария и вопроса', () => {
+  it('внутри программы нет самой программы и вопроса', () => {
     expect(DENIED_IN_PROGRAM.has('run_code')).toBe(true);
-    expect(DENIED_IN_PROGRAM.has('workflow')).toBe(true);
     expect(DENIED_IN_PROGRAM.has('ask')).toBe(true);
   });
 

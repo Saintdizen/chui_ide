@@ -867,8 +867,6 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await webFetch(ctx, args);
       case 'run_code':
         return await runCodeProgram(ctx, args);
-      case 'workflow':
-        return await workflowScript(ctx, args);
       case 'create_file':
         return await createFile(ctx.workspace, args);
       case 'delete_file':
@@ -3011,10 +3009,29 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
  * и из программы они всё равно ничего не поменяют.
  */
 async function runCodeProgram(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.runCode) return { ok: false, summary: 'Программа недоступна: нет запуска' };
-
   const code = requireString(args, 'code');
   const timeoutMs = optionalInteger(args, 'timeoutMs');
+  const kind = optionalString(args, 'kind') ?? 'code';
+
+  // Сценарий: тот же движок, но в контексте только агенты. Два имени были бы
+  // дешевле только на вид — тела схем всё равно остались бы оба, а выбор между
+  // «программой» и «сценарием» модель делает по одному слову.
+  if (kind === 'workflow') {
+    if (!ctx.workflow) return { ok: false, summary: 'Сценарий недоступен: нет запуска' };
+    const scripted = await ctx.workflow.run(code, {
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    });
+    const shaped = formatWorkflow(scripted);
+    return {
+      ok: !scripted.error && !scripted.timedOut,
+      summary: shaped.summary,
+      detail: shaped.detail,
+      applied: true,
+    };
+  }
+
+  if (!ctx.runCode) return { ok: false, summary: 'Программа недоступна: нет запуска' };
 
   const outcome = await ctx.runCode.run(code, {
     ...(ctx.signal ? { signal: ctx.signal } : {}),
@@ -3039,38 +3056,6 @@ async function runCodeProgram(ctx: ToolContext, args: Record<string, unknown>): 
   const shaped = formatRunCode(outcome);
   // Код программы уже отработал, и его текст лежит в трассе прогона: в истории
   // он висел бы до конца беседы (сто строк — около тысячи токенов на каждом шаге).
-  return {
-    ok: !outcome.error && !outcome.timedOut,
-    summary: shaped.summary,
-    detail: shaped.detail,
-    applied: true,
-  };
-}
-
-/**
- * Сценарий с агентами (`workflow`).
- *
- * Инструмент сам ничего не исполняет: запуск — тот же отдельный процесс, что у
- * `run_code`, а агента запускает service (там провайдер и модель). Здесь только
- * форма ответа: сводка по агентам для карточки и текст для модели.
- *
- * Почему это отдельный инструмент, а не `run_code` с `tools.task`: у сценария
- * нет ни одного инструмента вовсе. Он умеет одно — раздать работу агентам и
- * разветвить её по отчётам, и именно это ограничение нужно модели: правку
- * проекта делает не вид сценария, а тот, кому её поручили.
- */
-async function workflowScript(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.workflow) return { ok: false, summary: 'Сценарий недоступен: нет запуска' };
-
-  const code = requireString(args, 'code');
-  const timeoutMs = optionalInteger(args, 'timeoutMs');
-
-  const outcome = await ctx.workflow.run(code, {
-    ...(ctx.signal ? { signal: ctx.signal } : {}),
-    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
-  });
-
-  const shaped = formatWorkflow(outcome);
   return {
     ok: !outcome.error && !outcome.timedOut,
     summary: shaped.summary,

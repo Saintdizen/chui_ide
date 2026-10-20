@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { allowsInPlan } from '../src/shared/tool-policy';
 import { AGENT_TOOLS } from '../src/shared/tools';
+import { canonicalCall } from '../src/shared/tool-aliases';
 
 /**
  * Слитые инструменты: `browser`, `terminal`, `edit`, `schedule` с полем `action`.
@@ -149,5 +150,22 @@ describe('слитые инструменты: разбор', () => {
     expect(outcome.ok).toBe(false);
     // Отказ приходит до обработчика: схема требует action, и это названо прямо.
     expect(outcome.summary).toContain('action');
+  });
+});
+
+describe('сценарий: режим программы, а не второй инструмент', () => {
+  it('отдельного workflow в наборе больше нет', () => {
+    expect(AGENT_TOOLS.some((tool) => tool.name === 'workflow')).toBe(false);
+  });
+
+  it('старое имя подмешивает kind к аргументам', () => {
+    const call = canonicalCall('workflow', '{"code":"return 1;"}');
+    expect(call.name).toBe('run_code');
+    expect(JSON.parse(call.arguments)).toEqual({ code: 'return 1;', kind: 'workflow' });
+  });
+
+  it('названный моделью kind важнее старого имени', () => {
+    const call = canonicalCall('workflow', '{"code":"return 1;","kind":"code"}');
+    expect(JSON.parse(call.arguments).kind).toBe('code');
   });
 });

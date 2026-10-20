@@ -27,9 +27,15 @@ const NAME_ALIASES: Readonly<Record<string, string>> = {
   wait_agent: 'agents',
   send_message: 'agents',
   interrupt_agent: 'agents',
+  // Сценарий из агентов стал режимом программы: движок у них общий.
+  workflow: 'run_code',
 };
 
-/** Старое имя → действие, которое оно означало. */
+/** Старое имя → аргументы, которые оно подразумевало: `action` или `kind`. */
+const ARG_ALIASES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  workflow: { kind: 'workflow' },
+};
+
 const ACTION_ALIASES: Readonly<Record<string, string>> = {
   spawn_agent: 'spawn',
   list_agents: 'list',
@@ -44,7 +50,9 @@ export function canonicalCall(name: string, rawArguments: string): CanonicalCall
   if (!target) return { name, arguments: rawArguments, renamed: false };
 
   const action = ACTION_ALIASES[name];
-  if (!action) return { name: target, arguments: rawArguments, renamed: true };
+  const fixed = ARG_ALIASES[name];
+  const patch = fixed ?? (action ? { action } : undefined);
+  if (!patch) return { name: target, arguments: rawArguments, renamed: true };
 
   let value: Record<string, unknown>;
   try {
@@ -57,8 +65,14 @@ export function canonicalCall(name: string, rawArguments: string): CanonicalCall
     return { name: target, arguments: rawArguments, renamed: true };
   }
 
-  if (typeof value.action === 'string' && value.action.trim() !== '') {
-    return { name: target, arguments: rawArguments, renamed: true };
-  }
-  return { name: target, arguments: JSON.stringify({ ...value, action }), renamed: true };
+  // Уже названное значение не перебиваем: вызов мог прийти от модели, которая
+  // знает новые имена, и её выбор вернее нашего.
+  const missing = Object.entries(patch).filter(
+    ([key]) => typeof value[key] !== 'string' || (value[key] as string).trim() === '',
+  );
+  if (missing.length === 0) return { name: target, arguments: rawArguments, renamed: true };
+
+  const merged = { ...value };
+  for (const [key, entry] of missing) merged[key] = entry;
+  return { name: target, arguments: JSON.stringify(merged), renamed: true };
 }

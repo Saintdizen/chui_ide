@@ -88,9 +88,8 @@ describe('что программа может звать', () => {
     expect(runCodeToolAllowed('edit')).toBe(true);
   });
 
-  it('себя, сценарий с агентами, вопрос человеку и состояние беседы — нет', () => {
+  it('себя, вопрос человеку и состояние беседы — нет', () => {
     expect(runCodeToolAllowed('run_code')).toBe(false);
-    expect(runCodeToolAllowed('workflow')).toBe(false);
     expect(runCodeToolAllowed('ask')).toBe(false);
     expect(runCodeToolAllowed('update_plan')).toBe(false);
     expect(runCodeToolAllowed('update_goal')).toBe(false);

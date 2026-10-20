@@ -2278,9 +2278,9 @@ export class AiService {
     if (tool.name === 'session_search') return this.sessions !== undefined;
     if (tool.name === 'web_search') return this.canUseWebSearch(this.settings.get().ai.webSearch);
     if (tool.name === 'web_fetch') return this.settings.get().ai.webFetch?.enabled === true;
-    // Программа и сценарий требуют отдельного процесса (а сценарию ещё и агентов):
-    // при включённой песочнице они шли бы на хосте, а это обход обещания песочницы.
-    if (tool.name === 'run_code' || tool.name === 'workflow') {
+    // Программа (и её режим сценария) требует отдельного процесса: при включённой
+    // песочнице она шла бы на хосте, а это обход обещания песочницы.
+    if (tool.name === 'run_code') {
       return canRunProgram(Boolean(this.settings.get().ai.sandbox?.enabled));
     }
     // Браузер: включается настройкой (как веб-поиск), а действия на странице

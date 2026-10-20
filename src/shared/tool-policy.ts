@@ -25,7 +25,7 @@ export interface ToolPolicy {
   readonly readOnly?: boolean;
   /** Предлагается и исполняется в режиме «План»: ничего не меняет или меняет только сам план. */
   readonly plan?: boolean;
-  /** Доступен подзадаче (`task`) — и тем самым предел глубины: ни `task`, ни `workflow` здесь нет. */
+  /** Доступен подзадаче (`task`) — и тем самым предел глубины: ни `task` здесь нет. */
   readonly subagent?: boolean;
   /** Запрещён внутри программы (`run_code`): ей это не по силам или обманывает обещание. */
   readonly deniedInProgram?: boolean;
@@ -105,7 +105,6 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
 
   /* ── программа и сценарий ───────────────────────────────────────────── */
   run_code: { deniedInProgram: true },
-  workflow: { deniedInProgram: true },
 
   /* ── состояние беседы ───────────────────────────────────────────────── */
   update_plan: { plan: true, alwaysAvailable: true, deniedInProgram: true },
@@ -225,7 +224,7 @@ export function allowsInPlan(name: string, rawArguments: string): boolean {
  *
  * Только чтение: правки и команды остаются за основным агентом, который
  * показывает ревью и спрашивает человека. Здесь же лежит ответ на «а может ли
- * агент запустить агента»: ни `task`, ни `workflow` в наборе нет, поэтому
+ * агент запустить агента»: ни `task` в наборе нет, поэтому
  * глубина всегда 1 (см. `WORKFLOW_MAX_DEPTH`). Иначе один вопрос человека
  * превращался бы в дерево прогонов модели, за которое никто не считал.
  */
@@ -234,7 +233,7 @@ export const SUBAGENT_TOOLS = namesWhere('subagent');
 /**
  * Инструменты, которые программа (`run_code`) не зовёт.
  *
- * `run_code` и `workflow` — сами себя (рекурсия съела бы и время, и контекст).
+ * `run_code` — сам себя (рекурсия съела бы и время, и контекст).
  * `ask` — вопрос человеку: программа ждала бы ответа, а человек видел бы только
  * крутящуюся карточку. `update_plan` и `update_goal` — состояние беседы, а не
  * действие: его разбирает service, и из программы оно ничего не поменяет.

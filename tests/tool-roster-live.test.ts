@@ -14,7 +14,7 @@ describe('скрытое по имени: привычка не должна д�
   it('в запросе нет схемы codebase_search, но имя и аргумент — в ростере', () => {
     const wire = toOpenAiTools(offered()).map((tool) => tool.function.name);
     expect(wire).not.toContain('codebase_search');
-    expect(wire).toHaveLength(16);
+    expect(wire).toHaveLength(13);
     expect(toolPresetNote('auto')).toContain('codebase_search(query)');
   });
 

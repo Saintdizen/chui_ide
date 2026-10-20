@@ -8,6 +8,7 @@ import {
   TOOL_GROUPS,
   TOOL_PRESETS,
   isRosterTool,
+  rosterNames,
   presetToolNames,
   toolPresetNote,
   type ToolPresetId,
@@ -81,7 +82,10 @@ describe('бюджет схем', () => {
     expect(note).toBeLessThan(300);
     // И обратная сторона: набор не должен схлопнуться до десятка имён. 15 из 49 —
     // граница, за которой модель начнёт угадывать вызовы вместо работы.
-    expect(presetToolNames('auto')?.size ?? 0).toBeGreaterThan(15);
+    // Считаем не схемы, а имена, которые модель знает: ростер даёт вызов без
+    // схемы, и экономия не должна превращаться в «этого инструмента нет».
+    const known = new Set([...(presetToolNames('auto') ?? []), ...rosterNames('auto')]);
+    expect(known.size).toBeGreaterThan(15);
   });
 
   it('набор по умолчанию дешевле полного хотя бы на пятую часть', () => {

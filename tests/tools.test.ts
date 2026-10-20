@@ -41,7 +41,6 @@ describe('набор инструментов агента', () => {
       'get_diagnostics',
       'edit',
       'replace_in_files',
-      'workflow',
       'create_file',
       'delete_file',
       'move_file',

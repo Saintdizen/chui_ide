@@ -77,8 +77,8 @@ const AGENT_HINTS: readonly AgentHint[] = [
     needs: ['run_code'],
   },
   {
-    text: 'Раздать работу агентам и свести отчёты — workflow (if, Promise.all).',
-    needs: ['workflow'],
+    text: 'Раздать работу агентам и свести отчёты — run_code с kind "workflow" (agents.run, Promise.all).',
+    needs: ['run_code'],
   },
   {
     text: 'Перечитать много файлов ради ответа — `task`: его чтения не тратят твой контекст.',

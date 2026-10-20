@@ -149,9 +149,12 @@ describe('наборы инструментов агента', () => {
     expect(auto.widen).toBe(true);
     expect(auto.groups).not.toBeNull();
     // Всё, что меняет проект, в нём есть: правки прятать нельзя — это работа.
-    for (const name of ['edit', 'read', 'ask', 'run_tests']) {
+    for (const name of ['edit', 'read', 'run_tests']) {
       expect(presetToolNames('auto')?.has(name), `в «Авто» нет ${name}`).toBe(true);
     }
+    // Спросить человека тоже можно, но строкой ростера: форма вызова у него
+    // простая, а схема стоила 121 токен в каждом запросе.
+    expect(rosterNames('auto')).toContain('ask');
     // А дорогое и редкое — спрятано: именно на нём и экономия.
     for (const name of ['terminal', 'browser', 'git_write', 'schedule']) {
       expect(presetToolNames('auto')?.has(name), `в «Авто» не должно быть ${name}`).toBe(false);

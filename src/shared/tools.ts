@@ -38,7 +38,6 @@ export type AgentToolName =
   | 'web_search'
   | 'web_fetch'
   | 'run_code'
-  | 'workflow'
   | 'create_file'
   | 'delete_file'
   | 'move_file'
@@ -530,44 +529,27 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'run_code',
     side: 'main',
     description:
-      'A JavaScript program where tools are plain functions: await tools.read({ path ' +
-      '}) returns { ok, summary, text }. This is a function body: await and return are ' +
-      'available, imports are not. Only the temp folder is writable. Limits: 80 calls and 2 ' +
-      'minutes.',
+      'A JavaScript program where tools are plain functions: await tools.read({ path }) ' +
+      'returns { ok, summary, text }. It is a body: await and return work, imports do not. ' +
+      'Only the temp folder is writable. Limits: 80 calls, 2 minutes. kind "workflow" swaps ' +
+      'tools for agents: agents.run({ prompt }) and agents.parallel([...]) answer with ' +
+      '{ ok, summary, text }; 6 agents, 5 minutes.',
     inputSchema: {
       type: 'object',
       properties: {
-        code: { type: 'string', description: 'Async body; tools are plain function calls.' },
+        code: { type: 'string', description: 'Async body; tools (or agents) are plain calls.' },
+        kind: {
+          type: 'string',
+          enum: ['code', 'workflow'],
+          description: 'code (default): tools; workflow: agents instead of tools.',
+        },
         description: {
           type: 'string',
           description: 'What it does, 5-10 words, shown in the feed.',
         },
         timeoutMs: {
           type: 'number',
-          description: 'Time limit in milliseconds (default 120000, max 300000).',
-        },
-      },
-      required: ['code'],
-    },
-  },
-  {
-    name: 'workflow',
-    side: 'main',
-    description:
-      'A JavaScript scenario that distributes work to agents: agents.run({ prompt, ' +
-      'description }) returns { ok, summary, text }, agents.parallel([...]) runs a batch. ' +
-      'Tools are not available here. Limits: 6 agents and 5 minutes.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        code: { type: 'string', description: 'Async body; agents.run starts agents.' },
-        description: {
-          type: 'string',
-          description: 'What it does, 5-10 words, shown in the feed.',
-        },
-        timeoutMs: {
-          type: 'number',
-          description: 'Time limit in milliseconds (default 300000, max 600000).',
+          description: 'Milliseconds: code default 120000, workflow 300000; max 600000.',
         },
       },
       required: ['code'],
