@@ -201,7 +201,7 @@ describe('глубина: агент не запускает ни агентов
   });
 
   it('подзадача по-прежнему читает проект', () => {
-    expect(SUBAGENT_TOOLS.has('read_file')).toBe(true);
+    expect(SUBAGENT_TOOLS.has('read')).toBe(true);
     expect(SUBAGENT_TOOLS.has('search')).toBe(true);
   });
 });

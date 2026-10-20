@@ -249,7 +249,7 @@ const MAX_OUTLINE_DEPTH = 2;
 
 /**
  * Скелет файла — то, чем агент узнаёт устройство файла, не читая его целиком:
- * объявления с номерами строк, без тел. Номера сразу годятся для `read_file`
+ * объявления с номерами строк, без тел. Номера сразу годятся для `read`
  * с диапазоном, а строки кода агент запросит уже точечно.
  */
 export function formatOutline(
@@ -266,7 +266,7 @@ export function formatOutline(
       summary: `${name}: объявлений нет`,
       detail:
         `Объявлений в ${file} не нашлось: файл без символов, не тот язык или языковой сервер ` +
-        'его не разобрал. Смотри содержимое через search или read_file.',
+        'его не разобрал. Смотри содержимое через search или read.',
       total: 0,
       lines: 0,
     };
@@ -298,7 +298,7 @@ export function formatOutline(
   const header = `Скелет ${file}: ${declarations(total)}${size}`;
   const tail = cut
     ? `\n… показано ${shown} из ${total} — сузь задачу или смотри файл через search.`
-    : `\nТела не показаны: нужные строки читай диапазоном (read_file с startLine и endLine).`;
+    : `\nТела не показаны: нужные строки читай диапазоном (read с startLine и endLine).`;
 
   return {
     summary: `${name}: ${declarations(total)}`,

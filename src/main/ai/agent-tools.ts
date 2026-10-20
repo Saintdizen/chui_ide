@@ -65,7 +65,7 @@ import type { JobHandle, JobRegistry, JobSnapshot } from './jobs';
 /**
  * Исполнение инструментов агента.
  *
- * Чтение (list_dir, read_file, search) и запуск команд делаются здесь же:
+ * Чтение (list, read, search) и запуск команд делаются здесь же:
  * все пути проходят через `WorkspaceService`, а значит ограничены рабочей
  * папкой (включая проверку симлинков). Правки (`edit`) уходят в renderer
  * хостовым вызовом — там документная модель, undo и ревью пользователя.
@@ -503,7 +503,7 @@ export interface ToolContext {
    * Остаток бюджета вывода на шаг. Заводит агентный цикл на каждый шаг и
    * расходуют все инструменты шага вместе (см. `STEP_OUTPUT_CHARS`).
    *
-   * Предел на вызов этой задаче не отвечает: три `read_file` в одном шаге честно
+   * Предел на вызов этой задаче не отвечает: три `read` в одном шаге честно
    * укладываются в свои 60 000 символов каждый и дают 180 000 — контекст уже
    * переполнен, а обрезка срабатывает только следующим шагом и выбрасывает ходы
    * целиком. Поэтому шаг платит из общего бюджета, а исчерпанное называется вслух.
@@ -580,14 +580,14 @@ const MAX_FIND_FILES = 2000;
 const DEFAULT_FILES_ONLY_PATHS = 80;
 const MAX_DIR_ENTRIES = 500;
 /**
- * Сколько путей отдаёт `find_files`, если модель не попросила иначе. Двести
+ * Сколько путей отдаёт `list`, если модель не попросила иначе. Двести
  * путей — это около 6 500 символов (≈1 850 токенов) на запрос «какие тут есть
  * файлы»; сотни хватает, чтобы увидеть край дерева, а остальное берётся сужением
  * маски.
  */
 const DEFAULT_FIND_FILES = 100;
 /**
- * С какого размера файл называем в `list_dir`. Мелкие размеры — шум: за вызов
+ * С какого размера файл называем в `list`. Мелкие размеры — шум: за вызов
  * их бывает до 500, и «(412 Б)» у каждой записи стоит дороже, чем сообщает.
  */
 const BIG_FILE_BYTES = 1024 * 1024;
@@ -597,7 +597,7 @@ function formatBigSize(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} ГБ` : `${mb.toFixed(1)} МБ`;
 }
-/** Сколько строк отдаёт read_file за один диапазонный вызов. */
+/** Сколько строк отдаёт read за один диапазонный вызов. */
 const MAX_READ_LINES = 2000;
 /**
  * Файл длиннее — читается не целиком, а головой и оглавлением. Отдать 60 000
@@ -703,7 +703,7 @@ async function confirmRun(ctx: ToolContext, command: string, prompt = command): 
  *
  * Раньше брался один `summary`, а `detail` выбрасывался — при том что советы
  * живут как раз в нём («это не текстовый файл — если нужны метаданные, возьми
- * list_dir»). Модель видела «Ошибка: бинарный файл» и шла угадывать, а это не
+ * list»). Модель видела «Ошибка: бинарный файл» и шла угадывать, а это не
  * токены, а потерянный шаг.
  */
 export function failureText(outcome: ToolOutcome): string {
@@ -815,12 +815,13 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
     if (isMcpToolName(name)) return await runExternalTool(ctx, name, args);
 
     switch (name) {
-      case 'list_dir':
-        return await listDir(ctx.workspace, args);
-      case 'read_file':
-        return await readFile(ctx, args);
-      case 'read_files':
-        return await readFiles(ctx, args);
+      // Одно имя на папку и на поиск по маске: обе формы угадываются по аргументу
+      // (`glob` — маска, без него — содержимое папки), а две схемы стоили 186 токенов.
+      case 'list':
+        return await listAction(ctx, args);
+      // Одно имя на один файл и на пять: различие — только `path` против `paths`.
+      case 'read':
+        return await readAction(ctx, args);
       case 'search':
         return await search(ctx, args);
       case 'codebase_search':
@@ -849,8 +850,6 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await runTests(ctx, args);
       case 'project_map':
         return await projectMap(ctx.workspace);
-      case 'find_files':
-        return await findFiles(ctx, args);
       case 'get_diagnostics':
         return await diagnostics(ctx, args);
       case 'edit':
@@ -1295,6 +1294,39 @@ async function projectMap(workspace: WorkspaceService): Promise<ToolOutcome> {
   return { ok: true, summary, detail };
 }
 
+/**
+ * Одно имя на папку и на поиск по маске.
+ *
+ * Две схемы (`list` и `list`) различались одним аргументом и стоили
+ * 186 токенов в каждом запросе. Выбор по аргументу: есть `glob` — ищем файлы по
+ * маске, нет — показываем содержимое папки.
+ */
+async function listAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const glob = optionalString(args, 'glob');
+  if (glob !== undefined && glob.trim() !== '') {
+    return await findFiles(ctx.workspace, ctx, args);
+  }
+  return await listDir(ctx.workspace, args);
+}
+
+/**
+ * Одно имя на один файл и на пачку.
+ *
+ * Различие только в кратности (`path` против `paths`), а две схемы стоили 234
+ * токена. Дальше — прежние функции: у каждой свой разбор и свои потолки.
+ */
+async function readAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (Array.isArray(args.paths)) return await readFiles(ctx, args);
+  if (isAbsent(args.path)) {
+    return {
+      ok: false,
+      summary: 'Не сказано, что читать',
+      detail: 'Нужен `path` для одного файла (можно с startLine/endLine) или `paths` — список из 2–5 файлов.',
+    };
+  }
+  return await readFile(ctx, args);
+}
+
 async function listDir(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
   const requested = optionalString(args, 'path') ?? workspace.rootPath();
   if (!requested) return { ok: false, summary: 'Проект не открыт' };
@@ -1358,7 +1390,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
     return {
       ok: false,
       summary: `${rel}: бинарный файл`,
-      detail: 'Это не текстовый файл — читать его бессмысленно. Если нужны метаданные, используй list_dir.',
+      detail: 'Это не текстовый файл — читать его бессмысленно. Если нужны метаданные, используй list.',
     };
   }
   const allLines = content.text.length === 0 ? [] : content.text.split('\n');
@@ -1386,10 +1418,10 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
       const outline = await fileOutlineText(ctx, target, content.text);
       const tail =
         `… (файл длинный: строк всего ${total}, показаны первые ${head.length}). ` +
-        `Дальше — read_file с startLine с ${head.length + 1}` +
+        `Дальше — read с startLine с ${head.length + 1}` +
         `${outline ? ' или нужный раздел из оглавления выше' : ' или file_outline для оглавления'}.`;
       const body = `${numberedLines(head, 1)}\n\n${outline ? `Оглавление:\n${outline}\n\n` : ''}${tail}`;
-      const { text } = clipText(ctx, 'read_file', body);
+      const { text } = clipText(ctx, 'read', body);
       return {
         ok: true,
         summary: `${rel}: ${total} строк, показаны первые ${head.length}`,
@@ -1398,7 +1430,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
         read: { path: target, from: 1, to: head.length },
       };
     }
-    const { text, truncated } = clipText(ctx, 'read_file', content.text);
+    const { text, truncated } = clipText(ctx, 'read', content.text);
     return {
       ok: true,
       summary: `${rel}: ${total} строк${truncated ? ' (обрезано)' : ''}`,
@@ -1422,7 +1454,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
       summary: `${rel}: начало диапазона ${from} за концом файла (в файле строк: ${total})`,
       detail:
         `Строки ${from} нет: файл короче, чем ожидалось (в нём ${total}). ` +
-        `Перечитай файл целиком (read_file без диапазона) или посмотри скелет (file_outline) ` +
+        `Перечитай файл целиком (read без диапазона) или посмотри скелет (file_outline) ` +
         `и возьми существующий диапазон в пределах 1–${total}.`,
     };
   }
@@ -1443,7 +1475,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
   // Диапазон тоже режем по символам: 2000 строк по ~40 символов — это ~80 КБ,
   // вчетверо больше общего потолка вывода. Без этого одно чтение диапазона
   // съедало окно модели сильнее, чем чтение целого файла без диапазона.
-  const { text: trimmed } = clipText(ctx, 'read_file', body);
+  const { text: trimmed } = clipText(ctx, 'read', body);
   // Весь запрошенный кусок ушёл целиком — только тогда его можно считать прочитанным.
   const whole = trimmed === body;
 
@@ -1455,7 +1487,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
   };
 }
 
-/** Сколько файлов и сколько символов отдаёт `read_files` за один вызов. */
+/** Сколько файлов и сколько символов отдаёт `read` за один вызов. */
 const MAX_READ_FILES = 10;
 /**
  * Общий потолок пачки. Пять файлов по 12 000 символов — это уже 30 000, половина
@@ -1469,13 +1501,13 @@ const MAX_READ_FILES_TOTAL_CHARS = 30_000;
  * если каждый отдаёт по 3 000 символов, пачка доходит до общего потолка ровно
  * тогда, когда она ещё полезна. Цена пачки из двух больших файлов — 7 300
  * токенов за вызов (замер), а вопрос обычно решает середина первого файла:
- * остальное дешевле взять `read_file` с диапазоном по номеру строки.
+ * остальное дешевле взять `read` с диапазоном по номеру строки.
  */
 const READ_FILES_PER_FILE_CHARS = 6_000;
 
 /**
  * Пакетное чтение: 2–5 файлов за один шаг. Каждый файл получает те же номера
- * строк, что и `read_file`, но общий вывод ограничен — иначе пятёрка больших
+ * строк, что и `read`, но общий вывод ограничен — иначе пятёрка больших
  * файлов вытеснит из контекста всё остальное.
  */
 async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -1529,8 +1561,8 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
           .map((line, index) => `${index + 1} | ${line}`)
           .join('\n');
       }
-      const { text, truncated } = clipText(ctx, 'read_files', body);
-      const rest = cut ? `\n… (показаны строки 1–${shown} из ${lines.length} — дальше read_file с диапазоном)` : '';
+      const { text, truncated } = clipText(ctx, 'read', body);
+      const rest = cut ? `\n… (показаны строки 1–${shown} из ${lines.length} — дальше read с диапазоном)` : '';
       const marks = [truncated ? 'обрезано' : '', cut ? `первые ${shown}` : ''].filter(Boolean);
       const chunk = `### ${rel} (${lines.length} строк${marks.length ? `, ${marks.join(', ')}` : ''})\n${text || '(пустой файл)'}${rest}`;
       parts.push(chunk);
@@ -1687,12 +1719,12 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
  * Совпадения поиска в виде текста. Без контекста — по строке на совпадение
  * (`путь:строка:столбец: текст`), с контекстом — блоками, как `grep -C`: строка
  * совпадения помечена `:`, соседние — `-`. Номера строк настоящие, поэтому их
- * сразу можно передать в `read_file` с диапазоном.
+ * сразу можно передать в `read` с диапазоном.
  */
 function formatSearchHits(hits: readonly SearchHit[], root: string | null, context: number): string {
   if (hits.length === 0) return '';
   if (context <= 0) {
-    // Столбец не печатаем: в следующий вызов его не передать (у `read_file` и
+    // Столбец не печатаем: в следующий вызов его не передать (у `read` и
     // `edit` границы задаются строками), а в выдаче на 200 совпадений он стоит
     // пару сотен символов на каждой — тысячи на вызов.
     // Путь — заголовком файла, как и в выдаче с контекстом. Раньше он повторялся
@@ -1806,7 +1838,7 @@ async function fileOutline(ctx: ToolContext, args: Record<string, unknown>): Pro
       summary: `${rel}: языковой сервер недоступен`,
       detail:
         'Сервер этого языка не запущен или не умеет разбирать объявления. ' +
-        'Устройство файла смотри через search или read_file.',
+        'Устройство файла смотри через search или read.',
     };
   }
 
@@ -1863,7 +1895,7 @@ async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): 
  * Ответы по документации проекта: ищем в ней, а не в коде. Источник — README,
  * `docs/` и прочие документы; отбор и нарезка на разделы — в main (`searchDocs`),
  * потому что читать файлы можно только там. Модели отдаём путь, заголовок и строку
- * раздела: тот же путь и та же строка годятся в `read_file`, чтобы дочитать раздел.
+ * раздела: тот же путь и та же строка годятся в `read`, чтобы дочитать раздел.
  */
 async function searchDocs(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const query = requireString(args, 'query');
@@ -2335,8 +2367,7 @@ function sandboxUnavailable(sandbox: SandboxRunner): ToolOutcome {
  * Файлы по glob-маске. Отдельно от `search`: тут не читается содержимое,
  * поэтому обход дешёвый и результат — список путей.
  */
-async function findFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  const { workspace } = ctx;
+async function findFiles(workspace: WorkspaceService, ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const glob = optionalString(args, 'glob');
   const limit = optionalInteger(args, 'limit') ?? DEFAULT_FIND_FILES;
 
@@ -2344,7 +2375,7 @@ async function findFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
   return {
     ok: true,
     summary: `${glob ? `«${glob}»: ` : ''}файлов: ${files.length}${files.length >= limit ? ' (показаны первые: сузьте маску или увеличьте limit)' : ''}`,
-    detail: files.length ? clipText(ctx, 'find_files', files.join('\n')).text : 'Ничего не найдено',
+    detail: files.length ? clipText(ctx, 'list', files.join('\n')).text : 'Ничего не найдено',
   };
 }
 
@@ -3711,7 +3742,7 @@ function terminalStop(ctx: ToolContext, args: Record<string, unknown>): ToolOutc
 function describe(entry: DirEntry, root: string | null): string {
   const suffix = entry.kind === 'directory' ? '/' : '';
   // Размер печатаем только там, где он что-то решает: «(412 Б)» у каждой
-  // записи — это шум, который едет в контекст модели в каждом `list_dir` и
+  // записи — это шум, который едет в контекст модели в каждом `list` и
   // ничего не сообщает (до 500 записей за вызов). Крупный файл — другое дело:
   // по нему видно, что читать его целиком не стоит.
   const size = entry.kind === 'file' && entry.size >= BIG_FILE_BYTES ? ` (${formatBigSize(entry.size)})` : '';
@@ -3730,7 +3761,7 @@ function relative(target: string, root: string | null): string {
  *
  * Разделитель не оставляем «как есть»: на Windows `path.relative` вернул бы
  * обратные слэши, и один и тот же путь выглядел бы по-разному до и после —
- * в выводе `search`, `list_dir` и в самом проекте (`workspace.ts` уже отдаёт
+ * в выводе `search`, `list` и в самом проекте (`workspace.ts` уже отдаёт
  * относительные пути POSIX-вида). Путь в ответе модели должен быть один и тот же
  * на любой системе: по нему она ходит в следующие инструменты.
  */
@@ -3799,7 +3830,7 @@ function trimCommandTail(ctx: ToolContext, text: string, full: string | null): s
  *
  * Пометка «вывод обрезан» без адреса была тупиком: агент знал, что чего-то не
  * видит, но не мог это достать и перезапускал команду — а второй запуск даёт
- * уже другой вывод. `read_file` с диапазоном умеет прочитать такой файл, поэтому
+ * уже другой вывод. `read` с диапазоном умеет прочитать такой файл, поэтому
  * достаточно назвать путь.
  */
 function clipText(ctx: ToolContext, kind: string, text: string): { text: string; truncated: boolean } {

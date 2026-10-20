@@ -28,7 +28,7 @@ afterEach(async () => {
   await fs.rm(root, { recursive: true, force: true }).catch(() => undefined);
 });
 
-/** Хост инструментов: `read_file` отдаёт что-то похожее на настоящее чтение. */
+/** Хост инструментов: `read` отдаёт что-то похожее на настоящее чтение. */
 const tools = (seen: Array<{ name: string; args: unknown }>): RunCodeRunOptions['onCall'] => {
   return async (name, args) => {
     seen.push({ name, args });
@@ -42,8 +42,8 @@ describe('программа исполняется', () => {
     const seen: Array<{ name: string; args: unknown }> = [];
     const outcome = await runProgram(
       [
-        "const first = await tools.read_file({ path: 'a.txt' });",
-        "const second = await tools.read_file({ path: 'b.txt' });",
+        "const first = await tools.read({ path: 'a.txt' });",
+        "const second = await tools.read({ path: 'b.txt' });",
         "console.log('прочитано', first.ok, second.ok);",
         'return { count: 2, first: first.text };',
       ].join('\n'),
@@ -52,13 +52,13 @@ describe('программа исполняется', () => {
 
     expect(outcome.error).toBeUndefined();
     expect(seen).toEqual([
-      { name: 'read_file', args: { path: 'a.txt' } },
-      { name: 'read_file', args: { path: 'b.txt' } },
+      { name: 'read', args: { path: 'a.txt' } },
+      { name: 'read', args: { path: 'b.txt' } },
     ]);
-    expect(outcome.calls.map((call) => call.name)).toEqual(['read_file', 'read_file']);
+    expect(outcome.calls.map((call) => call.name)).toEqual(['read', 'read']);
     expect(outcome.logs).toBe('прочитано true true');
     expect(outcome.value).toContain('"count":2');
-    expect(outcome.value).toContain('текст от read_file');
+    expect(outcome.value).toContain('текст от read');
     expect(outcome.timedOut).toBe(false);
   });
 
@@ -113,7 +113,7 @@ describe('пределы', () => {
     const outcome = await runProgram(
       [
         'const results = [];',
-        'for (let i = 0; i < 5; i += 1) results.push(await tools.read_file({ path: String(i) }));',
+        'for (let i = 0; i < 5; i += 1) results.push(await tools.read({ path: String(i) }));',
         'return results.map((item) => item.ok);',
       ].join('\n'),
       { root, onCall: tools(seen), maxCalls: 2 },

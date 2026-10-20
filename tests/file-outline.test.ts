@@ -121,7 +121,7 @@ describe('formatOutline', () => {
       '  5–6: метод parse',
       '44: функция readFile',
       '',
-      'Тела не показаны: нужные строки читай диапазоном (read_file с startLine и endLine).',
+      'Тела не показаны: нужные строки читай диапазоном (read с startLine и endLine).',
     ]);
     expect(summary).toBe('parser.py: 3 объявления');
     expect(total).toBe(3);
@@ -144,7 +144,7 @@ describe('formatOutline', () => {
 
     expect(summary).toBe('notes.txt: объявлений нет');
     expect(detail).toContain('Объявлений в notes.txt не нашлось');
-    expect(detail).toContain('read_file');
+    expect(detail).toContain('read');
     expect(total).toBe(0);
   });
 

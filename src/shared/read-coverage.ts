@@ -16,16 +16,17 @@ export function isCovered(ranges: ReadonlyArray<{ from: number; to: number }>, f
 }
 
 /**
- * Запрос read_file, целиком лежащий в уже прочитанном диапазоне: такой повтор не
- * исполняем — текст уже есть выше в ветке. Ловим только запросы с явным endLine:
- * без него верхняя граница (конец файла) нам неизвестна.
+ * Запрос `read` с одним файлом, целиком лежащий в уже прочитанном диапазоне: такой
+ * повтор не исполняем — текст уже есть выше в ветке. Ловим только запросы с явным
+ * endLine: без него верхняя граница (конец файла) нам неизвестна. Пачечный вариант
+ * (`paths`) не трогаем: у него нет диапазонов, и цена повтора там иная.
  */
 export function coveredRequest(
   name: string,
   rawArguments: string,
   reads: ReadonlyMap<string, Array<{ from: number; to: number }>>,
 ): { path: string; from: number; to: number } | undefined {
-  if (name !== 'read_file') return undefined;
+  if (name !== 'read') return undefined;
   const parsed = parseToolArguments(rawArguments);
   if (!parsed.ok) return undefined;
   // force: явный запрос перечитать — контент мог выпасть из контекста. Флаг бывает
@@ -171,7 +172,7 @@ export function forgetChangedFiles<T>(
     const paths = [pathOf(args.path), pathOf(args.from), pathOf(args.to)].filter(
       (path): path is string => path !== null,
     );
-    // Файлы из правок тоже: `executed` помнит и read_file, и сами правки.
+    // Файлы из правок тоже: `executed` помнит и `read`, и сами правки.
     for (const inner of pathsOf(args.edits)) paths.push(inner);
     for (const inner of pathsOf(args.patches)) paths.push(inner);
     if (paths.some((path) => touched.has(pathKey(path)))) caches.executed.delete(key);

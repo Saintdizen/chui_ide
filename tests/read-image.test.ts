@@ -14,10 +14,10 @@ import {
 import { AGENT_TOOLS } from '../src/shared/tools';
 
 describe('imageRefusal', () => {
-  it('не картинка — отказ с подсказкой про read_file', () => {
+  it('не картинка — отказ с подсказкой про read', () => {
     const reason = imageRefusal(null, 1024);
     expect(reason).toContain('не изображение');
-    expect(reason).toContain('read_file');
+    expect(reason).toContain('read');
   });
 
   it('SVG — это текст, а не картинка для модели', () => {
@@ -138,7 +138,7 @@ describe('схема инструмента read_image', () => {
     expect(tool!.inputSchema.properties.path?.type).toBe('string');
   });
 
-  it('описание объясняет, чем он отличается от read_file', () => {
-    expect(tool!.description).toContain('read_file');
+  it('описание объясняет, чем он отличается от read', () => {
+    expect(tool!.description).toContain('read');
   });
 });

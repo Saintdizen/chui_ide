@@ -121,7 +121,7 @@ function foldPicked(messages: ChatMessage[], picked: readonly number[], spillDir
       continue;
     }
     const reason = where
-      ? `${size} симв. — текст в ${where}, читайте read_file с диапазоном`
+      ? `${size} симв. — текст в ${where}, читайте read с диапазоном`
       : `${size} симв. — перечитайте инструментом, если нужно`;
     const stub = `[свёрнуто: ${message.name ?? 'tool'}, ${reason}]`;
     // Заменяем объект, а не содержимое: ту же ссылку держит `produced` — то,

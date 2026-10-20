@@ -39,7 +39,7 @@ export interface ToolPolicy {
    * Действия, которые только читают состояние. Нужны слитым инструментам:
    * `terminal` целиком мир меняет (запускает команды), а `terminal` с
    * `action: read` — нет, и повтор такого вызова так же бесполезен, как повтор
-   * `read_file`. Без этого признака слияние молча отключило бы защиту от
+   * `read`. Без этого признака слияние молча отключило бы защиту от
    * зацикливания на чтении вывода.
    */
   readonly readOnlyActions?: readonly string[];
@@ -47,13 +47,14 @@ export interface ToolPolicy {
 
 export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   /* ── чтение проекта ─────────────────────────────────────────────────── */
-  list_dir: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
-  read_file: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
-  read_files: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
+  // Одно имя на папку и на маску: без `glob` — что в каталоге, с ним — найденные
+  // файлы. Оба действия только читают, поэтому право на них одно.
+  list: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
+  // Одно имя на один файл и на пачку (`path` | `paths`).
+  read: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
   search: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
   search_docs: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
   project_map: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
-  find_files: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
   read_image: { readOnly: true, plan: true, alwaysAvailable: true, deniedInProgram: true },
 
   /* Символы и языковой сервер: без него эти инструменты не предлагаются. */

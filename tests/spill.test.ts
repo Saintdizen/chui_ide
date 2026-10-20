@@ -95,7 +95,7 @@ describe('prune', () => {
 describe('spillHint', () => {
   it('говорит модели, чем прочитать файл', () => {
     const hint = spillHint('/tmp/ai-spill/20260812-173052-terminal.txt');
-    expect(hint).toContain('read_file');
+    expect(hint).toContain('read');
     expect(hint).toContain('/tmp/ai-spill/20260812-173052-terminal.txt');
   });
 });

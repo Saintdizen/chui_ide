@@ -55,13 +55,13 @@ async function measure(name: string, args: Record<string, unknown>): Promise<str
 describe('бюджет ответов инструментов', () => {
   it('ни один читающий инструмент не отдаёт больше потолка одного вызова', async () => {
     await measure('project_map', {});
-    await measure('list_dir', { path: path.join(ROOT, 'src/main/ai') });
-    await measure('find_files', { glob: '**/*.ts', limit: 200 });
+    await measure('list', { path: path.join(ROOT, 'src/main/ai') });
+    await measure('list', { glob: '**/*.ts', limit: 200 });
     await measure('search', { query: 'export function' });
     await measure('search', { query: 'export function', context: 2 });
     await measure('search', { query: 'export function', filesOnly: true });
-    await measure('read_file', { path: path.join(ROOT, 'src/main/ai/service.ts') });
-    await measure('read_files', {
+    await measure('read', { path: path.join(ROOT, 'src/main/ai/service.ts') });
+    await measure('read', {
       paths: [path.join(ROOT, 'src/shared/tool-presets.ts'), path.join(ROOT, 'src/shared/agent-prompt.ts')],
     });
 
@@ -128,11 +128,11 @@ describe('новые пределы выдачи', () => {
     const context = { workspace, signal: new AbortController().signal } as ToolContext;
     const out = await runTool(
       context,
-      'read_files',
+      'read',
       JSON.stringify({ paths: [path.join(ROOT, 'src/main/ai/service.ts'), path.join(ROOT, 'src/shared/tools.ts')] }),
     );
     const detail = out.detail ?? '';
-    expect(detail).toContain('дальше read_file с диапазоном');
+    expect(detail).toContain('дальше read с диапазоном');
     expect(detail.length).toBeLessThan(20_000);
   }, 60_000);
 });

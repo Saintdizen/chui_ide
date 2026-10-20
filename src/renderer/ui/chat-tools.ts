@@ -20,6 +20,9 @@ import { fileIcon } from './file-icons';
 const MAX_REASONING_CHARS = 20_000;
 
 const TOOL_LABELS: Record<string, string> = {
+  // Старые имена остаются: в истории бесед трассы прошлых прогонов уже записаны.
+  list: 'Просмотр',
+  read: 'Чтение',
   list_dir: 'Просмотр папки',
   read_file: 'Чтение файла',
   read_files: 'Чтение файлов',
@@ -47,6 +50,8 @@ const TOOL_LABELS: Record<string, string> = {
 
 /** У инструмента свой значок: строка читается без чтения подписи. */
 const TOOL_ICONS: Record<string, IconName> = {
+  list: 'folder',
+  read: 'file',
   list_dir: 'folder',
   read_file: 'file',
   read_files: 'file',
@@ -132,7 +137,7 @@ function toolIcon(name: string): IconName {
 
 /** Путь файла, если инструмент работает явно с одним файлом; иначе null. */
 function toolFilePath(name: string, raw: string): string | null {
-  if (name === 'list_dir') return null; // каталог, а не файл
+  if (name === 'list' || name === 'list_dir') return null; // каталог или маска, а не файл
   try {
     const value = JSON.parse(raw) as { path?: unknown; edits?: unknown };
     if (typeof value.path === 'string' && value.path) return value.path;
@@ -261,7 +266,8 @@ function toolDetailLanguage(call: ChatToolStartPayload): string {
       return '';
     }
   }
-  if (call.name !== 'read_file' && call.name !== 'list_dir') return '';
+  const single = ['read', 'read_file', 'list', 'list_dir'];
+  if (!single.includes(call.name)) return '';
   try {
     const args = JSON.parse(call.args) as { path?: unknown };
     return typeof args.path === 'string' ? languageFromPath(args.path) : '';

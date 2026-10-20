@@ -23,7 +23,7 @@ import { runtimePermissionArgs } from '../src/main/ai/run-code';
  */
 
 const call = (overrides: Partial<RunCodeCall> = {}): RunCodeCall => ({
-  name: 'read_file',
+  name: 'read',
   ok: true,
   summary: 'a.ts: 120 строк',
   ms: 12,
@@ -42,7 +42,7 @@ const outcome = (overrides: Partial<RunCodeOutcome> = {}): RunCodeOutcome => ({
 
 describe('какая программа годится', () => {
   it('обычное тело функции — годится', () => {
-    expect(programProblem('const files = await tools.list_dir({});\nreturn files;')).toBeNull();
+    expect(programProblem('const files = await tools.list({});\nreturn files;')).toBeNull();
   });
 
   it('пустая программа объясняет, что нужно', () => {
@@ -83,7 +83,7 @@ describe('файл программы', () => {
 
 describe('что программа может звать', () => {
   it('обычные инструменты — да', () => {
-    expect(runCodeToolAllowed('read_file')).toBe(true);
+    expect(runCodeToolAllowed('read')).toBe(true);
     expect(runCodeToolAllowed('terminal')).toBe(true);
     expect(runCodeToolAllowed('edit')).toBe(true);
   });
@@ -110,7 +110,7 @@ describe('сводка по вызовам', () => {
       call({ name: 'search', summary: 'найдено 2', ok: false }),
       call({ name: 'search', summary: 'найдено 0' }),
     ];
-    expect(summarizeCalls(calls)).toBe('5 вызовов: read_file ×3, search ×2, с ошибкой 1');
+    expect(summarizeCalls(calls)).toBe('5 вызовов: read ×3, search ×2, с ошибкой 1');
   });
 
   it('без вызовов говорит об этом прямо', () => {
@@ -121,13 +121,13 @@ describe('сводка по вызовам', () => {
 describe('ответ инструмента', () => {
   it('сводка называет вызовы и время', () => {
     const { summary } = formatRunCode(outcome());
-    expect(summary).toBe('run_code: 1 вызов: read_file за 1 с');
+    expect(summary).toBe('run_code: 1 вызов: read за 1 с');
   });
 
   it('в разборе есть и вызовы, и результат', () => {
     const { detail } = formatRunCode(outcome());
     expect(detail).toContain('Вызовы программы:');
-    expect(detail).toContain('1. read_file — a.ts: 120 строк (12 мс)');
+    expect(detail).toContain('1. read — a.ts: 120 строк (12 мс)');
     expect(detail).toContain('Что вернула программа:');
     expect(detail).toContain('{"files":3}');
   });

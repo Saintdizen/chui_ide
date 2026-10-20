@@ -38,18 +38,20 @@ const AGENT_HINTS: readonly AgentHint[] = [
     // Два совета были об одном и том же: «не догадывайся» и «не выдумывай». Один
     // из них — повторение другого, а платится он в каждом запросе каждого шага.
     text: 'Не выдумывай содержимое файлов: чего не знаешь — читай инструментами, а не по памяти.',
-    needs: ['read_file'],
+    needs: ['read'],
   },
   {
     text: 'Проект виден по карте: дерево не обходи, манифесты не читай (project_map).',
     needs: ['project_map'],
   },
   {
-    text: 'Сначала найди место, потом читай: codebase_search — объявление, find_references — применения, search — текст, find_files — имена.',
-    needs: ['codebase_search', 'find_references', 'search', 'find_files'],
+    text: 'Сначала найди место, потом читай: codebase_search — объявление, find_references — применения, search — текст, list с glob — имена.',
+    needs: ['codebase_search', 'find_references', 'search', 'list'],
   },
   {
-    text: 'У search бери context=2–3: соседних строк часто хватает вместо read_file.',
+    // Замер (`tests/tool-output-budget.test.ts`): search без context — 1 347 ток.,
+    // с context:2 — 2 828. Контекст берут, потому что он кажется бесплатным.
+    text: 'search сперва без context: он удваивает вывод. context=2–3 — когда без соседних строк не понять.',
     needs: ['search'],
   },
   {
@@ -57,11 +59,17 @@ const AGENT_HINTS: readonly AgentHint[] = [
     needs: ['search_docs'],
   },
   {
-    text: 'file_outline — скелет файла; дальше read_file диапазоном, не целиком и не дважды.',
-    needs: ['file_outline', 'read_file'],
+    // Пачка файлов целиком — самый дорогой вывод сборки: 4 629 токенов против
+    // 2 734 у одного. Для поиска годится скелет, а не пять файлов вслепую.
+    text: 'read с paths — для уже известных мест, а не для поиска: пять файлов целиком дороже любого оглавления.',
+    needs: ['read'],
   },
   {
-    text: 'Картинки — read_image (read_file откажет); SVG — наоборот, текст.',
+    text: 'file_outline — скелет файла; дальше read диапазоном, не целиком и не дважды.',
+    needs: ['file_outline', 'read'],
+  },
+  {
+    text: 'Картинки — read_image (read откажет); SVG — наоборот, текст.',
     needs: ['read_image'],
   },
   {

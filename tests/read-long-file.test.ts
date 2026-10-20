@@ -44,9 +44,9 @@ const symbols: SymbolSearch = {
   ],
 };
 
-const read = (ctx: ToolContext) => runTool(ctx, 'read_file', JSON.stringify({ path: big }));
+const read = (ctx: ToolContext) => runTool(ctx, 'read', JSON.stringify({ path: big }));
 
-describe('read_file длинного файла', () => {
+describe('read длинного файла', () => {
   it('отдаёт голову, а не первые 60 000 символов', async () => {
     const outcome = await read({ workspace });
     const detail = String(outcome.detail ?? '');
@@ -90,7 +90,7 @@ describe('read_file длинного файла', () => {
   it('короткий файл по-прежнему читается целиком', async () => {
     const small = path.join(dir, 'small.txt');
     await fs.writeFile(small, 'первая\nвторая\n', 'utf8');
-    const outcome = await runTool({ workspace }, 'read_file', JSON.stringify({ path: small }));
+    const outcome = await runTool({ workspace }, 'read', JSON.stringify({ path: small }));
     expect(outcome.detail).toBe('первая\nвторая\n');
     expect(outcome.read).toEqual({ path: small, from: 1, to: 3 });
   });

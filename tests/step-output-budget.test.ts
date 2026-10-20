@@ -43,7 +43,7 @@ afterEach(async () => {
   await fs.rm(dir, { recursive: true, force: true });
 });
 
-const readWhole = (ctx: ToolContext) => runTool(ctx, 'read_file', JSON.stringify({ path: big }));
+const readWhole = (ctx: ToolContext) => runTool(ctx, 'read', JSON.stringify({ path: big }));
 
 describe('бюджет вывода на шаг', () => {
   it('без бюджета поведение прежнее: действует только предел на вызов', async () => {
@@ -86,7 +86,7 @@ describe('бюджет вывода на шаг', () => {
     const budget = { left: STEP_OUTPUT_CHARS };
     const small = path.join(dir, 'small.txt');
     await fs.writeFile(small, 'одна строка\n', 'utf8');
-    const outcome = await runTool({ workspace, stepBudget: budget }, 'read_file', JSON.stringify({ path: small }));
+    const outcome = await runTool({ workspace, stepBudget: budget }, 'read', JSON.stringify({ path: small }));
     expect(outcome.detail).toBe('одна строка\n');
     // Списано ровно столько, сколько отдано.
     expect(budget.left).toBe(STEP_OUTPUT_CHARS - 'одна строка\n'.length);
@@ -143,11 +143,11 @@ describe('отказ инструмента', () => {
     await workspace.open(dir);
     try {
       const ctx = { workspace, signal: new AbortController().signal } as ToolContext;
-      const outcome = await runTool(ctx, 'read_file', JSON.stringify({ path: path.join(dir, 'logo.bin') }));
+      const outcome = await runTool(ctx, 'read', JSON.stringify({ path: path.join(dir, 'logo.bin') }));
       // Бинарный файл — отказ с советом в detail. Раньше в историю шёл только
       // summary («бинарный файл»), и модель шла угадывать, что с этим делать.
       expect(outcome.ok).toBe(false);
-      expect(failureText(outcome)).toContain('list_dir');
+      expect(failureText(outcome)).toContain('list');
     } finally {
       workspace.dispose();
       await fs.rm(dir, { recursive: true, force: true });

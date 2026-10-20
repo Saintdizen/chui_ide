@@ -52,7 +52,7 @@ export interface DocChunk {
   path: string;
   /** Заголовок раздела: `Установка > Зависимости`; пустой — текст без заголовков. */
   heading: string;
-  /** Строка начала раздела (1-based) — чтобы «дочитать» его через read_file. */
+  /** Строка начала раздела (1-based) — чтобы «дочитать» его через read. */
   line: number;
   /** Тело раздела: заголовок (если был) и текст до следующего заголовка. */
   text: string;
@@ -304,7 +304,7 @@ function snippetOf(text: string): string {
 
 /**
  * Ответ инструмента человеческим текстом. Раздел показываем с путём, строкой и
- * заголовком, чтобы его можно было дочитать целиком (`read_file` с startLine/endLine),
+ * заголовком, чтобы его можно было дочитать целиком (`read` с startLine/endLine),
  * а не только по выдержке: выдержка обрезана и как источник истины не годится.
  */
 export function formatDocsAnswer(
@@ -337,7 +337,7 @@ export function formatDocsAnswer(
   });
   lines.push(
     '',
-    'Это выдержки из документации проекта. Если нужен раздел целиком — прочитай его (read_file с startLine/endLine).',
+    'Это выдержки из документации проекта. Если нужен раздел целиком — прочитай его (read с startLine/endLine).',
   );
 
   return { summary: `«${result.query}»: разделов ${result.hits.length} в документации`, detail: lines.join('\n') };

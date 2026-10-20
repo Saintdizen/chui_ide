@@ -48,15 +48,15 @@ export interface ShrinkStep {
 /**
  * Почему картинку не отправляем. `null` — можно.
  *
- * Отказы намеренно делят случаи: «это не картинка» (текст читай `read_file`),
+ * Отказы намеренно делят случаи: «это не картинка» (текст читай `read`),
  * «формат не тот» (SVG — это текст) и «файл велик» (человек может уменьшить).
  */
 export function imageRefusal(mime: string | null, bytes: number): string | null {
   if (!mime) {
-    return 'Это не изображение: read_image работает с PNG, JPEG, WebP и GIF. Текст читай read_file.';
+    return 'Это не изображение: read_image работает с PNG, JPEG, WebP и GIF. Текст читай read.';
   }
   if (mime === 'image/svg+xml') {
-    return 'SVG — это текст: картинкой модель его не увидит. Читай SVG через read_file — там вся разметка и цвета.';
+    return 'SVG — это текст: картинкой модель его не увидит. Читай SVG через read — там вся разметка и цвета.';
   }
   if (!SENDABLE_MIME.has(mime)) {
     return `${imageMimeLabel(mime)} провайдеры картинкой не принимают. Пересохрани в PNG или JPEG — тогда read_image сработает.`;

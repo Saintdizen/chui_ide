@@ -9,8 +9,8 @@ import { WorkspaceService } from '../src/main/workspace/workspace';
  * Поиск с контекстом — как `-A`/`-B` у grep.
  *
  * Смысл проверок в том, ради чего контекст и добавлен: агент получает окружение
- * совпадения сразу и не делает следом отдельный `read_file`. Поэтому проверяем и
- * сами строки, и то, что номера в выводе — те же номера, что у `read_file`.
+ * совпадения сразу и не делает следом отдельный `read`. Поэтому проверяем и
+ * сами строки, и то, что номера в выводе — те же номера, что у `read`.
  *
  * Две роли строк видны по знаку: `N: текст` — совпадение (текст без отступов,
  * как и раньше), `N- текст` — соседняя строка (отступы сохранены: по ним видно
@@ -74,7 +74,7 @@ describe('search с контекстом', () => {
     expect(String(outcome.detail)).not.toContain('readFile(path)');
   });
 
-  it('с context рядом видны соседние строки — отдельный read_file не нужен', async () => {
+  it('с context рядом видны соседние строки — отдельный read не нужен', async () => {
     const outcome = await runTool(context(), 'search', JSON.stringify({ query: 'throw new Error', context: 2 }));
 
     // Строка совпадения и её окружение — в одном ответе. Текст совпадения без
@@ -84,10 +84,10 @@ describe('search с контекстом', () => {
     expect(lineContaining(outcome.detail, 'return text;')).toBe('5-   return text;');
   });
 
-  it('номера строк в выводе те же, что у read_file', async () => {
+  it('номера строк в выводе те же, что у read', async () => {
     const file = path.join(dir, 'src/loader.js');
-    const read = await runTool(context(), 'read_file', JSON.stringify({ path: file, startLine: 1, endLine: 6 }));
-    // read_file с диапазоном нумерует строки сам — сверим номера двух инструментов.
+    const read = await runTool(context(), 'read', JSON.stringify({ path: file, startLine: 1, endLine: 6 }));
+    // read с диапазоном нумерует строки сам — сверим номера двух инструментов.
     expect(String(read.detail)).toContain('2 |   const text = readFile(path);');
 
     const outcome = await runTool(context(), 'search', JSON.stringify({ query: 'readFile', context: 1 }));
@@ -133,10 +133,10 @@ describe('search: границы файла', () => {
     expect(Math.min(...lineNumbers(outcome.detail))).toBe(1);
   });
 
-  it('в конце файла контекст не выходит за пределы, которые знает read_file', async () => {
+  it('в конце файла контекст не выходит за пределы, которые знает read', async () => {
     const file = path.join(dir, 'src/loader.js');
-    const read = await runTool(context(), 'read_file', JSON.stringify({ path: file }));
-    // «путь: N строк» — столько строк знает read_file; столько же должен знать поиск.
+    const read = await runTool(context(), 'read', JSON.stringify({ path: file }));
+    // «путь: N строк» — столько строк знает read; столько же должен знать поиск.
     const total = Number(/(\d+) строк/.exec(String(read.summary))?.[1]);
 
     const outcome = await runTool(context(), 'search', JSON.stringify({ query: 'return text', context: 3 }));

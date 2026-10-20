@@ -56,15 +56,14 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
   {
     id: 'core',
     label: 'Основа',
-    // Самое необходимое, чтобы вообще найти нужное место: шесть схем вместо
+    // Самое необходимое, чтобы вообще найти нужное место: пять схем вместо
     // сорока. Столько стоит «просто спросил» — примерно вдесятеро дешевле полного.
-    names: ['list_dir', 'read_file', 'search', 'find_files', 'codebase_search', 'project_map'],
+    names: ['list', 'read', 'search', 'codebase_search', 'project_map'],
   },
   {
     id: 'read',
     label: 'Чтение',
     names: [
-      'read_files',
       'search_docs',
       'session_search',
       'read_skill',

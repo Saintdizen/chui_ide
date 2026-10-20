@@ -40,9 +40,9 @@ afterEach(async () => {
 });
 
 const context = (): ToolContext => ({ workspace }) as unknown as ToolContext;
-const run = (args: Record<string, unknown>) => runTool(context(), 'read_file', JSON.stringify(args));
+const run = (args: Record<string, unknown>) => runTool(context(), 'read', JSON.stringify(args));
 
-describe('read_file: границы диапазона', () => {
+describe('read: границы диапазона', () => {
   it('без диапазона читает файл целиком и помечает прочитанное', async () => {
     const outcome = await run({ path: file });
     expect(outcome.ok).toBe(true);
@@ -87,7 +87,7 @@ describe('read_file: границы диапазона', () => {
   });
 });
 
-describe('read_file: номера строк пришли строками', () => {
+describe('read: номера строк пришли строками', () => {
   it('«2»–«4» читают вторую–четвёртую строку, а не весь файл', async () => {
     const outcome = await run({ path: file, startLine: '2', endLine: '4' });
     expect(outcome.ok).toBe(true);

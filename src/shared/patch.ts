@@ -121,7 +121,7 @@ export function resolvePatches(text: string, patches: readonly PatchHunk[]): Pat
     if (patch.oldText.length === 0) {
       return {
         ok: false,
-        message: `${where}пустой якорь. Нужен точный текст из файла — прочитай его read_file и возьми фрагмент оттуда.`,
+        message: `${where}пустой якорь. Нужен точный текст из файла — прочитай его read и возьми фрагмент оттуда.`,
       };
     }
 

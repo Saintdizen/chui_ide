@@ -97,7 +97,7 @@ describe('повтор чтения', () => {
     expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'взмахнуть' }))).toBe(false);
     expect(isReadOnlyCall('terminal', 'не json')).toBe(false);
     // Обычные инструменты чтения работают как раньше.
-    expect(isReadOnlyCall('read_file', JSON.stringify({ path: '/p/a.ts' }))).toBe(true);
+    expect(isReadOnlyCall('read', JSON.stringify({ path: '/p/a.ts' }))).toBe(true);
     expect(isReadOnlyCall('edit', '{}')).toBe(false);
   });
 });

@@ -96,7 +96,7 @@ describe('наборы инструментов агента', () => {
       expect(allowed.has(name), `«чтение» не должно предлагать ${name}`).toBe(false);
     }
     // А читать и спрашивать — обязано: иначе набор бесполезен.
-    for (const name of ['read_file', 'search', 'file_outline', 'ask']) {
+    for (const name of ['read', 'search', 'file_outline', 'ask']) {
       expect(allowed.has(name)).toBe(true);
     }
   });
@@ -124,10 +124,12 @@ describe('наборы инструментов агента', () => {
   it('узкие наборы заметно дешевле полного', () => {
     // Ростер сжал и полный набор: разрыв с «Только чтение» стал 0,74 вместо 0,54.
     // Порог 0,8 держит именно это — иначе сторож молча пропустит рост схем.
+    // После слияний (read, list) «Чтение» стало дешевле, а «Минимум» — нет: его
+    // цена в основе, и порог оставлен 0,75.
     expect(tokens.read).toBeLessThan(tokens.full * 0.8);
-    expect(tokens.minimal).toBeLessThan(tokens.read * 0.7);
+    expect(tokens.minimal).toBeLessThan(tokens.read * 0.75);
     expect(tokens.edit).toBeLessThan(tokens.full);
-    // Абсолютный потолок чтения: ради этого выбор и заводился (замер — ≈3 840).
+    // Абсолютный потолок чтения: ради этого выбор и заводился (замер — ≈2 400).
     expect(tokens.read).toBeLessThan(6_500);
   });
 
@@ -147,7 +149,7 @@ describe('наборы инструментов агента', () => {
     expect(auto.widen).toBe(true);
     expect(auto.groups).not.toBeNull();
     // Всё, что меняет проект, в нём есть: правки прятать нельзя — это работа.
-    for (const name of ['edit', 'read_file', 'ask', 'run_tests']) {
+    for (const name of ['edit', 'read', 'ask', 'run_tests']) {
       expect(presetToolNames('auto')?.has(name), `в «Авто» нет ${name}`).toBe(true);
     }
     // А дорогое и редкое — спрятано: именно на нём и экономия.

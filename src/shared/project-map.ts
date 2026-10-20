@@ -109,8 +109,8 @@ export function formatProjectMap(scan: ProjectScan): { summary: string; detail: 
 
   lines.push(
     '',
-    'Дальше: find_files — какие файлы есть (по маске), list_dir — что в каталоге, ' +
-      'codebase_search — где объявлено имя. Содержимое читай точечно: read_file с startLine/endLine.',
+    'Дальше: list — что в каталоге, а с glob — какие файлы есть по маске; ' +
+      'codebase_search — где объявлено имя. Содержимое читай точечно: read с startLine/endLine.',
   );
 
   const summary =

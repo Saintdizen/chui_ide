@@ -28,9 +28,8 @@ describe('набор инструментов агента', () => {
   it('инструменты, о которых знает диспатчер, описаны', () => {
     // Список сверяем с `runTool`: имя, которое он умеет, обязано быть в наборе.
     const dispatched: AgentToolName[] = [
-      'list_dir',
-      'read_file',
-      'read_files',
+      'list',
+      'read',
       'search',
       'codebase_search',
       'search_docs',
@@ -39,7 +38,6 @@ describe('набор инструментов агента', () => {
       'go_to_definition',
       'rename_symbol',
       'run_tests',
-      'find_files',
       'get_diagnostics',
       'edit',
       'replace_in_files',
@@ -65,12 +63,25 @@ describe('набор инструментов агента', () => {
   });
 });
 
-describe('find_files', () => {
-  it('главная сторона и необязательные аргументы', () => {
-    const tool = byName.get('find_files')!;
+describe('list', () => {
+  it('папка без аргументов и маска с ними — в одной схеме', () => {
+    const tool = byName.get('list')!;
+    expect(tool.side).toBe('main');
+    // Обязательных нет нарочно: без `path` — корень проекта, без `glob` — его файлы.
+    // Выбор делает `listAction`, и оба действия только читают.
+    expect(tool.inputSchema.required).toBeUndefined();
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(['path', 'glob', 'limit']);
+  });
+});
+
+describe('read', () => {
+  it('один файл и пачка — в одной схеме, без обязательных полей', () => {
+    const tool = byName.get('read')!;
     expect(tool.side).toBe('main');
     expect(tool.inputSchema.required).toBeUndefined();
-    expect(Object.keys(tool.inputSchema.properties)).toEqual(['glob', 'limit']);
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(['path', 'paths', 'startLine', 'endLine', 'force']);
+    expect(tool.inputSchema.properties.paths?.type).toBe('array');
+    expect(tool.inputSchema.properties.paths?.items?.type).toBe('string');
   });
 });
 
@@ -93,16 +104,6 @@ describe('search', () => {
     // Предел есть и в схеме: без него модель не могла попросить меньше двухсот
     // совпадений, и поиск отдавал десятки тысяч символов на любой запрос.
     expect(props.limit?.type).toBe('number');
-  });
-});
-
-describe('read_files', () => {
-  it('требует непустой список путей', () => {
-    const tool = byName.get('read_files')!;
-    expect(tool.side).toBe('main');
-    expect(tool.inputSchema.required).toEqual(['paths']);
-    expect(tool.inputSchema.properties.paths?.type).toBe('array');
-    expect(tool.inputSchema.properties.paths?.items?.type).toBe('string');
   });
 });
 
@@ -199,10 +200,10 @@ describe('git_write', () => {
 
 describe('toOpenAiTools', () => {
   it('переносит имя и схему как есть', () => {
-    const [first] = toOpenAiTools([byName.get('find_files')!]);
+    const [first] = toOpenAiTools([byName.get('search')!]);
     expect(first!.type).toBe('function');
-    expect(first!.function.name).toBe('find_files');
-    expect(first!.function.parameters).toBe(byName.get('find_files')!.inputSchema);
+    expect(first!.function.name).toBe('search');
+    expect(first!.function.parameters).toBe(byName.get('search')!.inputSchema);
   });
 });
 

@@ -6,7 +6,7 @@
  * (там есть доступ к ФС), а правки документов — в renderer (там документная
  * модель и undo). Мост между ними уже готов — это RPC + события.
  *
- * Реализованы все: list_dir, read_file, search и terminal — в main,
+ * Реализованы все: list, read, search и terminal — в main,
  * edit — в renderer через хостовый вызов. Какие из них предложить модели,
  * решает сборка: см. `canRun` в `src/main/ai/service.ts`.
  */
@@ -14,9 +14,8 @@
 export type AgentToolSide = 'main' | 'renderer';
 
 export type AgentToolName =
-  | 'list_dir'
-  | 'read_file'
-  | 'read_files'
+  | 'list'
+  | 'read'
   | 'search'
   | 'codebase_search'
   | 'search_docs'
@@ -30,7 +29,6 @@ export type AgentToolName =
   | 'file_outline'
   | 'run_linter'
   | 'run_tests'
-  | 'find_files'
   | 'list_mcp_resources'
   | 'read_mcp_resource'
   | 'get_diagnostics'
@@ -105,25 +103,38 @@ export interface AgentToolSpec extends ExposedToolSpec {
 
 export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
-    name: 'list_dir',
+    name: 'list',
     side: 'main',
-    description: 'List the contents of a directory inside the workspace.',
+    description:
+      'What is there: `path` lists a folder, `glob` finds files by mask (**/*.py, src/**). ' +
+      'Service folders (node_modules, .git, dist) are skipped.',
     inputSchema: {
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Path.' },
+        glob: {
+          type: 'string',
+          description: 'Path mask: ** any depth, * one segment. Without it, all files.',
+        },
+        limit: { type: 'number', description: 'glob: how many (default 100, max 2000).' },
       },
-      required: ['path'],
     },
   },
   {
-    name: 'read_file',
+    name: 'read',
     side: 'main',
-    description: 'Read a file — whole or a line range. Output lines are numbered from 1: those numbers go to edit.',
+    description:
+      'Read a file — whole, a line range (`startLine`/`endLine`) or several at once (`paths`). ' +
+      'Output lines are numbered from 1: those numbers go to edit.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path.' },
+        path: { type: 'string', description: 'One file.' },
+        paths: {
+          type: 'array',
+          description: 'Instead of path: 2-5 files, output capped.',
+          items: { type: 'string' },
+        },
         startLine: {
           type: 'number',
           description: 'First line (1-based); default start.',
@@ -137,7 +148,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'Re-read what was read this turn.',
         },
       },
-      required: ['path'],
     },
   },
   {
@@ -185,7 +195,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Project documentation sections (README, docs/, *.md, *.rst): path, heading and ' +
-      'excerpt. The query may be written in words. Read a whole section with read_file, ' +
+      'excerpt. The query may be written in words. Read a whole section with read, ' +
       'starting at its startLine.',
     inputSchema: {
       type: 'object',
@@ -233,7 +243,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'read_image',
     side: 'main',
     description:
-      'View an image: screenshot, mockup, diagram. It reaches the model as an image in the next message; large files are downscaled. SVG is text — use read_file.',
+      'View an image: screenshot, mockup, diagram. It reaches the model as an image in the next message; large files are downscaled. SVG is text — use read.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -306,7 +316,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'File skeleton: declarations with line numbers and nesting, no bodies. The numbers ' +
-      'work in read_file ranges. Requires a language server.',
+      'work in read ranges. Requires a language server.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -357,22 +367,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
-    name: 'find_files',
-    side: 'main',
-    description:
-      'Files matching a path glob (**/*.py, src/**). Service folders (node_modules, .git, dist) are skipped.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        glob: {
-          type: 'string',
-          description: 'Path mask: ** any depth, * one segment (e.g. **/*.py). Without it, all files.',
-        },
-        limit: { type: 'number', description: 'How many (default 100, max 2000).' },
-      },
-    },
-  },
-  {
     name: 'list_mcp_resources',
     side: 'main',
     description:
@@ -398,22 +392,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         server: { type: 'string', description: 'Server, when several of them declare the same uri.' },
       },
       required: ['uri'],
-    },
-  },
-  {
-    name: 'read_files',
-    side: 'main',
-    description: 'Read 2-5 files in one call: line numbers as in read_file, total output capped.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        paths: {
-          type: 'array',
-          description: 'File paths.',
-          items: { type: 'string' },
-        },
-      },
-      required: ['paths'],
     },
   },
   {
@@ -553,7 +531,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'run_code',
     side: 'main',
     description:
-      'A JavaScript program where tools are plain functions: await tools.read_file({ path ' +
+      'A JavaScript program where tools are plain functions: await tools.read({ path ' +
       '}) returns { ok, summary, text }. This is a function body: await and return are ' +
       'available, imports are not. Only the temp folder is writable. Limits: 80 calls and 2 ' +
       'minutes.',

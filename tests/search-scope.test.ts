@@ -71,12 +71,12 @@ describe('search: область поиска', () => {
   });
 });
 
-describe('read_file: бинарный файл', () => {
+describe('read: бинарный файл', () => {
   it('отказывает словами, а не отдаёт мусор', async () => {
     const binary = path.join(dir, 'image.bin');
     await fs.writeFile(binary, Buffer.from([0x89, 0x50, 0x4e, 0x00, 0x47, 0x0d, 0x0a]));
 
-    const outcome = await run('read_file', { path: binary });
+    const outcome = await run('read', { path: binary });
     expect(outcome.ok).toBe(false);
     expect(String(outcome.summary)).toContain('бинарный');
   });
@@ -86,7 +86,7 @@ describe('read_file: бинарный файл', () => {
     await fs.writeFile(binary, Buffer.from([0x00, 0x01, 0x02]));
     const text = path.join(dir, 'src/app.ts');
 
-    const outcome = await run('read_files', { paths: [text, binary] });
+    const outcome = await run('read', { paths: [text, binary] });
     expect(String(outcome.detail)).toContain('const marker = 1;');
     expect(String(outcome.detail)).toContain('blob.bin');
   });

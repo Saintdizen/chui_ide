@@ -2117,7 +2117,7 @@ export class AiService {
     if (text.length > SUBAGENT_REPORT_CHARS) {
       const file = this.spillDir ? spillText(this.spillDir, 'otchet-podzadachi', text) : null;
       const rest = file
-        ? `… (отчёт обрезан: ${text.length} симв. — полностью в ${file}, читайте read_file с диапазоном строк)`
+        ? `… (отчёт обрезан: ${text.length} симв. — полностью в ${file}, читайте read с диапазоном строк)`
         : `… (отчёт обрезан: ${text.length} симв. — попросите подзадачу вернуть выжимку поменьше)`;
       clipped = `${text.slice(0, SUBAGENT_REPORT_CHARS)}\n${rest}`;
     }

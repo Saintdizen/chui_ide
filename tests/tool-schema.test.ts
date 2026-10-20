@@ -12,7 +12,7 @@ import { missingArguments, toolSpec } from '../src/shared/tool-schema';
 
 describe('toolSpec', () => {
   it('находит схему по имени', () => {
-    expect(toolSpec('read_file')?.name).toBe('read_file');
+    expect(toolSpec('read')?.name).toBe('read');
   });
 
   it('чужое имя (MCP) не находит', () => {
@@ -22,21 +22,21 @@ describe('toolSpec', () => {
 
 describe('missingArguments', () => {
   it('пустые аргументы — все обязательные поля перечислены', () => {
-    const spec = toolSpec('read_file')!;
-    expect(missingArguments(spec.inputSchema, {})).toEqual(['path']);
+    const spec = toolSpec('search')!;
+    expect(missingArguments(spec.inputSchema, {})).toEqual(['query']);
   });
 
   it('на месте — пустой список', () => {
-    const spec = toolSpec('read_file')!;
-    expect(missingArguments(spec.inputSchema, { path: '/a.ts' })).toEqual([]);
+    const spec = toolSpec('search')!;
+    expect(missingArguments(spec.inputSchema, { query: 'x' })).toEqual([]);
   });
 
   it('null считается пропуском, пустая строка — нет', () => {
     // Пустую строку разбор понимает по-своему (например, «весь файл»), и
     // отвергать её здесь значило бы разойтись с ним.
-    const spec = toolSpec('read_file')!;
-    expect(missingArguments(spec.inputSchema, { path: null })).toEqual(['path']);
-    expect(missingArguments(spec.inputSchema, { path: '' })).toEqual([]);
+    const spec = toolSpec('search')!;
+    expect(missingArguments(spec.inputSchema, { query: null })).toEqual(['query']);
+    expect(missingArguments(spec.inputSchema, { query: '' })).toEqual([]);
   });
 
   it('вложенный элемент массива называется с индексом', () => {
@@ -99,6 +99,8 @@ describe('описания аргументов', () => {
     'Folder or file (default: whole project).',
     'diff, log, blame: one file.',
     'One file instead of paths.',
+    'One file.',
+    'Instead of path: 2-5 files, output capped.',
     'Result files, one to five, inside the project.',
     'stage, unstage, discard, commit: files or folders.',
     'Scope; glob counts from here.',
@@ -110,7 +112,7 @@ describe('описания аргументов', () => {
     expect(notes.length).toBeGreaterThan(5);
     // Основная доля — один и тот же «Path.»; уточнения живут только там, где
     // действительно добавляют смысл (маска, диапазон, «один файл вместо списка»).
-    expect(notes.filter((note) => note.text === 'Path.').length).toBeGreaterThanOrEqual(6);
+    expect(notes.filter((note) => note.text === 'Path.').length).toBeGreaterThanOrEqual(4);
     for (const note of notes) {
       expect(CANONICAL.has(note.text), `${note.tool}.${note.name}: ${note.text}`).toBe(true);
     }

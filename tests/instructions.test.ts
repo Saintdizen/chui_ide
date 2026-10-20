@@ -39,7 +39,7 @@ describe('правила проекта в промпте', () => {
     expect(out).toContain('разделы:');
     expect(out).toContain('## Раздел');
     // Адрес, а не «дальше интереснее»: по файлу можно искать и читать диапазоном.
-    expect(out).toContain('read_file');
+    expect(out).toContain('read');
     expect(out).toContain('search');
   });
 
@@ -47,7 +47,7 @@ describe('правила проекта в промпте', () => {
     const text = 'Длинная строка правил без единого заголовка.\n'.repeat(200);
     const out = formatInstructionFile('.ai_rules', text, 2000);
     expect(out).toContain('без заголовков');
-    expect(out).toContain('read_file');
+    expect(out).toContain('read');
   });
 
   it('карта разделов не разрастается бесконечно', () => {

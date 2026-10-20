@@ -53,52 +53,52 @@ describe('coveredRequest', () => {
   });
 
   it('битый JSON — не разбираем', () => {
-    expect(coveredRequest('read_file', '{не json', reads)).toBeUndefined();
+    expect(coveredRequest('read', '{не json', reads)).toBeUndefined();
   });
 
   it('без endLine верхняя граница неизвестна — повтор разрешён', () => {
-    expect(coveredRequest('read_file', '{"path":"/proj/a.ts","startLine":1}', reads)).toBeUndefined();
+    expect(coveredRequest('read', '{"path":"/proj/a.ts","startLine":1}', reads)).toBeUndefined();
   });
 
   it('endLine не целое — не считаем диапазоном', () => {
-    expect(coveredRequest('read_file', '{"path":"/proj/a.ts","endLine":5.5}', reads)).toBeUndefined();
+    expect(coveredRequest('read', '{"path":"/proj/a.ts","endLine":5.5}', reads)).toBeUndefined();
   });
 
   it('force явно просит перечитать', () => {
-    expect(coveredRequest('read_file', '{"path":"/proj/a.ts","endLine":5,"force":true}', reads)).toBeUndefined();
+    expect(coveredRequest('read', '{"path":"/proj/a.ts","endLine":5,"force":true}', reads)).toBeUndefined();
   });
 
   it('диапазон уже прочитан — возвращаем его', () => {
-    const hit = coveredRequest('read_file', '{"path":"/proj/a.ts","startLine":10,"endLine":20}', reads);
+    const hit = coveredRequest('read', '{"path":"/proj/a.ts","startLine":10,"endLine":20}', reads);
     expect(hit).toEqual({ path: '/proj/a.ts', from: 10, to: 20 });
   });
 
   it('без startLine начало считается с первой строки', () => {
-    const hit = coveredRequest('read_file', '{"path":"/proj/a.ts","endLine":20}', reads);
+    const hit = coveredRequest('read', '{"path":"/proj/a.ts","endLine":20}', reads);
     expect(hit).toEqual({ path: '/proj/a.ts', from: 1, to: 20 });
   });
 
   it('диапазон вне прочитанного — не покрыт', () => {
-    expect(coveredRequest('read_file', '{"path":"/proj/a.ts","startLine":1,"endLine":200}', reads)).toBeUndefined();
+    expect(coveredRequest('read', '{"path":"/proj/a.ts","startLine":1,"endLine":200}', reads)).toBeUndefined();
   });
 
   it('неизвестный файл — не покрыт', () => {
-    expect(coveredRequest('read_file', '{"path":"/proj/b.ts","startLine":1,"endLine":5}', reads)).toBeUndefined();
+    expect(coveredRequest('read', '{"path":"/proj/b.ts","startLine":1,"endLine":5}', reads)).toBeUndefined();
   });
 
   it('перевёрнутый диапазон не покрыт: отказ объяснит инструмент, а не «уже прочитано»', () => {
-    expect(coveredRequest('read_file', '{"path":"/proj/a.ts","startLine":50,"endLine":10}', reads)).toBeUndefined();
+    expect(coveredRequest('read', '{"path":"/proj/a.ts","startLine":50,"endLine":10}', reads)).toBeUndefined();
   });
 
   it('границы, пришедшие строками, читаются так же, как числа', () => {
     // Модель шлёт «10»/«20» — диапазон от этого не перестаёт быть прочитанным.
-    const hit = coveredRequest('read_file', '{"path":"/proj/a.ts","startLine":"10","endLine":"20"}', reads);
+    const hit = coveredRequest('read', '{"path":"/proj/a.ts","startLine":"10","endLine":"20"}', reads);
     expect(hit).toEqual({ path: '/proj/a.ts', from: 10, to: 20 });
   });
 
   it('force строкой «true» тоже просит перечитать', () => {
     // Иначе флаг терялся бы, и вместо текста модель получила бы «уже прочитано».
-    expect(coveredRequest('read_file', '{"path":"/proj/a.ts","endLine":5,"force":"true"}', reads)).toBeUndefined();
+    expect(coveredRequest('read', '{"path":"/proj/a.ts","endLine":5,"force":"true"}', reads)).toBeUndefined();
   });
 });
 
@@ -170,8 +170,8 @@ describe('forgetChangedFiles', () => {
   /** Кеши как в агентном цикле: что исполнялось и какие диапазоны прочитаны. */
   const caches = () => ({
     executed: new Map<string, { ok: boolean }>([
-      ['read_file:{"path":"/proj/a.ts"}', { ok: true }],
-      ['read_file:{"path":"/proj/b.ts","endLine":9}', { ok: true }],
+      ['read:{"path":"/proj/a.ts"}', { ok: true }],
+      ['read:{"path":"/proj/b.ts","endLine":9}', { ok: true }],
     ]),
     coveredReads: new Map([
       ['/proj/a.ts', [{ from: 1, to: 100 }]],
@@ -184,10 +184,10 @@ describe('forgetChangedFiles', () => {
     forgetChangedFiles(state, 'create_file', JSON.stringify({ path: '/proj/a.ts', contents: 'x' }));
     // Забыт только a.ts — и в обоих кешах.
     expect(state.coveredReads.has('/proj/a.ts')).toBe(false);
-    expect(state.executed.has('read_file:{"path":"/proj/a.ts"}')).toBe(false);
+    expect(state.executed.has('read:{"path":"/proj/a.ts"}')).toBe(false);
     // b.ts не трогали: модель не перечитывает его заново.
     expect(state.coveredReads.has('/proj/b.ts')).toBe(true);
-    expect(state.executed.has('read_file:{"path":"/proj/b.ts","endLine":9}')).toBe(true);
+    expect(state.executed.has('read:{"path":"/proj/b.ts","endLine":9}')).toBe(true);
   });
 
   it('команда в терминале по-прежнему забывает всё', () => {
@@ -201,7 +201,7 @@ describe('forgetChangedFiles', () => {
     // На Windows main отдаёт пути через `\\`. Сравниваем по единому виду, иначе
     // правка не забыла бы ничего и модель читала бы изменённый файл из кеша.
     const state = {
-      executed: new Map<string, { ok: boolean }>([['read_file:{"path":"C:/proj/x.ts"}', { ok: true }]]),
+      executed: new Map<string, { ok: boolean }>([['read:{"path":"C:/proj/x.ts"}', { ok: true }]]),
       coveredReads: new Map([['C:/proj/x.ts', [{ from: 1, to: 5 }]]]),
     };
     forgetChangedFiles(state, 'create_file', JSON.stringify({ path: 'C:\\proj\\x.ts', contents: 'x' }));

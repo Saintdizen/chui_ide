@@ -36,7 +36,7 @@ export function spillName(kind: string, at: Date = new Date()): string {
 
 /** Что сказать модели вместо голого «вывод обрезан». */
 export function spillHint(file: string): string {
-  return `полностью — в файле ${file}: читайте read_file с диапазоном строк`;
+  return `полностью — в файле ${file}: читайте read с диапазоном строк`;
 }
 
 /**
