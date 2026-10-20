@@ -1898,6 +1898,11 @@ export class AiService {
         // Факт против оценки: провайдер сам сказал, сколько входных токенов взял.
         // Сравниваем с оценкой того же запроса и запоминаем поправку на будущее —
         // следующим шагам она уже не даст промахнуться мимо окна.
+        // Сравниваем с ВСЕМ входом: провайдер с кешем называет кешированное
+        // отдельным полем, а провайдеры приводятся к одному смыслу так, что
+        // `promptTokens` его включает (см. AnthropicProvider). Иначе при
+        // попадании в кеш оценка выглядела бы вдесятеро больше факта и обучила
+        // бы калибровку врать.
         if (done.usage?.promptTokens !== undefined) {
           const estimated = estimateMessagesTokens(wire.messages) + params.toolsTokens;
           this.calibration.observe(params.calibrationKey, estimated, done.usage.promptTokens);

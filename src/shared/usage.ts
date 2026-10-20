@@ -30,21 +30,40 @@ export function addUsage(a: ChatUsage | undefined, b: ChatUsage | undefined): Ch
     promptTokens: sum(a?.promptTokens, b?.promptTokens),
     completionTokens: sum(a?.completionTokens, b?.completionTokens),
     cachedTokens: sum(a?.cachedTokens, b?.cachedTokens),
+    cacheCreationTokens: sum(a?.cacheCreationTokens, b?.cacheCreationTokens),
   };
 }
 
 /**
  * Сколько стоил расход для этой модели, в долларах. `null` — модели нет в таблице
  * цен: считать по чужому тарифу хуже, чем не показать вовсе.
+ *
+ * Три статьи входа стоят по-разному, и это не придирка: попадание в кеш дешевле
+ * обычного ввода (у Anthropic — вдесятеро), а запись в кеш дороже (в 1.25 раза).
+ * Считать всё по цене обычного ввода значит показывать цифру, по которой нельзя
+ * решить, окупается ли кеш.
  */
 export function usageCost(usage: ChatUsage | undefined, model: string): number | null {
   if (!usage) return null;
   const pricing = modelPricing(model);
   if (!pricing) return null;
-  const input = usage.promptTokens ?? 0;
+  const total = usage.promptTokens ?? 0;
   const output = usage.completionTokens ?? 0;
-  if (input === 0 && output === 0) return null;
-  return (input / 1_000_000) * pricing.input + (output / 1_000_000) * pricing.output;
+  if (total === 0 && output === 0) return null;
+
+  // `cachedTokens` — часть `promptTokens`, поэтому из общего вычитается: без этого
+  // кешированное оплачивалось бы дважды — по полной цене и со скидкой.
+  const cached = Math.min(Math.max(0, usage.cachedTokens ?? 0), total);
+  const written = Math.min(Math.max(0, usage.cacheCreationTokens ?? 0), total - cached);
+  const plain = Math.max(0, total - cached - written);
+
+  return (
+    (plain * pricing.input +
+      cached * pricing.cachedInput +
+      written * pricing.cacheWrite +
+      output * pricing.output) /
+    1_000_000
+  );
 }
 
 /** Короткая запись числа токенов: 1 200 → «1.2K». */

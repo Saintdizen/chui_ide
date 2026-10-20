@@ -80,3 +80,26 @@ describe('формат чисел', () => {
     expect(formatCost(0.0042)).toBe('0.0042');
   });
 });
+
+describe('usageCost и кеш промпта', () => {
+  it('попадание в кеш считается по скидке, а не по полной цене', () => {
+    // gpt-4o: input 2.5, попадание в кеш вдвое дешевле — 1.25 за 1M.
+    const cost = usageCost({ promptTokens: 1_000_000, cachedTokens: 1_000_000 }, 'gpt-4o');
+    expect(cost).toBeCloseTo(1.25, 5);
+  });
+
+  it('запись в кеш у Anthropic дороже обычного ввода', () => {
+    // claude-sonnet: input 3, запись 3.75 за 1M.
+    const cost = usageCost({ promptTokens: 1_000_000, cacheCreationTokens: 1_000_000 }, 'claude-sonnet-4-5');
+    expect(cost).toBeCloseTo(3.75, 5);
+  });
+
+  it('смешанный запрос не оплачивает кеш дважды', () => {
+    // 1M всего: из них 600k из кеша (1.25), 100k записано (2.5), 300k обычных (2.5).
+    const cost = usageCost(
+      { promptTokens: 1_000_000, cachedTokens: 600_000, cacheCreationTokens: 100_000 },
+      'gpt-4o',
+    );
+    expect(cost).toBeCloseTo((600_000 * 1.25 + 400_000 * 2.5) / 1_000_000, 5);
+  });
+});

@@ -68,7 +68,7 @@ describe('contextWindow', () => {
 
 describe('modelPricing', () => {
   it('известная модель', () => {
-    expect(modelPricing('gpt-4o-mini')).toEqual({ input: 0.15, output: 0.6 });
+    expect(modelPricing('gpt-4o-mini')).toMatchObject({ input: 0.15, output: 0.6 });
   });
 
   it('пустое имя → null', () => {
@@ -126,29 +126,38 @@ describe('contextWindow: разбор имён', () => {
 
 describe('modelPricing: прайс по семействам', () => {
   it('OpenAI', () => {
-    expect(modelPricing('gpt-4o')).toEqual({ input: 2.5, output: 10 });
-    expect(modelPricing('gpt-4.1-mini')).toEqual({ input: 0.4, output: 1.6 });
-    expect(modelPricing('gpt-4.1')).toEqual({ input: 2, output: 8 });
-    expect(modelPricing('o4-mini')).toEqual({ input: 1.1, output: 4.4 });
-    expect(modelPricing('o3')).toEqual({ input: 10, output: 40 });
-    expect(modelPricing('o1-mini')).toEqual({ input: 1.1, output: 4.4 });
-    expect(modelPricing('o1')).toEqual({ input: 15, output: 60 });
-    expect(modelPricing('gpt-5')).toEqual({ input: 1.25, output: 10 });
+    expect(modelPricing('gpt-4o')).toMatchObject({ input: 2.5, output: 10 });
+    expect(modelPricing('gpt-4.1-mini')).toMatchObject({ input: 0.4, output: 1.6 });
+    expect(modelPricing('gpt-4.1')).toMatchObject({ input: 2, output: 8 });
+    expect(modelPricing('o4-mini')).toMatchObject({ input: 1.1, output: 4.4 });
+    expect(modelPricing('o3')).toMatchObject({ input: 10, output: 40 });
+    expect(modelPricing('o1-mini')).toMatchObject({ input: 1.1, output: 4.4 });
+    expect(modelPricing('o1')).toMatchObject({ input: 15, output: 60 });
+    expect(modelPricing('gpt-5')).toMatchObject({ input: 1.25, output: 10 });
   });
 
   it('DeepSeek', () => {
-    expect(modelPricing('deepseek-reasoner')).toEqual({ input: 0.55, output: 2.19 });
-    expect(modelPricing('deepseek-chat')).toEqual({ input: 0.27, output: 1.1 });
+    expect(modelPricing('deepseek-reasoner')).toMatchObject({ input: 0.55, output: 2.19 });
+    expect(modelPricing('deepseek-chat')).toMatchObject({ input: 0.27, output: 1.1 });
   });
 
   it('Anthropic через шлюз', () => {
-    expect(modelPricing('claude-opus-4-1')).toEqual({ input: 15, output: 75 });
-    expect(modelPricing('claude-haiku-4-5')).toEqual({ input: 1, output: 5 });
-    expect(modelPricing('claude-sonnet-4-5')).toEqual({ input: 3, output: 15 });
+    expect(modelPricing('claude-opus-4-1')).toMatchObject({ input: 15, output: 75 });
+    expect(modelPricing('claude-haiku-4-5')).toMatchObject({ input: 1, output: 5 });
+    expect(modelPricing('claude-sonnet-4-5')).toMatchObject({ input: 3, output: 15 });
+  });
+
+  it('кеш промпта: скидка за чтение и надбавка за запись', () => {
+    // Без этих двух чисел нельзя ответить, окупается ли кеш: попадание дешевле
+    // обычного ввода, а запись у Anthropic дороже.
+    expect(modelPricing('gpt-4o')).toMatchObject({ cachedInput: 1.25, cacheWrite: 2.5 });
+    expect(modelPricing('claude-sonnet-4-5')?.cachedInput).toBeCloseTo(0.3, 10);
+    expect(modelPricing('claude-sonnet-4-5')?.cacheWrite).toBe(3.75);
+    expect(modelPricing('deepseek-chat')?.cachedInput).toBeCloseTo(0.027, 10);
   });
 
   it('из пресетов и прочее', () => {
-    expect(modelPricing('llama-3.3-70b-versatile')).toEqual({ input: 0.59, output: 0.79 });
+    expect(modelPricing('llama-3.3-70b-versatile')).toMatchObject({ input: 0.59, output: 0.79 });
     expect(modelPricing('некая-модель')).toBeNull();
   });
 });

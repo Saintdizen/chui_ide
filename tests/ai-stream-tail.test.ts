@@ -96,3 +96,30 @@ describe('хвост SSE без завершающего перевода стр
     expect(done.text).toBe('раз два');
   });
 });
+
+describe('расход Anthropic считает весь вход', () => {
+  it('кешированное входит в promptTokens и не пропадает', async () => {
+    // Живой баг: Anthropic сообщает input_tokens БЕЗ кешированного. При
+    // попадании в кеш запрос выглядел пустым, и калибровка окна обучалась на
+    // ratio 0.1 — то есть считала, что текста вдесятеро меньше, чем есть.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sse([
+          'event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":120,"cache_read_input_tokens":900,"cache_creation_input_tokens":80,"output_tokens":1}}}\n\n',
+        ]),
+      ),
+    );
+
+    const provider = new AnthropicProvider({ id: 'a', label: 'A', baseUrl: 'http://localhost:1', apiKey: 'k' });
+    const done = await provider.streamChat(
+      { model: 'm', messages: [{ role: 'user', content: 'x' }], maxTokens: 100 },
+      { onDelta: () => undefined },
+      new AbortController().signal,
+    );
+
+    expect(done.usage?.promptTokens).toBe(1100);
+    expect(done.usage?.cachedTokens).toBe(900);
+    expect(done.usage?.cacheCreationTokens).toBe(80);
+  });
+});

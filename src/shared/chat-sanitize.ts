@@ -232,12 +232,21 @@ export function sanitizeToolCalls(raw: unknown): ChatToolCall[] {
 /** Расход из файла: числа только там, где они числа; иначе поля просто нет. */
 function sanitizeUsage(raw: unknown): ChatUsage | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
-  const value = raw as { promptTokens?: unknown; completionTokens?: unknown; cachedTokens?: unknown };
+  const value = raw as {
+    promptTokens?: unknown;
+    completionTokens?: unknown;
+    cachedTokens?: unknown;
+    cacheCreationTokens?: unknown;
+  };
   const clean: ChatUsage = {};
   if (typeof value.promptTokens === 'number') clean.promptTokens = value.promptTokens;
   if (typeof value.completionTokens === 'number') clean.completionTokens = value.completionTokens;
   if (typeof value.cachedTokens === 'number') clean.cachedTokens = value.cachedTokens;
-  return clean.promptTokens !== undefined || clean.completionTokens !== undefined || clean.cachedTokens !== undefined
+  if (typeof value.cacheCreationTokens === 'number') clean.cacheCreationTokens = value.cacheCreationTokens;
+  return clean.promptTokens !== undefined ||
+    clean.completionTokens !== undefined ||
+    clean.cachedTokens !== undefined ||
+    clean.cacheCreationTokens !== undefined
     ? clean
     : undefined;
 }

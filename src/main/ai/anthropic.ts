@@ -142,6 +142,7 @@ export class AnthropicProvider implements AiProvider {
     let promptTokens: number | undefined;
     let completionTokens: number | undefined;
     let cachedTokens: number | undefined;
+    let cacheCreationTokens: number | undefined;
     const toolSlots = new Map<number, { id: string; name: string; args: string }>();
 
     /** Одна строка SSE: разбираем её и раскладываем по накопителям. */
@@ -160,10 +161,17 @@ export class AnthropicProvider implements AiProvider {
       }
 
       if (chunk.type === 'message_start' && chunk.message?.usage) {
-        promptTokens = chunk.message.usage.input_tokens;
-        completionTokens = chunk.message.usage.output_tokens ?? completionTokens;
-        const fromCache = chunk.message.usage.cache_read_input_tokens ?? 0;
+        const usage = chunk.message.usage;
+        const fromCache = usage.cache_read_input_tokens ?? 0;
+        const toCache = usage.cache_creation_input_tokens ?? 0;
+        // Anthropic сообщает `input_tokens` БЕЗ кешированного: попадание в кеш
+        // выглядело бы как 0 токенов запроса, и всё, что ниже (калибровка окна,
+        // стоимость), приняло бы запрос за пустой. Приводим к одному смыслу с
+        // OpenAI: `promptTokens` — весь вход, кешированное — его часть.
+        promptTokens = (usage.input_tokens ?? 0) + fromCache + toCache;
+        completionTokens = usage.output_tokens ?? completionTokens;
         if (fromCache > 0) cachedTokens = fromCache;
+        if (toCache > 0) cacheCreationTokens = toCache;
         return;
       }
 
@@ -223,7 +231,12 @@ export class AnthropicProvider implements AiProvider {
     return {
       text,
       finishReason,
-      usage: { promptTokens, completionTokens, ...(cachedTokens !== undefined ? { cachedTokens } : {}) },
+      usage: {
+        promptTokens,
+        completionTokens,
+        ...(cachedTokens !== undefined ? { cachedTokens } : {}),
+        ...(cacheCreationTokens !== undefined ? { cacheCreationTokens } : {}),
+      },
       ...(thoughts ? { reasoning: thoughts } : {}),
       ...(toolCalls.length ? { toolCalls } : {}),
     };

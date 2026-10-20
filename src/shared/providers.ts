@@ -242,34 +242,48 @@ export function contextWindow(model: string, override?: number): number {
 export interface ModelPricing {
   input: number;
   output: number;
+  /** Чтение из кеша промпта: у всех, кто кеширует, дешевле обычного ввода. */
+  cachedInput: number;
+  /** Запись в кеш: некоторые берут за неё надбавку. */
+  cacheWrite: number;
 }
+
+function price(input: number, output: number, cachedInput = input, cacheWrite = input): ModelPricing {
+  return { input, output, cachedInput, cacheWrite };
+}
+
+const openAi = (input: number, output: number): ModelPricing => price(input, output, input * 0.5);
+
+const claude = (input: number, output: number): ModelPricing => price(input, output, input * 0.1, input * 1.25);
+
+const deepSeek = (input: number, output: number): ModelPricing => price(input, output, input * 0.1);
 
 export function modelPricing(model: string): ModelPricing | null {
   const name = model.trim().toLowerCase();
   if (!name) return null;
 
   // OpenAI
-  if (name.startsWith('gpt-4o-mini')) return { input: 0.15, output: 0.6 };
-  if (name.startsWith('gpt-4o')) return { input: 2.5, output: 10 };
-  if (name.startsWith('gpt-4.1-mini')) return { input: 0.4, output: 1.6 };
-  if (name.startsWith('gpt-4.1')) return { input: 2, output: 8 };
-  if (name.startsWith('o4-mini')) return { input: 1.1, output: 4.4 };
-  if (name.startsWith('o3')) return { input: 10, output: 40 };
-  if (name.startsWith('o1-mini')) return { input: 1.1, output: 4.4 };
-  if (name.startsWith('o1')) return { input: 15, output: 60 };
-  if (name.startsWith('gpt-5')) return { input: 1.25, output: 10 };
+  if (name.startsWith('gpt-4o-mini')) return openAi(0.15, 0.6);
+  if (name.startsWith('gpt-4o')) return openAi(2.5, 10);
+  if (name.startsWith('gpt-4.1-mini')) return openAi(0.4, 1.6);
+  if (name.startsWith('gpt-4.1')) return openAi(2, 8);
+  if (name.startsWith('o4-mini')) return openAi(1.1, 4.4);
+  if (name.startsWith('o3')) return openAi(10, 40);
+  if (name.startsWith('o1-mini')) return openAi(1.1, 4.4);
+  if (name.startsWith('o1')) return openAi(15, 60);
+  if (name.startsWith('gpt-5')) return openAi(1.25, 10);
 
   // DeepSeek
-  if (name.startsWith('deepseek-reasoner')) return { input: 0.55, output: 2.19 };
-  if (name.startsWith('deepseek')) return { input: 0.27, output: 1.1 };
+  if (name.startsWith('deepseek-reasoner')) return deepSeek(0.55, 2.19);
+  if (name.startsWith('deepseek')) return deepSeek(0.27, 1.1);
 
   // Anthropic (через шлюз)
-  if (name.includes('claude-opus')) return { input: 15, output: 75 };
-  if (name.includes('claude-haiku')) return { input: 1, output: 5 };
-  if (name.includes('claude')) return { input: 3, output: 15 };
+  if (name.includes('claude-opus')) return claude(15, 75);
+  if (name.includes('claude-haiku')) return claude(1, 5);
+  if (name.includes('claude')) return claude(3, 15);
 
   // Прочее из пресетов
-  if (name.startsWith('llama-3.3-70b')) return { input: 0.59, output: 0.79 };
+  if (name.startsWith('llama-3.3-70b')) return price(0.59, 0.79);
   if (name.includes('qwen') && name.includes('coder')) return null; // локальные/дешёвые — цену не гадаем
 
   return null;
