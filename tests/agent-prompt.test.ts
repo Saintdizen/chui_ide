@@ -27,6 +27,14 @@ describe('промпт агентного режима', () => {
     expect(read).not.toContain('action patch');
   });
 
+  it('совет про терминал отводит от cd и cat', () => {
+    // Замер живых прогонов: `terminal` — второе место после `read` по выводу,
+    // а главные источники — `cd` (243 вызова) и `cat`/`grep` вместо инструментов.
+    const text = agentPrompt('auto', { confirm: true });
+    expect(text).toContain('cwd');
+    expect(text).toContain('для содержимого — read');
+  });
+
   it('минимум не обещает памяти и подзадач', () => {
     const minimal = agentPrompt('minimal', { confirm: true });
     // В «Минимуме» только ядро и ведение работы: поиск есть, правок нет.
