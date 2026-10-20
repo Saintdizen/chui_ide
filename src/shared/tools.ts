@@ -66,7 +66,11 @@ export type AgentToolName =
 
 export interface JsonSchemaProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  description: string;
+  /**
+   * Необязательно: у вложенного узла (`items`, поля объекта) структура видна по
+   * именам полей и `required`, а пересказ её словами — это токены на каждом шаге.
+   */
+  description?: string;
   items?: JsonSchemaProperty;
   /**
    * Поля вложенного объекта. Нужны там, где элемент массива — объект со своими
@@ -119,9 +123,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'read_file',
     side: 'main',
-    description:
-      'Read a file. For a large file read a line range instead of the whole thing. Output ' +
-      'lines are numbered from 1: use those numbers for edit with action position.',
+    description: 'Read a file — whole or a line range. Output lines are numbered from 1: those numbers go to edit.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -146,10 +148,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'search',
     side: 'main',
     description:
-      'Search project files for a substring or a regular expression. Returns path, line ' +
-      'number and matched text. filesOnly=true returns file names only; context adds ' +
-      'surrounding lines, like grep -A/-B. For a declaration use codebase_search; for paths ' +
-      'by name pattern use find_files.',
+      'Search project files by substring or regex: path, line, matched text. filesOnly=true — names only; context adds neighbouring lines, like grep -A/-B.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -175,9 +174,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'codebase_search',
     side: 'main',
     description:
-      'Where a symbol is declared: language server declarations first, then text matches ' +
-      'grouped by file. Names may be written in words. For an exact string use search; for ' +
-      'paths by name pattern use find_files.',
+      'Where a symbol is declared: language-server declarations first, then text matches grouped by file. Names may be written in words.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -240,9 +237,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'read_image',
     side: 'main',
     description:
-      'View an image from the project: screenshot, mockup, diagram. The file reaches the ' +
-      'model as an image in the next message; large files are downscaled. SVG is text: read ' +
-      'it with read_file.',
+      'View an image: screenshot, mockup, diagram. It reaches the model as an image in the next message; large files are downscaled. SVG is text — use read_file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -345,9 +340,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'run_tests',
     side: 'main',
     description:
-      'Run project tests: the IDE picks the runner (pytest, vitest, jest, node --test), no ' +
-      'command guessing. A non-zero exit code means failing tests. target is a test file or ' +
-      'a test name: the full suite on a big project prints tens of thousands of lines.',
+      'Run project tests: the IDE picks the runner (pytest, vitest, jest, node --test). A non-zero exit code means failing tests. target narrows to a file or a test name.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -371,8 +364,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'find_files',
     side: 'main',
     description:
-      'Files matching a path glob (**/*.py, src/**). Service folders (node_modules, .git, ' +
-      'dist) are skipped. Returns paths, not contents: for text inside files use search.',
+      'Files matching a path glob (**/*.py, src/**). Service folders (node_modules, .git, dist) are skipped.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -415,10 +407,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'read_files',
     side: 'main',
-    description:
-      'Read several files in one call, when 2-5 files are needed at once. Saves steps: one ' +
-      'call instead of five read_file. Each file comes with line numbers as in read_file, ' +
-      'but the total output is capped.',
+    description: 'Read 2-5 files in one call: line numbers as in read_file, total output capped.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -469,35 +458,28 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'edit',
     side: 'renderer',
     description:
-      'Change files: each edit is checked against the file, then shown for review with undo. ' +
-      'Give an anchor — oldText, an exact fragment unique in the file — and newText: the IDE ' +
-      'finds the place, so no positions are needed (widen the anchor with a neighbouring line ' +
-      'if it repeats). Or give all four 1-based positions as in LSP, for a place you counted ' +
-      'yourself.',
+      'Change files: checked against the file, then shown for review with undo. Give oldText — ' +
+      'an exact fragment unique in the file — and newText; or all four 1-based LSP positions.',
     inputSchema: {
       type: 'object',
       properties: {
         edits: {
           type: 'array',
-          description: 'One entry per file.',
           items: {
             type: 'object',
-            description: 'File: path and edits.',
             properties: {
-              path: { type: 'string', description: 'Absolute path to the file.' },
+              path: { type: 'string', description: 'Absolute path.' },
               expectedVersion: {
                 type: 'number',
-                description: 'Optional: document version the agent saw. On mismatch position edits are rejected.',
+                description: 'Version the agent saw; a mismatch rejects position edits.',
               },
               edits: {
                 type: 'array',
-                description: 'Per file: the edits.',
                 items: {
                   type: 'object',
-                  description: 'Anchor or positions, not both.',
                   properties: {
-                    newText: { type: 'string', description: 'Replacement. An empty string removes the match.' },
-                    oldText: { type: 'string', description: 'Anchor: exact text from the file, unique in it.' },
+                    newText: { type: 'string', description: 'Replacement; empty removes.' },
+                    oldText: { type: 'string', description: 'Anchor: exact text, unique in the file.' },
                     startLine: { type: 'number', description: 'Start line (1-based).' },
                     startColumn: { type: 'number', description: 'Start column (1-based).' },
                     endLine: { type: 'number', description: 'End line (inclusive).' },
@@ -533,9 +515,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'terminal',
     side: 'main',
     description:
-      'Sessions: a real pty the user sees. Commands: run in the project (background: true ' +
-      'returns a job id, sandbox must be off), output reads a job or lists them, cancel stops ' +
-      'one. The user confirms every command, so keep it to one on purpose.',
+      'Sessions: a real pty the user sees. run executes in the project (background: true returns a job id), output reads a job or lists them, cancel stops one. One command per call.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -623,9 +603,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'create_file',
     side: 'main',
-    description:
-      'Create a new file with contents. An existing file is NOT overwritten: that returns ' +
-      'an error, use edit to modify one. contents is required.',
+    description: 'Create a new file with contents. An existing file is NOT overwritten — use edit to modify one.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -665,8 +643,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'update_plan',
     side: 'main',
     description:
-      'Update the work plan: steps with statuses. Call it at the start of a task and after ' +
-      'each completed step: the user sees progress and you keep the thread.',
+      'Update the work plan: steps with statuses. Call at the start and after each step: the user sees progress.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -683,8 +660,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'update_goal',
     side: 'main',
     description:
-      'Set or close the work goal: it survives the turn and goes into every next request. ' +
-      'done: true closes it; while the goal is open the run continues by itself.',
+      'Work goal: survives the turn, goes into every next request. done: true closes it; while open the run continues by itself.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -720,8 +696,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'ask',
     side: 'renderer',
     description:
-      'Ask the user a question and wait for the answer: the run pauses. Put finite choices ' +
-      'into options and the user answers with a click.',
+      'Ask the user and wait: the run pauses. Finite choices go into options — the user answers with a click.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -739,9 +714,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'task',
     side: 'main',
     description:
-      'A subtask for a separate agent with its own context: it explores the project and ' +
-      'returns a short report. Your conversation does not grow from its reads. Independent ' +
-      'questions can be sent at once via tasks and run in parallel.',
+      'A subtask in its own context: it explores the project and returns a short report; ' +
+      'your conversation does not grow from its reads. Parallel: use tasks.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -853,9 +827,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'remember',
     side: 'main',
     description:
-      'Save a note to memory: it survives the conversation and its compression and is shown ' +
-      'at the start of every answer. Only long-term agreements go here. scope: workspace ' +
-      '(default, project notes) or global.',
+      'Save a note to memory: it survives the conversation and is shown at the start of every answer. Only long-term agreements. scope: workspace (default) or global.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -969,9 +941,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'present',
     side: 'main',
-    description:
-      'Announce results: files the user opens with a button in the feed. Use it instead of ' +
-      'writing the file path in prose. To just open a file in the editor use open_file.',
+    description: 'Announce results: files the user opens with a button in the feed. Use it instead of a path in prose.',
     inputSchema: {
       type: 'object',
       properties: {

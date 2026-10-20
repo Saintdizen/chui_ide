@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { agentPrompt } from '../src/shared/agent-prompt';
 import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from '../src/shared/tools';
-import { TOOL_GROUPS, TOOL_PRESETS, presetToolNames, type ToolPresetId } from '../src/shared/tool-presets';
+import {
+  TOOL_GROUPS,
+  TOOL_PRESETS,
+  presetToolNames,
+  toolPresetNote,
+  type ToolPresetId,
+} from '../src/shared/tool-presets';
 
 /**
  * Бюджет схем инструментов — с отчётом, а не только с порогом.
@@ -51,6 +57,23 @@ describe('бюджет схем', () => {
   it('описания аргументов вместе влезают в 1 800 токенов', () => {
     const total = rows.reduce((sum, row) => sum + row.args, 0);
     expect(total).toBeLessThan(1_800);
+  });
+
+  // Замер: auto был 3 812 ток. (25 схем). Срезали ростром шести имён на 826 и
+  // описаниями — до того, что не сказано в промпте. Сейчас 2 620.
+  it('набор по умолчанию не дороже 2 700 токенов', () => {
+    expect(presetTokens('auto')).toBeLessThan(2_700);
+  });
+
+  it('ростер не растёт в цене схем', () => {
+    // Ростер — второй способ отдать инструмент: имя и обязательные аргументы по
+    // 8,8 ток. вместо 74-427 за схему. Но он тоже едет в каждом запросе, поэтому
+    // потолок нужен и здесь: иначе соблазн «спрятать всё» превратит набор в
+    // список имён без единой схемы, и модели придётся угадывать вызовы.
+    const note = estimateTextTokens(toolPresetNote('auto'));
+    expect(note).toBeLessThan(300);
+    // И обратная сторона: набор не должен схлопнуться до десятка имён.
+    expect(presetToolNames('auto')?.size ?? 0).toBeGreaterThan(17);
   });
 
   it('набор по умолчанию дешевле полного хотя бы на пятую часть', () => {

@@ -239,6 +239,12 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
       'go_to_definition',
       'find_references',
       'run_linter',
+      'replace_in_files',
+      'spawn_agent',
+      'wait_agent',
+      'project_map',
+      'search_docs',
+      'read_skill',
     ],
   },
   {
