@@ -54,7 +54,7 @@ import type { AgentWaitResult } from './agents';
 import { formatWorkflow } from '../../shared/workflow';
 import { parseToolArguments } from '../../shared/tools';
 import { isCondenseMarker } from '../../shared/context-fit';
-import { missingArguments, toolSpec } from '../../shared/tool-schema';
+import { missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
 import { canonicalCall } from '../../shared/tool-aliases';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
@@ -728,6 +728,20 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     const missing = missingArguments(spec.inputSchema, parsed.value);
     if (missing.length > 0) {
       return { ok: false, summary: `Не хватает аргумента: ${missing.join(', ')}` };
+    }
+    // Значение мимо `enum` — тот же класс ошибки, что забытое поле: `switch` ниже
+    // ответит «действие неизвестно» и не назовёт варианты, а модель потратит шаг.
+    const wrong = wrongArguments(spec.inputSchema, parsed.value);
+    if (wrong.length > 0) {
+      // Как и у нехватки поля: сначала значение, которое пришло от модели (иначе
+      // отказ не объясняет, что не так), потом перечень — он же в `detail`.
+      const values = wrong.map((issue) => `${issue.path} «${issue.value}»`).join(', ');
+      const allowed = wrong.map((issue) => issue.allowed.join(', ')).join('; ');
+      return {
+        ok: false,
+        summary: `Неизвестное значение аргумента: ${values}`,
+        detail: `Допустимые значения: ${allowed}.`,
+      };
     }
   }
 

@@ -1,7 +1,7 @@
 import { agentPrompt } from '../src/shared/agent-prompt';
 import { AGENT_TOOLS } from '../src/shared/tools';
 import { describe, expect, it } from 'vitest';
-import { missingArguments, toolSpec } from '../src/shared/tool-schema';
+import { missingArguments, toolSpec, wrongArguments } from '../src/shared/tool-schema';
 
 /**
  * Проверка обязательных полей до исполнения. Поводом была живая ошибка: модель
@@ -64,6 +64,32 @@ describe('missingArguments', () => {
   it('не-объект вместо элемента не роняет проверку', () => {
     const spec = toolSpec('edit')!;
     expect(missingArguments(spec.inputSchema, { edits: [{ path: '/a.ts', edits: ['строка'] }] })).toEqual([]);
+  });
+});
+
+/**
+ * Значения `enum` до исполнения. Повод: `update_plan.status` был свободной строкой,
+ * и `closed` вместо `done` уезжало в разбор, который таких значений не знает.
+ */
+describe('wrongArguments', () => {
+  it('значение вне перечня названо вместе с допустимыми', () => {
+    const spec = toolSpec('update_plan')!;
+    const args = { steps: [{ text: 'шаг', status: 'closed' }] };
+    expect(wrongArguments(spec.inputSchema, args)).toEqual([
+      { path: 'steps[0].status', value: 'closed', allowed: ['pending', 'in_progress', 'done'] },
+    ]);
+  });
+
+  it('значение из перечня проходит', () => {
+    const spec = toolSpec('update_plan')!;
+    const args = { steps: [{ text: 'шаг', status: 'done' }] };
+    expect(wrongArguments(spec.inputSchema, args)).toEqual([]);
+  });
+
+  it('чужая форма аргумента не роняет проверку', () => {
+    // Элемент массива — строка, а не объект: пусть об этом говорит разбор.
+    const spec = toolSpec('edit')!;
+    expect(wrongArguments(spec.inputSchema, { edits: ['строка'] })).toEqual([]);
   });
 });
 

@@ -611,7 +611,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
             type: 'object',
             properties: {
               text: { type: 'string', description: 'What to do.' },
-              status: { type: 'string', description: 'pending | in_progress | done.' },
+              // `enum` вместо пересказа значений в описании: их видит и проверка
+              // вызова (`wrongArguments`), а не только модель.
+              status: { type: 'string', enum: ['pending', 'in_progress', 'done'] },
             },
             required: ['text', 'status'],
           },

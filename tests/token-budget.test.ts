@@ -109,7 +109,9 @@ describe('бюджет схем', () => {
     // остаются оба, а общий у них только каркас.
     const candidates: ReadonlyArray<readonly [string, readonly string[]]> = [
       ['агенты', ['agents']],
-      ['подзадачи', ['task', 'workflow']],
+      // `workflow` больше не отдельный инструмент (это `run_code({kind})`):
+      // имя в списке давало `undefined → 0` и занижало вес семейства.
+      ['подзадачи', ['task']],
       ['поиск', ['search', 'codebase_search', 'search_docs']],
       ['чтение файла', ['read']],
       ['список файлов', ['list', 'project_map']],
