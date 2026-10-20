@@ -154,17 +154,15 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         path: { type: 'string', description: 'Absolute path to the file.' },
         startLine: {
           type: 'number',
-          description:
-            'First line of the range (1-based, inclusive). Defaults to the start of the file. ' +
-            'A line past the end is refused.',
+          description: 'First line (1-based). Defaults to the file start; past the end is refused.',
         },
         endLine: {
           type: 'number',
-          description: 'Last line of the range (inclusive). Defaults to the end, within the line limit.',
+          description: 'Last line (inclusive). Defaults to the end.',
         },
         force: {
           type: 'boolean',
-          description: 'Re-read even what was read this turn, when the content dropped out of context.',
+          description: 'Re-read what was read this turn.',
         },
       },
       required: ['path'],
@@ -188,8 +186,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         glob: { type: 'string', description: 'File mask, for example **/*.ts' },
         path: {
           type: 'string',
-          description:
-            'Search here only (folder or file). Without it, the whole project; glob is measured ' + 'from here.',
+          description: 'Folder or file; without it, the whole project. glob counts from here.',
         },
         context: {
           type: 'number',
@@ -210,7 +207,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Symbol name or words from it, for example `readFile`.' },
-        limit: { type: 'number', description: 'How many declarations to return (default 40).' },
+        limit: { type: 'number', description: 'How many (default 40).' },
       },
       required: ['query'],
     },
@@ -226,7 +223,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Question or keywords, for example "how to build".' },
-        limit: { type: 'number', description: 'How many sections to return (default 6, max 20).' },
+        limit: { type: 'number', description: 'How many (default 6, max 20).' },
       },
       required: ['query'],
     },
@@ -244,7 +241,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         query: { type: 'string', description: 'Search words: one or two, as in a file search.' },
         limit: {
           type: 'number',
-          description: 'How many conversations to return (default 5, max 20).',
+          description: 'How many (default 5, max 20).',
         },
       },
       required: ['query'],
@@ -291,7 +288,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         symbol: { type: 'string', description: 'Symbol name, for example `saveCalibration`.' },
         path: {
           type: 'string',
-          description: 'When a symbol has several declarations, narrow the search to this file (absolute path).',
+          description: 'Narrow to this file when the symbol has several declarations.',
         },
         includeDeclaration: {
           type: 'boolean',
@@ -332,7 +329,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         newName: { type: 'string', description: 'New name.' },
         path: {
           type: 'string',
-          description: 'When a symbol has several declarations, narrow the search to this file (absolute path).',
+          description: 'Narrow to this file when the symbol has several declarations.',
         },
       },
       required: ['symbol', 'newName'],
@@ -364,7 +361,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         path: {
           type: 'string',
-          description: 'File or folder (absolute path). Without it, the whole project.',
+          description: 'Folder or file; without it, the whole project.',
         },
       },
     },
@@ -381,9 +378,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         target: {
           type: 'string',
-          description:
-            'What to run: a test file path or a test name. Without it, the whole suite. ' +
-            'After a local edit run its test, not everything.',
+          description: 'Test file or test name; without it, the whole suite. After a local edit, just its test.',
         },
       },
     },
@@ -408,11 +403,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         glob: {
           type: 'string',
-          description:
-            'Path mask: `**` any depth, `*` inside one segment. For example **/*.py. ' +
-            'Without it, every project file.',
+          description: 'Path mask: ** any depth, * one segment (e.g. **/*.py). Without it, all files.',
         },
-        limit: { type: 'number', description: 'Max paths (default 200, max 2000).' },
+        limit: { type: 'number', description: 'How many (default 200, max 2000).' },
       },
     },
   },
@@ -476,7 +469,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         replacement: { type: 'string', description: 'Replacement (an empty string deletes).' },
         isRegex: {
           type: 'boolean',
-          description: 'Treat query as a regular expression, so groups like $1 work in the replacement.',
+          description: 'Treat query as a regex; $1 works in the replacement.',
         },
         caseSensitive: { type: 'boolean', description: 'Case sensitive (off by default).' },
         glob: { type: 'string', description: 'File mask, for example **/*.ts' },
@@ -596,7 +589,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         query: { type: 'string', description: 'Search query.' },
-        limit: { type: 'number', description: 'How many results (default 10).' },
+        limit: { type: 'number', description: 'How many (default 10).' },
       },
       required: ['query'],
     },
@@ -619,13 +612,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
         timeout: {
           type: 'number',
-          description:
-            'Time limit in seconds (default 120, in background 1800). Raise it only ' +
-            'for known long runs: build, dependency install.',
+          description: 'Seconds (default 120, background 1800). Raise for builds and installs.',
         },
         background: {
           type: 'boolean',
-          description: 'Do not wait: return a job id at once. Requires the sandbox to be off.',
+          description: 'Do not wait: returns a job id. Sandbox must be off.',
         },
       },
       required: ['command'],
@@ -644,7 +635,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         id: { type: 'string', description: 'Job id from run_terminal with background: true.' },
         from: {
           type: 'number',
-          description: 'Where to start reading. Defaults to the beginning, that is all output there is.',
+          description: 'Start offset; defaults to the beginning.',
         },
       },
       required: [],
@@ -676,7 +667,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         url: { type: 'string', description: 'Full page address: https://example.com/page' },
         maxChars: {
           type: 'number',
-          description: 'How many characters of text to return (default 20 000, max 60 000).',
+          description: 'Text characters (default 20 000, max 60 000).',
         },
       },
       required: ['url'],
@@ -693,10 +684,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        code: { type: 'string', description: 'Program: an async function body where tools are tool calls.' },
+        code: { type: 'string', description: 'Async body; tools are plain function calls.' },
         description: {
           type: 'string',
-          description: 'What the program does, short and in active voice (5-10 words), shown in the feed.',
+          description: 'What it does, 5-10 words, shown in the feed.',
         },
         timeoutMs: {
           type: 'number',
@@ -716,10 +707,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        code: { type: 'string', description: 'Scenario: an async function body where agents starts agents.' },
+        code: { type: 'string', description: 'Async body; agents.run starts agents.' },
         description: {
           type: 'string',
-          description: 'What the scenario does, short and in active voice (5-10 words), shown in the feed.',
+          description: 'What it does, 5-10 words, shown in the feed.',
         },
         timeoutMs: {
           type: 'number',
@@ -781,7 +772,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         steps: {
           type: 'array',
-          description: 'Plan steps: { text, status }, where status is pending | in_progress | done.',
+          description: 'Steps: { text, status }, status pending | in_progress | done.',
           items: { type: 'object', description: 'PlanStep' },
         },
       },
@@ -799,11 +790,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         goal: {
           type: 'string',
-          description: 'Goal in one phrase: what should come out. When omitted the goal text stays as it is.',
+          description: 'Goal in one phrase; omitted keeps the current text.',
         },
         done: {
           type: 'boolean',
-          description: 'true closes the goal. false or empty keeps the work going.',
+          description: 'true closes the goal; empty keeps it open.',
         },
       },
     },
@@ -820,7 +811,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         plan: {
           type: 'string',
-          description: 'Plan in brief: what you are going to do. Empty means the user sees the checklist only.',
+          description: 'Plan in brief; empty shows the checklist only.',
         },
       },
     },
@@ -834,10 +825,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        question: { type: 'string', description: 'What to ask. One concrete question, no preamble.' },
+        question: { type: 'string', description: 'One concrete question, no preamble.' },
         options: {
           type: 'array',
-          description: 'Ready answers (up to 5) shown as buttons. Optional.',
+          description: 'Ready answers as buttons, up to 5.',
           items: { type: 'string', description: 'Answer wording, for example "Option A".' },
         },
       },
@@ -857,13 +848,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         description: { type: 'string', description: 'Short subtask name, shown on the card.' },
         prompt: {
           type: 'string',
-          description: 'What to investigate: a question or a task. The more concrete, the better the report.',
+          description: 'What to investigate; the more concrete, the better.',
         },
         tasks: {
           type: 'array',
-          description:
-            'Several subtasks at once (up to 4): [{ description, prompt }]. Independent only: ' +
-            'neither needs the other answer. Use instead of prompt, not with it.',
+          description: 'Up to 4 independent subtasks: [{ description, prompt }]. Not with prompt.',
           items: { type: 'object', description: 'Subtask: { description, prompt }.' },
         },
       },
@@ -879,7 +868,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         description: { type: 'string', description: 'Short name, shown in the agents panel.' },
-        prompt: { type: 'string', description: 'Agent task: what to investigate and what to return.' },
+        prompt: { type: 'string', description: 'Agent task: what to investigate and return.' },
       },
       required: ['prompt'],
     },
@@ -918,7 +907,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         id: { type: 'string', description: 'Agent id from list_agents.' },
-        text: { type: 'string', description: 'What to clarify or correct. Short and to the point.' },
+        text: { type: 'string', description: 'What to clarify or correct; short.' },
       },
       required: ['id', 'text'],
     },
@@ -945,7 +934,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        url: { type: 'string', description: 'Page address. Without a scheme it means https (local ones use http).' },
+        url: { type: 'string', description: 'Page address; no scheme means https.' },
       },
       required: ['url'],
     },
@@ -1015,7 +1004,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         mode: {
           type: 'string',
-          description: 'What to do: in zooms in, out zooms out, fit fits the width, actual returns to 1:1.',
+          description: 'in | out | fit | actual (1:1).',
         },
       },
       required: ['mode'],
@@ -1041,7 +1030,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         scope: {
           type: 'string',
           enum: ['workspace', 'global'],
-          description: 'workspace for the project (default), global for all projects.',
+          description: 'workspace (default) or global.',
         },
       },
       required: ['text'],
@@ -1060,7 +1049,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         scope: {
           type: 'string',
           enum: ['workspace', 'global'],
-          description: 'workspace for the project (default), global for all projects.',
+          description: 'workspace (default) or global.',
         },
       },
       required: ['query'],
@@ -1170,7 +1159,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        limit: { type: 'number', description: 'How many recent commits (default 20, max 100).' },
+        limit: { type: 'number', description: 'How many (default 20, max 100).' },
         path: { type: 'string', description: 'Limit the history to one file (absolute path).' },
       },
     },
@@ -1186,7 +1175,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Absolute path to the file.' },
-        startLine: { type: 'number', description: 'First line of the range (1-based). Defaults to the start.' },
+        startLine: { type: 'number', description: 'First line (1-based); defaults to the start.' },
         endLine: { type: 'number', description: 'Last line of the range (inclusive).' },
       },
       required: ['path'],
@@ -1319,16 +1308,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         paths: {
           type: 'array',
-          description: 'Result files (absolute paths inside the project). One to five.',
+          description: 'Result files, one to five, inside the project.',
           items: { type: 'string', description: 'Path to the file.' },
         },
         path: {
           type: 'string',
-          description: 'A single file instead of the list: models sometimes send it this way and it is accepted.',
+          description: 'One file instead of paths.',
         },
         note: {
           type: 'string',
-          description: 'One line about the result: "spec in two formats", "built into dist".',
+          description: 'One line about the result.',
         },
       },
     },
@@ -1381,7 +1370,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         id: { type: 'string', description: 'Session id from terminal_start or terminal_list.' },
-        from: { type: 'number', description: 'Offset to read from (the offset field of the previous read).' },
+        from: { type: 'number', description: 'Offset from the previous read.' },
       },
       required: ['id'],
     },
