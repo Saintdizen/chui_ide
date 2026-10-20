@@ -151,6 +151,11 @@ interface StoredSettings {
 const DEFAULT_SYSTEM_PROMPT =
   'Ты — ассистент chui_iDE: кратко, правка — минимальный диф, API не выдумывай.';
 
+// Прежние встроенные тексты: их надо переписать на актуальный.
+const LEGACY_SYSTEM_PROMPTS: readonly string[] = [
+  'Ты — встроенный ассистент chui_iDE.\nОтвечай кратко и по делу. Когда предлагаешь правку — давай минимальный диф, а не файл целиком.\nНе выдумывай API: если не уверен в сигнатуре, попроси показать нужный файл.',
+];
+
 const DEFAULT_SETTINGS: StoredSettings = {
   ai: {
     // Ассистент включён по умолчанию: это часть IDE, выключается осознанно.
@@ -872,6 +877,12 @@ function loadSettings(filePath: string): StoredSettings {
   const storedWindow = Math.round(Number(storedAi.contextWindow));
   if (Number.isFinite(storedWindow) && storedWindow > 0) ai.contextWindow = storedWindow;
   else delete ai.contextWindow;
+  // Промт мог остаться прежним встроенным текстом — его не выбирали, а получили
+  // в наследство от прошлой версии. Свой текст человека не трогаем.
+  if (typeof ai.systemPrompt === 'string' && LEGACY_SYSTEM_PROMPTS.includes(ai.systemPrompt.trim())) {
+    ai.systemPrompt = DEFAULT_SYSTEM_PROMPT;
+  }
+
   // Старый общий предел 4096 был значением по умолчанию, а не выбором: в settings.json
   // он остался у всех.
   if (ai.maxTokens === 4096) ai.maxTokens = 0;
