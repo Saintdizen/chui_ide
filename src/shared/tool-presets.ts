@@ -346,7 +346,7 @@ function rosterLine(names: readonly string[]): string {
     const required = tool?.inputSchema.required ?? [];
     return required.length > 0 ? `${name}(${required.join(', ')})` : `${name}()`;
   });
-  return ` Скрыты ради цены, но есть: ${items.join(', ')}.`;
+  return ` Скрыты ради цены, но есть — вызов по имени, аргументы в скобках: ${items.join(', ')}.`;
 }
 
 /**
@@ -366,9 +366,9 @@ export function toolPresetNote(preset: ToolPresetId): string {
   if (spec.widen) {
     const roster = rosterLine(spec.except ?? []);
     return (
-      `Набор инструментов: «${spec.label}» (${labels}). Скрытого в нём нет запрета: если ` +
-      'для задачи нужен инструмент, которого не видно в списке, — вызови его по имени, он ' +
-      `подключится и выполнится. Спрашивать человека не нужно.${roster}`
+      `Набор инструментов: «${spec.label}» (${labels}). Скрытого в нём нет запрета: нужен ` +
+      'инструмент, которого не видно в списке, — вызови его по имени, он выполнится, и ' +
+      `спрашивать человека не нужно.${roster}`
     );
   }
   return (
