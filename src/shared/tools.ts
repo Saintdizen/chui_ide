@@ -94,12 +94,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path.' },
+        path: { type: 'string', description: 'Folder.' },
         glob: {
           type: 'string',
-          description: 'Path mask: ** any depth, * one segment. Without it, all files.',
+          description: 'Mask: ** any depth, * one segment. Default: all.',
         },
-        limit: { type: 'number', description: 'glob: how many (default 100, max 2000).' },
+        limit: { type: 'number', description: 'glob: max (100, up to 2000).' },
       },
     },
   },
@@ -115,20 +115,20 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         path: { type: 'string', description: 'One file.' },
         paths: {
           type: 'array',
-          description: 'Instead of path: 2-5 files, output capped.',
+          description: '2-5 files instead; output capped.',
           items: { type: 'string' },
         },
         startLine: {
           type: 'number',
-          description: 'First line (1-based); default start.',
+          description: 'First line, 1-based.',
         },
         endLine: {
           type: 'number',
-          description: 'Last line (inclusive); default end.',
+          description: 'Last line, inclusive.',
         },
         force: {
           type: 'boolean',
-          description: 'Re-read what was read this turn.',
+          description: 'Re-read (same turn).',
         },
       },
     },
@@ -145,19 +145,19 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         // в каждом запросе, а модель читает `enum` и так.
         action: { type: 'string', enum: ['text', 'code', 'docs', 'sessions'] },
         query: { type: 'string', description: 'Pattern.' },
-        isRegex: { type: 'boolean', description: 'Treat query as a regex (off: plain substring).' },
-        caseSensitive: { type: 'boolean', description: 'Case sensitive (off by default).' },
-        filesOnly: { type: 'boolean', description: 'Names only, no matching lines.' },
+        isRegex: { type: 'boolean', description: 'Regex (default: substring).' },
+        caseSensitive: { type: 'boolean', description: 'Match case.' },
+        filesOnly: { type: 'boolean', description: 'Names only.' },
         glob: { type: 'string', description: 'Mask, e.g. **/*.ts' },
         path: {
           type: 'string',
-          description: 'Scope; glob counts from here.',
+          description: 'Scope; glob from here.',
         },
         context: {
           type: 'number',
-          description: 'Lines around a match (0-5).',
+          description: 'Lines around (0-5).',
         },
-        limit: { type: 'number', description: 'Default 50; with context 35; files 80.' },
+        limit: { type: 'number', description: 'Max (50; 35 with context; 80 files).' },
       },
       required: ['query'],
     },
@@ -171,7 +171,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Skill name from the list, for example `release`.' },
+        name: { type: 'string', description: 'Skill name, e.g. `release`.' },
       },
       required: ['name'],
     },
@@ -184,7 +184,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Path (PNG, JPEG, WebP, GIF).' },
+        path: { type: 'string', description: 'PNG, JPEG, WebP, GIF.' },
       },
       required: ['path'],
     },
@@ -205,16 +205,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'string',
           enum: ['references', 'definition', 'outline'],
         },
-        symbol: { type: 'string', description: 'Symbol name, for example `saveCalibration`.' },
+        symbol: { type: 'string', description: 'Name, e.g. `saveCalibration`.' },
         path: {
           type: 'string',
-          description: 'references: narrow to this file. definition: file with the usage. outline: the file.',
+          description: 'references: narrow to a file. definition: file with the usage. outline: that file.',
         },
-        line: { type: 'number', description: 'definition: usage line in that file (1-based).' },
-        column: { type: 'number', description: 'definition: column (1-based). Defaults to the start of the line.' },
+        line: { type: 'number', description: 'definition: usage line, 1-based.' },
+        column: { type: 'number', description: 'definition: column, 1-based.' },
         includeDeclaration: {
           type: 'boolean',
-          description: 'references: include the declaration itself (yes by default).',
+          description: 'references: include the declaration (default yes).',
         },
       },
       required: ['action'],
@@ -224,17 +224,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'rename_symbol',
     side: 'main',
     description:
-      'Rename a symbol semantically: the server changes this symbol only, at the ' +
-      'declaration and in all references, other files included. Unlike file (action replace) it ' +
-      'does not replace text blindly.',
+      'Rename a symbol semantically: declaration and all references, other files included. ' +
+      'Unlike file (action replace) it does not replace text blindly.',
     inputSchema: {
       type: 'object',
       properties: {
-        symbol: { type: 'string', description: 'Current symbol name.' },
+        symbol: { type: 'string', description: 'Current name.' },
         newName: { type: 'string', description: 'New name.' },
         path: {
           type: 'string',
-          description: 'Narrow to this file; when a name is declared twice.',
+          description: 'Narrow to a file; when the name is declared twice.',
         },
       },
       required: ['symbol', 'newName'],
@@ -244,9 +243,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'checks',
     side: 'renderer',
     description:
-      'Project checks, no writes. action diagnostics — errors and warnings the editor knows (call ' +
-      'before fixing code, not after); action lint — run the project linter: ruff for Python, eslint ' +
-      'or biome for Node, findings by file, line, rule. Both take path to narrow to one file or folder.',
+      'Project checks, no writes. diagnostics — errors and warnings the editor knows (call before ' +
+      'fixing code); lint — the project linter: ruff, eslint or biome, findings by file, line, rule. ' +
+      'Both take path to narrow to one file or folder.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -256,7 +255,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
         path: {
           type: 'string',
-          description: 'One file or folder (diagnostics: default all open files; lint: default whole project).',
+          description: 'One file or folder (diagnostics: open files; lint: whole project).',
         },
       },
       required: ['action'],
@@ -266,13 +265,14 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'run_tests',
     side: 'main',
     description:
-      'Run project tests: the IDE picks the runner (pytest, vitest, jest, node --test). A non-zero exit code means failing tests. target narrows to a file or a test name.',
+      'Run project tests: the IDE picks the runner (pytest, vitest, jest, node --test). Non-zero exit ' +
+      'code means failing tests. target narrows to a file or a test name.',
     inputSchema: {
       type: 'object',
       properties: {
         target: {
           type: 'string',
-          description: 'Test file or test name; without it, the whole suite. After a local edit, just its test.',
+          description: 'Test file or test name; default all. After an edit, just its test.',
         },
       },
     },
@@ -281,23 +281,22 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'project_map',
     side: 'main',
     description:
-      'Project map by file names: what the project is, its parts, where tests and entry ' +
-      'points are. A short version is already in the system prompt: call this for details ' +
-      'or when it is stale.',
+      'Project map by file names: what the project is, its parts, where tests and entry points ' +
+      'are. A short version is in the system prompt: call for details or when it is stale.',
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'mcp',
     side: 'main',
     description:
-      'MCP server documents, not actions: action list — the catalog (uri, name, type) of the servers ' +
-      'from settings; action read — one document at a uri. List first and take the address there; ' +
-      'fill an address template with values first, binary content is marked, long content is cut.',
+      'MCP server documents, not actions: list — the catalog (uri, name, type) from settings; ' +
+      'read — one document at a uri. List first and take the address there; fill an address ' +
+      'template with values first, binary content is marked, long content is cut.',
     inputSchema: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['list', 'read'] },
-        uri: { type: 'string', description: 'read: resource address from the catalog.' },
+        uri: { type: 'string', description: 'read: address from the catalog.' },
         server: { type: 'string', description: 'list: this server only. read: when several declare the uri.' },
       },
       required: ['action'],
@@ -307,8 +306,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'edit',
     side: 'renderer',
     description:
-      'Change files: checked against the file, then shown for review with undo. Give oldText — an exact ' +
-      'fragment unique in the file — and newText; or all four 1-based LSP positions.',
+      'Change files: checked, then shown for review with undo. Give oldText — exact fragment, unique ' +
+      'in the file — and newText; or all four 1-based LSP positions.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -320,19 +319,19 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
               path: { type: 'string' },
               expectedVersion: {
                 type: 'number',
-                description: 'Version the agent saw; a mismatch rejects position edits.',
+                description: 'Version seen; a mismatch rejects position edits.',
               },
               edits: {
                 type: 'array',
                 items: {
                   type: 'object',
                   properties: {
-                    newText: { type: 'string', description: 'Replacement; empty removes.' },
-                    oldText: { type: 'string', description: 'Anchor: exact text, unique in the file.' },
-                    startLine: { type: 'number', description: 'Start line, 1-based.' },
-                    startColumn: { type: 'number', description: 'Start column, 1-based.' },
-                    endLine: { type: 'number', description: 'End line, inclusive.' },
-                    endColumn: { type: 'number', description: 'End column, exclusive.' },
+                    newText: { type: 'string', description: 'Replacement; empty deletes.' },
+                    oldText: { type: 'string', description: 'Anchor: exact, unique.' },
+                    startLine: { type: 'number', description: '1-based.' },
+                    startColumn: { type: 'number', description: '1-based.' },
+                    endLine: { type: 'number', description: 'Inclusive.' },
+                    endColumn: { type: 'number', description: 'Exclusive.' },
                   },
                   required: ['newText'],
                 },
@@ -356,10 +355,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['search', 'fetch'] },
-        query: { type: 'string', description: 'search: search query.' },
-        limit: { type: 'number', description: 'search: how many (default 10).' },
-        url: { type: 'string', description: 'fetch: full page address: https://example.com/page' },
-        maxChars: { type: 'number', description: 'fetch: text characters (default 8 000, max 60 000).' },
+        query: { type: 'string', description: 'search: query.' },
+        limit: { type: 'number', description: 'search: how many (10).' },
+        url: { type: 'string', description: 'fetch: page address, e.g. https://example.com/page' },
+        maxChars: { type: 'number', description: 'fetch: text characters (8 000; max 60 000).' },
       },
       required: ['action'],
     },
@@ -379,12 +378,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'Sessions (id) or commands (job id): start/write/stop | run/output/cancel.',
           enum: ['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel'],
         },
-        id: { type: 'string', description: 'read, write, stop: session id. output, cancel: job id.' },
-        command: { type: 'string', description: 'start: typed once the session opens. run: the command.' },
-        cwd: { type: 'string', description: 'start, run: folder inside the project (root by default).' },
-        data: { type: 'string', description: 'write: what to type; end with a newline for Enter.' },
-        from: { type: 'number', description: 'read, output: offset from the previous read.' },
-        timeout: { type: 'number', description: 'run: seconds (default 120, background 1800).' },
+        id: { type: 'string', description: 'read/write/stop: session id. output/cancel: job id.' },
+        command: { type: 'string', description: 'start: typed once open. run: the command.' },
+        cwd: { type: 'string', description: 'start, run: folder inside the project.' },
+        data: { type: 'string', description: 'write: what to type; newline = Enter.' },
+        from: { type: 'number', description: 'read, output: offset.' },
+        timeout: { type: 'number', description: 'run: seconds (120; background 1800).' },
         background: { type: 'boolean', description: 'run: do not wait, returns a job id.' },
       },
       required: ['action'],
@@ -394,20 +393,20 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'file',
     side: 'main',
     description:
-      'Files and folders. create writes a new file (an existing one is refused — use edit); move renames ' +
-      'inside the workspace; delete sends to the trash (no undo); replace rewrites every match in the project.',
+      'Files and folders. create writes a new file (existing is refused — use edit); move renames inside ' +
+      'the workspace; delete sends to the trash (no undo); replace rewrites every match in the project.',
     inputSchema: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['create', 'move', 'delete', 'replace'] },
         path: { type: 'string', description: 'Path.' },
-        contents: { type: 'string', description: 'create: file contents.' },
-        from: { type: 'string' },
-        to: { type: 'string' },
-        query: { type: 'string', description: 'replace: string or regex to find.' },
-        replacement: { type: 'string', description: 'replace: replacement (empty deletes).' },
-        isRegex: { type: 'boolean', description: 'replace: query is a regex; $1 works in the replacement.' },
-        caseSensitive: { type: 'boolean', description: 'replace: off by default.' },
+        contents: { type: 'string', description: 'create: contents.' },
+        from: { type: 'string', description: 'move: source.' },
+        to: { type: 'string', description: 'move: target.' },
+        query: { type: 'string', description: 'replace: string or regex.' },
+        replacement: { type: 'string', description: 'replace: empty deletes.' },
+        isRegex: { type: 'boolean', description: 'replace: regex; $1 works.' },
+        caseSensitive: { type: 'boolean', description: 'replace: default off.' },
         glob: { type: 'string', description: 'replace: file mask, e.g. **/*.ts' },
       },
       required: ['action'],
@@ -443,9 +442,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
         goal: {
           type: 'string',
-          description: 'goal: one phrase; omitted keeps the current text.',
+          description: 'goal: one phrase; empty keeps it.',
         },
-        done: { type: 'boolean', description: 'goal: true closes it; empty keeps it open.' },
+        done: { type: 'boolean', description: 'goal: true closes it.' },
       },
       required: ['action'],
     },
@@ -454,15 +453,14 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'exit_plan_mode',
     side: 'main',
     description:
-      'Hand the plan to the user for approval. Approval switches to Agent mode, rejection ' +
-      'comes back as a comment. Call it when the plan is ready: after update_plan, not ' +
-      'instead of it.',
+      'Hand the plan to the user for approval. Approval switches to Agent mode, rejection comes back ' +
+      'as a comment. Call when the plan is ready: after plan (action steps), not instead of it.',
     inputSchema: {
       type: 'object',
       properties: {
         plan: {
           type: 'string',
-          description: 'Plan in brief; empty shows the checklist only.',
+          description: 'Plan in brief; empty shows the checklist.',
         },
       },
     },
@@ -478,7 +476,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         question: { type: 'string', description: 'One concrete question, no preamble.' },
         options: {
           type: 'array',
-          description: 'Ready answers as buttons, up to 5.',
+          description: 'Ready answers as buttons, 5 max.',
           items: { type: 'string' },
         },
       },
@@ -521,10 +519,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'agents',
     side: 'main',
     description:
-      'Agents in the background: `spawn` starts one and returns an id at once, `list` shows who ' +
-      'works on what, `wait` gives their reports (a timeout means still working, not an error), ' +
-      '`send` reaches a running agent before its next step, `interrupt` stops one. The agent ' +
-      'only reads: edits stay with you.',
+      'Agents in the background: spawn starts one and returns an id at once, list shows who works ' +
+      'on what, wait gives reports (a timeout means still working, not an error), send reaches a ' +
+      'running agent before its next step, interrupt stops one. The agent only reads: edits stay with you.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -532,16 +529,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'string',
           enum: ['spawn', 'list', 'wait', 'send', 'interrupt'],
         },
-        prompt: { type: 'string', description: 'spawn: the task — this is all the agent sees.' },
+        prompt: { type: 'string', description: 'spawn: the task — all the agent sees.' },
         description: { type: 'string', description: 'spawn: short name for the agents panel.' },
         ids: {
           type: 'array',
           items: { type: 'string' },
-          description: 'wait: agent ids (up to five); empty means all.',
+          description: 'wait: agent ids (5 max); empty means all.',
         },
-        id: { type: 'string', description: 'wait for one, send, interrupt: agent id.' },
-        text: { type: 'string', description: 'send: what to clarify or correct; short.' },
-        timeout: { type: 'number', description: 'wait: seconds (default 120, max 300).' },
+        id: { type: 'string', description: 'send, interrupt: agent id.' },
+        text: { type: 'string', description: 'send: what to clarify; short.' },
+        timeout: { type: 'number', description: 'wait: seconds (120; max 300).' },
       },
       required: ['action'],
     },
@@ -550,9 +547,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'browser',
     side: 'main',
     description:
-      'Own Chromium over CDP; http or https only, needs the Browser setting. action: open (url), ' +
-      'snapshot, click (ref), type (ref, text, submit), evaluate (expression), zoom (mode), ' +
-      'close. Take a snapshot after each action: the page changes and old refs expire.',
+      'Own Chromium over CDP; http/https only, needs the Browser setting. snapshot after each action: ' +
+      'the page changes and old refs expire.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -563,7 +559,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         url: { type: 'string', description: 'open: page address; no scheme means https.' },
         ref: { type: 'string', description: 'click, type: element number from snapshot.' },
         text: { type: 'string', description: 'type: what to type.' },
-        submit: { type: 'boolean', description: 'type: press Enter to submit the form.' },
+        submit: { type: 'boolean', description: 'type: press Enter.' },
         expression: { type: 'string', description: 'evaluate: JS expression; return the value.' },
         mode: { type: 'string', description: 'zoom: in | out | fit | actual (1:1).' },
       },
@@ -584,8 +580,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'string',
           enum: ['remember', 'forget'],
         },
-        text: { type: 'string', description: 'remember: short note, one thought, a couple of lines at most.' },
-        query: { type: 'string', description: 'forget: substring that identifies notes to remove.' },
+        text: { type: 'string', description: 'remember: one thought, a couple of lines max.' },
+        query: { type: 'string', description: 'forget: substring identifying the notes.' },
         scope: { type: 'string', enum: ['workspace', 'global'], description: 'Workspace unless global.' },
       },
       required: ['action'],
@@ -595,19 +591,18 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'git_read',
     side: 'main',
     description:
-      'Read the repository: action status (branch, ahead/behind, changed files), diff (worktree ' +
-      'against the index, staged=true the index against HEAD), log (recent commits), blame (who ' +
-      'changed the lines of a file and when). Read-only. Check status and diff before committing ' +
-      'or reverting, so the commit holds exactly what you mean.',
+      'Read the repository: status (branch, ahead/behind, changed files), diff (worktree against the ' +
+      'index; staged against HEAD), log, blame (who changed which lines and when). Read-only: check ' +
+      'status and diff before committing, so the commit holds what you mean.',
     inputSchema: {
       type: 'object',
       properties: {
         action: { type: 'string', enum: ['status', 'diff', 'log', 'blame'] },
         path: { type: 'string', description: 'diff, log, blame: one file.' },
-        staged: { type: 'boolean', description: 'diff: index against HEAD.' },
-        limit: { type: 'number', description: 'log: how many (default 20, max 100).' },
-        startLine: { type: 'number', description: 'blame: first line (1-based).' },
-        endLine: { type: 'number', description: 'blame: last line (inclusive).' },
+        staged: { type: 'boolean', description: 'diff: vs HEAD.' },
+        limit: { type: 'number', description: 'log: how many (20; max 100).' },
+        startLine: { type: 'number', description: 'blame: first line, 1-based.' },
+        endLine: { type: 'number', description: 'blame: last line, inclusive.' },
       },
       required: ['action'],
     },
@@ -616,8 +611,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'git_write',
     side: 'main',
     description:
-      'The repository: stage, unstage, commit, checkout, discard, fetch, pull, push. Checkout rewrites files ' +
-      'and git may refuse uncommitted changes. Discard is irreversible — ask first. Resolve conflicts by hand.',
+      'The repository: stage, unstage, commit, checkout, discard, fetch, pull, push. Checkout rewrites ' +
+      'files and git may refuse uncommitted changes. Discard is irreversible — ask first. Resolve ' +
+      'conflicts by hand.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -630,12 +626,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
         paths: {
           type: 'array',
-          description: 'stage, unstage, discard, commit: files or folders.',
+          description: 'stage, unstage, discard, commit: files/folders.',
           items: { type: 'string' },
         },
         message: { type: 'string', description: 'commit: message.' },
         name: { type: 'string', description: 'checkout: branch.' },
-        create: { type: 'boolean', description: 'checkout: create it first.' },
+        create: { type: 'boolean', description: 'checkout: create first.' },
         setUpstream: { type: 'boolean', description: 'push: origin -u.' },
         force: { type: 'boolean', description: 'push: --force-with-lease.' },
       },
@@ -646,8 +642,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'show',
     side: 'main',
     description:
-      'Show the user where to look: action open — a file in the editor at a line, for referring to ' +
-      'specific code; action present — result files as buttons in the feed, instead of a path in prose.',
+      'Show where to look: open — a file in the editor at a line; present — result files as buttons.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -656,12 +651,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           enum: ['open', 'present'],
         },
         path: { type: 'string', description: 'Path.' },
-        line: { type: 'number', description: 'open: line (1-based).' },
-        column: { type: 'number', description: 'open: column (1-based).' },
+        line: { type: 'number', description: 'open: line, 1-based.' },
+        column: { type: 'number', description: 'open: column, 1-based.' },
         paths: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Result files, one to five, inside the project.',
+          description: 'present: result files, 1–5, inside the project.',
         },
         note: { type: 'string', description: 'present: one line about the result.' },
       },
