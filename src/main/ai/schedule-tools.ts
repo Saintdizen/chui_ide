@@ -10,7 +10,7 @@ import {
 import type { ToolContext, ToolOutcome } from './agent-tools';
 
 /**
- * Инструменты расписания: `schedule` (action create, update, delete) и `schedule_list`.
+ * Инструменты расписания: `schedule` — одно имя на list, create, update и delete.
  *
  * Расписание до сих пор ставилось только окном: человек открывал «Расписание
  * задач…» и заполнял форму. Отсюда же задачу ставит сам агент — одной фразой
@@ -87,13 +87,16 @@ const REPEAT_HINT = 'repeat: daily, weekly, once или interval.';
 /** Действия расписания одним инструментом: `action` вместо трёх имён. */
 export async function scheduleAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const action = text(args.action);
+  // `list` живёт здесь же: отдельное имя ради «видно в плане» больше не нужно —
+  // право на отдельное действие задаётся в TOOL_POLICIES (`planActions`).
+  if (action === 'list') return await scheduleList(ctx);
   if (action === 'create') return await scheduleCreate(ctx, args);
   if (action === 'update') return await scheduleUpdate(ctx, args);
   if (action === 'delete') return await scheduleDelete(ctx, args);
   return {
     ok: false,
     summary: `Неизвестное действие расписания: ${action ?? '(пусто)'}`,
-    detail: 'Допустимые: create, update, delete. Список задач — schedule_list.',
+    detail: 'Допустимые: list, create, update, delete.',
   };
 }
 
@@ -153,7 +156,7 @@ export async function scheduleUpdate(ctx: ToolContext, args: Record<string, unkn
   if (!ctx.schedules) return { ok: false, summary: 'Расписание недоступно' };
 
   const id = text(args.id);
-  if (!id) return { ok: false, summary: 'Нужен id', detail: 'id берётся из schedule_list.' };
+  if (!id) return { ok: false, summary: 'Нужен id', detail: 'id берётся из schedule (list).' };
 
   const located = findSchedule(await ctx.schedules.list(), id);
   if ('problem' in located) return { ok: false, summary: 'Задача не найдена', detail: located.problem };
@@ -210,7 +213,7 @@ export async function scheduleDelete(ctx: ToolContext, args: Record<string, unkn
   if (!ctx.schedules) return { ok: false, summary: 'Расписание недоступно' };
 
   const id = text(args.id);
-  if (!id) return { ok: false, summary: 'Нужен id', detail: 'id берётся из schedule_list.' };
+  if (!id) return { ok: false, summary: 'Нужен id', detail: 'id берётся из schedule (list).' };
 
   const located = findSchedule(await ctx.schedules.list(), id);
   if ('problem' in located) return { ok: false, summary: 'Задача не найдена', detail: located.problem };

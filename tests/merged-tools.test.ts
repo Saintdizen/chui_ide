@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
+import { allowsInPlan } from '../src/shared/tool-policy';
 import { AGENT_TOOLS } from '../src/shared/tools';
 
 /**
@@ -22,7 +23,7 @@ describe('слитые инструменты: схема', () => {
     };
     expect(actions('browser')).toEqual(['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close']);
     expect(actions('terminal')).toEqual(['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel']);
-    expect(actions('schedule')).toEqual(['create', 'update', 'delete']);
+    expect(actions('schedule')).toEqual(['list', 'create', 'update', 'delete']);
     expect(actions('git_read')).toEqual(['status', 'diff', 'log', 'blame']);
     expect(actions('git_write')).toEqual([
       'stage',
@@ -47,9 +48,13 @@ describe('слитые инструменты: схема', () => {
     }
   });
 
-  it('schedule_list остался отдельным: его видно в режиме плана', () => {
-    expect(spec('schedule_list').inputSchema.required).toBeUndefined();
-    expect(spec('schedule').name).toBe('schedule');
+  it('schedule: list — действие, а не второе имя', () => {
+    // Раньше `schedule_list` было отдельным инструментом ради права быть видимым
+    // в плане. Теперь право задаёт признак действия в TOOL_POLICIES, и второй
+    // схемы (26 токенов в каждом запросе) больше нет.
+    expect(AGENT_TOOLS.some((tool) => tool.name === 'schedule_list')).toBe(false);
+    expect(allowsInPlan('schedule', '{"action":"list"}')).toBe(true);
+    expect(allowsInPlan('schedule', '{"action":"create"}')).toBe(false);
   });
 });
 

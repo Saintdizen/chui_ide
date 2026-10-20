@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ToolContext } from '../src/main/ai/agent-tools';
 import {
   findSchedule,
+  scheduleAction,
   scheduleCreate,
   scheduleDelete,
   scheduleLine,
@@ -120,17 +121,19 @@ describe('schedule_create', () => {
   });
 });
 
-describe('schedule_list', () => {
+describe('schedule: list', () => {
+  const list = (ctx: ToolContext) => scheduleAction(ctx, { action: 'list' });
+
   it('пустое расписание говорит об этом, а не молчит', async () => {
     const { ctx } = harness();
-    const outcome = await scheduleList(ctx);
+    const outcome = await list(ctx);
     expect(outcome.ok).toBe(true);
     expect(outcome.summary).toContain('пустое');
   });
 
   it('строка задачи несёт id, правило и прошлый итог', async () => {
     const { ctx } = harness([existing]);
-    const outcome = await scheduleList(ctx);
+    const outcome = await list(ctx);
     expect(outcome.summary).toContain('1');
     expect(outcome.detail).toContain(existing.id);
     expect(outcome.detail).toContain('ежедневно в 09:00');

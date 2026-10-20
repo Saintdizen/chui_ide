@@ -52,7 +52,6 @@ export type AgentToolName =
   | 'remember'
   | 'forget'
   | 'schedule'
-  | 'schedule_list'
   | 'git_read'
   | 'git_write'
   | 'open_file'
@@ -800,22 +799,21 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'schedule_list',
-    side: 'main',
-    description: 'Scheduled tasks: id, rule, next run, last outcome.',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
     name: 'schedule',
     side: 'main',
     description:
-      'Change the schedule: create (the prompt is sent to the assistant automatically), update ' +
-      '(only the changed fields; id and run history are kept), delete. Ids come from schedule_list.',
+      'Manage the schedule: list (id, rule, next run, last outcome; read-only), create (the prompt ' +
+      'is sent to the assistant automatically), update (only the changed fields; id and run history ' +
+      'are kept), delete.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['create', 'update', 'delete'], description: 'Action.' },
-        id: { type: 'string', description: 'update, delete: task id from schedule_list.' },
+        action: {
+          type: 'string',
+          enum: ['list', 'create', 'update', 'delete'],
+          description: 'list needs nothing else; create, update, delete need the fields below.',
+        },
+        id: { type: 'string', description: 'update, delete: task id from action list.' },
         title: { type: 'string', description: 'create, update: title, the task is listed under it.' },
         prompt: { type: 'string', description: 'create, update: full prompt, sent as a question.' },
         repeat: { type: 'string', enum: ['daily', 'weekly', 'once', 'interval'], description: 'Repeat rule.' },

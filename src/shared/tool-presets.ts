@@ -156,7 +156,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     label: 'Расписание',
     // Задача живёт в файле проекта (`.chui/schedules.json`) и запускает агента сама:
     // в «только чтение» и «минимуме» её нет — там ничего не меняют.
-    names: ['schedule_list', 'schedule'],
+    names: ['schedule'],
   },
 ];
 

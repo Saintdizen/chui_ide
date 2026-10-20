@@ -30,7 +30,7 @@ import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
-import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, isReadOnlyCall } from '../../shared/tool-policy';
+import { ALWAYS_AVAILABLE, PLAN_MODE_OFFERED, SUBAGENT_TOOLS, allowsInPlan, isReadOnlyCall } from '../../shared/tool-policy';
 import { canonicalCall } from '../../shared/tool-aliases';
 import {
   condenseAppliedCalls,
@@ -883,7 +883,7 @@ export class AiService {
             toolPresetAllows(toolPreset, tool.name) &&
             (planMode || !isRosterTool(toolPreset, tool.name)) &&
             // Вне плана «утвердить план» нечего: инструмент живёт только в нём.
-            (planMode ? PLAN_MODE_TOOLS.has(tool.name) : tool.name !== 'exit_plan_mode'),
+            (planMode ? PLAN_MODE_OFFERED.has(tool.name) : tool.name !== 'exit_plan_mode'),
         )
       : [];
 
@@ -1613,7 +1613,7 @@ export class AiService {
           }
         }
         const denied =
-          planMode && !planApproved && !PLAN_MODE_TOOLS.has(call.name)
+          planMode && !planApproved && !allowsInPlan(call.name, call.arguments)
             ? {
                 content: `Режим плана: инструмент «${call.name}» недоступен. Ничего не меняй — составь план доступными средствами чтения.`,
                 summary: 'режим плана: изменение недоступно',
@@ -2271,7 +2271,7 @@ export class AiService {
     if (tool.name === 'agents') return this.agents !== undefined;
     // Расписание — тоже файл проекта: действие обратимо (задачу снимает
     // schedule_delete), а часы без окна и так молчат.
-    if (tool.name === 'schedule' || tool.name === 'schedule_list') return this.schedules !== undefined;
+    if (tool.name === 'schedule') return this.schedules !== undefined;
     // Навыки — файлы проекта: инструмент предлагаем только когда есть что читать.
     if (tool.name === 'read_skill') return hasSkills;
     // Прошлые беседы: без хранилища искать негде.

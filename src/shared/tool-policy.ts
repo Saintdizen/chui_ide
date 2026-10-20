@@ -43,6 +43,13 @@ export interface ToolPolicy {
    * зацикливания на чтении вывода.
    */
   readonly readOnlyActions?: readonly string[];
+  /**
+   * Действия, законные в режиме «План», когда инструмент в целом его не
+   * заслуживает: `schedule` с `list` только показывает задачи, а `create` и
+   * `delete` их меняют. Без этого признака слияние оставляло бы выбор из двух
+   * зол — не видеть расписание в плане вовсе или разрешить заводить задачи.
+   */
+  readonly planActions?: readonly string[];
 }
 
 export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
@@ -123,13 +130,11 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   git_read: { readOnly: true, plan: true, subagent: true },
   git_write: {},
 
-  /* ── расписание ─────────────────────────────────────────────────────── */
-  // В плане — только чтение: `schedule` меняет расписание (create, update,
-  // delete), `schedule_list` его только показывает. Именно поэтому они не слиты
-  // в один: слитое пришлось бы либо запретить в плане целиком — и там не
-  // посмотреть расписание, — либо разрешить, и в плане заводились бы задачи.
-  schedule_list: { plan: true },
-  schedule: {},
+  /* ── расписание ──────────────────────────────────────────────────────── */
+  // Одно имя на все действия: `list` только показывает список, остальные три
+  // его меняют. В плане законен только `list` — это оговорено действием, а не
+  // вторым именем инструмента (второе имя стоило схемы в каждом запросе).
+  schedule: { planActions: ['list'] },
 
   /* ── память проекта: заметка обратима, спрашивать не у кого ─────────── */
   remember: { alwaysAvailable: true },
@@ -185,6 +190,35 @@ export function isReadOnlyCall(name: string, rawArguments: string): boolean {
  * и не исполняется — даже если модель вызовет такой инструмент по имени.
  */
 export const PLAN_MODE_TOOLS = namesWhere('plan');
+
+/** Действия, законные в плане: имя инструмента → набор действий. */
+const PLAN_ACTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  (Object.entries(TOOL_POLICIES) as [AgentToolName, ToolPolicy][])
+    .filter(([, policy]) => (policy.planActions?.length ?? 0) > 0)
+    .map(([name, policy]) => [name, new Set(policy.planActions)]),
+);
+
+/**
+ * Инструменты, которые в плане предлагаются: целиком или отдельными действиями.
+ * `schedule` попадает сюда из-за одного `list`, и без его схемы модель не знала
+ * бы даже имени — поэтому предлагаем целиком, а решаем по действию.
+ */
+export const PLAN_MODE_OFFERED: ReadonlySet<string> = new Set([...PLAN_MODE_TOOLS, ...PLAN_ACTIONS.keys()]);
+
+/**
+ * Законен ли вызов в режиме плана. Смотрит и на инструмент, и на действие:
+ * `schedule(list)` расписание только показывает, а `create` его меняет.
+ * Без этого проверять пришлось бы целым инструментом — и слитое имя либо
+ * пропадало бы из плана вместе с `list`, либо заводило задачи.
+ */
+export function allowsInPlan(name: string, rawArguments: string): boolean {
+  const actions = PLAN_ACTIONS.get(name);
+  if (!actions) return PLAN_MODE_TOOLS.has(name);
+  const parsed = parseToolArguments(rawArguments);
+  if (!parsed.ok) return false;
+  const action = parsed.value.action;
+  return typeof action === 'string' && actions.has(action);
+}
 
 /**
  * Инструменты подзадачи (`task`) — и тем самым предел глубины работы агентов.

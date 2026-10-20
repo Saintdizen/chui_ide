@@ -53,7 +53,6 @@ describe('набор инструментов агента', () => {
       'remember',
       'forget',
       'schedule',
-      'schedule_list',
       'git_read',
       'git_write',
       'open_file',

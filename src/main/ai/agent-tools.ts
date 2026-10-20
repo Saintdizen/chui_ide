@@ -36,7 +36,7 @@ import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
 import type { TaskSchedule } from '../../shared/scheduling';
-import { scheduleAction, scheduleList } from './schedule-tools';
+import { scheduleAction } from './schedule-tools';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
 import {
   formatAgentList,
@@ -904,8 +904,6 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await remember(ctx, args);
       case 'forget':
         return await forget(ctx, args);
-      case 'schedule_list':
-        return await scheduleList(ctx);
       case 'schedule':
         return await scheduleAction(ctx, args);
       case 'git_read':
