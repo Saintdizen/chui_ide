@@ -6,6 +6,7 @@
  */
 
 import type { MenuRole } from './app-menu';
+import type { OfficePreview } from './office';
 import type { CursorStyle } from './cursor-style';
 import type { ApplyResult, FileEdit, TextEdit } from './edits';
 import type { BlameLine } from './git-blame';
@@ -2036,6 +2037,8 @@ export interface ChuiMethods {
   'workspace.readFile': { params: { path: string }; result: FileContent };
   /** Прочитать файл-картинку для вьюера. Текстом её не открыть: бинарь. */
   'workspace.readImage': { params: { path: string }; result: ViewImage };
+  /** Прочитать документ Office для предпросмотра (.docx/.xlsx). */
+  'workspace.readOffice': { params: { path: string }; result: OfficePreview };
   'workspace.writeFile': { params: { path: string; text: string }; result: { mtimeMs: number } };
   'workspace.stat': { params: { path: string }; result: FileStat };
 

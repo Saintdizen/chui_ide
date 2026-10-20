@@ -417,6 +417,7 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('workspace.readDir', (params) => deps.workspace.readDir(params.path));
   router.register('workspace.readFile', (params) => deps.workspace.readFile(params.path));
   router.register('workspace.readImage', (params) => deps.workspace.readImage(params.path));
+  router.register('workspace.readOffice', (params) => deps.workspace.readOffice(params.path));
   router.register('workspace.writeFile', (params) => deps.workspace.writeFile(params.path, params.text));
   router.register('workspace.stat', (params) => deps.workspace.stat(params.path));
   router.register('workspace.search', (params) => deps.workspace.search(params));

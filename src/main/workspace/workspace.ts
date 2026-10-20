@@ -18,6 +18,8 @@ import {
   type WorkspaceInfo,
 } from '../../shared/api';
 import { compareEntries } from '../../shared/entry-kind';
+import { officeKindOf, officeRefusal, type OfficePreview } from '../../shared/office';
+import { parseOfficeDocument } from '../doc/office';
 import { nextActiveRoot, type WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
 import { ContentCache, type ContentCacheStats } from './content-cache';
@@ -433,6 +435,32 @@ export class WorkspaceService {
     }
     const data = await fs.readFile(file);
     return { mime, bytes: data.byteLength, dataUrl: `data:${mime};base64,${data.toString('base64')}` };
+  }
+
+  /**
+   * Чтение документа Office для предпросмотра (.docx/.xlsx): текстом его не открыть —
+   * это zip с XML, и в документ редактора попал бы бинарь. Предел свой
+   * (`MAX_VIEW_OFFICE_BYTES`): разбор идёт в памяти, а распаковка даёт больше исходника.
+   */
+  async readOffice(filePath: string): Promise<OfficePreview> {
+    const file = await this.safePath(filePath);
+    const kind = officeKindOf(file);
+    if (kind === null) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `Предпросмотр показывает .docx и .xlsx: ${path.basename(file)}`);
+    }
+    const stat = await fs.stat(file).catch(() => null);
+    if (!stat?.isFile()) throw new RpcFailure(RpcErrorCode.NotFound, `Файл не найден: ${file}`);
+    const refusal = officeRefusal(kind, stat.size);
+    if (refusal !== null) {
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `${path.basename(file)}: ${refusal}`);
+    }
+    const data = await fs.readFile(file);
+    try {
+      return parseOfficeDocument(data, file);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new RpcFailure(RpcErrorCode.InvalidParams, `Не удалось прочитать документ: ${message}`);
+    }
   }
 
   async writeFile(filePath: string, text: string): Promise<{ mtimeMs: number }> {

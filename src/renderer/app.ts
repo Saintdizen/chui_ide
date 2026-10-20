@@ -47,6 +47,7 @@ import { languageFromPath, languageLabel, languageIndent } from './core/language
 import { normalizeBrowserUrl, isLocalUrl } from '../shared/browser';
 import { imageFormatLabel, isImagePath } from '../shared/images';
 import { fileUrlFor, isPdfPath, pdfTabTitle } from '../shared/pdf';
+import { isOfficePath, officeFormatLabel as officeFormatChip } from '../shared/office';
 import { BrowserTabs } from './core/browser-tabs';
 import { ImportChecker } from './core/import-check';
 import { LspClient } from './core/lsp';
@@ -113,6 +114,7 @@ import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
 import { createLspPopover, type LspPopoverView } from './ui/lsp-popover';
 import { createMarkdownPreview, isMarkdownPath } from './ui/markdown-preview';
+import { createDocView } from './ui/doc-view';
 import { createNotebookPanel } from './ui/notebook-panel';
 import { logoMark } from './ui/logo';
 import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-popover';
@@ -1462,6 +1464,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const imageView = createImageView({ rpc, notify: (message) => showToast(message, 'error') });
   layout.editorHost.appendChild(imageView.element);
 
+  // Предпросмотр документа Office (.docx/.xlsx): та же область, что у вьюера картинок.
+  // Когда он виден — решает `syncDoc` по активной вкладке.
+  const docView = createDocView({ rpc, notify: (message) => showToast(message, 'error') });
+  layout.editorHost.appendChild(docView.element);
+
   // Вкладки встроенного браузера: страницы живут в той же полосе, что файлы, а
   // рисует их вложение окна (WebContentsView) — место ему считает renderer.
   const browserTabs = new BrowserTabs();
@@ -1580,11 +1587,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       layout.editorIsland.classList.remove('is-browser');
       markdownPreview.hide();
       layout.editorIsland.classList.remove('is-markdown');
+      // Документ Office показывает свой экран — он тоже уступает чату.
+      docView.hide();
+      layout.editorIsland.classList.remove('is-doc');
     } else {
       // Чат ушёл — вернуть тот экран, которому принадлежит активная вкладка.
       syncImage();
       syncBrowser();
       syncMarkdown();
+      syncDoc();
     }
     tabs.refresh();
     // Вкладка чата — это тоже «показан ли чат»: кнопка AI должна это отражать.
@@ -1601,8 +1612,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Страница браузера занимает ту же область: уступаем ей.
     const shown = image !== null && browserTabs.activePageId === null && !(chatInEditor && chatTabActive);
     layout.editorIsland.classList.toggle('is-image', shown);
-    if (shown && image !== null) imageView.show(image);
-    else imageView.hide();
+    if (shown && image !== null) {
+      imageView.show(image);
+      // Документ Office — тоже экран на всю область: одновременно их не показываем.
+      docView.hide();
+      layout.editorIsland.classList.remove('is-doc');
+    } else imageView.hide();
+  }
+
+  /**
+   * Активная вкладка — документ Office (.docx/.xlsx): полотно уступает его экрану.
+   * Зовётся по смене активной вкладки и по показу чата: область у них одна.
+   */
+  function syncDoc(): void {
+    const path = openEditors.active?.path ?? null;
+    const doc = path !== null && isOfficePath(path) ? path : null;
+    const shown = doc !== null && browserTabs.activePageId === null && !(chatInEditor && chatTabActive);
+    layout.editorIsland.classList.toggle('is-doc', shown);
+    if (shown && doc !== null) {
+      docView.show(doc);
+      // Место в области одно: картинка и разметка уступают документу.
+      imageView.hide();
+      layout.editorIsland.classList.remove('is-image');
+      markdownPreview.hide();
+      layout.editorIsland.classList.remove('is-markdown');
+    } else {
+      docView.hide();
+    }
   }
 
   /**
@@ -1626,6 +1662,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       layout.editorIsland.classList.remove('is-image');
       markdownPreview.hide();
       layout.editorIsland.classList.remove('is-markdown');
+      docView.hide();
+      layout.editorIsland.classList.remove('is-doc');
     }
     // Подсветка кнопки в шапке идёт за страницей: она показывает, открыт ли браузер.
     syncViewButtons();
@@ -1683,6 +1721,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncImage();
     syncBrowser();
     syncMarkdown();
+    syncDoc();
   });
 
   function setChatInEditor(next: boolean): void {
@@ -2304,11 +2343,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       openPdfTab(path);
       return;
     }
+    // Документ Office — не текст, а zip с XML: в буфере редактора оказался бы бинарь.
+    // Заглушка нужна вкладке, дереву и статусбару, а содержимое рисует свой экран.
+    if (isOfficePath(path)) {
+      const document = edits.binaryDocument(path);
+      openEditors.open(document, options);
+      explorer.reveal(path);
+      hideChatTab();
+      return;
+    }
     // Картинка — не текст: бинарь открывать редактором нельзя. Заводим документ-заглушку
     // (он нужен вкладке, дереву и статусбару), а полотно покажет вьюер (см. `syncImage`).
     if (isImagePath(path)) {
-      // Документ-заглушка: текста в нём нет и быть не должно (см. `imageDocument`).
-      const document = edits.imageDocument(path);
+      // Документ-заглушка: текста в нём нет и быть не должно (см. `binaryDocument`).
+      const document = edits.binaryDocument(path);
       openEditors.open(document, options);
       explorer.reveal(path);
       // Открыли файл — вкладка чата ждёт в полосе.
@@ -3160,8 +3208,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (typeof path !== 'string') return;
     openEditors.activate(path);
     const document = documents.get(path);
-    // Картинку текстовому редактору не отдаём: её показывает вьюер.
-    if (document && !isImagePath(path)) editors.open(document);
+    // Картинку и документ Office текстовому редактору не отдаём: их показывает свой экран.
+    if (document && !isImagePath(path) && !isOfficePath(path)) editors.open(document);
     // Файл мог быть активным и до этого: клик по его вкладке всё равно должен
     // показать файл, а не оставить на экране чат или страницу браузера. Чат
     // отступает сам, а странице нужен отдельный сигнал: её активность живёт в
@@ -6132,7 +6180,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Картинка — не язык: в чипе показываем формат (PNG, SVG), а не «plaintext».
     const activePath = active?.path ?? null;
     const showImage = activePath !== null && isImagePath(activePath);
-    const language = showImage ? null : (active?.languageId ?? null);
+    const showOffice = activePath !== null && isOfficePath(activePath);
+    const language = showImage || showOffice ? null : (active?.languageId ?? null);
     const indent = settings.editor.languageIndent && language ? languageIndent(language) : null;
     // Язык сменился — перечитываем состав серверов: сервер поднимается при первом
     // открытии файла языка, и до этого про него ничего не известно.
@@ -6143,7 +6192,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     statusBar.update({
       readOnly: active?.readOnly ?? false,
       language:
-        showImage && activePath !== null ? imageFormatLabel(activePath) : language ? languageLabel(language) : null,
+        showImage && activePath !== null
+          ? imageFormatLabel(activePath)
+          : showOffice && activePath !== null
+            ? officeFormatChip(activePath)
+            : language
+              ? languageLabel(language)
+              : null,
       lsp: settings.lsp.enabled ? lspChipFor(language, lspStatus) : null,
       version: active?.version ?? 0,
       tabSize: indent?.tabSize ?? settings.editor.tabSize,
@@ -6267,8 +6322,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     diskDiffWarned.delete(document.path);
     // Режим разметки у закрытого файла больше не нужен.
     markdownPreviews.delete(document.path);
-    // Прочитанную картинку забываем: файл мог на диске и измениться.
+    // Прочитанную картинку и документ забываем: файл мог на диске и измениться.
     imageView.forget(document.path);
+    docView.forget(document.path);
   });
 
   /**
@@ -6288,6 +6344,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // бинарь). Файл мог смениться на диске — об этом узнаёт вьюер, а не буфер.
     if (isImagePath(path)) {
       imageView.refresh(path);
+      return;
+    }
+    // Документ Office — та же история: в буфер он не читается, обновится экран.
+    if (isOfficePath(path)) {
+      docView.refresh(path);
       return;
     }
     await edits.reloadFromDisk(path).catch(() => undefined);
@@ -6429,9 +6490,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       // Страницы браузера тоже отступают: активен файл — показываем файл.
       browserTabs.deactivate();
     }
-    // Активной могла стать картинка или markdown в режиме разметки — полотно уступает им.
+    // Активной могла стать картинка, документ Office или markdown в режиме разметки —
+    // полотно уступает им.
     syncImage();
     syncMarkdown();
+    syncDoc();
     // Точки останова контроллер помнит по файлам, а редактор о них не знает:
     // при открытии вкладки отдаём ему набор — значки (с условиями) появятся сразу.
     for (const path of openEditors.paths) editors.setBreakpoints(path, debug.breakpointsOf(path));

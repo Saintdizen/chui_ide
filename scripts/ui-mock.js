@@ -999,6 +999,17 @@ module.exports = [
         'MjCxkTFhUCAF1uCwG7vFcYAAAAAElFTkSuQmCC';
       return { mime: 'image/png', bytes: 84, dataUrl };
     },
+    // Предпросмотр документа Office: файловой системы в браузере нет, поэтому отдаём
+    // уже разобранный вид — важно, что экран ходит в main и рисует ответ.
+    'workspace.readOffice': () => ({
+      kind: 'docx',
+      bytes: 12_288,
+      blocks: [
+        { kind: 'heading', level: 1, text: 'Договор' },
+        { kind: 'paragraph', text: 'Содержимое из подменённого RPC.' },
+      ],
+      truncated: false,
+    }),
     'workspace.writeFile': (params) => {
       FILES.set(params.path, params.text ?? '');
       // Как main: сохранение файла — это изменение в рабочей папке, о нём
