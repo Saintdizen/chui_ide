@@ -122,6 +122,28 @@ describe('расход Anthropic считает весь вход', () => {
     expect(done.usage?.cachedTokens).toBe(900);
     expect(done.usage?.cacheCreationTokens).toBe(80);
   });
+
+  it('DeepSeek: попадание в кеш приходит полем prompt_cache_hit_tokens', async () => {
+    // Кеш у DeepSeek включён всегда: если это поле не читать, попадания
+    // выглядят как полная цена, и рычаг оптимизации не виден в учёте.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        sse([
+          'data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":1200,"completion_tokens":5,"prompt_cache_hit_tokens":1100,"prompt_cache_miss_tokens":100}}\n\n',
+        ]),
+      ),
+    );
+    const provider = new OpenAiCompatibleProvider({ id: 'd', label: 'D', baseUrl: 'https://api.deepseek.com', apiKey: 'k' });
+    const done = await provider.streamChat(
+      { model: 'deepseek-flash', messages: [{ role: 'user', content: 'x' }], maxTokens: 100 },
+      { onDelta: () => undefined },
+      new AbortController().signal,
+    );
+
+    expect(done.usage?.promptTokens).toBe(1200);
+    expect(done.usage?.cachedTokens).toBe(1100);
+  });
 });
 
 describe('ключ дискового кеша промпта', () => {

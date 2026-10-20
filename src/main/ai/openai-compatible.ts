@@ -36,8 +36,14 @@ interface ChatCompletionChunk {
   usage?: {
     prompt_tokens?: number;
     completion_tokens?: number;
-    /** OpenAI кладёт сюда попадание в кеш промпта — это оплаченные дешевле токены. */
+    /**
+     * Попадание в кеш промпта — это оплаченные в десятки раз дешевле токены.
+     * OpenAI кладёт его в `prompt_tokens_details.cached_tokens`, DeepSeek — в
+     * `prompt_cache_hit_tokens` рядом (у него кеш включён всегда, без настроек).
+     */
     prompt_tokens_details?: { cached_tokens?: number };
+    prompt_cache_hit_tokens?: number;
+    prompt_cache_miss_tokens?: number;
   };
 }
 
@@ -232,7 +238,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
 
       if (choice?.finish_reason) finishReason = choice.finish_reason;
       if (chunk.usage) {
-        const cached = chunk.usage.prompt_tokens_details?.cached_tokens;
+        const cached = chunk.usage.prompt_tokens_details?.cached_tokens ?? chunk.usage.prompt_cache_hit_tokens;
         usage = {
           promptTokens: chunk.usage.prompt_tokens,
           completionTokens: chunk.usage.completion_tokens,
