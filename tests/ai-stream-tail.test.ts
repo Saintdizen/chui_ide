@@ -123,3 +123,73 @@ describe('расход Anthropic считает весь вход', () => {
     expect(done.usage?.cacheCreationTokens).toBe(80);
   });
 });
+
+describe('ключ дискового кеша промпта', () => {
+  /** Тело последнего запроса: ключ кеша виден только там. */
+  async function bodyFor(baseUrl: string): Promise<Record<string, unknown>> {
+    const spy = vi.fn(async () => sse(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n']));
+    vi.stubGlobal('fetch', spy);
+    const provider = new OpenAiCompatibleProvider({ id: 'p', label: 'P', baseUrl, apiKey: 'k' });
+    await provider.streamChat(
+      {
+        model: 'deepseek-flash',
+        messages: [{ role: 'system', content: 'ты агент' }],
+        tools: [{ name: 'read', description: 'd', parameters: { type: 'object', properties: {} } }],
+      },
+      { onDelta: () => undefined },
+      new AbortController().signal,
+    );
+    const call = spy.mock.calls[0] as unknown as [string, { body: string }];
+    return JSON.parse(call[1].body) as Record<string, unknown>;
+  }
+
+  it('DeepSeek получает prompt_cache_key — у него есть дисковый кеш', async () => {
+    // Без ключа DeepSeek всё равно кеширует по префиксу, но ключ на 30× дешевле
+    // и снимает утечку между беседами: одинаковый system у всех.
+    expect((await bodyFor('https://api.deepseek.com')).prompt_cache_key).toEqual(expect.any(String));
+  });
+
+  it('чужой OpenAI-совместимый сервер ключа не получает — там это 400', async () => {
+    expect((await bodyFor('https://api.groq.com/openai/v1')).prompt_cache_key).toBeUndefined();
+  });
+});
+
+describe('кеш Anthropic держит только префикс прогона', () => {
+  /** Тела запросов: кеш видно только там. */
+  async function bodies(turns: number): Promise<Array<Record<string, unknown>>> {
+    const spy = vi.fn(async () => sse(['data: {"type":"message_stop"}\n\n']));
+    vi.stubGlobal('fetch', spy);
+    const provider = new AnthropicProvider({ id: 'a', label: 'A', baseUrl: 'http://localhost:1', apiKey: 'k' });
+    const messages = Array.from({ length: turns }, (_, index) => ({ role: 'user' as const, content: `шаг ${index}` }));
+    await provider.streamChat(
+      {
+        model: 'm',
+        system: 'ты агент',
+        messages,
+        tools: [{ name: 'read', description: 'd', parameters: { type: 'object', properties: {} } }],
+      },
+      { onDelta: () => undefined },
+      new AbortController().signal,
+    );
+    return spy.mock.calls.map((call) => JSON.parse((call as unknown as [string, { body: string }])[1].body));
+  }
+
+  /** Сколько сообщений несут cache_control: префикс кеша, а не хвост беседы. */
+  function marked(body: Record<string, unknown>): number {
+    const messages = body.messages as AnthropicMessage[];
+    return messages.filter((message) =>
+      Array.isArray(message.content) && message.content.some((block) => 'cache_control' in block),
+    ).length;
+  }
+
+  it('метка стоит на последнем сообщении с блоками — его и переиспользует следующий шаг', async () => {
+    const [body] = await bodies(4);
+    const messages = body!.messages as AnthropicMessage[];
+    expect(marked(body!)).toBe(1);
+    const last = messages[messages.length - 1]!;
+    expect(Array.isArray(last.content) && last.content.some((block) => 'cache_control' in block)).toBe(true);
+    // system (вместе с инструментами) — вторая, неподвижная точка.
+    const system = body!.system as Array<{ cache_control?: unknown }> | undefined;
+    if (system) expect(system[0]?.cache_control).toEqual({ type: 'ephemeral' });
+  });
+});

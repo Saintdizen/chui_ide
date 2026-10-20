@@ -124,7 +124,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
     // `stream_options` понимают не все: строгий OpenAI-совместимый сервер
     // (часть сборок llama.cpp, vLLM) отвечает ошибкой «unknown field». Поэтому
     // собираем тело сборщиком и при отказе повторяем запрос без него.
-    const buildBody = (includeStreamOptions: boolean): Record<string, unknown> => {
+    const buildBody = (includeStreamOptions: boolean, includeCacheKey = true): Record<string, unknown> => {
       const body: Record<string, unknown> = {
         model: params.model,
         messages: params.messages.map((message) => toWireMessage(message)),
@@ -144,10 +144,10 @@ export class OpenAiCompatibleProvider implements AiProvider {
       // Метка пользователя: по ней провайдер разделяет кеш и лимиты.
       if (params.userId) body.user_id = params.userId;
       if (params.tools?.length) body.tools = params.tools;
-      // Кеш промпта: только на официальном OpenAI — сторонние совместимые серверы
-      // могут отвергнуть незнакомое поле. Ключ стабилен для одного префикса, поэтому
-      // повторные запросы попадают в тот же кеш и префикс считается дешевле.
-      const cacheKey = promptCacheKey(this.options.baseUrl, params);
+      // Кеш промпта: только на официальном OpenAI и DeepSeek — сторонние совместимые
+      // серверы могут отвергнуть незнакомое поле. Ключ стабилен для одного префикса,
+      // поэтому повторные запросы попадают в тот же кеш и префикс считается дешевле.
+      const cacheKey = includeCacheKey ? promptCacheKey(this.options.baseUrl, params) : undefined;
       if (cacheKey) body.prompt_cache_key = cacheKey;
       return body;
     };
@@ -163,10 +163,8 @@ export class OpenAiCompatibleProvider implements AiProvider {
     let response = await post(buildBody(true));
     if (!response.ok && (response.status === 400 || response.status === 422)) {
       const detail = await safeText(response);
-      if (
-        /stream_options|stream options|unknown field|unrecognized|extra field|additional propert/i.test(detail ?? '')
-      ) {
-        response = await post(buildBody(false));
+      if (/cache_key|cache key/i.test(detail ?? '')) {
+        response = await post(buildBody(true, false));
         if (!response.ok) {
           const retryDetail = await safeText(response);
           throw new RpcFailure(RpcErrorCode.Internal, describeHttpError(response.status, retryDetail), retryDetail);
@@ -334,10 +332,11 @@ function wireContent(message: ChatMessage): unknown {
 }
 
 /**
- * Ключ кеша промпта для OpenAI. Поле понимает только официальный сервер, поэтому
- * шлём его лишь на `api.openai.com`: у сторонних OpenAI-совместимых серверов
- * незнакомое поле — это 400. Ключ должен быть стабилен для одного префикса
- * (модель + system + инструменты) — тогда повторы бьют в тот же кеш.
+ * Ключ кеша промпта для OpenAI. Поле понимает только официальный сервер и
+ * DeepSeek (он ввёл `prompt_cache_key` для своего дискового кеша), поэтому
+ * шлём его лишь туда: у прочих OpenAI-совместимых серверов незнакомое поле —
+ * это 400. Ключ должен быть стабилен для одного префикса (модель + system +
+ * инструменты) — тогда повторы бьют в тот же кеш.
  */
 function promptCacheKey(baseUrl: string, params: StreamChatParams): string | undefined {
   let host = '';
@@ -346,7 +345,7 @@ function promptCacheKey(baseUrl: string, params: StreamChatParams): string | und
   } catch {
     return undefined;
   }
-  if (host !== 'api.openai.com') return undefined;
+  if (host !== 'api.openai.com' && host !== 'api.deepseek.com') return undefined;
   const system = params.messages.find((message) => message.role === 'system')?.content ?? '';
   if (!system && !params.tools?.length) return undefined;
   return hashKey(`${params.model}\n${system}\n${params.tools?.length ?? 0}`);
