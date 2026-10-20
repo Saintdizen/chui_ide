@@ -38,6 +38,19 @@ import { formatSessionSearch, type SessionSearchReport } from '../../shared/sess
 import type { TaskSchedule } from '../../shared/scheduling';
 import { scheduleCreate, scheduleDelete, scheduleList, scheduleUpdate } from './schedule-tools';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
+import {
+  formatAgentList,
+  formatAgentWaits,
+  parseInterruptRequest,
+  parseMessageRequest,
+  parseSpawnRequest,
+  parseWaitRequest,
+  type AgentMessageFrom,
+  type AgentSnapshot,
+  type AgentStopReason,
+  type AgentWaitOutcome,
+} from '../../shared/agents';
+import type { AgentWaitResult } from './agents';
 import { formatWorkflow } from '../../shared/workflow';
 import { parseToolArguments } from '../../shared/tools';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
@@ -307,6 +320,24 @@ export interface SubagentRunner {
    * `MAX_PARALLEL`): каждая подзадача — свой прогон модели, то есть деньги.
    */
   runMany(tasks: readonly SubagentTask[]): Promise<ToolOutcome>;
+  /**
+   * Агент в фоне (`spawn_agent`): запустить и вернуть номер, не дожидаясь отчёта.
+   * Дальше с ним работают `list_agents`, `wait_agent`, `send_message` и
+   * `interrupt_agent` — через реестр (`ctx.agents`).
+   */
+  spawn?(params: { description: string; prompt: string }): ToolOutcome;
+}
+
+/**
+ * Живые агенты для инструментов (`list_agents`, `wait_agent`, `send_message`,
+ * `interrupt_agent`). Реестр живёт в main (`ai/agents.ts`), сюда приходит его
+ * видимая часть: по ней инструменты проверяются без модели и без окна.
+ */
+export interface AgentTools {
+  list(): AgentSnapshot[];
+  send(id: string, text: string, from: AgentMessageFrom): { ok: boolean; reason?: string };
+  interrupt(id: string, by: AgentStopReason): boolean;
+  wait(ids: readonly string[], timeoutMs: number): Promise<AgentWaitResult>;
 }
 
 /**
@@ -439,6 +470,12 @@ export interface ToolContext {
   mcp?: McpRunner;
   /** Подзадачи (инструмент `task`): запускает service — у него есть провайдер. */
   subagent?: SubagentRunner;
+  /**
+   * Живые агенты: список, ожидание, сообщение, остановка. Реестр один на окно
+   * (`ai/agents.ts`), поэтому видны и те агенты, что запущены прошлым — или фоновым —
+   * прогоном.
+   */
+  agents?: AgentTools;
   /** Браузер: подключён только при включённой настройке. */
   browser?: BrowserTools;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
@@ -647,6 +684,18 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await ask(ctx, parsed.value);
       case 'task':
         return await task(ctx, parsed.value);
+      // Агенты в фоне. Запуск — `spawn_agent`, остальные четыре говорят с уже
+      // запущенными: без них фоновый агент был бы бросанием денег на ветер.
+      case 'spawn_agent':
+        return await spawnAgent(ctx, parsed.value);
+      case 'list_agents':
+        return listAgents(ctx);
+      case 'wait_agent':
+        return await waitAgents(ctx, parsed.value);
+      case 'send_message':
+        return sendToAgent(ctx, parsed.value, 'agent');
+      case 'interrupt_agent':
+        return interruptAgent(ctx, parsed.value, 'model');
       case 'list_mcp_resources':
         return await listMcpResources(ctx, parsed.value);
       case 'read_mcp_resource':
@@ -781,6 +830,88 @@ async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<To
     return ctx.subagent.run({ description: only.description, prompt: only.prompt });
   }
   return ctx.subagent.runMany(request.tasks);
+}
+
+/* ── живые агенты ────────────────────────────────────────────────────────
+ *
+ * Агент в фоне (`spawn_agent`) и работа с уже запущенными: список, ожидание,
+ * сообщение, остановка. Сами агенты и почта живут в реестре main (`ai/agents.ts`),
+ * а цикл прогона — в `service.ts`; здесь только разбор аргументов и текст ответа.
+ * Поэтому эти инструменты проверяются без модели и без окна.
+ */
+
+/** Номера всех известных агентов: по ним разбираются аргументы вызовов. */
+function knownAgentIds(ctx: ToolContext): string[] {
+  return (ctx.agents?.list() ?? []).map((agent) => agent.id);
+}
+
+/** Агент в фоне: запустить и отдать номер. Отчёт заберут `wait_agent` или человек. */
+async function spawnAgent(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.subagent?.spawn) return { ok: false, summary: 'Агенты в фоне недоступны' };
+  const request = parseSpawnRequest(args);
+  if (request.error) return { ok: false, summary: 'Не задано задание', detail: request.error };
+  return ctx.subagent.spawn({ description: request.description, prompt: request.prompt });
+}
+
+/** Кто работает и чем занят. */
+function listAgents(ctx: ToolContext): ToolOutcome {
+  if (!ctx.agents) return { ok: false, summary: 'Реестр агентов недоступен' };
+  const agents = ctx.agents.list();
+  const running = agents.filter((agent) => agent.status === 'running').length;
+  return {
+    ok: true,
+    summary: agents.length === 0 ? 'агентов нет' : `агентов: ${agents.length}, работают: ${running}`,
+    detail: formatAgentList(agents),
+  };
+}
+
+/** Дождаться агентов и отдать отчёты. */
+async function waitAgents(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.agents) return { ok: false, summary: 'Реестр агентов недоступен' };
+  const request = parseWaitRequest(args, knownAgentIds(ctx));
+  if (request.error) return { ok: false, summary: 'Не указан агент', detail: request.error };
+  const ids = request.ids.slice(0, 5);
+  const result = await ctx.agents.wait(ids, request.timeoutMs);
+  const outcomes: AgentWaitOutcome[] = result.agents.map((agent) => ({
+    agent,
+    report: result.reports.get(agent.id) ?? null,
+  }));
+  const ready = outcomes.filter((outcome) => outcome.report !== null).length;
+  return {
+    ok: true,
+    summary:
+      outcomes.length === 0
+        ? 'таких агентов нет'
+        : ready === outcomes.length
+          ? `отчётов: ${ready}`
+          : `отчётов: ${ready}, ещё идут: ${outcomes.length - ready}`,
+    detail: formatAgentWaits(outcomes, result.timedOut),
+  };
+}
+
+/** Сказать агенту по делу: сообщение доедет перед его шагом. */
+function sendToAgent(ctx: ToolContext, args: Record<string, unknown>, from: AgentMessageFrom): ToolOutcome {
+  if (!ctx.agents) return { ok: false, summary: 'Реестр агентов недоступен' };
+  const request = parseMessageRequest(args, knownAgentIds(ctx));
+  if (request.error) return { ok: false, summary: 'Сообщение не отправлено', detail: request.error };
+  const sent = ctx.agents.send(request.id!, request.text, from);
+  if (!sent.ok) return { ok: false, summary: 'Сообщение не доставлено', detail: sent.reason };
+  return { ok: true, summary: `сообщение агенту ${request.id} отправлено` };
+}
+
+/** Остановить одного агента, не трогая остальных. */
+function interruptAgent(ctx: ToolContext, args: Record<string, unknown>, by: AgentStopReason): ToolOutcome {
+  if (!ctx.agents) return { ok: false, summary: 'Реестр агентов недоступен' };
+  const request = parseInterruptRequest(args, knownAgentIds(ctx));
+  if (request.error) return { ok: false, summary: 'Агент не остановлен', detail: request.error };
+  if (!ctx.agents.interrupt(request.id!, by)) {
+    return {
+      ok: false,
+      summary: 'Агент уже не работает',
+      detail: 'Останавливать нечего: агент уже закончил. Его отчёт читается через wait_agent.',
+    };
+  }
+  return { ok: true, summary: `агент ${request.id} остановлен` };
 }
 
 /* ── браузер ────────────────────────────────────────────────────────────── */

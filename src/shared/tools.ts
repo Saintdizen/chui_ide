@@ -53,6 +53,11 @@ export type AgentToolName =
   | 'exit_plan_mode'
   | 'ask'
   | 'task'
+  | 'spawn_agent'
+  | 'list_agents'
+  | 'wait_agent'
+  | 'send_message'
+  | 'interrupt_agent'
   | 'browser_open'
   | 'browser_snapshot'
   | 'browser_click'
@@ -875,6 +880,69 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           items: { type: 'object', description: 'Подзадача: { description, prompt }.' },
         },
       },
+    },
+  },
+  {
+    name: 'spawn_agent',
+    side: 'main',
+    description:
+      'Запустить агента в фоне: сразу номер. Состояние — list_agents, отчёт — wait_agent. ' +
+      'Агент только читает: правки остаются за тобой.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'Короткое название — попадёт в панель агентов.' },
+        prompt: { type: 'string', description: 'Задание агенту: что исследовать и что вернуть.' },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
+    name: 'list_agents',
+    side: 'main',
+    description: 'Кто работает и чем занят: номер, состояние, шаги, занятие.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'wait_agent',
+    side: 'main',
+    description: 'Дождаться агентов и получить отчёты. Время вышло — так и скажет: они ещё идут, это не ошибка.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          description: 'Номера агентов из list_agents или spawn_agent (до пяти).',
+          items: { type: 'string', description: 'Номер вида agent-3.' },
+        },
+        id: { type: 'string', description: 'Один номер — если ждёшь одного агента.' },
+        timeout: { type: 'number', description: 'Сколько ждать, секунд (по умолчанию 120, не больше 300).' },
+      },
+    },
+  },
+  {
+    name: 'send_message',
+    side: 'main',
+    description: 'Сказать работающему агенту: доедет перед его следующим шагом, обрывать работу не надо.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Номер агента из list_agents.' },
+        text: { type: 'string', description: 'Что уточнить или поправить. Коротко и по делу.' },
+      },
+      required: ['id', 'text'],
+    },
+  },
+  {
+    name: 'interrupt_agent',
+    side: 'main',
+    description: 'Остановить одного агента, не снимая остальных. Нужно, когда задание оказалось не тем.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Номер агента из list_agents.' },
+      },
+      required: ['id'],
     },
   },
   {

@@ -50,6 +50,7 @@
     "probe:browser-view": "npm run build && electron scripts/browser-view-probe.cjs",
     "probe:markdown": "npm run build && electron scripts/markdown-preview-probe.cjs",
     "probe:office": "npm run build && electron scripts/office-preview-probe.cjs",
+    "probe:agents": "npm run build && electron scripts/agents-probe.cjs",
     "probe:colors": "electron scripts/color-probe.cjs",
     "probe:menu": "npm run build:main && electron scripts/menu-probe.cjs",
     "probe:schedule": "npm run build && electron scripts/schedule-probe.cjs",

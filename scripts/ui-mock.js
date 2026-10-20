@@ -1422,6 +1422,11 @@ module.exports = [
     'ai.generateTest': async () => ({
       code: "describe('мок', () => {\n  it('работает', () => {\n    expect(true).toBe(true);\n  });\n});\n",
     }),
+    // Живые агенты: в браузере подзадач нет, поэтому список пуст — панель просто
+    // не появится. Вызовы правки отвечают «нет такого агента», как настоящие.
+    'ai.agents': () => [],
+    'ai.agentInterrupt': () => ({ ok: false }),
+    'ai.agentMessage': () => ({ ok: false, reason: 'В браузере агентов нет' }),
     'ai.chat': async (params, id) => {
       cancelRequested = false;
 

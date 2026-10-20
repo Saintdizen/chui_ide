@@ -858,6 +858,120 @@
 }
 
 /* Чек-лист плана агента. */
+
+/* ── живые агенты (подзадачи) ──────────────────────────────────────────── */
+
+/* Панель над полем ввода: агентов запускают пачкой, и «сколько их и что делают»
+   нужно видеть, не прокручивая ленту. Свёрнутая называет только идущих. */
+.composer-agents .agents-card {
+  margin-bottom: 6px;
+  border: 1px solid var(--separator_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
+  font-size: var(--font_labels_size);
+}
+
+.agents-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 8px;
+  color: var(--text_color_secondary);
+}
+
+.agents-head > .icon {
+  flex: 0 0 auto;
+  color: var(--accent_fill);
+}
+
+.agents-title {
+  font-weight: 600;
+}
+
+.agents-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 6px 6px;
+}
+
+.agents-collapsed {
+  overflow: hidden;
+  color: var(--text_color_tertiary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Строка агента: две линии — что за агент и что он делает сейчас. */
+.agent-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  border-radius: var(--radius_sm);
+  background: var(--editor_background);
+}
+
+.agent-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-name {
+  overflow: hidden;
+  color: var(--text_color);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agent-meta {
+  flex: 0 0 auto;
+  color: var(--text_color_tertiary);
+  font-family: var(--font_mono);
+  font-size: var(--font_small_size);
+}
+
+.agent-activity {
+  overflow: hidden;
+  color: var(--text_color_secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.agent-spacer {
+  flex: 1;
+}
+
+.agent-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+/* Снятый агент гаснет: он больше не работает, и путать его с идущим нельзя. */
+.agent-row.is-stopped .agent-name,
+.agent-row.is-stopped .agent-activity {
+  color: var(--text_color_tertiary);
+}
+
+/* Сбой — красным: это не «закончил», и одинаковый цвет тут врал бы.
+   Берём тот же красный, что у остальных ошибок в интерфейсе. */
+.agent-row.is-failed .agent-activity {
+  color: var(--red_prime_background);
+}
+
+.agent-message-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.agent-message {
+  flex: 1 1 auto;
+  min-width: 0;
+}
 .plan-card {
   margin-bottom: 6px;
   padding: 6px 8px;
@@ -1633,11 +1747,13 @@
    его даёт слот, а рамку/подложку — они сами. */
 .composer-box > .composer-extras > .composer-changes,
 .composer-box > .composer-extras > .composer-plan,
-.composer-box > .composer-extras > .composer-goal {
+.composer-box > .composer-extras > .composer-goal,
+.composer-box > .composer-extras > .composer-agents {
   padding: 0;
 }
 
 /* Появление панелей в футере — мягкий подъём снизу: они вырастают из композера. */
+.composer-agents:not([hidden]),
 .composer-goal:not([hidden]),
 .composer-plan:not([hidden]),
 .composer-changes:not([hidden]) {

@@ -1,5 +1,6 @@
 import {
   ChatStreamEvent,
+  PushTopic,
   type ApplyEditsHostParams,
   type ApplyEditsHostResult,
   type ApplyPatchesHostParams,
@@ -10,6 +11,7 @@ import {
   type ReasoningEffort,
   type Settings,
 } from '../../shared/api';
+import type { AgentSnapshot } from '../../shared/agents';
 import { sanitizeToolPreset, toolPresetSpec, type ToolPresetId } from '../../shared/tool-presets';
 import type { ApplyFailure, FileEdit } from '../../shared/edits';
 import { expandCommandPrompt, findCommand, parseCommandInvocation, type ProjectCommand } from '../../shared/commands';
@@ -35,6 +37,7 @@ import { createComposerMenu } from './chat-composer-menu';
 import { createChangesPanel } from './chat-changes';
 import { createPlanPanel } from './chat-plan';
 import { createGoalPanel } from './chat-goal';
+import { createAgentsPanel } from './chat-agents';
 import { CONTINUE_PROMPT, createStreamRunner } from './chat-stream';
 import type { ChatSession } from './chat-session';
 import {
@@ -330,6 +333,35 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       goalPanel.hide();
       scheduleSave();
     },
+  });
+
+  /**
+   * Живые агенты (подзадачи). Панель одна на окно, а не на беседу: агента мог
+   * запустить прогон соседней вкладки или фоном — он всё равно работает в этом
+   * проекте, и человек должен видеть его здесь. Список едет push-событием,
+   * начальный снимок — запросом при сборке панели.
+   */
+  const agentsPanel = createAgentsPanel({
+    interrupt: (id) => {
+      void deps.rpc.request('ai.agentInterrupt', { id }).catch(() => undefined);
+    },
+    message: (id, text) => {
+      void deps.rpc
+        .request('ai.agentMessage', { id, text })
+        .then((result) => {
+          if (!result.ok) showToast(result.reason ?? 'Сообщение не доставлено', 'error');
+        })
+        .catch(() => showToast('Сообщение не доставлено', 'error'));
+    },
+  });
+  void deps.rpc
+    .request('ai.agents', {})
+    .then((agents) => agentsPanel.render(agents))
+    .catch(() => undefined);
+  deps.rpc.onPush((message) => {
+    if (message.topic !== PushTopic.Agents) return;
+    const payload = message.payload as { agents?: AgentSnapshot[] };
+    agentsPanel.render(payload?.agents ?? []);
   });
 
   // Контекст, который пользователь прикладывает к вопросу (выделение, файл,
@@ -1182,7 +1214,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   // План, изменённые файлы и приложенный контекст — ВНУТРИ карточки композера, над
   // полем ввода: они относятся к вопросу, который человек набирает, а не к беседе.
   // Порядок стопки — сверху вниз: план, изменения, чипы.
-  composer.extras.append(goalPanel.element, planPanel.element, changesPanel.element, attachments.element);
+  composer.extras.append(
+    agentsPanel.element,
+    goalPanel.element,
+    planPanel.element,
+    changesPanel.element,
+    attachments.element,
+  );
 
   const element = h('div', { class: 'chat' }, tabs.element, tabs.searchBar, body, footer);
 
