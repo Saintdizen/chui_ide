@@ -130,11 +130,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         path: { type: 'string', description: 'Absolute path to the file.' },
         startLine: {
           type: 'number',
-          description: 'First line (1-based). Defaults to the file start; past the end is refused.',
+          description: 'First line (1-based); default start.',
         },
         endLine: {
           type: 'number',
-          description: 'Last line (inclusive). Defaults to the end.',
+          description: 'Last line (inclusive); default end.',
         },
         force: {
           type: 'boolean',
@@ -152,20 +152,20 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Search pattern.' },
-        isRegex: { type: 'boolean', description: 'Treat query as a regular expression.' },
-        caseSensitive: { type: 'boolean', description: 'Case sensitive (off by default).' },
-        filesOnly: { type: 'boolean', description: 'Return matching file paths only, no lines.' },
-        glob: { type: 'string', description: 'File mask, for example **/*.ts' },
+        query: { type: 'string', description: 'Pattern.' },
+        isRegex: { type: 'boolean' },
+        caseSensitive: { type: 'boolean' },
+        filesOnly: { type: 'boolean' },
+        glob: { type: 'string', description: 'Mask, e.g. **/*.ts' },
         path: {
           type: 'string',
-          description: 'Folder or file; without it, the whole project. glob counts from here.',
+          description: 'Scope; glob counts from here.',
         },
         context: {
           type: 'number',
-          description: 'Lines before and after a match (0-5).',
+          description: 'Lines around a match (0-5).',
         },
-        limit: { type: 'number', description: 'How many (default 50, 35 with context; 80 files).' },
+        limit: { type: 'number', description: 'Default 50; with context 35; files 80.' },
       },
       required: ['query'],
     },
@@ -704,7 +704,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         options: {
           type: 'array',
           description: 'Ready answers as buttons, up to 5.',
-          items: { type: 'string', description: 'Answer wording, for example "Option A".' },
+          items: { type: 'string' },
         },
       },
       required: ['question'],
@@ -727,7 +727,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         tasks: {
           type: 'array',
           description: 'Up to 4 independent subtasks: [{ description, prompt }]. Not with prompt.',
-          items: { type: 'object', description: 'Subtask: { description, prompt }.' },
+          items: { type: 'object' },
         },
       },
     },
@@ -948,7 +948,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         paths: {
           type: 'array',
           description: 'Result files, one to five, inside the project.',
-          items: { type: 'string', description: 'Path to the file.' },
+          items: { type: 'string' },
         },
         path: {
           type: 'string',
