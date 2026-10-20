@@ -125,3 +125,24 @@ describe('доступность (canRun)', () => {
     expect(uncovered).toEqual([]);
   });
 });
+
+describe('расширение набора', () => {
+  /**
+   * Пометка «подключён в набор» и пересборка набора — один раз на прогон, а не
+   * на каждый вызов. Живой прогон дал 91 пометку в 91 ответе `terminal` и
+   * `git_write`: эти инструменты не входят в группы «Авто», поэтому «скрыт
+   * набором» верно для них всегда. Модель читала это как «набор всё время
+   * меняется», и пометка ехала в каждом ответе до конца прогона.
+   *
+   * Проверяем по исходнику: сервис целиком не поднять без Electron.
+   */
+  it('widenedNow ставится только когда инструмент подключается впервые', () => {
+    const source = readFileSync(new URL('../src/main/ai/service.ts', import.meta.url), 'utf8');
+    const start = source.indexOf('const rosterOnly = isRosterTool(');
+    const body = source.slice(start, source.indexOf('const denied =', start));
+    expect(start).toBeGreaterThan(0);
+    // Признак «впервые» обязан быть — и обязан проверяться до добавления в набор.
+    expect(body).toContain('const first = !onDemandTools.has(call.name)');
+    expect(body).toContain('if (!rosterOnly && first)');
+  });
+});

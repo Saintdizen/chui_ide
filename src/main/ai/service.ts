@@ -1575,8 +1575,15 @@ export class AiService {
         if (hiddenByPreset && widensOnDemand && (!planMode || planApproved)) {
           const known = AGENT_TOOLS.find((tool) => tool.name === call.name);
           if (known && this.canRun(known, host, hasSkills)) {
+            // Пометка и пересборка набора — только когда инструмент появляется
+            // впервые. Иначе «подключён в набор» едет в каждом ответе до конца
+            // прогона: замер на живом прогоне дал 91 пометку в 91 ответе
+            // (`terminal` и `git_write` не входят в группы «Авто», поэтому
+            // условие «скрыт набором» верно для них всегда). Модель читает это
+            // как «набор всё время меняется», а человек — как рост на каждом шаге.
+            const first = !onDemandTools.has(call.name);
             onDemandTools.add(call.name);
-            if (!rosterOnly) {
+            if (!rosterOnly && first) {
               widenedNow = true;
               widenTools();
             }

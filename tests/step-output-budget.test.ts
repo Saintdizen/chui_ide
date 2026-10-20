@@ -92,3 +92,45 @@ describe('бюджет вывода на шаг', () => {
     expect(budget.left).toBe(STEP_OUTPUT_CHARS - 'одна строка\n'.length);
   });
 });
+
+describe('эхо команды в ответе', () => {
+  it('многострочная команда не возвращается целиком', async () => {
+    // Живой прогон: heredoc на две тысячи символов приходил обратно целиком —
+    // 34% всех символов в ответах terminal оказались эхом того, что модель уже
+    // написала в вызове.
+    const workspace = new WorkspaceService(() => undefined);
+    await workspace.open(process.cwd());
+    try {
+      const ctx = {
+        workspace,
+        signal: new AbortController().signal,
+        confirmCommand: async () => true,
+      } as ToolContext;
+      const command = ["cat > /dev/null <<'EOF'", 'строка один', 'строка два', 'EOF'].join('\n');
+      const out = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command }));
+      const detail = out.detail ?? out.summary ?? '';
+      expect(detail).toContain('команда из 4 строк');
+      expect(detail).not.toContain('строка два');
+    } finally {
+      workspace.dispose();
+    }
+  }, 60_000);
+
+  it('длинная команда в ошибке говорит, что делать', async () => {
+    const workspace = new WorkspaceService(() => undefined);
+    await workspace.open(process.cwd());
+    try {
+      const ctx = {
+        workspace,
+        signal: new AbortController().signal,
+        confirmCommand: async () => true,
+      } as ToolContext;
+      const long = `echo ${'x'.repeat(2500)}`;
+      const out = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: long }));
+      // Пять шагов потеряно на heredoc в живом прогоне: ошибка обязана называть выход.
+      expect(out.summary).toContain('create_file');
+    } finally {
+      workspace.dispose();
+    }
+  }, 60_000);
+});

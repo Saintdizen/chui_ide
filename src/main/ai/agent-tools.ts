@@ -614,6 +614,11 @@ const MAX_EDITS_PER_FILE = 500;
 
 /** Команда длиннее — это уже не команда, а попытка спрятать скрипт. */
 const MAX_COMMAND_CHARS = 2000;
+/**
+ * Сколько символов команды повторять в ответе. Короткая команда полезна в
+ * выводе (видно, что запускалось), длинная — нет: она уже есть в вызове.
+ */
+const ECHO_COMMAND_CHARS = 120;
 
 /** Форма аргумента правки: её называем в ошибках — вызов чинится за один шаг. */
 const EDITS_SHAPE =
@@ -2149,7 +2154,16 @@ async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): P
  */
 function commandLine(ctx: ToolContext, command: string, relative = ''): string {
   const where = relative ? ` [${relative}]` : '';
-  return ctx.sandbox ? `$ (в ${ctx.sandbox.label})${where} ${command}` : `$${where} ${command}`;
+  // Длинную команду не повторяем: она уже есть в вызове выше — модель сама её
+  // написала, и человек видит её в карточке. Замер на живом прогоне: в ответах
+  // `terminal` эхо команды занимало 34% символов, а heredoc на две тысячи
+  // символов возвращался целиком, ничего не сообщая.
+  const lines = command.split('\n');
+  const shown =
+    lines.length === 1 && command.length <= ECHO_COMMAND_CHARS
+      ? command
+      : `${lines[0]!.slice(0, ECHO_COMMAND_CHARS)}… (команда из ${lines.length} строк)`;
+  return ctx.sandbox ? `$ (в ${ctx.sandbox.label})${where} ${shown}` : `$${where} ${shown}`;
 }
 
 /**
@@ -2509,7 +2523,14 @@ async function terminalRun(ctx: ToolContext, args: Record<string, unknown>): Pro
 async function terminalRunForeground(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const command = requireString(args, 'command').trim();
   if (command.length > MAX_COMMAND_CHARS) {
-    throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
+    // Не только «нельзя», но и «как надо»: замер на живом прогоне дал пять
+    // потерянных шагов на heredoc, каждый — заново написанный текст. Длинная
+    // логика должна жить в файле, а не в команде.
+    throw new Error(
+      `Команда длиннее ${MAX_COMMAND_CHARS} символов (${command.length}): такое не проходит ` +
+        'через терминал. Положи текст в файл инструментом `create_file` или `edit` и запусти файл — ' +
+        'или сократи команду.',
+    );
   }
   // Предел времени — необязательный аргумент: у большинства команд хватает
   // значения по умолчанию, а заведомо долгой (сборка, установка) нужно больше.
