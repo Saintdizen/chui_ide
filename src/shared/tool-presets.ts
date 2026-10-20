@@ -193,6 +193,10 @@ export const ROSTER_TOOLS: readonly string[] = [
   'web',
   // `agents` без action — не подсказка: чем помочь, видно только из значений action.
   'agents',
+  // Редкие в обычном прогоне, и форма видна из строки: `terminal(action: …)`,
+  // `git_write(action: stage|commit|…)`. Схема каждого — 210–300 токенов на шаг.
+  'terminal',
+  'git_write',
 ];
 
 /** Варианты от полного к самому узкому: в списке идут именно так. */
