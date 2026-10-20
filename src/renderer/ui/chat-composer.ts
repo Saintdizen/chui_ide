@@ -44,6 +44,8 @@ export interface ComposerModes {
   planMode: boolean;
   /** Права одним выбором: что спрашивать у человека, а что делать сразу. */
   permission: PermissionPreset;
+  /** Набор инструментов, выбранный для этой беседы. */
+  toolPreset: ToolPresetId;
 }
 
 export interface ChatComposerView {
@@ -238,7 +240,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     presetSelect.element.classList.toggle('is-active', canChoose && toolPreset !== 'full');
     presetSelect.element.title = !canChoose
       ? 'Набор инструментов: доступен в режиме «Агент»'
-      : `Набор инструментов: ${toolPresetSpec(toolPreset).hint}`;
+      : `Набор инструментов этой беседы: ${toolPresetSpec(toolPreset).hint}`;
   }
 
   /** Скрепка открывает тот же список контекста, что и «#»: его видно и без подсказки. */
@@ -367,7 +369,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     extras,
     input,
     modeBadge,
-    modes: () => ({ mode, useTools, planMode, permission }),
+    modes: () => ({ mode, useTools, planMode, permission, toolPreset }),
     setMode,
     setBusy,
     setModel,

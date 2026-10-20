@@ -117,6 +117,16 @@ describe('sanitizeConversations', () => {
     expect(result[3]?.goal).toBeUndefined();
   });
 
+  // Набор инструментов — свойство беседы: без переноса в файл выбор терялся бы
+  // при каждом перезапуске, как когда-то терялась цель работы.
+  it('набор инструментов беседы переносим, незнакомое значение — общий', () => {
+    const result = sanitizeConversations([{ toolPreset: 'read' }, { toolPreset: 'мифический' }, { toolPreset: 5 }, {}]);
+    expect(result[0]?.toolPreset).toBe('read');
+    expect(result[1]?.toolPreset).toBe('full');
+    expect(result[2]?.toolPreset).toBeUndefined();
+    expect(result[3]?.toolPreset).toBeUndefined();
+  });
+
   it('число бесед ограничено', () => {
     const many = Array.from({ length: MAX_CONVERSATIONS + 5 }, () => ({}));
     expect(sanitizeConversations(many)).toHaveLength(MAX_CONVERSATIONS);

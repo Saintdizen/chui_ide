@@ -655,6 +655,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         session.usage = conversation.usage;
         session.trace = conversation.trace;
         session.goal = conversation.goal;
+        // Набор инструментов из файла — выбор этой беседы. Нет его — берётся общий
+        // из настроек (см. `syncToolPreset`): так старые файлы читаются без миграции.
+        session.toolPreset = conversation.toolPreset;
         renderHistory(session);
       }
       if (sessions.length === 0) createSession();
@@ -686,6 +689,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // Цель принадлежит беседе, а панель над полем одна — показываем цель той,
     // что открыта: у соседней вкладки может быть своя, и путать их нельзя.
     goalPanel.render(next.goal ?? null);
+    // Набор инструментов у каждой беседы свой: показать соседкин — значит соврать
+    // о том, что уйдёт модели следующим вопросом.
+    syncToolPreset();
     renderTabs();
     syncSessionInfo();
   }
@@ -1063,19 +1069,20 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
   }
 
-  /** Набор инструментов — из настроек: он общий для всех бесед и переживает перезапуск. */
+  /**
+   * Набор инструментов — свойство БЕСЕДЫ, а не общая настройка: «разговор про
+   * рефакторинг» и «разговор про релиз» не должны навязывать друг другу свой
+   * выбор. Настройка служит только значением по умолчанию для новых бесед.
+   */
   function syncToolPreset(): void {
-    composer.setToolPreset(sanitizeToolPreset(settings.ai.toolPreset));
+    composer.setToolPreset(sanitizeToolPreset(active().toolPreset ?? settings.ai.toolPreset));
   }
 
-  async function saveToolPreset(preset: ToolPresetId): Promise<void> {
-    try {
-      settings = await deps.rpc.request('settings.update', { ai: { toolPreset: preset } });
-      syncToolPreset();
-      showToast(`Набор инструментов: ${toolPresetSpec(preset).label}`);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
+  function saveToolPreset(preset: ToolPresetId): void {
+    active().toolPreset = preset;
+    composer.setToolPreset(preset);
+    scheduleSave();
+    showToast(`Набор инструментов: ${toolPresetSpec(preset).label}`);
   }
 
   /** Отрисовать панель изменений по активной беседе. */

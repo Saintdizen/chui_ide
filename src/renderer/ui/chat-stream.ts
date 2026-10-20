@@ -11,6 +11,7 @@ import {
   type ChatToolStartPayload,
 } from '../../shared/api';
 import type { PermissionPreset } from '../../shared/permissions';
+import type { ToolPresetId } from '../../shared/tool-presets';
 import { addRunTrace } from '../../shared/usage';
 import { describeRun, type ChatRunLog } from '../../shared/run-log';
 import type { RpcClient } from '../core/rpc';
@@ -47,6 +48,8 @@ export interface StreamModes {
   /** Права одним выбором: что агент делает без вопросов, а о чём спрашивает. */
   permission: PermissionPreset;
   planMode: boolean;
+  /** Набор инструментов беседы: едет в запрос, иначе main возьмёт общий из настроек. */
+  toolPreset: ToolPresetId;
 }
 
 /**
@@ -214,6 +217,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             useTools: modes.useTools,
             permission: modes.permission,
             planMode: modes.planMode,
+            toolPreset: modes.toolPreset,
             // Открытая цель едет с каждым шагом прогона: агент мог поставить её
             // сам на первом шаге, и продолжение обязано её видеть.
             ...(session.goal && !session.goal.done ? { goal: session.goal.text } : {}),

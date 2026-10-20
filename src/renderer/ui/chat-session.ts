@@ -1,4 +1,5 @@
 import type { ChatAttachment, ChatGoal, ChatMessage, ChatRunTrace, ChatUsage, ToolFileChange } from '../../shared/api';
+import type { ToolPresetId } from '../../shared/tool-presets';
 import type { ChatRunLog } from '../../shared/run-log';
 import type { ToggledFile } from './chat-changes';
 
@@ -54,6 +55,12 @@ export interface ChatSession {
    * она не едет, иначе история распухла бы выводами инструментов.
    */
   run?: ChatRunLog;
+  /**
+   * Набор инструментов этой беседы. Не задан — берётся общий из настроек; выбор
+   * в композере пишется сюда, поэтому «разговор про рефакторинг» и «разговор про
+   * релиз» не навязывают друг другу свой набор. Переживает перезапуск.
+   */
+  toolPreset?: ToolPresetId;
   /**
    * Цель работы: то, что агент доводит до конца, а не отвечает за один ход.
    * Живёт в беседе, а не в прогоне, — поэтому переживает и ход, и перезапуск.

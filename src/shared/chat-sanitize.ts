@@ -9,6 +9,7 @@ import type {
   ChatUsage,
 } from './api';
 import { sanitizeGoal } from './goal';
+import { sanitizeToolPreset } from './tool-presets';
 
 /**
  * Проверка прочитанной истории бесед.
@@ -85,6 +86,9 @@ export function sanitizeConversations(raw: unknown): ChatConversation[] {
     // а флаг читаем строго: строка «да» — это не «закрыто».
     const goal = sanitizeGoalFromFile(value.goal);
     if (goal) conversation.goal = goal;
+    // Набор инструментов беседы. Правило общее с настройками (`sanitizeToolPreset`):
+    // незнакомое значение — не мусор в файле, а повод взять общий набор.
+    if (typeof value.toolPreset === 'string') conversation.toolPreset = sanitizeToolPreset(value.toolPreset);
 
     used += conversationSize(messages);
     result.push(conversation);

@@ -53,6 +53,9 @@ export function serializeSession(session: ChatSession): ChatConversation {
     updatedAt: Date.now(),
     messages: session.transcript.map(copy),
     ...(compacted || session.transcript.length === 0 ? { context: session.history.map(copy) } : {}),
+    // Набор инструментов — свойство беседы, а не общая настройка: иначе выбор в
+    // одной вкладке менял бы поведение всех остальных.
+    ...(session.toolPreset ? { toolPreset: session.toolPreset } : {}),
     ...(session.usage ? { usage: { ...session.usage } } : {}),
     ...(session.trace ? { trace: { ...session.trace, usage: { ...session.trace.usage } } } : {}),
     // Цель переживает перезапуск: иначе окно, закрытое посреди работы, теряло бы
