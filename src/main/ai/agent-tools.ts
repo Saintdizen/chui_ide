@@ -598,6 +598,39 @@ function needsConfirmation(ctx: ToolContext, command: string): boolean {
   return ctx.confirmDangerous === true && isDangerousCommand(command);
 }
 
+/** Отказ «команду спросить не у кого»: окно редактора не подключено. */
+function noCommandBridge(): ToolOutcome {
+  return {
+    ok: false,
+    summary: 'Запуск команд недоступен: окно редактора не подключено',
+    detail: 'Команду должен подтвердить человек, а моста подтверждений нет. Не повторяй вызов.',
+  };
+}
+
+/** Человек не разрешил — одним текстом на всех путях запуска. */
+function commandDenied(): ToolOutcome {
+  return {
+    ok: false,
+    summary: 'Пользователь запретил выполнение команды',
+    detail: 'Пользователь не разрешил выполнить эту команду. Не повторяй её — предложи другое решение.',
+  };
+}
+
+/**
+ * Спросить разрешение на команду: null — можно выполнять.
+ *
+ * Путей запуска четыре — run_terminal, run_background, terminal_start,
+ * terminal_write — и раньше каждый отвечал своими словами («запретил команду»,
+ * «запретил ввод», «недоступен»). Модель не понимала, отличается ли отказ от
+ * отказа, и пробовала снова. Теперь и вопрос, и отказ одни на всех.
+ */
+async function confirmRun(ctx: ToolContext, command: string, prompt = command): Promise<ToolOutcome | null> {
+  if (!ctx.confirmCommand) return noCommandBridge();
+  if (!needsConfirmation(ctx, command)) return null;
+  const allowed = await ctx.confirmCommand(prompt);
+  return allowed ? null : commandDenied();
+}
+
 export async function runTool(ctx: ToolContext, name: string, rawArguments: string): Promise<ToolOutcome> {
   const parsed = parseToolArguments(rawArguments);
   if (!parsed.ok) return { ok: false, summary: parsed.message };
@@ -1909,8 +1942,46 @@ async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): P
  * Строка команды для вывода: видно, что именно выполнялось и где. В песочнице
  * это ещё и подсказка человеку, что код шёл в контейнере, а не на его машине.
  */
-function commandLine(ctx: ToolContext, command: string): string {
-  return ctx.sandbox ? `$ (в ${ctx.sandbox.label}) ${command}` : `$ ${command}`;
+function commandLine(ctx: ToolContext, command: string, relative = ''): string {
+  const where = relative ? ` [${relative}]` : '';
+  return ctx.sandbox ? `$ (в ${ctx.sandbox.label})${where} ${command}` : `$${where} ${command}`;
+}
+
+/**
+ * Папка запуска команды: `cwd` из аргументов, иначе корень проекта.
+ *
+ * Путь проверяется рабочей папкой (`workspace.stat`): запустить команду за
+ * пределами проекта не выйдет, а `..` и симлинки границу не обходят. Отдельно
+ * возвращается путь относительно корня: он нужен контейнеру, где смонтирован
+ * только корень.
+ */
+async function commandCwd(
+  ctx: ToolContext,
+  args: Record<string, unknown>,
+): Promise<{ root: string; path: string; relative: string } | null> {
+  const root = ctx.workspace.rootPath();
+  if (!root) return null;
+  const raw = optionalString(args, 'cwd');
+  if (!raw) return { root, path: root, relative: '' };
+  const stat = await ctx.workspace.stat(raw);
+  if (stat.kind !== 'directory') throw new Error(`Аргумент «cwd» — не папка: ${raw}`);
+  const relative = relativePath(stat.path, root);
+  return { root, path: stat.path, relative: relative === '.' ? '' : relative };
+}
+
+/**
+ * Команда для контейнера: проекта там только корень, поэтому подпапка — `cd`.
+ * Кавычки обязательны: в имени папки может быть пробел, и `sh -c` разберёт его
+ * как границу аргумента.
+ */
+function insideProject(relative: string, command: string): string {
+  if (!relative) return command;
+  return `cd ${quoteSh(relative)} && ${command}`;
+}
+
+/** Строка в одинарных кавычках для `sh -c`: внутри них ничего не раскрывается. */
+function quoteSh(value: string): string {
+  return "'" + value.replaceAll("'", "'\\''") + "'";
 }
 
 /**
@@ -2186,33 +2257,23 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   const timeoutSeconds = optionalInteger(args, 'timeout');
   const timeoutMs = timeoutSeconds !== undefined ? Math.min(Math.max(timeoutSeconds, 1), 1800) * 1000 : undefined;
   const runOptions = { signal: ctx.signal, ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
-  if (!ctx.confirmCommand) {
-    return { ok: false, summary: 'Запуск команд недоступен: окно редактора не подключено' };
-  }
-
-  const root = ctx.workspace.rootPath();
-  if (!root) return { ok: false, summary: 'Проект не открыт' };
+  const cwd = await commandCwd(ctx, args);
+  if (!cwd) return { ok: false, summary: 'Проект не открыт' };
 
   // Обычный агент спрашивает всегда; полный доступ — только если включена страховка.
-  if (needsConfirmation(ctx, command)) {
-    const allowed = await ctx.confirmCommand(command);
-    if (!allowed) {
-      return {
-        ok: false,
-        summary: 'Пользователь запретил выполнение команды',
-        detail: 'Пользователь не разрешил выполнить эту команду. Не повторяй её — предложи другое решение.',
-      };
-    }
-  }
+  const refusal = await confirmRun(ctx, command);
+  if (refusal) return refusal;
 
   if (ctx.sandbox && !ctx.sandbox.available) return sandboxUnavailable(ctx.sandbox);
   // В песочнице та же команда идёт в контейнер: агент об этом не просит отдельно,
   // режим задаёт человек настройкой.
   const spillStream = ctx.spillDir ? createSpillStream(ctx.spillDir, 'run_terminal') : null;
   const options: RunOptions = spillStream ? { ...runOptions, spill: (chunk) => spillStream.write(chunk) } : runOptions;
+  // В песочнице монтируется только корень проекта, поэтому подпапка — это `cd`
+  // внутри контейнера, а не второй том.
   const result = ctx.sandbox
-    ? await ctx.sandbox.run(command, root, options)
-    : await runShellCommand(command, root, options);
+    ? await ctx.sandbox.run(insideProject(cwd.relative, command), cwd.root, options)
+    : await runShellCommand(command, cwd.path, options);
   // Файл оставляем только тогда, когда вывод действительно не поместился в потолок.
   const full = spillStream?.close(result.truncated) ?? null;
   // Причёсываем и держим хвост: один `npm install` иначе завалит контекст логом.
@@ -2225,7 +2286,7 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   return {
     ok: result.code === 0 && !result.timedOut,
     summary: `код выхода ${result.code ?? '—'}${notes.length ? ` (${notes.join(', ')})` : ''}`,
-    detail: `${commandLine(ctx, command)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
+    detail: `${commandLine(ctx, command, cwd.relative)}\n${output.length ? output : '(пустой вывод)'}${spillNote(full)}`,
   };
 }
 
@@ -2243,31 +2304,19 @@ const MAX_JOB_TIMEOUT_SECONDS = 1800;
  */
 async function runBackground(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
-  if (!ctx.confirmCommand) {
-    return { ok: false, summary: 'Запуск команд недоступен: окно редактора не подключено' };
-  }
 
   const command = requireString(args, 'command').trim();
   if (command.length > MAX_COMMAND_CHARS) {
     throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
   }
   const timeoutSeconds = optionalInteger(args, 'timeout');
-
-  const root = ctx.workspace.rootPath();
-  if (!root) return { ok: false, summary: 'Проект не открыт' };
+  const cwd = await commandCwd(ctx, args);
+  if (!cwd) return { ok: false, summary: 'Проект не открыт' };
 
   // Подтверждение то же, что у обычного запуска: команда есть команда, и то, что
   // она уходит в фон, ничего не смягчает.
-  if (needsConfirmation(ctx, command)) {
-    const allowed = await ctx.confirmCommand(command);
-    if (!allowed) {
-      return {
-        ok: false,
-        summary: 'Пользователь запретил выполнение команды',
-        detail: 'Пользователь не разрешил выполнить эту команду. Не повторяй её — предложи другое решение.',
-      };
-    }
-  }
+  const refusal = await confirmRun(ctx, command);
+  if (refusal) return refusal;
 
   // Задание — это процесс на хосте. В песочнице контейнер живёт на время команды,
   // и «фон» в нём пришлось бы держать открытым, поэтому честно отказываем.
@@ -2288,7 +2337,7 @@ async function runBackground(ctx: ToolContext, args: Record<string, unknown>): P
   try {
     job = ctx.jobs.start({
       command,
-      cwd: root,
+      cwd: cwd.path,
       ...(ctx.spillDir ? { spillDir: ctx.spillDir } : {}),
       ...(limitMs !== undefined ? { timeoutMs: limitMs } : {}),
     });
@@ -3020,6 +3069,25 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * Терминальная сессия — это процесс на хосте: контейнер живёт ровно на время
+ * команды, поэтому «интерактивный терминал в песочнице» не бывает. Пока
+ * песочница включена, начинать сессию и печатать в неё нельзя — иначе команда
+ * уходила бы на машину человека мимо песочницы (`run_terminal` и
+ * `run_background` этот режим уже соблюдают). Остановить уже запущенную сессию
+ * можно: `terminal_stop` команду не выполняет.
+ */
+function sandboxRefusesTerminal(ctx: ToolContext): ToolOutcome | null {
+  if (!ctx.sandbox) return null;
+  return {
+    ok: false,
+    summary: 'В песочнице терминальная сессия не поддерживается',
+    detail:
+      `Песочница включена (${ctx.sandbox.label}), а терминальная сессия — процесс на хосте. ` +
+      'Запускай команды через run_terminal (долгие — через run_background): они идут в контейнер.',
+  };
+}
+
 function terminalList(ctx: ToolContext): ToolOutcome {
   if (!ctx.terminals) return { ok: false, summary: 'Терминал недоступен' };
   const sessions = ctx.terminals.list();
@@ -3037,27 +3105,22 @@ const TERMINAL_SETTLE_MS = 700;
 
 async function terminalStart(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.terminals) return { ok: false, summary: 'Терминал недоступен' };
+  const refuses = sandboxRefusesTerminal(ctx);
+  if (refuses) return refuses;
 
-  const cwd = optionalString(args, 'cwd') ?? ctx.workspace.rootPath() ?? undefined;
+  const cwd = await commandCwd(ctx, args);
   const command = optionalString(args, 'command');
   if (command && command.length > MAX_COMMAND_CHARS) {
     throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
   }
 
   // Обычный агент спрашивает всегда; полный доступ — только если включена страховка.
-  if (command && needsConfirmation(ctx, command)) {
-    if (!ctx.confirmCommand) return { ok: false, summary: 'Запуск команд недоступен' };
-    const allowed = await ctx.confirmCommand(command);
-    if (!allowed) {
-      return {
-        ok: false,
-        summary: 'Пользователь запретил команду',
-        detail: 'Не повторяй эту команду — предложи другое решение.',
-      };
-    }
+  if (command) {
+    const refusal = await confirmRun(ctx, command);
+    if (refusal) return refusal;
   }
 
-  const session = await ctx.terminals.create({ cols: TERMINAL_COLS, rows: TERMINAL_ROWS, cwd });
+  const session = await ctx.terminals.create({ cols: TERMINAL_COLS, rows: TERMINAL_ROWS, cwd: cwd?.path });
   if (command) ctx.terminals.write(session.id, `${command}\r`);
 
   await delay(TERMINAL_SETTLE_MS, ctx.signal);
@@ -3103,16 +3166,15 @@ function terminalRead(ctx: ToolContext, args: Record<string, unknown>): ToolOutc
 
 async function terminalWrite(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.terminals) return { ok: false, summary: 'Терминал недоступен' };
+  const refuses = sandboxRefusesTerminal(ctx);
+  if (refuses) return refuses;
 
   const id = requireString(args, 'id');
   const data = requireString(args, 'data');
 
   // Ввод в терминал может быть чем угодно — страховка ловит необратимое и здесь.
-  if (needsConfirmation(ctx, data)) {
-    if (!ctx.confirmCommand) return { ok: false, summary: 'Ввод в терминал недоступен' };
-    const allowed = await ctx.confirmCommand(`[${id}] ${data.replace(/\n/g, '⏎')}`);
-    if (!allowed) return { ok: false, summary: 'Пользователь запретил ввод', detail: 'Ввод отклонён.' };
-  }
+  const refusal = await confirmRun(ctx, data, `[${id}] ${data.replace(/\n/g, '⏎')}`);
+  if (refusal) return refusal;
 
   ctx.terminals.write(id, data);
   return {

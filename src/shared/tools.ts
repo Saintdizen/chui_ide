@@ -611,6 +611,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         command: { type: 'string', description: 'Команда для запуска.' },
+        cwd: {
+          type: 'string',
+          description: 'Папка запуска внутри проекта (по умолчанию — корень).',
+        },
         timeout: {
           type: 'number',
           description:
@@ -632,6 +636,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       type: 'object',
       properties: {
         command: { type: 'string', description: 'Команда для запуска.' },
+        cwd: {
+          type: 'string',
+          description: 'Папка запуска внутри проекта (по умолчанию — корень).',
+        },
         timeout: {
           type: 'number',
           description: 'Предел времени в секундах (по умолчанию и не больше 1800).',
