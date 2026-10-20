@@ -692,8 +692,18 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
         tasks: {
           type: 'array',
-          description: 'Up to 4 independent subtasks: [{ description, prompt }]. Not with prompt.',
-          items: { type: 'object' },
+          description: 'Up to 4 independent subtasks. Not with prompt.',
+          // Форма элемента — в полях, а не в тексте описания: подзадача,
+          // присланная как `{ name, prompt }`, теряется молча. Обязателен только
+          // `prompt`: `description` подставляет сам разбор (parseSubagentTasks).
+          items: {
+            type: 'object',
+            properties: {
+              description: { type: 'string' },
+              prompt: { type: 'string' },
+            },
+            required: ['prompt'],
+          },
         },
       },
     },

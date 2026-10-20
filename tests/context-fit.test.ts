@@ -10,6 +10,8 @@ import {
   compactionBudgetChars,
   condenseAppliedCalls,
   condenseCallArguments,
+  condenseSupersededPlans,
+  SUPERSEDED_PLAN_MARKER,
   contextUsage,
   estimateTextTokens,
   estimateTokens,
@@ -470,6 +472,54 @@ describe('condenseAppliedCalls', () => {
   it('не трогает сообщения не-ассистента', () => {
     const tool: ChatMessage = { role: 'tool', content: body, toolCallId: 'x' };
     expect(condenseAppliedCalls(tool, new Set(['x']))).toBe(tool);
+  });
+});
+
+describe('condenseSupersededPlans', () => {
+  const plan = (id: string, steps: readonly string[]): ChatMessage => ({
+    role: 'assistant',
+    content: '',
+    toolCalls: [
+      {
+        id,
+        name: 'update_plan',
+        arguments: JSON.stringify({ steps: steps.map((text) => ({ text, status: 'done' })) }),
+      },
+    ],
+  });
+  const steps = ['Изучить проект', 'Починить тесты', 'Прогнать проверки'];
+
+  it('в истории остаётся только актуальный план', () => {
+    const old = plan('first', steps);
+    const fresh = plan('second', steps);
+    expect(condenseSupersededPlans(old, 'second').toolCalls?.[0]?.arguments).toContain(SUPERSEDED_PLAN_MARKER);
+    // Актуальный план не трогаем: по нему модель отмечает шаги.
+    expect(condenseSupersededPlans(fresh, 'second')).toBe(fresh);
+  });
+
+  it('меняет только если стало короче', () => {
+    const long = plan('old', steps);
+    const condensed = condenseSupersededPlans(long, 'new').toolCalls?.[0]?.arguments ?? '';
+    expect(condensed.length).toBeLessThan(long.toolCalls?.[0]?.arguments.length ?? 0);
+    // План из одного шага короче пометки — сжимать нечего, тот же объект.
+    const short = plan('old', ['шаг']);
+    expect(condenseSupersededPlans(short, 'new')).toBe(short);
+  });
+
+  it('аргументы остаются разбираемым JSON', () => {
+    const condensed = condenseSupersededPlans(plan('old', steps), 'new');
+    expect(JSON.parse(condensed.toolCalls?.[0]?.arguments ?? '{}')).toEqual({ steps: SUPERSEDED_PLAN_MARKER });
+  });
+
+  it('чужие вызовы и ответы инструментов не трогает', () => {
+    const message: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      toolCalls: [{ id: 'a', name: 'read', arguments: JSON.stringify({ path: '/проект/файл.ts' }) }],
+    };
+    expect(condenseSupersededPlans(message, 'new')).toBe(message);
+    const tool: ChatMessage = { role: 'tool', content: 'План обновлён: шагов — 3', toolCallId: 'x' };
+    expect(condenseSupersededPlans(tool, 'new')).toBe(tool);
   });
 });
 

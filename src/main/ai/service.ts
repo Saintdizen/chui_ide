@@ -34,6 +34,7 @@ import { ALWAYS_AVAILABLE, PLAN_MODE_OFFERED, SUBAGENT_TOOLS, allowsInPlan, isRe
 import { canonicalCall } from '../../shared/tool-aliases';
 import {
   condenseAppliedCalls,
+  condenseSupersededPlans,
   answerReserve,
   estimateMessagesTokens,
   estimateTextTokens,
@@ -1472,6 +1473,8 @@ export class AiService {
       let didNewWork = false;
       /** Вызовы, чьи правки уже в файлах: тела правок из истории можно убрать. */
       const appliedCalls = new Set<string>();
+      /** Последний план шага: прежние версии в истории заменяются пометкой. */
+      let planCallId: string | undefined;
       // Бюджет вывода на шаг, общий для всех его вызовов: предел на вызов этой
       // задачи не отвечает — три чтения подряд дают 180 000 символов, и обрезка
       // истории выбрасывает уже потраченный шаг целиком.
@@ -1485,7 +1488,10 @@ export class AiService {
         // рисуем его отдельным событием, но модели всё равно отвечаем role:'tool'.
         if (call.name === 'update_plan') {
           const steps = parsePlanSteps(call.arguments);
-          if (steps.length > 0) emit(ChatStreamEvent.Plan, { steps });
+          if (steps.length > 0) {
+            emit(ChatStreamEvent.Plan, { steps });
+            planCallId = call.id;
+          }
           const toolMessage: ChatMessage = {
             role: 'tool',
             toolCallId: call.id,
@@ -1768,6 +1774,16 @@ export class AiService {
       if (appliedCalls.size > 0) {
         const at = messages.lastIndexOf(assistant);
         if (at >= 0) messages[at] = condenseAppliedCalls(assistant, appliedCalls);
+      }
+
+      // План в истории — только актуальный: `update_plan` присылает список целиком,
+      // поэтому прежние версии — повтор того же текста, и он едет в каждом шаге.
+      // Сжимаем так же: сразу после шага и только в том, что уходит провайдеру.
+      if (planCallId) {
+        for (let index = 0; index < messages.length; index += 1) {
+          const current = messages[index];
+          if (current) messages[index] = condenseSupersededPlans(current, planCallId);
+        }
       }
 
       commitStep();

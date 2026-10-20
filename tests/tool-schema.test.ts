@@ -65,6 +65,15 @@ describe('missingArguments', () => {
     const spec = toolSpec('edit')!;
     expect(missingArguments(spec.inputSchema, { edits: [{ path: '/a.ts', edits: ['строка'] }] })).toEqual([]);
   });
+
+  it('подзадача без prompt названа путём внутри tasks', () => {
+    // Форма элемента `task.tasks` — в полях схемы, иначе `{ name, prompt }`
+    // теряется молча; `description` нарочно не обязателен (разбор подставит сам).
+    const spec = toolSpec('task')!;
+    expect(missingArguments(spec.inputSchema, { tasks: [{ description: 'без промпта' }] })).toEqual([
+      'tasks[0].prompt',
+    ]);
+  });
 });
 
 /**
@@ -90,8 +99,7 @@ describe('wrongArguments', () => {
     // Элемент массива — строка, а не объект: пусть об этом говорит разбор.
     const spec = toolSpec('edit')!;
     expect(wrongArguments(spec.inputSchema, { edits: ['строка'] })).toEqual([]);
-  });
-});
+  });});
 
 /**
  * Описания аргументов — постоянная часть запроса: они едут на каждом шаге прогона.

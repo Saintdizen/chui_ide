@@ -543,3 +543,47 @@ export function condenseAppliedCalls(
   });
   return changed ? { ...message, toolCalls } : message;
 }
+
+/**
+ * Пометка для плана, который заменили более новым.
+ *
+ * `update_plan` присылает список шагов целиком и затирает прежний чек-лист,
+ * поэтому старая версия в истории — повтор того же текста, только длиннее:
+ * актуальные `status` уже в последнем вызове. Файла за планом нет, терять нечего.
+ */
+export const SUPERSEDED_PLAN_MARKER = '[план заменён: ниже актуальная версия]';
+
+/** Аргументы плана, который уже заменён: `steps` — пометка, остальное на месте. */
+function supersedePlan(args: string): string {
+  if (args.includes(SUPERSEDED_PLAN_MARKER)) return args;
+  const parsed = parseToolArguments(args);
+  if (!parsed.ok) return args;
+  const { steps, ...rest } = parsed.value;
+  if (steps === undefined) return args;
+  const replaced = JSON.stringify({ ...rest, steps: SUPERSEDED_PLAN_MARKER });
+  // Меняем только если стало короче: план в одну строку дешевле оставить как есть.
+  return replaced.length < args.length ? replaced : args;
+}
+
+/**
+ * Оставить в истории один актуальный план.
+ *
+ * `keepId` — вызов `update_plan`, который и есть текущая версия; у остальных
+ * `steps` заменяются пометкой. План едет в контексте на каждом шаге, а обновляется
+ * обычно много раз за прогон: отметил шаг — прислал весь список заново.
+ *
+ * Меняем сразу после шага и по ссылке, как тела правок (см. `condenseAppliedCalls`):
+ * сжатие задним числом двигало бы середину префикса и сбивало кеш.
+ */
+export function condenseSupersededPlans(message: ChatMessage, keepId: string): ChatMessage {
+  if (message.role !== 'assistant' || !message.toolCalls?.length) return message;
+  let changed = false;
+  const toolCalls = message.toolCalls.map((call) => {
+    if (call.name !== 'update_plan' || call.id === keepId) return call;
+    const args = supersedePlan(call.arguments);
+    if (args === call.arguments) return call;
+    changed = true;
+    return { ...call, arguments: args };
+  });
+  return changed ? { ...message, toolCalls } : message;
+}
