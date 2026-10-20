@@ -6,7 +6,7 @@
  * (там есть доступ к ФС), а правки документов — в renderer (там документная
  * модель и undo). Мост между ними уже готов — это RPC + события.
  *
- * Реализованы все: list_dir, read_file, search и run_terminal — в main,
+ * Реализованы все: list_dir, read_file, search и terminal — в main,
  * apply_edit — в renderer через хостовый вызов. Какие из них предложить модели,
  * решает сборка: см. `canRun` в `src/main/ai/service.ts`.
  */
@@ -37,9 +37,7 @@ export type AgentToolName =
   | 'apply_edit'
   | 'apply_patch'
   | 'replace_in_files'
-  | 'run_terminal'
-  | 'run_output'
-  | 'run_stop'
+  | 'terminal'
   | 'web_search'
   | 'web_fetch'
   | 'run_code'
@@ -65,8 +63,7 @@ export type AgentToolName =
   | 'git_read'
   | 'git_write'
   | 'open_file'
-  | 'present'
-  | 'terminal';
+  | 'present';
 
 export interface JsonSchemaProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -573,64 +570,30 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'run_terminal',
+    name: 'terminal',
     side: 'main',
     description:
-      'Run a shell command in the workspace and return its output. The user confirms every ' +
-      'run, so keep it to one command on purpose. background: true returns a job id instead ' +
-      'of output: use it for long runs (build, install, tests); read with run_output, stop ' +
-      'with run_stop. For a session visible to the user (dev server, watch, REPL) use terminal (action start).',
+      'Sessions (a real pty the user sees): list, start (command, cwd), read (id, from), write ' +
+      '(id, data), stop (id). Commands: run (command, cwd, timeout; background: true returns a ' +
+      'job id, sandbox must be off), output (id, from) reads a job or lists them, cancel (id) ' +
+      'stops one. The user confirms every command, so keep it to one on purpose.',
     inputSchema: {
       type: 'object',
       properties: {
-        command: { type: 'string', description: 'Command to run.' },
-        cwd: {
+        action: {
           type: 'string',
-          description: 'Start folder inside the project (root by default).',
+          enum: ['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel'],
+          description: 'Sessions: list, start, read, write, stop. Commands: run, output, cancel.',
         },
-        timeout: {
-          type: 'number',
-          description: 'Seconds (default 120, background 1800). Raise for builds and installs.',
-        },
-        background: {
-          type: 'boolean',
-          description: 'Do not wait: returns a job id. Sandbox must be off.',
-        },
+        id: { type: 'string', description: 'read, write, stop: session id. output, cancel: job id.' },
+        command: { type: 'string', description: 'start: typed once the session opens. run: the command.' },
+        cwd: { type: 'string', description: 'start, run: folder inside the project (root by default).' },
+        data: { type: 'string', description: 'write: what to type; end with a newline for Enter.' },
+        from: { type: 'number', description: 'read, output: offset from the previous read.' },
+        timeout: { type: 'number', description: 'run: seconds (default 120, background 1800).' },
+        background: { type: 'boolean', description: 'run: do not wait, returns a job id.' },
       },
-      required: ['command'],
-    },
-  },
-  {
-    name: 'run_output',
-    side: 'main',
-    description:
-      'Read a job: state (running, done, failed, exit code) and what was printed since the ' +
-      'last read. Pass the offset from the previous read so output is not repeated. Without ' +
-      'id it lists all jobs.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Job id from run_terminal with background: true.' },
-        from: {
-          type: 'number',
-          description: 'Start offset; defaults to the beginning.',
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'run_stop',
-    side: 'main',
-    description:
-      'Stop a job. Call it when the run is clearly wrong (bad command, wrong branch): an ' +
-      'abandoned build keeps burning CPU.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'Job id from run_terminal with background: true.' },
-      },
-      required: ['id'],
+      required: ['action'],
     },
   },
   {
@@ -1100,30 +1063,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         column: { type: 'number', description: 'Column (1-based).' },
       },
       required: ['path'],
-    },
-  },
-  {
-    name: 'terminal',
-    side: 'main',
-    description:
-      'REAL terminal (pty) that lives between steps: start a long process and read its output ' +
-      'later. For one command whose output you need now use run_terminal. action: list, start ' +
-      '(command, cwd), read (id, from), write (id, data), stop (id).',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['list', 'start', 'read', 'write', 'stop'],
-          description: 'What to do.',
-        },
-        id: { type: 'string', description: 'read, write, stop: session id from list.' },
-        command: { type: 'string', description: 'start: command typed right after start.' },
-        cwd: { type: 'string', description: 'start: working folder (project root by default).' },
-        data: { type: 'string', description: 'write: what to type; end with a newline for Enter.' },
-        from: { type: 'number', description: 'read: offset from the previous read.' },
-      },
-      required: ['action'],
     },
   },
 ];

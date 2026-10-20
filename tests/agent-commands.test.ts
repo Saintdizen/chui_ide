@@ -3,9 +3,9 @@ import { runTool, type SandboxRunner, type TerminalAgent, type ToolContext } fro
 import type { WorkspaceService } from '../src/main/workspace/workspace';
 
 /**
- * Запуск команд ассистентом — три пути в одну дверь: run_terminal (и он же с
- * `background: true`), terminal_start и terminal_write. Проверяем то, что у них общее
- * и что раньше расходилось: где именно выполняется команда (проект, подпапка или
+ * Запуск команд ассистентом — три пути в одну дверь: `terminal` с `action: run`
+ * (и он же с `background: true`), с `action: start` и с `action: write`. Проверяем
+ * то, что у них общее и что раньше расходилось: где именно выполняется команда (проект, подпапка или
  * песочница) и каким словом отказывают — отказ обязан быть один, иначе модель
  * считает отказы разными и пробует снова.
  */
@@ -57,7 +57,7 @@ describe('где выполняется команда', () => {
   it('по умолчанию — корень проекта', async () => {
     const box = sandbox();
     const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
-    const outcome = await runTool(ctx, 'run_terminal', JSON.stringify({ command: 'npm test' }));
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: 'npm test' }));
 
     expect(outcome.ok).toBe(true);
     expect(box.calls).toEqual([{ command: 'npm test', cwd: ROOT }]);
@@ -68,7 +68,11 @@ describe('где выполняется команда', () => {
     // подпапка выражается `cd` внутри уже смонтированного проекта.
     const box = sandbox();
     const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
-    await runTool(ctx, 'run_terminal', JSON.stringify({ command: 'npm test', cwd: `${ROOT}/packages/core` }));
+    await runTool(
+      ctx,
+      'terminal',
+      JSON.stringify({ action: 'run', command: 'npm test', cwd: `${ROOT}/packages/core` }),
+    );
 
     expect(box.calls).toEqual([{ command: "cd 'packages/core' && npm test", cwd: ROOT }]);
   });
@@ -76,7 +80,7 @@ describe('где выполняется команда', () => {
   it('cwd за пределами проекта — отказ, команда не выполняется', async () => {
     const box = sandbox();
     const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
-    const outcome = await runTool(ctx, 'run_terminal', JSON.stringify({ command: 'ls', cwd: '/etc' }));
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: 'ls', cwd: '/etc' }));
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('/etc');
@@ -87,8 +91,8 @@ describe('где выполняется команда', () => {
     const ctx = { workspace: workspace(), jobs: {}, confirmCommand: async () => true } as unknown as ToolContext;
     const outcome = await runTool(
       ctx,
-      'run_terminal',
-      JSON.stringify({ command: 'npm test', cwd: `${ROOT}/a.ts`, background: true }),
+      'terminal',
+      JSON.stringify({ action: 'run', command: 'npm test', cwd: `${ROOT}/a.ts`, background: true }),
     );
 
     expect(outcome.ok).toBe(false);
@@ -152,7 +156,7 @@ describe('отказ — одним словом', () => {
     const term = terminals();
     const base = { workspace: workspace(), terminals: term, confirmCommand: deny } as ToolContext;
 
-    const viaRun = await runTool(base, 'run_terminal', JSON.stringify({ command: 'npm test' }));
+    const viaRun = await runTool(base, 'terminal', JSON.stringify({ action: 'run', command: 'npm test' }));
     const viaSession = await runTool(base, 'terminal', JSON.stringify({ action: 'start', command: 'npm test' }));
     const viaTyping = await runTool(base, 'terminal', JSON.stringify({ action: 'write', id: 't1', data: 'npm test' }));
 
@@ -166,11 +170,11 @@ describe('отказ — одним словом', () => {
   it('без моста подтверждений — один и тот же отказ', async () => {
     const base = { workspace: workspace() } as ToolContext;
     const withJobs = { workspace: workspace(), jobs: {} } as unknown as ToolContext;
-    const viaRun = await runTool(base, 'run_terminal', JSON.stringify({ command: 'npm test' }));
+    const viaRun = await runTool(base, 'terminal', JSON.stringify({ action: 'run', command: 'npm test' }));
     const viaBackground = await runTool(
       withJobs,
-      'run_terminal',
-      JSON.stringify({ command: 'npm test', background: true }),
+      'terminal',
+      JSON.stringify({ action: 'run', command: 'npm test', background: true }),
     );
 
     expect(viaRun.ok).toBe(false);
@@ -192,7 +196,7 @@ describe('отказ — одним словом', () => {
       },
     } as unknown as ToolContext;
 
-    const outcome = await runTool(ctx, 'run_terminal', JSON.stringify({ command: 'npm test' }));
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: 'npm test' }));
 
     expect(outcome.ok).toBe(true);
     expect(asked).toBe(0);

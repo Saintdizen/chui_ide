@@ -160,7 +160,7 @@ describe('touchedPaths', () => {
   });
 
   it('команда и массовая замена: задетое назвать нельзя — null', () => {
-    expect(touchedPaths('run_terminal', JSON.stringify({ command: 'rm -rf build' }))).toBeNull();
+    expect(touchedPaths('terminal', JSON.stringify({ action: 'run', command: 'rm -rf build' }))).toBeNull();
     expect(touchedPaths('replace_in_files', JSON.stringify({ query: 'a', replacement: 'b' }))).toBeNull();
     expect(touchedPaths('apply_edit', '{битый json')).toBeNull();
   });
@@ -192,7 +192,7 @@ describe('forgetChangedFiles', () => {
 
   it('команда в терминале по-прежнему забывает всё', () => {
     const state = caches();
-    forgetChangedFiles(state, 'run_terminal', JSON.stringify({ command: 'npm install' }));
+    forgetChangedFiles(state, 'terminal', JSON.stringify({ action: 'run', command: 'npm install' }));
     expect(state.executed.size).toBe(0);
     expect(state.coveredReads.size).toBe(0);
   });

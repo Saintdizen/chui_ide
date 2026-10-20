@@ -28,7 +28,7 @@ import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
 import { modelCapabilities, contextWindow, findProviderPreset, reasoningEffortFor } from '../../shared/providers';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
-import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, READ_ONLY_TOOLS, SUBAGENT_TOOLS } from '../../shared/tool-policy';
+import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, isReadOnlyCall } from '../../shared/tool-policy';
 import {
   condenseAppliedCalls,
   answerReserve,
@@ -310,7 +310,7 @@ export class AiService {
   /** Песочница: без неё команды и тесты идут на хосте, как раньше. */
   private sandbox?: SandboxService;
   /**
-   * Задания (`run_terminal` с `background: true`): реестр один на окно, поэтому задание переживает
+   * Задания (`terminal` с `action: run` и `background: true`): реестр один на окно, поэтому задание переживает
    * шаг и даже ход — его можно дочитать следующим запросом.
    */
   private readonly jobs: JobRegistry = createJobRegistry();
@@ -1581,7 +1581,10 @@ export class AiService {
         toolContext.allowAll = liveFlags.allowAll;
 
         const key = `${call.name}:${call.arguments}`;
-        const repeated = READ_ONLY_TOOLS.has(call.name) ? executed.get(key) : undefined;
+        // Только ли читает вызов — вопрос не имени, а имени с действием: у слитых
+        // инструментов (`terminal`) чтение вывода и запуск команды — один инструмент.
+        const readOnly = isReadOnlyCall(call.name, call.arguments);
+        const repeated = readOnly ? executed.get(key) : undefined;
         // Повтор чтения уже прочитанного диапазона: текст есть выше, не дублируем.
         const covered = repeated ? undefined : coveredRequest(call.name, call.arguments, coveredReads);
 
@@ -1606,7 +1609,7 @@ export class AiService {
         } else {
           outcome = await runTool(toolContext, call.name, call.arguments);
           if (outcome.read) rememberRead(coveredReads, outcome.read);
-          if (READ_ONLY_TOOLS.has(call.name)) executed.set(key, outcome);
+          if (readOnly) executed.set(key, outcome);
           else {
             // Изменяющий вызов: прочитанное об изменившихся файлах устарело. Раньше
             // здесь чистилось ВСЁ, и одна правка в одном файле заставляла модель
@@ -2116,10 +2119,11 @@ export class AiService {
   private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined, hasSkills = false): boolean {
     if (tool.name === 'apply_edit') return host?.applyEdits !== undefined;
     if (tool.name === 'apply_patch') return host?.applyPatches !== undefined;
-    // Команда — и обычная, и с `background: true`: без окна её не подтвердить.
-    if (tool.name === 'run_terminal') return host?.confirmCommand !== undefined;
-    // Чтение заданий окна ничего не меняет и живёт в main.
-    if (tool.name === 'run_output' || tool.name === 'run_stop') return true;
+    // Терминал: команда, задание в фоне и живая сессия — без окна команду не
+    // подтвердить, а без сервиса терминалов не открыть сессию. Условие одно на
+    // все действия, как у браузера: действие без своей возможности откажет
+    // словами в обработчике, но в списке у модели инструмент есть.
+    if (tool.name === 'terminal') return this.terminals !== undefined || host?.confirmCommand !== undefined;
     if (tool.name === 'get_diagnostics') return host?.getDiagnostics !== undefined;
     // Ресурсы MCP предлагаются только тогда, когда серверы их объявили, — это
     // знает лишь подключение, а `canRun` синхронный. Схемы добавляет
@@ -2136,7 +2140,6 @@ export class AiService {
     // предлагаем. Условие общее на все действия, как у браузера: `stage` без моста
     // откажет словами в обработчике, но в списке инструмент есть.
     if (tool.name === 'git_write') return this.git !== undefined && host?.confirmGit !== undefined;
-    if (tool.name === 'terminal') return this.terminals !== undefined;
     // Оба инструмента символов живут на языковом сервере: без него их не предлагаем.
     if (
       tool.name === 'codebase_search' ||

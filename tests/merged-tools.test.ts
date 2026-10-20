@@ -21,7 +21,7 @@ describe('слитые инструменты: схема', () => {
       return property.enum ?? [];
     };
     expect(actions('browser')).toEqual(['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close']);
-    expect(actions('terminal')).toEqual(['list', 'start', 'read', 'write', 'stop']);
+    expect(actions('terminal')).toEqual(['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel']);
     expect(actions('schedule')).toEqual(['create', 'update', 'delete']);
     expect(actions('git_read')).toEqual(['status', 'diff', 'log', 'blame']);
     expect(actions('git_write')).toEqual([
@@ -35,7 +35,8 @@ describe('слитые инструменты: схема', () => {
       'push',
     ]);
     // Старых имён в наборе больше нет: иначе схема и обработчик разъехались бы.
-    for (const old of ['browser_open', 'terminal_start', 'schedule_create', 'git_status', 'git_push']) {
+    const gone = ['browser_open', 'terminal_start', 'schedule_create', 'git_status', 'run_terminal'];
+    for (const old of gone) {
       expect(AGENT_TOOLS.some((tool) => tool.name === old)).toBe(false);
     }
   });
@@ -60,6 +61,23 @@ describe('слитые инструменты: разбор', () => {
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('взмахнуть');
     expect(outcome.detail).toContain('list, start, read, write, stop');
+  });
+
+  it('terminal: команда и задание живут под общими действиями', async () => {
+    // `run` без команды и `cancel` без номера отказывают до обработчика — там
+    // контекста нет, и «не задан аргумент» из глубины читалось бы как поломка.
+    const run = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run' }));
+    expect(run.summary).toContain('command');
+    const cancel = await runTool(ctx, 'terminal', JSON.stringify({ action: 'cancel' }));
+    expect(cancel.summary).toContain('id');
+    // `output` без id — список заданий, а не ошибка: реестр заданий есть всегда.
+    const jobs = await runTool(
+      { ...ctx, jobs: { list: () => [], get: () => undefined } } as ToolContext,
+      'terminal',
+      JSON.stringify({ action: 'output' }),
+    );
+    expect(jobs.ok).toBe(true);
+    expect(jobs.summary).toContain('заданий');
   });
 
   it('недостающий аргумент назван по имени поля', async () => {

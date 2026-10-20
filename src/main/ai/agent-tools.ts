@@ -488,7 +488,7 @@ export interface ToolContext {
   /** Песочница: подключена только при включённой настройке. */
   sandbox?: SandboxRunner;
   /**
-   * Задания (`run_terminal` с `background: true`): долгие команды, которые не держат шаг.
+   * Задания (`terminal` с `action: run` и `background: true`): долгие команды, которые не держат шаг.
    * Реестр живёт в main на всё окно — по нему же видно, что уже запущено.
    */
   jobs?: JobRegistry;
@@ -631,8 +631,8 @@ function commandDenied(): ToolOutcome {
 /**
  * Спросить разрешение на команду: null — можно выполнять.
  *
- * Путей запуска три — run_terminal (в том числе с `background: true`), terminal_start
- * и terminal_write — и раньше каждый отвечал своими словами («запретил команду»,
+ * Путей запуска три — `terminal` с `action: run` (в том числе с `background: true`),
+ * `action: start` и `action: write` — и раньше каждый отвечал своими словами («запретил команду»,
  * «запретил ввод», «недоступен»). Модель не понимала, отличается ли отказ от
  * отказа, и пробовала снова. Теперь и вопрос, и отказ одни на всех.
  */
@@ -708,16 +708,6 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
         return await applyPatch(ctx, parsed.value);
       case 'replace_in_files':
         return await replaceInFiles(ctx.workspace, parsed.value);
-      case 'run_terminal':
-        // Фон — не отдельный инструмент, а флаг: схемы у них совпадали один в
-        // один, а имя `run_background` занимало в промпте отдельное описание.
-        return optionalBoolean(parsed.value, 'background') === true
-          ? await runBackground(ctx, parsed.value)
-          : await runTerminal(ctx, parsed.value);
-      case 'run_output':
-        return runOutput(ctx, parsed.value);
-      case 'run_stop':
-        return runStop(ctx, parsed.value);
       case 'web_search':
         return await webSearch(ctx, parsed.value);
       case 'web_fetch':
@@ -1920,7 +1910,7 @@ async function runLinter(ctx: ToolContext, args: Record<string, unknown>): Promi
 /**
  * Запуск тестов проекта: команду (pytest, vitest, jest, `node --test`) собирает
  * main — агент не должен угадывать раннер. Запуск спрашивает подтверждение, как
- * и `run_terminal`: тесты выполняют код проекта. Вывод отдаём хвостом — он важнее
+ * и команда в терминале: тесты выполняют код проекта. Вывод отдаём хвостом — он важнее
  * начала, а падение (упавший тест — код выхода не 0) это результат, а не сбой.
  */
 async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): Promise<ToolOutcome> {
@@ -1939,7 +1929,7 @@ async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): P
       summary: 'Тесты проекта не найдены',
       detail:
         'В проекте нет тестов или известного раннера: у Python это pytest с файлами `test_*.py`, ' +
-        'у Node — vitest, jest или встроенный `node --test`. Отдельный файл можно запустить через run_terminal.',
+        'у Node — vitest, jest или встроенный `node --test`. Отдельный файл можно запустить через terminal (action run).',
     };
   }
 
@@ -2288,10 +2278,20 @@ async function applyPatch(ctx: ToolContext, args: Record<string, unknown>): Prom
 /* ── запуск команд ──────────────────────────────────────────────────────── */
 
 /**
- * `run_terminal` — единственный инструмент, который меняет систему за
- * пределами документов, поэтому он всегда идёт через подтверждение.
+ * Команда в проекте — единственное, что меняет систему за пределами документов,
+ * поэтому она всегда идёт через подтверждение. `background: true` — та же команда,
+ * но шаг она не держит: возвращается номер задания, а вывод читается действием
+ * `output`. Раньше это были три имени (`run_terminal`, `run_output`, `run_stop`),
+ * и каждое стоило своей схемы в каждом запросе.
  */
-async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+async function terminalRun(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  return optionalBoolean(args, 'background') === true
+    ? await terminalRunBackground(ctx, args)
+    : await terminalRunForeground(ctx, args);
+}
+
+/** Обычный запуск: шаг ждёт команду и возвращает её вывод. */
+async function terminalRunForeground(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const command = requireString(args, 'command').trim();
   if (command.length > MAX_COMMAND_CHARS) {
     throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
@@ -2311,7 +2311,7 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   if (ctx.sandbox && !ctx.sandbox.available) return sandboxUnavailable(ctx.sandbox);
   // В песочнице та же команда идёт в контейнер: агент об этом не просит отдельно,
   // режим задаёт человек настройкой.
-  const spillStream = ctx.spillDir ? createSpillStream(ctx.spillDir, 'run_terminal') : null;
+  const spillStream = ctx.spillDir ? createSpillStream(ctx.spillDir, 'terminal') : null;
   const options: RunOptions = spillStream ? { ...runOptions, spill: (chunk) => spillStream.write(chunk) } : runOptions;
   // В песочнице монтируется только корень проекта, поэтому подпапка — это `cd`
   // внутри контейнера, а не второй том.
@@ -2322,7 +2322,7 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
   const full = spillStream?.close(result.truncated) ?? null;
   // Причёсываем и держим хвост: один `npm install` иначе завалит контекст логом.
   const condensed = condenseOutput(result.output);
-  const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'run_terminal', condensed);
+  const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'terminal', condensed);
   const notes: string[] = [];
   if (result.timedOut) notes.push('превышено время выполнения');
   if (result.truncated) notes.push('вывод обрезан');
@@ -2336,17 +2336,17 @@ async function runTerminal(ctx: ToolContext, args: Record<string, unknown>): Pro
 
 /* ── долгие команды: задания ─────────────────────────────────────────────── */
 
-/** Предел времени задания — тот же, что у `run_terminal`: больше 30 минут незачем. */
+/** Предел времени задания — тот же, что у команды: больше 30 минут незачем. */
 const MAX_JOB_TIMEOUT_SECONDS = 1800;
 
 /**
- * Запуск с `background: true` в `run_terminal` — та же команда, но шаг она не держит.
+ * Запуск с `background: true` — та же команда, но шаг она не держит.
  *
  * Возвращается номер задания, а не вывод: сборка на пять минут иначе держала бы
  * агента всё это время, и он не мог бы даже сказать, что там происходит. Вывод
- * читается через `run_output`.
+ * читается действием `output`.
  */
-async function runBackground(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+async function terminalRunBackground(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
 
   const command = requireString(args, 'command').trim();
@@ -2370,7 +2370,7 @@ async function runBackground(ctx: ToolContext, args: Record<string, unknown>): P
       summary: 'В песочнице фоновая команда не поддерживается',
       detail:
         `Песочница включена (${ctx.sandbox.label}), а контейнер живёт ровно на время команды. ` +
-        'Запусти команду через run_terminal без background и с бо́льшим пределом времени либо выключи песочницу.',
+        'Запусти команду через terminal (action run) без background и с бо́льшим пределом времени либо выключи песочницу.',
     };
   }
 
@@ -2398,7 +2398,7 @@ async function runBackground(ctx: ToolContext, args: Record<string, unknown>): P
       `команда: ${command}`,
       'состояние: идёт',
       '',
-      `Читай вывод через run_output { id: "${snapshot.id}" }, остановить — run_stop.`,
+      `Читай вывод через terminal { action: "output", id: "${snapshot.id}" }, снять — action "cancel".`,
       'Не запускай эту же команду второй раз: задание уже работает.',
     ].join('\n'),
   };
@@ -2416,10 +2416,10 @@ function jobState(snapshot: JobSnapshot): string {
 }
 
 /**
- * `run_output` — состояние задания и новый вывод. Без `id` — список заданий:
+ * `output` — состояние задания и новый вывод. Без `id` — список заданий:
  * чтобы не гадать, что вообще запущено, после перезапуска хода.
  */
-function runOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
+function terminalOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
   if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
 
   const id = optionalString(args, 'id')?.trim();
@@ -2436,7 +2436,7 @@ function runOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome
       ok: false,
       summary: `задание ${id} не найдено`,
       detail:
-        'Такого задания нет: номер берётся из ответа run_terminal с background: true, а завершённые задания ' +
+        'Такого задания нет: номер берётся из ответа terminal с action run и background: true, а завершённые ' +
         'убираются, когда набирается много новых. Запусти команду заново, если результат нужен.',
     };
   }
@@ -2444,7 +2444,7 @@ function runOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome
   const from = optionalInteger(args, 'from');
   const result = job.read(from);
   const snapshot = result.snapshot;
-  const output = result.data.length > 0 ? clipTail(ctx, 'run_output', condenseOutput(result.data)) : '';
+  const output = result.data.length > 0 ? clipTail(ctx, 'terminal', condenseOutput(result.data)) : '';
   // Смещение отдаём всегда: по нему следующее чтение не повторит прочитанное.
   const notes = [`offset: ${result.offset}`, `состояние: ${jobState(snapshot)}`];
   if (snapshot.file) notes.push(`полностью — в файле ${snapshot.file}`);
@@ -2457,13 +2457,15 @@ function runOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome
       ...notes,
       '',
       output || (running ? '(пока ничего не напечатано)' : '(вывод пуст)'),
-      ...(running ? [`Потом дочитай: run_output { id: "${snapshot.id}", from: ${result.offset} }`] : []),
+      ...(running
+        ? [`Потом дочитай: terminal { action: "output", id: "${snapshot.id}", from: ${result.offset} }`]
+        : []),
     ].join('\n'),
   };
 }
 
-/** `run_stop` — снять задание: брошенная сборка продолжает жечь процессор. */
-function runStop(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
+/** `cancel` — снять задание: брошенная сборка продолжает жечь процессор. */
+function terminalCancel(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
   if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
   const id = requireString(args, 'id');
   const job = ctx.jobs.get(id);
@@ -2481,7 +2483,7 @@ function runStop(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
   return {
     ok: true,
     summary: `${id}: остановлено`,
-    detail: 'Процесс убит вместе с дочерними. Вывод, который успел прийти, можно дочитать через run_output.',
+    detail: 'Процесс убит вместе с дочерними. Вывод, который успел прийти, можно дочитать действием output.',
   };
 }
 
@@ -3178,9 +3180,9 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  * Терминальная сессия — это процесс на хосте: контейнер живёт ровно на время
  * команды, поэтому «интерактивный терминал в песочнице» не бывает. Пока
  * песочница включена, начинать сессию и печатать в неё нельзя — иначе команда
- * уходила бы на машину человека мимо песочницы (`run_terminal` и
- * `run_terminal` с `background: true` этот режим уже соблюдают). Остановить уже запущенную сессию
- * можно: `terminal_stop` команду не выполняет.
+ * уходила бы на машину человека мимо песочницы (команда и команда в фоне этот режим
+ * уже соблюдают). Остановить уже запущенную сессию можно: `action: stop` команду
+ * не выполняет.
  */
 function sandboxRefusesTerminal(ctx: ToolContext): ToolOutcome | null {
   if (!ctx.sandbox) return null;
@@ -3189,7 +3191,7 @@ function sandboxRefusesTerminal(ctx: ToolContext): ToolOutcome | null {
     summary: 'В песочнице терминальная сессия не поддерживается',
     detail:
       `Песочница включена (${ctx.sandbox.label}), а терминальная сессия — процесс на хосте. ` +
-      'Запускай команды через run_terminal (долгие — с background: true): они идут в контейнер.',
+      'Запускай команды через terminal (action run; долгие — с background: true): они идут в контейнер.',
   };
 }
 
@@ -3207,11 +3209,17 @@ async function terminalAction(ctx: ToolContext, args: Record<string, unknown>): 
       return missingForAction(args, ['id', 'data']) ?? (await terminalWrite(ctx, args));
     case 'stop':
       return missingForAction(args, ['id']) ?? terminalStop(ctx, args);
+    case 'run':
+      return missingForAction(args, ['command']) ?? (await terminalRun(ctx, args));
+    case 'output':
+      return terminalOutput(ctx, args);
+    case 'cancel':
+      return missingForAction(args, ['id']) ?? terminalCancel(ctx, args);
     default:
       return {
         ok: false,
         summary: `Неизвестное действие терминала: ${action}`,
-        detail: 'Допустимые: list, start, read, write, stop.',
+        detail: 'Допустимые: list, start, read, write, stop, run, output, cancel.',
       };
   }
 }

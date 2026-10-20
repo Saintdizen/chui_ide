@@ -101,7 +101,9 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
   {
     id: 'shell',
     label: 'Терминал',
-    names: ['run_terminal', 'run_output', 'run_stop', 'terminal'],
+    // Команда, задание в фоне и живая сессия — действия одного инструмента:
+    // run, output, cancel, list, start, read, write, stop.
+    names: ['terminal'],
   },
   {
     id: 'git-read',

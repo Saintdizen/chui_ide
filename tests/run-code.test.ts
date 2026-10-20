@@ -84,7 +84,7 @@ describe('файл программы', () => {
 describe('что программа может звать', () => {
   it('обычные инструменты — да', () => {
     expect(runCodeToolAllowed('read_file')).toBe(true);
-    expect(runCodeToolAllowed('run_terminal')).toBe(true);
+    expect(runCodeToolAllowed('terminal')).toBe(true);
     expect(runCodeToolAllowed('apply_patch')).toBe(true);
   });
 

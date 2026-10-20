@@ -15,7 +15,7 @@
  * загадка «почему он молчит».
  */
 
-import { AGENT_TOOLS, type AgentToolName } from './tools';
+import { AGENT_TOOLS, parseToolArguments, type AgentToolName } from './tools';
 
 export interface ToolPolicy {
   /**
@@ -35,6 +35,14 @@ export interface ToolPolicy {
    * открывался модели сам собой.
    */
   readonly alwaysAvailable?: boolean;
+  /**
+   * Действия, которые только читают состояние. Нужны слитым инструментам:
+   * `terminal` целиком мир меняет (запускает команды), а `terminal` с
+   * `action: read` — нет, и повтор такого вызова так же бесполезен, как повтор
+   * `read_file`. Без этого признака слияние молча отключило бы защиту от
+   * зацикливания на чтении вывода.
+   */
+  readonly readOnlyActions?: readonly string[];
 }
 
 export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
@@ -81,10 +89,10 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   apply_patch: {},
 
   /* ── команды, задания, терминалы ────────────────────────────────────── */
-  run_terminal: {},
-  run_output: { readOnly: true, plan: true },
-  run_stop: {},
-  terminal: {},
+  // Один инструмент на всё, что запускает процессы: команда, задание в фоне,
+  // живая сессия. Целиком он мир меняет, поэтому не `readOnly` и не в плане;
+  // чтение вывода и список — отдельные действия, и они тоже только читают.
+  terminal: { readOnlyActions: ['list', 'read', 'output'] },
 
   /* ── программа и сценарий ───────────────────────────────────────────── */
   run_code: { deniedInProgram: true },
@@ -145,6 +153,28 @@ function namesWhere(flag: keyof ToolPolicy): ReadonlySet<string> {
  * Правки и команды сюда не входят: они меняют мир, и повторить их бывает нужно.
  */
 export const READ_ONLY_TOOLS = namesWhere('readOnly');
+
+/** Действия, которые только читают: имя инструмента → набор действий. */
+const READ_ONLY_ACTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  (Object.entries(TOOL_POLICIES) as [AgentToolName, ToolPolicy][])
+    .filter(([, policy]) => (policy.readOnlyActions?.length ?? 0) > 0)
+    .map(([name, policy]) => [name, new Set(policy.readOnlyActions)]),
+);
+
+/**
+ * Только ли читает этот вызов. Смотрит и на инструмент, и на его действие:
+ * повтор `terminal` с `action: read` ничего нового не даст, а `action: run` —
+ * это новая команда, и глушить её нельзя.
+ */
+export function isReadOnlyCall(name: string, rawArguments: string): boolean {
+  if (READ_ONLY_TOOLS.has(name)) return true;
+  const actions = READ_ONLY_ACTIONS.get(name);
+  if (!actions) return false;
+  const parsed = parseToolArguments(rawArguments);
+  if (!parsed.ok) return false;
+  const action = parsed.value.action;
+  return typeof action === 'string' && actions.has(action);
+}
 
 /**
  * Инструменты режима «План»: только чтение проекта и ведение плана. Всё, что

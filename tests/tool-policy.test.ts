@@ -6,6 +6,7 @@ import {
   DENIED_IN_PROGRAM,
   PLAN_MODE_TOOLS,
   READ_ONLY_TOOLS,
+  isReadOnlyCall,
   SUBAGENT_TOOLS,
   TOOL_POLICIES,
 } from '../src/shared/tool-policy';
@@ -62,7 +63,7 @@ describe('производные наборы', () => {
   });
 
   it('в плане нет ничего, что меняет мир', () => {
-    for (const name of ['apply_edit', 'apply_patch', 'create_file', 'delete_file', 'run_terminal']) {
+    for (const name of ['apply_edit', 'apply_patch', 'create_file', 'delete_file', 'terminal']) {
       expect(PLAN_MODE_TOOLS.has(name)).toBe(false);
     }
   });
@@ -76,9 +77,28 @@ describe('производные наборы', () => {
   it('без моста окна не обещает работать', () => {
     // Эти инструменты живут в ленте чата и в документной модели: без окна их
     // не исполнить, и «всегда доступен» про них было бы неправдой.
-    for (const name of ['ask', 'exit_plan_mode', 'apply_patch', 'apply_edit', 'open_file', 'run_terminal']) {
+    for (const name of ['ask', 'exit_plan_mode', 'apply_patch', 'apply_edit', 'open_file', 'terminal']) {
       expect(ALWAYS_AVAILABLE.has(name)).toBe(false);
     }
+  });
+});
+
+describe('повтор чтения', () => {
+  it('у слитого терминала чтение — по действию, а не по имени', () => {
+    // Иначе слияние молча отключило бы защиту от зацикливания: `terminal` целиком
+    // мир меняет, а чтение вывода и список — нет.
+    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'read', id: 't1' }))).toBe(true);
+    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'output' }))).toBe(true);
+    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'list' }))).toBe(true);
+    // Команда и ввод — новая работа, повтор бывает нужен.
+    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'run', command: 'npm test' }))).toBe(false);
+    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'write', id: 't1', data: 'ls\n' }))).toBe(false);
+    // Незнакомое действие и битые аргументы не считаются чтением: глушить нечего.
+    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'взмахнуть' }))).toBe(false);
+    expect(isReadOnlyCall('terminal', 'не json')).toBe(false);
+    // Обычные инструменты чтения работают как раньше.
+    expect(isReadOnlyCall('read_file', JSON.stringify({ path: '/p/a.ts' }))).toBe(true);
+    expect(isReadOnlyCall('apply_edit', '{}')).toBe(false);
   });
 });
 

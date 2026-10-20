@@ -63,7 +63,7 @@ describe('touchedFiles', () => {
 
   it('инструмент без файлов файлов не приносит', () => {
     expect(touchedFiles('read_file', '{"path":"/p/a.ts"}')).toEqual([]);
-    expect(touchedFiles('run_terminal', '{"command":"ls"}')).toEqual([]);
+    expect(touchedFiles('terminal', '{"action":"run","command":"ls"}')).toEqual([]);
   });
 
   it('аргумент без пути игнорируется, остальные остаются', () => {

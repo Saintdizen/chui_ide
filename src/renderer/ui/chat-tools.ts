@@ -31,7 +31,6 @@ const TOOL_LABELS: Record<string, string> = {
   get_diagnostics: 'Диагностика',
   apply_edit: 'Правка файлов',
   replace_in_files: 'Замена по проекту',
-  run_terminal: 'Команда в терминале',
   create_file: 'Создание файла',
   delete_file: 'Удаление',
   move_file: 'Перемещение',
@@ -59,7 +58,6 @@ const TOOL_ICONS: Record<string, IconName> = {
   get_diagnostics: 'warning',
   apply_edit: 'wrench',
   replace_in_files: 'refresh',
-  run_terminal: 'terminal',
   create_file: 'filePlus',
   delete_file: 'trash',
   move_file: 'file',
@@ -91,6 +89,9 @@ const TOOL_ACTION_LABELS: Record<string, Record<string, string>> = {
     read: 'Чтение терминала',
     write: 'Ввод в терминал',
     stop: 'Остановка терминала',
+    run: 'Команда в терминале',
+    output: 'Вывод задания',
+    cancel: 'Остановка задания',
   },
   schedule: { create: 'Новая задача по расписанию', update: 'Правка задачи', delete: 'Удаление задачи' },
   git_read: {
@@ -248,7 +249,15 @@ export interface ToolCardView {
  * или команда, и он заслуживает той же подсветки, что блоки в ответе.
  */
 function toolDetailLanguage(call: ChatToolStartPayload): string {
-  if (call.name === 'run_terminal') return 'shell';
+  // Вывод терминала — это команда и её текст: подсветка как у оболочки.
+  if (call.name === 'terminal') {
+    try {
+      const action = (JSON.parse(call.args) as { action?: unknown }).action;
+      return action === 'run' || action === 'start' || action === 'write' || action === 'output' ? 'shell' : '';
+    } catch {
+      return '';
+    }
+  }
   if (call.name !== 'read_file' && call.name !== 'list_dir') return '';
   try {
     const args = JSON.parse(call.args) as { path?: unknown };
