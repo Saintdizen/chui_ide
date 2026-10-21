@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { coveredRequest, forgetChangedFiles, isCovered, rememberRead, touchedPaths } from '../src/shared/read-coverage';
+import { coveredRequest, forgetChangedFiles, isCovered, rememberRead, touchedPaths, uncoveredRequest } from '../src/shared/read-coverage';
 
 /**
  * Учёт уже прочитанных диапазонов в агентном цикле.
@@ -218,5 +218,51 @@ describe('forgetChangedFiles', () => {
     forgetChangedFiles(state, 'file', JSON.stringify({ action: 'create', path: '/other/c.ts', contents: 'x' }));
     expect(state.coveredReads.size).toBe(2);
     expect(state.executed.size).toBe(2);
+  });
+});
+
+describe('uncoveredRequest', () => {
+  const reads = new Map([['/proj/a.ts', [{ from: 1, to: 120 }]]]);
+
+  it('хвост после прочитанного — только он и читается', () => {
+    const narrowed = uncoveredRequest(
+      'read',
+      JSON.stringify({ path: '/proj/a.ts', startLine: 1, endLine: 250 }),
+      reads,
+    );
+    expect(narrowed?.from).toBe(121);
+    expect(narrowed?.to).toBe(250);
+    expect(JSON.parse(narrowed!.arguments)).toEqual({ path: '/proj/a.ts', startLine: 121, endLine: 250 });
+  });
+
+  it('куски, стоящие встык, складываются в одно покрытие', () => {
+    const chained = new Map([
+      ['/proj/a.ts', [{ from: 1, to: 60 }, { from: 40, to: 120 }]],
+    ]);
+    const narrowed = uncoveredRequest(
+      'read',
+      JSON.stringify({ path: '/proj/a.ts', startLine: 1, endLine: 300 }),
+      chained,
+    );
+    expect(narrowed?.from).toBe(121);
+  });
+
+  it('выгадывать меньше двадцати строк — не стоит объяснения', () => {
+    const near = new Map([['/proj/a.ts', [{ from: 1, to: 10 }]]]);
+    expect(
+      uncoveredRequest('read', JSON.stringify({ path: '/proj/a.ts', endLine: 20 }), near),
+    ).toBeUndefined();
+  });
+
+  it('просили уже прочитанное или чужое — не наш случай', () => {
+    expect(
+      uncoveredRequest('read', JSON.stringify({ path: '/proj/a.ts', endLine: 100 }), reads),
+    ).toBeUndefined();
+    expect(
+      uncoveredRequest('search', JSON.stringify({ path: '/proj/a.ts', endLine: 300 }), reads),
+    ).toBeUndefined();
+    expect(
+      uncoveredRequest('read', JSON.stringify({ path: '/proj/b.ts', endLine: 300 }), reads),
+    ).toBeUndefined();
   });
 });

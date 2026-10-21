@@ -99,6 +99,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Read a file — whole, a line range (`startLine`/`endLine`) or several at once (`paths`). ' +
+      'Prefer a range around the spot: a whole file costs more than the answer needs. ' +
       'Output lines are numbered from 1: those numbers go to edit.',
     inputSchema: {
       type: 'object',
@@ -282,6 +283,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'write (default): `edits`. The rest: one file operation. Замена по проекту — `file`.',
         },
         path: { type: 'string', description: 'One file.' },
+        // Плоская форма той же правки: файл и замена рядом, без обёртки `edits[]`.
+        // По переписи отказов именно она и приходила без обёртки — объявляем её,
+        // чтобы модель не угадывала и не стоила лишнего шага.
+        oldText: { type: 'string', description: 'write: anchor without the edits[] wrapper.' },
+        newText: { type: 'string', description: 'write: replacement for that anchor.' },
         edits: {
           type: 'array',
           description: 'write: files and their changes.',
@@ -388,8 +394,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'mind',
     side: 'main',
-    description:
-      'Conversation and the human: notes, question, plan, goal, plan approval. The project is not touched.',
+    description: 'Conversation and the human: notes, question, plan, goal, plan approval. The project is not touched.',
     inputSchema: {
       type: 'object',
       properties: {

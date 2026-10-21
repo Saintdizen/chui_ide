@@ -125,7 +125,9 @@ describe('эхо команды в ответе', () => {
         signal: new AbortController().signal,
         confirmCommand: async () => true,
       } as ToolContext;
-      const long = `echo ${'x'.repeat(2500)}`;
+      // Предел команды — 4 000 символов (было 2 000): перепись отказов показала,
+      // что длинные `node -e` упирались в него и тратили шаг.
+      const long = `echo ${'x'.repeat(4100)}`;
       const out = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: long }));
       // Пять шагов потеряно на heredoc в живом прогоне: ошибка обязана называть выход.
       expect(out.summary).toContain('`file` (action create)');

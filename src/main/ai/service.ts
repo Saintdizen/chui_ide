@@ -91,7 +91,7 @@ import {
   type ChatTitleParts,
 } from '../../shared/chat-title';
 import { sandboxNote } from '../../shared/sandbox';
-import { coveredRequest, forgetChangedFiles, rememberRead } from '../../shared/read-coverage';
+import { coveredRequest, forgetChangedFiles, rememberRead, uncoveredRequest } from '../../shared/read-coverage';
 import { renderSessionReferences } from '../../shared/session-context';
 import {
   permissionFlags,
@@ -1231,6 +1231,12 @@ export class AiService {
           ...(project ? { project } : {}),
         })
         .catch(() => undefined);
+      // Счётчик шагов — без согласия: в нём нет ни инструкций, ни ответов.
+      void this.telemetry
+        ?.recordCounts(log, {
+          ...(request.conversationUid ? { conversation: request.conversationUid } : {}),
+        })
+        .catch(() => undefined);
       return log;
     };
 
@@ -1366,6 +1372,9 @@ export class AiService {
 
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
     const coveredReads = new Map<string, Array<{ from: number; to: number }>>();
+    // Тот же учёт — командам-читалкам в терминале: `cat` поверх уже прочитанного
+    // отвечает строкой, а не второй копией текста.
+    toolContext.coveredReads = coveredReads;
 
     /**
      * Цель прогона: ставится человеком (в запросе) или моделью (`update_goal`)
@@ -1585,7 +1594,7 @@ export class AiService {
         const call = mapped.renamed ? { ...raw, name: mapped.name, arguments: mapped.arguments } : raw;
         // План — не вызов инструмента в привычном смысле, а обновление чек-листа:
         // рисуем его отдельным событием, но модели всё равно отвечаем role:'tool'.
-        if (call.name === 'plan' && planActionOf(call.arguments) === 'steps') {
+        if (call.name === 'mind' && planActionOf(call.arguments) === 'steps') {
           const steps = parsePlanSteps(call.arguments);
           if (steps.length > 0) {
             emit(ChatStreamEvent.Plan, { steps });
@@ -1615,7 +1624,7 @@ export class AiService {
         // может поставить её сама, когда задача оказалась многошаговой, и закрыть,
         // когда работа кончилась: закрытие видит человек, и оно останавливает
         // автопродолжение.
-        if (call.name === 'plan') {
+        if (call.name === 'mind' && planActionOf(call.arguments) === 'goal') {
           const update = parseGoalUpdate(call.arguments);
           let note = 'Цель не изменена: нечего применять.';
           if (update?.text) {
@@ -1703,7 +1712,10 @@ export class AiService {
         // провайдер. Ростер даёт имя и обязательные аргументы, свой вызов модель
         // уже видела — повторный вызов по имени обойдётся дешевле.
         const rosterOnly = isRosterTool(toolPreset, call.name);
-        if ((hiddenByPreset || !shownAsSchema) && widensOnDemand && (!planMode || planApproved)) {
+        // `deny` — запрет по существу (живой MCP-сервер в наборе чтения): такой
+        // инструмент не докачивается, иначе запрет обходится первым вызовом.
+        const forbidden = (toolPresetSpec(toolPreset).deny ?? []).includes(call.name);
+        if (!forbidden && (hiddenByPreset || !shownAsSchema) && widensOnDemand && (!planMode || planApproved)) {
           const known = AGENT_TOOLS.find((tool) => tool.name === call.name);
           if (known && this.canRun(known, host)) {
             // Пометка и пересборка набора — только когда инструмент появляется
@@ -1773,6 +1785,9 @@ export class AiService {
         const repeated = readOnly ? executed.get(key) : undefined;
         // Повтор чтения уже прочитанного диапазона: текст есть выше, не дублируем.
         const covered = repeated ? undefined : coveredRequest(call.name, call.arguments, coveredReads);
+        // Перекрытие — не повтор, но и не весь текст заново: просят `1–250`, а
+        // `1–120` уже выше — читаем только хвост.
+        const narrowed = covered || repeated ? undefined : uncoveredRequest(call.name, call.arguments, coveredReads);
 
         emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
         let outcome: ToolOutcome;
@@ -1793,7 +1808,11 @@ export class AiService {
             detail: 'Этот диапазон уже есть выше в текущей ветке. Возьми текст оттуда, не читай повторно.',
           };
         } else {
-          outcome = await runTool(toolContext, call.name, call.arguments);
+          outcome = await runTool(toolContext, call.name, narrowed?.arguments ?? call.arguments);
+          if (narrowed) {
+            const head = `Начало файла (строки ${narrowed.from - 1} и выше) уже есть в ветке — читаю с ${narrowed.from}.`;
+            outcome = { ...outcome, detail: outcome.detail ? `${head}\n${outcome.detail}` : head };
+          }
           if (outcome.read) rememberRead(coveredReads, outcome.read);
           if (readOnly) executed.set(key, outcome);
           else {
@@ -2541,17 +2560,21 @@ function attachImages(messages: ChatMessage[], images: readonly string[]): void 
 }
 
 /**
- * Что именно делает `plan`: `steps` (план) или `goal` (цель).
+ * Что именно делает `mind`: `steps` (план), `goal` (цель) или `other`.
  *
  * План и цель — два состояния беседы, поэтому у них один инструмент с полем
  * `action`. Действие решает, какой из двух разборов применить: без действия
- * считаем шагами — так его звали всегда.
+ * (и при неразборчивом JSON) считаем шагами — так звали `plan`. Остальные
+ * действия общего инструмента (`remember`, `ask`, `forget`…) перехвату не подлежат:
+ * иначе память молча не запишется.
  */
-function planActionOf(raw: string): 'steps' | 'goal' {
+function planActionOf(raw: string): 'steps' | 'goal' | 'other' {
   try {
     const value = JSON.parse(raw) as unknown;
     const action = (value as { action?: unknown } | null)?.action;
-    return action === 'goal' ? 'goal' : 'steps';
+    if (action === undefined || action === 'steps') return 'steps';
+    if (action === 'goal') return 'goal';
+    return 'other';
   } catch {
     return 'steps';
   }

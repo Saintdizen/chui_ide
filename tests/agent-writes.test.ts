@@ -215,3 +215,90 @@ describe('edit: две адресации в одном вызове', () => {
     expect(outcome.detail).toContain('Не повторяй');
   });
 });
+
+describe('edit — формы, которые модель шлёт на самом деле', () => {
+  // По переписи отказов (TASKS.md, п.43) семь из двадцати четырёх — именно форма:
+  // якорь без обёртки, замены без пути, запись без якоря. Каждый такой отказ стоит
+  // целого шага, хотя смысл вызова читался однозначно. Здесь — то, что теперь
+  // понимается без повтора.
+  const applied = () =>
+    bridge({
+      rejected: false,
+      result: { reports: [{ path: '/proj/a.ts', applied: 1, version: 2 }], failed: [] },
+    });
+
+  it('плоская правка без обёртки edits[]', async () => {
+    const applyPatches = applied();
+    const outcome = await runTool(
+      context({ applyPatches }),
+      'edit',
+      JSON.stringify({ path: '/proj/a.ts', oldText: 'a', newText: 'b' }),
+    );
+
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    expect(applyPatches).toHaveBeenCalledTimes(1);
+  });
+
+  it('замены со своими путями собираются по файлам', async () => {
+    const applyPatches = applied();
+    const outcome = await runTool(
+      context({ applyPatches }),
+      'edit',
+      JSON.stringify({
+        edits: [
+          { path: '/proj/a.ts', oldText: 'a', newText: 'b' },
+          { path: '/proj/a.ts', oldText: 'c', newText: 'd' },
+        ],
+      }),
+    );
+
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    // Две замены одного файла — один вызов правки, а не два: путь у них общий.
+    expect(applyPatches).toHaveBeenCalledTimes(1);
+    const [anchors] = applyPatches.mock.calls[0] as unknown as [[{ path: string }]];
+    // Правки одного файла лежат в одной записи — файл у них общий, а не две карточки.
+    expect(anchors).toHaveLength(1);
+    expect((anchors[0] as unknown as { path: string }).path).toBe('/proj/a.ts');
+  });
+
+  it('запись без якоря в несуществующий файл — это создание', async () => {
+    const createFile = vi.fn(async (target: string) => target);
+    const workspace = {
+      rootPath: () => ROOT,
+      stat: async () => {
+        throw new Error('Файл не найден: /proj/new.ts');
+      },
+      createFile,
+    } as unknown as WorkspaceService;
+
+    const outcome = await runTool(
+      { workspace },
+      'edit',
+      JSON.stringify({ edits: [{ path: '/proj/new.ts', edits: [{ newText: 'a\nb' }] }] }),
+    );
+
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    expect(createFile).toHaveBeenCalledWith('/proj/new.ts', 'a\nb');
+    expect(outcome.summary).toContain('создан');
+  });
+
+  it('запись без якоря в существующий файл — отказ с подсказкой', async () => {
+    const createFile = vi.fn(async (target: string) => target);
+    const workspace = {
+      rootPath: () => ROOT,
+      stat: async () => ({ size: 10, mtimeMs: 1, isDirectory: false }),
+      createFile,
+    } as unknown as WorkspaceService;
+
+    const outcome = await runTool(
+      { workspace },
+      'edit',
+      JSON.stringify({ edits: [{ path: '/proj/a.ts', edits: [{ newText: 'a' }] }] }),
+    );
+
+    expect(outcome.ok).toBe(false);
+    // Файл уже есть: угадывать «заменить целиком» или «дописать» нельзя.
+    expect(outcome.summary).toContain('oldText');
+    expect(createFile).not.toHaveBeenCalled();
+  });
+});

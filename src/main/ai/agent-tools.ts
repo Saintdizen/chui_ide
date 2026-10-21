@@ -17,6 +17,7 @@ import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memor
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import { formatReadImageReply, formatReadImageSummary } from '../../shared/read-image';
 import { testTargetProblem } from '../../shared/test-target';
+import { coveredRequest } from '../../shared/read-coverage';
 import { limitPerFile, MAX_HITS_PER_FILE } from '../../shared/search-limit';
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
@@ -319,6 +320,12 @@ export interface ToolContext {
    */
   confirmDangerous?: boolean;
   /** Правки в документах; нет обработчика — правки недоступны. */
+  /**
+   * Уже прочитанное в этой ветке: файл и его диапазоны. Нужно командам-читалкам
+   * (`cat`, `sed -n`): без этого `cat` того же файла отдаёт текст заново, хотя
+   * покрытие про него знает — и платит модель.
+   */
+  coveredReads?: ReadonlyMap<string, Array<{ from: number; to: number }>>;
   applyEdits?(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /**
    * Правки по якорю. Якоря разрешает renderer: только у него есть текст
@@ -388,10 +395,16 @@ export interface ToolContext {
 
 /**
  * Ограничение вывода одного вызова: без него один файл на 2 МБ съест весь
- * контекст модели. 45 000 символов — это примерно 12 000 токенов, которых
- * хватает на средний модуль целиком.
+ * контекст модели.
+ *
+ * 18 000 символов — примерно 5 000 токенов. Было 45 000 (12 000 токенов), но
+ * замер по журналу прогонов показал цену: токен, попавший в контекст, платится
+ * один раз целиком и ещё ~30 раз по 10% (он в кеше префикса всех следующих
+ * шагов), то есть множитель ≈ 4. Один вызов на 12 000 токенов стоит как 48 000.
+ * Всё, что не влезло, не теряется: `clipText` пишет остаток в spill-файл и
+ * называет путь — модель дочитает диапазоном, если он правда нужен.
  */
-export const MAX_OUTPUT_CHARS = 45_000;
+export const MAX_OUTPUT_CHARS = 18_000;
 
 /**
  * Сколько символов вывода шаг отдаёт модели всего. Предела на вызов мало: агент
@@ -399,11 +412,13 @@ export const MAX_OUTPUT_CHARS = 45_000;
  * выбрасывает ходы целиком. Бюджет шага делает цену шага предсказуемой, а
  * `MIN_OUTPUT_CHARS` не даёт инструменту ответить пустотой.
  *
- * 60 000 — это три полных вызова или десяток небольших. Свежие результаты
- * инструментов провайдер оплачивает целиком (в кеш они попадают только со
- * следующего запроса), поэтому бюджет шага — самая дорогая часть истории.
+ * Свежие результаты инструментов провайдер оплачивает целиком (в кеш они
+ * попадают только со следующего запроса), поэтому бюджет шага — самая дорогая
+ * часть истории. Замер: в среднем вызов отдаёт 3 000 токенов, так что 24 000
+ * символов (≈6 700 токенов) — это два-три щедрых вызова; прежние 60 000
+ * срабатывали редко, но каждый такой шаг стоил как четыре обычных прогона.
  */
-export const STEP_OUTPUT_CHARS = 60_000;
+export const STEP_OUTPUT_CHARS = 24_000;
 
 /**
  * Минимум на один вызов, даже когда бюджет шага уже исчерпан. Пустой ответ модель
@@ -497,17 +512,34 @@ const MAX_READ_LINES = 2000;
  * Файл длиннее — читается не целиком, а головой и оглавлением. Отдать 60 000
  * символов начала — это ~15 000 токенов вслепую: конец файла всё равно не виден,
  * и модель просит следующие диапазоны наугад.
+ *
+ * Порог опущен с 250 до 160 по замеру восьми «целых» чтений в живых беседах:
+ * за следующим диапазоном того же файла модель пошла лишь в одном случае из восьми —
+ * значит, целиком она читает не ради полноты, а за компанию, и голова с оглавлением
+ * отвечает на тот же вопрос дешевле.
  */
-const WHOLE_FILE_MAX_LINES = 250;
-/** Сколько строк показываем из длинного файла и с какой просить продолжение. */
-const LONG_FILE_HEAD_LINES = 200;
+const WHOLE_FILE_MAX_LINES = 160;
+/**
+ * Сколько строк показываем из длинного файла и с какой просить продолжение.
+ * Голова нужна, чтобы узнать файл (шапка, импорты, первые объявления); остальное
+ * дешевле взять оглавлением и диапазоном. 200 строк — ~1 400 токенов за вызов,
+ * 120 — вдвое меньше, а оглавление всё равно назовёт номера нужных строк.
+ */
+const LONG_FILE_HEAD_LINES = 120;
 
 /** Максимум правок за один вызов: защита от вырожденного ответа модели. */
 const MAX_EDITED_FILES = 50;
 const MAX_EDITS_PER_FILE = 500;
 
-/** Команда длиннее — это уже не команда, а попытка спрятать скрипт. */
-const MAX_COMMAND_CHARS = 2000;
+/**
+ * Команда длиннее — это уже не команда, а попытка спрятать скрипт.
+ *
+ * Было 2000: по переписи отказов три вызова из 200 упирались именно в предел —
+ * то есть три шага уходили на переписывание команды, и это дороже, чем
+ * пропустить лишнюю тысячу символов в терминал. 4000 — ещё отсекает скрипт
+ * через heredoc, но пропускает длинный `node -e`.
+ */
+const MAX_COMMAND_CHARS = 4000;
 /**
  * Сколько символов команды повторять в ответе. Короткая команда полезна в
  * выводе (видно, что запускалось), длинная — нет: она уже есть в вызове.
@@ -874,8 +906,6 @@ async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<To
   }
   return ctx.subagent.runMany(request.tasks);
 }
-
-
 
 /* ── браузер ────────────────────────────────────────────────────────────── */
 
@@ -1270,18 +1300,17 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
 /** Сколько файлов и сколько символов отдаёт `read` за один вызов. */
 const MAX_READ_FILES = 10;
 /**
- * Общий потолок пачки. Пять файлов по 12 000 символов — это уже 30 000, половина
- * бюджета шага на один вызов. При 60 000 пара больших файлов отдавала около
- * 6 800 токенов за шаг и отбивала у модели охоту читать дальше: дешевле
- * прочитать один, чем всю пачку сразу.
+ * Общий потолок пачки. Пачка и существует ради двух-трёх мелких файлов; 20 000
+ * символов — это уже ~5 000 токенов, треть бюджета шага на один вызов. Пара
+ * больших файлов при 30 000 съедала половину шага и отбивала у модели охоту
+ * читать дальше: дешевле прочитать один, чем всю пачку сразу.
  */
-const MAX_READ_FILES_TOTAL_CHARS = 30_000;
+const MAX_READ_FILES_TOTAL_CHARS = 20_000;
 /**
- * Потолок на один файл в пачке. Десять файлов за раз инструмент и существует:
- * если каждый отдаёт по 3 000 символов, пачка доходит до общего потолка ровно
- * тогда, когда она ещё полезна. Цена пачки из двух больших файлов — 7 300
- * токенов за вызов (замер), а вопрос обычно решает середина первого файла:
- * остальное дешевле взять `read` с диапазоном по номеру строки.
+ * Потолок на один файл в пачке: 6 000 символов — это файл строк на 150. Пачка
+ * существует ради двух-трёх мелких файлов, а длинный обрезается по границе
+ * строки с пометкой «дальше read с диапазоном». Вопрос обычно решает середина
+ * первого файла: остальное дешевле взять `read` с диапазоном по номеру строки.
  */
 const READ_FILES_PER_FILE_CHARS = 6_000;
 
@@ -1377,13 +1406,36 @@ const MAX_REPLACE_SUMMARY_FILES = 20;
  */
 async function replaceInFiles(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
   const query = requireString(args, 'query');
+  const isRegex = optionalBoolean(args, 'isRegex') ?? false;
+  const glob = optionalString(args, 'glob');
+  // Предохранитель после аварии: `.*` без glob прошёлся по всем 1047 файлам и
+  // превратил дерево в «x», а откатить это было нечем. Шаблон, который совпадает
+  // с пустой строкой (`.`, `.*`, `^`, `\b`), без маски — это не «заменить», это
+  // «переписать всё»: сначала маска, потом замена.
+  if (isRegex && !glob) {
+    let matchesEmpty = false;
+    try {
+      matchesEmpty = new RegExp(query).test('');
+    } catch {
+      matchesEmpty = false;
+    }
+    if (matchesEmpty) {
+      return {
+        ok: false,
+        summary: 'шаблон слишком широкий',
+        detail:
+          `Регулярка «${query}» совпадает с пустой строкой — под неё попадёт почти весь проект. ` +
+          'Сузь её или добавь `glob` (например, `src/**/*.ts`); для одной строки — `edit` с `oldText`.',
+      };
+    }
+  }
   const replacement = typeof args.replacement === 'string' ? args.replacement : '';
   const result = await workspace.replace({
     query,
     replacement,
-    isRegex: optionalBoolean(args, 'isRegex') ?? false,
+    isRegex,
     caseSensitive: optionalBoolean(args, 'caseSensitive') ?? false,
-    glob: optionalString(args, 'glob'),
+    glob,
   });
 
   if (result.replaced === 0) {
@@ -1428,6 +1480,23 @@ async function searchAction(ctx: ToolContext, args: Record<string, unknown>): Pr
     default:
       return unknownAction(action, 'search: text, code, docs, sessions, trace.');
   }
+}
+
+/**
+ * Пустой результат поиска.
+ *
+ * Голое «Ничего не найдено» читается как «такого места нет» и лечится повтором того
+ * же поиска другими словами — целый шаг, заплаченный ни за что (замер по беседам:
+ * у поиска медиана совпадений — 0). Поэтому в ответе назван сам запрос, ослабленные
+ * условия которого хватило бы, и куда смотреть, если ошиблось место.
+ */
+function emptySearchDetail(query: string, opts: { isRegex: boolean; glob?: string; scope?: string }): string {
+  const where = [opts.glob ? `маска ${opts.glob}` : '', opts.scope ? `папка ${opts.scope}` : ''].filter(Boolean);
+  const hints = ['проверьте написание и регистр'];
+  if (opts.isRegex) hints.push('regex включён — возможно, его и надо выключить');
+  if (where.length > 0) hints.push('маска или папка могли сузить зря');
+  else hints.push('место ищется по всему проекту — сверьтесь с list или project_map');
+  return `Совпадений нет: «${query}»${where.length > 0 ? ` (${where.join(', ')})` : ''}. ${hints.join('; ')}.`;
 }
 
 async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -1488,7 +1557,7 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     return {
       ok: true,
       summary: `совпадения в файлах: ${unique.length}${result.truncated || rest > 0 ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
-      detail: files.length ? clipText(ctx, 'search', files.join('\n')).text + tail : 'Ничего не найдено',
+      detail: files.length ? clipText(ctx, 'search', files.join('\n')).text + tail : emptySearchDetail(query, { isRegex, glob, scope }),
     };
   }
 
@@ -1514,7 +1583,7 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
   return {
     ok: true,
     summary: `${limited.hits.length} совпадений${notes.length ? ` (${notes.join(', ')})` : ''} · просканировано файлов: ${result.scanned}`,
-    detail: detail.length ? clipText(ctx, 'search', detail).text + tail : 'Ничего не найдено',
+    detail: detail.length ? clipText(ctx, 'search', detail).text + tail : emptySearchDetail(query, { isRegex, glob, scope }),
   };
 }
 
@@ -2064,7 +2133,11 @@ async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): P
   const full = spillStream?.close(result.truncated) ?? null;
   const condensed = foldPassedTests(ctx, 'run_tests', condenseOutput(result.output));
   const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'run_tests', condensed);
-  const notes = [result.timedOut ? 'превышено время' : '', result.signal ? `убит сигналом ${result.signal}` : '', result.truncated ? 'вывод обрезан' : ''].filter(Boolean);
+  const notes = [
+    result.timedOut ? 'превышено время' : '',
+    result.signal ? `убит сигналом ${result.signal}` : '',
+    result.truncated ? 'вывод обрезан' : '',
+  ].filter(Boolean);
   // Ненулевой код — это упавшие тесты, а не ошибка инструмента: ответ ok, но с кодом.
   const passed = result.code === 0 && !result.timedOut;
 
@@ -2311,54 +2384,201 @@ const EDITOR_MISSING: ToolOutcome = {
  */
 async function editAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const action = typeof args.action === 'string' && args.action.trim() ? args.action.trim() : 'write';
-  if (action === 'write') return await editFiles(ctx, { ...args, edits: writePayload(args) });
+  if (action === 'write') return await editFiles(ctx, args);
   return await fileAction(ctx, { ...args, action, from: args.from ?? args.path });
 }
 
-/** Плоская форма (`path` + `edits`) приходит от модели чаще вложенной — разворачиваем. */
-function writePayload(args: Record<string, unknown>): unknown {
-  const edits = args.edits;
-  const legacy =
-    Array.isArray(edits) &&
-    edits.some((item) => item !== null && typeof item === 'object' && Array.isArray((item as { edits?: unknown }).edits));
-  if (legacy) return edits;
-  if (typeof args.path === 'string' && Array.isArray(edits)) return [{ path: args.path, edits }];
-  return edits;
+/**
+ * Привести вход правки к одной форме — списку файлов с их заменами.
+ *
+ * Зачем. По переписи отказов `edit` отказывал не по делу, а по форме: модель
+ * присылала ту же правку, только без обёртки `{ path, edits: [...] }` — либо
+ * `path` на верхнем уровне, либо `path` в каждом элементе. Каждый такой отказ
+ * стоил целого шага, хотя разобрать такую запись можно без догадок: все данные
+ * на месте, объявлена не та форма.
+ *
+ * Поэтому разбор снисходителен к обёрткам и остаётся строгим к самому адресу:
+ * нет пути ни в элементе, ни сверху — отказ (там действительно нечего исполнять).
+ */
+function normalizeWrite(args: Record<string, unknown>): unknown {
+  const top = typeof args.path === 'string' && args.path.trim().length > 0 ? args.path : undefined;
+  const raw = args.edits;
+
+  // Обёртки нет совсем: `path` и замена лежат рядом на верхнем уровне.
+  if (raw === undefined) {
+    if (top && typeof args.contents === 'string') return [{ path: top, edits: [{ newText: args.contents }] }];
+    if (top && (typeof args.oldText === 'string' || typeof args.newText === 'string')) {
+      const edit: Record<string, unknown> = { newText: typeof args.newText === 'string' ? args.newText : '' };
+      if (typeof args.oldText === 'string') edit.oldText = args.oldText;
+      return [{ path: top, edits: [edit] }];
+    }
+    return raw;
+  }
+
+  const list: unknown[] = Array.isArray(raw) ? raw : [raw];
+  // Вложенная форма: элементы — файлы. У файла без пути берём верхний.
+  if (list.some(hasInnerEdits)) {
+    return list.map((item) => (isRecord(item) && typeof item.path !== 'string' && top ? { ...item, path: top } : item));
+  }
+
+  // Плоская форма: элементы — сами замены. Собираем их по путям (свой или верхний).
+  const groups = new Map<string, unknown[]>();
+  for (const item of list) {
+    const itemPath = isRecord(item) && typeof item.path === 'string' ? item.path : top;
+    // Путь не найти — не угадываем: пусть отказ назовёт форму (это данные, а не шум).
+    if (!itemPath) return list;
+    const bucket = groups.get(itemPath) ?? [];
+    bucket.push(item);
+    groups.set(itemPath, bucket);
+  }
+  return [...groups.entries()].map(([filePath, edits]) => ({ path: filePath, edits }));
+}
+
+/** Элемент правки — файл с вложенными заменами, а не сама замена. */
+function hasInnerEdits(item: unknown): boolean {
+  return isRecord(item) && Array.isArray(item.edits);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Запись файла целиком, найденная среди правок: якоря нет, есть только текст. */
+interface WholeWrite {
+  path: string;
+  contents: string;
+}
+
+/**
+ * Отделить запись нового файла от правки существующего.
+ *
+ * `newText` без `oldText` — это не правка, а новый текст файла. Раньше на таком
+ * вызове был отказ с подсказкой про `create`; шаг на переписывание тратился,
+ * хотя решает не модель, а диск: файла нет — значит запись целиком. Если файл
+ * есть — правка без якоря неоднозначна, и отказ с подсказкой остаётся.
+ */
+async function splitWholeWrites(
+  workspace: WorkspaceService,
+  value: unknown,
+): Promise<{ files: unknown[]; creates: WholeWrite[] }> {
+  if (!Array.isArray(value)) return { files: [], creates: [] };
+  const files: unknown[] = [];
+  const creates: WholeWrite[] = [];
+  for (const item of value) {
+    const whole = isRecord(item) ? wholeWrite(item) : null;
+    if (!whole || (await pathExists(workspace, whole.path))) {
+      files.push(item);
+      continue;
+    }
+    creates.push(whole);
+  }
+  return { files, creates };
+}
+
+/** Файл-элемент, у которого все замены без якоря и без позиций, — запись целиком. */
+function wholeWrite(item: Record<string, unknown>): WholeWrite | null {
+  if (typeof item.path !== 'string' || !Array.isArray(item.edits)) return null;
+  const parts: string[] = [];
+  for (const edit of item.edits) {
+    if (!isRecord(edit)) return null;
+    const positional = ['startLine', 'startColumn', 'endLine', 'endColumn'].some((key) => edit[key] !== undefined);
+    if (positional || typeof edit.oldText === 'string' || typeof edit.newText !== 'string') return null;
+    parts.push(edit.newText);
+  }
+  return parts.length === 0 ? null : { path: item.path, contents: parts.join('\n') };
+}
+
+/** Файл на месте и это не каталог. */
+async function pathExists(workspace: WorkspaceService, target: string): Promise<boolean> {
+  // `stat` есть не всегда (упрощённый контекст в проверках). Нет его — считаем, что
+  // файл есть: угадывать по отсутствию метода нельзя, а отказ с подсказкой безвреден.
+  if (typeof workspace.stat !== 'function') return true;
+  try {
+    await workspace.stat(target);
+    return true;
+  } catch (error) {
+    // Только «не найден» — это «файла нет». Ошибка доступа означает «есть, разбирайся
+    // сам»: запись целиком поверх файла, к которому нет доступа, — не наше решение.
+    return !isMissing(error);
+  }
+}
+
+function isMissing(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === 'ENOENT') return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /ENOENT|не найден|не найдена/i.test(message);
 }
 
 async function editFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  const parsed = parseEdits(args.edits);
+  // Сначала форма: обёртки разворачиваются, запись целиком без якоря уходит в `create`.
+  const split = await splitWholeWrites(ctx.workspace, normalizeWrite(args));
+  const created: ToolOutcome[] = [];
+  for (const whole of split.creates)
+    created.push(await createFile(ctx.workspace, { path: whole.path, contents: whole.contents }));
+  if (split.files.length === 0) return combineOutcomes(created);
+
+  const parsed = parseEdits(split.files);
   const names = [...parsed.anchors, ...parsed.positions].map((file) => path.basename(file.path));
 
   const decisions: ApplyEditsHostResult[] = [];
   if (parsed.anchors.length > 0) {
-    if (!ctx.applyPatches) return EDITOR_MISSING;
+    if (!ctx.applyPatches) return combineOutcomes([...created, EDITOR_MISSING]);
     decisions.push(await ctx.applyPatches(parsed.anchors, ctx.autoApprove === true));
   }
   if (parsed.positions.length > 0) {
-    if (!ctx.applyEdits) return EDITOR_MISSING;
+    if (!ctx.applyEdits) return combineOutcomes([...created, EDITOR_MISSING]);
     decisions.push(await ctx.applyEdits(parsed.positions, ctx.autoApprove === true));
   }
 
   if (decisions.some((decision) => decision.rejected)) {
-    return {
-      ok: false,
-      summary: `Пользователь отклонил правки: ${names.join(', ')}`,
-      detail: 'Пользователь отклонил правки. Не повторяй этот вызов — предложи другое решение.',
-    };
+    return combineOutcomes([
+      ...created,
+      {
+        ok: false,
+        summary: `Пользователь отклонил правки: ${names.join(', ')}`,
+        detail: 'Пользователь отклонил правки. Не повторяй этот вызов — предложи другое решение.',
+      },
+    ]);
   }
 
   const merged = mergeDecisions(decisions);
   const outcome = readEditsOutcome(merged, (file) => path.basename(file));
   const unwritten = merged.unwritten?.length ?? 0;
 
+  return combineOutcomes([
+    ...created,
+    {
+      ok: outcome.ok,
+      summary: `применено файлов: ${outcome.applied.length}${outcome.failed.length ? `, с ошибками: ${outcome.failed.length}` : ''}${outcome.tail}`,
+      detail: outcome.detail,
+      // Тела правок можно забыть только когда они действительно легли в файлы:
+      // отклонённая или оставшаяся в буфере правка модели ещё понадобится.
+      ...(outcome.ok && unwritten === 0 ? { applied: true } : {}),
+    },
+  ]);
+}
+
+/**
+ * Ответы нескольких путей (созданные файлы вместе с правками) — один ответ: шаг
+ * у вызова один, и модели нужен один итог, а не три карточки.
+ */
+function combineOutcomes(outcomes: ToolOutcome[]): ToolOutcome {
+  const [only] = outcomes;
+  if (outcomes.length === 1 && only) return only;
+  if (outcomes.length === 0) return { ok: false, summary: 'Нечего применять: нет ни одной правки' };
+  const changes = outcomes.flatMap((outcome) => outcome.changes ?? []);
+  const detail = outcomes
+    .map((outcome) => outcome.detail ?? '')
+    .filter((text) => text.length > 0)
+    .join('\n');
+  const ok = outcomes.every((outcome) => outcome.ok !== false);
   return {
-    ok: outcome.ok,
-    summary: `применено файлов: ${outcome.applied.length}${outcome.failed.length ? `, с ошибками: ${outcome.failed.length}` : ''}${outcome.tail}`,
-    detail: outcome.detail,
-    // Тела правок можно забыть только когда они действительно легли в файлы:
-    // отклонённая или оставшаяся в буфере правка модели ещё понадобится.
-    ...(outcome.ok && unwritten === 0 ? { applied: true } : {}),
+    ok,
+    summary: outcomes.map((outcome) => outcome.summary).join('; '),
+    ...(detail ? { detail } : {}),
+    ...(changes.length > 0 ? { changes } : {}),
+    ...(ok && outcomes.every((outcome) => outcome.applied === true) ? { applied: true } : {}),
   };
 }
 
@@ -2517,6 +2737,205 @@ function mergeDecisions(decisions: readonly ApplyEditsHostResult[]): ApplyEditsH
 /* ── запуск команд ──────────────────────────────────────────────────────── */
 
 /**
+ * Команда, которая только читает: `cat`, `head -n N`, `sed -n 'A,Bp'`, `grep`.
+ *
+ * В переписи (TASKS.md, п.43) 43% вызовов `terminal` — именно чтение через шелл.
+ * Такой вызов дороже структурного со всех сторон: нет номеров строк, нет потолка
+ * вывода, перед каждой второй командой стоит `cd <папка> &&`, и перед запуском
+ * нужно подтверждение. Разбор нарочно узкий — одна простая команда без труб,
+ * перенаправлений, глобов и подстановок; всё остальное идёт в шелл как раньше.
+ */
+type LookupCall = { tool: 'read' | 'search' | 'list'; args: Record<string, unknown>; label: string };
+
+/** Что делает из команды не команду, а скрипт: всё это — мимо сокращения. */
+const SHELL_SYNTAX = /[|&;<>`$()*?[\]{}\n\\]/;
+
+/** Слова команды с учётом кавычек; null — незакрытая кавычка. */
+function commandWords(command: string): string[] | null {
+  const words: string[] = [];
+  let current = '';
+  let quote: string | null = null;
+  let opened = false;
+  for (const char of command) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      opened = true;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current || opened) words.push(current);
+      current = '';
+      opened = false;
+      continue;
+    }
+    current += char;
+  }
+  if (quote) return null;
+  if (current || opened) words.push(current);
+  return words;
+}
+
+/**
+ * Разбор команды-читалки в вызов `read`/`search`. null — не наша команда: пусть
+ * идёт в шелл, где ведёт себя ровно так, как её написали.
+ *
+ * Два примера, ради которых всё это есть: `sed -n '120,180p' src/a.ts` — это
+ * ровно `read` с двумя номерами строк, а `grep -rn foo src` — ровно `search`.
+ */
+function asLookupCall(command: string, cwdDir: string): LookupCall | null {
+  if (SHELL_SYNTAX.test(command)) return null;
+  const words = commandWords(command);
+  if (!words || words.length < 1) return null;
+  const [program, ...rest] = words as [string, ...string[]];
+  // Абсолютным: рабочая папка инструментов не обязана совпадать с текущей
+  // папкой процесса, а относительный путь `safePath` разворачивает именно от неё.
+  const scope = (value: string): string => (path.isAbsolute(value) ? value : path.resolve(cwdDir, value));
+
+  if (program === 'cat') {
+    // `-n` разрешён и не нужен: номера строк `read` ставит сам.
+    const files = rest.filter((word) => word !== '-n');
+    if (files.length === 0) return null;
+    if (files.some((file) => file.startsWith('-')) || files.length > MAX_READ_FILES) return null;
+    return files.length === 1
+      ? { tool: 'read', args: { path: scope(files[0]!) }, label: 'cat' }
+      : { tool: 'read', args: { paths: files.map(scope) }, label: 'cat' };
+  }
+
+  if (program === 'head') {
+    let count = 10;
+    const files: string[] = [];
+    for (let index = 0; index < rest.length; index += 1) {
+      const word = rest[index]!;
+      if (word === '-n') {
+        const value = rest[index + 1];
+        if (!value || !/^\d+$/.test(value)) return null;
+        count = Number(value);
+        index += 1;
+        continue;
+      }
+      if (/^-\d+$/.test(word)) {
+        count = Number(word.slice(1));
+        continue;
+      }
+      if (word.startsWith('-')) return null;
+      files.push(word);
+    }
+    // Один файл: `head` от двух — это склейка, а `read` вернул бы два разных отчёта.
+    if (files.length !== 1 || count < 1) return null;
+    return { tool: 'read', args: { path: scope(files[0]!), endLine: count }, label: `head -n ${count}` };
+  }
+
+  if (program === 'sed') {
+    const flags = rest.filter((word) => word.startsWith('-'));
+    const plain = rest.filter((word) => !word.startsWith('-'));
+    // Только `-n`: с `-e`, `-i` и выражениями подстановки `sed` делает больше, чем читает.
+    if (flags.length !== 1 || flags[0] !== '-n' || plain.length !== 2) return null;
+    const [script, file] = plain as [string, string];
+    const range = /^(\d+)(?:,(\d+))?p$/.exec(script);
+    if (!range) return null;
+    const startLine = Number(range[1]);
+    const endLine = range[2] ? Number(range[2]) : startLine;
+    if (startLine < 1 || endLine < startLine) return null;
+    return { tool: 'read', args: { path: scope(file), startLine, endLine }, label: `sed -n '${script}'` };
+  }
+
+  if (program === 'grep' || program === 'rg') {
+    const flags = new Set<string>();
+    const plain: string[] = [];
+    for (const word of rest) {
+      if (word === '--') continue;
+      if (word.startsWith('--')) return null;
+      if (word.startsWith('-') && word.length > 1) {
+        for (const flag of word.slice(1)) {
+          // `-c`, `-o`, `-v` и прочие меняют смысл поиска, а не только его вид.
+          if (!'niIrRFEl'.includes(flag)) return null;
+          flags.add(flag);
+        }
+        continue;
+      }
+      plain.push(word);
+    }
+    // Слово-образец и не более одной папки: `grep foo a.ts b.ts` — это две области.
+    if (plain.length === 0 || plain.length > 2) return null;
+    const [query, only] = plain as [string, string | undefined];
+    const isRegex = !flags.has('F') && (program === 'rg' || flags.has('E') || /[\\^$.*+?()[\]{}|]/.test(query));
+    return {
+      tool: 'search',
+      args: {
+        query,
+        isRegex,
+        caseSensitive: !flags.has('i'),
+        filesOnly: flags.has('l'),
+        ...(only ? { path: scope(only) } : {}),
+      },
+      label: program,
+    };
+  }
+
+  if (program === 'ls') {
+    const plain: string[] = [];
+    for (const word of rest) {
+      if (word.startsWith('--')) return null;
+      if (word.startsWith('-') && word.length > 1) {
+        // `-R` — обход вглубь, а `list` показывает один уровень.
+        if ([...word.slice(1)].some((flag) => !'alh1AF'.includes(flag))) return null;
+        continue;
+      }
+      plain.push(word);
+    }
+    if (plain.length > 1) return null;
+    const target = plain[0];
+    return { tool: 'list', args: target ? { path: scope(target) } : {}, label: 'ls' };
+  }
+
+  return null;
+}
+
+/**
+ * Выполнить разобранную команду инструментом. Ошибка разбора или отсутствие файла
+ * — это не отказ: команда уходит в шелл, как её написали.
+ */
+async function lookupOutcome(ctx: ToolContext, call: LookupCall): Promise<ToolOutcome | null> {
+  try {
+    const outcome =
+      call.tool === 'read'
+        ? await readAction(ctx, call.args)
+        : call.tool === 'list'
+          ? await listDir(ctx.workspace, call.args)
+          : await searchAction(ctx, call.args);
+    // Повторная читалка того же файла: текст уже в ветке выше. Проверяем после
+    // чтения, потому что только оно знает границы (`cat` их не называет), и до
+    // `rememberRead` — иначе совпадёт само с собой.
+    if (outcome.read && ctx.coveredReads) {
+      const covered = coveredRequest(
+        'read',
+        JSON.stringify({
+          path: outcome.read.path,
+          startLine: outcome.read.from,
+          endLine: outcome.read.to,
+        }),
+        ctx.coveredReads,
+      );
+      if (covered) {
+        return {
+          ok: true,
+          summary: `${call.label} → read · уже прочитано`,
+          detail: `${covered.path}: строки ${covered.from}–${covered.to} уже есть выше в ветке — не повторяю.`,
+        };
+      }
+    }
+    return { ...outcome, summary: `${call.label} → ${call.tool} · ${outcome.summary}` };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Команда в проекте — единственное, что меняет систему за пределами документов,
  * поэтому она всегда идёт через подтверждение. `background: true` — та же команда,
  * но шаг она не держит: возвращается номер задания, а вывод читается действием
@@ -2564,6 +2983,14 @@ async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<string, u
   const runOptions = { signal: ctx.signal, ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
   const cwd = await commandCwd(ctx, args);
   if (!cwd) return { ok: false, summary: 'Проект не открыт' };
+
+  // `cat`/`head`/`sed -n`/`grep` — это чтение, а не запуск: 43% вызовов `terminal`
+  // в переписи (TASKS.md, п.43) были именно такими. Разобрали — делаем структурно:
+  // номера строк, потолок вывода, без `cd` и без подтверждения.
+  // Папка вне проекта: пусть решает проверка пути дальше, а не наш разбор.
+  const lookup = cwd.relative.startsWith('..') ? null : asLookupCall(command, cwd.path);
+  const shortcut = lookup ? await lookupOutcome(ctx, lookup) : null;
+  if (shortcut) return shortcut;
 
   // Обычный агент спрашивает всегда; полный доступ — только если включена страховка.
   const refusal = await confirmRun(ctx, command);

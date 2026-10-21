@@ -74,15 +74,11 @@ describe('бюджет схем', () => {
 
   // Замер: auto был 3 812 ток. (25 схем). Срезали ростром имён на 826 и описаниями —
   // до того, что не сказано в промпте. `show` и `exit_plan_mode` (300 ток. вдвоём)
-  // ушли в ростер, а `terminal`/`mcp` перестали называться строкой:
-  // их схема докачивается первым вызовом. Потом `plan` (207 ток.) — по переписи
-  // его зовут дважды на 157 шагов. Сейчас 2 277 (схемы 1 303 + промпт 711 +
-  // ростер 263).
+  // ушли в ростер, а `terminal`/`mcp` сначала прятались совсем — до п.45, когда
+  // стало ясно, что докачка схемы обнуляет кеш префикса и дороже строки.
   it('операции с файлом живут в схеме edit, а не отдельной', () => {
-    // `file` нет ни в схемах, ни в ростере: его `action` уже перечислен в `edit`.
-    // Имя осталось вызываемым — старые беседы зовут его напрямую.
-    // `replace` (замена по проекту, 99 ток.) ушёл из схемы: редкое действие,
-    // живёт в `file` по имени. `action` вызывается и без `write`.
+    // `file` нет в схемах вовсе: и `action`, и имя одни и те же, а `replace`
+    // (замена по проекту) живёт по имени в строке ростера (п.45).
     const edit = AGENT_TOOLS.find((tool) => tool.name === 'edit')!;
     expect((edit.inputSchema.properties.action as { enum?: string[] }).enum).toEqual([
       'write',
@@ -91,8 +87,8 @@ describe('бюджет схем', () => {
       'delete',
     ]);
     expect(Object.keys(edit.inputSchema.properties)).not.toContain('replacement');
-    expect(WIDENED_TOOLS).toContain('file');
-    expect(ROSTER_TOOLS).not.toContain('file');
+    expect(WIDENED_TOOLS).not.toContain('file');
+    expect(ROSTER_TOOLS).toContain('file');
   });
 
   // Было 3 812 (25 схем) → 1 303 (7 схем) → 789 (3 схемы: read 174, search 260,
@@ -109,9 +105,11 @@ describe('бюджет схем', () => {
     // потолок нужен и здесь: иначе соблазн «спрятать всё» превратит набор в
     // список имён без единой схемы, и модели придётся угадывать вызовы.
     const note = estimateTextTokens(toolPresetNote('auto'));
-    // 19 имён — 249 ток.: из них ~40 — перечень `action` у `browser` и `web`,
-    // без него вызов идёт наугад.
-    expect(note).toBeLessThan(210);
+    // 23 имени — 253 ток. С п.45 в строку переехали `terminal`, `mcp`, `file`,
+    // `list` и `run_tests`: их схемы стоили 1 000 токенов на каждом шаге, а
+    // докачка вместо строки обнуляла кеш префикса. ~40 ток. из 253 — перечень
+    // `action`, без него вызов идёт наугад.
+    expect(note).toBeLessThan(270);
     // И обратная сторона: набор не должен схлопнуться до десятка имён. 15 из 49 —
     // граница, за которой модель начнёт угадывать вызовы вместо работы.
     // Считаем не схемы, а имена, которые модель знает: ростер даёт вызов без
@@ -222,7 +220,7 @@ describe('бюджет схем', () => {
     expect(estimateTextTokens(agentPrompt('auto', { confirm: true }))).toBeLessThan(570);
     for (const preset of TOOL_PRESETS) {
       // Ростер — цена скрытого: строка с именами не может стоить как схемы, которые прячет.
-      expect(estimateTextTokens(toolPresetNote(preset.id))).toBeLessThan(215);
+      expect(estimateTextTokens(toolPresetNote(preset.id))).toBeLessThan(270);
     }
   });
 });

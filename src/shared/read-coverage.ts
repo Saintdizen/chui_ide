@@ -46,6 +46,59 @@ export function coveredRequest(
   return { path: target, from, to };
 }
 
+/**
+ * Сколько строк стоит выгадывать, чтобы переписывать запрос: на десяти сэкономленных
+ * строках объяснение «часть уже выше» съест ту же цену, что и сам текст.
+ */
+export const MIN_NARROW_LINES = 20;
+
+/**
+ * Непрочитанный остаток запроса: `1–120` уже в ветке, а просят `1–250` — читаем
+ * `121–250` с пометкой. `coveredRequest` ловит только полное покрытие, а перекрытие
+ * до сих пор стоило полного текста: по переписи 25 из 40 чтений — повторные, и
+ * дочитывание хвоста после диапазона встречается чаще, чем буквальный повтор.
+ */
+export function uncoveredRequest(
+  name: string,
+  rawArguments: string,
+  reads: ReadonlyMap<string, Array<{ from: number; to: number }>>,
+): { path: string; from: number; to: number; arguments: string } | undefined {
+  if (name !== 'read') return undefined;
+  const parsed = parseToolArguments(rawArguments);
+  if (!parsed.ok) return undefined;
+  if (booleanArg(parsed.value.force) === true) return undefined;
+  const target = parsed.value.path;
+  const endLine = integerArg(parsed.value.endLine);
+  if (typeof target !== 'string' || endLine === undefined) return undefined;
+  const from = Math.max(1, integerArg(parsed.value.startLine) ?? 1);
+  if (endLine < from) return undefined;
+  const ranges = reads.get(target);
+  if (!ranges || ranges.length === 0) return undefined;
+  // Покрытие продвигаем от `from`: пока находится прочитанный кусок, начинающийся не
+  // позже текущей границы, сдвигаем границу за его конец. Куски помним как есть, без
+  // слияния, поэтому одного прохода мало: `1–120`, `100–150` — второй продолжает
+  // первый только после первого.
+  let cursor = from;
+  for (let moved = true; moved; ) {
+    moved = false;
+    for (const range of ranges) {
+      if (range.from <= cursor && range.to >= cursor) {
+        cursor = range.to + 1;
+        moved = true;
+      }
+    }
+  }
+  if (cursor - from < MIN_NARROW_LINES) return undefined;
+  // Дальше конца запроса — это полное покрытие, им занимается `coveredRequest`.
+  if (cursor > endLine) return undefined;
+  return {
+    path: target,
+    from: cursor,
+    to: endLine,
+    arguments: JSON.stringify({ ...parsed.value, startLine: cursor, endLine }),
+  };
+}
+
 /** Запомнить прочитанный диапазон файла. */
 export function rememberRead(
   reads: Map<string, Array<{ from: number; to: number }>>,

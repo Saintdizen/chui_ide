@@ -677,11 +677,18 @@ export function condenseAppliedCalls(
  */
 export const SUPERSEDED_PLAN_MARKER = '[план заменён: ниже актуальная версия]';
 
-/** План ли это: имя `plan` и действие `steps` (без действия — тоже оно). */
+/**
+ * План ли это: у общего инструмента `mind` действие `steps` (без действия — тоже оно)
+ * и в аргументах есть сам список. Имя `plan` остаётся для старых бесед.
+ */
 function isPlanSteps(call: { name: string; arguments: string }): boolean {
-  if (call.name !== 'plan') return false;
+  if (call.name !== 'mind' && call.name !== 'plan') return false;
   const parsed = parseToolArguments(call.arguments);
-  return !parsed.ok || parsed.value.action !== 'goal';
+  if (parsed.ok) {
+    if (parsed.value.action === 'goal') return false;
+    return parsed.value.steps !== undefined;
+  }
+  return call.name === 'plan';
 }
 
 /** Аргументы плана, который уже заменён: `steps` — пометка, остальное на месте. */

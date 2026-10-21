@@ -508,6 +508,24 @@ describe('condenseSupersededPlans', () => {
     expect(JSON.parse(condensed.toolCalls?.[0]?.arguments ?? '{}')).toEqual({ steps: SUPERSEDED_PLAN_MARKER });
   });
 
+  it('план приходит общим инструментом `mind` — сжимается так же', () => {
+    const mind = (id: string, args: Record<string, unknown>): ChatMessage => ({
+      role: 'assistant',
+      content: '',
+      toolCalls: [{ id, name: 'mind', arguments: JSON.stringify(args) }],
+    });
+    const list = steps.map((text) => ({ text, status: 'done' }));
+    const old = mind('old', { action: 'steps', steps: list });
+    const fresh = mind('fresh', { action: 'steps', steps: list });
+    expect(condenseSupersededPlans(old, 'fresh').toolCalls?.[0]?.arguments).toContain(SUPERSEDED_PLAN_MARKER);
+    expect(condenseSupersededPlans(fresh, 'fresh')).toBe(fresh);
+    // Действия `mind` без шагов — не план: их текст терять нельзя.
+    const note = mind('note', { action: 'remember', text: 'важно' });
+    expect(condenseSupersededPlans(note, 'fresh')).toBe(note);
+    const goal = mind('goal', { action: 'goal', goal: 'доделать', steps: list });
+    expect(condenseSupersededPlans(goal, 'fresh')).toBe(goal);
+  });
+
   it('чужие вызовы и ответы инструментов не трогает', () => {
     const message: ChatMessage = {
       role: 'assistant',

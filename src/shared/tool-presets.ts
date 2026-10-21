@@ -28,15 +28,7 @@ import { estimateTextTokens } from './context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from './tools';
 
 /** Группа инструментов: смысл, а не место в списке. */
-export type ToolGroupId =
-  | 'core'
-  | 'read'
-  | 'edit'
-  | 'verify'
-  | 'shell'
-  | 'web'
-  | 'browser'
-  | 'work';
+export type ToolGroupId = 'core' | 'read' | 'edit' | 'verify' | 'shell' | 'web' | 'browser' | 'work';
 
 /** Выбор набора. Идентификатор хранится в настройках и едет по RPC. */
 export type ToolPresetId = 'auto' | 'full' | 'edit' | 'read' | 'minimal';
@@ -132,6 +124,13 @@ export interface ToolPresetSpec {
    * схема в каждом запросе дороже, чем вызов по имени в одном прогоне из многих.
    */
   except?: readonly string[];
+  /**
+   * Имена, которых в наборе нет по существу: не разрешены и не обещаны ростром.
+   *
+   * `except` прячет от цены, `deny` — от модели. Разница видна на «Только чтение»:
+   * `mcp` поднял бы живой сервер, а строка ростера обещала бы вызов.
+   */
+  deny?: readonly string[];
 }
 
 /**
@@ -185,33 +184,37 @@ export const ROSTER_TOOLS: readonly string[] = [
   // Единственное обязательное поле — `path`, необязательных нет: строка
   // `read_image(path)` говорит всё. По переписи — ноль вызовов на 3 беседы.
   'read_image',
+  // Терминал и всё, что раньше докачивалось схемой при первом вызове: строка
+  // получается длинной из-за восьми `action`, но постоянная часть шага лежит в
+  // кеше префикса (замер: 96% попаданий), а докачка схемы — нет: она меняет
+  // блок `tools`, то есть обнуляет кеш начиная с системного промпта.
+  //
+  // Счёт: строка `terminal(...)` — около 25 токенов на шаг, при кеше это ~2,5
+  // реальных токена; разовый промах префикса при промпте 82 тыс. стоит ~74 тыс.
+  // токенов, то есть дороже строки в тридцать тысяч раз. Отсюда правило: в
+  // постоянной части пусть будет на 200 токенов больше — лишь бы она не менялась.
+  'terminal',
+  'mcp',
+  'list',
+  'run_tests',
+  'file',
 ];
 
 /**
- * Что НЕ едет строкой, хотя в набор входит: у этих инструментов схема
- * докачивается при первом вызове (`widen` в service).
+ * Что НЕ едет строкой, хотя в набор входит: схема докачивается при первом вызове.
  *
- * Почему исключение: у них много `action` (у `terminal` — восемь), и строка
- * перечисляла их все — весь роутер «Авто» стоил 135 токенов на каждом шаге.
- * Схема же нужна только тогда, когда инструмент зовут: провал кэша префикса
- * один, а дальше схема лежит в неизменяемом начале запроса. Строка честнее
- * только для инструмента, который зовут каждый шаг, — таким остаётся `read`.
- *
- * Мера — доля прогона: `terminal` зовётся раз в 3 шага и всё равно докачивается
- * один раз; `read` каждый шаг — и его схема едет сразу. `mcp` сюда же: список
- * серверов меняется между прогонами, и строка про него врёт.
+ * Осталось пустым намеренно — механизм жив, но им больше никто не пользуется.
+ * Посчитали: докачка меняет блок `tools`, то есть обнуляет кеш префикса целиком
+ * (замер по `chats/*.json`: 320,8 млн prompt при 308,4 млн cached — 96% попаданий,
+ * и кеш идёт с самого начала запроса). Один промах на промпте 82 тыс. стоит
+ * ~74 тыс. токенов, а строка ростера — 25 токенов на шаге, то есть ~2,5 при
+ * кеше. Плюс промах кеша триггерит `needsCompaction(..., 'cache-miss')` и может
+ * каскадом стоить сжатия всей истории. Правило: постоянная часть пусть будет
+ * длиннее, но неизменной.
  */
 export const WIDENED_TOOLS: readonly string[] = [
-  'terminal',
-  'mcp',
-  // `list` и `run_tests` важны `glob`/`limit`/`target`: строкой эти поля
-  // теряются, поэтому схема докачивается — но список не печатается вовсе.
-  'list',
-  'run_tests',
-  // `file` слит со схемой `edit` (`action` там уже перечислен): вторая схема
-  // на те же операции — 256 токенов в каждом запросе. Имя осталось ради
-  // старых бесед и вызовов по имени.
-  'file',
+  // Пусто с тех пор, как посчитали цену докачки: она ломает кеш префикса, а
+  // строка ростера лежит в кеше. Подробности — в `ROSTER_TOOLS`.
 ];
 
 /** Варианты от полного к самому узкому: в списке идут именно так. */
@@ -221,15 +224,17 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     label: 'Авто',
     icon: 'wrench',
     hint: 'Чтение, правки и проверки; редкое — по имени, без схемы',
-    groups: ['core', 'read', 'edit', 'verify', 'work'],
+    // `shell` добавлен ради строки ростера: терминал в наборе «Авто» остаётся
+    // скрытым (`except` ниже), но модель должна видеть, что он есть.
+    groups: ['core', 'read', 'edit', 'verify', 'work', 'shell'],
     widen: true,
     // Редкие и простые инструменты — одной строкой вместо схем (см. `ROSTER_TOOLS`):
     // схема каждого стоит 90–205 токенов в КАЖДОМ запросе, а вызов по имени
     // выполняется сразу. Схема при этом в набор не вернётся: `widen` касается того,
     // чего в этом списке нет.
     //
-    // `mcp` и `terminal` — в `WIDENED_TOOLS`: строка у них вышла
-    // дороже собственной схемы (много `action`), а зовут их не каждый шаг.
+    // `terminal` и `mcp` тоже едут строкой — с п.45 здесь нет ни одного
+    // инструмента, который докачивался бы схемой.
     except: [...WIDENED_TOOLS, ...ROSTER_TOOLS],
   },
   {
@@ -257,10 +262,9 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     icon: 'eye',
     hint: 'Чтение проекта, прогон проверок; изменений нет',
     groups: ['core', 'read', 'verify', 'work'],
-    // `mcp` вычтён через `WIDENED_TOOLS`, но набором он разрешён — снимаем прямым
-    // исключением: иначе вызов по имени поднял бы живой сервер из набора чтения,
-    // который этот сервер не обещал.
-    except: ['mcp'],
+    // `mcp` поднял бы живой сервер, которого набор чтения не обещал: не прячем в
+    // ростер, а запрещаем совсем.
+    deny: ['mcp'],
   },
   {
     id: 'minimal',
@@ -305,7 +309,8 @@ export function presetToolNames(preset: ToolPresetId): ReadonlySet<string> | nul
     if (!groups.includes(group.id)) continue;
     for (const name of group.names) names.add(name);
   }
-  for (const name of toolPresetSpec(preset).except ?? []) names.delete(name);
+  const spec = toolPresetSpec(preset);
+  for (const name of [...(spec.except ?? []), ...(spec.deny ?? [])]) names.delete(name);
   return names;
 }
 
@@ -337,6 +342,7 @@ export function rosterNames(preset: ToolPresetId): readonly string[] {
       if (ROSTER_TOOLS.includes(name) || WIDENED_TOOLS.includes(name)) names.add(name);
     }
   }
+  for (const name of spec.deny ?? []) names.delete(name);
   return [...names];
 }
 
@@ -347,13 +353,19 @@ export function toolPresetAllows(preset: ToolPresetId, name: string): boolean {
 }
 
 /**
- * Строка-ростер: имена скрытых инструментов вместо их схем.
+ * Необязательные поля, которые нужны в строке ростера, хотя схема их обязательными не считает.
  *
- * С обязательными аргументами, иначе первый вызов идёт наугад и экономия
- * уходит на шаг переделки. Аргументы берём из самих схем — список не разойдётся.
- * У обязательного поля с `enum` печатаем допустимые значения (`browser(action: open|…)`):
- * имя инструмента со `action` без них не говорит, какие действия бывают.
+ * `terminal(action: …)` без `command` бесполезен: имя действия есть, а чем его
+ * выполнять — нет. Такие поля печатаем с `?`, чтобы было видно: необязательны.
  */
+const ROSTER_EXTRA: Record<string, readonly string[]> = {
+  terminal: ['command', 'cwd', 'id'],
+  mcp: ['server', 'uri'],
+  list: ['path', 'glob', 'limit'],
+  run_tests: ['target'],
+  file: ['path'],
+};
+
 function rosterLine(names: readonly string[]): string {
   if (names.length === 0) return '';
   const items = names.map((name) => {
@@ -365,20 +377,17 @@ function rosterLine(names: readonly string[]): string {
       const values = tool?.inputSchema.properties?.[key]?.enum;
       return values && values.length > 0 ? `${key}: ${values.join('|')}` : key;
     });
+    for (const key of ROSTER_EXTRA[name] ?? []) {
+      if (!required.includes(key)) shown.push(`${key}?`);
+    }
     return shown.length > 0 ? `${name}(${shown.join(', ')})` : `${name}()`;
   });
   return ` Скрыто по цене, зовётся по имени: ${items.join(', ')}.`;
 }
 
-/**
- * Имена для строки ростера. Отличается от `rosterNames` одним: при `widen` в строку
- * не идут `WIDENED_TOOLS` — их схема докачивается первым вызовом, а перечень
- * `action: a|b|c…` стоил 135 токенов на каждом шаге (см. `WIDENED_TOOLS`).
- */
+/** Имена для строки ростера: всё, что скрыто от блока `tools`, без докачки схем. */
 function rosterLineNames(preset: ToolPresetId): readonly string[] {
-  const names = rosterNames(preset);
-  if (!toolPresetSpec(preset).widen) return names;
-  return names.filter((name) => !WIDENED_TOOLS.includes(name));
+  return rosterNames(preset);
 }
 
 /**
@@ -414,7 +423,7 @@ export function toolPresetNote(preset: ToolPresetId): string {
     const roster = rosterLine(rosterLineNames(preset));
     return (
       `Набор инструментов: «${spec.label}» (${labels}). Чего нет в списке — зови по имени: ` +
-      `выполнится, и спрашивать человека не нужно; схема придёт после вызова.${roster}`
+      `выполнится, и спрашивать человека не нужно; форма вызова — в строке ниже.${roster}`
     );
   }
   const roster = rosterLine(rosterNames(preset));

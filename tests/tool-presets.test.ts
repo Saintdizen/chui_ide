@@ -83,15 +83,7 @@ describe('наборы инструментов агента', () => {
 
   it('пресет «только чтение» не даёт ничего менять', () => {
     const allowed = presetToolNames('read')!;
-    const mutating = [
-      'edit',
-      'create_file',
-      'delete_file',
-      'move_file',
-      'replace_in_files',
-      'terminal',
-      'browser',
-    ];
+    const mutating = ['edit', 'create_file', 'delete_file', 'move_file', 'replace_in_files', 'terminal', 'browser'];
     for (const name of mutating) {
       expect(allowed.has(name), `«чтение» не должно предлагать ${name}`).toBe(false);
     }
@@ -157,15 +149,14 @@ describe('наборы инструментов агента', () => {
     for (const name of ['edit', 'read']) {
       expect(presetToolNames('auto')?.has(name), `в «Авто» нет ${name}`).toBe(true);
     }
-    // `run_tests` и `list` нужны, но схему везут только по первому вызову:
-    // строкой терялись бы `glob`, `limit` и `target`.
-    // `run_tests` и `list` зовутся по имени, но схему везут только по первому
-    // вызову: строкой терялись бы `glob`, `limit` и `target`.
+    // `run_tests` и `list` нужны почти каждому прогону, но их схемы (205 и 168
+    // ток.) не окупаются: строка ростера называет `target`, `glob`, `limit` и
+    // стоит ~15 ток. Докачки больше нет (п.45): она обнуляла кеш префикса.
     for (const name of ['run_tests', 'list']) {
-      expect(presetToolNames('auto')?.has(name), `«Авто» скрыл ${name} насовсем`).toBe(false);
-      expect(WIDENED_TOOLS, `${name} не докачивается`).toContain(name);
+      expect(presetToolNames('auto')?.has(name), `«Авто» отдал ${name} схемой`).toBe(false);
+      expect(rosterNames('auto'), `${name} нет в ростере`).toContain(name);
     }
-    expect(toolPresetSpec('auto').widen, 'у «Авто» нет докачки').toBe(true);
+    expect(WIDENED_TOOLS, 'докачка схем отменена').toEqual([]);
     // Спросить человека тоже можно, но строкой ростера: форма вызова у него
     // простая, а схема стоила 121 токен в каждом запросе.
     expect(rosterNames('auto')).toContain('mind');
@@ -195,18 +186,10 @@ describe('наборы инструментов агента', () => {
     expect(hidden.length).toBeGreaterThan(0);
     const note = toolPresetNote('auto');
     for (const name of hidden) {
-      // Ростера мало: без формы вызова первый вызов уйдёт наугад, и сэкономленные
-      // токены вернутся шагом переделки. Строка строится из самих схем; у `show`
-      // первое поле — `action` со значениями `enum`, поэтому сверяем начало формы.
-      // Исключение — `WIDENED_TOOLS`: их перечень `action` стоил 135 токенов на
-      // каждом шаге, а форма всё равно приедет схемой после первого вызова по имени.
-      if (WIDENED_TOOLS.includes(name)) {
-        expect(note, 'ростер не обещает вызов по имени').toContain('по имени');
-      } else {
-        const required = AGENT_TOOLS.find((tool) => tool.name === name)?.inputSchema.required ?? [];
-        const head = required.length === 0 ? `${name}()` : `${name}(${required[0]}`;
-        expect(note, `в ростере нет формы ${name}`).toContain(head);
-      }
+      // Ростера мало: без формы вызова первый вызов уйдёт наугад, а схема
+      // теперь не приедет вовсе (`WIDENED_TOOLS` пуст, п.45) — форма в строке
+      // единственное, что увидит модель. Сверяем начало формы.
+      expect(note, `в ростере нет формы ${name}`).toContain(`${name}(`);
       expect(toolPresetAllows('auto', name), `${name} не должен входить в схемы`).toBe(false);
       // Полный набор не задет: исключение — про цену, а не про возможность.
       expect(toolPresetAllows('full', name)).toBe(true);
@@ -284,5 +267,15 @@ describe('наборы инструментов агента', () => {
       expect(preset.hint.length).toBeGreaterThan(10);
       expect(preset.icon.length).toBeGreaterThan(2);
     }
+  });
+});
+
+describe('ростер не обещает запрещённого', () => {
+  it('«Только чтение» не зовёт mcp ни строкой, ни по имени', () => {
+    // `except` прячет от цены, `deny` — от модели: mcp поднял бы живой сервер,
+    // которого набор чтения не обещал.
+    expect(toolPresetAllows('read', 'mcp')).toBe(false);
+    expect(rosterNames('read')).not.toContain('mcp');
+    expect(toolPresetNote('read')).not.toContain('mcp(');
   });
 });

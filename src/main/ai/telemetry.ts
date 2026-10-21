@@ -8,13 +8,22 @@ import {
   type RunTelemetryInput,
   type RunTelemetryRecord,
 } from '../../shared/telemetry';
+import { buildCountsRecord, formatCountsLine, type CountsInput } from '../../shared/step-counts';
 
 /**
  * Журнал прогонов: файл в пользовательских данных и запись в него.
  *
- * Пишется только тогда, когда человек сам включил настройку: в записи лежат
- * системные инструкции, контекст проекта и ответы модели — то есть чтение чужой
+ * Файлов два и они разные по цене согласия.
+ *
+ * `runs.jsonl` — полный журнал, только по включённой настройке: в записи лежат
+ * системные инструкции, контекст проекта и ответы модели, то есть чтение чужой
  * переписки без спроса.
+ *
+ * `counts.jsonl` — счётчик шагов (`shared/step-counts.ts`): имена инструментов,
+ * числа, наши же короткие пометки. Ни одного слова переписки — поэтому пишется
+ * всегда, без настройки. Без него замеры приходилось считать по `chats/*.json`, где
+ * от прогона остались только итоги, — и каждый вывод про инструменты проверялся
+ * «на глаз».
  *
  * Формат — JSON Lines: строка на прогон. Дописывание дешевле перезаписи целого
  * файла, а падение посреди записи портит только последнюю строку, и разбор её
@@ -26,6 +35,8 @@ import {
  */
 
 export const TELEMETRY_FILE = 'runs.jsonl';
+/** Счётчик шагов — всегда включён: текстов переписки в нём нет. */
+export const COUNTS_FILE = 'counts.jsonl';
 /** Предел файла: выше — сдвигаем в `runs.1.jsonl`. */
 export const MAX_TELEMETRY_FILE_BYTES = 4 * 1024 * 1024;
 
@@ -56,6 +67,11 @@ export class TelemetryStore {
     return path.join(this.deps.dir(), TELEMETRY_FILE);
   }
 
+  /** Путь к счётчику шагов (`scripts/step-report.ts` читает его по умолчанию). */
+  countsPath(): string {
+    return path.join(this.deps.dir(), COUNTS_FILE);
+  }
+
   /**
    * Записать прогон. Выключенная телеметрия — тишина: ни файла, ни папки.
    *
@@ -65,7 +81,17 @@ export class TelemetryStore {
   record(run: ChatRunLog, input: RunTelemetryInput = {}): Promise<void> {
     if (!this.enabled) return Promise.resolve();
     const line = `${formatTelemetryLine(buildRunRecord(run, input))}\n`;
-    this.queue = this.queue.then(() => this.append(line));
+    this.queue = this.queue.then(() => this.append(this.path(), line));
+    return this.queue;
+  }
+
+  /**
+   * Записать счётчик шагов. В отличие от полного журнала — без настроек и без
+   * содержания: только имена, числа и пометки, поэтому согласия не требует.
+   */
+  recordCounts(run: ChatRunLog, input: CountsInput = {}): Promise<void> {
+    const line = `${formatCountsLine(buildCountsRecord(run, input))}\n`;
+    this.queue = this.queue.then(() => this.append(this.countsPath(), line));
     return this.queue;
   }
 
@@ -81,13 +107,13 @@ export class TelemetryStore {
 
   /** Очистить журнал: строки удаляются целиком, предыдущая копия тоже. */
   async clear(): Promise<void> {
-    const file = this.path();
-    await fs.rm(file, { force: true }).catch(() => undefined);
-    await fs.rm(previousFile(file), { force: true }).catch(() => undefined);
+    for (const file of [this.path(), this.countsPath()]) {
+      await fs.rm(file, { force: true }).catch(() => undefined);
+      await fs.rm(previousFile(file), { force: true }).catch(() => undefined);
+    }
   }
 
-  private async append(line: string): Promise<void> {
-    const file = this.path();
+  private async append(file: string, line: string): Promise<void> {
     try {
       await fs.mkdir(path.dirname(file), { recursive: true });
       await this.rotateIfNeeded(file);

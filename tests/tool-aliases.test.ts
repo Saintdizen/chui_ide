@@ -117,3 +117,28 @@ describe('что псевдоним не трогает', () => {
     }
   });
 });
+
+describe('слияния с действием: терминал', () => {
+  it('run_terminal, run_output, run_stop — три действия одного terminal', () => {
+    // 47 вызовов `run_terminal` в трёх беседах: имя живёт в истории, и модель его
+    // копирует. Без псевдонима — шаг в «Инструмент недоступен».
+    const rest = canonicalCall('run_terminal', '{"command":"npm t"}');
+    expect(rest.name).toBe('terminal');
+    // Действие по умолчанию — запуск: старое имя его не называло.
+    expect(JSON.parse(rest.arguments)).toEqual({ command: 'npm t', action: 'run' });
+    expect(JSON.parse(canonicalCall('run_output', '{"id":"3"}').arguments)).toEqual({
+      id: '3',
+      action: 'output',
+    });
+    expect(JSON.parse(canonicalCall('run_stop', '{"id":"3"}').arguments)).toEqual({
+      id: '3',
+      action: 'stop',
+    });
+  });
+
+  it('псевдонимы ведут к существующей схеме', () => {
+    for (const old of ['run_terminal', 'run_output', 'run_stop']) {
+      expect(names.has(canonicalCall(old, '{}').name), old).toBe(true);
+    }
+  });
+});

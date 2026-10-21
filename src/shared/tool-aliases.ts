@@ -60,12 +60,21 @@ const NAME_ALIASES: Readonly<Record<string, string>> = {
   // Ресурсы MCP: каталог и чтение — две половины одного похода.
   list_mcp_resources: 'mcp',
   read_mcp_resource: 'mcp',
+  // Терминал: три имени слились в одно с действиями. `run_terminal` — самое частое
+  // из старых (47 вызовов в трёх беседах): по переписи вывода оно попало в историю
+  // под своим именем, то есть модель его называет до сих пор.
+  run_terminal: 'terminal',
+  run_output: 'terminal',
+  run_stop: 'terminal',
 };
 
 /** Старое имя → аргументы, которые оно подразумевало: `action`. */
 const ARG_ALIASES: Readonly<Record<string, Readonly<Record<string, string>>>> = {};
 
 const ACTION_ALIASES: Readonly<Record<string, string>> = {
+  run_terminal: 'run',
+  run_output: 'output',
+  run_stop: 'stop',
   spawn_agent: 'spawn',
   list_agents: 'list',
   wait_agent: 'wait',

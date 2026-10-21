@@ -120,9 +120,10 @@ describe('search с контекстом', () => {
     expect(String(outcome.detail).trim()).toBe('src/loader.js');
   });
 
-  it('без совпадений ответ тот же, что и был', async () => {
-    const outcome = await runTool(context(), 'search', JSON.stringify({ query: 'нет-такого', context: 3 }));
-    expect(outcome.detail).toBe('Ничего не найдено');
+  it('без совпадений называет запрос и условия, которые можно ослабить', async () => {
+    const outcome = await runTool(context(), 'search', JSON.stringify({ query: 'нет-такого', context: 3, glob: 'src/**' }));
+    expect(String(outcome.detail)).toContain('Совпадений нет: «нет-такого»');
+    expect(String(outcome.detail)).toContain('маска src/**');
   });
 });
 
