@@ -17,7 +17,7 @@ import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memor
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import { formatReadImageReply, formatReadImageSummary } from '../../shared/read-image';
 import { testTargetProblem } from '../../shared/test-target';
-import { coveredRequest } from '../../shared/read-coverage';
+import { coveredRequest, readStamp, type ReadRange } from '../../shared/read-coverage';
 import { limitPerFile, MAX_HITS_PER_FILE } from '../../shared/search-limit';
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
@@ -57,8 +57,25 @@ export interface ToolOutcome {
   summary: string;
   /** То, что уходит модели. Может быть длинным — усекается до `MAX_OUTPUT_CHARS`. */
   detail?: string;
-  /** Фактически прочитанный диапазон строк (1-based, включительно): повтор не нужен. */
-  read?: { path: string; from: number; to: number };
+  /**
+   * Фактически прочитанные куски (1-based, включительно): повтор не нужен. Версия
+   * файла и `eof` — чтобы понимать, устарел ли текст и закрыт ли диапазон до конца.
+   */
+  read?: {
+    path: string;
+    from: number;
+    to: number;
+    stamp?: string;
+    eof?: boolean;
+  };
+  /** Пачка (`read { paths }`): каждый файл отдельным куском. */
+  reads?: Array<{
+    path: string;
+    from: number;
+    to: number;
+    stamp?: string;
+    eof?: boolean;
+  }>;
   /**
    * Картинки (data-URL), которые надо положить модели отдельным сообщением
    * прогона: в текст результата их положить нельзя — у OpenAI в `tool`-сообщении
@@ -325,7 +342,7 @@ export interface ToolContext {
    * (`cat`, `sed -n`): без этого `cat` того же файла отдаёт текст заново, хотя
    * покрытие про него знает — и платит модель.
    */
-  coveredReads?: ReadonlyMap<string, Array<{ from: number; to: number }>>;
+  coveredReads?: ReadonlyMap<string, ReadRange[]>;
   applyEdits?(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /**
    * Правки по якорю. Якоря разрешает renderer: только у него есть текст
@@ -841,7 +858,10 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return { ok: false, summary: `Инструмент недоступен: ${name}` };
     }
   } catch (error) {
-    return { ok: false, summary: error instanceof Error ? error.message : String(error) };
+    return {
+      ok: false,
+      summary: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -865,7 +885,11 @@ async function ask(ctx: ToolContext, args: Record<string, unknown>): Promise<Too
 
   const question = (optionalString(args, 'question') ?? '').trim();
   if (!question) {
-    return { ok: false, summary: 'Не задан вопрос', detail: 'Инструменту нужен непустой аргумент question.' };
+    return {
+      ok: false,
+      summary: 'Не задан вопрос',
+      detail: 'Инструменту нужен непустой аргумент question.',
+    };
   }
 
   const options = stringList(args.options).slice(0, MAX_ASK_OPTIONS);
@@ -902,7 +926,10 @@ async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<To
   // остаётся ровно тем же, что и раньше, — отчётом одного агента.
   if (request.tasks.length === 1) {
     const only = request.tasks[0]!;
-    return ctx.subagent.run({ description: only.description, prompt: only.prompt });
+    return ctx.subagent.run({
+      description: only.description,
+      prompt: only.prompt,
+    });
   }
   return ctx.subagent.runMany(request.tasks);
 }
@@ -920,7 +947,11 @@ async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<To
  * имени — поэтому вопрос всё равно нужен, но только в обычном режиме.
  */
 async function permitBrowser(ctx: ToolContext, action: string): Promise<ToolOutcome | null> {
-  if (!ctx.confirmBrowser) return { ok: false, summary: 'Браузер недоступен: окно редактора не подключено' };
+  if (!ctx.confirmBrowser)
+    return {
+      ok: false,
+      summary: 'Браузер недоступен: окно редактора не подключено',
+    };
   if (ctx.allowAll) return null;
   const allowed = await ctx.confirmBrowser(action);
   if (allowed) return null;
@@ -1073,9 +1104,17 @@ async function browserZoom(ctx: ToolContext, args: Record<string, unknown>): Pro
   }
 
   const result = await ctx.browser.zoom(mode);
-  if (!result.ok) return { ok: false, summary: result.reason ?? 'не удалось изменить масштаб' };
+  if (!result.ok)
+    return {
+      ok: false,
+      summary: result.reason ?? 'не удалось изменить масштаб',
+    };
   const percent = Math.round((result.zoom ?? 1) * 100);
-  return { ok: true, summary: `масштаб ${percent}%`, detail: `Страница показана с масштабом ${percent}%.` };
+  return {
+    ok: true,
+    summary: `масштаб ${percent}%`,
+    detail: `Страница показана с масштабом ${percent}%.`,
+  };
 }
 
 async function browserClose(ctx: ToolContext): Promise<ToolOutcome> {
@@ -1083,10 +1122,18 @@ async function browserClose(ctx: ToolContext): Promise<ToolOutcome> {
   // Сессии нет — закрывать нечего: «браузер закрыт» здесь звучало бы как отчёт
   // о сделанном, хотя браузера ещё не было.
   if (ctx.browser.running === false) {
-    return { ok: true, summary: 'браузер не запущен', detail: 'Сессии браузера нет — закрывать нечего.' };
+    return {
+      ok: true,
+      summary: 'браузер не запущен',
+      detail: 'Сессии браузера нет — закрывать нечего.',
+    };
   }
   await ctx.browser.close();
-  return { ok: true, summary: 'браузер закрыт', detail: 'Процесс браузера остановлен, временный профиль удалён.' };
+  return {
+    ok: true,
+    summary: 'браузер закрыт',
+    detail: 'Процесс браузера остановлен, временный профиль удалён.',
+  };
 }
 
 /**
@@ -1203,6 +1250,8 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
       detail: 'Это не текстовый файл — читать его бессмысленно. Если нужны метаданные, используй list.',
     };
   }
+  // Версия файла на момент чтения: по ней потом видно, устарел ли текст в ветке.
+  const stamp = readStamp(content);
   const allLines = content.text.length === 0 ? [] : content.text.split('\n');
   const total = allLines.length;
 
@@ -1237,7 +1286,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
         summary: `${rel}: ${total} строк, показаны первые ${head.length}`,
         detail: text,
         // Прочитанным считается только показанное: остальное модель не видела.
-        read: { path: target, from: 1, to: head.length },
+        read: { path: target, from: 1, to: head.length, stamp },
       };
     }
     const { text, truncated } = clipText(ctx, 'read', content.text);
@@ -1245,12 +1294,16 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
       ok: true,
       summary: `${rel}: ${total} строк${truncated ? ' (обрезано)' : ''}`,
       detail: text.length ? text : '(пустой файл)',
-      ...(truncated || total === 0 ? {} : { read: { path: target, from: 1, to: total } }),
+      ...(truncated || total === 0 ? {} : { read: { path: target, from: 1, to: total, stamp, eof: true } }),
     };
   }
 
   if (total === 0) {
-    return { ok: true, summary: `${rel}: пустой файл`, detail: '(пустой файл)' };
+    return {
+      ok: true,
+      summary: `${rel}: пустой файл`,
+      detail: '(пустой файл)',
+    };
   }
 
   const from = Math.max(1, startLine ?? 1);
@@ -1293,7 +1346,7 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
     ok: true,
     summary: `${rel}: строки ${from}–${last} из ${total}`,
     detail: `${trimmed}${clipped}`,
-    ...(whole ? { read: { path: target, from, to: last } } : {}),
+    ...(whole ? { read: { path: target, from, to: last, stamp, eof: last >= total } } : {}),
   };
 }
 
@@ -1334,6 +1387,14 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
   const root = workspace.rootPath();
   const parts: string[] = [];
   const failed: string[] = [];
+  /** Что из пачки окажется в покрытии: без этого повтор такой же пачки видел текст заново. */
+  const reads: Array<{
+    path: string;
+    from: number;
+    to: number;
+    stamp?: string;
+    eof?: boolean;
+  }> = [];
   let total = 0;
   let read = 0;
 
@@ -1341,6 +1402,13 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
     const rel = relative(target, root);
     if (total >= MAX_READ_FILES_TOTAL_CHARS) {
       parts.push(`### ${rel}\n… (пропущен: общий лимит вывода исчерпан)`);
+      continue;
+    }
+    // Файл уже прочитан целиком и не менялся с тех пор — текст есть выше, а его
+    // повтор в пачке самый дорогой: замер показал 12 тыс. токенов на 3 таких вызова.
+    const already = ctx.coveredReads ? await coveredWhole(ctx, target) : undefined;
+    if (already !== undefined) {
+      parts.push(`### ${rel} (уже прочитано: строки 1–${already}, без изменений)`);
       continue;
     }
     try {
@@ -1377,6 +1445,14 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
       parts.push(chunk);
       total += chunk.length;
       read += 1;
+      if (!truncated && !cut)
+        reads.push({
+          path: target,
+          from: 1,
+          to: lines.length,
+          stamp: readStamp(content),
+          eof: true,
+        });
     } catch (error) {
       failed.push(`${rel}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1392,7 +1468,24 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
     ok: failed.length < paths.length,
     summary: summaryParts.join(', '),
     detail: parts.join('\n\n'),
+    ...(reads.length > 0 ? { reads } : {}),
   };
+}
+
+/**
+ * Полностью ли уже прочитан и не изменился ли файл: `eof`-кусок с начала и версия,
+ * совпавшая со всеми кусками файла. Возвращает длину, если повтор не нужен.
+ */
+async function coveredWhole(ctx: ToolContext, target: string): Promise<number | undefined> {
+  const ranges = ctx.coveredReads?.get(target);
+  if (!ranges || ranges.length === 0) return undefined;
+  const whole = ranges.find((range) => range.from <= 1 && range.eof === true);
+  if (!whole) return undefined;
+  const version = await ctx.workspace.stat(target).catch(() => null);
+  if (!version) return undefined;
+  const stamp = readStamp(version);
+  if (!ranges.every((range) => range.stamp === stamp)) return undefined;
+  return whole.to;
 }
 
 /* ── замена по проекту ──────────────────────────────────────────────────── */
@@ -1455,7 +1548,11 @@ async function replaceInFiles(workspace: WorkspaceService, args: Record<string, 
     ok: true,
     summary: `заменено вхождений: ${result.replaced} · файлов: ${result.files.length}`,
     detail: lines.join('\n'),
-    changes: result.files.map((file) => ({ path: file, kind: 'modified' as const, replaced: result.replaced })),
+    changes: result.files.map((file) => ({
+      path: file,
+      kind: 'modified' as const,
+      replaced: result.replaced,
+    })),
   };
 }
 
@@ -1557,7 +1654,9 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
     return {
       ok: true,
       summary: `совпадения в файлах: ${unique.length}${result.truncated || rest > 0 ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
-      detail: files.length ? clipText(ctx, 'search', files.join('\n')).text + tail : emptySearchDetail(query, { isRegex, glob, scope }),
+      detail: files.length
+        ? clipText(ctx, 'search', files.join('\n')).text + tail
+        : emptySearchDetail(query, { isRegex, glob, scope }),
     };
   }
 
@@ -1583,7 +1682,9 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
   return {
     ok: true,
     summary: `${limited.hits.length} совпадений${notes.length ? ` (${notes.join(', ')})` : ''} · просканировано файлов: ${result.scanned}`,
-    detail: detail.length ? clipText(ctx, 'search', detail).text + tail : emptySearchDetail(query, { isRegex, glob, scope }),
+    detail: detail.length
+      ? clipText(ctx, 'search', detail).text + tail
+      : emptySearchDetail(query, { isRegex, glob, scope }),
   };
 }
 
@@ -1687,7 +1788,10 @@ const MAX_CODE_FILES = 25;
 async function fileOutline(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const target = requireString(args, 'path');
   if (!ctx.symbols?.outline) {
-    return { ok: false, summary: 'Языковой сервер не подключён: скелет файла недоступен' };
+    return {
+      ok: false,
+      summary: 'Языковой сервер не подключён: скелет файла недоступен',
+    };
   }
 
   const content = await ctx.workspace.readFile(target);
@@ -1713,7 +1817,9 @@ async function fileOutline(ctx: ToolContext, args: Record<string, unknown>): Pro
     };
   }
 
-  const { summary, detail } = formatOutline(rel, symbols, { totalLines: total });
+  const { summary, detail } = formatOutline(rel, symbols, {
+    totalLines: total,
+  });
   return { ok: true, summary, detail };
 }
 
@@ -1738,11 +1844,20 @@ async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): 
   // так он совпадёт с `readFile`. Регистр `search` учитывает сам.
   const compact = query.replace(/\s+/g, '');
   const hits = await ctx.workspace.search(
-    { query: compact, isRegex: false, caseSensitive: false, maxResults: MAX_SEARCH_HITS },
+    {
+      query: compact,
+      isRegex: false,
+      caseSensitive: false,
+      maxResults: MAX_SEARCH_HITS,
+    },
     ctx.signal,
   );
   const files = digestHits(
-    hits.hits.map((hit) => ({ path: relativePath(hit.path, root), line: hit.line, text: hit.text })),
+    hits.hits.map((hit) => ({
+      path: relativePath(hit.path, root),
+      line: hit.line,
+      text: hit.text,
+    })),
     MAX_CODE_FILES,
   );
 
@@ -1750,7 +1865,10 @@ async function codebaseSearch(ctx: ToolContext, args: Record<string, unknown>): 
     query,
     // Пути — как во всех инструментах: относительно рабочей папки, иначе модель
     // видит длинный абсолютный путь и не понимает, что файл рядом.
-    symbols: rankSymbols(found, query, limit).map((symbol) => ({ ...symbol, path: relativePath(symbol.path, root) })),
+    symbols: rankSymbols(found, query, limit).map((symbol) => ({
+      ...symbol,
+      path: relativePath(symbol.path, root),
+    })),
     symbolTotal: found.length,
     files,
     hitTotal: hits.hits.length,
@@ -1869,7 +1987,10 @@ async function documentOf(
  */
 async function findReferences(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.symbols?.references) {
-    return { ok: false, summary: 'Языковой сервер не подключён: поиск ссылок недоступен' };
+    return {
+      ok: false,
+      summary: 'Языковой сервер не подключён: поиск ссылок недоступен',
+    };
   }
 
   const name = requireString(args, 'symbol').trim();
@@ -1931,7 +2052,10 @@ async function goToDefinition(ctx: ToolContext, args: Record<string, unknown>): 
     };
   }
   if (!ctx.symbols) {
-    return { ok: false, summary: 'Языковой сервер не подключён: переход к определению недоступен' };
+    return {
+      ok: false,
+      summary: 'Языковой сервер не подключён: переход к определению недоступен',
+    };
   }
 
   const root = ctx.workspace.rootPath();
@@ -1941,7 +2065,10 @@ async function goToDefinition(ctx: ToolContext, args: Record<string, unknown>): 
   // Позиционный переход: файл и строка с использованием известны — решает сервер.
   if (pathArg && line) {
     if (!ctx.symbols.definition) {
-      return { ok: false, summary: 'Языковой сервер не подключён: переход по позиции недоступен' };
+      return {
+        ok: false,
+        summary: 'Языковой сервер не подключён: переход по позиции недоступен',
+      };
     }
     const doc = await documentOf(ctx, pathArg);
     if ('error' in doc) return doc.error;
@@ -1989,10 +2116,16 @@ async function goToDefinition(ctx: ToolContext, args: Record<string, unknown>): 
  */
 async function renameSymbol(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.symbols?.rename) {
-    return { ok: false, summary: 'Языковой сервер не подключён: переименование символа недоступно' };
+    return {
+      ok: false,
+      summary: 'Языковой сервер не подключён: переименование символа недоступно',
+    };
   }
   if (!ctx.applyEdits) {
-    return { ok: false, summary: 'Правки сейчас недоступны: окно редактора не подключено' };
+    return {
+      ok: false,
+      summary: 'Правки сейчас недоступны: окно редактора не подключено',
+    };
   }
 
   const name = requireString(args, 'symbol').trim();
@@ -2026,10 +2159,17 @@ async function renameSymbol(ctx: ToolContext, args: Record<string, unknown>): Pr
     };
   }
   if (edits.length === 0) {
-    return { ok: true, summary: `переименовывать нечего: ${target.name}`, detail: 'Сервер не вернул правок.' };
+    return {
+      ok: true,
+      summary: `переименовывать нечего: ${target.name}`,
+      detail: 'Сервер не вернул правок.',
+    };
   }
 
-  const files = edits.map((file) => ({ ...file, path: path.resolve(file.path) }));
+  const files = edits.map((file) => ({
+    ...file,
+    path: path.resolve(file.path),
+  }));
   const decision = await ctx.applyEdits(files, ctx.autoApprove === true);
   if (decision.rejected) {
     return {
@@ -2075,7 +2215,11 @@ async function runLinter(ctx: ToolContext, args: Record<string, unknown>): Promi
   }
 
   const target = requested ? relativePath(requested, root) : '.';
-  const report = formatLintReport({ tool: outcome.tool, target, problems: outcome.problems });
+  const report = formatLintReport({
+    tool: outcome.tool,
+    target,
+    problems: outcome.problems,
+  });
   return { ok: true, summary: report.summary, detail: report.detail };
 }
 
@@ -2092,7 +2236,11 @@ async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): P
     if (problem) return { ok: false, summary: problem };
   }
   if (!ctx.tests) return { ok: false, summary: 'Запуск тестов недоступен' };
-  if (!ctx.confirmCommand) return { ok: false, summary: 'Запуск тестов недоступен: окно редактора не подключено' };
+  if (!ctx.confirmCommand)
+    return {
+      ok: false,
+      summary: 'Запуск тестов недоступен: окно редактора не подключено',
+    };
 
   const resolved = await ctx.tests.command(target);
   if (!resolved) {
@@ -2275,7 +2423,10 @@ const MAX_DIAGNOSTICS = 60;
 /** Пометки языка собирает renderer: они живут в редакторе, а не на диске. */
 async function diagnostics(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.diagnostics) {
-    return { ok: false, summary: 'Диагностика недоступна: окно редактора не подключено' };
+    return {
+      ok: false,
+      summary: 'Диагностика недоступна: окно редактора не подключено',
+    };
   }
 
   const target = optionalString(args, 'path');
@@ -2333,7 +2484,13 @@ function describeUnwritten(reason: string | undefined): string {
 function readEditsOutcome(
   decision: ApplyEditsHostResult,
   label: (file: string) => string,
-): { applied: ApplyReport[]; failed: ApplyFailure[]; tail: string; detail: string; ok: boolean } {
+): {
+  applied: ApplyReport[];
+  failed: ApplyFailure[];
+  tail: string;
+  detail: string;
+  ok: boolean;
+} {
   const applied = decision.result?.reports ?? [];
   const failed = decision.result?.failed ?? [];
   const unwritten = decision.unwritten ?? [];
@@ -2385,7 +2542,11 @@ const EDITOR_MISSING: ToolOutcome = {
 async function editAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const action = typeof args.action === 'string' && args.action.trim() ? args.action.trim() : 'write';
   if (action === 'write') return await editFiles(ctx, args);
-  return await fileAction(ctx, { ...args, action, from: args.from ?? args.path });
+  return await fileAction(ctx, {
+    ...args,
+    action,
+    from: args.from ?? args.path,
+  });
 }
 
 /**
@@ -2408,7 +2569,9 @@ function normalizeWrite(args: Record<string, unknown>): unknown {
   if (raw === undefined) {
     if (top && typeof args.contents === 'string') return [{ path: top, edits: [{ newText: args.contents }] }];
     if (top && (typeof args.oldText === 'string' || typeof args.newText === 'string')) {
-      const edit: Record<string, unknown> = { newText: typeof args.newText === 'string' ? args.newText : '' };
+      const edit: Record<string, unknown> = {
+        newText: typeof args.newText === 'string' ? args.newText : '',
+      };
       if (typeof args.oldText === 'string') edit.oldText = args.oldText;
       return [{ path: top, edits: [edit] }];
     }
@@ -2431,7 +2594,10 @@ function normalizeWrite(args: Record<string, unknown>): unknown {
     bucket.push(item);
     groups.set(itemPath, bucket);
   }
-  return [...groups.entries()].map(([filePath, edits]) => ({ path: filePath, edits }));
+  return [...groups.entries()].map(([filePath, edits]) => ({
+    path: filePath,
+    edits,
+  }));
 }
 
 /** Элемент правки — файл с вложенными заменами, а не сама замена. */
@@ -2510,12 +2676,69 @@ function isMissing(error: unknown): boolean {
   return /ENOENT|не найден|не найдена/i.test(message);
 }
 
+/** Сколько строк вокруг правки показывает ответ `edit`. */
+const EDIT_CONTEXT_LINES = 4;
+
+/** Тексты замен из разобранных правок: по ним ищем место в файле после записи. */
+function editNeedles(parsed: ParsedEdits): Array<{ path: string; newText: string }> {
+  return [
+    ...parsed.anchors.flatMap((file) => file.patches.map((hunk) => ({ path: file.path, newText: hunk.newText }))),
+    ...parsed.positions.flatMap((file) => file.edits.map((edit) => ({ path: file.path, newText: edit.newText }))),
+  ].filter((item) => item.newText.trim().length > 0);
+}
+
+/**
+ * Окно строк вокруг каждой правки: `EDIT_CONTEXT_LINES` до и после, с номерами.
+ * Место ищем по тексту замены, а не по позиции: после нескольких правок в одном
+ * файле позиции сдвинулись, а вставленный текст — ровно тот, что просили.
+ */
+async function editWindows(
+  workspace: WorkspaceService,
+  edits: Array<{ path: string; newText: string }>,
+): Promise<string> {
+  const windows: string[] = [];
+  const seen = new Set<string>();
+  for (const edit of edits) {
+    const replacements = edit.newText.split('\n').filter((line) => line.trim().length > 0);
+    const needle = replacements[0]?.trim();
+    if (!needle) continue;
+    // Чтение может быть нечем: в узких тестах у рабочей области нет `readFile`.
+    // Окно — украшение к ответу, без него правка остаётся правкой.
+    let content: Awaited<ReturnType<WorkspaceService['readFile']>> | null = null;
+    try {
+      content = await workspace.readFile(edit.path);
+    } catch {
+      continue;
+    }
+    if (!content) continue;
+    const fileLines = content.text.split('\n');
+    const at = fileLines.findIndex((line) => line.trim() === needle);
+    if (at < 0) continue;
+    const from = Math.max(0, at - EDIT_CONTEXT_LINES);
+    const to = Math.min(fileLines.length, at + replacements.length + EDIT_CONTEXT_LINES);
+    const key = `${edit.path}:${from}:${to}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const body = fileLines
+      .slice(from, to)
+      .map((line, index) => `${from + index + 1} | ${line}`)
+      .join('\n');
+    windows.push(`${path.basename(edit.path)} (строки ${from + 1}–${to}):\n${body}`);
+  }
+  return windows.length > 0 ? `\n\nОкно вокруг правки:\n${windows.join('\n\n')}` : '';
+}
+
 async function editFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   // Сначала форма: обёртки разворачиваются, запись целиком без якоря уходит в `create`.
   const split = await splitWholeWrites(ctx.workspace, normalizeWrite(args));
   const created: ToolOutcome[] = [];
   for (const whole of split.creates)
-    created.push(await createFile(ctx.workspace, { path: whole.path, contents: whole.contents }));
+    created.push(
+      await createFile(ctx.workspace, {
+        path: whole.path,
+        contents: whole.contents,
+      }),
+    );
   if (split.files.length === 0) return combineOutcomes(created);
 
   const parsed = parseEdits(split.files);
@@ -2545,13 +2768,16 @@ async function editFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
   const merged = mergeDecisions(decisions);
   const outcome = readEditsOutcome(merged, (file) => path.basename(file));
   const unwritten = merged.unwritten?.length ?? 0;
+  // Файлы легли — показываем окно вокруг правки: иначе модель проверяет результат
+  // отдельным `read`, а это в замере — 4,7 тыс. ток. на трёх беседах (6% чтений).
+  const window = outcome.ok && unwritten === 0 ? await editWindows(ctx.workspace, editNeedles(parsed)) : '';
 
   return combineOutcomes([
     ...created,
     {
       ok: outcome.ok,
       summary: `применено файлов: ${outcome.applied.length}${outcome.failed.length ? `, с ошибками: ${outcome.failed.length}` : ''}${outcome.tail}`,
-      detail: outcome.detail,
+      detail: outcome.detail + window,
       // Тела правок можно забыть только когда они действительно легли в файлы:
       // отклонённая или оставшаяся в буфере правка модели ещё понадобится.
       ...(outcome.ok && unwritten === 0 ? { applied: true } : {}),
@@ -2661,11 +2887,16 @@ function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; pos
     throw new Error(`edits[${index}]: в одном файле и якоря (oldText), и позиции — раздели на два вызова`);
   }
   if (positions.length > 0) {
-    const fileEdit: FileEdit = { path: filePath, edits: positions.map((item) => item.position) };
+    const fileEdit: FileEdit = {
+      path: filePath,
+      edits: positions.map((item) => item.position),
+    };
     if (typeof raw.expectedVersion === 'number') fileEdit.expectedVersion = raw.expectedVersion;
     return { position: fileEdit };
   }
-  return { anchor: { path: filePath, patches: anchors.map((item) => item.anchor) } };
+  return {
+    anchor: { path: filePath, patches: anchors.map((item) => item.anchor) },
+  };
 }
 
 /** Одна правка: `newText` и адрес — якорь или все четыре позиции. */
@@ -2745,7 +2976,11 @@ function mergeDecisions(decisions: readonly ApplyEditsHostResult[]): ApplyEditsH
  * нужно подтверждение. Разбор нарочно узкий — одна простая команда без труб,
  * перенаправлений, глобов и подстановок; всё остальное идёт в шелл как раньше.
  */
-type LookupCall = { tool: 'read' | 'search' | 'list'; args: Record<string, unknown>; label: string };
+type LookupCall = {
+  tool: 'read' | 'search' | 'list';
+  args: Record<string, unknown>;
+  label: string;
+};
 
 /** Что делает из команды не команду, а скрипт: всё это — мимо сокращения. */
 const SHELL_SYNTAX = /[|&;<>`$()*?[\]{}\n\\]/;
@@ -2827,7 +3062,11 @@ function asLookupCall(command: string, cwdDir: string): LookupCall | null {
     }
     // Один файл: `head` от двух — это склейка, а `read` вернул бы два разных отчёта.
     if (files.length !== 1 || count < 1) return null;
-    return { tool: 'read', args: { path: scope(files[0]!), endLine: count }, label: `head -n ${count}` };
+    return {
+      tool: 'read',
+      args: { path: scope(files[0]!), endLine: count },
+      label: `head -n ${count}`,
+    };
   }
 
   if (program === 'sed') {
@@ -2841,7 +3080,11 @@ function asLookupCall(command: string, cwdDir: string): LookupCall | null {
     const startLine = Number(range[1]);
     const endLine = range[2] ? Number(range[2]) : startLine;
     if (startLine < 1 || endLine < startLine) return null;
-    return { tool: 'read', args: { path: scope(file), startLine, endLine }, label: `sed -n '${script}'` };
+    return {
+      tool: 'read',
+      args: { path: scope(file), startLine, endLine },
+      label: `sed -n '${script}'`,
+    };
   }
 
   if (program === 'grep' || program === 'rg') {
@@ -2890,7 +3133,11 @@ function asLookupCall(command: string, cwdDir: string): LookupCall | null {
     }
     if (plain.length > 1) return null;
     const target = plain[0];
-    return { tool: 'list', args: target ? { path: scope(target) } : {}, label: 'ls' };
+    return {
+      tool: 'list',
+      args: target ? { path: scope(target) } : {},
+      label: 'ls',
+    };
   }
 
   return null;
@@ -2929,7 +3176,10 @@ async function lookupOutcome(ctx: ToolContext, call: LookupCall): Promise<ToolOu
         };
       }
     }
-    return { ...outcome, summary: `${call.label} → ${call.tool} · ${outcome.summary}` };
+    return {
+      ...outcome,
+      summary: `${call.label} → ${call.tool} · ${outcome.summary}`,
+    };
   } catch {
     return null;
   }
@@ -2980,7 +3230,10 @@ async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<string, u
   // значения по умолчанию, а заведомо долгой (сборка, установка) нужно больше.
   const timeoutSeconds = optionalInteger(args, 'timeout');
   const timeoutMs = timeoutSeconds !== undefined ? Math.min(Math.max(timeoutSeconds, 1), 1800) * 1000 : undefined;
-  const runOptions = { signal: ctx.signal, ...(timeoutMs !== undefined ? { timeoutMs } : {}) };
+  const runOptions = {
+    signal: ctx.signal,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  };
   const cwd = await commandCwd(ctx, args);
   if (!cwd) return { ok: false, summary: 'Проект не открыт' };
 
@@ -3080,7 +3333,10 @@ async function terminalRunBackground(ctx: ToolContext, rawArgs: Record<string, u
       ...(limitMs !== undefined ? { timeoutMs: limitMs } : {}),
     });
   } catch (error) {
-    return { ok: false, summary: error instanceof Error ? error.message : String(error) };
+    return {
+      ok: false,
+      summary: error instanceof Error ? error.message : String(error),
+    };
   }
 
   const snapshot = job.snapshot();
@@ -3119,9 +3375,18 @@ function terminalOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOu
   const id = optionalString(args, 'id')?.trim();
   if (!id) {
     const all = ctx.jobs.list();
-    if (all.length === 0) return { ok: true, summary: 'заданий нет', detail: 'Ни одного запуска в фоне не было.' };
+    if (all.length === 0)
+      return {
+        ok: true,
+        summary: 'заданий нет',
+        detail: 'Ни одного запуска в фоне не было.',
+      };
     const lines = all.map((snapshot) => `${snapshot.id}: ${jobState(snapshot)} — ${snapshot.command}`);
-    return { ok: true, summary: `заданий: ${all.length}`, detail: lines.join('\n') };
+    return {
+      ok: true,
+      summary: `заданий: ${all.length}`,
+      detail: lines.join('\n'),
+    };
   }
 
   const job = ctx.jobs.get(id);
@@ -3195,7 +3460,11 @@ async function runExternalTool(
   exposedName: string,
   args: Record<string, unknown>,
 ): Promise<ToolOutcome> {
-  if (!ctx.mcp) return { ok: false, summary: `Внешний инструмент недоступен: ${exposedName}` };
+  if (!ctx.mcp)
+    return {
+      ok: false,
+      summary: `Внешний инструмент недоступен: ${exposedName}`,
+    };
 
   let tool: McpToolInfo | undefined;
   try {
@@ -3213,7 +3482,10 @@ async function runExternalTool(
 
   if (!tool.readOnly) {
     if (!ctx.confirmCommand) {
-      return { ok: false, summary: 'Внешний вызов требует подтверждения, но окно не подключено' };
+      return {
+        ok: false,
+        summary: 'Внешний вызов требует подтверждения, но окно не подключено',
+      };
     }
     const allowed = await ctx.confirmCommand(`${exposedName} ${JSON.stringify(args)}`);
     if (!allowed) {
@@ -3277,7 +3549,10 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
   const maxChars = requested === undefined ? undefined : Math.min(Math.max(requested, 1000), MAX_FETCH_CHARS);
 
   try {
-    const page = await ctx.webFetch.fetch(url, { signal: ctx.signal, maxChars });
+    const page = await ctx.webFetch.fetch(url, {
+      signal: ctx.signal,
+      maxChars,
+    });
     const shaped = formatFetchedPage(page);
     return { ok: true, summary: shaped.summary, detail: shaped.detail };
   } catch (error) {
@@ -3374,7 +3649,11 @@ async function remember(ctx: ToolContext, args: Record<string, unknown>): Promis
           'иначе новая заметка потеряется среди старых.',
       };
     }
-    return { ok: false, summary: 'Пустая заметка', detail: 'Передай непустой текст в аргументе `text`.' };
+    return {
+      ok: false,
+      summary: 'Пустая заметка',
+      detail: 'Передай непустой текст в аргументе `text`.',
+    };
   }
 
   const where = scope === 'global' ? 'в глобальной памяти' : 'в памяти проекта';
@@ -3430,7 +3709,10 @@ async function mindAction(ctx: ToolContext, args: Record<string, unknown>): Prom
     // Утверждение плана перехватывает `service.ts` до вызова обработчика: там
     // решается смена режима. Здесь — только если перехвата не было.
     case 'exit_plan':
-      return { ok: false, summary: 'Утверждать нечего: режим плана не включён' };
+      return {
+        ok: false,
+        summary: 'Утверждать нечего: режим плана не включён',
+      };
     default:
       return unknownAction(action, 'mind: remember, forget, ask, steps, goal, exit_plan.');
   }
@@ -3513,7 +3795,10 @@ async function showAction(ctx: ToolContext, args: Record<string, unknown>): Prom
 /** Открывает файл в renderer: вкладка и позиция — дело интерфейса, не ФС. */
 async function openFile(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.openFile) {
-    return { ok: false, summary: 'Открытие файла недоступно: окно редактора не подключено' };
+    return {
+      ok: false,
+      summary: 'Открытие файла недоступно: окно редактора не подключено',
+    };
   }
 
   const target = requireString(args, 'path');
@@ -3522,7 +3807,11 @@ async function openFile(ctx: ToolContext, args: Record<string, unknown>): Promis
   await ctx.openFile(target, line, column);
 
   const rel = relative(target, ctx.workspace.rootPath());
-  return { ok: true, summary: `открыт ${rel}${line ? `:${line}` : ''}`, detail: 'Файл открыт в редакторе.' };
+  return {
+    ok: true,
+    summary: `открыт ${rel}${line ? `:${line}` : ''}`,
+    detail: 'Файл открыт в редакторе.',
+  };
 }
 
 /* ── терминальные сессии (pty) ──────────────────────────────────────────── */
@@ -3612,7 +3901,11 @@ function terminalList(ctx: ToolContext): ToolOutcome {
     };
   }
   const lines = sessions.map((session) => `${session.id} · ${session.shell} · ${session.cwd} (pid ${session.pid})`);
-  return { ok: true, summary: `терминалов: ${sessions.length}`, detail: lines.join('\n') };
+  return {
+    ok: true,
+    summary: `терминалов: ${sessions.length}`,
+    detail: lines.join('\n'),
+  };
 }
 
 const TERMINAL_COLS = 120;
@@ -3637,7 +3930,11 @@ async function terminalStart(ctx: ToolContext, args: Record<string, unknown>): P
     if (refusal) return refusal;
   }
 
-  const session = await ctx.terminals.create({ cols: TERMINAL_COLS, rows: TERMINAL_ROWS, cwd: cwd?.path });
+  const session = await ctx.terminals.create({
+    cols: TERMINAL_COLS,
+    rows: TERMINAL_ROWS,
+    cwd: cwd?.path,
+  });
   if (command) ctx.terminals.write(session.id, `${command}\r`);
 
   await delay(TERMINAL_SETTLE_MS, ctx.signal);
@@ -3706,7 +4003,11 @@ function terminalStop(ctx: ToolContext, args: Record<string, unknown>): ToolOutc
 
   const id = requireString(args, 'id');
   ctx.terminals.kill(id);
-  return { ok: true, summary: `${id} остановлен`, detail: `Сессия ${id} остановлена.` };
+  return {
+    ok: true,
+    summary: `${id} остановлен`,
+    detail: `Сессия ${id} остановлена.`,
+  };
 }
 
 /* ── вспомогательное ────────────────────────────────────────────────────── */
@@ -3813,7 +4114,10 @@ function clipText(ctx: ToolContext, kind: string, text: string): { text: string;
   }
   const file = spill(ctx, kind, text);
   spendRoom(ctx, room);
-  return { text: `${text.slice(0, room)}\n${clipNote(ctx, file, 'вывод обрезан')}`, truncated: true };
+  return {
+    text: `${text.slice(0, room)}\n${clipNote(ctx, file, 'вывод обрезан')}`,
+    truncated: true,
+  };
 }
 
 /** То же для хвостовой обрезки: начало отброшено, но его можно прочитать. */
@@ -3929,7 +4233,11 @@ async function listMcpResources(ctx: ToolContext, args: Record<string, unknown>)
   try {
     all = await ctx.mcp.resources();
   } catch (error) {
-    return { ok: false, summary: 'Каталог ресурсов недоступен', detail: describeValue(error) };
+    return {
+      ok: false,
+      summary: 'Каталог ресурсов недоступен',
+      detail: describeValue(error),
+    };
   }
 
   const items = only ? all.filter((item) => item.serverId === only) : all;
@@ -3963,7 +4271,11 @@ async function readMcpResource(ctx: ToolContext, args: Record<string, unknown>):
 
   const uri = (optionalString(args, 'uri') ?? '').trim();
   if (!uri) {
-    return { ok: false, summary: 'Не задан адрес ресурса', detail: 'Инструменту нужен непустой аргумент uri.' };
+    return {
+      ok: false,
+      summary: 'Не задан адрес ресурса',
+      detail: 'Инструменту нужен непустой аргумент uri.',
+    };
   }
   const server = (optionalString(args, 'server') ?? '').trim() || undefined;
 

@@ -118,12 +118,7 @@ describe('edit', () => {
     // Обязательных полей нет: `write` без `action` и `create` без `edits` — обе
     // формы живые; что именно нужно, говорит описание действия (п.42 TASKS.md).
     expect(tool.inputSchema.required).toEqual([]);
-    expect(tool.inputSchema.properties.action?.enum).toEqual([
-      'write',
-      'create',
-      'move',
-      'delete',
-    ]);
+    expect(tool.inputSchema.properties.action?.enum).toEqual(['write', 'create', 'move', 'delete']);
     expect(tool.description.toLowerCase()).toContain('oldtext');
     expect(tool.description.toLowerCase()).toContain('create');
   });

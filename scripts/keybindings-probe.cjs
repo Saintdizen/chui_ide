@@ -28,19 +28,6 @@ function acceleratorAt(pathLabels) {
   return found ? (found.accelerator ?? null) : null;
 }
 
-/** Акселераторы всех пунктов-команд: подпись → клавиша. Роли не берём — у них нет команд. */
-function accelerators() {
-  const result = {};
-  const walk = (items) => {
-    for (const item of items) {
-      if (item.submenu) walk(item.submenu.items);
-      else if (item.label) result[item.label] = item.accelerator ?? null;
-    }
-  };
-  walk(Menu.getApplicationMenu()?.items ?? []);
-  return result;
-}
-
 let failures = 0;
 const check = (title, expected, actual) => {
   const ok = expected === actual;

@@ -48,7 +48,7 @@ describe('read: границы диапазона', () => {
     expect(outcome.ok).toBe(true);
     // Пять строк содержимого плюс последняя пустая: так же считает редактор в жёлобе.
     expect(outcome.summary).toContain('6 строк');
-    expect(outcome.read).toEqual({ path: file, from: 1, to: 6 });
+    expect(outcome.read).toMatchObject({ path: file, from: 1, to: 6 });
   });
 
   it('диапазон читает ровно запрошенные строки', async () => {
@@ -56,13 +56,13 @@ describe('read: границы диапазона', () => {
     expect(outcome.ok).toBe(true);
     expect(outcome.detail).toContain('вторая');
     expect(outcome.detail).not.toContain('первая');
-    expect(outcome.read).toEqual({ path: file, from: 2, to: 4 });
+    expect(outcome.read).toMatchObject({ path: file, from: 2, to: 4 });
   });
 
   it('конец за концом файла зажимается: «3–999» это «от третьей до конца»', async () => {
     const outcome = await run({ path: file, startLine: 3, endLine: 999 });
     expect(outcome.ok).toBe(true);
-    expect(outcome.read).toEqual({ path: file, from: 3, to: 6 });
+    expect(outcome.read).toMatchObject({ path: file, from: 3, to: 6 });
   });
 
   it('начало за концом файла: отказ, который называет конец файла', async () => {
@@ -91,7 +91,7 @@ describe('read: номера строк пришли строками', () => {
   it('«2»–«4» читают вторую–четвёртую строку, а не весь файл', async () => {
     const outcome = await run({ path: file, startLine: '2', endLine: '4' });
     expect(outcome.ok).toBe(true);
-    expect(outcome.read).toEqual({ path: file, from: 2, to: 4 });
+    expect(outcome.read).toMatchObject({ path: file, from: 2, to: 4 });
     expect(outcome.detail).toContain('вторая');
     expect(outcome.detail).not.toContain('первая');
   });
@@ -112,6 +112,6 @@ describe('read: номера строк пришли строками', () => {
   it('endLine строкой без startLine читает до этой строки', async () => {
     const outcome = await run({ path: file, endLine: '3' });
     expect(outcome.ok).toBe(true);
-    expect(outcome.read).toEqual({ path: file, from: 1, to: 3 });
+    expect(outcome.read).toMatchObject({ path: file, from: 1, to: 3 });
   });
 });

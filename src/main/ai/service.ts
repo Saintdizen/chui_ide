@@ -91,7 +91,17 @@ import {
   type ChatTitleParts,
 } from '../../shared/chat-title';
 import { sandboxNote } from '../../shared/sandbox';
-import { coveredRequest, forgetChangedFiles, rememberRead, uncoveredRequest } from '../../shared/read-coverage';
+import {
+  confirmFile,
+  coveredRequest,
+  forgetChangedFiles,
+  needsConfirm,
+  readStamp,
+  rememberRead,
+  uncoveredRequest,
+  type ReadRange,
+} from '../../shared/read-coverage';
+import { callFlags } from '../../shared/step-counts';
 import { renderSessionReferences } from '../../shared/session-context';
 import {
   permissionFlags,
@@ -566,15 +576,29 @@ export class AiService {
     const apiKey =
       params.apiKey?.trim() || (params.providerId ? this.settings.resolveApiKey(params.providerId) : undefined);
     if (!apiKey && !isLocalEndpoint(baseUrl)) {
-      return { ok: false, models: [], message: 'Нужен API-ключ: без него провайдер отклонит запрос' };
+      return {
+        ok: false,
+        models: [],
+        message: 'Нужен API-ключ: без него провайдер отклонит запрос',
+      };
     }
 
     // Проверка идёт тем же протоколом, что и рабочий запрос: у Anthropic он свой.
     const preset = params.providerId ? findProviderPreset(params.providerId) : undefined;
     const provider: AiProvider =
       preset?.protocol === 'anthropic'
-        ? new AnthropicProvider({ id: 'test', label: 'Проверка', baseUrl, apiKey })
-        : new OpenAiCompatibleProvider({ id: 'test', label: 'Проверка', baseUrl, apiKey });
+        ? new AnthropicProvider({
+            id: 'test',
+            label: 'Проверка',
+            baseUrl,
+            apiKey,
+          })
+        : new OpenAiCompatibleProvider({
+            id: 'test',
+            label: 'Проверка',
+            baseUrl,
+            apiKey,
+          });
     try {
       // Заодно запоминаем паспорта моделей: сервер сам говорит, сколько у них
       // окно и предел ответа, — и эти числа точнее догадок по имени модели.
@@ -889,7 +913,10 @@ export class AiService {
     const references = texts.filter((item) => item.kind === 'session');
     if (notes.length > 0) messages.push({ role: 'system', content: renderAttachments(notes) });
     if (references.length > 0) {
-      messages.push({ role: 'system', content: renderSessionReferences(references) });
+      messages.push({
+        role: 'system',
+        content: renderSessionReferences(references),
+      });
     }
     if (images.length > 0) {
       messages.push({ role: 'system', content: renderImageNote(images) });
@@ -901,7 +928,10 @@ export class AiService {
     const sandboxPrompt = sandboxed ? sandboxNote(sandboxSettings, this.sandbox!.available) : '';
 
     if (planMode)
-      messages.push({ role: 'system', content: `${agentPrompt(toolPreset, { confirm: false })}\n${PLAN_PROMPT}` });
+      messages.push({
+        role: 'system',
+        content: `${agentPrompt(toolPreset, { confirm: false })}\n${PLAN_PROMPT}`,
+      });
     else if (useTools)
       messages.push({
         role: 'system',
@@ -996,7 +1026,11 @@ export class AiService {
     // ход наружу. Адрес проверяется до запроса, а тело читается с потолком.
     if (settings.ai.webFetch?.enabled) {
       toolContext.webFetch = {
-        fetch: (url, options) => fetchPage(url, { signal: options?.signal, maxChars: options?.maxChars }),
+        fetch: (url, options) =>
+          fetchPage(url, {
+            signal: options?.signal,
+            maxChars: options?.maxChars,
+          }),
       };
     }
 
@@ -1008,10 +1042,17 @@ export class AiService {
         search: (query, limit, callSignal) =>
           searchWeb(
             query,
-            { provider: webSearch.provider, endpoint: webSearch.endpoint, apiKey: this.webSearchKey(webSearch) },
+            {
+              provider: webSearch.provider,
+              endpoint: webSearch.endpoint,
+              apiKey: this.webSearchKey(webSearch),
+            },
             limit,
             callSignal,
-          ).then((hits) => ({ hits, providerLabel: webSearchProviderLabel(webSearch.provider) })),
+          ).then((hits) => ({
+            hits,
+            providerLabel: webSearchProviderLabel(webSearch.provider),
+          })),
       };
     }
     // Браузер читает настройку на каждый прогон, как и веб-поиск: человек может
@@ -1198,7 +1239,9 @@ export class AiService {
         ...(systemPrompt.trim() ? { instructions: clampRunText(systemPrompt) } : {}),
         ...(context ? { context: clampRunText(context) } : {}),
         ...(attachments.length > 0
-          ? { attachments: attachments.map((item) => `${item.kind}: ${item.title}`.trim()) }
+          ? {
+              attachments: attachments.map((item) => `${item.kind}: ${item.title}`.trim()),
+            }
           : {}),
         provider: request.providerId,
         model: request.model,
@@ -1305,7 +1348,11 @@ export class AiService {
         runToolCalls += sub.toolCalls;
         // Подзадача идёт своим контекстом: её шаги в общий список не подмешать,
         // поэтому в трассе она — отдельная строка с числом шагов и вызовов.
-        runSubagents.push({ description, steps: sub.steps, toolCalls: sub.toolCalls });
+        runSubagents.push({
+          description,
+          steps: sub.steps,
+          toolCalls: sub.toolCalls,
+        });
       }
 
       const stoppedBy = handle.stopReason;
@@ -1327,7 +1374,11 @@ export class AiService {
       const opened = openAgent(description);
       if ('error' in opened) {
         return {
-          outcome: { ok: false, summary: 'агент не запущен', detail: opened.error } as ToolOutcome,
+          outcome: {
+            ok: false,
+            summary: 'агент не запущен',
+            detail: opened.error,
+          } as ToolOutcome,
           steps: 0,
           toolCalls: 0,
           usage: {},
@@ -1371,7 +1422,7 @@ export class AiService {
     };
 
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
-    const coveredReads = new Map<string, Array<{ from: number; to: number }>>();
+    const coveredReads = new Map<string, ReadRange[]>();
     // Тот же учёт — командам-читалкам в терминале: `cat` поверх уже прочитанного
     // отвечает строкой, а не второй копией текста.
     toolContext.coveredReads = coveredReads;
@@ -1387,6 +1438,12 @@ export class AiService {
     let goalContinues = 0;
     /** Работа в этом прогоне шла: без неё продолжать нечего. */
     let didWork = false;
+    /**
+     * Сколько подряд шло чтение через шелл (`cat`, `grep`, `sed`) вместо `read`.
+     * После второго добавляем строку подсказки: такие вызовы в замере — 23 из 90,
+     * а `read` дешевле и помнит уже прочитанное.
+     */
+    let shellReads = 0;
 
     for (let step = 0; step < steps; step += 1) {
       if (signal.aborted) break;
@@ -1394,7 +1451,12 @@ export class AiService {
       // Шаг трассы: время, текст модели и её вызовы. `commit` один на шаг —
       // вызывается на каждом выходе из итерации, повторный вызов ничего не делает.
       const stepStartedAt = Date.now();
-      const stepLog: RunStepLog = { index: runStepLogs.length + 1, ms: 0, calls: [], outputTokens: 0 };
+      const stepLog: RunStepLog = {
+        index: runStepLogs.length + 1,
+        ms: 0,
+        calls: [],
+        outputTokens: 0,
+      };
       let stepCommitted = false;
       const commitStep = (note?: string): void => {
         if (stepCommitted) return;
@@ -1445,7 +1507,11 @@ export class AiService {
       const stepsLeft = Math.max(0, steps - runSteps);
       // Сокращаем посреди прогона, но не на каждом шаге: разрыв кеша стоит
       // дорого, и пока впереди мало шагов, он не окупится (`midRunTrimDue`).
-      const trimmedNow = midRunTrimDue({ tokens: contextTokens, stepsLeft, pricing: pricingAt(workModel) })
+      const trimmedNow = midRunTrimDue({
+        tokens: contextTokens,
+        stepsLeft,
+        pricing: pricingAt(workModel),
+      })
         ? trimHistory()
         : 0;
       const heavy = contextTokens > HEAVY_CONTEXT_TOKENS;
@@ -1511,12 +1577,16 @@ export class AiService {
         const spent = stepCost(runUsage, workModel) ?? 0;
         const verdict = budgetVerdict(
           { limitUsd: budgetUsd, spentUsd: spent },
-          { canDegrade: Boolean(settings.ai.quickModel) && settings.ai.quickModel !== workModel },
+          {
+            canDegrade: Boolean(settings.ai.quickModel) && settings.ai.quickModel !== workModel,
+          },
         );
         if (verdict.action !== 'ok' && !budgetDeclared) {
           budgetDeclared = true;
           const degrade = verdict.action === 'degrade';
-          emit(ChatStreamEvent.Delta, { text: `\n\n${budgetMessage(verdict, degrade)}` });
+          emit(ChatStreamEvent.Delta, {
+            text: `\n\n${budgetMessage(verdict, degrade)}`,
+          });
           if (degrade) workModel = settings.ai.quickModel as string;
         }
         if (verdict.action === 'stop') {
@@ -1541,7 +1611,10 @@ export class AiService {
         if (goalText && !goalDone && didWork && !planMode && goalContinues < MAX_GOAL_CONTINUES && step + 1 < steps) {
           goalContinues += 1;
           messages.push(answer);
-          messages.push({ role: 'user', content: goalContinuePrompt(goalText, goalContinues, MAX_GOAL_CONTINUES) });
+          messages.push({
+            role: 'user',
+            content: goalContinuePrompt(goalText, goalContinues, MAX_GOAL_CONTINUES),
+          });
           emit(ChatStreamEvent.Goal, {
             goal: { text: goalText, done: false },
             continued: goalContinues,
@@ -1631,11 +1704,15 @@ export class AiService {
             goalText = update.text;
             goalDone = update.done === true;
             note = goalDone ? `Цель закрыта: ${goalText}` : `Цель поставлена: ${goalText}`;
-            emit(ChatStreamEvent.Goal, { goal: { text: goalText, done: goalDone } });
+            emit(ChatStreamEvent.Goal, {
+              goal: { text: goalText, done: goalDone },
+            });
           } else if (update?.done !== undefined && goalText) {
             goalDone = update.done;
             note = goalDone ? `Цель закрыта: ${goalText}` : `Цель снова открыта: ${goalText}`;
-            emit(ChatStreamEvent.Goal, { goal: { text: goalText, done: goalDone } });
+            emit(ChatStreamEvent.Goal, {
+              goal: { text: goalText, done: goalDone },
+            });
           }
           const toolMessage: ChatMessage = {
             role: 'tool',
@@ -1661,17 +1738,29 @@ export class AiService {
         // режим в renderer (он один знает композер), а прогон продолжается уже без
         // ограничений плана — иначе одобренное было бы нечем выполнить.
         if (isPlanExitCall(call.name, call.arguments)) {
-          emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
+          emit(ChatStreamEvent.ToolStart, {
+            id: call.id,
+            name: call.name,
+            args: call.arguments,
+          });
           const asked = parsePlanExitArgs(call.arguments);
           const decision: PlanExitDecision = host
             ? await host.exitPlan(asked)
-            : { approved: false, note: 'окно чата не подключено — утвердить план некому' };
+            : {
+                approved: false,
+                note: 'окно чата не подключено — утвердить план некому',
+              };
           if (decision.approved) {
             planApproved = true;
             widenTools();
           }
           const content = planExitResult(decision);
-          const toolMessage: ChatMessage = { role: 'tool', toolCallId: call.id, name: call.name, content };
+          const toolMessage: ChatMessage = {
+            role: 'tool',
+            toolCallId: call.id,
+            name: call.name,
+            content,
+          };
           messages.push(toolMessage);
           produced.push(toolMessage);
           didNewWork = true;
@@ -1745,7 +1834,11 @@ export class AiService {
                 }
               : undefined;
         if (denied) {
-          emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
+          emit(ChatStreamEvent.ToolStart, {
+            id: call.id,
+            name: call.name,
+            args: call.arguments,
+          });
           const refused: ChatMessage = {
             role: 'tool',
             toolCallId: call.id,
@@ -1784,12 +1877,22 @@ export class AiService {
         const readOnly = isReadOnlyCall(call.name, call.arguments);
         const repeated = readOnly ? executed.get(key) : undefined;
         // Повтор чтения уже прочитанного диапазона: текст есть выше, не дублируем.
-        const covered = repeated ? undefined : coveredRequest(call.name, call.arguments, coveredReads);
+        // После непрозрачного вызова (`terminal`) куски помечены сомнительными: сверяем
+        // версию файла с диском — не менялся — «уже прочитано» держится, менялся — забыт.
+        let covered = repeated ? undefined : coveredRequest(call.name, call.arguments, coveredReads);
+        if (covered && needsConfirm(coveredReads, covered.path)) {
+          const stamp = await this.versionOf(covered.path);
+          if (!confirmFile(coveredReads, covered.path, stamp)) covered = undefined;
+        }
         // Перекрытие — не повтор, но и не весь текст заново: просят `1–250`, а
         // `1–120` уже выше — читаем только хвост.
         const narrowed = covered || repeated ? undefined : uncoveredRequest(call.name, call.arguments, coveredReads);
 
-        emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
+        emit(ChatStreamEvent.ToolStart, {
+          id: call.id,
+          name: call.name,
+          args: call.arguments,
+        });
         let outcome: ToolOutcome;
         // Замер шага: карточка показывает имена и аргументы, а стоило ли это
         // секунду или пять минут — раньше видно не было.
@@ -1811,16 +1914,23 @@ export class AiService {
           outcome = await runTool(toolContext, call.name, narrowed?.arguments ?? call.arguments);
           if (narrowed) {
             const head = `Начало файла (строки ${narrowed.from - 1} и выше) уже есть в ветке — читаю с ${narrowed.from}.`;
-            outcome = { ...outcome, detail: outcome.detail ? `${head}\n${outcome.detail}` : head };
+            outcome = {
+              ...outcome,
+              detail: outcome.detail ? `${head}\n${outcome.detail}` : head,
+            };
           }
           if (outcome.read) rememberRead(coveredReads, outcome.read);
+          // Пачечное чтение (`paths`) тоже покрывает файлы: без этого каждое имя в
+          // нём потом читалось бы заново целиком (3 вызова за мерило — 12 тыс. ток.).
+          for (const read of outcome.reads ?? []) rememberRead(coveredReads, read);
           if (readOnly) executed.set(key, outcome);
           else {
             // Изменяющий вызов: прочитанное об изменившихся файлах устарело. Раньше
             // здесь чистилось ВСЁ, и одна правка в одном файле заставляла модель
             // перечитывать всё остальное, что она уже держала в контексте, — лишние
             // шаги на ровном месте. Забываем только затронутое; там, где задетое
-            // назвать нельзя (команда, массовая замена по маске), — по-прежнему всё.
+            // назвать нельзя (команда, массовая замена по маске), куски помечаются
+            // сомнительными и сверяются с диском при следующем чтении (`versionOf`).
             forgetChangedFiles({ executed, coveredReads }, call.name, call.arguments, outcome.changes);
           }
           didNewWork = true;
@@ -1855,6 +1965,18 @@ export class AiService {
         });
 
         const result = outcome.ok ? (outcome.detail ?? outcome.summary) : failureText(outcome);
+        // Шелл-чтение вместо `read`: после второго подряд — одна строка подсказки.
+        // Первый раз молчим: модель могла проверять, что в файле вообще есть. В замере
+        // 23 из 90 вызовов `terminal` — чтение через `cat`/`grep`/`sed`, почти всегда с
+        // ведущим `cd … &&`: они не попадают в память чтений и ломают её по частям.
+        if (call.name === 'read') shellReads = 0;
+        else if (call.name === 'terminal' && callFlags(call.name, call.arguments).includes('shell-read'))
+          shellReads += 1;
+        // Один раз на серию, а не в каждом ответе: повторённая строка сама станет шумом.
+        const shellReadNote =
+          call.name === 'terminal' && shellReads === 2
+            ? '\n(файл в проекте дешевле читать «read»: он отдаёт нужный диапазон и не повторяет уже прочитанное)'
+            : '';
         // Подключение называем вслух: иначе модель не понимает, почему инструмент
         // раньше не был виден, а человек — почему набор вырос.
         const widenedNote = widenedNow ? `\n(«${call.name}» подключён в набор)` : '';
@@ -1864,7 +1986,7 @@ export class AiService {
           name: call.name,
           // Единая точка сжатия для всех инструментов: в контекст модели уходит
           // текст без оформления, а человек в карточке (событие выше) видит полный.
-          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote,
+          content: (compressOutput ? compressToolOutput(result) : result) + widenedNote + shellReadNote,
         };
         countOutput(toolMessage.content ?? '');
         messages.push(toolMessage);
@@ -2108,7 +2230,12 @@ export class AiService {
     windowTokens: number;
     /** Набор инструментов прогона: подзадача может лишь сузить его (см. tool-presets). */
     toolPreset: ToolPresetId;
-  }): Promise<{ outcome: ToolOutcome; steps: number; toolCalls: number; usage: ChatUsage }> {
+  }): Promise<{
+    outcome: ToolOutcome;
+    steps: number;
+    toolCalls: number;
+    usage: ChatUsage;
+  }> {
     const settings = this.settings.get();
     const compressOutput = settings.ai.compressOutput !== false;
 
@@ -2116,7 +2243,10 @@ export class AiService {
     // истории беседы. Задание — одно сообщение.
     const messages: ChatMessage[] = [{ role: 'system', content: SUBAGENT_PROMPT }];
     if (params.context) messages.push({ role: 'system', content: params.context });
-    messages.push({ role: 'user', content: `Подзадача «${params.description}»:\n\n${params.prompt}` });
+    messages.push({
+      role: 'user',
+      content: `Подзадача «${params.description}»:\n\n${params.prompt}`,
+    });
 
     const available = AGENT_TOOLS.filter(
       (tool) =>
@@ -2143,7 +2273,11 @@ export class AiService {
     const webSearch = settings.ai.webSearch;
     if (settings.ai.webFetch?.enabled) {
       subContext.webFetch = {
-        fetch: (url, options) => fetchPage(url, { signal: options?.signal, maxChars: options?.maxChars }),
+        fetch: (url, options) =>
+          fetchPage(url, {
+            signal: options?.signal,
+            maxChars: options?.maxChars,
+          }),
       };
     }
     if (this.canUseWebSearch(webSearch)) {
@@ -2151,10 +2285,17 @@ export class AiService {
         search: (query, limit, callSignal) =>
           searchWeb(
             query,
-            { provider: webSearch.provider, endpoint: webSearch.endpoint, apiKey: this.webSearchKey(webSearch) },
+            {
+              provider: webSearch.provider,
+              endpoint: webSearch.endpoint,
+              apiKey: this.webSearchKey(webSearch),
+            },
             limit,
             callSignal,
-          ).then((hits) => ({ hits, providerLabel: webSearchProviderLabel(webSearch.provider) })),
+          ).then((hits) => ({
+            hits,
+            providerLabel: webSearchProviderLabel(webSearch.provider),
+          })),
       };
     }
 
@@ -2231,7 +2372,12 @@ export class AiService {
             const result = outcome.ok ? (outcome.detail ?? outcome.summary) : failureText(outcome);
             content = compressOutput ? compressToolOutput(result) : result;
           }
-          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content });
+          messages.push({
+            role: 'tool',
+            toolCallId: call.id,
+            name: call.name,
+            content,
+          });
         }
 
         stall = didNewWork ? 0 : stall + 1;
@@ -2284,7 +2430,11 @@ export class AiService {
       clipped = `${text.slice(0, SUBAGENT_REPORT_CHARS)}\n${rest}`;
     }
     return {
-      outcome: { ok: true, summary: `подзадача «${params.description}»: готово`, detail: clipped },
+      outcome: {
+        ok: true,
+        summary: `подзадача «${params.description}»: готово`,
+        detail: clipped,
+      },
       steps,
       toolCalls,
       usage,
@@ -2454,7 +2604,12 @@ export class AiService {
     }
 
     if (provider.protocol === 'anthropic') {
-      return new AnthropicProvider({ id: provider.id, label: provider.label, baseUrl: provider.baseUrl, apiKey });
+      return new AnthropicProvider({
+        id: provider.id,
+        label: provider.label,
+        baseUrl: provider.baseUrl,
+        apiKey,
+      });
     }
 
     return new OpenAiCompatibleProvider({
@@ -2480,6 +2635,20 @@ export class AiService {
       return text;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Версия файла для сверки памяти чтений: `mtimeMs:size` или `undefined`, если
+   * сосчитать нельзя (нет файла, каталог). Зовётся только для покрытия, помеченного
+   * сомнительным, — то есть после `terminal`, а не на каждом чтении.
+   */
+  private async versionOf(target: string): Promise<string | undefined> {
+    try {
+      const stat = await this.workspace.stat(target);
+      return stat.kind === 'file' ? readStamp(stat) : undefined;
+    } catch {
+      return undefined;
     }
   }
 
@@ -2635,7 +2804,12 @@ function stoppedSubagent(
   steps: number,
   toolCalls: number,
   usage: ChatUsage,
-): { outcome: ToolOutcome; steps: number; toolCalls: number; usage: ChatUsage } {
+): {
+  outcome: ToolOutcome;
+  steps: number;
+  toolCalls: number;
+  usage: ChatUsage;
+} {
   return {
     outcome: {
       ok: false,

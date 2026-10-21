@@ -84,7 +84,7 @@ describe('read длинного файла', () => {
   it('прочитанными считаются только показанные строки', async () => {
     const outcome = await read({ workspace });
     // Иначе следующий запрос «с 121 до конца» считался бы уже прочитанным.
-    expect(outcome.read).toEqual({ path: big, from: 1, to: 120 });
+    expect(outcome.read).toMatchObject({ path: big, from: 1, to: 120 });
   });
 
   it('файл длиннее 160 строк читается головой, а не целиком', async () => {
@@ -99,7 +99,7 @@ describe('read длинного файла', () => {
     expect(detail).toContain('120 | const row120');
     expect(detail).not.toContain('121 | const row121');
     expect(detail).toContain('startLine с 121');
-    expect(outcome.read).toEqual({ path: medium, from: 1, to: 120 });
+    expect(outcome.read).toMatchObject({ path: medium, from: 1, to: 120 });
   });
 
   it('файл до 160 строк по-прежнему читается целиком', async () => {
@@ -118,6 +118,6 @@ describe('read длинного файла', () => {
     await fs.writeFile(small, 'первая\nвторая\n', 'utf8');
     const outcome = await runTool({ workspace }, 'read', JSON.stringify({ path: small }));
     expect(outcome.detail).toBe('первая\nвторая\n');
-    expect(outcome.read).toEqual({ path: small, from: 1, to: 3 });
+    expect(outcome.read).toMatchObject({ path: small, from: 1, to: 3 });
   });
 });

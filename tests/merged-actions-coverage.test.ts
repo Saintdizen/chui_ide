@@ -20,19 +20,7 @@ function actionsOf(name: string): string[] {
 }
 
 /** Инструменты, у которых действие объявлено в схеме. */
-const WITH_ACTION = [
-  'browser',
-  'terminal',
-  'lsp',
-  'checks',
-  'mcp',
-  'web',
-  'file',
-  'show',
-  'mind',
-  'search',
-  'edit',
-];
+const WITH_ACTION = ['browser', 'terminal', 'lsp', 'checks', 'mcp', 'web', 'file', 'show', 'mind', 'search', 'edit'];
 
 describe('действия схемы доходят до обработчика', () => {
   for (const name of WITH_ACTION) {

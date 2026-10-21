@@ -35,7 +35,11 @@ function commandsDirFor(root: string | null, scope: ProjectCommandScope, home: s
 }
 
 /** Прочитать одну команду из файла. Ошибки чтения не всплывают: сломанный файл — не повод остаться без остальных. */
-async function readEntry(file: string, fallbackName: string, scope: ProjectCommandScope): Promise<ProjectCommand | null> {
+async function readEntry(
+  file: string,
+  fallbackName: string,
+  scope: ProjectCommandScope,
+): Promise<ProjectCommand | null> {
   try {
     const text = await fs.readFile(file, 'utf8');
     return parseCommandFile(text.slice(0, MAX_COMMAND_FILE_BYTES), { fallbackName, path: file, scope });

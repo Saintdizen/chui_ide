@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { coveredRequest, forgetChangedFiles, isCovered, rememberRead, touchedPaths, uncoveredRequest } from '../src/shared/read-coverage';
+import {
+  confirmFile,
+  coveredRequest,
+  forgetChangedFiles,
+  isCovered,
+  needsConfirm,
+  readStamp,
+  rememberRead,
+  touchedPaths,
+  uncoveredRequest,
+  type ReadRange,
+} from '../src/shared/read-coverage';
 
 /**
  * Учёт уже прочитанных диапазонов в агентном цикле.
@@ -120,7 +131,20 @@ describe('rememberRead', () => {
 describe('touchedPaths', () => {
   const edit = (path: string) =>
     JSON.stringify({
-      edits: [{ path, edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'x' }] }],
+      edits: [
+        {
+          path,
+          edits: [
+            {
+              startLine: 1,
+              startColumn: 1,
+              endLine: 1,
+              endColumn: 2,
+              newText: 'x',
+            },
+          ],
+        },
+      ],
     });
 
   it('путь правки берётся из аргументов edit', () => {
@@ -130,13 +154,23 @@ describe('touchedPaths', () => {
   it('одиночный файл без обёртки в массив — тоже путь', () => {
     const args = JSON.stringify({
       path: '/proj/b.ts',
-      edits: [{ startLine: 1, startColumn: 1, endLine: 1, endColumn: 2, newText: 'x' }],
+      edits: [
+        {
+          startLine: 1,
+          startColumn: 1,
+          endLine: 1,
+          endColumn: 2,
+          newText: 'x',
+        },
+      ],
     });
     expect([...(touchedPaths('edit', args) ?? [])]).toEqual(['/proj/b.ts']);
   });
 
   it('пути из патчей по якорю', () => {
-    const args = JSON.stringify({ patches: [{ path: '/proj/c.ts', patches: [{ oldText: 'a', newText: 'b' }] }] });
+    const args = JSON.stringify({
+      patches: [{ path: '/proj/c.ts', patches: [{ oldText: 'a', newText: 'b' }] }],
+    });
     expect([...(touchedPaths('edit', args) ?? [])]).toEqual(['/proj/c.ts']);
   });
 
@@ -148,7 +182,14 @@ describe('touchedPaths', () => {
       '/proj/d.ts',
     ]);
     const moved =
-      touchedPaths('file', JSON.stringify({ action: 'move', from: '/proj/old.ts', to: '/proj/new.ts' })) ?? new Set();
+      touchedPaths(
+        'file',
+        JSON.stringify({
+          action: 'move',
+          from: '/proj/old.ts',
+          to: '/proj/new.ts',
+        }),
+      ) ?? new Set();
     expect([...moved].sort()).toEqual(['/proj/new.ts', '/proj/old.ts']);
   });
 
@@ -159,7 +200,11 @@ describe('touchedPaths', () => {
   });
 
   it('разделители пути не мешают совпадению', () => {
-    const args = JSON.stringify({ action: 'create', path: 'C:\\proj\\a.ts', contents: '' });
+    const args = JSON.stringify({
+      action: 'create',
+      path: 'C:\\proj\\a.ts',
+      contents: '',
+    });
     expect([...(touchedPaths('file', args) ?? [])]).toEqual(['C:/proj/a.ts']);
   });
 
@@ -177,7 +222,7 @@ describe('forgetChangedFiles', () => {
       ['read:{"path":"/proj/a.ts"}', { ok: true }],
       ['read:{"path":"/proj/b.ts","endLine":9}', { ok: true }],
     ]),
-    coveredReads: new Map([
+    coveredReads: new Map<string, ReadRange[]>([
       ['/proj/a.ts', [{ from: 1, to: 100 }]],
       ['/proj/b.ts', [{ from: 1, to: 9 }]],
     ]),
@@ -194,11 +239,18 @@ describe('forgetChangedFiles', () => {
     expect(state.executed.has('read:{"path":"/proj/b.ts","endLine":9}')).toBe(true);
   });
 
-  it('команда в терминале по-прежнему забывает всё', () => {
+  it('команда в терминале не стирает память, а помечает её сомнительной', () => {
     const state = caches();
     forgetChangedFiles(state, 'terminal', JSON.stringify({ action: 'run', command: 'npm install' }));
+    // Точный кеш исполненного сбрасывается: текст в нём мог разойтись с диском.…
+    // Слишком дорого было выбрасывать всё: один `terminal` заставлял модель
+    // перечитывать каждый файл ветки. Поэтому память остаётся, но с пометкой:
+    // версию сверим с диском перед следующим повтором (`confirmFile`).
     expect(state.executed.size).toBe(0);
-    expect(state.coveredReads.size).toBe(0);
+    expect(state.coveredReads.size).toBe(2);
+    for (const ranges of state.coveredReads.values()) {
+      expect(ranges.every((range) => range.suspect === true)).toBe(true);
+    }
   });
 
   it('обратный слэш в пути не мешает забыть нужный файл', () => {
@@ -208,7 +260,15 @@ describe('forgetChangedFiles', () => {
       executed: new Map<string, { ok: boolean }>([['read:{"path":"C:/proj/x.ts"}', { ok: true }]]),
       coveredReads: new Map([['C:/proj/x.ts', [{ from: 1, to: 5 }]]]),
     };
-    forgetChangedFiles(state, 'file', JSON.stringify({ action: 'create', path: 'C:\\proj\\x.ts', contents: 'x' }));
+    forgetChangedFiles(
+      state,
+      'file',
+      JSON.stringify({
+        action: 'create',
+        path: 'C:\\proj\\x.ts',
+        contents: 'x',
+      }),
+    );
     expect(state.coveredReads.size).toBe(0);
     expect(state.executed.size).toBe(0);
   });
@@ -232,12 +292,22 @@ describe('uncoveredRequest', () => {
     );
     expect(narrowed?.from).toBe(121);
     expect(narrowed?.to).toBe(250);
-    expect(JSON.parse(narrowed!.arguments)).toEqual({ path: '/proj/a.ts', startLine: 121, endLine: 250 });
+    expect(JSON.parse(narrowed!.arguments)).toEqual({
+      path: '/proj/a.ts',
+      startLine: 121,
+      endLine: 250,
+    });
   });
 
   it('куски, стоящие встык, складываются в одно покрытие', () => {
     const chained = new Map([
-      ['/proj/a.ts', [{ from: 1, to: 60 }, { from: 40, to: 120 }]],
+      [
+        '/proj/a.ts',
+        [
+          { from: 1, to: 60 },
+          { from: 40, to: 120 },
+        ],
+      ],
     ]);
     const narrowed = uncoveredRequest(
       'read',
@@ -249,20 +319,69 @@ describe('uncoveredRequest', () => {
 
   it('выгадывать меньше двадцати строк — не стоит объяснения', () => {
     const near = new Map([['/proj/a.ts', [{ from: 1, to: 10 }]]]);
-    expect(
-      uncoveredRequest('read', JSON.stringify({ path: '/proj/a.ts', endLine: 20 }), near),
-    ).toBeUndefined();
+    expect(uncoveredRequest('read', JSON.stringify({ path: '/proj/a.ts', endLine: 20 }), near)).toBeUndefined();
   });
 
   it('просили уже прочитанное или чужое — не наш случай', () => {
-    expect(
-      uncoveredRequest('read', JSON.stringify({ path: '/proj/a.ts', endLine: 100 }), reads),
-    ).toBeUndefined();
-    expect(
-      uncoveredRequest('search', JSON.stringify({ path: '/proj/a.ts', endLine: 300 }), reads),
-    ).toBeUndefined();
-    expect(
-      uncoveredRequest('read', JSON.stringify({ path: '/proj/b.ts', endLine: 300 }), reads),
-    ).toBeUndefined();
+    expect(uncoveredRequest('read', JSON.stringify({ path: '/proj/a.ts', endLine: 100 }), reads)).toBeUndefined();
+    expect(uncoveredRequest('search', JSON.stringify({ path: '/proj/a.ts', endLine: 300 }), reads)).toBeUndefined();
+    expect(uncoveredRequest('read', JSON.stringify({ path: '/proj/b.ts', endLine: 300 }), reads)).toBeUndefined();
+  });
+});
+
+describe('версии файла вместо тотальной чистки', () => {
+  it('readStamp отличает версии', () => {
+    expect(readStamp({ mtimeMs: 1, size: 2 })).toBe('1:2');
+    expect(readStamp({ mtimeMs: 1, size: 2 })).not.toBe(readStamp({ mtimeMs: 1, size: 3 }));
+  });
+
+  it('непрозрачный вызов только помечает покрытие сомнительным', () => {
+    const state = {
+      executed: new Map(),
+      coveredReads: new Map([['/p/a.ts', [{ from: 1, to: 9, stamp: '1:2' }]]]),
+    };
+    forgetChangedFiles(state, 'terminal', JSON.stringify({ action: 'run', command: 'ls' }));
+    expect(state.coveredReads.size).toBe(1);
+    expect(needsConfirm(state.coveredReads, '/p/a.ts')).toBe(true);
+  });
+
+  it('версия совпала — покрытие снова надёжно', () => {
+    const reads = new Map([['/p/a.ts', [{ from: 1, to: 9, stamp: '1:2', suspect: true }]]]);
+    expect(confirmFile(reads, '/p/a.ts', '1:2')).toBe(true);
+    expect(needsConfirm(reads, '/p/a.ts')).toBe(false);
+  });
+
+  it('файл изменился — покрытие забыто', () => {
+    const reads = new Map([['/p/a.ts', [{ from: 1, to: 9, stamp: '1:2', suspect: true }]]]);
+    expect(confirmFile(reads, '/p/a.ts', '1:5')).toBe(false);
+    expect(reads.size).toBe(0);
+  });
+
+  it('нечем сверить — тоже забываем', () => {
+    const reads = new Map([['/p/a.ts', [{ from: 1, to: 9, stamp: '1:2', suspect: true }]]]);
+    expect(confirmFile(reads, '/p/a.ts', undefined)).toBe(false);
+    expect(reads.size).toBe(0);
+  });
+
+  it('перечитывание снимает старые куски другой версии', () => {
+    const reads = new Map([['/p/a.ts', [{ from: 1, to: 9, stamp: '1:2' }]]]);
+    rememberRead(reads, { path: '/p/a.ts', from: 10, to: 20, stamp: '1:5' });
+    expect(reads.get('/p/a.ts')).toEqual([{ from: 10, to: 20, stamp: '1:5', eof: undefined }]);
+  });
+});
+
+describe('coveredRequest без endLine', () => {
+  it('«с этой строки до конца» покрыто, если чтение дошло до конца', () => {
+    const reads = new Map([['/p/a.ts', [{ from: 1, to: 120, stamp: '1:2', eof: true }]]]);
+    expect(coveredRequest('read', JSON.stringify({ path: '/p/a.ts', startLine: 1 }), reads)).toEqual({
+      path: '/p/a.ts',
+      from: 1,
+      to: 120,
+    });
+  });
+
+  it('конец файла неизвестен — читаем заново', () => {
+    const reads = new Map([['/p/a.ts', [{ from: 1, to: 120, stamp: '1:2' }]]]);
+    expect(coveredRequest('read', JSON.stringify({ path: '/p/a.ts' }), reads)).toBeUndefined();
   });
 });

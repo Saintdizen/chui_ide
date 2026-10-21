@@ -6,10 +6,6 @@ import {
   parseNestingRules,
 } from '../src/renderer/core/file-nesting';
 
-/** Имена под родителем, для краткости тестов. */
-const under = (names: string[], parent: string): readonly string[] =>
-  nestEntries(names, DEFAULT_NESTING_RULES).children.get(parent) ?? [];
-
 /**
  * Свёртывание связанных файлов под родителя. Правило срабатывает на общий корень
  * имени: `Button.tsx` собирает `Button.module.css` и `Button.test.tsx`.

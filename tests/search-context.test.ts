@@ -121,7 +121,11 @@ describe('search с контекстом', () => {
   });
 
   it('без совпадений называет запрос и условия, которые можно ослабить', async () => {
-    const outcome = await runTool(context(), 'search', JSON.stringify({ query: 'нет-такого', context: 3, glob: 'src/**' }));
+    const outcome = await runTool(
+      context(),
+      'search',
+      JSON.stringify({ query: 'нет-такого', context: 3, glob: 'src/**' }),
+    );
     expect(String(outcome.detail)).toContain('Совпадений нет: «нет-такого»');
     expect(String(outcome.detail)).toContain('маска src/**');
   });

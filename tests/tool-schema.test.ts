@@ -68,9 +68,7 @@ describe('missingArguments', () => {
     expect(missingArguments(spec.inputSchema, { action: 'delete', path: '/a.ts' })).toEqual([]);
     expect(missingArguments(spec.inputSchema, { action: 'move', path: '/a.ts', to: '/b.ts' })).toEqual([]);
     // Плоская форма правки — тоже без отказа на этом уровне.
-    expect(missingArguments(spec.inputSchema, { path: '/a.ts', edits: [{ oldText: 'a', newText: 'b' }] })).toEqual(
-      [],
-    );
+    expect(missingArguments(spec.inputSchema, { path: '/a.ts', edits: [{ oldText: 'a', newText: 'b' }] })).toEqual([]);
   });
 
   it('не-объект вместо элемента не роняет проверку', () => {

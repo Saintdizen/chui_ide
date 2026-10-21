@@ -38,7 +38,6 @@ describe('venvDirOfPython', () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-venvact-'));
     dirs.push(root);
     const venv = await fakeVenv(root, 'shared', process.platform);
-    const python = path.join(venv, process.platform === 'win32' ? 'Scripts' : 'bin', 'python');
     expect(venvDirOfPython(path.join(venv, 'bin', 'python'))).toBe(venv);
   });
 
