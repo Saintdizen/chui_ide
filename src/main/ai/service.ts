@@ -122,6 +122,7 @@ import {
   type ReviewVerdict,
 } from '../../shared/approval-review';
 import { addUsage } from '../../shared/usage';
+import { budgetMessage, budgetVerdict, stepCost } from '../../shared/chat-budget';
 import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
 import type { TelemetryStore } from './telemetry';
@@ -587,13 +588,13 @@ export class AiService {
    * Подсказка для inline-автодополнения: продолжить код в месте курсора.
    *
    * В отличие от `chat` здесь нет ни истории, ни инструментов — только контекст
-   * вокруг курсора и короткий ответ. Модель берём активную (ту, что выбрана в
-   * панели AI): отдельной настройки для подсказок не заводим.
+   * вокруг курсора и короткий ответ. Модель берём дешёвую (`quickModel`), а
+   * без неё — активную: отдельной настройки для подсказок не заводим.
    */
   async completeInline(request: InlineCompletionRequest, signal: AbortSignal): Promise<InlineCompletionResult> {
     const ai = this.settings.get().ai;
     const providerId = ai.activeProviderId;
-    const model = ai.activeModel;
+    const model = ai.quickModel || ai.activeModel;
     if (!providerId || !model) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана модель для подсказок (панель AI)');
     }
@@ -697,13 +698,13 @@ export class AiService {
    *
    * Один запрос — один короткий ответ, как у inline-подсказок: ни истории, ни
    * инструментов, ни карты проекта. Сообщение коммита — это не беседа, и платить
-   * за беседу здесь незачем. Модель берём активную (выбранную в панели AI):
-   * отдельной настройки для сообщений не заводим.
+   * за беседу здесь незачем. Модель берём дешёвую (`quickModel`), а без неё —
+   * активную: отдельной настройки для сообщений не заводим.
    */
   async commitMessage(request: CommitPromptParts, signal: AbortSignal): Promise<CommitMessageResult> {
     const ai = this.settings.get().ai;
     const providerId = ai.activeProviderId;
-    const model = ai.activeModel;
+    const model = ai.quickModel || ai.activeModel;
     if (!providerId || !model) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана модель (панель AI)');
     }
@@ -733,13 +734,13 @@ export class AiService {
    * Тест к выделенному коду.
    *
    * Один запрос — один ответ, как у inline-подсказок и сообщения коммита: ни истории,
-   * ни инструментов, ни карты проекта — платить за беседу тут незачем. Модель берём
-   * активную (выбранную в панели AI).
+   * ни инструментов, ни карты проекта — платить за беседу тут незачем. Модель
+   * берём дешёвую (`quickModel`), а без неё — активную.
    */
   async generateTest(request: TestPromptParts, signal: AbortSignal): Promise<TestGenerationResult> {
     const ai = this.settings.get().ai;
     const providerId = ai.activeProviderId;
-    const model = ai.activeModel;
+    const model = ai.quickModel || ai.activeModel;
     if (!providerId || !model) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана модель (панель AI)');
     }
@@ -779,7 +780,7 @@ export class AiService {
   async suggestTitle(request: ChatTitleParts, signal: AbortSignal): Promise<ChatTitleResult> {
     const ai = this.settings.get().ai;
     const providerId = ai.activeProviderId;
-    const model = ai.activeModel;
+    const model = ai.quickModel || ai.activeModel;
     if (!providerId || !model) return { title: '' };
 
     let text = '';
@@ -790,7 +791,15 @@ export class AiService {
         { role: 'user', content: buildTitlePrompt(request) },
       ];
       await provider.streamChat(
-        { model, messages, temperature: 0.2, maxTokens: CHAT_TITLE_MAX_TOKENS },
+        {
+          model,
+          messages,
+          temperature: 0.2,
+          maxTokens: CHAT_TITLE_MAX_TOKENS,
+          // Название — одна строка. Обрываем на переводе строки: без него модель
+          // договаривает пояснение, а каждый такой токен платный.
+          stop: ['\n', '\n\n'],
+        },
         {
           onDelta: (piece) => {
             // Потолок по символам: `maxTokens` — просьба, а не гарантия.
@@ -1034,6 +1043,8 @@ export class AiService {
       request.model,
       firstPositive(request.maxTokens, connection?.maxTokens, settings.ai.maxTokens, passport?.maxOutputTokens),
     );
+    // Потолок беседы в долларах: 0 — бюджета нет, поведение прежнее.
+    const budgetUsd = settings.ai.chatBudgetUsd;
     const requestedEffort = request.reasoningEffort ?? connection?.reasoningEffort ?? settings.ai.reasoningEffort;
     const reasoningEffort = reasoningEffortFor(request.model, requestedEffort);
     // У модели, которая думает всегда, «без размышлений» надо ещё и выключить —
@@ -1112,6 +1123,10 @@ export class AiService {
     // Расход за весь прогон: провайдер сообщает его по шагу, а стоимость нужна за
     // прогон целиком — иначе виден только последний шаг и она занижена.
     let runUsage: ChatUsage = {};
+    /** Модель, которой идёт работа: деградирует при исчерпании бюджета. */
+    let workModel = request.model;
+    /** Бюджет уже объявлен человеку: повторять на каждом шаге незачем. */
+    let budgetDeclared = false;
     let runSteps = 0;
     let runToolCalls = 0;
     /**
@@ -1425,7 +1440,7 @@ export class AiService {
         ...(this.spillDir ? { spillDir: this.spillDir } : {}),
       });
       const done = await this.streamStep(provider, {
-        model: request.model,
+        model: workModel,
         messages,
         tools,
         temperature,
@@ -1453,6 +1468,26 @@ export class AiService {
       if (done.usage) {
         usage = done.usage;
         runUsage = addUsage(runUsage, done.usage);
+      }
+      // Бюджет беседы: шаги ограничивают длину, но не цену. Считаем после
+      // каждого шага; потолок пройден — дальше идём дешёвой моделью.
+      if (budgetUsd > 0 || budgetDeclared) {
+        const spent = stepCost(runUsage, workModel) ?? 0;
+        const verdict = budgetVerdict(
+          { limitUsd: budgetUsd, spentUsd: spent },
+          { canDegrade: Boolean(settings.ai.quickModel) && settings.ai.quickModel !== workModel },
+        );
+        if (verdict.action !== 'ok' && !budgetDeclared) {
+          budgetDeclared = true;
+          const degrade = verdict.action === 'degrade';
+          emit(ChatStreamEvent.Delta, { text: `\n\n${budgetMessage(verdict, degrade)}` });
+          if (degrade) workModel = settings.ai.quickModel as string;
+        }
+        if (verdict.action === 'stop') {
+          finishReason = finishReason ?? 'length';
+          commitStep('бюджет беседы исчерпан');
+          break;
+        }
       }
       if (done.finishReason) finishReason = done.finishReason;
 

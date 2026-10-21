@@ -7,6 +7,12 @@ export interface StreamChatParams {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Строки-обрывы: модель замолкает, как только допишет до любой из них.
+   * Для коротких ответов это дешевле, чем ждать `maxTokens`: лишние токены
+   * (перевод строки, «Надеюсь, это помогло») не генерируются вовсе.
+   */
+  stop?: readonly string[];
   /** Усилие размышления; не выставляется для моделей, которые его не понимают. */
   reasoningEffort?: ReasoningEffort;
   /**

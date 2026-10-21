@@ -95,6 +95,7 @@ export class AnthropicProvider implements AiProvider {
         messages: withCache ? withCacheBreakpoints(messages) : messages,
         stream: true,
       };
+      if (params.stop?.length) body.stop_sequences = params.stop;
       // system — блоком: cache_control на нём кеширует инструменты вместе с system.
       if (system) {
         body.system = withCache ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system;

@@ -82,6 +82,8 @@ interface StoredSettings {
     activeModel?: string;
     temperature: number;
     maxTokens: number;
+    /** Потолок расхода на беседу в долларах; 0 — бюджета нет. */
+    chatBudgetUsd: number;
     /** Не задано — окно определяется по имени модели. */
     contextWindow?: number;
     /** Абсолютный предел истории для автосжатия; 0 — не сжимать по объёму. */
@@ -90,6 +92,8 @@ interface StoredSettings {
     compactEveryTurns: number;
     /** Модель для сжатия беседы; не задана — активная. */
     compactModel?: string;
+    /** Модель для коротких подзадач; не задана — активная. */
+    quickModel?: string;
     systemPrompt: string;
     reasoningEffort: ReasoningEffort;
     /** Страховка от зацикливания: шагов «модель → инструмент → модель» в обычном режиме. */
@@ -173,6 +177,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     // там, где модель готова писать в сотню раз больше: предел ответа — свойство
     // модели, а не ассистента.
     maxTokens: 0,
+    chatBudgetUsd: 0,
     // Предел автосжатия выключен: пороги — промах кеша и подход к окну.
     compactAtTokens: COMPACT_AT_TOKENS,
     compactEveryTurns: COMPACT_EVERY_TURNS,
@@ -423,10 +428,12 @@ export class SettingsStore {
         activeModel: ai.activeModel,
         temperature: ai.temperature,
         maxTokens: ai.maxTokens,
+        chatBudgetUsd: ai.chatBudgetUsd,
         contextWindow: ai.contextWindow,
         compactAtTokens: ai.compactAtTokens,
         compactEveryTurns: ai.compactEveryTurns,
         compactModel: ai.compactModel,
+        quickModel: ai.quickModel,
         systemPrompt: ai.systemPrompt,
         reasoningEffort: ai.reasoningEffort ?? 'off',
         maxSteps: ai.maxSteps,
@@ -687,6 +694,11 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
   if (patch.activeModel !== undefined) target.activeModel = patch.activeModel;
   if (patch.temperature !== undefined) target.temperature = patch.temperature;
   if (patch.maxTokens !== undefined) target.maxTokens = patch.maxTokens;
+  // Ноль и отрицательное — бюджета нет; иначе запас округляем до цента.
+  if (patch.chatBudgetUsd !== undefined) {
+    const value = Math.round(Number(patch.chatBudgetUsd) * 100) / 100;
+    target.chatBudgetUsd = Number.isFinite(value) && value > 0 ? value : 0;
+  }
   // Окно контекста: 0 или отрицательное — снова доверяем имени модели.
   if (patch.contextWindow !== undefined) {
     const value = Math.round(patch.contextWindow);
@@ -708,6 +720,12 @@ function applyPatch(target: StoredSettings['ai'], patch: AiSettingsPatch): void 
     const value = patch.compactModel.trim();
     if (value) target.compactModel = value;
     else delete target.compactModel;
+  }
+  // Модель подзадач: пусто — снова идём активной моделью беседы.
+  if (patch.quickModel !== undefined) {
+    const value = patch.quickModel.trim();
+    if (value) target.quickModel = value;
+    else delete target.quickModel;
   }
   if (patch.systemPrompt !== undefined) target.systemPrompt = patch.systemPrompt;
   if (patch.reasoningEffort !== undefined) target.reasoningEffort = patch.reasoningEffort;
@@ -886,6 +904,10 @@ function loadSettings(filePath: string): StoredSettings {
   // он остался у всех.
   if (ai.maxTokens === 4096) ai.maxTokens = 0;
 
+  // Бюджет беседы: побитое, отрицательное и NaN — как «не задан» (0).
+  const storedBudget = Math.round(Number(storedAi.chatBudgetUsd) * 100) / 100;
+  ai.chatBudgetUsd = Number.isFinite(storedBudget) && storedBudget > 0 ? storedBudget : 0;
+
   // Предел автосжатия: 0 — не сжимать по объёму (теперь так по умолчанию). Побитое
   // или нулевое значение — как если бы его не было.
   const storedCompact = Math.round(Number(storedAi.compactAtTokens));
@@ -902,6 +924,10 @@ function loadSettings(filePath: string): StoredSettings {
     typeof storedAi.compactModel === 'string' && storedAi.compactModel.trim()
       ? storedAi.compactModel.trim()
       : undefined;
+
+  // Модель подзадач: та же проверка — строка без пробелов или ничего.
+  ai.quickModel =
+    typeof storedAi.quickModel === 'string' && storedAi.quickModel.trim() ? storedAi.quickModel.trim() : undefined;
 
   // Лимиты шагов могли прийти из старого файла или быть правлены руками.
   ai.maxSteps = clampSteps(storedAi.maxSteps, DEFAULT_SETTINGS.ai.maxSteps);

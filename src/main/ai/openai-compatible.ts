@@ -142,6 +142,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
       if (includeStreamOptions) body.stream_options = { include_usage: true };
       if (params.temperature !== undefined) body.temperature = params.temperature;
       if (params.maxTokens !== undefined) body.max_tokens = params.maxTokens;
+      if (params.stop?.length) body.stop = params.stop;
       // Имя поля — из OpenAI-протокола; так же его понимают OpenRouter, Groq и шлюзы.
       // Шкала усилий у моделей своя: DeepSeek понимает только low/high/max, и
       // наше `medium` для него — это `high`.
