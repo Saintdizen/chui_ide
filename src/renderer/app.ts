@@ -3,14 +3,12 @@ import {
   type BrowserEventPayload,
   type DebugLaunchOptions,
   type LayoutSettings,
-  type LspServerConfig,
   type Settings,
   type SettingsPatch,
   type WorkspaceChangedPayload,
 } from '../shared/api';
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
-import { lspLanguagesForKind, lspPrimaryLanguagesForKind, mergeLspServers } from '../shared/lsp-presets';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
 import { symbolIndexChip } from '../shared/symbol-index';
 import { toOffset } from '../shared/edits';
@@ -168,6 +166,7 @@ import { createTodoPanel } from './ui/todo-panel';
 import { showToast } from './ui/toast';
 import { installTooltips } from './ui/tooltip';
 import { createVenvModal } from './ui/venv-modal';
+import { createLspServers } from './core/lsp-servers';
 
 /**
  * Точка сборки приложения: сервисы, команды, подписки.
@@ -1845,27 +1844,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── запуск ────────────────────────────────────────────────────────────── */
 
-  /** Чем запускать код и какие задачи есть в проекте: спрашиваем один раз на корень. */
   const tools = new ProjectToolsModel(rpc, () => settings.run, info.platform);
   /** Подпись последнего нарисованного значка запуска: не трогаем украшения зря. */
   let runMarkerSignature = '';
-  /** Про выключенные подсказки говорим один раз за сеанс — иначе это стал бы шум. */
-  let lspHintShown = false;
-  /** Подсказку «сервера для языка проекта нет» показываем один раз за сеанс. */
-  let lspMissingHintShown = false;
-  /**
-   * Идущий прогон поиска серверов — один на всех вызывающих.
-   *
-   * В момент запуска окна `ensureLspServers` зовут почти одновременно трижды:
-   * загрузка окна, открытие проекта и смена активного корня. Настройки приходят
-   * в renderer push-событием (то есть ПОЗЖЕ ответа), поэтому каждый прогон видел
-   * один и тот же ещё не дополненный список, дописывал те же языки и показывал своё
-   * уведомление — три одинаковых тоста на старте. Вызовы, пришедшие во время
-   * прогона, ждут его результата и своего прогона не заводят.
-   */
-  let lspServersRun: Promise<boolean> | null = null;
-  /** Языки, о подключении которых уже сказали: повтор про то же — шум. */
-  const lspAnnounced = new Set<string>();
 
   /** Перечитать карту проекта: дёшево — обход имён без чтения содержимого. */
   async function refreshScan(): Promise<void> {
@@ -1878,161 +1859,38 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   }
 
   /**
-   * Сервера для языка проекта нет — сказать об этом и предложить настройку.
-   * Один раз за сеанс: на каждое обновление окружения это стало бы шумом.
+   * Языковые серверы: поиск недостающих, перезапуск, прогрев.
    *
-   * Молчать тут нельзя: без сервера не работают подсказки, переход к определению
-   * и подсветка пометок, а человек считает, что «IDE не умеет» вместо «нет сервера».
+   * Вся эта логика не знает ни DOM, ни редактора — она ушла в
+   * `core/lsp-servers.ts`, где проверяется тестом. Здесь передаются только связи:
+   * откуда взять свежие настройки, что показать человеку, куда ведёт кнопка.
    */
-  function suggestLspIfMissing(found: LspServerConfig[]): void {
-    if (lspMissingHintShown) return;
-    const kind = projectScan?.kind.id ?? null;
-    const languages = lspLanguagesForKind(kind);
-    if (!languages) return;
-    if (found.some((server) => languages.includes(server.language))) return;
-    lspMissingHintShown = true;
-    showToast(
-      kind === 'python'
-        ? 'Языковой сервер для Python не найден: переходы и подсказки работать не будут'
-        : 'Языковой сервер для JS/TS не найден: переходы и подсказки работать не будут',
-      'info',
-      { action: { label: 'Поставить', run: () => settingsModal.open('lsp') } },
-    );
-  }
-
-  /**
-   * Языковые серверы: дополнить настроенные найденными.
-   *
-   * Список может пополниться не только «с нуля»: сервер появляется позже — его
-   * поставили в только что созданное окружение проекта. Поэтому выходим не на
-   * непустом списке, а сверяем языки: чего в списке нет, а в системе нашлось —
-   * добавляем (`mergeLspServers`). Настроенные записи не трогаем: в них решения
-   * человека — свой путь, свои аргументы, выключенный сервер.
-   *
-   * Ничего не запускаем: только проверяем, что команда есть (PATH и главное
-   * окружение проекта).
-   *
-   * Возвращает признак «список пополнился»: после этого серверы нужно
-   * перезапустить, иначе новый так и не поднимется.
-   *
-   * Зовётся только из `ensureLspServers`: прогон должен быть один на всех.
-   */
-  async function discoverLspServers(): Promise<boolean> {
-    // Мастер-тумблер — решение человека: в обход него серверы не подставляем и не
-    // запускаем. Но если серверы в проекте есть, а подсказки выключены, сказать об
-    // этом стоит — иначе причину ищут в окружении, а не в настройке. Один раз за
-    // сеанс: на каждое окружение это стало бы шумом.
-    if (!settings.lsp.enabled) {
-      if (!lspHintShown) {
-        // Флаг занимаем ДО await: два вызова накладываются (загрузка и смена проекта),
-        // и если ставить его после ответа, оба успеют показать по уведомлению.
-        lspHintShown = true;
-        const available = await rpc.request('lsp.detect').catch(() => []);
-        if (available.length > 0) {
-          showToast('Языковые серверы установлены, но выключены в настройках', 'info', {
-            action: { label: 'Открыть', run: () => settingsModal.open('lsp') },
-          });
-        } else {
-          // Серверов нет — уведомления не было; пусть скажем позже, когда появятся.
-          lspHintShown = false;
-        }
-      }
-      return false;
-    }
-
-    const found = await rpc.request('lsp.detect').catch(() => []);
-    suggestLspIfMissing(found);
-    const configured = settings.lsp.servers;
-    const merged = mergeLspServers(configured, found);
-    if (merged.length === configured.length) return false;
-
-    // Дописанное всегда идёт в хвосте (см. `mergeLspServers`) — по длине исходного
-    // списка видно, что именно подключилось, и об этом стоит сказать.
-    const added = merged
-      .slice(configured.length)
-      .map((server) => server.language)
-      .filter((language) => !lspAnnounced.has(language));
-    await rpc.request('settings.update', { lsp: { servers: merged } }).catch(() => undefined);
-    // Сказать нечего — молчим: повторный прогон на тех же языках заметил бы их снова
-    // (настройки приходят push-событием позже ответа).
-    if (added.length === 0) return true;
-    for (const language of added) lspAnnounced.add(language);
-    showToast(`Языковые серверы подключены: ${added.join(', ')}`);
-    return true;
-  }
-
-  /**
-   * Дополнить настроенные серверы найденными — одним прогоном на всех.
-   *
-   * Сам поиск — в `discoverLspServers`; здесь только склейка вызовов: их в момент
-   * запуска несколько, и порознь каждый показывал своё уведомление.
-   */
-  function ensureLspServers(): Promise<boolean> {
-    if (!lspServersRun) {
-      lspServersRun = discoverLspServers().finally(() => {
-        lspServersRun = null;
-      });
-    }
-    return lspServersRun;
-  }
-
-  /**
-   * Перезапустить серверы подсказок и заново открыть в них документы.
-   *
-   * Сервер поднимается с интерпретатором проекта один раз — при первом открытии
-   * файла этого языка. Сменившееся или появившееся окружение он сам не заметит, а
-   * после перезапуска документы в нём уже не значатся: без повторного `lsp.open`
-   * подсказки пропали бы до переоткрытия файла.
-   */
-  function reopenLsp(): Promise<void> {
-    if (!settings.lsp.enabled) return Promise.resolve();
-    return rpc
-      .request('lsp.restart')
-      .then((status) => {
-        // Перезапуск снял и «не поднялось» — обновляем чип сразу ответом, а серверы
-        // поднимутся следом, когда уйдут `lsp.open` (тогда переспросим ещё раз).
-        applyLspStatus(status);
-        for (const document of documents.all()) {
-          void rpc.request('lsp.open', {
-            path: document.path,
-            languageId: document.languageId,
-            text: document.value,
-          });
-        }
-        window.setTimeout(() => void refreshLspStatus(), 1500);
-      })
-      .catch(() => undefined);
-  }
-
-  /**
-   * Прогреть серверы языков проекта, не дожидаясь открытия файлов.
-   *
-   * Языки берём из двух мест, и оба нужны:
-   *   • карта проекта — что в нём действительно лежит;
-   *   • вид проекта — по его манифестам (`lspPrimaryLanguagesForKind`): репозиторий
-   *     может быть Python-проектом без единого `.py` (конфиги да пустой пакет), и
-   *     сервер ему всё равно нужен; сюда же попадают языки, чьих файлов пока нет.
-   *
-   * Греть серверы языков, которых в проекте нет, — лишние процессы. Карта от другого
-   * корня (проект только что сменился) — молчим: прогреем, когда она пересчитается.
-   * Для каких языков сервер есть, решает main — у него свежие настройки, а здешние
-   * могли отстать; там же поднятый сервер обходит проект и строит индекс.
-   */
-  function prewarmLsp(): void {
-    if (!settings.lsp.enabled) return;
-    const root = workspace.root;
-    const scan = projectScan;
-    if (!root || !scan || scan.root !== root) return;
-    const fromKind = lspPrimaryLanguagesForKind(scan.kind.id) ?? [];
-    const languages = [...new Set([...scan.languages.map((item) => item.id), ...fromKind])];
-    if (languages.length === 0) return;
-    void rpc
-      .request('lsp.prewarm', { languages })
-      .then(() => refreshLspStatus())
-      // Прогрев заодно запускает сборку карты символов в main — начинаем за ней следить.
-      .then(() => refreshSymbolIndex())
-      .catch(() => undefined);
-  }
+  const lspServers = createLspServers({
+    rpc,
+    // Тумблер и список читаем СВЕЖИМИ функциями, а не значениями: настройки
+    // приходят push-событием позже ответа `settings.update`.
+    settings: () => ({ lsp: settings.lsp }),
+    root: () => workspace.root,
+    scan: () => projectScan,
+    documents: () => documents.all(),
+    // Уведомление с кнопкой — форма `showToast`, но кнопка называется иначе.
+    toast: (message, kind, action) =>
+      action
+        ? showToast(message, kind, { action: { label: action.label, run: action.run } })
+        : showToast(message, kind),
+    openLspSettings: () => {
+      // Окно настроек на разделе «Языки»: оттуда ставят сервер, которого нет.
+      settingsModal.open('lsp');
+    },
+    onStatus: (status) => applyLspStatus(status),
+    onPrewarmed: () => refreshSymbolIndex(),
+    onRestarted: () => {
+      // Перезапуск снял серверы: чип обновился сразу ответом, а «не поднялось» надо
+      // переспросить, когда документы доедут до main.
+      window.setTimeout(() => void refreshLspStatus(), 1500);
+    },
+  });
+  const refreshLsp = (): void => void lspServers.refresh();
 
   /**
    * Карта символов: сколько уже разобрано.
@@ -2061,20 +1919,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         }, 1000);
       })
       .catch(() => undefined);
-  }
-
-  /**
-   * Подхватить появившиеся серверы и перезапустить уже настроенные.
-   *
-   * Одно без другого бессмысленно: без перезапуска новый сервер не поднимется, а
-   * без перезапуска со сменившимся окружением старый останется с прошлым
-   * интерпретатором. Поэтому порядок один и тот же во всех случаях, когда
-   * окружение могло измениться: сначала дополнить список, потом перезапуск.
-   */
-  function refreshLsp(): void {
-    void ensureLspServers()
-      .then(() => reopenLsp())
-      .then(() => prewarmLsp());
   }
 
   /** Окружение изменилось: перечитать инструменты, карту проекта, подсказки и импорты. */
@@ -6663,8 +6507,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         await refreshScan();
         preloadEnvironment();
         // Смена активного корня может сменить языки проекта — греем их серверы.
-        await ensureLspServers();
-        prewarmLsp();
+        await lspServers.ensure();
+        void lspServers.prewarm();
       })();
       // Активный корень сменился — у него может быть свой набор настроек дерева.
       explorer.applySettings(resolveExplorerSettings(settings.explorer, workspace.root));
@@ -6683,8 +6527,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       preloadEnvironment();
       // У нового проекта мог появиться свой сервер в окружении (pylsp в его venv):
       // сначала подхватываем серверы, затем греем языки проекта.
-      await ensureLspServers();
-      prewarmLsp();
+      await lspServers.ensure();
+      lspServers.prewarm();
     })();
     // Другой проект — другое рабочее место: восстанавливаем его из сессии,
     // затем накладываем настройки и макет проекта из .chui_ide.
@@ -6739,12 +6583,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   await tools.refresh(workspace.root);
   await refreshScan();
-  await ensureLspServers();
+  await lspServers.ensure();
   // Состав серверов читаем сразу: чип в статусбаре покажет, что поднято и откуда.
   void refreshLspStatus();
   // И греем серверы языков проекта, не дожидаясь открытия файлов: подсказки,
   // переходы и поиск по символам готовы сразу (см. `prewarmLsp`).
-  prewarmLsp();
+  lspServers.prewarm();
   // Карта символов могла начать собираться ещё до окна (проект открыли раньше) — спросим
   // о ней сразу, не дожидаясь прогрева серверов: виджет в полосе состояния не должен
   // появляться только по счастливой случайности.
