@@ -17,7 +17,8 @@
 
 import { languageFromPath } from '../../core/languages';
 import { placePopup } from '../../core/popup-placement';
-import { grammarFor } from '../highlight/registry';
+import { languageGrammar } from '../highlight/lazy-registry';
+import type { Grammar } from '../highlight/grammar';
 import { LineHighlighter } from '../highlight/highlighter';
 import { sharedTokens } from '../highlight/token-cache';
 import { paletteOf, roleOfToken } from '../highlight/style';
@@ -68,6 +69,7 @@ export class PeekWidget {
   private last = 0;
   private targetLine = 1;
   private language = 'plaintext';
+  private grammar: Grammar | null = null;
 
   /** Открыть место насовсем — дело вызывающего. */
   onOpen: (() => void) | null = null;
@@ -131,6 +133,15 @@ export class PeekWidget {
     this.lines = payload.text.split('\n');
     this.targetLine = Math.max(1, payload.targetLine);
     this.language = languageFromPath(payload.path);
+    // Грамматика — `import()`-ом (см. `highlight/lazy-registry.ts`): 34 языка
+    // незачем везти в первом чанке ради всплывающей копии. Пока не приехала —
+    // копия показывается простым текстом, по приезде перерисовывается.
+    this.grammar = null;
+    void languageGrammar(this.language).then((grammar) => {
+      if (this.language !== languageFromPath(payload.path)) return;
+      this.grammar = grammar;
+      if (this.visible) this.render();
+    });
     const window = peekWindow(this.lines.length, this.targetLine);
     this.first = window.first;
     this.last = window.last;
@@ -203,7 +214,7 @@ export class PeekWidget {
 
   /** Пересобрать видимое окно строк: номера и текст с подсветкой. */
   private render(): void {
-    const grammar = grammarFor(this.language);
+    const grammar = this.grammar;
     const highlighter = new LineHighlighter(grammar, (line) => this.lines[line] ?? '', sharedTokens);
     const fragment = document.createDocumentFragment();
     for (let line = this.first; line <= this.last; line += 1) {

@@ -28,7 +28,7 @@
 import type { TextBuffer } from '../core/text-buffer';
 import { LineHighlighter } from '../highlight/highlighter';
 import { sharedTokens } from '../highlight/token-cache';
-import { grammarFor } from '../highlight/registry';
+import { languageGrammar } from '../highlight/lazy-registry';
 import type { Token } from '../highlight/tokens';
 import { paletteOf, roleOfToken } from '../highlight/style';
 import { overlayRanges, type RoleRange } from '../highlight/overlay';
@@ -239,13 +239,10 @@ export class EditorView {
     this.selections = [caret(0)];
     this.whitespace = options.whitespace ?? 'none';
     this.lineCount = buffer.lineCount;
-    // Текст строки подсветка берёт сама — ей довольно функции: так её можно проверить
-    // в тестах без модели текста (см. `highlight/highlighter.ts`).
-    this.highlighter = new LineHighlighter(
-      options.language ? grammarFor(options.language) : null,
-      (line) => this.buffer.lineText(line + 1),
-      sharedTokens,
-    );
+    // Грамматика приходит снаружи: здесь она нужна для первой отрисовки, а та всё
+    // равно дождётся `import()` реестра (см. `host/editor-host.ts`). Статический
+    // импорт реестра отсюда тянул бы все языки в первый же чанк — через `diff-editor`.
+    this.highlighter = new LineHighlighter(null, (line) => this.buffer.lineText(line + 1), sharedTokens);
     // Радужные скобки берут текст и токены той же строки: разбор подсветки уже есть,
     // второй раз строку не разбираем. Вложенность ведём по всему документу.
     this.bracketDepth = new BracketDepth(
@@ -743,13 +740,18 @@ export class EditorView {
     this.render();
   }
 
+  private languageId: string | null = null;
+
   /** Сменить язык подсветки (открыли другой файл в этой же вкладке). */
   setLanguage(languageId: string): void {
-    this.highlighter.setGrammar(grammarFor(languageId));
-    // Вложенность зависит от того, что подсветка считает строкой/комментарием, —
-    // со сменой языка пересчитываем с нуля.
-    this.bracketDepth.reset();
-    this.rerender();
+    this.highlighter.setGrammar(null);
+    void languageGrammar(languageId).then((grammar) => {
+      if (this.languageId !== languageId) return;
+      this.highlighter.setGrammar(grammar);
+      this.bracketDepth.reset();
+      this.rerender();
+    });
+    this.languageId = languageId;
   }
 
   /** Сменить схему оформления: цвета токенов берутся из темы и её надо переставить. */

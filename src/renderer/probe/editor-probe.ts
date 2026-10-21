@@ -34,6 +34,7 @@ import type { DiagnosticItem } from '../../shared/api';
 import type { SymbolLocation } from '../../shared/lsp-locations';
 import { indentFoldRanges, mergeFoldRanges } from '../../shared/fold-ranges';
 import { semanticFoldRanges } from '../editor/highlight/folds';
+import { grammarFor } from '../editor/highlight/registry';
 
 /**
  * Документ для пробы. Собран так, чтобы задеть всё, что есть в раскладке:
@@ -500,7 +501,7 @@ const foldsStore = new DocumentStore();
 const foldsRegistry = new DocumentRegistry(foldsStore);
 const foldsWorkspace = new EditorWorkspace(foldsRoot, foldsRegistry, {
   foldRanges: async (_path, text) =>
-    mergeFoldRanges([...semanticFoldRanges(text, 'typescript'), ...indentFoldRanges(text, 4)]),
+    mergeFoldRanges([...semanticFoldRanges(grammarFor('typescript'), text), ...indentFoldRanges(text, 4)]),
 });
 const foldsDoc = foldsStore.open(
   '/probe/folds.ts',

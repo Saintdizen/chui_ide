@@ -27,7 +27,6 @@
 
 import { mergeFoldRanges, type FoldRange } from '../../../shared/fold-ranges';
 import { ST_NORMAL, type Grammar } from './grammar';
-import { grammarFor } from './registry';
 import { COMMENT, STRING } from './tokens';
 
 /**
@@ -47,12 +46,26 @@ export interface SemanticFoldOptions {
 }
 
 /**
- * Диапазоны свёртки по грамматике языка. Языка без грамматики это не смущает: текста
- * по скобкам не сворачиваем (неизвестно, что скобка, а что буква) — вернём пусто.
+ * Диапазоны свёртки по готовой грамматике. Языка без грамматики это не смущает:
+ * текста по скобкам не сворачиваем (неизвестно, что скобка, а что буква) — вернём пусто.
+ *
+ * Грамматику передаёт вызывающий: реестр грузится по требованию (`grammarFor` в
+ * `core/highlight`), и держать здесь статический импорт значило бы вернуть все
+ * 34 языка в первый чанк — ради свёртки, которую чат не спрашивает.
  */
-export function semanticFoldRanges(text: string, languageId: string, options: SemanticFoldOptions = {}): FoldRange[] {
-  const grammar = grammarFor(languageId);
+export function semanticFoldRanges(
+  grammar: Grammar | null,
+  text: string,
+  options: SemanticFoldOptions = {},
+): FoldRange[] {
   if (!grammar) return [];
+  return foldRangesWithGrammar(grammar, text, options);
+}
+
+/**
+ * То же по готовой грамматике — когда она уже на руках (`await` реестра снаружи).
+ */
+export function foldRangesWithGrammar(grammar: Grammar, text: string, options: SemanticFoldOptions = {}): FoldRange[] {
   const maxLines = options.maxLines ?? MAX_SEMANTIC_FOLD_LINES;
   const lines = text.split('\n');
   if (lines.length > maxLines) return [];

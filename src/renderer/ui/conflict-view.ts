@@ -6,7 +6,7 @@ import {
   parseConflicts,
 } from '../../shared/conflicts';
 import type { TextEdit } from '../../shared/edits';
-import type { OwnDiffHandle } from '../editor/host/diff-editor';
+import type { OwnDiffHandle } from '../core/diff-handle';
 import type { GitModel } from '../core/git-model';
 import { languageFromPath } from '../core/languages';
 import { clear, h, svgIcon } from './dom';

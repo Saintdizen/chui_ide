@@ -7,7 +7,7 @@ import { indentFoldRanges, mergeFoldRanges } from '../src/shared/fold-ranges';
 
 /** Запустить свёртку по грамматике языка на готовом тексте. */
 function folds(text: string, language: string) {
-  return semanticFoldRanges(text, language);
+  return semanticFoldRanges(grammarFor(language), text);
 }
 
 describe('semanticFoldRanges: блоки по скобкам', () => {
@@ -73,15 +73,15 @@ describe('semanticFoldRanges: многострочные конструкции'
 
 describe('semanticFoldRanges: пределы и отсутствие грамматики', () => {
   it('язык без грамматики — пусто', () => {
-    expect(semanticFoldRanges('{\n}\n', 'plaintext')).toEqual([]);
-    expect(semanticFoldRanges('{\n}\n', 'неведомый-язык')).toEqual([]);
+    expect(semanticFoldRanges(grammarFor('plaintext'), '{\n}\n')).toEqual([]);
+    expect(semanticFoldRanges(grammarFor('неведомый-язык'), '{\n}\n')).toEqual([]);
   });
 
   it('файл длиннее предела не разбираем — останутся отступы', () => {
     const text = '{\n'.repeat(MAX_SEMANTIC_FOLD_LINES + 1);
-    expect(semanticFoldRanges(text, 'javascript')).toEqual([]);
+    expect(semanticFoldRanges(grammarFor('javascript'), text)).toEqual([]);
     // Предел можно задать и самому — им пользуются проверки на больших текстах.
-    expect(semanticFoldRanges(text, 'javascript', { maxLines: 5 })).toEqual([]);
+    expect(semanticFoldRanges(grammarFor('javascript'), text, { maxLines: 5 })).toEqual([]);
   });
 
   it('разбор для готовой грамматики доступен отдельно', () => {
@@ -96,7 +96,7 @@ describe('свёртка на настоящем файле проекта', () 
   it('в исходнике проекта находятся сворачиваемые блоки', () => {
     const file = path.join(__dirname, '..', 'src', 'renderer', 'editor', 'host', 'editor-commands.ts');
     const text = readFileSync(file, 'utf8');
-    const ranges = semanticFoldRanges(text, 'typescript');
+    const ranges = semanticFoldRanges(grammarFor('typescript'), text);
     expect(ranges.length).toBeGreaterThan(5);
     // Все диапазоны осмысленны: начало раньше конца, конец не вылезает за файл.
     const lines = text.split('\n').length;

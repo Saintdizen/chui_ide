@@ -84,6 +84,7 @@ import { installSuggestions } from '../shared/import-install';
 import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
 import { surroundOptions } from './editor/input/surround';
 import { semanticFoldRanges } from './editor/highlight/folds';
+import { languageGrammar } from './editor/highlight/lazy-registry';
 import { packageForModule } from '../shared/python-packages';
 import { fetchResultsSummary } from '../shared/git-multiroot';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
@@ -524,7 +525,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     foldRanges: async (path, text) => {
       const fromServer = await lsp.foldingRanges(path);
       if (fromServer.length > 0) return fromServer;
-      const grammar = semanticFoldRanges(text, languageFromPath(path));
+      // Свёртка ждёт реестр (см. `lazy-registry`): без грамматики возвращаются только
+      // отступы, а реестр к этому моменту обычно уже приехал — его просит открытие файла.
+      const grammar = semanticFoldRanges(await languageGrammar(languageFromPath(path)), text);
       const indent = indentFoldRanges(text, settings.editor.tabSize);
       return mergeFoldRanges([...grammar, ...indent]);
     },
@@ -1109,6 +1112,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (kind === 'node') void ensureNodeEnv().refresh();
     else void ensurePythonEnv().refresh();
   }
+
+  // Сравнение версий грузится по требованию: `OwnDiffEditor` тянет за собой реестр
+  // грамматик через `editor-view`, и статический импорт увез бы все 34 языка в первый
+  // чанк. Фабрика ставится сразу, модуль приезжает `import()` — к первому открытию
+  // экрана различий он уже здесь.
+  void import('./editor/host/diff-editor').then((module) => {
+    editors.setDiffFactory((container) => new module.OwnDiffEditor(container));
+  });
 
   const diffView = createDiffView({
     createDiff: (container) => editors.createDiff(container),

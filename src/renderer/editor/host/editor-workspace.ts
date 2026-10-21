@@ -30,7 +30,7 @@ import type { TextDocument } from '../../core/document';
 import { Emitter } from '../../core/events';
 import type { DiagnosticItem, LspDiagnostic } from '../../../shared/api';
 import { DiagnosticsStore } from './diagnostics';
-import { OwnDiffEditor, type OwnDiffHandle } from './diff-editor';
+import type { OwnDiffHandle } from './diff-editor';
 import { availableCommands, findEditorCommand, type EditorCommandContext } from './editor-commands';
 import { ProblemNavigation } from './problem-navigation';
 import type { SymbolSource } from './symbol-navigation';
@@ -835,8 +835,25 @@ export class EditorWorkspace {
    * не меняясь. Схему берём текущую: сравнение должно следовать за темой приложения.
    */
   createDiff(container: HTMLElement): OwnDiffHandle {
-    return new OwnDiffEditor(container);
+    const factory = this.diffFactory;
+    if (!factory) {
+      // Пока модуль сравнения едет, экран различий открывать нечем — но это ошибка
+      // сборки, а не положение дел: `app.ts` ставит фабрику на старте.
+      throw new Error('сравнение версий не подключено: setDiffFactory не вызван');
+    }
+    return factory(container);
   }
+
+  /**
+   * Сравнение двух версий: фабрика приходит снаружи (из `app.ts`, через `import()`),
+   * потому что конструктор `OwnDiffEditor` тянет весь редактор. Сравнение нужно
+   * только на экране различий — значит, и грузиться он должен там.
+   */
+  setDiffFactory(factory: (container: HTMLElement) => OwnDiffHandle): void {
+    this.diffFactory = factory;
+  }
+
+  private diffFactory: ((container: HTMLElement) => OwnDiffHandle) | null = null;
 
   /** Сменить схему оформления на всех панелях. */
   refreshTheme(): void {

@@ -1,5 +1,5 @@
 import type { GitDiff, GitDiffHunk } from '../../shared/api';
-import type { OwnDiffHandle, DiffSide } from '../editor/host/diff-editor';
+import type { OwnDiffHandle, DiffSide } from '../core/diff-handle';
 import type { GitModel } from '../core/git-model';
 import type { ReviewModel } from '../core/review-model';
 import type { ReviewThread } from '../../shared/review';
