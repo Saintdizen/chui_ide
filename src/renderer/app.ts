@@ -167,6 +167,7 @@ import { showToast } from './ui/toast';
 import { installTooltips } from './ui/tooltip';
 import { createVenvModal } from './ui/venv-modal';
 import { createLspServers } from './core/lsp-servers';
+import { editorSurfacePlan } from './core/editor-surface';
 
 /**
  * Точка сборки приложения: сервисы, команды, подписки.
@@ -1398,6 +1399,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // ленту чата, — безопасно (без `innerHTML`) и с той же подсветкой кода.
   // Какие файлы в режиме просмотра — помним набором путей: переключение вкладок режим не сбрасывает.
   const markdownPreviews = new Set<string>();
+  /** Разметка сейчас показана — чтобы не перечитывать файл на каждом пересчёте. */
+  let markdownPreviewShown = false;
   const markdownPreview = createMarkdownPreview({
     openEditors,
     documents,
@@ -1583,100 +1586,76 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   }
 
   function syncChatTab(): void {
-    const shown = chatInEditor && chatTabActive;
-    chatEditor.hidden = !shown;
-    layout.editorIsland.classList.toggle('is-chat', shown);
-    // Чат, картинка, страница и разметка делят одну область — одновременно их не показываем.
-    if (shown) {
-      imageView.hide();
-      layout.editorIsland.classList.remove('is-image');
-      browserView.hide();
-      layout.editorIsland.classList.remove('is-browser');
+    applySurfaces();
+  }
+
+  /**
+   * Что показать в области редактора — решает `core/editor-surface.ts`.
+   *
+   * Раньше каждый `sync*` знал про чужие экраны и гасил их сам; добавление
+   * седьмого экрана требовало правки всех. Теперь решение одно, а здесь только
+   * исполнение: экраны вне `shown` гасим, `shown` включаем. Классы у области те же,
+   * и снимаются они всегда — даже у того экрана, что уже погашен (иначе при смене
+   * вкладки оставался бы чужой класс и полотно пряталось бы зря).
+   */
+  function applySurfaces(): void {
+    const activePath = openEditors.active?.path ?? null;
+    const plan = editorSurfacePlan({
+      chatInEditor,
+      chatTabActive,
+      activePageId: browserTabs.activePageId,
+      activePath,
+      isImage: activePath !== null && isImagePath(activePath),
+      isOffice: activePath !== null && isOfficePath(activePath),
+      markdownPreview: activePath !== null && markdownPreviews.has(activePath),
+    });
+    const island = layout.editorIsland;
+    island.classList.toggle('is-chat', plan.shown === 'chat');
+    island.classList.toggle('is-browser', plan.shown === 'page');
+    island.classList.toggle('is-image', plan.shown === 'image');
+    island.classList.toggle('is-doc', plan.shown === 'doc');
+    island.classList.toggle('is-markdown', plan.shown === 'markdown');
+    chatEditor.hidden = plan.shown !== 'chat';
+    if (plan.shown !== 'page') browserView.hide();
+    if (plan.shown !== 'image') imageView.hide();
+    if (plan.shown !== 'doc') docView.hide();
+    if (plan.shown !== 'markdown') {
       markdownPreview.hide();
-      layout.editorIsland.classList.remove('is-markdown');
-      // Документ Office показывает свой экран — он тоже уступает чату.
-      docView.hide();
-      layout.editorIsland.classList.remove('is-doc');
-    } else {
-      // Чат ушёл — вернуть тот экран, которому принадлежит активная вкладка.
-      syncImage();
-      syncBrowser();
-      syncMarkdown();
-      syncDoc();
+      markdownPreviewShown = false;
     }
-    tabs.refresh();
-    // Вкладка чата — это тоже «показан ли чат»: кнопка AI должна это отражать.
+    switch (plan.shown) {
+      case 'page': {
+        const page = browserTabs.active;
+        // Вложение приезжает из main готовым слоем: показываем, только если его нет.
+        // Иначе каждый чих вкладки (смена заголовка, загрузка) дёргал бы main зря.
+        if (page && (browserView.pageId !== page.id || !browserView.isOpen)) browserView.show(page);
+        break;
+      }
+      case 'image':
+        // Только при смене файла: перезапись сбрасывала бы прокрутку и мигала на каждом
+        // чихе вкладок.
+        if (activePath !== null && imageView.path !== activePath) imageView.show(activePath);
+        break;
+      case 'doc':
+        if (activePath !== null) docView.show(activePath);
+        break;
+      case 'markdown':
+        // `show()` всегда перечитывает файл и поднимает прокрутку вверх — зовём, только
+        // когда разметку действительно надо обновить (после правки или переключения
+        // вкладки). Остальные поводы (страница, режим) ей ни к чему.
+        if (!markdownPreviewShown) markdownPreview.show();
+        markdownPreviewShown = true;
+        break;
+      default:
+        // Текст — экранам делать нечего, они уже погашены выше.
+        break;
+    }
+    // Подсветка кнопок в шапке идёт за экраном: по ней видно, открыт ли чат, браузер.
     syncViewButtons();
+    if (plan.shown !== 'chat') tabs.refresh();
   }
 
-  /**
-   * Активная вкладка — картинка: полотно редактора уступает вьюеру. Зовётся по
-   * смене активной вкладки и по показу чата — они делят одну область экрана.
-   */
-  function syncImage(): void {
-    const path = openEditors.active?.path ?? null;
-    const image = path !== null && isImagePath(path) ? path : null;
-    // Страница браузера занимает ту же область: уступаем ей.
-    const shown = image !== null && browserTabs.activePageId === null && !(chatInEditor && chatTabActive);
-    layout.editorIsland.classList.toggle('is-image', shown);
-    if (shown && image !== null) {
-      imageView.show(image);
-      // Документ Office — тоже экран на всю область: одновременно их не показываем.
-      docView.hide();
-      layout.editorIsland.classList.remove('is-doc');
-    } else imageView.hide();
-  }
-
-  /**
-   * Активная вкладка — документ Office (.docx/.xlsx): полотно уступает его экрану.
-   * Зовётся по смене активной вкладки и по показу чата: область у них одна.
-   */
-  function syncDoc(): void {
-    const path = openEditors.active?.path ?? null;
-    const doc = path !== null && isOfficePath(path) ? path : null;
-    const shown = doc !== null && browserTabs.activePageId === null && !(chatInEditor && chatTabActive);
-    layout.editorIsland.classList.toggle('is-doc', shown);
-    if (shown && doc !== null) {
-      docView.show(doc);
-      // Место в области одно: картинка и разметка уступают документу.
-      imageView.hide();
-      layout.editorIsland.classList.remove('is-image');
-      markdownPreview.hide();
-      layout.editorIsland.classList.remove('is-markdown');
-    } else {
-      docView.hide();
-    }
-  }
-
-  /**
-   * Активная вкладка — страница браузера: полотно редактора уступает вложению.
-   * Чат и страница делят одну область, поэтому показан может быть только один.
-   */
-  function syncBrowser(): void {
-    const page = browserTabs.active;
-    const shown = page !== null && !(chatInEditor && chatTabActive);
-    layout.editorIsland.classList.toggle('is-browser', shown);
-    if (shown && page) {
-      // Вложение приезжает из main готовым слоем: показываем, только если его нет.
-      // Иначе каждый чих вкладки (смена заголовка, загрузка) дёргал бы main зря.
-      if (browserView.pageId !== page.id || !browserView.isOpen) browserView.show(page);
-    } else {
-      browserView.hide();
-    }
-    if (shown) {
-      // Картинке здесь места нет: обе области — это один и тот же прямоугольник экрана.
-      imageView.hide();
-      layout.editorIsland.classList.remove('is-image');
-      markdownPreview.hide();
-      layout.editorIsland.classList.remove('is-markdown');
-      docView.hide();
-      layout.editorIsland.classList.remove('is-doc');
-    }
-    // Подсветка кнопки в шапке идёт за страницей: она показывает, открыт ли браузер.
-    syncViewButtons();
-  }
-
-  /** Путь активного файла, если он сейчас показан разметкой; иначе `null`. */
+  /** Часы правок файла и разметки: что показывать — решает `applySurfaces`. */
   function previewingMarkdownPath(): string | null {
     const path = openEditors.active?.path ?? null;
     return path !== null && markdownPreviews.has(path) ? path : null;
@@ -1687,33 +1666,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (path === null || !isMarkdownPath(path)) return;
     if (on) markdownPreviews.add(path);
     else markdownPreviews.delete(path);
-    syncMarkdown();
+    applySurfaces();
     tabs.refresh();
   }
 
   /** Переключить режим файла (.md): текст ↔ разметка. */
   function toggleMarkdownPreview(path: string): void {
     setMarkdownPreview(!markdownPreviews.has(path), path);
-  }
-
-  /**
-   * Активная вкладка — markdown в режиме просмотра: полотно уступает разметке.
-   * Режим помним по пути файла, поэтому переключение вкладок его не сбрасывает.
-   */
-  function syncMarkdown(): void {
-    const path = previewingMarkdownPath();
-    const shown = path !== null && browserTabs.activePageId === null && !(chatInEditor && chatTabActive);
-    layout.editorIsland.classList.toggle('is-markdown', shown);
-    if (shown) {
-      markdownPreview.show();
-      // Разметке здесь места не больше, чем картинке: та же прямоугольная область экрана.
-      imageView.hide();
-      layout.editorIsland.classList.remove('is-image');
-      browserView.hide();
-      layout.editorIsland.classList.remove('is-browser');
-    } else {
-      markdownPreview.hide();
-    }
   }
 
   // Страница навигировалась, открылась или закрылась — полотно идёт за ней,
@@ -1724,11 +1683,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // только в обработчике клика по вкладке.
     if (browserTabs.activePageId !== null) hideChatTab();
     // Страница заняла или освободила область: полотно, картинка и разметка делят
-    // её с ней, поэтому синхронизируем все экраны, а не только браузер.
-    syncImage();
-    syncBrowser();
-    syncMarkdown();
-    syncDoc();
+    // её с ней, поэтому пересчитываем область целиком, а не только браузер.
+    applySurfaces();
   });
 
   function setChatInEditor(next: boolean): void {
@@ -6215,10 +6171,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       browserTabs.deactivate();
     }
     // Активной могла стать картинка, документ Office или markdown в режиме разметки —
-    // полотно уступает им.
-    syncImage();
-    syncMarkdown();
-    syncDoc();
+    // область пересчитывается целиком.
+    applySurfaces();
     // Точки останова контроллер помнит по файлам, а редактор о них не знает:
     // при открытии вкладки отдаём ему набор — значки (с условиями) появятся сразу.
     for (const path of openEditors.paths) editors.setBreakpoints(path, debug.breakpointsOf(path));
