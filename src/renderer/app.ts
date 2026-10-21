@@ -16,7 +16,8 @@ import { perf } from '../shared/perf';
 import { classMembers } from './editor/complete/member-access';
 import { declarationOf, enclosingClassAt, overrideSnippet, paramsOf } from './editor/complete/override';
 import type { FileOperation } from '../shared/lsp-workspace-edit';
-import { progressLabel, type LspProgress, type WorkProgress } from '../shared/lsp-progress';
+import type { LspProgress } from '../shared/lsp-progress';
+import { createLspProgressController } from './core/lsp-progress';
 import { DEFAULT_SNIPPETS } from '../shared/snippets';
 import { revertPrompt } from '../shared/unsaved';
 import { AutoSave } from './core/auto-save';
@@ -5827,22 +5828,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   }
 
   /**
-   * Чем занят языковой сервер: состояния по токенам. Сервер шлёт `begin`/`report`/`end`
-   * (`$/progress`); показываем последнее начатое занятие, при `end` убираем. Токенов бывает
-   * несколько сразу (индексация и поиск параллельно), поэтому их и держим списком.
+   * Чем занят языковой сервер: состояния по токенам — в `core/lsp-progress.ts`
+   * (параллельные занятия, повторный `report`, забытый токен). Здесь — показ в статусбар.
    */
-  const lspProgress = new Map<string, WorkProgress>();
-
-  function applyLspProgress(progress: LspProgress): void {
-    if (progress.kind !== 'work') return;
-    const key = String(progress.token);
-    if (progress.phase === 'end') lspProgress.delete(key);
-    else lspProgress.set(key, progress);
-    const active = [...lspProgress.values()].at(-1) ?? null;
-    statusBar.update({
-      progress: active ? { label: progressLabel(active), percentage: active.percentage ?? null } : null,
-    });
-  }
+  const lspProgress = createLspProgressController({
+    show: (view) => statusBar.update({ progress: view }),
+  });
 
   const refreshStatus = (): void => {
     const active = openEditors.active;
@@ -6103,7 +6094,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         applySettings(rebuildSettings());
         break;
       case PushTopic.LspProgress:
-        applyLspProgress(message.payload as LspProgress);
+        lspProgress.apply(message.payload as LspProgress);
         break;
       case PushTopic.BrowserNav: {
         const payload = message.payload as BrowserEventPayload;
