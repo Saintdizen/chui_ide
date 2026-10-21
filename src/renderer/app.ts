@@ -70,9 +70,8 @@ import {
   type RunnableFile,
   testTargetOf,
 } from './core/run-config';
-import { isNodeTestFile, isPythonTestFile, type ProjectScan } from '../shared/project-scan';
-import { findRunnableTests } from '../shared/python-tests';
-import { detectNodeTestRunner, findRunnableNodeTests, type NodeTestRunner } from '../shared/node-tests';
+import type { ProjectScan } from '../shared/project-scan';
+import { detectNodeTestRunner, type NodeTestRunner } from '../shared/node-tests';
 import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
 import { codeActionKindLabel, type CodeActionItem } from '../shared/lsp-code-actions';
 import { refactorLabel, type RefactorAction } from '../shared/lsp-refactor';
@@ -167,7 +166,9 @@ import { showToast } from './ui/toast';
 import { installTooltips } from './ui/tooltip';
 import { createVenvModal } from './ui/venv-modal';
 import { createLspServers } from './core/lsp-servers';
+import { editorActionCommands } from './core/editor-actions';
 import { editorSurfacePlan } from './core/editor-surface';
+import { testMarkerSignature as testMarkerSignatureOf, testMarkersFor } from './core/test-markers';
 
 /**
  * Точка сборки приложения: сервисы, команды, подписки.
@@ -1932,27 +1933,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   let testMarkerSignature = '';
 
   /**
-   * Значки запуска отдельных тестов: по объявлениям `def test_…` в файле. Ставим
-   * их только тестовым файлам — иначе жёлоб пестрел бы стрелками у каждого
-   * `def test_` в чужом модуле.
+   * Значки запуска отдельных тестов в жёлобе. Тестовый ли файл и какие в нём тесты —
+   * решает `core/test-markers.ts`; здесь — только сравнение подписи и вызов редактора.
+   * Подпись несёт версию документа: без неё правка, добавляющая тест, не переставила бы значок.
    */
   function syncTestMarkers(document: TextDocument): void {
-    const relative = workspace.relative(document.path);
-    const inProject = relative !== document.path;
-    const python = inProject && document.languageId === 'python' && isPythonTestFile(relative);
-    // JS/TS разбираем своим разбором: `test('…')` и `describe` вместо `def test_…`.
-    const node = inProject && isNodeLanguage(document.languageId) && isNodeTestFile(relative);
-    if (!python && !node) {
-      editors.setTestMarkers(document.path, []);
-      return;
-    }
-
-    const signature = `${document.path}:${document.version}`;
+    const signature = testMarkerSignatureOf(document.path, document.version);
     if (signature === testMarkerSignature) return;
     testMarkerSignature = signature;
     editors.setTestMarkers(
       document.path,
-      python ? findRunnableTests(relative, document.value) : findRunnableNodeTests(relative, document.value),
+      testMarkersFor(
+        { relative: workspace.relative(document.path), absolute: document.path, languageId: document.languageId },
+        document.value,
+      ),
     );
   }
 
@@ -2844,23 +2838,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   let editorActionDisposers: Array<() => void> = [];
   const syncEditorActions = (): void => {
     for (const dispose of editorActionDisposers) dispose();
-    editorActionDisposers = editors.listActions().map((action) =>
-      commands.register(
-        {
-          id: `editor.${action.id}`,
-          title: action.label,
-          category: 'Редактор',
-          keywords: [action.id, action.alias].filter(Boolean),
-        },
-        async () => {
-          try {
-            editors.runAction(action.id);
-          } catch (error) {
-            console.error(`[chui] действие ${action.id} упало:`, error);
-            showToast(error instanceof Error ? error.message : String(error), 'error');
-          }
-        },
-      ),
+    editorActionDisposers = editorActionCommands(editors.listActions()).map((command) =>
+      commands.register(command, async () => {
+        // `editor.<id>` — обратно в id редактора: пункт заведён под префиксом.
+        const actionId = command.id.slice('editor.'.length);
+        try {
+          editors.runAction(actionId);
+        } catch (error) {
+          console.error(`[chui] действие ${actionId} упало:`, error);
+          showToast(error instanceof Error ? error.message : String(error), 'error');
+        }
+      }),
     );
   };
 
