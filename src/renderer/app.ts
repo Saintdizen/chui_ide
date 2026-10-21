@@ -519,9 +519,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     // Inline-подсказка «допиши за меня»: запрос к модели уходит в main через RPC.
     inlineCompletion: {
-      enabled: () => settings.ai.inlineCompletion.enabled,
+      // Два замка, а не один: личная галочка автодополнения и мастер-тумблер AI.
+      // Main оба тоже проверяет (`requireAiEnabled`), но он тогда уже ответил
+      // отказом — а значит, на каждую паузу в наборе летел бы RPC-вызов в никуда
+      // и сыпался бы toast об ошибке. Редактор должен молчать сам.
+      enabled: () => settings.ai.enabled && settings.ai.inlineCompletion.enabled,
       debounceMs: () => settings.ai.inlineCompletion.debounceMs,
       complete: async ({ path, language, prefix, suffix }) => {
+        // Проверяем ещё и здесь: `enabled()` спрашивают по краю, а пауза в наборе
+        // и сам запрос могут попасть в разные стороны тумблера.
+        if (!settings.ai.enabled) return null;
         try {
           const result = await rpc.request('ai.complete', {
             path: workspace.relative(path),
@@ -5790,6 +5797,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast('Отчёт о подсветке — в консоли (Ctrl+Shift+I)');
   });
 
+  // Трасса и журнал — диагностика, а не работа с моделью: ни запросов, ни трат
+  // они не делают. Гейт `aiEnabled()` здесь был бы вреден: "у меня не работает AI"
+  // — самый частый повод сюда заглянуть, в том числе при выключенном тумблере.
+  // Это не недоделка: не ставить сюда проверку мастера.
+
   define({ id: 'ai.newChat', title: 'Новый диалог', category: 'AI' }, () => {
     // revealChat сам откажет, если AI выключен: новый диалог в мёртвой панели
     // только выглядит работающим.
@@ -5808,6 +5820,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       category: 'AI',
       keywords: ['прогон', 'run', 'trace', 'диагностика'],
     },
+    // Без гейта по мастеру сознательно: трасса — это про уже случившееся, а
+    // разбирать прогон чаще всего и нужно тогда, когда AI уже выключили.
     () => chat.openRunLog(),
   );
 
@@ -5818,6 +5832,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       category: 'AI',
       keywords: ['телеметрия', 'telemetry', 'журнал', 'прогоны', 'диагностика'],
     },
+    // То же, что и у трассы: читаем историю, а не зовём модель — запросов нет,
+    // и запрещать нечего.
     () => void telemetryModal.open(),
   );
 
