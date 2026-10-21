@@ -5791,8 +5791,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   define({ id: 'ai.newChat', title: 'Новый диалог', category: 'AI' }, () => {
+    // revealChat сам откажет, если AI выключен: новый диалог в мёртвой панели
+    // только выглядит работающим.
+    if (!aiEnabled()) {
+      warnAiDisabled();
+      return;
+    }
     revealChat();
-    chat.newChat();
+    return chat.newChat();
   });
 
   define(
@@ -5815,7 +5821,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     () => void telemetryModal.open(),
   );
 
+  // Остановка работает независимо от мастера: если генерация уже идёт, а AI только что
+  // выключили в настройках — отменить её всё равно надо. Прятать здесь нечего.
   define({ id: 'ai.stop', title: 'Остановить генерацию', category: 'AI' }, () => chat.stop());
+
+  // Чат — единственный вход в AI, который был без мастера: с выключенным AI
+  // открывалась панель с полем ввода, и первая же отправка падала в main.
+  // Кнопка в тулбаре уже прячется по aiEnabled(), а команда пусть говорит правду.
+  define({ id: 'ai.toggle', title: 'Ассистент: показать/скрыть', category: 'AI', keybinding: 'Ctrl+Shift+A' }, () => {
+    if (!aiEnabled()) {
+      warnAiDisabled();
+      return;
+    }
+    toggleChat();
+  });
 
   define(
     { id: 'ai.openInEditor', title: 'Перенести чат в окно редактора', category: 'AI', keybinding: 'Ctrl+Alt+E' },
@@ -5825,11 +5844,21 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   define({ id: 'ai.backToPanel', title: 'Вернуть чат в боковую панель', category: 'AI' }, () => setChatInEditor(false));
 
   define({ id: 'ai.explainSelection', title: 'Объяснить выделение', category: 'AI' }, async () => {
+    // revealChat сам покажет «AI выключен», но `askAboutSelection` при этом всё равно
+    // сходил бы в main за ответом, который никто не увидит.
+    if (!aiEnabled()) {
+      warnAiDisabled();
+      return;
+    }
     revealChat();
     await chat.askAboutSelection('explain');
   });
 
   define({ id: 'ai.fixSelection', title: 'Исправить выделение', category: 'AI' }, async () => {
+    if (!aiEnabled()) {
+      warnAiDisabled();
+      return;
+    }
     revealChat();
     await chat.askAboutSelection('fix');
   });

@@ -1627,8 +1627,15 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     deps.rpc.cancelActive();
   }
 
-  /** Новая беседа — новая вкладка: старые остаются на месте. */
+  /**
+   * Новая беседа — новая вкладка: старые остаются на месте.
+   *
+   * Генерацию в старой беседе останавливаем: она продолжает писать в СВОЮ ленту,
+   * и человек её уже не видит. Ответ придёт в никуда, а занятость будет держать
+   * новый диалог — кнопка «Стоп» в нём борется с чужим ходом.
+   */
   function newChat(): void {
+    stop();
     const session = createSession();
     for (const item of sessions) item.thread.hidden = item.id !== session.id;
     activeId = session.id;
