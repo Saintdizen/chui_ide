@@ -38,6 +38,7 @@ import {
   reasoningEffortFor,
 } from '../../shared/providers';
 import type { ModelInfo } from '../../shared/model-info';
+import type { AccountBalance } from '../../shared/balance';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
 import {
   ALWAYS_AVAILABLE,
@@ -627,6 +628,27 @@ export class AiService {
     } catch (error) {
       return { ok: false, models: [], message: describeConnectionError(error) };
     }
+  }
+
+  /**
+   * Остаток на счёте у активного провайдера. `null` — не знает сервер или не
+   * умеет провайдер: попап просто не рисует строку про деньги. Список моделей
+   * не трогаем — цифра спрашивается при каждом открытии окна.
+   */
+  async accountBalance(signal?: AbortSignal): Promise<AccountBalance | null> {
+    const providerId = this.settings.get().ai.activeProviderId;
+    if (!providerId) return null;
+    let provider: AiProvider;
+    try {
+      provider = this.createProvider(providerId);
+    } catch {
+      return null;
+    }
+    if (!provider.getBalance) return null;
+    return provider
+      .getBalance(signal)
+      .then((value) => value ?? null)
+      .catch(() => null);
   }
 
   /**

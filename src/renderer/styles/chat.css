@@ -204,15 +204,17 @@
   font-size: var(--font_small_size);
 }
 
-.session-info-note {
-  margin-top: 8px;
-}
-
 .session-info-compact {
   width: 100%;
   justify-content: center;
   margin-top: 10px;
   gap: 6px;
+}
+
+/* Остаток на счёте: цифра моно-шрифтом, как и прочие числа в окне. */
+.session-info-balance {
+  font-family: var(--font_mono);
+  color: var(--text_color_secondary);
 }
 
 /* ── кнопка «Информация о сессии»: кольцо контекста и виджеты AI ────────── */

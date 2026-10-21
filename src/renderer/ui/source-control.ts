@@ -74,8 +74,16 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     class: 'sc-message',
     rows: 3,
     spellcheck: false,
-    placeholder: 'Сообщение коммита, Ctrl+Enter — закоммитить',
+    placeholder: 'Что изменилось?',
   });
+  // Подсказка про Ctrl+Enter — значком в углу поля: словами она занимала место в
+  // placeholder, а рядом с полем читалась как третья кнопка.
+  const messageField = h(
+    'div',
+    { class: 'sc-message-box' },
+    message,
+    h('span', { class: 'sc-message-hint' }, svgIcon('keyboard', 12), 'Ctrl+Enter'),
+  );
   const commitButton = h(
     'button',
     {
@@ -87,15 +95,38 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     'Закоммитить',
   );
 
-  // «Исправить последний коммит»: флажок вместо отдельной кнопки — режим виден
-  // рядом с полем сообщения и снимается сам. Пустое сообщение при нём сохраняет
-  // прежнее (см. `git.amendCommit`).
+  // «Исправить последний коммит»: переключатель в строке действий под полем —
+  // так он попадает в один ряд с «Соавтором» и «Сообщением по diff», а не
+  // висит отдельной строкой в футере. Пустое сообщение при нём сохраняет прежнее
+  // (см. `git.amendCommit`).
+  const amendBox = h('input', { class: 'sc-amend-box', type: 'checkbox' });
+  const amendRow = h(
+    'label',
+    { class: 'sc-amend', title: 'Заменить последний коммит вместо создания нового' },
+    amendBox,
+    h('span', {}, 'Исправить последний'),
+  );
+  // Подпись кнопки коммита: режим amend и число проиндексированных. Пересчитывается
+  // и в render, и при переключении флажка — иначе текст врёт о действии.
+  let commitLabel: HTMLSpanElement | null = null;
+  let stagedCount = 0;
+  const syncCommitLabel = (): void => {
+    if (!commitLabel) return;
+    const action = amendBox.checked ? 'Исправить' : 'Закоммитить';
+    commitLabel.textContent = stagedCount === 0 ? action : `${action} (${stagedCount})`;
+  };
+  amendBox.addEventListener('change', syncCommitLabel);
   // Соавторы: строка `Co-authored-by` дописывается в сообщение коммита. Панель не
   // придумывает людей сама — спрашивает имя и почту и дописывает их к тексту.
   const coAuthorButton = h(
     'button',
-    { class: 'sc-coauthor', type: 'button', title: 'Дописать соавтора в сообщение коммита' },
-    'Соавтор',
+    {
+      class: 'sc-coauthor',
+      type: 'button',
+      title: 'Дописать соавтора в сообщение коммита',
+      'aria-label': 'Дописать соавтора в сообщение коммита',
+    },
+    svgIcon('userPlus', 13),
   );
   const coAuthorList = h('div', { class: 'sc-coauthors' });
 
@@ -111,14 +142,6 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       onClick: () => void deps.commands.execute('git.generateCommitMessage'),
     },
     svgIcon('sparkle', 13),
-  );
-
-  const amendBox = h('input', { class: 'sc-amend-box', type: 'checkbox' });
-  const amendRow = h(
-    'label',
-    { class: 'sc-amend', title: 'Заменить последний коммит вместо создания нового' },
-    amendBox,
-    h('span', {}, 'Исправить последний коммит'),
   );
 
   const stagedGroup = h('div', { class: 'sc-group' });
@@ -201,16 +224,20 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     h(
       'div',
       { class: 'sc-head' },
-      svgIcon('branch', 14),
-      branchName,
+      // Текущая ветка — только селект: отдельные иконка и подпись дублировали бы
+      // то, что он и так показывает. Значок ветки едет значением опции.
       branchSelect.element,
       syncState,
       h(
         'div',
         { class: 'panel-actions' },
+        // Три группы по смыслу, а не одна куча иконок: забрать (fetch) — отдельно
+        // от «туда-обратно» (pull/push), ветки и отложенное — третья пара.
         fetchButton,
+        h('span', { class: 'panel-actions-sep' }),
         pullButton,
         pushButton,
+        h('span', { class: 'panel-actions-sep' }),
         stashButton,
         newBranchButton,
         h(
@@ -230,18 +257,28 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     h(
       'div',
       { class: 'sc-commit-box' },
-      message,
+      messageField,
       coAuthorList,
-      // Сообщение по diff — у поля: оно заполняет именно его. Флажок amend
-      // ушёл вниз, к самому действию (см. `sc-footer`).
-      h('div', { class: 'sc-commit-rows' }, coAuthorButton, messageFromDiffButton),
+      // Строка действий — под полем, в один ряд: изменение режима слева,
+      // добавления справа. Кнопка коммита живёт ниже, у списка файлов.
+      h('div', { class: 'sc-commit-rows' }, amendRow, h('div', { class: 'sc-commit-rows-right' }, coAuthorButton, messageFromDiffButton)),
     ),
-    // Всё, что осталось, — файлы: это скроллируемая зона, она забирает высоту.
+    // Всё, что осталось, — файлы: это скроллируемая зона, она забирает высоту
+    // (`flex: 1 1 auto` у `.sc-list`), поэтому футер виден при любом размере списка.
     h('div', { class: 'sc-list' }, stagedGroup, unstagedGroup, initButton),
-    // Нижняя панель: режим слева, главное действие справа. Прижата к низу панели
-    // (`margin-top: auto` в `.sc-footer`), чтобы кнопка была видна при любом
-    // размере списка, а не уезжала вместе с ним.
-    h('div', { class: 'sc-footer' }, amendRow, h('div', { class: 'sc-commit-actions' }, hint, commitButton)),
+    // Нижняя панель: подсказка слева, главное действие — справа во всю ширину панели.
+    h(
+      'div',
+      { class: 'sc-footer' },
+      h('div', { class: 'sc-footer-hint' }, hint),
+      h(
+        'button',
+        { class: 'btn btn-primary sc-commit-block', type: 'button', onClick: () => void commit() },
+        svgIcon('check', 14),
+        // Подпись меняется в `render` (режим amend и число проиндексированных).
+        (commitLabel = h('span', {}, 'Закоммитить')),
+      ),
+    ),
   );
 
   /** Показать уже упомянутых в сообщении соавторов — с кнопкой «убрать строку». */
@@ -455,6 +492,9 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     const host = staged ? stagedGroup : unstagedGroup;
     clear(host);
     host.hidden = files.length === 0;
+    // Класс остаётся и у пустой группы: по нему `.sc-list` понимает, что список
+    // пуст, и не рисует рамку — она выглядела полоской без содержимого.
+    host.classList.toggle('is-empty', files.length === 0);
     if (files.length === 0) return;
 
     // Действия — справа от счётчика: видно, что можно сделать со всем списком,
@@ -507,6 +547,10 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     const signature = branches.map((branch) => `${branch.name}${branch.current ? '*' : ''}`).join('|');
     if (branchSelect.element.dataset.signature === signature) return;
 
+    // Значок — только у текущего значения (слот `valueIcon` в select.ts), не в
+    // строках списка: там он повторялся бы у каждой ветки и только шумел.
+    // Поэтому опция описывается без `icon`, а значок ставится после `setValue`
+    // через собственный слот кнопки.
     branchSelect.setOptions(
       branches.map((branch) => ({
         value: branch.name,
@@ -514,6 +558,9 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
         hint: branch.remote ? 'удалённая' : undefined,
       })),
     );
+    branchSelect.element.classList.add('sc-branch-select');
+    // Значок ветки — на кнопке селекта, а не отдельной иконкой в шапке.
+    branchSelect.setValueIcon('branch');
     branchSelect.element.dataset.signature = signature;
     if (current) branchSelect.setValue(current);
     branchSelect.setHidden(branches.length === 0);
@@ -599,13 +646,17 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     void syncRemotes(isRepo);
     syncState.hidden = !isRepo || (repository?.ahead === 0 && repository?.behind === 0);
     if (isRepo && repository) {
-      const parts: string[] = [];
-      if (repository.ahead > 0) parts.push(`↑${repository.ahead}`);
-      if (repository.behind > 0) parts.push(`↓${repository.behind}`);
-      syncState.textContent = parts.join(' ');
+      // Слово «push» рядом с иконкой — дубль: кнопка рядом уже говорит, что делает.
+      // Остаётся число со стрелкой вверх (коммиты уедут) и вниз (коммиты заберутся) —
+      // направление читается со значка, а цвет отличает две стороны.
+      clear(syncState);
+      const part = (icon: IconName, count: number, title: string): HTMLElement =>
+        h('span', { class: 'sc-sync-part', title }, svgIcon(icon, 11), h('span', {}, String(count)));
+      if (repository.ahead > 0) syncState.appendChild(part('arrowUp', repository.ahead, 'Впереди: уйдёт push'));
+      if (repository.behind > 0) syncState.appendChild(part('arrowDown', repository.behind, 'Отстаёт: заберёт pull'));
       syncState.title =
         repository.ahead || repository.behind
-          ? `Локально впереди на ${repository.ahead}, отстаёт на ${repository.behind}`
+          ? `Впереди на ${repository.ahead}, отстаёт на ${repository.behind}`
           : '';
     }
     if (!isRepo) closeBranchInput();
@@ -619,8 +670,10 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
     hint.textContent = total === 0 ? '' : `${total} ${plural(total)}`;
     // Счётчик на кнопке — про проиндексированное: видно, что именно уйдёт в коммит.
     // Подсказка рядом считает все правки, включая ещё не отмеченные, и они не
-    // должны сливаться в одно число.
-    commitButton.textContent = staged.length === 0 ? 'Закоммитить' : `Закоммитить (${staged.length})`;
+    // должны сливаться в одно число. В режиме amend подпись говорит прямо, что
+    // произойдёт: кнопки «Закоммитить» и «Исправить последний» — разные действия.
+    stagedCount = staged.length;
+    syncCommitLabel();
     syncCommitDisabled();
     // Исправлять можно только когда есть что: в репозитории и с хотя бы одним коммитом.
     amendRow.hidden = !isRepo || repository?.head == null;

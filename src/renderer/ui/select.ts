@@ -14,6 +14,8 @@ export interface SelectView {
   setOptions(options: readonly SelectOption[]): void;
   get value(): string;
   setValue(value: string): void;
+  /** Значок только у значения в кнопке — без повтора в строках списка. */
+  setValueIcon(icon: IconName | null): void;
   onChange(listener: (value: string) => void): void;
   setDisabled(disabled: boolean): void;
   setHidden(hidden: boolean): void;
@@ -55,6 +57,8 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
 
   let items: readonly SelectOption[] = [];
   let current = '';
+  // Значок, заданный снаружи: не привязан к опции, поэтому в списке не повторяется.
+  let forcedIcon: IconName | null = null;
   let disabled = false;
   let popup: HTMLElement | null = null;
   let detach: (() => void) | null = null;
@@ -74,9 +78,12 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
     valueLabel.textContent = found?.label ?? options.placeholder ?? '';
     valueLabel.classList.toggle('is-empty', !found);
     // Значок меняется вместе со значением; нет иконки — слот пуст.
+    // `forcedIcon` — значок, заданный снаружи (`setValueIcon`): он не привязан
+    // к опции, поэтому в списке не повторяется у каждой строки.
     clear(valueIcon);
-    if (found?.icon) {
-      valueIcon.appendChild(svgIcon(found.icon, 14));
+    const icon = forcedIcon ?? found?.icon;
+    if (icon) {
+      valueIcon.appendChild(svgIcon(icon, 14));
       valueIcon.hidden = false;
     } else {
       valueIcon.hidden = true;
@@ -247,6 +254,10 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
         close();
         open();
       }
+      render();
+    },
+    setValueIcon(icon) {
+      forcedIcon = icon;
       render();
     },
     onChange(listener) {

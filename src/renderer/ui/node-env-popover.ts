@@ -135,7 +135,8 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
       extras.push(
         h('div', { class: 'python-env-requirements' }, nodeDependenciesNote(diff.missing.length, diff.present.length)),
       );
-      extras.push(button(`Установить зависимости (${installCommand(manager)})`, () => deps.onInstall()));
+      // Подпись — сама команда: так видно, что именно выполнится (npm/pnpm/yarn).
+      extras.push(button(installCommand(manager), () => deps.onInstall()));
     }
     nodes.push(
       section(
@@ -155,8 +156,9 @@ export function createNodeEnvPopover(deps: NodeEnvPopoverDeps): NodeEnvPopoverVi
   return { element, refresh };
 }
 
-/** Что сказать про сверку `package.json` с `node_modules`. */
+/** Сверка `package.json` с `node_modules`: только числа — установлено / всего.
+ *  Без фраз про «на месте» и «не установлено»: строка не меняет вид при
+ *  установке пакетов, меняются только числа. */
 function nodeDependenciesNote(missing: number, present: number): string {
-  if (missing === 0) return `Все объявленные зависимости на месте (${present})`;
-  return `Не установлено: ${missing} из ${missing + present}`;
+  return `Зависимости: ${present} / ${present + missing}`;
 }

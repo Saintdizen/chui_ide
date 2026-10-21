@@ -2715,6 +2715,12 @@ export interface ChuiMethods {
     params: { baseUrl: string; apiKey?: string; providerId?: string };
     result: AiConnectionTestResult;
   };
+  /**
+   * Остаток на счёте у активного провайдера. `null` — либо провайдер такого
+   * не умеет (локальные серверы, большинство OpenAI-совместимых), либо сервер
+   * не ответил: это не ошибка, и попап просто не рисует строку про деньги.
+   */
+  'ai.balance': { params: void; result: AccountBalance | null };
 
   'ai.chat': { params: ChatRequest; result: ChatStreamDone };
   /**

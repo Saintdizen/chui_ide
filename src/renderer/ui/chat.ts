@@ -779,7 +779,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /* ── информация о сессии ───────────────────────────────────────────────── */
 
-  const sessionInfo = createSessionInfo({ onCompact: () => void compactActive() });
+  const sessionInfo = createSessionInfo({
+    onCompact: () => void compactActive(),
+    // Счёт у провайдера — только если он его показывает: у локальных серверов
+    // и большинства OpenAI-совместимых метода нет, и main вернёт `null`.
+    balance: () => deps.rpc.request('ai.balance'),
+  });
 
   /**
    * Все виджеты про AI в полосе — одна кнопка «Информация о сессии» (кольцо
@@ -815,8 +820,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         contextWindow(currentModel(), settings.ai.contextWindow),
       ),
       usage: session.usage,
-      speed: session.speed,
-      trace: session.trace,
       contextWindow: settings.ai.contextWindow,
       ...(pending ? { pending } : {}),
     };
@@ -1506,7 +1509,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // После обрезки продолжение другое: по старому расходу про кеш не судим.
     session.usageFresh = false;
     session.turnsSinceCompact = turnsSinceCompact(session.history);
-    session.speed = undefined;
     renderHistory(session);
     syncSessionInfo();
     scheduleSave();
@@ -1547,7 +1549,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     session.usage = undefined;
     session.usageFresh = false;
     session.turnsSinceCompact = turnsSinceCompact(session.history);
-    session.speed = undefined;
     renderHistory(session);
     await stream.run(session, provider.id, model, []);
   }

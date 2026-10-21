@@ -525,11 +525,25 @@ textarea {
   margin-left: auto;
 }
 
+/* Разделитель между группами иконок: тонкая черта вместо лишнего отступа —
+   группы читаются, а шапка не раздувается по ширине. */
+.panel-actions-sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--separator_color);
+}
+
 .icon-btn {
   display: grid;
   place-items: center;
-  width: var(--toolbar_control_size);
-  height: var(--toolbar_control_size);
+  /* Квадрат 25 px: одна сторона задаёт масштаб, вторая идёт за ней — включая
+     случай, когда кнопка попадает в flex/grid-контейнер и могла бы растянуться. */
+  width: 25px;
+  height: 25px;
+  aspect-ratio: 1;
+  flex: none;
+  padding: 0;
   border-radius: var(--radius_sm);
   color: var(--text_color_tertiary);
 }
@@ -1198,6 +1212,9 @@ textarea {
   border-radius: var(--radius_sm);
   background: var(--button_background);
   color: var(--text_color);
+  /* Подпись по центру: у кнопки без значка `inline-flex` тянет текст влево,
+     и в широкой кнопке слово стояло у края. */
+  justify-content: center;
 }
 
 .btn:hover:not(:disabled) {

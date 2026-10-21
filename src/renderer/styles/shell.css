@@ -398,6 +398,28 @@
   padding: 12px;
 }
 
+/* Поле диалога — в столбик: подпись во всю ширину, под ней ввод.
+   Раньше здесь стояли классы панели venv (`venv-field`/`venv-label`), где метка
+   жестко 80 px — длинная подпись ломалась на две строки рядом с полем,
+   и ввод уезжал вправо. */
+.prompt-modal .prompt-field {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.prompt-modal .prompt-label {
+  color: var(--text_color_secondary);
+  font-size: var(--font_labels_size);
+  line-height: 1.35;
+}
+
+.prompt-modal .prompt-field .field-input {
+  width: 100%;
+  min-width: 0;
+}
+
 /* Параметры запуска: три поля столбиком, высота — по содержимому. */
 .launch-modal {
   width: min(520px, 100%);

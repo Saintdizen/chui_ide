@@ -143,6 +143,7 @@ const NOT_MOCKED: Record<string, string[]> = {
     'ai.clearWebSearchKey',
     'ai.setPermission',
   ],
+  'счёт провайдера — сетевой запрос к его API, в моке некому отвечать': ['ai.balance'],
   'встроенный браузер держит main: вложение — слой окна, а не элемент страницы': [
     'browser.viewCapture',
     'browser.viewClose',

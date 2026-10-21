@@ -31,7 +31,7 @@ export interface PromptModalView {
 }
 
 export function createPromptModal(): PromptModalView {
-  const label = h('span', { class: 'venv-label' });
+  const label = h('span', { class: 'prompt-label' });
   const input = h('input', { class: 'field-input', type: 'text', spellcheck: 'false' });
   const hint = h('div', { class: 'field-hint' });
   const confirmButton = h('button', { class: 'btn btn-primary', type: 'button' }, 'ОК');
@@ -54,7 +54,7 @@ export function createPromptModal(): PromptModalView {
       cancelled = true;
     },
   });
-  modal.body.append(h('div', { class: 'venv-field' }, label, input), hint);
+  modal.body.append(h('div', { class: 'prompt-field' }, label, input), hint);
 
   function close(): void {
     modal.close();

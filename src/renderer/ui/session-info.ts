@@ -1,7 +1,8 @@
-import type { ChatAttachment, ChatMessage, ChatRunTrace, ChatUsage } from '../../shared/api';
+import type { ChatAttachment, ChatMessage, ChatUsage } from '../../shared/api';
 import { contextUsage, estimateContextParts, type ContextUsage } from '../../shared/context-fit';
-import { formatCost, formatTokens, peakTariffHint, usageCost } from '../../shared/usage';
+import { formatTokens } from '../../shared/usage';
 import { clear, h, svgIcon } from './dom';
+import { formatBalance, type AccountBalance } from '../../shared/balance';
 
 /**
  * «Информация о сессии» — сколько контекста занято и из чего он состоит.
@@ -29,10 +30,6 @@ export interface SessionInfoData {
   /** Сколько токенов отдано под ответ. */
   reservedTokens: number;
   usage?: ChatUsage;
-  /** Скорость последнего ответа в токенах в секунду: считается в чате. */
-  speed?: number;
-  /** Накопленный расход беседы: шаги, вызовы и токены за всё время. */
-  trace?: ChatRunTrace;
   /** Явный размер окна из настроек; не задан — считается по имени модели. */
   contextWindow?: number;
   /**
@@ -130,17 +127,17 @@ export function createUsageRing(onClick: () => void): UsageRing {
   };
 }
 
-export function createSessionInfo(options: { onCompact(): void }): SessionInfoView {
+export function createSessionInfo(options: { onCompact(): void; balance?(): Promise<AccountBalance | null> }): SessionInfoView {
   const title = h('div', { class: 'session-info-title' }, svgIcon('info', 13), h('span', {}, 'Информация о сессии'));
   const contextHead = h('div', { class: 'session-info-sub' }, 'Контекстное окно');
   const gaugeValue = h('span', { class: 'session-info-value' });
   const gaugePercent = h('span', { class: 'session-info-percent' });
   const gaugeBar = h('div', { class: 'context-bar' });
   const reservedNote = h('div', { class: 'session-info-reserved' });
-  const usageNote = h('div', { class: 'field-hint session-info-usage' });
-  const traceNote = h('div', { class: 'field-hint session-info-trace', hidden: true });
+  // Остаток на счёте у провайдера. Строки нет, пока balance не ответил или
+  // провайдер такого не умеет (локальные и большинство OpenAI-совместимых).
+  const balanceNote = h('div', { class: 'field-hint session-info-balance', hidden: true });
   const list = h('div', { class: 'session-info-list' });
-  const note = h('div', { class: 'field-hint session-info-note' });
 
   const compactButton = h(
     'button',
@@ -157,10 +154,8 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
     h('div', { class: 'session-info-gauge' }, gaugeValue, gaugePercent),
     gaugeBar,
     reservedNote,
-    usageNote,
-    traceNote,
+    balanceNote,
     list,
-    note,
     compactButton,
   );
 
@@ -201,44 +196,9 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
     reservedNote.textContent = `Зарезервировано для ответа: ${formatTokens(data.reservedTokens)}`;
     reservedNote.hidden = data.reservedTokens <= 0;
 
-    // Реальные токены последнего обмена: у провайдера их два числа — запрос и ответ.
-    const completion = data.usage?.completionTokens;
-    if (real !== undefined || completion !== undefined || data.speed !== undefined) {
-      const parts: string[] = [];
-      const cached = data.usage?.cachedTokens;
-      if (real !== undefined) {
-        parts.push(`запрос ${formatTokens(real)}${cached ? ` (кеш ${formatTokens(cached)})` : ''}`);
-      }
-      if (completion !== undefined) parts.push(`ответ ${formatTokens(completion)}`);
-      // Стоимость — только когда модель есть в таблице цен: иначе это гадание.
-      const cost = usageCost(data.usage, data.model);
-      if (cost !== null) parts.push(`стоимость ≈ $${formatCost(cost)}`);
-      // Тариф зависит от часа: подсказка только тогда, когда это действительно дорого.
-      const peak = peakTariffHint(data.model);
-      if (peak) parts.push(peak);
-      if (data.speed !== undefined && data.speed > 0) parts.push(`${data.speed.toFixed(1)} tok/s`);
-      usageNote.textContent = `Последний обмен: ${parts.join(' · ')}`;
-      usageNote.hidden = false;
-    } else {
-      usageNote.hidden = true;
-    }
-
-    // Накопленный расход беседы: видно, во сколько она обошлась за всё время, а не
-    // только последний шаг. Стоимость — как и выше, лишь для известной модели.
-    const trace = data.trace;
-    const traceTokens = (trace?.usage.promptTokens ?? 0) + (trace?.usage.completionTokens ?? 0);
-    if (trace && traceTokens > 0) {
-      const bits: string[] = [];
-      if (trace.steps > 0) bits.push(`шагов ${trace.steps}`);
-      if (trace.toolCalls > 0) bits.push(`вызовов ${trace.toolCalls}`);
-      bits.push(`токенов ${formatTokens(traceTokens)}`);
-      const total = usageCost(trace.usage, data.model);
-      if (total !== null) bits.push(`≈ $${formatCost(total)}`);
-      traceNote.textContent = `За беседу: ${bits.join(' · ')}`;
-      traceNote.hidden = false;
-    } else {
-      traceNote.hidden = true;
-    }
+    // Расход последнего обмена и за всю беседу здесь не показываем: строки
+    // «Последний обмен: …» и «За беседу: …» были ценой и скоростью, а не
+    // подсказкой для работы. Остались контекст, запас и баланс.
 
     clear(list);
     for (const part of parts) {
@@ -258,11 +218,9 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
       );
     }
 
-    // Про источник чисел говорим прямо: иначе «≈» выглядит как ошибка округления.
-    note.textContent =
-      real !== undefined
-        ? 'Итог — из последнего ответа модели, разбивка — по объёму частей запроса.'
-        : 'Оценка: провайдер сообщит точный размер в следующем ответе.';
+    // Строку про деньги здесь не трогаем: баланс приходит отдельным запросом
+    // (см. `show`), а `render` вызывается и тогда, когда ответа ещё нет.
+
     compactButton.disabled = data.history.length === 0;
     compactButton.title =
       data.history.length === 0
@@ -279,6 +237,18 @@ export function createSessionInfo(options: { onCompact(): void }): SessionInfoVi
       render(data);
       element.hidden = false;
       open = true;
+      // Баланс — отдельный запрос к провайдеру: ответ приходит позже, чем сам
+      // попап. Спрашиваем, когда окно уже видно, и дописываем строку в
+      // отрисованный список; закрыли окно до ответа — молча забываем цифру.
+      void options.balance?.().then((balance) => {
+        if (!open) return;
+        if (balance === null) {
+          balanceNote.hidden = true;
+          return;
+        }
+        balanceNote.textContent = formatBalance(balance);
+        balanceNote.hidden = false;
+      });
     },
     hide() {
       element.hidden = true;

@@ -2430,16 +2430,22 @@
 /* ── попап Python-окружения в статусбаре ──────────────────────────────── */
 
 /* Отступ даёт сам попап (`.popover`): своё поле здесь сложилось бы с ним
-   в двойную рамку. */
+   в двойную рамку. Ширина — по содержимому: широкий попап на пустом месте
+   читался как панель, хотя внутри только пары «ключ — значение». */
 .python-env {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  width: max-content;
+  max-width: 100%;
 }
 
 /* Окружений бывает много: длинный список прокручиваем, а не вылезаем за окно. */
 .popover-python-env,
 .popover-node-env {
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  padding: 5px;
   max-height: calc(100vh - 16px);
   overflow: auto;
 }
@@ -2450,18 +2456,22 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  padding: 5px 5px 0 5px;
 }
 
 .python-env-body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 
+/* Ряды «ключ — значение»: поле 10 px по бокам держит их на той же
+   вертикали, что и заголовок с заметками того же попапа. */
 .python-env-row {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 5px;
+  padding: 0 10px;
   font-size: var(--font_labels_size);
 }
 
@@ -2497,12 +2507,13 @@
 
 /* Раздел выбора: подпись над списком, как у секций в других окнах. */
 .python-env-heading {
-  margin-top: 2px;
+  margin: 0;
   color: var(--text_color_secondary);
-  font-size: var(--font_small_size);
+  font-size: var(--font_micro_size);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  padding: 0 5px;
 }
 
 /* Строка выбора интерпретатора: клик выбирает, рамка показывает текущий. */
@@ -2601,27 +2612,28 @@
 .python-env-section {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-}
-
-.python-env-heading {
-  margin: 0;
-  color: var(--text_color_secondary);
-  font-size: var(--font_micro_size);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  gap: 5px;
 }
 
 .python-env-note {
   color: var(--text_color_tertiary);
   font-size: var(--font_labels_size);
+  padding-left: 10px;
 }
 
 /* Сверка с requirements.txt: чуть заметнее прочей подписи — по ней решают, что доставить. */
 .python-env-requirements {
   color: var(--text_color);
   font-size: var(--font_labels_size);
+  padding: 0 10px;
+}
+
+/* Кнопки действий попапа: подпись по центру своей колонки, а не у левого края:
+   кнопка тянется на ширину секции, а `inline-flex` без `justify-content`
+   прижимал текст влево. */
+.python-env-manage {
+  justify-content: center;
+  text-align: center;
 }
 
 /* Подпись без моно-шрифта: путь — код, а «источник» — просто слово. */

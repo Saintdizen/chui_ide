@@ -184,17 +184,14 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       reasoningView?.collapse();
       reasoningView = null;
     };
-    /** Замер скорости ответа: от первого текстового фрагмента до конца потока. */
-    let firstDeltaAt = 0;
-    let lastDeltaAt = 0;
 
     buffer = '';
     host.hidePlan();
     host.scrollToEnd(session);
     host.setStreaming(session);
-    // Замер ожидания пользователя: отправка → первый кусок текста. Размышления
-    // и вызовы инструментов входят в него — человек ждёт и их.
+    // Ждём первого куска текста: ожидание человека видно в замерax.
     perf.begin('chat:first-token');
+    let firstTokenSeen = false;
 
     const flushSegment = (): void => {
       cancelFrame();
@@ -266,12 +263,11 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
               activity.hide();
               // Пошёл текст ответа — цепочка вызовов закончилась.
               tools.seal();
-              const now = performance.now();
-              if (firstDeltaAt === 0) {
-                firstDeltaAt = now;
+              // Замер «ожидание человека» закрываем один раз — на первом куске.
+              if (!firstTokenSeen) {
+                firstTokenSeen = true;
                 perf.end('chat:first-token');
               }
-              lastDeltaAt = now;
               buffer += (payload as ChatDeltaPayload).text;
               scheduleRender(segment, session);
               return;
@@ -338,13 +334,6 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         // Память чтений вернулась из прогона: кладём в беседу, чтобы следующий ход
         // знал, что уже прочитано, и не читал это снова.
         if (done.reads) session.reads = done.reads;
-
-        // Скорость ответа: токены / время потока. Без обоих чисел не показываем.
-        const completion = done.usage?.completionTokens;
-        session.speed =
-          completion !== undefined && firstDeltaAt > 0 && lastDeltaAt > firstDeltaAt
-            ? completion / ((lastDeltaAt - firstDeltaAt) / 1000)
-            : undefined;
 
         // Обрезано по лимиту — достраиваем сами, пока есть бюджет продолжений.
         if (done.finishReason !== 'length' || continues >= MAX_AUTO_CONTINUE) break;

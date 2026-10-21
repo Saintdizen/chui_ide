@@ -1200,6 +1200,9 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
     requireAiEnabled();
     return deps.ai.testConnection(params, ctx.signal);
   });
+  // Деньги на счету — для окна «Информация о сессии». Отдельно от `ai.test`:
+  // список моделей для этой цифры не нужен, а спрашивают её часто.
+  router.register('ai.balance', (_params, ctx) => deps.ai.accountBalance(ctx.signal));
   /*
    * Живые агенты подзадач. Панель чата спрашивает список при появлении, а дальше
    * получает push-событие `PushTopic.Agents` — опрашивать сервис по таймеру незачем.

@@ -158,6 +158,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .sc-head {
@@ -182,7 +183,37 @@
   width: auto;
   max-width: 240px;
   min-height: 22px;
-  margin-left: auto;
+  /* Селект идёт первым после «ветки»-значка: прижимаем его влево, а не к правому
+     краю — счётчик и кнопки синхронизации остаются в своём ряду справа. */
+  margin-left: 0;
+}
+
+/* Счётчик расхождения — прямо за селектом, на его оптической оси. */
+.sc-sync-state {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  align-items: center;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.sc-sync-part {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+/* Направление — цветом: вверх (уйдёт push) и вниз (заберёт pull) различаются
+   и без чтения числа, как стрелки на кнопках синхронизации. */
+.sc-sync-part:first-child {
+  color: var(--blue_prime_background);
+}
+
+.sc-sync-state .sc-sync-part + .sc-sync-part {
+  color: var(--yellow_prime_background, var(--blue_prime_background));
 }
 
 /* Сводка по корням рабочей области: строка на папку. Видна только в многообласти,
@@ -206,6 +237,27 @@
 
 .sc-roots-head .icon-btn {
   margin-left: auto;
+}
+
+/* Иконки попапа — flex-центр, а не grid: так «голые» кнопки шапки и строки
+   действий сидят на одной оси со счётчиком и селектом, без сдвига на 1–2 px,
+   который давал строчный базлайн `grid`-кнопки рядом с текстом. */
+.panel-actions .icon-btn,
+.sc-roots-head .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Квадрат: `--toolbar_control_size` уходит и в ширину, и в высоту.
+     `aspect-ratio` прибивает его и на случай, если размер придёт из сетки. */
+  aspect-ratio: 1;
+  padding: 0;
+  line-height: 0;
+}
+
+.panel-actions .icon-btn svg,
+.sc-roots-head .icon-btn svg {
+  display: block;
+  flex: none;
 }
 
 .sc-roots {
@@ -269,7 +321,59 @@
   flex-direction: column;
   gap: 6px;
   padding: 4px 8px 8px;
-  border-bottom: 1px solid var(--separator_color);
+}
+
+/* Поле сообщения и кнопка «висят» на нём: клавиатура — в правом нижнем углу поля,
+   соавторы — сразу под ним. Поэтому обёртка, а не отступы у самого поля. */
+.sc-message-box {
+  position: relative;
+  display: flex;
+}
+
+/* Переключатель «Исправить последний»: квадрат с рамкой, как в схеме — это режим
+   коммита, а не галочка в списке файлов. */
+.sc-amend {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sc-amend:hover {
+  color: var(--text_color);
+}
+
+.sc-amend-box {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  appearance: none;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_xs);
+  background: var(--sunken_background);
+  cursor: pointer;
+}
+
+.sc-amend-box:checked {
+  border-color: var(--blue_prime_background);
+  background: var(--blue_prime_background);
+}
+
+/* Галочка — маской, а не svg: у `input` нет дочерних узлов. */
+.sc-amend-box:checked::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: var(--panel_background, #fff);
+  -webkit-mask: center / 10px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3.2L13 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  mask: center / 10px no-repeat
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3.2L13 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 
 .sc-message {
@@ -280,6 +384,30 @@
   border-radius: var(--radius_sm);
   background: var(--sunken_background);
   resize: vertical;
+}
+
+/* Подсказка о сочетании клавиш: появляется при наведении на поле, не занимает места. */
+.sc-message-hint {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--panel_background, var(--sunken_background));
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--motion_fast) var(--motion_ease);
+}
+
+.sc-message-box:hover .sc-message-hint,
+.sc-message:focus + .sc-message-hint {
+  opacity: 1;
 }
 
 .sc-commit-actions {
@@ -793,22 +921,53 @@
   color: var(--text_color_tertiary);
 }
 
-/* Соавторы коммита: строки под полем сообщения. */
+/* Строка действий под полем: в схеме это один ряд — переключатель режима слева,
+   добавления справа. */
 .sc-commit-rows {
   display: flex;
   gap: 8px;
   align-items: center;
 }
 
+/* Кнопка-иконка без текста: квадрат и значок в центре обоих осей, а не по
+   строчному базлайну. Без этого один и тот же `svg` с `padding` из текстовой
+   кнопки садился выше центра (стрелки в шапке git жили на 1–2 px выше соседей).
+   Размер квадрата один на всю панель — 25 px, и от него не отстают ни
+   «Соавтор», ни «по diff», ни крестик строки. */
+.sc-coauthor,
+.sc-coauthor-remove,
+.sc-from-diff {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  min-width: 25px;
+  aspect-ratio: 1;
+  flex: none;
+  padding: 0;
+  line-height: 0;
+}
+
 .sc-coauthor {
   border: 1px solid var(--separator_color);
   border-radius: var(--radius_sm);
-  padding: 2px 8px;
   background: transparent;
   color: var(--text_color_secondary);
   font-family: var(--font_ui);
   font-size: var(--font_small_size);
   cursor: pointer;
+}
+
+.sc-coauthor svg,
+.sc-coauthor-remove svg,
+.sc-from-diff svg {
+  display: block;
+  flex: none;
+  /* Значок по центру кнопки на px: координаты рисуются от края значка, а не от
+     текстового бокса, иначе small-иконка садится на 1 px вправо-вниз. */
+  margin: auto;
+  pointer-events: none;
 }
 
 .sc-coauthor:hover {
@@ -818,15 +977,12 @@
 }
 
 /* «Сообщение по diff»: кнопка-иконка рядом с «Соавтор» — та же строка, тот же размер.
-   Иконка искры, а не текст: в строке уже есть слово, второе её раздувает. */
+   Иконка искры, а не текст: в строке уже есть слово, второе её раздувает.
+   Геометрию (квадрат 25 px) даёт общее правило выше, здесь — только краска и место. */
 .sc-from-diff {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   margin-left: auto;
   border: 1px solid var(--separator_color);
   border-radius: var(--radius_sm);
-  padding: 3px 6px;
   background: transparent;
   color: var(--text_color_secondary);
   cursor: pointer;
@@ -843,11 +999,21 @@
   background: var(--element_background_hover);
 }
 
+/* Соавторы: строки в столбик; сам блок рисуется только когда строки есть. */
 .sc-coauthors {
   display: flex;
   flex-direction: column;
   gap: 2px;
   margin: 2px 0;
+}
+
+/* Нет соавторов — нет блока: пустой контейнер с отступами и `gap` оставлял
+   над полем лишнюю полосу. `hidden` ставит renderCoAuthors, `:empty` —
+   страховка на первый кадр до его вызова. */
+.sc-coauthors:empty,
+.sc-coauthors[hidden] {
+  display: none;
+  margin: 0;
 }
 
 .sc-coauthor-row {
@@ -859,7 +1025,6 @@
 }
 
 .sc-coauthor-remove {
-  padding: 0;
   background: transparent;
   color: var(--text_color_tertiary);
 }
@@ -1718,19 +1883,16 @@
 }
 
 /* Нижняя панель: режим слева, главное действие справа.
-   `margin-top: auto` прижимает её к низу: список файлов растягивается (`.sc-list`
-   с `flex: 1 1 auto` и `overflow: auto`), а кнопка «Закоммитить» остаётся на виду
-   при любом числе файлов. Раньше футер жил внутри блока ввода и уезжал вместе
-   со строкой темы. */
+   Высоту панели забирает список (`.sc-list` с `flex: 1 1 auto` и `overflow: auto`),
+   футер лишь не сжимается — `margin-top: auto` тут не нужен и вреден: при нехватке
+   места он отдаёт приоритет себе и сжимает список до нуля. */
 .sc-footer {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
-  margin-top: auto;
-  padding: 8px;
+  gap: 5px;
   border-top: 1px solid var(--separator_color);
-  background: var(--panel_background, var(--sunken_background));
+  padding: 5px 0 0 5px;
 }
 
 .sc-footer .sc-commit-actions {
@@ -1741,13 +1903,18 @@
    его от формы ввода, чтобы список не «резал» её на две части. */
 .sc-list {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 96px;
   overflow: auto;
-  margin: 0 8px 8px;
-  padding: 4px 0;
   border: 1px solid var(--border_color);
   border-radius: var(--radius_sm);
   background: var(--sunken_background);
+}
+
+/* Пусто — не рисуем рамку: «окно» без единой строки читается полоской, а не
+   списком. Класс `is-empty` ставит `group()` у каждой скрытой группы. */
+.sc-list:not(:has(.sc-group:not(.is-empty))) {
+  border-color: transparent;
+  background: transparent;
 }
 
 .sc-group-title {
@@ -1870,6 +2037,37 @@
 
 .popover-git .sc-commit-box {
   padding: 5px 0;
+}
+
+/* Кнопка коммита — по содержимому и у правого края: растянутая во всю ширину
+   она читалась как отдельная панель, а не как действие формы. */
+.sc-commit-block {
+  flex: 0 0 auto;
+  justify-content: center;
+  gap: 6px;
+  width: max-content;
+  max-width: max-content;
+  margin-left: auto;
+  min-height: 26px;
+  padding: 0 10px;
+}
+
+.sc-footer-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--text_color_tertiary);
+  font-size: var(--font_labels_size);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Строка действий под полем: режим (Исправить последний) слева, добавления справа. */
+.sc-commit-rows-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .popover-git .sc-list {

@@ -1051,7 +1051,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           void installRequirements();
         },
       });
-      pythonEnvPopover = createPopover(pythonEnvView.element, { width: 340 });
+      // Ширину не задаём: попап жмётся по содержимому (`.popover-python-env`),
+      // а фиксированные 340 px растягивали его на пустом месте.
+      pythonEnvPopover = createPopover(pythonEnvView.element);
       pythonEnvPopover.element.classList.add('popover-python-env');
     }
     return pythonEnvView;
@@ -1084,7 +1086,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           void installNodePackages([]);
         },
       });
-      nodeEnvPopover = createPopover(nodeEnvView.element, { width: 340 });
+      // Ширину не задаём: попап жмётся по содержимому (`.popover-node-env`),
+      // а фиксированные 340 px растягивали его на пустом месте.
+      nodeEnvPopover = createPopover(nodeEnvView.element);
       nodeEnvPopover.element.classList.add('popover-node-env');
     }
     return nodeEnvView;
