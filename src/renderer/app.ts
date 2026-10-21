@@ -10,7 +10,8 @@ import {
 import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
-import { symbolIndexChip } from '../shared/symbol-index';
+import { symbolIndexChip, type SymbolIndexStatus } from '../shared/symbol-index';
+import { createSymbolPoller } from './core/symbol-poll';
 import { toOffset } from '../shared/edits';
 import { perf } from '../shared/perf';
 import { classMembers } from './editor/complete/member-access';
@@ -1859,25 +1860,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * поиск по структуре в это время работает, но неполно, и человек должен это видеть.
    * Как только карта готова — опрос прекращается, виджет гаснет.
    */
-  let symbolPoll: number | null = null;
+  const symbolPoller = createSymbolPoller({
+    request: async () => (await rpc.request('index.status')) as SymbolIndexStatus,
+    show: (status) => statusBar.update({ symbols: symbolIndexChip(status as SymbolIndexStatus) }),
+    intervalMs: 1000,
+  });
 
   function refreshSymbolIndex(): void {
-    void rpc
-      .request('index.status')
-      .then((status) => {
-        statusBar.update({ symbols: symbolIndexChip(status) });
-        if (status.phase !== 'warming') {
-          if (symbolPoll !== null) window.clearTimeout(symbolPoll);
-          symbolPoll = null;
-          return;
-        }
-        if (symbolPoll !== null) return;
-        symbolPoll = window.setTimeout(() => {
-          symbolPoll = null;
-          refreshSymbolIndex();
-        }, 1000);
-      })
-      .catch(() => undefined);
+    symbolPoller.poll();
   }
 
   /** Окружение изменилось: перечитать инструменты, карту проекта, подсказки и импорты. */
