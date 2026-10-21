@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { betaBaseUrl, isPeakTariff, modelPricing, pricingAt, wireEffort } from '../src/shared/providers';
+import { betaBaseUrl, isPeakTariff, pricingAt, wireEffort } from '../src/shared/providers';
 import { usageCost } from '../src/shared/usage';
 import { parseBalance, formatBalance } from '../src/shared/balance';
 
@@ -79,7 +79,9 @@ describe('betaBaseUrl', () => {
 describe('баланс', () => {
   const payload = {
     is_available: true,
-    balance_infos: [{ currency: 'CNY', total_balance: '110.00', granted_balance: '10.00', topped_up_balance: '100.00' }],
+    balance_infos: [
+      { currency: 'CNY', total_balance: '110.00', granted_balance: '10.00', topped_up_balance: '100.00' },
+    ],
   };
 
   it('разбирает ответ /user/balance', () => {

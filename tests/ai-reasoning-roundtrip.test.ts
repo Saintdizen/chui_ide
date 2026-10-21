@@ -24,7 +24,9 @@ function sse(chunks: string[]): Response {
 /** Тело последнего запроса, который провайдер отправил. */
 function bodyOf(spy: ReturnType<typeof vi.fn>): { messages: Record<string, unknown>[] } {
   const call = spy.mock.calls.at(-1);
-  return JSON.parse(String((call?.[1] as RequestInit).body));
+  const init = call?.[1] as RequestInit | undefined;
+  if (!init?.body) throw new Error('провайдер не отправил тело запроса');
+  return JSON.parse(String(init.body));
 }
 
 afterEach(() => {
@@ -33,7 +35,9 @@ afterEach(() => {
 
 describe('reasoning_content в теле запроса', () => {
   it('размышления шага возвращаются вместе с вызовами', async () => {
-    const fetchSpy = vi.fn(async () => sse(['data: {"choices":[{"delta":{"content":"ок"},"finish_reason":"stop"}]}\n\n']));
+    const fetchSpy = vi.fn(async () =>
+      sse(['data: {"choices":[{"delta":{"content":"ок"},"finish_reason":"stop"}]}\n\n']),
+    );
     vi.stubGlobal('fetch', fetchSpy);
 
     const provider = new OpenAiCompatibleProvider({ id: 'p', label: 'P', baseUrl: 'http://localhost:1' });
@@ -61,7 +65,9 @@ describe('reasoning_content в теле запроса', () => {
   });
 
   it('без размышлений поля в теле нет', async () => {
-    const fetchSpy = vi.fn(async () => sse(['data: {"choices":[{"delta":{"content":"ок"},"finish_reason":"stop"}]}\n\n']));
+    const fetchSpy = vi.fn(async () =>
+      sse(['data: {"choices":[{"delta":{"content":"ок"},"finish_reason":"stop"}]}\n\n']),
+    );
     vi.stubGlobal('fetch', fetchSpy);
 
     const provider = new OpenAiCompatibleProvider({ id: 'p', label: 'P', baseUrl: 'http://localhost:1' });
@@ -83,7 +89,9 @@ describe('reasoning_content в теле запроса', () => {
   });
 
   it('выключение размышления уходит параметром', async () => {
-    const fetchSpy = vi.fn(async () => sse(['data: {"choices":[{"delta":{"content":"ок"},"finish_reason":"stop"}]}\n\n']));
+    const fetchSpy = vi.fn(async () =>
+      sse(['data: {"choices":[{"delta":{"content":"ок"},"finish_reason":"stop"}]}\n\n']),
+    );
     vi.stubGlobal('fetch', fetchSpy);
 
     const provider = new OpenAiCompatibleProvider({ id: 'p', label: 'P', baseUrl: 'http://localhost:1' });
@@ -103,7 +111,9 @@ describe('reasoning_content в теле запроса', () => {
   });
 
   it('когда размышление не выключали, поля thinking нет', async () => {
-    const fetchSpy = vi.fn(async () => sse(['data: {"choices":[{"delta":{"content":"ок"},"finish_reason":"stop"}]}\n\n']));
+    const fetchSpy = vi.fn(async () =>
+      sse(['data: {"choices":[{"delta":{"content":"ок"},"finish_reason":"stop"}]}\n\n']),
+    );
     vi.stubGlobal('fetch', fetchSpy);
 
     const provider = new OpenAiCompatibleProvider({ id: 'p', label: 'P', baseUrl: 'http://localhost:1' });
