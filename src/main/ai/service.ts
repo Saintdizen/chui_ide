@@ -122,7 +122,13 @@ import {
   type ReviewVerdict,
 } from '../../shared/approval-review';
 import { addUsage } from '../../shared/usage';
-import { budgetMessage, budgetVerdict, stepCost } from '../../shared/chat-budget';
+import {
+  budgetMessage,
+  budgetVerdict,
+  contextHeavyMessage,
+  HEAVY_CONTEXT_TOKENS,
+  stepCost,
+} from '../../shared/chat-budget';
 import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
 import type { TelemetryStore } from './telemetry';
@@ -223,6 +229,15 @@ const SUBAGENT_MAX_STEPS = 16;
  * больше — экономия начнётся слишком поздно, чтобы её заметить.
  */
 const STALE_KEEP_RECENT = 12;
+/**
+ * Свёртка истории, когда контекст шага перевалил за `HEAVY_CONTEXT_TOKENS`.
+ * Держим меньше свежих результатов, сворачиваем короткие и по одному за шаг:
+ * так освобождается заметно больше, а каждая свёртка всё равно происходит
+ * ровно один раз — по возрасту, а не задним числом.
+ */
+const STALE_KEEP_RECENT_HEAVY = 6;
+const STALE_MIN_CHARS_HEAVY = 900;
+const STALE_BATCH_HEAVY = 1;
 
 /**
  * Потолок отчёта подзадачи: это выжимка для основного агента, а не второй
@@ -1127,6 +1142,8 @@ export class AiService {
     let workModel = request.model;
     /** Бюджет уже объявлен человеку: повторять на каждом шаге незачем. */
     let budgetDeclared = false;
+    /** О тяжёлом контексте сказано: повторять на каждом шаге незачем. */
+    let contextDeclared = false;
     let runSteps = 0;
     let runToolCalls = 0;
     /**
@@ -1425,6 +1442,16 @@ export class AiService {
         stepLog.outputTokens = (stepLog.outputTokens ?? 0) + estimateTextTokens(content);
       };
 
+      // Окно модели говорит, сколько влезет, но не сколько это стоит: контекст
+      // едет в каждом шаге прогона. Порог ниже окна — с него шаг считается
+      // тяжёлым: говорим человеку один раз за прогон и сворачиваем старые
+      // результаты охотнее, иначе 200k на шаге едут до конца прогона.
+      const contextTokens = estimateMessagesTokens(messages) + toolsTokens;
+      const heavy = contextTokens > HEAVY_CONTEXT_TOKENS;
+      if (heavy && !contextDeclared) {
+        contextDeclared = true;
+        emit(ChatStreamEvent.Delta, { text: `\n\n${contextHeavyMessage(contextTokens)}` });
+      }
       // Каждый шаг сверяемся с окном: результаты инструментов копятся, и
       // длинный прогон легко переполняет контекст. Режем старые ходы целиком,
       // не трогая ни рамку запроса, ни пару «вызов → результат». Промах оценки
@@ -1436,7 +1463,8 @@ export class AiService {
       // каждое сообщение пересекает её один раз, и префикс запроса не меняется
       // задним числом — кэш провайдера цел.
       ageStaleResults(messages, {
-        keepRecent: STALE_KEEP_RECENT,
+        keepRecent: heavy ? STALE_KEEP_RECENT_HEAVY : STALE_KEEP_RECENT,
+        ...(heavy ? { minChars: STALE_MIN_CHARS_HEAVY, batchSize: STALE_BATCH_HEAVY } : {}),
         ...(this.spillDir ? { spillDir: this.spillDir } : {}),
       });
       const done = await this.streamStep(provider, {
@@ -1468,6 +1496,9 @@ export class AiService {
       if (done.usage) {
         usage = done.usage;
         runUsage = addUsage(runUsage, done.usage);
+        // Расход шага — в трассу: без него не видно, на каком именно шаге кеш
+        // слетел и сколько стоила промахнувшаяся часть.
+        stepLog.usage = done.usage;
       }
       // Бюджет беседы: шаги ограничивают длину, но не цену. Считаем после
       // каждого шага; потолок пройден — дальше идём дешёвой моделью.
