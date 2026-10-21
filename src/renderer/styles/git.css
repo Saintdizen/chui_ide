@@ -305,6 +305,26 @@
   margin: 0;
 }
 
+/* Чекбокс в строке файла: стоит слева, там где его ищет рука.
+   Рисуем значком, а не `input`: клик по строке уже переключает индексацию,
+   второй настоящий контрол только путал бы фокус и табуляцию. */
+.sc-row-check {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-right: 2px;
+  color: var(--text_color_tertiary);
+}
+
+.sc-row:hover .sc-row-check {
+  color: var(--text_color_secondary);
+}
+
+/* Проиндексированный файл: галочка цветом акцента, как в обычном чекбоксе. */
+.sc-row-check .is-checked {
+  color: var(--blue_prime_background);
+}
+
 /* ── окно рабочих каталогов (worktree) ─────────────────────────────────── */
 
 .worktree-modal {
@@ -1697,11 +1717,37 @@
   margin-left: auto;
 }
 
+/* Нижняя панель: режим слева, главное действие справа.
+   `margin-top: auto` прижимает её к низу: список файлов растягивается (`.sc-list`
+   с `flex: 1 1 auto` и `overflow: auto`), а кнопка «Закоммитить» остаётся на виду
+   при любом числе файлов. Раньше футер жил внутри блока ввода и уезжал вместе
+   со строкой темы. */
+.sc-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding: 8px;
+  border-top: 1px solid var(--separator_color);
+  background: var(--panel_background, var(--sunken_background));
+}
+
+.sc-footer .sc-commit-actions {
+  margin-left: auto;
+}
+
+/* Список файлов — отдельное окно: своя рамка и утопленный фон отделяют
+   его от формы ввода, чтобы список не «резал» её на две части. */
 .sc-list {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 2px 0 10px;
+  margin: 0 8px 8px;
+  padding: 4px 0;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_sm);
+  background: var(--sunken_background);
 }
 
 .sc-group-title {

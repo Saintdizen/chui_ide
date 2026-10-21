@@ -232,10 +232,16 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       { class: 'sc-commit-box' },
       message,
       coAuthorList,
-      h('div', { class: 'sc-commit-rows' }, amendRow, coAuthorButton, messageFromDiffButton),
-      h('div', { class: 'sc-commit-actions' }, hint, commitButton),
+      // Сообщение по diff — у поля: оно заполняет именно его. Флажок amend
+      // ушёл вниз, к самому действию (см. `sc-footer`).
+      h('div', { class: 'sc-commit-rows' }, coAuthorButton, messageFromDiffButton),
     ),
+    // Всё, что осталось, — файлы: это скроллируемая зона, она забирает высоту.
     h('div', { class: 'sc-list' }, stagedGroup, unstagedGroup, initButton),
+    // Нижняя панель: режим слева, главное действие справа. Прижата к низу панели
+    // (`margin-top: auto` в `.sc-footer`), чтобы кнопка была видна при любом
+    // размере списка, а не уезжала вместе с ним.
+    h('div', { class: 'sc-footer' }, amendRow, h('div', { class: 'sc-commit-actions' }, hint, commitButton)),
   );
 
   /** Показать уже упомянутых в сообщении соавторов — с кнопкой «убрать строку». */
@@ -382,8 +388,15 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
         onClick: () => void deps.commands.execute('git.showDiff', file.path, staged),
         onContextMenu: (event: Event) => openMenu(file, staged, event as MouseEvent),
       },
-      svgIcon('file', 13),
+      // Чекбокс слева — как в обычном списке выбора. Клик по нему = кнопка вправо:
+      // одна и та же операция, но с той стороны, где рука ищет «выбрать этот файл».
+      h(
+        'span',
+        { class: `sc-row-check${staged ? ' is-checked' : ''}`, 'aria-hidden': 'true' },
+        svgIcon(staged ? 'check' : 'square', 12),
+      ),
       h('span', { class: 'sc-row-name' }, deps.workspace.relative(file.path)),
+      // Статус (M, U) — справа, рядом с кнопкой индексации.
       h('span', { class: `sc-badge is-${file.change}`, title: CHANGE_TITLE[file.change] }, CHANGE_LETTER[file.change]),
       action,
     );
@@ -604,6 +617,10 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
 
     const total = staged.length + unstaged.length;
     hint.textContent = total === 0 ? '' : `${total} ${plural(total)}`;
+    // Счётчик на кнопке — про проиндексированное: видно, что именно уйдёт в коммит.
+    // Подсказка рядом считает все правки, включая ещё не отмеченные, и они не
+    // должны сливаться в одно число.
+    commitButton.textContent = staged.length === 0 ? 'Закоммитить' : `Закоммитить (${staged.length})`;
     syncCommitDisabled();
     // Исправлять можно только когда есть что: в репозитории и с хотя бы одним коммитом.
     amendRow.hidden = !isRepo || repository?.head == null;
