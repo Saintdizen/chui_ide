@@ -14,7 +14,7 @@
  *
  * Запуск: npx tsx scripts/read-repeat-census.ts [каталог-бесед]
  */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { estimateTextTokens } from '../src/shared/context-fit';
@@ -30,7 +30,8 @@ interface ChatFile {
   conversations?: { uid?: string; messages?: Message[] }[];
 }
 
-const dir = process.argv[2] ?? join(homedir(), '.config/chui-ide/chats');
+const DEFAULT_DIR = join(homedir(), '.config/chui-ide/chats');
+const dir = process.argv[2] ?? DEFAULT_DIR;
 
 /** Команды, которыми читают файлы в обход `read`: их вывод покрытие не видит. */
 const SHELL_READ = /^(cat|head|tail|sed|grep|rg|awk|less|more|git\s+(?:diff|show))\b/;
@@ -91,7 +92,14 @@ function rangeOf(raw: string): { from: number; to: number; whole: boolean } {
   return { from: Math.max(1, from), to, whole: to === 0 };
 }
 
+/**
+ * Живая беседа — та, которую правят прямо сейчас (наш собственный разговор).
+ * Если брать её в перепись, числа плывут от запуска к запуску.
+ */
+const LIVE_MS = 15 * 60 * 1000;
+
 for (const file of readdirSync(dir).filter((name) => name.endsWith('.json'))) {
+  if (dir === DEFAULT_DIR && Date.now() - statSync(join(dir, file)).mtimeMs < LIVE_MS) continue;
   const chat: ChatFile = JSON.parse(readFileSync(join(dir, file), 'utf8'));
   for (const conversation of chat.conversations ?? []) {
     const messages = conversation.messages ?? [];
