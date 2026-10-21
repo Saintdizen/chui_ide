@@ -58,6 +58,7 @@ import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
 import { hasEntries, splitSettingsPatch } from './core/settings-patch';
+import { projectSymbolAnswer, toProjectSymbols } from './core/project-symbols';
 import { type GitResult, rebaseNotice } from './core/git-notice';
 import {
   DEFAULT_MACRO_TIMES,
@@ -359,11 +360,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * поднимается или языка в нём нет.
    */
   const symbolsFromIndex = async (query: string) =>
-    (await rpc.request('index.find', { query }).catch(() => [])).map((symbol) => ({
-      name: symbol.name,
-      kind: symbol.kind,
-      package: symbol.package ?? null,
-    }));
+    toProjectSymbols(await rpc.request('index.find', { query }).catch(() => []));
 
   /**
    * Подсказки из карты вместе с языковыми серверами — обычный ответ на запрос
@@ -375,13 +372,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       rpc.request('index.status').catch(() => null),
     ]);
     // Карта не собрана — расширять нечем, и молчим: пустой ответ не должен
-    // выглядеть как «в проекте ничего нет».
-    if (status && status.phase === 'idle') return [];
-    return found.map((symbol) => ({
-      name: symbol.name,
-      kind: symbol.kind,
-      package: symbol.package ?? null,
-    }));
+    // выглядеть как «в проекте ничего нет». Решение — в core/project-symbols.ts.
+    return projectSymbolAnswer(found, status);
   };
 
   const editors = new EditorWorkspace(layout.editorHost, new DocumentRegistry(documents), {
