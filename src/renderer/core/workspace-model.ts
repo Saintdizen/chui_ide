@@ -1,4 +1,5 @@
 import type { DirEntry, WorkspaceInfo } from '../../shared/api';
+import { perf } from '../../shared/perf';
 import { pathAfter } from '../../shared/paths';
 import { relativeToRoots, rootForPath, workspaceLabel, type WorkspaceRoot } from '../../shared/workspace-roots';
 import { Emitter } from './events';
@@ -71,7 +72,12 @@ export class WorkspaceModel {
 
   /** Открыть папку как проект: рабочая область заменяется этой одной папкой. */
   async open(root: string): Promise<WorkspaceInfo> {
-    return this.apply(await this.rpc.request('workspace.open', { path: root }), 'project');
+    // Замер начинается здесь, а закрывается в `app.ts` на первом кадре с новым
+    // деревом: запрос к main — только половина работы.
+    perf.begin('project:open');
+    const applied = this.apply(await this.rpc.request('workspace.open', { path: root }), 'project');
+    perf.end('project:open');
+    return applied;
   }
 
   /** Добавить папку в рабочую область (несколько корней в одном окне). */

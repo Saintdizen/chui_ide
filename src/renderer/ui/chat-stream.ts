@@ -10,6 +10,7 @@ import {
   type ChatToolResultPayload,
   type ChatToolStartPayload,
 } from '../../shared/api';
+import { perf } from '../../shared/perf';
 import type { PermissionPreset } from '../../shared/permissions';
 import type { ToolPresetId } from '../../shared/tool-presets';
 import { addRunTrace } from '../../shared/usage';
@@ -191,6 +192,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
     host.hidePlan();
     host.scrollToEnd(session);
     host.setStreaming(session);
+    // Замер ожидания пользователя: отправка → первый кусок текста. Размышления
+    // и вызовы инструментов входят в него — человек ждёт и их.
+    perf.begin('chat:first-token');
 
     const flushSegment = (): void => {
       cancelFrame();
@@ -260,7 +264,10 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
               // Пошёл текст ответа — цепочка вызовов закончилась.
               tools.seal();
               const now = performance.now();
-              if (firstDeltaAt === 0) firstDeltaAt = now;
+              if (firstDeltaAt === 0) {
+                firstDeltaAt = now;
+                perf.end('chat:first-token');
+              }
               lastDeltaAt = now;
               buffer += (payload as ChatDeltaPayload).text;
               scheduleRender(segment, session);

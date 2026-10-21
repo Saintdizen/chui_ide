@@ -2,6 +2,7 @@ import { BrowserWindow, shell } from 'electron';
 import path from 'node:path';
 import { PushTopic, type WindowState } from '../shared/api';
 import { WINDOW_BACKGROUND } from '../shared/colors';
+import { perf } from '../shared/perf';
 import { pushToRenderers } from './ipc/push';
 import { APP_ORIGIN } from './protocol';
 import { isSafeExternalUrl, isSameUrlOrigin } from '../shared/url';
@@ -134,7 +135,13 @@ function createAppWindow(options: WindowOptions): BrowserWindow {
     },
   });
 
-  window.once('ready-to-show', () => window.show());
+  // Замер старта: окно собрано → оно на экране. Начало — в `index.ts`.
+  // В обычной работе трекер выключен, и `perf.end` возвращает null.
+  window.once('ready-to-show', () => {
+    window.show();
+    const span = perf.end('main:window');
+    if (span) console.info('[perf]', span.phase, Math.round(span.ms), 'мс');
+  });
 
   // Кнопки своей рамки зависят от состояния окна, а изменить его может и оконный менеджер.
   const notifyState = (): void => pushToRenderers(PushTopic.WindowStateChanged, windowState(window));

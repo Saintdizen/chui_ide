@@ -14,6 +14,7 @@ import { lspLanguagesForKind, lspPrimaryLanguagesForKind, mergeLspServers } from
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
 import { symbolIndexChip } from '../shared/symbol-index';
 import { toOffset } from '../shared/edits';
+import { perf } from '../shared/perf';
 import { classMembers } from './editor/complete/member-access';
 import { declarationOf, enclosingClassAt, overrideSnippet, paramsOf } from './editor/complete/override';
 import type { FileOperation } from '../shared/lsp-workspace-edit';
@@ -6728,6 +6729,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       explorer.applySettings(resolveExplorerSettings(settings.explorer, workspace.root));
       return;
     }
+
+    // Новый проект виден только после кадра: два rAF — это «уже нарисовано»,
+    // первый же срабатывает до отрисовки. Замер открыт в `workspace.open`.
+    requestAnimationFrame(() => requestAnimationFrame(() => perf.end('project:paint')));
 
     // Сменился ПРОЕКТ: окружение нового греем сразу (попап открывается без ожидания).
     void (async () => {

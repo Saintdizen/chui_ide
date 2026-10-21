@@ -24,6 +24,7 @@ import { SandboxService } from './sandbox/sandbox';
 import { TelemetryStore, telemetryDir } from './ai/telemetry';
 import { registerAppScheme, serveRenderer } from './protocol';
 import { WINDOW_BACKGROUND } from '../shared/colors';
+import { enablePerf, perf } from '../shared/perf';
 import { MAX_VIEW_PDF_BYTES, isPdfPath } from '../shared/pdf';
 import { activationForInterpreter, pythonInterpreterFor, venvDirOfPython } from './python/environments';
 import { SessionStore } from './session-store';
@@ -39,6 +40,11 @@ import { getIdeWindow, isWaylandSession, openWelcomeWindow } from './window';
 
 // Схему нужно объявить до инициализации приложения, иначе Chromium не даст ей привилегий.
 registerAppScheme();
+
+// Замеры старта включаются переменной окружения: `CHUI_PERF=1 npm start`.
+// Выключенный трекер не делает ни одного вызова `performance.now()`.
+enablePerf(process.env.CHUI_PERF === '1');
+perf.begin('main:window');
 
 // Палитра проекта описана в sRGB, а Chromium по умолчанию пересчитывает цвета
 // в профиль монитора. На широкоохватном экране без нормального ICC-профиля

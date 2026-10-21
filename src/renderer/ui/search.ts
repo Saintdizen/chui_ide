@@ -1,4 +1,5 @@
 import type { SearchResult } from '../../shared/api';
+import { perf } from '../../shared/perf';
 import type { CommandRegistry } from '../core/commands';
 import type { DocumentStore } from '../core/document-store';
 import type { RpcClient } from '../core/rpc';
@@ -189,11 +190,14 @@ export function createSearchView(deps: SearchDeps): SearchView {
       return;
     }
     try {
+      // Замер «поиск по проекту» — тот же путь, что и в панели поиска.
+      perf.begin('search:project');
       const result = await deps.rpc.request('workspace.search', {
         query,
         maxResults: 300,
         ...(regexOverride ? { isRegex: true } : {}),
       });
+      perf.end('search:project');
       if (current !== sequence) return;
       render(result, query);
     } catch (error) {
