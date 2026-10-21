@@ -30,6 +30,21 @@ def classify(command):
     return 'other'
 
 
+def classify_lead(command):
+    """Класс по ПЕРВОЙ строке: `cd` из тела heredoc — не смена папки.
+
+    Скрипт склеивает команду в одну строку, поэтому `python3 - <<PY … cd foo`
+    начинался с `python3`, а `cd … && python3 - <<PY` — с `cd`: по началу
+    склейки heredoc уезжал в `cd` или в `other` без разбора.
+    """
+    plain = ' '.join(command.split())  # склейка: heredoc перестаёт быть первой строкой
+    lead = plain.split(' ')[0]
+    if lead == 'cd':
+        # `cd … && python3 - <<PY` — команда, а не смена папки: скрипт, а не cd.
+        return 'other' if ('<<' in command or '\n' in command.strip()) else 'cd'
+    return classify(plain)
+
+
 def runs():
     out = []
     for path in glob.glob(TELEMETRY):
@@ -49,7 +64,7 @@ def runs():
                         args = json.loads(call.get('args') or '{}')
                     except Exception:
                         continue
-                    kind = classify(args.get('command') or '')
+                    kind = classify_lead(args.get('command') or '')
                     counts[kind] = counts.get(kind, 0) + 1
                     chars += len(call.get('detail') or '')
             if counts:

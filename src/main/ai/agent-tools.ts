@@ -744,6 +744,39 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
  */
 const BODY_FIELDS = ['contents', 'content', 'newText', 'oldText', 'code'] as const;
 
+/**
+ * В образце стоит только пометка: её написала сама модель, а не сжатие.
+ *
+ * Так пишут «дописать абзац»: образец — конец файла, остальное — в новой
+ * версии. Настоящее сжатие ставит пометки в ОБА поля пары, и только тогда
+ * пометка в образце значит «этот текст уже на диске».
+ */
+function handWrittenMarker(args: Record<string, unknown>, where: string): boolean {
+  if (!/oldText$/i.test(where)) return false;
+  // Сосед по паре: только он говорит, сам ли модель нарисовала пометку.
+  const peer = readPath(args, where.replace(/oldText$/i, 'newText'));
+  if (peer === undefined) return true;
+  return `${peer}`.trim() !== '';
+}
+
+/** Пройти по пути вида `edits[0].edits[1].newText`. */
+function readPath(root: unknown, path: string): unknown {
+  let node = root;
+  for (const raw of path.split('.')) {
+    const match = /^([^[\]]*)(?:\[(\d+)\])?$/.exec(raw);
+    if (!match) return undefined;
+    if (match[1]) {
+      if (typeof node !== 'object' || node === null) return undefined;
+      node = (node as Record<string, unknown>)[match[1]];
+    }
+    if (match[2] !== undefined) {
+      if (!Array.isArray(node)) return undefined;
+      node = node[Number(match[2])];
+    }
+  }
+  return node;
+}
+
 /** Имя поля, где вместо содержимого стоит пометка сжатия, или `null`. */
 function staleCondensedBody(args: Record<string, unknown>): string | null {
   // Тела правок лежат вложенно: `edit` присылает `edits[].edits[].newText`,
@@ -751,6 +784,8 @@ function staleCondensedBody(args: Record<string, unknown>): string | null {
   // инструментов не глубже четырёх уровней, а бесконечный обход тут не нужен.
   const walk = (value: unknown, path: string, depth: number): string | null => {
     if (depth > 4) return null;
+    // Внутрь пометки не заглядываем: она сама — текст, а не дерево аргументов.
+    if (typeof value === 'string') return null;
     if (Array.isArray(value)) {
       for (let i = 0; i < value.length; i += 1) {
         const found = walk(value[i], `${path}[${i}]`, depth + 1);
@@ -762,7 +797,7 @@ function staleCondensedBody(args: Record<string, unknown>): string | null {
     for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
       const where = path ? `${path}.${key}` : key;
       if ((BODY_FIELDS as readonly string[]).includes(key) && isCondenseMarker(inner)) {
-        return where;
+        if (!handWrittenMarker(args, where)) return where;
       }
       const found = walk(inner, where, depth + 1);
       if (found) return found;

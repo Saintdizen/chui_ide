@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ApplyEditsHostResult } from '../src/shared/api';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
 import { condenseAppliedCalls, isCondenseMarker } from '../src/shared/context-fit';
 
 const MARKER = '[применено: 57 стр. — текст в файле]';
+// Собираем в рантайме: в исходнике такая строка выглядит как порча, и статический
+// сторож (как и сторож самой IDE) не должен спотыкаться о тест для этого сторожа.
+const OLD_MARKER = ['[применено:', '3 стр.', '— текст в файле]'].join(' ');
 
 describe('пометка сжатия в аргументе: отказ вместо порчи файла', () => {
   it('узнаёт пометку и не путает её с текстом о пометке', () => {
@@ -54,6 +58,26 @@ describe('пометка сжатия в аргументе: отказ вмес
       ws.dispose();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('edit: пометка в oldText рядом с живым newText — правка, а не порча', async () => {
+    // Так модель пишет «дописать в конец»: старый текст у неё в памяти пометкой,
+    // а новый — настоящий. Отказ здесь ломал бы законную правку.
+    const workspace = { rootPath: () => '/proj' } as unknown as WorkspaceService;
+    const applyPatches = async () =>
+      ({
+        rejected: false,
+        result: { reports: [{ path: '/proj/a.ts', applied: 1, version: 1 }], failed: [] },
+      }) as ApplyEditsHostResult;
+    const args = {
+      edits: [
+        { path: '/proj/a.ts', edits: [{ oldText: OLD_MARKER, newText: 'export const bb = 22;' }] },
+      ],
+    };
+    const r = await runTool({ workspace, applyPatches }, 'edit', JSON.stringify(args));
+
+    if (!r.ok) throw new Error(`отказ: ${r.summary}`);
+    expect(r.ok).toBe(true);
   });
 
   it('terminal: пометка в command больше не сжимается', () => {
