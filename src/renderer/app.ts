@@ -57,6 +57,7 @@ import { OpenEditors } from './core/open-editors';
 import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
+import { deletePrompt, renamedNotice } from './core/file-notices';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
 import { RpcClient } from './core/rpc';
@@ -3104,31 +3105,25 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       : 0;
     if (wasActive) await openPath(renamed.path);
     explorer.scheduleRefresh();
-    showToast(
-      touched > 0
-        ? `Переименовано: ${basename(renamed.path)} · обновлено ссылок: ${touched}`
-        : `Переименовано: ${basename(renamed.path)}`,
-      'info',
-      {
-        action: {
-          label: 'Отменить',
-          run: async () => {
-            // Возвращаем прежнее имя и, если файл был открыт, открываем его там же.
-            await commands.execute('file.close', renamed.path);
-            await rpc.request('workspace.rename', { from: renamed.path, to: from });
-            // Ссылки возвращаются к прежнему имени тем же путём — иначе отмена
-            // переименования оставила бы в проекте ссылки на исчезнувший путь.
-            if (touched > 0) {
-              await rpc
-                .request('workspace.updateImports', { oldPath: renamed.path, newPath: from })
-                .catch(() => undefined);
-            }
-            if (wasActive) await openPath(from);
-            explorer.scheduleRefresh();
-          },
+    showToast(renamedNotice({ name: basename(renamed.path), touched }), 'info', {
+      action: {
+        label: 'Отменить',
+        run: async () => {
+          // Возвращаем прежнее имя и, если файл был открыт, открываем его там же.
+          await commands.execute('file.close', renamed.path);
+          await rpc.request('workspace.rename', { from: renamed.path, to: from });
+          // Ссылки возвращаются к прежнему имени тем же путём — иначе отмена
+          // переименования оставила бы в проекте ссылки на исчезнувший путь.
+          if (touched > 0) {
+            await rpc
+              .request('workspace.updateImports', { oldPath: renamed.path, newPath: from })
+              .catch(() => undefined);
+          }
+          if (wasActive) await openPath(from);
+          explorer.scheduleRefresh();
         },
       },
-    );
+    });
     return renamed.path;
   });
 
@@ -3138,10 +3133,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Удаление необратимо, поэтому спрашиваем — но только если так настроено:
     // в проводнике это рутинное действие, и лишний вопрос раздражает.
     if (settings.explorer.confirmDelete) {
+      const prompt = deletePrompt(basename(path), workspace.relative(path));
       const { confirmed } = await rpc.request('dialog.confirm', {
         title: 'Удалить в корзину',
-        message: `Переместить ${basename(path)} в корзину?`,
-        detail: `${workspace.relative(path)} — файл можно вернуть из корзины системы.`,
+        ...prompt,
         confirmLabel: 'Удалить',
       });
       if (!confirmed) return;
