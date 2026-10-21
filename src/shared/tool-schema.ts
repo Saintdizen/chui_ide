@@ -49,6 +49,38 @@ export function missingArguments(schema: JsonSchema, args: Record<string, unknow
   return missing;
 }
 
+/**
+ * Форма вызова одной строкой — к отказу «не хватает аргумента».
+ *
+ * Отказ называл потерянное поле, но не говорил, куда его класть: `edit`
+ * присылали плоским (`{path, edits: [{oldText, newText}]}`) вместо обёртки
+ * `edits: [{path, edits: [...]}]`, и каждый промах стоил шага переделки.
+ * Строка строится из самой схемы, поэтому с ней не разойдётся и токенов
+ * в шаге не стоит: платит только промах.
+ */
+export function describeShape(schema: JsonSchema, depth = 0): string {
+  const required = new Set(schema.required ?? []);
+  const parts = Object.entries(schema.properties ?? {}).map(
+    ([name, property]) => `${name}${required.has(name) ? '' : '?'}${shapeTail(property, depth)}`,
+  );
+  return parts.join(', ');
+}
+
+/** Хвост формы для одного поля: вложенные объекты и массивы объектов. */
+function shapeTail(property: JsonSchemaProperty, depth: number): string {
+  // Глубже четырёх уровней схемы не уходят — дальше форма только мешает читать.
+  if (depth >= 3) return '';
+  const inner = (properties: Record<string, JsonSchemaProperty>, required?: string[]) =>
+    describeShape({ type: 'object', properties, required }, depth + 1);
+  if (property.type === 'object' && property.properties) {
+    return `: {${inner(property.properties, property.required)}}`;
+  }
+  if (property.type === 'array' && property.items?.properties) {
+    return `: [{${inner(property.items.properties, property.items.required)}}]`;
+  }
+  return '';
+}
+
 /** Одно значение мимо схемы: где, что пришло, что допускается. */
 export interface ArgumentIssue {
   /** Путь поля: `action`, `steps[0].status`. */

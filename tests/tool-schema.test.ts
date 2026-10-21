@@ -1,7 +1,7 @@
 import { agentPrompt } from '../src/shared/agent-prompt';
 import { AGENT_TOOLS } from '../src/shared/tools';
 import { describe, expect, it } from 'vitest';
-import { missingArguments, toolSpec, wrongArguments } from '../src/shared/tool-schema';
+import { describeShape, missingArguments, toolSpec, wrongArguments } from '../src/shared/tool-schema';
 
 /**
  * Проверка обязательных полей до исполнения. Поводом была живая ошибка: модель
@@ -157,6 +157,19 @@ describe('описания аргументов', () => {
     for (const note of notes) {
       expect(CANONICAL.has(note.text), `${note.tool}.${note.name}: ${note.text}`).toBe(true);
     }
+  });
+
+  it('форма вызова в отказе называет вложенность', () => {
+    // Живой промах: правка ушла плоской (`{path, edits: [{oldText, newText}]}`),
+    // а схема ждёт обёртку `edits: [{path, edits: [...]}]`. Отказ называл
+    // `edits[0].path`, но не говорил, куда его класть, — и промах стоил шага.
+    const edit = toolSpec('edit');
+    if (!edit) throw new Error('нет схемы edit');
+    const shape = describeShape(edit.inputSchema);
+    expect(shape).toContain('edits');
+    expect(shape).toContain('edits: [{path');
+    // Подсказка стоит токенов только в отказе: в задании её нет.
+    expect(agentPrompt('auto', { confirm: false })).not.toContain('Форма:');
   });
 
   it('«Absolute» из схем ушло в промпт', () => {

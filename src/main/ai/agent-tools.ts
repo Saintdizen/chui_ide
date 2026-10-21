@@ -51,7 +51,7 @@ import {
 import type { AgentWaitResult } from './agents';
 import { parseToolArguments } from '../../shared/tools';
 import { isCondenseMarker } from '../../shared/context-fit';
-import { missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
+import { describeShape, missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
 import { canonicalCall } from '../../shared/tool-aliases';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
@@ -711,7 +711,12 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
   if (spec) {
     const missing = missingArguments(spec.inputSchema, parsed.value);
     if (missing.length > 0) {
-      return { ok: false, summary: `Не хватает аргумента: ${missing.join(', ')}` };
+      // Форма — в том же отказе: без неё потерянное поле ищут в неверном месте
+      // (плоский `edit` вместо обёртки `edits: [{path, edits}]`).
+      return {
+        ok: false,
+        summary: `Не хватает аргумента: ${missing.join(', ')}. Форма: ${describeShape(spec.inputSchema)}`,
+      };
     }
     // Значение мимо `enum` — тот же класс ошибки, что забытое поле: `switch` ниже
     // ответит «действие неизвестно» и не назовёт варианты, а модель потратит шаг.
