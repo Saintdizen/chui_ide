@@ -9,6 +9,7 @@ import {
 } from '../shared/api';
 import { mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
+import { aiPanelPlan } from '../shared/ai-panel';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
 import { symbolIndexChip, type SymbolIndexStatus } from '../shared/symbol-index';
 import { createSymbolPoller } from './core/symbol-poll';
@@ -6105,26 +6106,25 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Макет мог измениться (например, размеры панелей) — применяем без повторной записи.
     applyLayoutSettings(next.layout);
     // Ассистент выключили мастер-тумблером — закрываем его панель и обновляем шапку,
-    // чтобы она не занимала место и не звала в выключенный чат.
-    if (!next.ai.enabled) {
-      // Сначала уводим чат из редактора, пока панель ещё закрыта. Иначе
-      // `setChatInEditor(false)` распахнул бы правую панель (`setRightVisible(true)`
-      // внутри) и только следующий за ним `setRightVisible(false)` её схлопнул бы
-      // обратно — а при свёрнутой человеком панели получился бы видимый скачок.
-      layout.setRightVisible(false);
-      // Возвращать чат в панель без записи: свёрнутость панели — не выбор человека,
-      // а следствие выключенного тумблера, и в настройки ей попадать незачем.
-      if (chatInEditor) withoutPersist(() => setChatInEditor(false));
+    // чтобы она не занимала место и не звала в выключенный чат. План считает чистый
+    // модуль (`shared/ai-panel.ts`): тонкости порядка шагов закреплены тестами,
+    // а не только этим комментарием.
+    const panel = aiPanelPlan({
+      wasEnabled: previous.ai.enabled,
+      isEnabled: next.ai.enabled,
+      chatInEditor,
+      rightVisible: layout.rightVisible,
+      wantedRightVisible: next.layout.rightVisible,
+    });
+    if (panel.toggle === 'disabled') {
+      // Панель гасим первой: `setChatInEditor(false)` ниже сам её распахивает,
+      // и обратный порядок дал бы видимый скачок.
+      withoutPersist(() => layout.setRightVisible(false));
+      // Свёрнутость — следствие тумблера, а не выбор человека: в настройки не пишем.
+      if (panel.moveChatToPanel) withoutPersist(() => setChatInEditor(false));
     }
-    // Включили обратно — возвращаем правую панель туда, где её оставил человек
-    // (`rightVisible` в настройках не гасится выше, потому что закрытие было без записи).
-    // Без этого тумблер работал в одну сторону: выключил — чат исчез, включил — тишина.
-    // Возвращаем только при ВКЛЮЧЁННОМ AI и только если чат не в редакторе: иначе
-    // повторный applySettings снова гасил бы панель.
-    if (!previous.ai.enabled && next.ai.enabled && !chatInEditor) {
-      withoutPersist(() => {
-        if (!layout.rightVisible) layout.setRightVisible(next.layout.rightVisible);
-      });
+    if (panel.toggle === 'enabled' && panel.show) {
+      withoutPersist(() => layout.setRightVisible(true));
     }
     // Языковые серверы включили тумблером в настройках — подхватываем их и греем
     // сразу, не дожидаясь открытия файла: иначе подсказок не было бы до переоткрытия
