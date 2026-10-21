@@ -2982,8 +2982,62 @@ type LookupCall = {
   label: string;
 };
 
-/** Что делает из команды не команду, а скрипт: всё это — мимо сокращения. */
-const SHELL_SYNTAX = /[|&;<>`$()*?[\]{}\n\\]/;
+/**
+ * Стоит ли символ в значении флага вида `--include=*.ts`: тогда его глоб —
+ * маска, а не файл, и шелл по ней ничего не раскрывает.
+ */
+function inFlagValue(command: string, position: number): boolean {
+  const start = command.lastIndexOf(' ', position);
+  const word = command.slice(start + 1, position);
+  return word.startsWith('--') && word.includes('=');
+}
+
+/**
+ * Скриптовая скобка вне кавычек. Разбираем посимвольно, а не одной регуляркой по
+ * всей строке: `grep -n 'interface ChatConversation' -A 25 src/api.ts` — это
+ * `search`, хотя в кавычках лежит `)`, а `grep 'a\|b'` — тоже `search`, хотя в
+ * образце `|` и `\`. Содержимое кавычек шеллу не передаётся, так что читалка
+ * остаётся читалкой.
+ */
+function shellSyntax(command: string): boolean {
+  let quote: string | null = null;
+  for (const [position, char] of [...command].entries()) {
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    // Глоб `--include=*.ts` шелл не раскрывает: до `=` стоит имя флага, а не
+    // файл. Это маска фильтра, её и несёт `glob`.
+    if ('*?[]'.includes(char) && inFlagValue(command, position)) continue;
+    if ('()*?[]{}\\'.includes(char)) return true;
+  }
+  // Незакрытая кавычка — тоже не наш случай: её доразберёт шелл.
+  return quote !== null;
+}
+
+/**
+ * Труба, перенаправление, подстановка: это не одна команда, а скрипт. Тоже вне
+ * кавычек — иначе `grep 'a|b'` попал бы сюда.
+ */
+function shellPipeline(command: string): boolean {
+  let quote: string | null = null;
+  for (const char of command) {
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if ('|&;<>`$\n'.includes(char)) return true;
+  }
+  return false;
+}
 
 /** Слова команды с учётом кавычек; null — незакрытая кавычка. */
 function commandWords(command: string): string[] | null {
@@ -3023,7 +3077,30 @@ function commandWords(command: string): string[] | null {
  * ровно `read` с двумя номерами строк, а `grep -rn foo src` — ровно `search`.
  */
 function asLookupCall(command: string, cwdDir: string): LookupCall | null {
-  if (SHELL_SYNTAX.test(command)) return null;
+  const tail = takeHeadTail(command);
+  if (shellPipeline(tail.command) || shellSyntax(tail.command)) return null;
+  const call = asPlainLookupCall(tail.command, cwdDir);
+  if (!call || tail.limit === null) return call;
+  // `grep … | head -25` — тот же поиск, только короче: предел есть у `search`.
+  // `head`/`cat` хвостом не отсекаются — они уже читают диапазоном.
+  if (call.tool !== 'search') return null;
+  return { ...call, args: { ...call.args, limit: tail.limit }, label: `${call.label} | head -${tail.limit}` };
+}
+
+/**
+ * `команда | head [-n] N` — хвост, который просит урезать вывод. Не труба
+ * ради фильтрации: `grep … | grep …` остаётся скриптом и идёт в шелл.
+ */
+function takeHeadTail(command: string): { command: string; limit: number | null } {
+  // `head -5` и `head -n 5` — одно и то же; и то и другое просто предел.
+  const match = /^(.*?)\s*\|\s*head(?:\s+-n\s+|\s+-)(\d+)\s*$/.exec(command);
+  if (!match) return { command, limit: null };
+  const limit = Number(match[2]);
+  if (!Number.isFinite(limit) || limit < 1) return { command, limit: null };
+  return { command: match[1]!.trim(), limit };
+}
+
+function asPlainLookupCall(command: string, cwdDir: string): LookupCall | null {
   const words = commandWords(command);
   if (!words || words.length < 1) return null;
   const [program, ...rest] = words as [string, ...string[]];
@@ -3090,8 +3167,18 @@ function asLookupCall(command: string, cwdDir: string): LookupCall | null {
   if (program === 'grep' || program === 'rg') {
     const flags = new Set<string>();
     const plain: string[] = [];
+    let glob: string | null = null;
     for (const word of rest) {
       if (word === '--') continue;
+      // `--include=*.ts` — единственный длинный флаг, у которого есть точное
+      // соответствие: у `search` это `glob`. Остальные (`--exclude`, `-P`) меняют
+      // смысл поиска, и такой вызов идёт в шелл.
+      if (word.startsWith('--include=')) {
+        if (glob !== null) return null;
+        glob = word.slice('--include='.length);
+        if (!glob) return null;
+        continue;
+      }
       if (word.startsWith('--')) return null;
       if (word.startsWith('-') && word.length > 1) {
         for (const flag of word.slice(1)) {
@@ -3115,6 +3202,7 @@ function asLookupCall(command: string, cwdDir: string): LookupCall | null {
         caseSensitive: !flags.has('i'),
         filesOnly: flags.has('l'),
         ...(only ? { path: scope(only) } : {}),
+        ...(glob ? { glob } : {}),
       },
       label: program,
     };

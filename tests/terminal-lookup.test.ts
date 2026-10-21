@@ -115,6 +115,34 @@ describe('команда-читалка выполняется структур�
     expect(String(outcome.detail)).toContain('app.ts');
     expect(String(outcome.detail)).toContain('note.md');
   });
+  it('образец с трубой в кавычках — всё равно search', async () => {
+    // `grep 'a\|b'` шелл не раскрывает: это образец, а не скрипт.
+    for (const command of ['grep "row3\\|row4" src/app.ts', 'grep "(row3)" src/app.ts']) {
+      const box = sandbox();
+      await run(box, command);
+      expect(box.calls, command).toEqual([]);
+    }
+  });
+
+  it('`| head -N` — тот же поиск, только с пределом', async () => {
+    const box = sandbox();
+    for (const command of ['grep row src/app.ts | head -5', 'grep row src/app.ts | head -n 5']) {
+      await run(box, command);
+    }
+    expect(box.calls).toEqual([]);
+  });
+
+  it('`--include=*.md` — маска для search, а не глоб шелла', async () => {
+    const box = sandbox();
+    await run(box, 'grep -rn иголка src --include=*.md');
+    expect(box.calls).toEqual([]);
+  });
+
+  it('но `cat src/*.ts` — всё равно глоб: в шелл', async () => {
+    const box = sandbox();
+    await run(box, 'cat src/*.ts');
+    expect(box.calls.length).toBe(1);
+  });
 });
 
 describe('всё остальное по-прежнему идёт в шелл', () => {
@@ -126,11 +154,17 @@ describe('всё остальное по-прежнему идёт в шелл',
   });
 
   it('труба или перенаправление — это уже скрипт', async () => {
-    for (const command of ['cat src/app.ts | head -1', 'grep иголка src > out.txt', 'cat a.ts && cat b.ts']) {
+    for (const command of ['grep row1 src/app.ts | grep -c row', 'grep иголка src > out.txt', 'cat a.ts && cat b.ts']) {
       const box = sandbox();
       await run(box, command);
       expect(box.calls.length, command).toBe(1);
     }
+  });
+
+  it('`-c` меняет смысл поиска — в шелл', async () => {
+    const box = sandbox();
+    await run(box, 'grep -c row1 src/app.ts');
+    expect(box.calls.length).toBe(1);
   });
 
   it('неизвестный флаг — не наш случай', async () => {
