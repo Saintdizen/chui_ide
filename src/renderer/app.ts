@@ -57,7 +57,6 @@ import { OpenEditors } from './core/open-editors';
 import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
-import { envWidgetLabel } from './core/env-widget';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
 import { RpcClient } from './core/rpc';
@@ -159,6 +158,7 @@ import { createPipelinesModal } from './ui/pipelines-modal';
 import { createNotificationsModal } from './ui/notifications-modal';
 import { createTextModal } from './ui/text-modal';
 import { createStatusBar } from './ui/statusbar';
+import { needsLspRefresh, statusPatch } from './core/status-state';
 import { createSettingsModal } from './ui/settings-modal';
 import { createTabs, type PagesTabSource } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
@@ -5828,46 +5828,50 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const refreshStatus = (): void => {
     const active = openEditors.active;
     const projectTools = tools.get();
-    // Отступ и язык — свойства файла: у Python четыре пробела, у Makefile таб,
-    // поэтому в статусбаре видно ФАКТИЧЕСКОЕ значение, а не общее из настроек.
-    // Картинка — не язык: в чипе показываем формат (PNG, SVG), а не «plaintext».
+    // Картинка или Office — не язык: в чипе показываем формат (PNG, SVG).
     const activePath = active?.path ?? null;
-    const showImage = activePath !== null && isImagePath(activePath);
-    const showOffice = activePath !== null && isOfficePath(activePath);
-    const language = showImage || showOffice ? null : (active?.languageId ?? null);
+    const format: 'image' | 'office' | null =
+      activePath === null ? null : isImagePath(activePath) ? 'image' : isOfficePath(activePath) ? 'office' : null;
+    const language = format === null ? (active?.languageId ?? null) : null;
     const indent = settings.editor.languageIndent && language ? languageIndent(language) : null;
-    // Язык сменился — перечитываем состав серверов: сервер поднимается при первом
-    // открытии файла языка, и до этого про него ничего не известно.
-    if (settings.lsp.enabled && language && language !== lspChipLanguage) {
+    const inputs = {
+      active: active
+        ? {
+            path: active.path,
+            languageId: active.languageId ?? null,
+            readOnly: active.readOnly ?? false,
+            version: active.version ?? 0,
+          }
+        : null,
+      format,
+      formatLabel:
+        format === 'image' && activePath !== null
+          ? imageFormatLabel(activePath)
+          : format === 'office' && activePath !== null
+            ? officeFormatChip(activePath)
+            : null,
+      languageLabel: language ? languageLabel(language) : null,
+      languageIndent: indent,
+      settings: {
+        tabSize: settings.editor.tabSize,
+        insertSpaces: settings.editor.insertSpaces,
+        lspEnabled: settings.lsp.enabled,
+      },
+      lspChip: lspChipFor(language, lspStatus),
+      git: { branch: git.branch, changeCount: git.changeCount },
+      projectKind: projectScan?.kind ?? null,
+      problems: editors.problemCounts(),
+      vim: settings.editor.vimMode ? editors.vimMode() : null,
+      macro: editors.isRecordingMacro() ? { steps: editors.macroSteps().length } : null,
+      tools: projectTools,
+      configuredPython: settings.run.pythonPath,
+    };
+    // Язык сменился — перечитываем состав серверов: сервер поднимается лениво.
+    if (needsLspRefresh(inputs, lspChipLanguage)) {
       lspChipLanguage = language;
       void refreshLspStatus();
     }
-    statusBar.update({
-      readOnly: active?.readOnly ?? false,
-      language:
-        showImage && activePath !== null
-          ? imageFormatLabel(activePath)
-          : showOffice && activePath !== null
-            ? officeFormatChip(activePath)
-            : language
-              ? languageLabel(language)
-              : null,
-      lsp: settings.lsp.enabled ? lspChipFor(language, lspStatus) : null,
-      version: active?.version ?? 0,
-      tabSize: indent?.tabSize ?? settings.editor.tabSize,
-      useTabs: indent ? !indent.insertSpaces : !settings.editor.insertSpaces,
-      branch: git.branch,
-      changes: git.changeCount,
-      projectKindId: projectScan && projectScan.kind.source !== 'none' ? projectScan.kind.id : null,
-      problems: editors.problemCounts(),
-      // Vim-режим: значок в строке состояния, когда режим включён.
-      vim: settings.editor.vimMode ? editors.vimMode() : null,
-      // Идёт запись макроса — точка и число действий: забыть про запись легко.
-      macro: editors.isRecordingMacro() ? { steps: editors.macroSteps().length } : null,
-      // Виджет окружения говорит на языке проекта: у Node — версия и менеджер,
-      // у Python — интерпретатор. Раньше в Node-проекте тут висел Python.
-      env: envWidgetLabel(projectScan?.kind.id ?? null, projectTools, settings.run.pythonPath),
-    });
+    statusBar.update(statusPatch(inputs));
 
     // Имя открытого файла — в центре шапки; его сменяет кнопка запуска, когда есть
     // что запускать, и оно остаётся запасным вариантом на пустом месте.
