@@ -5,12 +5,14 @@ import {
   formatClock,
   formatDuration,
   formatThousands,
+  logUsage,
   plural,
   prettyJson,
   runCost,
   runTruncated,
 } from '../../shared/run-log';
 import { permissionSpec } from '../../shared/permissions';
+import { formatCost, usageCost } from '../../shared/usage';
 import { clear, h, svgIcon } from './dom';
 import { createModal } from './modal';
 
@@ -253,7 +255,14 @@ export function createRunInspector(): RunInspectorView {
     // Разделение важнее самих чисел: схемы дальше в префиксе запроса (их кеширует
     // провайдер), а выводы растут с каждым шагом. Здесь видно, что именно дорого.
     const cost = runCost(log);
-    if (cost.outputTokens > 0) rows.push(h('p', { class: 'run-step-note' }, costLine(cost)));
+    if (cost.outputTokens > 0) {
+      // В долларах — только если модель есть в таблице цен: для неизвестной честнее
+      // молчать, чем выдумать цифру (то же правило, что в `session-info`).
+      const reported = logUsage(log);
+      const money = reported === null ? null : usageCost(reported, log.system.model);
+      const tail = money === null ? '' : ` · стоимость ≈ $${formatCost(money)}`;
+      rows.push(h('p', { class: 'run-step-note' }, costLine(cost) + tail));
+    }
 
     clear(systemBox);
     systemBox.append(h('div', { class: 'run-section-title' }, 'Что ушло модели'), ...rows);

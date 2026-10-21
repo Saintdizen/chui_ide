@@ -6,6 +6,7 @@ import {
   describeRun,
   formatClock,
   formatDuration,
+  logUsage,
   plural,
   prettyJson,
   runCost,
@@ -124,6 +125,27 @@ describe('цена прогона по статьям', () => {
     expect(cost.outputTokens).toBe(0);
     expect(cost.steps).toBe(0);
     expect(cost.perStep).toBeNull();
+  });
+});
+
+describe('расход прогона по usage провайдера', () => {
+  it('складывает шаги и служебные вызовы, кеш помнит отдельно', () => {
+    const usage = logUsage(
+      log({
+        steps: [
+          { index: 1, ms: 1, calls: [], usage: { promptTokens: 100, completionTokens: 20, cachedTokens: 60 } },
+          { index: 2, ms: 1, calls: [], usage: { promptTokens: 50, completionTokens: 10 } },
+        ],
+        usage: { promptTokens: 7, completionTokens: 3 },
+      }),
+    );
+    expect(usage).toEqual({ promptTokens: 157, completionTokens: 33, cachedTokens: 60 });
+  });
+
+  it('провайдер молчал — null, а не ноль', () => {
+    // Ноль читался бы как «прогон был бесплатным»; на деле числа просто нет.
+    expect(logUsage(log())).toBeNull();
+    expect(logUsage(log({ steps: [{ index: 1, ms: 1, calls: [], usage: {} }] }))).toBeNull();
   });
 });
 

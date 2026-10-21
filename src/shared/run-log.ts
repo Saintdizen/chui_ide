@@ -17,6 +17,7 @@
 
 import type { ChatRunTrace, ChatUsage } from './api';
 import type { PermissionPreset } from './permissions';
+import { addUsage } from './usage';
 
 /** Потолок текста в одном поле трассы (аргументы, результат, ответ шага). */
 export const MAX_RUN_FIELD = 4000;
@@ -120,6 +121,12 @@ export interface ChatRunLog {
   /** Чем кончилось: ответом, лимитом шагов или обрывом. */
   finished: 'answer' | 'limit' | 'aborted';
   trace: ChatRunTrace;
+  /**
+   * Расход служебных вызовов прогона, которые не стали шагами: проверка
+   * заголовка, сжатие контекста, память. Провайдер прислал `usage` —
+   * сложено; не прислал — пусто (см. `logUsage`).
+   */
+  usage?: ChatUsage;
 }
 
 /** Обрезка текста по потолку — без разрезания символа (он может быть не ASCII). */
@@ -223,6 +230,13 @@ export function prettyJson(text: string): string {
 }
 
 /**
+ * Настоящий расход прогона по `usage` провайдера: складываем то, что он вернул
+ * на каждом шаге. `null` — когда провайдер не прислал ни одного числа: тогда
+ * цену в долларах считать не из чего, а оценка по символам соврала бы про деньги.
+ *
+ * Кешированные токены не вычитаются: `usageCost` знает свой тариф на них.
+ */
+/**
  * Какую часть шага занял вызов, в процентах. `null` — когда время неизвестно
  * (служебные вызовы и повторы не измеряются): ноль соврал бы, что вызов ничего
  * не стоил.
@@ -245,6 +259,30 @@ export function plural(count: number, one: string, few: string, many: string): s
 /** Тысячи с неразрывным пробелом: число читается, а не считается по разрядам. */
 export function formatThousands(value: number): string {
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
+}
+
+/**
+ * Расход прогона по `usage` провайдера: сумма по шагам и по служебным вызовам.
+ * `null` — когда провайдер не прислал ни одного числа: тогда цену считать не из
+ * чего, а оценка по символам соврала бы про деньги.
+ *
+ * Считается только то, что провайдер прислал сам. Оценки из `runCost` сюда не
+ * подмешиваются: цена в долларах — это отчёт, а не догадка, и смешивать их
+ * значило бы выдать выдуманное за измеренное.
+ */
+export function logUsage(log: ChatRunLog): ChatUsage | null {
+  let total: ChatUsage = {};
+  let known = false;
+  const take = (usage: ChatUsage | undefined): void => {
+    if (!usage) return;
+    const { promptTokens, completionTokens, cachedTokens } = usage;
+    if (promptTokens === undefined && completionTokens === undefined && cachedTokens === undefined) return;
+    total = addUsage(total, usage);
+    known = true;
+  };
+  for (const step of log.steps) take(step.usage);
+  take(log.usage);
+  return known ? total : null;
 }
 
 /**
