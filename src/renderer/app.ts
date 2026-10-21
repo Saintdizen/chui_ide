@@ -59,10 +59,13 @@ import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
 import { hasEntries, splitSettingsPatch } from './core/settings-patch';
 import {
+  createFileUndo,
+  createFolderUndo,
   prepareRename,
   trackMove,
   undoMoves,
   undoRenamePlan,
+  type CreateUndo,
   type MoveTrack,
   type RenamePlan,
 } from './core/file-actions';
@@ -3056,11 +3059,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast(`Создан файл ${basename(created.path)}`, 'info', {
       action: {
         label: 'Отменить',
-        run: async () => {
-          await commands.execute('file.close', created.path);
-          await rpc.request('workspace.trash', { path: created.path });
-          explorer.scheduleRefresh();
-        },
+        run: () => undoCreate(createFileUndo(created.path)),
       },
     });
     return created.path;
@@ -3073,10 +3072,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast(`Создана папка ${basename(created.path)}`, 'info', {
       action: {
         label: 'Отменить',
-        run: async () => {
-          await rpc.request('workspace.trash', { path: created.path });
-          explorer.scheduleRefresh();
-        },
+        run: () => undoCreate(createFolderUndo(created.path)),
       },
     });
     return created.path;
@@ -3137,6 +3133,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     explorer.scheduleRefresh();
   };
 
+  // Отмена создания: сначала закрыть вкладку (для файла), потом унести в корзину.
+  // У папки вкладки нет — это решает createFolderUndo, а не `if` на месте вызова.
+  const undoCreate = async (undo: CreateUndo): Promise<void> => {
+    if (undo.closeTab && undo.closePath) await commands.execute('file.close', undo.closePath);
+    await rpc.request('workspace.trash', { path: undo.trashPath }).catch(() => undefined);
+    explorer.scheduleRefresh();
+  };
+
+  // Удаление не предлагает «Отменить»: путей возврата из корзины через API нет
+  // (canUndoTrash в core/file-actions.ts — сейчас всегда false). Кнопка, которая
+  // при нажатии ничего не делает, хуже её отсутствия: человек верит, что файл
+  // вернулся. Когда восстановление появится, сюда придёт то же действие, что у
+  // создания, — с настоящим шагом возврата.
   define({ id: 'file.delete', title: 'Удалить в корзину', category: 'Файл' }, async (path) => {
     if (typeof path !== 'string') return;
 

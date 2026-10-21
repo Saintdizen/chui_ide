@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { prepareRename, trackMove, undoMoves, undoRenamePlan } from '../src/renderer/core/file-actions';
+import {
+  canUndoTrash,
+  createFileUndo,
+  createFolderUndo,
+  prepareRename,
+  trackMove,
+  undoMoves,
+  undoRenamePlan,
+} from '../src/renderer/core/file-actions';
 
 describe('prepareRename', () => {
   it('активная вкладка закрыта, если переименовываем именно её', () => {
@@ -31,6 +39,29 @@ describe('undoRenamePlan', () => {
 
   it('ссылки правились — их тоже надо вернуть, иначе в проекте останутся битые', () => {
     expect(undoRenamePlan({ from: '/o', to: '/n', touched: 2 }).restoreImports).toBe(true);
+  });
+});
+
+describe('отмена создания', () => {
+  it('файл: вкладку открывали — закрываем её и уносим тот же путь', () => {
+    expect(createFileUndo('/a.txt')).toEqual({ closeTab: true, closePath: '/a.txt', trashPath: '/a.txt' });
+  });
+
+  it('папка: вкладки нет — закрывать нечего', () => {
+    expect(createFolderUndo('/dir')).toEqual({ closeTab: false, closePath: null, trashPath: '/dir' });
+  });
+
+  it('после отмены создания файла в дереве ничего не осталось бы, если б не refreshed', () => {
+    // Тест на форму: всё для уборки — в одном значении, а не в трёх аргументах
+    // на месте вызова, где один из них легко перепутать с путём папки.
+    const undo = createFileUndo('/a.txt');
+    expect(undo.closePath).toBe(undo.trashPath);
+  });
+});
+
+describe('canUndoTrash', () => {
+  it('восстановления из корзины нет — и не притворяемся, что есть', () => {
+    expect(canUndoTrash()).toBe(false);
   });
 });
 

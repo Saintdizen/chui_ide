@@ -62,6 +62,46 @@ export function trackMove(from: string, to: string, activePath: string | null): 
   return { from, to, active: activePath === from };
 }
 
+/**
+ * Отмена создания: что закрыть и что вернуть.
+ *
+ * Отмена созданного файла трогает две вещи, и обе важны по-своему. Закрыть
+ * вкладку можно только через команду `file.close`: она же переводит редактор на
+ * соседнюю вкладку, а прямой `openEditors.close` оставил бы на экране закрытый файл.
+ *
+ * Папка вкладок не имеет — для неё шаг один.
+ */
+export interface CreateUndo {
+  /** Закрыть вкладку — только если её открывали. */
+  readonly closeTab: boolean;
+  /** Путь для `file.close`; null — папку закрывать нечем. */
+  readonly closePath: string | null;
+  /** Что унести в корзину: и файл, и папка уносятся одним и тем же путём. */
+  readonly trashPath: string;
+}
+
+/** Отмена создания файла: вкладку открывали всегда (`openPath` в самом сценарии). */
+export function createFileUndo(path: string): CreateUndo {
+  return { closeTab: true, closePath: path, trashPath: path };
+}
+
+/** Отмена создания папки: вкладки у папки нет. */
+export function createFolderUndo(path: string): CreateUndo {
+  return { closeTab: false, closePath: null, trashPath: path };
+}
+
+/**
+ * Можно ли предлагать отмену удаления.
+ *
+ * Нельзя, и это не придирка: `shell.trashItem` — единственный путь удаления, а
+ * обратного вызова у него нет. Кнопка «Отменить», которая при нажатии ничего не
+ * делает, хуже, чем её отсутствие: человек верит, что файл вернулся.
+ * Когда появится восстановление из корзины — здесь станет `true`.
+ */
+export function canUndoTrash(): boolean {
+  return false;
+}
+
 /** Обратные шаги: последний переехавший возвращается первым, и каждое ребро — наоборот. */
 export function undoMoves(moved: readonly MoveTrack[]): MoveTrack[] {
   return moved
