@@ -7,7 +7,7 @@ import {
   type SettingsPatch,
   type WorkspaceChangedPayload,
 } from '../shared/api';
-import { PROJECT_SETTINGS_SECTIONS, mergeDeep, type ProjectSettings } from '../shared/project-config';
+import { mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
 import { symbolIndexChip, type SymbolIndexStatus } from '../shared/symbol-index';
@@ -57,6 +57,7 @@ import { OpenEditors } from './core/open-editors';
 import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
+import { hasEntries, splitSettingsPatch } from './core/settings-patch';
 import { deleteManyPrompt, deletePrompt, movedNotice, renamedNotice, trashedNotice } from './core/file-notices';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
@@ -237,19 +238,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Правка настроек: IDE-секции уходят в userData, проектные (editor/explorer/run/lsp) — в .chui_ide.
   async function saveSettingsPatch(value: SettingsPatch): Promise<Settings> {
     const root = workspace.root;
-    const projectPatch: Record<string, unknown> = {};
-    const globalPatch: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      if ((PROJECT_SETTINGS_SECTIONS as readonly string[]).includes(key)) projectPatch[key] = entry;
-      else globalPatch[key] = entry;
-    }
-    if (root && Object.keys(projectPatch).length > 0) {
+    const { project: projectPatch, global: globalPatch } = splitSettingsPatch(value as Record<string, unknown>);
+    if (root && hasEntries(projectPatch)) {
       projectSettings = await rpc.request('project.updateSettings', {
         root,
         patch: projectPatch as ProjectSettings,
       });
     }
-    if (Object.keys(globalPatch).length > 0) {
+    if (hasEntries(globalPatch)) {
       baseSettings = await rpc.request('settings.update', globalPatch as SettingsPatch);
     }
     const next = rebuildSettings();
