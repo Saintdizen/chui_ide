@@ -4,9 +4,12 @@ import {
   coveredRequest,
   forgetChangedFiles,
   isCovered,
+  MAX_COVERAGE_FILES,
   needsConfirm,
   readStamp,
   rememberRead,
+  restoreReads,
+  snapshotReads,
   touchedPaths,
   uncoveredRequest,
   type ReadRange,
@@ -383,5 +386,44 @@ describe('coveredRequest без endLine', () => {
   it('конец файла неизвестен — читаем заново', () => {
     const reads = new Map([['/p/a.ts', [{ from: 1, to: 120, stamp: '1:2' }]]]);
     expect(coveredRequest('read', JSON.stringify({ path: '/p/a.ts' }), reads)).toBeUndefined();
+  });
+});
+
+describe('память чтений переживает границу хода', () => {
+  it('снимок и восстановление сохраняют диапазоны, штампы и флаги', () => {
+    const reads = new Map([
+      ['/p/a.ts', [{ from: 1, to: 40, stamp: '10:200', eof: true }]],
+      ['/p/b.ts', [{ from: 5, to: 9, stamp: '11:100', suspect: true }]],
+    ]);
+    const restored = restoreReads(snapshotReads(reads));
+    expect(restored.get('/p/a.ts')).toEqual([{ from: 1, to: 40, stamp: '10:200', eof: true }]);
+    expect(restored.get('/p/b.ts')).toEqual([{ from: 5, to: 9, stamp: '11:100', suspect: true }]);
+  });
+
+  it('прочитанное в прошлом ходе не читается заново в новом', () => {
+    // Ход 1: прочитали 1–100 файла и запомнили.
+    const first = new Map<string, ReadRange[]>();
+    rememberRead(first, { path: '/p/a.ts', from: 1, to: 100, stamp: '10:200' });
+    // Конец хода: карта уехала в беседу снимком и вернулась в следующем ходе.
+    const second = restoreReads(snapshotReads(first));
+    const covered = coveredRequest('read', JSON.stringify({ path: '/p/a.ts', startLine: 10, endLine: 20 }), second);
+    expect(covered).toEqual({ path: '/p/a.ts', from: 10, to: 20 });
+  });
+
+  it('пустой снимок не пишется, а мусор из файла не ломает чтение', () => {
+    expect(snapshotReads(new Map([['/p/a.ts', []]]))).toEqual({ files: [] });
+    const broken = { files: [null, { path: 5 }, { path: '/p/a.ts', ranges: [{ from: 'x' }] }] } as never;
+    expect(restoreReads(broken).size).toBe(0);
+  });
+
+  it('файлов больше потолка — давние выбрасываются, свежие остаются', () => {
+    const many = new Map<string, ReadRange[]>();
+    for (let index = 0; index < MAX_COVERAGE_FILES + 10; index += 1) {
+      many.set(`/p/f${index}.ts`, [{ from: 1, to: 2, stamp: '1:1' }]);
+    }
+    const restored = restoreReads(snapshotReads(many));
+    expect(restored.size).toBe(MAX_COVERAGE_FILES);
+    expect(restored.has('/p/f0.ts')).toBe(false);
+    expect(restored.has(`/p/f${MAX_COVERAGE_FILES + 9}.ts`)).toBe(true);
   });
 });

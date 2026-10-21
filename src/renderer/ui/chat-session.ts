@@ -1,6 +1,7 @@
 import type { ChatAttachment, ChatGoal, ChatMessage, ChatRunTrace, ChatUsage, ToolFileChange } from '../../shared/api';
 import type { ToolPresetId } from '../../shared/tool-presets';
 import type { ChatRunLog } from '../../shared/run-log';
+import type { ReadCoverageSnapshot } from '../../shared/read-coverage';
 import type { ToggledFile } from './chat-changes';
 
 /**
@@ -66,6 +67,12 @@ export interface ChatSession {
    * прогоном и переживает перезапуск — по нему видно, во сколько обошлась беседа.
    */
   trace?: ChatRunTrace;
+  /**
+   * Что агент уже прочитал в этой беседе (см. `shared/read-coverage.ts`). Едет в
+   * запросе и возвращается в `done`: без этого новый ход заново читал прочитанное
+   * (замер — 23,5 тыс. токенов на 71 тыс. чтений). Переживает перезапуск.
+   */
+  reads?: ReadCoverageSnapshot;
   /**
    * Трасса последнего прогона в этой беседе: что ушло модели, шаги, время.
    * Живёт только в памяти — это диагностика, а не часть переписки: в файл беседы

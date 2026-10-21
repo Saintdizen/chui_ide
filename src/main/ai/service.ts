@@ -98,6 +98,8 @@ import {
   needsConfirm,
   readStamp,
   rememberRead,
+  restoreReads,
+  snapshotReads,
   uncoveredRequest,
   type ReadRange,
 } from '../../shared/read-coverage';
@@ -1422,7 +1424,10 @@ export class AiService {
     };
 
     // Прочитанные диапазоны по файлам: повтор уже прочитанного места не исполняем.
-    const coveredReads = new Map<string, ReadRange[]>();
+    // Карта поднимается из беседы (`ChatConversation.reads`), а не заводится пустой:
+    // иначе в новом ходе агент заново читал то, что уже видел. Замер по истории —
+    // 23,5 тыс. токенов на 71 тыс. чтений пришлось на перекрытие, треть всех чтений.
+    const coveredReads = request.reads ? restoreReads(request.reads) : new Map<string, ReadRange[]>();
     // Тот же учёт — командам-читалкам в терминале: `cat` поверх уже прочитанного
     // отвечает строкой, а не второй копией текста.
     toolContext.coveredReads = coveredReads;
@@ -1633,6 +1638,7 @@ export class AiService {
           usage,
           trace: trace(),
           run: finishRun('answer'),
+          reads: snapshotReads(coveredReads),
           agentMessages: produced,
           ...(reasoning ? { reasoning } : {}),
         };
@@ -2046,6 +2052,7 @@ export class AiService {
           usage,
           trace: trace(),
           run: finishRun('limit'),
+          reads: snapshotReads(coveredReads),
           agentMessages: produced,
           ...(reasoning ? { reasoning } : {}),
         };
@@ -2062,6 +2069,7 @@ export class AiService {
         usage,
         trace: trace(),
         run: finishRun('aborted'),
+        reads: snapshotReads(coveredReads),
         agentMessages: produced,
         ...(reasoning ? { reasoning } : {}),
       };
@@ -2077,6 +2085,7 @@ export class AiService {
       usage,
       trace: trace(),
       run: finishRun('limit'),
+      reads: snapshotReads(coveredReads),
       agentMessages: produced,
       ...(reasoning ? { reasoning } : {}),
     };

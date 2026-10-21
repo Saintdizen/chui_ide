@@ -651,6 +651,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         session.turnsSinceCompact = 0;
         session.trace = conversation.trace;
         session.goal = conversation.goal;
+        // Память чтений из файла: следующий ход после открытия окна не начнётся
+        // с чистого листа и не перечитает то, что уже читали до закрытия.
+        session.reads = conversation.reads;
         // Набор инструментов из файла — выбор этой беседы. Нет его — берётся общий
         // из настроек (см. `syncToolPreset`): так старые файлы читаются без миграции.
         session.toolPreset = conversation.toolPreset;

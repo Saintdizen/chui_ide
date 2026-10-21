@@ -9,6 +9,7 @@ import type {
   ChatUsage,
 } from './api';
 import { sanitizeGoal } from './goal';
+import { restoreReads, snapshotReads, type ReadCoverageSnapshot } from './read-coverage';
 import { sanitizeToolPreset } from './tool-presets';
 
 /**
@@ -92,6 +93,11 @@ export function sanitizeConversations(raw: unknown): ChatConversation[] {
     // а флаг читаем строго: строка «да» — это не «закрыто».
     const goal = sanitizeGoalFromFile(value.goal);
     if (goal) conversation.goal = goal;
+    // Память чтений: без неё новый ход заново читал бы прочитанное (замер — треть
+    // всех токенов чтений). Читаем недоверчиво, как и всё из файла: мусор в
+    // диапазонах отбрасывает `restoreReads`, а пустую память не пишем вовсе.
+    const reads = restoreReads(value.reads as ReadCoverageSnapshot | undefined);
+    if (reads.size > 0) conversation.reads = snapshotReads(reads);
     // Набор инструментов беседы. Правило общее с настройками (`sanitizeToolPreset`):
     // незнакомое значение — не мусор в файле, а повод взять общий набор.
     if (typeof value.toolPreset === 'string') conversation.toolPreset = sanitizeToolPreset(value.toolPreset);

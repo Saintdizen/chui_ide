@@ -225,6 +225,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
             // сам на первом шаге, и продолжение обязано её видеть.
             ...(session.goal && !session.goal.done ? { goal: session.goal.text } : {}),
             attachments,
+            // Память чтений: без неё новый ход заново читал бы прочитанное (замер —
+            // треть всех токенов чтений). Приходит обратно в `done`.
+            ...(session.reads ? { reads: session.reads } : {}),
             // Беседа — для журнала прогонов: по ней строки одного разговора собираются вместе.
             conversationUid: session.uid,
           },
@@ -332,6 +335,9 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
         // След прогона копим в беседе: расход и число шагов видны за всё время,
         // а не только за последний шаг (см. «Информацию о сессии»).
         session.trace = addRunTrace(session.trace, done.trace);
+        // Память чтений вернулась из прогона: кладём в беседу, чтобы следующий ход
+        // знал, что уже прочитано, и не читал это снова.
+        if (done.reads) session.reads = done.reads;
 
         // Скорость ответа: токены / время потока. Без обоих чисел не показываем.
         const completion = done.usage?.completionTokens;

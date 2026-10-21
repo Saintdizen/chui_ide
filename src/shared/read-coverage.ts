@@ -312,3 +312,50 @@ export function forgetChangedFiles<T>(
     if (paths.some((path) => touched.has(pathKey(path)))) caches.executed.delete(key);
   }
 }
+
+/**
+ * Память чтений в виде, пригодном для файла беседы: массив, а не `Map`, потому что
+ * через JSON карта не проходит. Ключи файлов — как есть (`pathKey` уже их привёл
+ * к общему виду при записи).
+ *
+ * Потолок на число файлов: память чтений — подсказка, а не архив. Беседа в сотню
+ * файлов даёт перекрытие не чаще, зато файл истории распухает на каждом шаге.
+ */
+export interface ReadCoverageSnapshot {
+  files: { path: string; ranges: ReadRange[] }[];
+}
+
+/** Потолок файлов в памяти чтений беседы. Лишние выбрасываем, начиная с давних. */
+export const MAX_COVERAGE_FILES = 60;
+
+/** Снимок памяти чтений: только то, по чему есть куски. */
+export function snapshotReads(reads: ReadonlyMap<string, ReadRange[]>): ReadCoverageSnapshot {
+  const files: { path: string; ranges: ReadRange[] }[] = [];
+  for (const [path, ranges] of reads) {
+    if (ranges.length === 0) continue;
+    files.push({ path, ranges: ranges.map((range) => ({ ...range })) });
+  }
+  // Свежие в конце карты — им и верим в первую очередь при усечении.
+  if (files.length > MAX_COVERAGE_FILES) files.splice(0, files.length - MAX_COVERAGE_FILES);
+  return { files };
+}
+
+/** Восстановить память чтений из файла беседы: мусор в файле не должен ломать прогон. */
+export function restoreReads(snapshot: ReadCoverageSnapshot | undefined): Map<string, ReadRange[]> {
+  const reads = new Map<string, ReadRange[]>();
+  if (!snapshot || !Array.isArray(snapshot.files)) return reads;
+  for (const file of snapshot.files.slice(-MAX_COVERAGE_FILES)) {
+    if (!file || typeof file.path !== 'string' || !Array.isArray(file.ranges)) continue;
+    const ranges: ReadRange[] = [];
+    for (const raw of file.ranges) {
+      if (!raw || typeof raw.from !== 'number' || typeof raw.to !== 'number') continue;
+      const range: ReadRange = { from: raw.from, to: raw.to };
+      if (typeof raw.stamp === 'string') range.stamp = raw.stamp;
+      if (raw.eof === true) range.eof = true;
+      if (raw.suspect === true) range.suspect = true;
+      ranges.push(range);
+    }
+    if (ranges.length > 0) reads.set(file.path, ranges);
+  }
+  return reads;
+}

@@ -12,6 +12,7 @@ import type { CursorStyle } from './cursor-style';
 import type { ApplyResult, FileEdit, TextEdit } from './edits';
 import type { BlameLine } from './git-blame';
 import type { PatchFile } from './patch';
+import type { ReadCoverageSnapshot } from './read-coverage';
 import type { ProjectScan } from './project-scan';
 import type { ProjectSettings } from './project-config';
 import type { AutoSaveMode } from './auto-save';
@@ -1687,6 +1688,12 @@ export interface ChatRequest {
    */
   toolPreset?: ToolPresetId;
   /**
+   * Что агент уже прочитал в этой беседе (см. `ChatConversation.reads`). Renderer
+   * присылает карту вместе с запросом и забирает обновлённую из события `done`:
+   * так память чтений переживает границу хода, не требуя сервисного хранилища.
+   */
+  reads?: ReadCoverageSnapshot;
+  /**
    * Устаревшее: `true` — это «полный доступ». Оставлено для проб и скриптов,
    * которые шлют запрос напрямую; настоящий выбор теперь в `permission`.
    */
@@ -1777,6 +1784,12 @@ export interface ChatStreamDone {
   /** След прогона: шаги, вызовы и суммарный расход за все шаги (для наблюдаемости). */
   trace?: ChatRunTrace;
   /**
+   * Память чтений после этого хода. Renderer кладёт её в беседу
+   * (`ChatConversation.reads`) и присылает обратно со следующим запросом: так
+   * агент в новом ходе помнит, что уже прочитал, и не читает это снова.
+   */
+  reads?: ReadCoverageSnapshot;
+  /**
    * Подробная трасса этого прогона: что ушло модели, каждый шаг с его вызовами,
    * временем и итог. По ней разбирают, «почему это заняло минуту», — в отличие от
    * `trace`, где только итоговые числа.
@@ -1818,6 +1831,14 @@ export interface ChatConversation {
   trace?: ChatRunTrace;
   /** Цель работы: незакрытая цель поднимается вместе с беседой. */
   goal?: ChatGoal;
+  /**
+   * Что агент уже прочитал в этой беседе (см. `shared/read-coverage.ts`). Раньше
+   * память чтений жила один прогон и в новом ходе пустела: замер показал 23,5 тыс.
+   * токенов повторов на 71 тыс. чтений, треть — перекрытие уже виденного. Поле
+   * лежит в файле беседы, а не в сервисе: тогда память переживает и границу хода,
+   * и перезапуск.
+   */
+  reads?: ReadCoverageSnapshot;
   /**
    * Набор инструментов этой беседы (см. `shared/tool-presets.ts`). Не задан —
    * берётся общий из настроек. Поле есть в файле, иначе выбор терялся бы при записи.
