@@ -1726,6 +1726,15 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
           'несохранённые файлы записываются перед коммитом. Иначе правки остались бы вне коммита, ' +
           'а вкладка — с пометкой «не сохранён».',
       ),
+      switchRow('Сохранять файлы перед переключением ветки', git.saveBeforeCheckout, (value) =>
+        apply({ saveBeforeCheckout: value }),
+      ),
+      h(
+        'div',
+        { class: 'field-hint' },
+        'Переключение ветки тоже работает с файлами на диске: несохранённый буфер оно не видит. ' +
+          'Без этой настройки перед checkout спрашиваем, а с ней — сохраняем сразу.',
+      ),
     ];
   }
 

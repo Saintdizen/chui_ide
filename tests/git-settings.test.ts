@@ -48,6 +48,16 @@ describe('sanitizeGitSettings', () => {
     expect(sanitizeGitSettings({ pullMode: 'rebase', saveBeforeCommit: false })).toEqual({
       pullMode: 'rebase',
       saveBeforeCommit: false,
+      saveBeforeCheckout: true,
     });
+  });
+
+  it('сохранять перед переключением ветки включено по умолчанию', () => {
+    expect(DEFAULT_GIT_SETTINGS.saveBeforeCheckout).toBe(true);
+  });
+
+  it('явное false выключает и сохранение перед переключением', () => {
+    expect(sanitizeGitSettings({ saveBeforeCheckout: false }).saveBeforeCheckout).toBe(false);
+    expect(sanitizeGitSettings({ saveBeforeCheckout: 1 }).saveBeforeCheckout).toBe(true);
   });
 });

@@ -14,6 +14,10 @@ export const DEFAULT_GIT_SETTINGS: GitSettings = {
   // Перед коммитом сохраняем несохранённые файлы: коммит читает рабочее дерево,
   // а не экран, и правки из буфера иначе остались бы в стороне от коммита.
   saveBeforeCommit: true,
+  // Переключение ветки тоже идёт по диску: непoxранённый буфер оно не видит.
+  // Но checkout меняет файлы под ногами, поэтому по умолчанию СОХРАНЯЕМ сами:
+  // висящий вопрос «а куда делся мой текст?» здесь дороже одного тихого сохранения.
+  saveBeforeCheckout: true,
 };
 
 /**
@@ -27,5 +31,6 @@ export function sanitizeGitSettings(raw: unknown): GitSettings {
   return {
     pullMode: normalizePullMode(value.pullMode),
     saveBeforeCommit: value.saveBeforeCommit !== false,
+    saveBeforeCheckout: value.saveBeforeCheckout !== false,
   };
 }

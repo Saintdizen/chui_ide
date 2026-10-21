@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  amendWarning,
   canUndoDiscard,
   canUndoTrash,
   copiedToTrash,
   createFileUndo,
   createFolderUndo,
+  planAmend,
+  planCheckout,
   planCommitSave,
   planCommitStage,
   prepareDiscard,
@@ -222,5 +225,70 @@ describe('undoMoves', () => {
     const copy = steps.map((step) => ({ ...step }));
     undoMoves(steps);
     expect(steps).toEqual(copy);
+  });
+});
+
+describe('planCheckout', () => {
+  const dirty = [
+    { path: '/src/a.ts', readOnly: false },
+    { path: '/src/b.ts', readOnly: true },
+  ];
+
+  it('чистые буферы — переключаемся молча', () => {
+    expect(planCheckout([], true)).toEqual({ save: [], ask: false, blocked: [] });
+    expect(planCheckout([], false)).toEqual({ save: [], ask: false, blocked: [] });
+  });
+
+  it('сохранять разрешено — сохраняем всё записываемое и не спрашиваем', () => {
+    expect(planCheckout(dirty, true)).toEqual({ save: ['/src/a.ts'], ask: false, blocked: ['/src/b.ts'] });
+  });
+
+  it('сохранять запрещено — спрашиваем, но не сохраняем', () => {
+    expect(planCheckout(dirty, false)).toEqual({ save: [], ask: true, blocked: ['/src/b.ts'] });
+  });
+
+  it('из одних файлов «только чтение» спрашивать не о чем: сохранить их всё равно нельзя', () => {
+    expect(planCheckout([{ path: '/src/b.ts', readOnly: true }], false)).toEqual({
+      save: [],
+      ask: false,
+      blocked: ['/src/b.ts'],
+    });
+  });
+
+  it('файлы «только чтение» остаются в списке, какой бы ни была настройка', () => {
+    expect(planCheckout(dirty, false).blocked).toEqual(['/src/b.ts']);
+    expect(planCheckout(dirty, true).blocked).toEqual(['/src/b.ts']);
+  });
+});
+
+describe('planAmend', () => {
+  it('коммитов нет — править нечего', () => {
+    expect(planAmend(null, false)).toEqual({ kind: 'no-head' });
+  });
+
+  it('сообщение меняется — предупреждаем', () => {
+    expect(planAmend('abc123', true)).toEqual({ kind: 'commit', warn: true });
+  });
+
+  it('без нового сообщения предупреждать не о чем', () => {
+    expect(planAmend('abc123', false)).toEqual({ kind: 'commit', warn: false });
+  });
+});
+
+describe('amendWarning', () => {
+  it('ничего не меняется — молчим', () => {
+    expect(amendWarning(false, false)).toBeNull();
+  });
+
+  it('меняется только сообщение', () => {
+    expect(amendWarning(true, false)).toBe('Сообщение последнего коммита будет заменено');
+  });
+
+  it('коммит уже отправлен — это про историю, а не про текст', () => {
+    expect(amendWarning(false, true)).toContain('опубликованную историю');
+  });
+
+  it('оба сразу — говорим о force-push', () => {
+    expect(amendWarning(true, true)).toContain('force-push');
   });
 });

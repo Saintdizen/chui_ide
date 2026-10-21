@@ -59,9 +59,12 @@ import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
 import { hasEntries, splitSettingsPatch } from './core/settings-patch';
 import {
+  amendWarning,
   copiedToTrash,
   createFileUndo,
   createFolderUndo,
+  planAmend,
+  planCheckout,
   planCommitSave,
   prepareDiscard,
   prepareRename,
@@ -69,6 +72,7 @@ import {
   undoableAfterTrash,
   undoMoves,
   undoRenamePlan,
+  type CheckoutPlan,
   type CreateUndo,
   type MoveTrack,
   type RenamePlan,
@@ -2613,6 +2617,47 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   };
 
   /**
+   * Сторож для действий, меняющих рабочее дерево под ногами (checkout).
+   *
+   * Отличия от saveDirtyForGit: у checkout своя настройка (иначе человек,
+   * разрешивший сохранять перед коммитом, не ждал бы того же перед ветвью), и
+   * отказ здесь не «не сохранил», а «я сохранил, а ты всё равно потеряешь».
+   *
+   * Возвращает true — можно переключаться (что надо, уже на диске).
+   */
+  const prepareCheckout = async (): Promise<boolean> => {
+    const plan: CheckoutPlan = planCheckout(documents.dirty(), settings.git.saveBeforeCheckout !== false);
+    if (plan.blocked.length > 0) {
+      // Сохранить нечего — файл только для чтения. git смотрит диск, а на экране
+      // текст, которого на диске нет: переключение молча выкинет его.
+      showToast(`Не сохранить (только чтение): ${plan.blocked.length}`, 'error');
+      return false;
+    }
+    if (plan.ask) {
+      // Сохранять запрещено настройкой: решает человек, а не догадка.
+      const answer = await rpc.request('dialog.confirm', {
+        title: 'Есть несохранённые файлы',
+        message: 'Переключение ветки идёт по диску — несохранённое в ней не участвует. Сохранить и переключиться?',
+        confirmLabel: 'Сохранить и переключиться',
+      });
+      if (!answer.confirmed) return false;
+      for (const path of documents
+        .dirty()
+        .filter((document) => !document.readOnly)
+        .map((document) => document.path)) {
+        const document = documents.get(path);
+        if (document && !(await saveDocument(document))) return false;
+      }
+    }
+    for (const path of plan.save) {
+      const document = documents.get(path);
+      if (document && !(await saveDocument(document))) return false;
+    }
+    if (plan.save.length > 0 || plan.ask) await git.refresh().catch(() => undefined);
+    return true;
+  };
+
+  /**
    * Сохранить документ ПОД ДРУГИМ ИМЕНЕМ (Save As). Путь выбирает человек системным
    * диалогом, поэтому в отличие от Ctrl+S запись идёт не по пути документа, а по
    * выбранному. Прежний файл на диске остаётся как был — это копия, и терять его
@@ -3862,6 +3907,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         return undefined;
       }
       if (!(await saveDirtyForGit())) return undefined;
+      // Новое сообщение перезаписывает и текст коммита, и его историю: про это
+      // спрашиваем ДО, а не показываем повод в `git log`.
+      const plan = planAmend(git.repository.head, text.length > 0);
+      if (plan.kind === 'no-head') return undefined;
+      if (plan.warn) {
+        const warning = amendWarning(true, git.repository.ahead > 0);
+        const answer = await rpc.request('dialog.confirm', {
+          title: 'Исправить последний коммит',
+          message: warning ?? 'Сообщение последнего коммита будет заменено',
+          detail: 'Старый коммит останется только в reflog: обычная история указывает на новый.',
+          confirmLabel: 'Исправить',
+        });
+        if (!answer.confirmed) return undefined;
+      }
       const info = await git.commit(text, undefined, true);
       showToast(`Коммит ${info.hash} исправлен: ${info.summary}`);
       return info;
@@ -4976,8 +5035,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (!(await conflictView.open(target))) showToast('В этом файле нет конфликтов слияния');
   });
 
+  // Переключение и создание ветки меняют файлы под ногами: несохранённый буфер они
+  // не видят. Поэтому сперва prepareCheckout — сохранить или спросить.
   define({ id: 'git.checkout', title: 'Переключить ветку', category: 'Git' }, async (name) => {
     if (typeof name !== 'string' || !name) return;
+    if (!(await prepareCheckout())) return;
     await git.checkout(name);
     showToast(`Ветка: ${name}`);
   });
@@ -4985,6 +5047,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   define({ id: 'git.createBranch', title: 'Создать ветку', category: 'Git' }, async (name) => {
     const branch = typeof name === 'string' ? name.trim() : '';
     if (!branch) return;
+    if (!(await prepareCheckout())) return;
     await git.checkout(branch, true);
     showToast(`Ветка создана: ${branch}`);
   });

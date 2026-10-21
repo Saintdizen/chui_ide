@@ -1073,6 +1073,12 @@ export interface GitSettings {
    * осталась бы с пометкой «не сохранён».
    */
   saveBeforeCommit: boolean;
+  /**
+   * Сохранять несохранённые файлы перед переключением ветки. Checkout меняет
+   * файлы под ногами: несохранённый буфер он не видит, и после переключения на
+   * экране остаётся текст чужой ветки.
+   */
+  saveBeforeCheckout: boolean;
 }
 
 export interface AppearanceSettings {

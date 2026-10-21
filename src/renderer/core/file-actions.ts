@@ -134,27 +134,63 @@ export function renameUndoLabel(done: { from: string }): string {
 }
 
 /**
- * Можно ли приступать к коммиту и что для этого надо сохранить.
- *
- * Git смотрит рабочее дерево, а не экран: правки в буфере в коммит не попадают, пока
- * не сохранены. Сохранять — настройка, но у неё есть исключение, которое выключением
- * не отменяется: файл только для чтения сохранить нельзя — и тогда `false`, чтобы
- * коммит не ушёл по устаревшему содержимому.
- *
- * Содержимое буфера здесь не трогаем: сохранение — дело вызывающего.
- */
-/**
  * Что сказать перед amend.
  *
  * Аменд перезаписывает последний коммит — и вместе с ним сообщение, если передали
  * новое. Это перезапись опубликованной истории, и об этом человек должен знать до,
- * а не узнать из `git log` после. `published` — есть ли за этой веткой удалённая копия.
+ * а не узнать из `git log` после. Новое сообщение — `replaced`; уже отправленный
+ * коммит — `pushed`. Предупреждать надо про оба, и по-разному.
  */
 export type AmendPlan = { readonly kind: 'no-head' } | { readonly kind: 'commit'; readonly warn: boolean };
 
 export function planAmend(head: string | null, replaced: boolean): AmendPlan {
   if (head === null) return { kind: 'no-head' };
   return { kind: 'commit', warn: replaced };
+}
+
+/**
+ * Объяснение к amend: чем он опасен именно сейчас.
+ *
+ * `pushed` — последний коммит уже есть на удалённой ветке. Перезапись такой истории
+ * требует force-push и ломает копии у всех остальных. Это отдельный текст от
+ * «сообщение меняется», и спрашивать надо про оба.
+ */
+export function amendWarning(replaced: boolean, pushed: boolean): string | null {
+  if (replaced && pushed) return 'Сообщение изменится, а коммит уже отправлен: понадобится force-push';
+  if (replaced) return 'Сообщение последнего коммита будет заменено';
+  if (pushed) return 'Коммит уже отправлен: правка перепишет опубликованную историю';
+  return null;
+}
+
+/**
+ * Переключение ветки при несохранённых буферах.
+ *
+ * `git checkout` трогает рабочее дерево, а не экран: несохранённые правки он не
+ * видит вовсе. Если такой файл в целевой ветке отличается, git либо молча перенесёт
+ * правку, либо откажется; в обоих случаях человек ждал не этого. А если буфер
+ * открыт и отличается от диска, после переключения на экране останется текст
+ * чужой ветки — то самое «всё пропало», которое потом не воспроизвести.
+ *
+ * Поэтому: `save` — что сохранить до checkout (иначе диск устарел), `ask` — есть
+ * что сохранить, но настройка сохранять запрещает: тогда спрашиваем.
+ * `blocked` — файлы «только чтение»: их не сохранить, и переключение идёт по
+ * старому содержимому.
+ */
+export interface CheckoutPlan {
+  readonly save: readonly string[];
+  readonly ask: boolean;
+  readonly blocked: readonly string[];
+}
+
+export function planCheckout(
+  dirty: readonly { readonly path: string; readonly readOnly: boolean }[],
+  saveBeforeCheckout: boolean,
+): CheckoutPlan {
+  if (dirty.length === 0) return { save: [], ask: false, blocked: [] };
+  const writable = dirty.filter((document) => !document.readOnly).map((document) => document.path);
+  const blocked = dirty.filter((document) => document.readOnly).map((document) => document.path);
+  if (!saveBeforeCheckout) return { save: [], ask: writable.length > 0, blocked };
+  return { save: writable, ask: false, blocked };
 }
 
 /**
