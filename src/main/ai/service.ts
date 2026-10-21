@@ -126,9 +126,12 @@ import {
   budgetMessage,
   budgetVerdict,
   contextHeavyMessage,
+  contextTrimmedMessage,
   HEAVY_CONTEXT_TOKENS,
+  midRunTrimDue,
   stepCost,
 } from '../../shared/chat-budget';
+import { pricingAt } from '../../shared/providers';
 import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
 import type { TelemetryStore } from './telemetry';
@@ -214,6 +217,20 @@ const OVERFLOW_SHRINK = 0.7;
  */
 const TRIM_MARKER =
   'Часть ранней истории беседы опущена: она не помещалась в окно модели. Если нужны детали — перечитай их инструментами.';
+
+/**
+ * Пометка для сокращения посреди прогона. Другая причина — другой текст: здесь
+ * дело не в окне (до него далеко), а в цене: каждый шаг вёз историю заново.
+ */
+const MIDRUN_TRIM_MARKER =
+  'Ранняя часть истории прогона опущена: она ехала в каждом шаге и стоила дороже, чем перечитать её при нужде. Свежие шаги целы, опущенное можно прочитать инструментами.';
+
+/**
+ * Сколько последних сообщений оставить неприкосновенными при сокращении посреди
+ * прогона. Четыре — это текущий ход и предыдущий: по ним модель понимает, что
+ * уже сделано, а что ещё нет.
+ */
+const MIDRUN_KEEP_TURNS = 4;
 
 // Лимиты шагов «модель → инструмент → модель» живут в настройках
 // (`ai.maxSteps` и `ai.maxAutopilotSteps`): значения по умолчанию — там же.
@@ -1441,16 +1458,44 @@ export class AiService {
       const countOutput = (content: string): void => {
         stepLog.outputTokens = (stepLog.outputTokens ?? 0) + estimateTextTokens(content);
       };
+      /**
+       * Сократить историю прогона до порога `HEAVY_CONTEXT_TOKENS`.
+       *
+       * Переписывает префикс запроса, поэтому зовётся только когда оставшихся
+       * шагов хватает, чтобы промах кеша окупился (`midRunTrimDue`).
+       * Рамка запроса и свежие ходы целы: `trimMessagesToFit` режет по парам
+       * «вызов → результат» и не оставляет висячих `toolCallId`.
+       */
+      const trimHistory = (): number => {
+        const trimmed = trimMessagesToFit(messages, {
+          limitTokens: HEAVY_CONTEXT_TOKENS,
+          overheadTokens: toolsTokens,
+          reserveTokens: answerReserve(maxTokens, HEAVY_CONTEXT_TOKENS),
+          keepRecent: MIDRUN_KEEP_TURNS,
+          marker: MIDRUN_TRIM_MARKER,
+        });
+        if (trimmed.dropped === 0) return 0;
+        messages.splice(0, messages.length, ...trimmed.messages);
+        return trimmed.dropped;
+      };
 
       // Окно модели говорит, сколько влезет, но не сколько это стоит: контекст
-      // едет в каждом шаге прогона. Порог ниже окна — с него шаг считается
-      // тяжёлым: говорим человеку один раз за прогон и сворачиваем старые
-      // результаты охотнее, иначе 200k на шаге едут до конца прогона.
+      // едет в каждом шаге прогона.
       const contextTokens = estimateMessagesTokens(messages) + toolsTokens;
+      const stepsLeft = Math.max(0, steps - runSteps);
+      // Сокращаем посреди прогона, но не на каждом шаге: разрыв кеша стоит
+      // дорого, и пока впереди мало шагов, он не окупится (`midRunTrimDue`).
+      const trimmedNow = midRunTrimDue({ tokens: contextTokens, stepsLeft, pricing: pricingAt(workModel) })
+        ? trimHistory()
+        : 0;
       const heavy = contextTokens > HEAVY_CONTEXT_TOKENS;
       if (heavy && !contextDeclared) {
         contextDeclared = true;
-        emit(ChatStreamEvent.Delta, { text: `\n\n${contextHeavyMessage(contextTokens)}` });
+        emit(ChatStreamEvent.Delta, {
+          text: `\n\n${
+            trimmedNow > 0 ? contextTrimmedMessage(contextTokens, trimmedNow) : contextHeavyMessage(contextTokens)
+          }`,
+        });
       }
       // Каждый шаг сверяемся с окном: результаты инструментов копятся, и
       // длинный прогон легко переполняет контекст. Режем старые ходы целиком,

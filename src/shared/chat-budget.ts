@@ -91,3 +91,58 @@ export function contextHeavyMessage(tokens: number): string {
     'Старые результаты сворачиваю охотнее; новый прогон начнётся дешевле.'
   );
 }
+
+/** Цены, нужные для расчёта окупаемости: за миллион токенов. */
+export interface CachePrice {
+  /** Чтение из кеша промпта. */
+  cachedInput: number;
+  /** Запись в кеш — её и платим заново после переписывания префикса. */
+  cacheWrite: number;
+}
+
+/**
+ * Через сколько оставшихся шагов разрыв кеша окупается сокращением истории.
+ *
+ * Сокращение переписывает префикс запроса: следующий шаг читает историю заново
+ * по цене записи в кеш, а не попадания. Выгода — каждый оставшийся шаг везёт
+ * меньше.
+ *
+ * Без сокращения: N·C·cachedInput
+ * С сокращением:  C(1−r)·cacheWrite + (N−1)·C(1−r)·cachedInput
+ * => N > (1−r)(k−1)/r, где r — доля сокращения, k = cacheWrite/cachedInput.
+ *
+ * При r = 0.5 и ценах Anthropic-типа (запись 1.25×, чтение 0.1×) выходит 12
+ * шагов. Провайдер без кеша (cacheWrite = cachedInput) — сокращать выгодно
+ * сразу: терять нечего.
+ */
+export function cacheBreakPaybackSteps(pricing: CachePrice | null, savedShare = 0.5): number {
+  const share = Math.min(0.9, Math.max(0.1, savedShare));
+  // Цены нет или кеш бесплатный — сравнивать нечего, разрыв ничего не стоит.
+  if (!pricing || pricing.cachedInput <= 0) return 1;
+  const ratio = Math.max(1, pricing.cacheWrite / pricing.cachedInput);
+  return Math.max(1, Math.ceil(((1 - share) * (ratio - 1)) / share));
+}
+
+/**
+ * Пора ли сокращать историю прямо в прогоне.
+ *
+ * Два условия сразу: объём перевалил за порог и оставшихся шагов хватает,
+ * чтобы отбить промах кеша. Второе важнее первого: на последних шагах любое
+ * сокращение — чистый убыток, даже когда контекст огромен.
+ */
+export function midRunTrimDue(input: { tokens: number; stepsLeft: number; pricing: CachePrice | null }): boolean {
+  if (input.tokens <= HEAVY_CONTEXT_TOKENS) return false;
+  return input.stepsLeft >= cacheBreakPaybackSteps(input.pricing);
+}
+
+/**
+ * Текст для человека, когда историю прогона пришлось сократить. Отличается от
+ * предупреждения о тяжёлом контексте: там совет, здесь — сделанное и почему.
+ */
+export function contextTrimmedMessage(tokens: number, dropped: number): string {
+  const k = Math.round(tokens / 1000);
+  return (
+    `Контекст прогона — ${k}k токенов. Сократил раннюю историю (${dropped} сообщ.): ` +
+    'дальше каждый шаг несёт меньше. Опущенное перечитаю инструментами, если понадобится.'
+  );
+}
