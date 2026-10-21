@@ -5,6 +5,8 @@ import {
   copiedToTrash,
   createFileUndo,
   createFolderUndo,
+  planCommitSave,
+  planCommitStage,
   prepareDiscard,
   prepareRename,
   trackMove,
@@ -85,6 +87,46 @@ describe('trackMove', () => {
 
   it('активной нет — это не активность', () => {
     expect(trackMove('/src/a.ts', '/lib/a.ts', null).active).toBe(false);
+  });
+});
+
+describe('planCommitSave', () => {
+  const dirty = [
+    { path: '/src/a.ts', readOnly: false },
+    { path: '/vendor/b.ts', readOnly: true },
+    { path: '/src/c.ts', readOnly: false },
+  ];
+
+  it('сохраняет записываемые, а только для чтения — в blocked', () => {
+    const plan = planCommitSave(dirty, true);
+    expect(plan.save).toEqual(['/src/a.ts', '/src/c.ts']);
+    expect(plan.blocked).toEqual(['/vendor/b.ts']);
+  });
+
+  it('настройка выключена — не сохраняем ничего, но только для чтения всё равно не сохранить', () => {
+    // Тут важна честность плана: коммитить по устаревшему диску нельзя, даже если
+    // человек сам отказался от автосохранения. Иначе настройка превращается в баг.
+    const plan = planCommitSave(dirty, false);
+    expect(plan.save).toEqual([]);
+    expect(plan.blocked).toEqual([]);
+  });
+
+  it('нечего сохранять — нечего и блокировать', () => {
+    expect(planCommitSave([], true)).toEqual({ save: [], blocked: [] });
+  });
+});
+
+describe('planCommitStage', () => {
+  it('в индексе есть — коммитим', () => {
+    expect(planCommitStage(2, 5)).toBe('commit');
+  });
+
+  it('индекс пуст, а правки есть — спрашиваем', () => {
+    expect(planCommitStage(0, 3)).toBe('ask');
+  });
+
+  it('пусто везде — коммитить нечего', () => {
+    expect(planCommitStage(0, 0)).toBe('nothing');
   });
 });
 

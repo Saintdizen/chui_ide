@@ -39,12 +39,38 @@ export function prepareDiscard(
   const active = activePath !== null && paths.includes(activePath) ? activePath : null;
   return {
     // Закрываем только открытые: `close` на неоткрытый файл безвреден, но в пачке
-    // из сотни путей таких большинство — это лишние вызовы на пустом месте.
+    // из сотни путей таких большинство — лишние вызовы на пустом месте.
     close: paths.filter((path) => hasTab(path)),
     // Путь и флаг говорят одно и то же для разных читателей: флаг — ответ «да/нет»,
     // путь — то, что идут открывать обратно.
     wasActive: active !== null,
     activePath: active,
+  };
+}
+
+/**
+ * Можно ли приступать к коммиту и что для этого надо сохранить.
+ *
+ * Git смотрит рабочее дерево, а не экран: правки в буфере в коммит не попадают,
+ * пока не сохранены. Сохранять — настройка, но у неё есть исключение, которое
+ * выключением не отменяется: файл только для чтения сохранить нельзя — и тогда
+ * он попадает в `blocked`, чтобы коммит не ушёл по устаревшему содержимому.
+ *
+ * Содержимое буфера здесь не трогаем: сохранение — дело вызывающего.
+ */
+export interface CommitSavePlan {
+  readonly save: readonly string[];
+  readonly blocked: readonly string[];
+}
+
+export function planCommitSave(
+  dirty: readonly { readonly path: string; readonly readOnly: boolean }[],
+  saveBeforeCommit: boolean,
+): CommitSavePlan {
+  if (!saveBeforeCommit) return { save: [], blocked: [] };
+  return {
+    save: dirty.filter((document) => !document.readOnly).map((document) => document.path),
+    blocked: dirty.filter((document) => document.readOnly).map((document) => document.path),
   };
 }
 
@@ -56,6 +82,20 @@ export function prepareDiscard(
  */
 export function canUndoDiscard(): boolean {
   return false;
+}
+
+/**
+ * В индексе пусто, но правки есть — индексировать всё или отказывать.
+ *
+ * Спрашиваем, а не решаем молча: пустой индекс — либо забыли `git add`, либо нарочно
+ * коммитят часть правок. Ответ зависит от того, есть ли вообще что индексировать.
+ */
+export type CommitStagePlan = 'commit' | 'ask' | 'nothing';
+
+export function planCommitStage(staged: number, unstaged: number): CommitStagePlan {
+  if (staged > 0) return 'commit';
+  if (unstaged > 0) return 'ask';
+  return 'nothing';
 }
 
 /** Что известно про переименование до и после операции с диском. */
@@ -91,6 +131,30 @@ export function undoRenamePlan(done: { from: string; to: string; touched: number
 /** Подпись отмены переименования: старое имя, которое вернётся человеку. */
 export function renameUndoLabel(done: { from: string }): string {
   return `Вернуть ${basename(done.from)}`;
+}
+
+/**
+ * Можно ли приступать к коммиту и что для этого надо сохранить.
+ *
+ * Git смотрит рабочее дерево, а не экран: правки в буфере в коммит не попадают, пока
+ * не сохранены. Сохранять — настройка, но у неё есть исключение, которое выключением
+ * не отменяется: файл только для чтения сохранить нельзя — и тогда `false`, чтобы
+ * коммит не ушёл по устаревшему содержимому.
+ *
+ * Содержимое буфера здесь не трогаем: сохранение — дело вызывающего.
+ */
+/**
+ * Что сказать перед amend.
+ *
+ * Аменд перезаписывает последний коммит — и вместе с ним сообщение, если передали
+ * новое. Это перезапись опубликованной истории, и об этом человек должен знать до,
+ * а не узнать из `git log` после. `published` — есть ли за этой веткой удалённая копия.
+ */
+export type AmendPlan = { readonly kind: 'no-head' } | { readonly kind: 'commit'; readonly warn: boolean };
+
+export function planAmend(head: string | null, replaced: boolean): AmendPlan {
+  if (head === null) return { kind: 'no-head' };
+  return { kind: 'commit', warn: replaced };
 }
 
 /**

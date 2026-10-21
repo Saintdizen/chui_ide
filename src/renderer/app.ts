@@ -62,6 +62,7 @@ import {
   copiedToTrash,
   createFileUndo,
   createFolderUndo,
+  planCommitSave,
   prepareDiscard,
   prepareRename,
   trackMoves,
@@ -2592,13 +2593,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * иначе она прошла бы по устаревшему содержимому.
    */
   const saveDirtyForGit = async (): Promise<boolean> => {
-    // Настройку могли ещё не прочитать: отсутствие значения — это «сохранять»,
-    // как и умолчание main, а не «не сохранять».
-    if (settings.git.saveBeforeCommit === false) return true;
-    const dirty = documents.dirty();
-    if (dirty.length === 0) return true;
-    for (const document of dirty) {
-      if (!(await saveDocument(document))) return false;
+    // План решает core/file-actions.ts: что сохранять, что нельзя (только для чтения),
+    // а также учитывает настройку. Отсутствие значения — это «сохранять».
+    const plan = planCommitSave(documents.dirty(), settings.git.saveBeforeCommit !== false);
+    if (plan.blocked.length > 0) {
+      // Файлы только для чтения сохранить нельзя, а git смотрит диск: коммит ушёл бы
+      // по устаревшему содержимому. Отказываем и называем виновников.
+      showToast(`Не сохранить (только чтение): ${plan.blocked.length}`, 'error');
+      return false;
+    }
+    for (const path of plan.save) {
+      const document = documents.get(path);
+      if (document && !(await saveDocument(document))) return false;
     }
     // Файлы на диске только что изменились, а снимок статуса git у нас ещё прежний:
     // без пересчёта коммит решил бы, что правок нет (его модель помнит старый ответ).
