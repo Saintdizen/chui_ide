@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """Доли классов вызовов `terminal` до и после правки подсказки про cwd/read.
 
-База «до» — прогоны до коммита 5d5f93b (02:39:02 +0300), «после» — позже.
+Три части: «до» — раньше коммита 5d5f93b (02:39:02 +0300), «перезапуск» — код
+уже с правкой, но приложение ещё старое, «после» — приложение перезапущено
+(03:23:00 +0300). В замер идёт только «после».
 Класс по первой команде: `cd` — смена папки, `read` — cat/sed/awk/head/tail,
 `grep` — поиск в терминале, `pipe` — конвейер с фильтром, `other` — прочее.
 """
 import glob
 import json
 
-CUT = 1792538342000  # 2026-10-21 02:39:02 +0300, коммит 5d5f93b
+# Дата правки (5d5f93b) и дата перезапуска с ней (03:23) — разные вещи: до
+# перезапуска работал старый код, такие прогоны считаются в «до».
+COMMIT_CUT = 1792538342000  # 2026-10-21 02:39:02 +0300, коммит 5d5f93b
+CUT = 1792542180000  # 2026-10-21 03:23:00 +0300, перезапуск приложения с правками
 TELEMETRY = '/home/dethmond/.config/chui-ide/telemetry/runs*.jsonl'
 LEADS = {
     'grep': ('grep ', 'rg ', 'rg\t'),
@@ -54,7 +59,13 @@ def runs():
             run = json.loads(line)
             if run.get('mode') != 'agent':
                 continue
-            side = 'после' if (run.get('startedAt') or run.get('at') or 0) >= CUT else 'до'
+            started = run.get('startedAt') or run.get('at') or 0
+            if started >= CUT:
+                side = 'после'
+            elif started >= COMMIT_CUT:
+                side = 'перезапуск'  # код собран, но приложение ещё старое — в замер не идёт
+            else:
+                side = 'до'
             counts, chars = {}, 0
             for step in run.get('steps') or []:
                 for call in step.get('calls') or []:
@@ -74,7 +85,7 @@ def runs():
 
 def main():
     data = runs()
-    for side in ('до', 'после'):
+    for side in ('до', 'перезапуск', 'после'):
         mine = [r for r in data if r[0] == side]
         calls = sum(r[1] for r in mine)
         tokens = round(sum(r[3] for r in mine) / 3.5)
