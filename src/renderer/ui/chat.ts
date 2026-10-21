@@ -1127,10 +1127,22 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         if (result === 'conflict') {
           showToast(`Файл изменён на диске, не перезаписан: ${basename(path)}`, 'error');
         }
-      } catch {
-        // не записалось — файл останется «грязным», следующая правка повторит
+      } catch (error) {
+        // Не записалось — говорим вслух и оставляем файл «грязным». Раньше
+        // исключение глоталось целиком: документ оставался в буфере, а агент
+        // продолжал работать, не зная, что на диске старый текст.
+        showToast(`Не записано на диск: ${basename(path)} — ${describeError(error)}`, 'error');
       }
     }
+  }
+
+  /** Причина ошибки строкой: у отказа файловой системы есть код, он важнее текста. */
+  function describeError(error: unknown): string {
+    if (error instanceof Error) {
+      const code = (error as { code?: string }).code;
+      return code ? `${code}: ${error.message}` : error.message;
+    }
+    return String(error);
   }
 
   /**
@@ -1755,13 +1767,23 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // человек кнопкой «Сохранить» в панели изменений. Без записи на диск при
     // полном доступе следующий read_file/search (main читает с диска) показывал
     // бы старый текст, хотя инструмент уже отчитался «применено».
-    if (params.autoApprove === true && result.reports.length > 0) {
-      await persistPaths(result.reports.map((report) => report.path));
+    const applied = result.reports.length > 0;
+    if (applied) await persistPaths(result.reports.map((report) => report.path));
+
+    // Что осталось только в буфере. Раньше здесь ничего не делалось: агент
+    // получал строку «правку сохранит человек» и шёл дальше, а файл на диске
+    // оставался старым — следующий read видел не то, что агент только что
+    // написал. В open-беседе так и накопились два грязных буфера.
+    //
+    // Теперь на полном доступе дожимаем запись: `persistPaths` выше мог не
+    // справиться (конфликт времени, ошибка ввода-вывода), а признак — всё тот
+    // же `dirty` у документа.
+    if (params.autoApprove === true && applied) {
+      await persistPaths(
+        result.reports.map((report) => report.path).filter((path) => deps.documents.get(path)?.dirty),
+      );
     }
 
-    // Что осталось только в буфере: без полного доступа файл пишет человек, а при
-    // конфликте запись не проходит вовсе. Об этом говорим наружу — main читает файлы
-    // с диска, и агент без этой оговорки счёл бы старый текст уже применённым.
     const unwritten = result.reports
       .map((report) => report.path)
       .filter((target) => deps.documents.get(target)?.dirty === true);
