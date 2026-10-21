@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canUndoDiscard,
   canUndoTrash,
   copiedToTrash,
   createFileUndo,
   createFolderUndo,
+  prepareDiscard,
   prepareRename,
   trackMove,
   trackMoves,
@@ -83,6 +85,35 @@ describe('trackMove', () => {
 
   it('активной нет — это не активность', () => {
     expect(trackMove('/src/a.ts', '/lib/a.ts', null).active).toBe(false);
+  });
+});
+
+describe('prepareDiscard', () => {
+  const hasTab = (path: string): boolean => path.startsWith('/open/');
+
+  it('закрывает только открытые вкладки', () => {
+    const plan = prepareDiscard(['/open/a.ts', '/closed/b.ts'], null, hasTab);
+    expect(plan.close).toEqual(['/open/a.ts']);
+  });
+
+  it('активный файл помним по пути, а не по «первому в списке»', () => {
+    const plan = prepareDiscard(['/open/a.ts', '/open/b.ts'], '/open/b.ts', hasTab);
+    expect(plan.activePath).toBe('/open/b.ts');
+    expect(plan.wasActive).toBe(true);
+  });
+
+  it('активный не среди откатываемых — открывать заново нечего', () => {
+    const plan = prepareDiscard(['/open/a.ts'], '/open/other.ts', hasTab);
+    expect(plan.activePath).toBeNull();
+    expect(plan.wasActive).toBe(false);
+  });
+
+  it('активной нет — это не активность', () => {
+    expect(prepareDiscard(['/open/a.ts'], null, hasTab).activePath).toBeNull();
+  });
+
+  it('откат необратим — и не притворяемся, что нет', () => {
+    expect(canUndoDiscard()).toBe(false);
   });
 });
 

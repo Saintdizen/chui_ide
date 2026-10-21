@@ -12,6 +12,52 @@
 import { basename } from '../ui/dom';
 import type { MoveStep } from './tree-move';
 
+/**
+ * Что сделать с вкладками перед `git.discard`.
+ *
+ * `discard` возвращает рабочие файлы к коммиту, а новые (untracked) удаляет с диска.
+ * Но редактор об этом не знает: у удалённого файла остаётся вкладка с его текстом.
+ * Сохранить её поверх — значит воскресить файл, который только что выбросили; открыть
+ * заново нельзя — файла нет. Поэтому убираем вкладки ДО обращения к git, а не после.
+ *
+ * Активность помним заранее — по той же причине, что и в `prepareRename`.
+ */
+export interface DiscardPlan {
+  /** Пути, чьи вкладки надо закрыть перед откатом. */
+  readonly close: readonly string[];
+  /** На экране был один из них — вернуть его на экран после отката. */
+  readonly wasActive: boolean;
+  /** Какой именно был на экране: `null`, если ни один. */
+  readonly activePath: string | null;
+}
+
+export function prepareDiscard(
+  paths: readonly string[],
+  activePath: string | null,
+  hasTab: (path: string) => boolean,
+): DiscardPlan {
+  const active = activePath !== null && paths.includes(activePath) ? activePath : null;
+  return {
+    // Закрываем только открытые: `close` на неоткрытый файл безвреден, но в пачке
+    // из сотни путей таких большинство — это лишние вызовы на пустом месте.
+    close: paths.filter((path) => hasTab(path)),
+    // Путь и флаг говорят одно и то же для разных читателей: флаг — ответ «да/нет»,
+    // путь — то, что идут открывать обратно.
+    wasActive: active !== null,
+    activePath: active,
+  };
+}
+
+/**
+ * Можно ли предлагать отмену отката правок.
+ *
+ * Нельзя: `git.discard` перезаписывает рабочее дерево из индекса, а новых файлов
+ * просто удаляет с диска. Копии у нас нет, вернуть правки нечем — и обещать нельзя.
+ */
+export function canUndoDiscard(): boolean {
+  return false;
+}
+
 /** Что известно про переименование до и после операции с диском. */
 export interface RenamePlan {
   /** Переименовываемый путь. */

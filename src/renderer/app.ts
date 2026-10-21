@@ -62,6 +62,7 @@ import {
   copiedToTrash,
   createFileUndo,
   createFolderUndo,
+  prepareDiscard,
   prepareRename,
   trackMoves,
   undoableAfterTrash,
@@ -5088,7 +5089,17 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       });
       if (!confirmed) return;
 
+      // Вкладки убираем ДО git: новые файлы он удаляет с диска, а вкладка с их текстом
+      // осталась бы — и первое же Ctrl+S воскресило бы выброшенный файл. Активность
+      // помним здесь же: после закрытия `active` станет соседняя (prepareDiscard).
+      const plan = prepareDiscard(paths, openEditors.active?.path ?? null, (path) => openEditors.has(path));
+      for (const path of plan.close) openEditors.close(path);
+
       await git.discard(paths);
+      // Файлы изменились под нами — открываем заново то, что было на экране. Без этого
+      // на экране остался бы текст из прежнего снимка, а не с диска.
+      // Берём его из activePath — это и есть «тот файл», а не первый в списке.
+      if (plan.activePath) await openPath(plan.activePath).catch(() => undefined);
       showToast('Правки откатаны');
     },
   );
