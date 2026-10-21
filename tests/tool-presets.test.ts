@@ -184,9 +184,15 @@ describe('наборы инструментов агента', () => {
       // Ростера мало: без формы вызова первый вызов уйдёт наугад, и сэкономленные
       // токены вернутся шагом переделки. Строка строится из самих схем; у `agents`
       // первое поле — `action` со значениями `enum`, поэтому сверяем начало формы.
-      const required = AGENT_TOOLS.find((tool) => tool.name === name)?.inputSchema.required ?? [];
-      const head = required.length === 0 ? `${name}()` : `${name}(${required[0]}`;
-      expect(note, `в ростере нет формы ${name}`).toContain(head);
+      // Исключение — `WIDENED_TOOLS`: их перечень `action` стоил 135 токенов на
+      // каждом шаге, а форма всё равно приедет схемой после первого вызова по имени.
+      if (WIDENED_TOOLS.includes(name)) {
+        expect(note, 'ростер не обещает вызов по имени').toContain('по имени');
+      } else {
+        const required = AGENT_TOOLS.find((tool) => tool.name === name)?.inputSchema.required ?? [];
+        const head = required.length === 0 ? `${name}()` : `${name}(${required[0]}`;
+        expect(note, `в ростере нет формы ${name}`).toContain(head);
+      }
       expect(toolPresetAllows('auto', name), `${name} не должен входить в схемы`).toBe(false);
       // Полный набор не задет: исключение — про цену, а не про возможность.
       expect(toolPresetAllows('full', name)).toBe(true);

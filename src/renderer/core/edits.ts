@@ -70,6 +70,27 @@ export class EditService {
     return 'saved';
   }
 
+  /**
+   * Подтянуть чистый буфер к диску, если файл переписали снаружи.
+   *
+   * Возвращает `true`, если текст документа заменился текстом с диска. Зовётся
+   * перед правкой агента: якоря приходят из чтения ГЛАВНОГО процесса, то есть с
+   * диска, а не из буфера. Пока вкладка открыта давно и файл с тех пор изменили
+   * (git, терминал, другой инструмент), правка ляжет мимо — `oldText` совпадёт с
+   * диском и не совпадёт с буфером, — а сохранение затем откажет «файл изменён
+   * на диске». Для агента это выглядело как неудавшаяся правка, и он повторял
+   * круг с тем же якорем. Грязный буфер не трогаем: в нём несохранённая работа
+   * человека, и расхождение с диском там настоящее.
+   */
+  private async refreshStale(document: TextDocument): Promise<boolean> {
+    if (document.dirty) return false;
+    const stat = await this.deps.rpc.request('workspace.stat', { path: document.path }).catch(() => null);
+    if (!diskConflict(document.diskMtime, stat?.mtimeMs ?? null)) return false;
+    const before = document.version;
+    await this.reloadFromDisk(document.path);
+    return document.version !== before;
+  }
+
   async applyFileEdits(fileEdits: readonly FileEdit[], source: EditSource = 'programmatic'): Promise<ApplyResult> {
     const reports: ApplyReport[] = [];
     const failed: ApplyFailure[] = [];
@@ -80,7 +101,10 @@ export class EditService {
         if (document.readOnly) {
           throw new Error('файл открыт только для чтения: он слишком большой для правок');
         }
-        if (file.expectedVersion !== undefined && file.expectedVersion !== document.version) {
+        // Свежий текст с диска — до сверки версий: подтягивание меняет версию само,
+        // и ожидание из чтения к ней уже не относится.
+        const refreshed = await this.refreshStale(document);
+        if (!refreshed && file.expectedVersion !== undefined && file.expectedVersion !== document.version) {
           throw new Error(`Версия документа устарела: ожидалась ${file.expectedVersion}, текущая ${document.version}`);
         }
 

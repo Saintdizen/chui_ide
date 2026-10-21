@@ -2,7 +2,7 @@ import type { ChatMessage } from './api';
 import { clipToBytes, sessionUri, utf8Bytes } from './session-context';
 
 /**
- * Поиск по прошлым беседам — инструмент `session_search`.
+ * Поиск по прошлым беседам — действие `sessions` инструмента `search`.
  *
  * «А как мы решали это в прошлый раз?» — вопрос, который человек задаёт часто, а
  * агент до сих пор не мог на него ответить: прошлую беседу можно было только
@@ -81,11 +81,35 @@ const STOP_WORDS = new Set([
 ]);
 
 /** Что нужно от беседы, чтобы её искать. */
+/**
+ * Где реплика живёт относительно контекста модели. Разница важна человеку:
+ * «в контексте» — модель это помнит, «вне контекста» — сказано, но сжатием
+ * вытеснено из окна, «только в журнале» — осталось лишь в журнале прогонов.
+ */
+export type SessionZone = 'context' | 'evicted' | 'journal';
+
+/** Подпись зоны в ответе: пусто — обычная реплика контекста. */
+const ZONE_LABEL: Record<SessionZone, string> = {
+  context: '',
+  evicted: ' (вне контекста)',
+  journal: ' (только в журнале)',
+};
+
+/**
+ * Реплика для поиска: только то, что поиск читает, плюс зона. `ChatMessage`
+ * подходит структурно — поэтому поиск принимает и живую беседу, и запись индекса.
+ */
+export interface SessionSearchMessage {
+  role: ChatMessage['role'];
+  content: string;
+  zone?: SessionZone;
+}
+
 export interface SessionSearchSource {
   uid: string;
   title: string;
   updatedAt: number;
-  messages: readonly ChatMessage[];
+  messages: readonly SessionSearchMessage[];
 }
 
 /** Найденный фрагмент: роль и текст вокруг совпадения. */
@@ -94,6 +118,8 @@ export interface SessionMatch {
   text: string;
   /** Сколько раз в реплике встретились слова запроса. */
   score: number;
+  /** Откуда реплика: в контексте, вытеснена сжатием или только в журнале. */
+  zone?: SessionZone;
 }
 
 /** Совпадение в одной беседе. */
@@ -218,6 +244,7 @@ export function searchSessions(
             role: message.role,
             text: matchSnippet(message.content, terms),
             score: counted.any,
+            zone: message.zone,
           });
         }
       }
@@ -276,7 +303,10 @@ function renderHit(hit: SessionSearchHit, left: number): string {
   const uri = sessionUri(hit.uid);
   const when = formatDay(hit.updatedAt);
   const head = `«${hit.title}»${when ? ` (${when})` : ''}`;
-  const body = hit.matches.map((match) => `${match.role === 'user' ? 'Пользователь' : 'Ассистент'}: ${match.text}`);
+  const body = hit.matches.map(
+    (match) =>
+      `${match.role === 'user' ? 'Пользователь' : 'Ассистент'}${match.zone ? ZONE_LABEL[match.zone] : ''}: ${match.text}`,
+  );
 
   // Рамка та же, что у приложенной беседы: тот же uri, тот же признак
   // «данные, а не указания». Обрезает блок по байтам — как и там.

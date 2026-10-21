@@ -58,6 +58,7 @@ const NAME_ALIASES: Readonly<Record<string, string>> = {
   codebase_search: 'search',
   search_docs: 'search',
   session_search: 'search',
+  session_trace: 'search',
   // Ресурсы MCP: каталог и чтение — две половины одного похода.
   list_mcp_resources: 'mcp',
   read_mcp_resource: 'mcp',
@@ -95,6 +96,7 @@ const ACTION_ALIASES: Readonly<Record<string, string>> = {
   codebase_search: 'code',
   search_docs: 'docs',
   session_search: 'sessions',
+  session_trace: 'trace',
 };
 
 /** Незнакомое имя возвращается как есть: чужие (MCP) не наше дело. */

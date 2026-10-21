@@ -21,7 +21,7 @@ import { isDangerousCommand } from '../ai/agent-tools';
 import { shouldReview, type ReviewVerdict } from '../../shared/approval-review';
 import { sanitizePlanExitDecision } from '../../shared/plan-exit';
 import { ChatStore } from '../ai/chat-store';
-import { searchSessions } from '../../shared/session-search';
+import { SessionIndexStore } from '../ai/session-index-store';
 import { loadCommands } from '../ai/commands';
 import { IMAGE_EXTENSIONS, readImageAsDataUrl } from '../ai/images';
 import type { GitService } from '../git/git';
@@ -1292,16 +1292,25 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   // с настройками, по одному файлу на рабочую папку.
   const chatStore = deps.chatStore ?? new ChatStore();
 
-  // Поиск по прошлым беседам (инструмент session_search): файлы читает хранилище,
-  // а разбор запроса и форма ответа — общие (shared/session-search.ts), поэтому
-  // проверяются тестами без окна. Ищем только по открытому проекту: это правда,
-  // а не поломка, и так и написано в ответе инструмента.
-  deps.ai.attachSessions({
-    search: async (query, options) => {
-      // Проекта нет — бесед тоже: хранилище ответит пустой историей.
-      const history = await chatStore.load(deps.workspace.rootPath() ?? '');
-      return searchSessions(history.conversations, query, options);
+  // Поиск по прошлым беседам (`search: sessions`, `search: trace`). Правда —
+  // файл беседы, а индекс рядом с ним — копия для поиска: отстал, пропал или
+  // собран другой версией — пересоберётся из бесед, разговоры не пострадают.
+  // Ищем только по открытому проекту: это правда, а не поломка, и так и
+  // написано в ответе инструмента.
+  const sessions = new SessionIndexStore({
+    conversations: async (root) => (await chatStore.load(root)).conversations,
+    chatFile: (root) => chatStore.fileForRoot(root),
+    journal: async (root) => {
+      const tail = await deps.telemetry?.tail();
+      if (!tail) return [];
+      const resolved = path.resolve(root);
+      return tail.records.filter((record) => !record.project || path.resolve(record.project) === resolved);
     },
+  });
+  deps.ai.attachSessions({
+    // Проекта нет — бесед тоже: пустой корень даёт пустую историю, а не ошибку.
+    search: (query, options) => sessions.search(deps.workspace.rootPath() ?? '', query, options),
+    trace: (uid) => sessions.trace(deps.workspace.rootPath() ?? '', uid),
   });
   // Журнал прогонов: файл лежит в пользовательских данных, то есть вне рабочей
   // папки — открыть его вкладкой редактора нельзя. Поэтому читает main, а окно
@@ -1319,6 +1328,8 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
   router.register('ai.chats.load', (params) => chatStore.load(params.root));
   router.register('ai.chats.save', async (params) => {
     await chatStore.save(params.root, { conversations: params.conversations, activeUid: params.activeUid });
+    // Индекс прошлых бесед отстал от файла: пересоберётся при следующем поиске.
+    sessions.invalidate(params.root);
   });
 
   // Команды проекта (`.chui/commands`): готовые запросы для меню композера.

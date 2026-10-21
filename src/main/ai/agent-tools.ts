@@ -34,6 +34,7 @@ import type { ToolPresentedFile } from '../../shared/api';
 import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
+import { parseRalphRequest } from '../../shared/ralph';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
 import {
   formatAgentList,
@@ -212,6 +213,11 @@ export interface SessionSearchRunner {
    * `MAX_SESSION_HITS_CAP`. Нужен, когда поиск промахнулся и есть что посмотреть.
    */
   search(query: string, options?: { limit?: number }): Promise<SessionSearchReport>;
+  /**
+   * «Что было в прогоне» по прошлой беседе: шаги, вызовы и чем кончилось.
+   * Нет метода — нечем отвечать, и инструмент об этом скажет.
+   */
+  trace?(uid: string): Promise<string>;
 }
 
 export interface WebSearchRunner {
@@ -290,6 +296,12 @@ export interface SubagentRunner {
    * Дальше с ним работают `list`, `wait`, `send` и `interrupt` — через реестр (`ctx.agents`).
    */
   spawn?(params: { description: string; prompt: string }): ToolOutcome;
+  /**
+   * Цикл раундов: свежий агент на каждый раунд, и в каждый едет только сжатая
+   * сводка прежних (`shared/ralph.ts`). Остановку человека и предел раундов
+   * держит сервис: здесь только аргументы и текст ответа.
+   */
+  ralph?(params: { description: string; goal: string; rounds: number }): Promise<ToolOutcome>;
 }
 
 /**
@@ -412,7 +424,7 @@ export interface ToolContext {
   linter?: Linter;
   /** Команда запуска тестов: нужна инструменту run_tests. */
   tests?: TestRunner;
-  /** Прошлые беседы проекта: нужен инструменту `session_search`. */
+  /** Прошлые беседы проекта: нужно действию `sessions` инструмента `search`. */
   sessions?: SessionSearchRunner;
   /** Память проекта: нужна инструменту mind. */
   memory?: MemoryTools;
@@ -524,7 +536,7 @@ const DEFAULT_SEARCH_HITS_WITH_CONTEXT = 35;
  * файле это имя», и потолок тот же — это не выбор, а умолчание.
  */
 const DEFAULT_CODE_SYMBOLS = 40;
-/** Сколько разделов документации отдаём на один запрос `search_docs`. */
+/** Сколько разделов документации отдаём на один запрос `search: docs`. */
 const DEFAULT_DOC_RESULTS = 8;
 const MAX_DOC_RESULTS = DEFAULT_DOC_RESULTS;
 /**
@@ -872,6 +884,8 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await ask(ctx, args);
       case 'task':
         return await task(ctx, args);
+      case 'ralph':
+        return await ralph(ctx, args);
       // Агенты в фоне одним инструментом: запуск и ожидание — `agents`, действия по
       // имени. Пять схем стоили дороже одной с `action`, а повторный вызов по одному
       // имени всё равно выполняется сразу.
@@ -962,6 +976,26 @@ async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<To
     return ctx.subagent.run({ description: only.description, prompt: only.prompt });
   }
   return ctx.subagent.runMany(request.tasks);
+}
+
+/* ── раунды ────────────────────────────────────────────────────────────
+ *
+ * `ralph`: одно задание, несколько раундов свежим агентом. Сам цикл и разговор с
+ * моделью живут в `service.ts`; здесь — разбор аргументов и отказ словами, когда
+ * цикл не подключён (тот же порядок, что у `task`).
+ */
+
+async function ralph(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.subagent?.ralph) return { ok: false, summary: 'Раунды недоступны' };
+
+  const request = parseRalphRequest(args);
+  if (request.error) return { ok: false, summary: 'Не задано задание', detail: request.error };
+
+  return ctx.subagent.ralph({
+    description: request.description,
+    goal: request.goal,
+    rounds: request.rounds,
+  });
 }
 
 /* ── живые агенты ────────────────────────────────────────────────────────
@@ -1626,8 +1660,10 @@ async function searchAction(ctx: ToolContext, args: Record<string, unknown>): Pr
       return await searchDocs(ctx, args);
     case 'sessions':
       return await sessionSearch(ctx, args);
+    case 'trace':
+      return await sessionTrace(ctx, args);
     default:
-      return unknownAction(action, 'search: text, code, docs, sessions.');
+      return unknownAction(action, 'search: text, code, docs, sessions, trace.');
   }
 }
 
@@ -4038,7 +4074,7 @@ async function readMcpResource(ctx: ToolContext, args: Record<string, unknown>):
 }
 
 /**
- * `session_search` — что уже обсуждали в прошлых беседах проекта.
+ * `search: sessions` — что уже обсуждали в прошлых беседах проекта.
  *
  * Без ответа «ничего не нашлось» на этот вопрос агент начинает выдумывать, что
  * было в прошлом разговоре, или повторяет поиск другими словами. Поэтому пустой
@@ -4064,6 +4100,33 @@ async function sessionSearch(ctx: ToolContext, args: Record<string, unknown>): P
     summary: report.hits.length > 0 ? `бесед по запросу: ${report.hits.length}` : 'в прошлых беседах не нашлось',
     detail: formatSessionSearch(report),
   };
+}
+
+/**
+ * `trace` — действие search: «что было в прогоне» по прошлой беседе. Нужно,
+ * когда человек спрашивает «а почему вчера это заняло пять минут»: искать этот
+ * ответ в переписке бесполезно, он жил в шагах, которые в ленту не попадают.
+ */
+async function sessionTrace(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.sessions?.trace) {
+    return {
+      ok: false,
+      summary: 'След прогона недоступен',
+      detail: 'Журнал прогонов не ведётся или не подключён — читать его неоткуда.',
+    };
+  }
+  // `query` — обязательное поле схемы, поэтому беседу берём и оттуда: лишнее
+  // требование к модели дешевле, чем второй обязательный аргумент.
+  const uid = (optionalString(args, 'uid') ?? optionalString(args, 'query') ?? '').trim();
+  if (!uid) {
+    return {
+      ok: false,
+      summary: 'Не указана беседа',
+      detail: 'Нужен `uid`: его видно в uri беседы, который отдаёт `action: sessions`.',
+    };
+  }
+  const text = await ctx.sessions.trace(uid);
+  return { ok: true, summary: 'след прогона беседы', detail: text };
 }
 
 /**

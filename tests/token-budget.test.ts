@@ -72,10 +72,13 @@ describe('бюджет схем', () => {
     expect(total).toBeLessThan(1_800);
   });
 
-  // Замер: auto был 3 812 ток. (25 схем). Срезали ростром шести имён на 826 и
-  // описаниями — до того, что не сказано в промпте. Сейчас 2 620.
-  it('набор по умолчанию не дороже 2 700 токенов', () => {
-    expect(presetTokens('auto')).toBeLessThan(2_700);
+  // Замер: auto был 3 812 ток. (25 схем). Срезали ростром имён на 826 и описаниями —
+  // до того, что не сказано в промпте. `show` и `exit_plan_mode` (300 ток. вдвоём)
+  // ушли в ростер, а `terminal`/`git_write`/`mcp` перестали называться строкой:
+  // их схема докачивается первым вызовом. Сейчас 2 477 (схемы 1 510 + промпт 711 +
+  // ростер 256).
+  it('набор по умолчанию не дороже 2 400 токенов', () => {
+    expect(presetTokens('auto')).toBeLessThan(2_400);
   });
 
   it('ростер не растёт в цене схем', () => {
@@ -84,7 +87,9 @@ describe('бюджет схем', () => {
     // потолок нужен и здесь: иначе соблазн «спрятать всё» превратит набор в
     // список имён без единой схемы, и модели придётся угадывать вызовы.
     const note = estimateTextTokens(toolPresetNote('auto'));
-    expect(note).toBeLessThan(300);
+    // 13 имён — 256 ток.: из них ~90 — перечни `action` у `agents` и `browser`,
+    // без них вызов идёт наугад. 265 — замер плюс запас на одно имя.
+    expect(note).toBeLessThan(265);
     // И обратная сторона: набор не должен схлопнуться до десятка имён. 15 из 49 —
     // граница, за которой модель начнёт угадывать вызовы вместо работы.
     // Считаем не схемы, а имена, которые модель знает: ростер даёт вызов без
@@ -118,7 +123,7 @@ describe('бюджет схем', () => {
     const candidates: ReadonlyArray<readonly [string, readonly string[]]> = [
       ['агенты', ['agents']],
       ['подзадачи', ['task']],
-      ['поиск', ['search', 'codebase_search', 'search_docs']],
+      ['поиск', ['search']],
       ['чтение файла', ['read']],
       ['список файлов', ['list', 'project_map']],
     ];
@@ -134,6 +139,23 @@ describe('бюджет схем', () => {
 
     console.log(['по группам:', ...groups, '', 'кандидаты на слияние:', ...lines].join('\n'));
     expect(groups.length).toBeGreaterThan(5);
+  });
+
+  it('семейство поиска уже слито: одна схема, старые имена — псевдонимы', () => {
+    // Решение Ш5. Четыре имени отличались первой строкой описания, тело схемы было
+    // общее; в наборе остался один `search` с полем `action`, а `codebase_search`,
+    // `search_docs`, `session_search`, `session_trace`, `find_files` и `list_dir`
+    // разобраны в `tool-aliases.ts`. Живые прогоны зовут его же: `search` — 4
+    // вызова, `codebase_search`/`search_docs`/`session_search` — ноль. Поэтому
+    // обратно разводить нечего, а сторож не даёт именам вернуться в схемы и
+    // раздуть префикс.
+    const present = AGENT_TOOLS.map((tool) => tool.name);
+    for (const old of ['codebase_search', 'search_docs', 'session_search', 'session_trace', 'find_files', 'list_dir']) {
+      expect(present, old).not.toContain(old);
+    }
+    const search = rows.find((row) => row.name === 'search');
+    expect(search).toBeDefined();
+    expect(search!.tokens, 'слитое семейство дешевле четырёх схем (731) и заявленных 400').toBeLessThanOrEqual(300);
   });
 
   it('отчёт: постоянная часть на шаг, а не только на запрос', () => {

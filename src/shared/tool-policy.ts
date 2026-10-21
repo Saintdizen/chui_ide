@@ -104,6 +104,11 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   // Вопрос человеку: в плане законен.
   ask: { plan: true },
   task: { readOnly: true, plan: true, alwaysAvailable: true },
+  // Раунды сами ничего не меняют: каждый — подзадача чтения (`SUBAGENT_TOOLS`),
+  // правки по итогу делает основной агент. В плане законны: смотрят, не трогают.
+  // `readOnly` здесь ещё и про шаг: второй такой вызов в том же шаге почти наверно
+  // повтор, а стоит он как четыре подзадачи. Схемы в запросе нет (`ROSTER_TOOLS`).
+  ralph: { readOnly: true, plan: true, alwaysAvailable: true },
 
   /* ── агенты в фоне: план они не меняют, они читают проект ───────────── */
   // Одно имя на все пять действий: `spawn` и три разговора с живым агентом

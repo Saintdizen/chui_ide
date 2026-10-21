@@ -102,6 +102,7 @@ import {
 } from '../../shared/permissions';
 import { MAX_GOAL_CONTINUES, goalContinuePrompt, goalPrompt, parseGoalUpdate, sanitizeGoal } from '../../shared/goal';
 import { parsePlanExitArgs, planExitResult, type PlanExitDecision } from '../../shared/plan-exit';
+import { formatRalphReport, runRalphRounds } from '../../shared/ralph';
 import { formatSubagentReport, runWithLimit, subagentBatchSize, type SubagentFailure } from '../../shared/subagents';
 import { formatAgentNotes, stopReasonLabel, type AgentSnapshot, type AgentStopReason } from '../../shared/agents';
 import { createAgentRegistry, type AgentHandle, type AgentRegistry } from './agents';
@@ -351,7 +352,7 @@ export class AiService {
   private tests?: TestRunner;
   /** Внешние инструменты (MCP): нет сервиса — внешних инструментов не предлагаем. */
   private mcp?: McpRunner;
-  /** Прошлые беседы проекта: без хранилища инструмент session_search не предлагаем. */
+  /** Прошлые беседы проекта: без хранилища действие `sessions` не предлагаем. */
   private sessions?: SessionSearchRunner;
   /** Журнал прогонов в файл: пишет только при включённой настройке. */
   private telemetry?: TelemetryStore;
@@ -495,7 +496,7 @@ export class AiService {
   }
 
   /**
-   * Подключить поиск по прошлым беседам — включает инструмент `session_search`.
+   * Подключить поиск по прошлым беседам — включает действие `sessions`.
    * Хранилище бесед знает рабочие папки, поэтому поиск приходит готовым.
    */
   attachSessions(sessions: SessionSearchRunner): void {
@@ -1367,6 +1368,31 @@ export class AiService {
 
     toolContext.subagent = {
       run: async ({ description, prompt }) => (await runOne({ description, prompt })).outcome,
+      /**
+       * Цикл раундов (`ralph`): каждый раунд — свежий агент, и в него едет только
+       * сжатый итог прежних. Раунды идут по очереди: следующий должен видеть, что
+       * нашёл предыдущий, иначе это не цикл, а пачка одинаковых подзадач.
+       */
+      ralph: async ({ description, goal, rounds }) => {
+        // Сам цикл — в `shared/ralph.ts`: там же проверены предел раундов и обрыв.
+        const { rounds: passed, stop } = await runRalphRounds({
+          request: { description, goal, rounds },
+          aborted: () => signal.aborted,
+          run: async (prompt, round) => {
+            const { outcome } = await runOne({
+              description: `${description} · раунд ${round}/${rounds}`,
+              prompt,
+            });
+            return { ok: outcome.ok, report: outcome.detail ?? outcome.summary ?? '' };
+          },
+        });
+        const detail = formatRalphReport(passed, stop, rounds);
+        return {
+          ok: stop !== 'failed' && stop !== 'interrupted' && passed.length > 0,
+          summary: detail.split('\n')[0] ?? 'раунды',
+          detail,
+        };
+      },
       /**
        * Агент в фоне: работа идёт, а ход продолжается. Отчёт заберут `agents` с
        * `action: "wait"` — следующий ход или человек в панели.

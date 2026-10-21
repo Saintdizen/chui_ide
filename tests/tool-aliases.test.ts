@@ -79,6 +79,37 @@ describe('слияния с другим аргументом: языковой 
   });
 });
 
+describe('слияния с другим аргументом: поиск', () => {
+  it('codebase_search и search_docs стали действиями search', () => {
+    // Четыре имени различались первой строкой описания, а тело схемы у них было
+    // одно. Живые прогоны зовут семейство по имени `search` — старое не должно
+    // упираться в тупик, продолжая сохранённую беседу.
+    const code = canonicalCall('codebase_search', '{"query":"SessionIndex"}');
+    expect(code.name).toBe('search');
+    expect(JSON.parse(code.arguments)).toEqual({ query: 'SessionIndex', action: 'code' });
+
+    const docs = canonicalCall('search_docs', '{"query":"права"}');
+    expect(docs.name).toBe('search');
+    expect(JSON.parse(docs.arguments)).toEqual({ query: 'права', action: 'docs' });
+  });
+
+  it('session_search и session_trace стали действиями search', () => {
+    expect(JSON.parse(canonicalCall('session_search', '{"query":"индекс"}').arguments)).toEqual({
+      query: 'индекс',
+      action: 'sessions',
+    });
+    expect(JSON.parse(canonicalCall('session_trace', '{"uid":"a1"}').arguments)).toEqual({
+      uid: 'a1',
+      action: 'trace',
+    });
+  });
+
+  it('find_files и list_dir ведут к list: просмотр имён — один инструмент', () => {
+    expect(canonicalCall('find_files', '{"glob":"**/*.ts"}').name).toBe('list');
+    expect(canonicalCall('list_dir', '{"path":"/src"}').name).toBe('list');
+  });
+});
+
 describe('что псевдоним не трогает', () => {
   it('нынешнее имя возвращается как есть', () => {
     const call = canonicalCall('agents', '{"action":"list"}');
@@ -103,6 +134,9 @@ describe('что псевдоним не трогает', () => {
       expect(names.has(canonicalCall(old, '{}').name), old).toBe(true);
     }
     for (const old of ['file_outline', 'find_references', 'go_to_definition']) {
+      expect(names.has(canonicalCall(old, '{}').name), old).toBe(true);
+    }
+    for (const old of ['codebase_search', 'search_docs', 'session_search', 'session_trace', 'find_files']) {
       expect(names.has(canonicalCall(old, '{}').name), old).toBe(true);
     }
   });

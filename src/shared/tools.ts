@@ -32,6 +32,7 @@ export type AgentToolName =
   | 'exit_plan_mode'
   | 'ask'
   | 'task'
+  | 'ralph'
   | 'agents'
   | 'browser'
   | 'mind'
@@ -140,10 +141,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         action: {
           type: 'string',
-          enum: ['text', 'code', 'docs', 'sessions'],
+          enum: ['text', 'code', 'docs', 'sessions', 'trace'],
           // Смысл действий — здесь же, рядом с enum: в шапке он дублировался
           // и стоил токенов в каждом запросе.
-          description: 'text: path, line, match; code: declarations; docs: documentation; sessions: past chats.',
+          description:
+            'text: path, line, match; code: declarations; docs: documentation; ' +
+            'sessions: past chats; trace: a past run by uid.',
         },
         query: { type: 'string', description: 'Pattern.' },
         isRegex: { type: 'boolean', description: 'Regex (default: substring).' },
@@ -159,6 +162,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'Lines around (0-5).',
         },
         limit: { type: 'number', description: 'Cap on hits.' },
+        uid: { type: 'string', description: 'Chat uid for action trace.' },
       },
       required: ['query'],
     },
@@ -502,6 +506,22 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           },
         },
       },
+    },
+  },
+  {
+    name: 'ralph',
+    side: 'main',
+    description:
+      'Rounds on one goal: the same question to a fresh agent each round, which sees only a short ' +
+      'digest of earlier rounds. Use when one pass says «done» but you are not sure. Rounds only read.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goal: { type: 'string', description: 'One task for the whole cycle.' },
+        rounds: { type: 'number', description: 'Limit of rounds, 1-5, default 3. Set by the human.' },
+        description: { type: 'string', description: 'Short cycle name, shown on the card.' },
+      },
+      required: ['goal'],
     },
   },
   {

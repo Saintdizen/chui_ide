@@ -113,7 +113,7 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
     // Не действия над проектом, а разговор о них: план, цель, вопрос человеку,
     // подзадача, память. Эти инструменты нужны в любом наборе — без `ask` агент
     // не сможет ничего уточнить, а без `update_plan` не покажет, что задумал.
-    names: ['plan', 'exit_plan_mode', 'ask', 'task', 'agents', 'mind'],
+    names: ['plan', 'exit_plan_mode', 'ask', 'task', 'ralph', 'agents', 'mind'],
   },
 ];
 
@@ -195,6 +195,13 @@ export const ROSTER_TOOLS: readonly string[] = [
   'web',
   // `agents` без action — не подсказка: чем помочь, видно только из значений action.
   'agents',
+  // Цикл раундов — самая дорогая строка в наборе (до пяти прогонов модели), и
+  // зовут его редко. Форма угадывается по имени: задание и предел раундов.
+  'ralph',
+  // Действия в редакторе и выход из режима плана: модель зовёт их раз в прогон,
+  // а схемы стоят 189 и 111 токенов в КАЖДОМ запросе.
+  'show',
+  'exit_plan_mode',
 ];
 
 /**
@@ -370,6 +377,17 @@ function rosterLine(names: readonly string[]): string {
 }
 
 /**
+ * Имена для строки ростера. Отличается от `rosterNames` одним: при `widen` в строку
+ * не идут `WIDENED_TOOLS` — их схема докачивается первым вызовом, а перечень
+ * `action: a|b|c…` стоил 135 токенов на каждом шаге (см. `WIDENED_TOOLS`).
+ */
+function rosterLineNames(preset: ToolPresetId): readonly string[] {
+  const names = rosterNames(preset);
+  if (!toolPresetSpec(preset).widen) return names;
+  return names.filter((name) => !WIDENED_TOOLS.includes(name));
+}
+
+/**
  * Строка для модели о том, что набор сужен. Без неё агент молча упирается в
  * «нет такого инструмента» и начинает выдумывать обходные пути вместо того,
  * чтобы сказать человеку, чего ему не хватает.
@@ -399,7 +417,7 @@ export function toolPresetNote(preset: ToolPresetId): string {
     // `action` (у `git_write` — восемь), и перечень `action: a|b|c…` стоил 135
     // токенов на каждом шаге прогона — больше, чем одна докачка схемы. Модели
     // достаточно знать, что спрятанное зовётся по имени и форма видна из схемы.
-    const roster = rosterLine(rosterNames(preset));
+    const roster = rosterLine(rosterLineNames(preset));
     return (
       `Набор инструментов: «${spec.label}» (${labels}). Скрытого в нём нет запрета: нужен ` +
       'инструмент, которого не видно в списке, — вызови его по имени, он выполнится, и ' +
