@@ -87,6 +87,30 @@ describe('read длинного файла', () => {
     expect(outcome.read).toEqual({ path: big, from: 1, to: 200 });
   });
 
+  it('файл длиннее 250 строк читается головой, а не целиком', async () => {
+    // Порог WHOLE_FILE_MAX_LINES снижен с 400 до 250: файл на 300 строк раньше
+    // отдавался целиком (~2600 токенов), теперь — голова 200 строк и оглавление.
+    const medium = path.join(dir, 'medium.ts');
+    const rows = Array.from({ length: 300 }, (_, index) => `const row${index + 1} = ${index + 1};`);
+    await fs.writeFile(medium, rows.join('\n'), 'utf8');
+    const outcome = await runTool({ workspace }, 'read', JSON.stringify({ path: medium }));
+    const detail = String(outcome.detail ?? '');
+    expect(detail).toContain('1 | const row1');
+    expect(detail).toContain('200 | const row200');
+    expect(detail).not.toContain('201 | const row201');
+    expect(detail).toContain('startLine с 201');
+    expect(outcome.read).toEqual({ path: medium, from: 1, to: 200 });
+  });
+
+  it('файл до 250 строк по-прежнему читается целиком', async () => {
+    const medium = path.join(dir, 'small.ts');
+    const rows = Array.from({ length: 250 }, (_, index) => `const row${index + 1} = ${index + 1};`);
+    await fs.writeFile(medium, rows.join('\n'), 'utf8');
+    const outcome = await runTool({ workspace }, 'read', JSON.stringify({ path: medium }));
+    const detail = String(outcome.detail ?? '');
+    expect(detail).toContain('250 | const row250');
+  });
+
   it('короткий файл по-прежнему читается целиком', async () => {
     const small = path.join(dir, 'small.txt');
     await fs.writeFile(small, 'первая\nвторая\n', 'utf8');

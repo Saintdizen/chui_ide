@@ -22,11 +22,6 @@ const NAME_ALIASES: Readonly<Record<string, string>> = {
   list_dir: 'list',
   find_files: 'list',
   // Живые агенты: пять имён стали одним инструментом с `action`.
-  spawn_agent: 'agents',
-  list_agents: 'agents',
-  wait_agent: 'agents',
-  send_message: 'agents',
-  interrupt_agent: 'agents',
   // Память: запись и уборку заметок различал только глагол.
   remember: 'mind',
   forget: 'mind',
@@ -52,8 +47,11 @@ const NAME_ALIASES: Readonly<Record<string, string>> = {
   open_file: 'show',
   present: 'show',
   // Состояние беседы: чек-лист и цель — два поля одного инструмента.
-  update_plan: 'plan',
-  update_goal: 'plan',
+  update_plan: 'mind',
+  update_goal: 'mind',
+  ask_user: 'mind',
+  exit_plan_mode: 'mind',
+  ralph: 'mind',
   // Поиск: четыре источника различались только первой строкой описания.
   codebase_search: 'search',
   search_docs: 'search',

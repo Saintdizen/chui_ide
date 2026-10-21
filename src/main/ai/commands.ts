@@ -2,7 +2,6 @@ import { promises as fs, type Dirent } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { MAX_COMMAND_PROMPT_CHARS, MAX_COMMANDS, parseCommandFile, type ProjectCommand } from '../../shared/commands';
-import type { SkillScope } from '../../shared/skills';
 
 /**
  * Чтение команд проекта с диска.
@@ -27,13 +26,16 @@ const COMMANDS_DIR = path.join('.chui', 'commands');
 const MAX_COMMAND_FILE_BYTES = MAX_COMMAND_PROMPT_CHARS * 4;
 
 /** Каталог команд для области; `null` — искать негде (проект не открыт). */
-function commandsDirFor(root: string | null, scope: SkillScope, home: string): string | null {
+/** Где лежат команды: в проекте или в домашней папке. */
+type ProjectCommandScope = 'workspace' | 'global';
+
+function commandsDirFor(root: string | null, scope: ProjectCommandScope, home: string): string | null {
   if (scope === 'workspace') return root ? path.join(root, COMMANDS_DIR) : null;
   return path.join(home, COMMANDS_DIR);
 }
 
 /** Прочитать одну команду из файла. Ошибки чтения не всплывают: сломанный файл — не повод остаться без остальных. */
-async function readEntry(file: string, fallbackName: string, scope: SkillScope): Promise<ProjectCommand | null> {
+async function readEntry(file: string, fallbackName: string, scope: ProjectCommandScope): Promise<ProjectCommand | null> {
   try {
     const text = await fs.readFile(file, 'utf8');
     return parseCommandFile(text.slice(0, MAX_COMMAND_FILE_BYTES), { fallbackName, path: file, scope });
@@ -46,7 +48,7 @@ async function readEntry(file: string, fallbackName: string, scope: SkillScope):
  * Команды одного каталога. Порядок — по имени: меню читают глазами, и «прыгающий»
  * от запуска к запуску список мешал бы искать.
  */
-async function scanDir(dir: string, scope: SkillScope): Promise<ProjectCommand[]> {
+async function scanDir(dir: string, scope: ProjectCommandScope): Promise<ProjectCommand[]> {
   let items: Dirent[];
   try {
     items = await fs.readdir(dir, { withFileTypes: true });

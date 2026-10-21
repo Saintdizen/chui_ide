@@ -45,6 +45,21 @@ export function clipPlanNote(raw: unknown): string {
   return text.length <= MAX_PLAN_NOTE_CHARS ? text : `${text.slice(0, MAX_PLAN_NOTE_CHARS).trimEnd()}…`;
 }
 
+/**
+ * Этот ли вызов просит утвердить план. Действие живёт в общем инструменте
+ * `mind` (`action: exit_plan`), но имя проверяется здесь: от него зависит
+ * перехват в `service.ts` — до обработчика, чтобы успеть сменить режим.
+ */
+export function isPlanExitCall(name: string, rawArgs: string): boolean {
+  if (name !== 'mind') return false;
+  try {
+    const value = JSON.parse(rawArgs) as unknown;
+    return typeof value === 'object' && value !== null && (value as { action?: unknown }).action === 'exit_plan';
+  } catch {
+    return false;
+  }
+}
+
 /** Разбор аргументов вызова: план словами (необязательный). */
 export function parsePlanExitArgs(raw: string): string {
   let value: unknown;
@@ -83,9 +98,9 @@ export function planExitResult(decision: PlanExitDecision): string {
   const note = clipPlanNote(decision.note);
   if (!note) {
     return (
-      'План не утверждён, замечаний нет. Пересмотри план и снова вызови exit_plan_mode — ' +
+      'План не утверждён, замечаний нет. Пересмотри план и снова вызови mind (action: exit_plan) — ' +
       'или уточни через ask, что именно не так.'
     );
   }
-  return `План не утверждён. Замечание человека: ${note}\nУчти замечание в плане и снова вызови exit_plan_mode.`;
+  return `План не утверждён. Замечание человека: ${note}\nУчти замечание в плане и снова вызови mind (action: exit_plan).`;
 }

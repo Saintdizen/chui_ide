@@ -29,12 +29,9 @@ const WITH_ACTION = [
   'web',
   'file',
   'show',
-  'git_read',
-  'git_write',
   'mind',
   'search',
-  'plan',
-  'agents',
+  'edit',
 ];
 
 describe('действия схемы доходят до обработчика', () => {

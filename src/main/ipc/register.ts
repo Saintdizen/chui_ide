@@ -155,8 +155,6 @@ export async function openProjectFolder(
 export function registerIpc(deps: AppDependencies): RpcRouter {
   const router = new RpcRouter();
 
-  // Git нужен и агенту (инструменты git_read/git_write) — отдаём ему тот же сервис.
-  deps.ai.attachGit(deps.git);
   // Терминалы — тоже: агент работает с pty-сессиями, а не только разовыми командами.
   deps.ai.attachTerminals(deps.terminals);
   // Языковой сервер умеет искать по символам («перейти к символу») — это и есть
@@ -1245,8 +1243,6 @@ export function registerIpc(deps: AppDependencies): RpcRouter {
           );
           return decision.allowed;
         },
-        confirmGit: (action) =>
-          deps.host.request(ctx.sender, 'ai.confirmGit', { action }, ctx.signal).then((decision) => decision.allowed),
         confirmBrowser: (action) =>
           deps.host
             .request(ctx.sender, 'ai.confirmBrowser', { action }, ctx.signal)

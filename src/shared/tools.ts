@@ -17,7 +17,6 @@ export type AgentToolName =
   | 'list'
   | 'read'
   | 'search'
-  | 'read_skill'
   | 'read_image'
   | 'lsp'
   | 'project_map'
@@ -28,16 +27,9 @@ export type AgentToolName =
   | 'terminal'
   | 'web'
   | 'file'
-  | 'plan'
-  | 'exit_plan_mode'
-  | 'ask'
-  | 'task'
-  | 'ralph'
-  | 'agents'
-  | 'browser'
   | 'mind'
-  | 'git_read'
-  | 'git_write'
+  | 'task'
+  | 'browser'
   | 'show';
 
 export interface JsonSchemaProperty {
@@ -168,20 +160,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'read_skill',
-    side: 'main',
-    description:
-      'Full text of a project skill: the skill list shows only one description line. Call ' +
-      'it when the task matches that line, and not twice.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', description: 'Skill name.' },
-      },
-      required: ['name'],
-    },
-  },
-  {
     name: 'read_image',
     side: 'main',
     description:
@@ -294,42 +272,44 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'edit',
     side: 'renderer',
-    description: 'Change files: give oldText — an exact fragment, unique in the file — or four positions.',
+    description: 'Change files: oldText — an exact, unique fragment; also create, move, delete.',
     inputSchema: {
       type: 'object',
       properties: {
+        action: {
+          type: 'string',
+          enum: ['write', 'create', 'move', 'delete'],
+          description: 'write (default): `edits`. The rest: one file operation. Замена по проекту — `file`.',
+        },
+        path: { type: 'string', description: 'One file.' },
         edits: {
           type: 'array',
-          description: 'oldText (exact, unique) + newText; or four 1-based positions.',
+          description: 'write: files and their changes.',
           items: {
             type: 'object',
             properties: {
               path: { type: 'string' },
-              expectedVersion: {
-                type: 'number',
-                description: 'Version seen; a mismatch rejects position edits.',
-              },
               edits: {
                 type: 'array',
                 items: {
                   type: 'object',
                   properties: {
-                    newText: { type: 'string', description: 'Replacement; empty deletes.' },
                     oldText: { type: 'string', description: 'Anchor: exact, unique.' },
-                    startLine: { type: 'number', description: '1-based.' },
-                    startColumn: { type: 'number', description: '1-based.' },
-                    endLine: { type: 'number', description: 'Inclusive.' },
-                    endColumn: { type: 'number', description: 'Exclusive.' },
+                    newText: { type: 'string', description: 'Replacement; empty deletes.' },
                   },
                   required: ['newText'],
                 },
               },
             },
-            required: ['path', 'edits'],
+            // Форму адреса проверяет разбор: проходят обе — вложенная и плоская.
           },
         },
+        to: { type: 'string', description: 'move: target.' },
+        contents: { type: 'string', description: 'create: contents.' },
       },
-      required: ['edits'],
+      // Обязательных полей нет: `write` без `action`, `create` без `edits` — обе формы
+      // живые. Что именно нужно — говорит описание действия, а не `required`.
+      required: [],
     },
   },
   {
@@ -406,16 +386,29 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'plan',
+    name: 'mind',
     side: 'main',
-    description: 'Work state: the plan and the goal.',
+    description:
+      'Conversation and the human: notes, question, plan, goal, plan approval. The project is not touched.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['steps', 'goal'],
-          description: 'steps (default): the plan — call at the start and after each step; goal: survives the turn.',
+          enum: ['remember', 'forget', 'ask', 'steps', 'goal', 'exit_plan'],
+          description:
+            'remember|forget: notes (text, query, scope); ask: question, the run pauses (question, options); ' +
+            'steps: the plan, at the start and after each step (steps); ' +
+            'goal: survives the turn (goal, done); exit_plan: hand the plan over for approval (plan).',
+        },
+        text: { type: 'string', description: 'remember: one thought.' },
+        query: { type: 'string', description: 'forget: substring of the note.' },
+        scope: { type: 'string', enum: ['workspace', 'global'], description: 'remember, forget.' },
+        question: { type: 'string', description: 'ask: one question, no preamble.' },
+        options: {
+          type: 'array',
+          description: 'ask: answers as buttons, 5 max.',
+          items: { type: 'string' },
         },
         steps: {
           type: 'array',
@@ -425,7 +418,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           items: {
             type: 'object',
             properties: {
-              text: { type: 'string', description: 'steps: what to do.' },
+              text: { type: 'string' },
               // `enum` вместо пересказа значений в описании: их видит и проверка
               // вызова (`wrongArguments`), а не только модель.
               status: { type: 'string', enum: ['pending', 'in_progress', 'done'] },
@@ -433,47 +426,11 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
             required: ['text', 'status'],
           },
         },
-        goal: {
-          type: 'string',
-          description: 'goal: one phrase; empty keeps it.',
-        },
+        goal: { type: 'string', description: 'goal: one phrase; empty keeps it.' },
         done: { type: 'boolean', description: 'goal: true closes it.' },
+        plan: { type: 'string', description: 'exit_plan: in brief; empty — the checklist.' },
       },
       required: ['action'],
-    },
-  },
-  {
-    name: 'exit_plan_mode',
-    side: 'main',
-    description:
-      'Hand the plan to the user for approval. Approval switches to Agent mode, rejection comes back ' +
-      'as a comment. Call when the plan is ready: after plan (action steps), not instead of it.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        plan: {
-          type: 'string',
-          description: 'Plan in brief; empty shows the checklist.',
-        },
-      },
-    },
-  },
-  {
-    name: 'ask',
-    side: 'renderer',
-    description:
-      'Ask the user and wait: the run pauses. Finite choices go into options — the user answers with a click.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        question: { type: 'string', description: 'One concrete question, no preamble.' },
-        options: {
-          type: 'array',
-          description: 'Ready answers as buttons, 5 max.',
-          items: { type: 'string' },
-        },
-      },
-      required: ['question'],
     },
   },
   {
@@ -509,51 +466,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     },
   },
   {
-    name: 'ralph',
-    side: 'main',
-    description:
-      'Rounds on one goal: the same question to a fresh agent each round, which sees only a short ' +
-      'digest of earlier rounds. Use when one pass says «done» but you are not sure. Rounds only read.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        goal: { type: 'string', description: 'One task for the whole cycle.' },
-        rounds: { type: 'number', description: 'Limit of rounds, 1-5, default 3. Set by the human.' },
-        description: { type: 'string', description: 'Short cycle name, shown on the card.' },
-      },
-      required: ['goal'],
-    },
-  },
-  {
-    name: 'agents',
-    side: 'main',
-    description: 'Agents in the background. The agent only reads: edits stay with you.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['spawn', 'list', 'wait', 'send', 'interrupt'],
-          description:
-            'spawn: starts one, returns an id at once; list: who works on what; wait: reports (a ' +
-            'timeout means still working, not an error); send: reaches a running agent before its ' +
-            'next step; interrupt: stops one.',
-        },
-        prompt: { type: 'string', description: 'spawn: the task — all the agent sees.' },
-        description: { type: 'string', description: 'spawn: short name for the agents panel.' },
-        ids: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'wait: agent ids (5 max); empty means all.',
-        },
-        id: { type: 'string', description: 'send, interrupt: agent id.' },
-        text: { type: 'string', description: 'send: what to clarify; short.' },
-        timeout: { type: 'number', description: 'wait: seconds (120; max 300).' },
-      },
-      required: ['action'],
-    },
-  },
-  {
     name: 'browser',
     side: 'main',
     description: 'Own Chromium over CDP; http/https only, needs the Browser setting.',
@@ -573,84 +485,6 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         submit: { type: 'boolean', description: 'type: press Enter.' },
         expression: { type: 'string', description: 'evaluate: JS expression; return the value.' },
         mode: { type: 'string', description: 'zoom: in | out | fit | actual (1:1).' },
-      },
-      required: ['action'],
-    },
-  },
-  {
-    name: 'mind',
-    side: 'main',
-    description: 'Memory: notes that survive the conversation. Only long-term agreements.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['remember', 'forget'],
-          description:
-            'remember: saves one note (text); forget: removes notes containing a substring (query). ' +
-            'Notes ride in every request; scope: workspace (default) or global.',
-        },
-        text: { type: 'string', description: 'remember: one thought, a couple of lines max.' },
-        query: { type: 'string', description: 'forget: substring identifying the notes.' },
-        scope: { type: 'string', enum: ['workspace', 'global'], description: 'Workspace unless global.' },
-      },
-      required: ['action'],
-    },
-  },
-  {
-    name: 'git_read',
-    side: 'main',
-    description: 'Read the repository. Read-only.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          enum: ['status', 'diff', 'log', 'blame'],
-          description:
-            'status: branch, ahead/behind, changed files; diff: worktree against the index, staged ' +
-            '(with staged: true) against HEAD; log; blame: who changed which lines and when. ' +
-            'Check status and diff before committing.',
-        },
-        path: { type: 'string', description: 'diff, log, blame: one file.' },
-        staged: { type: 'boolean', description: 'diff: vs HEAD.' },
-        limit: { type: 'number', description: 'log: how many.' },
-        startLine: { type: 'number', description: 'blame: first line, 1-based.' },
-        endLine: { type: 'number', description: 'blame: last line, inclusive.' },
-      },
-      required: ['action'],
-    },
-  },
-  {
-    name: 'git_write',
-    side: 'main',
-    description:
-      'The repository, writes. Checkout rewrites files and git may refuse uncommitted changes. ' +
-      'Discard is irreversible — ask first. Resolve conflicts by hand.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          // `enum` даёт имена, а не смысл: здесь единственное, что не читается из
-          // них — что `unstage` не трогает рабочее дерево и что `push` — на upstream.
-          description:
-            'stage, unstage: the index only, the worktree stays. commit; checkout: a branch; ' +
-            'discard: drops changes for good; fetch, pull; push: upstream on the first push, ' +
-            'force only on request.',
-          enum: ['stage', 'unstage', 'commit', 'checkout', 'discard', 'fetch', 'pull', 'push'],
-        },
-        paths: {
-          type: 'array',
-          description: 'stage, unstage, discard, commit: files/folders.',
-          items: { type: 'string' },
-        },
-        message: { type: 'string', description: 'commit: message.' },
-        name: { type: 'string', description: 'checkout: branch.' },
-        create: { type: 'boolean', description: 'checkout: create first.' },
-        setUpstream: { type: 'boolean', description: 'push: origin -u.' },
-        force: { type: 'boolean', description: 'push: --force-with-lease.' },
       },
       required: ['action'],
     },

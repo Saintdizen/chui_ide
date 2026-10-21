@@ -41,6 +41,13 @@ describe('isDangerousCommand', () => {
     expect(isDangerousCommand('git push --force origin main')).toBe(true);
     expect(isDangerousCommand('git reset --hard HEAD~5')).toBe(true);
     expect(isDangerousCommand('git clean -fd')).toBe(true);
+    // Инструмента git у ассистента нет: всё, что меняет репозиторий, идёт через
+    // `terminal run`, а значит подтверждение должно спросить здесь, а не там.
+    expect(isDangerousCommand('git push origin main')).toBe(true);
+    expect(isDangerousCommand('git commit -m "fix"')).toBe(true);
+    expect(isDangerousCommand('git -C /x checkout -- src/app.ts')).toBe(true);
+    expect(isDangerousCommand('git stash drop')).toBe(true);
+    expect(isDangerousCommand('git merge feature')).toBe(true);
   });
 
   it('опасный глагол ловим и после разделителей', () => {
@@ -53,6 +60,9 @@ describe('isDangerousCommand', () => {
     expect(isDangerousCommand('ls -la')).toBe(false);
     expect(isDangerousCommand('npm run build')).toBe(false);
     expect(isDangerousCommand('git status')).toBe(false);
+    expect(isDangerousCommand('git diff HEAD~1')).toBe(false);
+    expect(isDangerousCommand('git log --oneline -5')).toBe(false);
+    expect(isDangerousCommand('git blame src/app.ts')).toBe(false);
     expect(isDangerousCommand('python -m pytest')).toBe(false);
     expect(isDangerousCommand('grep -rn todo src')).toBe(false);
   });

@@ -5,9 +5,6 @@ import type {
   DiagnosticItem,
   DiagnosticsHostResult,
   DirEntry,
-  GitCommitInfo,
-  GitNetworkResult,
-  GitStatus,
   SearchHit,
   TerminalCreateOptions,
   TerminalSession,
@@ -16,7 +13,6 @@ import type {
 import { formatBrowserSnapshot, type BrowserSnapshot } from '../../shared/browser';
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import { formatDocsAnswer } from '../../shared/docs-index';
-import { formatBlame, type BlameLine } from '../../shared/git-blame';
 import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import { formatReadImageReply, formatReadImageSummary } from '../../shared/read-image';
@@ -31,24 +27,9 @@ import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
 import { formatMcpResources, isMcpToolName, type McpResourceInfo, type McpToolInfo } from '../../shared/mcp';
 import { collapsePassedTests, compressToolOutput, looksLikeTestRun } from '../../shared/output-compress';
 import type { ToolPresentedFile } from '../../shared/api';
-import type { SkillEntry } from '../../shared/skills';
 import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
-import { parseRalphRequest } from '../../shared/ralph';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
-import {
-  formatAgentList,
-  formatAgentWaits,
-  parseInterruptRequest,
-  parseMessageRequest,
-  parseSpawnRequest,
-  parseWaitRequest,
-  type AgentMessageFrom,
-  type AgentSnapshot,
-  type AgentStopReason,
-  type AgentWaitOutcome,
-} from '../../shared/agents';
-import type { AgentWaitResult } from './agents';
 import { parseToolArguments } from '../../shared/tools';
 import { isCondenseMarker } from '../../shared/context-fit';
 import { describeShape, missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
@@ -102,30 +83,6 @@ export interface ToolOutcome {
 }
 
 /**
- * Git-инструменты агента. Нужен только минимум: посмотреть статус и diff.
- * Полный `GitService` подходит сюда структурно (см. `diffText`).
- */
-export interface GitTools {
-  status(): Promise<GitStatus>;
-  /** Diff файла; без пути — весь рабочий diff целиком («что я наменял»). */
-  diffText(path?: string, staged?: boolean): Promise<string>;
-  /** История коммитов текстом: hash, дата, автор, заголовок. */
-  logText(limit?: number, path?: string): Promise<string>;
-  /** Происхождение строк файла: кто, когда и каким коммитом их менял. */
-  blame(filePath: string, range?: { startLine?: number; endLine?: number }): Promise<readonly BlameLine[]>;
-  /** Записи: индексирование и коммит меняют состояние репозитория. */
-  stage(paths: string[]): Promise<GitStatus>;
-  unstage(paths: string[]): Promise<GitStatus>;
-  commit(message: string, paths?: string[]): Promise<GitCommitInfo>;
-  checkout(name: string, create?: boolean): Promise<GitStatus>;
-  discard(paths: string[]): Promise<GitStatus>;
-  /** Сеть: забрать, влить и отправить коммиты. */
-  fetch(): Promise<GitNetworkResult>;
-  pull(): Promise<GitNetworkResult>;
-  push(options?: { setUpstream?: boolean; force?: boolean }): Promise<GitNetworkResult>;
-}
-
-/**
  * Терминал для агента: настоящий pty, а не одноразовый spawn. Сессия живёт
  * между шагами — можно поднять сервер и позже читать его вывод.
  * Полный `TerminalService` подходит сюда структурно.
@@ -141,7 +98,7 @@ export interface TerminalAgent {
 /**
  * Поиск объявлений символов — его умеет языковой сервер («перейти к символу»),
  * и другого способа найти класс по имени в проекте нет. Полный `LspService`
- * подходит сюда структурно, как `GitTools` и `TerminalAgent`.
+ * подходит сюда структурно, как `TerminalAgent`.
  */
 export interface SymbolSearch {
   projectSymbols(query: string): Promise<readonly SearchSymbol[]>;
@@ -238,8 +195,7 @@ export interface WebFetchRunner {
 
 /**
  * Линтер проекта: проверка кода на замечания. Выбор движка и запуск живут в main
- * (`project/lint.ts`), сюда приходит готовый вызов — тот же уговор, что у `GitTools`
- * и `TerminalAgent`. Инструмент остаётся проверяемым без запуска линтеров.
+ * (`project/lint.ts`), сюда приходит готовый вызов — тот же уговор, что у `TerminalAgent` Инструмент остаётся проверяемым без запуска линтеров.
  */
 export interface Linter {
   /** Проверить файл, папку или весь проект (цель не задана). */
@@ -271,15 +227,6 @@ export interface MemoryTools {
 }
 
 /**
- * Навыки проекта для инструмента read_skill. Каталог — тот же, что ушёл в промпт:
- * иначе агент просил бы навык, которого нет, или пропускал бы новый.
- */
-export interface SkillTools {
-  list(): Promise<readonly SkillEntry[]>;
-  read(name: string): Promise<{ entry: SkillEntry; body: string } | null>;
-}
-
-/**
  * Подзадача (`task`): отдельный агент со своим контекстом. Цикл подзадачи живёт
  * в `service.ts` — там есть провайдер и модель, которых здесь нет. Сюда приходит
  * готовый вызов: инструмент остаётся проверяемым без сети и Electron.
@@ -291,29 +238,6 @@ export interface SubagentRunner {
    * `MAX_PARALLEL`): каждая подзадача — свой прогон модели, то есть деньги.
    */
   runMany(tasks: readonly SubagentTask[]): Promise<ToolOutcome>;
-  /**
-   * Агент в фоне (`action: "spawn"`): запустить и вернуть номер, не дожидаясь отчёта.
-   * Дальше с ним работают `list`, `wait`, `send` и `interrupt` — через реестр (`ctx.agents`).
-   */
-  spawn?(params: { description: string; prompt: string }): ToolOutcome;
-  /**
-   * Цикл раундов: свежий агент на каждый раунд, и в каждый едет только сжатая
-   * сводка прежних (`shared/ralph.ts`). Остановку человека и предел раундов
-   * держит сервис: здесь только аргументы и текст ответа.
-   */
-  ralph?(params: { description: string; goal: string; rounds: number }): Promise<ToolOutcome>;
-}
-
-/**
- * Живые агенты для инструмента `agents` (действия `list`, `wait`, `send`,
- * `interrupt`). Реестр живёт в main (`ai/agents.ts`), сюда приходит его
- * видимая часть: по ней инструменты проверяются без модели и без окна.
- */
-export interface AgentTools {
-  list(): AgentSnapshot[];
-  send(id: string, text: string, from: AgentMessageFrom): { ok: boolean; reason?: string };
-  interrupt(id: string, by: AgentStopReason): boolean;
-  wait(ids: readonly string[], timeoutMs: number): Promise<AgentWaitResult>;
 }
 
 /**
@@ -408,12 +332,8 @@ export interface ToolContext {
    * вопрос остался без ответа: прогон прервали или нажали «Отменить».
    */
   ask?(question: string, options?: readonly string[]): Promise<string>;
-  /** Спросить разрешение на действие git (коммит, отправка, откат). */
-  confirmGit?(action: string): Promise<boolean>;
   /** Пометки языка из редактора. */
   diagnostics?(path?: string): Promise<DiagnosticsHostResult>;
-  /** Git рабочей папки: нужен инструментам git_read/git_write. */
-  git?: GitTools;
   /** Открыть файл в редакторе (renderer): действие open инструмента show. */
   openFile?(path: string, line?: number, column?: number): Promise<boolean>;
   /** Терминальные сессии (pty): нужны инструментам terminal_*. */
@@ -428,8 +348,6 @@ export interface ToolContext {
   sessions?: SessionSearchRunner;
   /** Память проекта: нужна инструменту mind. */
   memory?: MemoryTools;
-  /** Навыки проекта (`.chui/skills`): каталог идёт в промпт, тело — инструментом read_skill. */
-  skills?: SkillTools;
   /** Картинки для модели (`read_image`): чтение и уменьшение живут в main (`ai/read-image.ts`). */
   readImage?: ReadImageRunner;
   /** Веб-поиск: подключён только при включённой настройке. */
@@ -440,12 +358,6 @@ export interface ToolContext {
   mcp?: McpRunner;
   /** Подзадачи (инструмент `task`): запускает service — у него есть провайдер. */
   subagent?: SubagentRunner;
-  /**
-   * Живые агенты: список, ожидание, сообщение, остановка. Реестр один на окно
-   * (`ai/agents.ts`), поэтому видны и те агенты, что запущены прошлым — или фоновым —
-   * прогоном.
-   */
-  agents?: AgentTools;
   /** Браузер: подключён только при включённой настройке. */
   browser?: BrowserTools;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
@@ -545,9 +457,6 @@ const MAX_DOC_RESULTS = DEFAULT_DOC_RESULTS;
  */
 const DEFAULT_WEB_RESULTS = 10;
 const MAX_WEB_RESULTS = DEFAULT_WEB_RESULTS;
-/** Сколько коммитов отдаёт `git_read log`, если модель не попросила иначе. */
-const DEFAULT_GIT_LOG = 20;
-const MAX_GIT_LOG = 100;
 /**
  * Во сколько раз просим больше совпадений, чем отдадим. Потолок на файл
  * отбирает уже после поиска: без запаса шумный файл занял бы весь список, и
@@ -589,7 +498,7 @@ const MAX_READ_LINES = 2000;
  * символов начала — это ~15 000 токенов вслепую: конец файла всё равно не виден,
  * и модель просит следующие диапазоны наугад.
  */
-const WHOLE_FILE_MAX_LINES = 400;
+const WHOLE_FILE_MAX_LINES = 250;
 /** Сколько строк показываем из длинного файла и с какой просить продолжение. */
 const LONG_FILE_HEAD_LINES = 200;
 
@@ -628,7 +537,11 @@ const DANGEROUS_COMMAND = new RegExp(
     String.raw`:\s*\(\s*\)\s*\{`,
     String.raw`chmod\s+-R\s+(777|666)\s+\/(\s|$)`,
     String.raw`chown\s+-R\s+\S+\s+\/(\s|$)`,
-    String.raw`git\s+(push\s+[^\n]*(--force|-f)\b|reset\s+--hard|clean\s+-[a-z]*f[a-z]*d)`,
+    // git меняет репозиторий только через `terminal run` — инструмента git у
+    // ассистента нет. Поэтому здесь ловятся и записи в историю, и сеть: иначе
+    // полный доступ молча пушил бы и коммитил. Чтение (`status`, `diff`, `log`)
+    // остаётся без вопроса — этот ряд про необратимое.
+    String.raw`(^|[\s;&|])git\s+(-[cC]\s+\S+\s+|--\S+\s+)*(push|commit|pull|fetch|merge|rebase|reset|restore|revert|am|apply|cherry-pick|stash\s+(drop|clear|pop)|checkout\s+--|switch|branch\s+(-D|-d)|tag\s+-d|clean\s+-[a-z]*f[a-z]*d)(?![\w-])`,
     String.raw`(curl|wget)\b[^\n|]*\|\s*(ba|z|fi|da)?sh\b`,
     `--no-preserve-root`,
   ].join('|'),
@@ -831,7 +744,7 @@ function staleCondensedBody(args: Record<string, unknown>): string | null {
  * Бюджет шага (`stepBudget`) и предел на вызов соблюдали только чтение файлов и
  * вывод команд — остальные инструменты отдавали как есть. Замер на живом
  * проекте: `search` с контекстом возвращал 45 000 символов (≈14 600 токенов за
- * один вызов), `search` (docs), `git_read`, `checks` не
+ * один вызов), `search` (docs), `checks` не
  * режутся вовсе. Пропустить потолок теперь не может ни один инструмент — в том
  * числе новый, который забыли об этом попросить.
  */
@@ -861,8 +774,6 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await readAction(ctx, args);
       case 'search':
         return await searchAction(ctx, args);
-      case 'read_skill':
-        return await readSkill(ctx, args);
       case 'read_image':
         return await readImage(ctx, args);
       case 'lsp':
@@ -875,40 +786,21 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await projectMap(ctx.workspace);
 
       case 'edit':
-        return await editFiles(ctx, args);
+        return await editAction(ctx, args);
       case 'web':
         return await webAction(ctx, args);
       case 'file':
         return await fileAction(ctx, args);
-      case 'plan':
-        return {
-          ok: true,
-          summary: requireString(args, 'action') === 'goal' ? 'цель обновлена' : 'план обновлён',
-        };
-      case 'ask':
-        return await ask(ctx, args);
       case 'task':
         return await task(ctx, args);
-      case 'ralph':
-        return await ralph(ctx, args);
-      // Агенты в фоне одним инструментом: запуск и ожидание — `agents`, действия по
-      // имени. Пять схем стоили дороже одной с `action`, а повторный вызов по одному
-      // имени всё равно выполняется сразу.
-      case 'agents':
-        return await agentsAction(ctx, args);
       case 'mcp':
         return await mcpAction(ctx, args);
-      // Три семейства ниже — одним инструментом с `action`: семь схем браузера и
-      // пять терминала стоили модели дороже, чем их различие по смыслу. У git
-      // имён два, а не одно: граница «чтение / запись» решает, где его позвать.
+      // Семейства ниже — одним инструментом с `action`: семь схем браузера и
+      // пять терминала стоили модели дороже, чем их различие по смыслу.
       case 'browser':
         return await browserAction(ctx, args);
       case 'mind':
         return await mindAction(ctx, args);
-      case 'git_read':
-        return await gitRead(ctx, args);
-      case 'git_write':
-        return await gitWrite(ctx, args);
       case 'show':
         return await showAction(ctx, args);
       case 'terminal':
@@ -983,141 +875,7 @@ async function task(ctx: ToolContext, args: Record<string, unknown>): Promise<To
   return ctx.subagent.runMany(request.tasks);
 }
 
-/* ── раунды ────────────────────────────────────────────────────────────
- *
- * `ralph`: одно задание, несколько раундов свежим агентом. Сам цикл и разговор с
- * моделью живут в `service.ts`; здесь — разбор аргументов и отказ словами, когда
- * цикл не подключён (тот же порядок, что у `task`).
- */
 
-async function ralph(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.subagent?.ralph) return { ok: false, summary: 'Раунды недоступны' };
-
-  const request = parseRalphRequest(args);
-  if (request.error) return { ok: false, summary: 'Не задано задание', detail: request.error };
-
-  return ctx.subagent.ralph({
-    description: request.description,
-    goal: request.goal,
-    rounds: request.rounds,
-  });
-}
-
-/* ── живые агенты ────────────────────────────────────────────────────────
- *
- * Агент в фоне (`agents` с `action: "spawn"`) и работа с уже запущенными: список,
- * ожидание,
- * сообщение, остановка. Сами агенты и почта живут в реестре main (`ai/agents.ts`),
- * а цикл прогона — в `service.ts`; здесь только разбор аргументов и текст ответа.
- * Поэтому эти инструменты проверяются без модели и без окна.
- */
-
-/** Номера всех известных агентов: по ним разбираются аргументы вызовов. */
-function knownAgentIds(ctx: ToolContext): string[] {
-  return (ctx.agents?.list() ?? []).map((agent) => agent.id);
-}
-
-/** Агент в фоне: запустить и отдать номер. Отчёт заберут `agents` с `action: "wait"` или человек. */
-async function spawnAgent(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.subagent?.spawn) return { ok: false, summary: 'Агенты в фоне недоступны' };
-  const request = parseSpawnRequest(args);
-  if (request.error) return { ok: false, summary: 'Не задано задание', detail: request.error };
-  return ctx.subagent.spawn({ description: request.description, prompt: request.prompt });
-}
-
-/** Кто работает и чем занят. */
-function listAgents(ctx: ToolContext): ToolOutcome {
-  if (!ctx.agents) return { ok: false, summary: 'Реестр агентов недоступен' };
-  const agents = ctx.agents.list();
-  const running = agents.filter((agent) => agent.status === 'running').length;
-  return {
-    ok: true,
-    summary: agents.length === 0 ? 'агентов нет' : `агентов: ${agents.length}, работают: ${running}`,
-    detail: formatAgentList(agents),
-  };
-}
-
-/** Дождаться агентов и отдать отчёты. */
-async function waitAgents(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.agents) return { ok: false, summary: 'Реестр агентов недоступен' };
-  const request = parseWaitRequest(args, knownAgentIds(ctx));
-  if (request.error) return { ok: false, summary: 'Не указан агент', detail: request.error };
-  const ids = request.ids.slice(0, 5);
-  const result = await ctx.agents.wait(ids, request.timeoutMs);
-  const outcomes: AgentWaitOutcome[] = result.agents.map((agent) => ({
-    agent,
-    report: result.reports.get(agent.id) ?? null,
-  }));
-  const ready = outcomes.filter((outcome) => outcome.report !== null).length;
-  return {
-    ok: true,
-    summary:
-      outcomes.length === 0
-        ? 'таких агентов нет'
-        : ready === outcomes.length
-          ? `отчётов: ${ready}`
-          : `отчётов: ${ready}, ещё идут: ${outcomes.length - ready}`,
-    detail: formatAgentWaits(outcomes, result.timedOut),
-  };
-}
-
-/** Сказать агенту по делу: сообщение доедет перед его шагом. */
-function sendToAgent(ctx: ToolContext, args: Record<string, unknown>, from: AgentMessageFrom): ToolOutcome {
-  if (!ctx.agents) return { ok: false, summary: 'Реестр агентов недоступен' };
-  const request = parseMessageRequest(args, knownAgentIds(ctx));
-  if (request.error) return { ok: false, summary: 'Сообщение не отправлено', detail: request.error };
-  const sent = ctx.agents.send(request.id!, request.text, from);
-  if (!sent.ok) return { ok: false, summary: 'Сообщение не доставлено', detail: sent.reason };
-  return { ok: true, summary: `сообщение агенту ${request.id} отправлено` };
-}
-
-/** Остановить одного агента, не трогая остальных. */
-function interruptAgent(ctx: ToolContext, args: Record<string, unknown>, by: AgentStopReason): ToolOutcome {
-  if (!ctx.agents) return { ok: false, summary: 'Реестр агентов недоступен' };
-  const request = parseInterruptRequest(args, knownAgentIds(ctx));
-  if (request.error) return { ok: false, summary: 'Агент не остановлен', detail: request.error };
-  if (!ctx.agents.interrupt(request.id!, by)) {
-    return {
-      ok: false,
-      summary: 'Агент уже не работает',
-      detail: 'Останавливать нечего: агент уже закончил. Его отчёт читается через agents с action: "wait".',
-    };
-  }
-  return { ok: true, summary: `агент ${request.id} остановлен` };
-}
-
-/**
- * Живые агенты одним инструментом с `action`.
- *
- * Пять отдельных имён (`spawn_agent` и четыре спутника) стоили пяти схем в каждом
- * запросе, а различались только первой
- * строкой описания. Разбор аргументов остался в прежних функциях — здесь только
- * выбор по действию, проверка обязательных полей и отказ на незнакомое.
- *
- * Ждущий агент не занимает прогон: `wait` блокирует только этот шаг, и таймаут — не
- * ошибка, а «ещё работают» (об этом говорит сам ответ).
- */
-async function agentsAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  const action = requireString(args, 'action').trim();
-  switch (action) {
-    case 'spawn':
-      return missingForAction(args, ['prompt']) ?? (await spawnAgent(ctx, args));
-    case 'list':
-      return listAgents(ctx);
-    case 'wait':
-      return await waitAgents(ctx, args);
-    case 'send':
-      return missingForAction(args, ['id', 'text']) ?? sendToAgent(ctx, args, 'agent');
-    case 'interrupt':
-      return missingForAction(args, ['id']) ?? interruptAgent(ctx, args, 'model');
-    default:
-      return {
-        ok: false,
-        summary: `Неизвестное действие с агентами: ${action}`,
-        detail: 'Допустимые: spawn, list, wait, send, interrupt.',
-      };
-  }
-}
 
 /* ── браузер ────────────────────────────────────────────────────────────── */
 
@@ -1164,7 +922,7 @@ function pageSummary(snapshot: BrowserSnapshot): string {
 function missingForAction(args: Record<string, unknown>, keys: readonly string[]): ToolOutcome | null {
   for (const key of keys) {
     const value = args[key];
-    // `git_write` называет списком не только строки: `paths` — массив, и пустой
+    // `edit` называет списком не только строки: `paths` — массив, и пустой
     // массив значит «аргумента нет», а не «проиндексировать всё».
     // Элемент массива — не всегда строка: у `edit` это объект (`patches[]`,
     // `edits[]`), и он тоже считается аргументом, иначе вызов с готовым
@@ -1951,28 +1709,6 @@ async function searchDocs(ctx: ToolContext, args: Record<string, unknown>): Prom
 }
 
 /**
- * Прочитать навык целиком. Каталог (имя и одна строка) агент уже видел в промпте,
- * поэтому здесь — тело и ничего больше.
- *
- * Ошибка возвращается с подсказкой, а не тупиком: модель должна суметь исправить
- * вызов за один шаг — увидев, какие имена вообще есть.
- */
-async function readSkill(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.skills) return { ok: false, summary: 'Навыки недоступны' };
-  const name = requireString(args, 'name');
-  const found = await ctx.skills.read(name);
-  if (!found) {
-    const known = (await ctx.skills.list()).map((skill) => skill.name);
-    return {
-      ok: false,
-      summary: `Навыка «${name}» нет`,
-      detail: known.length > 0 ? `Есть такие: ${known.join(', ')}` : 'В проекте нет ни одного навыка.',
-    };
-  }
-  return { ok: true, summary: `Навык ${found.entry.name}`, detail: found.body };
-}
-
-/**
  * Посмотреть картинку (`read_image`). Саму картинку в текст результата не положить:
  * у OpenAI в `tool`-сообщении допустим только текст, поэтому она едет в
  * `images` — отдельным сообщением прогона (см. `service.ts`). Здесь — вызов main,
@@ -2395,6 +2131,35 @@ function quoteSh(value: string): string {
 }
 
 /**
+ * `cd <папка> && команда` — тот же запуск, только папку несёт сама команда.
+ *
+ * В переписи живых вызовов 76 из 93 начинались с такого префикса, хотя у `run`
+ * есть `cwd`: привычка модели, а не нужда. Поднимаем префикс в аргумент — панель
+ * ревью и история показывают саму команду, а не обвязку. Папку вне проекта
+ * (`stat` бросит) не трогаем: пусть откажет проверка пути, а не догадка.
+ */
+async function liftCdPrefix(
+  ctx: ToolContext,
+  command: string,
+  args: Record<string, unknown>,
+): Promise<{ command: string; args: Record<string, unknown> }> {
+  // Явный `cwd` главнее: тогда `cd` внутри команды — это уже её собственный шаг.
+  if (optionalString(args, 'cwd')?.trim()) return { command, args };
+  const match = /^cd\s+(?:'([^']*)'|"([^"]*)"|(\S+))\s*&&\s*(\S[\s\S]*)$/.exec(command);
+  if (!match) return { command, args };
+  const dir = match[1] ?? match[2] ?? match[3];
+  const rest = match[4];
+  if (!dir) return { command, args };
+  try {
+    const stat = await ctx.workspace.stat(dir);
+    if (stat.kind !== 'directory') return { command, args };
+    return { command: rest, args: { ...args, cwd: stat.path } };
+  } catch {
+    return { command, args };
+  }
+}
+
+/**
  * Песочница включена, а движка нет: команду не выполняем и прямо говорим, что на
  * хост она не переключится. Тихий откат был бы худшим исходом — человек считал бы,
  * что чужой код идёт в изоляции, а он шёл бы на его машине.
@@ -2539,6 +2304,28 @@ const EDITOR_MISSING: ToolOutcome = {
  * документа, в том числе несохранённый), позиции применяет документная модель.
  * Ревью, undo и панель изменений у обоих одни и те же.
  */
+/**
+ * Слитая запись: `write` (или его отсутствие) — правки по якорям, остальные
+ * действия — файловые операции. `file` остаётся вызываемым по имени ради
+ * старых бесед, но схему больше не возит.
+ */
+async function editAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = typeof args.action === 'string' && args.action.trim() ? args.action.trim() : 'write';
+  if (action === 'write') return await editFiles(ctx, { ...args, edits: writePayload(args) });
+  return await fileAction(ctx, { ...args, action, from: args.from ?? args.path });
+}
+
+/** Плоская форма (`path` + `edits`) приходит от модели чаще вложенной — разворачиваем. */
+function writePayload(args: Record<string, unknown>): unknown {
+  const edits = args.edits;
+  const legacy =
+    Array.isArray(edits) &&
+    edits.some((item) => item !== null && typeof item === 'object' && Array.isArray((item as { edits?: unknown }).edits));
+  if (legacy) return edits;
+  if (typeof args.path === 'string' && Array.isArray(edits)) return [{ path: args.path, edits }];
+  return edits;
+}
+
 async function editFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const parsed = parseEdits(args.edits);
   const names = [...parsed.anchors, ...parsed.positions].map((file) => path.basename(file.path));
@@ -2620,8 +2407,18 @@ function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; pos
   // Самая частая ошибка — замена вместо файла: в элементе oldText и newText, а
   // обёртки с путём нет. Об этом и говорим, иначе модель пришлёт то же снова.
   if (typeof filePath !== 'string' || filePath.trim().length === 0) {
-    const hunk = typeof raw.oldText === 'string' || typeof raw.newText === 'string';
-    const hint = hunk ? ' В элементе лежат сами замены (oldText/newText), а не файл.' : '';
+    const inner = Array.isArray(raw.edits) ? raw.edits : [];
+    const swap = typeof raw.oldText === 'string' || typeof raw.newText === 'string';
+    const whole = inner.some((item) => {
+      if (typeof item !== 'object' || item === null) return false;
+      const hunk = item as Record<string, unknown>;
+      return typeof hunk.newText === 'string' && hunk.oldText === undefined;
+    });
+    const hint = whole
+      ? ' Похоже на запись файла целиком: новый файл пишет `create` с `contents`.'
+      : swap
+        ? ' В элементе лежат сами замены (oldText/newText), а не файл.'
+        : '';
     throw new Error(`edits[${index}]: не задан path.${hint} ${EDITS_SHAPE}`);
   }
   if (!path.isAbsolute(filePath)) {
@@ -2684,7 +2481,12 @@ function parseEditItem(value: unknown, fileIndex: number, editIndex: number): Ed
     throw new Error(`${where}: позиции заданы не все — нужны startLine, startColumn, endLine, endColumn`);
   }
   if (typeof oldText !== 'string' || oldText.length === 0) {
-    throw new Error(`${where}: нужен oldText (якорь) или все четыре позиции. ${EDITS_SHAPE}`);
+    // Запись файла целиком приходит без якоря: в переписи это два отказа из
+    // двадцати четырёх (`edits[].edits[]` с одним `newText` и без `path`).
+    // Без адреса правку не сделать, но модель обычно метила в `create` — говорим.
+    const whole = typeof newText === 'string' && newText.includes('\n');
+    const hint = whole ? ' Похоже на запись файла целиком: у `create` есть `contents`.' : '';
+    throw new Error(`${where}: нужен oldText (якорь) или все четыре позиции.${hint} ${EDITS_SHAPE}`);
   }
   return { anchor: { oldText, newText } };
 }
@@ -2741,8 +2543,10 @@ function didWork(result: { code: number | null; timedOut?: boolean }, command: s
 }
 
 /** Обычный запуск: шаг ждёт команду и возвращает её вывод. */
-async function terminalRunForeground(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  const command = requireString(args, 'command').trim();
+async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<string, unknown>): Promise<ToolOutcome> {
+  const lifted = await liftCdPrefix(ctx, requireString(rawArgs, 'command').trim(), rawArgs);
+  const args = lifted.args;
+  const command = lifted.command;
   if (command.length > MAX_COMMAND_CHARS) {
     // Не только «нельзя», но и «как надо»: замер на живом прогоне дал пять
     // потерянных шагов на heredoc, каждый — заново написанный текст. Длинная
@@ -2807,10 +2611,12 @@ const MAX_JOB_TIMEOUT_SECONDS = 1800;
  * агента всё это время, и он не мог бы даже сказать, что там происходит. Вывод
  * читается действием `output`.
  */
-async function terminalRunBackground(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+async function terminalRunBackground(ctx: ToolContext, rawArgs: Record<string, unknown>): Promise<ToolOutcome> {
   if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
 
-  const command = requireString(args, 'command').trim();
+  const lifted = await liftCdPrefix(ctx, requireString(rawArgs, 'command').trim(), rawArgs);
+  const args = lifted.args;
+  const command = lifted.command;
   if (command.length > MAX_COMMAND_CHARS) {
     throw new Error(`Команда длиннее ${MAX_COMMAND_CHARS} символов`);
   }
@@ -3060,26 +2866,6 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
   }
 }
 
-/** История коммитов: read-only контекст «что тут менялось». */
-async function gitLog(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-
-  const limit = Math.min(optionalInteger(args, 'limit') ?? DEFAULT_GIT_LOG, MAX_GIT_LOG);
-  const target = optionalString(args, 'path');
-  const text = (await ctx.git.logText(limit, target)).trim();
-
-  if (!text) {
-    return { ok: true, summary: 'история пуста', detail: 'У репозитория нет коммитов.' };
-  }
-
-  const lines = text.split('\n').filter(Boolean);
-  return {
-    ok: true,
-    summary: `коммитов: ${lines.length}${target ? ` по ${path.basename(target)}` : ''}`,
-    detail: text,
-  };
-}
-
 /* ── создание, удаление и перемещение ───────────────────────────────────── */
 
 /** Новый файл. Существующий не перетираем — для этого есть правка. */
@@ -3128,323 +2914,6 @@ async function moveFile(workspace: WorkspaceService, args: Record<string, unknow
     detail: `Перемещено: ${from} → ${moved}.`,
     changes: [{ path: moved, kind: 'moved', from }],
   };
-}
-
-/* ── git ────────────────────────────────────────────────────────────────── */
-
-/** Буква изменения — как в списке git: M, A, D, R, U (новый), ! (конфликт). */
-function gitLetter(change: GitStatus['files'][number]['change']): string {
-  switch (change) {
-    case 'modified':
-      return 'M';
-    case 'added':
-      return 'A';
-    case 'deleted':
-      return 'D';
-    case 'renamed':
-      return 'R';
-    case 'untracked':
-      return 'U';
-    case 'conflicted':
-      return '!';
-    default:
-      return '?';
-  }
-}
-
-const MAX_GIT_FILES = 200;
-
-/* ── git: двенадцать действий под двумя именами ─────────────────────────── */
-
-/**
- * Действия git — одним инструментом, но под двумя именами.
- *
- * Чтение и запись здесь не «два действия одного инструмента», а две степени
- * доверия: от неё зависит, предложить ли инструмент в режиме «План», подзадаче и
- * набору «Только чтение». Один `git` отдал бы `push` набору, который обещает
- * ничего не менять, — поэтому имён два, а действия внутри.
- */
-async function gitRead(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  const action = requireString(args, 'action').trim();
-  switch (action) {
-    case 'status':
-      return await gitStatus(ctx);
-    case 'diff':
-      return await gitDiff(ctx, args);
-    case 'log':
-      return await gitLog(ctx, args);
-    case 'blame':
-      return missingForAction(args, ['path']) ?? (await gitBlame(ctx, args));
-    default:
-      return {
-        ok: false,
-        summary: `Неизвестное действие чтения git: ${action}`,
-        detail: 'Допустимые: status, diff, log, blame.',
-      };
-  }
-}
-
-async function gitWrite(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  const action = requireString(args, 'action').trim();
-  switch (action) {
-    case 'stage':
-      return missingForAction(args, ['paths']) ?? (await gitStage(ctx, args));
-    case 'unstage':
-      return missingForAction(args, ['paths']) ?? (await gitUnstage(ctx, args));
-    case 'discard':
-      return missingForAction(args, ['paths']) ?? (await gitDiscard(ctx, args));
-    case 'commit':
-      return missingForAction(args, ['message']) ?? (await gitCommit(ctx, args));
-    case 'checkout':
-      return missingForAction(args, ['name']) ?? (await gitCheckout(ctx, args));
-    case 'fetch':
-      return await gitNetwork(ctx, 'fetch');
-    case 'pull':
-      return await gitNetwork(ctx, 'pull');
-    case 'push':
-      return await gitPush(ctx, args);
-    default:
-      return {
-        ok: false,
-        summary: `Неизвестное действие git: ${action}`,
-        detail: 'Допустимые: stage, unstage, commit, checkout, discard, fetch, pull, push.',
-      };
-  }
-}
-
-/** Состояние репозитория: ветка, синхронизация и список изменённых файлов. */
-async function gitStatus(ctx: ToolContext): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-
-  const status = await ctx.git.status();
-  const repo = status.repository;
-  if (!repo) {
-    return { ok: true, summary: 'не git-репозиторий', detail: 'Проект не лежит внутри git-репозитория.' };
-  }
-
-  const where = repo.branch
-    ? `ветка ${repo.branch}`
-    : repo.detached
-      ? `отделённый HEAD ${repo.head ?? ''}`.trim()
-      : 'репозиторий без коммитов';
-  const sync = [repo.ahead > 0 ? `впереди ${repo.ahead}` : '', repo.behind > 0 ? `позади ${repo.behind}` : '']
-    .filter(Boolean)
-    .join(', ');
-
-  if (status.files.length === 0) {
-    return { ok: true, summary: `${where}: изменений нет`, detail: 'Рабочее дерево чистое.' };
-  }
-
-  const shown = status.files.slice(0, MAX_GIT_FILES);
-  const lines = shown.map(
-    (file) => `${gitLetter(file.change)} ${file.staged ? '[индекс]' : '[ ]     '} ${file.relative}`,
-  );
-  if (status.files.length > shown.length) lines.push(`… ещё файлов: ${status.files.length - shown.length}`);
-
-  return {
-    ok: true,
-    summary: `${where}: ${status.files.length} изменённых файлов${sync ? ` (${sync})` : ''}`,
-    detail: lines.join('\n'),
-  };
-}
-
-/**
- * Diff в формате git: `+`/`-` строки, как в терминале. Без пути — весь рабочий
- * diff целиком: «покажи, что я наменял» иначе превращалось в перебор файлов по
- * одному, а это вызов и шаг на каждый.
- */
-async function gitDiff(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-
-  const target = optionalString(args, 'path')?.trim();
-  const staged = optionalBoolean(args, 'staged') ?? false;
-  const diff = await ctx.git.diffText(target, staged);
-  const where = target ? relative(target, ctx.workspace.rootPath()) : 'рабочее дерево';
-  const scope = staged ? ' (индекс)' : '';
-
-  if (!diff.trim()) {
-    return { ok: true, summary: `${where}: нет изменений${scope}`, detail: 'git не показал различий.' };
-  }
-
-  const { text, truncated } = clipText(ctx, 'git diff', diff);
-  // Без пути diff бывает большим: сводку строим по числу файлов, а не по одному.
-  const files = target ? '' : ` · файлов: ${new Set(diff.matchAll(/^diff --git a\/(.+?) b\//gm)).size}`;
-  return {
-    ok: true,
-    summary: `diff ${where}${scope}${files}${truncated ? ' (обрезано)' : ''}`,
-    detail: text,
-  };
-}
-
-/**
- * Происхождение строк файла: кто, когда и каким коммитом их менял. Отвечает на
- * «почему тут так» — по автору и сообщению коммита часто видно замысел, которого
- * в коде уже нет. Чтение: ничего не меняет. `startLine`/`endLine` сужают вывод.
- */
-async function gitBlame(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-
-  const target = requireString(args, 'path');
-  const startLine = optionalInteger(args, 'startLine');
-  const endLine = optionalInteger(args, 'endLine');
-  const lines: readonly BlameLine[] = await ctx.git.blame(target, { startLine, endLine });
-  const rel = relative(target, ctx.workspace.rootPath());
-  const report = formatBlame(rel, lines);
-  return { ok: true, summary: report.summary, detail: report.detail };
-}
-
-/* ── git: правки репозитория ────────────────────────────────────────────── */
-
-/**
- * Действия git, которые меняют состояние репозитория. В обычном режиме агент
- * спрашивает на каждое; при полном доступе — только на эти: откат теряет работу
- * безвозвратно, переключение ветки переписывает файлы, отправка и вливание
- * затрагивают удалённый репозиторий и чужие коммиты.
- *
- * Имена здесь — действия `git_write` (в вызовах `permitGit`), а не имена
- * инструментов: спрашивать или нет, решает действие, а не инструмент.
- */
-const DANGEROUS_GIT_ACTIONS = new Set(['git_discard', 'git_push', 'git_pull', 'git_checkout']);
-
-/** Тот же уговор, что у команд: обычный режим спрашивает всегда, полный — только за опасное. */
-function needsGitConfirmation(ctx: ToolContext, name: string): boolean {
-  if (!ctx.allowAll) return true;
-  return ctx.confirmDangerous === true && DANGEROUS_GIT_ACTIONS.has(name);
-}
-
-/** Пути аргумента `paths`, проверенные на принадлежность рабочей папке (без обращения к диску). */
-function gitPaths(ctx: ToolContext, args: Record<string, unknown>): string[] {
-  const value = args.paths;
-  if (!Array.isArray(value)) throw new Error('Не задан аргумент «paths»');
-  const root = ctx.workspace.rootPath();
-  if (!root) throw new Error('Проект не открыт');
-
-  const paths: string[] = [];
-  for (const item of value) {
-    if (typeof item !== 'string' || !item.trim()) continue;
-    // Относительный путь (как в выводе `git status`) считаем от корня проекта,
-    // а не от рабочего каталога main: агенту привычнее пути из своего проекта.
-    const absolute = path.isAbsolute(item) ? path.resolve(item) : path.resolve(root, item);
-    const rel = path.relative(root, absolute);
-    // Граница та же, что у чтения и правок: файл должен лежать внутри проекта.
-    // Диск не читаем намеренно — откат бывает и у удалённого файла.
-    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
-      throw new Error(`Путь вне рабочей папки: ${item}`);
-    }
-    paths.push(absolute);
-  }
-  if (paths.length === 0) throw new Error('Не задан аргумент «paths»');
-  return paths;
-}
-
-/**
- * Спросить разрешение на действие git. Нет моста подтверждений — действия git
- * агенту недоступны (такие инструменты и не предлагаются: см. `canRun`).
- */
-async function permitGit(ctx: ToolContext, name: string, action: string): Promise<ToolOutcome | null> {
-  if (!ctx.confirmGit) return { ok: false, summary: 'Действия git недоступны: окно редактора не подключено' };
-  if (!needsGitConfirmation(ctx, name)) return null;
-  const allowed = await ctx.confirmGit(action);
-  if (allowed) return null;
-  return {
-    ok: false,
-    summary: 'Пользователь отклонил действие git',
-    detail: 'Пользователь не разрешил это действие git. Не повторяй его — предложи другой ход.',
-  };
-}
-
-async function gitStage(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-  const paths = gitPaths(ctx, args);
-  const denied = await permitGit(ctx, 'git_stage', `git add ${paths.length} ${pluralFiles(paths.length)}`);
-  if (denied) return denied;
-
-  await ctx.git.stage(paths);
-  return {
-    ok: true,
-    summary: `проиндексировано: ${paths.length}`,
-    detail: paths.map((target) => relative(target, ctx.workspace.rootPath())).join('\n'),
-  };
-}
-
-async function gitUnstage(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-  const paths = gitPaths(ctx, args);
-  const denied = await permitGit(ctx, 'git_unstage', `git reset -- ${paths.length} ${pluralFiles(paths.length)}`);
-  if (denied) return denied;
-
-  await ctx.git.unstage(paths);
-  return {
-    ok: true,
-    summary: `убрано из индекса: ${paths.length}`,
-    detail: paths.map((target) => relative(target, ctx.workspace.rootPath())).join('\n'),
-  };
-}
-
-async function gitCommit(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-
-  const message = requireString(args, 'message').trim();
-  const paths = Array.isArray(args.paths) ? gitPaths(ctx, args) : undefined;
-  const denied = await permitGit(ctx, 'git_commit', `git commit -m "${message}"`);
-  if (denied) return denied;
-
-  const info: GitCommitInfo = await ctx.git.commit(message, paths);
-  return { ok: true, summary: `коммит ${info.hash}`, detail: info.summary };
-}
-
-async function gitCheckout(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-
-  const name = requireString(args, 'name').trim();
-  const create = optionalBoolean(args, 'create') ?? false;
-  const denied = await permitGit(ctx, 'git_checkout', create ? `git checkout -b ${name}` : `git checkout ${name}`);
-  if (denied) return denied;
-
-  const status = await ctx.git.checkout(name, create);
-  return {
-    ok: true,
-    summary: `${create ? 'создана и текущая' : 'текущая'} ветка: ${status.repository?.branch ?? name}`,
-    detail: `git ${create ? 'checkout -b' : 'checkout'} ${name}`,
-  };
-}
-
-async function gitDiscard(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-  const paths = gitPaths(ctx, args);
-  const denied = await permitGit(ctx, 'git_discard', `git restore / вернуть в корзину: ${paths.length}`);
-  if (denied) return denied;
-
-  await ctx.git.discard(paths);
-  return {
-    ok: true,
-    summary: `откачено файлов: ${paths.length}`,
-    detail: 'Правки отменены: отслеживаемые файлы вернулись к последнему коммиту, новые удалены.',
-  };
-}
-
-/** Общее для fetch/pull: обе — сетевые операции без пути, разница только в команде. */
-async function gitNetwork(ctx: ToolContext, kind: 'fetch' | 'pull'): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-  const name = kind === 'fetch' ? 'git_fetch' : 'git_pull';
-  const denied = await permitGit(ctx, name, `git ${kind}`);
-  if (denied) return denied;
-
-  const result: GitNetworkResult = kind === 'fetch' ? await ctx.git.fetch() : await ctx.git.pull();
-  return { ok: result.ok, summary: `git ${kind}: ${result.ok ? 'готово' : 'сбой'}`, detail: result.message };
-}
-
-async function gitPush(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  if (!ctx.git) return { ok: false, summary: 'Git недоступен' };
-
-  const setUpstream = optionalBoolean(args, 'setUpstream') ?? false;
-  const force = optionalBoolean(args, 'force') ?? false;
-  const action = `git push${force ? ' --force-with-lease' : ''}${setUpstream ? ' -u origin' : ''}`;
-  const denied = await permitGit(ctx, 'git_push', action);
-  if (denied) return denied;
-
-  const result: GitNetworkResult = await ctx.git.push({ setUpstream, force });
-  return { ok: result.ok, summary: `git push: ${result.ok ? 'отправлено' : 'сбой'}`, detail: result.message };
 }
 
 /* ── память проекта ─────────────────────────────────────────────────────── */
@@ -3514,7 +2983,7 @@ async function forget(ctx: ToolContext, args: Record<string, unknown>): Promise<
 /**
  * Память одним инструментом: `remember` и `forget` — два глагола об одном
  * хранилище, а стоили двух схем в каждом запросе. Поля у них разные, поэтому
- * схема общая, а недостающее называется до обработчика — как у `git_write`.
+ * схема общая, а недостающее называется до обработчика — как у `edit`.
  */
 async function mindAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const action = requireString(args, 'action').trim();
@@ -3523,12 +2992,20 @@ async function mindAction(ctx: ToolContext, args: Record<string, unknown>): Prom
       return missingForAction(args, ['text']) ?? (await remember(ctx, args));
     case 'forget':
       return missingForAction(args, ['query']) ?? (await forget(ctx, args));
+    case 'ask':
+      return await ask(ctx, args);
+    // План и цель — состояние беседы, а не файлы: на диске ничего не меняется,
+    // запись делает renderer по самому вызову.
+    case 'steps':
+      return { ok: true, summary: 'план обновлён' };
+    case 'goal':
+      return { ok: true, summary: 'цель обновлена' };
+    // Утверждение плана перехватывает `service.ts` до вызова обработчика: там
+    // решается смена режима. Здесь — только если перехвата не было.
+    case 'exit_plan':
+      return { ok: false, summary: 'Утверждать нечего: режим плана не включён' };
     default:
-      return {
-        ok: false,
-        summary: `Неизвестное действие: ${action}`,
-        detail: 'mind: remember, forget.',
-      };
+      return unknownAction(action, 'mind: remember, forget, ask, steps, goal, exit_plan.');
   }
 }
 
@@ -3593,15 +3070,6 @@ async function mcpAction(ctx: ToolContext, args: Record<string, unknown>): Promi
 /** Незнакомое действие слитого инструмента: ответ называет допустимые. */
 function unknownAction(action: string, detail: string): ToolOutcome {
   return { ok: false, summary: `Неизвестное действие: ${action}`, detail };
-}
-
-/** «1 файл», «2 файла», «5 файлов» — для подписи действия в подтверждении. */
-function pluralFiles(count: number): string {
-  const mod10 = count % 10;
-  const mod100 = count % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'файл';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'файла';
-  return 'файлов';
 }
 
 /* ── открытие файла в редакторе ─────────────────────────────────────────── */

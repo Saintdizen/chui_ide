@@ -30,6 +30,32 @@ function bridge(result: ApplyEditsHostResult) {
   return vi.fn(async () => result);
 }
 
+describe('edit — слитая запись', () => {
+  it('плоская форма доходит до правки', async () => {
+    const applyPatches = bridge({
+      rejected: false,
+      result: { reports: [{ path: '/proj/a.ts', applied: 1, version: 2 }], failed: [] },
+    });
+    const outcome = await runTool(
+      context({ applyPatches }),
+      'edit',
+      '{"path":"/proj/a.ts","edits":[{"oldText":"a","newText":"b"}]}',
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+  });
+
+  it('замена без файла называет create с contents', async () => {
+    const r = await runTool(context(), 'edit', '{"edits":[{"edits":[{"newText":"a\\nb"}]}]}');
+    expect(r.ok).toBe(false);
+    expect(r.summary).toContain('contents');
+  });
+
+  it('action уходит в файловые операции, а не в правку', async () => {
+    const outcome = await runTool(context(), 'edit', '{"action":"move","path":"/proj/a.ts","to":"/proj/b.ts"}');
+    expect(outcome.detail ?? outcome.summary).not.toContain('Не хватает аргумента: from');
+  });
+});
+
 describe('edit по позициям: записан ли файл на диск', () => {
   it('всё записано — о буфере не говорим', async () => {
     const applyEdits = bridge({

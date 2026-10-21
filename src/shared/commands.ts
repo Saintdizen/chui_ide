@@ -29,7 +29,8 @@
  * Поэтому модуль чистый и проверяется без Electron.
  */
 
-import type { SkillScope } from './skills';
+/** Откуда пришёл файл: из проекта или из дома. Раньше жил в модуле навыков. */
+export type SkillScope = 'workspace' | 'global';
 
 /** Одна команда проекта: как её зовут, что она делает и что подставить в поле. */
 export interface ProjectCommand {

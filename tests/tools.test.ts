@@ -31,22 +31,18 @@ describe('набор инструментов агента', () => {
       'list',
       'read',
       'search',
-      'read_skill',
       'lsp',
       'run_tests',
       'checks',
       'edit',
       'file',
-      'plan',
-      'ask',
+      'mind',
       'task',
       'browser',
 
       'mind',
       'mcp',
       'web',
-      'git_read',
-      'git_write',
       'show',
       'terminal',
     ];
@@ -116,16 +112,20 @@ describe('file: replace', () => {
 });
 
 describe('edit', () => {
-  it('одна форма входа: адрес — якорь или позиции', () => {
+  it('одна форма входа: правка по якорям плюс операции с файлом', () => {
     const tool = byName.get('edit')!;
     expect(tool.side).toBe('renderer');
-    // Форму выбирает сама правка, поэтому обязателен только массив файлов:
-    // отдельное поле action означало бы выбор между двумя схемами.
-    expect(tool.inputSchema.required).toEqual(['edits']);
-    expect(tool.inputSchema.properties.action).toBeUndefined();
-    // Описания схем — по-английски (их читает только модель), поэтому ищем смысл:
-    // якорь назван, а не только правка по номерам строк.
+    // Обязательных полей нет: `write` без `action` и `create` без `edits` — обе
+    // формы живые; что именно нужно, говорит описание действия (п.42 TASKS.md).
+    expect(tool.inputSchema.required).toEqual([]);
+    expect(tool.inputSchema.properties.action?.enum).toEqual([
+      'write',
+      'create',
+      'move',
+      'delete',
+    ]);
     expect(tool.description.toLowerCase()).toContain('oldtext');
+    expect(tool.description.toLowerCase()).toContain('create');
   });
 
   it('схема описывает поля элемента, а не только «объект вообще»', () => {
@@ -135,13 +135,16 @@ describe('edit', () => {
     const file = byName.get('edit')!.inputSchema.properties.edits!.items!;
     expect(file.properties?.path?.type).toBe('string');
     expect(file.properties?.edits?.type).toBe('array');
-    expect(file.required).toEqual(['path', 'edits']);
-    // У правки обязательна только замена: адрес — якорь или четыре позиции.
+    // `required` у элемента нет намеренно: разбор принимает и вложенную форму,
+    // и плоскую (`path` + `edits` без обёртки) — её модель слала чаще всего.
+    expect(file.required).toBeUndefined();
+    // У правки обязательна только замена: адрес — якорь `oldText`.
     const item = file.properties?.edits?.items?.properties;
     expect(item?.newText?.type).toBe('string');
     expect(item?.oldText?.type).toBe('string');
-    expect(item?.startLine?.type).toBe('number');
-    expect(item?.endColumn?.type).toBe('number');
+    // Позиции со схемы сняты — но разбор их понимает, это нужно старым беседам.
+    expect(item?.startLine).toBeUndefined();
+    expect(file.properties?.edits?.items?.required).toEqual(['newText']);
   });
 });
 
@@ -153,41 +156,6 @@ describe('file', () => {
     expect(tool.side).toBe('main');
     expect(tool.inputSchema.required).toEqual(['action']);
     expect(tool.inputSchema.properties.contents?.type).toBe('string');
-  });
-});
-
-describe('git_read', () => {
-  it('главная сторона, действия чтения и необязательные аргументы', () => {
-    const tool = byName.get('git_read')!;
-    expect(tool.side).toBe('main');
-    expect(tool.inputSchema.required).toEqual(['action']);
-    expect(Object.keys(tool.inputSchema.properties)).toEqual([
-      'action',
-      'path',
-      'staged',
-      'limit',
-      'startLine',
-      'endLine',
-    ]);
-  });
-});
-
-describe('git_write', () => {
-  it('меняет репозиторий, живёт в main и требует только действие', () => {
-    const tool = byName.get('git_write')!;
-    expect(tool.side).toBe('main');
-    // Остальные аргументы зависят от действия: commit просит message, stage — paths.
-    // Их проверяет обработчик, поэтому в схеме обязателен только `action`.
-    expect(tool.inputSchema.required).toEqual(['action']);
-    expect(Object.keys(tool.inputSchema.properties)).toEqual([
-      'action',
-      'paths',
-      'message',
-      'name',
-      'create',
-      'setUpstream',
-      'force',
-    ]);
   });
 });
 

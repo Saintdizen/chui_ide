@@ -56,7 +56,7 @@ describe('exit_plan_mode: решение человека', () => {
   it('отказ без замечания не выдумывает причину', () => {
     const text = planExitResult({ approved: false, note: '' });
     expect(text).toContain('не утверждён');
-    expect(text).toContain('exit_plan_mode');
+    expect(text).toContain('mind (action: exit_plan)');
     expect(text).not.toContain('Замечание человека');
   });
 

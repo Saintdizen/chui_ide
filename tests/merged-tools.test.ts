@@ -3,7 +3,7 @@ import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { AGENT_TOOLS } from '../src/shared/tools';
 
 /**
- * Слитые инструменты: `browser`, `terminal`, `edit`, `git_*` с полем `action`.
+ * Слитые инструменты: `browser`, `terminal`, `edit`, `lsp` с полем `action`.
  *
  * Схема обещает те действия, которые разбирает код, промах по действию называет
  * допустимые, а недостающий аргумент возвращается отказом с именем поля, а не
@@ -21,17 +21,6 @@ describe('слитые инструменты: схема', () => {
     expect(actions('browser')).toEqual(['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close']);
     expect(actions('terminal')).toEqual(['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel']);
     expect(actions('lsp')).toEqual(['references', 'definition', 'outline', 'rename']);
-    expect(actions('git_read')).toEqual(['status', 'diff', 'log', 'blame']);
-    expect(actions('git_write')).toEqual([
-      'stage',
-      'unstage',
-      'commit',
-      'checkout',
-      'discard',
-      'fetch',
-      'pull',
-      'push',
-    ]);
     // Старых имён в наборе больше нет: иначе схема и обработчик разъехались бы.
     const gone = ['browser_open', 'terminal_start', 'git_status', 'run_terminal', 'apply_patch', 'file_outline'];
     for (const old of gone) {
@@ -40,7 +29,7 @@ describe('слитые инструменты: схема', () => {
   });
 
   it('обязателен только action: остальные поля зависят от действия', () => {
-    for (const name of ['browser', 'terminal', 'lsp', 'git_read', 'git_write']) {
+    for (const name of ['browser', 'terminal', 'lsp']) {
       expect(spec(name).inputSchema.required).toEqual(['action']);
     }
   });
@@ -115,23 +104,8 @@ describe('слитые инструменты: разбор', () => {
     expect(outcome.summary).toContain('ref');
   });
 
-  it('git_write: аргумент спрашивается по действию', async () => {
-    const stage = await runTool(ctx, 'git_write', JSON.stringify({ action: 'stage' }));
-    expect(stage.summary).toContain('paths');
-    const commit = await runTool(ctx, 'git_write', JSON.stringify({ action: 'commit' }));
-    expect(commit.summary).toContain('message');
-    const checkout = await runTool(ctx, 'git_write', JSON.stringify({ action: 'checkout' }));
-    expect(checkout.summary).toContain('name');
-  });
-
-  it('git_read: незнакомое действие называет допустимые', async () => {
-    const outcome = await runTool(ctx, 'git_read', JSON.stringify({ action: 'stage' }));
-    expect(outcome.ok).toBe(false);
-    expect(outcome.detail).toContain('status, diff, log, blame');
-  });
-
   it('без действия вызов тоже объясняется', async () => {
-    const outcome = await runTool(ctx, 'git_read', JSON.stringify({}));
+    const outcome = await runTool(ctx, 'lsp', JSON.stringify({}));
     expect(outcome.ok).toBe(false);
     // Отказ приходит до обработчика: схема требует action, и это названо прямо.
     expect(outcome.summary).toContain('action');

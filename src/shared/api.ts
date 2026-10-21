@@ -1987,21 +1987,12 @@ export interface ConfirmCommandHostResult {
   allowed: boolean;
 }
 
-/** Аргументы `ai.confirmGit`: действие git, которое просит выполнить агент. */
-export interface ConfirmGitHostParams {
-  action: string;
-}
-
 /** Аргументы `ai.confirmBrowser`: действие в браузере, которое просит выполнить агент. */
 export interface ConfirmBrowserHostParams {
   action: string;
 }
 
 export interface ConfirmBrowserHostResult {
-  allowed: boolean;
-}
-
-export interface ConfirmGitHostResult {
   allowed: boolean;
 }
 
@@ -2071,7 +2062,6 @@ export interface HostMethods {
   /** Правки по якорю: позиции считает renderer — у него есть текст документа. */
   'ai.applyPatches': { params: ApplyPatchesHostParams; result: ApplyEditsHostResult };
   'ai.confirmCommand': { params: ConfirmCommandHostParams; result: ConfirmCommandHostResult };
-  'ai.confirmGit': { params: ConfirmGitHostParams; result: ConfirmGitHostResult };
   'ai.confirmBrowser': { params: ConfirmBrowserHostParams; result: ConfirmBrowserHostResult };
   /** Вопрос человеку с ожиданием ответа: инструмент `ask`. */
   'ai.ask': { params: AskHostParams; result: AskHostResult };

@@ -5,19 +5,11 @@ import {
   MAX_KEPT_AGENTS,
   MAX_LIVE_AGENTS,
   MAX_MESSAGE_CHARS,
-  WAIT_DEFAULT_MS,
-  WAIT_MAX_MS,
   agentActivityLabel,
   agentStatusLabel,
-  findAgentId,
   formatAgentList,
   formatAgentNotes,
-  formatAgentWaits,
   formatElapsed,
-  parseInterruptRequest,
-  parseMessageRequest,
-  parseSpawnRequest,
-  parseWaitRequest,
   stopReasonLabel,
   type AgentSnapshot,
 } from '../src/shared/agents';
@@ -28,105 +20,6 @@ function spawnOk(registry: AgentRegistry, description = 'разведка'): Age
   if ('error' in spawned) throw new Error(`агент не запустился: ${spawned.error}`);
   return spawned;
 }
-
-const KNOWN = ['agent-1', 'agent-2', 'agent-12'];
-
-describe('номер агента в аргументах', () => {
-  it('точный номер находится', () => {
-    expect(findAgentId('agent-2', KNOWN)).toEqual({ id: 'agent-2' });
-  });
-
-  it('сокращённый номер понимается, если он один такой', () => {
-    expect(findAgentId('agent-2', ['agent-2', 'agent-5'])).toEqual({ id: 'agent-2' });
-  });
-
-  it('точный номер важнее сокращения: agent-1 — это agent-1, а не agent-12', () => {
-    expect(findAgentId('agent-1', KNOWN)).toEqual({ id: 'agent-1' });
-  });
-
-  it('неоднозначное сокращение отвергается списком', () => {
-    // «agent-» подходит ко всем трём: угадывать, кого имели в виду, нельзя.
-    const found = findAgentId('agent-', KNOWN);
-    expect(found.id).toBeNull();
-    expect(found.error).toContain('agent-1');
-    expect(found.error).toContain('agent-12');
-  });
-
-  it('неизвестный номер объясняется, а не угадывается', () => {
-    const found = findAgentId('agent-9', KNOWN);
-    expect(found.id).toBeNull();
-    expect(found.error).toContain('agents');
-  });
-
-  it('пустой номер — свой отказ', () => {
-    expect(findAgentId('', KNOWN).error).toContain('Нужен номер');
-  });
-});
-
-describe('разбор wait_agent', () => {
-  it('список номеров и таймаут в секундах переводятся в миллисекунды', () => {
-    const request = parseWaitRequest({ ids: ['agent-1', 'agent-2'], timeout: 30 }, KNOWN);
-    expect(request.error).toBeUndefined();
-    expect(request.ids).toEqual(['agent-1', 'agent-2']);
-    expect(request.timeoutMs).toBe(30_000);
-  });
-
-  it('один номер через id понимается так же', () => {
-    expect(parseWaitRequest({ id: 'agent-1' }, KNOWN).ids).toEqual(['agent-1']);
-  });
-
-  it('без времени ждём по умолчанию, слишком долгое — срезаем', () => {
-    expect(parseWaitRequest({ id: 'agent-1' }, KNOWN).timeoutMs).toBe(WAIT_DEFAULT_MS);
-    expect(parseWaitRequest({ id: 'agent-1', timeout: 9_999 }, KNOWN).timeoutMs).toBe(WAIT_MAX_MS);
-  });
-
-  it('повторы в номерах убираются', () => {
-    expect(parseWaitRequest({ ids: ['agent-1', 'agent-1'] }, KNOWN).ids).toEqual(['agent-1']);
-  });
-
-  it('без номеров и с чужим номером — отказы словами', () => {
-    expect(parseWaitRequest({}, KNOWN).error).toContain('Нужны номера');
-    expect(parseWaitRequest({ id: 'agent-99' }, KNOWN).error).toContain('agents');
-  });
-});
-
-describe('разбор send_message', () => {
-  it('номер и текст принимаются', () => {
-    const request = parseMessageRequest({ id: 'agent-1', text: 'смотри ветку develop' }, KNOWN);
-    expect(request.error).toBeUndefined();
-    expect(request.id).toBe('agent-1');
-  });
-
-  it('пустой текст не отправляем', () => {
-    expect(parseMessageRequest({ id: 'agent-1', text: '   ' }, KNOWN).error).toContain('текст');
-  });
-
-  it('слишком длинное сообщение срезаем словами', () => {
-    const long = 'я'.repeat(MAX_MESSAGE_CHARS + 10);
-    expect(parseMessageRequest({ id: 'agent-1', text: long }, KNOWN).error).toContain('длиннее');
-  });
-});
-
-describe('разбор spawn и interrupt', () => {
-  it('без задания агент не запускается', () => {
-    expect(parseSpawnRequest({}).error).toContain('prompt');
-  });
-
-  it('без описания подпись становится «подзадача»', () => {
-    expect(parseSpawnRequest({ prompt: 'найди тесты' }).description).toBe('подзадача');
-  });
-
-  it('описание — одна строка без двойных пробелов', () => {
-    const description = parseSpawnRequest({ prompt: 'x', description: `а  ${'б'.repeat(200)}` }).description;
-    expect(description.length).toBeLessThan(100);
-    expect(description).not.toContain('  ');
-  });
-
-  it('остановить можно только названного агента', () => {
-    expect(parseInterruptRequest({ id: 'agent-12' }, KNOWN).id).toBe('agent-12');
-    expect(parseInterruptRequest({ id: 'agent-77' }, KNOWN).error).toContain('agents');
-  });
-});
 
 describe('подписи', () => {
   it('состояние и причина — словами', () => {
@@ -339,17 +232,6 @@ describe('текст для модели', () => {
     expect(text).toContain('от ведущего агента: не трогай стиль');
   });
 
-  it('ожидание: отчёт целиком, идущий — с оговоркой', () => {
-    const text = formatAgentWaits(
-      [
-        { agent: agentSnapshot({ id: 'agent-1', status: 'done', summary: 'готово' }), report: 'полный отчёт' },
-        { agent: agentSnapshot({ id: 'agent-2' }), report: null },
-      ],
-      true,
-    );
-    expect(text).toContain('полный отчёт');
-    expect(text).toContain('ещё работают');
-  });
 });
 
 describe('почта не превращается в свалку', () => {

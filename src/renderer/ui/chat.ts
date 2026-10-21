@@ -1701,11 +1701,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     allowed: await commandApproval.confirm(params.command, params.review?.reason),
   }));
 
-  // Действия git спрашивают тем же способом, что и команды: карточка в ленте.
-  deps.host.handle('ai.confirmGit', async (params) => ({
-    allowed: await commandApproval.confirmGit(params.action),
-  }));
-
   // Действия в браузере — тоже карточка в ленте: страница может сделать что угодно
   // от имени пользователя, поэтому вопрос задаётся тем же способом.
   deps.host.handle('ai.confirmBrowser', async (params) => ({

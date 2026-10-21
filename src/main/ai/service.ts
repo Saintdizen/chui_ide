@@ -60,7 +60,6 @@ import {
 import { agentPrompt } from '../../shared/agent-prompt';
 import { formatMemory } from '../../shared/memory';
 import { formatInstructionFile } from '../../shared/instructions';
-import { formatSkillCatalog } from '../../shared/skills';
 import {
   cleanCompletion,
   INLINE_MAX_CHARS,
@@ -101,8 +100,7 @@ import {
   type PermissionPreset,
 } from '../../shared/permissions';
 import { MAX_GOAL_CONTINUES, goalContinuePrompt, goalPrompt, parseGoalUpdate, sanitizeGoal } from '../../shared/goal';
-import { parsePlanExitArgs, planExitResult, type PlanExitDecision } from '../../shared/plan-exit';
-import { formatRalphReport, runRalphRounds } from '../../shared/ralph';
+import { isPlanExitCall, parsePlanExitArgs, planExitResult, type PlanExitDecision } from '../../shared/plan-exit';
 import { formatSubagentReport, runWithLimit, subagentBatchSize, type SubagentFailure } from '../../shared/subagents';
 import { formatAgentNotes, stopReasonLabel, type AgentSnapshot, type AgentStopReason } from '../../shared/agents';
 import { createAgentRegistry, type AgentHandle, type AgentRegistry } from './agents';
@@ -136,7 +134,6 @@ import { pricingAt } from '../../shared/providers';
 import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
 import type { TelemetryStore } from './telemetry';
-import { createSkillLibrary, type SkillLibrary } from './skills';
 import { createJobRegistry, type JobRegistry } from './jobs';
 import type { SandboxService } from '../sandbox/sandbox';
 import { RpcFailure } from '../ipc/router';
@@ -150,11 +147,9 @@ import {
   stepOutputChars,
   failureText,
   type BrowserTools,
-  type GitTools,
   type Linter,
   type McpRunner,
   type SymbolSearch,
-  type SkillTools,
   type TerminalAgent,
   type TestRunner,
   type SessionSearchRunner,
@@ -277,9 +272,9 @@ const AUTO_APPROVE_PROMPT = [
  * не меняя. Правки и команды ему недоступны — не предлагай их и не вызывай.
  */
 const PLAN_PROMPT = [
-  'Режим плана: сначала изучи проект доступными инструментами чтения, затем составь план через plan (action: steps).',
+  'Режим плана: сначала изучи проект доступными инструментами чтения, затем составь план через mind (action: steps).',
   'Ничего не меняй: правки файлов и запуск команд в этом режиме недоступны и не выполнятся.',
-  'План готов — заверши его вызовом exit_plan_mode: человек утвердит его или вернёт замечание.',
+  'План готов — заверши его вызовом mind (action: exit_plan): человек утвердит его или вернёт замечание.',
   'В конце объясни план словами: что предлагаешь сделать, в каком порядке и почему.',
 ].join('\n');
 
@@ -316,14 +311,12 @@ export interface ChatHostBridge {
   applyPatches(patches: PatchFile[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /** Спросить у пользователя разрешение на запуск команды. */
   confirmCommand(command: string): Promise<boolean>;
-  /** Спросить разрешение на действие git (коммит, отправка, переключение ветки, откат). */
-  confirmGit(action: string): Promise<boolean>;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
   confirmBrowser(action: string): Promise<boolean>;
   /** Задать человеку вопрос и дождаться ответа: инструмент `ask`. Пустая строка — ответа не будет. */
   ask(question: string, options?: readonly string[]): Promise<string>;
   /**
-   * Отдать план на утверждение (инструмент `exit_plan_mode`). Режим переключает
+   * Отдать план на утверждение (`mind`, действие `exit_plan`). Режим переключает
    * renderer: только он знает, что человек выбрал в композере.
    */
   exitPlan(plan: string): Promise<PlanExitDecision>;
@@ -340,8 +333,6 @@ export interface ChatHostBridge {
  * возвращается в диалог, пока модель не ответит текстом.
  */
 export class AiService {
-  /** Git подключается снаружи (registerIpc): без него git-инструменты не предлагаем. */
-  private git?: GitTools;
   /** Терминальные сессии тоже приходят снаружи: без них terminal_* не предлагаем. */
   private terminals?: TerminalAgent;
   /** Поиск символов проекта: без него search (action code) ищет только текстом. */
@@ -442,11 +433,6 @@ export class AiService {
     // Поправки оценки токенов переживают перезапуск: без них первые шаги снова
     // промахиваются мимо окна, пока калибровка не наберёт замеры заново.
     this.calibration.load(readCalibration(this.settings.file()));
-  }
-
-  /** Подключить git рабочей папки: включает инструменты git_read и git_write. */
-  attachGit(git: GitTools): void {
-    this.git = git;
   }
 
   /**
@@ -887,9 +873,7 @@ export class AiService {
 
     // Карта проекта нужна там, где агент работает с проектом; в «Вопросе»
     // инструментов нет, и обход дерева за наши деньги был бы лишним.
-    // Навыки читаются один раз на прогон: каталог нужен и в промпте, и инструменту.
-    const skills = createSkillLibrary(this.workspace.rootPath());
-    const context = await this.buildWorkspaceContext(useTools || planMode, skills);
+    const context = await this.buildWorkspaceContext(useTools || planMode);
     if (context) messages.push({ role: 'system', content: context });
     // Контекст, который пользователь приложил сам (выделение, файл, ошибки),
     // едет отдельным сообщением: в самом вопросе он мешал бы его читать.
@@ -957,19 +941,16 @@ export class AiService {
       );
 
     // Предлагаем модели только то, что реально может исполнить эта сборка.
-    // Навыки спрашиваем заранее: read_skill без единого навыка — шаг впустую.
-    const hasSkills = useTools && (await skills.list()).length > 0;
     const available = useTools
       ? AGENT_TOOLS.filter(
           (tool) =>
-            this.canRun(tool, host, hasSkills) &&
+            this.canRun(tool, host) &&
             // Набор даёт права, а ростер и `WIDENED_TOOLS` — что из них едет
             // схемой: первое видно строкой ростера, второе — ничего не видно,
             // пока не позовут (схему тогда докачивает `widenTools`).
             (planMode || !isRosterTool(toolPreset, tool.name)) &&
             (planMode || !WIDENED_TOOLS.includes(tool.name)) &&
-            // Вне плана «утвердить план» нечего: инструмент живёт только в нём.
-            (planMode ? PLAN_MODE_TOOLS.has(tool.name) : tool.name !== 'exit_plan_mode'),
+            (planMode ? PLAN_MODE_TOOLS.has(tool.name) : true),
         )
       : [];
 
@@ -998,7 +979,6 @@ export class AiService {
     // Сжатие вывода — только для контекста модели: человек в карточке инструмента
     // видит текст как он есть (см. `compressToolOutput`).
     const compressOutput = settings.ai.compressOutput !== false;
-    if (this.git) toolContext.git = this.git;
     if (this.terminals) toolContext.terminals = this.terminals;
     if (this.symbols) toolContext.symbols = this.symbols;
     if (this.linter) toolContext.linter = this.linter;
@@ -1009,7 +989,6 @@ export class AiService {
       forget: (query, scope) => this.memory.forget(this.workspace.rootPath(), query, scope),
     };
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
-    if (hasSkills) toolContext.skills = skills;
     // Картинки для модели: чтение и уменьшение файлов живут в main, инструмент
     // только просит. Права не спрашиваем — это чтение внутри проекта.
     toolContext.readImage = createReadImageRunner(this.workspace);
@@ -1047,7 +1026,6 @@ export class AiService {
       toolContext.applyEdits = (edits, auto) => host.applyEdits(edits, auto);
       toolContext.applyPatches = (patches, auto) => host.applyPatches(patches, auto);
       toolContext.confirmCommand = (command) => host.confirmCommand(command);
-      toolContext.confirmGit = (action) => host.confirmGit(action);
       toolContext.confirmBrowser = (action) => host.confirmBrowser(action);
       toolContext.ask = (question, options) => host.ask(question, options);
       toolContext.diagnostics = (path) => host.getDiagnostics(path);
@@ -1129,8 +1107,7 @@ export class AiService {
     const widenTools = (): void => {
       const widened = AGENT_TOOLS.filter(
         (tool) =>
-          tool.name !== 'exit_plan_mode' &&
-          this.canRun(tool, host, hasSkills) &&
+          this.canRun(tool, host) &&
           // Ростер отсекаем и здесь: расширение — про то, чего в наборе не было,
           // а не про то, что нарочно спрятано в строку.
           !isRosterTool(toolPreset, tool.name) &&
@@ -1307,8 +1284,6 @@ export class AiService {
           host,
           context,
           windowTokens,
-          // Подзадача видит тот же контекст (с каталогом навыков) и может читать тело.
-          skills,
           // Набор тот же, что у основного агента: сужение не расширяется подзадачей.
           toolPreset,
         });
@@ -1362,58 +1337,8 @@ export class AiService {
      * Одна упавшая подзадача не отменяет остальные: отчёт собирается по каждой
      * отдельно, а провал называется словами — иначе треть работы пропадёт молча.
      */
-    // Реестр живых агентов — тому же инструменту: `list` и остальные действия
-    // смотрят на тот же список, что и панель окна.
-    toolContext.agents = this.agents;
-
     toolContext.subagent = {
       run: async ({ description, prompt }) => (await runOne({ description, prompt })).outcome,
-      /**
-       * Цикл раундов (`ralph`): каждый раунд — свежий агент, и в него едет только
-       * сжатый итог прежних. Раунды идут по очереди: следующий должен видеть, что
-       * нашёл предыдущий, иначе это не цикл, а пачка одинаковых подзадач.
-       */
-      ralph: async ({ description, goal, rounds }) => {
-        // Сам цикл — в `shared/ralph.ts`: там же проверены предел раундов и обрыв.
-        const { rounds: passed, stop } = await runRalphRounds({
-          request: { description, goal, rounds },
-          aborted: () => signal.aborted,
-          run: async (prompt, round) => {
-            const { outcome } = await runOne({
-              description: `${description} · раунд ${round}/${rounds}`,
-              prompt,
-            });
-            return { ok: outcome.ok, report: outcome.detail ?? outcome.summary ?? '' };
-          },
-        });
-        const detail = formatRalphReport(passed, stop, rounds);
-        return {
-          ok: stop !== 'failed' && stop !== 'interrupted' && passed.length > 0,
-          summary: detail.split('\n')[0] ?? 'раунды',
-          detail,
-        };
-      },
-      /**
-       * Агент в фоне: работа идёт, а ход продолжается. Отчёт заберут `agents` с
-       * `action: "wait"` — следующий ход или человек в панели.
-       * Ошибку прогона здесь не бросаем наружу: она уже записана в реестр, а ход
-       * из-за фонового агента падать не должен.
-       */
-      spawn: ({ description, prompt }) => {
-        const opened = openAgent(description);
-        if ('error' in opened) {
-          return { ok: false, summary: 'Агент не запущен', detail: opened.error };
-        }
-        void runAgent(opened.id, description, prompt).catch(() => undefined);
-        return {
-          ok: true,
-          summary: `агент ${opened.id} работает в фоне`,
-          detail:
-            `Агент ${opened.id} «${description}» запущен в фоне и работает, пока ты продолжаешь. ` +
-            'Состояние — agents с action: "list", отчёт — action: "wait", поправить курс — ' +
-            'action: "send", снять — action: "interrupt". Не жди его без нужды: работа может идти долго.',
-        };
-      },
       runMany: async (tasks) => {
         // Пул живёт в `shared/subagents.ts`: там же проверено, что он держит
         // предел и что одна упавшая задача не отменяет остальные.
@@ -1726,7 +1651,7 @@ export class AiService {
         // «Утвердить план»: человек решает, работать ли по нему. Ответ переключает
         // режим в renderer (он один знает композер), а прогон продолжается уже без
         // ограничений плана — иначе одобренное было бы нечем выполнить.
-        if (call.name === 'exit_plan_mode') {
+        if (isPlanExitCall(call.name, call.arguments)) {
           emit(ChatStreamEvent.ToolStart, { id: call.id, name: call.name, args: call.arguments });
           const asked = parsePlanExitArgs(call.arguments);
           const decision: PlanExitDecision = host
@@ -1780,12 +1705,12 @@ export class AiService {
         const rosterOnly = isRosterTool(toolPreset, call.name);
         if ((hiddenByPreset || !shownAsSchema) && widensOnDemand && (!planMode || planApproved)) {
           const known = AGENT_TOOLS.find((tool) => tool.name === call.name);
-          if (known && this.canRun(known, host, hasSkills)) {
+          if (known && this.canRun(known, host)) {
             // Пометка и пересборка набора — только когда инструмент появляется
             // впервые. Иначе «подключён в набор» едет в каждом ответе до конца
             // прогона: замер на живом прогоне дал 91 пометку в 91 ответе
-            // (`terminal` и `git_write` не входят в группы «Авто», поэтому
-            // условие «скрыт набором» верно для них всегда). Модель читает это
+            // (`terminal` не входит в группы «Авто», поэтому условие «скрыт
+            // набором» верно для него всегда). Модель читает это
             // как «набор всё время меняется», а человек — как рост на каждом шаге.
             const first = !onDemandTools.has(call.name);
             onDemandTools.add(call.name);
@@ -2162,8 +2087,6 @@ export class AiService {
     host: ChatHostBridge | undefined;
     context: string | null;
     windowTokens: number;
-    /** Навыки прогона: каталог подзадача видит, тело читает инструментом. */
-    skills?: SkillTools;
     /** Набор инструментов прогона: подзадача может лишь сузить его (см. tool-presets). */
     toolPreset: ToolPresetId;
   }): Promise<{ outcome: ToolOutcome; steps: number; toolCalls: number; usage: ChatUsage }> {
@@ -2180,7 +2103,7 @@ export class AiService {
       (tool) =>
         SUBAGENT_TOOLS.has(tool.name) &&
         toolPresetAllows(params.toolPreset, tool.name) &&
-        this.canRun(tool, params.host, params.skills !== undefined),
+        this.canRun(tool, params.host),
     );
     const tools = available.length > 0 ? toOpenAiTools(available) : undefined;
     const toolsTokens = tools ? estimateTextTokens(JSON.stringify(tools)) : 0;
@@ -2194,10 +2117,8 @@ export class AiService {
       allowAll: false,
       confirmDangerous: true,
     };
-    if (this.git) subContext.git = this.git;
     if (this.symbols) subContext.symbols = this.symbols;
     if (this.linter) subContext.linter = this.linter;
-    if (params.skills) subContext.skills = params.skills;
     const host = params.host;
     if (host) subContext.diagnostics = (path) => host.getDiagnostics(path);
     const webSearch = settings.ai.webSearch;
@@ -2367,7 +2288,7 @@ export class AiService {
   }
 
   /**
-   * Может ли эта сборка исполнить инструмент. Файловые операции и git живут в
+   * Может ли эта сборка исполнить инструмент. Файловые операции живут в
    * main; правки, диагностика и открытие вкладки — в renderer, поэтому зависят
    * от того, подключён ли мост. Лишний инструмент хуже отсутствующего: модель
    * потратит шаг на вызов, который заведомо не сработает.
@@ -2446,7 +2367,7 @@ export class AiService {
     return undefined;
   }
 
-  private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined, hasSkills = false): boolean {
+  private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined): boolean {
     // Правка файлов в двух формах: по якорю и по позициям. Нужен хоть один мост,
     // вторую форму без своего моста откажет обработчик — своими словами.
     if (tool.name === 'edit') return host?.applyEdits !== undefined || host?.applyPatches !== undefined;
@@ -2462,17 +2383,10 @@ export class AiService {
     // знает лишь подключение, а `canRun` синхронный. Схемы добавляет
     // `resourceTools` ниже, поэтому в статическом отборе их нет.
     if (tool.name === 'mcp') return false;
-    // Вопрос человеку живёт в ленте чата: без окна задать его негде.
-    if (tool.name === 'ask') return host?.ask !== undefined;
-    // Утверждать план некому без окна: карточка живёт в ленте чата.
-    if (tool.name === 'exit_plan_mode') return host?.exitPlan !== undefined;
+    // Заметки, вопрос, план и его утверждение живут в окне; отказ без него
+    // скажет обработчик.
+    if (tool.name === 'mind') return host !== undefined;
     if (tool.name === 'show') return host?.openFile !== undefined || host !== undefined;
-    // Чтение репозитория ничего не меняет — нужен только git.
-    if (tool.name === 'git_read') return this.git !== undefined;
-    // Записи в репозиторий спрашивают подтверждение: без моста подтверждений их не
-    // предлагаем. Условие общее на все действия, как у браузера: `stage` без моста
-    // откажет словами в обработчике, но в списке инструмент есть.
-    if (tool.name === 'git_write') return this.git !== undefined && host?.confirmGit !== undefined;
     // Символы живут на языковом сервере: без него их не предлагаем. Переименование
     // меняет код через сервер: `canRun` аргументов не видит, поэтому условие
     // общее на все действия — без окна с применением правок `lsp` не предлагается.
@@ -2483,13 +2397,6 @@ export class AiService {
     if (tool.name === 'run_tests') return this.tests !== undefined && host?.confirmCommand !== undefined;
     // Память проекта (mind) — в ALWAYS_AVAILABLE: заметка обратима,
     // спрашивать не у кого.
-    // Живые агенты: реестр живёт в main и есть всегда — спрашивать не у кого.
-    // Исключение — запуск в фоне: без окна его итог некому показать. Действия
-    // различает `action`, а `canRun` аргументов не видит, поэтому одно имя на
-    // всё: без реестра `spawn` ответит словами.
-    if (tool.name === 'agents') return this.agents !== undefined;
-    // Навыки — файлы проекта: инструмент предлагаем только когда есть что читать.
-    if (tool.name === 'read_skill') return hasSkills;
     // Поиск одним именем: действия `code` и `sessions` без своей возможности
     // откажут словами в обработчике, а текстовый и документация есть всегда.
     if (tool.name === 'web') {
@@ -2557,7 +2464,7 @@ export class AiService {
     }
   }
 
-  private async buildWorkspaceContext(withMap: boolean, skills?: SkillLibrary): Promise<string | null> {
+  private async buildWorkspaceContext(withMap: boolean): Promise<string | null> {
     const root = this.workspace.rootPath();
     if (!root) return null;
 
@@ -2590,11 +2497,6 @@ export class AiService {
         // файла нет — это нормально
       }
     }
-    // Навыки — после правил: правила действуют всегда, а навык подгружается по
-    // надобности. Здесь только каталог: тело агент просит инструментом read_skill.
-    // Без инструментов каталог не нужен: прочитать навык будет нечем.
-    const catalog = formatSkillCatalog(withMap && skills ? await skills.list() : []);
-    if (catalog) parts.push(catalog);
     return parts.join('\n\n');
   }
 }

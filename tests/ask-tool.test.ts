@@ -9,10 +9,10 @@ function context(ask: AskFn | undefined, extra: Partial<ToolContext> = {}): Tool
   return { workspace, ask, ...extra };
 }
 
-describe('ask', () => {
+describe('mind', () => {
   it('отдаёт вопрос человеку и возвращает ответ модели', async () => {
     const ask = vi.fn<AskFn>(async () => 'вариант А');
-    const outcome = await runTool(context(ask), 'ask', JSON.stringify({ question: 'Какой подход?' }));
+    const outcome = await runTool(context(ask), 'mind', JSON.stringify({ action: 'ask', question: 'Какой подход?' }));
 
     expect(ask).toHaveBeenCalledWith('Какой подход?', undefined);
     expect(outcome.ok).toBe(true);
@@ -25,8 +25,8 @@ describe('ask', () => {
     const ask = vi.fn<AskFn>(async () => 'два');
     await runTool(
       context(ask),
-      'ask',
-      JSON.stringify({ question: 'q', options: ['один', 'два', 'три', 'четыре', 'пять', 'шесть'] }),
+      'mind',
+      JSON.stringify({ action: 'ask', question: 'q', options: ['один', 'два', 'три', 'четыре', 'пять', 'шесть'] }),
     );
 
     // Больше пяти кнопок — уже список, а не выбор: шестой вариант отсекаем.
@@ -35,14 +35,14 @@ describe('ask', () => {
 
   it('одиночная строка в options — это один вариант, а не ошибка', async () => {
     const ask = vi.fn<AskFn>(async () => 'да');
-    await runTool(context(ask), 'ask', JSON.stringify({ question: 'q', options: 'да' }));
+    await runTool(context(ask), 'mind', JSON.stringify({ action: 'ask', question: 'q', options: 'да' }));
 
     expect(ask.mock.calls[0]![1]).toEqual(['да']);
   });
 
   it('пустой вопрос не доходит до человека', async () => {
     const ask = vi.fn<AskFn>(async () => 'x');
-    const outcome = await runTool(context(ask), 'ask', JSON.stringify({ question: '   ' }));
+    const outcome = await runTool(context(ask), 'mind', JSON.stringify({ action: 'ask', question: '   ' }));
 
     expect(ask).not.toHaveBeenCalled();
     expect(outcome.ok).toBe(false);
@@ -52,8 +52,8 @@ describe('ask', () => {
     // Прогон прервали или нажали «Отменить»: карточка отдаёт пустую строку.
     const outcome = await runTool(
       context(async () => ''),
-      'ask',
-      JSON.stringify({ question: 'q' }),
+      'mind',
+      JSON.stringify({ action: 'ask', question: 'q' }),
     );
 
     expect(outcome.ok).toBe(false);
@@ -61,7 +61,7 @@ describe('ask', () => {
   });
 
   it('без моста вопрос недоступен', async () => {
-    const outcome = await runTool(context(undefined), 'ask', JSON.stringify({ question: 'q' }));
+    const outcome = await runTool(context(undefined), 'mind', JSON.stringify({ action: 'ask', question: 'q' }));
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('недоступен');

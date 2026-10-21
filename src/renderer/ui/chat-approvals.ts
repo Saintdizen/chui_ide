@@ -185,11 +185,11 @@ export function createEditReview(host: ApprovalHost): EditReview {
   return { review };
 }
 
-/** Что показать в карточке подтверждения: команда и действие git отличаются только подписями. */
+/** Что показать в карточке подтверждения: команда и действие в браузере отличаются только подписями. */
 interface ApprovalRequest {
   /** Заголовок карточки. */
   title: string;
-  /** Тело: сама команда или действие git. */
+  /** Тело: сама команда или действие в браузере. */
   body: string;
   /** Пояснение под телом. */
   hint: string;
@@ -207,8 +207,6 @@ export interface CommandApproval {
    * `review` — причина, по которой проверка модели не разрешила команду сама.
    */
   confirm(command: string, review?: string): Promise<boolean>;
-  /** Спросить разрешение на действие git (коммит, отправка, ветка, откат). */
-  confirmGit(action: string): Promise<boolean>;
   /** Спросить разрешение на действие в браузере (переход, клик, ввод, скрипт). */
   confirmBrowser(action: string): Promise<boolean>;
 }
@@ -279,14 +277,6 @@ export function createCommandApproval(host: ApprovalHost): CommandApproval {
         done: 'Выполняется скрипт',
         icon: 'terminal',
         ...(review ? { review: `Проверка не решилась: ${review}` } : {}),
-      }),
-    confirmGit: (action) =>
-      show({
-        title: 'Ассистент просит действие git',
-        body: action,
-        hint: 'Действие изменит репозиторий в папке проекта.',
-        done: 'Действие git',
-        icon: 'branch',
       }),
     confirmBrowser: (action) =>
       show({

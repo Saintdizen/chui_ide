@@ -40,11 +40,10 @@ describe('missingArguments', () => {
   });
 
   it('вложенный элемент массива называется с индексом', () => {
-    // Та самая ошибка: `edits[0].path` — не «path», и по такому ответу видно,
-    // какой именно элемент формы забыл поле.
-    const spec = toolSpec('edit')!;
-    const missing = missingArguments(spec.inputSchema, { edits: [{ edits: [{ newText: 'x' }] }] });
-    expect(missing).toEqual(['edits[0].path']);
+    // Проверяем индексацию вложенного массива, а не форму правки: она менялась.
+    const spec = toolSpec('mind')!;
+    const missing = missingArguments(spec.inputSchema, { action: 'steps', steps: [{ text: 'x' }] });
+    expect(missing).toEqual(['steps[0].status']);
   });
 
   it('полная форма правки по якорю проходит', () => {
@@ -59,6 +58,19 @@ describe('missingArguments', () => {
     // Обязателен только `newText`: адрес — якорь или четыре позиции, и это
     // проверяет разбор аргументов, который знает про две формы.
     expect(missing).toEqual(['edits[0].edits[0].newText']);
+  });
+
+  it('у `edit` нет обязательных полей: без `edits` живут три действия из четырёх', () => {
+    // `required: ['edits']` требовало вложенный массив у `create`/`move`/`delete`,
+    // где его нет: форма обвиняла модель в том, чего схема сама не даёт.
+    const spec = toolSpec('edit')!;
+    expect(missingArguments(spec.inputSchema, { action: 'create', path: '/a.ts', contents: 'x' })).toEqual([]);
+    expect(missingArguments(spec.inputSchema, { action: 'delete', path: '/a.ts' })).toEqual([]);
+    expect(missingArguments(spec.inputSchema, { action: 'move', path: '/a.ts', to: '/b.ts' })).toEqual([]);
+    // Плоская форма правки — тоже без отказа на этом уровне.
+    expect(missingArguments(spec.inputSchema, { path: '/a.ts', edits: [{ oldText: 'a', newText: 'b' }] })).toEqual(
+      [],
+    );
   });
 
   it('не-объект вместо элемента не роняет проверку', () => {
@@ -82,7 +94,7 @@ describe('missingArguments', () => {
  */
 describe('wrongArguments', () => {
   it('значение вне перечня названо вместе с допустимыми', () => {
-    const spec = toolSpec('plan')!;
+    const spec = toolSpec('mind')!;
     const args = { action: 'steps', steps: [{ text: 'шаг', status: 'closed' }] };
     expect(wrongArguments(spec.inputSchema, args)).toEqual([
       { path: 'steps[0].status', value: 'closed', allowed: ['pending', 'in_progress', 'done'] },
@@ -90,7 +102,7 @@ describe('wrongArguments', () => {
   });
 
   it('значение из перечня проходит', () => {
-    const spec = toolSpec('plan')!;
+    const spec = toolSpec('mind')!;
     const args = { action: 'steps', steps: [{ text: 'шаг', status: 'done' }] };
     expect(wrongArguments(spec.inputSchema, args)).toEqual([]);
   });
@@ -167,7 +179,10 @@ describe('описания аргументов', () => {
     if (!edit) throw new Error('нет схемы edit');
     const shape = describeShape(edit.inputSchema);
     expect(shape).toContain('edits');
-    expect(shape).toContain('edits: [{path');
+    expect(shape).toContain('edits?: [{path');
+    // `?` появились после того, как `required` в `edit` опустел: иначе `create`
+    // обязан был притащить `edits`, которого у него нет (п.42 TASKS.md). Форма
+    // вызова от этого честнее: отказ говорит, какие поля необязательны.
     // Подсказка стоит токенов только в отказе: в задании её нет.
     expect(agentPrompt('auto', { confirm: false })).not.toContain('Форма:');
   });

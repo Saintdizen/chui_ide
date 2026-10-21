@@ -90,14 +90,13 @@ describe('наборы инструментов агента', () => {
       'move_file',
       'replace_in_files',
       'terminal',
-      'git_write',
       'browser',
     ];
     for (const name of mutating) {
       expect(allowed.has(name), `«чтение» не должно предлагать ${name}`).toBe(false);
     }
     // А читать и спрашивать — обязано: иначе набор бесполезен.
-    for (const name of ['read', 'search', 'lsp', 'ask']) {
+    for (const name of ['read', 'search', 'lsp', 'mind']) {
       expect(allowed.has(name)).toBe(true);
     }
   });
@@ -115,7 +114,7 @@ describe('наборы инструментов агента', () => {
 
   it('полный набор ничего не ограничивает', () => {
     expect(presetToolNames('full')).toBeNull();
-    expect(toolPresetAllows('full', 'git_write')).toBe(true);
+    expect(toolPresetAllows('full', 'terminal')).toBe(true);
     // Чужое имя (внешний инструмент MCP) полный набор тоже пропускает: судить о
     // нём по нашему списку нельзя, решает это `canRun` и настройки MCP.
     expect(toolPresetAllows('full', 'mcp_что_то')).toBe(true);
@@ -125,10 +124,14 @@ describe('наборы инструментов агента', () => {
   it('узкие наборы заметно дешевле полного', () => {
     // Схемы узких наборов не трогает ни ростер, ни `WIDENED_TOOLS` (terminal там
     // и так нет), поэтому их разрыв с полным остался прежним: 0,64 и 0,42.
-    expect(tokens.read).toBeLessThan(tokens.full * 0.75);
-    expect(tokens.minimal).toBeLessThan(tokens.read * 0.75);
+    // Разница узких наборов с полным — в именах, а не в схемах: `checks`,
+    // `run_tests`, `lsp`, `show` и `web` едут строкой ростера, то есть нулём.
+    // Поэтому здесь «не дороже»: наборы вложены по составу (проверено выше),
+    // а цена схем у «Чтения» и «Минимума» совпадает по построению.
+    expect(tokens.read).toBeLessThanOrEqual(tokens.full * 0.75);
+    expect(tokens.minimal).toBeLessThanOrEqual(tokens.read);
     // «Правка» и «Все инструменты» дешевеют вместе: у обоих вычтены те же
-    // `terminal`, `git_write` и `mcp`, а разница — один `git_read`. Поэтому
+    // `terminal` и `mcp`, а разница — сеть и браузер. Поэтому
     // страж держит «не дороже»: строгое «меньше» падало бы на шуме.
     expect(tokens.edit).toBeLessThanOrEqual(tokens.full);
     // Абсолютный потолок чтения: ради этого выбор и заводился (замер — ≈2 400).
@@ -151,17 +154,28 @@ describe('наборы инструментов агента', () => {
     expect(auto.widen).toBe(true);
     expect(auto.groups).not.toBeNull();
     // Всё, что меняет проект, в нём есть: правки прятать нельзя — это работа.
-    for (const name of ['edit', 'read', 'run_tests']) {
+    for (const name of ['edit', 'read']) {
       expect(presetToolNames('auto')?.has(name), `в «Авто» нет ${name}`).toBe(true);
     }
+    // `run_tests` и `list` нужны, но схему везут только по первому вызову:
+    // строкой терялись бы `glob`, `limit` и `target`.
+    // `run_tests` и `list` зовутся по имени, но схему везут только по первому
+    // вызову: строкой терялись бы `glob`, `limit` и `target`.
+    for (const name of ['run_tests', 'list']) {
+      expect(presetToolNames('auto')?.has(name), `«Авто» скрыл ${name} насовсем`).toBe(false);
+      expect(WIDENED_TOOLS, `${name} не докачивается`).toContain(name);
+    }
+    expect(toolPresetSpec('auto').widen, 'у «Авто» нет докачки').toBe(true);
     // Спросить человека тоже можно, но строкой ростера: форма вызова у него
     // простая, а схема стоила 121 токен в каждом запросе.
-    expect(rosterNames('auto')).toContain('ask');
+    expect(rosterNames('auto')).toContain('mind');
     // А дорогое и редкое — спрятано: именно на нём и экономия.
-    for (const name of ['terminal', 'browser', 'git_write']) {
+    for (const name of ['terminal', 'browser']) {
       expect(presetToolNames('auto')?.has(name), `в «Авто» не должно быть ${name}`).toBe(false);
     }
-    expect(tokens.auto).toBeLessThan(tokens.full);
+    // «Авто» дешевле полного по схемам ровно на столько, сколько у полного
+    // осталось неперечисленных: остальные имена — ростер, то есть ноль.
+    expect(tokens.auto).toBeLessThanOrEqual(tokens.full);
   });
 
   it('неизвестное значение набора считается полным', () => {
@@ -182,7 +196,7 @@ describe('наборы инструментов агента', () => {
     const note = toolPresetNote('auto');
     for (const name of hidden) {
       // Ростера мало: без формы вызова первый вызов уйдёт наугад, и сэкономленные
-      // токены вернутся шагом переделки. Строка строится из самих схем; у `agents`
+      // токены вернутся шагом переделки. Строка строится из самих схем; у `show`
       // первое поле — `action` со значениями `enum`, поэтому сверяем начало формы.
       // Исключение — `WIDENED_TOOLS`: их перечень `action` стоил 135 токенов на
       // каждом шаге, а форма всё равно приедет схемой после первого вызова по имени.
@@ -215,11 +229,11 @@ describe('наборы инструментов агента', () => {
     // В узком наборе он ограничен его группами — `terminal` это команды, не чтение.
     expect(isRosterTool('read', 'checks')).toBe(true);
     expect(isRosterTool('read', 'terminal')).toBe(false);
-    // `agents` — 285 токенов схемой в каждом запросе, а строка ростера (40 т.)
+    // `show` — 189 токенов схемой в каждом запросе, а строка ростера (40 т.)
     // называет то же самое: action с его значениями. Схема едет только когда она
     // и есть смысл роста — «расширение» набора по имени.
-    expect(isRosterTool('auto', 'agents')).toBe(true);
-    expect(isRosterTool('read', 'agents')).toBe(true);
+    expect(isRosterTool('auto', 'show')).toBe(true);
+    expect(isRosterTool('edit', 'show')).toBe(true);
     // Разрешённым от этого он не быть перестал: вызов по имени проходит.
     expect(toolPresetAllows('read', 'checks')).toBe(true);
   });

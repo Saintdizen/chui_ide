@@ -77,6 +77,25 @@ describe('где выполняется команда', () => {
     expect(box.calls).toEqual([{ command: "cd 'packages/core' && npm test", cwd: ROOT }]);
   });
 
+  it('cd внутри проекта поднимается в cwd', async () => {
+    // Перепись: 76 из 93 вызовов terminal начинались с `cd <папка> && `.
+    // Префикс — привычка, а не нужда: у run есть cwd. Панель ревью и история
+    // должны показывать саму команду.
+    const box = sandbox();
+    const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
+    await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: `cd ${ROOT}/packages/core && npm test` }));
+
+    expect(box.calls).toEqual([{ command: "cd 'packages/core' && npm test", cwd: ROOT }]);
+  });
+
+  it('cd вне проекта остаётся в команде', async () => {
+    const box = sandbox();
+    const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
+    await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: 'cd /tmp && npm test' }));
+
+    expect(box.calls).toEqual([{ command: 'cd /tmp && npm test', cwd: ROOT }]);
+  });
+
   it('cwd за пределами проекта — отказ, команда не выполняется', async () => {
     const box = sandbox();
     const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;

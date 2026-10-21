@@ -39,8 +39,6 @@ const TOOL_LABELS: Record<string, string> = {
   ask: 'Вопрос агента',
   task: 'Подзадача',
   browser: 'Браузер',
-  git_read: 'Чтение git',
-  git_write: 'Действие git',
   show: 'Показ',
   terminal: 'Терминал',
   lsp: 'Символы и скелет',
@@ -71,8 +69,6 @@ const TOOL_ICONS: Record<string, IconName> = {
   ask: 'bubble',
   task: 'sparkle',
   browser: 'search',
-  git_read: 'branch',
-  git_write: 'branch',
   show: 'file',
   terminal: 'terminal',
   lsp: 'checklist',
@@ -111,22 +107,6 @@ const TOOL_ACTION_LABELS: Record<string, Record<string, string>> = {
   web: { search: 'Поиск в интернете', fetch: 'Чтение страницы' },
   file: { create: 'Создание файла', move: 'Перемещение', delete: 'Удаление' },
   mind: { remember: 'Заметка в память', forget: 'Забыть заметки' },
-  git_read: {
-    status: 'Состояние git',
-    diff: 'Diff git',
-    log: 'История git',
-    blame: 'Автор строк',
-  },
-  git_write: {
-    stage: 'Индекс git',
-    unstage: 'Снятие с индекса',
-    commit: 'Коммит',
-    checkout: 'Смена ветки',
-    discard: 'Откат изменений',
-    fetch: 'Получение из remote',
-    pull: 'Вливание из remote',
-    push: 'Отправка в remote',
-  },
 };
 
 export function toolLabel(name: string, raw?: string): string {

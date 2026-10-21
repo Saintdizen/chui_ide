@@ -78,7 +78,6 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
    */
   web: { plan: true, subagent: true, readOnlyActions: ['fetch'] },
 
-  read_skill: { readOnly: true, plan: true, subagent: true },
   checks: { readOnly: true, plan: true, subagent: true },
   mcp: { plan: true },
 
@@ -97,18 +96,12 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   terminal: { readOnlyActions: ['list', 'read', 'output'] },
 
   /* ── состояние беседы ───────────────────────────────────────────────── */
-  // План и цель — одно состояние беседы: `steps` рисует шаги, `goal` живёт
-  // дольше хода. В плане доступно и то, и другое: это не правка проекта.
-  plan: { plan: true, alwaysAvailable: true },
-  exit_plan_mode: { plan: true },
-  // Вопрос человеку: в плане законен.
-  ask: { plan: true },
+  // Одно имя на всё разговорное: заметки, вопрос, план, цель, утверждение
+  // плана. Пять имён стоили пяти строк ростера и трёх схем в режиме плана.
+  // План и вопрос в плане законны, а `remember`/`forget` ПИШУТ память — их
+  // держит `writeActions`, а не имя.
+  mind: { plan: true, alwaysAvailable: true, writeActions: ['remember', 'forget'] },
   task: { readOnly: true, plan: true, alwaysAvailable: true },
-  // Раунды сами ничего не меняют: каждый — подзадача чтения (`SUBAGENT_TOOLS`),
-  // правки по итогу делает основной агент. В плане законны: смотрят, не трогают.
-  // `readOnly` здесь ещё и про шаг: второй такой вызов в том же шаге почти наверно
-  // повтор, а стоит он как четыре подзадачи. Схемы в запросе нет (`ROSTER_TOOLS`).
-  ralph: { readOnly: true, plan: true, alwaysAvailable: true },
 
   /* ── агенты в фоне: план они не меняют, они читают проект ───────────── */
   // Одно имя на все пять действий: `spawn` и три разговора с живым агентом
@@ -116,17 +109,6 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   // в каждом запросе). `list` ничего не меняет — повтор в том же шаге не нужен.
   // Шаб не в ALWAYS_AVAILABLE: в «Авто» он есть строкой ростера (имя, действие,
   // аргументы), и схема 310 токенов в каждом запросе того не стоит.
-  agents: { plan: true, readOnlyActions: ['list'] },
-
-  /* ── git ────────────────────────────────────────────────────────────── */
-  // Два имени, а не одно: граница «чтение / запись» — то самое различие,
-  // от которого зависит, где инструмент можно позвать. Слить в один `git`
-  // значило бы отдать `push` набору «Только чтение».
-  git_read: { readOnly: true, plan: true, subagent: true },
-  git_write: {},
-
-  /* ── память проекта: заметка обратима, спрашивать не у кого ─────────── */
-  mind: { alwaysAvailable: true },
 
   /* ── браузер ────────────────────────────────────────────────────────── */
   // Одно имя на все действия: снимок читает состояние страницы, но остальные
