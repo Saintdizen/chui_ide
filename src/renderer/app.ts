@@ -57,7 +57,7 @@ import { OpenEditors } from './core/open-editors';
 import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
-import { deletePrompt, renamedNotice } from './core/file-notices';
+import { deleteManyPrompt, deletePrompt, movedNotice, renamedNotice, trashedNotice } from './core/file-notices';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
 import { RpcClient } from './core/rpc';
@@ -3158,8 +3158,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     if (settings.explorer.confirmDelete) {
       const { confirmed } = await rpc.request('dialog.confirm', {
         title: 'Удалить в корзину',
-        message: `Переместить в корзину ${list.length} ${objectsWord(list.length)}?`,
-        detail: 'Файлы и папки можно вернуть из корзины системы.',
+        ...deleteManyPrompt(list.length, objectsWord),
         confirmLabel: 'Удалить',
       });
       if (!confirmed) return;
@@ -3176,7 +3175,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       }
     }
     explorer.scheduleRefresh();
-    showToast(`В корзине: ${removed} ${objectsWord(removed)}`);
+    const notice = trashedNotice(removed, objectsWord);
+    if (notice) showToast(notice);
   });
 
   define({ id: 'file.moveInto', title: 'Переместить в папку', category: 'Файл' }, async (paths, targetDir) => {
@@ -3206,25 +3206,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     }
     for (const step of moved) if (step.active) await openPath(step.to);
 
-    showToast(
-      moved.length === 1
-        ? `Перенесено: ${basename(moved[0]!.to)}`
-        : `Перенесено: ${moved.length} ${objectsWord(moved.length)}`,
-      'info',
-      {
-        action: {
-          label: 'Отменить',
-          run: async () => {
-            for (const step of moved) {
-              if (openEditors.has(step.to)) openEditors.close(step.to);
-              await rpc.request('workspace.rename', { from: step.to, to: step.from }).catch(() => undefined);
-            }
-            for (const step of moved) if (step.active) await openPath(step.from);
-            explorer.scheduleRefresh();
-          },
+    showToast(movedNotice(moved.length, moved.length === 1 ? basename(moved[0]!.to) : null, objectsWord), 'info', {
+      action: {
+        label: 'Отменить',
+        run: async () => {
+          for (const step of moved) {
+            if (openEditors.has(step.to)) openEditors.close(step.to);
+            await rpc.request('workspace.rename', { from: step.to, to: step.from }).catch(() => undefined);
+          }
+          for (const step of moved) if (step.active) await openPath(step.from);
+          explorer.scheduleRefresh();
         },
       },
-    );
+    });
   });
 
   // Сравнение двух папок: список различий, клик по файлу открывает его сравнение.

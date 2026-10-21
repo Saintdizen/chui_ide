@@ -22,7 +22,35 @@ export function renamedNotice(facts: RenameNoticeFacts): string {
   return facts.touched > 0 ? `${head} · обновлено ссылок: ${facts.touched}` : head;
 }
 
-/** Подтверждение удаления: первая строка — вопрос, вторая — что за файл и как вернуть. */
+/** Подтверждение удаления пачки: число и слово-склонение — «3 объекта».
+ *
+ * Один вопрос на всю пачку намеренно: спрашивать по разу на файл — то самое
+ * раздражение, ради ухода от которого и делают групповое выделение.
+ */
+export function deleteManyPrompt(count: number, plural: (n: number) => string): { message: string; detail: string } {
+  return {
+    message: `Переместить в корзину ${count} ${plural(count)}?`,
+    detail: 'Файлы и папки можно вернуть из корзины системы.',
+  };
+}
+
+/**
+ * Итог удаления, когда часть объектов не далась. Ноль — не показываем вовсе:
+ * «в корзине: 0» человеку ничего не говорит.
+ */
+export function trashedNotice(count: number, plural: (n: number) => string): string | null {
+  return count > 0 ? `В корзине: ${count} ${plural(count)}` : null;
+}
+
+/**
+ * Итог переноса: одного называем по имени, пачку — числом. Без причин пропусков:
+ * на этом шаге видно только, что какой-то объект не переехал, а не почему.
+ */
+export function movedNotice(moved: number, onlyOne: string | null, plural: (n: number) => string): string {
+  return onlyOne !== null ? `Перенесено: ${onlyOne}` : `Перенесено: ${moved} ${plural(moved)}`;
+}
+
+/** Подтверждение удаления одного файла: вопрос и вторая строка — что за файл и как вернуть. */
 export function deletePrompt(name: string, relative: string): { message: string; detail: string } {
   return {
     message: `Переместить ${name} в корзину?`,
