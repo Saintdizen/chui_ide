@@ -167,6 +167,7 @@ import { installTooltips } from './ui/tooltip';
 import { createVenvModal } from './ui/venv-modal';
 import { createLspServers } from './core/lsp-servers';
 import { editorActionCommands } from './core/editor-actions';
+import { outcomeOfFailure } from './core/file-operations';
 import { editorSurfacePlan } from './core/editor-surface';
 import { testMarkerSignature as testMarkerSignatureOf, testMarkersFor } from './core/test-markers';
 
@@ -2137,13 +2138,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   };
 
   /**
-   * Клик по ссылке в коде. Адрес ведёт наружу (системным обработчиком), файл — в редактор;
-   * относительный путь считаем от папки файла, где стоит ссылка.
-   */
-  /**
    * Применить операции с файлами из `WorkspaceEdit` сервера (создать, переименовать,
    * удалить) — по порядку. Возвращает текст ошибки или null. «Пропустить молча» уважаем:
    * сервер этим говорит, что отсутствие файла/существование цели — не беда.
+   * Что считается ошибкой и как она звучит для человека — решает `core/file-operations.ts`.
    */
   const applyFileOperations = async (operations: readonly FileOperation[]): Promise<string | null> => {
     for (const operation of operations) {
@@ -2156,10 +2154,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           await rpc.request('workspace.trash', { path: operation.path });
         }
       } catch (error) {
-        if (operation.kind === 'create' && operation.ignoreIfExists) continue;
-        if (operation.kind === 'delete' && operation.ignoreIfNotExists) continue;
-        const what = operation.kind === 'rename' ? `${operation.from} → ${operation.to}` : operation.path;
-        return `Не удалось выполнить операцию с файлом ${what}: ${String(error)}`;
+        // «Пропустить молча» решает модуль: только свой флаг прощает свою ошибку.
+        const outcome = outcomeOfFailure(operation, error);
+        if (outcome.kind === 'skipped') continue;
+        return outcome.error;
       }
     }
     return null;
