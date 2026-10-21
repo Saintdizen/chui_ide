@@ -6107,10 +6107,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Ассистент выключили мастер-тумблером — закрываем его панель и обновляем шапку,
     // чтобы она не занимала место и не звала в выключенный чат.
     if (!next.ai.enabled) {
-      if (chatInEditor) setChatInEditor(false);
-      withoutPersist(() => {
-        if (layout.rightVisible) layout.setRightVisible(false);
-      });
+      // Сначала уводим чат из редактора, пока панель ещё закрыта. Иначе
+      // `setChatInEditor(false)` распахнул бы правую панель (`setRightVisible(true)`
+      // внутри) и только следующий за ним `setRightVisible(false)` её схлопнул бы
+      // обратно — а при свёрнутой человеком панели получился бы видимый скачок.
+      layout.setRightVisible(false);
+      // Возвращать чат в панель без записи: свёрнутость панели — не выбор человека,
+      // а следствие выключенного тумблера, и в настройки ей попадать незачем.
+      if (chatInEditor) withoutPersist(() => setChatInEditor(false));
     }
     // Включили обратно — возвращаем правую панель туда, где её оставил человек
     // (`rightVisible` в настройках не гасится выше, потому что закрытие было без записи).
@@ -6134,8 +6138,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       syncRunControl();
       refreshStatus();
     });
-    // Сменили интерпретатор — перепроверяем импорты в открытых файлах.
-    importChecker.refresh();
+    // Сменили интерпретатор — перепроверяем импорты в открытых файлах. Сравниваем
+    // весь блок `run`, а не только pythonPath: менеджер пакетов и venv меняют то же
+    // самое окружение. Без сравнения каждый `applySettings` (в том числе смена темы)
+    // заново обходил бы все открытые файлы.
+    if (previous.run !== next.run) importChecker.refresh();
     // Схема могла прийти извне — догоняем редактор и терминал.
     theme.apply();
     refreshStatus();
