@@ -134,7 +134,12 @@ describe('расход Anthropic считает весь вход', () => {
         ]),
       ),
     );
-    const provider = new OpenAiCompatibleProvider({ id: 'd', label: 'D', baseUrl: 'https://api.deepseek.com', apiKey: 'k' });
+    const provider = new OpenAiCompatibleProvider({
+      id: 'd',
+      label: 'D',
+      baseUrl: 'https://api.deepseek.com',
+      apiKey: 'k',
+    });
     const done = await provider.streamChat(
       { model: 'deepseek-flash', messages: [{ role: 'user', content: 'x' }], maxTokens: 100 },
       { onDelta: () => undefined },
@@ -199,8 +204,8 @@ describe('кеш Anthropic держит только префикс прогон
   /** Сколько сообщений несут cache_control: префикс кеша, а не хвост беседы. */
   function marked(body: Record<string, unknown>): number {
     const messages = body.messages as AnthropicMessage[];
-    return messages.filter((message) =>
-      Array.isArray(message.content) && message.content.some((block) => 'cache_control' in block),
+    return messages.filter(
+      (message) => Array.isArray(message.content) && message.content.some((block) => 'cache_control' in block),
     ).length;
   }
 

@@ -616,7 +616,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
               'Открытый http допускается только для localhost и частных адресов: остальное — по https.'
           : ai.webSearch.provider === 'deepseek'
             ? 'Пусто — адрес по умолчанию https://api.deepseek.com/v1/tools/search. ' +
-                'Свой ключ не нужен: берётся ключ подключения DeepSeek.'
+              'Свой ключ не нужен: берётся ключ подключения DeepSeek.'
             : 'Пусто — адрес по умолчанию https://api.search.brave.com/res/v1/web/search.',
       ),
       webSearchKeyField,
@@ -726,13 +726,7 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
       ),
       field(
         'Сжимать беседу чаще (ходов)',
-        numberInput(
-          ai.compactEveryTurns,
-          0,
-          200,
-          1,
-          (value) => void patch({ ai: { compactEveryTurns: value } }),
-        ),
+        numberInput(ai.compactEveryTurns, 0, 200, 1, (value) => void patch({ ai: { compactEveryTurns: value } })),
       ),
       h(
         'div',
@@ -967,19 +961,13 @@ export function createSettingsModal(deps: SettingsModalDeps): SettingsModalView 
     const rows: (HTMLElement | null)[] = [
       fields.includes('label') ? field('Название', labelField) : null,
       fields.includes('baseUrl') ? field('Адрес API', baseUrlField) : null,
-      fields.includes('apiKey')
-        ? field('API-ключ', h('div', { class: 'field-row' }, keyField, clearKeyButton))
-        : null,
+      fields.includes('apiKey') ? field('API-ключ', h('div', { class: 'field-row' }, keyField, clearKeyButton)) : null,
       fields.includes('model') ? field('Модель', modelSelect.element) : null,
       fields.includes('model') ? field('Или id модели вручную', manualModel) : null,
       fields.includes('protocol') ? field('Протокол', protocolSelect.element) : null,
       h('div', { class: 'settings-divider' }),
       field('Метка пользователя', userIdField),
-      h(
-        'div',
-        { class: 'field-hint' },
-        'Уходит провайдеру как user_id: по нему разделяются кеш контекста и лимиты.',
-      ),
+      h('div', { class: 'field-hint' }, 'Уходит провайдеру как user_id: по нему разделяются кеш контекста и лимиты.'),
       h(
         'div',
         { class: 'field field-between' },

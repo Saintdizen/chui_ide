@@ -100,7 +100,12 @@ export class OpenAiCompatibleProvider implements AiProvider {
    * под `/v1`, поэтому путь собираем от хоста, а не от базового адреса.
    */
   async getBalance(signal?: AbortSignal): Promise<AccountBalance> {
-    const response = await fetchWithRetry(this.accountUrl('/user/balance'), { headers: this.headers() }, signal, netFetch);
+    const response = await fetchWithRetry(
+      this.accountUrl('/user/balance'),
+      { headers: this.headers() },
+      signal,
+      netFetch,
+    );
     if (!response.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -116,9 +121,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
   /** Адрес служебного вызова: у корня хоста, без `/v1` и `/beta`. */
   private accountUrl(pathname: string): string {
     const base = this.options.baseUrl.replace(/\/+$/, '');
-    const root = base
-      .replace(/\/(v1|beta)\/?$/i, '')
-      .replace(/\/+$/, '');
+    const root = base.replace(/\/(v1|beta)\/?$/i, '').replace(/\/+$/, '');
     return `${root}${pathname}`;
   }
 

@@ -183,7 +183,12 @@ describe('sanitizeMessages', () => {
   // запрос с tools без них), поэтому переживают запись и чтение истории.
   it('размышления шага сохраняются', () => {
     const result = sanitizeMessages([
-      { role: 'assistant', content: '', reasoning: 'подумал', toolCalls: [{ id: 'c1', name: 'read', arguments: '{}' }] },
+      {
+        role: 'assistant',
+        content: '',
+        reasoning: 'подумал',
+        toolCalls: [{ id: 'c1', name: 'read', arguments: '{}' }],
+      },
       { role: 'tool', content: 'ok', toolCallId: 'c1' },
     ]);
     expect(result[0]?.reasoning).toBe('подумал');

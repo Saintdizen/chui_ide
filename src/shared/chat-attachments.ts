@@ -45,7 +45,9 @@ export function dropAttachment(session: { kept?: ChatAttachment[] }, label: stri
  *
  * Ничего не приложено — возвращаем `null`, и история остаётся как была.
  */
-export function keptContextMessage(kept: readonly ChatAttachment[] | undefined): { role: 'user'; content: string } | null {
+export function keptContextMessage(
+  kept: readonly ChatAttachment[] | undefined,
+): { role: 'user'; content: string } | null {
   const items = keepLatest(kept ?? []);
   if (items.length === 0) return null;
 
@@ -79,4 +81,3 @@ export function keepLatest(items: readonly ChatAttachment[]): ChatAttachment[] {
   }
   return kept;
 }
-

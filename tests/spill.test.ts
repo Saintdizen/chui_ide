@@ -2,7 +2,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { AGED_KIND, createSpillStream, MAX_AGED_FILES, MAX_SPILL_FILES, prune, spillHint, spillName, spillText } from '../src/main/ai/spill';
+import {
+  AGED_KIND,
+  createSpillStream,
+  MAX_AGED_FILES,
+  MAX_SPILL_FILES,
+  prune,
+  spillHint,
+  spillName,
+  spillText,
+} from '../src/main/ai/spill';
 
 /**
  * Копия длинного вывода.

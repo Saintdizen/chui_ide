@@ -104,10 +104,7 @@ export function parseModelInfos(payload: unknown): ModelInfo[] {
 }
 
 /** Паспорт по имени модели; `undefined`, если сервер о ней ничего не сказал. */
-export function findModelInfo(
-  models: readonly ModelInfo[] | undefined,
-  model: string,
-): ModelInfo | undefined {
+export function findModelInfo(models: readonly ModelInfo[] | undefined, model: string): ModelInfo | undefined {
   const name = model.trim().toLowerCase();
   if (!name) return undefined;
   return models?.find((item) => item.id.toLowerCase() === name);

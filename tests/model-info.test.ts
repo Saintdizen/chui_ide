@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  acceptsImages,
-  findModelInfo,
-  parseModelInfos,
-  supportedEfforts,
-} from '../src/shared/model-info';
+import { acceptsImages, findModelInfo, parseModelInfos, supportedEfforts } from '../src/shared/model-info';
 
 // Ответ настоящего `GET /models` у DeepSeek: паспорт модели, а не голая строка.
 const DEEPSEEK = {

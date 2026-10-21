@@ -7,11 +7,12 @@ import { toOpenAiTools, type ExposedToolSpec } from '../src/shared/tools';
  * ограничения длины охотно, а с ними провайдер отвергает весь запрос.
  */
 
-const spec = (parameters: Record<string, unknown>): ExposedToolSpec => ({
-  name: 'demo',
-  description: 'демо',
-  inputSchema: parameters,
-}) as ExposedToolSpec;
+const spec = (parameters: Record<string, unknown>): ExposedToolSpec =>
+  ({
+    name: 'demo',
+    description: 'демо',
+    inputSchema: parameters,
+  }) as ExposedToolSpec;
 
 describe('toOpenAiTools в строгом режиме', () => {
   it('по умолчанию strict не ставится', () => {

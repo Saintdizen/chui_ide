@@ -70,9 +70,7 @@ describe('пометка сжатия в аргументе: отказ вмес
         result: { reports: [{ path: '/proj/a.ts', applied: 1, version: 1 }], failed: [] },
       }) as ApplyEditsHostResult;
     const args = {
-      edits: [
-        { path: '/proj/a.ts', edits: [{ oldText: OLD_MARKER, newText: 'export const bb = 22;' }] },
-      ],
+      edits: [{ path: '/proj/a.ts', edits: [{ oldText: OLD_MARKER, newText: 'export const bb = 22;' }] }],
     };
     const r = await runTool({ workspace, applyPatches }, 'edit', JSON.stringify(args));
 

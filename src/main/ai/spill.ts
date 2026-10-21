@@ -143,7 +143,10 @@ export function prune(dir: string, keep: number = MAX_SPILL_FILES): void {
   }
   const aged = names.filter((name) => name.includes(`-${AGED_KIND}.txt`));
   const rest = names.filter((name) => !name.includes(`-${AGED_KIND}.txt`));
-  for (const [list, limit] of [[aged, Math.min(keep, MAX_AGED_FILES)], [rest, keep]] as const) {
+  for (const [list, limit] of [
+    [aged, Math.min(keep, MAX_AGED_FILES)],
+    [rest, keep],
+  ] as const) {
     if (list.length <= limit) continue;
     list.sort();
     for (const name of list.slice(0, list.length - limit)) removeQuiet(path.join(dir, name));

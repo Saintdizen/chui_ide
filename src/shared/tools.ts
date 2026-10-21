@@ -143,8 +143,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           enum: ['text', 'code', 'docs', 'sessions'],
           // Смысл действий — здесь же, рядом с enum: в шапке он дублировался
           // и стоил токенов в каждом запросе.
-          description:
-            'text: path, line, match; code: declarations; docs: documentation; sessions: past chats.',
+          description: 'text: path, line, match; code: declarations; docs: documentation; sessions: past chats.',
         },
         query: { type: 'string', description: 'Pattern.' },
         isRegex: { type: 'boolean', description: 'Regex (default: substring).' },
@@ -412,8 +411,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         action: {
           type: 'string',
           enum: ['steps', 'goal'],
-          description:
-            'steps (default): the plan — call at the start and after each step; goal: survives the turn.',
+          description: 'steps (default): the plan — call at the start and after each step; goal: survives the turn.',
         },
         steps: {
           type: 'array',

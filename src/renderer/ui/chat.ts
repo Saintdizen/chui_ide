@@ -808,9 +808,9 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       // помечая «≈».
       ...(session.trace?.toolsTokens !== undefined ? { toolsTokens: session.trace.toolsTokens } : {}),
       reservedTokens: answerReserve(
-          maxOutputTokens(currentModel(), settings.ai.maxTokens),
-          contextWindow(currentModel(), settings.ai.contextWindow),
-        ),
+        maxOutputTokens(currentModel(), settings.ai.maxTokens),
+        contextWindow(currentModel(), settings.ai.contextWindow),
+      ),
       usage: session.usage,
       speed: session.speed,
       trace: session.trace,
@@ -1779,9 +1779,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // справиться (конфликт времени, ошибка ввода-вывода), а признак — всё тот
     // же `dirty` у документа.
     if (params.autoApprove === true && applied) {
-      await persistPaths(
-        result.reports.map((report) => report.path).filter((path) => deps.documents.get(path)?.dirty),
-      );
+      await persistPaths(result.reports.map((report) => report.path).filter((path) => deps.documents.get(path)?.dirty));
     }
 
     const unwritten = result.reports

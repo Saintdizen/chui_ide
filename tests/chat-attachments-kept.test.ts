@@ -16,12 +16,13 @@ import type { ChatAttachment } from '../src/shared/api';
  * после первого сжатия продолжала бы работу, не видя кода, о котором речь.
  */
 
-const file = (label: string, text = 'const x = 1;'): ChatAttachment => ({
-  kind: 'file',
-  label,
-  title: label,
-  text,
-}) as ChatAttachment;
+const file = (label: string, text = 'const x = 1;'): ChatAttachment =>
+  ({
+    kind: 'file',
+    label,
+    title: label,
+    text,
+  }) as ChatAttachment;
 
 describe('takeSent', () => {
   it('отдаёт вложения, но сам ничего не откладывает', () => {

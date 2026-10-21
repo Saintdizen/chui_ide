@@ -148,8 +148,7 @@ interface StoredSettings {
   keybindings: KeybindingSettings;
 }
 
-const DEFAULT_SYSTEM_PROMPT =
-  'Ты — ассистент chui_iDE: кратко, правка — минимальный диф, API не выдумывай.';
+const DEFAULT_SYSTEM_PROMPT = 'Ты — ассистент chui_iDE: кратко, правка — минимальный диф, API не выдумывай.';
 
 // Прежние встроенные тексты: их надо переписать на актуальный.
 const LEGACY_SYSTEM_PROMPTS: readonly string[] = [

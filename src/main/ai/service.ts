@@ -39,7 +39,13 @@ import {
 } from '../../shared/providers';
 import type { ModelInfo } from '../../shared/model-info';
 import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
-import { ALWAYS_AVAILABLE, PLAN_MODE_TOOLS, SUBAGENT_TOOLS, isReadOnlyCall, isWriteCall } from '../../shared/tool-policy';
+import {
+  ALWAYS_AVAILABLE,
+  PLAN_MODE_TOOLS,
+  SUBAGENT_TOOLS,
+  isReadOnlyCall,
+  isWriteCall,
+} from '../../shared/tool-policy';
 import { canonicalCall } from '../../shared/tool-aliases';
 import {
   condenseAppliedCalls,
@@ -935,8 +941,7 @@ export class AiService {
     const offered = [...available, ...external, ...resourceTools];
     // `let`: набор схем пересобирается, если человек утвердил план посреди прогона
     // (см. `widen` ниже).
-    let tools =
-      offered.length > 0 ? toOpenAiTools(offered, { strict: connection?.strictTools === true }) : undefined;
+    let tools = offered.length > 0 ? toOpenAiTools(offered, { strict: connection?.strictTools === true }) : undefined;
     /** План утверждён человеком посреди прогона: ограничения плана больше не действуют. */
     let planApproved = false;
     // Полный доступ: и правки, и команды без подтверждений.
@@ -1027,15 +1032,9 @@ export class AiService {
     // 0 или пусто — предел самой модели: ответ ограничивает модель, а не общая константа.
     const maxTokens = maxOutputTokens(
       request.model,
-      firstPositive(
-        request.maxTokens,
-        connection?.maxTokens,
-        settings.ai.maxTokens,
-        passport?.maxOutputTokens,
-      ),
+      firstPositive(request.maxTokens, connection?.maxTokens, settings.ai.maxTokens, passport?.maxOutputTokens),
     );
-    const requestedEffort =
-      request.reasoningEffort ?? connection?.reasoningEffort ?? settings.ai.reasoningEffort;
+    const requestedEffort = request.reasoningEffort ?? connection?.reasoningEffort ?? settings.ai.reasoningEffort;
     const reasoningEffort = reasoningEffortFor(request.model, requestedEffort);
     // У модели, которая думает всегда, «без размышлений» надо ещё и выключить —
     // молчание в запросе означает «думай по умолчанию», а не «не думай».

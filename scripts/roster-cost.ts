@@ -24,14 +24,22 @@ const auto = AGENT_TOOLS.filter((spec) => toolPresetAllows('auto', spec.name));
 const withSchemas = estimateTextTokens(JSON.stringify(toOpenAiTools(auto)));
 const rosterLine = estimateTextTokens(ROSTER_TOOLS.join(', '));
 
-console.log(`auto: схем ${auto.length} — ${withSchemas} токенов; ростер — ${ROSTER_TOOLS.length} имён в ${rosterLine} токенах`);
+console.log(
+  `auto: схем ${auto.length} — ${withSchemas} токенов; ростер — ${ROSTER_TOOLS.length} имён в ${rosterLine} токенах`,
+);
 console.log('\nцена схемы каждого ростера:');
 const costs = ROSTER_TOOLS.map((name) => ({ name, tokens: schemaTokens(name) })).sort((a, b) => b.tokens - a.tokens);
 for (const row of costs) console.log(`  ${row.name.padEnd(14)} ${String(row.tokens).padStart(4)}`);
 
 const file = process.argv[2] ?? join(homedir(), '.config/chui-ide/telemetry/runs.jsonl');
-interface RunStep { calls?: { name?: string }[] }
-interface RunRecord { mode: string; trace: { steps: number }; steps?: RunStep[] }
+interface RunStep {
+  calls?: { name?: string }[];
+}
+interface RunRecord {
+  mode: string;
+  trace: { steps: number };
+  steps?: RunStep[];
+}
 let runs: RunRecord[] = [];
 try {
   runs = readFileSync(file, 'utf8')
