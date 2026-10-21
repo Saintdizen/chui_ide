@@ -2199,6 +2199,9 @@ async function renameSymbol(ctx: ToolContext, args: Record<string, unknown>): Pr
     ok: outcome.ok,
     summary: `${name} → ${newName}: файлов ${outcome.applied.length}${outcome.failed.length ? `, с ошибками ${outcome.failed.length}` : ''}${outcome.tail}`,
     detail: outcome.detail,
+    // Переименование — тоже правка: если она легла только в буфер, тела правок
+    // не забываем; чтение с диска вернёт старое имя, и правку придётся повторить.
+    ...(outcome.ok && outcome.tail === '' ? { applied: true } : {}),
   };
 }
 
@@ -2430,6 +2433,17 @@ function formatDiagnostic(item: DiagnosticItem, root: string | null): string {
 /* ── правки документов ──────────────────────────────────────────────────── */
 
 /**
+ * Почему правка осталась в буфере — короткой фразой, которую агент может сразу
+ * переложить в действие. `undefined` — запись не пытались: так бывает без полного
+ * доступа, файл сохраняет человек.
+ */
+function describeUnwritten(reason: string | undefined): string {
+  if (!reason) return 'сохранит человек';
+  if (reason === 'conflict') return 'файл изменён на диске, перечитай его перед правкой';
+  return `запись не удалась (${reason}), дальше чтение вернёт старый текст`;
+}
+
+/**
  * Разбор ответа renderer о правках: что применилось, что не удалось и что осталось
  * только в буфере редактора.
  *
@@ -2444,11 +2458,14 @@ function readEditsOutcome(
   const applied = decision.result?.reports ?? [];
   const failed = decision.result?.failed ?? [];
   const unwritten = decision.unwritten ?? [];
+  const reasons = decision.unwrittenReasons ?? {};
   const lines = [
     ...applied.map((report) => `ok ${label(report.path)}: применено правок — ${report.applied}`),
     ...failed.map((failure) => `ошибка ${label(failure.path)}: ${failure.message}`),
     // Буфер и диск разошлись: правка видна в редакторе, а в файле её нет.
-    ...unwritten.map((file) => `буфер ${label(file)}: на диск не записано — правку сохранит человек`),
+    // Причина называет, что именно чинить: конфликт с диском — перечитать файл,
+    // EACCES — права. Без неё агент принимается переделывать саму правку.
+    ...unwritten.map((file) => `буфер ${label(file)}: на диск не записано — ${describeUnwritten(reasons[file])}`),
   ];
   return {
     applied,

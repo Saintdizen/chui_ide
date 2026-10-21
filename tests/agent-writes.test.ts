@@ -53,6 +53,37 @@ describe('edit по позициям: записан ли файл на диск
 
     expect(outcome.summary).toBe('применено файлов: 1, не записано на диск: 1');
     expect(outcome.detail).toContain('буфер a.ts');
+    // Причины нет — значит запись и не пытались (нет полного доступа):
+    // так и говорим, не выдумывая отказ.
+    expect(outcome.detail).toContain('сохранит человек');
+  });
+
+  it('конфликт с диском — совет перечитать, а не переделать правку', async () => {
+    const applyEdits = bridge({
+      rejected: false,
+      result: { reports: [{ path: '/proj/a.ts', applied: 2, version: 3 }], failed: [] },
+      unwritten: ['/proj/a.ts'],
+      unwrittenReasons: { '/proj/a.ts': 'conflict' },
+    });
+    const outcome = await runTool(context({ applyEdits }), 'edit', EDITS_ARGS);
+
+    expect(outcome.detail).toContain('буфер a.ts');
+    expect(outcome.detail).toContain('перечитай');
+    // Про человека — только когда причина неизвестна.
+    expect(outcome.detail).not.toContain('сохранит человек');
+  });
+
+  it('ФС отказала — в итог едет текст ошибки', async () => {
+    const applyEdits = bridge({
+      rejected: false,
+      result: { reports: [{ path: '/proj/a.ts', applied: 2, version: 3 }], failed: [] },
+      unwritten: ['/proj/a.ts'],
+      unwrittenReasons: { '/proj/a.ts': 'EACCES: permission denied' },
+    });
+    const outcome = await runTool(context({ applyEdits }), 'edit', EDITS_ARGS);
+
+    expect(outcome.detail).toContain('EACCES');
+    expect(outcome.detail).toContain('старый текст');
   });
 
   it('отказ пользователя — про запись речи нет', async () => {

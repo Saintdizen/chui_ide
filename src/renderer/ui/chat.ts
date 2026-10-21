@@ -1116,7 +1116,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    * изменений (см. `saveTouched`). Откат пишет на диск сразу: возвращая текст,
    * странно оставлять файл версией агента.
    */
-  async function persistPaths(paths: Iterable<string>): Promise<void> {
+  async function persistPaths(paths: Iterable<string>): Promise<Map<string, string>> {
+    const reasons = new Map<string, string>();
     for (const path of paths) {
       const document = deps.documents.get(path);
       if (!document?.dirty) continue;
@@ -1125,15 +1126,18 @@ export function createChatPanel(deps: ChatDeps): ChatView {
         // перетереть чужую правку (того же файла мог коснуться другой инструмент).
         const result = await deps.edits.saveDocument(document);
         if (result === 'conflict') {
+          reasons.set(path, 'conflict');
           showToast(`Файл изменён на диске, не перезаписан: ${basename(path)}`, 'error');
         }
       } catch (error) {
         // Не записалось — говорим вслух и оставляем файл «грязным». Раньше
         // исключение глоталось целиком: документ оставался в буфере, а агент
         // продолжал работать, не зная, что на диске старый текст.
+        reasons.set(path, describeError(error));
         showToast(`Не записано на диск: ${basename(path)} — ${describeError(error)}`, 'error');
       }
     }
+    return reasons;
   }
 
   /** Причина ошибки строкой: у отказа файловой системы есть код, он важнее текста. */
@@ -1768,7 +1772,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // полном доступе следующий read_file/search (main читает с диска) показывал
     // бы старый текст, хотя инструмент уже отчитался «применено».
     const applied = result.reports.length > 0;
-    if (applied) await persistPaths(result.reports.map((report) => report.path));
+    // Причины незаписи собираем, а не только показываем тостом: по ним агент
+    // понимает, что смотреть, а не просто «правка не на диске».
+    const reasons = applied
+      ? await persistPaths(result.reports.map((report) => report.path))
+      : new Map<string, string>();
 
     // Что осталось только в буфере. Раньше здесь ничего не делалось: агент
     // получал строку «правку сохранит человек» и шёл дальше, а файл на диске
@@ -1779,7 +1787,11 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     // справиться (конфликт времени, ошибка ввода-вывода), а признак — всё тот
     // же `dirty` у документа.
     if (params.autoApprove === true && applied) {
-      await persistPaths(result.reports.map((report) => report.path).filter((path) => deps.documents.get(path)?.dirty));
+      for (const [path, reason] of await persistPaths(
+        result.reports.map((report) => report.path).filter((path) => deps.documents.get(path)?.dirty),
+      )) {
+        reasons.set(path, reason);
+      }
     }
 
     const unwritten = result.reports
@@ -1799,7 +1811,12 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     }
     renderChanges();
 
-    return { rejected: false, result, ...(unwritten.length > 0 ? { unwritten } : {}) };
+    return {
+      rejected: false,
+      result,
+      ...(unwritten.length > 0 ? { unwritten } : {}),
+      ...(reasons.size > 0 ? { unwrittenReasons: Object.fromEntries(reasons) } : {}),
+    };
   }
 
   /**

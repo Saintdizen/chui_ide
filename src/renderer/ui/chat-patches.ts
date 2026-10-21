@@ -12,16 +12,21 @@ import type { ApplyFailure } from '../../shared/edits';
  * Терять её нельзя: main читает файлы с диска, поэтому без оговорки агент считает
  * правку применённой, а следующее чтение возвращает старый текст — и ошибка
  * выглядит как промах чтения, а не как незаписанный файл (подробнее —
- * `readEditsOutcome` в `main/ai/agent-tools.ts`).
+ * `readEditsOutcome` в `main/ai/agent-tools.ts`). Вместе с оговоркой переезжают
+ * и причины незаписи: без них оговорка не говорит, что чинить.
  */
 export function mergePatchResult(outcome: ApplyEditsHostResult, failed: readonly ApplyFailure[]): ApplyEditsHostResult {
   const reports = outcome.result?.reports ?? [];
   const failures = [...(outcome.result?.failed ?? []), ...failed];
   const unwritten = outcome.unwritten ?? [];
+  // Причины переживают свод: иначе main знал бы «не записано», но не знал бы,
+  // что именно чинить (конфликт с диском или отказ ФС).
+  const reasons = outcome.unwrittenReasons;
 
   return {
     rejected: false,
     result: { reports, failed: failures },
     ...(unwritten.length > 0 ? { unwritten } : {}),
+    ...(reasons && Object.keys(reasons).length > 0 ? { unwrittenReasons: reasons } : {}),
   };
 }
