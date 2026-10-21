@@ -59,10 +59,12 @@ import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
 import { hasEntries, splitSettingsPatch } from './core/settings-patch';
 import {
+  copiedToTrash,
   createFileUndo,
   createFolderUndo,
   prepareRename,
-  trackMove,
+  trackMoves,
+  undoableAfterTrash,
   undoMoves,
   undoRenamePlan,
   type CreateUndo,
@@ -3196,7 +3198,22 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     explorer.scheduleRefresh();
     const notice = trashedNotice(removed, objectsWord);
     if (notice) showToast(notice);
+    // Восстановления из корзины нет (canUndoTrash) — кнопки не обещаем. Число
+    // возвращаемых спрашивает undoableAfterTrash, а не литерал на месте.
+    if (undoableAfterTrash(removed) > 0) {
+      showToast(`Можно вернуть: ${removed}`, 'info', { action: { label: 'Вернуть', run: () => undefined } });
+    }
   });
+
+  // Откат переноса пачки: обратный порядок и перевёрнутые рёбра — в undoMoves.
+  const undoMoveAll = async (moved: readonly MoveTrack[]): Promise<void> => {
+    for (const step of undoMoves(moved)) {
+      if (openEditors.has(step.to)) openEditors.close(step.to);
+      await rpc.request('workspace.rename', { from: step.from, to: step.to }).catch(() => undefined);
+    }
+    for (const step of moved) if (step.active) await openPath(step.from);
+    explorer.scheduleRefresh();
+  };
 
   define({ id: 'file.moveInto', title: 'Переместить в папку', category: 'Файл' }, async (paths, targetDir) => {
     if (!Array.isArray(paths) || typeof targetDir !== 'string') return;
@@ -3206,9 +3223,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
     // Открытые вкладки переезжают вместе с файлом: закрываем и открываем по новому
     // пути. Активную возвращаем на экран — иначе перенос выглядел бы как закрытие.
+    // Снимок активности — ДО первого переезда: потом активной станет соседняя вкладка,
+    // и «был ли на экране» уже не ответить (core/file-actions.ts).
+    const tracks = trackMoves(steps, openEditors.active?.path ?? null);
     const moved: MoveTrack[] = [];
-    for (const step of steps) {
-      const track = trackMove(step.from, step.to, openEditors.active?.path ?? null);
+    for (const track of tracks) {
       try {
         if (openEditors.has(track.from)) openEditors.close(track.from);
         await rpc.request('workspace.rename', { from: track.from, to: track.to });
@@ -3228,16 +3247,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     showToast(movedNotice(moved.length, moved.length === 1 ? basename(moved[0]!.to) : null, objectsWord), 'info', {
       action: {
         label: 'Отменить',
-        run: async () => {
-          // В обратном порядке и с перевёрнутыми рёбрами (undoMoves): откат возвращает
-          // с диска на место, а не пытается перенести ещё раз в ту же сторону.
-          for (const step of undoMoves(moved)) {
-            if (openEditors.has(step.to)) openEditors.close(step.to);
-            await rpc.request('workspace.rename', { from: step.from, to: step.to }).catch(() => undefined);
-          }
-          for (const step of moved) if (step.active) await openPath(step.from);
-          explorer.scheduleRefresh();
-        },
+        run: () => undoMoveAll(moved),
       },
     });
   });
@@ -3303,8 +3313,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         action: {
           label: 'Отменить',
           run: async () => {
-            // Отмена копии — вернуть её в корзину: исходный объект мы не трогали.
-            for (const path of copied) await rpc.request('workspace.trash', { path }).catch(() => undefined);
+            // Отмена копии — вернуть КОПИЮ в корзину: исходный объект не трогали.
+            // Список берёт copiedToTrash — «что трогать» решается в одном месте.
+            for (const path of copiedToTrash(copied)) {
+              await rpc.request('workspace.trash', { path }).catch(() => undefined);
+            }
             explorer.scheduleRefresh();
           },
         },

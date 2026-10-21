@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   canUndoTrash,
+  copiedToTrash,
   createFileUndo,
   createFolderUndo,
   prepareRename,
   trackMove,
+  trackMoves,
   undoMoves,
   undoRenamePlan,
+  undoableAfterTrash,
 } from '../src/renderer/core/file-actions';
 
 describe('prepareRename', () => {
@@ -80,6 +83,45 @@ describe('trackMove', () => {
 
   it('активной нет — это не активность', () => {
     expect(trackMove('/src/a.ts', '/lib/a.ts', null).active).toBe(false);
+  });
+});
+
+describe('trackMoves', () => {
+  it('снимок делается по всем шагам и одной активной вкладке', () => {
+    const tracks = trackMoves(
+      [
+        { from: '/src/a.ts', to: '/lib/a.ts' },
+        { from: '/src/b.ts', to: '/lib/b.ts' },
+      ],
+      '/src/b.ts',
+    );
+    expect(tracks).toEqual([
+      { from: '/src/a.ts', to: '/lib/a.ts', active: false },
+      { from: '/src/b.ts', to: '/lib/b.ts', active: true },
+    ]);
+  });
+});
+
+describe('copiedToTrash', () => {
+  it('в корзину идёт копия, а не исходник', () => {
+    expect(copiedToTrash(['/lib/a.ts'])).toEqual(['/lib/a.ts']);
+  });
+
+  it('ничего не скопировалось — нечего убирать', () => {
+    expect(copiedToTrash([])).toEqual([]);
+  });
+
+  it('вход не переворачивается и не чистит сам себя', () => {
+    const copied = ['/lib/a.ts', '/lib/b.ts'];
+    copiedToTrash(copied).push('/lib/c.ts');
+    expect(copied).toEqual(['/lib/a.ts', '/lib/b.ts']);
+  });
+});
+
+describe('undoableAfterTrash', () => {
+  it('без восстановления из корзины возвращать нечего, сколько ни удали', () => {
+    expect(undoableAfterTrash(5)).toBe(0);
+    expect(undoableAfterTrash(0)).toBe(0);
   });
 });
 
