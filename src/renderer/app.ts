@@ -58,6 +58,14 @@ import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
 import { hasEntries, splitSettingsPatch } from './core/settings-patch';
+import { type GitResult, rebaseNotice } from './core/git-notice';
+import {
+  DEFAULT_MACRO_TIMES,
+  checkMacroTimes,
+  macroPlayCheck,
+  macroPlayedNotice,
+  macroRecordedNotice,
+} from './core/macro-run';
 import { deleteManyPrompt, deletePrompt, movedNotice, renamedNotice, trashedNotice } from './core/file-notices';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
@@ -3906,11 +3914,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * останавливается на конфликте или на шаге правки — об этом говорим отдельно,
    * а не показываем текст git как ошибку.
    */
-  const reportRebase = (result: { ok: boolean; inProgress: boolean; conflict: boolean; message: string }): void => {
-    if (result.conflict) showToast('Есть конфликты — разрешите их и продолжите rebase', 'error');
-    else if (result.inProgress) showToast('Rebase идёт: исправьте коммит и продолжите', 'info');
-    else if (result.ok) showToast('Rebase завершён');
-    else showToast(result.message, 'error');
+  const reportRebase = (result: GitResult): void => {
+    const notice = rebaseNotice(result);
+    showToast(notice.message, notice.kind);
   };
 
   /** Пошаговый поиск багованного коммита (bisect). */
@@ -5523,7 +5529,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     }
     if (editors.isRecordingMacro()) {
       const steps = editors.stopMacro();
-      showToast(steps.length > 0 ? `Макрос записан: действий ${steps.length}` : 'Макрос пуст: ни одного действия');
+      showToast(macroRecordedNotice(steps.length));
       refreshStatus();
       return;
     }
@@ -5534,17 +5540,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   const playMacro = (times: number): void => {
     const steps = editors.macroSteps();
-    if (steps.length === 0) {
-      showToast('Макрос не записан');
-      return;
-    }
-    if (!editors.currentPath) {
-      showToast('Откройте файл: макрос выполняется в редакторе');
+    const check = macroPlayCheck(steps.length, editors.currentPath !== null);
+    if (check.kind === 'refused') {
+      showToast(check.message);
       return;
     }
     let done = 0;
     for (let i = 0; i < times; i += 1) done += editors.playMacro(steps);
-    showToast(times > 1 ? `Макрос выполнен ${times} раз (шагов: ${done})` : `Макрос выполнен: шагов ${done}`);
+    showToast(macroPlayedNotice(times, done));
   };
 
   define({ id: 'editor.macroPlay', title: 'Макрос: выполнить', category: 'Редактор' }, () => playMacro(1));
@@ -5553,15 +5556,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const answer = await promptValue({
       title: 'Сколько раз выполнить макрос?',
       label: 'Число повторов',
-      value: '5',
+      value: String(DEFAULT_MACRO_TIMES),
     });
     if (answer === null) return;
-    const times = Number(answer.trim());
-    if (!Number.isInteger(times) || times < 1 || times > 1000) {
-      showToast('Число повторов — целое от 1 до 1000', 'error');
+    const check = checkMacroTimes(answer);
+    if (check.kind === 'refused') {
+      showToast(check.message, 'error');
       return;
     }
-    playMacro(times);
+    playMacro(check.times);
   });
 
   /**
