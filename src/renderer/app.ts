@@ -55,6 +55,7 @@ import { fetchTypeHierarchy, type TypeDirection } from './core/type-hierarchy';
 import { OpenEditors } from './core/open-editors';
 import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
+import { createPreloadPlanner } from './core/env-preload';
 import { envWidgetLabel } from './core/env-widget';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
@@ -1106,17 +1107,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * интерпретатор Python (см. envWidgetLabel). Попап обновляет снимок сам при
    * открытии, поэтому устаревания тут не боимся — прогрев лишь убирает ожидание.
    */
-  let preloadedProject = '';
+  const preloadPlanner = createPreloadPlanner({
+    root: () => workspace.root ?? null,
+    kind: () => projectScan?.kind.id ?? null,
+    tools: () => tools.get(),
+    configuredPython: () => settings.run.pythonPath,
+  });
 
   function preloadEnvironment(): void {
-    const kind = projectScan?.kind.id ?? null;
-    if (!envWidgetLabel(kind, tools.get(), settings.run.pythonPath)) return;
-    // Прогрев — один на проект: открытие стартового проекта приходит и подпиской
-    // на workspace, и начальным кодом, и без этой метки окружение читалось бы дважды.
-    const signature = `${workspace.root ?? ''}|${kind ?? ''}`;
-    if (signature === preloadedProject) return;
-    preloadedProject = signature;
-    if (kind === 'node') void ensureNodeEnv().refresh();
+    if (!preloadPlanner.shouldPreload()) return;
+    if (preloadPlanner.target() === 'node') void ensureNodeEnv().refresh();
     else void ensurePythonEnv().refresh();
   }
 
