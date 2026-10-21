@@ -2328,7 +2328,7 @@ async function runTests(ctx: ToolContext, args: Record<string, unknown> = {}): P
   const full = spillStream?.close(result.truncated) ?? null;
   const condensed = foldPassedTests(ctx, 'run_tests', condenseOutput(result.output));
   const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'run_tests', condensed);
-  const notes = [result.timedOut ? 'превышено время' : '', result.truncated ? 'вывод обрезан' : ''].filter(Boolean);
+  const notes = [result.timedOut ? 'превышено время' : '', result.signal ? `убит сигналом ${result.signal}` : '', result.truncated ? 'вывод обрезан' : ''].filter(Boolean);
   // Ненулевой код — это упавшие тесты, а не ошибка инструмента: ответ ok, но с кодом.
   const passed = result.code === 0 && !result.timedOut;
 
@@ -2782,6 +2782,9 @@ async function terminalRunForeground(ctx: ToolContext, args: Record<string, unkn
   const output = full ? trimCommandTail(ctx, condensed, full) : clipTail(ctx, 'terminal', condensed);
   const notes: string[] = [];
   if (result.timedOut) notes.push('превышено время выполнения');
+  // Пустой код без причины агент читает как сбой связи: «код выхода —» в трёх
+  // живых вызовах `python3 …` был убит сигналом, а не сломанным инструментом.
+  else if (result.signal) notes.push(`убит сигналом ${result.signal}`);
   if (result.truncated) notes.push('вывод обрезан');
 
   return {

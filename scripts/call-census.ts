@@ -19,6 +19,10 @@
  * процентам.
  *
  * Запуск: npx tsx scripts/call-census.ts [каталог-бесед]
+ *
+ * Не путать с `scripts/measure-terminal-usage.py`: тот считает, КАК зовут
+ * `terminal` (cd/pipe/read — для З1), а этот — ЧТО вообще зовут и с какими
+ * аргументами (для решения по схемам и ростру).
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
