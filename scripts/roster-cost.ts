@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from '../src/shared/tools';
-import { ROSTER_TOOLS, toolPresetAllows } from '../src/shared/tool-presets';
+import { ROSTER_TOOLS, WIDENED_TOOLS, toolPresetAllows } from '../src/shared/tool-presets';
 
 const specOf = (name: string) => AGENT_TOOLS.find((tool) => tool.name === name)!;
 const schemaTokens = (name: string) => estimateTextTokens(JSON.stringify(toOpenAiTools([specOf(name)])));
@@ -28,7 +28,11 @@ console.log(
   `auto: схем ${auto.length} — ${withSchemas} токенов; ростер — ${ROSTER_TOOLS.length} имён в ${rosterLine} токенах`,
 );
 console.log('\nцена схемы каждого ростера:');
-const costs = ROSTER_TOOLS.map((name) => ({ name, tokens: schemaTokens(name) })).sort((a, b) => b.tokens - a.tokens);
+// Докачиваемые по цене (`WIDENED_TOOLS`) считаем рядом: у них нет строки в
+// ростере, но цена та же — схема, которая поедет после первого вызова.
+const costs = [...new Set([...ROSTER_TOOLS, ...WIDENED_TOOLS])]
+  .map((name) => ({ name, tokens: schemaTokens(name) }))
+  .sort((a, b) => b.tokens - a.tokens);
 for (const row of costs) console.log(`  ${row.name.padEnd(14)} ${String(row.tokens).padStart(4)}`);
 
 const file = process.argv[2] ?? join(homedir(), '.config/chui-ide/telemetry/runs.jsonl');

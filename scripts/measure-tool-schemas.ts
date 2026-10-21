@@ -6,10 +6,24 @@
  */
 import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from '../src/shared/tools';
-import { TOOL_PRESETS, toolPresetAllows, type ToolPresetId } from '../src/shared/tool-presets';
+import {
+  TOOL_PRESETS,
+  WIDENED_TOOLS,
+  isRosterTool,
+  toolPresetAllows,
+  type ToolPresetId,
+} from '../src/shared/tool-presets';
 
+/**
+ * Схемы набора — как их отправляет service: ростер и `WIDENED_TOOLS` вычтены.
+ * Без вычета замер показывал бы цену схем, которых в запросе нет (было 4 585
+ * «схем полного», а едет 24 инструмента, а не 42).
+ */
 function toolsForPreset(preset: ToolPresetId) {
-  return AGENT_TOOLS.filter((spec) => toolPresetAllows(preset, spec.name));
+  return AGENT_TOOLS.filter(
+    (spec) =>
+      toolPresetAllows(preset, spec.name) && !isRosterTool(preset, spec.name) && !WIDENED_TOOLS.includes(spec.name),
+  );
 }
 
 const rows: { name: string; tools: number; tokens: number }[] = [];

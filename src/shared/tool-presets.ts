@@ -195,11 +195,23 @@ export const ROSTER_TOOLS: readonly string[] = [
   'web',
   // `agents` без action — не подсказка: чем помочь, видно только из значений action.
   'agents',
-  // Редкие в обычном прогоне, и форма видна из строки: `terminal(action: …)`,
-  // `git_write(action: stage|commit|…)`. Схема каждого — 210–300 токенов на шаг.
-  'terminal',
-  'git_write',
 ];
+
+/**
+ * Что НЕ едет строкой, хотя в набор входит: у этих инструментов схема
+ * докачивается при первом вызове (`widen` в service).
+ *
+ * Почему исключение: у них много `action` (у `git_write` — восемь), и строка
+ * перечисляла их все — весь роутер «Авто» стоил 135 токенов на каждом шаге.
+ * Схема же нужна только тогда, когда инструмент зовут: провал кэша префикса
+ * один, а дальше схема лежит в неизменяемом начале запроса. Строка честнее
+ * только для инструмента, который зовут каждый шаг, — таким остаётся `read`.
+ *
+ * Мера — доля прогона: `terminal` зовётся раз в 3 шага и всё равно докачивается
+ * один раз; `read` каждый шаг — и его схема едет сразу. `mcp` сюда же: список
+ * серверов меняется между прогонами, и строка про него врёт.
+ */
+export const WIDENED_TOOLS: readonly string[] = ['terminal', 'git_write', 'mcp'];
 
 /** Варианты от полного к самому узкому: в списке идут именно так. */
 export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
@@ -215,9 +227,9 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     // выполняется сразу. Схема при этом в набор не вернётся: `widen` касается того,
     // чего в этом списке нет.
     //
-    // Сверх общего ростера — `mcp`: его схема и так появляется только при живом
-    // сервере, а строка ростера бесполезна без адреса.
-    except: ['mcp', ...ROSTER_TOOLS],
+    // `mcp`, `terminal` и `git_write` — в `WIDENED_TOOLS`: строка у них вышла
+    // дороже собственной схемы (много `action`), а зовут их не каждый шаг.
+    except: [...WIDENED_TOOLS, ...ROSTER_TOOLS],
   },
   {
     id: 'full',
@@ -226,10 +238,10 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     // «Без ограничения» — про права, а не про цену: группы берутся все (забытого
     // в группе не потеряем), но редкое и простое уходит в тот же ростер, что и в
     // «Авто». Способность остаётся: вызов по имени выполняется здесь сразу, без
-    // расширения набора.
+    // расширения набора (поэтому `widen` в этом наборе нет).
     hint: `Всё, что может эта сборка; редкое и простое — по имени (≈${fullSetTokens()} токенов схем в каждом запросе)`,
     groups: null,
-    except: ROSTER_TOOLS,
+    except: [...WIDENED_TOOLS, ...ROSTER_TOOLS],
   },
   {
     id: 'edit',
@@ -244,6 +256,10 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     icon: 'eye',
     hint: 'Чтение проекта и git, прогон проверок; изменений нет',
     groups: ['core', 'read', 'verify', 'git-read', 'work'],
+    // `mcp` вычтён через `WIDENED_TOOLS`, но набором он разрешён — снимаем прямым
+    // исключением: иначе вызов по имени поднял бы живой сервер из набора чтения,
+    // который этот сервер не обещал.
+    except: ['mcp'],
   },
   {
     id: 'minimal',
@@ -314,7 +330,11 @@ export function rosterNames(preset: ToolPresetId): readonly string[] {
   const names = new Set<string>(spec.except ?? []);
   for (const group of TOOL_GROUPS) {
     if (spec.groups !== null && !spec.groups.includes(group.id)) continue;
-    for (const name of group.names) if (ROSTER_TOOLS.includes(name)) names.add(name);
+    for (const name of group.names) {
+      // `WIDENED_TOOLS` узких наборов тоже едут строкой: их `action` стоят дороже
+      // собственного имени, а расширять набор там нечем (`widen` только у «Авто»).
+      if (ROSTER_TOOLS.includes(name) || WIDENED_TOOLS.includes(name)) names.add(name);
+    }
   }
   return [...names];
 }
@@ -375,11 +395,15 @@ export function toolPresetNote(preset: ToolPresetId): string {
   // упрётся в «нет такого инструмента» и пойдёт обходным путём там, где
   // достаточно назвать нужное.
   if (spec.widen) {
+    // `terminal`, `git_write`, `mcp` в ростер не названы нарочно: у них много
+    // `action` (у `git_write` — восемь), и перечень `action: a|b|c…` стоил 135
+    // токенов на каждом шаге прогона — больше, чем одна докачка схемы. Модели
+    // достаточно знать, что спрятанное зовётся по имени и форма видна из схемы.
     const roster = rosterLine(rosterNames(preset));
     return (
       `Набор инструментов: «${spec.label}» (${labels}). Скрытого в нём нет запрета: нужен ` +
       'инструмент, которого не видно в списке, — вызови его по имени, он выполнится, и ' +
-      `спрашивать человека не нужно.${roster}`
+      `спрашивать человека не нужно; форма станет видна из схемы после вызова.${roster}`
     );
   }
   const roster = rosterLine(rosterNames(preset));

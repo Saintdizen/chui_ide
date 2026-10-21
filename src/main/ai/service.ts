@@ -163,6 +163,7 @@ import {
   toolPresetNote,
   toolPresetSpec,
   isRosterTool,
+  WIDENED_TOOLS,
   type ToolPresetId,
 } from '../../shared/tool-presets';
 
@@ -920,12 +921,11 @@ export class AiService {
       ? AGENT_TOOLS.filter(
           (tool) =>
             this.canRun(tool, host, hasSkills) &&
-            // Набор даёт права, а ростер — что из них едет схемой: имя из ростера
-            // разрешено, но в блок `tools` не попадает (его видно строкой).
-            // В плане ростер не действует: там схем и так мало (`PLAN_MODE_TOOLS`),
-            // и это ровно инструменты чтения, которыми план и собирается.
-            toolPresetAllows(toolPreset, tool.name) &&
+            // Набор даёт права, а ростер и `WIDENED_TOOLS` — что из них едет
+            // схемой: первое видно строкой ростера, второе — ничего не видно,
+            // пока не позовут (схему тогда докачивает `widenTools`).
             (planMode || !isRosterTool(toolPreset, tool.name)) &&
+            (planMode || !WIDENED_TOOLS.includes(tool.name)) &&
             // Вне плана «утвердить план» нечего: инструмент живёт только в нём.
             (planMode ? PLAN_MODE_TOOLS.has(tool.name) : tool.name !== 'exit_plan_mode'),
         )
@@ -1090,6 +1090,11 @@ export class AiService {
           // Ростер отсекаем и здесь: расширение — про то, чего в наборе не было,
           // а не про то, что нарочно спрятано в строку.
           !isRosterTool(toolPreset, tool.name) &&
+          // Разница между ростором и `WIDENED_TOOLS`: у первого имя видно строкой
+          // и схема не появится никогда, у второго схемы не видно вовсе — и она
+          // докачивается, как только инструмент позвали. Провал кэша префикса
+          // тут один, а строка подсказки стоила бы на каждом шаге.
+          (!WIDENED_TOOLS.includes(tool.name) || onDemandTools.has(tool.name)) &&
           (toolPresetAllows(toolPreset, tool.name) || onDemandTools.has(tool.name)),
       );
       const next = [...widened, ...external, ...resourceTools];
@@ -1626,6 +1631,9 @@ export class AiService {
         // ради прав — исполняем его и берём в набор со следующего шага.
         let widenedNow = false;
         const hiddenByPreset = !toolPresetAllows(toolPreset, call.name);
+        // Схемы не будет и у инструмента ВНЕ `except`, если он в `WIDENED_TOOLS`:
+        // там его тоже докачиваем после первого вызова (см. `widenTools`).
+        const shownAsSchema = !isRosterTool(toolPreset, call.name) && !WIDENED_TOOLS.includes(call.name);
         // Инструменты из ростера (`except`) выполняются по имени, но в набор не
         // возвращаются. Причина — цена: схема, добавленная один раз, едет в
         // КАЖДОМ следующем запросе прогона (у `terminal` это 344 токена на
@@ -1633,7 +1641,7 @@ export class AiService {
         // провайдер. Ростер даёт имя и обязательные аргументы, свой вызов модель
         // уже видела — повторный вызов по имени обойдётся дешевле.
         const rosterOnly = isRosterTool(toolPreset, call.name);
-        if (hiddenByPreset && widensOnDemand && (!planMode || planApproved)) {
+        if ((hiddenByPreset || !shownAsSchema) && widensOnDemand && (!planMode || planApproved)) {
           const known = AGENT_TOOLS.find((tool) => tool.name === call.name);
           if (known && this.canRun(known, host, hasSkills)) {
             // Пометка и пересборка набора — только когда инструмент появляется

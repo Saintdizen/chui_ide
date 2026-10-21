@@ -9,6 +9,7 @@ import {
   TOOL_PRESETS,
   isRosterTool,
   rosterNames,
+  WIDENED_TOOLS,
   presetToolNames,
   toolPresetNote,
   type ToolPresetId,
@@ -47,11 +48,15 @@ const rows = AGENT_TOOLS.map((tool) => ({
 })).sort((left, right) => right.tokens - left.tokens);
 
 function presetTokens(preset: ToolPresetId): number {
-  // Ростер вычтён — так же, как его вычитает service перед отправкой: иначе отчёт
-  // показывал бы цену схем, которых в запросе нет.
+  // Вычтено то же, что вычитает service перед отправкой: ростер (имя едет
+  // строкой) и `WIDENED_TOOLS` (имени не видно вовсе, схема докачивается при
+  // первом вызове). Иначе отчёт показывал бы цену схем, которых в запросе нет.
   const allowed = presetToolNames(preset);
   const tools = AGENT_TOOLS.filter(
-    (tool) => (allowed === null || allowed.has(tool.name)) && !isRosterTool(preset, tool.name),
+    (tool) =>
+      (allowed === null || allowed.has(tool.name)) &&
+      !isRosterTool(preset, tool.name) &&
+      !WIDENED_TOOLS.includes(tool.name),
   );
   return estimateTextTokens(JSON.stringify(toOpenAiTools(tools)));
 }
@@ -88,10 +93,13 @@ describe('бюджет схем', () => {
     expect(known.size).toBeGreaterThan(15);
   });
 
-  it('набор по умолчанию дешевле полного хотя бы на пятую часть', () => {
+  // Схемы «Авто» и «Все инструменты» различает один инструмент (git_read), а
+  // ростер у обоих общий: ждать здесь пятой части нельзя — экономия «Авто» уже
+  // потрачена на ростер. Сторож держит другое: наборы не съехались по цене.
+  it('набор по умолчанию не дороже полного', () => {
     const full = presetTokens('full');
     const preset = TOOL_PRESETS[0]!;
-    expect(presetTokens(preset.id)).toBeLessThan(full * 0.85);
+    expect(presetTokens(preset.id)).toBeLessThanOrEqual(full);
   });
 
   it('отчёт: вес по семействам и кандидаты на слияние', () => {

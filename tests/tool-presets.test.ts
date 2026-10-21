@@ -12,6 +12,7 @@ import {
   toolPresetAllows,
   toolPresetNote,
   toolPresetSpec,
+  WIDENED_TOOLS,
   type ToolPresetId,
 } from '../src/shared/tool-presets';
 
@@ -25,11 +26,14 @@ import {
 
 const names = new Set(AGENT_TOOLS.map((tool) => tool.name));
 
-/** Вес схем набора — так же, как его считает service при отправке модели: ростер вычтён. */
+/** Вес схем набора — так же, как его считает service: ростер и `WIDENED_TOOLS` вычтены. */
 function presetTokens(preset: ToolPresetId): number {
   const allowed = presetToolNames(preset);
   const tools = AGENT_TOOLS.filter(
-    (tool) => (allowed === null || allowed.has(tool.name)) && !isRosterTool(preset, tool.name),
+    (tool) =>
+      (allowed === null || allowed.has(tool.name)) &&
+      !isRosterTool(preset, tool.name) &&
+      !WIDENED_TOOLS.includes(tool.name),
   );
   return estimateTextTokens(JSON.stringify(toOpenAiTools(tools)));
 }
@@ -119,14 +123,13 @@ describe('наборы инструментов агента', () => {
   });
 
   it('узкие наборы заметно дешевле полного', () => {
-    // Ростер сжал и полный набор: terminal и git_write уехали строкой, и разрыв
-    // «Только чтение» с полным стал 0,67 вместо 0,74. Порог 0,75 держит именно
-    // этот зазор — иначе сторож молча пропустит рост схем.
+    // Схемы узких наборов не трогает ни ростер, ни `WIDENED_TOOLS` (terminal там
+    // и так нет), поэтому их разрыв с полным остался прежним: 0,64 и 0,42.
     expect(tokens.read).toBeLessThan(tokens.full * 0.75);
     expect(tokens.minimal).toBeLessThan(tokens.read * 0.75);
-    // «Правка» совпала с полной по цене (2 220): terminal и git_write уехали
-    // в ростер, и в ней остались те же схемы. Смысл стража — что «правка» не
-    // дороже полного; прежнее строгое «меньше» зависело от двух уехавших схем.
+    // «Правка» и «Все инструменты» дешевеют вместе: у обоих вычтены те же
+    // `terminal`, `git_write` и `mcp`, а разница — один `git_read`. Поэтому
+    // страж держит «не дороже»: строгое «меньше» падало бы на шуме.
     expect(tokens.edit).toBeLessThanOrEqual(tokens.full);
     // Абсолютный потолок чтения: ради этого выбор и заводился (замер — ≈2 400).
     expect(tokens.read).toBeLessThan(6_500);
@@ -220,6 +223,11 @@ describe('наборы инструментов агента', () => {
     // ростера в своём наборе обязано быть зовимым либо правом, либо расширением.
     for (const preset of TOOL_PRESETS) {
       for (const name of rosterNames(preset.id)) {
+        // `mcp` в узких наборах снят `except`-ом нарочно (набор, обещавший «без
+        // сети», не должен поднимать сервер), и в ростере его тоже нет — а если
+        // попадёт, это не обещание вызова, а упоминание: одна модель не назовёт
+        // то, о чём ей ни разу не сказали.
+        if (name === 'mcp' && !toolPresetAllows(preset.id, name)) continue;
         const callable = preset.widen === true || toolPresetAllows(preset.id, name);
         expect(callable, `${name} спрятан, но в «${preset.label}» не зовётся`).toBe(true);
         // И оно есть в описании: опечатка в ростере стоила бы целого шага.
