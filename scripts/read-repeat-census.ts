@@ -8,7 +8,8 @@
  *  - виды чтений (первое, продолжение, точный повтор, перекрытие, перечитывание);
  *  - сколько токенов повтора пришло сразу после `terminal` — цена того, что
  *    непрозрачный вызов помечал покрытие сомнительным (или стирал целиком);
- *  - шелл-чтения внутри `terminal` и сколько из них начинается с `cd <abs> &&`;
+ *  - шелл-чтения внутри `terminal`, сколько из них начинается с `cd <abs> &&` и
+ *    сколько — не чтение, а запись (`cat > x <<EOF`, `sed -i`);
  *  - цену номеров строк `N | ` в выводе `read`.
  *
  * Запуск: npx tsx scripts/read-repeat-census.ts [каталог-бесед]
@@ -33,19 +34,55 @@ const dir = process.argv[2] ?? join(homedir(), '.config/chui-ide/chats');
 
 /** Команды, которыми читают файлы в обход `read`: их вывод покрытие не видит. */
 const SHELL_READ = /^(cat|head|tail|sed|grep|rg|awk|less|more|git\s+(?:diff|show))\b/;
+/**
+ * Та же команда, но с записью в файл: `cat > x <<EOF`, `sed -i`, `tee`. Вывод
+ * такой команды пуст или это её же эхо, и покрытие она не портит — отделяем,
+ * иначе они попадают в «шелл-чтения» и завышают цену выхода из `read`.
+ * Редирект ищем вне кавычек: `grep -n '<<EOF' a.ts` — чтение, а `cat > x <<EOF`
+ * — запись, и одной регуляркой этого не различить.
+ */
+function shellWrites(command: string): boolean {
+  if (/\bsed\s+-i|\btee\b/.test(command)) return true;
+  let quoted: string | null = null;
+  for (let i = 0; i < command.length; i += 1) {
+    const char = command[i];
+    if (quoted) {
+      if (char === quoted) quoted = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quoted = char;
+      continue;
+    }
+    if (char === '>') return true;
+    if (char === '<' && command[i + 1] === '<') return true;
+  }
+  return false;
+}
 
 const kinds = new Map<string, { calls: number; tokens: number }>();
 /** Повторы, пришедшие следом за `terminal`/правкой: их и должны снимать штампы. */
 const afterDirty = { calls: 0, tokens: 0 };
 /** Пометки `N | ` в выводе `read`: строка-номер в каждой строке текста. */
 const numbering = { chars: 0 };
-const shell = { calls: 0, tokens: 0, cd: 0, cdTokens: 0 };
+const shell = { calls: 0, tokens: 0, cd: 0, cdTokens: 0, writes: 0 };
 
 function add(key: string, tokens: number): void {
   const row = kinds.get(key) ?? { calls: 0, tokens: 0 };
   row.calls += 1;
   row.tokens += tokens;
   kinds.set(key, row);
+}
+
+/** Команда вызова `terminal`: JSON-разбор, а не регулярка по сырым аргументам. */
+function commandOf(raw: string): string {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    const command = (parsed as { command?: unknown } | null)?.command;
+    return typeof command === 'string' ? command : '';
+  } catch {
+    return '';
+  }
 }
 
 function rangeOf(raw: string): { from: number; to: number; whole: boolean } {
@@ -82,14 +119,23 @@ for (const file of readdirSync(dir).filter((name) => name.endsWith('.json'))) {
 
       if (name === 'terminal') {
         dirty = true;
-        const command = /"command"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(raw)?.[1] ?? '';
+        // Разбираем аргументы как JSON, а не ищем `"command"` регуляркой по сырому
+        // тексту: иначе heredoc внутри скрипта (`python3 - <<'PY' … cd … &&`) даёт
+        // ложные шелл-чтения — в замере таких оказалось 12 из 51.
+        const command = commandOf(raw);
         const real = command.replace(/^cd\s+\S+\s*&&\s*/, '');
-        if (SHELL_READ.test(real.trim())) {
-          shell.calls += 1;
-          shell.tokens += tokens;
-          if (real !== command) {
-            shell.cd += 1;
-            shell.cdTokens += tokens;
+        const body = real.trim();
+        if (SHELL_READ.test(body)) {
+          if (shellWrites(body)) {
+            // Читалка есть, но результат уходит в файл (`cat > x <<EOF`): чтения нет.
+            shell.writes += 1;
+          } else {
+            shell.calls += 1;
+            shell.tokens += tokens;
+            if (real !== command) {
+              shell.cd += 1;
+              shell.cdTokens += tokens;
+            }
           }
         }
         continue;
@@ -143,7 +189,8 @@ console.log(
 );
 console.log(
   `\nШелл-чтения в terminal: ${shell.calls} выз. ${shell.tokens} ток., из них с ведущим ` +
-    `\`cd … &&\`: ${shell.cd} (${shell.cdTokens} ток.)`,
+    `\`cd … &&\`: ${shell.cd} (${shell.cdTokens} ток.); из них отсеяно как запись, ` +
+    `а не чтение (\`cat > x <<EOF\`, \`sed -i\`): ${shell.writes}`,
 );
 const numberTokens = Math.round(numbering.chars / 4);
 console.log(
