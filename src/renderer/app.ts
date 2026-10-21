@@ -66,6 +66,7 @@ import {
   planAmend,
   planCheckout,
   planCommitSave,
+  planPush,
   prepareDiscard,
   prepareRename,
   trackMoves,
@@ -5106,6 +5107,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   define(
     { id: 'git.push', title: 'Отправить коммиты (push)', category: 'Git', enabled: () => git.isRepository },
     async () => {
+      // Счётчики считает main: без них push уходил «в пустоту» (всё отправлено) или
+      // отваливался отказом non-fast-forward вместо понятного «сначала влейте».
+      const repository = git.repository;
+      if (!repository) return;
+      const plan = planPush(repository.ahead, repository.behind);
+      if (plan === 'nothing') {
+        showToast('Отправлять нечего: коммитов впереди нет');
+        return;
+      }
+      if (plan === 'rejected') {
+        showToast('На удалённой ветке есть чужие коммиты: сначала влейте их (pull)', 'error');
+        return;
+      }
       const result = await git.push();
       showToast(`push: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
     },

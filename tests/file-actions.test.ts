@@ -9,6 +9,7 @@ import {
   planAmend,
   planCheckout,
   planCommitSave,
+  planPush,
   planCommitStage,
   prepareDiscard,
   prepareRename,
@@ -258,6 +259,32 @@ describe('planCheckout', () => {
   it('файлы «только чтение» остаются в списке, какой бы ни была настройка', () => {
     expect(planCheckout(dirty, false).blocked).toEqual(['/src/b.ts']);
     expect(planCheckout(dirty, true).blocked).toEqual(['/src/b.ts']);
+  });
+});
+
+describe('planPush', () => {
+  it('новые коммиты есть — отправляем', () => {
+    expect(planPush(2, 0)).toBe('push');
+  });
+
+  it('впереди пусто — сеть не трогаем', () => {
+    expect(planPush(0, 0)).toBe('nothing');
+  });
+
+  it('чужие коммиты — сначала pull, даже если свои тоже есть', () => {
+    expect(planPush(1, 1)).toBe('rejected');
+    expect(planPush(0, 3)).toBe('rejected');
+  });
+
+  it('force не выводится никогда: ни один счетчик не даёт зелёного света на перезапись', () => {
+    for (const [ahead, behind] of [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+      [5, 5],
+    ] as const) {
+      expect(['push', 'nothing', 'rejected']).toContain(planPush(ahead, behind));
+    }
   });
 });
 
