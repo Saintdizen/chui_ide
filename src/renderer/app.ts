@@ -67,7 +67,6 @@ import {
   collectRunTargets,
   entryLine,
   nodeCoverageTarget,
-  nodeInstallTarget,
   pytestCoverageTarget,
   type RunTarget,
   type RunnableFile,
@@ -80,6 +79,7 @@ import { formatEngine, formatToolNames, type FormatEngine } from '../shared/form
 import { codeActionKindLabel, type CodeActionItem } from '../shared/lsp-code-actions';
 import { refactorLabel, type RefactorAction } from '../shared/lsp-refactor';
 import { installLanguageOf, installMenuItems, installSuggestions, objectsWord } from '../shared/import-install';
+import { createInstallActions } from './core/install-actions';
 import { isNodeLanguage } from '../shared/languages';
 import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
 import { surroundOptions } from './editor/input/surround';
@@ -2998,79 +2998,23 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * Поставить пакеты в окружение проекта и перепроверить импорты.
    * Один путь для трёх входов: команда, кнопка в попапе и быстрая правка.
    */
-  const installPythonPackages = async (packages: string[], requirements = false): Promise<void> => {
-    if (!workspace.root) {
-      showToast('Проект не открыт', 'error');
-      return;
-    }
-    showToast(packages.length > 0 ? `Ставлю: ${packages.join(', ')}…` : 'Устанавливаю зависимости…');
-    try {
-      const result = await rpc.stream('python.install', { packages, requirements }, () => undefined);
-      showToast(result.installed.length > 0 ? `Готово: ${result.installed.join(', ')}` : 'Нечего ставить');
-      // Пакеты появились — подчёркнутые импорты должны это увидеть.
-      importChecker.refresh();
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  };
-
-  const installRequirements = (): Promise<void> => installPythonPackages([], true);
-
-  /**
-   * Поставить пакеты Node. Идёт в терминал, как и задачи проекта: вывод
-   * `npm install` длинный, его читают и прерывают руками, а не в тосте.
-   */
-  const installNodePackages = async (packages: string[]): Promise<void> => {
-    if (!tools.get().root) {
-      showToast('Проект не открыт', 'error');
-      return;
-    }
-    await runTarget(nodeInstallTarget(tools.get(), packages));
-    // Пакеты появились — подчёркнутые импорты должны это увидеть.
-    importChecker.refresh();
-  };
-
-  /** Запомнить интерпретатор для этого проекта (пусто — вернуться к общему). */
-  const setProjectInterpreter = async (command: string): Promise<void> => {
-    const root = workspace.root;
-    if (!root) return;
-    const pythonByRoot = { ...settings.run.pythonByRoot };
-    if (command) pythonByRoot[root] = command;
-    else delete pythonByRoot[root];
-    await rpc.request('settings.update', { run: { pythonByRoot } });
-    // Инструменты и кнопка запуска пересчитываются сами по push-событию настроек
-    // (см. `applySettings`): здесь это делать не нужно.
-  };
-
-  /**
-   * Указать уже созданное окружение на диске: своё, вне проекта, общее на несколько
-   * проектов. Поиск в проекте такое не находит (`findEnvironments`), поэтому папку
-   * выбирает человек, а main проверяет, окружение ли это, и отдаёт интерпретатор.
-   *
-   * Проверка обязательна: в диалоге папок легко указать соседнюю — и проект тихо
-   * остался бы на прежнем питоне, а причину искали бы в коде.
-   */
-  const pickExistingVenv = async (): Promise<void> => {
-    const picked = await rpc.request('dialog.pickFolder', { title: 'Папка виртуального окружения' });
-    if (!picked.path) return;
-    const found = await rpc.request('python.venvAt', { path: picked.path });
-    const environment = found.environment;
-    if (!environment) {
-      showToast(found.reason ?? 'В выбранной папке нет виртуального окружения', 'error');
-      return;
-    }
-    if (workspace.root) {
-      await setProjectInterpreter(environment.python);
-    } else {
-      // Проекта нет — интерпретатор остаётся общим: выбирать «для проекта» нечего.
-      await rpc.request('settings.update', { run: { pythonPath: environment.python } });
-    }
-    showToast(`Интерпретатор: ${environment.label}`);
-    // Подсказки подняты со старым интерпретатором — перезапускаем: у нового окружения
-    // может найтись и свой pylsp.
-    refreshLsp();
-    void pythonEnvView?.refresh();
-  };
+  const install = createInstallActions({
+    rpc,
+    toast: showToast,
+    settings: () => settings,
+    root: () => workspace.root,
+    projectTools: () => tools.get(),
+    runInTerminal: (target) => runTarget(target),
+    refreshImports: () => importChecker.refresh(),
+    onInterpreterChanged: () => {
+      // Подсказки подняты со старым интерпретатором — перезапускаем: у нового
+      // окружения может найтись и свой pylsp.
+      refreshLsp();
+      void pythonEnvView?.refresh();
+    },
+  });
+  const { installPythonPackages, installRequirements, installNodePackages, setProjectInterpreter, pickExistingVenv } =
+    install;
 
   /* ── реестр команд ─────────────────────────────────────────────────────── */
 
