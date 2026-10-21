@@ -12,6 +12,24 @@
 
 import type { ImportRef } from './imports';
 
+/** Пункт меню быстрой правки. Структура та же, что у `CommandItem` реестра команд. */
+export interface InstallMenuItem {
+  id: string;
+  title: string;
+  category: string;
+  run: () => void;
+}
+
+/**
+ * Язык, который умеет «поставить пакет»: для него быстрая правка переводит
+ * имя модуля в имя пакета и зовёт менеджер.
+ */
+export function installLanguageOf(languageId: string): { python: boolean } | null {
+  if (languageId === 'python') return { python: true };
+  if (languageId === 'javascript' || languageId === 'typescript') return { python: false };
+  return null;
+}
+
 /** Что предложить поставить: модуль, из-за которого подняли, и имя пакета. */
 export interface InstallSuggestion {
   /** Имя, как написано в импорте (`yaml`, `zod`). */
@@ -46,4 +64,59 @@ export function installSuggestions(
   }
 
   return suggestions;
+}
+
+/**
+ * Строки файла, которых касается выделение.
+ *
+ * Заменяет то, что раньше считали в `app.ts` для двух быстрых правок: «поставить
+ * пакет» по диапазону выделения. Позиции — из выделения редактора (1-based),
+ * поэтому перевод в номера строк отдельным правилом: иначе граница выделения
+ * съезжает на строку при каждом подпакете.
+ */
+export function linesInRange(startLine: number, endLine: number, endColumn: number): Set<number> {
+  const lines = new Set<number>();
+  const first = Math.max(1, Math.min(startLine, endLine));
+  const last = Math.max(startLine, endLine);
+  // Выделение до начала строки значит «строка не затронута»: конец выделения
+  // ровно на её нулевом столбце — это место ПЕРЕД первым символом.
+  const stop = endColumn <= 1 && last > first ? last - 1 : last;
+  for (let line = first; line <= stop; line += 1) lines.add(line);
+  return lines;
+}
+
+/**
+ * Пункты меню для предложений «поставить пакет»: одно действие на пакет.
+ *
+ * Живёт здесь, а не в `app.ts`, потому что это подпись, а не поведение:
+ * что написать в меню для Python (`pip`) и для Node (`npm`), решает тот же
+ * модуль, что решает, какие пакеты предлагать. Как ставить — знает вызывающий
+ * (`installPackage` он получает функцией).
+ */
+export function installMenuItems(
+  suggestions: readonly InstallSuggestion[],
+  python: boolean,
+  installPackage: (pkg: string, python: boolean) => void,
+): InstallMenuItem[] {
+  return suggestions.map((suggestion) => ({
+    id: `install:${suggestion.package}@${python ? 'pip' : 'npm'}`,
+    title: python ? `Установить пакет ${suggestion.package} (pip)` : `Установить пакет ${suggestion.package} (npm)`,
+    category: python ? 'Python' : 'Node',
+    run: () => installPackage(suggestion.package, python),
+  }));
+}
+
+/**
+ * Слово к числу файлов и папок в корзине: 1 объект, 2 объекта, 5 объектов.
+ *
+ * Своё склонение, а не `plural` из `run-log`: там слово возвращается вместе с
+ * числом, а здесь нужна подстановка в фразу (`… ${n} ${objectsWord(n)}?`).
+ */
+export function objectsWord(count: number): string {
+  const tail = count % 100;
+  if (tail >= 11 && tail <= 14) return 'объектов';
+  const last = count % 10;
+  if (last === 1) return 'объект';
+  if (last >= 2 && last <= 4) return 'объекта';
+  return 'объектов';
 }

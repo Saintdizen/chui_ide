@@ -68,11 +68,10 @@ import {
   entryLine,
   nodeCoverageTarget,
   nodeInstallTarget,
-  nodeTestsTarget,
   pytestCoverageTarget,
-  pytestTarget,
   type RunTarget,
   type RunnableFile,
+  testTargetOf,
 } from './core/run-config';
 import { isNodeTestFile, isPythonTestFile, type ProjectScan } from '../shared/project-scan';
 import { findRunnableTests } from '../shared/python-tests';
@@ -80,7 +79,8 @@ import { detectNodeTestRunner, findRunnableNodeTests, type NodeTestRunner } from
 import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
 import { codeActionKindLabel, type CodeActionItem } from '../shared/lsp-code-actions';
 import { refactorLabel, type RefactorAction } from '../shared/lsp-refactor';
-import { installSuggestions } from '../shared/import-install';
+import { installLanguageOf, installMenuItems, installSuggestions, objectsWord } from '../shared/import-install';
+import { isNodeLanguage } from '../shared/languages';
 import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
 import { surroundOptions } from './editor/input/surround';
 import { semanticFoldRanges } from './editor/highlight/folds';
@@ -627,16 +627,20 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    */
   const importInstallActions = (path: string, position: { line: number; column: number }): PopupMenuItem[] => {
     const language = documents.get(path)?.languageId ?? '';
-    const python = language === 'python';
-    if (!python && language !== 'javascript' && language !== 'typescript') return [];
+    const installable = installLanguageOf(language);
+    if (!installable) return [];
+    const python = installable.python;
     const refs = importChecker.missingFor(path);
     if (refs.length === 0) return [];
     // Ориентируемся на строку под курсором: имя модуля берём из импорта, а не из позиции.
     const suggestions = installSuggestions(refs, new Set([position.line]), python ? packageForModule : undefined);
-    return suggestions.map((item) => ({
-      label: `Установить пакет «${item.package}»`,
+    const install = (pkg: string, forPython: boolean): void => {
+      void (forPython ? installPythonPackages([pkg]) : installNodePackages([pkg]));
+    };
+    return installMenuItems(suggestions, python, install).map((item) => ({
+      label: item.title,
       hint: 'быстрое исправление',
-      onSelect: () => void (python ? installPythonPackages([item.package]) : installNodePackages([item.package])),
+      onSelect: item.run,
     }));
   };
 
@@ -1184,9 +1188,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    */
   let pytestDisabledPlugins: string[] = [];
 
-  /** Язык, который исполняется Node: у него свои тесты и свои инструменты. */
-  const isNodeLanguage = (languageId: string): boolean => languageId === 'javascript' || languageId === 'typescript';
-
   /** Раннер тестов Node: объявленный в проекте, иначе встроенный `node --test`. */
   const nodeRunner = (): NodeTestRunner | null =>
     detectNodeTestRunner(tools.get().testRunner, projectScan?.testFiles ?? []);
@@ -1195,15 +1196,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * Цель прогона тестов панели: селектор узла, а `null` — все тесты проекта. Раннер
    * выбираем по карте проекта: у Python это pytest, у Node — раннер проекта.
    */
-  const testTargetFor = (selector: string | null, options: { report?: boolean } = {}): RunTarget => {
-    const node = nodeRunner();
-    if (node) return nodeTestsTarget(tools.get(), node, selector, { ...options, platform: info.platform });
-    return pytestTarget(tools.get(), selector, {
+  const testTargetFor = (selector: string | null, options: { report?: boolean } = {}): RunTarget =>
+    testTargetOf(tools.get(), nodeRunner(), selector, {
       ...options,
       platform: info.platform,
       disabledPlugins: pytestDisabledPlugins,
     });
-  };
 
   /**
    * Куда прогон с покрытием пишет JSON-отчёт. Путь — во временном каталоге (даёт main):
@@ -3433,16 +3431,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     explorer.scheduleRefresh();
     showToast(`В корзине: ${basename(path)}`);
   });
-
-  /** Слово к числу: 1 объект, 2 объекта, 5 объектов. */
-  const objectsWord = (count: number): string => {
-    const tail = count % 100;
-    if (tail >= 11 && tail <= 14) return 'объектов';
-    const last = count % 10;
-    if (last === 1) return 'объект';
-    if (last >= 2 && last <= 4) return 'объекта';
-    return 'объектов';
-  };
 
   define({ id: 'file.deleteMany', title: 'Удалить выделенное в корзину', category: 'Файл' }, async (paths) => {
     if (!Array.isArray(paths)) return;
@@ -6521,9 +6509,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   editors.onTestMarker(({ path, selector, name }) => {
     const node = isNodeLanguage(documents.get(path)?.languageId ?? '') ? nodeRunner() : null;
     void runTarget(
-      node
-        ? nodeTestsTarget(tools.get(), node, selector, { platform: info.platform })
-        : pytestTarget(tools.get(), selector, { disabledPlugins: pytestDisabledPlugins }),
+      testTargetOf(tools.get(), node, selector, { platform: info.platform, disabledPlugins: pytestDisabledPlugins }),
     );
     showToast(`Запускаю тест ${name}`);
   });

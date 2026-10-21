@@ -222,6 +222,22 @@ export function pytestTarget(
 }
 
 /**
+ * Цель прогона тестов панели: селектор узла, а `null` — все тесты проекта.
+ *
+ * Раннер Node приходит снаружи (`nodeRunner`): его выбирает тот, кто знает карту
+ * проекта (`null` — Node-раннера нет). Здесь только развилка «pytest или раннер
+ * проекта», одинаковая для кнопки ▶ и для панели тестов.
+ */
+export function testTargetOf(
+  tools: ProjectTools,
+  nodeRunner: NodeTestRunner | null,
+  selector: string | null,
+  options: { report?: boolean; platform?: string; disabledPlugins?: readonly string[] } = {},
+): RunTarget {
+  return nodeRunner ? nodeTestsTarget(tools, nodeRunner, selector, options) : pytestTarget(tools, selector, options);
+}
+
+/**
  * Цель с покрытием: `pytest --cov`. Отдельная от обычного прогона, потому что
  * требует `pytest-cov` в окружении и пишет отчёт после тестов — смешивать их в
  * одной кнопке значило бы гадать, чего ждёт человек.

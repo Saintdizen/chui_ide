@@ -11,6 +11,7 @@ import {
   pytestCoverageTarget,
   pytestRunTargets,
   pytestTarget,
+  testTargetOf,
 } from '../src/renderer/core/run-config';
 
 const tools: ProjectTools = {
@@ -316,6 +317,22 @@ describe('nodeCoverageTarget', () => {
   it('с report дописывает печать кода выхода — по ней панель узнаёт исход', () => {
     expect(nodeCoverageTarget(tools, 'vitest', null, { report: true, platform: 'linux' }).command).toBe(
       'npx vitest run --coverage --coverage.reporter=json; echo "chui-test-result $?"',
+    );
+  });
+});
+
+describe('testTargetOf: развилка «pytest или раннер Node»', () => {
+  it('раннер Node есть — цель Node', () => {
+    expect(testTargetOf(tools, 'vitest', null).command).toContain('vitest run');
+  });
+
+  it('раннера Node нет — цель pytest', () => {
+    expect(testTargetOf(tools, null, null).command).toContain('.venv/bin/python');
+  });
+
+  it('report доходит до выбранной цели', () => {
+    expect(testTargetOf(tools, 'vitest', null, { report: true, platform: 'linux' }).command).toContain(
+      'chui-test-result',
     );
   });
 });

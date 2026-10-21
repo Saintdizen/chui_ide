@@ -287,6 +287,11 @@ export function languageIndent(languageId: string): LanguageIndent | null {
   return BY_ID.get(languageId)?.indent ?? null;
 }
 
+/** Язык, который исполняется Node: у него свои тесты и свои инструменты. */
+export function isNodeLanguage(languageId: string): boolean {
+  return languageId === 'javascript' || languageId === 'typescript';
+}
+
 /** Значок файла: вид для отрисовки и подпись внутри. */
 export function fileIconOf(filePath: string): { kind: FileIconKind; badge: string } {
   const name = basename(filePath);
