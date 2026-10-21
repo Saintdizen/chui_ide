@@ -58,6 +58,14 @@ import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
 import { hasEntries, splitSettingsPatch } from './core/settings-patch';
+import {
+  prepareRename,
+  trackMove,
+  undoMoves,
+  undoRenamePlan,
+  type MoveTrack,
+  type RenamePlan,
+} from './core/file-actions';
 import { projectSymbolAnswer, toProjectSymbols } from './core/project-symbols';
 import { type GitResult, rebaseNotice } from './core/git-notice';
 import {
@@ -3083,45 +3091,51 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     explorer.startCreate('directory');
   });
 
+  // Сценарий по шагам. Порядок не косметика: активность запоминается ДО закрытия
+  // вкладки (иначе активной уже будет соседняя), прежнее имя и число правленных
+  // ссылок — до возврата, откат идёт через те же шаги в обратную сторону.
+  // Решения о порядке — в core/file-actions.ts, здесь только диск и окна.
   define({ id: 'file.rename', title: 'Переименовать', category: 'Файл' }, async (from, to) => {
     if (typeof from !== 'string' || typeof to !== 'string') return undefined;
-    const wasActive = openEditors.active?.path === from;
-    if (openEditors.has(from)) openEditors.close(from);
+    const plan = prepareRename(from, openEditors.active?.path ?? null, openEditors.has(from));
+    if (plan.hadTab) openEditors.close(plan.from);
 
-    const renamed = await rpc.request('workspace.rename', { from, to });
-    // Переименование ломает ссылки на файл — правим их сразу, пока человек ещё
-    // ждёт ответа. Настройкой это можно выключить: тогда останется только то, что
-    // путь в проекте придётся поправить руками.
-    const touched = settings.explorer.updateImportsOnRename
-      ? (
-          await rpc
-            .request('workspace.updateImports', { oldPath: from, newPath: renamed.path })
-            .catch(() => ({ files: [] }))
-        ).files.length
-      : 0;
-    if (wasActive) await openPath(renamed.path);
+    const renamed = await rpc.request('workspace.rename', { from: plan.from, to });
+    const touched = await followRename(plan.from, renamed.path);
+    if (plan.wasActive) await openPath(renamed.path);
     explorer.scheduleRefresh();
+
     showToast(renamedNotice({ name: basename(renamed.path), touched }), 'info', {
       action: {
         label: 'Отменить',
-        run: async () => {
-          // Возвращаем прежнее имя и, если файл был открыт, открываем его там же.
-          await commands.execute('file.close', renamed.path);
-          await rpc.request('workspace.rename', { from: renamed.path, to: from });
-          // Ссылки возвращаются к прежнему имени тем же путём — иначе отмена
-          // переименования оставила бы в проекте ссылки на исчезнувший путь.
-          if (touched > 0) {
-            await rpc
-              .request('workspace.updateImports', { oldPath: renamed.path, newPath: from })
-              .catch(() => undefined);
-          }
-          if (wasActive) await openPath(from);
-          explorer.scheduleRefresh();
-        },
+        run: () => undoRename({ plan, to: renamed.path, touched }),
       },
     });
     return renamed.path;
   });
+
+  // Шаги «переименовал» и «вернул» — рядом с обработчиком, потому что оба знают
+  // порядок: сначала закрыть вкладку, потом трогать диск, иначе редактор будет
+  // держать файл за прежний дескриптор. Настройка updateImportsOnRename гасит
+  // только правку ссылок, само переименование не трогает.
+  const followRename = async (oldPath: string, newPath: string): Promise<number> => {
+    if (!settings.explorer.updateImportsOnRename) return 0;
+    const result = await rpc
+      .request('workspace.updateImports', { oldPath, newPath })
+      .catch(() => ({ files: [] as string[] }));
+    return result.files.length;
+  };
+
+  const undoRename = async (done: { plan: RenamePlan; to: string; touched: number }): Promise<void> => {
+    const back = undoRenamePlan({ from: done.plan.from, to: done.to, touched: done.touched });
+    await commands.execute('file.close', back.from);
+    await rpc.request('workspace.rename', { from: back.from, to: back.to });
+    // Ссылки возвращаются тем же путём — иначе отмена оставила бы в проекте
+    // ссылки на исчезнувший путь.
+    if (back.restoreImports) await followRename(back.from, back.to);
+    if (done.plan.wasActive) await openPath(back.to);
+    explorer.scheduleRefresh();
+  };
 
   define({ id: 'file.delete', title: 'Удалить в корзину', category: 'Файл' }, async (path) => {
     if (typeof path !== 'string') return;
@@ -3183,13 +3197,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
     // Открытые вкладки переезжают вместе с файлом: закрываем и открываем по новому
     // пути. Активную возвращаем на экран — иначе перенос выглядел бы как закрытие.
-    const moved: Array<{ from: string; to: string; active: boolean }> = [];
+    const moved: MoveTrack[] = [];
     for (const step of steps) {
-      const wasActive = openEditors.active?.path === step.from;
+      const track = trackMove(step.from, step.to, openEditors.active?.path ?? null);
       try {
-        if (openEditors.has(step.from)) openEditors.close(step.from);
-        await rpc.request('workspace.rename', { from: step.from, to: step.to });
-        moved.push({ ...step, active: wasActive });
+        if (openEditors.has(track.from)) openEditors.close(track.from);
+        await rpc.request('workspace.rename', { from: track.from, to: track.to });
+        moved.push(track);
       } catch {
         // Имя в целевой папке занято — этот объект пропускаем, остальные переносим.
       }
@@ -3206,9 +3220,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       action: {
         label: 'Отменить',
         run: async () => {
-          for (const step of moved) {
+          // В обратном порядке и с перевёрнутыми рёбрами (undoMoves): откат возвращает
+          // с диска на место, а не пытается перенести ещё раз в ту же сторону.
+          for (const step of undoMoves(moved)) {
             if (openEditors.has(step.to)) openEditors.close(step.to);
-            await rpc.request('workspace.rename', { from: step.to, to: step.from }).catch(() => undefined);
+            await rpc.request('workspace.rename', { from: step.from, to: step.to }).catch(() => undefined);
           }
           for (const step of moved) if (step.active) await openPath(step.from);
           explorer.scheduleRefresh();
