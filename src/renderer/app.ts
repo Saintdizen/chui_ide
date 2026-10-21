@@ -5838,10 +5838,26 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   define(
     { id: 'ai.openInEditor', title: 'Перенести чат в окно редактора', category: 'AI', keybinding: 'Ctrl+Alt+E' },
-    () => showChatTab(),
+    () => {
+      // Без мастера перенос в редактор открывает пустую вкладку чата — и она
+      // остаётся в полосе вкладок, пока её не закроют руками.
+      if (!aiEnabled()) {
+        warnAiDisabled();
+        return;
+      }
+      showChatTab();
+    },
   );
 
-  define({ id: 'ai.backToPanel', title: 'Вернуть чат в боковую панель', category: 'AI' }, () => setChatInEditor(false));
+  // Возврат назад в панель — тоже вход в чат: с выключенным AI он распахнул бы
+  // правую панель с мёртвым чатом взамен свёрнутой.
+  define({ id: 'ai.backToPanel', title: 'Вернуть чат в боковую панель', category: 'AI' }, () => {
+    if (!aiEnabled()) {
+      warnAiDisabled();
+      return;
+    }
+    setChatInEditor(false);
+  });
 
   define({ id: 'ai.explainSelection', title: 'Объяснить выделение', category: 'AI' }, async () => {
     // revealChat сам покажет «AI выключен», но `askAboutSelection` при этом всё равно
@@ -6078,6 +6094,16 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       if (chatInEditor) setChatInEditor(false);
       withoutPersist(() => {
         if (layout.rightVisible) layout.setRightVisible(false);
+      });
+    }
+    // Включили обратно — возвращаем правую панель туда, где её оставил человек
+    // (`rightVisible` в настройках не гасится выше, потому что закрытие было без записи).
+    // Без этого тумблер работал в одну сторону: выключил — чат исчез, включил — тишина.
+    // Возвращаем только при ВКЛЮЧЁННОМ AI и только если чат не в редакторе: иначе
+    // повторный applySettings снова гасил бы панель.
+    if (!previous.ai.enabled && next.ai.enabled && !chatInEditor) {
+      withoutPersist(() => {
+        if (!layout.rightVisible) layout.setRightVisible(next.layout.rightVisible);
       });
     }
     // Языковые серверы включили тумблером в настройках — подхватываем их и греем
