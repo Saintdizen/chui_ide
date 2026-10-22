@@ -99,6 +99,8 @@ export interface ToolOutcome {
    * редактора, ещё понадобится модели целиком.
    */
   applied?: boolean;
+  /** Сколько всего нашлось, если показываем не всё (счёт `grep -c`). */
+  matches?: number;
 }
 
 /**
@@ -467,7 +469,7 @@ const MAX_SEARCH_HITS = 200;
  * Умолчания `limit`: в схеме только «сколько», а само число — здесь. Строчка
  * «(50; 35 с контекстом; 80 файлов)» читалась моделью на каждом шаге и весила
  * больше, чем весь остальной аргумент; поведение от этого не меняется — код и
- * раньше брал то же число, когда модель молчала. Те же числа для людей — в `TOOLS.md`.
+ * раньше брал то же число, когда модель молчала. Числа сами — ниже, в константах.
  */
 /**
  * Сколько совпадений отдаём, если модель не попросила иначе. Двести — потолок,
@@ -1705,6 +1707,9 @@ function searchFlags(args: Record<string, unknown>): Record<string, unknown> {
     isRegex: set.has('r'),
     caseSensitive: set.has('c'),
     filesOnly: set.has('n'),
+    // `k` — «сколько»: как `grep -c`, отдаёт число совпадений одной строкой.
+    // Отдельной буквой, не `c`: `c` уже занят «учитывать регистр».
+    countOnly: set.has('k'),
   };
 }
 
@@ -1832,6 +1837,8 @@ interface SearchRequest {
   context: number;
   limit: number;
   fileLimit: number;
+  /** `grep -c`: нужен счёт совпадений, а не строки — он считается по всему списку. */
+  countOnly?: boolean;
   /** Подпись к ответу, если запрос ослаблен запасной попыткой. */
   note?: string;
 }
@@ -1855,7 +1862,8 @@ async function runSearch(ctx: ToolContext, request: SearchRequest): Promise<{ ou
       // В режиме «только файлы» просим всё, что даст поиск: обход дешев, а число
       // найденных файлов нужно, чтобы назвать остаток. Дорого было отдавать их
       // модели — это решает `fileLimit` ниже.
-      maxResults: filesOnly ? MAX_FIND_FILES : limit * SEARCH_OVERFETCH,
+      // Счёт (`grep -c`) — тоже требование ко всему списку, а не к его видимой части.
+      maxResults: filesOnly || request.countOnly ? MAX_FIND_FILES : limit * SEARCH_OVERFETCH,
     },
     ctx.signal,
   );
@@ -1912,6 +1920,8 @@ async function runSearch(ctx: ToolContext, request: SearchRequest): Promise<{ ou
       detail: detail.length
         ? head + clipText(ctx, 'search', detail).text + tail
         : emptySearchDetail(query, { isRegex, glob, scope }),
+      // Столько всего нашлось, без учёта потолка на файл: `grep -c` печатает это число.
+      matches: result.hits.length,
     },
   };
 }
@@ -1940,7 +1950,18 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
   // В режиме «только файлы» предел считает файлы, а не строки: одна строка на
   // файл, и умолчание там своё (см. DEFAULT_FILES_ONLY_PATHS).
   const fileLimit = Math.min(MAX_FIND_FILES, Math.max(1, wantedLimit ?? DEFAULT_FILES_ONLY_PATHS));
-  const request: SearchRequest = { query, isRegex, caseSensitive, filesOnly, glob, scope, context, limit, fileLimit };
+  const request: SearchRequest = {
+    query,
+    isRegex,
+    caseSensitive,
+    filesOnly,
+    glob,
+    scope,
+    context,
+    limit,
+    fileLimit,
+    countOnly: optionalBoolean(args, 'countOnly') ?? false,
+  };
 
   const first = await runSearch(ctx, request);
   if (!first.empty) return first.outcome;
@@ -3300,6 +3321,11 @@ type LookupCall = {
   tool: 'read' | 'search' | 'list';
   args: Record<string, unknown>;
   label: string;
+  /**
+   * `grep -c`: вместо совпадений нужен только их счёт — его и печатаем.
+   * Разбор при этом остаётся одним и тем же `search`.
+   */
+  countOnly?: boolean;
 };
 
 /**
@@ -3398,18 +3424,88 @@ function commandWords(command: string): string[] | null {
  */
 function asLookupCall(command: string, cwdDir: string): LookupCall | null {
   const tail = takeHeadTail(command);
-  if (shellPipeline(tail.command) || shellSyntax(tail.command)) return null;
-  const call = asPlainLookupCall(tail.command, cwdDir);
-  if (!call || tail.limit === null) return call;
-  // `grep … | head -25` — тот же поиск, только короче: предел есть у `search`.
-  // `head`/`cat` хвостом не отсекаются — они уже читают диапазоном.
-  if (call.tool !== 'search') return null;
-  return { ...call, args: { ...call.args, limit: tail.limit }, label: `${call.label} | head -${tail.limit}` };
+  if (tail.command !== command) return finishLookup(asPlainLookupCall(tail.command, cwdDir), tail.limit);
+  // `команда | grep …`: читалка, чей вывод отфильтрован одной строкой. Это не
+  // скрипт, а тот же `search`, только запрос — из самого `grep`, а папка — из
+  // читалки. Остальные трубы (`| wc -l`, `| sort`) по-прежнему идут в шелл:
+  // счёт и сортировка — работа шелла, у нас для них нет ответа.
+  const piped = splitPipe(command);
+  if (!piped) {
+    if (shellPipeline(command) || shellSyntax(command)) return null;
+    return asPlainLookupCall(command, cwdDir);
+  }
+  if (shellSyntax(piped.left) || shellSyntax(piped.right)) return null;
+  const source = asPlainLookupCall(piped.left, cwdDir);
+  const filter = asPlainLookupCall(piped.right, cwdDir);
+  if (!source || !filter || filter.tool !== 'search') return null;
+  const merged = mergePipedSearch(source, filter);
+  return merged ? finishLookup(merged, null) : null;
 }
 
 /**
- * `команда | head [-n] N` — хвост, который просит урезать вывод. Не труба
- * ради фильтрации: `grep … | grep …` остаётся скриптом и идёт в шелл.
+ * Довесок к разобранной команде: `| head -N` задаёт предел совпадений.
+ * `head`/`cat` хвостом не отсекаются — они уже читают диапазоном.
+ */
+function finishLookup(call: LookupCall | null, limit: number | null): LookupCall | null {
+  if (!call || limit === null) return call;
+  if (call.tool !== 'search') return null;
+  return { ...call, args: { ...call.args, limit }, label: `${call.label} | head -${limit}` };
+}
+
+/**
+ * `левая | правая` — ровно одна труба снаружи кавычек.
+ * null — труб больше одной: `a | b | c` — уже скрипт.
+ */
+function splitPipe(command: string): { left: string; right: string } | null {
+  // Труба внутри кавычек — это `\|` в образце grep, а не конвейер.
+  let quote: string | null = null;
+  let cut = -1;
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (quote) {
+      if (char === '\\') index += 1;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+    else if (char !== '|') continue;
+    // Вторая труба снаружи кавычек — это уже скрипт: разбираем ровно одну.
+    else if (cut >= 0) return null;
+    else cut = index;
+  }
+  if (cut <= 0) return null;
+  const left = command.slice(0, cut).trim();
+  const right = command.slice(cut + 1).trim();
+  return left && right ? { left, right } : null;
+}
+
+/**
+ * `grep` по тексту из трубы — это поиск по файлам, только запрос берётся из
+ * самого `grep`, а область — из левой части. Годится только источник-обход:
+ * `list <папка>` или `search` по папке. По одиночному файлу (`grep x f | grep y`,
+ * `cat f | grep x`) не разбираем: буквальный аналог — поиск по всему проекту, а
+ * это уже другой ответ, чем дал бы шелл.
+ */
+function mergePipedSearch(source: LookupCall, filter: LookupCall): LookupCall | null {
+  // Свой `path` у фильтра главнее непонятно чего: не угадываем.
+  if (filter.args.path !== undefined) return null;
+  if (source.tool !== 'list' && source.tool !== 'search') return null;
+  const folder = typeof source.args.path === 'string' ? source.args.path : null;
+  const glob = source.args.glob ?? filter.args.glob;
+  return {
+    ...filter,
+    args: {
+      ...filter.args,
+      ...(folder ? { path: folder } : {}),
+      ...(glob !== undefined ? { glob } : {}),
+    },
+    label: `${source.label} | ${filter.label}`,
+  };
+}
+
+/**
+ * `команда | head [-n] N` — хвост, который просит урезать вывод. Сюда же не
+ * попадает `grep … | grep …`: эту трубу разбирает `splitPipe` (тот же `search`).
  */
 function takeHeadTail(command: string): { command: string; limit: number | null } {
   // `head -5` и `head -n 5` — одно и то же; и то и другое просто предел.
@@ -3502,8 +3598,9 @@ function asPlainLookupCall(command: string, cwdDir: string): LookupCall | null {
       if (word.startsWith('--')) return null;
       if (word.startsWith('-') && word.length > 1) {
         for (const flag of word.slice(1)) {
-          // `-c`, `-o`, `-v` и прочие меняют смысл поиска, а не только его вид.
-          if (!'niIrRFEl'.includes(flag)) return null;
+          // `-o`, `-v` и прочие меняют смысл поиска, а не только его вид.
+          // `-c` — исключение: это тот же поиск, но модели нужен счёт, а не строки.
+          if (!'niIrRFElc'.includes(flag)) return null;
           flags.add(flag);
         }
         continue;
@@ -3525,6 +3622,7 @@ function asPlainLookupCall(command: string, cwdDir: string): LookupCall | null {
         ...(glob ? { glob } : {}),
       },
       label: program,
+      ...(flags.has('c') ? { countOnly: true } : {}),
     };
   }
 
@@ -3587,6 +3685,17 @@ async function lookupOutcome(ctx: ToolContext, call: LookupCall): Promise<ToolOu
           detail: `${covered.path}: строки ${covered.from}–${covered.to} уже есть выше в ветке — не повторяю.`,
         };
       }
+    }
+    if (call.countOnly && call.tool === 'search') {
+      // `grep -c` отдаёт число совпадений и ничего больше. Считаем по тому, что
+      // вернул поиск: потолок на файл (`MAX_HITS_PER_FILE`) мог срезать лишнее,
+      // поэтому значение берём у `matches`, а не из текста результата.
+      const found = outcome.matches ?? 0;
+      return {
+        ok: true,
+        summary: `${call.label} → search · ${outcome.matches ?? '?'} совпадений`,
+        detail: found === 0 ? '0' : `${found}`,
+      };
     }
     return {
       ...outcome,

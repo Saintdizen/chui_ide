@@ -145,7 +145,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         // а все вместе — 28 токенов в каждом запросе.
         flags: {
           type: 'string',
-          description: 'Any of: r regex, c case-sensitive, n names only (default: substring).',
+          description: 'Any of: r regex, c case-sensitive, n names, k count (default: substring).',
         },
         glob: { type: 'string', description: 'Mask.' },
         path: {

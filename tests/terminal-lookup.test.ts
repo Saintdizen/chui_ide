@@ -155,16 +155,48 @@ describe('всё остальное по-прежнему идёт в шелл',
   });
 
   it('труба или перенаправление — это уже скрипт', async () => {
-    for (const command of ['grep row1 src/app.ts | grep -c row', 'grep иголка src > out.txt', 'cat a.ts && cat b.ts']) {
+    for (const command of ['grep иголка src > out.txt', 'cat a.ts && cat b.ts', 'grep foo src | wc -l']) {
       const box = sandbox();
       await run(box, command);
       expect(box.calls.length, command).toBe(1);
     }
   });
 
-  it('`-c` меняет смысл поиска — в шелл', async () => {
+  it('`grep … | grep …` — одна труба, разбирается в один search', async () => {
     const box = sandbox();
-    await run(box, 'grep -c row1 src/app.ts');
+    const outcome = await run(box, 'grep -rn row src | grep row2');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(true);
+    // Оба условия разом: `row` из левой части и `row2` из правой.
+    expect(String(outcome.detail)).toContain('row2');
+    expect(String(outcome.detail)).not.toContain('row1 =');
+    expect(outcome.summary).toContain('grep | grep → search');
+  });
+
+  it('`grep … | grep -c …` — счёт по всему, а не по видимому', async () => {
+    const box = sandbox();
+    const outcome = await run(box, 'grep -rn row src/app.ts | grep -c row1');
+
+    expect(box.calls).toEqual([]);
+    // Строк в app.ts больше, чем потолок на файл (10), а «row1» ловит 11 из них
+    // (row1, row10, row11…): счёт не должен упереться в 10.
+    expect(Number(outcome.detail)).toBeGreaterThan(10);
+  });
+
+  it('`-c` — это тот же search, но ответ — число', async () => {
+    const box = sandbox();
+    const outcome = await run(box, 'grep -c row2 src/app.ts');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(true);
+    expect(Number(outcome.detail)).toBeGreaterThan(0);
+    expect(outcome.summary).toContain('совпадений');
+  });
+
+  it('труба с папкой у фильтра — не гадаем, в шелл', async () => {
+    const box = sandbox();
+    await run(box, 'grep -rn row src | grep row docs');
     expect(box.calls.length).toBe(1);
   });
 
