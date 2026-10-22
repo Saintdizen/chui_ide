@@ -173,9 +173,10 @@ export const ROSTER_TOOLS: readonly string[] = [
   'project_map',
   // Задача — один `prompt`: форма видна из строки ростера.
   'task',
-  // Вся разговорная часть собрана в `mind`: память, вопрос, план, цель,
-  // утверждение плана. Пять имён стоили пяти строк ростера и трёх схем в режиме
-  // плана — теперь одна строка и одна схема. Замер — `tests/token-budget.test.ts`.
+  // «Я» агента: память, вопрос человеку, план, цель, утверждение плана. Схема
+  // (410 ток — самая дорогая) снята: инструмент зовётся раз в прогон, значения
+  // `action` названы строкой ростера, форма — по перечню полей в отказе вызова.
+  // Замер — `tests/token-budget.test.ts`.
   'mind',
   'browser',
   'web',
@@ -371,6 +372,7 @@ const ROSTER_EXTRA: Record<string, readonly string[]> = {
   // Без`query` поиск по беседам отказывает, а без`uid` не назвать прогон: оба
   // поля необязательные, но без них строка ростера не объясняет, чем звать.
   history: ['query', 'uid'],
+  mind: ['text', 'question', 'steps'],
 };
 
 function rosterLine(names: readonly string[]): string {
@@ -430,7 +432,7 @@ export function toolPresetNote(preset: ToolPresetId): string {
     const roster = rosterLine(rosterLineNames(preset));
     return (
       `Набор инструментов: «${spec.label}» (${labels}). Чего нет в списке — зови по имени: ` +
-      `выполнится, и спрашивать человека не нужно; форма вызова — в строке ниже.${roster}`
+      `выполнится, и спрашивать человека не надо; поля формы — из отказа «не задан аргумент».${roster}`
     );
   }
   const roster = rosterLine(rosterNames(preset));

@@ -113,6 +113,25 @@ const ACTION_ALIASES: Readonly<Record<string, string>> = {
   session_trace: 'trace',
 };
 
+/**
+ * Плоская правка (`path` + `oldText` + `newText`) → пакетная (`edits[]`).
+ *
+ * Схема возит одну форму: две параллельные стоили 96 токенов в каждом запросе.
+ * Старые вызовы и привычка «один файл — один якорь» остаются рабочими: адрес
+ * переносится элементом `edits[]`, верхние поля снимаются, чтобы не править
+ * один и тот же якорь дважды.
+ */
+export function packFlatEdit(args: Record<string, unknown>): Record<string, unknown> {
+  const path = typeof args.path === 'string' && args.path.trim() ? args.path : undefined;
+  const hasAnchor = typeof args.oldText === 'string' || typeof args.newText === 'string';
+  if (!path || !hasAnchor || args.edits !== undefined) return args;
+  const { path: _path, oldText, newText, ...rest } = args;
+  const item: Record<string, unknown> = { path };
+  if (oldText !== undefined) item.oldText = oldText;
+  if (newText !== undefined) item.newText = newText;
+  return { ...rest, edits: [item] };
+}
+
 /** Старое имя → правка его аргументов: форма другая, а смысл тот же. */
 const ARGUMENT_REWRITES: Readonly<Record<string, (args: Record<string, unknown>) => Record<string, unknown>>> = {
   // `apply_patch` называл правку «патчами» на двух уровнях: `patches[].patches[]`.
@@ -147,6 +166,13 @@ function rewriteArguments(
 
 /** Незнакомое имя возвращается как есть: чужие (MCP) не наше дело. */
 export function canonicalCall(name: string, rawArguments: string): CanonicalCall {
+  // Своё имя `edit`: схема возит только `edits[]`, а плоская форма
+  // (`path`+`oldText`+`newText`) ещё живёт в старых вызовах и в привычке модели.
+  if (name === 'edit') {
+    const packed = rewriteArguments(rawArguments, packFlatEdit);
+    return { name, arguments: packed, renamed: packed !== rawArguments };
+  }
+
   const target = NAME_ALIASES[name];
   if (!target) return { name, arguments: rawArguments, renamed: false };
 

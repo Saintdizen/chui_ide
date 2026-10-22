@@ -141,9 +141,12 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'text: path, line, match; code: declarations; docs: documentation.',
         },
         query: { type: 'string', description: 'Pattern.' },
-        isRegex: { type: 'boolean', description: 'Regex (default: substring).' },
-        caseSensitive: { type: 'boolean', description: 'Match case.' },
-        filesOnly: { type: 'boolean', description: 'Names only.' },
+        // Три флага строкой: каждый булев флаг стоил каркаса схемы (≈9 ток),
+        // а все вместе — 28 токенов в каждом запросе.
+        flags: {
+          type: 'string',
+          description: 'Any of: r regex, c case-sensitive, n names only (default: substring).',
+        },
         glob: { type: 'string', description: 'Mask.' },
         path: {
           type: 'string',
@@ -294,44 +297,33 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     // `action` снято со схемы вместе с дублями `create`/`move`/`delete`: те же
     // операции есть у `file` и меняют диск одинаково. Старые вызовы с `action`
     // живы — схема их больше не объявляет, а `editAction` делегирует в `file`.
+    // Одна форма вместо двух: файл и замена в одном элементе `edits[]`. Плоская
+    // запись (`path`+`oldText`+`newText`, `path`+`contents`) остаётся живой — её
+    // собирает разбор (`flatWrite`), но схема её больше не объявляет: две
+    // параллельные формы стоили 96 токенов в каждом запросе.
     description:
-      'Change files: oldText — an exact, unique fragment; edits — files and their changes; ' +
-      'contents — the whole file. Create, move, delete — file.',
+      'Change files: edits[] — [{path, oldText, newText}] or [{path, contents}]; ' + 'create, move, delete — file.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'One file.' },
-        // Плоская форма той же правки: файл и замена рядом, без обёртки `edits[]`.
-        // По переписи отказов именно она и приходила без обёртки — объявляем её,
-        // чтобы модель не угадывала и не стоила лишнего шага.
-        oldText: { type: 'string', description: 'Anchor: exact, unique; with path — flat form.' },
-        newText: { type: 'string', description: 'Replacement for that anchor.' },
         edits: {
           type: 'array',
-          description: 'write: files and their changes.',
+          description: 'Files and their changes.',
           items: {
             type: 'object',
             properties: {
               path: { type: 'string' },
-              edits: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    oldText: { type: 'string', description: 'Anchor: exact, unique.' },
-                    newText: { type: 'string', description: 'Replacement; empty deletes.' },
-                  },
-                  required: ['newText'],
-                },
-              },
+              oldText: { type: 'string', description: 'Anchor: exact, unique.' },
+              newText: { type: 'string', description: 'Replacement; empty deletes.' },
+              contents: { type: 'string', description: 'Whole file: replaces it.' },
             },
-            // Форму адреса проверяет разбор: проходят обе — вложенная и плоская.
+            // `path` здесь НЕ обязателен: проверка схемы срабатывает раньше разбора
+            // и выдавала бы «не хватает edits[0].path» вместо точного совета, а разбор
+            // понимает ещё две раскладки (поле `edits[].edits[]` и одиночный объект).
+            required: [],
           },
         },
-        contents: { type: 'string', description: 'Whole file contents: replaces the file.' },
       },
-      // Обязательных полей нет: `write` без `action` и запись целиком через
-      // `path`+`contents` — обе формы живые. Что именно нужно — говорит описание.
       required: [],
     },
   },
@@ -386,21 +378,27 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'file',
     side: 'main',
-    description: 'Files and folders; move stays inside the workspace.',
+    description: 'Files and folders inside the workspace.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
           enum: ['create', 'move', 'delete', 'replace'],
-          description: 'create, move, delete (trash, no undo), replace (every match).',
+          description:
+            'create: whole new file (contents; existing = error); ' +
+            'move: from, to; delete: to trash, no undo; ' +
+            'replace: all matches, dry-run first.',
         },
         path: { type: 'string', description: 'Path.' },
-        contents: { type: 'string', description: 'create: contents.' },
+        // Различие «новый файл целиком» и «правка старого» — главная путаница `file`:
+        // модель несла `contents` на `replace` и наоборот. `file` только создаёт файл
+        // целиком; менять существующий — это `edit` (якорь или позиции).
+        contents: { type: 'string', description: 'create: the whole new file. To change an existing file use edit.' },
         from: { type: 'string', description: 'move: source.' },
         to: { type: 'string', description: 'move: target.' },
         query: { type: 'string', description: 'replace: string or regex.' },
-        replacement: { type: 'string', description: 'replace: empty deletes.' },
+        replacement: { type: 'string', description: 'replace: empty deletes (not "contents").' },
         isRegex: { type: 'boolean', description: 'replace: regex; $1 works.' },
         caseSensitive: { type: 'boolean', description: 'replace: default off.' },
         glob: { type: 'string', description: 'replace: file mask.' },
@@ -609,11 +607,42 @@ export function parseToolArguments(
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       return { ok: false, message: 'Аргументы инструмента должны быть JSON-объектом' };
     }
-    return { ok: true, value: value as Record<string, unknown> };
+    // Плоская запись правки — своя же форма в один элемент: `edit(path, oldText,
+    // newText)` и `edit(path, contents)`. Схема возит только `edits[]`, а этот
+    // разбор принимает обе — иначе короткий вызов превращался бы в «не хватает
+    // аргумента: edits» и стоил шага.
+    return { ok: true, value: flatWrite(value as Record<string, unknown>) };
   } catch (error) {
     return {
       ok: false,
       message: `Не удалось разобрать аргументы: ${error instanceof Error ? error.message : String(error)}`,
     };
   }
+}
+
+/** Поля плоской записи: что модель написала рядом с `path`, а не внутри `edits[]`. */
+const FLAT_WRITE_FIELDS = ['oldText', 'newText', 'contents', 'content'] as const;
+
+/**
+ * Плоская запись → `edits[]`. Остальное не трогаем.
+ *
+ * Схема `edit` описывает одну форму (`edits[]`) — две параллельные формы стоили
+ * 96 токенов в каждом запросе. Приём остаётся: файловое действие без `action`
+ * даёт запись целиком, а тела правки рядом с `path` — один элемент списка.
+ */
+function flatWrite(args: Record<string, unknown>): Record<string, unknown> {
+  const path = typeof args.path === 'string' ? args.path.trim() : '';
+  if (!path) return args;
+  if (args.edits !== undefined) return args;
+  const write = args.action === undefined || args.action === 'write';
+  if (!write) return args;
+  const hasBody = FLAT_WRITE_FIELDS.some((field) => typeof args[field] === 'string');
+  if (!hasBody) return args;
+  const element: Record<string, unknown> = { path };
+  for (const field of FLAT_WRITE_FIELDS) {
+    if (args[field] !== undefined) element[field] = args[field];
+  }
+  const rest: Record<string, unknown> = { ...args, edits: [element] };
+  for (const field of [...FLAT_WRITE_FIELDS, 'path']) delete rest[field];
+  return rest;
 }

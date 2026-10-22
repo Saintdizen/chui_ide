@@ -8,6 +8,21 @@ describe('состояние языковых серверов', () => {
     failed: [{ language: 'go', reason: 'сервер не найден' }],
   };
 
+  it('причина — словами сервера, а не наше «не поднялся»', () => {
+    // Так пришёл настоящий отказ tsserver: виды «не поднялся» виноватого не называют.
+    const refused: LspStatus = {
+      running: [],
+      servers: [],
+      failed: [
+        {
+          language: 'typescript',
+          reason: 'Request initialize failed with message: The TypeScript of the workspace provides no tsserver.js.',
+        },
+      ],
+    };
+    expect(lspChipFor('typescript', refused)?.failed).toContain('no tsserver.js');
+  });
+
   it('подпись источника — словами', () => {
     expect(lspOriginLabel('bundled')).toBe('поставка IDE');
     expect(lspOriginLabel('python')).toBe('окружение проекта');

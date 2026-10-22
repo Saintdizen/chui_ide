@@ -158,13 +158,18 @@ describe('сжатие аргументов не трогает команды',
       role: 'assistant' as const,
       content: '',
       toolCalls: [
-        { id: 'call-3', name: 'create_file', arguments: JSON.stringify({ path: '/tmp/x.ts', contents: body }) },
+        {
+          id: 'call-3',
+          name: 'create_file',
+          arguments: JSON.stringify({ edits: [{ path: '/tmp/x.ts', contents: body }] }),
+        },
       ],
     };
     const out = condenseAppliedCalls(message, new Set(['call-3']));
     expect(out).not.toBe(message);
     const args = JSON.parse((out as { toolCalls: { arguments: string }[] }).toolCalls[0].arguments);
-    expect(isCondenseMarker(args.contents)).toBe(true);
-    expect(args.path).toBe('/tmp/x.ts');
+    const item = args.edits[0];
+    expect(isCondenseMarker(item.contents)).toBe(true);
+    expect(item.path).toBe('/tmp/x.ts');
   });
 });

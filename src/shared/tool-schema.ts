@@ -123,3 +123,24 @@ export function wrongArguments(schema: JsonSchema, args: Record<string, unknown>
 export function toolSpec(name: string): AgentToolSpec | undefined {
   return AGENT_TOOLS.find((tool) => tool.name === name);
 }
+
+/**
+ * Схема инструмента к отказу по аргументам — тот же JSON, но без прозы.
+ *
+ * Инструменты из ростера едут в запросе одной строкой (п.45); форма его
+ * аргументов модели неизвестна, и промах стоил двух шагов: сначала «не хватает
+ * аргумента», потом угадывание. Форма в отказе — та же схема без описаний:
+ * модель видит имена и типы, а цену платит только промах (не каждый шаг).
+ * Описания остаются у полей, но в одну строку — по ним видно, что куда класть
+ * (`text`, `question`, `steps` у `mind`).
+ */
+export function argumentsShape(schema: JsonSchema, depth = 0): string {
+  const required = new Set(schema.required ?? []);
+  const parts = Object.entries(schema.properties ?? {}).map(([name, property]) => {
+    const mark = required.has(name) ? '' : '?';
+    const enumList = property.enum ? `=${property.enum.join('|')}` : '';
+    const inner = depth >= 3 ? '' : shapeTail(property, depth);
+    return `${name}${mark}:${property.type ?? 'any'}${enumList}${inner}`;
+  });
+  return parts.length > 0 ? `{${parts.join(', ')}}` : '{}';
+}

@@ -43,6 +43,7 @@ const enumOf = (name: string, field: string): string[] => {
   return Array.isArray(values) ? values : [];
 };
 
+const refusalReasons = new Map<string, number>();
 const perName = new Map<string, number>();
 const perAction = new Map<string, number>();
 const badAction = new Map<string, number>();
@@ -88,6 +89,10 @@ for (const messages of sample.messages) {
         .find((candidate) => candidate.role === 'tool' && candidate.toolCallId === call.id);
       if (result && isFailure(result)) {
         failures.set(name, (failures.get(name) ?? 0) + 1);
+        // Текст отказа — то, что реально чинить: «переделки» показывают цену,
+        // а причину видно только здесь. Храним по одной строке на вид отказа.
+        const reason = `${name}: ${(result.content ?? '').split('\n')[0].slice(0, 110)}`;
+        refusalReasons.set(reason, (refusalReasons.get(reason) ?? 0) + 1);
       }
     }
 
@@ -131,6 +136,12 @@ for (const name of WIDENED_TOOLS) {
 if (examples.length > 0) {
   console.log('\nпримеры значений вне схемы:');
   for (const line of examples) console.log(`  ${line}`);
+}
+
+if (refusalReasons.size > 0) {
+  console.log('\nчастые отказы (первая строка результата):');
+  const top = [...refusalReasons.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  for (const [reason, count] of top) console.log(`  ${String(count).padStart(3)}  ${reason}`);
 }
 
 const planned = ['file', 'history', 'mcp', 'show'];

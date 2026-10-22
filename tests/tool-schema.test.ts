@@ -55,9 +55,9 @@ describe('missingArguments', () => {
   it('вложенный объект в правке тоже проверяется', () => {
     const spec = toolSpec('edit')!;
     const missing = missingArguments(spec.inputSchema, { edits: [{ path: '/a.ts', edits: [{ startLine: 1 }] }] });
-    // Обязателен только `newText`: адрес — якорь или четыре позиции, и это
-    // проверяет разбор аргументов, который знает про две формы.
-    expect(missing).toEqual(['edits[0].edits[0].newText']);
+    // Схема объявляет плоскую форму, старую вложенную знает только разбор:
+    // проверка схемы её не разбирает и не требует чужих полей.
+    expect(missing).toEqual([]);
   });
 
   it('у `edit` нет обязательных полей: без `edits` живут три действия из четырёх', () => {

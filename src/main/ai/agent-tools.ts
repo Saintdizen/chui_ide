@@ -34,7 +34,7 @@ import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
 import { AGENT_TOOLS, parseToolArguments } from '../../shared/tools';
 import { estimateTextTokens, isCondenseMarker } from '../../shared/context-fit';
 import { fitOutput, fitOutputLines } from '../../shared/output-budget';
-import { describeShape, missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
+import { argumentsShape, describeShape, missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
 import { canonicalCall } from '../../shared/tool-aliases';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
 import { scanProject } from '../project/scan';
@@ -574,7 +574,7 @@ const ECHO_COMMAND_CHARS = 120;
 
 /** Форма аргумента правки: её называем в ошибках — вызов чинится за один шаг. */
 const EDITS_SHAPE =
-  'нужен [{ path: "/абсолютный/путь/файл", edits: [{ oldText, newText }] }] — ' +
+  'нужен [{ path: "/абсолютный/путь/файл", oldText, newText }] — файл и замена в одном элементе; ' +
   'вместо старого текста можно четыре позиции: startLine, startColumn, endLine, endColumn';
 
 /**
@@ -683,10 +683,13 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     const missing = missingArguments(spec.inputSchema, parsed.value);
     if (missing.length > 0) {
       // Форма — в том же отказе: без неё потерянное поле ищут в неверном месте
-      // (плоский `edit` вместо обёртки `edits: [{path, edits}]`).
+      // (плоский `edit` вместо обёртки `edits: [{path, edits}]`). Сама схема — тоже:
+      // инструменты из ростера (п.45) едут одной строкой, и их формы у модели нет
+      // вовсе — пересказывать её прозой значит потерять имена полей и типы.
       return {
         ok: false,
         summary: `Не хватает аргумента: ${missing.join(', ')}. Форма: ${describeShape(spec.inputSchema)}`,
+        detail: `Аргументы ${name}: ${argumentsShape(spec.inputSchema)}`,
       };
     }
     // Значение мимо `enum` — тот же класс ошибки, что забытое поле: `switch` ниже
@@ -700,7 +703,7 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
       return {
         ok: false,
         summary: `Неизвестное значение аргумента: ${values}`,
-        detail: `Допустимые значения: ${allowed}.`,
+        detail: `Допустимые значения: ${allowed}.\nАргументы ${name}: ${argumentsShape(spec.inputSchema)}`,
       };
     }
   }
@@ -1043,7 +1046,7 @@ function pageSummary(snapshot: BrowserSnapshot): string {
  * одному `open`, `ref` — `click`. Проверяем до обработчика: ответ называет место,
  * как и у остальных инструментов, а не «не задан аргумент» из глубины.
  */
-function missingForAction(args: Record<string, unknown>, keys: readonly string[]): ToolOutcome | null {
+function missingForAction(args: Record<string, unknown>, keys: readonly string[], tool?: string): ToolOutcome | null {
   for (const key of keys) {
     const value = args[key];
     // `edit` называет списком не только строки: `paths` — массив, и пустой
@@ -1057,10 +1060,15 @@ function missingForAction(args: Record<string, unknown>, keys: readonly string[]
         )
       : typeof value === 'string' && value.trim().length > 0;
     if (!present) {
+      // Поле действия — плюс вся форма: `mind` и прочие из ростера не возят схему,
+      // и кроме имени поля модели нужно знать, какие ещё поля у инструмента есть.
+      const shape = toolSpec(tool ?? '');
       return {
         ok: false,
-        summary: `Действию «${String(args.action)}» нужен аргумент «${key}»`,
-        detail: `${String(args.action)} требует: ${keys.join(', ')}.`,
+        summary: `Действию «${String(args.action)}» нужен аргумент «${key}». Форма: ${keys.join(', ')}`,
+        detail:
+          `${String(args.action)} требует: ${keys.join(', ')}.` +
+          (shape ? `\nАргументы ${shape.name}: ${argumentsShape(shape.inputSchema)}` : ''),
       };
     }
   }
@@ -1668,16 +1676,36 @@ async function replaceInFiles(workspace: WorkspaceService, args: Record<string, 
  */
 async function searchAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const action = (optionalString(args, 'action') ?? '').trim() || 'text';
+  // Три булевых флага переехали в одну строку `flags`: каждый стоил каркаса схемы
+  // (≈9 ток) в КАЖДОМ запросе. Разворачиваем обратно здесь, старые ключи принимаем.
+  const flags = searchFlags(args);
   switch (action) {
     case 'text':
-      return await search(ctx, args);
+      return await search(ctx, flags);
     case 'code':
-      return await codebaseSearch(ctx, args);
+      return await codebaseSearch(ctx, flags);
     case 'docs':
-      return await searchDocs(ctx, args);
+      return await searchDocs(ctx, flags);
     default:
       return unknownAction(action, 'search: text, code, docs.');
   }
+}
+
+/**
+ * `flags: "rc"` → `isRegex`/`caseSensitive`/`filesOnly`. Значения из флагов главнее
+ * старых ключей: если модель прислала и то, и другое, — пришёл новый способ.
+ */
+function searchFlags(args: Record<string, unknown>): Record<string, unknown> {
+  const flags = optionalString(args, 'flags');
+  if (flags === undefined) return args;
+  const set = new Set(flags.toLowerCase().replace(/[\s,;]/g, ''));
+  const { flags: _dropped, ...rest } = args;
+  return {
+    ...rest,
+    isRegex: set.has('r'),
+    caseSensitive: set.has('c'),
+    filesOnly: set.has('n'),
+  };
 }
 
 /**
@@ -2823,7 +2851,15 @@ function normalizeWrite(args: Record<string, unknown>): unknown {
   const list: unknown[] = Array.isArray(raw) ? raw : [raw];
   // Вложенная форма: элементы — файлы. У файла без пути берём верхний.
   if (list.some(hasInnerEdits)) {
-    return list.map((item) => (isRecord(item) && typeof item.path !== 'string' && top ? { ...item, path: top } : item));
+    return list.map((item) => {
+      if (!isRecord(item)) return item;
+      // Замена, положенная рядом с путём (`{path, oldText, newText}`), — тоже файл:
+      // объявленная форма `edits` в схеме именно такая. Сворачиваем в `edits[]`,
+      // иначе разбор дойдёт до `oldText` как до чужого поля и откажет.
+      const hunk = flatHunk(item);
+      const file = hasInnerEdits(item) || hunk ? { ...item, edits: item.edits ?? [hunk] } : item;
+      return typeof file.path !== 'string' && top ? { ...file, path: top } : file;
+    });
   }
 
   // Плоская форма: элементы — сами замены. Собираем их по путям (свой или верхний).
@@ -2832,8 +2868,11 @@ function normalizeWrite(args: Record<string, unknown>): unknown {
     const itemPath = isRecord(item) && typeof item.path === 'string' ? item.path : top;
     // Путь не найти — не угадываем: пусть отказ назовёт форму (это данные, а не шум).
     if (!itemPath) return list;
+    const hunk = isRecord(item) ? flatHunk(item) : null;
     const bucket = groups.get(itemPath) ?? [];
-    bucket.push(item);
+    // Замена во плоской форме (`{path, oldText, newText}` среди замен) — тоже по адресу:
+    // иначе до разбора дошёл бы `path` как чужое поле замены, и вызов бы отвалился.
+    bucket.push(hunk ?? item);
     groups.set(itemPath, bucket);
   }
   return [...groups.entries()].map(([filePath, edits]) => ({
@@ -2845,6 +2884,22 @@ function normalizeWrite(args: Record<string, unknown>): unknown {
 /** Элемент правки — файл с вложенными заменами, а не сама замена. */
 function hasInnerEdits(item: unknown): boolean {
   return isRecord(item) && Array.isArray(item.edits);
+}
+
+/**
+ * Замена, лежащая в самом элементе файла: `{path, oldText, newText}`. Схема `edit`
+ * объявляет `edits` массивом, и модель кладёт в него ровно такую запись — путь и
+ * замена рядом. Отказ здесь был вторым по частоте («у элемента не нашлось якоря»),
+ * хотя в действительности было ясно, что менять и чем.
+ */
+function flatHunk(item: Record<string, unknown>): Record<string, unknown> | null {
+  if (typeof item.oldText !== 'string' && typeof item.newText !== 'string') return null;
+  const hunk: Record<string, unknown> = { newText: typeof item.newText === 'string' ? item.newText : '' };
+  if (typeof item.oldText === 'string') hunk.oldText = item.oldText;
+  for (const key of ['startLine', 'startColumn', 'endLine', 'endColumn'] as const) {
+    if (typeof item[key] === 'number') hunk[key] = item[key];
+  }
+  return hunk;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -3080,6 +3135,24 @@ function parseEdits(value: unknown): ParsedEdits {
 type EditItem = { anchor: PatchHunk } | { position: TextEdit };
 
 /**
+ * Якоря, положенные прямо в элемент файла: `{path, oldText, newText}`,
+ * `{path, contents}` или их список в `patches`/`hunks`. Пусто — если их нет.
+ */
+function flatHunks(raw: Record<string, unknown>): unknown {
+  for (const key of ['patches', 'hunks']) {
+    const list = raw[key];
+    if (Array.isArray(list) && list.length > 0) return list;
+  }
+  const hasAnchor = typeof raw.oldText === 'string' || typeof raw.newText === 'string';
+  if (!hasAnchor) return undefined;
+  const hunk: Record<string, unknown> = {};
+  for (const key of ['oldText', 'newText']) {
+    if (raw[key] !== undefined) hunk[key] = raw[key];
+  }
+  return [hunk];
+}
+
+/**
  * Один файл. Якоря и позиции в одном файле — это два разных пути правки (якоря
  * разрешает renderer, позиции применяет документная модель), поэтому файл
  * отдаётся одному из них целиком: смесь чинится разделением вызова.
@@ -3105,7 +3178,7 @@ function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; pos
     const hint = whole
       ? ' Похоже на запись файла целиком: новый файл пишет `create` с `contents`.'
       : swap
-        ? ' В элементе лежат сами замены (oldText/newText), а не файл.'
+        ? ' В элементе лежат сами замены (oldText/newText), а не файл — добавь `path` рядом.'
         : '';
     throw new Error(`edits[${index}]: не задан path.${hint} ${EDITS_SHAPE}`);
   }
@@ -3113,7 +3186,12 @@ function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; pos
     throw new Error(`edits[${index}].path: нужен абсолютный путь, получено «${filePath}»`);
   }
 
-  const edits = raw.edits;
+  // Элемент без `edits[]`, но с самим якорем: `{path, oldText, newText}` — та же
+  // правка, только на уровень выше. По переписи вызовов это САМАЯ частая ошибка
+  // `edit` (11 из 15 отказов): `edits[0].edits` — третья вложенность, о которой
+  // никто не догадывается. Разбираем обе раскладки — ошибка стоит шага, а
+  // снисходительность — ничего.
+  const edits = raw.edits === undefined ? flatHunks(raw) : raw.edits;
   if (!Array.isArray(edits) || edits.length === 0) {
     throw new Error(`edits[${index}].edits: нужен непустой массив правок. ${EDITS_SHAPE}`);
   }
@@ -3919,13 +3997,21 @@ async function webFetch(ctx: ToolContext, args: Record<string, unknown>): Promis
 /** Новый файл. Существующий не перетираем — для этого есть правка. */
 async function createFile(workspace: WorkspaceService, args: Record<string, unknown>): Promise<ToolOutcome> {
   const target = requireString(args, 'path');
-  // Пустая строка — законное содержимое, а вот ОТСУТСТВИЕ поля — нет: раньше оно
-  // тихо превращалось в пустой файл, и инструмент отчитывался «создан (0 строк)».
-  // Опечатка в имени поля или потерянный аргумент давали не ошибку, а пустоту.
+  // Пустая строка — законное содержимое, а вот отсутствие поля — нет: раньше оно
+  // тихо превращалось в пустой файл, и инструмент отчитывался «создан (0 строк)» —
+  // опечатка в имени поля давала не ошибку, а пустоту. Отказ называет форму целиком:
+  // за «создай a.ts» модель понимает, что нужен `contents`.
   if (typeof args.contents !== 'string') {
-    throw new Error('Не задан аргумент «contents» (содержимое нового файла)');
+    return {
+      ok: false,
+      summary: 'Не задан аргумент «contents» (содержимое нового файла)',
+      detail:
+        'Создание файла требует содержимого целиком. Форма: ' +
+        '{"action":"create","path":"a/b.ts","contents":"…"}. Пустой файл — "contents":""; ' +
+        'менять существующий файл — это edit.',
+    };
   }
-  const contents = args.contents;
+  const contents = typeof args.contents === 'string' ? args.contents : String(args.contents);
   const created = await workspace.createFile(target, contents);
   const lines = contents.length === 0 ? 0 : contents.split('\n').length;
   return {
@@ -4041,9 +4127,9 @@ async function mindAction(ctx: ToolContext, args: Record<string, unknown>): Prom
   const action = requireString(args, 'action').trim();
   switch (action) {
     case 'remember':
-      return missingForAction(args, ['text']) ?? (await remember(ctx, args));
+      return missingForAction(args, ['text'], 'mind') ?? (await remember(ctx, args));
     case 'forget':
-      return missingForAction(args, ['query']) ?? (await forget(ctx, args));
+      return missingForAction(args, ['query'], 'mind') ?? (await forget(ctx, args));
     case 'ask':
       return await ask(ctx, args);
     // План и цель — состояние беседы, а не файлы: на диске ничего не меняется,
@@ -4102,15 +4188,34 @@ async function webAction(ctx: ToolContext, args: Record<string, unknown>): Promi
   return unknownAction(action, 'web: search, fetch.');
 }
 
-/** Файлы и папки: создание, перемещение, удаление и замела по проекту меняют диск одинаково. */
+/**
+ * Обязательные поля каждого действия `file`. Их называет не только разбор, но и
+ * ответ на опечатку в `action`: модель тогда видит, каких аргументов не хватало.
+ */
+const FILE_ARGS: Record<string, readonly string[]> = {
+  create: ['path', 'contents'],
+  move: ['from', 'to'],
+  delete: ['path'],
+  replace: ['query', 'replacement'],
+};
+
+/**
+ * Файлы и папки: создание, перемещение, удаление и замена по проекту меняют диск
+ * одинаково. Смысл каждого действия живёт в описаниях его полей (схема — в
+ * `shared/tools.ts`), здесь только адрес и порядок.
+ */
 async function fileAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const action = requireString(args, 'action').trim();
-  if (action === 'create') return missingForAction(args, ['path']) ?? (await createFile(ctx.workspace, args));
-  if (action === 'move') return missingForAction(args, ['from', 'to']) ?? (await moveFile(ctx.workspace, args));
-  if (action === 'delete') return missingForAction(args, ['path']) ?? (await deleteFile(ctx.workspace, args));
-  if (action === 'replace') {
-    return missingForAction(args, ['query']) ?? (await replaceInFiles(ctx.workspace, args));
-  }
+  const missing = missingForAction(args, FILE_ARGS[action] ?? []);
+  if (missing) return missing;
+  // Смысл каждого действия — в его полях, а не в шапке: шапку модель читает один
+  // раз, а поле — ровно перед тем, как его заполнить. `contents` у `create` и
+  // `replacement` у `replace` путали чаще всего («не задан аргумент contents»
+  // приходил на `replace` — модель несла новое содержимое из привычки).
+  if (action === 'create') return await createFile(ctx.workspace, args);
+  if (action === 'move') return await moveFile(ctx.workspace, args);
+  if (action === 'delete') return await deleteFile(ctx.workspace, args);
+  if (action === 'replace') return await replaceInFiles(ctx.workspace, args);
   return unknownAction(action, 'file: create, move, delete, replace.');
 }
 

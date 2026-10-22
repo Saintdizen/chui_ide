@@ -172,7 +172,11 @@ class JsonRpcConnection {
   private nextId = 1;
   private readonly pending = new Map<
     number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void; partial?: string }
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+      partial?: string;
+    }
   >();
   /** Номер запроса по ключу «вид запроса»: по нему отменяем устаревшие (см. `request`). */
   private readonly pendingByKey = new Map<string, number>();
@@ -213,12 +217,19 @@ class JsonRpcConnection {
     let outParams = params;
     if (options.partial && params && typeof params === 'object') {
       partial = `partial-${id}`;
-      outParams = { ...(params as Record<string, unknown>), partialResultToken: partial };
+      outParams = {
+        ...(params as Record<string, unknown>),
+        partialResultToken: partial,
+      };
       this.partials.set(partial, []);
     }
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, ...(partial ? { partial } : {}) });
+      this.pending.set(id, {
+        resolve,
+        reject,
+        ...(partial ? { partial } : {}),
+      });
       this.send({ jsonrpc: '2.0', id, method, params: outParams });
     });
   }
@@ -330,7 +341,11 @@ class JsonRpcConnection {
         .catch((error) => {
           // Наш код ошибки уважаем (MethodNotFound), прочее — внутренняя ошибка.
           const code = error instanceof RpcRequestError ? error.code : -32603;
-          this.send({ jsonrpc: '2.0', id: message.id, error: { code, message: String(error?.message ?? error) } });
+          this.send({
+            jsonrpc: '2.0',
+            id: message.id,
+            error: { code, message: String(error?.message ?? error) },
+          });
         });
       return;
     }
@@ -385,7 +400,9 @@ interface LspCapabilities {
    */
   documentRangeFormattingProvider?: unknown;
   /** Точная семантическая подсветка: по ней разбираем ответ (легенду объявляет сервер). */
-  semanticTokensProvider?: { legend?: { tokenTypes?: unknown; tokenModifiers?: unknown } };
+  semanticTokensProvider?: {
+    legend?: { tokenTypes?: unknown; tokenModifiers?: unknown };
+  };
 }
 
 export class LspService {
@@ -410,6 +427,12 @@ export class LspService {
    * это дорого и ничего не меняет. Снимается перезапуском (`restart`).
    */
   private readonly failed = new Map<string, string>();
+  /**
+   * Причина отказа самого сервера на `initialize` (язык → текст ошибки). Наш
+   * `failed` говорит «не поднялся», а сервер знает, почему именно: у tsserver это
+   * «TypeScript 7 provides no tsserver.js» — без этой строки виноватого не найти.
+   */
+  private readonly refusals = new Map<string, string>();
   /** Ответ на «лежит ли команда в окружении проекта»: по команде, с проверкой диска. */
   private readonly environmentCommands = new Map<string, boolean>();
   /**
@@ -471,7 +494,10 @@ export class LspService {
     return {
       running: [...this.runtimes.keys()],
       servers,
-      failed: [...this.failed.entries()].map(([language, reason]) => ({ language, reason })),
+      failed: [...this.failed.entries()].map(([language, reason]) => ({
+        language,
+        reason,
+      })),
     };
   }
 
@@ -484,6 +510,8 @@ export class LspService {
     // Подъёмы, начатые до перезапуска, станут ненужными: счётчик версий их отсечёт.
     this.generation += 1;
     this.failed.clear();
+    // Причина отказа тоже устарела: следующий подъём может пройти (человек поставил tsserver).
+    this.refusals.clear();
     // Новые процессы проекта ещё не читали: при следующем прогреве обойдут заново.
     this.scanned.clear();
     for (const language of [...this.runtimes.keys()]) this.stop(language);
@@ -566,7 +594,9 @@ export class LspService {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         await withTimeout(
-          runtime.connection.request('workspace/symbol', { query: PROJECT_SCAN_QUERY }),
+          runtime.connection.request('workspace/symbol', {
+            query: PROJECT_SCAN_QUERY,
+          }),
           PROJECT_SCAN_TIMEOUT_MS,
           'обход проекта',
         );
@@ -637,7 +667,12 @@ export class LspService {
     runtime.versions.set(path, 1);
     this.openedIn.set(path, runtime);
     runtime.connection.notify('textDocument/didOpen', {
-      textDocument: { uri: pathToFileURL(path).toString(), languageId, version: 1, text: current },
+      textDocument: {
+        uri: pathToFileURL(path).toString(),
+        languageId,
+        version: 1,
+        text: current,
+      },
     });
   }
 
@@ -671,7 +706,9 @@ export class LspService {
     this.openedIn.delete(path);
     runtime.versions.delete(path);
     if (opened) {
-      runtime.connection.notify('textDocument/didClose', { textDocument: { uri: pathToFileURL(path).toString() } });
+      runtime.connection.notify('textDocument/didClose', {
+        textDocument: { uri: pathToFileURL(path).toString() },
+      });
     }
     this.publish(PushTopic.LspDiagnostics, { path, diagnostics: [] });
   }
@@ -679,6 +716,7 @@ export class LspService {
   dispose(): void {
     this.generation += 1;
     this.failed.clear();
+    this.refusals.clear();
     this.scanned.clear();
     this.latestText.clear();
     this.openedIn.clear();
@@ -745,9 +783,13 @@ export class LspService {
       return fallback;
     }
     // Ничего не вышло — запоминаем причину, чтобы человек видел её, а не искал наугад.
+    // Сервер, который отказал на `initialize`, называет причину сам («TypeScript 7
+    // provides no tsserver.js»): она точнее нашего «не поднялся» и сразу указывает
+    // на виновника, поэтому идёт первой.
+    const refusal = this.refusals.get(language);
     this.failed.set(
       language,
-      configured.length === 0 && alternates.length === 0 ? 'сервер не найден' : 'сервер не поднялся',
+      refusal ?? (configured.length === 0 && alternates.length === 0 ? 'сервер не найден' : 'сервер не поднялся'),
     );
     return null;
   }
@@ -800,7 +842,10 @@ export class LspService {
     // Языковой сервер видит `.env` проекта — тем же путём, что терминал и запуск.
     // Своё окружение конфига идёт последним: серверам из поставки нужен режим Node
     // (`ELECTRON_RUN_AS_NODE`), и проектное `.env` его перебивать не должно.
-    const env = { ...mergeEnv(process.env, await this.env()), ...(config.env ?? {}) };
+    const env = {
+      ...mergeEnv(process.env, await this.env()),
+      ...(config.env ?? {}),
+    };
     const child = spawn(config.command, config.args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -956,7 +1001,10 @@ export class LspService {
             // Правки сервера (переименование) приходят с `documentChanges` — разбираем.
             // Заодно умеем операции с файлами: создать, переименовать, удалить (их применяет
             // приложение). Без этого объявления сервер их не пришлёт (см. capabilities).
-            workspaceEdit: { documentChanges: true, resourceOperations: ['create', 'rename', 'delete'] },
+            workspaceEdit: {
+              documentChanges: true,
+              resourceOperations: ['create', 'rename', 'delete'],
+            },
           },
         },
         // Путь к питону передаём сразу: pyright берёт его отсюда, иначе не видит
@@ -966,7 +1014,15 @@ export class LspService {
       }),
       INITIALIZE_TIMEOUT_MS,
       `initialize: ${runtime.config.command}`,
-    )) as { capabilities?: LspCapabilities } | null;
+    )) as {
+      capabilities?: LspCapabilities;
+      error?: { message?: string };
+    } | null;
+
+    // Отказ самого сервера (`initialize` ответил `error`) — причина точнее нашей:
+    // она называет виновника, например «TypeScript 7 provides no tsserver.js».
+    const refusal = result?.error?.message;
+    if (refusal) this.refusals.set(runtime.config.language, refusal);
 
     // Возможности решают, что можно спрашивать: их отсутствие — не ошибка.
     runtime.capabilities = result?.capabilities ?? {};
@@ -1014,7 +1070,12 @@ export class LspService {
    */
   async formatRange(
     path: string,
-    range: { startLine: number; startColumn: number; endLine: number; endColumn: number },
+    range: {
+      startLine: number;
+      startColumn: number;
+      endLine: number;
+      endColumn: number;
+    },
   ): Promise<TextEdit[]> {
     const runtime = this.runtimeForPath(path);
     if (!runtime?.capabilities.documentRangeFormattingProvider) return [];
@@ -1024,8 +1085,14 @@ export class LspService {
       const result = await runtime.connection.request('textDocument/rangeFormatting', {
         textDocument: { uri },
         range: {
-          start: { line: Math.max(0, range.startLine - 1), character: Math.max(0, range.startColumn - 1) },
-          end: { line: Math.max(0, range.endLine - 1), character: Math.max(0, range.endColumn - 1) },
+          start: {
+            line: Math.max(0, range.startLine - 1),
+            character: Math.max(0, range.startColumn - 1),
+          },
+          end: {
+            line: Math.max(0, range.endLine - 1),
+            character: Math.max(0, range.endColumn - 1),
+          },
         },
         options: { tabSize: 4, insertSpaces: true },
       });
@@ -1088,7 +1155,9 @@ export class LspService {
       if (!runtime.capabilities.workspaceSymbolProvider) continue;
       await runtime.initialized.catch(() => undefined);
       try {
-        const raw = await runtime.connection.request('workspace/symbol', { query });
+        const raw = await runtime.connection.request('workspace/symbol', {
+          query,
+        });
         results.push(...toProjectSymbols(raw, fileURLToPath));
       } catch {
         // Сервер не ответил — это не повод терять результаты остальных.
@@ -1147,7 +1216,10 @@ export class LspService {
           'textDocument/references',
           {
             textDocument: { uri },
-            position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
+            position: {
+              line: Math.max(line - 1, 0),
+              character: Math.max(column - 1, 0),
+            },
             context: { includeDeclaration },
           },
           undefined,
@@ -1175,7 +1247,10 @@ export class LspService {
       runtime.connection
         .request('textDocument/definition', {
           textDocument: { uri },
-          position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
+          position: {
+            line: Math.max(line - 1, 0),
+            character: Math.max(column - 1, 0),
+          },
         })
         .then((raw) => toLocations(raw, fileURLToPath))
         .catch(() => [] as SymbolLocation[]),
@@ -1207,7 +1282,10 @@ export class LspService {
       runtime.connection
         .request('textDocument/rename', {
           textDocument: { uri },
-          position: { line: Math.max(line - 1, 0), character: Math.max(column - 1, 0) },
+          position: {
+            line: Math.max(line - 1, 0),
+            character: Math.max(column - 1, 0),
+          },
           newName,
         })
         .then((raw) => toWorkspaceFileEdits(raw, fileURLToPath))
@@ -1275,12 +1353,17 @@ export class LspService {
       // описывали код, которого в файле уже нет. Отдаём ему тот текст, который спросили.
       this.change(path, text);
     } else {
-      runtime.connection.notify('textDocument/didOpen', { textDocument: { uri, languageId, version: 1, text } });
+      runtime.connection.notify('textDocument/didOpen', {
+        textDocument: { uri, languageId, version: 1, text },
+      });
     }
     try {
       return await run(uri);
     } finally {
-      if (!opened) runtime.connection.notify('textDocument/didClose', { textDocument: { uri } });
+      if (!opened)
+        runtime.connection.notify('textDocument/didClose', {
+          textDocument: { uri },
+        });
     }
   }
 
@@ -1302,7 +1385,11 @@ export class LspService {
       return;
     }
     if (method !== 'textDocument/publishDiagnostics') return;
-    const payload = params as { uri?: string; diagnostics?: unknown[]; version?: unknown };
+    const payload = params as {
+      uri?: string;
+      diagnostics?: unknown[];
+      version?: unknown;
+    };
     if (typeof payload.uri !== 'string') return;
     // uri → путь: у сервиса свой корень, но file:// понимает и fileURLToPath.
     let path: string;
@@ -1318,7 +1405,10 @@ export class LspService {
       const known = runtime.versions.get(path);
       if (known !== undefined && payload.version < known) return;
     }
-    this.publish(PushTopic.LspDiagnostics, { path, diagnostics: toDiagnostics(payload.diagnostics) });
+    this.publish(PushTopic.LspDiagnostics, {
+      path,
+      diagnostics: toDiagnostics(payload.diagnostics),
+    });
   }
 
   /**
@@ -1375,7 +1465,10 @@ function toDiagnostics(raw: unknown): LspDiagnostic[] {
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) continue;
     const value = item as {
-      range?: { start?: { line?: number; character?: number }; end?: { line?: number; character?: number } };
+      range?: {
+        start?: { line?: number; character?: number };
+        end?: { line?: number; character?: number };
+      };
       severity?: number;
       message?: unknown;
       source?: unknown;
@@ -1404,13 +1497,37 @@ function toDiagnostics(raw: unknown): LspDiagnostic[] {
  * Питон нужен всем питоновским серверам (иначе они не видят пакеты окружения), а
  * свои доводы приходят у серверов из поставки — например, путь к `tsserver.js`.
  * Свои идут последними: если они о том же поле, пусть решает конфиг сервера.
+ * Слияние — вглубь: `settings` поставки не должен стереть `settings.python`, иначе
+ * питон потеряется ровно у тех серверов, что пришли со своими доводами.
  */
 function buildInitializationOptions(
   runtime: ServerRuntime,
   python: string | null,
 ): Record<string, unknown> | undefined {
-  const base = python ? { pythonPath: python, settings: { python: { pythonPath: python } } } : {};
-  const merged = { ...base, ...(runtime.config.initializationOptions ?? {}) };
+  const base: Record<string, unknown> = python
+    ? { pythonPath: python, settings: { python: { pythonPath: python } } }
+    : {};
+  const own = (runtime.config.initializationOptions ?? {}) as Record<string, unknown>;
+  const settings = {
+    ...(base.settings as Record<string, unknown> | undefined),
+    ...(own.settings as Record<string, unknown> | undefined),
+  };
+  const merged: Record<string, unknown> = {
+    ...base,
+    ...own,
+    ...(Object.keys(settings).length > 0 ? { settings } : {}),
+  };
+  // Путь к `tsserver` — из поставки, и он главнее: `typescript-language-server` берёт
+  // `typescript` из `node_modules` проекта, а там с TypeScript 7 нет `tsserver.js`
+  // (компилятор переписан, отдельного сервера больше нет). Без своего пути сервер
+  // отказывает на `initialize` целиком, и язык остаётся без скелета и ссылок.
+  const bundledTsserver = (own.tsserver as Record<string, unknown> | undefined)?.path;
+  if (typeof bundledTsserver === 'string' && bundledTsserver.length > 0) {
+    merged.tsserver = {
+      ...(own.tsserver as Record<string, unknown>),
+      path: bundledTsserver,
+    };
+  }
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 

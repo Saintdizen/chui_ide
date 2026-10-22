@@ -396,13 +396,12 @@ describe('condenseCallArguments', () => {
   });
 
   it('сжимает длинное содержимое create_file', () => {
-    const args = JSON.stringify({ path: 'src/b.ts', contents: long });
+    const args = JSON.stringify({ edits: [{ path: 'src/b.ts', contents: long }] });
     const parsed = JSON.parse(condenseCallArguments(args, minChars)) as {
-      path: string;
-      contents: string;
+      edits: { path: string; contents: string }[];
     };
-    expect(parsed.path).toBe('src/b.ts');
-    expect(parsed.contents).not.toContain('строка');
+    expect(parsed.edits[0].path).toBe('src/b.ts');
+    expect(parsed.edits[0].contents).not.toContain('строка');
   });
 
   it('оставляет текст команды терминала целым', () => {

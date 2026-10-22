@@ -50,6 +50,35 @@ describe('edit — слитая запись', () => {
     expect(r.summary).toContain('contents');
   });
 
+  // Схема `edit` возит только форму `edits[]`, а плоская запись — привычка, которую
+  // модель притащит из прошлых бесед. Она должна доходить до правки, а не в отказ.
+  it('плоская запись не платит шагом за форму', async () => {
+    const applyPatches = bridge({
+      rejected: false,
+      result: { reports: [{ path: '/proj/a.ts', applied: 1, version: 2 }], failed: [] },
+    });
+    const outcome = await runTool(
+      context({ applyPatches }),
+      'edit',
+      '{"path":"/proj/a.ts","oldText":"a","newText":"b"}',
+    );
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    const sent = applyPatches.mock.calls[0]?.[0] as { path?: string; patches?: { oldText?: string }[] }[];
+    // Плоская запись упакована в элемент списка: якоря верхнего уровня больше нет.
+    expect(sent[0]?.patches?.[0]?.oldText).toBe('a');
+  });
+
+  // Ростер (п.45) даёт имя и действие, но не поля формы. Отказ обязан их назвать,
+  // иначе инструмент из строки недостижим: модель знает действие и не знает букв.
+  it('отказ по аргументам возвращает форму инструмента', async () => {
+    const r = await runTool(context(), 'mind', '{"action":"remember"}');
+    expect(r.ok).toBe(false);
+    const text = `${r.summary}\n${r.detail ?? ''}`;
+    expect(text).toContain('text');
+    // Форма — в `detail`: там поля с типами и `action` со списком значений.
+    expect(r.detail).toMatch(/Аргументы mind: \{action:string=/);
+  });
+
   it('action уходит в файловые операции, а не в правку', async () => {
     const outcome = await runTool(context(), 'edit', '{"action":"move","path":"/proj/a.ts","to":"/proj/b.ts"}');
     expect(outcome.detail ?? outcome.summary).not.toContain('Не хватает аргумента: from');
@@ -233,6 +262,36 @@ describe('edit — формы, которые модель шлёт на сам�
       context({ applyPatches }),
       'edit',
       JSON.stringify({ path: '/proj/a.ts', oldText: 'a', newText: 'b' }),
+    );
+
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    expect(applyPatches).toHaveBeenCalledTimes(1);
+  });
+
+  it('запись файла прямо в edits[] — ровно так, как объявлено схемой', async () => {
+    // Вторая по частоте форма отказа: модель кладёт в `edits` запись целиком —
+    // путь и замена рядом, а не замена с вложенным `edits`. Смысл читался, а вызов
+    // падал: до разбора доходил `path` как чужое поле замены.
+    const applyPatches = applied();
+    const outcome = await runTool(
+      context({ applyPatches }),
+      'edit',
+      JSON.stringify({ edits: [{ path: '/proj/a.ts', oldText: 'a', newText: 'b' }] }),
+    );
+
+    expect(outcome.ok, JSON.stringify(outcome)).toBe(true);
+    expect(applyPatches).toHaveBeenCalledTimes(1);
+  });
+
+  it('описанная схемой форма с верхним путём и без него в элементе', async () => {
+    const applyPatches = applied();
+    const outcome = await runTool(
+      context({ applyPatches }),
+      'edit',
+      JSON.stringify({
+        path: '/proj/a.ts',
+        edits: [{ path: '/proj/a.ts', oldText: 'a', newText: 'b' }],
+      }),
     );
 
     expect(outcome.ok, JSON.stringify(outcome)).toBe(true);

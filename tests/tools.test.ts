@@ -75,17 +75,7 @@ describe('read', () => {
 describe('search', () => {
   it('принимает регистр, режим «только файлы», контекст и предел выдачи', () => {
     const props = byName.get('search')!.inputSchema.properties;
-    expect(Object.keys(props)).toEqual([
-      'action',
-      'query',
-      'isRegex',
-      'caseSensitive',
-      'filesOnly',
-      'glob',
-      'path',
-      'context',
-      'limit',
-    ]);
+    expect(Object.keys(props)).toEqual(['action', 'query', 'flags', 'glob', 'path', 'context', 'limit']);
     expect(byName.get('search')!.inputSchema.required).toEqual(['query']);
     // Контекст — как -A/-B у grep: без него результат остаётся одной строкой.
     expect(props.context?.type).toBe('number');
@@ -130,7 +120,7 @@ describe('edit', () => {
     // `action` снято со схемы: создание, перемещение и удаление живут у `file`.
     // Старые вызовы с `action` схема не объявляет, но разбор их понимает.
     expect(tool.inputSchema.properties.action).toBeUndefined();
-    expect(Object.keys(tool.inputSchema.properties)).toEqual(['path', 'oldText', 'newText', 'edits', 'contents']);
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(['edits']);
     expect(tool.description.toLowerCase()).toContain('oldtext');
     expect(tool.description.toLowerCase()).toContain('file');
   });
@@ -141,17 +131,15 @@ describe('edit', () => {
     // и вызов падал на «edits[0]: не задан path».
     const file = byName.get('edit')!.inputSchema.properties.edits!.items!;
     expect(file.properties?.path?.type).toBe('string');
-    expect(file.properties?.edits?.type).toBe('array');
-    // `required` у элемента нет намеренно: разбор принимает и вложенную форму,
-    // и плоскую (`path` + `edits` без обёртки) — её модель слала чаще всего.
-    expect(file.required).toBeUndefined();
+    expect(file.properties?.edits).toBeUndefined();
+    // `required` у элемента нет намеренно: адрес — `path`, а второе поле — якорь
+    // или `contents`/`to`. Забытое поле ловит разбор, и он же называет форму.
+    expect(file.required).toEqual([]);
     // У правки обязательна только замена: адрес — якорь `oldText`.
-    const item = file.properties?.edits?.items?.properties;
-    expect(item?.newText?.type).toBe('string');
-    expect(item?.oldText?.type).toBe('string');
+    expect(file.properties?.newText?.type).toBe('string');
+    expect(file.properties?.oldText?.type).toBe('string');
     // Позиции со схемы сняты — но разбор их понимает, это нужно старым беседам.
-    expect(item?.startLine).toBeUndefined();
-    expect(file.properties?.edits?.items?.required).toEqual(['newText']);
+    expect(file.properties?.startLine).toBeUndefined();
   });
 });
 
