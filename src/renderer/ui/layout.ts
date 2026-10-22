@@ -1,4 +1,5 @@
 import { clear, h } from './dom';
+import { applyPanelIntent, type PanelState } from '../core/panel-layout';
 
 /**
  * Каркас в духе современных IDE: фон приложения темнее панелей, панели —
@@ -23,9 +24,11 @@ export interface Layout {
   readonly sidebarVisible: boolean;
   readonly rightVisible: boolean;
   readonly dockVisible: boolean;
+  readonly editorVisible: boolean;
   setSidebarVisible(visible: boolean): void;
   setRightVisible(visible: boolean): void;
   setDockVisible(visible: boolean): void;
+  setEditorVisible(visible: boolean): void;
   readonly sidebarSize: number;
   readonly rightSize: number;
   readonly dockSize: number;
@@ -51,8 +54,8 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
   const dockSplitter = h('div', { class: 'splitter splitter-dock' });
   const dockHost = h('div', { class: 'dock-host' });
   const dockIsland = h('section', { class: 'island dock' }, dockHost);
-  // Нижний остров — своей дорожкой сетки: под левой панелью и редактором, но НЕ под
-  // правой (чат тянется вниз до строки состояния).
+  // Нижний остров — своей дорожкой сетки: только под редактором. Ни под проводником,
+  // ни под правой панелью: обе идут вниз до строки состояния.
   const dockWrap = h('div', { class: 'dock-wrap' }, dockSplitter, dockIsland);
 
   const center = h('div', { class: 'center' }, editorIsland);
@@ -76,13 +79,16 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     statusBarHost,
   );
 
-  let sidebarVisible = true;
-  let rightVisible = true;
+  // Видимость панелей — одним состоянием: редактор и правая панель связаны
+  // инвариантом (см. `applyPanelIntent`), а разнесённые `let` однажды применят
+  // его наполовину.
+  let panels: PanelState = { sidebar: true, right: true, editor: true };
   let dockVisible = false;
 
   const apply = (): void => {
-    root.classList.toggle('is-sidebar-hidden', !sidebarVisible);
-    root.classList.toggle('is-right-hidden', !rightVisible);
+    root.classList.toggle('is-sidebar-hidden', !panels.sidebar);
+    root.classList.toggle('is-right-hidden', !panels.right);
+    root.classList.toggle('is-editor-hidden', !panels.editor);
     root.classList.toggle('is-dock-hidden', !dockVisible);
   };
 
@@ -136,26 +142,40 @@ export function createLayout(mount: HTMLElement, options: { onChange?: () => voi
     rightBody,
     statusBarHost,
     get sidebarVisible() {
-      return sidebarVisible;
+      return panels.sidebar;
     },
     get rightVisible() {
-      return rightVisible;
+      return panels.right;
     },
     get dockVisible() {
       return dockVisible;
     },
+    get editorVisible() {
+      return panels.editor;
+    },
     setSidebarVisible(visible: boolean) {
-      sidebarVisible = visible;
+      panels = applyPanelIntent(panels, { sidebar: visible });
       apply();
       options.onChange?.();
     },
     setRightVisible(visible: boolean) {
-      rightVisible = visible;
+      const next = applyPanelIntent(panels, { right: visible });
+      // Инвариант отклонил намерение: скрытый редактор держит правую панель.
+      // Молча, без записи в настройки — панель ведь не менялась.
+      if (next.right === panels.right) return;
+      panels = next;
       apply();
       options.onChange?.();
     },
     setDockVisible(visible: boolean) {
       dockVisible = visible;
+      apply();
+      options.onChange?.();
+    },
+    setEditorVisible(visible: boolean) {
+      // Скрывая редактор при свёрнутой правой, раскладка возвращает правую:
+      // пустое окно — не состояние, а поломка (см. `applyPanelIntent`).
+      panels = applyPanelIntent(panels, { editor: visible });
       apply();
       options.onChange?.();
     },

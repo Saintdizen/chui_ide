@@ -24,6 +24,34 @@ export interface PanelVisibility {
   right: boolean;
 }
 
+/** Видимость трёх панелей, между которыми делится ширина окна. */
+export interface PanelState extends PanelVisibility {
+  /** Область редактора: файлы, вкладки-страницы, разметка. */
+  editor: boolean;
+}
+
+/** Намерение человека: что именно он переключил, остальное остаётся как было. */
+export type PanelIntent = Partial<PanelState>;
+
+/**
+ * Видимость панелей после намерения — с одним инвариантом: скрытый редактор
+ * оставляет окно без содержимого, поэтому правую панель (ассистент, сравнение)
+ * он держит видимой.
+ *
+ * Отсюда две стороны одного правила:
+ *   — свёрнуть правую при скрытом редакторе нельзя — намерение отклоняется;
+ *   — скрыть редактор при уже свёрнутой правой можно, но правая вернётся: иначе
+ *     человек остался бы с пустым окном и ни одного повода туда смотреть.
+ *
+ * Боковую (оглавление проекта) можно сворачивать всегда: без неё содержимое есть —
+ * это и есть редактор.
+ */
+export function applyPanelIntent(state: PanelState, intent: PanelIntent): PanelState {
+  const next: PanelState = { ...state, ...intent };
+  if (!next.editor) next.right = true;
+  return next;
+}
+
 /** Полоса по ширине окна. Пороги задают, когда панель уступает место редактору. */
 export function panelBand(width: number): PanelBand {
   if (width < COMPACT_WIDTH) return 'compact';

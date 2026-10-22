@@ -109,6 +109,8 @@ import {
   restoreReads,
   snapshotReads,
   uncoveredRequest,
+  pruneReads,
+  liveSources,
   type ReadRange,
 } from '../../shared/read-coverage';
 import { callFlags } from '../../shared/step-counts';
@@ -1048,6 +1050,7 @@ export class AiService {
     toolContext.memory = {
       remember: (text, scope) => this.memory.remember(this.workspace.rootPath(), text, scope),
       forget: (query, scope) => this.memory.forget(this.workspace.rootPath(), query, scope),
+      notes: (scope) => this.memory.list(this.workspace.rootPath(), scope),
     };
     if (this.mcp && external.length > 0) toolContext.mcp = this.mcp;
     // Картинки для модели: чтение и уменьшение файлов живут в main, инструмент
@@ -1457,6 +1460,11 @@ export class AiService {
     // иначе в новом ходе агент заново читал то, что уже видел. Замер по истории —
     // 23,5 тыс. токенов на 71 тыс. чтений пришлось на перекрытие, треть всех чтений.
     const coveredReads = request.reads ? restoreReads(request.reads) : new Map<string, ReadRange[]>();
+    // Покрытие из беседы живёт дольше ветки: после сжатия, удалённого хода или
+    // перегенерации текст-источник выпал, а запись осталась. Оставляем только куски,
+    // чей вызов ещё лежит в истории целым (`src`), иначе заглушка «уже прочитано»
+    // сошлётся на пустоту. После свёртки по возрасту внутри прогона — та же сверка.
+    pruneReads(coveredReads, liveSources(messages));
     // Тот же учёт — командам-читалкам в терминале: `cat` поверх уже прочитанного
     // отвечает строкой, а не второй копией текста.
     toolContext.coveredReads = coveredReads;
@@ -1532,6 +1540,9 @@ export class AiService {
         });
         if (trimmed.dropped === 0) return 0;
         messages.splice(0, messages.length, ...trimmed.messages);
+        // Вместе с ходами из ветки ушёл и текст прочитанного: запись о покрытии
+        // без своего вызова — обещание, которого в контексте нет.
+        pruneReads(coveredReads, liveSources(messages));
         return trimmed.dropped;
       };
 
@@ -1567,11 +1578,13 @@ export class AiService {
       // давно отработал. Граница по возрасту, а не «сколько надо освободить»:
       // каждое сообщение пересекает её один раз, и префикс запроса не меняется
       // задним числом — кэш провайдера цел.
-      ageStaleResults(messages, {
+      const aged = ageStaleResults(messages, {
         keepRecent: heavy ? STALE_KEEP_RECENT_HEAVY : STALE_KEEP_RECENT,
         ...(heavy ? { minChars: STALE_MIN_CHARS_HEAVY, batchSize: STALE_BATCH_HEAVY } : {}),
         ...(this.spillDir ? { spillDir: this.spillDir } : {}),
       });
+      // Свёрнутый результат — уже не текст, а адрес: покрытие по нему станет врать.
+      if (aged.aged > 0) pruneReads(coveredReads, liveSources(messages));
       const done = await this.streamStep(provider, {
         model: workModel,
         messages,
@@ -1962,10 +1975,12 @@ export class AiService {
               detail: outcome.detail ? `${head}\n${outcome.detail}` : head,
             };
           }
-          if (outcome.read) rememberRead(coveredReads, outcome.read);
+          // `src` — id вызова: результат ляжет в ветку сообщением с тем же `toolCallId`.
+          // Без этой связи покрытие потом не отличить от следа выпавшего хода.
+          if (outcome.read) rememberRead(coveredReads, outcome.read, call.id);
           // Пачечное чтение (`paths`) тоже покрывает файлы: без этого каждое имя в
           // нём потом читалось бы заново целиком (3 вызова за мерило — 12 тыс. ток.).
-          for (const read of outcome.reads ?? []) rememberRead(coveredReads, read);
+          for (const read of outcome.reads ?? []) rememberRead(coveredReads, read, call.id);
           if (readOnly) {
             if (cacheable) executed.set(key, outcome);
           } else {

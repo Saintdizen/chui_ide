@@ -130,10 +130,26 @@ export function formatMemory(notes: readonly MemoryNote[], scope: MemoryScope = 
   shown.reverse();
 
   const hidden = notes.length - shown.length;
-  const tail = hidden > 0 ? [`(ещё ${hidden}: не показаны — не вместились в бюджет промпта)`] : [];
+  // У скрытой части обязан быть адрес: без него память полна, а что в ней — не
+  // видно, и `forget` бьёт по догадке. Ссылку называем только когда есть что скрывать.
+  const tail =
+    hidden > 0 ? [`(ещё ${hidden}: не показаны — не вместились в бюджет промпта; весь список — mind (action: notes))`] : [];
   return [
     'Память ' + SCOPE_LABEL[scope] + ' (заметки, которые ты оставил ранее; они переживают беседу):',
     ...shown,
     ...tail,
   ].join('\n');
+}
+
+/**
+ * Вся память области одним куском — ответ на `mind (action: notes)`. В промпт
+ * едет только хвост (см. `formatMemory`), поэтому при переполнении агент видит
+ * 12 заметок из 40: без полного списка `forget` работает наугад, а отказ
+ * `remember` по «память заполнена» не даёт даже посмотреть, что там лежит.
+ * Нумеруем для чтения глазами; `forget` по-прежнему ищет подстроку.
+ */
+export function formatAllNotes(notes: readonly MemoryNote[], scope: MemoryScope = 'workspace'): string {
+  if (notes.length === 0) return 'Память ' + SCOPE_LABEL[scope] + ' пуста.';
+  const head = 'Память ' + SCOPE_LABEL[scope] + ' — все заметки (' + notes.length + ' из ' + MAX_NOTES + '):';
+  return [head, ...notes.map((note, at) => at + 1 + '. ' + note.text)].join('\n');
 }

@@ -189,6 +189,7 @@ describe('движение отключается системной настр�
       '.app.is-sidebar-hidden .sidebar',
       '.app.is-right-hidden .right-panel',
       '.app.is-dock-hidden .dock-wrap',
+      '.app.is-editor-hidden .center',
     ]) {
       const rule = MAIN.match(new RegExp(`${selector.replace(/[.]/g, '\\.')}[\\s\\S]{0,160}?display:\\s*none`));
       expect(rule, `${selector} → display: none`).not.toBeNull();

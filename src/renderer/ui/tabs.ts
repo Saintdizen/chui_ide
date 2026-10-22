@@ -4,26 +4,10 @@ import type { OpenEditors } from '../core/open-editors';
 import { showContextMenu } from './context-menu';
 import { basename, clear, h, svgIcon } from './dom';
 
-/**
- * Вкладка-спутник: не документ, но живёт в той же полосе. Сейчас это чат — он
- * открывается в области редактора как обычная вкладка и закрывается крестиком.
- */
-export interface AuxiliaryTab {
-  title: string;
-  /** Вкладка есть в полосе: чат может жить и в боковой панели. */
-  readonly visible: boolean;
-  /** Активна ли она сейчас: тогда активного файла в полосе нет. */
-  readonly active: boolean;
-  activate(): void;
-  close(): void;
-}
-
 export interface TabsDeps {
   openEditors: OpenEditors;
   documents: DocumentStore;
   commands: CommandRegistry;
-  /** Вкладка-спутник появится в полосе, если она задана. */
-  auxiliary?: AuxiliaryTab;
   /** Вкладки встроенного браузера: страницы стоят в той же полосе, что файлы. */
   pages?: PagesTabSource;
   /**
@@ -74,18 +58,17 @@ export function createTabs(deps: TabsDeps): Tabs {
 
   /**
    * Вид вкладки в полосе. В одном ряду живут три разные вещи: файл (`OpenEditors`),
-   * страница браузера (`BrowserTabs`) и чат (вкладка-спутник). Ведутся они разные
-   * модели, поэтому вид вкладки хранится в её `dataset` и разбирается здесь, а не
+   * страница браузера (`BrowserTabs`). Ведутся они разные модели, поэтому вид вкладки хранится в её `dataset` и разбирается здесь, а не
    * угадывается по наличию пути.
    */
-  type TabKind = 'file' | 'page' | 'aux';
+  type TabKind = 'file' | 'page';
 
   const kindOf = (node: HTMLElement): TabKind | null => {
     const kind = node.dataset.kind;
-    return kind === 'file' || kind === 'page' || kind === 'aux' ? kind : null;
+    return kind === 'file' || kind === 'page' ? kind : null;
   };
 
-  /** Открыть вкладку: у каждого вида свой адресат — файл, страница, чат. */
+  /** Открыть вкладку: у каждого вида свой адресат — файл, страница. */
   const openTab = (node: HTMLElement): void => {
     switch (kindOf(node)) {
       case 'file':
@@ -93,9 +76,6 @@ export function createTabs(deps: TabsDeps): Tabs {
         return;
       case 'page':
         if (node.dataset.pageId) deps.pages?.activate(node.dataset.pageId);
-        return;
-      case 'aux':
-        deps.auxiliary?.activate();
         return;
       default:
         return;
@@ -110,9 +90,6 @@ export function createTabs(deps: TabsDeps): Tabs {
         return;
       case 'page':
         if (node.dataset.pageId) deps.pages?.close(node.dataset.pageId);
-        return;
-      case 'aux':
-        deps.auxiliary?.close();
         return;
       default:
         return;
@@ -158,12 +135,10 @@ export function createTabs(deps: TabsDeps): Tabs {
     // он упал бы на `body` — человек, идущий по вкладкам стрелками, терял бы место.
     const hadFocus = element.contains(document.activeElement);
     clear(element);
-    const auxiliary = deps.auxiliary;
-    const auxActive = auxiliary?.active === true;
     const pages = deps.pages;
     const pageActive = pages?.activePageId ?? null;
-    // Пока активна вкладка-спутник или страница браузера, ни один файл не выглядит открытым.
-    const active = auxActive || pageActive !== null ? null : (deps.openEditors.active?.path ?? null);
+    // Пока активна страница браузера, ни один файл не выглядит открытым.
+    const active = pageActive !== null ? null : (deps.openEditors.active?.path ?? null);
 
     // Закреплённые — левее прочих: их место не «съедает» предпросмотр, и так видно,
     // что они не уедут. Порядок внутри группы прежний (сортировка устойчива).
@@ -322,42 +297,6 @@ export function createTabs(deps: TabsDeps): Tabs {
       element.appendChild(tab);
     }
 
-    if (auxiliary?.visible) {
-      const classes = ['tab', 'tab-auxiliary'];
-      if (auxActive) classes.push('is-active');
-      const tab = h(
-        'div',
-        {
-          class: classes.join(' '),
-          title: auxiliary.title,
-          role: 'tab',
-          dataset: { kind: 'aux' },
-          'aria-selected': auxActive ? 'true' : 'false',
-          tabindex: auxActive ? '0' : '-1',
-        },
-        svgIcon('chat', 13),
-        h('span', { class: 'tab-label' }, auxiliary.title),
-        h(
-          'button',
-          {
-            class: 'tab-close',
-            type: 'button',
-            title: 'Закрыть (чат вернётся в боковую панель)',
-            onClick: (event: Event) => {
-              event.stopPropagation();
-              auxiliary.close();
-            },
-          },
-          svgIcon('close', 11),
-        ),
-      );
-      tab.addEventListener('click', () => auxiliary.activate());
-      tab.addEventListener('auxclick', (event) => {
-        if (event.button === 1) auxiliary.close();
-      });
-      tab.addEventListener('keydown', (event) => onTabKey(event, tab));
-      element.appendChild(tab);
-    }
 
     // Активная вкладка могла уехать за край — подкручиваем к ней, но без движения,
     // если она и так видна.

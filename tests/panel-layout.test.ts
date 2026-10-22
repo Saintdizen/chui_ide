@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AutoPanelLayout, autoPanels, panelBand } from '../src/renderer/core/panel-layout';
+import {
+  AutoPanelLayout,
+  autoPanels,
+  applyPanelIntent,
+  panelBand,
+  type PanelState,
+} from '../src/renderer/core/panel-layout';
 
 describe('panelBand', () => {
   it('делит ширину на узкую, обычную и широкую полосы по порогам', () => {
@@ -17,6 +23,52 @@ describe('autoPanels', () => {
     expect(autoPanels('compact')).toEqual({ sidebar: false, right: false });
     expect(autoPanels('regular')).toEqual({ sidebar: true, right: false });
     expect(autoPanels('wide')).toEqual({ sidebar: true, right: true });
+  });
+});
+
+describe('applyPanelIntent', () => {
+  const shown: PanelState = { sidebar: true, right: true, editor: true };
+
+  it('обычное намерение исполняется как есть', () => {
+    expect(applyPanelIntent(shown, { right: false })).toEqual({ sidebar: true, right: false, editor: true });
+    expect(applyPanelIntent(shown, { editor: false })).toEqual({ sidebar: true, right: true, editor: false });
+  });
+
+  it('боковую можно свернуть всегда — она оглавление, а не содержимое', () => {
+    expect(applyPanelIntent(shown, { sidebar: false })).toEqual({ sidebar: false, right: true, editor: true });
+    expect(applyPanelIntent({ sidebar: true, right: true, editor: false }, { sidebar: false })).toEqual({
+      sidebar: false,
+      right: true,
+      editor: false,
+    });
+  });
+
+  it('при скрытом редакторе правую не свернуть', () => {
+    // Иначе окно остаётся без единого содержимого.
+    const hiddenEditor: PanelState = { sidebar: true, right: true, editor: false };
+    expect(applyPanelIntent(hiddenEditor, { right: false })).toEqual(hiddenEditor);
+  });
+
+  it('скрытие редактора при свёрнутой правой возвращает правую', () => {
+    const hiddenRight: PanelState = { sidebar: true, right: false, editor: true };
+    expect(applyPanelIntent(hiddenRight, { editor: false })).toEqual({
+      sidebar: true,
+      right: true,
+      editor: false,
+    });
+  });
+
+  it('после любого намерения окно не остаётся пустым', () => {
+    for (const sidebar of [true, false]) {
+      for (const right of [true, false]) {
+        for (const editor of [true, false]) {
+          for (const intent of [{ sidebar: false }, { right: false }, { editor: false }, {}]) {
+            const next = applyPanelIntent({ sidebar, right, editor }, intent);
+            expect(next.right || next.editor, JSON.stringify({ sidebar, right, editor, intent })).toBe(true);
+          }
+        }
+      }
+    }
   });
 });
 

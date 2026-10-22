@@ -20,7 +20,7 @@ export const DEFAULT_KEYBINDINGS: readonly Keybinding[] = [
   { combo: 'Ctrl+,', command: 'settings.open' },
   { combo: 'Ctrl+Shift+G', command: 'view.showChanges' },
   { combo: 'Ctrl+`', command: 'view.showTerminal' },
-  { combo: 'Ctrl+Alt+E', command: 'ai.openInEditor' },
+  { combo: 'Ctrl+Alt+E', command: 'view.toggleEditor' },
   // Запуск — Shift+F10 и Ctrl+F5: обе привычки живут рядом.
   { combo: 'Ctrl+F5', command: 'run.file' },
   { combo: 'Shift+F10', command: 'run.choose' },

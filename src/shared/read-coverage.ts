@@ -25,6 +25,12 @@ export interface ReadRange {
   eof?: boolean;
   /** Файл мог измениться: перед верой в покрытие сверить версию с диском. */
   suspect?: boolean;
+  /**
+   * id вызова `read`, чей результат лежит в ветке. Без него «уже прочитано» — догадка:
+   * после сжатия, перегенерации или удалённого хода текст из ветки выпадает, а память
+   * о чтении остаётся (см. `pruneReads`).
+   */
+  src?: string;
 }
 
 /** Версия файла одной строкой: совпала — содержимое то же, что читали. */
@@ -195,14 +201,63 @@ export function rememberRead(
     to: number;
     stamp?: string;
     eof?: boolean;
+    src?: string;
   },
+  /** id вызова, чей результат лежит в ветке: без него кусок не переживёт смену хода. */
+  src?: string,
 ): void {
   const previous = reads.get(read.path) ?? [];
   const kept = previous.filter(
     (range) => range.suspect !== true && (read.stamp === undefined || range.stamp === read.stamp),
   );
-  kept.push({ from: read.from, to: read.to, stamp: read.stamp, eof: read.eof });
+  kept.push({ from: read.from, to: read.to, stamp: read.stamp, eof: read.eof, src: src ?? read.src });
   reads.set(read.path, kept);
+}
+
+/**
+ * Начало свёрнутого результата инструмента (`age-results.ts` заменяет им текст).
+ * Один литерал на два модуля: там ставят, здесь узнают.
+ */
+export const STALE_RESULT_PREFIX = '[свёрнуто:';
+
+/**
+ * Живые источники покрытия: id вызовов, чей результат ещё лежит в ветке целым.
+ *
+ * Свёрнутый результат (`[свёрнуто: …]`) источником не считается: текст уехал в файл
+ * переполнения, и «уже прочитано» сошлётся на пустоту — ровно тот случай, когда
+ * память чтений врёт.
+ */
+export function liveSources(
+  messages: ReadonlyArray<{ role: string; toolCallId?: string; content?: unknown }>,
+): Set<string> {
+  const live = new Set<string>();
+  for (const message of messages) {
+    if (message.role !== 'tool' || !message.toolCallId) continue;
+    const content = typeof message.content === 'string' ? message.content : '';
+    if (content.startsWith(STALE_RESULT_PREFIX)) continue;
+    live.add(message.toolCallId);
+  }
+  return live;
+}
+
+/**
+ * Выбросить куски, чей источник из ветки ушёл: сжали историю, удалили ход,
+ * перегенерировали ответ — текста выше больше нет.
+ *
+ * Куски без `src` тоже выбрасываются: это запись старого формата, проверить её
+ * нечем, а ложное «уже прочитано» дороже одного лишнего чтения.
+ *
+ * Возвращает, сколько кусков забыто — для трассы и замеров.
+ */
+export function pruneReads(reads: Map<string, ReadRange[]>, live: ReadonlySet<string>): number {
+  let dropped = 0;
+  for (const [path, ranges] of reads) {
+    const kept = ranges.filter((range) => range.src !== undefined && live.has(range.src));
+    dropped += ranges.length - kept.length;
+    if (kept.length === 0) reads.delete(path);
+    else if (kept.length !== ranges.length) reads.set(path, kept);
+  }
+  return dropped;
 }
 
 /* ── забыть прочитанное об изменившихся файлах ───────────────────────────────
@@ -373,6 +428,7 @@ export function restoreReads(snapshot: ReadCoverageSnapshot | undefined): Map<st
       if (typeof raw.stamp === 'string') range.stamp = raw.stamp;
       if (raw.eof === true) range.eof = true;
       if (raw.suspect === true) range.suspect = true;
+      if (typeof raw.src === 'string') range.src = raw.src;
       ranges.push(range);
     }
     if (ranges.length > 0) reads.set(file.path, ranges);

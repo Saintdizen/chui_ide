@@ -1,6 +1,7 @@
 import type { ChatMessage } from '../../shared/api';
 import { IMAGE_TOKENS, estimateTextTokens } from '../../shared/context-fit';
 import { AGED_KIND, spillText } from './spill';
+import { STALE_RESULT_PREFIX } from '../../shared/read-coverage';
 
 /**
  * Свёртка старых результатов инструментов — вместо выбрасывания целых ходов.
@@ -123,7 +124,7 @@ function foldPicked(messages: ChatMessage[], picked: readonly number[], spillDir
     const reason = where
       ? `${size} симв. — текст в ${where}, читайте read с диапазоном`
       : `${size} симв. — перечитайте инструментом, если нужно`;
-    const stub = `[свёрнуто: ${message.name ?? 'tool'}, ${reason}]`;
+    const stub = `${STALE_RESULT_PREFIX} ${message.name ?? 'tool'}, ${reason}]`;
     // Заменяем объект, а не содержимое: ту же ссылку держит `produced` — то,
     // что человек видит в карточке и что ложится в файл беседы.
     messages[index] = { ...message, content: stub };

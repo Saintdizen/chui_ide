@@ -32,7 +32,7 @@ describe('промпт агентного режима', () => {
     // а главные источники — `cd` (243 вызова) и `cat`/`grep` вместо инструментов.
     const text = agentPrompt('auto', { confirm: true });
     expect(text).toContain('cwd');
-    expect(text).toContain('для содержимого — read');
+    expect(text).toContain('содержимое — read');
   });
 
   it('минимум не обещает памяти и подзадач', () => {

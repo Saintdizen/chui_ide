@@ -35,14 +35,26 @@ let closeOpen: (() => void) | null = null;
  * `role="listbox"`/`option` в списке, стрелки, Home/End, Enter, Escape
  * и поиск по первой букве.
  */
-export function createSelect(options: { title?: string; placeholder?: string; class?: string } = {}): SelectView {
+export function createSelect(
+  options: {
+    title?: string;
+    placeholder?: string;
+    class?: string;
+    /**
+     * Кнопка без подписи — только значок и стрелка. Так же сидит кнопка прав
+     * доступа: слово в тулбаре занимало ширину ради того, что значок говорит
+     * сам, а смысл остался в подсказке и в списке (там подписи НЕ трогаются).
+     */
+    iconOnly?: boolean;
+  } = {},
+): SelectView {
   /** Значок текущего значения: свой у каждой опции, поэтому живёт отдельным слотом. */
   const valueIcon = h('span', { class: 'select-icon', hidden: true });
   const valueLabel = h('span', { class: 'select-value is-empty' }, options.placeholder ?? '');
   const element = h(
     'button',
     {
-      class: `select${options.class ? ` ${options.class}` : ''}`,
+      class: `select${options.iconOnly ? ' is-icon-only' : ''}${options.class ? ` ${options.class}` : ''}`,
       type: 'button',
       title: options.title ?? '',
       role: 'combobox',
@@ -77,6 +89,9 @@ export function createSelect(options: { title?: string; placeholder?: string; cl
     const found = labelFor(current);
     valueLabel.textContent = found?.label ?? options.placeholder ?? '';
     valueLabel.classList.toggle('is-empty', !found);
+    // Скрытая подпись — не потерянное имя: кнопку называют вслух тем же словом,
+    // что видно в списке.
+    if (options.iconOnly) element.setAttribute('aria-label', valueLabel.textContent);
     // Значок меняется вместе со значением; нет иконки — слот пуст.
     // `forcedIcon` — значок, заданный снаружи (`setValueIcon`): он не привязан
     // к опции, поэтому в списке не повторяется у каждой строки.

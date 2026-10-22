@@ -5,7 +5,6 @@ import { aiPanelPlan, type AiPanelState } from '../src/shared/ai-panel';
 const base: AiPanelState = {
   wasEnabled: true,
   isEnabled: true,
-  chatInEditor: false,
   rightVisible: true,
   wantedRightVisible: true,
 };
@@ -19,7 +18,6 @@ describe('aiPanelPlan', () => {
     expect(plan({ rightVisible: false })).toEqual({
       toggle: 'unchanged',
       hide: false,
-      moveChatToPanel: false,
       show: false,
     });
     expect(plan({ wasEnabled: false, isEnabled: false })).toMatchObject({ toggle: 'unchanged', hide: false });
@@ -29,21 +27,10 @@ describe('aiPanelPlan', () => {
     expect(plan({ isEnabled: false })).toMatchObject({ toggle: 'disabled', hide: true });
   });
 
-  it('выключение уводит чат из редактора', () => {
-    expect(plan({ isEnabled: false, chatInEditor: true })).toMatchObject({
-      hide: true,
-      moveChatToPanel: true,
-    });
-  });
-
-  it('выключение не зовёт возврат чата, если он и так в панели', () => {
-    expect(plan({ isEnabled: false, chatInEditor: false })).toMatchObject({ moveChatToPanel: false });
-  });
-
   it('выключение не показывает панель — даже если по настройкам она «видна»', () => {
-    // Главная ловушка: `setChatInEditor(false)` внутри распахивает панель. Порядок
-    // «сперва скрыть, потом уводить чат» — единственный, при котором нет скачка.
-    const p = plan({ isEnabled: false, chatInEditor: true, wantedRightVisible: true });
+    // Главная ловушка: скрытие идёт первым и без записи в настройки — иначе
+    // повторное применение настроек распахнуло бы панель с мёртвым чатом.
+    const p = plan({ isEnabled: false, wantedRightVisible: true });
     expect(p.show).toBe(false);
     expect(p.hide).toBe(true);
   });
@@ -67,22 +54,11 @@ describe('aiPanelPlan', () => {
     expect(plan({ wasEnabled: false, rightVisible: true })).toMatchObject({ show: false, hide: false });
   });
 
-  it('включение молчит, если чат живёт вкладкой в редакторе', () => {
-    // Второе окно того же диалога справа — хуже, чем ничего.
-    expect(plan({ wasEnabled: false, rightVisible: false, chatInEditor: true })).toMatchObject({
-      toggle: 'enabled',
-      show: false,
-      moveChatToPanel: false,
-    });
-  });
-
-  it('выключение и включение несовместимы в одном плане', () => {
+  it('включение и выключение несовместимы в одном плане', () => {
     for (const isEnabled of [true, false]) {
-      for (const chatInEditor of [true, false]) {
-        for (const rightVisible of [true, false]) {
-          const p = plan({ wasEnabled: !isEnabled, isEnabled, chatInEditor, rightVisible });
-          expect(p.hide && p.show).toBe(false);
-        }
+      for (const rightVisible of [true, false]) {
+        const p = plan({ wasEnabled: !isEnabled, isEnabled, rightVisible });
+        expect(p.hide && p.show).toBe(false);
       }
     }
   });

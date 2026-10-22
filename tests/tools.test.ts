@@ -98,14 +98,17 @@ describe('history', () => {
   });
 });
 
-describe('file: replace', () => {
-  it('замена идёт действием и говорит, чего ей не хватает', () => {
+describe('file: replace (снят со схемы)', () => {
+  it('замена осталась только разбором — в схеме её нет', () => {
     const tool = byName.get('file')!;
     expect(tool.side).toBe('main');
-    // Обязательно только действие: остальное спрашивает само действие.
+    // Пакетная замена по проекту — это `search` + `edit`, а не третья форма
+    // правки: модель не должна выбирать между двумя способами менять текст.
+    // Само действие живо: старые беседы зовут `replace` по имени и получают
+    // работу, но схема его больше не объявляет (и не платит за него токенами).
     expect(tool.inputSchema.required).toEqual(['action']);
-    for (const name of ['query', 'replacement', 'isRegex', 'caseSensitive', 'glob']) {
-      expect(Object.keys(tool.inputSchema.properties)).toContain(name);
+    for (const name of ['query', 'replacement', 'isRegex', 'caseSensitive', 'glob', 'contents']) {
+      expect(Object.keys(tool.inputSchema.properties)).not.toContain(name);
     }
   });
 });
@@ -144,13 +147,14 @@ describe('edit', () => {
 });
 
 describe('file', () => {
-  it('требует и путь, и содержимое', () => {
-    // Раньше `contents` было необязательным: забытое содержимое давало пустой
-    // файл и отчёт «создан (0 строк)» — успех вместо ошибки.
+  it('в схеме только структура: перенос и удаление', () => {
+    // `create` ушёл к `edit` (там уже есть `{path, contents}`) — дубль снят:
+    // модель больше не выбирает между двумя записями файла целиком.
     const tool = byName.get('file')!;
     expect(tool.side).toBe('main');
     expect(tool.inputSchema.required).toEqual(['action']);
-    expect(tool.inputSchema.properties.contents?.type).toBe('string');
+    expect(tool.inputSchema.properties.action?.enum).toEqual(['move', 'delete']);
+    expect(tool.inputSchema.properties.contents).toBeUndefined();
   });
 });
 

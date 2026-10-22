@@ -252,7 +252,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     side: 'main',
     description:
       'Run project tests: the IDE picks the runner (pytest, vitest, jest, node --test). Non-zero exit ' +
-      'code means failing tests. target narrows to a file or a test name.',
+      'code means failing tests. target narrows to a file or a test name. The only way to run tests: ' +
+      'do not hand-roll the runner through terminal.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -295,14 +296,15 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
     name: 'edit',
     side: 'renderer',
     // `action` снято со схемы вместе с дублями `create`/`move`/`delete`: те же
-    // операции есть у `file` и меняют диск одинаково. Старые вызовы с `action`
-    // живы — схема их больше не объявляет, а `editAction` делегирует в `file`.
-    // Одна форма вместо двух: файл и замена в одном элементе `edits[]`. Плоская
-    // запись (`path`+`oldText`+`newText`, `path`+`contents`) остаётся живой — её
-    // собирает разбор (`flatWrite`), но схема её больше не объявляет: две
-    // параллельные формы стоили 96 токенов в каждом запросе.
+    // операции меняют диск одинаково. Старые вызовы с `action` живы — схема их
+    // больше не объявляет, а `editAction` делегирует в `file`.
+    // Одна форма на запись: новый файл целиком и правка — в одном `edits[]`.
+    // Плоская запись (`path`+`oldText`+`newText`, `path`+`contents`) остаётся
+    // живой — её собирает разбор (`flatWrite`), но схема её больше не объявляет:
+    // две параллельные формы стоили 96 токенов в каждом запросе.
     description:
-      'Change files: edits[] — [{path, oldText, newText}] or [{path, contents}]; ' + 'create, move, delete — file.',
+      'Change files: edits[] — [{path, oldText, newText}] or [{path, contents}] for a whole new file; ' +
+      'move, delete — file.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -339,7 +341,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           enum: ['search', 'fetch'],
           description:
             'search: links, titles, short snippets — the list only, links are not opened, so ' +
-            'verify facts instead of stating them; fetch: a page by url — title, plain text, links on it.',
+            'verify facts instead of stating them; fetch: a page by url — title, plain text, links on it; ' +
+            'no JS and no clicks (that is browser), so a page behind a login or a script stays empty.'
         },
         query: { type: 'string', description: 'search: query.' },
         limit: { type: 'number', description: 'search: how many.' },
@@ -352,7 +355,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'terminal',
     side: 'main',
-    description: 'A real pty the user sees. One command per call.',
+    description: 'A real pty the user sees. One command per call. Project tests are run_tests, not here.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -378,31 +381,25 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'file',
     side: 'main',
-    description: 'Files and folders inside the workspace.',
+    description:
+      'Files and folders inside the workspace: move, delete. A whole new file is edit ({path, contents}); ' +
+      'changing many files at once is search + edit.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['create', 'move', 'delete', 'replace'],
-          description:
-            'create: whole new file (contents; existing = error); ' +
-            'move: from, to; delete: to trash, no undo; ' +
-            'replace: all matches, dry-run first.',
+          enum: ['move', 'delete'],
+          description: 'move: from, to; delete: to trash, no undo.',
         },
         path: { type: 'string', description: 'Path.' },
-        // Различие «новый файл целиком» и «правка старого» — главная путаница `file`:
-        // модель несла `contents` на `replace` и наоборот. `file` только создаёт файл
-        // целиком; менять существующий — это `edit` (якорь или позиции).
-        contents: { type: 'string', description: 'create: the whole new file. To change an existing file use edit.' },
         from: { type: 'string', description: 'move: source.' },
         to: { type: 'string', description: 'move: target.' },
-        query: { type: 'string', description: 'replace: string or regex.' },
-        replacement: { type: 'string', description: 'replace: empty deletes (not "contents").' },
-        isRegex: { type: 'boolean', description: 'replace: regex; $1 works.' },
-        caseSensitive: { type: 'boolean', description: 'replace: default off.' },
-        glob: { type: 'string', description: 'replace: file mask.' },
       },
+      // `create` и `replace` сняты со схемы: `create` дублировал запись целиком у
+      // `edit` (та же `contents`, тот же `createFile`), `replace` — пакетную правку
+      // `search` + `edit`. Разбор и реализация у обоих живы: старые беседы зовут их
+      // по имени, а проверка `enum` для этих двух действий пропускает (runTool).
       required: ['action'],
     },
   },
@@ -415,15 +412,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
       properties: {
         action: {
           type: 'string',
-          enum: ['remember', 'forget', 'ask', 'steps', 'goal', 'exit_plan'],
+          enum: ['remember', 'forget', 'notes', 'ask', 'steps', 'goal', 'exit_plan'],
           description:
-            'remember|forget: notes (text, query, scope); ask: question, the run pauses (question, options); ' +
+            'remember|forget|notes: the memory (text, query, scope); notes: every note, the prompt may hold only the tail; ' +
+            'ask: question, the run pauses (question, options); ' +
             'steps: the plan, at the start and after each step (steps); ' +
             'goal: survives the turn (goal, done); exit_plan: hand the plan over for approval (plan).',
         },
         text: { type: 'string', description: 'remember: one thought.' },
         query: { type: 'string', description: 'forget: substring of the note.' },
-        scope: { type: 'string', enum: ['workspace', 'global'], description: 'remember, forget.' },
+        scope: { type: 'string', enum: ['workspace', 'global'], description: 'remember, forget, notes.' },
         question: { type: 'string', description: 'ask: one question, no preamble.' },
         options: {
           type: 'array',
@@ -488,7 +486,9 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'browser',
     side: 'main',
-    description: 'Own Chromium over CDP; http/https only, needs the Browser setting.',
+    description:
+      'Own Chromium over CDP; http/https only, needs the Browser setting. A page needed only as text ' +
+      'is web fetch: cheaper and no browser.',
     inputSchema: {
       type: 'object',
       properties: {

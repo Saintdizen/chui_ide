@@ -97,8 +97,9 @@ const VIEW: MenuNode = {
   label: 'Вид',
   children: [
     { label: 'Боковая панель', accelerator: 'Ctrl+B', command: 'view.toggleSidebar' },
+    { label: 'Панель редактора', accelerator: 'Ctrl+Alt+E', command: 'view.toggleEditor' },
     { label: 'Нижняя панель', accelerator: 'Alt+F12', command: 'view.toggleDock' },
-    { label: 'Панель AI', accelerator: 'Ctrl+Shift+A', command: 'view.toggleRight' },
+    { label: 'Панель AI', accelerator: 'Ctrl+Shift+A', command: 'ai.toggle' },
     { label: 'Режим дзен', accelerator: 'Alt+Z', command: 'view.zen' },
     { separator: true },
     { label: 'Терминал', command: 'view.showTerminal' },
@@ -153,7 +154,7 @@ export const APP_MENU: readonly MenuNode[] = [FILE, EDIT, VIEW, AI, PYTHON];
 /** Команды-переключатели: их состояние меню показывает отметкой слева. */
 export const MENU_TOGGLES = {
   sidebar: 'view.toggleSidebar',
-  aiPanel: 'view.toggleRight',
+  aiPanel: 'ai.toggle',
   terminal: 'view.showTerminal',
 } as const;
 

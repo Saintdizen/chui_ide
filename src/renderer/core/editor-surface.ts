@@ -1,7 +1,7 @@
 /**
  * Кто сейчас занимает область редактора.
  *
- * Область одна, а претендентов шесть: полотно текста, чат, страница браузера,
+ * Область одна, а претендентов пять: полотно текста, страница браузера,
  * картинка, документ Office и просмотр разметки. Правило выбора — «побеждает
  * самый свежий выбор человека» — раньше было размазано по пяти `sync*`-функциям
  * в `app.ts`, и каждая знала про чужие экраны: картинка прятала документ, документ
@@ -14,14 +14,10 @@
  */
 
 /** Экран, который может занять область редактора. */
-export type EditorSurface = 'text' | 'chat' | 'page' | 'image' | 'doc' | 'markdown';
+export type EditorSurface = 'text' | 'page' | 'image' | 'doc' | 'markdown';
 
 /** Всё, что решает выбор: состояние вкладок и предпросмотров на текущий момент. */
 export interface EditorSurfaceInput {
-  /** Чат перенесён в редактор (и вкладка стоит в полосе). */
-  chatInEditor: boolean;
-  /** Вкладка чата активна: файлы ждут своей очереди. */
-  chatTabActive: boolean;
   /** Активная страница браузера или `null`. */
   activePageId: string | null;
   /** Путь активного файла или `null`. */
@@ -38,18 +34,14 @@ export interface EditorSurfaceInput {
  * Что показать в области редактора.
  *
  * Порядок старшинства — и он намеренный:
- *   1. Чат: его включил человек, и он последним тронул область. Пока вкладка чата
- *      активна, остальные не показываются — даже если их вкладки стоят.
- *   2. Файл, который нельзя править текстом: картинка и документ Office. Человек
+ *   1. Файл, который нельзя править текстом: картинка и документ Office. Человек
  *      выбрал именно его, а страница браузера — прошлый заход.
- *   3. Страница браузера: свой экран, тоже выбор человека. Вкладку файла при ней
+ *   2. Страница браузера: свой экран, тоже выбор человека. Вкладку файла при ней
  *      не закрывают, поэтому побеждает она только над текстом.
- *   4. Разметка `.md`: режим того же файла, что и текст.
- *   5. Текст — остаётся по умолчанию.
+ *   3. Разметка `.md`: режим того же файла, что и текст.
+ *   4. Текст — остаётся по умолчанию.
  */
 export function pickEditorSurface(input: EditorSurfaceInput): EditorSurface {
-  const chat = input.chatInEditor && input.chatTabActive;
-  if (chat) return 'chat';
   if (input.activePath !== null && input.isImage) return 'image';
   if (input.activePath !== null && input.isOffice) return 'doc';
   if (input.activePageId !== null) return 'page';
@@ -60,7 +52,7 @@ export function pickEditorSurface(input: EditorSurfaceInput): EditorSurface {
 
 /** Какие экраны держать погашенными при выбранном. */
 export function surfacesToHide(shown: EditorSurface): EditorSurface[] {
-  const all: EditorSurface[] = ['chat', 'page', 'image', 'doc', 'markdown'];
+  const all: EditorSurface[] = ['page', 'image', 'doc', 'markdown'];
   return all.filter((surface) => surface !== shown);
 }
 

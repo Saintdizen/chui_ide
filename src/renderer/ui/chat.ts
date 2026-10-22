@@ -124,10 +124,6 @@ export interface ChatDeps {
   settingsModal: SettingsOpener;
   /** Приёмник хостовых вызовов: правки приходят из main. */
   host: HostService;
-  /** Переключить чат между боковой панелью и областью редактора. */
-  toggleEditor?: () => void;
-  /** Чат уже в области редактора — от этого зависит подпись пункта меню. */
-  isInEditor?: () => boolean;
 }
 
 /**
@@ -422,25 +418,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     focusInput: () => input.focus(),
   });
 
-  /**
-   * Контекстное меню вкладки беседы: перенос в окно редактора и закрытие.
-   * Перенос — не свойство одной беседы, панель переезжает целиком, но открыть
-   * меню логично на той вкладке, с которой работаешь.
-   */
+  /** Контекстное меню вкладки беседы: закрыть её. */
   function openTabMenu(id: number, event: MouseEvent): void {
-    const inEditor = deps.isInEditor?.() === true;
     showContextMenu(
       [
-        {
-          label: inEditor ? 'Вернуть в боковую панель' : 'Перенести в окно редактора',
-          // Клавиша только открывает: подпись для возврата была бы обманом.
-          hint: inEditor ? undefined : 'Ctrl+Alt+E',
-          onSelect: () => {
-            activate(id);
-            void deps.commands.execute(inEditor ? 'ai.backToPanel' : 'ai.openInEditor');
-          },
-        },
-        { separator: true },
         {
           label: 'Закрыть беседу',
           danger: true,
@@ -451,6 +432,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       event.clientY,
     );
   }
+
 
   /** Поиск по беседам: одна строка на беседу, в которой нашлось совпадение. */
   function searchChats(query: string): ChatSearchHit[] {

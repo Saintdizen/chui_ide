@@ -343,6 +343,7 @@ const DEFAULT_SETTINGS: StoredSettings = {
     sidebarVisible: true,
     rightVisible: true,
     dockVisible: false,
+    editorVisible: true,
   },
   lsp: {
     // По умолчанию ВКЛЮЧЕНО: часть серверов едет вместе с IDE (см.
@@ -1133,6 +1134,7 @@ function sanitizeLayout(value: LayoutSettings): LayoutSettings {
     sidebarVisible: flag(value.sidebarVisible, DEFAULT_SETTINGS.layout.sidebarVisible),
     rightVisible: flag(value.rightVisible, DEFAULT_SETTINGS.layout.rightVisible),
     dockVisible: flag(value.dockVisible, DEFAULT_SETTINGS.layout.dockVisible),
+    editorVisible: flag(value.editorVisible, DEFAULT_SETTINGS.layout.editorVisible),
   };
 }
 

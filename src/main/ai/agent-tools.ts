@@ -13,6 +13,7 @@ import type {
 import { formatBrowserSnapshot, type BrowserSnapshot } from '../../shared/browser';
 import { digestHits, formatCodeSearch, rankSymbols, type SearchSymbol } from '../../shared/code-search';
 import { formatDocsAnswer } from '../../shared/docs-index';
+import { formatAllNotes } from '../../shared/memory';
 import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memory';
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import { formatReadImageReply, formatReadImageSummary } from '../../shared/read-image';
@@ -245,6 +246,8 @@ export interface TestRunner {
 export interface MemoryTools {
   remember(text: string, scope?: MemoryScope): Promise<RememberResult>;
   forget(query: string, scope?: MemoryScope): Promise<{ notes: readonly MemoryNote[]; removed: number }>;
+  /** Вся память области: в промпт едет только её хвост, остальное читается здесь. */
+  notes(scope?: MemoryScope): Promise<readonly MemoryNote[]>;
 }
 
 /**
@@ -696,7 +699,17 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     }
     // Значение мимо `enum` — тот же класс ошибки, что забытое поле: `switch` ниже
     // ответит «действие неизвестно» и не назовёт варианты, а модель потратит шаг.
-    const wrong = wrongArguments(spec.inputSchema, parsed.value);
+    // Схема `file` больше не объявляет `create`/`replace` (дубли `edit` и `search`+`edit`),
+    // но старые беседы зовут их по имени — реализация жива, поэтому мимо `enum`
+    // пропускаем ровно эти два действия.
+    const wrong = wrongArguments(spec.inputSchema, parsed.value).filter(
+      (issue) =>
+        !(
+          name === 'file' &&
+          issue.path === 'action' &&
+          (issue.value === 'create' || issue.value === 'replace')
+        ),
+    );
     if (wrong.length > 0) {
       // Как и у нехватки поля: сначала значение, которое пришло от модели (иначе
       // отказ не объясняет, что не так), потом перечень — он же в `detail`.
@@ -3197,7 +3210,7 @@ function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; pos
       return typeof hunk.newText === 'string' && hunk.oldText === undefined;
     });
     const hint = whole
-      ? ' Похоже на запись файла целиком: новый файл пишет `create` с `contents`.'
+      ? ' Похоже на запись файла целиком: в элементе нужен `path` рядом с `contents`.'
       : swap
         ? ' В элементе лежат сами замены (oldText/newText), а не файл — добавь `path` рядом.'
         : '';
@@ -4186,8 +4199,8 @@ async function remember(ctx: ToolContext, args: Record<string, unknown>): Promis
         ok: false,
         summary: 'Память заполнена',
         detail:
-          'Заметок стало слишком много. Убери устаревшие через `mind` (action: "forget"), а затем запиши нужную снова — ' +
-          'иначе новая заметка потеряется среди старых.',
+          'Заметок стало слишком много. Посмотри их все (`mind` action: "notes"), убери устаревшие через `mind` ' +
+          '(action: "forget"), а затем запиши нужную снова — иначе новая заметка потеряется среди старых.',
       };
     }
     return {
@@ -4228,9 +4241,25 @@ async function forget(ctx: ToolContext, args: Record<string, unknown>): Promise<
 }
 
 /**
- * Память одним инструментом: `remember` и `forget` — два глагола об одном
- * хранилище, а стоили двух схем в каждом запросе. Поля у них разные, поэтому
- * схема общая, а недостающее называется до обработчика — как у `edit`.
+ * Вся память области: в промпт едет только хвост (`MEMORY_PROMPT_CHARS`), и при
+ * переполнении агент видит 12 заметок из 40. Без этого действия `forget` бьёт
+ * наугад, а отказ `remember` («память заполнена») не показывает, что уже занято.
+ */
+async function memoryNotes(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  if (!ctx.memory) return { ok: false, summary: 'Память недоступна' };
+  const scope = readScope(args);
+  const notes = await ctx.memory.notes(scope);
+  return {
+    ok: true,
+    summary: notes.length > 0 ? 'заметок: ' + notes.length : 'память пуста',
+    detail: formatAllNotes(notes, scope),
+  };
+}
+
+/**
+ * Память одним инструментом: `remember`, `forget` и `notes` — три глагола об
+ * одном хранилище, а стоили трёх схем в каждом запросе. Поля у них разные,
+ * поэтому схема общая, а недостающее называется до обработчика — как у `edit`.
  */
 async function mindAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const action = requireString(args, 'action').trim();
@@ -4239,6 +4268,8 @@ async function mindAction(ctx: ToolContext, args: Record<string, unknown>): Prom
       return missingForAction(args, ['text'], 'mind') ?? (await remember(ctx, args));
     case 'forget':
       return missingForAction(args, ['query'], 'mind') ?? (await forget(ctx, args));
+    case 'notes':
+      return await memoryNotes(ctx, args);
     case 'ask':
       return await ask(ctx, args);
     // План и цель — состояние беседы, а не файлы: на диске ничего не меняется,
@@ -4255,7 +4286,7 @@ async function mindAction(ctx: ToolContext, args: Record<string, unknown>): Prom
         summary: 'Утверждать нечего: режим плана не включён',
       };
     default:
-      return unknownAction(action, 'mind: remember, forget, ask, steps, goal, exit_plan.');
+      return unknownAction(action, 'mind: remember, forget, notes, ask, steps, goal, exit_plan.');
   }
 }
 

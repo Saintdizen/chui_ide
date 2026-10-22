@@ -181,7 +181,7 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
    * видно в панели изменений и можно отменить, а `npm install` отменять нечем.
    * В «Вопросе» и «Плане» менять нечего — выбор недоступен.
    */
-  const permSelect = createSelect({ class: 'composer-select composer-perm' });
+  const permSelect = createSelect({ class: 'composer-select composer-perm', iconOnly: true });
   permSelect.setOptions(
     PERMISSION_PRESETS.map((item) => ({
       value: item.id,
@@ -205,9 +205,12 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     permSelect.setValue(permission);
     // Подсветка у всего, что снимает вопрос; «Спрашивать» — обычный вид.
     permSelect.element.classList.toggle('is-active', canChoose && permission !== 'ask');
+    // Подпись ушла с кнопки (значка хватает), но не потерялась: она же — имя
+    // кнопки для screen reader (см. `iconOnly` в `ui/select.ts`), а в подсказке
+    // слово названо явно — на значке замка не видно, «спрашивать» это или нет.
     permSelect.element.title = !canChoose
       ? 'Права доступа: доступно в режиме «Агент»'
-      : `Права доступа: ${permissionSpec(permission).hint}`;
+      : `Права доступа: ${permissionSpec(permission).label} — ${permissionSpec(permission).hint}`;
   }
 
   /**
@@ -314,9 +317,9 @@ export function createChatComposer(deps: ChatComposerDeps): ChatComposerView {
     syncMode();
   }
 
-  /** Подпись кнопки модели — «Провайдер - Модель»: где и чем спрашиваем, видно сразу. */
+  /** Подпись кнопки модели — только имя модели: провайдер виден в подсказке. */
   function setModel(providerLabel: string, model: string): void {
-    modelLabel.textContent = `${providerLabel} - ${model}`;
+    modelLabel.textContent = model;
     modelButton.title = `${providerLabel} · ${model}\nНажмите, чтобы сменить провайдера, модель или ключ`;
   }
 

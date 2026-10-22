@@ -10,13 +10,11 @@ import {
 import { mergeDeep, type ProjectSettings } from '../shared/project-config';
 import { menuChecks } from '../shared/app-menu';
 import { aiPanelPlan } from '../shared/ai-panel';
+import { settingsPlan } from '../shared/settings-plan';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
 import { symbolIndexChip, type SymbolIndexStatus } from '../shared/symbol-index';
 import { createSymbolPoller } from './core/symbol-poll';
-import { toOffset } from '../shared/edits';
 import { perf } from '../shared/perf';
-import { classMembers } from './editor/complete/member-access';
-import { declarationOf, enclosingClassAt, overrideSnippet, paramsOf } from './editor/complete/override';
 import type { FileOperation } from '../shared/lsp-workspace-edit';
 import type { LspProgress } from '../shared/lsp-progress';
 import { createLspProgressController } from './core/lsp-progress';
@@ -36,7 +34,18 @@ import { DocumentRegistry } from './editor/host/document-registry';
 import { LspFeatures } from './editor/host/lsp-features';
 import { GitModel } from './core/git-model';
 import { ReviewModel } from './core/review-model';
+import { registerGitWriteCommands } from './core/git-write-commands';
+import { registerGitViewCommands } from './core/git-view-commands';
+import { registerGitAiCommands } from './core/git-ai-commands';
+import { registerGitPanelCommands } from './core/git-panel-commands';
+import { registerGitSyncCommands } from './core/git-sync-commands';
+import { registerGitToolsCommands } from './core/git-tools-commands';
+import { registerGitHistoryCommands } from './core/git-history-commands';
+import { createEditorFixes } from './core/editor-fixes';
+import { createGutterMenus } from './core/gutter-menus';
+import { createSymbolPickers } from './core/symbol-pickers';
 import { BookmarkModel } from './core/bookmarks';
+import { editorContextMenuPlan } from './core/editor-menu';
 import { SpellCheck } from './core/spellcheck';
 import { ProjectPackagesModel } from './core/project-packages';
 import { parseCoverageJson } from '../shared/coverage-json';
@@ -52,35 +61,13 @@ import { isOfficePath, officeFormatLabel as officeFormatChip } from '../shared/o
 import { BrowserTabs } from './core/browser-tabs';
 import { ImportChecker } from './core/import-check';
 import { LspClient } from './core/lsp';
-import { fetchCallHierarchy, type CallDirection } from './core/call-hierarchy';
-import { fetchTypeHierarchy, type TypeDirection } from './core/type-hierarchy';
 import { OpenEditors } from './core/open-editors';
 import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
 import { hasEntries, splitSettingsPatch } from './core/settings-patch';
-import {
-  amendWarning,
-  copiedToTrash,
-  createFileUndo,
-  createFolderUndo,
-  planAmend,
-  planCheckout,
-  planCommitSave,
-  planPush,
-  prepareDiscard,
-  prepareRename,
-  trackMoves,
-  undoableAfterTrash,
-  undoMoves,
-  undoRenamePlan,
-  type CheckoutPlan,
-  type CreateUndo,
-  type MoveTrack,
-  type RenamePlan,
-} from './core/file-actions';
+import { planCheckout, planCommitSave, type CheckoutPlan } from './core/file-actions';
 import { projectSymbolAnswer, toProjectSymbols } from './core/project-symbols';
-import { type GitResult, rebaseNotice } from './core/git-notice';
 import {
   DEFAULT_MACRO_TIMES,
   checkMacroTimes,
@@ -88,7 +75,14 @@ import {
   macroPlayedNotice,
   macroRecordedNotice,
 } from './core/macro-run';
-import { deleteManyPrompt, deletePrompt, movedNotice, renamedNotice, trashedNotice } from './core/file-notices';
+import { registerFileCreateCommands } from './core/file-create-commands';
+import { registerFileMutationCommands } from './core/file-mutation-commands';
+import { registerDebugCommands } from './core/debug-commands';
+import { registerAiCommands } from './core/ai-commands';
+import { registerViewCommands, type ZenSnapshot } from './core/view-commands';
+import { registerEditorFixCommands } from './core/editor-fix-commands';
+import { registerEditorModeCommands, type EditorModeName } from './core/editor-mode-commands';
+import { registerFileSaveCommands } from './core/file-save-commands';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
 import { RpcClient } from './core/rpc';
@@ -107,26 +101,18 @@ import {
 import type { ProjectScan } from '../shared/project-scan';
 import { detectNodeTestRunner, type NodeTestRunner } from '../shared/node-tests';
 import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
-import { codeActionKindLabel, type CodeActionItem } from '../shared/lsp-code-actions';
-import { refactorLabel, type RefactorAction } from '../shared/lsp-refactor';
-import { installLanguageOf, installMenuItems, installSuggestions, objectsWord } from '../shared/import-install';
 import { createInstallActions } from './core/install-actions';
 import { isNodeLanguage } from '../shared/languages';
 import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
 import { surroundOptions } from './editor/input/surround';
 import { semanticFoldRanges } from './editor/highlight/folds';
 import { languageGrammar } from './editor/highlight/lazy-registry';
-import { packageForModule } from '../shared/python-packages';
-import { fetchResultsSummary } from '../shared/git-multiroot';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
 import { applyTextEdits, fromOffset } from '../shared/edits';
 import { decideSaveAs } from '../shared/save-as';
-import { isEmptyCommitMessage } from '../shared/commit-message';
 import { pairFromSelection } from './core/file-compare';
-import { hunkAtLine } from '../shared/hunk-lines';
 import { isInsidePath, joinPath, pathAfter, separatorOf, splitPath } from '../shared/paths';
-import { copyPlan, movePlan } from './core/tree-move';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
@@ -144,25 +130,25 @@ import { createBrowserView } from './ui/browser-view';
 import { createExplorer } from './ui/explorer';
 import { createLaunchOptionsModal } from './ui/launch-options-modal';
 import { createLayout } from './ui/layout';
-import { createLspPopover, type LspPopoverView } from './ui/lsp-popover';
+import { createLspPopover } from './ui/lsp-popover';
 import { createMarkdownPreview, isMarkdownPath } from './ui/markdown-preview';
 import { createDocView } from './ui/doc-view';
 import { createNotebookPanel } from './ui/notebook-panel';
 import { logoMark } from './ui/logo';
-import { createNodeEnvPopover, type NodeEnvPopoverView } from './ui/node-env-popover';
+import { createNodeEnvPopover } from './ui/node-env-popover';
 import { createOutline } from './ui/outline';
 import { createProblemPanel } from './ui/problem-panel';
 import { problemBadgeText } from '../shared/problem-list';
 import { formatDuration, highlightedLines, hottestLines, profileSummary } from '../shared/line-profile';
 import { TODO_QUERY, toTodoItems } from '../shared/todo-list';
 import { createPalette } from './ui/palette';
-import { createPopover, type PopoverView } from './ui/popover';
-import { createPythonEnvPopover, type PythonEnvPopoverView } from './ui/python-env-popover';
+import { createPythonEnvPopover } from './ui/python-env-popover';
+import { createLazyPopover } from './ui/lazy-popover';
 import { createMeaningSearch } from './ui/meaning-search';
 import { createQuickOpen } from './ui/quick-open';
 import { createSymbolPicker } from './ui/symbol-picker';
 import { isEmptyTest, suggestTestPath, truncateTestCode } from '../shared/test-generation';
-import { closePopupMenu, isPopupOpen, showPopupMenu, type PopupMenuItem } from './ui/popup-menu';
+import { closePopupMenu, isPopupOpen, showPopupMenu } from './ui/popup-menu';
 import { createPromptModal } from './ui/prompt-modal';
 import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
@@ -296,6 +282,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           sidebarVisible: layout.sidebarVisible,
           rightVisible: layout.rightVisible,
           dockVisible: layout.dockVisible,
+          editorVisible: layout.editorVisible,
         },
       })
       .catch(() => baseSettings);
@@ -321,6 +308,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       layout.setSidebarVisible(saved.sidebarVisible);
       layout.setRightVisible(saved.rightVisible);
       layout.setDockVisible(saved.dockVisible);
+      layout.setEditorVisible(saved.editorVisible);
     });
   }
 
@@ -546,7 +534,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     // Быстрые исправления: список действий языка показывает приложение — у него и попапы,
     // и языковой сервер, и документная модель для правок.
-    codeActions: (path, position) => void runCodeActions(path, position),
+    codeActions: (path, position) => void fixes.runCodeActions(path, position),
     // Свёртка: диапазоны берём у сервера, а если он их не умеет — считаем по отступам.
     // Свёртка: сперва сервер (он видит блоки смыслово). Нет сервера — считаем сами:
     // по грамматике (скобки, блочные комментарии, длинные строки) и по отступам.
@@ -568,264 +556,29 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Подсказки-вставки: тип переменной, имя параметра — прямо в коде. Серверу нужен
     // диапазон, а своего текста у него нет: конец документа считаем по тексту файла.
     inlayHints: (path, text) => lsp.inlayHints(path, endOfText(text)),
-    // Правый клик по тексту: меню собираем здесь, а не в панели, — пункты это команды
-    // приложения (отмена, буфер обмена, поиск, переходы), и реестр команд у него.
+    // Правый клик по тексту: состав пунктов — `core/editor-menu.ts` (чистая функция,
+    // покрыта тестом), а показывает приложение: попапы и реестр команд у него.
     contextMenu: (info, event) => {
-      const items: PopupMenuItem[] = [
-        { label: 'Отменить', hint: 'Ctrl+Z', onSelect: () => editors.runAction('editor.undo') },
-        { label: 'Повторить', hint: 'Ctrl+Y', onSelect: () => editors.runAction('editor.redo') },
-        { separator: true },
-      ];
-      if (info.hasSelection) {
-        items.push(
-          { label: 'Вырезать', hint: 'Ctrl+X', onSelect: () => editors.cutToClipboard() },
-          { label: 'Копировать', hint: 'Ctrl+C', onSelect: () => editors.copyToClipboard() },
-        );
-      }
-      items.push(
-        { label: 'Вставить', hint: 'Ctrl+V', onSelect: () => editors.pasteFromClipboard() },
-        { separator: true },
-        { label: 'Выделить всё', hint: 'Ctrl+A', onSelect: () => editors.runAction('editor.selectAll') },
-        { separator: true },
-        { label: 'Увеличить отступ', hint: 'Tab', onSelect: () => editors.runAction('editor.indent') },
-        { label: 'Уменьшить отступ', hint: 'Shift+Tab', onSelect: () => editors.runAction('editor.outdent') },
-        { separator: true },
-        { label: 'Найти', hint: 'Ctrl+F', onSelect: () => editors.runAction('editor.find') },
-        { label: 'Найти и заменить', hint: 'Ctrl+H', onSelect: () => editors.runAction('editor.replace') },
-        { label: 'Перейти к строке', hint: 'Ctrl+G', onSelect: () => editors.runAction('editor.gotoLine') },
-      );
-      // Переходы по символу и переименование доступны только с языковым сервером:
-      // без него этих команд в каталоге редактора нет — и пункты не показываем.
-      if (editors.listActions().some((action) => action.id === 'editor.goToDefinition')) {
-        items.push(
-          { separator: true },
-          { label: 'Перейти к определению', onSelect: () => editors.runAction('editor.goToDefinition') },
-          { label: 'Заглянуть в определение', onSelect: () => editors.runAction('editor.peekDefinition') },
-          { label: 'Найти все ссылки', onSelect: () => editors.runAction('editor.references') },
-          { label: 'Переименовать символ', onSelect: () => editors.runAction('editor.renameSymbol') },
-        );
-        // Рефакторинги тоже делает сервер. Извлечение — только по выделению: пункт есть,
-        // когда есть что выносить.
-        const refactorPath = info.path;
-        if (refactorPath) {
-          items.push({ label: 'Рефакторинг…', onSelect: () => void runRefactorMenu(refactorPath) });
-          if (info.hasSelection) {
-            items.push({ label: 'Извлечь…', onSelect: () => void runRefactor(refactorPath, 'extract') });
-          }
-          items.push({ label: 'Развернуть (inline)…', onSelect: () => void runRefactor(refactorPath, 'inline') });
-        }
-      }
-      // Закладка ставится на конкретную строку, поэтому и пункт есть только у файла.
-      const bookmarkPath = info.path;
-      if (bookmarkPath) {
-        const bookmarked = bookmarks.isBookmarked(bookmarkPath, info.line);
-        items.push(
-          { separator: true },
-          {
-            label: bookmarked ? 'Убрать закладку' : 'Поставить закладку',
-            onSelect: () => bookmarks.toggle(bookmarkPath, info.line),
-          },
-          { label: 'Закладки…', hint: 'Ctrl+Alt+B', onSelect: () => bookmarksModal.open() },
-        );
-      }
-      // Орфография: пункты есть, только когда под курсором слово с ошибкой.
-      if (editors.spellingWordAtCursor()) {
-        items.push(
-          { separator: true },
-          { label: 'Добавить в словарь', onSelect: () => editors.addSpellingWordToDictionary() },
-          { label: 'Пропустить слово', onSelect: () => editors.ignoreSpellingWord() },
-        );
-      }
-      // Быстрые исправления: пункт есть там, где он что-то даст — с языковым сервером.
-      if (info.path && editors.listActions().some((action) => action.id === 'editor.codeActions')) {
-        items.push({
-          label: 'Быстрые исправления…',
-          hint: 'Ctrl+.',
-          onSelect: () => void runCodeActions(info.path!, { line: info.line, column: info.column }),
-        });
-      }
+      const items = editorContextMenuPlan(info, {
+        hasAction: (id) => editors.listActions().some((action) => action.id === id),
+        runAction: (id) => editors.runAction(id),
+        cut: () => editors.cutToClipboard(),
+        copy: () => editors.copyToClipboard(),
+        paste: () => editors.pasteFromClipboard(),
+        spellingAtCursor: () => Boolean(editors.spellingWordAtCursor()),
+        addToDictionary: () => editors.addSpellingWordToDictionary(),
+        ignoreSpelling: () => editors.ignoreSpellingWord(),
+        isBookmarked: (path, line) => bookmarks.isBookmarked(path, line),
+        toggleBookmark: (path, line) => bookmarks.toggle(path, line),
+        openBookmarks: () => bookmarksModal.open(),
+        refactorMenu: (path) => void fixes.runRefactorMenu(path),
+        refactor: (path, action) => void fixes.runRefactor(path, action),
+        codeActions: (path, position) => void fixes.runCodeActions(path, position),
+      });
       showContextMenu(items, event.clientX, event.clientY);
     },
   });
   const edits = new EditService({ documents, editors, rpc });
-
-  /**
-   * Наши быстрые правки: поставить не установленный пакет. Своя проверка импортов
-   * (`core/import-check.ts`) знает, чего не хватает, а перевод «модуль → пакет» — таблица
-   * Python (`yaml` → `PyYAML`). У языков разные пути установки: Python идёт `pip` в своё
-   * окружение, Node — менеджером проекта в терминале.
-   */
-  const importInstallActions = (path: string, position: { line: number; column: number }): PopupMenuItem[] => {
-    const language = documents.get(path)?.languageId ?? '';
-    const installable = installLanguageOf(language);
-    if (!installable) return [];
-    const python = installable.python;
-    const refs = importChecker.missingFor(path);
-    if (refs.length === 0) return [];
-    // Ориентируемся на строку под курсором: имя модуля берём из импорта, а не из позиции.
-    const suggestions = installSuggestions(refs, new Set([position.line]), python ? packageForModule : undefined);
-    const install = (pkg: string, forPython: boolean): void => {
-      void (forPython ? installPythonPackages([pkg]) : installNodePackages([pkg]));
-    };
-    return installMenuItems(suggestions, python, install).map((item) => ({
-      label: item.title,
-      hint: 'быстрое исправление',
-      onSelect: item.run,
-    }));
-  };
-
-  /**
-   * Свои быстрые правки из диагностики — без языкового сервера. Сейчас это замены для
-   * отмеченного орфографией слова: подсказки из словаря, плюс «в словарь» и «пропустить».
-   * Нет слова с ошибкой — списка нет.
-   */
-  const spellingQuickFixes = (): PopupMenuItem[] => {
-    const found = editors.spellingSuggestionsAtCursor();
-    if (!found) return [];
-    const items: PopupMenuItem[] = found.suggestions.map((word) => ({
-      label: `Заменить на «${word}»`,
-      hint: 'орфография',
-      onSelect: () => {
-        if (!editors.replaceSpellingWord(word)) showToast('Не удалось заменить слово', 'error');
-      },
-    }));
-    items.push(
-      { label: 'Добавить в словарь', hint: 'орфография', onSelect: () => editors.addSpellingWordToDictionary() },
-      { label: 'Пропустить слово', hint: 'орфография', onSelect: () => editors.ignoreSpellingWord() },
-    );
-    return items;
-  };
-
-  /**
-   * Быстрые исправления под курсором: спросить сервер, показать список у каретки,
-   * применить выбранное. Правки идут через документную модель — значит с undo; команда
-   * сервера выполняется там, где он живёт.
-   */
-  const runCodeActions = async (path: string, position: { line: number; column: number }): Promise<void> => {
-    // Контекст запроса — пометки ЭТОЙ строки: сервер отвечает исправлениями на них.
-    const diagnostics = editors.lspDiagnostics(path).filter((item) => item.line === position.line);
-    const actions = await lsp.codeActions(path, position, diagnostics);
-    // Свои правки идут вперёд: они отвечают на наши же пометки и понятнее серверных.
-    const own: PopupMenuItem[] = [...spellingQuickFixes(), ...importInstallActions(path, position)];
-    const fromServer: PopupMenuItem[] = actions.map((action) => ({
-      label: action.title,
-      hint: codeActionKindLabel(action.kind),
-      onSelect: () => void applyCodeAction(path, action),
-    }));
-    const items: PopupMenuItem[] =
-      own.length > 0 && fromServer.length > 0 ? [...own, { separator: true }, ...fromServer] : [...own, ...fromServer];
-    if (items.length === 0) {
-      showToast('Быстрых исправлений здесь нет');
-      return;
-    }
-    // Список ставим у каретки — как список подсказок: глаз уже там, где он печатает.
-    const point = editors.caretPoint();
-    showPopupMenu(items, point?.left ?? 0, (point?.bottom ?? 0) + 2);
-  };
-
-  /** Применить выбранное действие: его правки и/или команду сервера. */
-  const applyCodeAction = async (path: string, action: CodeActionItem): Promise<void> => {
-    if (action.edits) {
-      const result = await edits.applyFileEdits(action.edits);
-      if (result.failed.length > 0) showToast(result.failed[0]!.message, 'error');
-    }
-    if (!action.command) return;
-    await runLensCommand(path, action.command);
-  };
-
-  /**
-   * Упорядочить импорты файла: сервер один знает, что лишнее и чего не хватает, —
-   * просим действие `source.organizeImports` и применяем его правки обычным путём.
-   */
-  const runOrganizeImports = async (path: string): Promise<void> => {
-    const document = documents.get(path);
-    if (!document) return;
-    const actions = await lsp.organizeImports(path, { line: document.lineCount, column: 1 });
-    const action = actions.find((item) => item.edits);
-    if (!action) {
-      showToast('Упорядочить импорты сервер не предложил');
-      return;
-    }
-    await applyCodeAction(path, action);
-  };
-
-  /**
-   * Извлечение и «разворачивание» (inline) — рефакторинги, которые умеет только языковой
-   * сервер. Просим у него действие нужного вида и применяем выбранное: извлечение — по
-   * выделению, разворачивание — по символу под кареткой.
-   */
-  const runRefactor = async (path: string, action: RefactorAction): Promise<void> => {
-    const document = documents.get(path);
-    if (!document) return;
-    if (document.readOnly) {
-      showToast('Файл открыт только для чтения — рефакторинг не применить');
-      return;
-    }
-    const range = editors.selectionRange();
-    // Извлечению нужен участок: по пустому выделению выносить нечего.
-    const empty = range.startLine === range.endLine && range.startColumn === range.endColumn;
-    if (action === 'extract' && empty) {
-      showToast('Выделите выражение, которое надо извлечь');
-      return;
-    }
-    const actions = await lsp.refactor(path, range, action);
-    if (actions.length === 0) {
-      showToast(`Сервер ${refactorLabel(action)} не предложил`);
-      return;
-    }
-    // Одно действие — применяем сразу; несколько (в переменную и в функцию) — выбираем.
-    const [first] = actions;
-    if (actions.length === 1 && first) {
-      await applyCodeAction(path, first);
-      return;
-    }
-    const point = editors.caretPoint();
-    showPopupMenu(
-      actions.map((entry) => ({
-        label: entry.title,
-        hint: codeActionKindLabel(entry.kind),
-        onSelect: () => void applyCodeAction(path, entry),
-      })),
-      point?.left ?? 0,
-      (point?.bottom ?? 0) + 2,
-    );
-  };
-
-  /**
-   * Общий список рефакторингов: что сервер предлагает для выделения или символа под
-   * кареткой, то и показываем — извлечение, разворачивание и всё прочее из раздела
-   * `refactor` (вынести в файл, преобразовать…). Отдельные команды для извлечения и
-   * inline при этом остаются: они сразу прыгают в конкретный подвид, минуя выбор.
-   */
-  const runRefactorMenu = async (path: string): Promise<void> => {
-    const document = documents.get(path);
-    if (!document) return;
-    if (document.readOnly) {
-      showToast('Файл открыт только для чтения — рефакторинг не применить');
-      return;
-    }
-    const actions = await lsp.refactorActions(path, editors.selectionRange());
-    if (actions.length === 0) {
-      showToast('Сервер рефакторингов не предложил');
-      return;
-    }
-    // Один — применяем сразу, без списка из одной строки; несколько — выбираем.
-    const [first] = actions;
-    if (actions.length === 1 && first) {
-      await applyCodeAction(path, first);
-      return;
-    }
-    const point = editors.caretPoint();
-    showPopupMenu(
-      actions.map((entry) => ({
-        label: entry.title,
-        hint: codeActionKindLabel(entry.kind),
-        onSelect: () => void applyCodeAction(path, entry),
-      })),
-      point?.left ?? 0,
-      (point?.bottom ?? 0) + 2,
-    );
-  };
 
   /**
    * Исполнить команду сервера (быстрого исправления или клика по линзе): ответ бывает
@@ -999,15 +752,15 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * в статусбаре — вкладки «Изменения» в нижней панели больше нет. Экземпляр один:
    * берём тот же `sourceControl`, а не заводим вторую копию с отдельной подпиской.
    */
-  let gitManagerPopover: PopoverView | null = null;
+  const gitManagerPopover = createLazyPopover({
+    create: () => ({ element: sourceControl.element }),
+    className: 'popover-git',
+    width: 360,
+    // Свежее состояние: репозиторий мог измениться вне приложения.
+    beforeOpen: () => void git.refresh(),
+  });
 
   function openGitManager(anchor: HTMLElement): void {
-    if (!gitManagerPopover) {
-      gitManagerPopover = createPopover(sourceControl.element, { width: 360 });
-      gitManagerPopover.element.classList.add('popover-git');
-    }
-    // Свежее состояние: репозиторий мог измениться вне приложения.
-    void git.refresh();
     gitManagerPopover.toggle(anchor);
   }
 
@@ -1016,12 +769,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * лениво, но прогреваем снимок при открытии проекта (см. preloadEnvironment);
    * список обновляем ещё и при каждом открытии — попап мог провисеть долго.
    */
-  let pythonEnvPopover: PopoverView | null = null;
-  let pythonEnvView: PythonEnvPopoverView | null = null;
-
-  function ensurePythonEnv(): PythonEnvPopoverView {
-    if (!pythonEnvPopover || !pythonEnvView) {
-      pythonEnvView = createPythonEnvPopover({
+  const pythonEnvPopover = createLazyPopover({
+    create: (close) =>
+      createPythonEnvPopover({
         rpc,
         root: () => workspace.root,
         tools: () => tools.get(),
@@ -1033,36 +783,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           // Интерпретатор выбирается для ЭТОГО проекта: два Python-проекта не
           // должны подменять друг другу окружение. Пусто — вернуться к общему.
           void setProjectInterpreter(command);
-          pythonEnvPopover?.close();
+          close();
           // Сервер подсказок поднят со старым интерпретатором — перезапускаем; у
           // выбранного окружения могло найтись и своё (pylsp в его `bin`).
           refreshLsp();
         },
         onCreate: () => {
-          pythonEnvPopover?.close();
+          close();
           void venvModal.open();
         },
         onPickExisting: () => {
-          pythonEnvPopover?.close();
+          close();
           void pickExistingVenv();
         },
         onInstallRequirements: () => {
-          pythonEnvPopover?.close();
+          close();
           void installRequirements();
         },
-      });
-      // Ширину не задаём: попап жмётся по содержимому (`.popover-python-env`),
-      // а фиксированные 340 px растягивали его на пустом месте.
-      pythonEnvPopover = createPopover(pythonEnvView.element);
-      pythonEnvPopover.element.classList.add('popover-python-env');
-    }
-    return pythonEnvView;
-  }
+      }),
+    // Ширину не задаём: попап жмётся по содержимому (`.popover-python-env`),
+    // а фиксированные 340 px растягивали его на пустом месте.
+    className: 'popover-python-env',
+    // Снимок обновляем при каждом открытии: попап мог провисеть долго.
+    refresh: (view) => void view.refresh(),
+  });
 
   function openPythonEnv(anchor: HTMLElement): void {
-    // Снимок обновляем при каждом открытии: попап мог провисеть долго (см. refresh).
-    void ensurePythonEnv().refresh();
-    pythonEnvPopover?.toggle(anchor);
+    pythonEnvPopover.toggle(anchor);
   }
 
   /**
@@ -1070,64 +817,54 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * ставятся зависимости и всё ли из `package.json` на месте. Снимок греем при
    * открытии проекта (см. preloadEnvironment), а при открытии попапа обновляем.
    */
-  let nodeEnvPopover: PopoverView | null = null;
-  let nodeEnvView: NodeEnvPopoverView | null = null;
-
-  function ensureNodeEnv(): NodeEnvPopoverView {
-    if (!nodeEnvPopover || !nodeEnvView) {
-      nodeEnvView = createNodeEnvPopover({
+  const nodeEnvPopover = createLazyPopover({
+    create: (close) =>
+      createNodeEnvPopover({
         rpc,
         root: () => workspace.root,
         tools: () => tools.get(),
         projectKind: () => projectScan?.kind.label ?? null,
         onInstall: () => {
-          nodeEnvPopover?.close();
+          close();
           // Ставим все объявленные зависимости: `npm install` без аргументов.
           void installNodePackages([]);
         },
-      });
-      // Ширину не задаём: попап жмётся по содержимому (`.popover-node-env`),
-      // а фиксированные 340 px растягивали его на пустом месте.
-      nodeEnvPopover = createPopover(nodeEnvView.element);
-      nodeEnvPopover.element.classList.add('popover-node-env');
-    }
-    return nodeEnvView;
-  }
+      }),
+    // Ширину не задаём: попап жмётся по содержимому (`.popover-node-env`),
+    // а фиксированные 340 px растягивали его на пустом месте.
+    className: 'popover-node-env',
+    refresh: (view) => void view.refresh(),
+  });
 
   function openNodeEnv(anchor: HTMLElement): void {
-    void ensureNodeEnv().refresh();
-    nodeEnvPopover?.toggle(anchor);
+    nodeEnvPopover.toggle(anchor);
   }
 
   /**
    * Попап языковых серверов по клику на чип в статусбаре: какой сервер обслуживает
    * язык, откуда он взят и что не поднялось. Так «почему нет подсказок» видно сразу.
    */
-  let lspPopover: PopoverView | null = null;
-  let lspPopoverView: LspPopoverView | null = null;
-
-  function ensureLspPopover(): LspPopoverView {
-    if (!lspPopover || !lspPopoverView) {
-      lspPopoverView = createLspPopover({
+  const lspPopover = createLazyPopover({
+    create: (close) =>
+      createLspPopover({
         rpc,
         onRestart: () => {
-          lspPopover?.close();
+          close();
           void commands.execute('lsp.restart');
         },
         onOpenSettings: () => {
-          lspPopover?.close();
+          close();
           settingsModal.open('lsp');
         },
-      });
-      lspPopover = createPopover(lspPopoverView.element, { width: 340, align: 'end' });
-      lspPopover.element.classList.add('popover-lsp-status');
-    }
-    return lspPopoverView;
-  }
+      }),
+    className: 'popover-lsp-status',
+    width: 340,
+    align: 'end',
+    refresh: (view) => void view.refresh(),
+  });
 
   function openLsp(anchor: HTMLElement): void {
-    void ensureLspPopover().refresh();
-    lspPopover?.toggle(anchor);
+    lspPopover.toggle(anchor);
   }
 
   /**
@@ -1146,8 +883,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   function preloadEnvironment(): void {
     if (!preloadPlanner.shouldPreload()) return;
-    if (preloadPlanner.target() === 'node') void ensureNodeEnv().refresh();
-    else void ensurePythonEnv().refresh();
+    if (preloadPlanner.target() === 'node') nodeEnvPopover.warm();
+    else pythonEnvPopover.warm();
   }
 
   // Сравнение версий грузится по требованию: `OwnDiffEditor` тянет за собой реестр
@@ -1494,14 +1231,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── чат ───────────────────────────────────────────────────────────────── */
 
-  /**
-   * Чат можно перенести в область редактора — тогда он становится обычной
-   * вкладкой рядом с файлами, а не отдельным экраном. Панель чата при этом одна:
-   * элемент переезжает между хозяевами, второй копии не существует.
-   */
-  const chatEditor = h('div', { class: 'chat-editor', hidden: true });
-  layout.editorHost.appendChild(chatEditor);
-
   // Вьюер картинок: та же область, но показывает изображение вместо текста.
   // Когда он виден — решает `syncImage` по активной вкладке.
   const imageView = createImageView({ rpc, notify: (message) => showToast(message, 'error') });
@@ -1581,15 +1310,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   };
 
-  let chatInEditor = false;
-  /** Вкладка чата показана сейчас: файлы ждут своей очереди. */
-  let chatTabActive = false;
-
-  /** Чат виден человеку: панелью справа либо вкладкой в редакторе. */
-  function chatVisible(): boolean {
-    return chatInEditor ? chatTabActive : layout.rightVisible;
-  }
-
   /** Ассистент выключен мастер-тумблером в настройках: все входы в него должны молчать. */
   const aiEnabled = (): boolean => settings.ai.enabled;
 
@@ -1597,30 +1317,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const warnAiDisabled = (): void => {
     showToast('AI выключен в настройках. Включить: Настройки → AI.', 'error');
   };
-
-  /** Показать вкладку чата (или перенести чат, если он ещё в панели). */
-  function showChatTab(): void {
-    if (!chatInEditor) {
-      setChatInEditor(true);
-      return;
-    }
-    chatTabActive = true;
-    // Страница уступает чату: область редактора у них одна, и активной вкладкой
-    // в полосе должна быть ровно одна — иначе подсвечены две, а на экране чат.
-    browserTabs.deactivate();
-    syncChatTab();
-  }
-
-  /** Активировали файл — вкладка чата остаётся в полосе, но не показывается. */
-  function hideChatTab(): void {
-    if (!chatInEditor || !chatTabActive) return;
-    chatTabActive = false;
-    syncChatTab();
-  }
-
-  function syncChatTab(): void {
-    applySurfaces();
-  }
 
   /**
    * Что показать в области редактора — решает `core/editor-surface.ts`.
@@ -1634,8 +1330,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   function applySurfaces(): void {
     const activePath = openEditors.active?.path ?? null;
     const plan = editorSurfacePlan({
-      chatInEditor,
-      chatTabActive,
       activePageId: browserTabs.activePageId,
       activePath,
       isImage: activePath !== null && isImagePath(activePath),
@@ -1643,12 +1337,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       markdownPreview: activePath !== null && markdownPreviews.has(activePath),
     });
     const island = layout.editorIsland;
-    island.classList.toggle('is-chat', plan.shown === 'chat');
     island.classList.toggle('is-browser', plan.shown === 'page');
     island.classList.toggle('is-image', plan.shown === 'image');
     island.classList.toggle('is-doc', plan.shown === 'doc');
     island.classList.toggle('is-markdown', plan.shown === 'markdown');
-    chatEditor.hidden = plan.shown !== 'chat';
     if (plan.shown !== 'page') browserView.hide();
     if (plan.shown !== 'image') imageView.hide();
     if (plan.shown !== 'doc') docView.hide();
@@ -1683,9 +1375,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         // Текст — экранам делать нечего, они уже погашены выше.
         break;
     }
-    // Подсветка кнопок в шапке идёт за экраном: по ней видно, открыт ли чат, браузер.
+    // Подсветка кнопок в шапке идёт за экраном: по ней видно, открыт ли браузер.
     syncViewButtons();
-    if (plan.shown !== 'chat') tabs.refresh();
+    tabs.refresh();
   }
 
   /** Часы правок файла и разметки: что показывать — решает `applySurfaces`. */
@@ -1711,62 +1403,33 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // Страница навигировалась, открылась или закрылась — полотно идёт за ней,
   // а разметка уступает место, если страница заняла область.
   browserTabs.onDidChange(() => {
-    // Активная страница забирает область редактора у вкладки чата. Событие приходит и
-    // тогда, когда страницу открыл агент, поэтому уступать чат заставляем здесь, а не
-    // только в обработчике клика по вкладке.
-    if (browserTabs.activePageId !== null) hideChatTab();
     // Страница заняла или освободила область: полотно, картинка и разметка делят
     // её с ней, поэтому пересчитываем область целиком, а не только браузер.
     applySurfaces();
   });
 
-  function setChatInEditor(next: boolean): void {
-    if (next === chatInEditor) {
-      if (next) showChatTab();
-      return;
-    }
-    chatInEditor = next;
-    chatTabActive = next;
-
-    if (next) {
-      // Панель отдаёт чат редактору: два хозяина у одной области экрана лишние.
-      layout.rightBody.replaceChildren();
-      chatEditor.appendChild(chat.element);
-      layout.setRightVisible(false);
-      // Чат занимает область редактора — страница браузера её уступает.
-      browserTabs.deactivate();
-    } else {
-      chatEditor.hidden = true;
-      layout.rightBody.appendChild(chat.element);
-      layout.setRightVisible(true);
-    }
-
-    syncChatTab();
-  }
-
-  /** Показать чат там, где он сейчас живёт: панелью справа или вкладкой в редакторе. */
+  /** Показать чат в правой панели — единственном его месте. */
   function revealChat(): void {
     if (!aiEnabled()) {
       warnAiDisabled();
       return;
     }
-    if (chatInEditor) showChatTab();
-    else layout.setRightVisible(true);
+    layout.setRightVisible(true);
     syncViewButtons();
   }
 
-  /**
-   * Кнопка AI: свернуть/развернуть чат — где бы он ни жил. Когда чат перенесён
-   * в редактор, правая панель пуста, поэтому переключать нужно вкладку, а не её.
-   */
+  /** Кнопка AI: свернуть/развернуть правую панель с чатом. */
   function toggleChat(): void {
     if (!aiEnabled()) {
       warnAiDisabled();
       return;
     }
-    if (chatInEditor) {
-      if (chatTabActive) hideChatTab();
-      else showChatTab();
+    // Скрытый редактор — окно без единого файла, и ассистент в нём остаётся
+    // единственным содержимым. Свернуть и его значит остаться с пустым полотном.
+    // Инвариант держит сам `layout` (см. `applyPanelIntent`); здесь — чтобы сказать
+    // вслух, почему кнопка не отозвалась.
+    if (layout.rightVisible && !layout.editorVisible) {
+      showToast('Редактор скрыт: ассистент — единственное, что есть в окне. Верните редактор (Ctrl+Alt+E)');
       return;
     }
     layout.setRightVisible(!layout.rightVisible);
@@ -1786,8 +1449,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Открытие файла — тем же путём, что у дерева и быстрого открытия: клик по
     // файлу в ленте чата открывает вкладку, а не только ставит курсор.
     openFile: (path) => openPath(path),
-    toggleEditor: () => setChatInEditor(!chatInEditor),
-    isInEditor: () => chatInEditor,
   });
   layout.rightBody.appendChild(chat.element);
   // Чат готов — браузер теперь может слать ему снимок страницы и её консоль.
@@ -1807,17 +1468,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       applies: (path) => isMarkdownPath(path),
       active: (path) => markdownPreviews.has(path),
       toggle: (path) => toggleMarkdownPreview(path),
-    },
-    auxiliary: {
-      title: 'Чат',
-      get visible() {
-        return chatInEditor;
-      },
-      get active() {
-        return chatTabActive;
-      },
-      activate: showChatTab,
-      close: () => setChatInEditor(false),
     },
   });
   layout.tabsHost.appendChild(tabs.element);
@@ -2019,6 +1669,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Панель закрывают и кнопкой, и командой, и сплиттером — подсветка идёт за состоянием. */
   const syncViewButtons = (): void => {
     viewButtons.get('project')?.classList.toggle('is-active', layout.sidebarVisible);
+    viewButtons.get('editorToggle')?.classList.toggle('is-active', layout.editorVisible);
     viewButtons.get('search')?.classList.toggle('is-active', layout.dockVisible && dock.activeId === 'search');
     // Кнопка нижней панели помнит состояние самого острова, а не одной вкладки:
     // она его распахивает и захлопывает целиком.
@@ -2031,7 +1682,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const aiButton = viewButtons.get('ai');
     if (aiButton) {
       aiButton.hidden = !aiEnabled();
-      aiButton.classList.toggle('is-active', aiEnabled() && chatVisible());
+      aiButton.classList.toggle('is-active', aiEnabled() && layout.rightVisible);
     }
   };
 
@@ -2087,6 +1738,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // содержимое, и в ряду действий над файлами им не место.
   // Переключатель боковой панели: он про то же — что открыто слева.
   addTopButton(layout.topBarRight, 'project', 'panel', 'Боковая панель (Ctrl+B)', 'view.toggleSidebar');
+  // Панель редактора: тот же смысл — что открыто в центре. Прячется целиком, отдавая
+  // место соседям; правка файлов при этом не теряется, вкладки никуда не деваются.
+  addTopButton(layout.topBarRight, 'editorToggle', 'panelCenter', 'Панель редактора (Ctrl+Alt+E)', 'view.toggleEditor');
   // Нижний остров (терминал, поиск, задачи): кнопка целиком включает и выключает его,
   // а значок — та же рамка с полосой, что у боковой панели, только полоса снизу.
   addTopButton(layout.topBarRight, 'dock', 'panelBottom', 'Нижняя панель (Alt+F12)', 'view.toggleDock');
@@ -2103,7 +1757,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   if (paletteButton) paletteButton.hidden = true;
   // Ассистент носит знак приложения, а не звезду-искру: тот же знак, что
   // в пустом состоянии редактора, — кнопка и экран говорят одно и то же.
-  addTopButton(layout.topBarRight, 'ai', 'sparkle', 'AI Assistant (Ctrl+Shift+A)', 'view.toggleRight', logoMark(13));
+  // Кнопка AI в шапке бьёт в `ai.toggle`, а не в собственную команду: прежняя
+  // `view.toggleRight` звала `toggleChat()` мимо проверки `aiEnabled()` и открывала
+  // панель при выключенном AI — та же ошибка, что чинил `ai.toggle` (см. ниже).
+  addTopButton(layout.topBarRight, 'ai', 'sparkle', 'AI Assistant (Ctrl+Shift+A)', 'ai.toggle', logoMark(13));
 
   // Своя рамка создаётся последней: кнопки окна должны стоять с краю шапки,
   // а не перед кнопками действий.
@@ -2135,7 +1792,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       const document = edits.binaryDocument(path);
       openEditors.open(document, options);
       explorer.reveal(path);
-      hideChatTab();
       return;
     }
     // Картинка — не текст: бинарь открывать редактором нельзя. Заводим документ-заглушку
@@ -2145,16 +1801,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       const document = edits.binaryDocument(path);
       openEditors.open(document, options);
       explorer.reveal(path);
-      // Открыли файл — вкладка чата ждёт в полосе.
-      hideChatTab();
       return;
     }
     const document = await edits.ensureDocument(path);
     openEditors.open(document, options);
     editors.open(document);
     explorer.reveal(path);
-    // Открыли файл — на экране он, вкладка чата ждёт в полосе.
-    hideChatTab();
   };
 
   /**
@@ -2868,11 +2520,26 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       // Подсказки подняты со старым интерпретатором — перезапускаем: у нового
       // окружения может найтись и свой pylsp.
       refreshLsp();
-      void pythonEnvView?.refresh();
+      pythonEnvPopover.refresh();
     },
   });
   const { installPythonPackages, installRequirements, installNodePackages, setProjectInterpreter, pickExistingVenv } =
     install;
+
+  // Быстрые правки под курсором: свои (поставить пакет) и серверные (refactor,
+  // действия языка). Состав меню — `core/editor-fixes.ts`.
+  const fixes = createEditorFixes({
+    editors,
+    documents,
+    lsp,
+    edits,
+    importChecker,
+    installPythonPackages,
+    installNodePackages,
+    showToast,
+    // Команда линзы — часть командного слоя; подсказки только зовут её.
+    runLensCommand: (path, command) => void runLensCommand(path, command),
+  });
 
   /* ── реестр команд ─────────────────────────────────────────────────────── */
 
@@ -2964,15 +2631,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Картинку и документ Office текстовому редактору не отдаём: их показывает свой экран.
     if (document && !isImagePath(path) && !isOfficePath(path)) editors.open(document);
     // Файл мог быть активным и до этого: клик по его вкладке всё равно должен
-    // показать файл, а не оставить на экране чат или страницу браузера. Чат
-    // отступает сам, а странице нужен отдельный сигнал: её активность живёт в
-    // другой модели, и `openEditors.activate` при том же файле события не шлёт.
-    hideChatTab();
+    // показать файл, а не оставить на экране страницу браузера. Ей нужен отдельный
+    // сигнал: её активность живёт в другой модели, и `openEditors.activate`
+    // при том же файле события не шлёт.
     browserTabs.deactivate();
   });
 
-  /** В полосе показана вкладка без файла: страница браузера или чат. */
-  const straysShown = (): boolean => (chatInEditor && chatTabActive) || browserTabs.activePageId !== null;
+  /** В полосе показана вкладка без файла: страница браузера. */
+  const straysShown = (): boolean => browserTabs.activePageId !== null;
 
   define(
     {
@@ -2988,10 +2654,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       // Без явного пути (Ctrl+W) закрывается ТА вкладка, что показана. Иначе при
       // открытом чате или странице команда молча закрывала бы файл за ними.
       if (typeof path !== 'string') {
-        if (chatInEditor && chatTabActive) {
-          setChatInEditor(false);
-          return;
-        }
         const pageId = browserTabs.activePageId;
         if (pageId !== null) {
           browserPages.close(pageId);
@@ -3028,295 +2690,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
-  define(
-    {
-      id: 'file.save',
-      title: 'Сохранить',
-      category: 'Файл',
-      keybinding: 'Ctrl+S',
-      enabled: () => openEditors.active !== null,
-    },
-    async () => {
-      const document = openEditors.active;
-      if (!document) {
-        showToast('Нет открытого файла');
-        return;
-      }
-      await saveDocument(document);
-    },
-  );
-
-  define(
-    {
-      id: 'file.saveAs',
-      title: 'Сохранить как…',
-      category: 'Файл',
-      keybinding: 'Ctrl+Shift+S',
-      enabled: () => openEditors.active !== null,
-    },
-    // Путь приходит из меню вкладки: сохраняем тот файл, по которому кликнули,
-    // а не активный. Без аргумента — активный (палитра, горячая клавиша).
-    async (path) => {
-      const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
-      const document = target ? (documents.get(target) ?? null) : null;
-      if (!document) {
-        showToast('Нет открытого файла');
-        return;
-      }
-      await saveDocumentAs(document);
-    },
-  );
-
-  define(
-    {
-      id: 'file.saveAll',
-      title: 'Сохранить всё',
-      category: 'Файл',
-      // Ctrl+Shift+S отдано «Сохранить как…» — привычному сочетанию.
-      keybinding: 'Ctrl+Alt+S',
-      enabled: () => documents.dirty().length > 0,
-    },
-    async () => {
-      const dirty = documents.dirty();
-      if (dirty.length === 0) {
-        showToast('Все файлы уже сохранены');
-        return;
-      }
-      for (const document of dirty) await saveDocument(document);
-    },
-  );
-
-  // Возврат к версии на диске. Нужен там, где буфер разошёлся с файлом: правки
-  // записал другой инструмент или они легли мимо. Без этой команды такой документ
-  // оставался бы «не сохранён» до самого закрытия вкладки.
-  define(
-    {
-      id: 'file.revertFromDisk',
-      title: 'Перечитать с диска (отменить правки в буфере)',
-      category: 'Файл',
-      // Доступна, пока есть хоть один правленый буфер: команда умеет и путь в аргументе
-      // (правый клик по вкладке), и активный файл — гасить её по одному файлу незачем.
-      enabled: () => documents.dirty().length > 0,
-    },
-    (pathArg) => {
-      const target = typeof pathArg === 'string' ? pathArg : (openEditors.active?.path ?? null);
-      if (!target) return;
-      return revertFilesToDisk([target]);
-    },
-  );
-
-  // То же для всех разом: файлов в буфере бывает несколько, и закрывать окно,
-  // отвечая по одному, — лишняя работа.
-  define(
-    {
-      id: 'file.revertAllFromDisk',
-      title: 'Перечитать все файлы с диска',
-      category: 'Файл',
-      enabled: () => documents.dirty().length > 0,
-    },
-    () => revertFilesToDisk(documents.dirty().map((document) => document.path)),
-  );
-
-  define({ id: 'file.createFile', title: 'Создать файл', category: 'Файл' }, async (path) => {
-    if (typeof path !== 'string') return undefined;
-    const created = await rpc.request('workspace.createFile', { path });
-    await openPath(created.path);
-    explorer.scheduleRefresh();
-    // Сразу предлагаем отменить: файл могли создать по ошибке в неверной папке.
-    showToast(`Создан файл ${basename(created.path)}`, 'info', {
-      action: {
-        label: 'Отменить',
-        run: () => undoCreate(createFileUndo(created.path)),
-      },
-    });
-    return created.path;
-  });
-
-  define({ id: 'file.createFolder', title: 'Создать папку', category: 'Файл' }, async (path) => {
-    if (typeof path !== 'string') return undefined;
-    const created = await rpc.request('workspace.createDir', { path });
-    explorer.scheduleRefresh();
-    showToast(`Создана папка ${basename(created.path)}`, 'info', {
-      action: {
-        label: 'Отменить',
-        run: () => undoCreate(createFolderUndo(created.path)),
-      },
-    });
-    return created.path;
-  });
-
-  // Из меню и палитры создание начинается с инлайн-ввода имени в дереве.
-  define({ id: 'file.newFile', title: 'Новый файл…', category: 'Файл', keybinding: 'Ctrl+N' }, () => {
-    explorer.startCreate('file');
-  });
-
-  define({ id: 'file.newFolder', title: 'Новая папка…', category: 'Файл' }, () => {
-    explorer.startCreate('directory');
-  });
-
-  // Сценарий по шагам. Порядок не косметика: активность запоминается ДО закрытия
-  // вкладки (иначе активной уже будет соседняя), прежнее имя и число правленных
-  // ссылок — до возврата, откат идёт через те же шаги в обратную сторону.
-  // Решения о порядке — в core/file-actions.ts, здесь только диск и окна.
-  define({ id: 'file.rename', title: 'Переименовать', category: 'Файл' }, async (from, to) => {
-    if (typeof from !== 'string' || typeof to !== 'string') return undefined;
-    const plan = prepareRename(from, openEditors.active?.path ?? null, openEditors.has(from));
-    if (plan.hadTab) openEditors.close(plan.from);
-
-    const renamed = await rpc.request('workspace.rename', { from: plan.from, to });
-    const touched = await followRename(plan.from, renamed.path);
-    if (plan.wasActive) await openPath(renamed.path);
-    explorer.scheduleRefresh();
-
-    showToast(renamedNotice({ name: basename(renamed.path), touched }), 'info', {
-      action: {
-        label: 'Отменить',
-        run: () => undoRename({ plan, to: renamed.path, touched }),
-      },
-    });
-    return renamed.path;
-  });
-
-  // Шаги «переименовал» и «вернул» — рядом с обработчиком, потому что оба знают
-  // порядок: сначала закрыть вкладку, потом трогать диск, иначе редактор будет
-  // держать файл за прежний дескриптор. Настройка updateImportsOnRename гасит
-  // только правку ссылок, само переименование не трогает.
-  const followRename = async (oldPath: string, newPath: string): Promise<number> => {
-    if (!settings.explorer.updateImportsOnRename) return 0;
-    const result = await rpc
-      .request('workspace.updateImports', { oldPath, newPath })
-      .catch(() => ({ files: [] as string[] }));
-    return result.files.length;
-  };
-
-  const undoRename = async (done: { plan: RenamePlan; to: string; touched: number }): Promise<void> => {
-    const back = undoRenamePlan({ from: done.plan.from, to: done.to, touched: done.touched });
-    await commands.execute('file.close', back.from);
-    await rpc.request('workspace.rename', { from: back.from, to: back.to });
-    // Ссылки возвращаются тем же путём — иначе отмена оставила бы в проекте
-    // ссылки на исчезнувший путь.
-    if (back.restoreImports) await followRename(back.from, back.to);
-    if (done.plan.wasActive) await openPath(back.to);
-    explorer.scheduleRefresh();
-  };
-
-  // Отмена создания: сначала закрыть вкладку (для файла), потом унести в корзину.
-  // У папки вкладки нет — это решает createFolderUndo, а не `if` на месте вызова.
-  const undoCreate = async (undo: CreateUndo): Promise<void> => {
-    if (undo.closeTab && undo.closePath) await commands.execute('file.close', undo.closePath);
-    await rpc.request('workspace.trash', { path: undo.trashPath }).catch(() => undefined);
-    explorer.scheduleRefresh();
-  };
-
-  // Удаление не предлагает «Отменить»: путей возврата из корзины через API нет
-  // (canUndoTrash в core/file-actions.ts — сейчас всегда false). Кнопка, которая
-  // при нажатии ничего не делает, хуже её отсутствия: человек верит, что файл
-  // вернулся. Когда восстановление появится, сюда придёт то же действие, что у
-  // создания, — с настоящим шагом возврата.
-  define({ id: 'file.delete', title: 'Удалить в корзину', category: 'Файл' }, async (path) => {
-    if (typeof path !== 'string') return;
-
-    // Удаление необратимо, поэтому спрашиваем — но только если так настроено:
-    // в проводнике это рутинное действие, и лишний вопрос раздражает.
-    if (settings.explorer.confirmDelete) {
-      const prompt = deletePrompt(basename(path), workspace.relative(path));
-      const { confirmed } = await rpc.request('dialog.confirm', {
-        title: 'Удалить в корзину',
-        ...prompt,
-        confirmLabel: 'Удалить',
-      });
-      if (!confirmed) return;
-    }
-
-    if (openEditors.has(path)) openEditors.close(path);
-    await rpc.request('workspace.trash', { path });
-    explorer.scheduleRefresh();
-    showToast(`В корзине: ${basename(path)}`);
-  });
-
-  define({ id: 'file.deleteMany', title: 'Удалить выделенное в корзину', category: 'Файл' }, async (paths) => {
-    if (!Array.isArray(paths)) return;
-    const list = paths.filter((item): item is string => typeof item === 'string');
-    if (list.length === 0) return;
-
-    // Вопрос один на всю пачку: спрашивать по разу на файл — то самое раздражение,
-    // ради ухода от которого и делают групповое выделение.
-    if (settings.explorer.confirmDelete) {
-      const { confirmed } = await rpc.request('dialog.confirm', {
-        title: 'Удалить в корзину',
-        ...deleteManyPrompt(list.length, objectsWord),
-        confirmLabel: 'Удалить',
-      });
-      if (!confirmed) return;
-    }
-
-    let removed = 0;
-    for (const path of list) {
-      try {
-        if (openEditors.has(path)) openEditors.close(path);
-        await rpc.request('workspace.trash', { path });
-        removed += 1;
-      } catch {
-        // Одного неудачного объекта мало, чтобы отменить удаление остальных.
-      }
-    }
-    explorer.scheduleRefresh();
-    const notice = trashedNotice(removed, objectsWord);
-    if (notice) showToast(notice);
-    // Восстановления из корзины нет (canUndoTrash) — кнопки не обещаем. Число
-    // возвращаемых спрашивает undoableAfterTrash, а не литерал на месте.
-    if (undoableAfterTrash(removed) > 0) {
-      showToast(`Можно вернуть: ${removed}`, 'info', { action: { label: 'Вернуть', run: () => undefined } });
-    }
-  });
-
-  // Откат переноса пачки: обратный порядок и перевёрнутые рёбра — в undoMoves.
-  const undoMoveAll = async (moved: readonly MoveTrack[]): Promise<void> => {
-    for (const step of undoMoves(moved)) {
-      if (openEditors.has(step.to)) openEditors.close(step.to);
-      await rpc.request('workspace.rename', { from: step.from, to: step.to }).catch(() => undefined);
-    }
-    for (const step of moved) if (step.active) await openPath(step.from);
-    explorer.scheduleRefresh();
-  };
-
-  define({ id: 'file.moveInto', title: 'Переместить в папку', category: 'Файл' }, async (paths, targetDir) => {
-    if (!Array.isArray(paths) || typeof targetDir !== 'string') return;
-    const list = paths.filter((item): item is string => typeof item === 'string');
-    const steps = movePlan(list, targetDir);
-    if (steps.length === 0) return;
-
-    // Открытые вкладки переезжают вместе с файлом: закрываем и открываем по новому
-    // пути. Активную возвращаем на экран — иначе перенос выглядел бы как закрытие.
-    // Снимок активности — ДО первого переезда: потом активной станет соседняя вкладка,
-    // и «был ли на экране» уже не ответить (core/file-actions.ts).
-    const tracks = trackMoves(steps, openEditors.active?.path ?? null);
-    const moved: MoveTrack[] = [];
-    for (const track of tracks) {
-      try {
-        if (openEditors.has(track.from)) openEditors.close(track.from);
-        await rpc.request('workspace.rename', { from: track.from, to: track.to });
-        moved.push(track);
-      } catch {
-        // Имя в целевой папке занято — этот объект пропускаем, остальные переносим.
-      }
-    }
-
-    explorer.scheduleRefresh();
-    if (moved.length === 0) {
-      showToast('Перенести не удалось: в целевой папке уже есть такое имя', 'error');
-      return;
-    }
-    for (const step of moved) if (step.active) await openPath(step.to);
-
-    showToast(movedNotice(moved.length, moved.length === 1 ? basename(moved[0]!.to) : null, objectsWord), 'info', {
-      action: {
-        label: 'Отменить',
-        run: () => undoMoveAll(moved),
-      },
-    });
-  });
-
   // Сравнение двух папок: список различий, клик по файлу открывает его сравнение.
   define({ id: 'folder.compare', title: 'Сравнить папки', category: 'Навигация' }, async (left, right) => {
     if (typeof left !== 'string' || typeof right !== 'string') return;
@@ -3346,48 +2719,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const pair = pairFromSelection(list);
     if (!pair) return;
     await diffView.openFiles(pair.left, pair.right);
-  });
-
-  define({ id: 'file.copyInto', title: 'Скопировать в папку', category: 'Файл' }, async (paths, targetDir) => {
-    if (!Array.isArray(paths) || typeof targetDir !== 'string') return;
-    const list = paths.filter((item): item is string => typeof item === 'string');
-    const steps = copyPlan(list, targetDir);
-    if (steps.length === 0) return;
-
-    const copied: string[] = [];
-    for (const step of steps) {
-      try {
-        const result = await rpc.request('workspace.copy', { from: step.from, to: step.to });
-        copied.push(result.path);
-      } catch {
-        // Имя в целевой папке занято — копию пропускаем, остальные делаем.
-      }
-    }
-
-    explorer.scheduleRefresh();
-    if (copied.length === 0) {
-      showToast('Скопировать не удалось: в целевой папке уже есть такое имя', 'error');
-      return;
-    }
-    showToast(
-      copied.length === 1
-        ? `Скопировано: ${basename(copied[0]!)}`
-        : `Скопировано: ${copied.length} ${objectsWord(copied.length)}`,
-      'info',
-      {
-        action: {
-          label: 'Отменить',
-          run: async () => {
-            // Отмена копии — вернуть КОПИЮ в корзину: исходный объект не трогали.
-            // Список берёт copiedToTrash — «что трогать» решается в одном месте.
-            for (const path of copiedToTrash(copied)) {
-              await rpc.request('workspace.trash', { path }).catch(() => undefined);
-            }
-            explorer.scheduleRefresh();
-          },
-        },
-      },
-    );
   });
 
   // Терминал системы в папке: открывается ВНЕ окна IDE, привычный человеку.
@@ -3616,98 +2947,25 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     else dock.show('debug');
   };
 
-  define({ id: 'debug.start', title: 'Отладка: запустить файл', category: 'Отладка' }, () => startDebug());
-
-  // Параметры запуска одним окном: аргументы, переменные окружения и рабочий каталог.
-  // Заданные один раз, они держатся в памяти и подставляются в обычный F5.
-  define({ id: 'debug.startWithOptions', title: 'Отладка: параметры запуска…', category: 'Отладка' }, () => {
-    if (!activeDebuggableFile()) return;
-    launchOptions.open({
-      options: debugOptions,
-      onAccept: (options) => {
-        debugOptions = options;
-        session.scheduleSave();
-        void startDebug(options);
-      },
-      onReset: () => {
-        debugOptions = {};
-        session.scheduleSave();
-        showToast('Параметры запуска сброшены');
-      },
-    });
+  // Команды отладки — `core/debug-commands.ts`: тексты, клавиши, «что сказать,
+  // если не вышло». Исполняет DebugController, поэтому состояние спрашивается
+  // через его же get(), а параметры запуска держит это замыкание (они в сессии).
+  registerDebugCommands(define, {
+    debug,
+    openEditors,
+    editors,
+    dock,
+    promptValue,
+    launchOptions,
+    activeDebuggableFile: () => activeDebuggableFile(),
+    startDebug: (options) => startDebug(options),
+    getLaunchOptions: () => debugOptions,
+    setLaunchOptions: (options) => {
+      debugOptions = options;
+    },
+    scheduleSave: () => session.scheduleSave(),
+    showToast,
   });
-
-  /**
-   * Подключение к уже запущенному процессу.
-   *
-   * Спрашиваем только порт: хост и так локальный, а чем запущен процесс — видно по
-   * открытому файлу (Python или Node). Раннер и файл тут ни при чём: отлаживать
-   * будем то, что уже работает, а не запускать заново.
-   */
-  define({ id: 'debug.attach', title: 'Отладка: подключиться к процессу…', category: 'Отладка' }, async () => {
-    const answer = await promptValue({
-      title: 'Подключиться к процессу',
-      label: 'Порт инспектора (node --inspect=127.0.0.1:9229)',
-      value: '9229',
-    });
-    if (answer === null) return;
-
-    const port = Number(answer.trim());
-    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-      showToast('Порт — это число от 1 до 65535', 'error');
-      return;
-    }
-
-    const target = openEditors.active?.languageId === 'python' ? 'python' : 'node';
-    const result = await debug.attach({ port, target });
-    if (!result.ok) showToast(result.message, 'error');
-    else dock.show('debug');
-  });
-
-  // F5: не идёт отладка — начать, стоит на паузе — продолжить.
-  define(
-    { id: 'debug.continue', title: 'Отладка: продолжить / запустить', category: 'Отладка', keybinding: 'F5' },
-    async () => {
-      if (debug.get().phase === 'idle') await startDebug();
-      else await debug.resume();
-    },
-  );
-  define({ id: 'debug.stop', title: 'Отладка: остановить', category: 'Отладка', keybinding: 'Shift+F5' }, async () => {
-    await debug.stop();
-  });
-  define(
-    { id: 'debug.stepOver', title: 'Отладка: шаг с обходом', category: 'Отладка', keybinding: 'F10' },
-    async () => {
-      await debug.step('over');
-    },
-  );
-  define(
-    { id: 'debug.stepInto', title: 'Отладка: шаг с заходом', category: 'Отладка', keybinding: 'F11' },
-    async () => {
-      await debug.step('into');
-    },
-  );
-  define(
-    { id: 'debug.stepOut', title: 'Отладка: шаг из функции', category: 'Отладка', keybinding: 'Shift+F11' },
-    async () => {
-      await debug.step('out');
-    },
-  );
-
-  // F9 — точка останова на строке курсора: привычное место, не уводя руки с клавиатуры.
-  define(
-    {
-      id: 'debug.toggleBreakpoint',
-      title: 'Отладка: переключить точку останова',
-      category: 'Отладка',
-      keybinding: 'F9',
-    },
-    async () => {
-      const active = openEditors.active;
-      if (!active) return;
-      editors.setBreakpoints(active.path, await debug.toggleBreakpoint(active.path, editors.cursor().line));
-    },
-  );
 
   // Закладки: поставить на строку курсора, ходить между ними, показать списком.
   // Уборка закладок файла клавиши не получает: это редкое дело, а не жест.
@@ -3768,1473 +3026,220 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
-  define({ id: 'view.showExplorer', title: 'Показать проводник', category: 'Вид', keybinding: 'Alt+1' }, () => {
-    layout.setSidebarVisible(true);
-    syncViewButtons();
+  // Дзен-режим помнит, что было видно до входа. Состояние живёт здесь, а не в модуле
+  // команд: оно переживает вызовы и умирает вместе с окном, как и сам макет.
+  let zenSaved: ZenSnapshot | null = null;
+
+  // Вид: панели, док, разделение и дзен — `core/view-commands.ts`. Состояние остаётся
+  // в раскладке и доке; команда только переключает и просит перерисовать кнопки.
+  registerViewCommands(define, {
+    layout,
+    dock,
+    syncViewButtons,
+    withoutPersist,
+    getZen: () => zenSaved,
+    setZen: (snapshot) => {
+      zenSaved = snapshot;
+    },
+    editors,
+    openEditors,
+    statusBar,
+    openGitManager,
+    isMarkdownPath,
+    toggleMarkdownPreview,
+    regexTester,
+    showToast,
+  });
+
+  // Флаг режима: чтение и запись одним местом. Запись обновляет и локальные
+  // настройки (иначе команда не увидит своего эффекта до перечитывания), и диск —
+  // одна команда не сможет записать одно, а показать другое.
+  const editorMode = (name: EditorModeName): boolean => settings.editor[name];
+  const setEditorMode = (name: EditorModeName, on: boolean): void => {
+    settings = { ...settings, editor: { ...settings.editor, [name]: on } };
+    void saveSettingsPatch({ editor: { [name]: on } }).catch(() => undefined);
+  };
+
+  // Режимы ввода и орфография — `core/editor-mode-commands.ts`: там порядок
+  // «применить → сообщить → сохранить» и все тексты.
+  registerEditorModeCommands(define, {
+    editors,
+    mode: editorMode,
+    setMode: setEditorMode,
+    showToast,
+    // Лениво: `refreshStatus` объявлена ниже — ссылка «сейчас» упала бы в TDZ.
+    refreshStatus: () => refreshStatus(),
+  });
+
+  // Исправления и рефакторинги текущего файла — `core/editor-fix-commands.ts`:
+  // четыре команды — одна развилка «есть ли открытый файл».
+  registerEditorFixCommands(define, {
+    currentPath: () => editors.currentPath,
+    fixes,
+    showToast,
+  });
+
+  // Создание и переименование — в `core/file-create-commands.ts`: там порядок шагов
+  // (закрыть вкладку → трогать диск) и отмены, идущие теми же шагами обратно.
+  registerFileCreateCommands(define, {
+    rpc,
+    commands,
+    openEditors,
+    explorer,
+    settings,
+    showToast,
+    openPath,
+  });
+
+  // Сохранение и перечитывание с диска — в `core/file-save-commands.ts`: самой
+  // записи буфера там нет, только выбор цели и честное «нет открытого файла».
+  registerFileSaveCommands(define, {
+    openEditors,
+    documents,
+    saveDocument,
+    saveDocumentAs,
+    // Лениво: `revertFilesToDisk` объявлена ниже этой строки, и брать ссылку сразу
+    // нельзя — имена модулей сидят в замыкании, а не в моменте регистрации.
+    revertFilesToDisk: (targets) => revertFilesToDisk(targets),
+    showToast,
+  });
+
+  // Удаление в корзину, перенос и копирование живут в `core/file-mutation-commands.ts`:
+  // диск, вкладки и уведомления — там, а «что именно трогать» решают чистые модули
+  // (`file-actions`, `tree-move`, `file-notices`).
+  registerFileMutationCommands(define, {
+    rpc,
+    openEditors,
+    explorer,
+    settings,
+    workspace,
+    showToast,
+    openPath,
   });
 
   /* ── git ───────────────────────────────────────────────────────────────── */
 
-  /** Путь приходит аргументом команды: так её можно вызвать из палитры и от ассистента. */
-  const asPath = (value: unknown): string | null => (typeof value === 'string' && value ? value : null);
 
-  /** Первая содержательная строка ответа git — для уведомления: целиком оно не влезет. */
-  const firstLine = (text: string): string =>
-    text
-      .split('\n')
-      .find((line) => line.trim())
-      ?.trim() ?? text;
-
-  define({ id: 'git.refresh', title: 'Обновить состояние репозитория', category: 'Git' }, async () => {
-    await git.refresh();
+  // Запись в репозиторий (индекс, коммит, откат) живёт в `core/git-write-commands.ts`:
+  // оно не завязано на панели, а зависит только от модели git и двух диалогов —
+  // и проверяется тестом без окна.
+  registerGitWriteCommands(define, {
+    git,
+    showToast,
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+    root: () => workspace.root,
+    relative: (path) => workspace.relative(path),
+    saveDirtyForGit,
   });
 
-  define(
-    {
-      id: 'git.init',
-      title: 'Создать репозиторий git',
-      category: 'Git',
-      enabled: () => workspace.root !== null && !git.isRepository,
-    },
-    async () => {
-      await git.init();
-      showToast('Репозиторий git создан');
-    },
-  );
-
-  define({ id: 'git.stage', title: 'Проиндексировать файл', category: 'Git' }, async (path) => {
-    const target = asPath(path);
-    if (target) await git.stage([target]);
-  });
-
-  define({ id: 'git.unstage', title: 'Убрать файл из индекса', category: 'Git' }, async (path) => {
-    const target = asPath(path);
-    if (target) await git.unstage([target]);
-  });
-
-  define({ id: 'git.discard', title: 'Откатить правки файла', category: 'Git' }, async (path, label) => {
-    const target = asPath(path);
-    if (!target) return;
-
-    // Откат необратим, поэтому спрашиваем системным диалогом, а не просто делаем.
-    const { confirmed } = await rpc.request('dialog.confirm', {
-      title: 'Откатить правки',
-      message: `Отменить правки в ${basename(target)}?`,
-      detail: `${workspace.relative(target)}${typeof label === 'string' ? ` (${label})` : ''} — файл вернётся к состоянию последнего коммита. Вернуть правки будет нельзя.`,
-      confirmLabel: 'Откатить',
-    });
-    if (!confirmed) return;
-
-    await git.discard([target]);
-    showToast(`Откатано: ${basename(target)}`);
-  });
-
-  define({ id: 'git.commit', title: 'Закоммитить изменения', category: 'Git' }, async (messageArg) => {
-    const text = typeof messageArg === 'string' ? messageArg : '';
-    if (!text.trim()) {
-      showToast('Сначала напишите сообщение коммита', 'error');
-      return undefined;
-    }
-
-    // Правки в буферах git ещё не видит: он смотрит рабочее дерево, а не экран.
-    // Сохраняем ДО индексации — иначе и в индекс, и в коммит ушло бы старое содержимое.
-    if (!(await saveDirtyForGit())) return undefined;
-
-    // Как в других IDE: пустой индекс — не повод отказывать, а повод спросить.
-    if (git.staged.length === 0) {
-      if (git.unstaged.length === 0) {
-        showToast('Изменений для коммита нет', 'error');
-        return undefined;
-      }
-      const { confirmed } = await rpc.request('dialog.confirm', {
-        title: 'Коммит',
-        message: 'В индексе нет файлов. Проиндексировать все изменения и закоммитить?',
-        detail: `Файлов с правками: ${git.unstaged.length}`,
-        confirmLabel: 'Проиндексировать и закоммитить',
-      });
-      if (!confirmed) return undefined;
-      await git.stage(git.unstaged.map((file) => file.path));
-    }
-
-    const info = await git.commit(text);
-    showToast(`Коммит ${info.hash}: ${info.summary}`);
-    return info;
-  });
-
-  /**
-   * Сообщение коммита по diff: модель читает правки и предлагает текст.
-   *
-   * Это не агент и не беседа — один запрос, короткий ответ (`ai.commitMessage`).
-   * Текст кладём В ПОЛЕ, а не коммитим сразу: сообщение правят и дополняют, а
-   * кнопка «Закоммитить» рядом. Diff собирает main (`git.commitDiff`): в renderer
-   * рабочего дерева нет, а обрезать и склеить правки — работа для того, у кого git.
-   */
-  define({ id: 'git.generateCommitMessage', title: 'Сообщение коммита по diff (AI)', category: 'Git' }, async () => {
-    if (!git.isRepository) {
-      showToast('Проект не в репозитории git', 'error');
-      return;
-    }
-    if (!aiEnabled()) {
-      warnAiDisabled();
-      return;
-    }
-
-    const context = await git.commitDiff();
-    if (!context.diff.trim() && context.untracked.length === 0) {
-      showToast('Правок нет — сообщение писать не по чему', 'error');
-      return;
-    }
-
-    try {
-      const { message } = await rpc.request('ai.commitMessage', {
-        diff: context.diff,
-        staged: context.staged,
-        branch: git.branch,
-        untracked: context.untracked,
-      });
-      if (isEmptyCommitMessage(message)) {
-        showToast('Модель вернула пустое сообщение — попробуйте ещё раз', 'error');
-        return;
-      }
-      sourceControl.setMessage(message);
-      // Панель изменений теперь в поповере у кнопки ветки: показываем её, чтобы
-      // готовое сообщение было видно. Уже открытый не переключаем (toggle бы закрыл).
+  // Сообщение коммита по diff — в `core/git-ai-commands.ts`: там же гейты AI,
+  // а самой команде нужен только один запрос к main.
+  registerGitAiCommands(define, {
+    git,
+    showToast,
+    isAiEnabled: aiEnabled,
+    warnAiDisabled,
+    commitMessage: (payload) => rpc.request('ai.commitMessage', payload),
+    setMessage: (message) => sourceControl.setMessage(message),
+    // Панель изменений теперь в поповере у кнопки ветки: уже открытый не переключаем (toggle бы закрыл).
+    revealComposer: () => {
       if (!gitManagerPopover?.isOpen) openGitManager(statusBar.gitAnchor);
-      // Диф обрезан — предупреждаем: модель видела не всю правку, тему стоит проверить.
-      showToast(context.truncated ? 'Сообщение готово (diff был обрезан — проверьте)' : 'Сообщение готово');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
+    },
   });
 
-  /**
-   * Исправить последний коммит (amend). Пустое сообщение — оставить прежнее:
-   * так можно просто добавить в него дозревшие правки.
-   */
-  define(
-    { id: 'git.amendCommit', title: 'Исправить последний коммит (amend)', category: 'Git' },
-    async (messageArg) => {
-      const text = typeof messageArg === 'string' ? messageArg : '';
-      if (!git.repository || git.repository.head === null) {
-        showToast('Исправлять нечего: коммитов ещё нет', 'error');
-        return undefined;
-      }
-      if (!(await saveDirtyForGit())) return undefined;
-      // Новое сообщение перезаписывает и текст коммита, и его историю: про это
-      // спрашиваем ДО, а не показываем повод в `git log`.
-      const plan = planAmend(git.repository.head, text.length > 0);
-      if (plan.kind === 'no-head') return undefined;
-      if (plan.warn) {
-        const warning = amendWarning(true, git.repository.ahead > 0);
-        const answer = await rpc.request('dialog.confirm', {
-          title: 'Исправить последний коммит',
-          message: warning ?? 'Сообщение последнего коммита будет заменено',
-          detail: 'Старый коммит останется только в reflog: обычная история указывает на новый.',
-          confirmLabel: 'Исправить',
-        });
-        if (!answer.confirmed) return undefined;
-      }
-      const info = await git.commit(text, undefined, true);
-      showToast(`Коммит ${info.hash} исправлен: ${info.summary}`);
-      return info;
-    },
-  );
-
-  define({ id: 'git.showDiff', title: 'Показать различия файла', category: 'Git' }, async (path, staged) => {
-    const target = asPath(path);
-    if (target) await diffView.open(target, staged === true);
+  // Показ (сравнение, замечания, blame, жёлоб) — рядом, в `core/git-view-commands.ts`:
+  // там только диалоги и ни одного пути записи в репозиторий.
+  registerGitViewCommands(define, {
+    git,
+    showToast,
+    openDiff: (path, staged, commit) => diffView.open(path, staged, commit),
+    diffIsOpen: () => diffView.isOpen,
+    showDiffComments: () => diffView.showComments(),
+    currentPath: () => editors.currentPath,
+    cursorLine: () => editors.cursor().line,
+    toggleBlame: () => blame.toggle(),
+    toggleFileBlame: () => blame.toggleFile(),
+    toggleChangeGutter: () => changeGutter.toggle(),
   });
 
-  /** Замечания к коду: сравнение файла и лента замечаний сбоку. */
-  define({ id: 'git.reviewComments', title: 'Замечания к коду в сравнении', category: 'Git' }, async () => {
-    const path = editors.currentPath;
-    if (!path) {
-      showToast('Откройте файл, чтобы оставить замечание', 'error');
-      return;
-    }
-    const staged = git.statusOf(path)?.staged === true;
-    if (!diffView.isOpen) await diffView.open(path, staged);
-    diffView.showComments();
+  // История и stash — только показ готового от git: `core/git-panel-commands.ts`.
+  registerGitPanelCommands(define, {
+    git,
+    showToast,
+    openText: (title, text) => textModal.open(title, text),
+    openStash: () => stashModal.open(),
   });
 
-  /** Показать или скрыть автора строки у курсора (blame). */
-  define({ id: 'git.toggleBlame', title: 'Автор строки (blame): показать/скрыть', category: 'Git' }, () => {
-    const on = blame.toggle();
-    showToast(on ? 'Blame включён: у строки под курсором видно автора' : 'Blame выключен');
+  // Окна git, которые ничего не меняют: bisect, worktree, площадка, личность, LFS,
+  // sparse, сравнение веток и подмодули — `core/git-tools-commands.ts`.
+  registerGitToolsCommands(define, {
+    isRepository: () => git.isRepository,
+    showToast,
+    panels: {
+      bisect: () => bisectModal.open(),
+      worktrees: () => worktreeModal.open(),
+      pullRequests: () => forgeModal.open(),
+      issues: () => issuesModal.open(),
+      pipelines: () => pipelinesModal.open(),
+      notifications: () => notificationsModal.open(),
+      identity: () => identityModal.open(),
+      lfs: () => lfsModal.open(),
+      sparse: () => sparseModal.open(),
+      compareRefs: () => refDiffModal.open(),
+    },
+    submoduleUpdate: async () => {
+      await git.submoduleUpdate();
+    },
   });
 
-  /** Подписи blame у всех строк файла: разом видно, кто и когда писал каждую строку. */
-  define({ id: 'git.toggleFileBlame', title: 'Blame всего файла: показать/скрыть', category: 'Git' }, () => {
-    const on = blame.toggleFile();
-    showToast(on ? 'Подписи у всех строк файла включены' : 'Подписи у всех строк файла выключены');
+  // История, теги и reflog — списки, из которых выбирают действие:
+  // `core/git-history-commands.ts`. Попап открываем там, где стоит редактор.
+  registerGitHistoryCommands(define, {
+    git,
+    showToast,
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+    ask: (options) => promptValue(options),
+    popup: (items) => {
+      const rect = layout.editorHost.getBoundingClientRect();
+      showPopupMenu(items, rect.left + 40, rect.top + 40, { anchor: layout.editorHost });
+    },
+    execute: (id) => void commands.execute(id),
+    openRebase: () => rebaseModal.open(),
+    openDiff: (path, commit) => diffView.open(path, false, commit),
+    currentPath: () => editors.currentPath,
   });
 
-  /** Перейти к коммиту, изменившему строку под курсором. */
-  define({ id: 'git.showLineCommit', title: 'Коммит строки под курсором', category: 'Git' }, async () => {
-    const path = editors.currentPath;
-    if (!path) {
-      showToast('Откройте файл, строку которого смотрите', 'error');
-      return;
-    }
-    const at = editors.cursor();
-    const lines = await git.blame(path, { startLine: at.line, endLine: at.line }).catch(() => []);
-    const line = lines[0];
-    if (!line) {
-      showToast('У этой строки нет истории: файл не в git или строка не менялась', 'error');
-      return;
-    }
-    await diffView.open(path, false, line.hash);
+  // Списки символов: иерархии, экспорты, наследование, члены типа, переопределения.
+  // Состав и переходы — `core/symbol-pickers.ts`; команды он регистрирует сам.
+  createSymbolPickers({
+    define,
+    lsp,
+    editors,
+    workspace,
+    rpc,
+    layout,
+    openPath,
+    meaningSearch,
+    refreshSymbolIndex,
   });
 
-  /** История в виде графа веток — текстом, как её рисует git. */
-  define({ id: 'git.logGraph', title: 'История с графом веток', category: 'Git' }, async () => {
-    if (!git.isRepository) {
-      showToast('Проект не в репозитории git', 'error');
-      return;
-    }
-    const text = await git.logGraph(100);
-    if (!text.trim()) {
-      showToast('Истории ещё нет');
-      return;
-    }
-    textModal.open('История (граф веток)', text);
+  // Ветки, синхронизация и массовые действия с индексом — `core/git-sync-commands.ts`:
+  // там всё, что трогает дерево разом или спрашивает подтверждение.
+  registerGitSyncCommands(define, {
+    git,
+    showToast,
+    prepareCheckout: () => prepareCheckout(),
+    openConflict: (path) => conflictView.open(path),
+    currentPath: () => editors.currentPath,
+    pullMode: () => settings.git.pullMode,
+    isMultiRoot: () => workspace.isMultiRoot,
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+    activePath: () => openEditors.active?.path ?? null,
+    hasTab: (path) => openEditors.has(path),
+    closeTab: (path) => openEditors.close(path),
+    openPath: (path) => openPath(path),
   });
 
-  /** Показать или скрыть полоски изменений в жёлобе редактора. */
-  define(
-    { id: 'git.toggleChangeGutter', title: 'Полоски изменений в жёлобе: показать/скрыть', category: 'Git' },
-    () => {
-      const on = changeGutter.toggle();
-      showToast(on ? 'Полоски изменений включены' : 'Полоски изменений скрыты');
-    },
-  );
-
-  /** Отложенные изменения (stash): список записей и действия над ними. */
-  define({ id: 'git.openStash', title: 'Отложенные изменения (stash)', category: 'Git' }, async () => {
-    if (!git.isRepository) {
-      showToast('Проект не в репозитории git', 'error');
-      return;
-    }
-    await stashModal.open();
-  });
-
-  /**
-   * Итог операции с историей одним сообщением. Rebase может не закончиться: он
-   * останавливается на конфликте или на шаге правки — об этом говорим отдельно,
-   * а не показываем текст git как ошибку.
-   */
-  const reportRebase = (result: GitResult): void => {
-    const notice = rebaseNotice(result);
-    showToast(notice.message, notice.kind);
-  };
-
-  /** Пошаговый поиск багованного коммита (bisect). */
-  define(
-    {
-      id: 'git.bisect',
-      title: 'Найти багованный коммит (bisect)',
-      category: 'Git',
-      keywords: ['bisect', 'бисект', 'плохой коммит', 'поиск'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await bisectModal.open();
-    },
-  );
-
-  /** Дополнительные рабочие каталоги одного репозитория (worktree). */
-  define(
-    {
-      id: 'git.worktrees',
-      title: 'Рабочие каталоги (worktree)',
-      category: 'Git',
-      keywords: ['worktree', 'каталог', 'ветка', 'ворктри'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await worktreeModal.open();
-    },
-  );
-
-  /** Запросы на слияние площадки (PR/MR) через `gh`/`glab`. */
-  define(
-    {
-      id: 'git.pullRequests',
-      title: 'Запросы на слияние (PR/MR)',
-      category: 'Git',
-      keywords: ['pr', 'mr', 'pull request', 'merge request', 'github', 'gitlab', 'запрос', 'слияние'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await forgeModal.open();
-    },
-  );
-
-  /** Задачи площадки (issues) через `gh`/`glab`. */
-  define(
-    {
-      id: 'git.issues',
-      title: 'Задачи площадки (issues)',
-      category: 'Git',
-      keywords: ['issue', 'issues', 'задача', 'задачи', 'github', 'gitlab', 'ticket'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await issuesModal.open();
-    },
-  );
-
-  /** Прогоны CI площадки (Actions/Pipelines) через `gh`/`glab`. */
-  define(
-    {
-      id: 'git.pipelines',
-      title: 'Прогоны CI (Actions/Pipelines)',
-      category: 'Git',
-      keywords: ['ci', 'actions', 'pipelines', 'прогон', 'сборка', 'github', 'gitlab'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await pipelinesModal.open();
-    },
-  );
-
-  /** Уведомления площадки (непрочитанные ветки / незакрытые дела) через `gh`/`glab`. */
-  define(
-    {
-      id: 'git.notifications',
-      title: 'Уведомления площадки',
-      category: 'Git',
-      keywords: ['уведомления', 'notifications', 'todos', 'github', 'gitlab', 'непрочитано'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await notificationsModal.open();
-    },
-  );
-
-  /** Личность и подпись: имя, почта, GPG/SSH-подпись коммитов и тегов, ключи. */
-  define(
-    {
-      id: 'git.identity',
-      title: 'Личность и подпись коммитов',
-      category: 'Git',
-      keywords: ['подпись', 'gpg', 'ssh', 'signing', 'key', 'author', 'имя', 'почта', 'co-authored-by'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await identityModal.open();
-    },
-  );
-
-  /** Большие файлы (Git LFS): шаблоны, файлы под хранилищем и их подтягивание. */
-  define(
-    {
-      id: 'git.lfs',
-      title: 'Большие файлы (Git LFS)',
-      category: 'Git',
-      keywords: ['lfs', 'большие файлы', 'хранилище', 'gitattributes'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await lfsModal.open();
-    },
-  );
-
-  /** Разреженный рабочий каталог (sparse checkout): какие папки выложены на диск. */
-  define(
-    {
-      id: 'git.sparse',
-      title: 'Разреженный рабочий каталог…',
-      category: 'Git',
-      keywords: ['sparse', 'разреженный', 'sparse-checkout', 'монорепо', 'папки'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await sparseModal.open();
-    },
-  );
-
-  /** Подмодули: в дереве помечены значком, а забрать их код можно этой командой. */
-  define(
-    {
-      id: 'git.submoduleUpdate',
-      title: 'Обновить подмодули',
-      category: 'Git',
-      keywords: ['submodule', 'подмодуль', 'init', 'update'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      showToast('Забираю подмодули…');
-      try {
-        await git.submoduleUpdate();
-        showToast('Подмодули обновлены');
-      } catch (error) {
-        showToast(error instanceof Error ? error.message : String(error), 'error');
-      }
-    },
-  );
-
-  /** Сравнение веток: список различий и просмотр отдельного файла. */
-  define(
-    {
-      id: 'git.compareBranches',
-      title: 'Сравнить ветки',
-      category: 'Git',
-      keywords: ['diff', 'ветки', 'сравнить', 'различия'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await refDiffModal.open();
-    },
-  );
-
-  /** Интерактивный rebase: список коммитов собирает своё окно. */
-  define(
-    {
-      id: 'git.rebase',
-      title: 'Перестроить историю (interactive rebase)',
-      category: 'Git',
-      keywords: ['rebase', 'squash', 'fixup', 'склеить', 'переставить'],
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      if (!git.isRepository) {
-        showToast('Проект не в репозитории git', 'error');
-        return;
-      }
-      await rebaseModal.open();
-    },
-  );
-
-  define({ id: 'git.rebaseContinue', title: 'Rebase: продолжить', category: 'Git' }, async () => {
-    try {
-      reportRebase(await git.rebaseContinue());
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  });
-
-  define({ id: 'git.rebaseSkip', title: 'Rebase: пропустить коммит', category: 'Git' }, async () => {
-    try {
-      reportRebase(await git.rebaseSkip());
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  });
-
-  define({ id: 'git.rebaseAbort', title: 'Rebase: прервать', category: 'Git' }, async () => {
-    try {
-      await git.rebaseAbort();
-      showToast('Rebase прерван, ветка на прежнем месте');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  });
-
-  /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
-
-  /** Сбросить ветку на коммит. Режим выбирает, что будет с правками; спрашиваем всегда. */
-  const resetTo = async (mode: 'soft' | 'mixed' | 'hard', hash: string, summary: string): Promise<void> => {
-    const detail =
-      mode === 'hard'
-        ? 'Правки в рабочем дереве и индексе будут потеряны безвозвратно.'
-        : mode === 'mixed'
-          ? 'Индекс сбросится, правки в файлах останутся.'
-          : 'Правки останутся и в файлах, и в индексе — они не пропадут.';
-    const { confirmed } = await rpc.request('dialog.confirm', {
-      title: 'Сброс ветки',
-      message: `Сбросить ${git.branch ?? 'ветку'} на ${hash}?`,
-      detail: `${summary}\n${detail}`,
-      confirmLabel: mode === 'hard' ? 'Сбросить жёстко' : 'Сбросить',
-    });
-    if (!confirmed) return;
-    try {
-      await git.reset(mode, hash);
-      showToast(`Ветка сброшена на ${hash}`);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  };
-
-  /** Действия над одним коммитом: перенос, откат и сброс ветки на него. */
-  const commitActions = (hash: string, summary: string): PopupMenuItem[] => [
-    {
-      label: 'Перенести в текущую ветку (cherry-pick)',
-      onSelect: () => {
-        void git.cherryPick(hash).then(
-          () => showToast(`Коммит ${hash} перенесён`),
-          (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
-        );
-      },
-    },
-    {
-      label: 'Отменить коммит (revert)',
-      onSelect: () => {
-        void git.revert(hash).then(
-          () => showToast(`Коммит ${hash} отменён`),
-          (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
-        );
-      },
-    },
-    { separator: true },
-    {
-      label: 'Сбросить ветку на этот коммит',
-      submenu: [
-        { label: 'Мягкий (soft) — правки в индексе', onSelect: () => void resetTo('soft', hash, summary) },
-        { label: 'Смешанный (mixed) — индекс чист', onSelect: () => void resetTo('mixed', hash, summary) },
-        {
-          label: 'Жёсткий (hard) — правки теряются',
-          danger: true,
-          onSelect: () => void resetTo('hard', hash, summary),
-        },
-      ],
-    },
-  ];
-
-  /** История коммитов репозитория: у каждого — действия над этим коммитом. */
-  define({ id: 'git.showLog', title: 'История коммитов', category: 'Git' }, async () => {
-    if (!git.isRepository) {
-      showToast('Проект не в репозитории git', 'error');
-      return;
-    }
-    const commits = await git.log(undefined, 50);
-    if (commits.length === 0) {
-      showToast('Коммитов ещё нет');
-      return;
-    }
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(
-      commits.map((commit) => ({
-        label: `${commit.hash} ${commit.date} ${commit.author}`,
-        hint: commit.summary,
-        submenu: commitActions(commit.hash, commit.summary),
-      })),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-  });
-
-  /** Создать тег на текущем коммите. */
-  define({ id: 'git.createTag', title: 'Создать тег', category: 'Git' }, async () => {
-    if (!git.isRepository) {
-      showToast('Проект не в репозитории git', 'error');
-      return;
-    }
-    const name = await promptValue({ title: 'Создать тег', label: 'Имя тега', value: '' });
-    if (!name) return;
-    try {
-      await git.createTag(name);
-      showToast(`Тег ${name} создан`);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  });
-
-  /** Теги: список с действиями и создание нового. */
-  define({ id: 'git.tags', title: 'Теги', category: 'Git' }, async () => {
-    if (!git.isRepository) {
-      showToast('Проект не в репозитории git', 'error');
-      return;
-    }
-    const tags = await git.tags();
-    const items: PopupMenuItem[] = [
-      { label: 'Создать тег…', onSelect: () => void commands.execute('git.createTag') },
-      { separator: true },
-    ];
-    if (tags.length === 0) {
-      items.push({ label: 'Тегов нет', hint: 'поставьте первый', onSelect: () => undefined });
-    }
-    for (const tag of tags) {
-      items.push({
-        label: tag.name,
-        hint: tag.commit,
-        submenu: [
-          {
-            label: 'Переключиться на тег',
-            onSelect: () => {
-              void rpc
-                .request('dialog.confirm', {
-                  title: 'Переключение на тег',
-                  message: `Перейти на тег ${tag.name}?`,
-                  detail: 'Ветка станет отсоединённой (detached HEAD): новые коммиты в неё не попадут.',
-                  confirmLabel: 'Перейти',
-                })
-                .then(({ confirmed }) => (confirmed ? git.checkout(tag.name) : undefined))
-                .catch((error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'));
-            },
-          },
-          {
-            label: 'Отправить в origin',
-            onSelect: () => {
-              void git.pushTag(tag.name).then(
-                (result) => showToast(result.message),
-                (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
-              );
-            },
-          },
-          { separator: true },
-          {
-            label: 'Удалить тег',
-            danger: true,
-            onSelect: () => {
-              void rpc
-                .request('dialog.confirm', {
-                  title: 'Удалить тег',
-                  message: `Удалить тег ${tag.name}?`,
-                  detail: 'Удалённый тег останется в origin — там его нужно убирать отдельно.',
-                  confirmLabel: 'Удалить',
-                })
-                .then(({ confirmed }) => (confirmed ? git.deleteTag(tag.name) : undefined))
-                .then(() => undefined)
-                .catch((error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'));
-            },
-          },
-        ],
-      });
-    }
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(items, rect.left + 40, rect.top + 40, { anchor: layout.editorHost });
-  });
-
-  /** Отменить последний коммит, оставив его правки в индексе (reset --soft HEAD~1). */
-  define({ id: 'git.undoCommit', title: 'Отменить последний коммит (правки остаются)', category: 'Git' }, async () => {
-    if (!git.repository?.head) {
-      showToast('Коммитов ещё нет', 'error');
-      return;
-    }
-    const { confirmed } = await rpc.request('dialog.confirm', {
-      title: 'Отменить коммит',
-      message: 'Отменить последний коммит?',
-      detail: 'Коммит уйдёт из истории, а его правки останутся в индексе — их можно поправить и закоммитить заново.',
-      confirmLabel: 'Отменить коммит',
-    });
-    if (!confirmed) return;
-    try {
-      await git.reset('soft', 'HEAD~1');
-      showToast('Последний коммит отменён, правки в индексе');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  });
-
-  /** Журнал ссылок: сюда смотрят, чтобы откатить неудачный merge, rebase или reset. */
-  define({ id: 'git.reflog', title: 'Журнал ссылок (reflog)', category: 'Git' }, async () => {
-    if (!git.isRepository) {
-      showToast('Проект не в репозитории git', 'error');
-      return;
-    }
-    const entries = await git.reflog(50);
-    if (entries.length === 0) {
-      showToast('Журнал ссылок пуст');
-      return;
-    }
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(
-      entries.map((entry) => ({
-        label: `${entry.ref} → ${entry.hash}`,
-        hint: entry.action,
-        submenu: [
-          {
-            label: 'Перенести в текущую ветку (cherry-pick)',
-            onSelect: () => {
-              void git.cherryPick(entry.hash).then(
-                () => showToast(`Коммит ${entry.hash} перенесён`),
-                (error: unknown) => showToast(error instanceof Error ? error.message : String(error), 'error'),
-              );
-            },
-          },
-          { separator: true },
-          {
-            label: 'Сбросить ветку сюда (soft) — правки в индексе',
-            onSelect: () => void resetTo('soft', entry.hash, entry.action),
-          },
-          { label: 'Сбросить ветку сюда (mixed)', onSelect: () => void resetTo('mixed', entry.hash, entry.action) },
-          {
-            label: 'Сбросить ветку сюда (hard) — правки теряются',
-            danger: true,
-            onSelect: () => void resetTo('hard', entry.hash, entry.action),
-          },
-        ],
-      })),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-  });
-
-  /** Удалить ветку. Имя можно передать аргументом, иначе спрашиваем. */
-  define({ id: 'git.deleteBranch', title: 'Удалить ветку', category: 'Git' }, async (nameArg) => {
-    if (!git.isRepository) {
-      showToast('Проект не в репозитории git', 'error');
-      return;
-    }
-    const name =
-      typeof nameArg === 'string' && nameArg
-        ? nameArg
-        : await promptValue({ title: 'Удалить ветку', label: 'Имя ветки', value: '' });
-    if (!name) return;
-    try {
-      await git.deleteBranch(name);
-      showToast(`Ветка ${name} удалена`);
-    } catch (error) {
-      // git не даёт удалить невлитую ветку — предложим сделать это силой.
-      const { confirmed } = await rpc.request('dialog.confirm', {
-        title: 'Ветка не влита',
-        message: `Удалить ветку ${name} принудительно?`,
-        detail: error instanceof Error ? error.message : String(error),
-        confirmLabel: 'Удалить принудительно',
-      });
-      if (!confirmed) return;
-      try {
-        await git.deleteBranch(name, true);
-        showToast(`Ветка ${name} удалена принудительно`);
-      } catch (forced) {
-        showToast(forced instanceof Error ? forced.message : String(forced), 'error');
-      }
-    }
-  });
-
-  /** Переименовать текущую ветку. */
-  define({ id: 'git.renameBranch', title: 'Переименовать текущую ветку', category: 'Git' }, async () => {
-    const from = git.branch;
-    if (!git.isRepository || !from) {
-      showToast('Мы не на ветке — переименовывать нечего', 'error');
-      return;
-    }
-    const to = await promptValue({ title: 'Переименовать ветку', label: `Новое имя для «${from}»`, value: from });
-    if (!to || to === from) return;
-    try {
-      await git.renameBranch(from, to);
-      showToast(`Ветка переименована в ${to}`);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  });
-
-  /** Добавить файл (или файлы) в .gitignore. Пути принимаем аргументом команды. */
-  define({ id: 'git.ignore', title: 'Добавить в .gitignore', category: 'Git' }, async (pathArg) => {
-    const paths = Array.isArray(pathArg)
-      ? (pathArg as unknown[]).filter((item): item is string => typeof item === 'string')
-      : typeof pathArg === 'string'
-        ? [pathArg]
-        : [];
-    if (paths.length === 0) {
-      showToast('Нечего добавлять: файл не выбран', 'error');
-      return;
-    }
-    try {
-      await git.ignore(paths);
-      showToast(paths.length === 1 ? 'Добавлено в .gitignore' : `В .gitignore добавлено файлов: ${paths.length}`);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    }
-  });
-
-  /** История коммитов файла: выбор записи открывает сравнение с текущим текстом. */
-  define({ id: 'git.fileHistory', title: 'История файла', category: 'Git' }, async (path) => {
-    const target = asPath(path) ?? editors.currentPath;
-    if (!target) {
-      showToast('Откройте файл, историю которого хотите посмотреть', 'error');
-      return;
-    }
-
-    const commits = await git.log(target, 50);
-    if (commits.length === 0) {
-      showToast('Истории нет: файл не в git или коммитов ещё нет');
-      return;
-    }
-
-    // Команда может прийти и из палитры, поэтому якоря под курсором нет —
-    // отсчитываем панель от угла самой области редактора.
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(
-      commits.map((commit) => ({
-        label: `${commit.hash} ${commit.date} ${commit.author}`,
-        hint: commit.summary,
-        onSelect: () => void diffView.open(target, false, commit.hash),
-      })),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-  });
-
-  /**
-   * Иерархия вызовов символа: кто его вызывает или кого вызывает он. Показываем
-   * списком — тем же попапом, что и прочие переходы.
-   */
-  const openCallHierarchy = async (direction: CallDirection): Promise<void> => {
-    const path = editors.currentPath;
-    if (!path) {
-      showToast('Откройте файл', 'error');
-      return;
-    }
-    const position = editors.cursor();
-    const result = await fetchCallHierarchy(rpc, path, position, direction).catch(() => null);
-    if (!result) {
-      showToast('Сервер символов не отвечает: нужен языковой сервер для этого языка', 'error');
-      return;
-    }
-    if (result.calls.length === 0) {
-      showToast(
-        direction === 'incoming'
-          ? `Никто не вызывает ${result.symbol.name}`
-          : `${result.symbol.name} ничего не вызывает`,
-      );
-      return;
-    }
-
-    const rect = layout.editorHost.getBoundingClientRect();
-    const heading = direction === 'incoming' ? `Вызывают ${result.symbol.name}` : `${result.symbol.name} вызывает`;
-    showPopupMenu(
-      result.calls.map((target) => ({
-        label: target.name,
-        hint: `${workspace.relative(target.path)}:${target.line}`,
-        onSelect: () => void openPath(target.path).then(() => editors.reveal(target.path, target.line, target.column)),
-      })),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-    showToast(`${heading}: ${result.calls.length}`);
-  };
-
-  define(
-    { id: 'editor.callers', title: 'Кто вызывает символ', category: 'Навигация' },
-    () => void openCallHierarchy('incoming'),
-  );
-  define(
-    { id: 'editor.callees', title: 'Кого вызывает символ', category: 'Навигация' },
-    () => void openCallHierarchy('outgoing'),
-  );
-
-  /**
-   * Иерархия типов символа: от кого наследует и кто наследует от него. Показываем
-   * тем же списком, что вызовы: своего дерева у нас нет, а список читается и так.
-   */
-  const openTypeHierarchy = async (direction: TypeDirection): Promise<void> => {
-    const path = editors.currentPath;
-    if (!path) {
-      showToast('Откройте файл', 'error');
-      return;
-    }
-    const position = editors.cursor();
-    const result = await fetchTypeHierarchy(rpc, path, position, direction).catch(() => null);
-    if (!result) {
-      showToast('Сервер символов не отвечает: нужен языковой сервер для этого языка', 'error');
-      return;
-    }
-    if (result.types.length === 0) {
-      showToast(
-        direction === 'supertypes'
-          ? `У ${result.symbol.name} нет надтипов`
-          : `От ${result.symbol.name} никто не наследует`,
-      );
-      return;
-    }
-
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(
-      result.types.map((target) => ({
-        label: target.name,
-        hint: target.detail ?? `${workspace.relative(target.path)}:${target.line}`,
-        onSelect: () => void openPath(target.path).then(() => editors.reveal(target.path, target.line, target.column)),
-      })),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-    const heading = direction === 'supertypes' ? `Надтипы ${result.symbol.name}` : `Подтипы ${result.symbol.name}`;
-    showToast(`${heading}: ${result.types.length}`);
-  };
-
-  define(
-    { id: 'editor.supertypes', title: 'Иерархия типов: надтипы', category: 'Навигация' },
-    () => void openTypeHierarchy('supertypes'),
-  );
-  define(
-    { id: 'editor.subtypes', title: 'Иерархия типов: подтипы', category: 'Навигация' },
-    () => void openTypeHierarchy('subtypes'),
-  );
-
-  /**
-   * Где имя экспортируется: по имени под кареткой обходим проект и показываем файлы, где
-   * оно объявлено экспортом. Список — тем же попапом, что и ссылки: у нас нет ни языкового
-   * сервера в этом месте (в LSP такого запроса нет), ни дерева разбора — только разбор
-   * строк по языку (`shared/symbol-exports.ts`).
-   */
-  const openFindExports = async (): Promise<void> => {
-    const path = editors.currentPath;
-    if (!path) {
-      showToast('Откройте файл', 'error');
-      return;
-    }
-    // Имя — из выделения, а если выделения нет, из слова под кареткой.
-    const name = editors.selectedText().trim() || editors.wordAtCursor() || '';
-    if (!name) {
-      showToast('Поставьте курсор на имя', 'info');
-      return;
-    }
-
-    const result = await rpc.request('workspace.findExports', { name }).catch(() => null);
-    if (!result) {
-      showToast('Не удалось искать по проекту', 'error');
-      return;
-    }
-    if (result.total === 0) {
-      showToast(`${name}: экспортов не найдено`);
-      return;
-    }
-
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(
-      result.files.flatMap((file) =>
-        file.entries.map((entry) => ({
-          label: `${workspace.relative(file.path)}:${entry.line}`,
-          hint: exportKindLabel(entry.kind),
-          onSelect: () => void openPath(file.path).then(() => editors.reveal(file.path, entry.line, 1)),
-        })),
-      ),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-    showToast(`Экспортов ${name}: ${result.total}`);
-  };
-
-  define(
-    { id: 'search.findExports', title: 'Где экспортируется', category: 'Поиск', keywords: ['export', 'экспорт'] },
-    () => void openFindExports(),
-  );
-
-  define(
-    {
-      id: 'search.meaning',
-      title: 'Поиск по смыслу',
-      category: 'Поиск',
-      keybinding: 'Ctrl+Shift+M',
-      keywords: ['смысл', 'словами', 'meaning', 'semantic'],
-    },
-    () => meaningSearch.open(),
-  );
-
-  /**
-   * Наследование имени под кареткой по проекту: кто наследует (subtypes) или от кого
-   * наследует (supertypes). Тем же списком, что экспорты: свой разбор строк, без сервера
-   * (иерархию типов сервер показывает лишь для символа под курсором).
-   */
-  const openInheritance = async (direction: 'subtypes' | 'supertypes'): Promise<void> => {
-    const path = editors.currentPath;
-    if (!path) {
-      showToast('Откройте файл', 'error');
-      return;
-    }
-    const name = editors.selectedText().trim() || editors.wordAtCursor() || '';
-    if (!name) {
-      showToast('Поставьте курсор на имя типа', 'info');
-      return;
-    }
-
-    const result = await rpc.request('workspace.findInheritance', { name, direction }).catch(() => null);
-    if (!result) {
-      showToast('Не удалось искать по проекту', 'error');
-      return;
-    }
-    const empty = direction === 'subtypes' ? `${name}: наследников не найдено` : `${name}: объявлений не найдено`;
-    if (result.total === 0) {
-      showToast(empty);
-      return;
-    }
-
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(
-      result.files.flatMap((file) =>
-        file.entries.map((entry) => ({
-          label: `${workspace.relative(file.path)}:${entry.line}`,
-          hint: describeType(entry),
-          onSelect: () => void openPath(file.path).then(() => editors.reveal(file.path, entry.line, 1)),
-        })),
-      ),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-    showToast(direction === 'subtypes' ? `Наследуют ${name}: ${result.total}` : `${name}: ${result.total}`);
-  };
-
-  define(
-    { id: 'search.findSubtypes', title: 'Кто наследует тип', category: 'Поиск', keywords: ['наслед', 'subclass'] },
-    () => void openInheritance('subtypes'),
-  );
-  define(
-    {
-      id: 'search.findSupertypes',
-      title: 'От кого наследует тип',
-      category: 'Поиск',
-      keywords: ['родител', 'superclass'],
-    },
-    () => void openInheritance('supertypes'),
-  );
-
-  /**
-   * Что тип умеет: свои методы и поля вместе с унаследованными.
-   *
-   * Отличие от «кто наследует» выше: там ищут наследников в тексте проекта, а здесь —
-   * сам список членов типа с указанием, кто из предков их дал. Считается по карте
-   * символов (`index.inherited`), поэтому отвечает без языкового сервера и сразу, а
-   * `phase` говорит, стоит ли переспросить пока карта собирается.
-   */
-  const openTypeMembers = async (): Promise<void> => {
-    if (!editors.currentPath) {
-      showToast('Откройте файл', 'error');
-      return;
-    }
-    const name = editors.selectedText().trim() || editors.wordAtCursor() || '';
-    if (!name) {
-      showToast('Поставьте курсор на имя типа', 'info');
-      return;
-    }
-
-    const result = await rpc.request('index.inherited', { name }).catch(() => null);
-    if (!result) {
-      showToast('Не удалось спросить карту символов', 'error');
-      return;
-    }
-    if (result.members.length === 0) {
-      // Пустой ответ при собирающейся карте — это «ещё не знаю», а не «нет такого».
-      showToast(
-        result.phase === 'warming'
-          ? `${name}: карта символов ещё собирается — повторите через минуту`
-          : `${name}: членов не найдено`,
-      );
-      return;
-    }
-
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(
-      result.members.map((member) => ({
-        label: `${member.kind} ${member.name}`,
-        // От кого метод: своё объявление — сам тип, унаследованное — предок.
-        hint: member.from === name ? 'свой' : `от ${member.from}`,
-        onSelect: () => void openPath(member.path).then(() => editors.reveal(member.path, member.line, 1)),
-      })),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-    const inherited = result.members.filter((member) => member.from !== name).length;
-    showToast(`${name}: ${result.members.length}, из них унаследовано ${inherited}`);
-  };
-
-  define(
-    {
-      id: 'search.typeMembers',
-      title: 'Что умеет тип: свои и унаследованные члены',
-      category: 'Навигация',
-      keywords: ['методы', 'members', 'унаследованные'],
-    },
-    () => void openTypeMembers(),
-  );
-
-  /**
-   * Пересобрать карту символов — аналог «Invalidate Caches / Restart» в больших IDE,
-   * только без перезапуска.
-   *
-   * Нужно, когда карта разошлась с кодом по причине, которую мы не увидели: правка
-   * мимо рабочей папки, откат ветки внешним инструментом, чужой `git` в терминале.
-   * Обход дешёвый — не изменившиеся файлы берутся из кэша, — поэтому звать можно
-   * сколько угодно. Пока идёт сборка, за ней снова следит виджет в полосе состояния.
-   */
-  const rebuildSymbolIndex = async (): Promise<void> => {
-    try {
-      const status = await rpc.request('index.rebuild');
-      showToast(
-        status.phase === 'warming'
-          ? `Пересобираю карту символов: ${status.files} файлов в ней`
-          : `Карта символов пересобрана: ${status.files} файлов, ${status.decls} объявлений`,
-      );
-      refreshSymbolIndex();
-    } catch {
-      showToast('Не удалось пересобрать карту символов', 'error');
-    }
-  };
-
-  /**
-   * Переопределить методы предка: выбрать из списка и получить заготовку.
-   *
-   * Наследование уже разобрано картой символов (`index.inherited`), поэтому искать
-   * предков не нужно: карта знает и цепочку, и членов каждого предка. Открываем её,
-   * убираем то, что в этом классе уже объявлено, и на выбранное имя вставляем
-   * заготовку — с параметрами предка и вызовом `super`: самое частое, что пишут при
-   * переопределении, а забыть его значит получить метод, который молча ничего не делает.
-   */
-  const overrideMembers = async (): Promise<void> => {
-    const path = editors.currentPath;
-    if (!path) {
-      showToast('Откройте файл', 'error');
-      return;
-    }
-    const text = editors.currentText(path) ?? '';
-    const position = editors.cursor();
-    const owner = enclosingClassAt(text, toOffset(text, position.line, position.column));
-    if (!owner) {
-      showToast('Поставьте курсор внутрь класса', 'info');
-      return;
-    }
-
-    const result = await rpc.request('index.inherited', { name: owner.name }).catch(() => null);
-    if (!result) {
-      showToast('Не удалось спросить карту символов', 'error');
-      return;
-    }
-    // Своё уже объявлено — переопределять нечего: берём только унаследованное.
-    const own = new Set(classMembers(text, 'self').map((member) => member.name));
-    const candidates = result.members.filter((member) => member.from !== owner.name && !own.has(member.name));
-    if (candidates.length === 0) {
-      showToast(
-        result.phase === 'warming'
-          ? `${owner.name}: карта символов ещё собирается — повторите через минуту`
-          : `${owner.name}: переопределять нечего — предков с методами не нашлось`,
-      );
-      return;
-    }
-
-    /** Взять заготовку из предка и вставить её в конец тела класса. */
-    const insertOverride = async (name: string, origin: string): Promise<void> => {
-      // Параметры — из строки объявления в файле предка: карта хранит только номер
-      // строки, а сигнатура нужна целиком (типы, значения по умолчанию).
-      const source = await rpc.request('workspace.readFile', { path: origin }).catch(() => null);
-      const declaration = source ? declarationOf(source.text, name) : null;
-      const params = declaration ? paramsOf(declaration) : '';
-      const snippet = overrideSnippet({
-        language: owner.language,
-        name,
-        params,
-        // Отступ члена — на ступень глубже класса: у Python четыре пробела, у JS два.
-        indent: owner.indent + (owner.language === 'python' ? 4 : 2),
-      });
-
-      // Вставляем в конец тела класса, а не в каретку: она могла стоять где угодно
-      // внутри класса, а новый метод должен встать рядом с остальными.
-      const lines = (editors.currentText(path) ?? text).split('\n');
-      const endColumn = (lines[owner.endLine - 1]?.length ?? 0) + 1;
-      editors.reveal(path, owner.endLine, endColumn);
-      editors.insertAtCursor(snippet);
-      showToast(`Переопределён ${name}`);
-    };
-
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(
-      candidates.map((member) => ({
-        label: `${member.kind} ${member.name}`,
-        // Одноимённый метод бывает у нескольких предков — важно знать, чей это.
-        hint: `от ${member.from}`,
-        onSelect: () => void insertOverride(member.name, member.path),
-      })),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-  };
-
-  define(
-    {
-      id: 'editor.overrideMembers',
-      title: 'Переопределить методы предка',
-      category: 'Навигация',
-      keywords: ['override', 'переопределить', 'наслед', 'super'],
-    },
-    () => void overrideMembers(),
-  );
-
-  define(
-    {
-      id: 'index.rebuild',
-      title: 'Пересобрать карту символов',
-      category: 'Навигация',
-      keywords: ['индекс', 'index', 'кэш', 'пересобрать', 'invalidate'],
-    },
-    () => void rebuildSymbolIndex(),
-  );
-
-  /**
-   * Моникер символа под курсором: устойчивое имя, по которому символ связывается с тем же
-   * символом в других инструментах. Показываем список (схем бывает несколько), а первый
-   * сразу копируем в буфер — чаще всего его и нужно вставить в другой инструмент.
-   */
-  const showMoniker = async (): Promise<void> => {
-    const path = editors.currentPath;
-    if (!path) {
-      showToast('Откройте файл', 'error');
-      return;
-    }
-    const monikers = await lsp.monikers(path, editors.cursor()).catch(() => []);
-    if (monikers.length === 0) {
-      showToast('Моникер не найден: сервер этого не умеет или символа под курсором нет');
-      return;
-    }
-    const copy = (identifier: string): void => {
-      void navigator.clipboard.writeText(identifier).catch(() => undefined);
-      showToast('Моникер скопирован');
-    };
-    const rect = layout.editorHost.getBoundingClientRect();
-    showPopupMenu(
-      monikers.map((item) => ({
-        label: item.identifier,
-        hint: `${item.scheme}${item.unique ? ' · уникальный' : ''}`,
-        onSelect: () => copy(item.identifier),
-      })),
-      rect.left + 40,
-      rect.top + 40,
-      { anchor: layout.editorHost },
-    );
-    copy(monikers[0]!.identifier);
-  };
-
-  define({ id: 'editor.moniker', title: 'Моникер символа', category: 'Навигация' }, () => void showMoniker());
-
-  /** Разрешить конфликт слияния: экран с обеими сторонами и выбором по блокам. */
-  define({ id: 'git.resolveConflicts', title: 'Разрешить конфликт слияния', category: 'Git' }, async (path) => {
-    const target = asPath(path) ?? editors.currentPath;
-    if (!target) {
-      showToast('Откройте файл с конфликтом', 'error');
-      return;
-    }
-    if (!(await conflictView.open(target))) showToast('В этом файле нет конфликтов слияния');
-  });
-
-  // Переключение и создание ветки меняют файлы под ногами: несохранённый буфер они
-  // не видят. Поэтому сперва prepareCheckout — сохранить или спросить.
-  define({ id: 'git.checkout', title: 'Переключить ветку', category: 'Git' }, async (name) => {
-    if (typeof name !== 'string' || !name) return;
-    if (!(await prepareCheckout())) return;
-    await git.checkout(name);
-    showToast(`Ветка: ${name}`);
-  });
-
-  define({ id: 'git.createBranch', title: 'Создать ветку', category: 'Git' }, async (name) => {
-    const branch = typeof name === 'string' ? name.trim() : '';
-    if (!branch) return;
-    if (!(await prepareCheckout())) return;
-    await git.checkout(branch, true);
-    showToast(`Ветка создана: ${branch}`);
-  });
-
-  // Синхронизация с удалённым репозиторием. Нажатие кнопки — уже решение человека,
-  // поэтому отдельного вопроса не задаём; об исходе говорит уведомление, а провал
-  // (нет remote, отказ авторизации, конфликт) приходит текстом от git.
-  define(
-    { id: 'git.fetch', title: 'Забрать изменения (fetch)', category: 'Git', enabled: () => git.isRepository },
-    async () => {
-      const result = await git.fetch();
-      showToast(`fetch: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
-    },
-  );
-
-  // Многообласть: папок несколько, у каждой свой репозиторий — обновляем все разом.
-  define(
-    {
-      id: 'git.fetchRoots',
-      title: 'Забрать изменения во всех папках (fetch)',
-      category: 'Git',
-      enabled: () => workspace.isMultiRoot,
-    },
-    async () => {
-      const results = await git.fetchRoots();
-      const summary = fetchResultsSummary(results);
-      showToast(summary.text, summary.ok ? 'info' : 'error');
-    },
-  );
-
-  // Режим pull берём из настроек (проектных): у команд разные привычки — кому слияние,
-  // кому перебазирование. `default` не подсказывает флагов, и git ведёт себя как настроен.
-  define(
-    { id: 'git.pull', title: 'Влить изменения (pull)', category: 'Git', enabled: () => git.isRepository },
-    async () => {
-      const result = await git.pull(settings.git.pullMode);
-      showToast(`pull: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
-    },
-  );
-
-  // То же слиянием или перебазированием — разово, поверх настройки: иногда нужно
-  // именно так, не меняя поведение по умолчанию.
-  define(
-    {
-      id: 'git.pullRebase',
-      title: 'Влить изменения (pull) с перебазированием',
-      category: 'Git',
-      enabled: () => git.isRepository,
-    },
-    async () => {
-      const result = await git.pull('rebase');
-      showToast(`pull --rebase: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
-    },
-  );
-
-  define(
-    { id: 'git.push', title: 'Отправить коммиты (push)', category: 'Git', enabled: () => git.isRepository },
-    async () => {
-      // Счётчики считает main: без них push уходил «в пустоту» (всё отправлено) или
-      // отваливался отказом non-fast-forward вместо понятного «сначала влейте».
-      const repository = git.repository;
-      if (!repository) return;
-      const plan = planPush(repository.ahead, repository.behind);
-      if (plan === 'nothing') {
-        showToast('Отправлять нечего: коммитов впереди нет');
-        return;
-      }
-      if (plan === 'rejected') {
-        showToast('На удалённой ветке есть чужие коммиты: сначала влейте их (pull)', 'error');
-        return;
-      }
-      const result = await git.push();
-      showToast(`push: ${firstLine(result.message)}`, result.ok ? 'info' : 'error');
-    },
-  );
-
-  define(
-    {
-      id: 'git.stageAll',
-      title: 'Проиндексировать все изменения',
-      category: 'Git',
-      enabled: () => git.unstaged.length > 0,
-    },
-    async () => {
-      const paths = git.unstaged.map((file) => file.path);
-      if (paths.length === 0) {
-        showToast('Нет изменений для индексации', 'error');
-        return;
-      }
-      await git.stage(paths);
-    },
-  );
-
-  define(
-    { id: 'git.unstageAll', title: 'Убрать всё из индекса', category: 'Git', enabled: () => git.staged.length > 0 },
-    async () => {
-      const paths = git.staged.map((file) => file.path);
-      if (paths.length === 0) {
-        showToast('Индекс уже пуст', 'error');
-        return;
-      }
-      await git.unstage(paths);
-    },
-  );
-
-  define(
-    { id: 'git.discardAll', title: 'Откатить все правки', category: 'Git', enabled: () => git.unstaged.length > 0 },
-    async () => {
-      const paths = git.unstaged.map((file) => file.path);
-      if (paths.length === 0) {
-        showToast('Нет правок для отката', 'error');
-        return;
-      }
-
-      // Откат необратим: спрашиваем системным диалогом, как и для одного файла.
-      const { confirmed } = await rpc.request('dialog.confirm', {
-        title: 'Откатить все правки',
-        message: 'Отменить все правки в рабочем дереве?',
-        detail: `Файлов: ${paths.length}. Изменённые вернутся к последнему коммиту, новые будут удалены. Вернуть правки будет нельзя.`,
-        confirmLabel: 'Откатить все',
-      });
-      if (!confirmed) return;
-
-      // Вкладки убираем ДО git: новые файлы он удаляет с диска, а вкладка с их текстом
-      // осталась бы — и первое же Ctrl+S воскресило бы выброшенный файл. Активность
-      // помним здесь же: после закрытия `active` станет соседняя (prepareDiscard).
-      const plan = prepareDiscard(paths, openEditors.active?.path ?? null, (path) => openEditors.has(path));
-      for (const path of plan.close) openEditors.close(path);
-
-      await git.discard(paths);
-      // Файлы изменились под нами — открываем заново то, что было на экране. Без этого
-      // на экране остался бы текст из прежнего снимка, а не с диска.
-      // Берём его из activePath — это и есть «тот файл», а не первый в списке.
-      if (plan.activePath) await openPath(plan.activePath).catch(() => undefined);
-      showToast('Правки откатаны');
-    },
-  );
-
-  // Вкладки «Изменения» в нижней панели больше нет: полный менеджер git открывается
-  // поповером от кнопки ветки в статусбаре.
-  define({ id: 'view.showChanges', title: 'Показать изменения', category: 'Вид', keybinding: 'Ctrl+Shift+G' }, () => {
-    openGitManager(statusBar.gitAnchor);
-  });
-
-  define({ id: 'view.toggleSidebar', title: 'Боковая панель', category: 'Вид', keybinding: 'Ctrl+B' }, () => {
-    layout.setSidebarVisible(!layout.sidebarVisible);
-    syncViewButtons();
-  });
-
-  // Режим дзен: прячем всю обвязку — панели, нижний док, строку состояния и шапку — и
-  // оставляем только редактор. Что было видно, ЗАПОМИНАЕМ и возвращаем на выходе;
-  // спрятанный макет сохранять нельзя, поэтому прячем внутри `withoutPersist`.
-  let zenSaved: { sidebar: boolean; right: boolean; dock: boolean } | null = null;
-  define({ id: 'view.zen', title: 'Режим дзен', category: 'Вид', keywords: ['zen', 'фокус'] }, () => {
-    if (zenSaved) {
-      const saved = zenSaved;
-      zenSaved = null;
-      withoutPersist(() => {
-        layout.setSidebarVisible(saved.sidebar);
-        layout.setRightVisible(saved.right);
-        layout.setDockVisible(saved.dock);
-      });
-      layout.root.classList.remove('is-zen');
-    } else {
-      zenSaved = { sidebar: layout.sidebarVisible, right: layout.rightVisible, dock: layout.dockVisible };
-      withoutPersist(() => {
-        layout.setSidebarVisible(false);
-        layout.setRightVisible(false);
-        layout.setDockVisible(false);
-      });
-      layout.root.classList.add('is-zen');
-    }
-    syncViewButtons();
-  });
 
   define({ id: 'search.project', title: 'Поиск по проекту', category: 'Поиск', keybinding: 'Ctrl+Shift+F' }, () =>
     dock.show('search'),
@@ -5255,61 +3260,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
   );
 
-  // Alt+F12 и кнопка шапки включают и выключают нижний остров целиком — как есть,
-  // с той вкладкой, что была открыта (первая по умолчанию — терминал).
-  define({ id: 'view.toggleDock', title: 'Нижняя панель', category: 'Вид', keybinding: 'Alt+F12' }, () => {
-    dock.toggle(dock.activeId ?? 'terminal');
-  });
-
-  // Открыть именно вкладку терминала (палитра, Ctrl+`).
-  define({ id: 'view.showTerminal', title: 'Терминал', category: 'Вид' }, () => {
-    dock.show('terminal');
-  });
-
-  define({ id: 'view.showOutline', title: 'Структура файла', category: 'Вид' }, () => {
-    dock.toggle('outline');
-  });
-
-  define({ id: 'view.notebooks', title: 'Ячейки ноутбука', category: 'Вид' }, () => {
-    dock.show('notebooks');
-  });
-
-  define({ id: 'view.showMarkdownPreview', title: 'Предпросмотр Markdown', category: 'Вид' }, () => {
-    const path = openEditors.active?.path ?? null;
-    if (path === null || !isMarkdownPath(path)) {
-      showToast('Предпросмотр Markdown: откройте файл .md', 'error');
-      return;
-    }
-    toggleMarkdownPreview(path);
-  });
-
-  define({ id: 'view.regexTester', title: 'Отладчик регулярных выражений', category: 'Вид' }, () => {
-    regexTester.open();
-  });
 
   define({ id: 'editor.structuralReplace', title: 'Заменить по структуре', category: 'Рефакторинг' }, () => {
     structuralSearch.open();
   });
 
-  define({ id: 'view.showProblems', title: 'Проблемы', category: 'Вид', keywords: ['ошибки', 'warning'] }, () => {
-    dock.show('problems');
-  });
-
-  // Задачи: список пометок TODO/FIXME/HACK/XXX по проекту — как панель «Проблемы»,
-  // только источник у списка другой (поиск по проекту).
-  define(
-    { id: 'view.showTodos', title: 'Задачи (TODO/FIXME)', category: 'Вид', keywords: ['todo', 'fixme', 'пометки'] },
-    () => {
-      dock.show('todo');
-    },
-  );
-
-  // Тумблер острова — одна команда на палитру, кнопку шапки и Alt+F12: показывает
-  // нижнюю панель с прежней вкладкой, а если она уже открыта — скрывает целиком.
-  define({ id: 'view.toggleDock', title: 'Нижняя панель', category: 'Вид', keybinding: 'Alt+F12' }, () => {
-    if (dock.visible) dock.hide();
-    else dock.show(dock.activeId ?? 'terminal');
-  });
 
   /**
    * Открыть адрес вкладкой встроенного браузера. Адрес нормализуем тем же правилом,
@@ -5365,31 +3320,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     browserTabs.closeAll();
   });
 
-  define({ id: 'view.toggleRight', title: 'Панель AI', category: 'Вид', keybinding: 'Ctrl+Shift+A' }, () => {
-    toggleChat();
-  });
-
-  // Разделение области редактора: одна кнопка включает и выключает, как и у панелей.
-  define({ id: 'view.splitEditor', title: 'Разделить редактор', category: 'Вид', keybinding: 'Ctrl+\\' }, () => {
-    if (editors.isSplit) editors.closeSplit();
-    else editors.splitEditor();
-    syncViewButtons();
-  });
-
-  // Сетка из четырёх панелей: разложить в 2×2, повторный вызов возвращает одну панель.
-  define(
-    {
-      id: 'view.splitEditorGrid',
-      title: 'Разделить на четыре (сетка)',
-      category: 'Вид',
-      keybinding: 'Ctrl+Shift+\\',
-    },
-    () => {
-      if (editors.isGrid) editors.closeSplit();
-      else editors.splitEditorGrid();
-      syncViewButtons();
-    },
-  );
 
   define({ id: 'app.showMenu', title: 'Меню приложения', category: 'Вид', keybinding: 'Alt+F10' }, () => {
     // Повторное нажатие закрывает: так ведёт себя системное меню, и так ждёт человек.
@@ -5405,7 +3335,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
         runRole: (role) => void rpc.request('menu.role', { role }),
         checks: menuChecks({
           sidebar: layout.sidebarVisible,
-          aiPanel: aiEnabled() && chatVisible(),
+          aiPanel: aiEnabled() && layout.rightVisible,
           terminal: layout.dockVisible && dock.activeId === 'terminal',
         }),
       },
@@ -5541,12 +3471,14 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   // Форматирование ВЫДЕЛЕНИЯ: сервер переписывает только участок, файл целиком не трогает.
   // Инструмент проекта так не умеет — он всегда форматирует весь файл.
+  // Сочетание Ctrl+K Ctrl+F живёт в клавиатуре редактора (`keymap.ts` → `formatSelection`):
+  // вторая подпись на ту же пару врала — гонку выигрывал обработчик редактора.
+  // Здесь сочетания нет намеренно: команда нужна палитре и меню.
   define(
     {
       id: 'format.selection',
       title: 'Форматировать выделение',
       category: 'Файл',
-      keybinding: 'Ctrl+K Ctrl+F',
       keywords: ['format', 'selection', 'выделение', 'формат'],
     },
     async () => {
@@ -5575,81 +3507,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   );
 
   // Упорядочить импорты делает языковой сервер: у него просим действие `source.organizeImports`.
-  define(
-    {
-      id: 'editor.organizeImports',
-      title: 'Упорядочить импорты',
-      category: 'Редактор',
-      keybinding: 'Shift+Alt+O',
-      keywords: ['imports', 'import', 'импорт', 'organize'],
-    },
-    () => {
-      const path = editors.currentPath;
-      if (!path) {
-        showToast('Нет открытого файла');
-        return;
-      }
-      void runOrganizeImports(path);
-    },
-  );
-
-  // Общий список рефакторингов от сервера: что он предложит для выделения (или символа
-  // под кареткой) — извлечение, inline, вынести в файл и прочее. Это ответ на
-  // «какие тут вообще есть рефакторинги» без угадывания подвида.
-  define(
-    {
-      id: 'editor.refactor',
-      title: 'Рефакторинг…',
-      category: 'Редактор',
-      keybinding: 'Ctrl+Shift+R',
-      keywords: ['refactor', 'рефакторинг', 'все действия'],
-    },
-    () => {
-      const path = editors.currentPath;
-      if (!path) {
-        showToast('Нет открытого файла');
-        return;
-      }
-      void runRefactorMenu(path);
-    },
-  );
-
-  // Извлечение в переменную или функцию — рефакторинг от сервера: у нас только запрос,
-  // список предложенного и применение. Выделение задаёт, что именно выносить.
-  define(
-    {
-      id: 'editor.extractSymbol',
-      title: 'Извлечь в переменную или функцию',
-      category: 'Редактор',
-      keywords: ['refactor', 'extract', 'извлечь', 'переменная', 'функция'],
-    },
-    () => {
-      const path = editors.currentPath;
-      if (!path) {
-        showToast('Нет открытого файла');
-        return;
-      }
-      void runRefactor(path, 'extract');
-    },
-  );
-
-  // «Разворачивание» (inline) — обратный рефакторинг: тело символа встаёт на место вызова.
-  define(
-    {
-      id: 'editor.inlineSymbol',
-      title: 'Развернуть (inline)',
-      category: 'Редактор',
-      keywords: ['refactor', 'inline', 'развернуть', 'встроить'],
-    },
-    () => {
-      const path = editors.currentPath;
-      if (!path) {
-        showToast('Нет открытого файла');
-        return;
-      }
-      void runRefactor(path, 'inline');
-    },
-  );
 
   /**
    * Макросы: запись действий и повтор. Макрос копит не клавиши, а действия (движение,
@@ -5703,68 +3560,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     playMacro(check.times);
   });
 
-  /**
-   * Vim-режим: модальное управление клавишами. Настройка переживает перезапуск, а
-   * состояние (текущий режим) живёт в вводе редактора. Переключение применяется сразу,
-   * не дожидаясь повторного чтения настроек.
-   */
-  define({ id: 'editor.toggleVim', title: 'Vim-режим: включить или выключить', category: 'Редактор' }, () => {
-    const next = !settings.editor.vimMode;
-    settings = { ...settings, editor: { ...settings.editor, vimMode: next } };
-    editors.setVimMode(next);
-    refreshStatus();
-    showToast(next ? 'Vim-режим включён' : 'Vim-режим выключен');
-    void saveSettingsPatch({ editor: { vimMode: next } }).catch(() => undefined);
-  });
-
-  /**
-   * Emacs-режим: сочетания Ctrl/Alt поверх обычного ввода. Переключение применяется
-   * сразу (и к уже открытым панелям), а не дожидается повторного чтения настроек.
-   */
-  define({ id: 'editor.toggleEmacs', title: 'Emacs-режим: включить или выключить', category: 'Редактор' }, () => {
-    const next = !settings.editor.emacsMode;
-    settings = { ...settings, editor: { ...settings.editor, emacsMode: next } };
-    editors.setEmacsMode(next);
-    showToast(next ? 'Emacs-режим включён' : 'Emacs-режим выключен');
-    void saveSettingsPatch({ editor: { emacsMode: next } }).catch(() => undefined);
-  });
-
-  // Орфография: добавить слово под курсором в словарь или пропустить его на сеанс.
-  define(
-    {
-      id: 'editor.addToDictionary',
-      title: 'Орфография: добавить слово в словарь',
-      category: 'Редактор',
-      keywords: ['spell', 'dictionary', 'орфография', 'словарь'],
-    },
-    () => {
-      if (!editors.addSpellingWordToDictionary()) showToast('Под курсором нет слова с ошибкой');
-    },
-  );
-
-  define(
-    {
-      id: 'editor.ignoreSpelling',
-      title: 'Орфография: пропустить слово',
-      category: 'Редактор',
-      keywords: ['spell', 'ignore', 'орфография', 'пропустить'],
-    },
-    () => {
-      if (!editors.ignoreSpellingWord()) showToast('Под курсором нет слова с ошибкой');
-    },
-  );
-
-  define(
-    {
-      id: 'editor.toggleSpellcheck',
-      title: 'Орфография: включить или выключить проверку',
-      category: 'Редактор',
-      keywords: ['spell', 'spellcheck', 'орфография'],
-    },
-    () => {
-      void saveSettingsPatch({ editor: { spellcheck: !settings.editor.spellcheck } });
-    },
-  );
 
   define(
     {
@@ -5794,110 +3589,19 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     window.setTimeout(() => void refreshLspStatus(), 1500);
   });
 
-  // Диагностика нужна, когда приходит «в чате не подсвечивается код»:
-  // отчёт в консоли показывает, какие языки дают токены и с каким цветом.
-  define({ id: 'ai.highlightProbe', title: 'AI: диагностика подсветки кода', category: 'AI' }, async () => {
-    const report = await diagnoseHighlighting();
-    console.info(`[chui] подсветка кода\n${report}`);
-    showToast('Отчёт о подсветке — в консоли (Ctrl+Shift+I)');
-  });
-
-  // Трасса и журнал — диагностика, а не работа с моделью: ни запросов, ни трат
-  // они не делают. Гейт `aiEnabled()` здесь был бы вреден: "у меня не работает AI"
-  // — самый частый повод сюда заглянуть, в том числе при выключенном тумблере.
-  // Это не недоделка: не ставить сюда проверку мастера.
-
-  define({ id: 'ai.newChat', title: 'Новый диалог', category: 'AI' }, () => {
-    // revealChat сам откажет, если AI выключен: новый диалог в мёртвой панели
-    // только выглядит работающим.
-    if (!aiEnabled()) {
-      warnAiDisabled();
-      return;
-    }
-    revealChat();
-    return chat.newChat();
-  });
-
-  define(
-    {
-      id: 'ai.runLog',
-      title: 'Прогон агента: трасса',
-      category: 'AI',
-      keywords: ['прогон', 'run', 'trace', 'диагностика'],
-    },
-    // Без гейта по мастеру сознательно: трасса — это про уже случившееся, а
-    // разбирать прогон чаще всего и нужно тогда, когда AI уже выключили.
-    () => chat.openRunLog(),
-  );
-
-  define(
-    {
-      id: 'ai.telemetry',
-      title: 'Журнал прогонов…',
-      category: 'AI',
-      keywords: ['телеметрия', 'telemetry', 'журнал', 'прогоны', 'диагностика'],
-    },
-    // То же, что и у трассы: читаем историю, а не зовём модель — запросов нет,
-    // и запрещать нечего.
-    () => void telemetryModal.open(),
-  );
-
-  // Остановка работает независимо от мастера: если генерация уже идёт, а AI только что
-  // выключили в настройках — отменить её всё равно надо. Прятать здесь нечего.
-  define({ id: 'ai.stop', title: 'Остановить генерацию', category: 'AI' }, () => chat.stop());
-
-  // Чат — единственный вход в AI, который был без мастера: с выключенным AI
-  // открывалась панель с полем ввода, и первая же отправка падала в main.
-  // Кнопка в тулбаре уже прячется по aiEnabled(), а команда пусть говорит правду.
-  define({ id: 'ai.toggle', title: 'Ассистент: показать/скрыть', category: 'AI', keybinding: 'Ctrl+Shift+A' }, () => {
-    if (!aiEnabled()) {
-      warnAiDisabled();
-      return;
-    }
-    toggleChat();
-  });
-
-  define(
-    { id: 'ai.openInEditor', title: 'Перенести чат в окно редактора', category: 'AI', keybinding: 'Ctrl+Alt+E' },
-    () => {
-      // Без мастера перенос в редактор открывает пустую вкладку чата — и она
-      // остаётся в полосе вкладок, пока её не закроют руками.
-      if (!aiEnabled()) {
-        warnAiDisabled();
-        return;
-      }
-      showChatTab();
-    },
-  );
-
-  // Возврат назад в панель — тоже вход в чат: с выключенным AI он распахнул бы
-  // правую панель с мёртвым чатом взамен свёрнутой.
-  define({ id: 'ai.backToPanel', title: 'Вернуть чат в боковую панель', category: 'AI' }, () => {
-    if (!aiEnabled()) {
-      warnAiDisabled();
-      return;
-    }
-    setChatInEditor(false);
-  });
-
-  define({ id: 'ai.explainSelection', title: 'Объяснить выделение', category: 'AI' }, async () => {
-    // revealChat сам покажет «AI выключен», но `askAboutSelection` при этом всё равно
-    // сходил бы в main за ответом, который никто не увидит.
-    if (!aiEnabled()) {
-      warnAiDisabled();
-      return;
-    }
-    revealChat();
-    await chat.askAboutSelection('explain');
-  });
-
-  define({ id: 'ai.fixSelection', title: 'Исправить выделение', category: 'AI' }, async () => {
-    if (!aiEnabled()) {
-      warnAiDisabled();
-      return;
-    }
-    revealChat();
-    await chat.askAboutSelection('fix');
+  // Команды ассистента — `core/ai-commands.ts`: там три правила про гейт мастера
+  // (вход в чат — спрашивает, диагностика — нет, остановка — всегда).
+  // `ai.generateTest` остался здесь: у него 15 зависимостей (rpc, workspace, пути) —
+  // вынос дал бы модулю больше связей, чем строк.
+  registerAiCommands(define, {
+    aiEnabled,
+    warnAiDisabled,
+    chat,
+    revealChat,
+    toggleChat,
+    telemetryModal,
+    diagnoseHighlighting,
+    showToast,
   });
 
   /**
@@ -6070,6 +3774,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   const applySettings = (next: Settings): void => {
     const previous = settings;
     settings = next;
+    // Что перестраивать, а что трогать незачем, решает чистый модуль
+    // (`shared/settings-plan.ts`): тонкости сравнения закреплены тестами.
+    const plan = settingsPlan(previous, next);
     applyUiScale(next.appearance.uiScale);
     editors.applyOptions({
       tabSize: next.editor.tabSize,
@@ -6088,15 +3795,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       spellcheck: next.editor.spellcheck,
     });
     // Словарь человека изменили — пересобираем модель (она сама перепроверит текст).
-    if (previous.editor.spellWords !== next.editor.spellWords) spell.setUserWords(next.editor.spellWords);
+    if (plan.spellWords) spell.setUserWords(next.editor.spellWords);
     // Автосохранение сменили — режим или паузу: снимаем уже назначенную запись или
     // ставим новую с новой задержкой. Иначе правка ждала бы прежней задержки.
-    if (
-      previous.editor.autoSave !== next.editor.autoSave ||
-      previous.editor.autoSaveDelayMs !== next.editor.autoSaveDelayMs
-    ) {
-      autoSave.settingsChanged();
-    }
+    if (plan.autoSave) autoSave.settingsChanged();
     // Дерево получает настройки С УЧЁТОМ отличий активного корня: у каждой папки
     // области они свои (см. `shared/explorer-settings.ts`).
     explorer.applySettings(resolveExplorerSettings(next.explorer, workspace.root));
@@ -6116,17 +3818,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const panel = aiPanelPlan({
       wasEnabled: previous.ai.enabled,
       isEnabled: next.ai.enabled,
-      chatInEditor,
       rightVisible: layout.rightVisible,
       wantedRightVisible: next.layout.rightVisible,
     });
-    if (panel.toggle === 'disabled') {
-      // Панель гасим первой: `setChatInEditor(false)` ниже сам её распахивает,
-      // и обратный порядок дал бы видимый скачок.
-      withoutPersist(() => layout.setRightVisible(false));
-      // Свёрнутость — следствие тумблера, а не выбор человека: в настройки не пишем.
-      if (panel.moveChatToPanel) withoutPersist(() => setChatInEditor(false));
-    }
+    // Свёрнутость — следствие тумблера, а не выбор человека: в настройки не пишем.
+    if (panel.hide) withoutPersist(() => layout.setRightVisible(false));
     if (panel.toggle === 'enabled' && panel.show) {
       withoutPersist(() => layout.setRightVisible(true));
     }
@@ -6134,7 +3830,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // сразу, не дожидаясь открытия файла: иначе подсказок не было бы до переоткрытия
     // файла. Выключение здесь ничего не делает: подъёмы прекращает сам main
     // (`startLanguage` смотрит на `lsp.enabled`).
-    if (!previous.lsp.enabled && next.lsp.enabled) refreshLsp();
+    if (plan.warmLsp) refreshLsp();
     syncViewButtons();
     // Инструменты проекта зависят от настроек запуска: путь к интерпретатору
     // и менеджеру пакетов могли поменять — перепроверяем проект заново.
@@ -6142,11 +3838,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       syncRunControl();
       refreshStatus();
     });
-    // Сменили интерпретатор — перепроверяем импорты в открытых файлах. Сравниваем
+    // Сменили интерпретатор — перепроверяем импорты в открытых файлах. Сравнивается
     // весь блок `run`, а не только pythonPath: менеджер пакетов и venv меняют то же
-    // самое окружение. Без сравнения каждый `applySettings` (в том числе смена темы)
-    // заново обходил бы все открытые файлы.
-    if (previous.run !== next.run) importChecker.refresh();
+    // самое окружение. Сравнение по значению, а не по ссылке (см. `settings-plan.ts`):
+    // без этого смена темы заново обходила бы все открытые файлы.
+    if (plan.imports) importChecker.refresh();
     // Схема могла прийти извне — догоняем редактор и терминал.
     theme.apply();
     refreshStatus();
@@ -6329,9 +4025,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     refreshStatus();
     syncEmptyState();
     syncRunControl();
-    // Файл стал активным — показываем его, а вкладка чата просто ждёт в полосе.
+    // Файл стал активным — показываем его.
     if (openEditors.active) {
-      hideChatTab();
       // Страницы браузера тоже отступают: активен файл — показываем файл.
       browserTabs.deactivate();
     }
@@ -6434,153 +4129,28 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void debug.toggleBreakpoint(path, line).then((breakpoints) => editors.setBreakpoints(path, breakpoints));
   });
 
-  /** Меню точки останова по правому клику на поле номеров строк. */
-  const openBreakpointMenu = ({ path, line }: { path: string; line: number }): void => {
-    const breakpoint = debug.breakpointsOf(path).find((item) => item.line === line);
-    const at = breakpoint ?? { line };
+  // Меню жёлоба — точки останова и блоки изменений: состав и подтверждения
+  // живут в `core/gutter-menus.ts`.
+  const gutterMenus = createGutterMenus({
+    git,
+    debug,
+    workspace,
+    explorer,
+    editors,
+    documents,
+    changeGutter,
+    conditionInput,
+    saveDocument,
+    reloadIfOpen,
+    confirm: (options) => rpc.request('dialog.confirm', options),
+  });
+  // Место последнего нажатия — для меню жёлоба: у события контекстного меню нет
+  // координат окна, а меню ставится по месту нажатия.
+  document.addEventListener('mousedown', (event) => gutterMenus.trackPointer(event.clientX, event.clientY), true);
 
-    /** Задать настройку точки и перерисовать значки. */
-    const apply = (options: { condition?: string; hitCondition?: string; logMessage?: string }): void => {
-      void debug.setBreakpointOptions(path, line, options).then((list) => editors.setBreakpoints(path, list));
-    };
-
-    showPopupMenu(
-      [
-        {
-          label: at.condition ? 'Изменить условие…' : 'Условие останова…',
-          onSelect: () => {
-            conditionInput.open({
-              title: 'Условие останова',
-              label: `Строка ${line}`,
-              value: at.condition ?? '',
-              placeholder: 'например n > 100',
-              confirmLabel: 'Задать',
-              onAccept: (value) => apply({ ...at, condition: value }),
-            });
-          },
-        },
-        {
-          label: at.hitCondition ? 'Изменить счётчик попаданий…' : 'Счётчик попаданий…',
-          onSelect: () => {
-            conditionInput.open({
-              title: 'Счётчик попаданий',
-              label: 'Сколько раз пройти мимо, прежде чем остановиться',
-              value: at.hitCondition ?? '',
-              placeholder: 'например 5 или >3',
-              confirmLabel: 'Задать',
-              onAccept: (value) => apply({ ...at, hitCondition: value }),
-            });
-          },
-        },
-        {
-          label: at.logMessage ? 'Изменить сообщение журнала…' : 'Точка в журнал…',
-          onSelect: () => {
-            conditionInput.open({
-              title: 'Точка в журнал',
-              label: 'Сообщение; {выражение} подставит значение',
-              value: at.logMessage ?? '',
-              placeholder: 'например n = {n}',
-              confirmLabel: 'Задать',
-              onAccept: (value) => apply({ ...at, logMessage: value }),
-            });
-          },
-        },
-        {
-          label: breakpoint ? 'Убрать точку останова' : 'Поставить точку останова',
-          onSelect: () => void debug.toggleBreakpoint(path, line).then((list) => editors.setBreakpoints(path, list)),
-        },
-      ],
-      lastPointer.x,
-      lastPointer.y,
-    );
-  };
-
-  // Правый клик на жёлобе: координаты берём из последнего события мыши — у самого
-  // события контекстного меню нет координат окна, а меню ставится по месту нажатия.
-  const lastPointer = { x: 0, y: 0 };
-
-  /**
-   * Правый клик по полоске изменения: меню одного БЛОКА правок.
-   *
-   * Работаем по строке, а строки у полосок и у diff согласуются только с рабочим
-   * деревом: полоски считаются по тексту редактора, а git про буфер не знает. Чтобы
-   * они не разъехались, сперва сохраняем файл — иначе `git apply` приложил бы блок
-   * к другой версии файла. Не сохранилось (отказ от перезаписи) — меню не показываем.
-   *
-   * Блоков два набора: неиндексированные (`unstaged`) можно проиндексировать или
-   * откатить, проиндексированные (`staged`) — убрать из индекса. Что под строкой,
-   * решает `hunkAtLine` (общая граница блоков с `git-hunks`).
-   */
-  const openChangeStripMenu = async ({ path, line }: { path: string; line: number }): Promise<void> => {
-    const document = documents.get(path) ?? null;
-    if (document?.dirty) {
-      if (!(await saveDocument(document))) return;
-    }
-
-    const hunks = await git.fileHunks(path).catch(() => ({ unstaged: [], staged: [] }));
-    const unstagedIndex = hunkAtLine(hunks.unstaged, line);
-    const stagedIndex = hunkAtLine(hunks.staged, line);
-
-    if (unstagedIndex === null && stagedIndex === null) {
-      showToast('Правок в этой строке нет', 'info');
-      return;
-    }
-
-    /** После правки блока: полоски пересчитать, файл (если менялся на диске) перечитать. */
-    const after = (reload: boolean): void => {
-      changeGutter.refreshContent();
-      if (reload) void reloadIfOpen(path);
-      explorer.scheduleRefresh();
-    };
-
-    const items: PopupMenuItem[] = [];
-    if (unstagedIndex !== null) {
-      items.push({
-        label: 'Проиндексировать это изменение',
-        onSelect: () => void git.stageHunk(path, unstagedIndex).then(() => after(false)),
-      });
-    }
-    if (stagedIndex !== null) {
-      items.push({
-        label: 'Убрать это изменение из индекса',
-        onSelect: () => void git.unstageHunk(path, stagedIndex).then(() => after(false)),
-      });
-    }
-    if (unstagedIndex !== null) {
-      // Откат теряет правки безвозвратно — спрашиваем системным диалогом, как и у отката файла.
-      items.push({ separator: true });
-      items.push({
-        label: 'Откатить это изменение',
-        danger: true,
-        onSelect: () => {
-          void (async () => {
-            const { confirmed } = await rpc.request('dialog.confirm', {
-              title: 'Откатить изменение',
-              message: `Вернуть строку к состоянию индекса?`,
-              detail: `${workspace.relative(path)} — блок изменений у строки ${line}. Правки в этом блоке будут потеряны.`,
-              confirmLabel: 'Откатить',
-            });
-            if (!confirmed) return;
-            await git.discardHunk(path, unstagedIndex);
-            after(true);
-          })();
-        },
-      });
-    }
-
-    showPopupMenu(items, lastPointer.x, lastPointer.y);
-  };
-  document.addEventListener(
-    'mousedown',
-    (event) => {
-      lastPointer.x = event.clientX;
-      lastPointer.y = event.clientY;
-    },
-    true,
-  );
-  editors.onBreakpointMenu(openBreakpointMenu);
+  editors.onBreakpointMenu(gutterMenus.openBreakpointMenu);
   // Правый клик по полоске изменения: меню блока (индексировать, убрать, откатить).
-  editors.onChangeStripMenu((hit) => void openChangeStripMenu(hit));
+  editors.onChangeStripMenu((hit) => void gutterMenus.openChangeStripMenu(hit));
 
   // Останов: подсвечиваем строку и показываем панель. Пока программа идёт или
   // отладка не запущена — подсветки нет.
@@ -6754,18 +4324,4 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 function endOfText(text: string): { line: number; column: number } {
   const lines = text.split('\n');
   return { line: lines.length, column: (lines[lines.length - 1]?.length ?? 0) + 1 };
-}
-
-/** Подпись вида экспорта для списка мест: коротко и по-русски. */
-function exportKindLabel(kind: string): string {
-  if (kind === 'default') return 'по умолчанию';
-  if (kind === 'star') return 'звёздочкой';
-  if (kind === 'named') return 'списком';
-  return 'объявлением';
-}
-
-/** Подпись объявления типа для списка: вид и его прямые родители. */
-function describeType(entry: { kind: string; bases: string[] }): string {
-  if (entry.bases.length === 0) return entry.kind;
-  return `${entry.kind} · ${entry.bases.join(', ')}`;
 }

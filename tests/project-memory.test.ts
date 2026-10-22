@@ -133,6 +133,7 @@ describe('инструменты remember/forget', () => {
     const memory: MemoryTools = {
       remember: vi.fn(async () => ({ ok: true, notes: [{ text: 'x' }], added: true })),
       forget: vi.fn(),
+      notes: vi.fn(async () => []),
     };
     const outcome = await runTool(context(memory), 'mind', '{"action":"remember","text":"важное"}');
 
@@ -146,6 +147,7 @@ describe('инструменты remember/forget', () => {
     const memory: MemoryTools = {
       remember: vi.fn(async () => ({ ok: true, notes: [{ text: 'x' }], added: true })),
       forget: vi.fn(),
+      notes: vi.fn(async () => []),
     };
     const outcome = await runTool(context(memory), 'mind', '{"action":"remember","text":"личное","scope":"global"}');
 
@@ -158,6 +160,7 @@ describe('инструменты remember/forget', () => {
     const memory: MemoryTools = {
       remember: vi.fn(async () => ({ ok: false, reason: 'full' as const })),
       forget: vi.fn(),
+      notes: vi.fn(async () => []),
     };
     const outcome = await runTool(context(memory), 'mind', '{"action":"remember","text":"x"}');
 
@@ -166,10 +169,29 @@ describe('инструменты remember/forget', () => {
     expect(outcome.detail).toContain('mind');
   });
 
+  it('notes показывает всю память, а не только ту часть, что в промпте', async () => {
+    // В промпт едет только хвост памяти (`MEMORY_PROMPT_CHARS`): замер живой беседы
+    // дал 12 показанных заметок из 40 — без полного списка `forget` бьёт наугад.
+    const memory: MemoryTools = {
+      remember: vi.fn(),
+      forget: vi.fn(),
+      notes: vi.fn(async () => [{ text: 'первая' }, { text: 'вторая' }]),
+    };
+    const outcome = await runTool(context(memory), 'mind', '{"action":"notes"}');
+
+    expect(outcome.ok).toBe(true);
+    expect(outcome.detail).toContain('1. первая');
+    expect(outcome.detail).toContain('2. вторая');
+    expect(outcome.detail).toContain('все заметки');
+    // Без scope — память проекта, как у remember/forget.
+    expect(memory.notes).toHaveBeenCalledWith('workspace');
+  });
+
   it('forget про «нечего удалять» — не ошибка', async () => {
     const memory: MemoryTools = {
       remember: vi.fn(),
       forget: vi.fn(async () => ({ notes: [], removed: 0 })),
+      notes: vi.fn(async () => []),
     };
     const outcome = await runTool(context(memory), 'mind', '{"action":"forget","query":"нет такого"}');
 
@@ -183,7 +205,7 @@ describe('инструменты remember/forget', () => {
   });
 
   it('незнакомое действие называет допустимые', async () => {
-    const memory: MemoryTools = { remember: vi.fn(), forget: vi.fn() };
+    const memory: MemoryTools = { remember: vi.fn(), forget: vi.fn(), notes: vi.fn(async () => []) };
     const outcome = await runTool(context(memory), 'mind', '{"action":"list"}');
     expect(outcome.ok).toBe(false);
     expect(outcome.detail).toContain('remember, forget');
@@ -191,7 +213,7 @@ describe('инструменты remember/forget', () => {
 
   it('аргумент своего действия спрашивается по имени', async () => {
     // Схема общая: `text` и `query` нужны разным действиям, и ответ говорит, какое.
-    const memory: MemoryTools = { remember: vi.fn(), forget: vi.fn() };
+    const memory: MemoryTools = { remember: vi.fn(), forget: vi.fn(), notes: vi.fn(async () => []) };
     const lost = await runTool(context(memory), 'mind', '{"action":"forget"}');
     expect(lost.ok).toBe(false);
     expect(lost.summary).toContain('query');

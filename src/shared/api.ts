@@ -1120,6 +1120,8 @@ export interface LayoutSettings {
   sidebarVisible: boolean;
   rightVisible: boolean;
   dockVisible: boolean;
+  /** Область редактора (по центру). Скрывают, когда нужны только панели. */
+  editorVisible: boolean;
 }
 
 /* ── Python: окружения и создание venv ─────────────────────────────────── */

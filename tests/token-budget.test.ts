@@ -85,11 +85,12 @@ describe('бюджет схем', () => {
     expect(edit.inputSchema.properties.action).toBeUndefined();
     expect(Object.keys(edit.inputSchema.properties)).not.toContain('replacement');
     const file = AGENT_TOOLS.find((tool) => tool.name === 'file')!;
+    // Со схемы `file` сняты `create` (дубль `edit`-записи целиком) и `replace`
+    // (дубль `search` + `edit`): осталось только то, чего больше нигде нет —
+    // перемещение и удаление. Имена живы для старых бесед, но не в схеме.
     expect((file.inputSchema.properties.action as { enum?: string[] }).enum).toEqual([
-      'create',
       'move',
       'delete',
-      'replace',
     ]);
     expect(WIDENED_TOOLS).not.toContain('file');
     expect(ROSTER_TOOLS).toContain('file');

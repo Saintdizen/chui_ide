@@ -8,11 +8,9 @@
  *
  *   - выключение закрывает панель БЕЗ записи: свёрнутость — следствие тумблера,
  *     а не выбор человека, и в настройки ей попадать незачем;
- *   - выключение уводит чат из редактора ДО закрытия панели: `setChatInEditor(false)`
- *     внутри распахивает правую панель, и обратный порядок даёт видимый скачок;
  *   - включение возвращает панель только если она была видна при выключении
- *     (`layout.rightVisible` из настроек) и чат не в редакторе — иначе повторное
- *     применение настроек гасило бы панель у того, кто держит чат вкладкой.
+ *     (`layout.rightVisible` из настроек) — иначе повторное применение настроек
+ *     гасило бы панель у того, кто свернул её руками.
  *
  * Модуль чистый: ни DOM, ни настроек — только факты на входе и план на выходе.
  */
@@ -26,21 +24,17 @@ export interface AiPanelState {
   wasEnabled: boolean;
   /** Мастер-тумблер включён в новых настройках. */
   isEnabled: boolean;
-  /** Чат сейчас живёт вкладкой в редакторе. */
-  chatInEditor: boolean;
   /** Правая панель видна сейчас. */
   rightVisible: boolean;
   /** Была ли правая панель видна по настройкам — куда возвращать при включении. */
   wantedRightVisible: boolean;
 }
 
-/** Шаги над макетом и чатом. Порядок важен: `hide` идёт первым. */
+/** Шаги над макетом. Порядок важен: `hide` идёт первым. */
 export interface AiPanelPlan {
   toggle: AiToggle;
   /** Скрыть правую панель (без записи в настройки). */
   hide: boolean;
-  /** Вернуть чат из редактора в панель. */
-  moveChatToPanel: boolean;
   /** Показать правую панель (без записи в настройки). */
   show: boolean;
 }
@@ -52,25 +46,17 @@ export interface AiPanelPlan {
  * темы, шрифта) пересобирало бы макет у того, кто свернул панель руками.
  */
 export function aiPanelPlan(state: AiPanelState): AiPanelPlan {
-  const idle: AiPanelPlan = { toggle: 'unchanged', hide: false, moveChatToPanel: false, show: false };
+  const idle: AiPanelPlan = { toggle: 'unchanged', hide: false, show: false };
   if (state.wasEnabled === state.isEnabled) return idle;
 
   if (!state.isEnabled) {
-    return {
-      toggle: 'disabled',
-      // Панель гасим всегда: чат в ней уже мёртв, а место он всё равно занимает.
-      hide: true,
-      // Чат из редактора уводим только если он там — иначе незачем.
-      moveChatToPanel: state.chatInEditor,
-      show: false,
-    };
+    // Панель гасим всегда: чат в ней уже мёртв, а место он всё равно занимает.
+    return { toggle: 'disabled', hide: true, show: false };
   }
 
-  // Включили обратно. Чат в редакторе — панель не нужна: он и так виден вкладкой,
-  // а распахнутая справа копия была бы вторым окном того же диалога.
-  if (state.chatInEditor) return { toggle: 'enabled', hide: false, moveChatToPanel: false, show: false };
-  // Панель уже видна (человек раскрыл её вручную при выключенном AI) — не трогаем.
-  if (state.rightVisible) return { toggle: 'enabled', hide: false, moveChatToPanel: false, show: false };
+  // Включили обратно. Панель уже видна (человек раскрыл её вручную при выключенном
+  // AI) — не трогаем.
+  if (state.rightVisible) return { toggle: 'enabled', hide: false, show: false };
   // Возвращаем на место, только если она была видна по настройкам до выключения.
-  return { toggle: 'enabled', hide: false, moveChatToPanel: false, show: state.wantedRightVisible };
+  return { toggle: 'enabled', hide: false, show: state.wantedRightVisible };
 }
