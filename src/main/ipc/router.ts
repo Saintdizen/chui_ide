@@ -1,4 +1,4 @@
-import { ipcMain, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import { ipcMain, type WebContents } from 'electron';
 import {
   RPC_CALL_CHANNEL,
   RPC_CANCEL_CHANNEL,
@@ -58,14 +58,24 @@ export class RpcRouter {
   }
 
   attach(): void {
-    ipcMain.handle(RPC_CALL_CHANNEL, (event, call: unknown) => this.dispatch(event, call));
+    ipcMain.handle(RPC_CALL_CHANNEL, (event, call: unknown) => this.dispatch(event.sender, call));
     ipcMain.handle(RPC_CANCEL_CHANNEL, (_event, id: unknown) => {
-      if (typeof id === 'string') this.running.get(id)?.abort();
+      if (typeof id === 'string') this.cancel(id);
       return true;
     });
   }
 
-  private async dispatch(event: IpcMainInvokeEvent, raw: unknown): Promise<RpcResult> {
+  /** Отмена вызова по id: ровно то, что делает канал `chui:rpc:cancel` из renderer. */
+  cancel(id: string): void {
+    this.running.get(id)?.abort();
+  }
+
+  /**
+   * Разобрать вызов и выполнить его. Это и есть весь RPC main: `attach()` лишь
+   * подключает его к каналу, поэтому отправитель приходит сюда напрямую — так
+   * разбор и развод ошибок проверяются без Electron.
+   */
+  async dispatch(sender: WebContents, raw: unknown): Promise<RpcResult> {
     // Вызов приходит из renderer'а, то есть снаружи контракта: `RpcCall` — это
     // ожидание, а не гарантия. Мусор в полях разбираем сами, иначе TypeError
     // ушёл бы наружу вместо RpcError — уже мимо try.
@@ -82,7 +92,7 @@ export class RpcRouter {
     if (!runner) {
       // Стрим не состоится, но renderer ждёт метку конца событий — иначе вызов
       // с неизвестным методом подвесил бы его до страховочного срока.
-      sendStreamEnd(event.sender, call);
+      sendStreamEnd(sender, call);
       return {
         id: call.id,
         ok: false,
@@ -90,7 +100,6 @@ export class RpcRouter {
       };
     }
 
-    const sender = event.sender;
     const controller = new AbortController();
     this.running.set(call.id, controller);
 

@@ -71,6 +71,40 @@ describe('search: область поиска', () => {
   });
 });
 
+/**
+ * Обход `fs` — путь для машин без ripgrep.
+ *
+ * Пока пустой поиск уходил в обход, он проверялся попутно, на каждом «ничего не
+ * нашлось». Теперь пустой результат приходит от ripgrep, и обход надо звать
+ * явно: иначе его поведение (абсолютные пути, число просмотренных файлов,
+ * порядок совпадений) остаётся без присмотра до чьей-то машины без `rg`.
+ */
+describe('search: свой обход без ripgrep', () => {
+  const withoutRipgrep = (service: WorkspaceService): void => {
+    (service as unknown as { ripgrepFound: boolean | null }).ripgrepFound = false;
+  };
+
+  it('находит то же, что ripgrep, и считает те же файлы', async () => {
+    const viaRipgrep = await workspace.search({ query: 'marker' });
+    withoutRipgrep(workspace);
+    const viaFs = await workspace.search({ query: 'marker' });
+
+    // Два пути обязаны быть неразличимы снаружи — иначе поиск менял бы
+    // поведение от того, установлена ли в системе команда.
+    expect(viaFs.hits).toEqual(viaRipgrep.hits);
+    expect(viaFs.scanned).toBe(viaRipgrep.scanned);
+  });
+
+  it('пустой поиск не рапортует нулём просмотренных файлов', async () => {
+    withoutRipgrep(workspace);
+    const result = await workspace.search({ query: 'такого-нет-нигде' });
+
+    expect(result.hits).toEqual([]);
+    // Четыре файла проекта: src/app.ts, src/helper.ts, docs/readme.md, root.ts.
+    expect(result.scanned).toBe(4);
+  });
+});
+
 describe('read: бинарный файл', () => {
   it('отказывает словами, а не отдаёт мусор', async () => {
     const binary = path.join(dir, 'image.bin');

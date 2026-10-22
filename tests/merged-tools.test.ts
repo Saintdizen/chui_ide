@@ -98,6 +98,18 @@ describe('слитые инструменты: разбор', () => {
     expect(mixed.summary).toContain('два вызова');
   });
 
+  it('edit со старым action не тупик: create и move делегируются в file', async () => {
+    // Схема `action` больше не объявляет (дубли сняты: создание, перемещение
+    // и удаление живут у `file`), но сохранённые беседы продолжаются. Такой
+    // вызов доходит до разбора и отказывает по делу — именем поля, а не
+    // «неизвестное значение аргумента».
+    const create = await runTool(ctx, 'edit', JSON.stringify({ action: 'create' }));
+    expect(create.ok).toBe(false);
+    expect(create.summary).toContain('path');
+    const move = await runTool(ctx, 'edit', JSON.stringify({ action: 'move' }));
+    expect(move.summary).toContain('from');
+  });
+
   it('недостающий аргумент назван по имени поля', async () => {
     const outcome = await runTool(ctx, 'browser', JSON.stringify({ action: 'click' }));
     expect(outcome.ok).toBe(false);

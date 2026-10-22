@@ -72,6 +72,9 @@ export function ripgrepArgs(
   context: number,
 ): string[] {
   const args = ['--json', '--no-config', '--no-messages', '--color', 'never'];
+  // Итог со счётчиками ripgrep кладёт отдельной записью `summary` — она нужна
+  // ради одного честного числа: сколько файлов он просмотрел.
+  args.push('--stats');
 
   // Регулярку отдаём как есть; обычную строку просим искать буквально.
   if (!options.isRegex) args.push('-F');
@@ -112,6 +115,34 @@ interface RipgrepRecord {
     line_number?: unknown;
     submatches?: Array<{ start?: unknown }>;
   };
+}
+
+/**
+ * Сколько файлов ripgrep просмотрел — из итоговой записи `summary`.
+ *
+ * Считать по самим совпадениям нельзя (просмотренных файлов больше), а по
+ * записям `begin` — тоже: ripgrep печатает `begin` только для файлов, где
+ * совпадение ЕСТЬ (проверено на 15.0: 2 записи на 9 просмотренных файлов).
+ *
+ * Итог всегда последняя строка вывода, поэтому читаем хвост отдельно: разбор
+ * обрывается на пределе совпадений и до неё не доходит, а число нужно и тогда.
+ */
+function searchedCount(output: string): number {
+  let end = output.length;
+  while (end > 0 && (output[end - 1] === '\n' || output[end - 1] === '\r')) end -= 1;
+  const start = output.lastIndexOf('\n', end - 1) + 1;
+  if (end <= start) return 0;
+  try {
+    const record = JSON.parse(output.slice(start, end)) as {
+      type?: unknown;
+      data?: { stats?: { searches?: unknown } };
+    };
+    if (record.type !== 'summary') return 0;
+    const searches = record.data?.stats?.searches;
+    return typeof searches === 'number' ? searches : 0;
+  } catch {
+    return 0; // строка обрезана — итога нет
+  }
 }
 
 /**
@@ -203,5 +234,14 @@ export function parseRipgrepJson(output: string, options: SearchOptions, limit: 
   }
 
   hits.sort((a, b) => (a.path === b.path ? a.line - b.line : a.path < b.path ? -1 : 1));
-  return { hits, truncated, scanned: hits.length };
+  return { hits, truncated, scanned: scannedCount(output, hits) };
+}
+
+/** Просмотренные файлы: итог ripgrep, а без итога — хотя бы те, где есть совпадения. */
+function scannedCount(output: string, hits: readonly SearchHit[]): number {
+  const searched = searchedCount(output);
+  if (searched > 0) return searched;
+  // Итога нет (вывод обрезан буфером): отдаём нижнюю границу — файлы, которые
+  // мы точно видели. Ноль здесь означал бы «ничего не смотрели», а это ложь.
+  return new Set(hits.map((hit) => hit.path)).size;
 }

@@ -127,7 +127,10 @@ export function createUsageRing(onClick: () => void): UsageRing {
   };
 }
 
-export function createSessionInfo(options: { onCompact(): void; balance?(): Promise<AccountBalance | null> }): SessionInfoView {
+export function createSessionInfo(options: {
+  onCompact(): void;
+  balance?(): Promise<AccountBalance | null>;
+}): SessionInfoView {
   const title = h('div', { class: 'session-info-title' }, svgIcon('info', 13), h('span', {}, 'Информация о сессии'));
   const contextHead = h('div', { class: 'session-info-sub' }, 'Контекстное окно');
   const gaugeValue = h('span', { class: 'session-info-value' });

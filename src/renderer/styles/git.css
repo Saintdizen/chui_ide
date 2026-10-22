@@ -368,11 +368,13 @@
 .sc-amend-box:checked::after {
   position: absolute;
   inset: 0;
-  content: '';
+  content: "";
   background: var(--panel_background, #fff);
-  -webkit-mask: center / 10px no-repeat
+  -webkit-mask:
+    center / 10px no-repeat
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3.2L13 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  mask: center / 10px no-repeat
+  mask:
+    center / 10px no-repeat
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3.2L13 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
 }
 

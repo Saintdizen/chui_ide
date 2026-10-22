@@ -23,7 +23,7 @@ import { parseOfficeDocument } from '../doc/office';
 import { nextActiveRoot, type WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
 import { ContentCache, type ContentCacheStats } from './content-cache';
-import { escapesRoot, isInsideRoot } from './path-guard';
+import { absoluteSearchPath, escapesRoot, isInsideRoot } from './path-guard';
 import { globToRegExp } from '../../shared/glob';
 import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
@@ -629,9 +629,16 @@ export class WorkspaceService {
 
     try {
       const output = await runRipgrep(args, cwd, signal);
-      // Команда есть, но совпадений нет — это результат, а не сбой.
+      // `null` — команды нет; пустой вывод — это результат «ничего не нашлось»,
+      // и его не нужно переигрывать обходом `fs`.
       if (output === null) return null;
-      return parseRipgrepJson(output, options, limit);
+      // Пути в `--json` относительны к cwd запуска (`./app.ts`), а свой обход
+      // отдаёт абсолютные. Сводим к одному виду до сортировки: иначе панель и
+      // агент разрешат `./app.ts` от процесса, а не от проекта.
+      const parsed = parseRipgrepJson(output, options, limit);
+      const hits = parsed.hits.map((hit) => ({ ...hit, path: absoluteSearchPath(cwd, hit.path) }));
+      hits.sort((a, b) => (a.path === b.path ? a.line - b.line : a.path < b.path ? -1 : 1));
+      return { ...parsed, hits };
     } catch {
       return null;
     }
@@ -1395,7 +1402,11 @@ function clipLine(line: string): string {
  * Запустить ripgrep и собрать вывод. `null` — совпадений нет или команду прервали;
  * сбой запуска летит исключением, чтобы вызывающий откатился на свой обход.
  */
-function runRipgrep(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string | null> {
+/**
+ * Запуск ripgrep. `null` — команды в системе нет; вывод отдаётся и при пустом
+ * результате (код 1), потому что это ответ, а не сбой.
+ */
+export function runRipgrep(args: readonly string[], cwd: string, signal?: AbortSignal): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const child = spawn('rg', [...args], { cwd, windowsHide: true });
     // Вывод собираем целиком: он ограничен числом совпадений, а склеивать
@@ -1409,11 +1420,11 @@ function runRipgrep(args: readonly string[], cwd: string, signal?: AbortSignal):
     child.stderr.on('data', (chunk: Buffer) => {
       failed += chunk.toString('utf8');
     });
-    child.on('error', reject);
+    child.on('error', () => resolve(null));
     child.on('close', (code) => {
-      // 0 — есть совпадения, 1 — их нет (это не ошибка), 2 — сбой самого поиска.
-      if (code === 0) resolve(out);
-      else if (code === 1) resolve(null);
+      // 0 — есть совпадения, 1 — их нет (это тоже результат: в выводе остаётся
+      // итоговая запись со счётчиками), 2 — сбой самого поиска.
+      if (code === 0 || code === 1) resolve(out);
       else reject(new Error(`rg завершился с кодом ${code}: ${failed.trim()}`));
     });
 

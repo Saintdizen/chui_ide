@@ -18,6 +18,13 @@ const match = (path: string, line: number, text: string, start = 0): string =>
 const context = (path: string, line: number, text: string): string =>
   jsonLine({ type: 'context', data: { path: { text: path }, lines: { text: `${text}\n` }, line_number: line } });
 
+/** Начало и конец работы над файлом: ripgrep печатает их вокруг содержимого. */
+const begin = (path: string): string => jsonLine({ type: 'begin', data: { path: { text: path } } });
+
+/** Итоговая запись: с `--stats` ripgrep кладёт её последней строкой вывода. */
+const summary = (searches: number): string =>
+  jsonLine({ type: 'summary', data: { stats: { searches, searches_with_match: 1 } } });
+
 describe('ripgrepArgs', () => {
   const base = { query: 'needle' };
 
@@ -26,6 +33,8 @@ describe('ripgrepArgs', () => {
     // --no-config обязателен: иначе поведение поиска зависело бы от машины.
     expect(args).toContain('--json');
     expect(args).toContain('--no-config');
+    // --stats даёт итоговую запись: только из неё видно, сколько файлов просмотрено.
+    expect(args).toContain('--stats');
   });
 
   it('обычная строка ищется буквально, регулярка — как регулярка', () => {
@@ -154,6 +163,40 @@ describe('parseRipgrepJson', () => {
 
   it('пустой вывод — пустой результат', () => {
     expect(parseRipgrepJson('', { query: 'needle' }, 200)).toEqual({ hits: [], truncated: false, scanned: 0 });
+  });
+
+  it('просмотренные файлы берутся из итоговой записи, а не из совпадений', () => {
+    // Число совпадений на вопрос «сколько проверено» не отвечает: в этих девяти
+    // файлах совпадение одно, а просмотрены все девять.
+    const output = begin('/p/a.ts') + match('/p/a.ts', 1, 'needle') + summary(9);
+    const result = parseRipgrepJson(output, { query: 'needle' }, 200);
+    expect(result.hits).toHaveLength(1);
+    expect(result.scanned).toBe(9);
+  });
+
+  it('поиск без совпадений всё равно знает, сколько файлов просмотрено', () => {
+    // Раньше `scanned` было равно числу совпадений, и панель писала
+    // «проверено файлов: 0», хотя обход состоялся.
+    const result = parseRipgrepJson(summary(4), { query: 'needle' }, 200);
+    expect(result.hits).toEqual([]);
+    expect(result.scanned).toBe(4);
+  });
+
+  it('итог читается, даже когда разбор оборвался на пределе совпадений', () => {
+    // `summary` — последняя строка вывода, а разбор выходит из цикла раньше:
+    // без отдельного чтения хвоста обрезанный список терял бы и счётчик.
+    const output = match('/p/a.ts', 1, 'needle') + match('/p/a.ts', 2, 'needle') + summary(6);
+    const result = parseRipgrepJson(output, { query: 'needle' }, 1);
+    expect(result.truncated).toBe(true);
+    expect(result.hits).toHaveLength(1);
+    expect(result.scanned).toBe(6);
+  });
+
+  it('без итоговой записи остаётся нижняя граница — файлы с совпадениями', () => {
+    // Так выглядит обрезанный буфером вывод: врать нулём хуже, чем назвать
+    // файлы, которые точно просмотрены.
+    const output = match('/p/a.ts', 1, 'needle') + match('/p/b.ts', 3, 'needle');
+    expect(parseRipgrepJson(output, { query: 'needle' }, 200).scanned).toBe(2);
   });
 
   it('длинная строка обрезается тем же потолком, что и в своём обходе', () => {

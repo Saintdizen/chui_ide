@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { escapesRoot, isInsideRoot } from '../src/main/workspace/path-guard';
+import { absoluteSearchPath, escapesRoot, isInsideRoot } from '../src/main/workspace/path-guard';
 
 /**
  * Проверки пути. Первая защищает от `..` в запросе, вторая — от чтения чужих
@@ -56,5 +56,20 @@ describe('escapesRoot', () => {
 
   it('похожее имя каталога не считается своим', () => {
     expect(escapesRoot(rootReal, similar)).toBe(true);
+  });
+});
+
+describe('absoluteSearchPath', () => {
+  const cwd = path.resolve('/proj/src');
+
+  it('относительный путь ripgrep считается от каталога запуска, а не от процесса', () => {
+    // Именно так `rg` печатает файл, когда cwd — область поиска.
+    expect(absoluteSearchPath(cwd, './app.ts')).toBe(path.resolve('/proj/src/app.ts'));
+    expect(absoluteSearchPath(cwd, 'helper.ts')).toBe(path.resolve('/proj/src/helper.ts'));
+  });
+
+  it('абсолютный путь не переписывается относительно cwd', () => {
+    const absolute = path.resolve('/proj/src/app.ts');
+    expect(absoluteSearchPath(cwd, absolute)).toBe(absolute);
   });
 });

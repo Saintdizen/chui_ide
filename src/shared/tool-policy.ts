@@ -60,6 +60,8 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   // Одно имя на один файл и на пачку (`path` | `paths`).
   read: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
   search: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
+  // Прошлые беседы и следы прогонов: журнал только читают, проекта не касаются.
+  history: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
   project_map: { readOnly: true, plan: true, subagent: true, alwaysAvailable: true },
   read_image: { readOnly: true, plan: true, alwaysAvailable: true },
 

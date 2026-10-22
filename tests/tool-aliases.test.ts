@@ -72,15 +72,14 @@ describe('слияния с другим аргументом: поиск', () =
     expect(JSON.parse(docs.arguments)).toEqual({ query: 'права', action: 'docs' });
   });
 
-  it('session_search и session_trace стали действиями search', () => {
-    expect(JSON.parse(canonicalCall('session_search', '{"query":"индекс"}').arguments)).toEqual({
-      query: 'индекс',
-      action: 'sessions',
-    });
-    expect(JSON.parse(canonicalCall('session_trace', '{"uid":"a1"}').arguments)).toEqual({
-      uid: 'a1',
-      action: 'trace',
-    });
+  it('session_search и session_trace ведут к history, а не к search', () => {
+    // Журнал разговоров — не поиск по проекту: `sessions`/`trace` переехали в своё имя.
+    const sessions = canonicalCall('session_search', '{"query":"индекс"}');
+    expect(sessions.name).toBe('history');
+    expect(JSON.parse(sessions.arguments)).toEqual({ query: 'индекс', action: 'sessions' });
+    const trace = canonicalCall('session_trace', '{"uid":"a1"}');
+    expect(trace.name).toBe('history');
+    expect(JSON.parse(trace.arguments)).toEqual({ uid: 'a1', action: 'trace' });
   });
 
   it('find_files и list_dir ведут к list: просмотр имён — один инструмент', () => {
@@ -140,5 +139,33 @@ describe('слияния с действием: терминал', () => {
     for (const old of ['run_terminal', 'run_output', 'run_stop']) {
       expect(names.has(canonicalCall(old, '{}').name), old).toBe(true);
     }
+  });
+});
+
+describe('правка по якорю под старыми именами', () => {
+  it('str_replace — та же плоская форма, что у edit', () => {
+    const args = '{"path":"/a.ts","oldText":"a","newText":"b"}';
+    const call = canonicalCall('str_replace', args);
+    expect(call.name).toBe('edit');
+    expect(call.renamed).toBe(true);
+    // Переименовывать нечего: поля те же.
+    expect(call.arguments).toBe(args);
+  });
+
+  it('apply_patch: patches на двух уровнях — это edits', () => {
+    // Форма старого вызова: `{ patches: [{ path, patches: [{ oldText, newText }] }] }`.
+    // У `edit` те же поля под именем `edits` — на обоих уровнях.
+    const call = canonicalCall(
+      'apply_patch',
+      JSON.stringify({ patches: [{ path: '/a.ts', patches: [{ oldText: 'a', newText: 'b' }] }] }),
+    );
+    expect(call.name).toBe('edit');
+    expect(call.renamed).toBe(true);
+    expect(JSON.parse(call.arguments)).toEqual({ edits: [{ path: '/a.ts', edits: [{ oldText: 'a', newText: 'b' }] }] });
+  });
+
+  it('битые аргументы старого имени доезжают как есть', () => {
+    // Разберётся инструмент и скажет, что именно не так: молча терять текст нельзя.
+    expect(canonicalCall('apply_patch', '{битый').arguments).toBe('{битый');
   });
 });

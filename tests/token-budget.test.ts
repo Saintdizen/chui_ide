@@ -77,16 +77,20 @@ describe('бюджет схем', () => {
   // ушли в ростер, а `terminal`/`mcp` сначала прятались совсем — до п.45, когда
   // стало ясно, что докачка схемы обнуляет кеш префикса и дороже строки.
   it('операции с файлом живут в схеме edit, а не отдельной', () => {
-    // `file` нет в схемах вовсе: и `action`, и имя одни и те же, а `replace`
-    // (замена по проекту) живёт по имени в строке ростера (п.45).
+    // `file` нет в схемах вовсе: его имя и форма едут строкой ростера (п.45).
+    // Дубли сняты: `create`/`move`/`delete` есть у `file`, и в `edit` их больше
+    // не объявляем — один смысл в двух схемах был источником промахов. Старые
+    // вызовы `edit` с `action` при этом живы: `editAction` делегирует в `file`.
     const edit = AGENT_TOOLS.find((tool) => tool.name === 'edit')!;
-    expect((edit.inputSchema.properties.action as { enum?: string[] }).enum).toEqual([
-      'write',
+    expect(edit.inputSchema.properties.action).toBeUndefined();
+    expect(Object.keys(edit.inputSchema.properties)).not.toContain('replacement');
+    const file = AGENT_TOOLS.find((tool) => tool.name === 'file')!;
+    expect((file.inputSchema.properties.action as { enum?: string[] }).enum).toEqual([
       'create',
       'move',
       'delete',
+      'replace',
     ]);
-    expect(Object.keys(edit.inputSchema.properties)).not.toContain('replacement');
     expect(WIDENED_TOOLS).not.toContain('file');
     expect(ROSTER_TOOLS).toContain('file');
   });

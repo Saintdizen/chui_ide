@@ -43,6 +43,12 @@ const NAME_ALIASES: Readonly<Record<string, string>> = {
   move_file: 'file',
   delete_file: 'file',
   replace_in_files: 'file',
+  // Правка по якорю. `str_replace` приходит с той же плоской формой
+  // (`path`/`oldText`/`newText`), что у `edit`, — переименовывать нечего.
+  str_replace: 'edit',
+  // `apply_patch` — старое имя той же правки: форма `patches[]`, её перекладывает
+  // `ARGUMENT_REWRITES`. Без этого продолжение сохранённой беседы — тупик за шаг.
+  apply_patch: 'edit',
   // Показ: открыть файл и предложить результат — две стороны «вот здесь».
   open_file: 'show',
   present: 'show',
@@ -52,11 +58,12 @@ const NAME_ALIASES: Readonly<Record<string, string>> = {
   ask_user: 'mind',
   exit_plan_mode: 'mind',
   ralph: 'mind',
-  // Поиск: четыре источника различались только первой строкой описания.
+  // Поиск: два источника различались только первой строкой описания.
   codebase_search: 'search',
   search_docs: 'search',
-  session_search: 'search',
-  session_trace: 'search',
+  // Журнал разговоров переехал из `search` в своё имя: это не поиск по проекту.
+  session_search: 'history',
+  session_trace: 'history',
   // Ресурсы MCP: каталог и чтение — две половины одного похода.
   list_mcp_resources: 'mcp',
   read_mcp_resource: 'mcp',
@@ -106,10 +113,48 @@ const ACTION_ALIASES: Readonly<Record<string, string>> = {
   session_trace: 'trace',
 };
 
+/** Старое имя → правка его аргументов: форма другая, а смысл тот же. */
+const ARGUMENT_REWRITES: Readonly<Record<string, (args: Record<string, unknown>) => Record<string, unknown>>> = {
+  // `apply_patch` называл правку «патчами» на двух уровнях: `patches[].patches[]`.
+  // У `edit` те же поля, но имя `edits` — переименовываем ключ на всех уровнях.
+  apply_patch: (args) => renameKey(args, 'patches', 'edits') as Record<string, unknown>,
+};
+
+/** Ключ `from` → `to` на всех уровнях объекта: `patches[]` старой правки → `edits[]`. */
+function renameKey(value: unknown, from: string, to: string): unknown {
+  if (Array.isArray(value)) return value.map((item) => renameKey(item, from, to));
+  if (typeof value !== 'object' || value === null) return value;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    result[key === from ? to : key] = renameKey(item, from, to);
+  }
+  return result;
+}
+
+/** Аргументы с переложенной формой. Битый JSON отдаём как есть: разберётся инструмент. */
+function rewriteArguments(
+  rawArguments: string,
+  rewrite: (args: Record<string, unknown>) => Record<string, unknown>,
+): string {
+  try {
+    const parsed: unknown = JSON.parse(rawArguments.trim() || '{}');
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return rawArguments;
+    return JSON.stringify(rewrite(parsed as Record<string, unknown>));
+  } catch {
+    return rawArguments;
+  }
+}
+
 /** Незнакомое имя возвращается как есть: чужие (MCP) не наше дело. */
 export function canonicalCall(name: string, rawArguments: string): CanonicalCall {
   const target = NAME_ALIASES[name];
   if (!target) return { name, arguments: rawArguments, renamed: false };
+
+  // Аргументы старого имени бывают другой формы: `patches` → `edits`.
+  const rewrite = ARGUMENT_REWRITES[name];
+  if (rewrite) {
+    return { name: target, arguments: rewriteArguments(rawArguments, rewrite), renamed: true };
+  }
 
   const action = ACTION_ALIASES[name];
   const fixed = ARG_ALIASES[name];

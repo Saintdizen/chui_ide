@@ -261,7 +261,12 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       coAuthorList,
       // Строка действий — под полем, в один ряд: изменение режима слева,
       // добавления справа. Кнопка коммита живёт ниже, у списка файлов.
-      h('div', { class: 'sc-commit-rows' }, amendRow, h('div', { class: 'sc-commit-rows-right' }, coAuthorButton, messageFromDiffButton)),
+      h(
+        'div',
+        { class: 'sc-commit-rows' },
+        amendRow,
+        h('div', { class: 'sc-commit-rows-right' }, coAuthorButton, messageFromDiffButton),
+      ),
     ),
     // Всё, что осталось, — файлы: это скроллируемая зона, она забирает высоту
     // (`flex: 1 1 auto` у `.sc-list`), поэтому футер виден при любом размере списка.
@@ -655,9 +660,7 @@ export function createSourceControl(deps: SourceControlDeps): SourceControlView 
       if (repository.ahead > 0) syncState.appendChild(part('arrowUp', repository.ahead, 'Впереди: уйдёт push'));
       if (repository.behind > 0) syncState.appendChild(part('arrowDown', repository.behind, 'Отстаёт: заберёт pull'));
       syncState.title =
-        repository.ahead || repository.behind
-          ? `Впереди на ${repository.ahead}, отстаёт на ${repository.behind}`
-          : '';
+        repository.ahead || repository.behind ? `Впереди на ${repository.ahead}, отстаёт на ${repository.behind}` : '';
     }
     if (!isRepo) closeBranchInput();
 

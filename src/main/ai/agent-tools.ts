@@ -31,7 +31,7 @@ import type { ToolPresentedFile } from '../../shared/api';
 import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
-import { parseToolArguments } from '../../shared/tools';
+import { AGENT_TOOLS, parseToolArguments } from '../../shared/tools';
 import { isCondenseMarker } from '../../shared/context-fit';
 import { describeShape, missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
 import { canonicalCall } from '../../shared/tool-aliases';
@@ -470,10 +470,15 @@ const MAX_SEARCH_HITS = 200;
  * а не умолчание: замер на живом проекте (‘export function’) давал 21 000
  * символов ≈ 6 000 токенов за один вызов, и это при том, что первые десять
  * строк уже отвечают на вопрос.
+ *
+ * Пятьдесят стали двадцатью пятью по переписи: за 43 вызова поиска медиана
+ * совпадений — 0, максимум 18, в 98 % случаев не больше десяти. Потолок в
+ * двадцать пять не режет нужное, но вдвое укорачивает шумный запрос — тот
+ * самый случай, ради которого умолчание и существует.
  */
-const DEFAULT_SEARCH_HITS = 50;
+const DEFAULT_SEARCH_HITS = 25;
 /** С контекстом умолчание ниже: каждое совпадение — это блок из пяти строк. */
-const DEFAULT_SEARCH_HITS_WITH_CONTEXT = 35;
+const DEFAULT_SEARCH_HITS_WITH_CONTEXT = 20;
 /**
  * Сколько совпадений отдаём в `search code`, если модель не попросила иначе.
  * Объявления символов — что и где: сорока строк с запасом хватает на «в каком
@@ -823,6 +828,8 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
         return await readAction(ctx, args);
       case 'search':
         return await searchAction(ctx, args);
+      case 'history':
+        return await historyAction(ctx, args);
       case 'read_image':
         return await readImage(ctx, args);
       case 'lsp':
@@ -855,7 +862,7 @@ async function dispatchTool(ctx: ToolContext, name: string, args: Record<string,
       case 'terminal':
         return await terminalAction(ctx, args);
       default:
-        return { ok: false, summary: `Инструмент недоступен: ${name}` };
+        return unknownTool(name);
     }
   } catch (error) {
     return {
@@ -1570,13 +1577,27 @@ async function searchAction(ctx: ToolContext, args: Record<string, unknown>): Pr
       return await codebaseSearch(ctx, args);
     case 'docs':
       return await searchDocs(ctx, args);
-    case 'sessions':
-      return await sessionSearch(ctx, args);
-    case 'trace':
-      return await sessionTrace(ctx, args);
     default:
-      return unknownAction(action, 'search: text, code, docs, sessions, trace.');
+      return unknownAction(action, 'search: text, code, docs.');
   }
+}
+
+/**
+ * Прошлые беседы и следы прогонов: `sessions` и `trace`.
+ *
+ * Были действиями `search`, хотя проекта не касаются: журнал разговоров — не код.
+ * Схема `search` платила за них `enum` и `uid` в КАЖДОМ запросе, а перепись
+ * 403 вызовов дала на них ноль обращений. Отдельным именем они едут строкой
+ * ростера: имя видно, схема не стоит ничего.
+ *
+ * Ветеранные вызовы `search` с этими действиями схема теперь отвергает — с
+ * перечнем допустимых (`text, code, docs`), то есть одним шагом поправимыми.
+ */
+async function historyAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
+  const action = (optionalString(args, 'action') ?? '').trim();
+  if (action === 'sessions') return await sessionSearch(ctx, args);
+  if (action === 'trace') return await sessionTrace(ctx, args);
+  return unknownAction(action, 'history: sessions, trace.');
 }
 
 /**
@@ -1587,13 +1608,186 @@ async function searchAction(ctx: ToolContext, args: Record<string, unknown>): Pr
  * у поиска медиана совпадений — 0). Поэтому в ответе назван сам запрос, ослабленные
  * условия которого хватило бы, и куда смотреть, если ошиблось место.
  */
-function emptySearchDetail(query: string, opts: { isRegex: boolean; glob?: string; scope?: string }): string {
+function emptySearchDetail(
+  query: string,
+  opts: { isRegex: boolean; glob?: string; scope?: string },
+  tried: readonly string[] = [],
+): string {
   const where = [opts.glob ? `маска ${opts.glob}` : '', opts.scope ? `папка ${opts.scope}` : ''].filter(Boolean);
-  const hints = ['проверьте написание и регистр'];
+  const hints = ['Проверьте написание и регистр'];
   if (opts.isRegex) hints.push('regex включён — возможно, его и надо выключить');
   if (where.length > 0) hints.push('маска или папка могли сузить зря');
   else hints.push('место ищется по всему проекту — сверьтесь с list или project_map');
-  return `Совпадений нет: «${query}»${where.length > 0 ? ` (${where.join(', ')})` : ''}. ${hints.join('; ')}.`;
+  // Что уже перебрали — в том же ответе: иначе агент пробует ровно это ещё раз.
+  const triedNote = tried.length > 0 ? ` Уже проверено: ${tried.join(', ')}.` : '';
+  return `Совпадений нет: «${query}»${where.length > 0 ? ` (${where.join(', ')})` : ''}. ${hints.join('; ')}.${triedNote}`;
+}
+
+/**
+ * Слова составного запроса: `read_file`, `readTextFile`, `src/a.ts` → части.
+ *
+ * Нужны запасному поиску: имя в коде пишут не так, как в запросе (camelCase против
+ * snake_case), и точная подстрока не находится, хотя место есть.
+ */
+function queryWords(query: string): string[] {
+  const words: string[] = [];
+  for (const chunk of query.split(/[^\p{L}\p{N}]+/u)) {
+    if (!chunk) continue;
+    // Граница camelCase: заглавная после строчной либо конец аббревиатуры.
+    for (const part of chunk.split(/(?<=\p{Ll})(?=\p{Lu})|(?<=\p{Lu})(?=\p{Lu}\p{Ll})/u)) {
+      if (part) words.push(part);
+    }
+  }
+  return words;
+}
+
+/** Запасной запрос: ослабленное условие, подпись к ответу и короткая пометка для перечня проб. */
+export interface SearchFallback {
+  values: { query?: string; isRegex?: boolean; caseSensitive?: boolean };
+  note: string;
+  /** Короткое описание пробы: им перечисляется, что уже проверено. */
+  label: string;
+}
+
+/**
+ * Чем заменить запрос, который ничего не нашёл.
+ *
+ * Поиск без совпадений — самый частый его исход (перепись: медиана 0 попаданий на
+ * 43 вызова). Голое «совпадений нет» агент лечит повтором того же поиска другими
+ * словами — целый шаг. Дешевле один-два ослабленных запроса, сделанных здесь.
+ *
+ * Порядок — от самого вероятного промаха: regex, который надо было выключить;
+ * регистр; составное имя, которое в коде пишут иначе. Предел — два запроса: каждый
+ * стоит времени обхода, и третий уже не окупается.
+ */
+export function searchFallbacks(
+  query: string,
+  options: { isRegex: boolean; caseSensitive: boolean },
+): SearchFallback[] {
+  const variants: SearchFallback[] = [];
+  if (options.isRegex) {
+    variants.push({
+      values: { isRegex: false },
+      note: 'regex ничего не нашёл; та же строка как обычный текст',
+      label: 'как обычный текст',
+    });
+  }
+  if (options.caseSensitive) {
+    variants.push({
+      values: { caseSensitive: false },
+      note: 'точного с учётом регистра нет; без учёта регистра',
+      label: 'без учёта регистра',
+    });
+  }
+  if (!options.isRegex) {
+    // Самая длинная часть имени: она и informative, и реже всего шумная.
+    const part = queryWords(query)
+      .filter((word) => word.length >= 3 && word !== query)
+      .sort((left, right) => right.length - left.length)[0];
+    if (part) {
+      variants.push({
+        values: { query: part, caseSensitive: false },
+        note: `«${query}» целиком не найдено; по части «${part}» (не точное совпадение)`,
+        label: `по части «${part}»`,
+      });
+    }
+  }
+  return variants.slice(0, 2);
+}
+
+/** Всё, что нужно одному заходу поиска — и на исполнение, и на оформление ответа. */
+interface SearchRequest {
+  query: string;
+  isRegex: boolean;
+  caseSensitive: boolean;
+  filesOnly: boolean;
+  glob?: string;
+  scope?: string;
+  context: number;
+  limit: number;
+  fileLimit: number;
+  /** Подпись к ответу, если запрос ослаблен запасной попыткой. */
+  note?: string;
+}
+
+/** Один заход: исполнение и оформление. `empty` — ни одного совпадения. */
+async function runSearch(ctx: ToolContext, request: SearchRequest): Promise<{ outcome: ToolOutcome; empty: boolean }> {
+  const { workspace } = ctx;
+  const { query, isRegex, caseSensitive, filesOnly, glob, scope, context, limit, fileLimit } = request;
+  const result = await workspace.search(
+    {
+      query,
+      isRegex,
+      caseSensitive,
+      filesOnly,
+      glob,
+      path: scope,
+      context,
+      // Просим с запасом: потолок на файл отбирает уже потом, и без запаса один
+      // шумный файл (`package-lock.json`) занял бы весь список, а до остальных
+      // файлов поиск бы даже не дошёл.
+      // В режиме «только файлы» просим всё, что даст поиск: обход дешев, а число
+      // найденных файлов нужно, чтобы назвать остаток. Дорого было отдавать их
+      // модели — это решает `fileLimit` ниже.
+      maxResults: filesOnly ? MAX_FIND_FILES : limit * SEARCH_OVERFETCH,
+    },
+    ctx.signal,
+  );
+  const root = workspace.rootPath();
+  // Подпись ослабленного запроса — первой строкой: без неё найденное читается
+  // как точное совпадение, и агент делает вывод по чужому имени.
+  const head = request.note ? `${request.note}:\n` : '';
+
+  // Режим «только файлы»: одна строка на файл, без номера строки и текста.
+  if (filesOnly) {
+    const unique = [...new Set(result.hits.map((hit) => relativePath(hit.path, root)))];
+    const files = unique.slice(0, fileLimit);
+    const rest = unique.length - files.length;
+    const tail =
+      rest > 0
+        ? `\n… ещё файлов: ${rest} — сузьте запрос или папку, либо limit=${Math.min(MAX_FIND_FILES, fileLimit * 2)}`
+        : '';
+    return {
+      empty: unique.length === 0,
+      outcome: {
+        ok: true,
+        summary: `совпадения в файлах: ${unique.length}${result.truncated || rest > 0 ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
+        detail: files.length
+          ? head + clipText(ctx, 'search', files.join('\n')).text + tail
+          : emptySearchDetail(query, { isRegex, glob, scope }),
+      },
+    };
+  }
+
+  // Потолок на файл: десяток строк из одного места полезнее двухсот, а по числу
+  // скрытых видно, что файл шумный, — и модель сузит запрос вместо вывода
+  // «больше нигде нет».
+  const limited = limitPerFile(result.hits, MAX_HITS_PER_FILE, limit);
+  const detail = formatSearchHits(limited.hits, root, context);
+  const truncated = result.truncated || limited.truncated;
+  const notes = [truncated ? 'список обрезан' : '', limited.hidden > 0 ? `на файл до ${MAX_HITS_PER_FILE}` : ''].filter(
+    Boolean,
+  );
+
+  // Хвост именно в `detail`: `summary` остаётся для карточки, а модель видит
+  // только `detail`. Без этой строки обрезанный список читается как «больше
+  // нигде нет», и агент делает вывод по половине ответа.
+  const tail =
+    truncated || limited.hidden > 0
+      ? `\n… (список неполный: ${limited.hits.length} из ${limit}, на файл до ${MAX_HITS_PER_FILE} — ` +
+        `поднимите limit или сузьте запрос)`
+      : '';
+
+  return {
+    empty: limited.hits.length === 0,
+    outcome: {
+      ok: true,
+      summary: `${limited.hits.length} совпадений${notes.length ? ` (${notes.join(', ')})` : ''} · просканировано файлов: ${result.scanned}`,
+      detail: detail.length
+        ? head + clipText(ctx, 'search', detail).text + tail
+        : emptySearchDetail(query, { isRegex, glob, scope }),
+    },
+  };
 }
 
 async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -1620,72 +1814,22 @@ async function search(ctx: ToolContext, args: Record<string, unknown>): Promise<
   // В режиме «только файлы» предел считает файлы, а не строки: одна строка на
   // файл, и умолчание там своё (см. DEFAULT_FILES_ONLY_PATHS).
   const fileLimit = Math.min(MAX_FIND_FILES, Math.max(1, wantedLimit ?? DEFAULT_FILES_ONLY_PATHS));
+  const request: SearchRequest = { query, isRegex, caseSensitive, filesOnly, glob, scope, context, limit, fileLimit };
 
-  const result = await workspace.search(
-    {
-      query,
-      isRegex,
-      caseSensitive,
-      filesOnly,
-      glob,
-      path: scope,
-      context,
-      // Просим с запасом: потолок на файл отбирает уже потом, и без запаса один
-      // шумный файл (`package-lock.json`) занял бы весь список, а до остальных
-      // файлов поиск бы даже не дошёл.
-      // В режиме «только файлы» просим всё, что даст поиск: обход дешев, а число
-      // найденных файлов нужно, чтобы назвать остаток. Дорого было отдавать их
-      // модели — это решает `fileLimit` ниже.
-      maxResults: filesOnly ? MAX_FIND_FILES : limit * SEARCH_OVERFETCH,
-    },
-    ctx.signal,
-  );
-  const root = workspace.rootPath();
+  const first = await runSearch(ctx, request);
+  if (!first.empty) return first.outcome;
 
-  // Режим «только файлы»: одна строка на файл, без номера строки и текста.
-  if (filesOnly) {
-    const unique = [...new Set(result.hits.map((hit) => relativePath(hit.path, root)))];
-    const files = unique.slice(0, fileLimit);
-    const rest = unique.length - files.length;
-    const tail =
-      rest > 0
-        ? `\n… ещё файлов: ${rest} — сузьте запрос или папку, либо limit=${Math.min(MAX_FIND_FILES, fileLimit * 2)}`
-        : '';
-    return {
-      ok: true,
-      summary: `совпадения в файлах: ${unique.length}${result.truncated || rest > 0 ? ' (список обрезан)' : ''} · просканировано: ${result.scanned}`,
-      detail: files.length
-        ? clipText(ctx, 'search', files.join('\n')).text + tail
-        : emptySearchDetail(query, { isRegex, glob, scope }),
-    };
+  // Пусто — не повод тратить шаг на «попробую иначе»: пробуем сами (см. `searchFallbacks`).
+  const tried: string[] = [];
+  for (const variant of searchFallbacks(query, { isRegex, caseSensitive })) {
+    const retry = await runSearch(ctx, { ...request, ...variant.values, note: variant.note });
+    if (!retry.empty) return retry.outcome;
+    tried.push(variant.label);
   }
-
-  // Потолок на файл: десяток строк из одного места полезнее двухсот, а по числу
-  // скрытых видно, что файл шумный, — и модель сузит запрос вместо вывода
-  // «больше нигде нет».
-  const limited = limitPerFile(result.hits, MAX_HITS_PER_FILE, limit);
-  const detail = formatSearchHits(limited.hits, root, context);
-  const truncated = result.truncated || limited.truncated;
-  const notes = [truncated ? 'список обрезан' : '', limited.hidden > 0 ? `на файл до ${MAX_HITS_PER_FILE}` : ''].filter(
-    Boolean,
-  );
-
-  // Хвост именно в `detail`: `summary` остаётся для карточки, а модель видит
-  // только `detail`. Без этой строки обрезанный список читается как «больше
-  // нигде нет», и агент делает вывод по половине ответа.
-  const tail =
-    truncated || limited.hidden > 0
-      ? `\n… (список неполный: ${limited.hits.length} из ${limit}, на файл до ${MAX_HITS_PER_FILE} — ` +
-        `поднимите limit или сузьте запрос)`
-      : '';
-
-  return {
-    ok: true,
-    summary: `${limited.hits.length} совпадений${notes.length ? ` (${notes.join(', ')})` : ''} · просканировано файлов: ${result.scanned}`,
-    detail: detail.length
-      ? clipText(ctx, 'search', detail).text + tail
-      : emptySearchDetail(query, { isRegex, glob, scope }),
-  };
+  // Всё пусто — в ответе называем и то, что уже перебрали: иначе агент повторяет те же пробы.
+  return tried.length === 0
+    ? first.outcome
+    : { ...first.outcome, detail: emptySearchDetail(query, { isRegex, glob, scope }, tried) };
 }
 
 /**
@@ -3869,6 +4013,22 @@ function unknownAction(action: string, detail: string): ToolOutcome {
   return { ok: false, summary: `Неизвестное действие: ${action}`, detail };
 }
 
+/**
+ * Незнакомое имя инструмента: назвать те, что есть.
+ *
+ * Имена сливались (`apply_patch` → `edit`, `read_file` → `read`), а сохранённая
+ * беседа продолжается: модель копирует прошлый вызов. Голое «инструмент
+ * недоступен» стоит целого шага — агент пробует другое имя наугад. Перечень имён
+ * в ответе (около 40 токенов) дешевле потерянного шага.
+ */
+function unknownTool(name: string): ToolOutcome {
+  return {
+    ok: false,
+    summary: `Инструмент недоступен: ${name}`,
+    detail: `Такого инструмента нет. Доступные: ${AGENT_TOOLS.map((tool) => tool.name).join(', ')}.`,
+  };
+}
+
 /* ── открытие файла в редакторе ─────────────────────────────────────────── */
 
 async function showAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -4418,8 +4578,9 @@ async function sessionTrace(ctx: ToolContext, args: Record<string, unknown>): Pr
       detail: 'Журнал прогонов не ведётся или не подключён — читать его неоткуда.',
     };
   }
-  // `query` — обязательное поле схемы, поэтому беседу берём и оттуда: лишнее
-  // требование к модели дешевле, чем второй обязательный аргумент.
+  // `query` обязательным больше не считается (`history` требует только `action`),
+  // но старые вызовы его присылали — и беседу берём и оттуда: лишнее требование
+  // к модели дешевле, чем второй обязательный аргумент.
   const uid = (optionalString(args, 'uid') ?? optionalString(args, 'query') ?? '').trim();
   if (!uid) {
     return {

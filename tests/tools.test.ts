@@ -85,7 +85,6 @@ describe('search', () => {
       'path',
       'context',
       'limit',
-      'uid',
     ]);
     expect(byName.get('search')!.inputSchema.required).toEqual(['query']);
     // Контекст — как -A/-B у grep: без него результат остаётся одной строкой.
@@ -93,9 +92,19 @@ describe('search', () => {
     // Предел есть и в схеме: без него модель не могла попросить меньше двухсот
     // совпадений, и поиск отдавал десятки тысяч символов на любой запрос.
     expect(props.limit?.type).toBe('number');
-    // `uid` — для действия `trace`: какой прогон разбирать. Беседа приходит из
-    // uri найденной беседы, поэтому это первое, что видит модель после поиска.
-    expect(props.uid?.type).toBe('string');
+  });
+});
+
+describe('history', () => {
+  it('журнал разговоров — своё имя, а не действие search', () => {
+    // `sessions`/`trace` стоили `enum` и `uid` в схеме `search` в каждом запросе,
+    // а за 403 вызова переписи не понадобились ни разу.
+    const tool = byName.get('history')!;
+    expect(tool.side).toBe('main');
+    expect(tool.inputSchema.required).toEqual(['action']);
+    expect(tool.inputSchema.properties.action?.enum).toEqual(['sessions', 'trace']);
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(['action', 'query', 'uid', 'limit']);
+    expect(byName.get('search')!.inputSchema.properties.action?.enum).toEqual(['text', 'code', 'docs']);
   });
 });
 
@@ -112,15 +121,18 @@ describe('file: replace', () => {
 });
 
 describe('edit', () => {
-  it('одна форма входа: правка по якорям плюс операции с файлом', () => {
+  it('правка по якорям: дублей create/move/delete в схеме нет', () => {
     const tool = byName.get('edit')!;
     expect(tool.side).toBe('renderer');
-    // Обязательных полей нет: `write` без `action` и `create` без `edits` — обе
-    // формы живые; что именно нужно, говорит описание действия (п.42 TASKS.md).
+    // Обязательных полей нет: правка без `action` и запись целиком через
+    // `path`+`contents` — обе формы живые.
     expect(tool.inputSchema.required).toEqual([]);
-    expect(tool.inputSchema.properties.action?.enum).toEqual(['write', 'create', 'move', 'delete']);
+    // `action` снято со схемы: создание, перемещение и удаление живут у `file`.
+    // Старые вызовы с `action` схема не объявляет, но разбор их понимает.
+    expect(tool.inputSchema.properties.action).toBeUndefined();
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(['path', 'oldText', 'newText', 'edits', 'contents']);
     expect(tool.description.toLowerCase()).toContain('oldtext');
-    expect(tool.description.toLowerCase()).toContain('create');
+    expect(tool.description.toLowerCase()).toContain('file');
   });
 
   it('схема описывает поля элемента, а не только «объект вообще»', () => {

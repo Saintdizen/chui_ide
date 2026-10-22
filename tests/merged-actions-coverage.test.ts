@@ -19,10 +19,24 @@ function actionsOf(name: string): string[] {
   return property?.enum ?? [];
 }
 
-/** Инструменты, у которых действие объявлено в схеме. */
-const WITH_ACTION = ['browser', 'terminal', 'lsp', 'checks', 'mcp', 'web', 'file', 'show', 'mind', 'search', 'edit'];
+/**
+ * Инструменты, у которых действие объявлено в схеме. Список берём из самих схем,
+ * а не пишем руками: снятое со схемы действие (`edit` — дубли с `file`) иначе
+ * оставалось бы в стороже и проверяло несуществующее.
+ */
+const WITH_ACTION = AGENT_TOOLS.filter((tool) => {
+  const action = tool.inputSchema.properties.action as { enum?: string[] } | undefined;
+  return (action?.enum?.length ?? 0) > 0;
+}).map((tool) => tool.name);
 
 describe('действия схемы доходят до обработчика', () => {
+  it('сторож смотрит на все инструменты с действиями', () => {
+    // Пустой список прошёл бы все проверки молча — это и есть его слепое пятно.
+    expect(WITH_ACTION).toContain('search');
+    expect(WITH_ACTION).toContain('history');
+    expect(WITH_ACTION).toContain('terminal');
+  });
+
   for (const name of WITH_ACTION) {
     it(`${name}: все действия из enum известны разбору`, async () => {
       const actions = actionsOf(name);

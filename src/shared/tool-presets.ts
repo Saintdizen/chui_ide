@@ -51,7 +51,8 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
   {
     id: 'read',
     label: 'Чтение',
-    names: ['read_image', 'mcp', 'lsp'],
+    // Прошлые беседы — тоже чтение, только журнала, а не проекта.
+    names: ['read_image', 'mcp', 'lsp', 'history'],
   },
   {
     id: 'edit',
@@ -198,6 +199,9 @@ export const ROSTER_TOOLS: readonly string[] = [
   'list',
   'run_tests',
   'file',
+  // Прошлые беседы и следы прогонов: ноль вызовов на 403 в переписи, а схема
+  // стоит 100+ токенов на шаге. Имя в ростере называет оба действия.
+  'history',
 ];
 
 /**
@@ -364,6 +368,9 @@ const ROSTER_EXTRA: Record<string, readonly string[]> = {
   list: ['path', 'glob', 'limit'],
   run_tests: ['target'],
   file: ['path'],
+  // Без`query` поиск по беседам отказывает, а без`uid` не назвать прогон: оба
+  // поля необязательные, но без них строка ростера не объясняет, чем звать.
+  history: ['query', 'uid'],
 };
 
 function rosterLine(names: readonly string[]): string {

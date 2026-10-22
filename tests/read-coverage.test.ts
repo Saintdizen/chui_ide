@@ -330,6 +330,22 @@ describe('uncoveredRequest', () => {
     expect(uncoveredRequest('search', JSON.stringify({ path: '/proj/a.ts', endLine: 300 }), reads)).toBeUndefined();
     expect(uncoveredRequest('read', JSON.stringify({ path: '/proj/b.ts', endLine: 300 }), reads)).toBeUndefined();
   });
+
+  it('файл целиком после прочитанного начала — тоже хвост', () => {
+    // Прочитали 1–120, потом просят весь файл: начало уже в ветке, и платить
+    // за него второй раз незачем. `to: 0` — конец файла, `endLine` ведь нет.
+    const narrowed = uncoveredRequest('read', JSON.stringify({ path: '/proj/a.ts' }), reads);
+    expect(narrowed?.from).toBe(121);
+    expect(narrowed?.to).toBe(0);
+    expect(JSON.parse(narrowed!.arguments)).toEqual({ path: '/proj/a.ts', startLine: 121 });
+  });
+
+  it('файл целиком: короткое покрытие и force переписывания не стоят', () => {
+    const near = new Map([['/proj/a.ts', [{ from: 1, to: 10 }]]]);
+    expect(uncoveredRequest('read', JSON.stringify({ path: '/proj/a.ts' }), near)).toBeUndefined();
+    // `force` — явная просьба перечитать: текст мог выпасть из контекста.
+    expect(uncoveredRequest('read', JSON.stringify({ path: '/proj/a.ts', force: true }), reads)).toBeUndefined();
+  });
 });
 
 describe('версии файла вместо тотальной чистки', () => {

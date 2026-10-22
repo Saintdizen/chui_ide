@@ -17,6 +17,7 @@ export type AgentToolName =
   | 'list'
   | 'read'
   | 'search'
+  | 'history'
   | 'read_image'
   | 'lsp'
   | 'project_map'
@@ -128,18 +129,16 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'search',
     side: 'main',
-    description: 'Project search by action.',
+    description: 'Project search: text and code declarations.',
     inputSchema: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          enum: ['text', 'code', 'docs', 'sessions', 'trace'],
+          enum: ['text', 'code', 'docs'],
           // Смысл действий — здесь же, рядом с enum: в шапке он дублировался
           // и стоил токенов в каждом запросе.
-          description:
-            'text: path, line, match; code: declarations; docs: documentation; ' +
-            'sessions: past chats; trace: a past run by uid.',
+          description: 'text: path, line, match; code: declarations; docs: documentation.',
         },
         query: { type: 'string', description: 'Pattern.' },
         isRegex: { type: 'boolean', description: 'Regex (default: substring).' },
@@ -155,9 +154,28 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'Lines around (0-5).',
         },
         limit: { type: 'number', description: 'Cap on hits.' },
-        uid: { type: 'string', description: 'Chat uid for action trace.' },
       },
       required: ['query'],
+    },
+  },
+  {
+    name: 'history',
+    side: 'main',
+    description: 'Past chats and runs of this project: what was asked before.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['sessions', 'trace'],
+          description:
+            'sessions: past chats by words, with their uid; trace: one past run by uid — steps, commands, results.',
+        },
+        query: { type: 'string', description: 'sessions: words to look for.' },
+        uid: { type: 'string', description: 'trace: chat uid from sessions.' },
+        limit: { type: 'number', description: 'sessions: how many chats.' },
+      },
+      required: ['action'],
     },
   },
   {
@@ -273,21 +291,21 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'edit',
     side: 'renderer',
-    description: 'Change files: oldText — an exact, unique fragment; also create, move, delete.',
+    // `action` снято со схемы вместе с дублями `create`/`move`/`delete`: те же
+    // операции есть у `file` и меняют диск одинаково. Старые вызовы с `action`
+    // живы — схема их больше не объявляет, а `editAction` делегирует в `file`.
+    description:
+      'Change files: oldText — an exact, unique fragment; edits — files and their changes; ' +
+      'contents — the whole file. Create, move, delete — file.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: {
-          type: 'string',
-          enum: ['write', 'create', 'move', 'delete'],
-          description: 'write (default): `edits`. The rest: one file operation. Замена по проекту — `file`.',
-        },
         path: { type: 'string', description: 'One file.' },
         // Плоская форма той же правки: файл и замена рядом, без обёртки `edits[]`.
         // По переписи отказов именно она и приходила без обёртки — объявляем её,
         // чтобы модель не угадывала и не стоила лишнего шага.
-        oldText: { type: 'string', description: 'write: anchor without the edits[] wrapper.' },
-        newText: { type: 'string', description: 'write: replacement for that anchor.' },
+        oldText: { type: 'string', description: 'Anchor: exact, unique; with path — flat form.' },
+        newText: { type: 'string', description: 'Replacement for that anchor.' },
         edits: {
           type: 'array',
           description: 'write: files and their changes.',
@@ -310,11 +328,10 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
             // Форму адреса проверяет разбор: проходят обе — вложенная и плоская.
           },
         },
-        to: { type: 'string', description: 'move: target.' },
-        contents: { type: 'string', description: 'create: contents.' },
+        contents: { type: 'string', description: 'Whole file contents: replaces the file.' },
       },
-      // Обязательных полей нет: `write` без `action`, `create` без `edits` — обе формы
-      // живые. Что именно нужно — говорит описание действия, а не `required`.
+      // Обязательных полей нет: `write` без `action` и запись целиком через
+      // `path`+`contents` — обе формы живые. Что именно нужно — говорит описание.
       required: [],
     },
   },

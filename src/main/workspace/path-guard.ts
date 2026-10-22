@@ -28,3 +28,15 @@ export function escapesRoot(rootReal: string | null, real: string | null): boole
   if (!real || !rootReal) return false;
   return real !== rootReal && !real.startsWith(rootReal + path.sep);
 }
+
+/**
+ * Путь из вывода ripgrep — к абсолютному, от каталога, в котором его запускали.
+ *
+ * `rg` печатает `./app.ts`, а свой обход отдаёт абсолютный путь. Если оставить
+ * относительный, `path.relative(корень, hit.path)` разрешит его от процесса,
+ * а не от проекта. Абсолютный путь ripgrep не трогаем: `path.resolve` так и
+ * делает.
+ */
+export function absoluteSearchPath(cwd: string, reported: string): string {
+  return path.resolve(cwd, reported);
+}

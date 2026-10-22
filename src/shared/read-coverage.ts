@@ -134,6 +134,9 @@ export const MIN_NARROW_LINES = 20;
  * `121–250` с пометкой. `coveredRequest` ловит только полное покрытие, а перекрытие
  * до сих пор стоило полного текста: по переписи 25 из 40 чтений — повторные, и
  * дочитывание хвоста после диапазона встречается чаще, чем буквальный повтор.
+ *
+ * Файл целиком после прочитанного начала — тот же случай: конец у такого запроса —
+ * конец файла, и платить за уже показанное начало второй раз незачем.
  */
 export function uncoveredRequest(
   name: string,
@@ -146,11 +149,27 @@ export function uncoveredRequest(
   if (booleanArg(parsed.value.force) === true) return undefined;
   const target = parsed.value.path;
   const endLine = integerArg(parsed.value.endLine);
-  if (typeof target !== 'string' || endLine === undefined) return undefined;
-  const from = Math.max(1, integerArg(parsed.value.startLine) ?? 1);
-  if (endLine < from) return undefined;
+  if (typeof target !== 'string') return undefined;
   const ranges = reads.get(target);
   if (!ranges || ranges.length === 0) return undefined;
+  const from = Math.max(1, integerArg(parsed.value.startLine) ?? 1);
+
+  // Чтение целиком после прочитанного начала. Конец у него — конец файла, то есть
+  // та же задача, что у диапазона: отдаём только непрочитанный хвост. Без этого
+  // `1–120`, а потом файл целиком платили за первые 120 строк второй раз (по
+  // переписи — 13 % цены чтений: перекрытие, а не продолжение).
+  if (endLine === undefined && integerArg(parsed.value.startLine) === undefined) {
+    const { cursor } = coverageCursor(ranges, from);
+    if (cursor - from < MIN_NARROW_LINES) return undefined;
+    // `to: 0` — «до конца файла»: `endLine` в аргументах нет.
+    return { path: target, from: cursor, to: 0, arguments: JSON.stringify({ ...parsed.value, startLine: cursor }) };
+  }
+
+  if (endLine === undefined) return undefined;
+  // Перевёрнутый диапазон (конец раньше начала) — не наш случай: такому запросу
+  // инструмент ответит своим отказом с объяснением, и подменять его вестью
+  // «часть уже выше» значило бы прятать ошибку в аргументах.
+  if (endLine < from) return undefined;
   const { cursor } = coverageCursor(ranges, from);
   if (cursor - from < MIN_NARROW_LINES) return undefined;
   // Дальше конца запроса — это полное покрытие, им занимается `coveredRequest`.
