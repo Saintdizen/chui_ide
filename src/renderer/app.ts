@@ -83,6 +83,10 @@ import { registerViewCommands, type ZenSnapshot } from './core/view-commands';
 import { registerEditorFixCommands } from './core/editor-fix-commands';
 import { registerEditorModeCommands, type EditorModeName } from './core/editor-mode-commands';
 import { registerFileSaveCommands } from './core/file-save-commands';
+import { registerFileTabCommands } from './core/file-tab-commands';
+import { registerExplorerCommands } from './core/explorer-commands';
+import { registerRunCommands } from './core/run-commands';
+import { registerPythonCommands } from './core/python-commands';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
 import { RpcClient } from './core/rpc';
@@ -139,7 +143,6 @@ import { createNodeEnvPopover } from './ui/node-env-popover';
 import { createOutline } from './ui/outline';
 import { createProblemPanel } from './ui/problem-panel';
 import { problemBadgeText } from '../shared/problem-list';
-import { formatDuration, highlightedLines, hottestLines, profileSummary } from '../shared/line-profile';
 import { TODO_QUERY, toTodoItems } from '../shared/todo-list';
 import { createPalette } from './ui/palette';
 import { createPythonEnvPopover } from './ui/python-env-popover';
@@ -2583,11 +2586,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     );
   };
 
-  define({ id: 'workspace.openFolder', title: 'Открыть проект', category: 'Файл', keybinding: 'Ctrl+O' }, async () => {
-    const path = await workspace.pick();
-    if (!path) return;
-    void commands.execute('view.showExplorer');
-    showToast(`Открыт проект ${basename(path)}`);
+  // Дерево, рабочая область и уведомления — в `core/explorer-commands.ts`: сами команды
+  // решают, что перерисовать и что сказать человеку, а модели дерева и области живут у
+  // себя. `applySettings` передаём лениво — она объявлена ниже, а нужна в момент вызова.
+  registerExplorerCommands(define, {
+    workspace,
+    explorer,
+    editors,
+    rpc,
+    commands,
+    showToast,
+    applySettings: (next) => applySettings(next),
+    basename,
   });
 
   // Закрыть проект: окно IDE уступает место стартовому окну со списком проектов
@@ -2595,100 +2605,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   // о несохранённых файлах.
   define({ id: 'project.close', title: 'Закрыть проект', category: 'Файл' }, () => closeWindowSafely(true));
 
-  // Добавить папку в рабочую область: несколько папок в одном окне (см. workspace-model).
-  // Активной становится только что добавленная — туда идут git и поиск.
-  define({ id: 'workspace.addFolder', title: 'Добавить папку в рабочую область', category: 'Файл' }, async () => {
-    if (!workspace.current) {
-      showToast('Сначала откройте проект', 'error');
-      return;
-    }
-    const result = await rpc.request('dialog.pickFolder', { title: 'Добавить папку в рабочую область' });
-    if (!result.path) return;
-    await workspace.addRoot(result.path);
-    explorer.render();
-    showToast(`В рабочую область добавлена папка ${basename(result.path)}`);
+
+  // Вкладки — в `core/file-tab-commands.ts`. Открытие пути осталось здесь: только оно
+  // различает pdf, картинку, Office и текст; модулю досталось «какая вкладка показана»
+  // и что делать с соседями — это фасет «вкладки», которым потом поделится AppContext.
+  registerFileTabCommands(define, {
+    openEditors,
+    documents,
+    editors,
+    browserStrip: browserTabs,
+    browserPages,
+    openPath,
   });
-
-  define({ id: 'workspace.refresh', title: 'Обновить дерево', category: 'Файл' }, async () => {
-    await workspace.refresh();
-    explorer.render();
-  });
-
-  define({ id: 'workspace.revealPath', title: 'Показать в проводнике', category: 'Навигация' }, (path) => {
-    if (typeof path === 'string') explorer.reveal(path);
-  });
-
-  define({ id: 'file.open', title: 'Открыть файл', category: 'Файл' }, async (path, options) => {
-    if (typeof path !== 'string') return;
-    const preview = (options as { preview?: boolean } | undefined)?.preview === true;
-    await openPath(path, { preview });
-  });
-
-  define({ id: 'file.activate', title: 'Активировать вкладку', category: 'Файл' }, (path) => {
-    if (typeof path !== 'string') return;
-    openEditors.activate(path);
-    const document = documents.get(path);
-    // Картинку и документ Office текстовому редактору не отдаём: их показывает свой экран.
-    if (document && !isImagePath(path) && !isOfficePath(path)) editors.open(document);
-    // Файл мог быть активным и до этого: клик по его вкладке всё равно должен
-    // показать файл, а не оставить на экране страницу браузера. Ей нужен отдельный
-    // сигнал: её активность живёт в другой модели, и `openEditors.activate`
-    // при том же файле события не шлёт.
-    browserTabs.deactivate();
-  });
-
-  /** В полосе показана вкладка без файла: страница браузера. */
-  const straysShown = (): boolean => browserTabs.activePageId !== null;
-
-  define(
-    {
-      id: 'file.close',
-      title: 'Закрыть вкладку',
-      category: 'Файл',
-      keybinding: 'Ctrl+W',
-      // Закрывать есть что и тогда, когда на экране страница или чат: Ctrl+W относится
-      // к показанной вкладке, а не только к последнему файлу в фоне.
-      enabled: () => openEditors.active !== null || straysShown(),
-    },
-    (path) => {
-      // Без явного пути (Ctrl+W) закрывается ТА вкладка, что показана. Иначе при
-      // открытом чате или странице команда молча закрывала бы файл за ними.
-      if (typeof path !== 'string') {
-        const pageId = browserTabs.activePageId;
-        if (pageId !== null) {
-          browserPages.close(pageId);
-          return;
-        }
-      }
-      const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
-      if (!target) return;
-      openEditors.close(target);
-      const next = openEditors.active;
-      if (next) editors.open(next);
-    },
-  );
-
-  // Закрепление вкладки: закреплённую не вытесняет предпросмотр, и её не трогает
-  // «закрыть другие». Тумблер — одна команда и в меню вкладки, и в палитре.
-  define({ id: 'file.togglePin', title: 'Закрепить/открепить вкладку', category: 'Файл' }, (path) => {
-    const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
-    if (!target) return;
-    if (openEditors.isPinned(target)) openEditors.unpin(target);
-    else openEditors.pin(target);
-  });
-
-  define(
-    {
-      id: 'file.closeOthers',
-      title: 'Закрыть другие вкладки',
-      category: 'Файл',
-      enabled: () => openEditors.paths.length > 1,
-    },
-    (path) => {
-      const target = typeof path === 'string' ? path : (openEditors.active?.path ?? null);
-      if (target) openEditors.closeOthers(target);
-    },
-  );
 
   // Сравнение двух папок: список различий, клик по файлу открывает его сравнение.
   define({ id: 'folder.compare', title: 'Сравнить папки', category: 'Навигация' }, async (left, right) => {
@@ -2775,17 +2703,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void remoteFileModal.open(address);
   });
 
-  // Набор значков дерева из файла: правила приносит человек или сторонний набор.
-  define({ id: 'explorer.importBadges', title: 'Набор значков дерева из файла…', category: 'Вид' }, async () => {
-    const result = await rpc.request('explorer.importBadges', undefined).catch((error: unknown) => {
-      showToast(error instanceof Error ? error.message : 'Не удалось прочитать набор значков', 'error');
-      return null;
-    });
-    if (!result) return;
-    applySettings(result.settings);
-    showToast(result.count > 0 ? `Значков дерева: ${result.count}` : 'Набор значков пуст');
-  });
-
   // Настройки вида дерева для одной папки области: пункт меню у строки корня.
   define({ id: 'explorer.rootSettings', title: 'Настройки папки…', category: 'Вид' }, (path) => {
     rootSettingsTarget = typeof path === 'string' && path !== '' ? path : workspace.root;
@@ -2796,23 +2713,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     rootSettingsModal.open();
   });
 
-  // Избранное: то же, что пункт меню дерева, но по текущему файлу или папке.
-  define({ id: 'explorer.favorite', title: 'В избранное / убрать', category: 'Файл' }, async (path) => {
-    const target = typeof path === 'string' && path !== '' ? path : (editors.currentPath ?? workspace.root);
-    if (!target) return;
-    const wasFavorite = explorer.favorites().includes(target);
-    explorer.toggleFavorite(target);
-    showToast(wasFavorite ? 'Убрано из избранного' : 'Добавлено в избранное');
-  });
-
-  // Закреплённое сверху дерева: то же, что пункт меню, но по текущему файлу.
-  define({ id: 'explorer.togglePin', title: 'Закрепить файл в дереве', category: 'Файл' }, async (path) => {
-    const target = typeof path === 'string' ? path : editors.currentPath;
-    if (!target) return;
-    const wasPinned = explorer.pinnedPaths().includes(target);
-    explorer.togglePin(target);
-    showToast(wasPinned ? 'Откреплено сверху дерева' : 'Закреплено сверху дерева');
-  });
 
   define({ id: 'file.revealInOS', title: 'Показать в системном проводнике', category: 'Файл' }, async (path) => {
     if (typeof path !== 'string') return;
@@ -2875,37 +2775,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     );
   };
 
-  define(
-    {
-      id: 'run.file',
-      title: 'Запустить файл',
-      category: 'Запуск',
-      keybinding: 'Ctrl+F5',
-      enabled: () => targetsFor(openEditors.active).some((item) => item.source === 'file'),
-    },
-    async () => {
-      // Именно файл, а не первая цель из набора: у Python первыми могли оказаться
-      // тесты, и Ctrl+F5 запускал бы их вместо самого файла.
-      const target = targetsFor(openEditors.active).find((item) => item.source === 'file');
-      if (!target) {
-        showToast('Запускать нечего: нужен скрипт или задача в package.json', 'error');
-        return;
-      }
-      await runTarget(target);
-    },
-  );
-
-  define(
-    { id: 'run.tests', title: 'Запустить тесты', category: 'Запуск', enabled: () => testTarget() !== undefined },
-    async () => {
-      const target = testTarget();
-      if (!target) {
-        showToast('Тесты не найдены: нужен pytest, vitest, jest или файлы для `node --test`', 'error');
-        return;
-      }
-      await runTarget(target);
-    },
-  );
+  // Сами команды запуска — в `core/run-commands.ts`: они только выбирают цель и говорят,
+  // чего не хватает. Расчёт целей (`targetsFor`, `testTarget`) и прогон (`runTarget`)
+  // остаются здесь: ими пользуются кнопка в шапке, статус-бар и панель задач.
+  registerRunCommands(define, {
+    openEditors,
+    targetsFor,
+    testTarget,
+    runTarget,
+    runControl,
+    showMenu: (items, x, y, options) => showPopupMenu(items, x, y, options),
+    showToast,
+  });
 
   /* ── отладка ───────────────────────────────────────────────────────────── */
 
@@ -2996,35 +2877,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const path = editors.currentPath;
     if (path) bookmarks.clearFile(path);
   });
-
-  define(
-    {
-      id: 'run.choose',
-      title: 'Запустить…',
-      category: 'Запуск',
-      keybinding: 'Shift+F10',
-      enabled: () => targetsFor(openEditors.active).length > 0,
-    },
-    () => {
-      const targets = targetsFor(openEditors.active);
-      if (targets.length === 0) {
-        showToast('Запускать нечего: нужен скрипт или задача в package.json', 'error');
-        return;
-      }
-      if (targets.length === 1) {
-        void runTarget(targets[0]!);
-        return;
-      }
-      const anchor = runControl.element;
-      const rect = anchor.getBoundingClientRect();
-      showPopupMenu(
-        targets.map((target) => ({ label: target.label, hint: target.detail, onSelect: () => void runTarget(target) })),
-        rect.right - 260,
-        rect.bottom + 4,
-        { anchor },
-      );
-    },
-  );
 
   // Дзен-режим помнит, что было видно до входа. Состояние живёт здесь, а не в модуле
   // команд: оно переживает вызовы и умирает вместе с окном, как и сам макет.
@@ -3372,65 +3224,18 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     settingsModal.open(),
   );
 
-  define(
-    {
-      id: 'python.environments',
-      title: 'Python: виртуальные окружения',
-      category: 'Python',
-      // «venv» — как это называют на деле: без слова поиск в палитре не находит.
-      keywords: ['venv', 'virtualenv', 'окружение', 'интерпретатор'],
-    },
-    () => void venvModal.open(),
-  );
-
-  // Профиль строк: свой профилировщик исполняет файл и говорит, где прошло время.
-  // Перед запуском сохраняем правленое: профилировщик исполняет файл С ДИСКА, и без
-  // сохранения профиль был бы про старую версию — то есть про не то, что на экране.
-  define(
-    {
-      id: 'python.profileLines',
-      title: 'Python: профиль строк',
-      category: 'Python',
-      keywords: ['профилировщик', 'profile', 'производительность', 'горячие строки', 'узкое место'],
-    },
-    async () => {
-      const path = editors.currentPath;
-      if (!path) {
-        showToast('Нет открытого файла', 'error');
-        return;
-      }
-      if (!path.toLowerCase().endsWith('.py')) {
-        showToast('Профилировать можно файл Python (.py)', 'error');
-        return;
-      }
-      for (const document of documents.dirty()) await saveDocument(document);
-      showToast('Профилирую: файл исполняется медленно, это нормально');
-      const result = await rpc.request('python.profileLines', { path }).catch(() => null);
-      if (!result) {
-        showToast('Профилирование не запустилось', 'error');
-        return;
-      }
-      if (result.failed) {
-        showToast(result.message ?? 'Профилирование не удалось', 'error');
-        return;
-      }
-      const { profile } = result;
-      editors.setLineProfile(profile.files.map((file) => [file.path, highlightedLines(file)] as const));
-      if (profile.error) {
-        // Строки профиля всё же показываем: до падения программа что-то успела сделать.
-        showToast(`Программа упала: ${profile.error.trim().split('\n').at(-1) ?? 'см. вывод'}`, 'error');
-        return;
-      }
-      const top = hottestLines(profile, 1)[0];
-      const hot = top
-        ? ` · горячее всего: ${basename(top.path)}:${top.line.line} (${formatDuration(top.line.timeNs)})`
-        : '';
-      showToast(`${profileSummary(profile)}${hot}`);
-    },
-  );
-
-  define({ id: 'python.clearProfileLines', title: 'Python: убрать подсветку профиля', category: 'Python' }, () => {
-    editors.setLineProfile([]);
+  // Команды Python — в `core/python-commands.ts`: меню, проверки и то, что видит человек.
+  // Профилировщик и установщик пакетов приходят сюда из `core/line-profile.ts` и
+  // `core/install-actions.ts` — они нужны не только командам.
+  registerPythonCommands(define, {
+    editors,
+    documents,
+    saveDocument,
+    venvModal,
+    installRequirements,
+    rpc,
+    showToast,
+    basename,
   });
 
   define(
@@ -3560,16 +3365,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     playMacro(check.times);
   });
 
-
-  define(
-    {
-      id: 'python.installRequirements',
-      title: 'Python: установить зависимости',
-      category: 'Python',
-      keywords: ['pip', 'install', 'requirements', 'пакеты'],
-    },
-    () => installRequirements(),
-  );
 
   define({ id: 'settings.revealFile', title: 'Открыть settings.json', category: 'Настройки' }, async () => {
     const result = await rpc.request('settings.revealFile');

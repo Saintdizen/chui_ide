@@ -35,17 +35,33 @@
 
 Предстоит:
 
-- разбить `src/renderer/app.ts` (4 427 строк; было 6 771; блоков `define` — 57
-  из 113). Сделано −2 344 строки; список вынесенных модулей и их сторожей —
+- разбить `src/renderer/app.ts` (4 122 строки; было 6 771; блоков `define` — 38
+  из 113). Сделано −2 649 строк; список вынесенных модулей и их сторожей —
   в README («Что дальше»). **Осталось: `AppContext`** — не один большой, а три-четыре
-  узких фасета: уведомления (`showToast` в 32 блоках), вкладки (`openEditors`,
-  `browserTabs`), дерево/rpc (`rpc` 11, `explorer`). Порядок:
-  сперва вкладки (`file.activate` 7, `file.close` 7, `file.compareWith` 2,
-  `file.history` 1, `file.revealInOS` 2, `file.quickOpen` 1) — они же гейт для
-  фасета «вкладки+чат», — потом фасеты.
-  Остаток по семьям (замер, блоков/имён): file 12, editor 9, workspace 4, python 4,
-  explorer 4, run 3 — плюс `ai.generateTest`, который решено оставить (15 имён на
-  64 строки — дороже всего семейства). Что в списке НЕ откроется заново:
+  узких фасета. Сделаны: вкладки, дерево/rpc, запуск, Python. Остаток — россыпь по
+  1–9 блоков (file 7, editor 9, settings 2), дробить дальше дороже, чем даёт выигрыш.
+  Вкладки вынесены — `core/file-tab-commands.ts` (`file.open`, `file.activate`,
+  `file.close`, `file.togglePin`, `file.closeOthers`; deps 6, порты узкие:
+  `TabBuffers`/`TabEditorHost`/`TabBrowserStrip`/`TabPageCloser`). Это и есть фасет
+  «вкладки»; общего `AppContext` ему не нужно.
+  Дерево вынесено — `core/explorer-commands.ts` (`workspace.openFolder`,
+  `workspace.addFolder`, `workspace.refresh`, `workspace.revealPath`,
+  `explorer.importBadges`, `explorer.favorite`, `explorer.togglePin`; deps 8, порт
+  `ExplorerTree` из шести операций, `basename` идёт через deps — в `core` нельзя
+  тянуть `ui/dom`). `explorer.rootSettings` остался: `rootSettingsTarget` — состояние
+  модалки, ему место рядом с модалкой.
+  Запуск вынесен — `core/run-commands.ts` (`run.file`, `run.tests`, `run.choose`;
+  deps 7, меню приходит портом `showMenu`). Расчёт целей (`targetsFor`, `testTarget`)
+  и прогон (`runTarget`) остались: ими пользуются кнопка в шапке, статус-бар и панель
+  задач, а не только команды.
+  Python вынесен — `core/python-commands.ts` (`python.environments`,
+  `python.profileLines`, `python.clearProfileLines`, `python.installRequirements`;
+  deps 8; `formatDuration`/`highlightedLines`/`hottestLines`/`profileSummary`
+  импортируются прямо из `shared/line-profile`, а не идут через deps).
+  Остаток — россыпь: 38 блоков на всё, крупнейшие — editor 9, file 7, settings 2;
+  `showToast` в 11 блоках, но это не владелец фасета, а зависимость, и резать по нему
+  значит разорвать команды по семьям. `ai.generateTest` решено оставить (15 имён на
+  64 строки — дороже всего оставшегося). Что в списке НЕ откроется заново:
   `view.toggleRight` (звала `toggleChat()` мимо `aiEnabled()`, удалена, три ссылки
   на `ai.toggle`), дубль `Ctrl+K Ctrl+F` у `format.selection` (снят), реестр
   проверен целиком (223 id, 49 вызовов `execute`, 38 пунктов меню — висячих нет).
