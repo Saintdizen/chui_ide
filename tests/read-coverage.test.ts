@@ -23,6 +23,19 @@ import {
  * всё же разрешён (`force`, отсутствие диапазона, незакрытая верхняя граница).
  */
 
+describe('частичное покрытие после непрозрачного изменения', () => {
+  it('не скрывает сомнительное начало до сверки версии', () => {
+    const reads = new Map<string, ReadRange[]>([['a.ts', [{ from: 1, to: 120, stamp: 'v1', suspect: true }]]]);
+    const args = JSON.stringify({ path: 'a.ts', startLine: 1, endLine: 250 });
+    expect(uncoveredRequest('read', args, reads)).toBeUndefined();
+    expect(confirmFile(reads, 'a.ts', 'v1')).toBe(true);
+    expect(uncoveredRequest('read', args, reads)?.from).toBe(121);
+    reads.get('a.ts')![0]!.suspect = true;
+    expect(confirmFile(reads, 'a.ts', 'v2')).toBe(false);
+    expect(uncoveredRequest('read', args, reads)).toBeUndefined();
+  });
+});
+
 describe('isCovered', () => {
   it('диапазон внутри прочитанного — покрыт', () => {
     expect(isCovered([{ from: 1, to: 10 }], 3, 5)).toBe(true);

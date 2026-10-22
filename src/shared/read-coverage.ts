@@ -151,7 +151,8 @@ export function uncoveredRequest(
   const endLine = integerArg(parsed.value.endLine);
   if (typeof target !== 'string') return undefined;
   const ranges = reads.get(target);
-  if (!ranges || ranges.length === 0) return undefined;
+  // Частичный запрос не должен скрывать устаревшее начало. Сначала confirmFile.
+  if (!ranges || ranges.length === 0 || ranges.some((range) => range.suspect)) return undefined;
   const from = Math.max(1, integerArg(parsed.value.startLine) ?? 1);
 
   // Чтение целиком после прочитанного начала. Конец у него — конец файла, то есть

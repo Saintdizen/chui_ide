@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildCountsRecord, callFlags, formatCountsLine, parseCounts } from '../src/shared/step-counts';
+import {
+  buildCountsRecord,
+  callFailureReason,
+  callFlags,
+  formatCountsLine,
+  parseCounts,
+} from '../src/shared/step-counts';
 import type { ChatRunLog } from '../src/shared/run-log';
 
 function run(overrides: Partial<ChatRunLog> = {}): ChatRunLog {
@@ -66,7 +72,14 @@ describe('счётчик шагов', () => {
     expect(terminal!.ok).toBe(false);
     expect(terminal!.ms).toBe(120);
     expect(second!.out).toBe(120);
-    expect(record.trace).toEqual({ steps: 2, toolCalls: 3, prompt: 100, cached: 96, output: 40 });
+    expect(record.trace).toEqual({
+      steps: 2,
+      toolCalls: 3,
+      prompt: 100,
+      cached: 96,
+      output: 40,
+      cacheCreation: 0,
+    });
   });
 
   it('подписывает форму вызова: cd, шелл вместо read, целое чтение, пачка', () => {
@@ -84,5 +97,32 @@ describe('счётчик шагов', () => {
     const records = parseCounts(`${line}\n{"version":1,"steps":[\n`);
     expect(records).toHaveLength(1);
     expect(parseCounts('')).toEqual([]);
+  });
+
+  it('кодирует причину отказа без текста ошибки', () => {
+    const log = run();
+    log.steps[0]!.calls = [
+      { id: 'a', name: 'mind', args: '{"action":""}', ok: false, summary: 'Неизвестное действие: ' },
+      { id: 'b', name: 'edit', args: '{}', ok: false, summary: 'Не хватает аргумента', detail: 'Передай oldText' },
+      { id: 'c', name: 'terminal', args: '{}', ok: false, summary: 'код выхода 1' },
+      { id: 'd', name: 'read', args: '{}', ok: false, summary: 'Файл не найден: a.ts' },
+    ];
+    const record = buildCountsRecord(log);
+    expect(record.steps[0]!.calls.map((item) => item.reason)).toEqual(['action', 'arg', 'command', 'not-found']);
+    expect(callFailureReason({ ok: true, summary: 'ok' })).toBe('other');
+  });
+
+  it('размечает повторы и смысловые пересечения в одном шаге', () => {
+    const log = run();
+    log.steps[0]!.calls = [
+      { id: 'a', name: 'search', args: '{"action":"code","query":"User"}', ok: true, summary: '1' },
+      { id: 'b', name: 'lsp', args: '{"action":"definition","symbol":"User"}', ok: true, summary: '2' },
+      { id: 'c', name: 'read', args: '{"path":"src/a.ts"}', ok: true, summary: '3' },
+      { id: 'd', name: 'search', args: '{"query":"User","action":"code"}', ok: true, summary: '4' },
+    ];
+    const record = buildCountsRecord(log);
+    expect(record.steps[0]!.overlaps).toEqual([{ a: 0, b: 1, kind: 'search-lsp' }]);
+    expect(record.steps[0]!.calls[3]!.flags).toContain('repeat');
+    expect(record.steps[0]!.calls[0]!.flags ?? []).not.toContain('repeat');
   });
 });

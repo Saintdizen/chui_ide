@@ -183,3 +183,36 @@ const TEST_SUMMARY_LINE = /\b\d+\s+(?:passed|passing|прошло)\b|#\s*(?:pass
 export function looksLikeTestRun(text: string): boolean {
   return TEST_SUMMARY_LINE.test(text);
 }
+
+/** Команды установки пакетов: вывод у них длинный и на треть служебный. */
+const INSTALL_COMMAND = /\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|ci|add)\b/;
+
+/** Строки npm/pnpm/yarn/bun, без которых результат установки не прочитать. */
+const INSTALL_ERROR =
+  /(?:\b(?:ERR_|ERESOLVE|ECONNREFUSED|ETIMEDOUT|EINTEGRITY)|\b(?:error|fatal|failed|invalid|unsupported|warn|notice|deprecated)\b|^YN\d{4}:)/i;
+
+/** Итоговые строки установки: добавлено/изменено/найдено и `up to date`. */
+const INSTALL_SUMMARY =
+  /^(?:added|removed|changed|updated|audited|found)\b|^up to date\b|packages are looking for funding|^run `npm fund` for details$/i;
+
+function isInstallLine(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  return INSTALL_ERROR.test(trimmed) || INSTALL_SUMMARY.test(trimmed);
+}
+
+/**
+ * Сжать вывод установки пакетов до результата и ошибок, не теряя их.
+ *
+ * Полный вывод остаётся у вызывающего (обычно в spill-файле), а модели уходит
+ * только то, что влияет на следующее действие: сколько пакетов добавилось,
+ * какие предупреждения/ошибки возникли. Возвращает `null`, когда команда не про
+ * установку или выход уже и так короткий — тогда сжатие не нужно.
+ */
+export function summarizeInstall(command: string, text: string): { text: string; hidden: number } | null {
+  if (!INSTALL_COMMAND.test(command)) return null;
+  const lines = text.split('\n');
+  const kept = lines.filter(isInstallLine);
+  if (kept.length === 0 || kept.length >= lines.length - 1) return null;
+  return { text: kept.join('\n'), hidden: lines.length - kept.length };
+}

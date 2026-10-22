@@ -59,8 +59,8 @@ console.log('');
 console.log(`Отказы: ${failed.length} из ${calls.length} (${Math.round((failed.length / calls.length) * 100)}%)`);
 const byName = top(failed.map((call) => call.name));
 for (const [name, count] of byName) {
-  const notes = top(failed.filter((call) => call.name === name).map((call) => call.note ?? '—'));
-  const detail = notes.map(([note, n]) => `${note} ×${n}`).join(', ');
+  const reasons = top(failed.filter((call) => call.name === name).map((call) => call.reason ?? '—'));
+  const detail = reasons.map(([reason, n]) => `${reason} ×${n}`).join(', ');
   console.log(`  ${name.padEnd(12)} ${String(count).padStart(4)}   ${detail}`);
 }
 
@@ -104,11 +104,23 @@ if (flagged.size > 0) {
   }
 }
 
+// Пересечения инструментов в одном шаге: модель могла попросить то же самое дважды.
+const overlaps = steps.flatMap((step) => step.overlaps ?? []);
+if (overlaps.length > 0) {
+  console.log('');
+  console.log(`Пересечения инструментов в одном шаге: ${overlaps.length}`);
+  const byKind = top(overlaps.map((item) => item.kind));
+  for (const [kind, count] of byKind) {
+    console.log(`  ${kind.padEnd(16)} ${count}`);
+  }
+}
+
 // Шаг: цена и кеш. Кеш префикса — единственная причина, по которой постоянная часть
 // (схемы + промпт + ростер) стоит не столько, сколько весит.
 const stepOut = steps.map((step) => step.out ?? 0);
 const prompt = sum(steps.map((step) => step.usage?.prompt ?? 0));
 const cached = sum(steps.map((step) => step.usage?.cached ?? 0));
+const cacheCreation = sum(steps.map((step) => step.usage?.cacheCreation ?? 0));
 console.log('');
 console.log(
   `Шаг: вывод медиана ${median(stepOut)} ток., 90% ${percentile(stepOut, 0.9)} ток., макс ${Math.max(0, ...stepOut)} ток.`,
@@ -117,6 +129,9 @@ if (prompt > 0) {
   console.log(
     `Кеш: ${Math.round((cached / prompt) * 100)}% префикса из кеша (${cached} из ${prompt} ток. входа, ${steps.length} шагов)`,
   );
+}
+if (cacheCreation > 0) {
+  console.log(`Часть входа, записанная в кеш: ${cacheCreation} ток. из ${prompt} ток.`);
 }
 
 function top(values: string[]): [string, number][] {

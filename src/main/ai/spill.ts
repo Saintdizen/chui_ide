@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 /**
@@ -42,7 +43,7 @@ export const MAX_AGED_FILES = 8;
 export function spillName(kind: string, at: Date = new Date()): string {
   const stamp = at.toISOString().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
   const safe = kind.replace(/[^\w.-]+/g, '_').slice(0, 40) || 'tool';
-  return `${stamp}-${safe}.txt`;
+  return `${stamp}-${String(at.getUTCMilliseconds()).padStart(3, '0')}-${randomUUID()}-${safe}.txt`;
 }
 
 /** Что сказать модели вместо голого «вывод обрезан». */
@@ -68,13 +69,15 @@ export function createSpillStream(dir: string, kind: string): SpillStream {
   let fd: number | null = null;
   let written = 0;
   let broken = false;
+  let created = false;
 
   /** Файл открывается при первой записи: короткие выводы его не создают вовсе. */
   const open = (): number | null => {
     if (fd !== null) return fd;
     try {
       fs.mkdirSync(dir, { recursive: true });
-      fd = fs.openSync(file, 'w');
+      fd = fs.openSync(file, 'wx');
+      created = true;
       return fd;
     } catch {
       broken = true;
@@ -107,7 +110,7 @@ export function createSpillStream(dir: string, kind: string): SpillStream {
         fd = null;
       }
       if (!keep || broken || written === 0) {
-        removeQuiet(file);
+        if (created) removeQuiet(file);
         return null;
       }
       prune(dir);

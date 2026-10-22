@@ -24,31 +24,13 @@
  * `terminal` (cd/pipe/read — для З1), а этот — ЧТО вообще зовут и с какими
  * аргументами (для решения по схемам и ростру).
  */
-import { readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { canonicalCall } from '../src/shared/tool-aliases';
+import { censusHeader, isFailure, loadCensus, retryNames } from './census-data';
 import { estimateTextTokens } from '../src/shared/context-fit';
 import { AGENT_TOOLS, toOpenAiTools } from '../src/shared/tools';
 import { ROSTER_TOOLS, WIDENED_TOOLS } from '../src/shared/tool-presets';
 
-interface ToolCall {
-  id?: string;
-  name?: string;
-  arguments?: string;
-}
-interface Message {
-  role?: string;
-  content?: unknown;
-  name?: string;
-  toolCallId?: string;
-  toolCalls?: ToolCall[];
-}
-interface ChatFile {
-  conversations?: { messages?: Message[] }[];
-}
-
-const dir = process.argv[2] ?? join(homedir(), '.config/chui-ide/chats');
+const sample = loadCensus();
+console.log(censusHeader(sample));
 
 const specOf = (name: string) => AGENT_TOOLS.find((tool) => tool.name === name);
 const schemaTokens = (name: string): number => {
@@ -61,107 +43,55 @@ const enumOf = (name: string, field: string): string[] => {
   return Array.isArray(values) ? values : [];
 };
 
-/** Признак отказа инструмента: так отвечают и `runTool`, и фильтр набора. */
-const isFailure = (text: string): boolean =>
-  /^Ошибка\b/u.test(text.trim()) ||
-  /Не хватает аргумента/u.test(text) ||
-  /не входит\. Скажи человеку/u.test(text) ||
-  /код выхода [1-9]/u.test(text);
-
-const textOf = (content: unknown): string => {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part) =>
-        part && typeof part === 'object' && 'text' in part ? String((part as { text: unknown }).text) : '',
-      )
-      .join('');
-  }
-  return '';
-};
-
-let files: string[] = [];
-try {
-  files = readdirSync(dir).filter((name) => name.endsWith('.json') && !name.endsWith('.index.json'));
-} catch {
-  console.log(`бесед нет (${dir}) — считать нечего`);
-  process.exit(0);
-}
-
 const perName = new Map<string, number>();
 const perAction = new Map<string, number>();
-const aliased = new Map<string, number>();
 const badAction = new Map<string, number>();
 const failures = new Map<string, number>();
 const retries = new Map<string, number>();
 let steps = 0;
 let calls = 0;
-let chats = 0;
+const chats = sample.chats.length;
 const examples: string[] = [];
 
-for (const file of files) {
-  let chat: ChatFile;
-  try {
-    chat = JSON.parse(readFileSync(join(dir, file), 'utf8'));
-  } catch {
-    continue;
-  }
-  chats += 1;
-  for (const conversation of chat.conversations ?? []) {
-    const messages = conversation.messages ?? [];
-    for (let index = 0; index < messages.length; index += 1) {
-      const message = messages[index];
-      if (message.role !== 'assistant' || !message.toolCalls?.length) continue;
-      steps += 1;
-      for (const call of message.toolCalls) {
-        const rawName = call.name;
-        if (!rawName) continue;
-        // Старое имя — не ошибка модели, а след прошлого промпта: считаем по
-        // каноническому, иначе `file` выглядит незванным рядом с `create_file`.
-        const name = canonicalCall(rawName, call.arguments ?? '').name;
-        if (name !== rawName) aliased.set(name, (aliased.get(name) ?? 0) + 1);
-        calls += 1;
-        perName.set(name, (perName.get(name) ?? 0) + 1);
+for (const messages of sample.messages) {
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role !== 'assistant' || !message.toolCalls?.length) continue;
+    steps += 1;
+    for (const call of message.toolCalls) {
+      const rawName = call.name;
+      if (!rawName) continue;
+      // Старое имя — не ошибка модели, а след прошлого промпта: считаем по
+      // каноническому, иначе `file` выглядит незванным рядом с `create_file`.
+      const name = rawName;
+      calls += 1;
+      perName.set(name, (perName.get(name) ?? 0) + 1);
 
-        let args: Record<string, unknown> = {};
-        try {
-          args = JSON.parse(call.arguments ?? '') as Record<string, unknown>;
-        } catch {
-          // Аргументы не разобрались — это уже промах формы, считаем как есть.
-        }
-        const action = typeof args.action === 'string' ? args.action : '(нет)';
-        perAction.set(`${name}.${action}`, (perAction.get(`${name}.${action}`) ?? 0) + 1);
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(call.arguments ?? '') as Record<string, unknown>;
+      } catch {
+        // Аргументы не разобрались — это уже промах формы, считаем как есть.
+      }
+      const action = typeof args.action === 'string' ? args.action : '(нет)';
+      perAction.set(`${name}.${action}`, (perAction.get(`${name}.${action}`) ?? 0) + 1);
 
-        const allowed = enumOf(name, 'action');
-        if (allowed.length > 0 && action !== '(нет)' && !allowed.includes(action)) {
-          badAction.set(name, (badAction.get(name) ?? 0) + 1);
-          if (examples.length < 12) examples.push(`${file}: ${name}(action: ${action})`);
-        }
-
-        // Результат — ближайшая реплика `tool` с тем же `toolCallId`.
-        const result = messages
-          .slice(index + 1)
-          .find((candidate) => candidate.role === 'tool' && candidate.toolCallId === call.id);
-        if (result && isFailure(textOf(result.content))) {
-          failures.set(name, (failures.get(name) ?? 0) + 1);
-        }
+      const allowed = enumOf(name, 'action');
+      if (allowed.length > 0 && action !== '(нет)' && !allowed.includes(action)) {
+        badAction.set(name, (badAction.get(name) ?? 0) + 1);
+        if (examples.length < 12) examples.push(`${name}(action: ${action})`);
       }
 
-      // Переделка: следующий шаг снова зовёт тот же инструмент.
-      const following = messages
+      // Результат — ближайшая реплика `tool` с тем же `toolCallId`.
+      const result = messages
         .slice(index + 1)
-        .find((candidate) => candidate.role === 'assistant' && candidate.toolCalls?.length);
-      if (following) {
-        const before = new Set(
-          (message.toolCalls ?? []).map((call) => canonicalCall(call.name ?? '', call.arguments ?? '').name),
-        );
-        for (const name of new Set(
-          (following.toolCalls ?? []).map((call) => canonicalCall(call.name ?? '', call.arguments ?? '').name),
-        )) {
-          if (name && before.has(name)) retries.set(name, (retries.get(name) ?? 0) + 1);
-        }
+        .find((candidate) => candidate.role === 'tool' && candidate.toolCallId === call.id);
+      if (result && isFailure(result)) {
+        failures.set(name, (failures.get(name) ?? 0) + 1);
       }
     }
+
+    for (const name of retryNames(messages, index)) retries.set(name, (retries.get(name) ?? 0) + 1);
   }
 }
 
@@ -203,7 +133,7 @@ if (examples.length > 0) {
   for (const line of examples) console.log(`  ${line}`);
 }
 
-const planned = ['file', 'plan', 'mcp', 'show', 'exit_plan_mode'];
+const planned = ['file', 'history', 'mcp', 'show'];
 console.log('\nрешение по спорным (цена схемы против частоты):');
 for (const name of planned) {
   const used = perName.get(name) ?? 0;
@@ -211,6 +141,6 @@ for (const name of planned) {
   const perStep = used === 0 ? '∞' : `${(steps / used).toFixed(1)} шагов`;
   console.log(
     `  ${name.padEnd(14)} ${String(tokens).padStart(4)} т.  зван ${String(used).padStart(4)}  (раз в ${perStep})  ` +
-      `ростер сэкономил бы ${Math.round((tokens - 9) * steps)} т. за всю перепись`,
+      `разница схемы и строки ростера ≈ ${Math.round((tokens - 9) * steps)} входных т. без учёта кеша`,
   );
 }

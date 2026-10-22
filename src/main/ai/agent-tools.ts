@@ -17,7 +17,7 @@ import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memor
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import { formatReadImageReply, formatReadImageSummary } from '../../shared/read-image';
 import { testTargetProblem } from '../../shared/test-target';
-import { coveredRequest, readStamp, type ReadRange } from '../../shared/read-coverage';
+import { confirmFile, coveredRequest, uncoveredRequest, readStamp, type ReadRange } from '../../shared/read-coverage';
 import { limitPerFile, MAX_HITS_PER_FILE } from '../../shared/search-limit';
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
 import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
@@ -32,7 +32,8 @@ import { formatProjectMap } from '../../shared/project-map';
 import { formatSessionSearch, type SessionSearchReport } from '../../shared/session-search';
 import { parseSubagentTasks, type SubagentTask } from '../../shared/subagents';
 import { AGENT_TOOLS, parseToolArguments } from '../../shared/tools';
-import { isCondenseMarker } from '../../shared/context-fit';
+import { estimateTextTokens, isCondenseMarker } from '../../shared/context-fit';
+import { fitOutput, fitOutputLines } from '../../shared/output-budget';
 import { describeShape, missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
 import { canonicalCall } from '../../shared/tool-aliases';
 import { booleanArg, describeValue, integerArg, isAbsent } from '../../shared/tool-args';
@@ -340,9 +341,10 @@ export interface ToolContext {
   /**
    * Уже прочитанное в этой ветке: файл и его диапазоны. Нужно командам-читалкам
    * (`cat`, `sed -n`): без этого `cat` того же файла отдаёт текст заново, хотя
-   * покрытие про него знает — и платит модель.
+   * покрытие про него знает — и платит модель. Читалки могут подтвердить версию
+   * или удалить устаревшие диапазоны перед подавлением повтора.
    */
-  coveredReads?: ReadonlyMap<string, ReadRange[]>;
+  coveredReads?: Map<string, ReadRange[]>;
   applyEdits?(edits: FileEdit[], autoApprove: boolean): Promise<ApplyEditsHostResult>;
   /**
    * Правки по якорю. Якоря разрешает renderer: только у него есть текст
@@ -407,7 +409,7 @@ export interface ToolContext {
    * переполнен, а обрезка срабатывает только следующим шагом и выбрасывает ходы
    * целиком. Поэтому шаг платит из общего бюджета, а исчерпанное называется вслух.
    */
-  stepBudget?: { left: number };
+  stepBudget?: { left: number; tokensLeft?: number; exhausted?: boolean };
 }
 
 /**
@@ -422,6 +424,8 @@ export interface ToolContext {
  * называет путь — модель дочитает диапазоном, если он правда нужен.
  */
 export const MAX_OUTPUT_CHARS = 18_000;
+/** Оценка, а не токенизатор провайдера: кириллица не должна обходить символьный потолок. */
+export const MAX_OUTPUT_TOKENS = 5_200;
 
 /**
  * Сколько символов вывода шаг отдаёт модели всего. Предела на вызов мало: агент
@@ -714,7 +718,14 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     };
   }
 
-  return clipOutcome(ctx, name, await dispatchTool(ctx, name, parsed.value));
+  const before = ctx.stepBudget
+    ? {
+        left: ctx.stepBudget.left,
+        tokensLeft: ctx.stepBudget.tokensLeft ?? Math.ceil(ctx.stepBudget.left / 3.5),
+      }
+    : undefined;
+  if (ctx.stepBudget) ctx.stepBudget.exhausted = false;
+  return clipOutcome(ctx, name, await dispatchTool(ctx, name, parsed.value), before);
 }
 
 /**
@@ -802,13 +813,58 @@ function staleCondensedBody(args: Record<string, unknown>): string | null {
  * режутся вовсе. Пропустить потолок теперь не может ни один инструмент — в том
  * числе новый, который забыли об этом попросить.
  */
-function clipOutcome(ctx: ToolContext, name: string, outcome: ToolOutcome): ToolOutcome {
-  const detail = outcome.detail;
-  // Короткое не трогаем: лишний файл копии и пометка «обрезано» дороже самого
-  // ответа, а инструменты, которые сами блюдут бюджет, сюда просто не попадут.
-  if (typeof detail !== 'string' || detail.length <= MAX_OUTPUT_CHARS) return outcome;
-  const { text, truncated } = clipText(ctx, name, detail);
-  return truncated ? { ...outcome, detail: text } : outcome;
+function clipOutcome(
+  ctx: ToolContext,
+  name: string,
+  outcome: ToolOutcome,
+  before?: { left: number; tokensLeft: number },
+): ToolOutcome {
+  const exhausted = ctx.stepBudget?.exhausted === true || before?.left === 0 || before?.tokensLeft === 0;
+  const source = outcome.ok ? (outcome.detail ?? outcome.summary) : failureText(outcome);
+  const original =
+    exhausted && !source.includes('бюджет вывода на шаг исчерпан')
+      ? `${source}\n… (бюджет вывода на шаг исчерпан)`
+      : source;
+  const limit = {
+    chars: Math.min(MAX_OUTPUT_CHARS, Math.max(MIN_OUTPUT_CHARS, before?.left ?? MAX_OUTPUT_CHARS)),
+    tokens: Math.min(
+      MAX_OUTPUT_TOKENS,
+      Math.max(Math.ceil(MIN_OUTPUT_CHARS / 3.5), before?.tokensLeft ?? MAX_OUTPUT_TOKENS),
+    ),
+  };
+  let detail = original;
+  if (fitOutput(original, limit) !== original) {
+    const file = spill(ctx, name, original);
+    const note = `\n… (вывод обрезан${exhausted ? ' — бюджет вывода на шаг исчерпан' : ''}${file ? `; ${spillHint(file)}` : ''})`;
+    const head = name === 'terminal' ? `${original.split('\n').slice(0, 2).join('\n').slice(0, 400)}\n` : '';
+    const room = {
+      chars: limit.chars - note.length - head.length,
+      tokens: limit.tokens - estimateTextTokens(note + head),
+    };
+    const fitted = fitOutput(original, room, name === 'terminal');
+    // Код и списки не обрываем посреди строки, если есть хотя бы одна полная.
+    const newline = name === 'terminal' ? fitted.indexOf('\n') : fitted.lastIndexOf('\n');
+    const body = newline < 0 ? fitted : name === 'terminal' ? fitted.slice(newline + 1) : fitted.slice(0, newline);
+    detail = head + body + note;
+  }
+  if (ctx.stepBudget && before) {
+    // Единожды учитываем весь результат, включая заголовки и ссылку на копию.
+    ctx.stepBudget.left = exhausted ? 0 : Math.max(0, before.left - detail.length);
+    ctx.stepBudget.tokensLeft = exhausted ? 0 : Math.max(0, before.tokensLeft - estimateTextTokens(detail));
+  }
+  if (detail === source) return outcome;
+  // При отказе service вызовет failureText ещё раз: не дублируем заголовок ошибки.
+  const result: ToolOutcome = outcome.ok
+    ? { ...outcome, detail }
+    : {
+        ...outcome,
+        summary: detail.startsWith('Ошибка: ') ? detail.slice('Ошибка: '.length) : detail,
+        detail: undefined,
+      };
+  if (detail === original) return result;
+  // Финальная страховка могла убрать куски пачки: скрытый текст не считается прочитанным.
+  const { read: _read, reads: _reads, ...rest } = result;
+  return rest;
 }
 
 /** Аргументы уже разобраны: дальше — только исполнение и потолок вывода. */
@@ -1214,10 +1270,43 @@ async function listDir(workspace: WorkspaceService, args: Record<string, unknown
  * должны годиться в правку по позициям без пересчёта.
  */
 function numberedLines(lines: readonly string[], from: number): string {
-  // Без выравнивания: `padStart` добавляет пробелы к каждой строке файла, а
-  // модель читает числа, а не колонку. На двух тысячах строк это около 4 000
-  // символов на один вызов — больше, чем весит иное оглавление.
+  // Без выравнивания: модель читает числа, а не колонку.
   return lines.map((line, index) => `${from + index} | ${line}`).join('\n');
+}
+
+/** Полные строки и точное продолжение: обрезанный префикс тоже попадает в покрытие. */
+function readPrefix(
+  ctx: ToolContext,
+  lines: readonly string[],
+  from: number,
+  chars = outputRoom(ctx),
+  tokens = MAX_OUTPUT_TOKENS,
+) {
+  const body = numberedLines(lines, from);
+  tokens = Math.min(
+    tokens,
+    Math.max(Math.ceil(MIN_OUTPUT_CHARS / 3.5), ctx.stepBudget?.tokensLeft ?? MAX_OUTPUT_TOKENS),
+  );
+  // Запас на заголовок, продолжение и ссылку на полную копию.
+  const limit = {
+    chars: Math.max(0, chars - Math.min(700, Math.floor(chars / 3))),
+    tokens: Math.max(0, tokens - Math.min(500, Math.floor(tokens / 3))),
+  };
+  const fitted = fitOutputLines(body, limit);
+  if (
+    !fitted.complete &&
+    ctx.stepBudget &&
+    (ctx.stepBudget.left < MAX_OUTPUT_CHARS || (ctx.stepBudget.tokensLeft ?? Infinity) < MAX_OUTPUT_TOKENS)
+  )
+    ctx.stepBudget.exhausted = true;
+  const last = from + fitted.lines - 1;
+  const file = fitted.complete ? null : spill(ctx, 'read', body);
+  const note = fitted.complete
+    ? ''
+    : `\n… (вывод обрезан; ${fitted.lines > 0 ? `показаны строки ${from}–${last}` : `строка ${from} показана частично`}; дальше read с диапазоном: startLine с ${last + 1}${file ? `; ${spillHint(file)}` : ''})`;
+  // Если даже первая строка не помещается, показываем фрагмент, но не помним её прочитанной.
+  const fragment = fitted.lines === 0 ? fitOutput(body, limit) : '';
+  return { text: (fitted.text || fragment) + note, last, complete: fitted.complete };
 }
 
 /**
@@ -1280,28 +1369,48 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
   // конец всё равно не виден, а модель просит диапазоны наугад.
   if (startLine === undefined && endLine === undefined) {
     if (total > WHOLE_FILE_MAX_LINES) {
-      const head = allLines.slice(0, LONG_FILE_HEAD_LINES);
+      const prefix = readPrefix(ctx, allLines.slice(0, LONG_FILE_HEAD_LINES), 1);
       const outline = await fileOutlineText(ctx, target, content.text);
       const tail =
-        `… (файл длинный: строк всего ${total}, показаны первые ${head.length}). ` +
-        `Дальше — read с startLine с ${head.length + 1}` +
+        `… (файл длинный: строк всего ${total}, показаны первые ${prefix.last}). ` +
+        `Дальше — read с startLine с ${prefix.last + 1}` +
         `${outline ? ' или нужный раздел из оглавления выше' : ' или lsp (action: outline)'}.`;
-      const body = `${numberedLines(head, 1)}\n\n${outline ? `Оглавление:\n${outline}\n\n` : ''}${tail}`;
-      const { text } = clipText(ctx, 'read', body);
+      const body = `${prefix.text}\n\n${tail}${outline ? `\n\nОглавление:\n${outline}` : ''}`;
+      // Оглавление не должно отнять место у показанных строк и адреса продолжения.
+      const limit = { chars: outputRoom(ctx), tokens: MAX_OUTPUT_TOKENS };
+      let detail = fitOutput(body, limit);
+      if (detail !== body) {
+        const file = spill(ctx, 'read', body);
+        const note = `\n… (оглавление обрезано${file ? `; ${spillHint(file)}` : ''})`;
+        detail =
+          fitOutput(body, { chars: limit.chars - note.length, tokens: limit.tokens - estimateTextTokens(note) }) + note;
+      }
+      spendRoom(ctx, detail.length);
       return {
         ok: true,
-        summary: `${rel}: ${total} строк, показаны первые ${head.length}`,
-        detail: text,
-        // Прочитанным считается только показанное: остальное модель не видела.
-        read: { path: target, from: 1, to: head.length, stamp },
+        summary: `${rel}: ${total} строк, показаны первые ${prefix.last}`,
+        detail,
+        ...(prefix.last > 0 && detail.startsWith(prefix.text)
+          ? { read: { path: target, from: 1, to: prefix.last, stamp } }
+          : {}),
       };
     }
-    const { text, truncated } = clipText(ctx, 'read', content.text);
+    if (content.text.length <= outputRoom(ctx) && estimateTextTokens(content.text) <= MAX_OUTPUT_TOKENS) {
+      spendRoom(ctx, content.text.length);
+      return {
+        ok: true,
+        summary: `${rel}: ${total} строк`,
+        detail: content.text || '(пустой файл)',
+        ...(total > 0 ? { read: { path: target, from: 1, to: total, stamp, eof: true } } : {}),
+      };
+    }
+    const prefix = readPrefix(ctx, allLines, 1);
+    spendRoom(ctx, prefix.text.length);
     return {
       ok: true,
-      summary: `${rel}: ${total} строк${truncated ? ' (обрезано)' : ''}`,
-      detail: text.length ? text : '(пустой файл)',
-      ...(truncated || total === 0 ? {} : { read: { path: target, from: 1, to: total, stamp, eof: true } }),
+      summary: `${rel}: ${total} строк (обрезано)`,
+      detail: prefix.text,
+      ...(prefix.last > 0 ? { read: { path: target, from: 1, to: prefix.last, stamp, eof: prefix.complete } } : {}),
     };
   }
 
@@ -1338,22 +1447,16 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
 
   // Диапазон тоже ограничиваем: модель может попросить «весь файл» через 1–∞.
   const last = Math.min(to, from + MAX_READ_LINES - 1);
-  const slice = allLines.slice(from - 1, last);
-  const body = numberedLines(slice, from);
-  const clipped = last < to ? `\n… (показаны строки ${from}–${last} из ${to}; продолжай с ${last + 1})` : '';
-
-  // Диапазон тоже режем по символам: 2000 строк по ~40 символов — это ~80 КБ,
-  // вчетверо больше общего потолка вывода. Без этого одно чтение диапазона
-  // съедало окно модели сильнее, чем чтение целого файла без диапазона.
-  const { text: trimmed } = clipText(ctx, 'read', body);
-  // Весь запрошенный кусок ушёл целиком — только тогда его можно считать прочитанным.
-  const whole = trimmed === body;
-
+  const prefix = readPrefix(ctx, allLines.slice(from - 1, last), from);
+  const clipped =
+    prefix.complete && last < to ? `\n… (показаны строки ${from}–${last} из ${to}; продолжай с ${last + 1})` : '';
+  const detail = prefix.text + clipped;
+  spendRoom(ctx, detail.length);
   return {
     ok: true,
-    summary: `${rel}: строки ${from}–${last} из ${total}`,
-    detail: `${trimmed}${clipped}`,
-    ...(whole ? { read: { path: target, from, to: last, stamp, eof: last >= total } } : {}),
+    summary: `${rel}: строки ${from}–${prefix.last} из ${total}`,
+    detail,
+    ...(prefix.last >= from ? { read: { path: target, from, to: prefix.last, stamp, eof: prefix.last >= total } } : {}),
   };
 }
 
@@ -1365,7 +1468,7 @@ const MAX_READ_FILES = 10;
  * больших файлов при 30 000 съедала половину шага и отбивала у модели охоту
  * читать дальше: дешевле прочитать один, чем всю пачку сразу.
  */
-const MAX_READ_FILES_TOTAL_CHARS = 20_000;
+const MAX_READ_FILES_TOTAL_CHARS = MAX_OUTPUT_CHARS;
 /**
  * Потолок на один файл в пачке: 6 000 символов — это файл строк на 150. Пачка
  * существует ради двух-трёх мелких файлов, а длинный обрезается по границе
@@ -1413,7 +1516,7 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
     }
     // Файл уже прочитан целиком и не менялся с тех пор — текст есть выше, а его
     // повтор в пачке самый дорогой: замер показал 12 тыс. токенов на 3 таких вызова.
-    const already = ctx.coveredReads ? await coveredWhole(ctx, target) : undefined;
+    const already = ctx.coveredReads && booleanArg(args.force) !== true ? await coveredWhole(ctx, target) : undefined;
     if (already !== undefined) {
       parts.push(`### ${rel} (уже прочитано: строки 1–${already}, без изменений)`);
       continue;
@@ -1425,40 +1528,38 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
         continue;
       }
       const lines = content.text.length === 0 ? [] : content.text.split('\n');
-      // Потолок на файл режем по границе строки, а не посередине: обрывок
-      // строки в правку не годится, а по номеру последней видно, откуда читать
-      // дальше. Полный текст не пропадает — адрес назван в пометке.
-      let shown = lines.length;
-      let cut = false;
-      let body = lines.map((line, index) => `${index + 1} | ${line}`).join('\n');
-      if (body.length > READ_FILES_PER_FILE_CHARS) {
-        cut = true;
-        shown = 1;
-        let size = 0;
-        for (let index = 0; index < lines.length; index += 1) {
-          size += lines[index]!.length + 3;
-          if (size > READ_FILES_PER_FILE_CHARS) break;
-          shown = index + 1;
-        }
-        body = lines
-          .slice(0, shown)
-          .map((line, index) => `${index + 1} | ${line}`)
-          .join('\n');
+      let from = 1;
+      if (ctx.coveredReads && booleanArg(args.force) !== true) {
+        confirmFile(ctx.coveredReads, target, readStamp(content));
+        from = uncoveredRequest('read', JSON.stringify({ path: target }), ctx.coveredReads)?.from ?? 1;
       }
-      const { text, truncated } = clipText(ctx, 'read', body);
-      const rest = cut ? `\n… (показаны строки 1–${shown} из ${lines.length} — дальше read с диапазоном)` : '';
-      const marks = [truncated ? 'обрезано' : '', cut ? `первые ${shown}` : ''].filter(Boolean);
-      const chunk = `### ${rel} (${lines.length} строк${marks.length ? `, ${marks.join(', ')}` : ''})\n${text || '(пустой файл)'}${rest}`;
+      const room = Math.min(READ_FILES_PER_FILE_CHARS, outputRoom(ctx), MAX_READ_FILES_TOTAL_CHARS - total - 500);
+      const tokens = MAX_OUTPUT_TOKENS - estimateTextTokens(parts.join('\n\n'));
+      if (room < 800 || tokens < 600) {
+        parts.push(`### ${rel}\n… (пропущен: общий лимит вывода исчерпан)`);
+        continue;
+      }
+      const prefix = lines.length
+        ? readPrefix(ctx, lines.slice(from - 1), from, room, tokens)
+        : { text: '(пустой файл)', last: 0, complete: true };
+      const shown =
+        from > 1
+          ? `, строки ${from}–${prefix.last}; начало уже прочитано`
+          : prefix.complete
+            ? ''
+            : `, первые ${prefix.last}`;
+      const chunk = `### ${rel} (${lines.length} строк${shown})\n${prefix.text}`;
       parts.push(chunk);
-      total += chunk.length;
+      total += chunk.length + 2;
+      spendRoom(ctx, chunk.length + 2);
       read += 1;
-      if (!truncated && !cut)
+      if (prefix.last >= from)
         reads.push({
           path: target,
-          from: 1,
-          to: lines.length,
+          from,
+          to: prefix.last,
           stamp: readStamp(content),
-          eof: true,
+          eof: prefix.complete,
         });
     } catch (error) {
       failed.push(`${rel}: ${error instanceof Error ? error.message : String(error)}`);
@@ -1486,13 +1587,10 @@ async function readFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
 async function coveredWhole(ctx: ToolContext, target: string): Promise<number | undefined> {
   const ranges = ctx.coveredReads?.get(target);
   if (!ranges || ranges.length === 0) return undefined;
-  const whole = ranges.find((range) => range.from <= 1 && range.eof === true);
-  if (!whole) return undefined;
+  if (!ranges.some((range) => range.eof === true)) return undefined;
   const version = await ctx.workspace.stat(target).catch(() => null);
-  if (!version) return undefined;
-  const stamp = readStamp(version);
-  if (!ranges.every((range) => range.stamp === stamp)) return undefined;
-  return whole.to;
+  if (!version || !confirmFile(ctx.coveredReads!, target, readStamp(version))) return undefined;
+  return coveredRequest('read', JSON.stringify({ path: target }), ctx.coveredReads!)?.to;
 }
 
 /* ── замена по проекту ──────────────────────────────────────────────────── */
@@ -3391,6 +3489,10 @@ async function lookupOutcome(ctx: ToolContext, call: LookupCall): Promise<ToolOu
     // чтения, потому что только оно знает границы (`cat` их не называет), и до
     // `rememberRead` — иначе совпадёт само с собой.
     if (outcome.read && ctx.coveredReads) {
+      const previous = ctx.coveredReads.get(outcome.read.path) ?? [];
+      if (previous.some((range) => range.suspect || range.stamp !== undefined)) {
+        confirmFile(ctx.coveredReads, outcome.read.path, outcome.read.stamp);
+      }
       const covered = coveredRequest(
         'read',
         JSON.stringify({
@@ -3601,6 +3703,9 @@ function jobState(snapshot: JobSnapshot): string {
  * `output` — состояние задания и новый вывод. Без `id` — список заданий:
  * чтобы не гадать, что вообще запущено, после перезапуска хода.
  */
+// Курсор привязан к самому заданию, а не к id (в новом реестре id повторяются).
+const jobOutputOffsets = new WeakMap<JobHandle, number>();
+
 function terminalOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOutcome {
   if (!ctx.jobs) return { ok: false, summary: 'Задания недоступны' };
 
@@ -3633,14 +3738,25 @@ function terminalOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOu
   }
 
   const from = optionalInteger(args, 'from');
-  const result = job.read(from);
+  const result = job.read(from ?? jobOutputOffsets.get(job) ?? 0);
   const snapshot = result.snapshot;
-  const output = result.data.length > 0 ? clipTail(ctx, 'terminal', condenseOutput(result.data)) : '';
-  // Смещение отдаём всегда: по нему следующее чтение не повторит прочитанное.
-  const notes = [`offset: ${result.offset}`, `состояние: ${jobState(snapshot)}`];
+  const running = snapshot.status === 'running' || snapshot.status === 'stopping';
+  let data = result.data;
+  let offset = result.offset;
+  // Незавершённая строка остаётся на следующий опрос: куски stdout не границы строк.
+  if (running && data.length > 0) {
+    const end = data.lastIndexOf('\n') + 1;
+    offset -= data.length - end;
+    data = data.slice(0, end);
+  }
+  jobOutputOffsets.set(job, Math.max(jobOutputOffsets.get(job) ?? 0, offset));
+  const condensed = condenseOutput(data);
+  const folded = running ? condensed : foldPassedTests(ctx, 'terminal', condensed, snapshot.file);
+  const output = folded.length > 0 ? clipTail(ctx, 'terminal', folded) : '';
+  // Смещение относится к сырому выводу, не к свёрнутому тексту.
+  const notes = [`offset: ${offset}`, `состояние: ${jobState(snapshot)}`];
   if (snapshot.file) notes.push(`полностью — в файле ${snapshot.file}`);
 
-  const running = snapshot.status === 'running' || snapshot.status === 'stopping';
   return {
     ok: snapshot.status !== 'failed',
     summary: `${snapshot.id}: ${jobState(snapshot)}${output ? ` · нового вывода: ${output.split('\n').length} строк` : ''}`,
@@ -3648,9 +3764,7 @@ function terminalOutput(ctx: ToolContext, args: Record<string, unknown>): ToolOu
       ...notes,
       '',
       output || (running ? '(пока ничего не напечатано)' : '(вывод пуст)'),
-      ...(running
-        ? [`Потом дочитай: terminal { action: "output", id: "${snapshot.id}", from: ${result.offset} }`]
-        : []),
+      ...(running ? [`Потом дочитай: terminal { action: "output", id: "${snapshot.id}", from: ${offset} }`] : []),
     ].join('\n'),
   };
 }
@@ -4301,11 +4415,11 @@ function relativePath(target: string, root: string | null): string {
  * Применяется только там, где рядом есть итог прогона (`looksLikeTestRun`):
  * в произвольном выводе команды строка с `✓` может быть данными.
  */
-function foldPassedTests(ctx: ToolContext, kind: string, text: string): string {
+function foldPassedTests(ctx: ToolContext, kind: string, text: string, fullFile?: string): string {
   if (!looksLikeTestRun(text)) return text;
   const folded = collapsePassedTests(text);
   if (folded.hidden === 0) return text;
-  const file = spill(ctx, kind, text);
+  const file = fullFile ?? spill(ctx, kind, text);
   const where = file ? `; ${spillHint(file)}` : '';
   return `${folded.text}\n… (свёрнуто отметок о прошедших: ${folded.hidden}${where})`;
 }

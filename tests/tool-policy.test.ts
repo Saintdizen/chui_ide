@@ -6,6 +6,7 @@ import {
   PLAN_MODE_TOOLS,
   READ_ONLY_TOOLS,
   isReadOnlyCall,
+  isCacheableReadCall,
   isWriteCall,
   SUBAGENT_TOOLS,
   TOOL_POLICIES,
@@ -20,6 +21,19 @@ import {
  */
 
 const names = AGENT_TOOLS.map((tool) => tool.name);
+
+describe('повторы живого вывода', () => {
+  it('права чтения не превращают опрос процесса в кешированный результат', () => {
+    for (const action of ['list', 'read', 'output']) {
+      const args = JSON.stringify({ action, id: 'job-1' });
+      expect(isReadOnlyCall('terminal', args)).toBe(true);
+      expect(isCacheableReadCall('terminal', args)).toBe(false);
+    }
+    expect(isCacheableReadCall('read', '{"path":"a.ts"}')).toBe(true);
+    expect(isCacheableReadCall('read', '{"path":"a.ts","force":true}')).toBe(false);
+    expect(isCacheableReadCall('read', '{"path":"a.ts","force":"true"}')).toBe(false);
+  });
+});
 
 describe('таблица признаков', () => {
   it('знает каждый инструмент набора', () => {

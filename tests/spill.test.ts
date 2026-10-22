@@ -70,6 +70,22 @@ describe('createSpillStream', () => {
     expect(fs.readFileSync(file as string, 'utf8')).toBe('начало середина конец');
   });
 
+  it('параллельные результаты одного инструмента не перезаписывают друг друга', () => {
+    const dir = tempDir();
+    const first = createSpillStream(dir, 'terminal');
+    const second = createSpillStream(dir, 'terminal');
+    first.write('first');
+    second.write('second');
+    first.write(' tail');
+    const a = first.close(true)!;
+    const b = second.close(true)!;
+    expect(a).not.toBe(b);
+    expect(fs.readFileSync(a, 'utf8')).toBe('first tail');
+    expect(fs.readFileSync(b, 'utf8')).toBe('second');
+    const at = new Date('2026-08-12T17:30:52.637Z');
+    expect(spillName('terminal', at)).not.toBe(spillName('terminal', at));
+  });
+
   it('короткий вывод не оставляет файла', () => {
     const dir = tempDir();
     const stream = createSpillStream(dir, 'read_file');

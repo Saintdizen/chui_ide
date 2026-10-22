@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
+import { rememberRead, uncoveredRequest } from '../src/shared/read-coverage';
 
 /**
  * Чтение файла диапазоном: границы и разбор аргументов.
@@ -84,6 +85,66 @@ describe('read: границы диапазона', () => {
     const outcome = await run({ path: file, startLine: 99 });
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('за концом файла');
+  });
+});
+
+describe('read: покрытие обрезанного вывода', () => {
+  it('помнит полный показанный префикс и продолжает с первой невидимой строки', async () => {
+    const lines = Array.from({ length: 600 }, (_, index) => `строка${index + 1}: ${'value '.repeat(15)}`);
+    await fs.writeFile(file, lines.join('\n'));
+    const outcome = await run({ path: file, startLine: 1, endLine: 600 });
+    expect(outcome.read).toBeDefined();
+    const read = outcome.read!;
+    expect(read.to).toBeGreaterThan(20);
+    expect(read.to).toBeLessThan(600);
+    expect(read.eof).not.toBe(true);
+    expect(outcome.detail).toContain(`${read.to} | ${lines[read.to - 1]}`);
+    expect(outcome.detail).not.toContain(`${read.to + 1} |`);
+    expect(outcome.detail).toContain(`startLine с ${read.to + 1}`);
+    const coverage = new Map();
+    rememberRead(coverage, read);
+    const next = uncoveredRequest('read', JSON.stringify({ path: file, startLine: 1, endLine: 600 }), coverage);
+    expect(next?.from).toBe(read.to + 1);
+  });
+
+  it('повтор файла в другой пачке продолжает хвост, а изменившийся файл читает сначала', async () => {
+    await fs.writeFile(file, Array.from({ length: 400 }, (_, i) => `line${i + 1} ${'x'.repeat(80)}`).join('\n'));
+    const coverage = new Map();
+    const ctx = { workspace, coveredReads: coverage } as ToolContext;
+    const first = await runTool(ctx, 'read', JSON.stringify({ paths: [file] }));
+    const before = first.reads![0]!;
+    expect(before.to).toBeGreaterThan(20);
+    rememberRead(coverage, before);
+    const next = await runTool(ctx, 'read', JSON.stringify({ paths: [file] }));
+    expect(next.reads![0]!.from).toBe(before.to + 1);
+    expect(next.detail).not.toContain('1 | line1 ');
+    await fs.writeFile(file, 'changed file\n');
+    const changed = await runTool(ctx, 'read', JSON.stringify({ paths: [file] }));
+    expect(changed.detail).toContain('1 | changed file');
+    expect(changed.reads![0]!.from).toBe(1);
+  });
+
+  it('очень длинную первую строку не объявляет прочитанной', async () => {
+    await fs.writeFile(file, `${'я'.repeat(30_000)}\nnext`);
+    const outcome = await run({ path: file, startLine: 1, endLine: 2 });
+    expect(outcome.read).toBeUndefined();
+    expect(outcome.detail).toContain('строка 1 показана частично');
+    expect(outcome.detail).toContain('startLine с 1');
+  });
+
+  it('пачка помнит частичные файлы, но не скрытые строки', async () => {
+    await fs.writeFile(file, Array.from({ length: 400 }, (_, i) => `line${i + 1} ${'x'.repeat(80)}`).join('\n'));
+    const second = path.join(dir, 'second.txt');
+    await fs.copyFile(file, second);
+    const outcome = await run({ paths: [file, second] });
+    expect(outcome.reads?.length).toBe(2);
+    for (const read of outcome.reads!) {
+      expect(read.to).toBeLessThan(400);
+      expect(read.eof).toBe(false);
+      const block = outcome.detail!.split(`### ${path.basename(read.path)}`)[1]!.split('### ')[0]!;
+      expect(block).toContain(`${read.to} | line${read.to} `);
+      expect(block).not.toContain(`${read.to + 1} | line${read.to + 1} `);
+    }
   });
 });
 

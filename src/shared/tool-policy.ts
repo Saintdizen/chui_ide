@@ -169,6 +169,14 @@ export function isReadOnlyCall(name: string, rawArguments: string): boolean {
   return typeof action === 'string' && actions.has(action);
 }
 
+/** Чтение живого процесса и явное force нельзя подавлять как буквальный повтор. */
+export function isCacheableReadCall(name: string, rawArguments: string): boolean {
+  if (!isReadOnlyCall(name, rawArguments) || name === 'terminal') return false;
+  if (name !== 'read') return true;
+  const parsed = parseToolArguments(rawArguments);
+  return parsed.ok && parsed.value.force !== true && parsed.value.force !== 'true';
+}
+
 /**
  * Меняет ли вызов мир — по действию, а не только по имени. Нужно режиму плана,
  * где даже такой инструмент по имени не исполнится.

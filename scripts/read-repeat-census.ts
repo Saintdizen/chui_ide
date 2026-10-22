@@ -14,24 +14,11 @@
  *
  * Запуск: npx tsx scripts/read-repeat-census.ts [каталог-бесед]
  */
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { argumentsOf, censusHeader, isFailure, loadCensus, readRangeOf, textOf } from './census-data';
 import { estimateTextTokens } from '../src/shared/context-fit';
-import { canonicalCall } from '../src/shared/tool-aliases';
 
-interface Message {
-  role?: string;
-  content?: unknown;
-  toolCallId?: string;
-  toolCalls?: { id?: string; name?: string; arguments?: string }[];
-}
-interface ChatFile {
-  conversations?: { uid?: string; messages?: Message[] }[];
-}
-
-const DEFAULT_DIR = join(homedir(), '.config/chui-ide/chats');
-const dir = process.argv[2] ?? DEFAULT_DIR;
+const sample = loadCensus();
+console.log(censusHeader(sample));
 
 /** Команды, которыми читают файлы в обход `read`: их вывод покрытие не видит. */
 const SHELL_READ = /^(cat|head|tail|sed|grep|rg|awk|less|more|git\s+(?:diff|show))\b/;
@@ -86,100 +73,84 @@ function commandOf(raw: string): string {
   }
 }
 
-function rangeOf(raw: string): { from: number; to: number; whole: boolean } {
-  const from = Number(/"startLine"\s*:\s*(\d+)/.exec(raw)?.[1] ?? 1);
-  const to = Number(/"endLine"\s*:\s*(\d+)/.exec(raw)?.[1] ?? 0);
-  return { from: Math.max(1, from), to, whole: to === 0 };
-}
-
-/**
- * Живая беседа — та, которую правят прямо сейчас (наш собственный разговор).
- * Если брать её в перепись, числа плывут от запуска к запуску.
- */
-const LIVE_MS = 15 * 60 * 1000;
-
-for (const file of readdirSync(dir).filter((name) => name.endsWith('.json'))) {
-  if (dir === DEFAULT_DIR && Date.now() - statSync(join(dir, file)).mtimeMs < LIVE_MS) continue;
-  const chat: ChatFile = JSON.parse(readFileSync(join(dir, file), 'utf8'));
-  for (const conversation of chat.conversations ?? []) {
-    const messages = conversation.messages ?? [];
-    const names = new Map<string, string>();
-    const args = new Map<string, string>();
-    for (const message of messages) {
-      for (const call of message.toolCalls ?? []) {
-        if (!call.id || !call.name) continue;
-        names.set(call.id, canonicalCall(call.name, call.arguments ?? '').name);
-        args.set(call.id, call.arguments ?? '');
-      }
+for (const messages of sample.messages) {
+  const names = new Map<string, string>();
+  const args = new Map<string, string>();
+  for (const message of messages) {
+    for (const call of message.toolCalls ?? []) {
+      if (!call.id || !call.name) continue;
+      names.set(call.id, call.name);
+      args.set(call.id, call.arguments ?? '');
     }
-    const seen = new Map<string, { from: number; to: number; whole: boolean }[]>();
-    const edited = new Set<string>();
-    // Мог ли файл измениться после последнего чтения. `terminal` и правки без
-    // названного файла — единственный источник сомнения, который нам виден.
-    let dirty = false;
+  }
+  const seen = new Map<string, { from: number; to: number; whole: boolean }[]>();
+  const edited = new Set<string>();
+  // Мог ли файл измениться после последнего чтения. `terminal` и правки без
+  // названного файла — единственный источник сомнения, который нам виден.
+  let dirty = false;
 
-    for (const message of messages) {
-      if (message.role !== 'tool' || !message.toolCallId) continue;
-      const name = names.get(message.toolCallId) ?? 'unknown';
-      const text = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? '');
-      const tokens = estimateTextTokens(text);
-      const raw = args.get(message.toolCallId) ?? '';
+  for (const message of messages) {
+    if (message.role !== 'tool' || !message.toolCallId) continue;
+    const name = names.get(message.toolCallId) ?? 'unknown';
+    const text = textOf(message.content);
+    const tokens = estimateTextTokens(text);
+    const raw = args.get(message.toolCallId) ?? '';
 
-      if (name === 'terminal') {
-        dirty = true;
-        // Разбираем аргументы как JSON, а не ищем `"command"` регуляркой по сырому
-        // тексту: иначе heredoc внутри скрипта (`python3 - <<'PY' … cd … &&`) даёт
-        // ложные шелл-чтения — в замере таких оказалось 12 из 51.
-        const command = commandOf(raw);
-        const real = command.replace(/^cd\s+\S+\s*&&\s*/, '');
-        const body = real.trim();
-        if (SHELL_READ.test(body)) {
-          if (shellWrites(body)) {
-            // Читалка есть, но результат уходит в файл (`cat > x <<EOF`): чтения нет.
-            shell.writes += 1;
-          } else {
-            shell.calls += 1;
-            shell.tokens += tokens;
-            if (real !== command) {
-              shell.cd += 1;
-              shell.cdTokens += tokens;
-            }
+    if (name === 'terminal') {
+      dirty = true;
+      // Разбираем аргументы как JSON, а не ищем `"command"` регуляркой по сырому
+      // тексту: иначе heredoc внутри скрипта (`python3 - <<'PY' … cd … &&`) даёт
+      // ложные шелл-чтения — в замере таких оказалось 12 из 51.
+      const command = commandOf(raw);
+      const real = command.replace(/^cd\s+\S+\s*&&\s*/, '');
+      const body = real.trim();
+      if (SHELL_READ.test(body)) {
+        if (shellWrites(body)) {
+          // Читалка есть, но результат уходит в файл (`cat > x <<EOF`): чтения нет.
+          shell.writes += 1;
+        } else {
+          shell.calls += 1;
+          shell.tokens += tokens;
+          if (real !== command) {
+            shell.cd += 1;
+            shell.cdTokens += tokens;
           }
         }
-        continue;
       }
-
-      const path = /"path"\s*:\s*"([^"]+)"/.exec(raw)?.[1];
-      if (path && (name === 'edit' || name === 'file')) {
-        edited.add(path);
-        dirty = true;
-      }
-      if (!path || name !== 'read') continue;
-
-      numbering.chars += (text.match(/^\s*\d+ \| /gm) ?? []).join('').length;
-
-      const range = rangeOf(raw);
-      const was = seen.get(path) ?? [];
-      let kind: string;
-      if (was.length === 0) kind = 'первое чтение файла';
-      else if (edited.has(path)) {
-        kind = 'перечитывание после правки';
-        edited.delete(path);
-      } else if (was.some((item) => item.from === range.from && item.to === range.to && item.whole === range.whole))
-        kind = 'точный повтор';
-      else if (was.some((item) => item.whole || range.whole || (item.from <= range.to && range.from <= item.to)))
-        kind = 'перекрытие (мусор)';
-      else kind = 'продолжение файла';
-
-      add(kind, tokens);
-      if (dirty && kind !== 'первое чтение файла') {
-        afterDirty.calls += 1;
-        afterDirty.tokens += tokens;
-      }
-      dirty = false;
-      was.push(range);
-      seen.set(path, was);
+      continue;
     }
+
+    const target = argumentsOf(raw).path;
+    const path = typeof target === 'string' ? target : undefined;
+    if (path && (name === 'edit' || name === 'file') && !isFailure(message)) {
+      edited.add(path);
+      dirty = true;
+    }
+    if (!path || name !== 'read' || isFailure(message)) continue;
+
+    numbering.chars += (text.match(/^\s*\d+ \| /gm) ?? []).join('').length;
+
+    const range = readRangeOf(raw);
+    const was = seen.get(path) ?? [];
+    let kind: string;
+    if (was.length === 0) kind = 'первое чтение файла';
+    else if (edited.has(path)) {
+      kind = 'перечитывание после правки';
+      edited.delete(path);
+    } else if (was.some((item) => item.from === range.from && item.to === range.to && item.whole === range.whole))
+      kind = 'точный повтор';
+    else if (was.some((item) => item.whole || range.whole || (item.from <= range.to && range.from <= item.to)))
+      kind = 'перекрытие запросов';
+    else kind = 'продолжение файла';
+
+    add(kind, tokens);
+    if (dirty && kind !== 'первое чтение файла') {
+      afterDirty.calls += 1;
+      afterDirty.tokens += tokens;
+    }
+    dirty = false;
+    was.push(range);
+    seen.set(path, was);
   }
 }
 
@@ -193,7 +164,7 @@ for (const [kind, row] of [...kinds].sort((a, b) => b[1].tokens - a[1].tokens)) 
 }
 console.log(
   `\nПовтор сразу после terminal/правки: ${afterDirty.tokens} ток. (${afterDirty.calls} выз.) — ` +
-    'это и снимают штампы версий',
+    'эвристика по запросам: фактическое изменение файла здесь неизвестно',
 );
 console.log(
   `\nШелл-чтения в terminal: ${shell.calls} выз. ${shell.tokens} ток., из них с ведущим ` +

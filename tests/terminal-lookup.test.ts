@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runTool, type SandboxRunner, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
+import { rememberRead, type ReadRange } from '../src/shared/read-coverage';
 
 /**
  * Чтение через шелл — 43% вызовов `terminal` в переписи (TASKS.md, п.43).
@@ -176,6 +177,19 @@ describe('всё остальное по-прежнему идёт в шелл',
 });
 
 describe('читалка поверх уже прочитанного', () => {
+  it('не прячет изменившийся файл за старым покрытием', async () => {
+    const box = sandbox();
+    const coveredReads = new Map<string, ReadRange[]>();
+    const ctx = context(box, coveredReads);
+    const args = JSON.stringify({ action: 'run', command: 'cat src/app.ts' });
+    const first = await runTool(ctx, 'terminal', args);
+    rememberRead(coveredReads, first.read!);
+    coveredReads.get(first.read!.path)![0]!.suspect = true;
+    await fs.writeFile(first.read!.path, 'changed file\n');
+    const second = await runTool(ctx, 'terminal', args);
+    expect(second.detail).toContain('changed file');
+    expect(second.summary).not.toContain('уже прочитано');
+  });
   it('повторный cat того же файла — строка, а не вторая копия', async () => {
     const box = sandbox();
     const coveredReads = new Map<string, Array<{ from: number; to: number }>>();

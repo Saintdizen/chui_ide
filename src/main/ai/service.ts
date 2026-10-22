@@ -39,12 +39,19 @@ import {
 } from '../../shared/providers';
 import type { ModelInfo } from '../../shared/model-info';
 import type { AccountBalance } from '../../shared/balance';
-import { AGENT_TOOLS, toOpenAiTools, type AgentToolSpec, type ExposedToolSpec } from '../../shared/tools';
+import {
+  AGENT_TOOLS,
+  parseToolArguments,
+  toOpenAiTools,
+  type AgentToolSpec,
+  type ExposedToolSpec,
+} from '../../shared/tools';
 import {
   ALWAYS_AVAILABLE,
   PLAN_MODE_TOOLS,
   SUBAGENT_TOOLS,
   isReadOnlyCall,
+  isCacheableReadCall,
   isWriteCall,
 } from '../../shared/tool-policy';
 import { canonicalCall } from '../../shared/tool-aliases';
@@ -1903,7 +1910,15 @@ export class AiService {
         // Только ли читает вызов — вопрос не имени, а имени с действием: у слитых
         // инструментов (`terminal`) чтение вывода и запуск команды — один инструмент.
         const readOnly = isReadOnlyCall(call.name, call.arguments);
-        const repeated = readOnly ? executed.get(key) : undefined;
+        const cacheable = isCacheableReadCall(call.name, call.arguments);
+        const repeated = cacheable ? executed.get(key) : undefined;
+        // Версию сверяем и перед частичным сужением: иначе изменившееся начало
+        // файла можно ошибочно выкинуть из нового чтения.
+        const readArgs = call.name === 'read' ? parseToolArguments(call.arguments) : undefined;
+        const readPath = readArgs?.ok ? readArgs.value.path : undefined;
+        if (typeof readPath === 'string' && needsConfirm(coveredReads, readPath)) {
+          confirmFile(coveredReads, readPath, await this.versionOf(readPath));
+        }
         // Повтор чтения уже прочитанного диапазона: текст есть выше, не дублируем.
         // После непрозрачного вызова (`terminal`) куски помечены сомнительными: сверяем
         // версию файла с диском — не менялся — «уже прочитано» держится, менялся — забыт.
@@ -1951,8 +1966,9 @@ export class AiService {
           // Пачечное чтение (`paths`) тоже покрывает файлы: без этого каждое имя в
           // нём потом читалось бы заново целиком (3 вызова за мерило — 12 тыс. ток.).
           for (const read of outcome.reads ?? []) rememberRead(coveredReads, read);
-          if (readOnly) executed.set(key, outcome);
-          else {
+          if (readOnly) {
+            if (cacheable) executed.set(key, outcome);
+          } else {
             // Изменяющий вызов: прочитанное об изменившихся файлах устарело. Раньше
             // здесь чистилось ВСЁ, и одна правка в одном файле заставляла модель
             // перечитывать всё остальное, что она уже держала в контексте, — лишние
@@ -2390,7 +2406,7 @@ export class AiService {
           const call = mapped.renamed ? { ...raw, name: mapped.name, arguments: mapped.arguments } : raw;
           const key = `${call.name}:${call.arguments}`;
           let content: string;
-          if (executed.has(key)) {
+          if (isCacheableReadCall(call.name, call.arguments) && executed.has(key)) {
             // Результат уже есть выше — не повторяем дорогое чтение.
             content = `Повтор вызова «${call.name}» пропущен: такой вызов уже был, его результат выше.`;
           } else {
@@ -2398,7 +2414,7 @@ export class AiService {
             // «идёт», но и на каком месте он стоит.
             params.agent?.note({ activity: call.name, steps, toolCalls });
             const outcome = await runTool(subContext, call.name, call.arguments);
-            executed.set(key, outcome);
+            if (isCacheableReadCall(call.name, call.arguments)) executed.set(key, outcome);
             didNewWork = true;
             const result = outcome.ok ? (outcome.detail ?? outcome.summary) : failureText(outcome);
             content = compressOutput ? compressToolOutput(result) : result;
