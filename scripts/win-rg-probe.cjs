@@ -21,9 +21,15 @@ function probe(label, command, options) {
     try {
       const child = spawn(command, ['--json'], { ...options, windowsHide: true });
       promise = new Promise((res) => {
-        child.stdout.on('data', (d) => { out += d.toString(); });
-        child.stderr.on('data', (d) => { err += d.toString(); });
-        child.on('error', (e) => { err += 'ERR ' + String(e); });
+        child.stdout.on('data', (d) => {
+          out += d.toString();
+        });
+        child.stderr.on('data', (d) => {
+          err += d.toString();
+        });
+        child.on('error', (e) => {
+          err += 'ERR ' + String(e);
+        });
         child.on('close', (code) => res(code));
       });
       promise.then((code) => {
@@ -40,7 +46,7 @@ function probe(label, command, options) {
 (async () => {
   console.log('каталог:', readdirSync(dir));
   await probe('rg без опций', 'rg', {});
-  await probe('cmd /c rg', 'cmd', { shell: false });  // просто чтобы увидеть окружение
+  await probe('cmd /c rg', 'cmd', { shell: false }); // просто чтобы увидеть окружение
   await probe('rg.cmd явно', join(dir, 'rg.cmd'), {});
   await probe('rg с shell:true', 'rg', { shell: true });
 })();
