@@ -140,3 +140,53 @@ describe('правила исключения действуют', () => {
     expect(files).toEqual(['черновики/нужен.ts']);
   });
 });
+
+/**
+ * Гонка «закрыли окно между правкой и отправкой». Наблюдатель асинхронный:
+ * файл успевает измениться, а проект уже закрыт. Уведомление в этом случае
+ * уходить некуда и не должно уходить — иначе окно получит событие о проекте,
+ * которого у него больше нет.
+ */
+describe('закрытие во время правки', () => {
+  it('правка после close не доходит до подписчика', async () => {
+    const dir = await makeDir();
+    const events: Array<{ topic: string; payload: unknown }> = [];
+    const ws = service(events);
+    await ws.open(dir);
+
+    // Правка мимо сервиса ставит отложенное уведомление (окно схлопывания).
+    await fs.writeFile(path.join(dir, 'a.ts'), 'x\n', 'utf8');
+    // Закрываем ДО того, как таймер схлопывания успел выстрелить.
+    ws.close();
+    const before = events.length;
+
+    // Ждём заметно дольше окна схлопывания: если бы уведомление осталось
+    // в таймере, оно пришло бы сюда.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(events.length).toBe(before);
+    expect(events.some((event) => String(event.topic).includes('workspace'))).toBe(false);
+  });
+
+  it('сторож отложенного уведомления: пустой проект не шлёт событие', async () => {
+    const dir = await makeDir();
+    const events: Array<{ topic: string; payload: unknown }> = [];
+    const ws = service(events);
+    await ws.open(dir);
+
+    // Правка ставит отложенное уведомление и НЕ глушит его: таймер ещё жив.
+    await fs.writeFile(path.join(dir, 'a.ts'), 'x\n', 'utf8');
+    // Активного корня больше нет, а таймер остался — ровно та гонка, от которой
+    // сторожит проверка `if (!this.active)`. Достаёмся до неё как есть:
+    // обнуляем поле напрямую в обход `close()`, который гасит таймер.
+    const raw = ws as unknown as { active: string | null; watchTimer: unknown };
+    expect(raw.watchTimer).not.toBeNull();
+    raw.active = null;
+    const before = events.length;
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Событие без корня уходить некуда — подписчик его не получает.
+    expect(events.length).toBe(before);
+  });
+});

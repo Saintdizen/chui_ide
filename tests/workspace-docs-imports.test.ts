@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { WorkspaceService } from '../src/main/workspace/workspace';
+import {
+  MAX_DOC_BYTES,
+  MAX_FILE_BYTES,
+  WorkspaceService,
+} from '../src/main/workspace/workspace';
 
 /**
  * Поиск по документации и перезапись импортов после переименования.
@@ -197,5 +201,71 @@ describe('updateImports', () => {
 
     await ws.updateImports(path.join(root, 'src/util.ts'), path.join(root, 'lib/util.ts'));
     expect(saved).toEqual(['src/app.ts']);
+  });
+});
+
+/**
+ * Потолки документации и переписывания импортов. Оба гейта экономят память
+ * на «случайно огромном» файле; важнее всего, что при превышении сервис молча
+ * не ест гигабайт, но и не падает.
+ */
+describe('searchDocs: потолки', () => {
+  it('документ больше потолка пропускается, соседи индексируются', async () => {
+    const dir = await makeDir();
+    const big = path.join(dir, 'ОГРОМНЫЙ.md');
+    await fs.writeFile(big, '', 'utf8');
+    await fs.truncate(big, MAX_DOC_BYTES + 1);
+    await fs.writeFile(path.join(dir, 'README.md'), '# Установка\n\nкак установить проект\n', 'utf8');
+    const ws = service();
+    await ws.open(dir);
+
+    const result = await ws.searchDocs({ query: 'установить' });
+
+    // Огромный файл не попал в индекс вовсе — иначе он заслонил бы README.
+    expect(result.files).toBe(1);
+    expect(result.hits.length).toBeGreaterThan(0);
+    for (const hit of result.hits) expect(hit.path).toContain('README.md');
+  });
+
+  it('документ ровно в потолок индексируется', async () => {
+    const dir = await makeDir();
+    const body = '# Установка\n\nкак установить\n';
+    const doc = path.join(dir, 'README.md');
+    await fs.writeFile(doc, body, 'utf8');
+    await fs.truncate(doc, MAX_DOC_BYTES);
+    const ws = service();
+    await ws.open(dir);
+
+    const result = await ws.searchDocs({ query: 'установить' });
+
+    // Граница включающая: ровно потолок — ещё читаем.
+    expect(result.files).toBe(1);
+    expect(result.hits.length).toBeGreaterThan(0);
+  });
+});
+
+describe('updateImports: потолки', () => {
+  it('файл больше потолка не переписывается и не ломает остальные', async () => {
+    const dir = await makeDir();
+    await fs.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'src', 'old.ts'), 'export const a = 1;\n', 'utf8');
+
+    const big = path.join(dir, 'src', 'big.ts');
+    await fs.writeFile(big, `import { a } from './old';\n`, 'utf8');
+    await fs.truncate(big, MAX_FILE_BYTES + 1);
+
+    const small = path.join(dir, 'src', 'small.ts');
+    await fs.writeFile(small, `import { a } from './old';\n`, 'utf8');
+    const ws = service();
+    await ws.open(dir);
+
+    const result = await ws.updateImports(path.join(dir, 'src', 'old.ts'), path.join(dir, 'src', 'new.ts'));
+
+    // Крупный файл пропущен: его содержимое не читали и не переписывали.
+    // Пути отдаются абсолютными — сверяем хвост, а не весь путь.
+    expect(result.files).toHaveLength(1);
+    expect(result.files[0].endsWith('/src/small.ts')).toBe(true);
+    expect(await fs.readFile(big, 'utf8')).toContain(`from './old'`);
+    expect(await fs.readFile(small, 'utf8')).toContain(`from './new'`);
   });
 });

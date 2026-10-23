@@ -58,9 +58,9 @@ const IGNORED_DIRS = new Set(['node_modules', '.git', 'dist', 'out', '.cache', '
  * нужды в обход не тащим.
  */
 const IGNORE_FILES = ['.gitignore', '.ai_ignore'] as const;
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
+export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 /** Потолок документации: README в сотни килобайт — уже не документ, а свалка. */
-const MAX_DOC_BYTES = 512 * 1024;
+export const MAX_DOC_BYTES = 512 * 1024;
 /** Сколько мест одного файла отдаём в предпросмотр (полное число — в `count`). */
 const MAX_SEARCH_RESULTS = 2000;
 /** Потолок контекста вокруг совпадения: `-C 5` уже показывает блок целиком. */
