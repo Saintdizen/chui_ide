@@ -135,3 +135,92 @@ describe('compareFolders', () => {
     await expect(ws.compareFolders(outside, outside)).rejects.toThrow(/вне рабочей папки/i);
   });
 });
+
+/**
+ * Потолки обхода. Проверяются на «дешёвых» значениях: настоящий предел —
+ * двадцать тысяч файлов, и тест с таким деревом мерил бы диск, а не поведение.
+ * Потолок говорит главное: результат ЧЕСТНО помечен `truncated`, а не выглядит
+ * полным списком, которого на самом деле нет.
+ */
+/** Пара папок с урезанными потолками: настоящие (20 000/1 000) мерили бы диск. */
+async function limitedPair(limits: { scanFiles?: number; compareReads?: number } = {}) {
+  const root = await makeDir();
+  const ws = new WorkspaceService(() => undefined, limits);
+  services.push(ws);
+  await ws.open(root);
+  const left = path.join(root, 'left');
+  const right = path.join(root, 'right');
+  await fs.mkdir(left, { recursive: true });
+  await fs.mkdir(right, { recursive: true });
+  return { ws, left, right };
+}
+
+describe('потолки сравнения', () => {
+  it('обход упёрся в потолок — результат помечен truncated', async () => {
+    const { ws, left, right } = await limitedPair({ scanFiles: 2 });
+    for (const name of ['a.txt', 'b.txt', 'c.txt', 'd.txt']) await write(left, name, 'x\n');
+
+    const result = await ws.compareFolders(left, right);
+
+    expect(result.truncated).toBe(true);
+    // Не больше потолка: обход остановился, а не прочитал всё и соврал флагом.
+    expect(result.files.length).toBeLessThanOrEqual(2);
+  });
+
+  it('в потолок уложились — результат полный', async () => {
+    const { ws, left, right } = await limitedPair({ scanFiles: 100 });
+    await write(left, 'a.txt', 'x\n');
+    await write(left, 'b.txt', 'y\n');
+
+    const result = await ws.compareFolders(left, right);
+
+    expect(result.truncated).toBe(false);
+    expect(result.files.map((entry) => entry.path)).toEqual(['a.txt', 'b.txt']);
+  });
+
+  it('потолок сверки содержимого: остальные файлы сверяются по размеру', async () => {
+    const { ws, left, right } = await limitedPair({ compareReads: 1 });
+    // Одинаковый размер, РАЗНОЕ содержимое — различие видно только по байтам.
+    await write(left, 'a.txt', 'ab\n');
+    await write(right, 'a.txt', 'cd\n');
+    await write(left, 'b.txt', 'ef\n');
+    await write(right, 'b.txt', 'gh\n');
+
+    const result = await ws.compareFolders(left, right);
+
+    // Сверить по байтам успели только один файл, второй сверен по размеру
+    // и потому не показан различием — но результат об этом честно говорит.
+    expect(result.truncated).toBe(true);
+    expect(result.files.map((entry) => entry.path)).toEqual(['a.txt']);
+    expect(result.identical).toBe(1);
+  });
+});
+
+describe('обход вложенных папок', () => {
+  it('вложенные папки обходятся, а служебные — пропускаются', async () => {
+    const { ws, left, right } = await limitedPair();
+    await write(left, 'top.ts', 'x\n');
+    await write(left, 'src/deep/inner.ts', 'x\n');
+    // Мусор сборки не должен попадать в сравнение.
+    await write(left, 'node_modules/pkg/index.js', 'x\n');
+    await write(left, '.git/config', 'x\n');
+
+    const result = await ws.compareFolders(left, right);
+
+    expect(result.files.map((entry) => entry.path)).toEqual([
+      'src/deep/inner.ts',
+      'top.ts',
+    ]);
+  });
+
+  it('потолок дотягивается до вложенной папки', async () => {
+    const { ws, left, right } = await limitedPair({ scanFiles: 1 });
+    await write(left, 'a.ts', 'x\n');
+    await write(left, 'sub/b.ts', 'x\n');
+
+    const result = await ws.compareFolders(left, right);
+
+    expect(result.truncated).toBe(true);
+    expect(result.files).toHaveLength(1);
+  });
+});

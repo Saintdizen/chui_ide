@@ -79,6 +79,14 @@ const WATCH_RETRY_MS = 3_000;
 /** Сколько раз подряд пробуем поднять наблюдение, прежде чем оставить попытки. */
 const WATCH_RETRY_LIMIT = 5;
 
+/** Что подставляет `WorkspaceService` вместо потолков: тестам нужен дешёвый обход. */
+export interface WorkspaceLimits {
+  /** Потолок файлов одного обхода (`listFiles`, `search`, `compareFolders`). */
+  scanFiles?: number;
+  /** Потолок файлов, сверяемых по содержимому при сравнении папок. */
+  compareReads?: number;
+}
+
 /**
  * Работа с рабочей директорией. Renderer никогда не трогает ФС напрямую:
  * он видит только этот API, поэтому позже сюда можно подставить виртуальную,
@@ -158,7 +166,21 @@ export class WorkspaceService {
    */
   private readOnlyDirs: string[] = [];
 
-  constructor(private readonly onChange: (topic: string, payload: unknown) => void) {}
+  /**
+   * Потолки обхода и сравнения. Необязательны: в работе всегда значения
+   * по умолчанию (`MAX_SCAN_FILES`, `MAX_COMPARE_READS`), а задают их
+   * только тесты — иначе потолок проверялся бы двадцатью тысячами файлов.
+   */
+  private readonly scanFiles: number;
+  private readonly compareReads: number;
+
+  constructor(
+    private readonly onChange: (topic: string, payload: unknown) => void,
+    limits: WorkspaceLimits = {},
+  ) {
+    this.scanFiles = limits.scanFiles ?? MAX_SCAN_FILES;
+    this.compareReads = limits.compareReads ?? MAX_COMPARE_READS;
+  }
 
   /**
    * Разрешить чтение из каталога вне проекта (копии длинного вывода). Запись
@@ -658,10 +680,10 @@ export class WorkspaceService {
     // его распараллеливаем с ограничением, а не идём по дереву последовательно.
     const files: string[] = [];
     const collect = async (dir: string): Promise<void> => {
-      if (signal?.aborted || files.length >= MAX_SCAN_FILES) return;
+      if (signal?.aborted || files.length >= this.scanFiles) return;
       const dirents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
       for (const dirent of dirents) {
-        if (signal?.aborted || files.length >= MAX_SCAN_FILES) return;
+        if (signal?.aborted || files.length >= this.scanFiles) return;
         const full = path.join(dir, dirent.name);
         if (dirent.isDirectory()) {
           if (!IGNORED_DIRS.has(dirent.name) && !this.isIgnored(full, true)) await collect(full);
@@ -759,7 +781,7 @@ export class WorkspaceService {
 
     // Пул завершает файлы в произвольном порядке — для стабильного вывода сортируем.
     hits.sort((a, b) => (a.path === b.path ? a.line - b.line : a.path < b.path ? -1 : 1));
-    return { hits: hits.slice(0, limit), truncated: stop || files.length >= MAX_SCAN_FILES, scanned };
+    return { hits: hits.slice(0, limit), truncated: stop || files.length >= this.scanFiles, scanned };
   }
 
   /**
@@ -772,10 +794,10 @@ export class WorkspaceService {
     const files: string[] = [];
 
     const collect = async (dir: string): Promise<void> => {
-      if (files.length >= MAX_SCAN_FILES) return;
+      if (files.length >= this.scanFiles) return;
       const dirents = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
       for (const dirent of dirents) {
-        if (files.length >= MAX_SCAN_FILES) return;
+        if (files.length >= this.scanFiles) return;
         const full = path.join(dir, dirent.name);
         if (dirent.isDirectory()) {
           if (!IGNORED_DIRS.has(dirent.name) && !this.isIgnored(full, true)) await collect(full);
@@ -842,7 +864,7 @@ export class WorkspaceService {
       }
       // Размер совпал — сравниваем содержимое, но не для огромных и не сверх потолка.
       if (a.size > MAX_FILE_BYTES) continue;
-      if (reads >= MAX_COMPARE_READS) {
+      if (reads >= this.compareReads) {
         truncated = true;
         continue;
       }
@@ -867,13 +889,13 @@ export class WorkspaceService {
     const files: string[] = [];
     let truncated = false;
     const collect = async (current: string): Promise<void> => {
-      if (files.length >= MAX_SCAN_FILES) {
+      if (files.length >= this.scanFiles) {
         truncated = true;
         return;
       }
       const dirents = await fs.readdir(current, { withFileTypes: true }).catch(() => []);
       for (const dirent of dirents) {
-        if (files.length >= MAX_SCAN_FILES) {
+        if (files.length >= this.scanFiles) {
           truncated = true;
           return;
         }
