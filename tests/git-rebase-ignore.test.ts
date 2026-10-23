@@ -54,6 +54,10 @@ async function makeRepo(): Promise<string> {
   // Windows по умолчанию держит autocrlf=true: без этой строки файлы из
   // рабочей папки приходят с \r\n, и тест сравнивает их с чистым \n.
   await git(dir, ['config', 'core.autocrlf', 'false']);
+  // `eol=lf` в .gitattributes сильнее core.autocrlf: на Windows рабочая папка
+  // отдаёт CRLF даже при autocrlf=false. Правим правило только в этом репозитории.
+  await git(dir, ['config', 'core.attributesFile', path.join(dir, '.gitattributes')]);
+  await fs.writeFile(path.join(dir, '.gitattributes'), '* text=auto eol=lf\n');
   return dir;
 }
 
