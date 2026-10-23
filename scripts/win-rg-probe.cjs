@@ -43,3 +43,16 @@ child.stdout.on('data', (d) => { out += d.toString(); });
 child.stderr.on('data', (d) => { err += d.toString(); });
 child.on('error', (e) => console.log('async spawn error:', String(e)));
 child.on('close', (code) => console.log('async spawn close:', { code, out, err }));
+
+console.log('--- процессы:');
+console.log('  pid', process.pid, 'ppid', process.ppid);
+try { const { execSync } = require('node:child_process');
+  console.log(execSync('wmic process where "ProcessId=' + process.ppid + '" get CommandLine /value', { encoding: 'utf8' }).trim().slice(0, 300));
+} catch (e) { console.log('  wmic не сработал:', String(e).slice(0, 80)); }
+const { spawn: sp2 } = require('node:child_process');
+const c2 = sp2('where', ['rg'], { windowsHide: true, shell: false });
+let o2 = ''; c2.stdout.on('data', (d) => { o2 += d.toString(); });
+c2.on('close', (code) => console.log('  where rg:', code, JSON.stringify(o2)));
+const c3 = sp2('rg', ['--version'], { windowsHide: true, shell: true });
+let o3 = ''; let e3 = ''; c3.stdout.on('data', (d) => { o3 += d.toString(); }); c3.stderr.on('data', (d) => { e3 += d.toString(); });
+c3.on('close', (code) => console.log('  с shell:true:', code, JSON.stringify(o3), JSON.stringify(e3).slice(0, 120)));
