@@ -301,7 +301,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       layout.setDockVisible(saved.dockVisible);
       layout.setEditorVisible(saved.editorVisible);
     });
-  }
+  };
 
   // При открытии проекта накладываем настройки из его `.chui_ide` поверх общих.
   async function loadProjectConfig(root: string): Promise<void> {

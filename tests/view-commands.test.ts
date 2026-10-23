@@ -13,7 +13,9 @@ function setup(opts: { active?: { path: string } | null } = {}) {
   const visible = { sidebar: true, right: true, dock: true, editor: true };
   const deps = {
     layout: {
-      root: { classList: { add: (c: string) => log.push(`class+${c}`), remove: (c: string) => log.push(`class-${c}`) } },
+      root: {
+        classList: { add: (c: string) => log.push(`class+${c}`), remove: (c: string) => log.push(`class-${c}`) },
+      },
       get sidebarVisible() {
         return visible.sidebar;
       },

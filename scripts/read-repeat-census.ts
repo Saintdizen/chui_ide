@@ -61,7 +61,8 @@ const afterDirty = {
 const numbering = { chars: 0 };
 const shell = { calls: 0, tokens: 0, cd: 0, cdTokens: 0, writes: 0 };
 
-function add(key: string, tokens: number): void {  const row = kinds.get(key) ?? { calls: 0, tokens: 0 };
+function add(key: string, tokens: number): void {
+  const row = kinds.get(key) ?? { calls: 0, tokens: 0 };
   row.calls += 1;
   row.tokens += tokens;
   kinds.set(key, row);

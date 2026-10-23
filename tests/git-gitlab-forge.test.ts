@@ -146,4 +146,3 @@ describe('GitLab: ветка glab', () => {
     }
   });
 });
-

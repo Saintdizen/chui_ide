@@ -133,7 +133,9 @@ export function formatMemory(notes: readonly MemoryNote[], scope: MemoryScope = 
   // У скрытой части обязан быть адрес: без него память полна, а что в ней — не
   // видно, и `forget` бьёт по догадке. Ссылку называем только когда есть что скрывать.
   const tail =
-    hidden > 0 ? [`(ещё ${hidden}: не показаны — не вместились в бюджет промпта; весь список — mind (action: notes))`] : [];
+    hidden > 0
+      ? [`(ещё ${hidden}: не показаны — не вместились в бюджет промпта; весь список — mind (action: notes))`]
+      : [];
   return [
     'Память ' + SCOPE_LABEL[scope] + ' (заметки, которые ты оставил ранее; они переживают беседу):',
     ...shown,

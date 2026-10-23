@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { DefineCommand } from '../src/renderer/core/command-args';
-import { registerEditorModeCommands, type EditorModeDeps, type EditorModeName } from '../src/renderer/core/editor-mode-commands';
+import {
+  registerEditorModeCommands,
+  type EditorModeDeps,
+  type EditorModeName,
+} from '../src/renderer/core/editor-mode-commands';
 
 type Run = (...args: unknown[]) => unknown;
 

@@ -34,7 +34,6 @@ describe('pickEditorSurface: старшинство', () => {
   it('разметка бьёт текст у того же файла', () => {
     expect(pickEditorSurface({ ...file, markdownPreview: true })).toBe('markdown');
   });
-
 });
 
 describe('surfacesToHide', () => {

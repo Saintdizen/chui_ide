@@ -87,9 +87,7 @@ describe('скрытый редактор', () => {
     expect(wrap).toContain('grid-row: 2 / 4');
     expect(wrap).toContain('grid-template-rows: minmax(0, 1fr)');
     //Верхняя ручка без работы: тянуть некуда — высота уже вся.
-    expect(
-      rule('.app.is-editor-hidden:not(.is-dock-hidden) .dock-wrap > .splitter-dock'),
-    ).toMatch(/display:\s*none/);
+    expect(rule('.app.is-editor-hidden:not(.is-dock-hidden) .dock-wrap > .splitter-dock')).toMatch(/display:\s*none/);
   });
 
   it('центр скрыт всегда — иначе при открытом доке показался бы «скрытый» редактор', () => {

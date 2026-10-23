@@ -33,10 +33,7 @@ async function until(check: () => boolean, timeoutMs = 3000): Promise<void> {
   }
 }
 
-function changesFor(
-  events: Array<{ topic: string; payload: unknown }>,
-  root: string,
-): WorkspaceChangedPayload[] {
+function changesFor(events: Array<{ topic: string; payload: unknown }>, root: string): WorkspaceChangedPayload[] {
   return events
     .filter((event) => event.topic === 'workspace:changed')
     .map((event) => event.payload as WorkspaceChangedPayload)

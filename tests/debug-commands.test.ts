@@ -107,7 +107,12 @@ describe('registerDebugCommands', () => {
   it('параметры запуска принимаются, запоминаются и идут в запуск', async () => {
     const f = setup();
     await run(f, 'debug.startWithOptions');
-    expect(f.log).toEqual(['open-options', 'setOptions:{"program":"x.py"}', 'save-session', 'start:{"program":"x.py"}']);
+    expect(f.log).toEqual([
+      'open-options',
+      'setOptions:{"program":"x.py"}',
+      'save-session',
+      'start:{"program":"x.py"}',
+    ]);
   });
 
   it('точка останова: строка курсора активного файла, без файла — молчание', async () => {

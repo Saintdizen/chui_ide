@@ -207,10 +207,7 @@ describe('обход вложенных папок', () => {
 
     const result = await ws.compareFolders(left, right);
 
-    expect(result.files.map((entry) => entry.path)).toEqual([
-      'src/deep/inner.ts',
-      'top.ts',
-    ]);
+    expect(result.files.map((entry) => entry.path)).toEqual(['src/deep/inner.ts', 'top.ts']);
   });
 
   it('потолок дотягивается до вложенной папки', async () => {

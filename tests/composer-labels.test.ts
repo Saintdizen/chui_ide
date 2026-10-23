@@ -12,10 +12,7 @@ import { describe, expect, it } from 'vitest';
  * Сторож читает исходник: подпись — это текст, а не поведение, и проверить его
  * иначе, чем по коду, нечем (селект живёт в DOM, тесты — в node).
  */
-const COMPOSER = readFileSync(
-  resolve(process.cwd(), 'src/renderer/ui/chat-composer.ts'),
-  'utf8',
-);
+const COMPOSER = readFileSync(resolve(process.cwd(), 'src/renderer/ui/chat-composer.ts'), 'utf8');
 
 describe('подписи в панели композера', () => {
   it('кнопка прав — только значки, список — с подписями', () => {

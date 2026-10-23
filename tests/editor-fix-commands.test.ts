@@ -48,11 +48,6 @@ describe('registerEditorFixCommands', () => {
     run(f, 'editor.refactor');
     run(f, 'editor.extractSymbol');
     run(f, 'editor.inlineSymbol');
-    expect(f.log).toEqual([
-      'organize:/p/b.ts',
-      'menu:/p/b.ts',
-      'refactor:extract:/p/b.ts',
-      'refactor:inline:/p/b.ts',
-    ]);
+    expect(f.log).toEqual(['organize:/p/b.ts', 'menu:/p/b.ts', 'refactor:extract:/p/b.ts', 'refactor:inline:/p/b.ts']);
   });
 });

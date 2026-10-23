@@ -42,9 +42,7 @@ function registeredMethods(): string[] {
       .map((name) => read(`src/main/ipc/methods/${name}`)),
   ];
   return sources.flatMap((source) =>
-    [...source.matchAll(/router\.register\(\s*(['"`])([a-z]+(?:\.[A-Za-z0-9]+)+)\1/g)].map(
-      (match) => match[2]!,
-    ),
+    [...source.matchAll(/router\.register\(\s*(['"`])([a-z]+(?:\.[A-Za-z0-9]+)+)\1/g)].map((match) => match[2]!),
   );
 }
 

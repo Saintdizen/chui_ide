@@ -342,7 +342,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description:
             'search: links, titles, short snippets — the list only, links are not opened, so ' +
             'verify facts instead of stating them; fetch: a page by url — title, plain text, links on it; ' +
-            'no JS and no clicks (that is browser), so a page behind a login or a script stays empty.'
+            'no JS and no clicks (that is browser), so a page behind a login or a script stays empty.',
         },
         query: { type: 'string', description: 'search: query.' },
         limit: { type: 'number', description: 'search: how many.' },

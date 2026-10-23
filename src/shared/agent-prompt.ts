@@ -69,8 +69,7 @@ const AGENT_HINTS: readonly AgentHint[] = [
   {
     // `rename` — единственная запись мимо `edit`: без слова в промпте модель делает
     // переименование через search+edit, хотя lsp поправит все ссылки одним вызовом.
-    text:
-      'lsp — references, outline (скелет), rename символа; дальше read диапазоном, не целиком и не дважды.',
+    text: 'lsp — references, outline (скелет), rename символа; дальше read диапазоном, не целиком и не дважды.',
     needs: ['lsp', 'read'],
   },
   {

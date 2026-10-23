@@ -12,7 +12,9 @@ function setup(opts: { active?: string | null; updateImports?: boolean } = {}) {
   const deps = {
     rpc: {
       request: async (method: string, params: Record<string, unknown> = {}) => {
-        log.push(`${method}:${params.path ?? params.from ?? params.oldPath ?? ''}->${params.to ?? params.newPath ?? ''}`);
+        log.push(
+          `${method}:${params.path ?? params.from ?? params.oldPath ?? ''}->${params.to ?? params.newPath ?? ''}`,
+        );
         if (method === 'workspace.updateImports') return { files: ['/p/x.ts'] };
         if (method === 'workspace.createFile' || method === 'workspace.createDir') return { path: params.path };
         if (method === 'workspace.rename') return { path: params.to };

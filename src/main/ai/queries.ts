@@ -8,11 +8,7 @@ import type {
 } from '../../shared/api';
 import { RpcErrorCode } from '../../shared/api';
 import type { ReviewVerdict } from '../../shared/approval-review';
-import {
-  REVIEW_SYSTEM_PROMPT,
-  buildReviewPrompt,
-  parseReviewVerdict,
-} from '../../shared/approval-review';
+import { REVIEW_SYSTEM_PROMPT, buildReviewPrompt, parseReviewVerdict } from '../../shared/approval-review';
 import {
   buildTitlePrompt,
   cleanChatTitle,

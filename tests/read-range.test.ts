@@ -233,7 +233,10 @@ describe('read: бюджет считается по чистому тексту
     await fs.writeFile(long, `${lines.join('\n')}\n`, 'utf8');
 
     const withBudget = (chars: number) =>
-      ({ workspace, stepBudget: { left: chars, spent: 0, tokensLeft: chars / 3.5, tokensSpent: 0 } }) as unknown as ToolContext;
+      ({
+        workspace,
+        stepBudget: { left: chars, spent: 0, tokensLeft: chars / 3.5, tokensSpent: 0 },
+      }) as unknown as ToolContext;
     const outcome = await runTool(withBudget(4000), 'read', JSON.stringify({ path: long }));
     expect(outcome.ok).toBe(true);
     expect(outcome.read?.to).toBeGreaterThan(60);

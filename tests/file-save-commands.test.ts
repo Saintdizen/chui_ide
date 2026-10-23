@@ -14,7 +14,8 @@ function setup(opts: { active?: string | null; dirty?: string[] } = {}) {
   const deps = {
     openEditors: { active: opts.active ? doc(opts.active) : null },
     documents: {
-      get: (path: string) => (opts.dirty ?? []).concat(opts.active ? [opts.active] : []).includes(path) ? doc(path) : undefined,
+      get: (path: string) =>
+        (opts.dirty ?? []).concat(opts.active ? [opts.active] : []).includes(path) ? doc(path) : undefined,
       dirty: () => dirty,
     },
     saveDocument: async (document: { path: string }) => {

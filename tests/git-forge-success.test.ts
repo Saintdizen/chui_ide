@@ -256,7 +256,7 @@ describe('площадка: успешные пути', () => {
   it('forgeIssueClose(): номер проверен до запуска, затем список перечитан', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('printf \'[]\'');
+    const stub = await withGhScript("printf '[]'");
     try {
       await expect(serviceFor(work).forgeIssueClose(0)).rejects.toThrow(/номер/i);
       expect(await fs.readFile(stub.calls, 'utf8')).not.toContain('issue close');
@@ -315,7 +315,7 @@ describe('площадка: успешные пути', () => {
   it('forgePipelineRerun(): номер проверен до запуска', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('printf \'[]\'');
+    const stub = await withGhScript("printf '[]'");
     try {
       await expect(serviceFor(work).forgePipelineRerun(0)).rejects.toThrow(/номер/i);
       expect(await fs.readFile(stub.calls, 'utf8')).not.toContain('run rerun');
@@ -329,7 +329,7 @@ describe('площадка: успешные пути', () => {
   it('forgeNotifications(): идёт в api своего репозитория и отдаёт пустой список без падения', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('printf \'[]\'');
+    const stub = await withGhScript("printf '[]'");
     try {
       const list = await serviceFor(work).forgeNotifications();
       const calls = await fs.readFile(stub.calls, 'utf8');
@@ -343,7 +343,7 @@ describe('площадка: успешные пути', () => {
   it('forgeNotificationRead(): пустой id отвергнут до запроса', async () => {
     if (!gitAvailable || !stubSupported) return;
     const work = await makeRepo();
-    const stub = await withGhScript('printf \'[]\'');
+    const stub = await withGhScript("printf '[]'");
     try {
       await expect(serviceFor(work).forgeNotificationRead('   ')).rejects.toThrow(/уведомлен/i);
       expect(await fs.readFile(stub.calls, 'utf8')).not.toContain('PATCH');

@@ -133,7 +133,6 @@ describe('discard', () => {
   // уводит их в корзину через shell.trashItem из Electron, которого здесь нет.
   // Отслеживаемый файл идёт другой дорогой — `git restore` — и проверен выше.
 
-
   it('незнакомый путь просто игнорируется, а не бросает ошибку', async () => {
     if (!gitAvailable) return;
     const dir = await makeRepo();

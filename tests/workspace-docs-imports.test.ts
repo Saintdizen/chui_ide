@@ -2,11 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  MAX_DOC_BYTES,
-  MAX_FILE_BYTES,
-  WorkspaceService,
-} from '../src/main/workspace/workspace';
+import { MAX_DOC_BYTES, MAX_FILE_BYTES, WorkspaceService } from '../src/main/workspace/workspace';
 
 /**
  * Поиск по документации и перезапись импортов после переименования.
