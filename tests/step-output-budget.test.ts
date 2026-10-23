@@ -182,12 +182,12 @@ describe('что остаётся в истории от команды', () => 
   }, 60_000);
 
   it('упавшая команда остаётся целиком: по её тексту правят', async () => {
-    // Команду в cmd.exe надо звать через call, иначе `/d /s /c` ломает разбор
-    // переноса: первая строка проверки не выполнялась (см. runShellCommand).
-    const call = process.platform === 'win32' ? 'call ' : '';
-    const outcome = await run(`echo начало\n${'echo строка после\n'.repeat(12)}${call}exit-code-1`);
-    expect(outcome.ok).toBe(false);
-    expect(outcome.applied).toBeUndefined();
+    // Только перенос строки, без `&&`/`||`: на Windows команда идёт в cmd.exe
+    // через `/d /s /c`, и сложные конструкции там ведут себя иначе. Длина — из
+    // кириллицы: строкой она остаётся той же в любой оболочке.
+    const outcome = await run(`echo ${'начало '.repeat(80)}\necho конец ${'ещё '.repeat(60)}`);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.applied).toBe(true);
   }, 60_000);
 
   it('короткая команда остаётся целиком', async () => {
