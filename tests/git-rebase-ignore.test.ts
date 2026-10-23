@@ -293,7 +293,9 @@ describe('worktreePrune и checkIgnore', () => {
       path.join(dir, 'kept.txt'),
       path.join(dir, 'build/out.js'),
     ]);
-    expect(result.map((item) => path.relative(dir, item)).sort()).toEqual(['build/out.js', 'ignored.txt']);
+    // Сервис отдаёт пути как их назвал `git` — на Windows это родной разделитель.
+    const shown = result.map((item) => path.relative(dir, item).split(path.sep).join('/')).sort();
+    expect(shown).toEqual(['build/out.js', 'ignored.txt']);
   });
 
   it('ничего не игнорируется — пустой ответ, а не ошибка (код 1 от git)', async () => {
