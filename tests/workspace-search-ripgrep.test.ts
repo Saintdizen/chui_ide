@@ -45,23 +45,17 @@ async function withRipgrep(output: string): Promise<{ args: () => Promise<string
   // Тело — на Node, а не `sh`: на Windows оболочки нет, заглушка молча не
   // запускалась, и ripgrep считался отсутствующим — весь файл краснел зря.
   const script = [
-    '#!/usr/bin/env node',
     "const fs = require('node:fs');",
     `fs.appendFileSync(${JSON.stringify(argsFile)}, process.argv.slice(2).map((a) => a + '\\n').join(''));`,
     "if (process.argv[2] === '--version') process.exit(0);",
     `process.stdout.write(${JSON.stringify(output)});`,
     '',
   ].join('\n');
-  const js = path.join(dir, 'rg-fake.js');
-  await fs.writeFile(js, script, 'utf8');
-  // Windows не запускает файл без известного расширения (`spawn UNKNOWN`) —
-  // под `rg` кладём `.cmd`-обёртку, зовущую node. На остальных — shebang и права.
-  if (process.platform === 'win32') {
-    await fs.writeFile(path.join(dir, 'rg.cmd'), `@echo off\r\nnode "${js}" %*\r\n`, 'utf8');
-  } else {
-    await fs.rename(js, path.join(dir, 'rg'));
-    await fs.chmod(path.join(dir, 'rg'), 0o755);
-  }
+  // Windows: только `.exe` — ни `rg` без расширения, ни `rg.cmd` спавн без оболочки
+  // не найдёт (ENOENT). Шебанг не помешает: Node читает его сам.
+  const file = path.join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg');
+  await fs.writeFile(file, `#!/usr/bin/env node\n${script}\n`, 'utf8');
+  if (process.platform !== 'win32') await fs.chmod(file, 0o755);
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   return {

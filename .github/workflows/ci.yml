@@ -62,9 +62,6 @@ jobs:
       - name: Установить зависимости
         run: npm ci
 
-      - name: ВРЕМЕННО — что видит Windows в каталоге заглушки
-        run: node scripts/win-rg-probe.cjs
-
       - name: Проверить код
         run: npm run check
 

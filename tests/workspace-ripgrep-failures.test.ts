@@ -26,22 +26,15 @@ afterEach(async () => {
  *
  * На POSIX обычный файл с шебангом запускается только через execvp, а спавн
  * без дисплея идёт в оболочке через PATH — так и происходит в бою. На Windows
- * исполняется `rg.exe`: имя с расширением — единственное, что найдёт `where`.
+ * без оболочки — только `.exe`: ни `rg` без расширения, ни `rg.cmd` спавн не найдёт
+ * (ENOENT даже с `PATHEXT`). Шебанг для этого не нужен: Node читает его сам.
  */
 async function withFakeRg(body: string): Promise<void> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-fail-'));
   roots.push(dir);
-  // Windows: node не запускает `.exe`-файл с текстом — пишем `.cmd`-обёртку,
-  // которая зовёт node. На остальных системах — скрипт с shebang и правами.
-  if (process.platform === 'win32') {
-    const js = path.join(dir, 'rg-fake.js');
-    await fs.writeFile(js, body, 'utf8');
-    await fs.writeFile(path.join(dir, 'rg.cmd'), `@echo off\r\nnode "${js}" %*\r\n`, 'utf8');
-  } else {
-    const file = path.join(dir, 'rg');
-    await fs.writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
-    await fs.chmod(file, 0o755);
-  }
+  const file = path.join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg');
+  await fs.writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
+  if (process.platform !== 'win32') await fs.chmod(file, 0o755);
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   // Возврат PATH — через afterEach неудобно: сохраняем в замыкании хука.
