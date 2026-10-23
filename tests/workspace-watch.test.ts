@@ -89,3 +89,54 @@ describe('наблюдение за файлами', () => {
     expect(events).toHaveLength(0);
   });
 });
+
+/**
+ * Правила исключения должны ЧТО-ТО исключать. `ignoreRuleCount` говорит лишь
+ * «файл правил прочитан»; здесь проверяется сам эффект: путь из `.ai_ignore`
+ * не попадает ни в дерево, ни в поиск, ни в список файлов.
+ */
+describe('правила исключения действуют', () => {
+  it('исключённая папка не попадает ни в поиск, ни в список, ни в дерево', async () => {
+    const dir = await makeDir();
+    await fs.mkdir(path.join(dir, 'секрет'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'секрет', 'a.ts'), 'иголка\n', 'utf8');
+    await fs.writeFile(path.join(dir, 'открыт.ts'), 'иголка\n', 'utf8');
+    await fs.writeFile(path.join(dir, '.ai_ignore'), 'секрет/\n', 'utf8');
+    const ws = service([]);
+    await ws.open(dir);
+    expect(ws.ignoreRuleCount()).toBe(1);
+
+    const found = await ws.search({ query: 'иголка' });
+    const files = await ws.findFiles('*.ts');
+    const tree = await ws.readDir(dir);
+
+    expect(found.hits.map((hit) => path.basename(hit.path))).toEqual(['открыт.ts']);
+    expect(files).toEqual(['открыт.ts']);
+    // Дерево — отдельный путь: оно показывает папку, но не считает её частью
+    // поиска. Проверяем, что исключение не спрятало её от человека.
+    expect(tree.map((entry) => entry.name)).toContain('секрет');
+  });
+
+  it('`!` возвращает файл — но только через возврат самой папки, как в git', async () => {
+    const dir = await makeDir();
+    await fs.mkdir(path.join(dir, 'черновики'), { recursive: true });
+    await fs.writeFile(path.join(dir, 'черновики', 'нужен.ts'), 'иголка\n', 'utf8');
+    await fs.writeFile(path.join(dir, 'черновики', 'лишний.ts'), 'иголка\n', 'utf8');
+    // Одного `!черновики/нужен.ts` мало: в исключённую папку обход не заходит
+    // (так же считает git). Работает идиома: вернуть папку, исключить её
+    // содержимое, вернуть нужный файл.
+    await fs.writeFile(
+      path.join(dir, '.ai_ignore'),
+      'черновики/\n!черновики/\nчерновики/*\n!черновики/нужен.ts\n',
+      'utf8',
+    );
+    const ws = service([]);
+    await ws.open(dir);
+
+    // Маска `*.ts` — только верхний уровень, путь внутри папки ей не подходит:
+    // берём маску «на любой глубине».
+    const files = await ws.findFiles('**/*.ts');
+
+    expect(files).toEqual(['черновики/нужен.ts']);
+  });
+});

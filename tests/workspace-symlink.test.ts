@@ -77,3 +77,42 @@ describe('симлинки за пределы проекта', () => {
     expect(content.text).toContain('const a = 1;');
   });
 });
+
+/**
+ * Дерево показывает ссылку с её целью. Живая ссылка — куда ведёт и папка ли
+ * это; битая — что цель не найдена, чтобы дерево не пыталось её раскрыть.
+ */
+describe('ссылки в дереве', () => {
+  it('живая ссылка отдаёт цель и её вид', async () => {
+    const root = await makeDir();
+    await fs.mkdir(path.join(root, 'src'));
+    await fs.symlink(path.join(root, 'src'), path.join(root, 'ссылка'), 'dir');
+
+    const ws = service();
+    await ws.open(root);
+    const entries = await ws.readDir(root);
+    const link = entries.find((entry) => entry.name === 'ссылка');
+
+    expect(link?.kind).toBe('symlink');
+    expect(link?.symlink).toEqual({
+      target: await fs.realpath(path.join(root, 'src')),
+      kind: 'directory',
+      broken: false,
+    });
+  });
+
+  it('битая ссылка видна, помечена и не роняет дерево', async () => {
+    const root = await makeDir();
+    await fs.symlink(path.join(root, 'нет-такого'), path.join(root, 'битая'), 'dir');
+
+    const ws = service();
+    await ws.open(root);
+    const entries = await ws.readDir(root);
+    const link = entries.find((entry) => entry.name === 'битая');
+
+    // Ссылка остаётся в списке: спрятать её — соврать, что файла нет вовсе.
+    expect(link?.kind).toBe('symlink');
+    expect(link?.symlink?.broken).toBe(true);
+    expect(link?.symlink?.target).toBe(path.join(root, 'нет-такого'));
+  });
+});
