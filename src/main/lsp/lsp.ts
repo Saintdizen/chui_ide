@@ -1178,16 +1178,20 @@ export class LspService {
    */
   async outline(path: string, languageId: string, text: string): Promise<FileSymbol[] | null> {
     const runtime = await this.runtimeForDocument(path, languageId);
-    // `null` — сервера нет или он этого не умеет. Пустой список — другое: сервер
-    // ответил, объявлений в файле просто нет. Разница видна агенту в тексте.
+    // `null` — сервера нет, он этого не умеет или не ответил. Пустой список — другое:
+    // сервер ответил, объявлений в файле просто нет. Разница видна агенту в тексте.
     if (!runtime?.capabilities.documentSymbolProvider) return null;
 
     return this.withDocument(runtime, path, languageId, text, (uri) =>
       runtime.connection
         .request('textDocument/documentSymbol', { textDocument: { uri } })
         .then(toFileSymbols)
-        // сервер не ответил — это не повод ломать агентный шаг
-        .catch(() => [] as FileSymbol[]),
+        // Сервер не ответил — отдаём `null`, а НЕ пустой список. Разница
+        // смысловая: `[]` значит «сервер посмотрел и объявлений нет» (пустой файл,
+        // не тот язык), а отказ — «я не могу сказать». Раньше оба случая
+        // сваливались в `[]`, и агент читал «объявлений нет» там, где сервер упал
+        // или не поднял проект. Шаг из-за этого не ломаем — ответ готовит вызывающий.
+        .catch(() => null as FileSymbol[] | null),
     );
   }
 
@@ -1228,7 +1232,9 @@ export class LspService {
           { partial: true },
         )
         .then((raw) => toLocations(raw, fileURLToPath))
-        .catch(() => [] as SymbolLocation[]),
+        // Как у скелета: не ответил — `null`, а не пусто. `[]` значило бы «искал,
+        // не нашёл», и агент сделал бы из этого вывод об устаревании символа.
+        .catch(() => null as SymbolLocation[] | null),
     );
   }
 
@@ -1253,7 +1259,9 @@ export class LspService {
           },
         })
         .then((raw) => toLocations(raw, fileURLToPath))
-        .catch(() => [] as SymbolLocation[]),
+        // Не ответил — `null`, не пусто: «определение не найдено» и «спросить негде»
+        // — разные ответы, и второй не должен притворяться первым.
+        .catch(() => null as SymbolLocation[] | null),
     );
   }
 
