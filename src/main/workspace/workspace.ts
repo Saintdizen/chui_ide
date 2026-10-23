@@ -610,6 +610,8 @@ export class WorkspaceService {
     const stat = await fs.stat(scope).catch(() => null);
     const cwd = stat?.isFile() ? path.dirname(scope) : scope;
     const target = stat?.isFile() ? path.basename(scope) : '.';
+    // Маска без слэша у ripgrep тоже имя файла на верхнем уровне области, а не на
+    // любой глубине, поэтому переписывать её в `**/` не нужно.
     const args = ripgrepArgs({ ...options, path: target }, [...IGNORED_DIRS], limit, context);
 
     try {
@@ -669,7 +671,11 @@ export class WorkspaceService {
         if (this.isIgnored(full, false)) continue;
         // Маска меряется от области поиска, а не от корня проекта: с `path=src`
         // маска `*.ts` означает «файлы прямо в src», а не «в src на любой глубине».
-        if (globMatcher && !globMatcher.test(path.relative(scope, full))) continue;
+        // Маска без слэша — имена файлов на верхнем уровне области (`*.ts`), со
+        // слэшем — путь от области (`src/*.ts`). «Любая глубина» — только через
+        // `**`: иначе запись `src/*.ts` при области `src` молча не находила бы
+        // ничего, а с `glob: "a.ts"` не находился бы файл даже в своём каталоге.
+        if (globMatcher && !globRelativeTest(globMatcher, scope, full)) continue;
         files.push(full);
       }
     };
@@ -678,7 +684,7 @@ export class WorkspaceService {
     // проверяется по имени файла — `glob` тут означает «тот самый файл?».
     const scopeStat = await fs.stat(scope).catch(() => null);
     if (scopeStat?.isFile()) {
-      if (!globMatcher || globMatcher.test(path.basename(scope))) files.push(scope);
+      if (!globMatcher || globMatcher.test(path.posix.basename(scope.split(path.sep).join('/')))) files.push(scope);
     } else {
       await collect(scope);
     }
@@ -1268,6 +1274,32 @@ export class WorkspaceService {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Путь файла в виде, в каком его ждёт маска.
+ *
+ * Маска без слэша (`*.ts`, `a.ts`) — про имя в верхнем уровне области: путь
+ * от области, когда файл лежит прямо в ней, иначе голое имя. Без этого
+ * `glob: "a.ts"` не находил бы файл в своём же каталоге, а совпадал бы с ним
+ * только на самом верху проекта.
+ *
+ * Маска со слэшем (`src/*.ts`) — уже путь от области, её отдаём как есть.
+ * «На любой глубине» — только через `**`: иначе `src/*.ts` при области `src`
+ * молча не находил бы ничего.
+ */
+/**
+ * Совпадает ли файл с маской в области поиска.
+ *
+ * `*.ts` без слэша — имена файлов на верхнем уровне области, а не на любой
+ * глубине: так обещано в описании `list` (`*` — один сегмент). Но файл,
+ * ради которого сузили область (`search({path: 'src/a.ts', glob: 'a.ts'})`),
+ * обязан проходить собственную маску — область тут означает «файл», а не «каталог».
+ */
+function globRelativeTest(matcher: RegExp, scope: string, full: string): boolean {
+  const relative = path.relative(scope, full).split(path.sep).join('/');
+  matcher.lastIndex = 0;
+  return matcher.test(relative);
 }
 
 /**
