@@ -2027,11 +2027,14 @@ export class GitService {
       repoRoot,
       relative.map((item) => item.text),
     );
-    return output
-      .split('\u0000')
-      .map((line) => line.trim())
-      .map((line) => known.get(line))
-      .filter((item): item is string => typeof item === 'string');
+    return (
+      output
+        .split('\u0000')
+        // На Windows git отвечает родным разделителем — сверяем в прямых слэшах.
+        .map((line) => line.trim().split('\\').join('/'))
+        .map((line) => known.get(line))
+        .filter((item): item is string => typeof item === 'string')
+    );
   }
 
   /** Сам вызов `git check-ignore`: пути на stdin, ответ NUL-разделённый. */

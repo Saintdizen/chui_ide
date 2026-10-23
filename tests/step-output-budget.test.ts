@@ -182,10 +182,12 @@ describe('что остаётся в истории от команды', () => 
   }, 60_000);
 
   it('упавшая команда остаётся целиком: по её тексту правят', async () => {
+    // Оболочка разная по системам: на Windows — cmd.exe, его встроенное условие
+    // `(exit /b 1)`, на остальных — `exit 1`. Через `&&` в POSIX-оболочке проверка
+    // ложная не стала бы последней командой и код вышел бы нулевым.
+    const fail = process.platform === 'win32' ? '(exit /b 1)' : 'exit 1';
     // Команда длинная и с переносом — тест после падения не стал бы коротким.
-    // Условие ложное в обеих оболочках: `exit 1` в sh, `exit /b 1` в cmd —
-    // встроенное слово вроде `false` на Windows не команда вовсе.
-    const outcome = await run('echo начало\n' + 'rem строка после\n'.repeat(12) + 'exit 1');
+    const outcome = await run(`echo начало\n${'rem строка после\n'.repeat(12)}${fail}`);
     expect(outcome.ok).toBe(false);
     expect(outcome.applied).toBeUndefined();
   }, 60_000);
