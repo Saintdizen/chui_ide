@@ -182,9 +182,10 @@ describe('что остаётся в истории от команды', () => 
   }, 60_000);
 
   it('упавшая команда остаётся целиком: по её тексту правят', async () => {
-    // Команда длинная и с переносом строки — после падения тест не стал бы
-    // коротким, так что проверка «applied нет» действительно про падение.
-    const outcome = await run(`echo начало\n${'echo строка после\n'.repeat(12)}exit-code-1`);
+    // Команду в cmd.exe надо звать через call, иначе `/d /s /c` ломает разбор
+    // переноса: первая строка проверки не выполнялась (см. runShellCommand).
+    const call = process.platform === 'win32' ? 'call ' : '';
+    const outcome = await run(`echo начало\n${'echo строка после\n'.repeat(12)}${call}exit-code-1`);
     expect(outcome.ok).toBe(false);
     expect(outcome.applied).toBeUndefined();
   }, 60_000);
