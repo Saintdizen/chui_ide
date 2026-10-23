@@ -33,3 +33,13 @@ const direct = spawnSync('rg', ['--version'], { windowsHide: true, encoding: 'ut
 console.log('spawn rg --version:', { error: direct.error && String(direct.error), status: direct.status, stderr: direct.stderr });
 const search = spawnSync('rg', ['--json', '-e', 'x', '.'], { windowsHide: true, encoding: 'utf8' });
 console.log('spawn rg (поиск):', { error: search.error && String(search.error), status: search.status, stdout: search.stdout, stderr: search.stderr });
+
+// Настоящий spawn (как в runRipgrep) — асинхронный и ищет .cmd сам, если может.
+const { spawn } = require('node:child_process');
+const child = spawn('rg', ['--json', '-e', 'x', '.'], { windowsHide: true });
+let out = '';
+let err = '';
+child.stdout.on('data', (d) => { out += d.toString(); });
+child.stderr.on('data', (d) => { err += d.toString(); });
+child.on('error', (e) => console.log('async spawn error:', String(e)));
+child.on('close', (code) => console.log('async spawn close:', { code, out, err }));
