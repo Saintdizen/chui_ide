@@ -31,10 +31,17 @@ afterEach(async () => {
 async function withFakeRg(body: string): Promise<void> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-fail-'));
   roots.push(dir);
-  const file = path.join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg');
-  await fs.writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
-  // На Windows права не нужны, а `chmod` там падает: файла `rg` без `.exe` нет.
-  if (process.platform !== 'win32') await fs.chmod(file, 0o755);
+  // Windows: node не запускает `.exe`-файл с текстом — пишем `.cmd`-обёртку,
+  // которая зовёт node. На остальных системах — скрипт с shebang и правами.
+  if (process.platform === 'win32') {
+    const js = path.join(dir, 'rg-fake.js');
+    await fs.writeFile(js, body, 'utf8');
+    await fs.writeFile(path.join(dir, 'rg.cmd'), `@node "${js}" %*\r\n`, 'utf8');
+  } else {
+    const file = path.join(dir, 'rg');
+    await fs.writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
+    await fs.chmod(file, 0o755);
+  }
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   // Возврат PATH — через afterEach неудобно: сохраняем в замыкании хука.
@@ -82,7 +89,7 @@ describe('сбои rg', () => {
     const marker = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-kill-'));
     roots.push(marker);
     const died = path.join(marker, 'died.txt');
-    // Сам сигнал на Windows не ловится: там процесс просто завершается убийством._
+    // Сам сигнал на Windows не ловится: там процесс просто завершается убийством.
     const diedLiteral = JSON.stringify(died);
     await withFakeRg(
       script(
@@ -93,8 +100,10 @@ describe('сбои rg', () => {
     const controller = new AbortController();
     const pending = runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir(), controller.signal);
     setTimeout(() => controller.abort(), 150);
-    await expect(pending).rejects.toThrow('rg завершился с кодом 143: ');
+    const isWindows = process.platform === 'win32';
+    // На Windows `kill()` не шлёт SIGTERM: процесс просто завершается, код null.
+    await expect(pending).rejects.toThrow(isWindows ? 'rg завершился с кодом null: ' : 'rg завершился с кодом 143: ');
     // Обработчик TERM сработал — процесс был именно убит, а не истёк сам.
-    await expect(fs.readFile(died, 'utf8')).resolves.toContain('да');
+    if (!isWindows) await expect(fs.readFile(died, 'utf8')).resolves.toContain('да');
   });
 });
