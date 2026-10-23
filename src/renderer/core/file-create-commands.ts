@@ -2,7 +2,14 @@ import { basename } from '../ui/dom';
 import type { ToastKind, ToastOptions } from '../ui/toast';
 import type { CommandRegistry } from './commands';
 import type { DefineCommand } from './command-args';
-import { createFileUndo, createFolderUndo, prepareRename, undoRenamePlan, type CreateUndo, type RenamePlan } from './file-actions';
+import {
+  createFileUndo,
+  createFolderUndo,
+  prepareRename,
+  undoRenamePlan,
+  type CreateUndo,
+  type RenamePlan,
+} from './file-actions';
 import { renamedNotice } from './file-notices';
 import type { OpenEditors } from './open-editors';
 import type { RpcClient } from './rpc';

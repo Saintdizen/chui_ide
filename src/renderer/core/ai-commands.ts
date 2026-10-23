@@ -95,7 +95,6 @@ export function registerAiCommands(define: DefineCommand, deps: AiCommandDeps): 
     deps.toggleChat();
   });
 
-
   define({ id: 'ai.explainSelection', title: 'Объяснить выделение', category: 'AI' }, async () => {
     // revealChat сам покажет «AI выключен», но `askAboutSelection` при этом всё равно
     // сходил бы в main за ответом, который никто не увидит.

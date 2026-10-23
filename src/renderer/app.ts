@@ -8,7 +8,6 @@ import {
   type WorkspaceChangedPayload,
 } from '../shared/api';
 import { mergeDeep, type ProjectSettings } from '../shared/project-config';
-import { menuChecks } from '../shared/app-menu';
 import { aiPanelPlan } from '../shared/ai-panel';
 import { settingsPlan } from '../shared/settings-plan';
 import { lspChipFor, NO_LSP_STATUS, type LspStatus } from '../shared/lsp-status';
@@ -34,16 +33,16 @@ import { DocumentRegistry } from './editor/host/document-registry';
 import { LspFeatures } from './editor/host/lsp-features';
 import { GitModel } from './core/git-model';
 import { ReviewModel } from './core/review-model';
-import { registerGitWriteCommands } from './core/git-write-commands';
-import { registerGitViewCommands } from './core/git-view-commands';
-import { registerGitAiCommands } from './core/git-ai-commands';
-import { registerGitPanelCommands } from './core/git-panel-commands';
-import { registerGitSyncCommands } from './core/git-sync-commands';
-import { registerGitToolsCommands } from './core/git-tools-commands';
-import { registerGitHistoryCommands } from './core/git-history-commands';
+import { registerPathCommands } from './core/path-commands';
+import { registerCompareCommands } from './core/compare-commands';
+import { registerSearchCommands } from './core/search-commands';
+import { registerFormatCommands } from './core/format-commands';
+import { registerMacroCommands } from './core/macro-commands';
+import { registerSettingsCommands } from './core/settings-commands';
+import { registerLanguageCommands } from './core/language-commands';
+import { registerGitCommands, registerSymbolLists } from './core/git-registrations';
 import { createEditorFixes } from './core/editor-fixes';
 import { createGutterMenus } from './core/gutter-menus';
-import { createSymbolPickers } from './core/symbol-pickers';
 import { BookmarkModel } from './core/bookmarks';
 import { editorContextMenuPlan } from './core/editor-menu';
 import { SpellCheck } from './core/spellcheck';
@@ -66,20 +65,13 @@ import { AutoPanelLayout } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
 import { hasEntries, splitSettingsPatch } from './core/settings-patch';
-import { planCheckout, planCommitSave, type CheckoutPlan } from './core/file-actions';
 import { projectSymbolAnswer, toProjectSymbols } from './core/project-symbols';
-import {
-  DEFAULT_MACRO_TIMES,
-  checkMacroTimes,
-  macroPlayCheck,
-  macroPlayedNotice,
-  macroRecordedNotice,
-} from './core/macro-run';
 import { registerFileCreateCommands } from './core/file-create-commands';
 import { registerFileMutationCommands } from './core/file-mutation-commands';
 import { registerDebugCommands } from './core/debug-commands';
 import { registerAiCommands } from './core/ai-commands';
 import { registerViewCommands, type ZenSnapshot } from './core/view-commands';
+import { registerAppViewCommands } from './core/app-view-commands';
 import { registerEditorFixCommands } from './core/editor-fix-commands';
 import { registerEditorModeCommands, type EditorModeName } from './core/editor-mode-commands';
 import { registerFileSaveCommands } from './core/file-save-commands';
@@ -90,7 +82,6 @@ import { registerPythonCommands } from './core/python-commands';
 import { DebugController, frameForHover } from './core/debug';
 import { resolveInlineValues } from './core/inline-values';
 import { RpcClient } from './core/rpc';
-import { addressProblem } from '../shared/fs-address';
 import { resolveExplorerSettings } from '../shared/explorer-settings';
 import { createSessionControl } from './core/session-control';
 import {
@@ -104,7 +95,8 @@ import {
 } from './core/run-config';
 import type { ProjectScan } from '../shared/project-scan';
 import { detectNodeTestRunner, type NodeTestRunner } from '../shared/node-tests';
-import { formatEngine, formatToolNames, type FormatEngine } from '../shared/format';
+import { formatDocument, type FormatDeps } from './core/format-commands';
+import { createFileWrite } from './core/file-write';
 import { createInstallActions } from './core/install-actions';
 import { isNodeLanguage } from '../shared/languages';
 import { indentFoldRanges, mergeFoldRanges } from '../shared/fold-ranges';
@@ -114,13 +106,10 @@ import { languageGrammar } from './editor/highlight/lazy-registry';
 import { toWorkspaceFileEdits } from '../shared/lsp-workspace-edit';
 import { applySaveEdits } from '../shared/save-edits';
 import { applyTextEdits, fromOffset } from '../shared/edits';
-import { decideSaveAs } from '../shared/save-as';
-import { pairFromSelection } from './core/file-compare';
 import { isInsidePath, joinPath, pathAfter, separatorOf, splitPath } from '../shared/paths';
 import { ThemeService } from './core/theme-service';
 import { WindowFrame } from './core/window-frame';
 import { WorkspaceModel } from './core/workspace-model';
-import { showApplicationMenu } from './ui/app-menu';
 import { showContextMenu } from './ui/context-menu';
 import { createBreadcrumbs } from './ui/breadcrumbs';
 import { createChatPanel, type ChatView } from './ui/chat';
@@ -150,8 +139,7 @@ import { createLazyPopover } from './ui/lazy-popover';
 import { createMeaningSearch } from './ui/meaning-search';
 import { createQuickOpen } from './ui/quick-open';
 import { createSymbolPicker } from './ui/symbol-picker';
-import { isEmptyTest, suggestTestPath, truncateTestCode } from '../shared/test-generation';
-import { closePopupMenu, isPopupOpen, showPopupMenu } from './ui/popup-menu';
+import { closePopupMenu, showPopupMenu } from './ui/popup-menu';
 import { createPromptModal } from './ui/prompt-modal';
 import { createRunButton } from './ui/run-button';
 import { createSearchView } from './ui/search';
@@ -1627,7 +1615,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   /** Запуск цели: файл сохраняем, панель показываем, команду набираем в терминале. */
   async function runTarget(target: RunTarget): Promise<void> {
     if (settings.run.saveBeforeRun) {
-      for (const document of documents.dirty()) await saveDocument(document);
+      for (const document of documents.dirty()) await fileWrite.saveDocument(document);
     }
     dock.show('terminal');
     await terminalPanel.run(target.command, target.label);
@@ -2176,9 +2164,10 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   document.body.appendChild(bookmarksModal.element);
 
-  /**
-   * «Настройки папки»: вид дерева для ОДНОГО корня области. Путь приходит аргументом
-   * команды (пункт меню у строки корня) — поэтому окно и открывается на конкретной папке.
+  /*
+   * Сохранить документ на диск. Если файл изменился снаружи после нашего чтения,
+   * молча писать нельзя — перетрём чужую правку (ассистента, из терминала).
+   * Спрашиваем и перезаписываем только с согласия. `false` — человек отменил.
    */
   let rootSettingsTarget: string | null = null;
   const rootSettingsModal = createRootSettingsModal({
@@ -2215,227 +2204,49 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
   // Клик по значку закладки в поле слева снимает её: состоянием владеет модель.
   editors.onBookmarkToggle(({ path, line }) => bookmarks.remove(path, line));
-  /**
-   * Сохранить документ на диск. Если файл изменился снаружи после нашего чтения,
-   * молча писать нельзя — перетрём чужую правку (ассистента, из терминала).
-   * Спрашиваем и перезаписываем только с согласия. `false` — человек отменил.
-   */
-  const saveDocument = async (document: TextDocument): Promise<boolean> => {
-    // Файл только для чтения (большой) сохранять нечего: правок в нём быть не может.
-    if (document.readOnly) {
-      showToast('Файл открыт только для чтения — сохранять нечего', 'error');
-      return false;
-    }
-    // Правки текста при сохранении: подрезать хвосты и поставить перевод строки.
-    // Проводим через документ — тогда и на экране, и на диске одно и то же.
-    const prepared = applySaveEdits(document.value, {
-      trimTrailingWhitespace: settings.editor.trimTrailingWhitespace,
-      insertFinalNewline: settings.editor.insertFinalNewline,
-    });
-    if (prepared !== document.value) document.setText(prepared, 'programmatic');
-    // Форматирование при сохранении: правку проводит документ, поэтому на экране
-    // и на диске оказывается одно и то же.
-    if (settings.editor.formatOnSave) await formatDocument(document);
-    const result = await edits.saveDocument(document);
-    if (result === 'conflict') {
-      const { confirmed } = await rpc.request('dialog.confirm', {
-        title: 'Файл изменён на диске',
-        message: `Файл «${basename(document.path)}» изменён после того, как его открыли.`,
-        detail:
-          'На диске уже другая версия — вероятно, её записал ассистент или другой инструмент. ' +
-          'Если сохранить сейчас, правки из редактора заменят то, что там записано. Продолжить?',
-        confirmLabel: 'Перезаписать',
-      });
-      if (!confirmed) return false;
-      await edits.saveDocument(document, { force: true });
-    }
-    showToast(`Сохранено: ${basename(document.path)}`);
-    return true;
-  };
+  // Запись на диск — `core/file-write.ts`: Ctrl+S, «Сохранить как», сохранение перед
+  // git и закрытие окна. Спрашивать про расхождение с диском умеет каждый вход, а сама
+  // запись — одна.
 
   /**
-   * Сохранить несохранённые буферы перед операцией, которая читает рабочее дерево.
-   *
-   * Коммит (и исправление коммита) работает с файлами на диске, а не с экраном:
-   * без этого правки из буфера в коммит не попадали, зато вкладка оставалась с
-   * пометкой «не сохранён» — и работа человека терялась из виду.
-   *
-   * `false` — сохранить не удалось: человек отказался перезаписывать файл, который
-   * изменили снаружи, или файл открыт только для чтения. Тогда операцию не начинаем:
-   * иначе она прошла бы по устаревшему содержимому.
+   * Политика записи для автосохранения — та же, что у Ctrl+S (хвосты, перевод строки,
+   * формат): один файл не должен получать разный текст в зависимости от того, кто
+   * его записал — человек или таймер.
    */
-  const saveDirtyForGit = async (): Promise<boolean> => {
-    // План решает core/file-actions.ts: что сохранять, что нельзя (только для чтения),
-    // а также учитывает настройку. Отсутствие значения — это «сохранять».
-    const plan = planCommitSave(documents.dirty(), settings.git.saveBeforeCommit !== false);
-    if (plan.blocked.length > 0) {
-      // Файлы только для чтения сохранить нельзя, а git смотрит диск: коммит ушёл бы
-      // по устаревшему содержимому. Отказываем и называем виновников.
-      showToast(`Не сохранить (только чтение): ${plan.blocked.length}`, 'error');
-      return false;
-    }
-    for (const path of plan.save) {
-      const document = documents.get(path);
-      if (document && !(await saveDocument(document))) return false;
-    }
-    // Файлы на диске только что изменились, а снимок статуса git у нас ещё прежний:
-    // без пересчёта коммит решил бы, что правок нет (его модель помнит старый ответ).
-    await git.refresh().catch(() => undefined);
-    return true;
-  };
+  const writePolicy = () => settings.editor;
 
-  /**
-   * Сторож для действий, меняющих рабочее дерево под ногами (checkout).
-   *
-   * Отличия от saveDirtyForGit: у checkout своя настройка (иначе человек,
-   * разрешивший сохранять перед коммитом, не ждал бы того же перед ветвью), и
-   * отказ здесь не «не сохранил», а «я сохранил, а ты всё равно потеряешь».
-   *
-   * Возвращает true — можно переключаться (что надо, уже на диске).
-   */
-  const prepareCheckout = async (): Promise<boolean> => {
-    const plan: CheckoutPlan = planCheckout(documents.dirty(), settings.git.saveBeforeCheckout !== false);
-    if (plan.blocked.length > 0) {
-      // Сохранить нечего — файл только для чтения. git смотрит диск, а на экране
-      // текст, которого на диске нет: переключение молча выкинет его.
-      showToast(`Не сохранить (только чтение): ${plan.blocked.length}`, 'error');
-      return false;
-    }
-    if (plan.ask) {
-      // Сохранять запрещено настройкой: решает человек, а не догадка.
-      const answer = await rpc.request('dialog.confirm', {
-        title: 'Есть несохранённые файлы',
-        message: 'Переключение ветки идёт по диску — несохранённое в ней не участвует. Сохранить и переключиться?',
-        confirmLabel: 'Сохранить и переключиться',
-      });
-      if (!answer.confirmed) return false;
-      for (const path of documents
-        .dirty()
-        .filter((document) => !document.readOnly)
-        .map((document) => document.path)) {
-        const document = documents.get(path);
-        if (document && !(await saveDocument(document))) return false;
-      }
-    }
-    for (const path of plan.save) {
-      const document = documents.get(path);
-      if (document && !(await saveDocument(document))) return false;
-    }
-    if (plan.save.length > 0 || plan.ask) await git.refresh().catch(() => undefined);
-    return true;
-  };
-
-  /**
-   * Сохранить документ ПОД ДРУГИМ ИМЕНЕМ (Save As). Путь выбирает человек системным
-   * диалогом, поэтому в отличие от Ctrl+S запись идёт не по пути документа, а по
-   * выбранному. Прежний файл на диске остаётся как был — это копия, и терять его
-   * правкой «сохранить как» неправильно.
-   *
-   * Вкладка переезжает на новый файл: несохранённые правки уезжают вместе с ней,
-   * поэтому закрытие прежней вкладки ничего не теряет. Правки при сохранении
-   * (хвосты, перевод строки, формат) — те же, что у Ctrl+S: иначе текст на диске
-   * зависел бы от того, каким путём его сохранили.
-   */
-  const saveDocumentAs = async (document: TextDocument): Promise<boolean> => {
-    if (document.readOnly) {
-      showToast('Файл открыт только для чтения — сохранить как нельзя', 'error');
-      return false;
-    }
-    const picked = await rpc
-      .request('dialog.saveFile', { title: 'Сохранить как', defaultPath: document.path })
-      .catch(() => null);
-
-    // Что делать с выбранным путём — решает чистая функция: отмена, тот же путь
-    // (обычное сохранение) или путь вне рабочей области. Здесь остаётся запись.
-    const decision = decideSaveAs(document.path, picked?.path ?? null, workspace.roots);
-    if (decision.kind === 'cancel') return false;
-    if (decision.kind === 'same-path') return saveDocument(document);
-    if (decision.kind === 'outside') {
-      showToast(decision.message, 'error');
-      return false;
-    }
-    const target = decision.target;
-
-    const prepared = applySaveEdits(document.value, {
-      trimTrailingWhitespace: settings.editor.trimTrailingWhitespace,
-      insertFinalNewline: settings.editor.insertFinalNewline,
-    });
-    if (prepared !== document.value) document.setText(prepared, 'programmatic');
-    if (settings.editor.formatOnSave) await formatDocument(document);
-
-    try {
-      await rpc.request('workspace.writeFile', { path: target, text: document.value });
-    } catch (error) {
-      showToast(
-        `Не удалось сохранить как ${basename(target)}: ${error instanceof Error ? error.message : String(error)}`,
-        'error',
-      );
-      return false;
-    }
-
-    // Вкладка переходит на новый файл. Прежнюю закрываем: два документа с одним
-    // текстом на экране только путают, а правки уже записаны в новый файл.
-    const previous = document.path;
-    openEditors.close(previous);
-    await openPath(target);
-    explorer.scheduleRefresh();
-    showToast(`Сохранено как ${basename(target)}`);
-    return true;
-  };
-
-  /**
-   * Закрытие окна с несохранёнными файлами. Сессию пишем всегда — это последний
-   * шанс сохранить рабочее место. А правки терять нельзя, поэтому закрытие
-   * отменяем и спрашиваем системным диалогом; окно при этом остаётся живым:
-   * Electron по умолчанию не игнорирует отмену из `beforeunload`.
-   *
-   * `toLauncher` — куда уходит закрытое окно: «Закрыть проект» возвращает человека
-   * к списку проектов (его поднимает main), обычное закрытие — просто выход.
-   * Стартовое окно просим ПЕРЕД своим закрытием: отправить ответ в уничтоженное
-   * окно невозможно, и вызов остался бы без результата.
-   */
-  let closing = false;
-  const closeWindowSafely = async (toLauncher = false): Promise<void> => {
-    closing = true;
-    try {
-      const files = documents.dirty();
-      if (files.length > 0) {
-        const { choice } = await rpc.request('dialog.confirmClose', { files: files.map((file) => file.path) });
-        if (choice === 'cancel') return;
-        if (choice === 'save') {
-          for (const file of files) {
-            // Отмена перезаписи — окно оставляем: правки ещё в редакторе.
-            if (!(await saveDocument(file))) return;
-          }
-        }
-      }
-      if (toLauncher) await rpc.request('app.closeProject');
-      // «Сохранить» и «Выйти без сохранения» ведут сюда: этот `window.close`
-      // проходит без повторного вопроса — флаг `closing` уже поднят.
-      await rpc.request('window.close');
-    } catch (error) {
-      // Сохранение не прошло — окно оставляем, иначе правки пропадут молча.
-      showToast(error instanceof Error ? error.message : String(error), 'error');
-    } finally {
-      closing = false;
-    }
-  };
-
-  const confirmClose = (): Promise<void> => closeWindowSafely();
+  const fileWrite = createFileWrite({
+    documents,
+    edits,
+    rpc,
+    openEditors: { close: (path) => openEditors.close(path) },
+    save: {
+      policy: writePolicy,
+      format: (document) => formatDocument(formatDeps, document),
+    },
+    git: {
+      saveBeforeCommit: () => settings.git.saveBeforeCommit !== false,
+      saveBeforeCheckout: () => settings.git.saveBeforeCheckout !== false,
+      refresh: () => git.refresh(),
+    },
+    roots: () => workspace.roots,
+    openPath: (path) => openPath(path),
+    refreshTree: () => explorer.scheduleRefresh(),
+    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+    showToast,
+    basename,
+  });
 
   window.addEventListener('beforeunload', (event) => {
     session.saveNow();
-    if (closing || documents.dirty().length === 0) return;
+    if (fileWrite.isClosing() || documents.dirty().length === 0) return;
     event.preventDefault();
     // Без `returnValue` Chromium не считает выгрузку отменённой — окно закрылось бы.
     event.returnValue = false;
-    void confirmClose();
+    void fileWrite.closeWindowSafely();
   });
 
   /* ── Инструменты проекта: формат и установка ───────────────────────────── */
-
-  /** Что вышло из попытки форматирования. */
-  type FormatOutcome = 'changed' | 'unchanged' | 'unavailable' | 'readonly';
 
   /**
    * Отформатировать УЧАСТОК файла языковым сервером (`rangeFormatting`). Так форматируют
@@ -2476,35 +2287,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       return false;
     }
     return true;
-  };
-
-  /**
-   * Отформатировать документ инструментом проекта. Правку проводим через документ:
-   * так она попадает в undo и в сохранение.
-   *
-   * `unavailable` — это не «менять нечего»: инструмента в проекте может просто не
-   * быть, и сказать об этом надо честно, а не молчанием.
-   */
-  const formatDocument = async (document: TextDocument): Promise<FormatOutcome> => {
-    if (document.readOnly) return 'readonly';
-    const engine = formatEngine(document.languageId);
-    if (!engine) return 'unavailable';
-    const result =
-      engine === 'python'
-        ? await rpc.request('python.format', { path: document.path, text: document.value }).catch(() => null)
-        : await rpc.request('node.format', { path: document.path, text: document.value }).catch(() => null);
-    if (!result?.tool) return 'unavailable';
-    if (result.text === document.value) return 'unchanged';
-    document.setText(result.text, 'programmatic');
-    return 'changed';
-  };
-
-  /** Человеческий итог форматирования — одним сообщением. */
-  const formatOutcomeMessage = (engine: FormatEngine, outcome: FormatOutcome): string => {
-    if (outcome === 'changed') return 'Файл отформатирован';
-    if (outcome === 'unchanged') return 'Менять нечего';
-    if (outcome === 'readonly') return 'Файл открыт только для чтения — форматировать нечего';
-    return `Нечем форматировать: ${formatToolNames(engine).join(' и ')} в проекте нет`;
   };
 
   /**
@@ -2600,12 +2382,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     basename,
   });
 
-  // Закрыть проект: окно IDE уступает место стартовому окну со списком проектов
-  // (`app.closeProject` в main). Путь тот же, что у закрытия окна, — с вопросом
-  // о несохранённых файлах.
-  define({ id: 'project.close', title: 'Закрыть проект', category: 'Файл' }, () => closeWindowSafely(true));
-
-
   // Вкладки — в `core/file-tab-commands.ts`. Открытие пути осталось здесь: только оно
   // различает pdf, картинку, Office и текст; модулю досталось «какая вкладка показана»
   // и что делать с соседями — это фасет «вкладки», которым потом поделится AppContext.
@@ -2619,140 +2395,35 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   });
 
   // Сравнение двух папок: список различий, клик по файлу открывает его сравнение.
-  define({ id: 'folder.compare', title: 'Сравнить папки', category: 'Навигация' }, async (left, right) => {
-    if (typeof left !== 'string' || typeof right !== 'string') return;
-    await folderCompareModal.open(left, right);
-  });
 
   // Сравнение двух файлов — из дерева, тем же экраном, что показывает git-различия.
   // Это просмотр: блоки без кнопок индексации (см. `openFiles`).
-  define({ id: 'diff.compareFiles', title: 'Сравнить два файла', category: 'Навигация' }, async (left, right) => {
-    if (typeof left !== 'string' || typeof right !== 'string') return;
-    await diffView.openFiles(left, right);
-  });
 
   // «Сравнить с…»: выбранный файл и подобранный быстрым открывателем. Так сравнивают
   // с файлом из другой папки, не раскрывая дерево до него.
-  define({ id: 'file.compareWith', title: 'Сравнить с…', category: 'Файл' }, async (path) => {
-    if (typeof path !== 'string') return;
-    const other = await quickOpen.pick('С чем сравнить?');
-    if (!other || other === path) return;
-    await diffView.openFiles(path, other);
-  });
 
   // Ровно два файла в выделении — сравниваем их между собой без вопросов.
-  define({ id: 'file.compareSelection', title: 'Сравнить выделенные файлы', category: 'Файл' }, async (paths) => {
-    if (!Array.isArray(paths)) return;
-    const list = paths.filter((item): item is string => typeof item === 'string');
-    const pair = pairFromSelection(list);
-    if (!pair) return;
-    await diffView.openFiles(pair.left, pair.right);
-  });
 
-  // Терминал системы в папке: открывается ВНЕ окна IDE, привычный человеку.
-  // Не путать с `terminal.openIn` — тот поднимает встроенную панель.
-  define({ id: 'terminal.openExternal', title: 'Терминал системы в папке', category: 'Терминал' }, async (target) => {
-    const path = typeof target === 'string' && target !== '' ? target : workspace.root;
-    if (!path) return;
-    const { ok } = await rpc.request('shell.openTerminal', { path });
-    if (!ok) showToast('Не нашёл терминал: задайте свой в настройке `TERMINAL`', 'error');
-  });
-
-  /**
-   * Подключить удалённую папку: адрес спрашиваем строкой (системный диалог папки
-   * локальный — удалённую папку он выбрать не может), проверяем разбором и клиентом.
-   */
-  const addRemoteRoot = (): void => {
-    conditionInput.open({
-      title: 'Удалённая папка',
-      label: 'Адрес',
-      placeholder: 'ssh://user@host/srv/app',
-      confirmLabel: 'Подключить',
-      onAccept: (value) => void connectRemoteRoot(value),
-    });
-  };
-
-  const connectRemoteRoot = async (value: string): Promise<void> => {
-    const problem = addressProblem(value);
-    if (problem) {
-      showToast(problem, 'error');
-      return;
-    }
-    // Клиент проверяем ДО записи в настройки: без ssh/wsl/docker адрес открывать нечем,
-    // и лучше сказать это сразу, чем оставить молча нерабочую строку в списке.
-    const check = await rpc.request('remote.check', { address: value }).catch((error: unknown) => ({
-      ok: false,
-      detail: error instanceof Error ? error.message : String(error),
-    }));
-    if (!check.ok) {
-      showToast(check.detail, 'error');
-      return;
-    }
-    if (settings.workspace.remoteRoots.includes(value)) {
-      showToast('Такая папка уже подключена');
-      return;
-    }
-    await saveSettingsPatch({ workspace: { remoteRoots: [...settings.workspace.remoteRoots, value] } });
-    showToast(`Подключено: ${check.detail || value}`);
-  };
-
-  define({ id: 'remote.addRoot', title: 'Подключить удалённую папку…', category: 'Вид' }, () => addRemoteRoot());
-
-  define({ id: 'remote.openFile', title: 'Открыть удалённый файл…', category: 'Вид' }, (address) => {
-    if (typeof address !== 'string' || address === '') return;
-    void remoteFileModal.open(address);
-  });
-
-  // Настройки вида дерева для одной папки области: пункт меню у строки корня.
-  define({ id: 'explorer.rootSettings', title: 'Настройки папки…', category: 'Вид' }, (path) => {
-    rootSettingsTarget = typeof path === 'string' && path !== '' ? path : workspace.root;
-    if (!rootSettingsTarget) {
-      showToast('Папка не открыта', 'error');
-      return;
-    }
-    rootSettingsModal.open();
-  });
-
-
-  define({ id: 'file.revealInOS', title: 'Показать в системном проводнике', category: 'Файл' }, async (path) => {
-    if (typeof path !== 'string') return;
-    const { ok } = await rpc.request('shell.revealInOS', { path });
-    if (!ok) showToast('Не удалось показать в проводнике системы', 'error');
-  });
-
-  define(
-    {
-      id: 'file.history',
-      title: 'Локальная история файла',
-      category: 'Файл',
-      keywords: ['история', 'снимки', 'локальная', 'timeline', 'восстановить версию'],
+  // Пути, «Настройки папки», история файла, удалённые корни и оба терминала —
+  // в `core/path-commands.ts`: здесь только порты окна. Открытие и сохранение самих
+  // файлов не там — тот дом зовёт `file-write`, а это «показать наружу», «поднять панель».
+  registerPathCommands(define, {
+    rpc,
+    workspace,
+    settings,
+    saveSettingsPatch,
+    showToast,
+    conditionInput,
+    historyModal,
+    remoteFileModal,
+    rootSettingsModal,
+    setRootSettingsTarget: (path) => {
+      rootSettingsTarget = path;
     },
-    (path) => {
-      if (typeof path !== 'string') return;
-      void historyModal.open(path);
-    },
-  );
-
-  define({ id: 'file.openExternal', title: 'Открыть внешней программой', category: 'Файл' }, async (path) => {
-    if (typeof path !== 'string') return;
-    const { ok } = await rpc.request('shell.openPath', { path });
-    if (!ok) showToast('Система не нашла, чем открыть файл', 'error');
-  });
-
-  // Терминал поднимается в нужной папке: у открытого файла — рядом с ним, у папки —
-  // в ней самой. Сессию создаём ДО показа дока: показ сам открывает терминал, и та
-  // сессия ушла бы в корень области — наш каталог потерялся бы (гонка `creating`).
-  define({ id: 'terminal.openIn', title: 'Терминал в папке', category: 'Терминал' }, async (target) => {
-    const path = typeof target === 'string' && target !== '' ? target : workspace.root;
-    if (!path) return;
-    await terminalPanel.newSession(path);
-    dock.show('terminal');
-  });
-
-  define({ id: 'file.revealAt', title: 'Перейти к позиции', category: 'Навигация' }, async (path, line, column) => {
-    if (typeof path !== 'string') return;
-    await openPath(path);
-    editors.reveal(path, typeof line === 'number' ? line : 1, typeof column === 'number' ? column : 1);
+    terminalPanel,
+    dock,
+    openPath,
+    editors,
   });
 
   /* ── запуск ────────────────────────────────────────────────────────────── */
@@ -2821,7 +2492,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     const active = activeDebuggableFile();
     if (!active) return;
     if (settings.run.saveBeforeRun) {
-      for (const document of documents.dirty()) await saveDocument(document);
+      for (const document of documents.dirty()) await fileWrite.saveDocument(document);
     }
     const result = await debug.start(active.path, options);
     if (!result.ok) showToast(result.message, 'error');
@@ -2846,36 +2517,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     },
     scheduleSave: () => session.scheduleSave(),
     showToast,
-  });
-
-  // Закладки: поставить на строку курсора, ходить между ними, показать списком.
-  // Уборка закладок файла клавиши не получает: это редкое дело, а не жест.
-  define({ id: 'editor.toggleBookmark', title: 'Закладки: поставить или снять', category: 'Навигация' }, () => {
-    const path = editors.currentPath;
-    if (path) bookmarks.toggle(path, editors.cursor().line);
-  });
-
-  /** Перейти к соседней закладке: файл может быть другим — сначала открываем его. */
-  const goToBookmark = (direction: 1 | -1): void => {
-    const path = editors.currentPath;
-    const target = path
-      ? bookmarks.next({ path, line: editors.cursor().line }, direction)
-      : ((direction === 1 ? bookmarks.all[0] : bookmarks.all[bookmarks.all.length - 1]) ?? null);
-    if (!target) {
-      showToast('Закладок нет');
-      return;
-    }
-    void openPath(target.path).then(() => editors.reveal(target.path, target.line, 1));
-  };
-
-  define({ id: 'editor.nextBookmark', title: 'Закладки: следующая', category: 'Навигация' }, () => goToBookmark(1));
-  define({ id: 'editor.previousBookmark', title: 'Закладки: предыдущая', category: 'Навигация' }, () =>
-    goToBookmark(-1),
-  );
-  define({ id: 'editor.bookmarksList', title: 'Закладки: список', category: 'Навигация' }, () => bookmarksModal.open());
-  define({ id: 'editor.clearBookmarksInFile', title: 'Закладки: убрать в файле', category: 'Навигация' }, () => {
-    const path = editors.currentPath;
-    if (path) bookmarks.clearFile(path);
   });
 
   // Дзен-режим помнит, что было видно до входа. Состояние живёт здесь, а не в модуле
@@ -2948,8 +2589,8 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   registerFileSaveCommands(define, {
     openEditors,
     documents,
-    saveDocument,
-    saveDocumentAs,
+    saveDocument: (document) => fileWrite.saveDocument(document),
+    saveDocumentAs: (document) => fileWrite.saveDocumentAs(document),
     // Лениво: `revertFilesToDisk` объявлена ниже этой строки, и брать ссылку сразу
     // нельзя — имена модулей сидят в замыкании, а не в моменте регистрации.
     revertFilesToDisk: (targets) => revertFilesToDisk(targets),
@@ -2971,153 +2612,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   /* ── git ───────────────────────────────────────────────────────────────── */
 
-
-  // Запись в репозиторий (индекс, коммит, откат) живёт в `core/git-write-commands.ts`:
-  // оно не завязано на панели, а зависит только от модели git и двух диалогов —
-  // и проверяется тестом без окна.
-  registerGitWriteCommands(define, {
-    git,
-    showToast,
-    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
-    root: () => workspace.root,
-    relative: (path) => workspace.relative(path),
-    saveDirtyForGit,
-  });
-
-  // Сообщение коммита по diff — в `core/git-ai-commands.ts`: там же гейты AI,
-  // а самой команде нужен только один запрос к main.
-  registerGitAiCommands(define, {
-    git,
-    showToast,
-    isAiEnabled: aiEnabled,
-    warnAiDisabled,
-    commitMessage: (payload) => rpc.request('ai.commitMessage', payload),
-    setMessage: (message) => sourceControl.setMessage(message),
-    // Панель изменений теперь в поповере у кнопки ветки: уже открытый не переключаем (toggle бы закрыл).
-    revealComposer: () => {
-      if (!gitManagerPopover?.isOpen) openGitManager(statusBar.gitAnchor);
-    },
-  });
-
-  // Показ (сравнение, замечания, blame, жёлоб) — рядом, в `core/git-view-commands.ts`:
-  // там только диалоги и ни одного пути записи в репозиторий.
-  registerGitViewCommands(define, {
-    git,
-    showToast,
-    openDiff: (path, staged, commit) => diffView.open(path, staged, commit),
-    diffIsOpen: () => diffView.isOpen,
-    showDiffComments: () => diffView.showComments(),
-    currentPath: () => editors.currentPath,
-    cursorLine: () => editors.cursor().line,
-    toggleBlame: () => blame.toggle(),
-    toggleFileBlame: () => blame.toggleFile(),
-    toggleChangeGutter: () => changeGutter.toggle(),
-  });
-
-  // История и stash — только показ готового от git: `core/git-panel-commands.ts`.
-  registerGitPanelCommands(define, {
-    git,
-    showToast,
-    openText: (title, text) => textModal.open(title, text),
-    openStash: () => stashModal.open(),
-  });
-
-  // Окна git, которые ничего не меняют: bisect, worktree, площадка, личность, LFS,
-  // sparse, сравнение веток и подмодули — `core/git-tools-commands.ts`.
-  registerGitToolsCommands(define, {
-    isRepository: () => git.isRepository,
-    showToast,
-    panels: {
-      bisect: () => bisectModal.open(),
-      worktrees: () => worktreeModal.open(),
-      pullRequests: () => forgeModal.open(),
-      issues: () => issuesModal.open(),
-      pipelines: () => pipelinesModal.open(),
-      notifications: () => notificationsModal.open(),
-      identity: () => identityModal.open(),
-      lfs: () => lfsModal.open(),
-      sparse: () => sparseModal.open(),
-      compareRefs: () => refDiffModal.open(),
-    },
-    submoduleUpdate: async () => {
-      await git.submoduleUpdate();
-    },
-  });
-
-  // История, теги и reflog — списки, из которых выбирают действие:
-  // `core/git-history-commands.ts`. Попап открываем там, где стоит редактор.
-  registerGitHistoryCommands(define, {
-    git,
-    showToast,
-    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
-    ask: (options) => promptValue(options),
-    popup: (items) => {
-      const rect = layout.editorHost.getBoundingClientRect();
-      showPopupMenu(items, rect.left + 40, rect.top + 40, { anchor: layout.editorHost });
-    },
-    execute: (id) => void commands.execute(id),
-    openRebase: () => rebaseModal.open(),
-    openDiff: (path, commit) => diffView.open(path, false, commit),
-    currentPath: () => editors.currentPath,
-  });
-
-  // Списки символов: иерархии, экспорты, наследование, члены типа, переопределения.
-  // Состав и переходы — `core/symbol-pickers.ts`; команды он регистрирует сам.
-  createSymbolPickers({
-    define,
-    lsp,
-    editors,
-    workspace,
-    rpc,
-    layout,
-    openPath,
-    meaningSearch,
-    refreshSymbolIndex,
-  });
-
-  // Ветки, синхронизация и массовые действия с индексом — `core/git-sync-commands.ts`:
-  // там всё, что трогает дерево разом или спрашивает подтверждение.
-  registerGitSyncCommands(define, {
-    git,
-    showToast,
-    prepareCheckout: () => prepareCheckout(),
-    openConflict: (path) => conflictView.open(path),
-    currentPath: () => editors.currentPath,
-    pullMode: () => settings.git.pullMode,
-    isMultiRoot: () => workspace.isMultiRoot,
-    confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
-    activePath: () => openEditors.active?.path ?? null,
-    hasTab: (path) => openEditors.has(path),
-    closeTab: (path) => openEditors.close(path),
-    openPath: (path) => openPath(path),
-  });
-
-
-  define({ id: 'search.project', title: 'Поиск по проекту', category: 'Поиск', keybinding: 'Ctrl+Shift+F' }, () =>
-    dock.show('search'),
-  );
-
-  // TODO/FIXME — тот же поиск по проекту, только запрос готовый: регулярка ловит
-  // пометки одним проходом, а результаты открываются как обычно — панелью поиска.
-  define(
-    {
-      id: 'search.todo',
-      title: 'Найти TODO и FIXME',
-      category: 'Поиск',
-      keywords: ['todo', 'fixme', 'hack', 'пометки'],
-    },
-    () => {
-      dock.show('search');
-      searchView.search('\\b(TODO|FIXME|HACK|XXX)\\b', { isRegex: true });
-    },
-  );
-
-
-  define({ id: 'editor.structuralReplace', title: 'Заменить по структуре', category: 'Рефакторинг' }, () => {
-    structuralSearch.open();
-  });
-
-
   /**
    * Открыть адрес вкладкой встроенного браузера. Адрес нормализуем тем же правилом,
    * что и браузер агента (`shared/browser.ts`): без схемы — https, локальные — http,
@@ -3132,6 +2626,146 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // Дальше всё делает модель: вкладка появится в полосе, а полотно покажет страницу.
     browserTabs.open(normalized.url);
   };
+
+  // Меню, палитра, быстрый переход к файлу и символу, браузер —
+  // в `core/app-view-commands.ts`: они ничего не меняют в документе, только
+  // показывают поверх него, поэтому и порты у них «показать».
+  registerAppViewCommands(define, {
+    closePopupMenu,
+    flags: () => ({
+      sidebarVisible: layout.sidebarVisible,
+      rightVisible: layout.rightVisible,
+      dockVisible: layout.dockVisible,
+      activeDockId: dock.activeId,
+      aiEnabled: aiEnabled(),
+    }),
+    menuAnchor: menuButton,
+    execute: (command, ...args) => commands.execute(command, ...args),
+    runMenuRole: (role) => {
+      void rpc.request('menu.role', { role });
+    },
+    promptValue,
+    openBrowserPage,
+    browserTabs,
+    rpc,
+    syncEditorActions,
+    palette,
+    quickOpen,
+    symbolPicker,
+  });
+
+  // Семь домов git (запись, сообщение коммита, показ, панель, инструменты, история,
+  // синхронизация) живут в своих `core/git-*-commands.ts`; здесь только порты от
+  // окна — все модули уже собраны выше этой строки.
+  // Закрыть проект: окно IDE уступает место стартовому окну со списком проектов
+  // (`app.closeProject` в main). Путь тот же, что у закрытия окна, — с вопросом
+  // о несохранённых файлах.
+  define({ id: 'project.close', title: 'Закрыть проект', category: 'Файл' }, () => fileWrite.closeWindowSafely(true));
+
+  registerGitCommands({
+    define,
+    write: {
+      git,
+      showToast,
+      confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+      root: () => workspace.root,
+      relative: (path) => workspace.relative(path),
+      saveDirtyForGit: () => fileWrite.saveDirtyForGit(),
+    },
+    ai: {
+      git,
+      showToast,
+      isAiEnabled: aiEnabled,
+      warnAiDisabled,
+      commitMessage: (payload) => rpc.request('ai.commitMessage', payload),
+      setMessage: (message) => sourceControl.setMessage(message),
+      // Панель изменений теперь в поповере у кнопки ветки: уже открытый не переключаем (toggle бы закрыл).
+      revealComposer: () => {
+        if (!gitManagerPopover?.isOpen) openGitManager(statusBar.gitAnchor);
+      },
+    },
+    view: {
+      git,
+      showToast,
+      openDiff: (path, staged, commit) => diffView.open(path, staged, commit),
+      diffIsOpen: () => diffView.isOpen,
+      showDiffComments: () => diffView.showComments(),
+      currentPath: () => editors.currentPath,
+      cursorLine: () => editors.cursor().line,
+      toggleBlame: () => blame.toggle(),
+      toggleFileBlame: () => blame.toggleFile(),
+      toggleChangeGutter: () => changeGutter.toggle(),
+    },
+    panel: {
+      git,
+      showToast,
+      openText: (title, text) => textModal.open(title, text),
+      openStash: () => stashModal.open(),
+    },
+    tools: {
+      isRepository: () => git.isRepository,
+      showToast,
+      panels: {
+        bisect: () => bisectModal.open(),
+        worktrees: () => worktreeModal.open(),
+        pullRequests: () => forgeModal.open(),
+        issues: () => issuesModal.open(),
+        pipelines: () => pipelinesModal.open(),
+        notifications: () => notificationsModal.open(),
+        identity: () => identityModal.open(),
+        lfs: () => lfsModal.open(),
+        sparse: () => sparseModal.open(),
+        compareRefs: () => refDiffModal.open(),
+      },
+      submoduleUpdate: async () => {
+        await git.submoduleUpdate();
+      },
+    },
+    history: {
+      git,
+      showToast,
+      confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+      ask: (options) => promptValue(options),
+      popup: (items) => {
+        const rect = layout.editorHost.getBoundingClientRect();
+        showPopupMenu(items, rect.left + 40, rect.top + 40, { anchor: layout.editorHost });
+      },
+      execute: (id) => void commands.execute(id),
+      openRebase: () => rebaseModal.open(),
+      openDiff: (path, commit) => diffView.open(path, false, commit),
+      currentPath: () => editors.currentPath,
+    },
+    sync: {
+      git,
+      showToast,
+      prepareCheckout: () => fileWrite.prepareCheckout(),
+      openConflict: (path) => conflictView.open(path),
+      currentPath: () => editors.currentPath,
+      pullMode: () => settings.git.pullMode,
+      isMultiRoot: () => workspace.isMultiRoot,
+      confirm: async (options) => (await rpc.request('dialog.confirm', options)).confirmed,
+      activePath: () => openEditors.active?.path ?? null,
+      hasTab: (path) => openEditors.has(path),
+      closeTab: (path) => openEditors.close(path),
+      openPath: (path) => openPath(path),
+    },
+  });
+
+  // Списки символов — «перейти к символу» из проекта и из рабочей папки.
+  registerSymbolLists({
+    define,
+    lsp,
+    editors,
+    workspace,
+    rpc,
+    layout,
+    openPath,
+    meaningSearch,
+    refreshSymbolIndex,
+  });
+
+  // TODO/FIXME — тот же поиск по проекту, только запрос готовый: регулярка ловит
+  // пометки одним проходом, а результаты открываются как обычно — панелью поиска.
 
   /**
    * Ссылка из вывода терминала. Локальный адрес открываем вкладкой в IDE: это почти
@@ -3148,89 +2782,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     void rpc.request('shell.openExternal', { url }).catch(() => undefined);
   };
 
-  // Встроенный браузер: страница открывается вкладкой в редакторе.
-  define(
-    {
-      id: 'browser.open',
-      title: 'Открыть страницу (браузер в редакторе)',
-      category: 'Вид',
-      keybinding: 'Ctrl+Shift+B',
-      keywords: ['browser', 'url', 'страница', 'браузер', 'интернет'],
-    },
-    async () => {
-      const value = await promptValue({ title: 'Открыть страницу', label: 'Адрес', value: 'https://' });
-      if (value === null || value.trim() === '') return;
-      openBrowserPage(value);
-    },
-  );
-
-  // Закрыть все вкладки браузера: у файлов есть «закрыть другие», у страниц не было,
-  // а их набирается много, когда ходишь по одному сайту.
-  define({ id: 'browser.closeAll', title: 'Закрыть все вкладки браузера', category: 'Вид' }, () => {
-    if (browserTabs.list.length === 0) return;
-    void rpc.request('browser.viewCloseAll', undefined).catch(() => undefined);
-    browserTabs.closeAll();
-  });
-
-
-  define({ id: 'app.showMenu', title: 'Меню приложения', category: 'Вид', keybinding: 'Alt+F10' }, () => {
-    // Повторное нажатие закрывает: так ведёт себя системное меню, и так ждёт человек.
-    if (isPopupOpen()) {
-      closePopupMenu();
-      return;
-    }
-    menuButton.classList.add('is-menu-open');
-    showApplicationMenu(
-      menuButton,
-      {
-        execute: (command) => void commands.execute(command),
-        runRole: (role) => void rpc.request('menu.role', { role }),
-        checks: menuChecks({
-          sidebar: layout.sidebarVisible,
-          aiPanel: aiEnabled() && layout.rightVisible,
-          terminal: layout.dockVisible && dock.activeId === 'terminal',
-        }),
-      },
-      () => menuButton.classList.remove('is-menu-open'),
-    );
-  });
-
-  define({ id: 'palette.open', title: 'Палитра команд', category: 'Вид', keybinding: 'Ctrl+Shift+P' }, () => {
-    syncEditorActions();
-    palette.open();
-  });
-
-  // Необязательный аргумент — начальный отбор: крошки и статусбар передают путь
-  // папки, чтобы палитра сразу показала файлы рядом, а не весь проект.
-  define(
-    { id: 'file.quickOpen', title: 'Быстрое открытие файла', category: 'Навигация', keybinding: 'Ctrl+Shift+O' },
-    (query) => {
-      void quickOpen.open(typeof query === 'string' ? query : '');
-    },
-  );
-
-  define(
-    {
-      id: 'navigate.symbol',
-      title: 'Перейти к символу в проекте',
-      category: 'Навигация',
-      keybinding: 'Ctrl+T',
-      keywords: ['symbol', 'символ', 'класс', 'функция'],
-    },
-    () => symbolPicker.open(),
-  );
-
-  define({ id: 'settings.open', title: 'Настройки', category: 'Настройки', keybinding: 'Ctrl+,' }, () =>
-    settingsModal.open(),
-  );
-
   // Команды Python — в `core/python-commands.ts`: меню, проверки и то, что видит человек.
   // Профилировщик и установщик пакетов приходят сюда из `core/line-profile.ts` и
   // `core/install-actions.ts` — они нужны не только командам.
   registerPythonCommands(define, {
     editors,
     documents,
-    saveDocument,
+    saveDocument: (document) => fileWrite.saveDocument(document),
     venvModal,
     installRequirements,
     rpc,
@@ -3238,78 +2796,11 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     basename,
   });
 
-  define(
-    {
-      id: 'tests.open',
-      title: 'Тесты: панель',
-      category: 'Запуск',
-      keywords: ['pytest', 'тесты', 'test'],
-    },
-    () => dock.show('tests'),
-  );
-
-  define(
-    {
-      id: 'format.document',
-      title: 'Форматировать файл',
-      category: 'Файл',
-      keywords: ['ruff', 'black', 'prettier', 'biome', 'формат'],
-    },
-    async () => {
-      const document = openEditors.active;
-      if (!document) {
-        showToast('Нет открытого файла');
-        return;
-      }
-      if (document.readOnly) {
-        showToast('Файл открыт только для чтения — форматировать нечего');
-        return;
-      }
-      const engine = formatEngine(document.languageId);
-      if (!engine) {
-        showToast(`Не форматирую ${languageLabel(document.languageId)}: для него инструмента нет`);
-        return;
-      }
-      showToast(formatOutcomeMessage(engine, await formatDocument(document)));
-    },
-  );
-
   // Форматирование ВЫДЕЛЕНИЯ: сервер переписывает только участок, файл целиком не трогает.
   // Инструмент проекта так не умеет — он всегда форматирует весь файл.
   // Сочетание Ctrl+K Ctrl+F живёт в клавиатуре редактора (`keymap.ts` → `formatSelection`):
   // вторая подпись на ту же пару врала — гонку выигрывал обработчик редактора.
   // Здесь сочетания нет намеренно: команда нужна палитре и меню.
-  define(
-    {
-      id: 'format.selection',
-      title: 'Форматировать выделение',
-      category: 'Файл',
-      keywords: ['format', 'selection', 'выделение', 'формат'],
-    },
-    async () => {
-      const document = openEditors.active;
-      if (!document) {
-        showToast('Нет открытого файла');
-        return;
-      }
-      if (document.readOnly) {
-        showToast('Файл открыт только для чтения — форматировать нечего');
-        return;
-      }
-      // Выделения нет — форматируем весь файл: команда участка без выделения
-      // берёт документ целиком. Иначе команда молчала бы о «нечего делать».
-      if (!editors.hasSelection()) {
-        const engine = formatEngine(document.languageId);
-        if (!engine) {
-          showToast(`Не форматирую ${languageLabel(document.languageId)}: для него инструмента нет`);
-          return;
-        }
-        showToast(formatOutcomeMessage(engine, await formatDocument(document)));
-        return;
-      }
-      await formatRangeWithServer(document.path, editors.selectionRange());
-    },
-  );
 
   // Упорядочить импорты делает языковой сервер: у него просим действие `source.organizeImports`.
 
@@ -3320,69 +2811,6 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * жест, и вешать его на клавишу, которую кто-то уже занял, значит мешать чаще, чем
    * помогать. Вызываются из палитры команд.
    */
-  define({ id: 'editor.macroRecord', title: 'Макрос: начать или остановить запись', category: 'Редактор' }, () => {
-    if (!editors.currentPath && !editors.isRecordingMacro()) {
-      showToast('Нет открытого файла');
-      return;
-    }
-    if (editors.isRecordingMacro()) {
-      const steps = editors.stopMacro();
-      showToast(macroRecordedNotice(steps.length));
-      refreshStatus();
-      return;
-    }
-    editors.startMacro();
-    showToast('Запись макроса началась: остановить — той же командой');
-    refreshStatus();
-  });
-
-  const playMacro = (times: number): void => {
-    const steps = editors.macroSteps();
-    const check = macroPlayCheck(steps.length, editors.currentPath !== null);
-    if (check.kind === 'refused') {
-      showToast(check.message);
-      return;
-    }
-    let done = 0;
-    for (let i = 0; i < times; i += 1) done += editors.playMacro(steps);
-    showToast(macroPlayedNotice(times, done));
-  };
-
-  define({ id: 'editor.macroPlay', title: 'Макрос: выполнить', category: 'Редактор' }, () => playMacro(1));
-
-  define({ id: 'editor.macroPlayCount', title: 'Макрос: выполнить несколько раз…', category: 'Редактор' }, async () => {
-    const answer = await promptValue({
-      title: 'Сколько раз выполнить макрос?',
-      label: 'Число повторов',
-      value: String(DEFAULT_MACRO_TIMES),
-    });
-    if (answer === null) return;
-    const check = checkMacroTimes(answer);
-    if (check.kind === 'refused') {
-      showToast(check.message, 'error');
-      return;
-    }
-    playMacro(check.times);
-  });
-
-
-  define({ id: 'settings.revealFile', title: 'Открыть settings.json', category: 'Настройки' }, async () => {
-    const result = await rpc.request('settings.revealFile');
-    showToast(`Настройки: ${result.path}`);
-  });
-
-  define({ id: 'lsp.restart', title: 'Языковые серверы: перезапустить', category: 'Языки' }, async () => {
-    const result = await rpc.request('lsp.restart');
-    // Состояние после перезапуска — оно же и сняло «не поднялось»: показываем чип сразу.
-    applyLspStatus(result);
-    showToast(
-      result.running.length > 0
-        ? `Серверы: ${result.servers.map((server) => server.label).join(', ')}`
-        : 'Языковые серверы остановлены',
-    );
-    // Серверы поднимаются лениво, при открытии файлов: перепроверим, когда поднимутся.
-    window.setTimeout(() => void refreshLspStatus(), 1500);
-  });
 
   // Команды ассистента — `core/ai-commands.ts`: там три правила про гейт мастера
   // (вход в чат — спрашивает, диагностика — нет, остановка — всегда).
@@ -3405,70 +2833,80 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * НОВЫЙ файл по предложенному пути (`shared/test-generation.ts`), чтобы человек его
    * посмотрел и поправил, как обычный код.
    */
-  define(
-    { id: 'ai.generateTest', title: 'Сгенерировать тест к коду', category: 'AI', keywords: ['тест', 'test'] },
-    async () => {
-      if (!aiEnabled()) {
-        warnAiDisabled();
-        return;
-      }
-      const path = editors.currentPath;
-      if (!path) {
-        showToast('Откройте файл', 'error');
-        return;
-      }
-      const document = documents.get(path);
-      const code = editors.selectedText().trim() || document?.value.trim() || '';
-      if (!code) {
-        showToast('Нечего тестировать: пустой файл', 'info');
-        return;
-      }
 
-      const relative = workspace.relative(path);
-      const testRelative = suggestTestPath(relative);
-      if (!testRelative) {
-        showToast('Это уже тест: файл теста к тесту не создаём', 'info');
-        return;
-      }
-      const root = workspace.ownerOf(path)?.root ?? workspace.root;
-      if (!root) {
-        showToast('Сначала откройте проект', 'error');
-        return;
-      }
+  /* ── команды, вынесенные из сборки ─────────────────────────────────────── */
 
-      const truncated = truncateTestCode(code);
-      showToast('Пишу тест…', 'info');
-      let result: { code: string };
-      try {
-        result = await rpc.request('ai.generateTest', {
-          language: editors.activeLanguage(),
-          relativePath: relative,
-          code: truncated.text,
-          testPath: testRelative,
-        });
-      } catch (error) {
-        showToast(error instanceof Error ? error.message : String(error), 'error');
-        return;
-      }
-      if (isEmptyTest(result.code)) {
-        showToast('Модель не предложила тест', 'info');
-        return;
-      }
+  // Сравнение (папки, файлы, выделенное) — `core/compare-commands.ts`.
+  registerCompareCommands(define, { quickOpen, folderCompare: folderCompareModal, diffView });
 
-      const target = joinPath(root, testRelative);
-      try {
-        await rpc.request('workspace.createFile', { path: target, contents: `${result.code}\n` });
-      } catch (error) {
-        // Файл уже есть — не перетираем чужой тест, а честно об этом говорим.
-        showToast(error instanceof Error ? error.message : String(error), 'error');
-        return;
-      }
+  // Поиск по проекту, TODO-пометки и замена по структуре — `core/search-commands.ts`.
+  registerSearchCommands(define, { dock, searchView, structuralSearch });
 
-      explorer.scheduleRefresh();
-      await openPath(target);
-      showToast(`Тест создан: ${testRelative}`);
+  // Форматирование документа и выделения — `core/format-commands.ts`. Тот же набор портов
+  // нужен сохранению с `formatOnSave`, поэтому он в переменной, а не в литерале вызова.
+  const formatDeps: FormatDeps = {
+    documents,
+    lsp,
+    edits,
+    rpc,
+    openEditors: {
+      get active() {
+        return editors.activePath ? (documents.get(editors.activePath) ?? null) : null;
+      },
     },
-  );
+    workspace: { hasSelection: () => editors.hasSelection(), selectionRange: () => editors.selectionRange() },
+    showToast,
+  };
+  registerFormatCommands(define, formatDeps);
+
+  // Макросы — `core/macro-commands.ts`.
+  registerMacroCommands(define, {
+    editors: {
+      get currentPath() {
+        return editors.currentPath;
+      },
+      isRecordingMacro: () => editors.isRecordingMacro(),
+      startMacro: () => editors.startMacro(),
+      stopMacro: () => editors.stopMacro(),
+      macroSteps: () => editors.macroSteps(),
+      playMacro: (steps) => editors.playMacro(steps),
+    },
+    showToast,
+    refreshStatus: () => refreshStatus(),
+    promptValue,
+  });
+
+  // Настройки (открыть файл, показать в нём текущий ключ) — `core/settings-commands.ts`.
+  registerSettingsCommands(define, { rpc, settingsModal, showToast });
+
+  // Языки: перезапуск серверов, запуск теста открытого файла — `core/language-commands.ts`.
+  registerLanguageCommands(define, {
+    dock,
+    rpc,
+    applyLspStatus,
+    refreshLspStatus,
+    showToast,
+    editors: {
+      get currentPath() {
+        return editors.currentPath;
+      },
+      selectedText: () => editors.selectedText(),
+      activeLanguage: () => editors.activeLanguage(),
+    },
+    documents,
+    workspace: {
+      get root() {
+        return workspace.root;
+      },
+      relative: (path) => workspace.relative(path),
+      ownerOf: (path) => workspace.ownerOf(path),
+    },
+    aiEnabled,
+    warnAiDisabled,
+    explorer,
+    openPath,
+    schedule: (delayMs, run) => void setTimeout(run, delayMs),
+  });
 
   /* ── реакция на события ────────────────────────────────────────────────── */
 
@@ -3864,7 +3302,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
           insertFinalNewline: settings.editor.insertFinalNewline,
         });
         if (prepared !== document.value) document.setText(prepared, 'programmatic');
-        if (settings.editor.formatOnSave) await formatDocument(document);
+        if (settings.editor.formatOnSave) await formatDocument(formatDeps, document);
         try {
           const outcome = await edits.saveDocument(document);
           if (outcome === 'conflict') skipped.push(basename(document.path));
@@ -3935,7 +3373,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     documents,
     changeGutter,
     conditionInput,
-    saveDocument,
+    saveDocument: (document) => fileWrite.saveDocument(document),
     reloadIfOpen,
     confirm: (options) => rpc.request('dialog.confirm', options),
   });

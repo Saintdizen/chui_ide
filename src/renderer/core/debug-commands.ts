@@ -12,17 +12,9 @@ export interface DebugCommandDeps {
   editors: Pick<EditorWorkspace, 'cursor' | 'setBreakpoints'>;
   /** Панель отладки: показываем её, только когда действие удалось. */
   dock: { show(id: 'debug'): void };
-  promptValue(options: {
-    title: string;
-    label: string;
-    value: string;
-  }): Promise<string | null> | string | null;
+  promptValue(options: { title: string; label: string; value: string }): Promise<string | null> | string | null;
   launchOptions: {
-    open(options: {
-      options: DebugLaunchOptions;
-      onAccept(options: DebugLaunchOptions): void;
-      onReset(): void;
-    }): void;
+    open(options: { options: DebugLaunchOptions; onAccept(options: DebugLaunchOptions): void; onReset(): void }): void;
   };
   /** Есть ли активный файл, который вообще можно отлаживать. */
   activeDebuggableFile(): unknown;

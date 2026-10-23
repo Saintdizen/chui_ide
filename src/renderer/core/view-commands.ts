@@ -83,13 +83,10 @@ export function registerViewCommands(define: DefineCommand, deps: ViewCommandDep
   // Область редактора — такая же часть макета, как панели: кто-то работает только
   // с чатом и деревом, кто-то — только с терминалом. Свёрнутость — осознанный выбор
   // человека, поэтому пишется в настройки так же, как у боковой панели и дока.
-  define(
-    { id: 'view.toggleEditor', title: 'Панель редактора', category: 'Вид', keybinding: 'Ctrl+Alt+E' },
-    () => {
-      layout.setEditorVisible(!layout.editorVisible);
-      syncViewButtons();
-    },
-  );
+  define({ id: 'view.toggleEditor', title: 'Панель редактора', category: 'Вид', keybinding: 'Ctrl+Alt+E' }, () => {
+    layout.setEditorVisible(!layout.editorVisible);
+    syncViewButtons();
+  });
 
   // Режим дзен: прячем всю обвязку — панели, нижний док, строку состояния и шапку — и
   // оставляем только редактор. Что было видно, ЗАПОМИНАЕМ и возвращаем на выходе;

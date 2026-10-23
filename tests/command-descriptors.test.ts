@@ -34,7 +34,19 @@ function descriptors(text: string, where: string): Descriptor[] {
   return found;
 }
 
-const all = files(ROOT).flatMap((file) => descriptors(readFileSync(file, 'utf8'), file.slice(ROOT.length + 1)));
+const texts = files(ROOT).map((file) => ({ where: file.slice(ROOT.length + 1), text: readFileSync(file, 'utf8') }));
+
+/**
+ * `app.ts` — сборка окна. Всё, что из него вынесено, живёт в `core/*`; после перевода
+ * вызова на модуль объявления в сборке быть не должно. Исключений нет: `path-commands`
+ * подключён, и единственная команда, оставшаяся в сборке, — `project.close` (он закрывает
+ * окно, а не путь), в `core/*` её нет — значит это не копия, а само определение.
+ *
+ * Раньше здесь стояло послабление: объявление в `app.ts` прощалось, если такое же
+ * есть в `core/*`. Оно было нужно на время переезда и стало пустым, когда переезд
+ * кончился — убрано, чтобы тест ловил переписанную копию сразу.
+ */
+const all = texts.flatMap(({ where, text }) => descriptors(text, where));
 
 describe('дескрипторы команд', () => {
   it('находятся: их больше двухсот', () => {
