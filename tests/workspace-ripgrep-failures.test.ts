@@ -19,18 +19,35 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
 
-/** Поддельный `rg` с готовым телом скрипта. */
+/**
+ * Поддельный `rg`: настоящий исполняемый файл с телом на Node. Не `sh` — на Windows
+ * его нет, и тест молча получал `null`: `rg` якобы не установлен, а решения
+ * сервиса при таком ответе другие, и проверка ничего не доказывала.
+ *
+ * На POSIX обычный файл с шебангом запускается только через execvp, а спавн
+ * без дисплея идёт в оболочке через PATH — так и происходит в бою. На Windows
+ * исполняется `rg.exe`: имя с расширением — единственное, что найдёт `where`.
+ */
 async function withFakeRg(body: string): Promise<void> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-fail-'));
   roots.push(dir);
-  await fs.writeFile(path.join(dir, 'rg'), `#!/bin/sh\n${body}\n`, 'utf8');
-  await fs.chmod(path.join(dir, 'rg'), 0o755);
+  const file = path.join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg');
+  await fs.writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
+  await fs.chmod(file, 0o755);
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   // Возврат PATH — через afterEach неудобно: сохраняем в замыкании хука.
   afterEach(() => {
     process.env.PATH = previous;
   });
+}
+
+/**
+ * Тело поддельного `rg`: проверка `--version` и действие `body`. Без `sh`: тело
+ * пишется на Node, как и сам файл.
+ */
+function script(body: string): string {
+  return `if (process.argv[2] === '--version') process.exit(0);\n${body}`;
 }
 
 describe('сбои rg', () => {
@@ -48,14 +65,14 @@ describe('сбои rg', () => {
   });
 
   it('сбой поиска (код 2) — отказ с причиной из stderr', async () => {
-    await withFakeRg('case "$1" in --version) exit 0 ;; esac\necho "битый шаблон" >&2\nexit 2');
+    await withFakeRg(script(`process.stderr.write('битый шаблон\\n');\nprocess.exit(2);`));
     await expect(runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir())).rejects.toThrow(
       'rg завершился с кодом 2: битый шаблон',
     );
   });
 
   it('совпадений нет (код 1) — это результат, а не отказ', async () => {
-    await withFakeRg('case "$1" in --version) exit 0 ;; esac\necho "итог"\nexit 1');
+    await withFakeRg(script(`process.stdout.write('итог\\n');\nprocess.exit(1);`));
     expect(await runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir())).toBe('итог\n');
   });
 
@@ -64,7 +81,13 @@ describe('сбои rg', () => {
     const marker = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-kill-'));
     roots.push(marker);
     const died = path.join(marker, 'died.txt');
-    await withFakeRg(`case "$1" in --version) exit 0 ;; esac\ntrap 'echo да > "${died}"; exit 143' TERM\nsleep 5\n`);
+    // Сам сигнал на Windows не ловится: там процесс просто завершается убийством._
+    const diedLiteral = JSON.stringify(died);
+    await withFakeRg(
+      script(
+        `process.on('SIGTERM', () => { require('node:fs').writeFileSync(${diedLiteral}, 'да'); process.exit(143); });\nsetTimeout(() => {}, 5000);`,
+      ),
+    );
 
     const controller = new AbortController();
     const pending = runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir(), controller.signal);

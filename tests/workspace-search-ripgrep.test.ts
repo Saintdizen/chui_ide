@@ -42,18 +42,17 @@ async function withRipgrep(output: string): Promise<{ args: () => Promise<string
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-stub-'));
   roots.push(dir);
   const argsFile = path.join(dir, 'args.txt');
+  // Тело — на Node, а не `sh`: на Windows оболочки нет, заглушка молча не
+  // запускалась, и ripgrep считался отсутствующим — весь файл краснел зря.
   const script = [
-    '#!/bin/sh',
-    'for a in "$@"; do printf "%s\\n" "$a" >> "' + argsFile + '"; done',
-    'case "$1" in',
-    '  --version) exit 0 ;;',
-    'esac',
-    "cat <<'RGOUT'",
-    output,
-    'RGOUT',
+    '#!/usr/bin/env node',
+    "const fs = require('node:fs');",
+    `fs.appendFileSync(${JSON.stringify(argsFile)}, process.argv.slice(2).map((a) => a + '\\n').join(''));`,
+    "if (process.argv[2] === '--version') process.exit(0);",
+    `process.stdout.write(${JSON.stringify(output)});`,
     '',
   ].join('\n');
-  await fs.writeFile(path.join(dir, 'rg'), script, 'utf8');
+  await fs.writeFile(path.join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg'), script, 'utf8');
   await fs.chmod(path.join(dir, 'rg'), 0o755);
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;

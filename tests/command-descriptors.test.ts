@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /**
@@ -8,7 +9,9 @@ import { describe, expect, it } from 'vitest';
  * `search.meaning` чужое сочетание клавиш от соседа, и три «дубля» из семи
  * оказались выдуманными. Здесь — литерал от `{` до парной `}`.
  */
-const ROOT = new URL('../src/renderer', import.meta.url).pathname;
+// Только `fileURLToPath`: у `URL.pathname` остаются лишние `%20` в путях с пробелами
+// и вид `/D:/…` на Windows — `readdirSync` такого адреса не знает.
+const ROOT = fileURLToPath(new URL('../src/renderer', import.meta.url));
 
 interface Descriptor {
   id: string;
