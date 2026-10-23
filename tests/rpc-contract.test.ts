@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -32,8 +32,20 @@ function contractMethods(): string[] {
 
 /** Имена методов, зарегистрированных роутером в main. */
 function registeredMethods(): string[] {
-  const source = read('src/main/ipc/register.ts');
-  return [...source.matchAll(/router\.register\(\s*(['"`])([a-z]+(?:\.[A-Za-z0-9]+)+)\1/g)].map((match) => match[2]!);
+  // Домены разнесены по `src/main/ipc/methods/*.ts`: сторожить надо все файлы
+  // сразу, иначе вынос домена выглядит как «метод пропал». Новые модули
+  // подхватываются сами — список здесь только точка входа `registerIpc`.
+  const sources = [
+    read('src/main/ipc/register.ts'),
+    ...readdirSync(resolve(process.cwd(), 'src/main/ipc/methods'))
+      .filter((name) => name.endsWith('.ts'))
+      .map((name) => read(`src/main/ipc/methods/${name}`)),
+  ];
+  return sources.flatMap((source) =>
+    [...source.matchAll(/router\.register\(\s*(['"`])([a-z]+(?:\.[A-Za-z0-9]+)+)\1/g)].map(
+      (match) => match[2]!,
+    ),
+  );
 }
 
 describe('контракт RPC: ChuiMethods ↔ регистрация в main', () => {

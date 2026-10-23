@@ -1,3 +1,4 @@
+import { createCodeIndex } from './code-index';
 import { spawn } from 'node:child_process';
 import { promises as fs, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
@@ -29,31 +30,10 @@ import { parseRipgrepJson, ripgrepArgs } from '../../shared/ripgrep';
 import { combineIgnoreFiles, IgnoreRules } from '../../shared/ignore';
 import { importStyleOf, rewriteImports } from '../../shared/import-rewrite';
 import { replaceAll } from '../../shared/replace';
-import {
-  hashCommentsForPath,
-  parseTemplate,
-  structuralFind,
-  structuralReplace,
-  type StructuralFileMatches,
-  type StructuralProjectMatches,
-  type StructuralProjectOptions,
-} from '../../shared/structural-search';
-import {
-  exportedNames,
-  supportsExports,
-  type ExportsQuery,
-  type ExportsResult,
-  type ExportFileHits,
-} from '../../shared/symbol-exports';
-import { languageFromPath } from '../../shared/languages';
+import type { StructuralProjectMatches, StructuralProjectOptions } from '../../shared/structural-search';
+import type { ExportsQuery, ExportsResult } from '../../shared/symbol-exports';
 import { MAX_VIEW_IMAGE_BYTES, imageMimeType } from '../../shared/images';
-import {
-  inheritanceMatches,
-  supportsInheritance,
-  type InheritanceQuery,
-  type InheritanceResult,
-  type InheritanceFileHits,
-} from '../../shared/type-inheritance';
+import type { InheritanceQuery, InheritanceResult } from '../../shared/type-inheritance';
 import { MAX_OPEN_BYTES, isReadOnlySize, withinOpenLimit } from '../../shared/large-file';
 import { buildFolderDiff, splitFolderLists, type FolderCompareResult } from '../../shared/folder-compare';
 import {
@@ -82,7 +62,6 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024;
 /** Потолок документации: README в сотни килобайт — уже не документ, а свалка. */
 const MAX_DOC_BYTES = 512 * 1024;
 /** Сколько мест одного файла отдаём в предпросмотр (полное число — в `count`). */
-const MAX_STRUCTURAL_MATCHES_PER_FILE = 20;
 const MAX_SEARCH_RESULTS = 2000;
 /** Потолок контекста вокруг совпадения: `-C 5` уже показывает блок целиком. */
 const MAX_SEARCH_CONTEXT = 5;
@@ -150,6 +129,12 @@ export class WorkspaceService {
    * изменившееся. Свежесть сверяется по `mtime` и размеру при каждом обращении.
    */
   private readonly contents = new ContentCache();
+  /**
+   * Обход проекта для поисков по коду (структура, экспорты, наследование).
+   * Лениво: создаётся при первом поиске. Сам модуль про сервис не знает —
+   * получает четыре порта в `createCodeIndex`.
+   */
+  private codeIndexInstance: ReturnType<typeof createCodeIndex> | null = null;
   /** Есть ли ripgrep в системе: `null` — ещё не выяснили. */
   private ripgrepFound: boolean | null = null;
   /**
@@ -969,37 +954,7 @@ export class WorkspaceService {
    * отдавать весь список не нужно, а человек видит, куда замена попадёт.
    */
   async findByStructure(options: StructuralProjectOptions): Promise<StructuralProjectMatches> {
-    const root = this.requireRoot();
-    const template = parseTemplate(options.pattern);
-    if (template.error) throw new RpcFailure(RpcErrorCode.InvalidParams, template.error);
-
-    const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
-    const files: StructuralFileMatches[] = [];
-    let total = 0;
-    let scanned = 0;
-
-    for (const file of await this.collectFiles()) {
-      const relative = path.relative(root, file).split(path.sep).join('/');
-      if (matcher && !matcher.test(relative)) continue;
-      const stat = await fs.stat(file).catch(() => null);
-      if (!stat || stat.size > MAX_FILE_BYTES) continue;
-      const buffer = await fs.readFile(file).catch(() => null);
-      if (!buffer) continue;
-      scanned += 1;
-
-      const text = buffer.toString('utf8').replace(/\r\n/g, '\n');
-      const matches = structuralFind(text, template, { hashComments: hashCommentsForPath(relative) });
-      if (matches.length === 0) continue;
-
-      total += matches.length;
-      files.push({
-        path: file,
-        count: matches.length,
-        matches: matches.slice(0, MAX_STRUCTURAL_MATCHES_PER_FILE),
-      });
-    }
-
-    return { files, total, scanned };
+    return this.codeIndex().findByStructure(options);
   }
 
   /**
@@ -1012,37 +967,7 @@ export class WorkspaceService {
    * Большие файлы пропускаем: держать их целиком в памяти ради замены не стоит.
    */
   async replaceByStructure(options: StructuralProjectOptions): Promise<{ files: string[]; replaced: number }> {
-    const root = this.requireRoot();
-    const template = parseTemplate(options.pattern);
-    if (template.error) throw new RpcFailure(RpcErrorCode.InvalidParams, template.error);
-
-    const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
-    const changed: string[] = [];
-    let replaced = 0;
-
-    for (const file of await this.collectFiles()) {
-      const relative = path.relative(root, file).split(path.sep).join('/');
-      if (matcher && !matcher.test(relative)) continue;
-      const stat = await fs.stat(file).catch(() => null);
-      if (!stat || stat.size > MAX_FILE_BYTES) continue;
-      const buffer = await fs.readFile(file).catch(() => null);
-      if (!buffer) continue;
-
-      const text = buffer.toString('utf8').replace(/\r\n/g, '\n');
-      const result = structuralReplace(text, template, options.replacement, {
-        hashComments: hashCommentsForPath(relative),
-      });
-      if (result.count === 0) continue;
-
-      await this.onBeforeChange?.(file, 'save');
-      await fs.writeFile(file, result.text, 'utf8');
-      this.contents.invalidate(file);
-      this.notifyChanged(file);
-      changed.push(file);
-      replaced += result.count;
-    }
-
-    return { files: changed, replaced };
+    return this.codeIndex().replaceByStructure(options);
   }
 
   /**
@@ -1054,35 +979,7 @@ export class WorkspaceService {
    * ничего», нечестно — поэтому список просмотренных файлов идёт наружу (`scanned`).
    */
   async findExports(options: ExportsQuery): Promise<ExportsResult> {
-    const name = options.name.trim();
-    if (name === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задано имя символа');
-
-    const root = this.requireRoot();
-    const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
-    const files: ExportFileHits[] = [];
-    let total = 0;
-    let scanned = 0;
-
-    for (const file of await this.collectFiles()) {
-      const relative = path.relative(root, file).split(path.sep).join('/');
-      if (matcher && !matcher.test(relative)) continue;
-      const language = languageFromPath(relative);
-      if (!supportsExports(language)) continue;
-      const stat = await fs.stat(file).catch(() => null);
-      if (!stat || stat.size > MAX_FILE_BYTES) continue;
-      const buffer = await fs.readFile(file).catch(() => null);
-      if (!buffer) continue;
-      scanned += 1;
-
-      const text = buffer.toString('utf8').replace(/\r\n/g, '\n');
-      const found = exportedNames(text, language).filter((entry) => entry.name === name);
-      if (found.length === 0) continue;
-
-      total += found.length;
-      files.push({ path: file, entries: found });
-    }
-
-    return { name, files, total, scanned };
+    return this.codeIndex().findExports(options);
   }
 
   /**
@@ -1094,36 +991,7 @@ export class WorkspaceService {
    * Языки без разбора пропускаем: притворяться, что «не нашлось», там нечестно.
    */
   async findInheritance(options: InheritanceQuery): Promise<InheritanceResult> {
-    const name = options.name.trim();
-    if (name === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задано имя типа');
-    const direction = options.direction === 'supertypes' ? 'supertypes' : 'subtypes';
-
-    const root = this.requireRoot();
-    const matcher = options.glob?.trim() ? globToRegExp(options.glob.trim()) : null;
-    const files: InheritanceFileHits[] = [];
-    let total = 0;
-    let scanned = 0;
-
-    for (const file of await this.collectFiles()) {
-      const relative = path.relative(root, file).split(path.sep).join('/');
-      if (matcher && !matcher.test(relative)) continue;
-      const language = languageFromPath(relative);
-      if (!supportsInheritance(language)) continue;
-      const stat = await fs.stat(file).catch(() => null);
-      if (!stat || stat.size > MAX_FILE_BYTES) continue;
-      const buffer = await fs.readFile(file).catch(() => null);
-      if (!buffer) continue;
-      scanned += 1;
-
-      const text = buffer.toString('utf8').replace(/\r\n/g, '\n');
-      const found = inheritanceMatches(text, language, name, direction);
-      if (found.length === 0) continue;
-
-      total += found.length;
-      files.push({ path: file, entries: found });
-    }
-
-    return { name, direction, files, total, scanned };
+    return this.codeIndex().findInheritance(options);
   }
 
   /**
@@ -1212,6 +1080,22 @@ export class WorkspaceService {
 
   dispose(): void {
     this.closeAllRoots();
+  }
+
+  /**
+   * Обход проекта для поисков по коду: структура, экспорты, наследование.
+   * Отдельный модуль (`code-index.ts`) знает только об файлах и записи — про
+   * корни, watcher и кэши знает сервис и передаёт это портами.
+   */
+  private codeIndex(): ReturnType<typeof createCodeIndex> {
+    this.codeIndexInstance ??= createCodeIndex({
+      requireRoot: () => this.requireRoot(),
+      collectFiles: () => this.collectFiles(),
+      beforeChange: (file) => this.onBeforeChange?.(file, 'save'),
+      invalidate: (file) => this.contents.invalidate(file),
+      notifyChanged: (file) => this.notifyChanged(file),
+    });
+    return this.codeIndexInstance;
   }
 
   private requireRoot(): string {

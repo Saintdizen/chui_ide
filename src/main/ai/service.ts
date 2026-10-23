@@ -1,4 +1,5 @@
-import { promises as fs, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createAiQueries } from './queries';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   ChatStreamEvent,
@@ -25,7 +26,8 @@ import {
 import type { FileEdit } from '../../shared/edits';
 import type { PatchFile } from '../../shared/patch';
 import { ageStaleResults, ageToolResults } from './age-results';
-import { spillText } from './spill';
+import { clipWithRemainder } from './spill';
+import { readCalibration, saveCalibration } from './token-calibration';
 import { compressToolOutput } from '../../shared/output-compress';
 import { formatShortMap } from '../../shared/project-map';
 import {
@@ -47,7 +49,6 @@ import {
   type ExposedToolSpec,
 } from '../../shared/tools';
 import {
-  ALWAYS_AVAILABLE,
   PLAN_MODE_TOOLS,
   SUBAGENT_TOOLS,
   isReadOnlyCall,
@@ -55,6 +56,7 @@ import {
   isWriteCall,
 } from '../../shared/tool-policy';
 import { canonicalCall } from '../../shared/tool-aliases';
+import { canRunTool, canUseWebSearch } from './available-tools';
 import {
   condenseAppliedCalls,
   condenseSupersededPlans,
@@ -68,36 +70,9 @@ import {
 import { agentPrompt } from '../../shared/agent-prompt';
 import { formatMemory } from '../../shared/memory';
 import { formatInstructionFile } from '../../shared/instructions';
-import {
-  cleanCompletion,
-  INLINE_MAX_CHARS,
-  INLINE_MAX_TOKENS,
-  INLINE_SYSTEM_PROMPT,
-  renderInlinePrompt,
-} from '../../shared/inline-ai';
-import {
-  buildCommitPrompt,
-  cleanCommitMessage,
-  COMMIT_MAX_CHARS,
-  COMMIT_MAX_TOKENS,
-  COMMIT_SYSTEM_PROMPT,
-  type CommitPromptParts,
-} from '../../shared/commit-message';
-import {
-  buildTestPrompt,
-  cleanTestCode,
-  TEST_MAX_CHARS,
-  TEST_MAX_TOKENS,
-  TEST_SYSTEM_PROMPT,
-  type TestPromptParts,
-} from '../../shared/test-generation';
-import {
-  buildTitlePrompt,
-  cleanChatTitle,
-  CHAT_TITLE_MAX_TOKENS,
-  CHAT_TITLE_SYSTEM_PROMPT,
-  type ChatTitleParts,
-} from '../../shared/chat-title';
+import type { CommitPromptParts } from '../../shared/commit-message';
+import type { TestPromptParts } from '../../shared/test-generation';
+import type { ChatTitleParts } from '../../shared/chat-title';
 import { sandboxNote } from '../../shared/sandbox';
 import {
   confirmFile,
@@ -108,6 +83,7 @@ import {
   rememberRead,
   restoreReads,
   snapshotReads,
+  uncoverFiles,
   uncoveredRequest,
   pruneReads,
   liveSources,
@@ -135,13 +111,7 @@ import {
   type RunStepLog,
   type RunSubagentLog,
 } from '../../shared/run-log';
-import {
-  REVIEW_SYSTEM_PROMPT,
-  REVIEW_TIMEOUT_MS,
-  buildReviewPrompt,
-  parseReviewVerdict,
-  type ReviewVerdict,
-} from '../../shared/approval-review';
+import type { ReviewVerdict } from '../../shared/approval-review';
 import { addUsage } from '../../shared/usage';
 import {
   budgetMessage,
@@ -179,7 +149,7 @@ import {
   type ToolOutcome,
 } from './agent-tools';
 import { AnthropicProvider } from './anthropic';
-import { searchWeb, webSearchNeedsKey, webSearchProviderLabel } from './web-search';
+import { searchWeb, webSearchProviderLabel } from './web-search';
 import { fetchPage } from './web-fetch';
 import { assertChatImages } from './images';
 import { createReadImageRunner } from './read-image';
@@ -355,6 +325,11 @@ export interface ChatHostBridge {
  * возвращается в диалог, пока модель не ответит текстом.
  */
 export class AiService {
+  /**
+   * Короткие запросы к модели (подсказка, коммит, тест, название, второе мнение
+   * о команде). Лениво: создаётся при первом таком запросе.
+   */
+  private queriesInstance: ReturnType<typeof createAiQueries> | null = null;
   /** Терминальные сессии тоже приходят снаружи: без них terminal_* не предлагаем. */
   private terminals?: TerminalAgent;
   /** Поиск символов проекта: без него search (action code) ищет только текстом. */
@@ -668,47 +643,7 @@ export class AiService {
    * без неё — активную: отдельной настройки для подсказок не заводим.
    */
   async completeInline(request: InlineCompletionRequest, signal: AbortSignal): Promise<InlineCompletionResult> {
-    const ai = this.settings.get().ai;
-    const providerId = ai.activeProviderId;
-    const model = ai.quickModel || ai.activeModel;
-    if (!providerId || !model) {
-      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана модель для подсказок (панель AI)');
-    }
-    const provider = this.createProvider(providerId);
-
-    const messages: ChatMessage[] = [
-      { role: 'system', content: INLINE_SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: renderInlinePrompt({
-          language: request.language,
-          relativePath: request.path,
-          prefix: request.prefix,
-          suffix: request.suffix,
-        }),
-      },
-    ];
-
-    let text = '';
-    try {
-      await provider.streamChat(
-        { model, messages, temperature: 0.1, maxTokens: INLINE_MAX_TOKENS },
-        {
-          onDelta: (piece) => {
-            // Потолок по символам: `maxTokens` — просьба, а не гарантия.
-            if (text.length < INLINE_MAX_CHARS) text += piece;
-          },
-        },
-        signal,
-      );
-    } catch (error) {
-      // Отмена — это человек печатает дальше, а не сбой. Отдаём пусто: подсказка
-      // не нужна, а ошибку в редакторе показывать негде.
-      if (signal.aborted) return { text: '' };
-      throw error;
-    }
-
-    return { text: cleanCompletion(text) };
+    return this.queries().completeInline(request, signal);
   }
 
   /**
@@ -725,48 +660,7 @@ export class AiService {
    * и вызывающий просто показывает карточку.
    */
   async reviewCommand(command: string, cwd: string | null, signal: AbortSignal): Promise<ReviewVerdict | null> {
-    const ai = this.settings.get().ai;
-    const providerId = ai.activeProviderId;
-    // Модель проверки: своя из настроек, иначе активная. Отдельная нужна потому,
-    // что эту работу делает дешёвая модель, а беседует человек с сильной.
-    const model = ai.reviewModel || ai.activeModel;
-    if (!providerId || !model) return null;
-    const provider = this.createProvider(providerId);
-
-    const messages: ChatMessage[] = [
-      { role: 'system', content: REVIEW_SYSTEM_PROMPT },
-      { role: 'user', content: buildReviewPrompt(command, cwd ?? undefined) },
-    ];
-
-    // Свой предел времени поверх отмены прогона: проверка, которая думает дольше
-    // человека, бесполезна — он уже нажал бы сам.
-    const local = new AbortController();
-    const abort = (): void => local.abort();
-    signal.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(abort, REVIEW_TIMEOUT_MS);
-    timer.unref?.();
-
-    let text = '';
-    try {
-      await provider.streamChat(
-        { model, messages, temperature: 0, maxTokens: 60 },
-        {
-          onDelta: (piece) => {
-            // Потолок и здесь: `maxTokens` — просьба, а не гарантия.
-            if (text.length < 400) text += piece;
-          },
-        },
-        local.signal,
-      );
-    } catch {
-      // Сеть, таймаут, отказ провайдера — ни одного повода разрешить молча.
-      return null;
-    } finally {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', abort);
-    }
-
-    return parseReviewVerdict(text);
+    return this.queries().reviewCommand(command, cwd, signal);
   }
 
   /**
@@ -778,32 +672,7 @@ export class AiService {
    * активную: отдельной настройки для сообщений не заводим.
    */
   async commitMessage(request: CommitPromptParts, signal: AbortSignal): Promise<CommitMessageResult> {
-    const ai = this.settings.get().ai;
-    const providerId = ai.activeProviderId;
-    const model = ai.quickModel || ai.activeModel;
-    if (!providerId || !model) {
-      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана модель (панель AI)');
-    }
-    const provider = this.createProvider(providerId);
-
-    const messages: ChatMessage[] = [
-      { role: 'system', content: COMMIT_SYSTEM_PROMPT },
-      { role: 'user', content: buildCommitPrompt(request) },
-    ];
-
-    let text = '';
-    await provider.streamChat(
-      { model, messages, temperature: 0.2, maxTokens: COMMIT_MAX_TOKENS },
-      {
-        onDelta: (piece) => {
-          // Потолок по символам: `maxTokens` — просьба, а не гарантия.
-          if (text.length < COMMIT_MAX_CHARS) text += piece;
-        },
-      },
-      signal,
-    );
-
-    return { message: cleanCommitMessage(text) };
+    return this.queries().commitMessage(request, signal);
   }
 
   /**
@@ -814,32 +683,7 @@ export class AiService {
    * берём дешёвую (`quickModel`), а без неё — активную.
    */
   async generateTest(request: TestPromptParts, signal: AbortSignal): Promise<TestGenerationResult> {
-    const ai = this.settings.get().ai;
-    const providerId = ai.activeProviderId;
-    const model = ai.quickModel || ai.activeModel;
-    if (!providerId || !model) {
-      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбрана модель (панель AI)');
-    }
-    const provider = this.createProvider(providerId);
-
-    const messages: ChatMessage[] = [
-      { role: 'system', content: TEST_SYSTEM_PROMPT },
-      { role: 'user', content: buildTestPrompt(request) },
-    ];
-
-    let text = '';
-    await provider.streamChat(
-      { model, messages, temperature: 0.2, maxTokens: TEST_MAX_TOKENS },
-      {
-        onDelta: (piece) => {
-          // Потолок по символам: `maxTokens` — просьба, а не гарантия.
-          if (text.length < TEST_MAX_CHARS) text += piece;
-        },
-      },
-      signal,
-    );
-
-    return { code: cleanTestCode(text) };
+    return this.queries().generateTest(request, signal);
   }
 
   /**
@@ -854,42 +698,7 @@ export class AiService {
    * вопросу, и это нормальный вид, а не сбой.
    */
   async suggestTitle(request: ChatTitleParts, signal: AbortSignal): Promise<ChatTitleResult> {
-    const ai = this.settings.get().ai;
-    const providerId = ai.activeProviderId;
-    const model = ai.quickModel || ai.activeModel;
-    if (!providerId || !model) return { title: '' };
-
-    let text = '';
-    try {
-      const provider = this.createProvider(providerId);
-      const messages: ChatMessage[] = [
-        { role: 'system', content: CHAT_TITLE_SYSTEM_PROMPT },
-        { role: 'user', content: buildTitlePrompt(request) },
-      ];
-      await provider.streamChat(
-        {
-          model,
-          messages,
-          temperature: 0.2,
-          maxTokens: CHAT_TITLE_MAX_TOKENS,
-          // Название — одна строка. Обрываем на переводе строки: без него модель
-          // договаривает пояснение, а каждый такой токен платный.
-          stop: ['\n', '\n\n'],
-        },
-        {
-          onDelta: (piece) => {
-            // Потолок по символам: `maxTokens` — просьба, а не гарантия.
-            if (text.length < 400) text += piece;
-          },
-        },
-        signal,
-      );
-    } catch {
-      // Молча: название — украшение, а не работа. Отменённый прогон тоже здесь.
-      return { title: '' };
-    }
-
-    return { title: cleanChatTitle(text) };
+    return this.queries().suggestTitle(request, signal);
   }
 
   async chat(
@@ -1071,7 +880,7 @@ export class AiService {
     // Веб-поиск читает настройки на каждый прогон: человек может включить его
     // посреди работы, и следующее действие должно это увидеть. Ключ тоже берём
     // в момент вызова: он мог появиться уже после старта приложения.
-    if (this.canUseWebSearch(webSearch)) {
+    if (canUseWebSearch({ webSearch, webSearchKey: this.webSearchKey(webSearch) })) {
       toolContext.webSearch = {
         search: (query, limit, callSignal) =>
           searchWeb(
@@ -1942,6 +1751,10 @@ export class AiService {
         }
         // Перекрытие — не повтор, но и не весь текст заново: просят `1–250`, а
         // `1–120` уже выше — читаем только хвост.
+        // Пачка (`paths`) сужается отдельно: у `uncoveredRequest` форма только с одним
+        // `path`, и повтор пачки, куда добавили один файл, оплачивал старые заново.
+        const batch =
+          covered || repeated || call.name !== 'read' ? undefined : uncoverFiles(call.arguments, coveredReads);
         const narrowed = covered || repeated ? undefined : uncoveredRequest(call.name, call.arguments, coveredReads);
 
         emit(ChatStreamEvent.ToolStart, {
@@ -1967,7 +1780,15 @@ export class AiService {
             detail: 'Этот диапазон уже есть выше в текущей ветке. Возьми текст оттуда, не читай повторно.',
           };
         } else {
-          outcome = await runTool(toolContext, call.name, narrowed?.arguments ?? call.arguments);
+          const args = narrowed?.arguments ?? (batch ? JSON.stringify(batch.args) : call.arguments);
+          outcome = await runTool(toolContext, call.name, args);
+          if (batch) {
+            const head = `В пачке ${batch.paths.length} файл(ов) частично уже прочитаны — читаю только непрочитанное.`;
+            outcome = {
+              ...outcome,
+              detail: outcome.detail ? `${head}\n${outcome.detail}` : head,
+            };
+          }
           if (narrowed) {
             const head = `Начало файла (строки ${narrowed.from - 1} и выше) уже есть в ветке — читаю с ${narrowed.from}.`;
             outcome = {
@@ -2233,7 +2054,7 @@ export class AiService {
         if (done.usage?.promptTokens !== undefined) {
           const estimated = estimateMessagesTokens(wire.messages) + params.toolsTokens;
           this.calibration.observe(params.calibrationKey, estimated, done.usage.promptTokens);
-          this.saveCalibration();
+          saveCalibration(this.settings.file(), this.calibration.snapshot());
         }
         // Диагностика: разбивка оценки по секциям — видно, что реально занимает окно
         // (чат, результаты инструментов, фиксированные схемы). Включается переменной
@@ -2342,7 +2163,7 @@ export class AiService {
           }),
       };
     }
-    if (this.canUseWebSearch(webSearch)) {
+    if (canUseWebSearch({ webSearch, webSearchKey: this.webSearchKey(webSearch) })) {
       subContext.webSearch = {
         search: (query, limit, callSignal) =>
           searchWeb(
@@ -2480,17 +2301,8 @@ export class AiService {
       };
     }
 
-    // Отчёт длиннее потолка: в основной контекст едет голова, а полный текст
-    // ложится в файл с адресом. Без адреса обрезка отчёта — это потеря работы
-    // подзадачи: перезапускать её дороже, чем прочитать остаток файла.
-    let clipped = text;
-    if (text.length > SUBAGENT_REPORT_CHARS) {
-      const file = this.spillDir ? spillText(this.spillDir, 'otchet-podzadachi', text) : null;
-      const rest = file
-        ? `… (отчёт обрезан: ${text.length} симв. — полностью в ${file}, читайте read с диапазоном строк)`
-        : `… (отчёт обрезан: ${text.length} симв. — попросите подзадачу вернуть выжимку поменьше)`;
-      clipped = `${text.slice(0, SUBAGENT_REPORT_CHARS)}\n${rest}`;
-    }
+    // Отчёт длиннее потолка: в контекст едет голова, остаток — в файл с адресом.
+    const clipped = clipWithRemainder(this.spillDir, 'otchet-podzadachi', text, SUBAGENT_REPORT_CHARS);
     return {
       outcome: {
         ok: true,
@@ -2501,21 +2313,6 @@ export class AiService {
       toolCalls,
       usage,
     };
-  }
-
-  /**
-   * Сохранить поправки оценки на диск. Поправка — необязательное удобство:
-   * сбой записи не должен ломать чат, поэтому ошибки глушим.
-   */
-  private saveCalibration(): void {
-    try {
-      const file = calibrationPath(this.settings.file());
-      const temporary = `${file}.tmp`;
-      writeFileSync(temporary, JSON.stringify(this.calibration.snapshot()), 'utf8');
-      renameSync(temporary, file);
-    } catch {
-      // Калибровка — удобство, а не данные: терять из-за неё ответ нельзя.
-    }
   }
 
   /**
@@ -2577,16 +2374,6 @@ export class AiService {
   }
 
   /**
-   * Готов ли веб-поиск к работе: включён и обеспечен ключом, если тот нужен.
-   * Brave без ключа — это инструмент, который заведомо ответит ошибкой, поэтому
-   * модели он не предлагается.
-   */
-  private canUseWebSearch(search: AiWebSearchSettings): boolean {
-    if (!search.enabled) return false;
-    return !webSearchNeedsKey(search.provider) || Boolean(this.webSearchKey(search));
-  }
-
-  /**
    * Ключ для поиска. Свой ключ поиска главнее; у поиска DeepSeek запасной
    * вариант — ключ самого подключения DeepSeek: это один и тот же аккаунт, и
    * требовать вводить его второй раз незачем.
@@ -2599,56 +2386,46 @@ export class AiService {
   }
 
   private canRun(tool: AgentToolSpec, host: ChatHostBridge | undefined): boolean {
-    // Правка файлов в двух формах: по якорю и по позициям. Нужен хоть один мост,
-    // вторую форму без своего моста откажет обработчик — своими словами.
-    if (tool.name === 'edit') return host?.applyEdits !== undefined || host?.applyPatches !== undefined;
-    // Терминал: команда, задание в фоне и живая сессия — без окна команду не
-    // подтвердить, а без сервиса терминалов не открыть сессию. Условие одно на
-    // все действия, как у браузера: действие без своей возможности откажет
-    // словами в обработчике, но в списке у модели инструмент есть.
-    if (tool.name === 'terminal') return this.terminals !== undefined || host?.confirmCommand !== undefined;
-    // Проверки: у действий разные возможности (пометки даёт окно, линтер — main),
-    // поэтому условие одно на оба, как у браузера и терминала.
-    if (tool.name === 'checks') return host?.getDiagnostics !== undefined || this.linter !== undefined;
-    // Ресурсы MCP предлагаются только тогда, когда серверы их объявили, — это
-    // знает лишь подключение, а `canRun` синхронный. Схемы добавляет
-    // `resourceTools` ниже, поэтому в статическом отборе их нет.
-    if (tool.name === 'mcp') return false;
-    // Заметки, вопрос, план и его утверждение живут в окне; отказ без него
-    // скажет обработчик.
-    if (tool.name === 'mind') return host !== undefined;
-    if (tool.name === 'show') return host?.openFile !== undefined || host !== undefined;
-    // Символы живут на языковом сервере: без него их не предлагаем. Переименование
-    // меняет код через сервер: `canRun` аргументов не видит, поэтому условие
-    // общее на все действия — без окна с применением правок `lsp` не предлагается.
-    if (tool.name === 'lsp') {
-      return this.symbols !== undefined && host?.applyEdits !== undefined;
-    }
-    // Тесты выполняют код проекта: нужен и резолвер команды, и подтверждение.
-    if (tool.name === 'run_tests') return this.tests !== undefined && host?.confirmCommand !== undefined;
-    // Память проекта (mind) — в ALWAYS_AVAILABLE: заметка обратима,
-    // спрашивать не у кого.
-    // Поиск одним именем: действия `code` и `sessions` без своей возможности
-    // откажут словами в обработчике, а текстовый и документация есть всегда.
-    if (tool.name === 'web') {
-      return (
-        this.canUseWebSearch(this.settings.get().ai.webSearch) || this.settings.get().ai.webFetch?.enabled === true
-      );
-    }
-    // Браузер: включается настройкой (как веб-поиск), а действия на странице
-    // спрашивают подтверждение — значит, без подключённого окна их не предлагаем.
-    // Действия разные по правам (снимок ничего не меняет, масштаб не спрашивает
-    // подтверждения), но ограничение у них общее: остальные всё равно пойдут
-    // спрашивать, а действие без своей возможности откажет словами в обработчике.
-    if (tool.name === 'browser') {
-      if (!this.browser || !this.settings.get().ai.browser.enabled) return false;
-      return host?.confirmBrowser !== undefined || this.browser.zoom !== undefined;
-    }
+    const ai = this.settings.get().ai;
+    return canRunTool(tool, {
+      host,
+      terminals: this.terminals,
+      tests: this.tests,
+      linter: this.linter,
+      symbols: this.symbols,
+      browser: this.browser,
+      browserEnabled: ai.browser.enabled,
+      webSearch: ai.webSearch,
+      webFetchEnabled: ai.webFetch?.enabled === true,
+      webSearchKey: this.webSearchKey(ai.webSearch),
+    });
+  }
 
-    // Всё прочее — только по явному признаку. Новый инструмент без условия в
-    // этой проверке модели не предлагается вовсе (это видно в пробе), а не
-    // открывается ей сам собой: раньше дефолт был «main — значит можно».
-    return ALWAYS_AVAILABLE.has(tool.name);
+  /**
+   * Короткие запросы к модели: подсказка, коммит, тест, название, второе мнение о
+   * команде. Лениво и только один раз: провайдер спрашивается по требованию, а
+   * настройки читаются свежими при каждом запросе — сервис уже так живёт.
+   */
+  private queries(): ReturnType<typeof createAiQueries> {
+    this.queriesInstance ??= createAiQueries({
+      quickModel: () => this.pickModel(undefined),
+      reviewModel: () => this.pickModel(this.settings.get().ai.reviewModel),
+      provider: (providerId) => this.createProvider(providerId),
+    });
+    return this.queriesInstance;
+  }
+
+  /**
+   * Модель для короткого ответа: названная в настройке, а без неё — активная.
+   * `null`, когда активной нет вовсе: короткому запросу нечем отвечать.
+   */
+  private pickModel(named: string | undefined): { providerId: string; model: string } | null {
+    const ai = this.settings.get().ai;
+    const providerId = ai.activeProviderId;
+    if (!providerId) return null;
+    const model = named?.trim() || ai.quickModel?.trim() || ai.activeModel;
+    if (!model) return null;
+    return { providerId, model };
   }
 
   private createProvider(providerId: string): AiProvider {
@@ -2914,18 +2691,4 @@ function describeConnectionError(error: unknown): string {
   // Всё остальное с «fetch failed» — тоже проблема связи, а не конфигурации.
   if (/fetch failed/i.test(raw)) return 'Сервер не отвечает — он запущен и слушает этот порт?';
   return raw || 'Не удалось подключиться';
-}
-
-/** Файл с поправками оценки токенов — рядом с settings.json. */
-function calibrationPath(settingsFile: string): string {
-  return path.join(path.dirname(settingsFile), 'token-calibration.json');
-}
-
-/** Прочитать сохранённые поправки; нет файла или мусор — начинаем с чистого листа. */
-function readCalibration(settingsFile: string): unknown {
-  try {
-    return JSON.parse(readFileSync(calibrationPath(settingsFile), 'utf8'));
-  } catch {
-    return undefined;
-  }
 }

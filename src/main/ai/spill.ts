@@ -133,6 +133,23 @@ export function spillText(dir: string, kind: string, text: string): string | nul
 export const AGED_KIND = 'svernutye-rezultaty';
 
 /**
+ * Обрезать текст под потолок, оставив адрес остатка. Это не то же, что «обрезать и
+ * промолчать»: обрезка отчёта подзадачи без адреса — потеря работы, которую
+ * перезапускать дороже, чем прочитать остаток файла.
+ *
+ * Без каталога (спилл не настроен) честно говорим, что осталось за кадром,
+ * и просим вернуть выжимку поменьше.
+ */
+export function clipWithRemainder(dir: string | undefined, kind: string, text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const file = dir ? spillText(dir, kind, text) : null;
+  const rest = file
+    ? `… (отчёт обрезан: ${text.length} симв. — полностью в ${file}, читайте read с диапазоном строк)`
+    : `… (отчёт обрезан: ${text.length} симв. — попросите подзадачу вернуть выжимку поменьше)`;
+  return `${text.slice(0, limit)}\n${rest}`;
+}
+
+/**
  * Убрать старые файлы. Счёт у каждого вида свой: свёртка живёт по
  * `MAX_AGED_FILES`, всё остальное — по `MAX_SPILL_FILES`. Имя начинается со
  * времени, поэтому сортировка режет именно старое.

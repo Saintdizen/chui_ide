@@ -119,17 +119,22 @@ describe('повтор чтения', () => {
 
 describe('доступность (canRun)', () => {
   /**
-   * `canRun` в сервисе отказывает по умолчанию: инструмент, которого там нет и
-   * которого нет в `ALWAYS_AVAILABLE`, модели просто не предложится — тихо, без
-   * ошибки. Поэтому проверка читает исходник `canRun` и требует, чтобы про
-   * каждый инструмент было сказано хоть что-то: имя, семейство по префиксу
-   * (`terminal_`, `browser_`) или набор «доступен всегда».
+   * `canRunTool` (`main/ai/available-tools.ts`) отказывает по умолчанию:
+   * инструмент, которого там нет и которого нет в `ALWAYS_AVAILABLE`, модели
+   * просто не предложится — тихо, без ошибки. Поэтому проверка читает
+   * исходник и требует, чтобы про каждый инструмент было сказано хоть что-то:
+   * имя, семейство по префиксу (`terminal_`, `browser_`) или набор «доступен
+   * всегда».
+   *
+   * Условия живут в отдельном модуле нарочно: пока они были методом сервиса,
+   * проверять их без настроек было нельзя, и тест читал исходник по границам
+   * `private canRun(`..`private createProvider(`.
    */
-  it('у каждого инструмента есть условие в canRun', () => {
-    const source = readFileSync(new URL('../src/main/ai/service.ts', import.meta.url), 'utf8');
-    const start = source.indexOf('private canRun(');
-    const body = source.slice(start, source.indexOf('private createProvider(', start));
+  it('у каждого инструмента есть условие в canRunTool', () => {
+    const source = readFileSync(new URL('../src/main/ai/available-tools.ts', import.meta.url), 'utf8');
+    const start = source.indexOf('export function canRunTool(');
     expect(start).toBeGreaterThan(0);
+    const body = source.slice(start);
 
     const uncovered = names.filter((name) => {
       if (ALWAYS_AVAILABLE.has(name)) return false;
