@@ -433,7 +433,6 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     );
   }
 
-
   /** Поиск по беседам: одна строка на беседу, в которой нашлось совпадение. */
   function searchChats(query: string): ChatSearchHit[] {
     const hits: ChatSearchHit[] = [];

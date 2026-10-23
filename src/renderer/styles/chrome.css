@@ -152,7 +152,9 @@ textarea {
   /* Ширина редакторской дорожки — переменной, чтобы панель редактора можно было
      свернуть так же, как боковую и правую: `is-editor-hidden` обнуляет её. */
   --editor-width: minmax(0, 1fr);
-  grid-template-columns: 6px var(--sidebar-width) var(--sidebar-gap) var(--editor-width) var(--right-gap) var(--right-width) 6px;
+  grid-template-columns: 6px var(--sidebar-width) var(--sidebar-gap) var(--editor-width) var(--right-gap) var(
+      --right-width
+    ) 6px;
   /* Четыре ряда: шапка, рабочая зона (лево · редактор · право), нижний остров
      и строка состояния. Нижний остров — своя дорожка под редактором: боковая
      и правая панели проходят мимо и доходят до строки состояния. */

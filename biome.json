@@ -35,7 +35,8 @@
         "noEmptyBlockStatements": "off",
         "noControlCharactersInRegex": "off",
         "noAssignInExpressions": "off",
-        "noConfusingVoidType": "off"
+        "noConfusingVoidType": "off",
+        "useIterableCallbackReturn": "error"
       },
       "complexity": {
         "noForEach": "off",

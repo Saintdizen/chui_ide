@@ -297,7 +297,6 @@ export function createTabs(deps: TabsDeps): Tabs {
       element.appendChild(tab);
     }
 
-
     // Активная вкладка могла уехать за край — подкручиваем к ней, но без движения,
     // если она и так видна.
     const activeTab = element.querySelector<HTMLElement>('.tab.is-active');
