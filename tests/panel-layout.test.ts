@@ -10,11 +10,18 @@ import {
 describe('panelBand', () => {
   it('делит ширину на узкую, обычную и широкую полосы по порогам', () => {
     expect(panelBand(600)).toBe('compact');
-    expect(panelBand(999)).toBe('compact');
-    expect(panelBand(1000)).toBe('regular');
+    expect(panelBand(819)).toBe('compact');
+    expect(panelBand(820)).toBe('regular');
     expect(panelBand(1199)).toBe('regular');
     expect(panelBand(1200)).toBe('wide');
     expect(panelBand(2560)).toBe('wide');
+  });
+
+  it('половина 1920-экрана — не «узкое окно»', () => {
+    // Плитка слева/справа в оконном менеджере: панели в таком окне помещаются,
+    // и сворачивать их из-за прилипания к краю нельзя.
+    expect(panelBand(960)).toBe('regular');
+    expect(panelBand(960)).not.toBe('compact');
   });
 });
 
@@ -98,7 +105,7 @@ describe('AutoPanelLayout', () => {
     const layout = new AutoPanelLayout();
     layout.update(1300, { sidebar: true, right: true });
     // На сужении человек сам держит правую закрытой — это его выбор, не наш.
-    layout.update(900, { sidebar: true, right: false });
+    layout.update(800, { sidebar: true, right: false });
     // Возврат на широкую: боковая (наша) встаёт, правая (его) остаётся закрытой.
     expect(layout.update(1300, { sidebar: false, right: false })).toEqual({ sidebar: true, right: false });
   });
@@ -107,5 +114,57 @@ describe('AutoPanelLayout', () => {
     const layout = new AutoPanelLayout();
     layout.update(1300, { sidebar: true, right: true });
     expect(layout.update(900, { sidebar: false, right: false })).toBeNull();
+  });
+});
+
+describe('AutoPanelLayout: восстановление после запуска', () => {
+  it('restore() запоминает полосу и не решает за человека', () => {
+    const auto = new AutoPanelLayout();
+    // Узкое окно требует спрятать обе панели, но человек оставил их открытыми.
+    auto.restore(600, { sidebar: true, right: true });
+
+    // Полоса уже известна — повторный расчёт по той же ширине ничего не трогает.
+    expect(auto.update(600, { sidebar: true, right: true })).toBeNull();
+  });
+
+  it('без restore() первый расчёт — обычный переход между полосами', () => {
+    const auto = new AutoPanelLayout();
+
+    expect(auto.update(600, { sidebar: true, right: true })).toEqual({ sidebar: false, right: false });
+  });
+
+  it('после восстановления смена полосы снова работает', () => {
+    const auto = new AutoPanelLayout();
+    auto.restore(1200, { sidebar: true, right: true });
+
+    // Широкое окно -> узкое: панели прячутся, и это уже не восстановление.
+    expect(auto.update(600, { sidebar: true, right: true })).toEqual({ sidebar: false, right: false });
+  });
+
+  it('панель, свёрнутую вручную, расширение окна не возвращает', () => {
+    const auto = new AutoPanelLayout();
+    auto.restore(1200, { sidebar: false, right: true });
+
+    // Человек сам закрыл проводник; при сужении и обратном расширении его нет.
+    expect(auto.update(600, { sidebar: false, right: true })).toEqual({
+      sidebar: false,
+      right: false,
+    });
+    // Правую свернул автопоказ, а не человек: при расширении она возвращается,
+    // а проводник — нет, потому что его закрыли вручную.
+    expect(auto.update(1200, { sidebar: false, right: false })).toEqual({
+      sidebar: false,
+      right: true,
+    });
+  });
+
+  it('неправдоподобная ширина не считается полосой', () => {
+    const auto = new AutoPanelLayout();
+    auto.restore(1200, { sidebar: true, right: true });
+
+    // Окно свернули/перетащили — ширина 0, решение по ней не принимаем.
+    expect(auto.update(0, { sidebar: true, right: true })).toBeNull();
+    // И полоса не сбилась: настоящее сужение после этого всё ещё видно.
+    expect(auto.update(600, { sidebar: true, right: true })).toEqual({ sidebar: false, right: false });
   });
 });

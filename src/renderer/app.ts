@@ -61,7 +61,7 @@ import { BrowserTabs } from './core/browser-tabs';
 import { ImportChecker } from './core/import-check';
 import { LspClient } from './core/lsp';
 import { OpenEditors } from './core/open-editors';
-import { AutoPanelLayout } from './core/panel-layout';
+import { AutoPanelLayout, MIN_TRUSTED_WIDTH } from './core/panel-layout';
 import { ProjectToolsModel } from './core/project-tools';
 import { createPreloadPlanner } from './core/env-preload';
 import { hasEntries, splitSettingsPatch } from './core/settings-patch';
@@ -290,7 +290,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   }
 
   /** Применить макет из настроек: размеры и видимость панелей. */
-  function applyLayoutSettings(saved: LayoutSettings | undefined): void {
+  const applyLayoutSettings = (saved: LayoutSettings | undefined): void => {
     if (!saved) return;
     withoutPersist(() => {
       layout.setSidebarSize(saved.sidebarSize);
@@ -1683,6 +1683,9 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
    * поэтому в настройки её не пишем (`withoutPersist`) и подсветку кнопок обновляем.
    */
   const syncAdaptivePanels = (): void => {
+    // Окно свёрнуто или ещё не получило размер: полоса по такой ширине — ложь,
+    // и принимать по ней решение значит закрыть панели без причины.
+    if (window.innerWidth < MIN_TRUSTED_WIDTH) return;
     const change = panelAuto.update(window.innerWidth, {
       sidebar: layout.sidebarVisible,
       right: layout.rightVisible,
@@ -1695,7 +1698,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     syncViewButtons();
   };
   window.addEventListener('resize', syncAdaptivePanels);
-  syncAdaptivePanels();
+  // Первый расчёт не решает: макет уже пришёл из настроек, и автопоказ не вправе
+  // его переигрывать — при узком окне он свернул бы обе панели, и человек увидел
+  // бы, что выбор из прошлой сессии потерян.
+  panelAuto.restore(window.innerWidth, {
+    sidebar: layout.sidebarVisible,
+    right: layout.rightVisible,
+  });
 
   // Системной полосы меню у безрамочного окна нет — открываем её кнопкой.
   // Меню рисует renderer, поэтому оно выглядит как остальные выпадашки; системное
@@ -2239,6 +2248,13 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
 
   window.addEventListener('beforeunload', (event) => {
     session.saveNow();
+    // История бесед пишется с паузой: без немедленной записи последний выбор
+    // (набор инструментов, цель, память чтений) терялся бы, если окно закрыли
+    // в пределах этой паузы.
+    chat.flushHistory();
+    // Макет тоже пишется с паузой: свёрнутая панель должна пережить закрытие окна,
+    // а не откатиться к состоянию до последнего клика.
+    void persistLayout();
     if (fileWrite.isClosing() || documents.dirty().length === 0) return;
     event.preventDefault();
     // Без `returnValue` Chromium не считает выгрузку отменённой — окно закрылось бы.

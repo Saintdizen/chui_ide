@@ -83,6 +83,15 @@ export interface ChatView {
   statusElement: HTMLElement;
   newChat(): void;
   stop(): void;
+  /**
+   * Дописать историю бесед немедленно, не дожидаясь паузы в 400 мс.
+   *
+   * Нужен на выгрузке окна: отложенный таймер до закрытия страницы не доживёт,
+   * и последний выбор (набор инструментов, цель беседы) пропал бы.
+   */
+  flushHistory(): void;
+  /** Набор инструментов активной беседы — его и надо считать «текущим». */
+  currentToolPreset(): ToolPresetId;
   /** Проверка модели разрешила команду без человека. Строка ложится в ленту того
    * хода, что идёт сейчас: молча выполненное действие должно быть видно.
    */
@@ -663,6 +672,28 @@ export function createChatPanel(deps: ChatDeps): ChatView {
   /** Записать беседы с задержкой: пачка правок даёт один файл. */
   const scheduleSave = (): void => persistence.schedule();
 
+  /**
+   * Дописать историю немедленно, не дожидаясь паузы `SAVE_DELAY`.
+   *
+   * Нужно ровно на закрытии окна: `beforeunload` успевает отправить запрос, а
+   * отложенный таймер — нет, страница умирает раньше. Без этого последний выбор
+   * (набор инструментов) терялся, если человек закрывал окно в пределах 400 мс
+   * после клика.
+   */
+  function flushHistory(): void {
+    persistence.flush();
+  }
+
+  /**
+   * Набор инструментов активной беседы — не выдумка, а то, что реально лежит
+   * в сессии. Панель настроек сверяет с ним кнопку «Агент», когда жмёт
+   * «включить ассистента»: без этого глобальная настройка молча перебивала бы
+   * выбор, сделанный в беседе, и кнопка звала бы к набору, которого нет.
+   */
+  function currentToolPreset(): ToolPresetId {
+    return sanitizeToolPreset(active().toolPreset ?? settings.ai.toolPreset);
+  }
+
   /** Обновить вид активной беседы после восстановления вкладок. */
   function syncActiveView(): void {
     const next = active();
@@ -1087,6 +1118,14 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     active().toolPreset = preset;
     composer.setToolPreset(preset);
     scheduleSave();
+    // И в настройку по умолчанию: новой беседе достался бы старый набор, и выбор,
+    // сделанный один раз, приходилось бы повторять в каждой вкладке заново.
+    void deps.rpc
+      .request('settings.update', { ai: { toolPreset: preset } })
+      .then((next) => {
+        settings = next;
+      })
+      .catch(() => undefined);
     showToast(`Набор инструментов: ${toolPresetSpec(preset).label}`);
   }
 
@@ -1961,6 +2000,8 @@ export function createChatPanel(deps: ChatDeps): ChatView {
     statusElement,
     newChat,
     stop,
+    flushHistory,
+    currentToolPreset,
     askAboutSelection,
     openRunLog: () => {
       // Трасса есть только у прогонов этого запуска: она живёт в памяти беседы,
