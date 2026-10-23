@@ -57,7 +57,7 @@ async function withRipgrep(output: string): Promise<{ args: () => Promise<string
   // Windows не запускает файл без известного расширения (`spawn UNKNOWN`) —
   // под `rg` кладём `.cmd`-обёртку, зовущую node. На остальных — shebang и права.
   if (process.platform === 'win32') {
-    await fs.writeFile(path.join(dir, 'rg.cmd'), `@node "${js}" %*\r\n`, 'utf8');
+    await fs.writeFile(path.join(dir, 'rg.cmd'), `@echo off\r\nnode "${js}" %*\r\n`, 'utf8');
   } else {
     await fs.rename(js, path.join(dir, 'rg'));
     await fs.chmod(path.join(dir, 'rg'), 0o755);

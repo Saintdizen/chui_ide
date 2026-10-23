@@ -36,7 +36,7 @@ async function withFakeRg(body: string): Promise<void> {
   if (process.platform === 'win32') {
     const js = path.join(dir, 'rg-fake.js');
     await fs.writeFile(js, body, 'utf8');
-    await fs.writeFile(path.join(dir, 'rg.cmd'), `@node "${js}" %*\r\n`, 'utf8');
+    await fs.writeFile(path.join(dir, 'rg.cmd'), `@echo off\r\nnode "${js}" %*\r\n`, 'utf8');
   } else {
     const file = path.join(dir, 'rg');
     await fs.writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
