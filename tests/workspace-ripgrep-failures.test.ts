@@ -82,6 +82,7 @@ describe('сбои rg', () => {
     const marker = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-kill-'));
     roots.push(marker);
     const died = path.join(marker, 'died.txt');
+    const isWindows = process.platform === 'win32';
     // Сам сигнал на Windows не ловится: там процесс просто завершается убийством.
     const diedLiteral = JSON.stringify(died);
     await withFakeRg(
@@ -93,7 +94,6 @@ describe('сбои rg', () => {
     const controller = new AbortController();
     const pending = runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir(), controller.signal);
     setTimeout(() => controller.abort(), 150);
-    const isWindows = process.platform === 'win32';
     // На Windows `kill()` не шлёт SIGTERM: процесс просто завершается, код null.
     await expect(pending).rejects.toThrow(isWindows ? 'rg завершился с кодом null: ' : 'rg завершился с кодом 143: ');
     // Обработчик TERM сработал — процесс был именно убит, а не истёк сам.
