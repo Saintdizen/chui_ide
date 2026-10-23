@@ -182,8 +182,9 @@ describe('что остаётся в истории от команды', () => 
   }, 60_000);
 
   it('упавшая команда остаётся целиком: по её тексту правят', async () => {
-    // Последняя команда задаёт код выхода: `false` в конце — отказ.
-    const outcome = await run('echo начало\nfalse');
+    // Последняя команда задаёт код выхода: в конце — заведомо ложное условие.
+    // Не `false`: на Windows это не команда, а встроенное слово оболочки.
+    const outcome = await run('echo начало\nexit 1');
     expect(outcome.ok).toBe(false);
     expect(outcome.applied).toBeUndefined();
   }, 60_000);

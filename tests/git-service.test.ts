@@ -95,6 +95,9 @@ async function makeRepos(): Promise<{ work: string; bare: string; branch: string
   await git(work, ['config', 'user.email', 'test@example.com']);
   await git(work, ['config', 'user.name', 'Test']);
   await git(work, ['config', 'commit.gpgsign', 'false']);
+  // Windows по умолчанию держит autocrlf=true: без этой строки файлы из
+  // рабочей папки приходят с \r\n, и тест сравнивает их с чистым \n.
+  await git(work, ['config', 'core.autocrlf', 'false']);
   // Содержимое сверяем посимвольно, а на Windows `core.autocrlf` по умолчанию
   // переводит строки в CRLF при выдаче файла на диск — тогда `pull` давал бы
   // `from peer\r\n` там, где в коммите лежит `from peer\n`.

@@ -55,6 +55,9 @@ async function makeRepo(): Promise<string> {
   await git(work, ['config', 'user.email', 'test@example.com']);
   await git(work, ['config', 'user.name', 'Test']);
   await git(work, ['config', 'commit.gpgsign', 'false']);
+  // Windows по умолчанию держит autocrlf=true: без этой строки файлы из
+  // рабочей папки приходят с \r\n, и тест сравнивает их с чистым \n.
+  await git(work, ['config', 'core.autocrlf', 'false']);
   await fs.mkdir(path.join(work, 'src'));
   await fs.mkdir(path.join(work, 'docs'));
   await fs.writeFile(path.join(work, 'src', 'index.ts'), 'export {};\n');

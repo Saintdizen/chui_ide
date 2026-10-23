@@ -133,7 +133,7 @@ describe('updateImports', () => {
 
     // Файл переехал в подпапку — импорт обязан за ним.
     const result = await ws.updateImports(path.join(root, 'src/util.ts'), path.join(root, 'lib/util.ts'));
-    expect(result.files.map((f) => path.relative(root, f))).toEqual(['src/app.ts']);
+    expect(result.files.map((f) => path.relative(root, f).split(path.sep).join('/'))).toEqual(['src/app.ts']);
     expect(await read(root, 'src/app.ts')).toContain("'../lib/util'");
   });
 
