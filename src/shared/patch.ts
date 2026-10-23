@@ -87,16 +87,79 @@ export function nearestPlace(text: string, anchor: string): { line: number; snip
   return { line: at + 1, snippet };
 }
 
-/** Сколько раз якорь встречается в тексте (неперекрывающиеся вхождения). */
-export function countOccurrences(text: string, needle: string): number {
-  if (!needle) return 0;
-  let count = 0;
+/** Вхождение якоря в тексте: где начинается и где кончается. */
+interface Occurrence {
+  start: number;
+  end: number;
+}
+
+/** Все неперекрывающиеся вхождения подстроки. */
+export function occurrences(text: string, needle: string): Occurrence[] {
+  if (!needle) return [];
+  const hits: Occurrence[] = [];
   let at = text.indexOf(needle);
   while (at !== -1) {
-    count += 1;
+    hits.push({ start: at, end: at + needle.length });
     at = text.indexOf(needle, at + needle.length);
   }
-  return count;
+  return hits;
+}
+
+/** Сколько раз якорь встречается в тексте (неперекрывающиеся вхождения). */
+export function countOccurrences(text: string, needle: string): number {
+  return occurrences(text, needle).length;
+}
+
+/**
+ * Вхождения якоря с поправкой на невидимое: перевод строки и общий отступ.
+ *
+ * В выводе `read` агент не видит ни `\r`, ни табов: строка выглядит как
+ * `  return 1;`, а в файле лежит `\treturn 1;\r\n`. Дословный поиск такой якорь
+ * не находит, и правка отказывается, хотя место агентом указано верно. Поэтому
+ * здесь текст и якорь приводятся к одному виду (CRLF → LF), а у строк якоря
+ * отбрасывается общий отступ: он в якоре — украшение, в файле — его нет.
+ *
+ * Снисходительность узкая и в одну сторону: якорь ищется только если он точный
+ * у всех строк с точностью до отступа. Несколько вхождений — по-прежнему отказ
+ * (см. `resolvePatches`): угадывать, какое из них имелось в виду, нельзя.
+ */
+function occurrencesLoose(text: string, anchor: string): Occurrence[] {
+  const want = anchor.split('\n').map((line) => line.replace(/\r$/, '').trim());
+  // Якорь из одних пробелов ничего не говорит о месте — не угадываем.
+  if (want.join('').length === 0) return [];
+
+  // Идём по строкам файла и сравниваем их без отступа: для якоря и для файла
+  // срез один и тот же, поэтому таб и пробелы перестают иметь значение.
+  const rows = text.split('\n');
+  const stripped = rows.map((row) => row.replace(/\r$/, '').trim());
+  const hits: Occurrence[] = [];
+  const offsets = lineOffsets(text);
+
+  for (let start = 0; start + want.length <= rows.length; start += 1) {
+    let same = true;
+    for (let i = 0; i < want.length; i += 1) {
+      if (stripped[start + i] !== want[i]) {
+        same = false;
+        break;
+      }
+    }
+    if (!same) continue;
+    const begin = offsets[start]!;
+    const last = start + want.length - 1;
+    // Конец — по концу последней строки БЕЗ её `\r`: якорь перевод строки не захватывает.
+    const end = offsets[last]! + rows[last]!.replace(/\r$/, '').length;
+    hits.push({ start: begin, end });
+  }
+  return hits;
+}
+
+/** Смещение начала каждой строки в тексте (разбиение по `\n`). */
+function lineOffsets(text: string): number[] {
+  const offsets = [0];
+  for (let i = 0; i < text.length; i += 1) {
+    if (text[i] === '\n') offsets.push(i + 1);
+  }
+  return offsets;
 }
 
 /**
@@ -125,7 +188,15 @@ export function resolvePatches(text: string, patches: readonly PatchHunk[]): Pat
       };
     }
 
-    const found = countOccurrences(text, patch.oldText);
+    // Якорь ищем в два приёма. Сначала дословно: это точное место, и если оно
+    // ровно одно — вопросов нет. Потом с поправкой на невидимое: перевод строки
+    // и общий отступ. Их агент не видит в выводе `read`, а файл на диске живёт
+    // с ними (CRLF после Windows, табы, вложенность). Раньше такой якорь просто
+    // «не находился», и правка отказывалась на ровном месте.
+    const exact = occurrences(text, patch.oldText);
+    const loose = exact.length > 0 ? [] : occurrencesLoose(text, patch.oldText);
+    const hits = exact.length > 0 ? exact : loose;
+    const found = hits.length;
     if (found === 0) {
       // Ближайшее место вместо «перечитай файл»: полное чтение стоит до 60 000
       // символов контекста, а подсказка с номером строки и соседними строками
@@ -151,9 +222,13 @@ export function resolvePatches(text: string, patches: readonly PatchHunk[]): Pat
       };
     }
 
-    const at = text.indexOf(patch.oldText);
-    const from = fromOffset(text, at);
-    const to = fromOffset(text, at + patch.oldText.length);
+    // Позиция — по найденному вхождению, а `oldText` — РЕАЛЬНЫЙ кусок файла (у
+    // невидимого якоря он отличается от того, что прислал агент). Так документная
+    // модель сверит не пустое место: её следующий шаг — сравнить `oldText` с тем,
+    // что лежит в документе, и якорь агента там провалился бы второй раз.
+    const hit = hits[0]!;
+    const from = fromOffset(text, hit.start);
+    const to = fromOffset(text, hit.end);
     edits.push({
       startLine: from.line,
       startColumn: from.column,
@@ -162,7 +237,7 @@ export function resolvePatches(text: string, patches: readonly PatchHunk[]): Pat
       newText: patch.newText,
       // Якорь кладём и в саму правку: документная модель сверит его ещё раз
       // перед применением — на случай гонки с чужой правкой в том же файле.
-      oldText: patch.oldText,
+      oldText: text.slice(hit.start, hit.end),
     });
   }
 

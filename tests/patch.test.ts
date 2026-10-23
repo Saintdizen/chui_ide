@@ -160,6 +160,47 @@ describe('resolvePatches: отказы', () => {
   });
 });
 
+describe('невидимые символы в якоре', () => {
+  const run = (text: string, oldText: string) => resolvePatches(text, [{ oldText, newText: 'X' }]);
+
+  it('CRLF в файле, LF в якоре — находится', () => {
+    // Файл на Windows несёт `\r\n`, а `read` отдаёт строки без `\r`.
+    const r = run('function a() {\r\n  return 1;\r\n}\r\n', '  return 1;\n}');
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.edits[0]!.startLine).toBe(2);
+      // `oldText` — реальный кусок файла (с `\r`), а не якорь агента: иначе
+      // следующий шаг — сверка с документом — провалил бы якорь второй раз.
+      expect(r.edits[0]!.oldText).toBe('  return 1;\r\n}');
+    }
+  });
+
+  it('табы в файле, пробелы в якоре — находится', () => {
+    const r = run('function a() {\n\treturn 1;\n}\n', '    return 1;\n}');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.edits[0]!.oldText).toBe('\treturn 1;\n}');
+  });
+
+  it('CRLF и табы сразу — находится', () => {
+    expect(run('if (x) {\r\n\treturn 1;\r\n}\r\n', '  return 1;\n}').ok).toBe(true);
+  });
+
+  it('два подходящих места — по-прежнему отказ', () => {
+    // Снисходительность не должна превращать неоднозначность в догадку.
+    expect(run('  a();\n  a();\n', '    a();').ok).toBe(false);
+  });
+
+  it('настоящий промах остаётся промахом', () => {
+    expect(run('a\nb\n', 'zzz').ok).toBe(false);
+  });
+
+  it('точный якорь не трогаем — снисходительность не вступает', () => {
+    const r = run('a\nb\n', 'a\nb');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.edits[0]!.oldText).toBe('a\nb');
+  });
+});
+
 describe('countOccurrences', () => {
   it('считает вхождения без перекрытий', () => {
     expect(countOccurrences('aaaa', 'aa')).toBe(2);
