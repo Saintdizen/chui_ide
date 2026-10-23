@@ -190,6 +190,48 @@ export function uncoveredRequest(
 }
 
 /**
+ * Непрочитанное в пачке `read { paths }`: та же задача, что у одиночного пути, но
+ * `uncoveredRequest` знает только форму с `path`. Модель тянет пачку повторно
+ * (обычно добавив в неё один файл), и каждый уже показанный файл оплачивался заново.
+ *
+ * Хвост у файлов свой, а `startLine` у пачки общий: режем по общему началу и
+ * оставляем в `paths` только те файлы, кому этот хвост ещё что-то даст.
+ */
+export function uncoverFiles(
+  rawArguments: string,
+  reads: ReadonlyMap<string, ReadRange[]>,
+): { paths: string[]; args: Record<string, unknown> } | undefined {
+  const parsed = parseToolArguments(rawArguments);
+  if (!parsed.ok) return undefined;
+  const raw = parsed.value.paths;
+  if (!Array.isArray(raw)) return undefined;
+  const paths = raw.filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  if (paths.length === 0) return undefined;
+
+  const endLine = integerArg(parsed.value.endLine);
+  const requestStart = Math.max(1, integerArg(parsed.value.startLine) ?? 1);
+  const whole = paths.slice();
+  const starts: number[] = [];
+  for (const target of paths) {
+    const ranges = reads.get(target);
+    if (!ranges || ranges.length === 0 || ranges.some((range) => range.suspect)) continue;
+    const { cursor } = coverageCursor(ranges, requestStart);
+    if (cursor - requestStart < MIN_NARROW_LINES) continue;
+    if (endLine !== undefined && cursor > endLine) continue;
+    starts.push(cursor);
+  }
+  if (starts.length === 0) return undefined;
+
+  // Общий `startLine` — самый ранний хвост: у остальных файлов он ничего не срежет.
+  const start = Math.min(...starts);
+  if (start === requestStart) return undefined;
+  const next: Record<string, unknown> = { ...parsed.value, startLine: start };
+  if (endLine !== undefined) next.endLine = endLine;
+  if (next.paths === raw) next.paths = whole;
+  return { paths: whole, args: next };
+}
+
+/**
  * Запомнить прочитанный диапазон файла. Сомнительные куски выбрасываем — их текст мог
  * разойтись с диском; при смене версии выкидываем и остальные: строки в них уже не те.
  */

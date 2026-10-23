@@ -176,3 +176,70 @@ describe('read: номера строк пришли строками', () => {
     expect(outcome.read).toMatchObject({ path: file, from: 1, to: 3 });
   });
 });
+
+describe('read: повтор целого файла не платится второй раз', () => {
+  /**
+   * Первое чтение даёт текст, второе — только весточку, если файл не менялся.
+   * Версия сверяется по `stat`: файл, поправленный мимо инструментов, повторяется.
+   */
+  it('второй полный read того же файла не тащит текст снова', async () => {
+    const ctx = { workspace, coveredReads: new Map() } as unknown as ToolContext;
+    const first = await runTool(ctx, 'read', JSON.stringify({ path: file }));
+    expect(first.ok).toBe(true);
+    const reads = (ctx as unknown as { coveredReads: Map<string, unknown> }).coveredReads;
+    // Как это делает цикл: `runTool` покрытие только ЧИТАЕТ, запись — забота прогона.
+    // `eof` обязателен: без него «файл прочитан до конца» неизвестно, и повтор разрешён.
+    expect(first.read?.eof).toBe(true);
+    if (first.read) rememberRead(reads as never, first.read);
+
+    const second = await runTool(ctx, 'read', JSON.stringify({ path: file }));
+    expect(second.ok).toBe(true);
+    expect(second.summary).toContain('уже прочитано');
+    expect(second.detail).not.toContain('третья');
+    expect(second.detail).toContain('force: true');
+  });
+
+  it('изменённый файл читается заново', async () => {
+    const ctx = { workspace, coveredReads: new Map() } as unknown as ToolContext;
+    const first = await runTool(ctx, 'read', JSON.stringify({ path: file }));
+    const reads = (ctx as unknown as { coveredReads: Map<string, unknown> }).coveredReads;
+    for (const r of first.reads ?? []) rememberRead(reads as never, r);
+
+    await fs.writeFile(file, `${LINES.join('\n')}\nшестая\n`, 'utf8');
+    const second = await runTool(ctx, 'read', JSON.stringify({ path: file }));
+    expect(second.detail).toContain('шестая');
+  });
+
+  it('range-запрос (startLine) не подавляется', async () => {
+    const ctx = { workspace, coveredReads: new Map() } as unknown as ToolContext;
+    const first = await runTool(ctx, 'read', JSON.stringify({ path: file }));
+    const reads = (ctx as unknown as { coveredReads: Map<string, unknown> }).coveredReads;
+    for (const r of first.reads ?? []) rememberRead(reads as never, r);
+
+    const second = await runTool(ctx, 'read', JSON.stringify({ path: file, startLine: 1, endLine: 3 }));
+    expect(second.detail).toContain('третья');
+  });
+});
+
+describe('read: бюджет считается по чистому тексту, а не по номерам', () => {
+  /**
+   * Потолок вывода режется по тексту, и только потом ставится нумерация.
+   * Раньше бюджет тратился на «1234 | » в каждой строке: длинный файл
+   * обрезался заметно раньше, чем кончался сам текст.
+   */
+  it('в узком бюджете доезжает больше строк, чем съел бы запас на номера', async () => {
+    const long = path.join(dir, 'long.txt');
+    const lines = Array.from({ length: 4000 }, (_, index) => `строка ${index + 1} текста`);
+    await fs.writeFile(long, `${lines.join('\n')}\n`, 'utf8');
+
+    const withBudget = (chars: number) =>
+      ({ workspace, stepBudget: { left: chars, spent: 0, tokensLeft: chars / 3.5, tokensSpent: 0 } }) as unknown as ToolContext;
+    const outcome = await runTool(withBudget(4000), 'read', JSON.stringify({ path: long }));
+    expect(outcome.ok).toBe(true);
+    expect(outcome.read?.to).toBeGreaterThan(60);
+    expect(outcome.read?.to).toBeLessThan(4000);
+    // Нумерация на месте — без неё нельзя назвать диапазон правки.
+    expect(outcome.detail).toMatch(/^\s*1 \| /m);
+    expect(outcome.detail).toContain('вывод обрезан');
+  });
+});

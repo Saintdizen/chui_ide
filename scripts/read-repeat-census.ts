@@ -50,13 +50,18 @@ function shellWrites(command: string): boolean {
 
 const kinds = new Map<string, { calls: number; tokens: number }>();
 /** Повторы, пришедшие следом за `terminal`/правкой: их и должны снимать штампы. */
-const afterDirty = { calls: 0, tokens: 0 };
+const afterDirty = {
+  calls: 0,
+  tokens: 0,
+  /** Из них — запросы «весь файл»: только их теперь срезает подавление повторов. */
+  wholeCalls: 0,
+  wholeTokens: 0,
+};
 /** Пометки `N | ` в выводе `read`: строка-номер в каждой строке текста. */
 const numbering = { chars: 0 };
 const shell = { calls: 0, tokens: 0, cd: 0, cdTokens: 0, writes: 0 };
 
-function add(key: string, tokens: number): void {
-  const row = kinds.get(key) ?? { calls: 0, tokens: 0 };
+function add(key: string, tokens: number): void {  const row = kinds.get(key) ?? { calls: 0, tokens: 0 };
   row.calls += 1;
   row.tokens += tokens;
   kinds.set(key, row);
@@ -147,6 +152,14 @@ for (const messages of sample.messages) {
     if (dirty && kind !== 'первое чтение файла') {
       afterDirty.calls += 1;
       afterDirty.tokens += tokens;
+      // Не всё здесь срезаемо: readFile теперь подавляет только запрос «весь файл»
+      // (нет startLine, endLine), который уже есть выше и не менялся. Куски и первые
+      // чтения после правки оплачиваются честно — показываем их отдельно, чтобы
+      // строка не читалась как «выйгрыш целиком».
+      if (kind !== 'продолжение файла' && range.whole) {
+        afterDirty.wholeCalls += 1;
+        afterDirty.wholeTokens += tokens;
+      }
     }
     dirty = false;
     was.push(range);
@@ -167,11 +180,15 @@ console.log(
     'эвристика по запросам: фактическое изменение файла здесь неизвестно',
 );
 console.log(
-  `\nШелл-чтения в terminal: ${shell.calls} выз. ${shell.tokens} ток., из них с ведущим ` +
-    `\`cd … &&\`: ${shell.cd} (${shell.cdTokens} ток.); из них отсеяно как запись, ` +
-    `а не чтение (\`cat > x <<EOF\`, \`sed -i\`): ${shell.writes}`,
+  `  из них подавляемо (запрос «весь файл», уже есть выше): ${afterDirty.wholeTokens} ток. ` +
+    `(${afterDirty.wholeCalls} выз.), остальное — куски и первые чтения, они платятся честно`,
 );
-const numberTokens = Math.round(numbering.chars / 4);
+console.log(
+  `\nШелл-чтения в terminal: ${shell.calls} выз. ${shell.tokens} ток., из них с ведущим ` +
+    `\`cd … &&\`: ${shell.cd} (${shell.cdTokens} ток.); ещё отвергнуто как запись, ` +
+    `а не чтение (\`cat > x <<EOF\`, \`sed -i\`): ${shell.writes} выз. (в счёт выше не входят)`,
+);
+const numberTokens = estimateTextTokens('x'.repeat(numbering.chars));
 console.log(
   `Номера строк в выводе read: ${numbering.chars} симв. ≈ ${numberTokens} ток. = ` +
     `${Math.round((100 * numberTokens) / Math.max(1, readTotal))}% чтений`,

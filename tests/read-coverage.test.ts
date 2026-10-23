@@ -11,6 +11,7 @@ import {
   restoreReads,
   snapshotReads,
   touchedPaths,
+  uncoverFiles,
   uncoveredRequest,
   type ReadRange,
 } from '../src/shared/read-coverage';
@@ -22,6 +23,46 @@ import {
  * Проверяем границы — что именно считается покрытым и в каких случаях повтор
  * всё же разрешён (`force`, отсутствие диапазона, незакрытая верхняя граница).
  */
+
+describe('частичное покрытие пачки (`read { paths }`)', () => {
+  it('сужает начало до самого раннего непрочитанного хвоста', () => {
+    const reads = new Map<string, ReadRange[]>([
+      ['a.ts', [{ from: 1, to: 120 }]],
+      ['b.ts', [{ from: 1, to: 60 }]],
+    ]);
+    const args = JSON.stringify({ paths: ['a.ts', 'b.ts', 'c.ts'], startLine: 1, endLine: 400 });
+    const narrowed = uncoverFiles(args, reads);
+    expect(narrowed?.paths).toEqual(['a.ts', 'b.ts', 'c.ts']);
+    expect(narrowed?.args.startLine).toBe(61);
+    expect(narrowed?.args.endLine).toBe(400);
+  });
+
+  it('не сужает, если прочитан самый запрос, а не его начало', () => {
+    // Порог считается от начала запроса (`startLine`), а не от хвоста: `390–400` —
+    // нет смысла резать, текст всё равно не перекрыт.
+    const reads = new Map<string, ReadRange[]>([['a.ts', [{ from: 400, to: 500 }]]]);
+    const args = JSON.stringify({ paths: ['a.ts'], startLine: 1, endLine: 400 });
+    expect(uncoverFiles(args, reads)).toBeUndefined();
+  });
+
+  it('не сужает, когда прочитано почти всё без остатка', () => {
+    const reads = new Map<string, ReadRange[]>([['a.ts', [{ from: 1, to: 10 }]]]);
+    const args = JSON.stringify({ paths: ['a.ts'], startLine: 1, endLine: 400 });
+    expect(uncoverFiles(args, reads)).toBeUndefined();
+  });
+
+  it('сомнительный кусок не сужает: версия могла разойтись', () => {
+    const reads = new Map<string, ReadRange[]>([['a.ts', [{ from: 1, to: 300, suspect: true }]]]);
+    const args = JSON.stringify({ paths: ['a.ts'], startLine: 1, endLine: 400 });
+    expect(uncoverFiles(args, reads)).toBeUndefined();
+  });
+
+  it('не та форма — `undefined`', () => {
+    const reads = new Map<string, ReadRange[]>();
+    expect(uncoverFiles(JSON.stringify({ path: 'a.ts' }), reads)).toBeUndefined();
+    expect(uncoverFiles(JSON.stringify({ paths: [] }), reads)).toBeUndefined();
+  });
+});
 
 describe('частичное покрытие после непрозрачного изменения', () => {
   it('не скрывает сомнительное начало до сверки версии', () => {
