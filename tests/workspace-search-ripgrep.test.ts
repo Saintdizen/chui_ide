@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { WorkspaceService } from '../src/main/workspace/workspace';
+import { stubSupported, withRipgrep } from './ripgrep-stub';
 
 /**
  * Путь поиска через настоящий ripgrep.
@@ -38,34 +39,6 @@ async function makeDir(): Promise<string> {
  * вызовы печатают `output` и пишут свои аргументы в файл — по нему видно,
  * что именно мы попросили искать.
  */
-async function withRipgrep(output: string): Promise<{ args: () => Promise<string>; restore: () => void }> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-stub-'));
-  roots.push(dir);
-  const argsFile = path.join(dir, 'args.txt');
-  // Тело — на Node, а не `sh`: на Windows оболочки нет, заглушка молча не
-  // запускалась, и ripgrep считался отсутствующим — весь файл краснел зря.
-  const script = [
-    "const fs = require('node:fs');",
-    `fs.appendFileSync(${JSON.stringify(argsFile)}, process.argv.slice(2).map((a) => a + '\\n').join(''));`,
-    "if (process.argv[2] === '--version') process.exit(0);",
-    `process.stdout.write(${JSON.stringify(output)});`,
-    '',
-  ].join('\n');
-  // Windows: только `.exe` — ни `rg` без расширения, ни `rg.cmd` спавн без оболочки
-  // не найдёт (ENOENT). Шебанг не помешает: Node читает его сам.
-  const file = path.join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg');
-  await fs.writeFile(file, `#!/usr/bin/env node\n${script}\n`, 'utf8');
-  if (process.platform !== 'win32') await fs.chmod(file, 0o755);
-  const previous = process.env.PATH ?? '';
-  process.env.PATH = `${dir}${path.delimiter}${previous}`;
-  return {
-    args: () => fs.readFile(argsFile, 'utf8').catch(() => ''),
-    restore: () => {
-      process.env.PATH = previous;
-    },
-  };
-}
-
 /** Запись `--json`. */
 function match(file: string, line: number, text: string, start = 0): string {
   return JSON.stringify({
@@ -93,7 +66,7 @@ function service(): WorkspaceService {
 }
 
 describe('search через ripgrep', () => {
-  it('путь из --json становится абсолютным, а порядок — по файлу и строке', async () => {
+  it.skipIf(!stubSupported)('путь из --json становится абсолютным, а порядок — по файлу и строке', async () => {
     const root = await makeDir();
     await fs.mkdir(path.join(root, 'src'));
     await fs.writeFile(path.join(root, 'src/a.ts'), 'x\n');
@@ -120,7 +93,7 @@ describe('search через ripgrep', () => {
     }
   });
 
-  it('столбец считается в СИМВОЛАХ, а ripgrep даёт байты', async () => {
+  it.skipIf(!stubSupported)('столбец считается в СИМВОЛАХ, а ripgrep даёт байты', async () => {
     const root = await makeDir();
     await fs.writeFile(path.join(root, 'a.ts'), 'кириллица\n');
     // «кириллица» — 9 символов по 2 байта; смещение 18 — конец строки.
@@ -138,7 +111,7 @@ describe('search через ripgrep', () => {
 });
 
 describe('search через ripgrep: контекст и провод', () => {
-  it('контекст до совпадения копится, после — пристраивается к нему', async () => {
+  it.skipIf(!stubSupported)('контекст до совпадения копится, после — пристраивается к нему', async () => {
     const root = await makeDir();
     await fs.writeFile(path.join(root, 'a.ts'), 'x\n');
     const stub = await withRipgrep(
@@ -161,7 +134,7 @@ describe('search через ripgrep: контекст и провод', () => {
     }
   });
 
-  it('на проводе: маска, отказ от конфига, точный регистр', async () => {
+  it.skipIf(!stubSupported)('на проводе: маска, отказ от конфига, точный регистр', async () => {
     const root = await makeDir();
     await fs.writeFile(path.join(root, 'a.ts'), 'x\n');
     const stub = await withRipgrep([match(path.join(root, 'a.ts'), 1, 'q'), summary(1)].join('\n'));
@@ -182,7 +155,7 @@ describe('search через ripgrep: контекст и провод', () => {
 });
 
 describe('search через ripgrep: отказы', () => {
-  it('пустой вывод — «ничего не нашлось», а не повод искать заново', async () => {
+  it.skipIf(!stubSupported)('пустой вывод — «ничего не нашлось», а не повод искать заново', async () => {
     const root = await makeDir();
     await fs.writeFile(path.join(root, 'a.ts'), 'тут есть\n');
     const stub = await withRipgrep('');
@@ -197,7 +170,7 @@ describe('search через ripgrep: отказы', () => {
     }
   });
 
-  it('код 1 — «совпадений нет», а не сбой: отката нет, выдача пуста', async () => {
+  it.skipIf(!stubSupported)('код 1 — «совпадений нет», а не сбой: отката нет, выдача пуста', async () => {
     const root = await makeDir();
     await fs.writeFile(path.join(root, 'a.ts'), 'нужное\n');
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-one-'));
@@ -218,7 +191,7 @@ describe('search через ripgrep: отказы', () => {
     }
   });
 
-  it('код 2 — настоящий сбой ripgrep, и тогда спасает собственный обход', async () => {
+  it.skipIf(!stubSupported)('код 2 — настоящий сбой ripgrep, и тогда спасает собственный обход', async () => {
     const root = await makeDir();
     await fs.writeFile(path.join(root, 'a.ts'), 'нужное\n');
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-bad-'));

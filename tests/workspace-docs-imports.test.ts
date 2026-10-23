@@ -191,7 +191,7 @@ describe('updateImports', () => {
     );
     // onBeforeChange — порт «до правки»: без него перезапись необратима.
     (ws as unknown as { onBeforeChange?: (file: string, kind: string) => void }).onBeforeChange = (file) => {
-      saved.push(path.relative(root, file));
+      saved.push(path.relative(root, file).split(path.sep).join('/'));
     };
     await ws.open(root);
 
@@ -260,7 +260,7 @@ describe('updateImports: потолки', () => {
     // Крупный файл пропущен: его содержимое не читали и не переписывали.
     // Пути отдаются абсолютными — сверяем хвост, а не весь путь.
     expect(result.files).toHaveLength(1);
-    expect(result.files[0].endsWith('/src/small.ts')).toBe(true);
+    expect(result.files[0].split(path.sep).join('/')).toMatch(/\/src\/small\.ts$/);
     expect(await fs.readFile(big, 'utf8')).toContain(`from './old'`);
     expect(await fs.readFile(small, 'utf8')).toContain(`from './new'`);
   });

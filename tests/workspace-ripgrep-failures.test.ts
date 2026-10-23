@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { runRipgrep } from '../src/main/workspace/workspace';
+import { stubSupported } from './ripgrep-stub';
 
 /**
  * Что делает поиск, когда `rg` недоступен: упал, завис, его прервали.
@@ -32,9 +33,9 @@ afterEach(async () => {
 async function withFakeRg(body: string): Promise<void> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-fail-'));
   roots.push(dir);
-  const file = path.join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg');
+  const file = path.join(dir, 'rg');
   await fs.writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
-  if (process.platform !== 'win32') await fs.chmod(file, 0o755);
+  await fs.chmod(file, 0o755);
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   // Возврат PATH — через afterEach неудобно: сохраняем в замыкании хука.
@@ -65,19 +66,19 @@ describe('сбои rg', () => {
     }
   });
 
-  it('сбой поиска (код 2) — отказ с причиной из stderr', async () => {
+  it.skipIf(!stubSupported)('сбой поиска (код 2) — отказ с причиной из stderr', async () => {
     await withFakeRg(script(`process.stderr.write('битый шаблон\\n');\nprocess.exit(2);`));
     await expect(runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir())).rejects.toThrow(
       'rg завершился с кодом 2: битый шаблон',
     );
   });
 
-  it('совпадений нет (код 1) — это результат, а не отказ', async () => {
+  it.skipIf(!stubSupported)('совпадений нет (код 1) — это результат, а не отказ', async () => {
     await withFakeRg(script(`process.stdout.write('итог\\n');\nprocess.exit(1);`));
     expect(await runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir())).toBe('итог\n');
   });
 
-  it('прерванный поиск убивает процесс', async () => {
+  it.skipIf(!stubSupported)('прерванный поиск убивает процесс', async () => {
     // Скрипт живёт, пока его не убьют: проверяем, что сигнал доходит.
     const marker = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-kill-'));
     roots.push(marker);
