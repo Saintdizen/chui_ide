@@ -133,16 +133,136 @@ describe('команда-читалка выполняется структур�
     expect(box.calls).toEqual([]);
   });
 
+  it('`"` не часть команды: труба внутри цитаты — образец, а не конвейер', async () => {
+    // Грабля: `asPipedCommand` не знал про кавычки и читал `a|"b` в образце как
+    // конвейер. `commandWords` на незакрытой цитате возвращал null, вызов молча
+    // уходил в шелл, а шелл на таком образце молча отдавал пустой вывод — то есть
+    // «не нашлось» вместо «не смог». Проверяем именно разбор: в шелл не идём.
+    const box = sandbox();
+    const outcome = await run(box, 'grep -nE "row3|row4" src/app.ts | head -5');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(true);
+    expect(String(outcome.detail)).toContain('row3');
+    expect(String(outcome.detail)).toContain('row4');
+  });
+
+  it('`\\|` в образце внутри конвейера — всё равно search', async () => {
+    // Грабля: `pipePosition` не пропускал `\\` внутри кавычек — труба в образце
+    // (`"row3\\|row4"`) виделась второй, внешней, `splitPipe` отвечал `'script'`,
+    // и вызов уходил в шелл мимо `search`. Образец с экранированной трубой —
+    // обычное дело: так пишут «или» без regex.
+    const box = sandbox();
+    const outcome = await run(box, 'grep -nE "row3\\|row4" src/app.ts | head -5');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(true);
+    expect(String(outcome.detail)).toContain('row3');
+  });
+
   it('`--include=*.md` — маска для search, а не глоб шелла', async () => {
     const box = sandbox();
     await run(box, 'grep -rn иголка src --include=*.md');
     expect(box.calls).toEqual([]);
   });
 
+  it('конвейер с `head` не глотает regex-трубу в образце', async () => {
+    // Грабля: `takeHeadTail` резал строку regex-ом `^(.*?)\\s*\\|\\s*head...`, и
+    // ленивая группа отдавала кусок ДО первой трубы — тут это труба в самом образце.
+    // Всё после терялось, в `search` уезжал одинокий `row3` без `-E`: ложный ответ.
+    const box = sandbox();
+    const outcome = await run(box, 'grep -nE "row3|row4" src/app.ts | head -5');
+    expect(box.calls).toEqual([]);
+    expect(String(outcome.detail)).toContain('row4');
+  });
+
+  it('`\\|` из BRE не доходит до JS regex буквальной трубой', async () => {
+    // Грабля: в grep `\\|` — это «или», а в JS regex `\\|` — буквальная труба.
+    // Образец уезжал в `search` как есть, и `grep -n "row3\\|row4" файл`
+    // неизменно отвечал «Совпадений нет» там, где совпадения есть.
+    const box = sandbox();
+    const outcome = await run(box, 'grep -n "row3\\|row4" src/app.ts');
+    expect(box.calls).toEqual([]);
+    expect(outcome.summary).toContain('10 совпадений');
+  });
+
   it('но `cat src/*.ts` — всё равно глоб: в шелл', async () => {
     const box = sandbox();
     await run(box, 'cat src/*.ts');
     expect(box.calls.length).toBe(1);
+  });
+
+  it('незакрытая кавычка — отказ с объяснением, а не пустой вывод из шелла', async () => {
+    // Грабля: `shellSyntax` отдавал такую команду шеллу, тот отрабатывал с кодом 0
+    // и пустым выводом, и модель читала `(пустой вывод)` как «файла нет» или
+    // «файл пуст». Сломанная команда — это ответ, а не повод идти в шелл.
+    const box = sandbox();
+    const outcome = await run(box, 'grep -n "row3 src/app.ts');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.summary).toContain('кавычка без пары');
+  });
+
+  it('то же для `cat` с незакрытой кавычкой', async () => {
+    const box = sandbox();
+    const outcome = await run(box, 'cat "src/app.ts');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(false);
+  });
+
+  it('парная кавычка — по-прежнему `search`, отказ её не задевает', async () => {
+    const box = sandbox();
+    const outcome = await run(box, 'grep -n "row3" src/app.ts');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(true);
+  });
+});
+
+describe('background на чистых чтениях', () => {
+  // Грабля: `terminalRun` смотрел на `background` раньше, чем на команду, и `cat
+  // file` с `background: true` уходил в ветку заданий — в песочнице это отказ
+  // «фон не поддерживается», то есть чтение вообще не выполнялось. Флаг — про
+  // долгие процессы, а читалка всё равно отвечает сразу.
+  const runBackground = (box: SandboxRunner, command: string) =>
+    runTool(context(box), 'terminal', JSON.stringify({ action: 'run', command, background: true }));
+
+  it('`cat` с background читается структурно, а не падает в фон', async () => {
+    const box = sandbox();
+    const outcome = await runBackground(box, 'cat src/app.ts');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.summary).toContain('read');
+  });
+
+  it('`grep` с background — это `search`, а не задание', async () => {
+    const box = sandbox();
+    const outcome = await runBackground(box, 'grep row3 src/app.ts');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.summary).toContain('search');
+  });
+
+  it('`ls` с background — это `list`', async () => {
+    const box = sandbox();
+    const outcome = await runBackground(box, 'ls src');
+
+    expect(box.calls).toEqual([]);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.summary).toContain('list');
+  });
+
+  it('а вот не-читалка с background в фон по-прежнему уходит', async () => {
+    // Страж в другую сторону: правка не должна превратить `background` в пустышку.
+    // В тестовом контексте заданий нет — значит до ветки фона дошли, и она сказала своё.
+    const box = sandbox();
+    const outcome = await runBackground(box, 'npm run build');
+
+    expect(outcome.summary).toContain('Задания недоступны');
   });
 });
 

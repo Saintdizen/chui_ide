@@ -18,11 +18,19 @@ import type { MemoryNote, MemoryScope, RememberResult } from '../../shared/memor
 import { formatWebResults, type WebSearchHit } from '../../shared/web-search';
 import { formatReadImageReply, formatReadImageSummary } from '../../shared/read-image';
 import { testTargetProblem } from '../../shared/test-target';
-import { confirmFile, coveredRequest, uncoveredRequest, readStamp, type ReadRange } from '../../shared/read-coverage';
+import {
+  confirmFile,
+  coveredRequest,
+  uncoverFiles,
+  uncoveredRequest,
+  readStamp,
+  type ReadRange,
+} from '../../shared/read-coverage';
 import { limitPerFile, MAX_HITS_PER_FILE } from '../../shared/search-limit';
 import { formatFetchedPage, type FetchedPage } from '../../shared/web-fetch';
-import type { ApplyFailure, ApplyReport, FileEdit, TextEdit } from '../../shared/edits';
-import type { PatchFile, PatchHunk } from '../../shared/patch';
+import type { ApplyFailure, ApplyReport, FileEdit } from '../../shared/edits';
+import { combineOutcomes, parseEdits, type ParsedEdits } from './edit-parsing';
+import type { PatchFile } from '../../shared/patch';
 import { formatLintReport, type LintOutcome } from '../../shared/lint';
 import { formatLocations, type SymbolLocation } from '../../shared/lsp-locations';
 import { formatOutline, type FileSymbol } from '../../shared/lsp-symbols';
@@ -558,10 +566,6 @@ const WHOLE_FILE_MAX_LINES = 160;
  */
 const LONG_FILE_HEAD_LINES = 120;
 
-/** Максимум правок за один вызов: защита от вырожденного ответа модели. */
-const MAX_EDITED_FILES = 50;
-const MAX_EDITS_PER_FILE = 500;
-
 /**
  * Команда длиннее — это уже не команда, а попытка спрятать скрипт.
  *
@@ -576,11 +580,6 @@ const MAX_COMMAND_CHARS = 4000;
  * выводе (видно, что запускалось), длинная — нет: она уже есть в вызове.
  */
 const ECHO_COMMAND_CHARS = 120;
-
-/** Форма аргумента правки: её называем в ошибках — вызов чинится за один шаг. */
-const EDITS_SHAPE =
-  'нужен [{ path: "/абсолютный/путь/файл", oldText, newText }] — файл и замена в одном элементе; ' +
-  'вместо старого текста можно четыре позиции: startLine, startColumn, endLine, endColumn';
 
 /**
  * Необратимые команды — на них и срабатывает страховка полного доступа
@@ -704,11 +703,7 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     // пропускаем ровно эти два действия.
     const wrong = wrongArguments(spec.inputSchema, parsed.value).filter(
       (issue) =>
-        !(
-          name === 'file' &&
-          issue.path === 'action' &&
-          (issue.value === 'create' || issue.value === 'replace')
-        ),
+        !(name === 'file' && issue.path === 'action' && (issue.value === 'create' || issue.value === 'replace')),
     );
     if (wrong.length > 0) {
       // Как и у нехватки поля: сначала значение, которое пришло от модели (иначе
@@ -1292,6 +1287,12 @@ async function listDir(workspace: WorkspaceService, args: Record<string, unknown
  * Один и тот же вид у диапазонного чтения и у головы длинного файла: номера
  * должны годиться в правку по позициям без пересчёта.
  */
+/** Сколько места съедает номер строки (−) с пробелами; по нему считаем бюджет ниже. */
+function numberWidth(from: number, count: number): number {
+  const last = String(from + Math.max(0, count - 1)).length;
+  return last + 3;
+}
+
 function numberedLines(lines: readonly string[], from: number): string {
   // Без выравнивания: модель читает числа, а не колонку.
   return lines.map((line, index) => `${from + index} | ${line}`).join('\n');
@@ -1305,7 +1306,7 @@ function readPrefix(
   chars = outputRoom(ctx),
   tokens = MAX_OUTPUT_TOKENS,
 ) {
-  const body = numberedLines(lines, from);
+  const full = lines.join('\n');
   tokens = Math.min(
     tokens,
     Math.max(Math.ceil(MIN_OUTPUT_CHARS / 3.5), ctx.stepBudget?.tokensLeft ?? MAX_OUTPUT_TOKENS),
@@ -1315,21 +1316,36 @@ function readPrefix(
     chars: Math.max(0, chars - Math.min(700, Math.floor(chars / 3))),
     tokens: Math.max(0, tokens - Math.min(500, Math.floor(tokens / 3))),
   };
-  const fitted = fitOutputLines(body, limit);
+  // Режем чистый текст, а не пронумерованный: `12345 | ` — сервисная обвязка,
+  // и если считать её в бюджете, длинный файл обрезается раньше, чем кончится
+  // сам текст (перепись: 5 % чтений уходило на номера).
+  const fitted = fitOutputLines(full, limit);
+  let kept = fitted.lines;
+  if (!fitted.complete) {
+    // Строки вместе с номерами стоят дороже: ужимаем до тех пор, пока
+    // пронумерованный префикс не влезет в те же два потолка.
+    while (kept > 0) {
+      const text = numberedLines(lines.slice(0, kept), from);
+      if (text.length <= limit.chars && estimateTextTokens(text) <= limit.tokens) break;
+      // Ширина номера — 3 символа и ещё до 2 на сам текст: шаг не меньше 1.
+      kept -= Math.max(1, Math.ceil((text.length - limit.chars) / (numberWidth(from, kept) + 2)));
+    }
+  }
+  const text = numberedLines(lines.slice(0, Math.max(0, kept)), from);
   if (
     !fitted.complete &&
     ctx.stepBudget &&
     (ctx.stepBudget.left < MAX_OUTPUT_CHARS || (ctx.stepBudget.tokensLeft ?? Infinity) < MAX_OUTPUT_TOKENS)
   )
     ctx.stepBudget.exhausted = true;
-  const last = from + fitted.lines - 1;
-  const file = fitted.complete ? null : spill(ctx, 'read', body);
+  const last = from + kept - 1;
+  const file = fitted.complete ? null : spill(ctx, 'read', full);
   const note = fitted.complete
     ? ''
-    : `\n… (вывод обрезан; ${fitted.lines > 0 ? `показаны строки ${from}–${last}` : `строка ${from} показана частично`}; дальше read с диапазоном: startLine с ${last + 1}${file ? `; ${spillHint(file)}` : ''})`;
+    : `\n… (вывод обрезан; ${kept > 0 ? `показаны строки ${from}–${last}` : `строка ${from} показана частично`}; дальше read с диапазоном: startLine с ${last + 1}${file ? `; ${spillHint(file)}` : ''})`;
   // Если даже первая строка не помещается, показываем фрагмент, но не помним её прочитанной.
-  const fragment = fitted.lines === 0 ? fitOutput(body, limit) : '';
-  return { text: (fitted.text || fragment) + note, last, complete: fitted.complete };
+  const fragment = kept === 0 ? fitOutput(lines.length ? numberedLines(lines.slice(0, 1), from) : '', limit) : '';
+  return { text: (text || fragment) + note, last, complete: fitted.complete };
 }
 
 /**
@@ -1357,8 +1373,27 @@ async function fileOutlineText(ctx: ToolContext, target: string, text: string): 
 async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const { workspace } = ctx;
   const target = requireString(args, 'path');
-  const content = await workspace.readFile(target);
   const rel = relative(target, workspace.rootPath());
+  // Запрос «весь файл» = без startLine и без внятного endLine (нет его или это не число).
+  const wholeFile = isAbsent(args.startLine) && integerArg(args.endLine) === undefined;
+  // Запрос «весь файл», уже целиком показанный выше в ветке и с тех пор не менявшийся:
+  // отдаём весточку, а не текст второй раз (65 % чтений — первое чтение, и ещё часть —
+  // его буквальный повтор). Версию `coveredWhole` сверяет по `stat` перед ответом,
+  // поэтому файл, поправленный мимо инструментов (терминал, git, внешний редактор),
+  // повтором не подавляется. `force: true` — явное «перечитай», текст мог выпасть.
+  if (ctx.coveredReads && booleanArg(args.force) !== true && wholeFile) {
+    const whole = await coveredWhole(ctx, target);
+    if (whole !== undefined) {
+      return {
+        ok: true,
+        summary: `${rel}: уже прочитано`,
+        detail:
+          `${rel}: строки 1–${whole} уже есть выше в ветке, файл с той поры не менялся — не повторяю. ` +
+          'Если текст выпал из контекста, зови read с force: true.',
+      };
+    }
+  }
+  const content = await workspace.readFile(target);
   // Бинарный файл в utf8 — это мусор, который зря жжёт контекст и ничего не
   // объясняет. Отказываем словами (тот же нулевой байт, по которому поиск
   // отличает бинарное от текстового).
@@ -1484,7 +1519,37 @@ async function readFile(ctx: ToolContext, args: Record<string, unknown>): Promis
 }
 
 /** Сколько файлов и сколько символов отдаёт `read` за один вызов. */
-const MAX_READ_FILES = 10;
+/**
+ * Команда, которая только читает: `cat`, `head -n N`, `sed -n 'A,Bp'`, `grep`.
+ *
+ * В переписи (TASKS.md, п.43) 43% вызовов `terminal` — именно чтение через шелл.
+ * Такой вызов дороже структурного со всех сторон: нет номеров строк, нет потолка
+ * вывода, перед каждой второй командой стоит `cd <папка> &&`, и перед запуском
+ * нужно подтверждение. Разбор нарочно узкий — одна простая команда без труб,
+ * перенаправлений, глобов и подстановок; всё остальное идёт в шелл как раньше.
+ */
+export type LookupCall = {
+  tool: 'read' | 'search' | 'list';
+  args: Record<string, unknown>;
+  label: string;
+  /**
+   * `grep -c`: вместо совпадений нужен только их счёт — его и печатаем.
+   * Разбор при этом остаётся одним и тем же `search`.
+   */
+  countOnly?: boolean;
+};
+
+/**
+ * Команда, которую разбор узнал — и не смог разобрать.
+ *
+ * Это НЕ то же, что «не читалка» (`null`). Сломанную команду нельзя отдавать
+ * шеллу: шелл на `grep -n "row3 file` отработает с кодом 0 и пустым выводом, и
+ * агент прочтёт «(пустой вывод)» как «такого файла нет» или «файл пуст». Отказ —
+ * короткий и с подсказкой, что именно чинить.
+ */
+export type BrokenCommand = { broken: string };
+
+export const MAX_READ_FILES = 10;
 /**
  * Общий потолок пачки. Пачка и существует ради двух-трёх мелких файлов; 20 000
  * символов — это уже ~5 000 токенов, треть бюджета шага на один вызов. Пара
@@ -2816,12 +2881,6 @@ function readEditsOutcome(
   };
 }
 
-/** Найденные правки: по якорю и по позициям — дальше это два разных моста renderer. */
-interface ParsedEdits {
-  anchors: PatchFile[];
-  positions: FileEdit[];
-}
-
 const EDITOR_MISSING: ToolOutcome = {
   ok: false,
   summary: 'Правки сейчас недоступны: окно редактора не подключено',
@@ -3116,326 +3175,12 @@ async function editFiles(ctx: ToolContext, args: Record<string, unknown>): Promi
   ]);
 }
 
-/**
- * Ответы нескольких путей (созданные файлы вместе с правками) — один ответ: шаг
- * у вызова один, и модели нужен один итог, а не три карточки.
- */
-function combineOutcomes(outcomes: ToolOutcome[]): ToolOutcome {
-  const [only] = outcomes;
-  if (outcomes.length === 1 && only) return only;
-  if (outcomes.length === 0) return { ok: false, summary: 'Нечего применять: нет ни одной правки' };
-  const changes = outcomes.flatMap((outcome) => outcome.changes ?? []);
-  const detail = outcomes
-    .map((outcome) => outcome.detail ?? '')
-    .filter((text) => text.length > 0)
-    .join('\n');
-  const ok = outcomes.every((outcome) => outcome.ok !== false);
-  return {
-    ok,
-    summary: outcomes.map((outcome) => outcome.summary).join('; '),
-    ...(detail ? { detail } : {}),
-    ...(changes.length > 0 ? { changes } : {}),
-    ...(ok && outcomes.every((outcome) => outcome.applied === true) ? { applied: true } : {}),
-  };
-}
-
-/**
- * Разбор аргумента `edit`. Модель — недоверенный источник, поэтому структура
- * проверяется вручную: битая правка дальше в документную модель попасть не
- * должна. Форму выбирает сама правка: все четыре позиции — правка по позициям
- * (`oldText` рядом с ними остаётся сверкой), иначе нужен якорь `oldText`.
- */
-function parseEdits(value: unknown): ParsedEdits {
-  // Одиночный файл без обёртки в массив — та же правка: ронять вызов из-за
-  // лишних квадратных скобок незачем.
-  const single = typeof value === 'object' && value !== null && !Array.isArray(value);
-  const list: unknown = single ? [value] : value;
-  if (!Array.isArray(list)) throw new Error(`Аргумент «edits» должен быть массивом: ${EDITS_SHAPE}`);
-  if (list.length === 0) throw new Error('Не передано ни одной правки');
-  if (list.length > MAX_EDITED_FILES) {
-    throw new Error(`Слишком много файлов за один вызов: ${list.length} (максимум ${MAX_EDITED_FILES})`);
-  }
-
-  const parsed: ParsedEdits = { anchors: [], positions: [] };
-  list.forEach((item, index) => {
-    const file = parseEditFile(item, index);
-    if (file.anchor) parsed.anchors.push(file.anchor);
-    if (file.position) parsed.positions.push(file.position);
-  });
-  return parsed;
-}
-
-/** Правка внутри файла: либо якорь, либо диапазон — вместе они не ходят. */
-type EditItem = { anchor: PatchHunk } | { position: TextEdit };
-
-/**
- * Якоря, положенные прямо в элемент файла: `{path, oldText, newText}`,
- * `{path, contents}` или их список в `patches`/`hunks`. Пусто — если их нет.
- */
-function flatHunks(raw: Record<string, unknown>): unknown {
-  for (const key of ['patches', 'hunks']) {
-    const list = raw[key];
-    if (Array.isArray(list) && list.length > 0) return list;
-  }
-  const hasAnchor = typeof raw.oldText === 'string' || typeof raw.newText === 'string';
-  if (!hasAnchor) return undefined;
-  const hunk: Record<string, unknown> = {};
-  for (const key of ['oldText', 'newText']) {
-    if (raw[key] !== undefined) hunk[key] = raw[key];
-  }
-  return [hunk];
-}
-
-/**
- * Один файл. Якоря и позиции в одном файле — это два разных пути правки (якоря
- * разрешает renderer, позиции применяет документная модель), поэтому файл
- * отдаётся одному из них целиком: смесь чинится разделением вызова.
- */
-function parseEditFile(value: unknown, index: number): { anchor?: PatchFile; position?: FileEdit } {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`edits[${index}]: ожидался объект — ${EDITS_SHAPE}`);
-  }
-
-  const raw = value as Record<string, unknown>;
-  const filePath = raw.path;
-  // Форму называем прямо: «не задан path» само по себе не говорит, куда его класть.
-  // Самая частая ошибка — замена вместо файла: в элементе oldText и newText, а
-  // обёртки с путём нет. Об этом и говорим, иначе модель пришлёт то же снова.
-  if (typeof filePath !== 'string' || filePath.trim().length === 0) {
-    const inner = Array.isArray(raw.edits) ? raw.edits : [];
-    const swap = typeof raw.oldText === 'string' || typeof raw.newText === 'string';
-    const whole = inner.some((item) => {
-      if (typeof item !== 'object' || item === null) return false;
-      const hunk = item as Record<string, unknown>;
-      return typeof hunk.newText === 'string' && hunk.oldText === undefined;
-    });
-    const hint = whole
-      ? ' Похоже на запись файла целиком: в элементе нужен `path` рядом с `contents`.'
-      : swap
-        ? ' В элементе лежат сами замены (oldText/newText), а не файл — добавь `path` рядом.'
-        : '';
-    throw new Error(`edits[${index}]: не задан path.${hint} ${EDITS_SHAPE}`);
-  }
-  if (!path.isAbsolute(filePath)) {
-    throw new Error(`edits[${index}].path: нужен абсолютный путь, получено «${filePath}»`);
-  }
-
-  // Элемент без `edits[]`, но с самим якорем: `{path, oldText, newText}` — та же
-  // правка, только на уровень выше. По переписи вызовов это САМАЯ частая ошибка
-  // `edit` (11 из 15 отказов): `edits[0].edits` — третья вложенность, о которой
-  // никто не догадывается. Разбираем обе раскладки — ошибка стоит шага, а
-  // снисходительность — ничего.
-  const edits = raw.edits === undefined ? flatHunks(raw) : raw.edits;
-  if (!Array.isArray(edits) || edits.length === 0) {
-    throw new Error(`edits[${index}].edits: нужен непустой массив правок. ${EDITS_SHAPE}`);
-  }
-  if (edits.length > MAX_EDITS_PER_FILE) {
-    throw new Error(`edits[${index}].edits: слишком много правок (${edits.length}), максимум ${MAX_EDITS_PER_FILE}`);
-  }
-
-  const items = edits.map((edit, editIndex) => parseEditItem(edit, index, editIndex));
-  const anchors = items.filter((item): item is { anchor: PatchHunk } => 'anchor' in item);
-  const positions = items.filter((item): item is { position: TextEdit } => 'position' in item);
-
-  if (anchors.length > 0 && positions.length > 0) {
-    throw new Error(`edits[${index}]: в одном файле и якоря (oldText), и позиции — раздели на два вызова`);
-  }
-  if (positions.length > 0) {
-    const fileEdit: FileEdit = {
-      path: filePath,
-      edits: positions.map((item) => item.position),
-    };
-    if (typeof raw.expectedVersion === 'number') fileEdit.expectedVersion = raw.expectedVersion;
-    return { position: fileEdit };
-  }
-  return {
-    anchor: { path: filePath, patches: anchors.map((item) => item.anchor) },
-  };
-}
-
-/** Одна правка: `newText` и адрес — якорь или все четыре позиции. */
-function parseEditItem(value: unknown, fileIndex: number, editIndex: number): EditItem {
-  const where = `edits[${fileIndex}].edits[${editIndex}]`;
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`${where}: ожидался объект`);
-  }
-
-  const raw = value as Record<string, unknown>;
-  const newText = raw.newText;
-  if (typeof newText !== 'string') throw new Error(`${where}.newText: нужна строка`);
-
-  const oldText = raw.oldText;
-  if (oldText !== undefined && typeof oldText !== 'string') throw new Error(`${where}.oldText: нужна строка`);
-
-  const keys = ['startLine', 'startColumn', 'endLine', 'endColumn'] as const;
-  const given = keys.filter((key) => raw[key] !== undefined);
-  if (given.length === keys.length) {
-    const edit: TextEdit = {
-      startLine: editPosition(raw, 'startLine', where),
-      startColumn: editPosition(raw, 'startColumn', where),
-      endLine: editPosition(raw, 'endLine', where),
-      endColumn: editPosition(raw, 'endColumn', where),
-      newText,
-    };
-    // Якорь рядом с позициями — сверка, а не адрес: промах по номеру строки
-    // тогда просто не пройдёт.
-    if (typeof oldText === 'string') edit.oldText = oldText;
-    return { position: edit };
-  }
-  if (given.length > 0) {
-    throw new Error(`${where}: позиции заданы не все — нужны startLine, startColumn, endLine, endColumn`);
-  }
-  if (typeof oldText !== 'string' || oldText.length === 0) {
-    // Запись файла целиком приходит без якоря: в переписи это два отказа из
-    // двадцати четырёх (`edits[].edits[]` с одним `newText` и без `path`).
-    // Без адреса правку не сделать, но модель обычно метила в `create` — говорим.
-    const whole = typeof newText === 'string' && newText.includes('\n');
-    const hint = whole ? ' Похоже на запись файла целиком: у `create` есть `contents`.' : '';
-    throw new Error(`${where}: нужен oldText (якорь) или все четыре позиции.${hint} ${EDITS_SHAPE}`);
-  }
-  return { anchor: { oldText, newText } };
-}
-
-/** Позиция правки: целое число ≥ 1, как в LSP. */
-function editPosition(raw: Record<string, unknown>, key: string, where: string): number {
-  const number = raw[key];
-  if (typeof number !== 'number' || !Number.isInteger(number) || number < 1) {
-    throw new Error(`${where}.${key}: нужно целое число ≥ 1`);
-  }
-  return number;
-}
-
-/** Ответы двух мостов — один: отчёт о файлах складывается, «не записано» тоже. */
-function mergeDecisions(decisions: readonly ApplyEditsHostResult[]): ApplyEditsHostResult {
-  const [only] = decisions;
-  if (decisions.length === 1 && only) return only;
-  return {
-    rejected: decisions.some((decision) => decision.rejected),
-    result: {
-      reports: decisions.flatMap((decision) => decision.result?.reports ?? []),
-      failed: decisions.flatMap((decision) => decision.result?.failed ?? []),
-    },
-    unwritten: decisions.flatMap((decision) => decision.unwritten ?? []),
-  };
-}
-
-/* ── запуск команд ──────────────────────────────────────────────────────── */
-
-/**
- * Команда, которая только читает: `cat`, `head -n N`, `sed -n 'A,Bp'`, `grep`.
- *
- * В переписи (TASKS.md, п.43) 43% вызовов `terminal` — именно чтение через шелл.
- * Такой вызов дороже структурного со всех сторон: нет номеров строк, нет потолка
- * вывода, перед каждой второй командой стоит `cd <папка> &&`, и перед запуском
- * нужно подтверждение. Разбор нарочно узкий — одна простая команда без труб,
- * перенаправлений, глобов и подстановок; всё остальное идёт в шелл как раньше.
- */
-type LookupCall = {
-  tool: 'read' | 'search' | 'list';
-  args: Record<string, unknown>;
-  label: string;
-  /**
-   * `grep -c`: вместо совпадений нужен только их счёт — его и печатаем.
-   * Разбор при этом остаётся одним и тем же `search`.
-   */
-  countOnly?: boolean;
-};
-
-/**
- * Стоит ли символ в значении флага вида `--include=*.ts`: тогда его глоб —
- * маска, а не файл, и шелл по ней ничего не раскрывает.
- */
-function inFlagValue(command: string, position: number): boolean {
-  const start = command.lastIndexOf(' ', position);
-  const word = command.slice(start + 1, position);
-  return word.startsWith('--') && word.includes('=');
-}
-
-/**
- * Скриптовая скобка вне кавычек. Разбираем посимвольно, а не одной регуляркой по
- * всей строке: `grep -n 'interface ChatConversation' -A 25 src/api.ts` — это
- * `search`, хотя в кавычках лежит `)`, а `grep 'a\|b'` — тоже `search`, хотя в
- * образце `|` и `\`. Содержимое кавычек шеллу не передаётся, так что читалка
- * остаётся читалкой.
- */
-function shellSyntax(command: string): boolean {
-  let quote: string | null = null;
-  for (const [position, char] of [...command].entries()) {
-    if (quote) {
-      if (char === quote) quote = null;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    // Глоб `--include=*.ts` шелл не раскрывает: до `=` стоит имя флага, а не
-    // файл. Это маска фильтра, её и несёт `glob`.
-    if ('*?[]'.includes(char) && inFlagValue(command, position)) continue;
-    if ('()*?[]{}\\'.includes(char)) return true;
-  }
-  // Незакрытая кавычка — тоже не наш случай: её доразберёт шелл.
-  return quote !== null;
-}
-
-/**
- * Труба, перенаправление, подстановка: это не одна команда, а скрипт. Тоже вне
- * кавычек — иначе `grep 'a|b'` попал бы сюда.
- */
-function shellPipeline(command: string): boolean {
-  let quote: string | null = null;
-  for (const char of command) {
-    if (quote) {
-      if (char === quote) quote = null;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if ('|&;<>`$\n'.includes(char)) return true;
-  }
-  return false;
-}
-
-/** Слова команды с учётом кавычек; null — незакрытая кавычка. */
-function commandWords(command: string): string[] | null {
-  const words: string[] = [];
-  let current = '';
-  let quote: string | null = null;
-  let opened = false;
-  for (const char of command) {
-    if (quote) {
-      if (char === quote) quote = null;
-      else current += char;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      opened = true;
-      continue;
-    }
-    if (/\s/.test(char)) {
-      if (current || opened) words.push(current);
-      current = '';
-      opened = false;
-      continue;
-    }
-    current += char;
-  }
-  if (quote) return null;
-  if (current || opened) words.push(current);
-  return words;
-}
-
-/**
- * Разбор команды-читалки в вызов `read`/`search`. null — не наша команда: пусть
- * идёт в шелл, где ведёт себя ровно так, как её написали.
- *
- * Два примера, ради которых всё это есть: `sed -n '120,180p' src/a.ts` — это
- * ровно `read` с двумя номерами строк, а `grep -rn foo src` — ровно `search`.
- */
-function asLookupCall(command: string, cwdDir: string): LookupCall | null {
+function asLookupCall(command: string, cwdDir: string): LookupCall | BrokenCommand | null {
+  // Сломанная команда — это ответ, а не повод уйти в шелл: шелл на ней
+  // отработает с кодом 0 и пустым выводом, и агент прочтёт «(пустой вывод)»
+  // как «файла нет» или «пустой файл». Проверяем ДО разбора: образец в кавычках
+  // — норма, а вот кавычка без пары — ошибка, где бы она ни стояла.
+  if (unclosedQuote(command)) return { broken: `кавычка без пары: ${JSON.stringify(command)}` };
   const tail = takeHeadTail(command);
   if (tail.command !== command) return finishLookup(asPlainLookupCall(tail.command, cwdDir), tail.limit);
   // `команда | grep …`: читалка, чей вывод отфильтрован одной строкой. Это не
@@ -3443,15 +3188,16 @@ function asLookupCall(command: string, cwdDir: string): LookupCall | null {
   // читалки. Остальные трубы (`| wc -l`, `| sort`) по-прежнему идут в шелл:
   // счёт и сортировка — работа шелла, у нас для них нет ответа.
   const piped = splitPipe(command);
+  if (piped === 'script') return null;
   if (!piped) {
     if (shellPipeline(command) || shellSyntax(command)) return null;
     return asPlainLookupCall(command, cwdDir);
   }
   if (shellSyntax(piped.left) || shellSyntax(piped.right)) return null;
-  const source = asPlainLookupCall(piped.left, cwdDir);
+  const left = asPlainLookupCall(piped.left, cwdDir);
   const filter = asPlainLookupCall(piped.right, cwdDir);
-  if (!source || !filter || filter.tool !== 'search') return null;
-  const merged = mergePipedSearch(source, filter);
+  if (!left || !filter || filter.tool !== 'search') return null;
+  const merged = mergePipedSearch(left, filter);
   return merged ? finishLookup(merged, null) : null;
 }
 
@@ -3466,11 +3212,14 @@ function finishLookup(call: LookupCall | null, limit: number | null): LookupCall
 }
 
 /**
- * `левая | правая` — ровно одна труба снаружи кавычек.
- * null — труб больше одной: `a | b | c` — уже скрипт.
+ * Где труба снаружи кавычек: `'none'` — её нет, `'many'` — больше одной
+ * (`a | b | c` уже скрипт), число — позиция единственной.
+ *
+ * Считает именно позицию, а не режет: по ней `splitPipe` делает две команды,
+ * по ней же `shellPipeline` видит, что дело не в цитате. Без этого деления
+ * `shellPipeline` заново склеивал позиции и не отличал `a | b` от `a\|b`.
  */
-function splitPipe(command: string): { left: string; right: string } | null {
-  // Труба внутри кавычек — это `\|` в образце grep, а не конвейер.
+function pipePosition(command: string): number | 'none' | 'many' {
   let quote: string | null = null;
   let cut = -1;
   for (let index = 0; index < command.length; index += 1) {
@@ -3482,10 +3231,25 @@ function splitPipe(command: string): { left: string; right: string } | null {
     }
     if (char === '"' || char === "'") quote = char;
     else if (char !== '|') continue;
-    // Вторая труба снаружи кавычек — это уже скрипт: разбираем ровно одну.
-    else if (cut >= 0) return null;
+    else if (cut >= 0) return 'many';
     else cut = index;
   }
+  return cut < 0 ? 'none' : cut;
+}
+
+/**
+ * `левая | правая` — ровно одна труба снаружи кавычек.
+ *
+ * `'script'` — это НЕ то же, что `null`: `null` значит «трубы снаружи нет, читай
+ * одну команду», а скрипт выше разбором не является и в шелл идти не должен.
+ * Два разных ответа на один `null` дорого стоили: `grep -nE "a\|b" file` считался
+ * скриптом — то есть понятой командой, — и уходил в шелл мимо `search`, у которого
+ * экранирование понимается правильно. Ответ на такой вызов приходил пустым.
+ */
+function splitPipe(command: string): { left: string; right: string } | null | 'script' {
+  const cut = pipePosition(command);
+  if (cut === 'none') return null;
+  if (cut === 'many') return 'script';
   if (cut <= 0) return null;
   const left = command.slice(0, cut).trim();
   const right = command.slice(cut + 1).trim();
@@ -3521,12 +3285,15 @@ function mergePipedSearch(source: LookupCall, filter: LookupCall): LookupCall | 
  * попадает `grep … | grep …`: эту трубу разбирает `splitPipe` (тот же `search`).
  */
 function takeHeadTail(command: string): { command: string; limit: number | null } {
-  // `head -5` и `head -n 5` — одно и то же; и то и другое просто предел.
-  const match = /^(.*?)\s*\|\s*head(?:\s+-n\s+|\s+-)(\d+)\s*$/.exec(command);
-  if (!match) return { command, limit: null };
-  const limit = Number(match[2]);
+  // Труба ищется тем же счётом с кавычками, что у `splitPipe`: regex здесь ловил
+  // трубу и ВНУТРИ образца (`grep "row3\|row4" f`) и обрезал команду по ней.
+  const cut = pipePosition(command);
+  if (cut === 'none' || cut === 'many') return { command, limit: null };
+  const head = /^head(?:\s+-n\s+|\s+-)(\d+)\s*$/.exec(command.slice(cut + 1).trim());
+  if (!head) return { command, limit: null };
+  const limit = Number(head[1]);
   if (!Number.isFinite(limit) || limit < 1) return { command, limit: null };
-  return { command: match[1]!.trim(), limit };
+  return { command: command.slice(0, cut).trim(), limit };
 }
 
 function asPlainLookupCall(command: string, cwdDir: string): LookupCall | null {
@@ -3623,11 +3390,13 @@ function asPlainLookupCall(command: string, cwdDir: string): LookupCall | null {
     // Слово-образец и не более одной папки: `grep foo a.ts b.ts` — это две области.
     if (plain.length === 0 || plain.length > 2) return null;
     const [query, only] = plain as [string, string | undefined];
-    const isRegex = !flags.has('F') && (program === 'rg' || flags.has('E') || /[\\^$.*+?()[\]{}|]/.test(query));
+    // Признаки regex в самом образце: имя вроде `A|B` — это тоже regex.
+    const looksRegex = /[\\^$.*+?()[\]{}|]/.test(query);
+    const isRegex = !flags.has('F') && (program === 'rg' || flags.has('E') || looksRegex);
     return {
       tool: 'search',
       args: {
-        query,
+        query: isRegex && !flags.has('E') && !flags.has('F') && program !== 'rg' ? ungrepPattern(query) : query,
         isRegex,
         caseSensitive: !flags.has('i'),
         filesOnly: flags.has('l'),
@@ -3663,10 +3432,31 @@ function asPlainLookupCall(command: string, cwdDir: string): LookupCall | null {
 }
 
 /**
+ * Образец grep → образец `search`: BRE/ERE считают `\|` «или», а JS в regex `\|` —
+ * буквальная труба. Без этой развёртки `grep -nE "a\|b" f` уходил в `search`
+ * как ?a\|b? и давал «Совпадений нет» — ложное «ничего нет» там, где есть.
+ *
+ * Порядок важен: `\|` разворачивается ПЕРВЫМ и только он. Общий проход штампов
+ * развернул бы и `\\|` — экранированную трубу в BRE, то есть «буквальную трубу»
+ * у grep, — превратив её в «или». Остальные знаки (`[`, `]`, `{`, `}`, `.`, `\\`)
+ * в обоих языках значит одно и то же, и трогать его нельзя.
+ */
+export function ungrepPattern(pattern: string): string {
+  return pattern.replace(/\\\|/g, '|').replace(/\\([\\^$.*+?()[\]{}/])/g, '$1');
+}
+
+/**
+ * Команда в проекте — единственное, что меняет систему за пределами документов,
+ * поэтому она всегда идёт через подтверждение. `background: true` — та же команда,
+ * но шаг она не держит: возвращается номер задания, а вывод читается действием
+ * `output`. Раньше это были три имени (`run_terminal`, `run_output`, `run_stop`),
+ * и каждое стоило своей схемы в каждом запросе.
+ */
+/**
  * Выполнить разобранную команду инструментом. Ошибка разбора или отсутствие файла
  * — это не отказ: команда уходит в шелл, как её написали.
  */
-async function lookupOutcome(ctx: ToolContext, call: LookupCall): Promise<ToolOutcome | null> {
+export async function lookupOutcome(ctx: ToolContext, call: LookupCall): Promise<ToolOutcome | null> {
   try {
     const outcome =
       call.tool === 'read'
@@ -3699,6 +3489,19 @@ async function lookupOutcome(ctx: ToolContext, call: LookupCall): Promise<ToolOu
         };
       }
     }
+    // Пачка (`paths`): `coveredRequest` знает только один `path`, а повтор пачки с одним
+    // новым файлом оплачивал старые целиком. `uncoverFiles` возвращает сужение, только
+    // когда оно осмысленно; здесь важнее сам факт «сужать нечего» — все файлы уже были.
+    if (call.tool === 'read' && ctx.coveredReads && outcome.reads && outcome.reads.length > 0) {
+      const still = uncoverFiles(JSON.stringify(call.args), ctx.coveredReads);
+      if (!still) {
+        return {
+          ok: true,
+          summary: `${call.label} → read · уже прочитано`,
+          detail: `Все файлы пачки (${outcome.reads.length}) уже есть выше в ветке — не повторяю.`,
+        };
+      }
+    }
     if (call.countOnly && call.tool === 'search') {
       // `grep -c` отдаёт число совпадений и ничего больше. Считаем по тому, что
       // вернул поиск: потолок на файл (`MAX_HITS_PER_FILE`) мог срезать лишнее,
@@ -3719,17 +3522,169 @@ async function lookupOutcome(ctx: ToolContext, call: LookupCall): Promise<ToolOu
   }
 }
 
+/** Ответы двух мостов — один: отчёт о файлах складывается, «не записано» тоже. */
+function mergeDecisions(decisions: readonly ApplyEditsHostResult[]): ApplyEditsHostResult {
+  const [only] = decisions;
+  if (decisions.length === 1 && only) return only;
+  return {
+    rejected: decisions.some((decision) => decision.rejected),
+    result: {
+      reports: decisions.flatMap((decision) => decision.result?.reports ?? []),
+      failed: decisions.flatMap((decision) => decision.result?.failed ?? []),
+    },
+    unwritten: decisions.flatMap((decision) => decision.unwritten ?? []),
+  };
+}
+
 /**
- * Команда в проекте — единственное, что меняет систему за пределами документов,
- * поэтому она всегда идёт через подтверждение. `background: true` — та же команда,
- * но шаг она не держит: возвращается номер задания, а вывод читается действием
- * `output`. Раньше это были три имени (`run_terminal`, `run_output`, `run_stop`),
- * и каждое стоило своей схемы в каждом запросе.
+ * Разбор командного поиска: `cat`, `head -n N`, `sed -n 'A,Bp'`, `grep` и их
+ * конвейеры. Понять, что это чтение, и отдать структурному инструменту дешевле
+ * для всех сторон: появляются номера строк и потолок вывода, отпадает
+ * подтверждение, и `cd <папка> &&` больше не нужен.
+ *
+ * Разбор нарочно узкий: одна простая команда без перенаправлений, подстановок и
+ * незнакомых флагов. Всё, что не узнано, возвращается как `null` — такое уходит
+ * в шелл, как его и написали. Ошибиться здесь дороже, чем не сэкономить.
  */
+
+/**
+ * Стоит ли символ в значении флага вида `--include=*.ts`: тогда его глоб —
+ * маска, а не файл, и шелл по ней ничего не раскрывает.
+ */
+function inFlagValue(command: string, position: number): boolean {
+  const start = command.lastIndexOf(' ', position);
+  const word = command.slice(start + 1, position);
+  return word.startsWith('--') && word.includes('=');
+}
+
+/**
+ * Скриптовая скобка вне кавычек. Разбираем посимвольно, а не одной регуляркой по
+ * всей строке: `grep -n 'interface ChatConversation' -A 25 src/api.ts` — это
+ * `search`, хотя в кавычках лежит `)`, а `grep 'a\|b'` — тоже `search`, хотя в
+ * образце `|` и `\`. Содержимое кавычек шеллу не передаётся, так что читалка
+ * остаётся читалкой.
+ */
+function shellSyntax(command: string): boolean {
+  let quote: string | null = null;
+  for (const [position, char] of [...command].entries()) {
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    // Глоб `--include=*.ts` шелл не раскрывает: до `=` стоит имя флага, а не
+    // файл. Это маска фильтра, её и несёт `glob`.
+    if ('*?[]'.includes(char) && inFlagValue(command, position)) continue;
+    if ('()*?[]{}\\'.includes(char)) return true;
+  }
+  // Незакрытая кавычка здесь больше не проверяется: это не «скрипт», а сломанная
+  // команда. Своя проверка — `unclosedQuote`, чтобы ответ был ошибкой, а не шеллом.
+  return false;
+}
+
+/**
+ * Незакрытая кавычка: `grep -n "row3 src/app.ts`.
+ *
+ * Отдельно от `shellSyntax`, потому что ответ у них разный. `shellSyntax` — «это
+ * скрипт, иди в шелл»: там `true` значит «наша читалка тут не при делах». А
+ * незакрытая кавычка — это сломанная команда: шелл её тоже не поймёт и вернёт
+ * пустой вывод с кодом 0, а агент прочтёт `(пустой вывод)` как «файл пустой».
+ * Поэтому такую команду надо назвать ошибкой, а не отдать шеллу.
+ */
+function unclosedQuote(command: string): boolean {
+  let quote: string | null = null;
+  for (const char of command) {
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+  }
+  return quote !== null;
+}
+
+/**
+ * Труба, перенаправление, подстановка: это не одна команда, а скрипт. Тоже вне
+ * кавычек — иначе `grep 'a|b'` попал бы сюда.
+ */
+function shellPipeline(command: string): boolean {
+  let quote: string | null = null;
+  for (const char of command) {
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if ('|&;<>`$\n'.includes(char)) return true;
+  }
+  return false;
+}
+
+/** Слова команды с учётом кавычек; null — незакрытая кавычка. */
+function commandWords(command: string): string[] | null {
+  const words: string[] = [];
+  let current = '';
+  let quote: string | null = null;
+  let opened = false;
+  for (const char of command) {
+    if (quote) {
+      if (char === quote) quote = null;
+      else current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      opened = true;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current || opened) words.push(current);
+      current = '';
+      opened = false;
+      continue;
+    }
+    current += char;
+  }
+  if (quote) return null;
+  if (current || opened) words.push(current);
+  return words;
+}
+
+/**
+ * Читалка ли это — по одной лишь команде, до разрешения папки.
+ *
+ * Нужна только для выбора ветки `background`: разобрать по-настоящему можно лишь
+ * зная `cwd`, а решать, запускать ли задание, надо раньше. Поэтому проверка
+ * нарочно дешёвая: `asLookupCall` уже отделяет «не читалка» (`null`) и «сломано»
+ * (`broken`) от настоящей читалки, но ему нужна папка. Здесь папка не нужна:
+ * разбор зависит только от текста команды, а `cwdDir` влияет на разрешение путей
+ * уже потом. Пустой `cwdDir` даёт только `relative` — его здесь не смотрим.
+ */
+function looksLikeReadCommand(args: Record<string, unknown>): boolean {
+  const raw = optionalString(args, 'command');
+  if (!raw) return false;
+  // Сломанную команду чтением не считаем: пусть разбирает `terminalRunForeground`.
+  // Там на неё есть внятный ответ, а в фоне она была бы заданием без смысла.
+  const call = asLookupCall(raw.trim(), '');
+  return call !== null && !('broken' in call);
+}
+
 async function terminalRun(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  return optionalBoolean(args, 'background') === true
-    ? await terminalRunBackground(ctx, args)
-    : await terminalRunForeground(ctx, args);
+  // `background` — про долгие процессы (`npm run dev`, вотчер), а не про чтение.
+  // Читалка с ним всё равно выполняется структурно и сразу: `cat` не «работает в
+  // фоне», он отвечает. Раньше флаг слепо уводил в ветку заданий, и `cat file` с
+  // `background: true` падал «Задания недоступны» / «В песочнице фон не
+  // поддерживается» — отказ ни о чём. Поэтому сначала смотрим, читалка ли это.
+  if (optionalBoolean(args, 'background') === true && !looksLikeReadCommand(args)) {
+    return await terminalRunBackground(ctx, args);
+  }
+  return await terminalRunForeground(ctx, args);
 }
 
 /**
@@ -3776,6 +3731,18 @@ async function terminalRunForeground(ctx: ToolContext, rawArgs: Record<string, u
   // номера строк, потолок вывода, без `cd` и без подтверждения.
   // Папка вне проекта: пусть решает проверка пути дальше, а не наш разбор.
   const lookup = cwd.relative.startsWith('..') ? null : asLookupCall(command, cwd.path);
+  // Сломанная команда — ответ, а не повод идти в шелл: там её ждёт код 0 и пустой
+  // вывод, то есть «(пустой вывод)» вместо ошибки разбора.
+  if (lookup && 'broken' in lookup) {
+    return {
+      ok: false,
+      summary: `Команда не разобрана: ${lookup.broken}`,
+      detail:
+        `Команда не разобрана: ${lookup.broken}.\n\n` +
+        'Шелл на такой команде вернёт пустой вывод с кодом 0, и это будет прочитано как «ничего не найдено». ' +
+        'Проверьте пары кавычек: у образца и у пути своя пара, вложенные кавычки того же вида не поддерживаются.',
+    };
+  }
   const shortcut = lookup ? await lookupOutcome(ctx, lookup) : null;
   if (shortcut) return shortcut;
 

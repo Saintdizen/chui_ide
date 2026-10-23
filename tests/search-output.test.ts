@@ -46,6 +46,17 @@ function hits(detail: string): number {
   return detail.split('\n').filter((line) => line.includes('needle')).length;
 }
 
+/**
+ * Число совпадений из `summary` — «N совпадений…».
+ *
+ * `hits` по `detail` считает строки и для проверки умолчаний не годится: строки
+ * контекста тоже содержат образец, а число видимых блоков зависит от потолка на
+ * файл — то есть от раскладки файлов, а не от умолчания.
+ */
+function matches(summary: string): number {
+  return Number(/^(\d+) совпадений/.exec(summary)?.[1] ?? Number.NaN);
+}
+
 describe('предел выдачи search', () => {
   it('limit работает и режет список', async () => {
     const ws = await project(6, 20);
@@ -65,10 +76,21 @@ describe('предел выдачи search', () => {
   });
 
   it('с контекстом умолчание ниже: блок из пяти строк дороже строки', async () => {
-    const ws = await project(40, 20);
+    // Считаем сами совпадения, а не строки `detail`: строки контекста — не совпадения,
+    // и их число зависит от того, где лёг потолок на файл. На `project(40, 20)` он
+    // как раз ложится на границу, и разница «25 против 24» гуляла в пределах одной
+    // строки — тест падал на полном прогоне в одном случае из пяти.
+    //
+    // Суть проверки — в умолчаниях: 25 без контекста, 20 с контекстом
+    // (`DEFAULT_SEARCH_HITS` / `DEFAULT_SEARCH_HITS_WITH_CONTEXT`). Оба потолка
+    // недостижимы только потолком на файл (10), поэтому в выдаче видны оба —
+    // берём файлов больше, чем строк в потолке на файл.
+    const ws = await project(6, 5);
     const plain = await runTool(context(ws), 'search', JSON.stringify({ query: 'needle' }));
     const withContext = await runTool(context(ws), 'search', JSON.stringify({ query: 'needle', context: 2 }));
-    expect(hits(withContext.detail ?? '')).toBeLessThan(hits(plain.detail ?? ''));
+
+    expect(matches(plain.summary)).toBe(25);
+    expect(matches(withContext.summary)).toBe(20);
   });
 });
 
