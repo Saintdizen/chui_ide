@@ -174,12 +174,15 @@ describe('закрытие во время правки', () => {
     const ws = service(events);
     await ws.open(dir);
 
-    // Правка ставит отложенное уведомление и НЕ глушит его: таймер ещё жив.
-    await fs.writeFile(path.join(dir, 'a.ts'), 'x\n', 'utf8');
+    // Таймер ставим сами, а не ждём события от ОС. Наблюдатель отдаёт правку
+    // асинхронно и когда ему вздумается: на macOS уведомление приходит уже после
+    // записи (FSEvents пачкой), и ожидание «таймер точно жив» было гонкой — на
+    // macOS прогон краснел, на Linux проходил.
+    const raw = ws as unknown as { active: string | null; watchTimer: unknown; scheduleChange(p: string): void };
+    raw.scheduleChange(path.join(dir, 'a.ts'));
     // Активного корня больше нет, а таймер остался — ровно та гонка, от которой
     // сторожит проверка `if (!this.active)`. Достаёмся до неё как есть:
     // обнуляем поле напрямую в обход `close()`, который гасит таймер.
-    const raw = ws as unknown as { active: string | null; watchTimer: unknown };
     expect(raw.watchTimer).not.toBeNull();
     raw.active = null;
     const before = events.length;
