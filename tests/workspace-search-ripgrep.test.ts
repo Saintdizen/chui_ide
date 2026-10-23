@@ -48,7 +48,7 @@ async function withRipgrep(output: string): Promise<{ args: () => Promise<string
     'case "$1" in',
     '  --version) exit 0 ;;',
     'esac',
-    'cat <<\'RGOUT\'',
+    "cat <<'RGOUT'",
     output,
     'RGOUT',
     '',
@@ -74,7 +74,10 @@ function match(file: string, line: number, text: string, start = 0): string {
 }
 
 function contextLine(file: string, line: number, text: string): string {
-  return JSON.stringify({ type: 'context', data: { path: { text: file }, lines: { text: `${text}\n` }, line_number: line } });
+  return JSON.stringify({
+    type: 'context',
+    data: { path: { text: file }, lines: { text: `${text}\n` }, line_number: line },
+  });
 }
 
 function summary(searches: number): string {
