@@ -182,6 +182,74 @@ describe('rebase: конфликт, continue, abort', () => {
   });
 });
 
+describe('LFS без установленного git-lfs', () => {
+  /**
+   * В этом окружении самого `git lfs` нет — редкий случай, когда «инструмент
+   * не найден» проверяется по-настоящему, а не заглушкой. Отсутствие LFS не
+   * ошибка: окно должно честно сказать «нет» и показать уже заданные шаблоны,
+   * иначе человек не поймёт, что настраивал.
+   *
+   * Если git-lfs всё-таки стоит, ветка «не найден» недостижима — тесты это
+   * учитывают и проверяют оставшееся (шаблоны всё равно читаются с диска).
+   */
+  async function lfsInstalled(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      execFile('git', ['lfs', 'version'], { cwd: os.tmpdir(), windowsHide: true }, (error) => resolve(!error));
+    });
+  }
+
+  async function repoWithAttributes(): Promise<string> {
+    const dir = await makeRepo();
+    await write(
+      dir,
+      '.gitattributes',
+      ['*.psd filter=lfs diff=lfs merge=lfs -text', '# комментарий', '*.txt text'].join('\n'),
+    );
+    await commitAll(dir, 'init');
+    return dir;
+  }
+
+  it('без git-lfs info честно говорит «нет», но шаблоны показывает', async () => {
+    if (!gitAvailable) return;
+    const dir = await repoWithAttributes();
+    const info = await serviceFor(dir).lfsInfo();
+    const installed = await lfsInstalled();
+
+    expect(info.available).toBe(installed);
+    // Шаблоны читаются с диска в любом случае — они нужны и без git-lfs.
+    expect(info.patterns.map((item) => item.pattern)).toEqual(['*.psd']);
+    expect(info.configured).toBe(true);
+    if (!installed) expect(info.version).toBeNull();
+  });
+
+  it('не репозиторий — lfsInfo отказывает, а не отдаёт пустоту', async () => {
+    const dir = await makeDir();
+    await expect(serviceFor(dir).lfsInfo()).rejects.toThrow(/не репозиторий/i);
+  });
+
+  it('пустой шаблон и шаблон с пробелом — InvalidParams', async () => {
+    if (!gitAvailable) return;
+    const dir = await repoWithAttributes();
+    const service = serviceFor(dir);
+
+    await expect(service.lfsTrack('   ')).rejects.toThrow(/пустым/i);
+    // Пробел развалил бы строку .gitattributes на два правила — тоже отказ.
+    await expect(service.lfsTrack('a b')).rejects.toThrow(/пробел/i);
+    await expect(service.lfsUntrack('  ')).rejects.toThrow(/пустой/i);
+  });
+
+  it('без git-lfs track/pull/install падают, а не делают вид, что сработало', async () => {
+    if (!gitAvailable) return;
+    if (await lfsInstalled()) return; // ветка «не найден» недостижима
+    const dir = await repoWithAttributes();
+    const service = serviceFor(dir);
+
+    await expect(service.lfsTrack('*.bin')).rejects.toThrow();
+    await expect(service.lfsPull()).rejects.toThrow();
+    await expect(service.lfsInstall()).rejects.toThrow();
+  });
+});
+
 describe('worktreePrune и checkIgnore', () => {
   it('prune убирает записи о каталогах, которых уже нет на диске', async () => {
     if (!gitAvailable) return;
