@@ -33,7 +33,8 @@ async function withFakeRg(body: string): Promise<void> {
   roots.push(dir);
   const file = path.join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg');
   await fs.writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
-  await fs.chmod(file, 0o755);
+  // На Windows права не нужны, а `chmod` там падает: файла `rg` без `.exe` нет.
+  if (process.platform !== 'win32') await fs.chmod(file, 0o755);
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   // Возврат PATH — через afterEach неудобно: сохраняем в замыкании хука.

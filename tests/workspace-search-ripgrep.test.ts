@@ -52,8 +52,11 @@ async function withRipgrep(output: string): Promise<{ args: () => Promise<string
     `process.stdout.write(${JSON.stringify(output)});`,
     '',
   ].join('\n');
-  await fs.writeFile(path.join(dir, process.platform === 'win32' ? 'rg.exe' : 'rg'), script, 'utf8');
-  await fs.chmod(path.join(dir, 'rg'), 0o755);
+  // На Windows имя с суффиксом .exe (его находит `spawn`), а `chmod` там не работает:
+  // права не нужны, и попытка падала на «нет такого файла».
+  const names = process.platform === 'win32' ? ['rg.exe'] : ['rg'];
+  await fs.writeFile(path.join(dir, names[0]), script, 'utf8');
+  if (process.platform !== 'win32') await fs.chmod(path.join(dir, 'rg'), 0o755);
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
   return {
