@@ -103,6 +103,9 @@ async function makeRepos(): Promise<{ work: string; bare: string; branch: string
   // примеры из `/usr/share/git-core`, а они не нужны ни одному тесту (замер:
   // 20 init с шаблоном — 62мс, без — 52мс). Сервис настроек не читает, так что
   // пропажа папки `info` (в ней `exclude`) тестам не мешает.
+  // Два `init` одним процессом НЕ сделать: `git init` принимает ровно один каталог
+  // (проверено: `git init a b` — usage, код 129). Путь — `git init --bare <каталог>`
+  // в иерархии каталогов того же вызова не спасает: bare-разметка иная, чем у рабочего.
   await git(base, ['init', '-q', '--bare', '--template=', bare]);
   await git(work, ['init', '-q', '--template=']);
   // Четыре настройки дописываем в `.git/config` ОДНОЙ записью файла, а не четырьмя
@@ -128,8 +131,15 @@ async function makeRepos(): Promise<{ work: string; bare: string; branch: string
   await fs.writeFile(path.join(work, 'a.txt'), 'one\n');
   await git(work, ['add', '-A']);
   await git(work, ['commit', '-q', '-m', 'init']);
+  const branch = (await git(work, ['symbolic-ref', '--short', 'HEAD'])).stdout.trim();
+  // `remote add` + `push` в один процесс НЕ сводятся: проверил — `git push -u
+  // <адрес> <ветка>` адрес принимает, но `remote.origin.fetch/pushurl` НЕ создаёт
+  // (в конфиге только `branch.<имя>.remote = <адрес>`), а тесты `remotes()` и `push()`
+  // ждут именно именованный origin. Ветку берём у git: master или main решает
+  // настройка машины, угадывать нельзя.
   await git(work, ['remote', 'add', 'origin', bare]);
-  const branch = (await git(work, ['branch', '--show-current'])).stdout.trim();
+  // `push -u` сам заводит ветку на сервере и ставит upstream — одно действие вместо
+  // `push` + ручного `update-ref`.
   await git(work, ['push', '-q', '-u', 'origin', branch]);
 
   return { work, bare, branch };

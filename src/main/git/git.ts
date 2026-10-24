@@ -865,18 +865,25 @@ export class GitService {
    * если удалённая ветка уехала вперёд, — то есть страхует от чужой работы.
    */
   async push(options: { setUpstream?: boolean; force?: boolean } = {}): Promise<GitNetworkResult> {
-    const status = await this.status();
-    const repoRoot = status.repository?.root;
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    const branch = status.repository?.branch;
-    if (!branch) {
+    // Одна команда вместо цепочки «статус → проверка upstream → push»: каждый
+    // запуск процесса стоит времени, а git отдаёт нужное сам. `%00` разделяет
+    // поля, потому что имя ветки может содержать что угодно, кроме NUL.
+    //
+    // Отдельно про detached HEAD: `%(refname:short)` для него пуст, а не «HEAD» —
+    // пустое имя git отвергнет сам (`fatal: dst refspec ... does not match any`),
+    // и это честнее нашего прежнего отказа. Ветку берём из `symbolic-ref`: он
+    // отвечает «не ветка» кодом, а не пустой строкой, которую нельзя отличить
+    // от ошибки запуска.
+    const repoRoot = await this.requireRoot();
+    const head = await execGit(['symbolic-ref', '--short', '-q', 'HEAD'], repoRoot, { allowFailure: true });
+    if (!head.ok || !head.stdout.trim()) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'HEAD оторван (detached): нечего отправлять');
     }
-
+    const branch = head.stdout.trim();
+    const probe = await execGit(['config', '--get', `branch.${branch}.remote`], repoRoot, { allowFailure: true });
     const args = ['push'];
     if (options.force) args.push('--force-with-lease');
-    if (options.setUpstream || !(await this.hasUpstream(repoRoot))) args.push('-u', 'origin', branch);
+    if (options.setUpstream || !probe.stdout.trim()) args.push('-u', 'origin', branch);
     return this.network(args);
   }
 
@@ -2092,14 +2099,6 @@ export class GitService {
     const message = text || `git ${args[0]}: выполнено`;
     const status = await this.refresh();
     return { ok: result.ok, message, status };
-  }
-
-  /** Настроен ли upstream у текущей ветки: без него `push`/`pull` не знают пары. */
-  private async hasUpstream(repoRoot: string): Promise<boolean> {
-    const result = await execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoRoot, {
-      allowFailure: true,
-    });
-    return result.ok && result.stdout.trim() !== '';
   }
 
   private requireRoot(): string {
