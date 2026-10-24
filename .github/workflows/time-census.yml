@@ -1,0 +1,45 @@
+name: Замер времени тестов
+
+# Временный workflow — только для снятия цифр по Windows. Основной ci.yml не трогаем:
+# замер — не проверка, и держать его в главном потоке незачем. Файл можно удалить,
+# как только цифры окажутся в TASKS.md.
+#
+# Зачем: разброс по Windows (±30с между прогонами одного набора) больше любого
+# выигрыша, за который мы беремся. На Linux `scripts/test-time-census.ts` даёт
+# стабильные 41.7 / 41.9 / 41.7с; на Windows его не запускали — отсюда запуск.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  time-windows:
+    name: Время тестов, Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Установить зависимости
+        run: npm ci
+
+      # Пять прогонов подряд на одной машине — именно того и не хватало: прогоны разных
+      # раннеров между собой несравнимы, а эти идут один за другим на одном железе.
+      - name: Замер по файлам
+        run: npx tsx scripts/test-time-census.ts --runs=5 --top=30 --out=time-windows.json
+
+      - name: Полный прогон — общая цифра
+        run: npm test
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: time-windows
+          path: time-windows.json
+          if-no-files-found: warn

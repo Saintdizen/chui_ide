@@ -108,6 +108,8 @@ function handle(message) {
       // Как debugpy: сначала программа пошла (process + thread). Останов придёт
       // только если есть точка останова — иначе программа просто выполняется.
       setTimeout(() => send({ type: 'event', event: 'process', body: { name: 'app.py', startMethod: 'launch' } }), 10);
+      // thread и stopped — разными таймерами от одного старта: останов обязан быть
+      // позже потока, иначе на медленной машине щель перевернётся и пауза потеряется.
       setTimeout(() => send({ type: 'event', event: 'thread', body: { reason: 'started', threadId: 1 } }), THREAD_DELAY);
       if (breakpoints > 0) {
         setTimeout(() => send({ type: 'event', event: 'stopped', body: { reason: 'breakpoint', threadId: 1 } }), 30);
@@ -142,7 +144,10 @@ function handle(message) {
       // thread. Не знает — молчим, и останов не придёт (прежнее поведение).
       response(message.seq, 'pause', { threadId: args.threadId });
       if (typeof args.threadId === 'number') {
-        setTimeout(() => send({ type: 'event', event: 'stopped', body: { reason: 'pause', threadId: args.threadId } }), 20);
+        setTimeout(
+          () => send({ type: 'event', event: 'stopped', body: { reason: 'pause', threadId: args.threadId } }),
+          20,
+        );
       }
       break;
     }
@@ -411,9 +416,9 @@ describe('DebugService', () => {
     expect(await waitPhase(service, 'running')).toBe('running');
 
     // Пауза останавливает идущую программу: threadId клиент берёт из события thread.
-    // Раньше его неоткуда было взять (останова ещё не было), и пауза молча ничего
-    // не делала.
     await service.pause();
+    // Ждём фазу, а не «сразу после pause»: останов приходит событием, и ответ
+    // адаптера может его опередить.
     expect(await waitPhase(service, 'stopped')).toBe('stopped');
 
     service.dispose();
@@ -423,12 +428,22 @@ describe('DebugService', () => {
     // Поток приходит событием `thread` после `process`. На нагруженной машине
     // между ними заметная щель: пауза, нажатая в неё, уходила без threadId и
     // терялась молча — именно так падал этот тест на Windows (по тайм-ауту).
+    //
+    // Щель тут в 250 мс (иначе её не нажать наверняка), но ждём мы не её, а
+    // фазу: как только поток известен и останов пришёл, тест идёт дальше.
     const { service } = fakeService('python', 250);
     await service.start('/proj/app.py');
     expect(await waitPhase(service, 'running')).toBe('running');
 
+    const pauseStarted = Date.now();
     await service.pause();
+    // Отказ виден фазами, а не тайм-аутом: без threadId пауза уходит молча, и
+    // сервис остаётся `running`. Ждём фазу, а не «сразу после pause»: останов
+    // приходит событием и может опередить ответ адаптера или отстать от него.
     expect(await waitPhase(service, 'stopped')).toBe('stopped');
+    // Пауза не могла отработать раньше, чем адаптер объявил поток: именно эту
+    // щель тест и проверяет. Ждём вполовину — с запасом на планировщик.
+    expect(Date.now() - pauseStarted).toBeGreaterThanOrEqual(125);
 
     service.dispose();
   });

@@ -610,8 +610,13 @@ export class WorkspaceService {
     // Сперва пробуем ripgrep: он обходит проект потоком и на большом дереве
     // быстрее нашего обхода. Нет его в системе или он не справился — ищем сами:
     // результат у обоих путей один, выбор пути наружу не видён.
+    //
+    // «Не справился» — это нехватка `rg` и ошибка самого поиска (кривой шаблон),
+    // но не отказ человека: прерванный поиск отменён, и обход `fs` его не повторяет
+    // — иначе отмена ничего бы не отменяла, а длинный обход продолжался бы втихую.
     const viaRipgrep = await this.searchWithRipgrep(scope, options, limit, context, signal);
     if (viaRipgrep) return viaRipgrep;
+    signal?.throwIfAborted();
 
     return this.searchWithFs(scope, options, limit, context, signal);
   }
@@ -1359,6 +1364,9 @@ export function runRipgrep(args: readonly string[], cwd: string, signal?: AbortS
     // поток частями пришлось бы всё равно — запись рвётся посредине.
     let out = '';
     let failed = '';
+    // Отмена замечена — значит отказ наш, независимо от кода выхода и от того,
+    // успел ли процесс писать коды (см. `abort`).
+    let aborted = false;
 
     child.stdout.on('data', (chunk: Buffer) => {
       out += chunk.toString('utf8');
@@ -1370,11 +1378,19 @@ export function runRipgrep(args: readonly string[], cwd: string, signal?: AbortS
     child.on('close', (code) => {
       // 0 — есть совпадения, 1 — их нет (это тоже результат: в выводе остаётся
       // итоговая запись со счётчиками), 2 — сбой самого поиска.
-      if (code === 0 || code === 1) resolve(out);
-      else reject(new Error(`${signal?.aborted ? ABORTED_RG : `rg завершился с кодом ${code}`}: ${failed.trim()}`));
+      // Убитый процесс вправе не записать никакого кода, а успешный — успеть
+      // написать нулём до доставки сигнала: решает наш флаг, а не код.
+      if (aborted) reject(new Error(`${ABORTED_RG}: прервано по запросу`));
+      else if (code === 0 || code === 1) resolve(out);
+      else reject(new Error(`rg завершился с кодом ${code}: ${failed.trim()}`));
     });
 
     const abort = (): void => {
+      // Флаг ставится до `kill`: SIGTERM доставляется при следующем тике, а
+      // заглушка в тестах успевает выйти раньше — и тогда `close` приходит с
+      // кодом от самого процесса, а не с признаком отмены. Флаг убирает гонку:
+      // для вызывающего важно, что мы решили прервать, а не кто успел первым.
+      aborted = true;
       child.kill();
     };
     signal?.addEventListener('abort', abort, { once: true });
