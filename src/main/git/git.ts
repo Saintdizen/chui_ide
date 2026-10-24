@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promises as fs, readFileSync, statSync, watch, type FSWatcher } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { app, shell } from 'electron';
+import { shell } from 'electron';
 import {
   PushTopic,
   RpcErrorCode,
@@ -77,39 +77,17 @@ import { summarizeRoot, type GitRootFetch, type GitRootSummary } from '../../sha
 import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
+export { gitTemplateDir } from './exec';
+import {
+  CLONE_TIMEOUT_MS,
+  execGit,
+  gitTemplateDir,
+  GIT_TIMEOUT_MS,
+  MAX_BUFFER,
+  MAX_DIFF_BYTES,
+  NETWORK_TIMEOUT_MS,
+} from './exec';
 
-/**
- * Пустой каталог шаблонов git. git кладёт в новый `.git` хук-образец и примеры
- * ловушек, которые IDE не показывает и никто не исполняет: замер — 50 `init` с
- * шаблоном 192мс, с пустым каталогом 126мс. Каталог один на машину, поэтому и
- * живёт рядом с прочим состоянием приложения, а не в репозитории.
- *
- * Функция, а не константа: импорт модуля в юнит-тестах не должен трогать `app`
- * (Electron там нет вовсе). Значение считается на вызове, а `mkdir` перед `init`
- * подстраховывает первый запуск — git без каталога тоже работает, но пишет
- * предупреждение в stderr, а его мы показываем как ошибку панели.
- * Если `app` всё-таки недоступен, шаблоны просто не подставляем: это ускоритель,
- * а не условие работы.
- */
-export function gitTemplateDir(): string | undefined {
-  try {
-    return path.join(app.getPath('userData'), 'git-templates');
-  } catch {
-    return undefined;
-  }
-}
-
-const GIT_TIMEOUT_MS = 20_000;
-/** Клонирование зависит от сети: здесь ограничение по времени много больше. */
-const CLONE_TIMEOUT_MS = 10 * 60_000;
-/**
- * Сетевые операции (fetch/pull/push) тоже ждут сеть, но не так долго, как полный
- * клон: обычный fetch укладывается в секунды, а зависший лучше прервать раньше.
- */
-const NETWORK_TIMEOUT_MS = 3 * 60_000;
-const MAX_BUFFER = 8 * 1024 * 1024;
-/** Размер файла, выше которого diff не строим: сравнение такого в редакторе бессмысленно. */
-const MAX_DIFF_BYTES = 2 * 1024 * 1024;
 /**
  * Пересчёт статуса после чужой git-операции схлопываем: запись в `.git` идёт
  * пачкой (индекс, ссылка, журнал) - одного пересчёта на пачку хватает.
@@ -269,7 +247,7 @@ export class GitService {
     if (rootPath === undefined) this.syncWatcher(repoRoot);
     if (!repoRoot) return { repository: null, files: [] };
 
-    const result = await this.exec(['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'], repoRoot);
+    const result = await execGit(['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'], repoRoot);
     return this.parseStatus(result.stdout, repoRoot);
   }
 
@@ -292,7 +270,7 @@ export class GitService {
     const root = this.requireRoot();
     const templates = gitTemplateDir();
     if (templates) await fs.mkdir(templates, { recursive: true });
-    await this.exec(['init'], root);
+    await execGit(['init'], root);
     return this.refresh();
   }
 
@@ -318,7 +296,7 @@ export class GitService {
     const args = staged
       ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff']
       : ['diff', '-U3', '--no-color', '--no-ext-diff'];
-    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    const result = await execGit(args, repoRoot, { allowFailure: true });
 
     // Обрезка по потолку — общей функцией: её же проверяют тесты сборки промпта.
     const limited = truncateDiff(result.stdout, COMMIT_DIFF_MAX_CHARS);
@@ -336,7 +314,7 @@ export class GitService {
   async stage(paths: string[]): Promise<GitStatus> {
     const { repoRoot, relative } = await this.locate(paths);
     // `-A` нужен, чтобы одной командой уходили и удаления: `add --` их не замечает.
-    await this.exec(['add', '-A', '--', ...relative], repoRoot);
+    await execGit(['add', '-A', '--', ...relative], repoRoot);
     return this.refresh();
   }
 
@@ -400,8 +378,8 @@ export class GitService {
     const { repoRoot, relative } = await this.locate(paths);
     // `restore --staged` требует HEAD, а в репозитории без коммитов его нет —
     // там файл просто убирается из индекса.
-    const result = await this.exec(['restore', '--staged', '--', ...relative], repoRoot, { allowFailure: true });
-    if (!result.ok) await this.exec(['rm', '--cached', '-q', '--', ...relative], repoRoot);
+    const result = await execGit(['restore', '--staged', '--', ...relative], repoRoot, { allowFailure: true });
+    if (!result.ok) await execGit(['rm', '--cached', '-q', '--', ...relative], repoRoot);
     return this.refresh();
   }
 
@@ -429,7 +407,7 @@ export class GitService {
     }
 
     if (tracked.length) {
-      await this.exec(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...tracked], repoRoot);
+      await execGit(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...tracked], repoRoot);
     }
     for (const file of loose) {
       await shell.trashItem(file).catch(() => undefined);
@@ -465,8 +443,8 @@ export class GitService {
       args.push('--', ...relative);
     }
 
-    await this.exec(args, repoRoot);
-    const info = await this.exec(['log', '-1', '--format=%h%x00%s'], repoRoot);
+    await execGit(args, repoRoot);
+    const info = await execGit(['log', '-1', '--format=%h%x00%s'], repoRoot);
     const [hash, summary] = info.stdout.trim().split('\u0000');
     const result = { hash: hash ?? '', summary: summary ?? '' };
     await this.refresh();
@@ -541,8 +519,8 @@ export class GitService {
     const repoRoot = await this.requireRoot();
     const left = this.refArg(base);
     const right = this.refArg(head);
-    const names = await this.exec(['diff', '--name-status', '-z', left, right], repoRoot);
-    const stats = await this.exec(['diff', '--numstat', '-z', left, right], repoRoot);
+    const names = await execGit(['diff', '--name-status', '-z', left, right], repoRoot);
+    const stats = await execGit(['diff', '--numstat', '-z', left, right], repoRoot);
     return { base: left, head: right, files: mergeRefDiff(names.stdout, stats.stdout) };
   }
 
@@ -586,21 +564,21 @@ export class GitService {
     if (options.good) args.push(this.commitArg(options.good));
     // Берём ОБА потока: git может сказать во stderr (предупреждение), а итог —
     // в stdout. Выбор «stderr || stdout» терял бы сообщение с виновником.
-    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    const result = await execGit(args, repoRoot, { allowFailure: true });
     return this.readBisectState(repoRoot, `${result.stdout}\n${result.stderr}`);
   }
 
   /** Пометить текущий проверяемый коммит хорошим, плохим или пропустить его. */
   async bisectMark(mark: 'good' | 'bad' | 'skip'): Promise<GitBisectState> {
     const repoRoot = await this.requireRoot();
-    const result = await this.exec(['bisect', mark], repoRoot, { allowFailure: true });
+    const result = await execGit(['bisect', mark], repoRoot, { allowFailure: true });
     return this.readBisectState(repoRoot, `${result.stdout}\n${result.stderr}`);
   }
 
   /** Закончить поиск: ветка возвращается туда, где была до него. */
   async bisectReset(): Promise<GitStatus> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['bisect', 'reset'], repoRoot);
+    await execGit(['bisect', 'reset'], repoRoot);
     return this.refresh();
   }
 
@@ -621,7 +599,7 @@ export class GitService {
 
     let current: { hash: string; summary: string } | null = null;
     if (started) {
-      const head = await this.exec(['log', '-1', '--format=%h%x00%s'], repoRoot, { allowFailure: true });
+      const head = await execGit(['log', '-1', '--format=%h%x00%s'], repoRoot, { allowFailure: true });
       const [hash, summary] = head.stdout.trim().split('\u0000');
       if (hash) current = { hash, summary: summary ?? '' };
     }
@@ -661,7 +639,7 @@ export class GitService {
       : target.staged
         ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff', ...scope]
         : ['diff', '-U3', '--no-color', '--no-ext-diff', ...scope];
-    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    const result = await execGit(args, repoRoot, { allowFailure: true });
     return result.stdout;
   }
 
@@ -680,7 +658,7 @@ export class GitService {
 
     // allowFailure: в репозитории без коммитов `git log` завершается ошибкой,
     // а это не сбой — просто истории ещё нет.
-    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    const result = await execGit(args, repoRoot, { allowFailure: true });
     return result.ok ? result.stdout : '';
   }
 
@@ -705,7 +683,7 @@ export class GitService {
 
     // allowFailure: в репозитории без коммитов `git log` завершается ошибкой,
     // а это не сбой — просто истории ещё нет.
-    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    const result = await execGit(args, repoRoot, { allowFailure: true });
     if (!result.ok) return [];
 
     const commits: GitCommit[] = [];
@@ -744,7 +722,7 @@ export class GitService {
     }
     args.push('--', relative);
 
-    const result = await this.exec(args, repoRoot, { allowFailure: true });
+    const result = await execGit(args, repoRoot, { allowFailure: true });
     return result.ok ? parseBlamePorcelain(result.stdout) : [];
   }
 
@@ -772,7 +750,7 @@ export class GitService {
    */
   async markResolved(filePath: string): Promise<GitStatus> {
     const { repoRoot, relative } = await this.locateHunk(filePath);
-    await this.exec(['add', '--', relative], repoRoot);
+    await execGit(['add', '--', relative], repoRoot);
     return this.refresh();
   }
 
@@ -781,8 +759,8 @@ export class GitService {
     if (!repoRoot) return [];
 
     const [local, remote] = await Promise.all([
-      this.exec(['branch', '--list', '--format=%(refname:short)%09%(HEAD)'], repoRoot),
-      this.exec(['branch', '--remotes', '--format=%(refname:short)'], repoRoot),
+      execGit(['branch', '--list', '--format=%(refname:short)%09%(HEAD)'], repoRoot),
+      execGit(['branch', '--remotes', '--format=%(refname:short)'], repoRoot),
     ]);
 
     const parsed: GitBranch[] = [];
@@ -809,7 +787,7 @@ export class GitService {
 
     const branch = name.trim();
     if (!branch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Пустое имя ветки');
-    await this.exec(create ? ['checkout', '-b', branch] : ['checkout', branch], repoRoot);
+    await execGit(create ? ['checkout', '-b', branch] : ['checkout', branch], repoRoot);
     return this.refresh();
   }
 
@@ -821,7 +799,7 @@ export class GitService {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return [];
 
-    const result = await this.exec(['remote', '-v'], repoRoot, { allowFailure: true });
+    const result = await execGit(['remote', '-v'], repoRoot, { allowFailure: true });
     const byName = new Map<string, GitRemote>();
     for (const line of result.stdout.split('\n')) {
       // Формат: `origin\thttps://… (fetch)`. Пробелы в адресе недопустимы, поэтому хвост режем по нему.
@@ -855,7 +833,7 @@ export class GitService {
         if (!repoRoot) {
           return { root: item.root, name: item.name, ok: false, message: 'не репозиторий git' };
         }
-        const result = await this.exec(['fetch', '--all', '--prune'], repoRoot, {
+        const result = await execGit(['fetch', '--all', '--prune'], repoRoot, {
           allowFailure: true,
           timeout: NETWORK_TIMEOUT_MS,
         });
@@ -942,7 +920,7 @@ export class GitService {
   async stashList(): Promise<GitStashEntry[]> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return [];
-    const result = await this.exec(['stash', 'list', '--format=%gd%x1f%gs'], repoRoot, { allowFailure: true });
+    const result = await execGit(['stash', 'list', '--format=%gd%x1f%gs'], repoRoot, { allowFailure: true });
     return parseStashList(result.stdout);
   }
 
@@ -958,7 +936,7 @@ export class GitService {
     if (options.includeUntracked) args.push('--include-untracked');
     const message = options.message?.trim();
     if (message) args.push('-m', message);
-    await this.exec(args, repoRoot);
+    await execGit(args, repoRoot);
     return this.refresh();
   }
 
@@ -980,7 +958,7 @@ export class GitService {
   /** Полный патч записи — содержимое для просмотра. */
   async stashShow(index: number): Promise<string> {
     const { repoRoot, ref } = await this.locateStash(index);
-    const result = await this.exec(['stash', 'show', '-p', '--no-color', '--no-ext-diff', ref], repoRoot, {
+    const result = await execGit(['stash', 'show', '-p', '--no-color', '--no-ext-diff', ref], repoRoot, {
       allowFailure: true,
     });
     // Пусто — в записи нет правок отслеживаемых файлов (бывают только новые):
@@ -990,7 +968,7 @@ export class GitService {
 
   private async stashOp(op: 'apply' | 'pop' | 'drop', index: number): Promise<GitStatus> {
     const { repoRoot, ref } = await this.locateStash(index);
-    await this.exec(['stash', op, ref], repoRoot);
+    await execGit(['stash', op, ref], repoRoot);
     return this.refresh();
   }
 
@@ -1009,7 +987,7 @@ export class GitService {
   /** Перенести один коммит в текущую ветку. */
   async cherryPick(commit: string): Promise<GitStatus> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['cherry-pick', this.commitArg(commit)], repoRoot);
+    await execGit(['cherry-pick', this.commitArg(commit)], repoRoot);
     return this.refresh();
   }
 
@@ -1017,14 +995,14 @@ export class GitService {
   async revert(commit: string): Promise<GitStatus> {
     const repoRoot = await this.requireRoot();
     // --no-edit: сообщение берём готовое, редактор не открываем.
-    await this.exec(['revert', '--no-edit', this.commitArg(commit)], repoRoot);
+    await execGit(['revert', '--no-edit', this.commitArg(commit)], repoRoot);
     return this.refresh();
   }
 
   /** Передвинуть ветку на коммит: soft (только указатель), mixed (+ индекс), hard (+ дерево). */
   async reset(mode: 'soft' | 'mixed' | 'hard', commit: string): Promise<GitStatus> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['reset', `--${mode}`, this.commitArg(commit)], repoRoot);
+    await execGit(['reset', `--${mode}`, this.commitArg(commit)], repoRoot);
     return this.refresh();
   }
 
@@ -1046,7 +1024,7 @@ export class GitService {
     const invalid = validateRebaseTodo(items);
     if (invalid) throw new RpcFailure(RpcErrorCode.InvalidParams, invalid);
     const depth = Math.max(Math.trunc(count), 1);
-    const head = await this.exec(['rev-parse', '--verify', `HEAD~${depth}`], repoRoot, { allowFailure: true });
+    const head = await execGit(['rev-parse', '--verify', `HEAD~${depth}`], repoRoot, { allowFailure: true });
     if (!head.ok) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'В ветке меньше коммитов, чем выбрано для перестройки');
     }
@@ -1073,7 +1051,7 @@ export class GitService {
       await fs.writeFile(messageEditor, MESSAGE_EDITOR_SCRIPT, 'utf8');
 
       const runner = this.editorCommand(sequenceEditor);
-      const result = await this.exec(['rebase', '-i', `HEAD~${depth}`], repoRoot, {
+      const result = await execGit(['rebase', '-i', `HEAD~${depth}`], repoRoot, {
         allowFailure: true,
         env: {
           ELECTRON_RUN_AS_NODE: '1',
@@ -1093,21 +1071,21 @@ export class GitService {
   async rebaseContinue(): Promise<GitRebaseResult> {
     const repoRoot = await this.requireRoot();
     // Редактор сообщений тут не нужен: git берёт готовое сообщение (или уже поправленное).
-    const result = await this.exec(['rebase', '--continue'], repoRoot, { allowFailure: true });
+    const result = await execGit(['rebase', '--continue'], repoRoot, { allowFailure: true });
     return this.rebaseOutcome(repoRoot, result);
   }
 
   /** Пропустить текущий коммит остановленного rebase. */
   async rebaseSkip(): Promise<GitRebaseResult> {
     const repoRoot = await this.requireRoot();
-    const result = await this.exec(['rebase', '--skip'], repoRoot, { allowFailure: true });
+    const result = await execGit(['rebase', '--skip'], repoRoot, { allowFailure: true });
     return this.rebaseOutcome(repoRoot, result);
   }
 
   /** Прервать rebase: ветка возвращается туда, где была до запуска. */
   async rebaseAbort(): Promise<GitStatus> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['rebase', '--abort'], repoRoot);
+    await execGit(['rebase', '--abort'], repoRoot);
     return this.refresh();
   }
 
@@ -1138,7 +1116,7 @@ export class GitService {
 
   /** Есть ли в индексе неразрешённые конфликты (`git ls-files -u`). */
   private async hasConflicts(repoRoot: string): Promise<boolean> {
-    const result = await this.exec(['ls-files', '-u'], repoRoot, { allowFailure: true });
+    const result = await execGit(['ls-files', '-u'], repoRoot, { allowFailure: true });
     return result.ok && result.stdout.trim() !== '';
   }
 
@@ -1147,7 +1125,7 @@ export class GitService {
    * самого git: у связанных рабочих каталогов `.git` — это файл, а не папка.
    */
   private async gitPath(repoRoot: string, name: string): Promise<string | null> {
-    const result = await this.exec(['rev-parse', '--git-path', name], repoRoot, { allowFailure: true });
+    const result = await execGit(['rev-parse', '--git-path', name], repoRoot, { allowFailure: true });
     const value = result.stdout.trim();
     if (!result.ok || !value) return null;
     return path.isAbsolute(value) ? value : path.join(repoRoot, value);
@@ -1155,7 +1133,7 @@ export class GitService {
 
   /** Полные сообщения последних `depth` коммитов: ключ — хеш, значение — текст целиком. */
   private async commitMessages(repoRoot: string, depth: number): Promise<Map<string, string>> {
-    const result = await this.exec(['log', `-n`, String(depth), '--no-color', '--format=%H%x1f%B%x1e'], repoRoot, {
+    const result = await execGit(['log', `-n`, String(depth), '--no-color', '--format=%H%x1f%B%x1e'], repoRoot, {
       allowFailure: true,
     });
     const map = new Map<string, string>();
@@ -1172,7 +1150,7 @@ export class GitService {
 
   /** Полный хеш по короткому: редактор сообщений сопоставляет по исходному тексту. */
   private async fullHash(repoRoot: string, commit: string): Promise<string> {
-    const result = await this.exec(['rev-parse', '--verify', this.commitArg(commit)], repoRoot, {
+    const result = await execGit(['rev-parse', '--verify', this.commitArg(commit)], repoRoot, {
       allowFailure: true,
     });
     return result.ok ? result.stdout.trim() : '';
@@ -1191,7 +1169,7 @@ export class GitService {
   async tags(): Promise<GitTag[]> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return [];
-    const result = await this.exec(
+    const result = await execGit(
       ['tag', '--list', '--format=%(refname:short)\t%(objectname:short)\t%(contents:subject)'],
       repoRoot,
       {
@@ -1209,14 +1187,14 @@ export class GitService {
     if (message) args.push('-a', '-m', message);
     args.push(this.nameArg(name));
     if (options.commit) args.push(this.commitArg(options.commit));
-    await this.exec(args, repoRoot);
+    await execGit(args, repoRoot);
     return this.refresh();
   }
 
   /** Удалить тег из репозитория (удалённый не трогаем). */
   async deleteTag(name: string): Promise<GitStatus> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['tag', '-d', this.nameArg(name)], repoRoot);
+    await execGit(['tag', '-d', this.nameArg(name)], repoRoot);
     return this.refresh();
   }
 
@@ -1233,14 +1211,14 @@ export class GitService {
    */
   async deleteBranch(name: string, force = false): Promise<GitStatus> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['branch', force ? '-D' : '-d', this.nameArg(name)], repoRoot);
+    await execGit(['branch', force ? '-D' : '-d', this.nameArg(name)], repoRoot);
     return this.refresh();
   }
 
   /** Переименовать ветку (у текущей — без указания старого имени). */
   async renameBranch(from: string, to: string): Promise<GitStatus> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['branch', '-m', this.nameArg(from), this.nameArg(to)], repoRoot);
+    await execGit(['branch', '-m', this.nameArg(from), this.nameArg(to)], repoRoot);
     return this.refresh();
   }
 
@@ -1275,14 +1253,14 @@ export class GitService {
   async submodules(): Promise<GitSubmodule[]> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return [];
-    const result = await this.exec(['submodule', 'status'], repoRoot, { allowFailure: true });
+    const result = await execGit(['submodule', 'status'], repoRoot, { allowFailure: true });
     return result.ok ? parseSubmodules(result.stdout) : [];
   }
 
   /** Забрать код подмодулей: `git submodule update --init --recursive`. */
   async submoduleUpdate(): Promise<GitStatus> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['submodule', 'update', '--init', '--recursive'], repoRoot, {
+    await execGit(['submodule', 'update', '--init', '--recursive'], repoRoot, {
       timeout: NETWORK_TIMEOUT_MS,
     });
     return this.refresh();
@@ -1778,10 +1756,10 @@ export class GitService {
     for (const item of identityPatch(current, values)) {
       if (item.value === '') {
         // Пустое значение — снять настройку; её могло и не быть.
-        await this.exec(['config', '--local', '--unset', item.key], repoRoot, { allowFailure: true });
+        await execGit(['config', '--local', '--unset', item.key], repoRoot, { allowFailure: true });
         continue;
       }
-      await this.exec(['config', '--local', item.key, item.value], repoRoot);
+      await execGit(['config', '--local', item.key, item.value], repoRoot);
     }
     return this.identity();
   }
@@ -1821,7 +1799,7 @@ export class GitService {
 
   /** Значение настройки git: пустая строка, если она не задана. */
   private async configGet(repoRoot: string, key: string): Promise<string> {
-    const result = await this.exec(['config', '--get', key], repoRoot, { allowFailure: true });
+    const result = await execGit(['config', '--get', key], repoRoot, { allowFailure: true });
     return result.ok ? result.stdout.trim() : '';
   }
 
@@ -1863,16 +1841,16 @@ export class GitService {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
 
-    const enabledRaw = await this.exec(['config', '--get', 'core.sparseCheckout'], repoRoot, { allowFailure: true });
+    const enabledRaw = await execGit(['config', '--get', 'core.sparseCheckout'], repoRoot, { allowFailure: true });
     const enabled = enabledRaw.ok && parseSparseFlag(enabledRaw.stdout);
     if (!enabled) return { enabled: false, cone: false, patterns: [] };
 
-    const coneRaw = await this.exec(['config', '--get', 'core.sparseCheckoutCone'], repoRoot, { allowFailure: true });
+    const coneRaw = await execGit(['config', '--get', 'core.sparseCheckoutCone'], repoRoot, { allowFailure: true });
     // Современный git по умолчанию работает в cone-режиме: нет значения — считаем cone,
     // явное `false` — режим шаблонов.
     const cone = !coneRaw.ok || coneRaw.stdout.trim() === '' || parseSparseFlag(coneRaw.stdout);
 
-    const list = await this.exec(['sparse-checkout', 'list'], repoRoot, { allowFailure: true });
+    const list = await execGit(['sparse-checkout', 'list'], repoRoot, { allowFailure: true });
     const patterns = list.ok ? parseSparseList(list.stdout) : [];
     return { enabled: true, cone: cone || isConePatterns(patterns), patterns };
   }
@@ -1887,7 +1865,7 @@ export class GitService {
     const repoRoot = await this.requireRoot();
     const dirs = this.cleanDirectories(directories);
     if (dirs.length === 0) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не выбран ни один каталог');
-    await this.exec(['sparse-checkout', 'set', '--cone', '--', ...dirs], repoRoot);
+    await execGit(['sparse-checkout', 'set', '--cone', '--', ...dirs], repoRoot);
     return this.sparseInfo();
   }
 
@@ -1896,14 +1874,14 @@ export class GitService {
     const repoRoot = await this.requireRoot();
     const clean = normalizeSparseDirectory(directory);
     if (clean === null) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Негодный путь каталога');
-    await this.exec(['sparse-checkout', 'add', '--', clean], repoRoot);
+    await execGit(['sparse-checkout', 'add', '--', clean], repoRoot);
     return this.sparseInfo();
   }
 
   /** Выключить разреженный режим: на диск возвращается весь репозиторий. */
   async sparseDisable(): Promise<GitSparseInfo> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['sparse-checkout', 'disable'], repoRoot);
+    await execGit(['sparse-checkout', 'disable'], repoRoot);
     return this.sparseInfo();
   }
 
@@ -1933,12 +1911,12 @@ export class GitService {
     const attributes = await fs.readFile(path.join(repoRoot, '.gitattributes'), 'utf8').catch(() => '');
     const patterns = parseLfsPatterns(attributes);
 
-    const version = await this.exec(['lfs', 'version'], repoRoot, { allowFailure: true });
+    const version = await execGit(['lfs', 'version'], repoRoot, { allowFailure: true });
     if (!version.ok) return emptyLfsInfo(patterns);
     // `git lfs version` печатает «git-lfs/3.4.0 (GitHub; …)» — берём первое слово.
     const versionText = version.stdout.trim().split(/\s+/)[0] ?? '';
 
-    const listing = await this.exec(['lfs', 'ls-files'], repoRoot, { allowFailure: true });
+    const listing = await execGit(['lfs', 'ls-files'], repoRoot, { allowFailure: true });
     const files = listing.ok ? parseLfsFiles(listing.stdout) : [];
     return {
       available: true,
@@ -1956,7 +1934,7 @@ export class GitService {
     if (clean === '' || /\s/.test(clean)) {
       throw new RpcFailure(RpcErrorCode.InvalidParams, 'Шаблон не должен быть пустым или содержать пробелы');
     }
-    await this.exec(['lfs', 'track', '--', clean], repoRoot);
+    await execGit(['lfs', 'track', '--', clean], repoRoot);
     return this.lfsInfo();
   }
 
@@ -1965,21 +1943,21 @@ export class GitService {
     const repoRoot = await this.requireRoot();
     const clean = normalizeLfsPattern(pattern);
     if (clean === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Пустой шаблон');
-    await this.exec(['lfs', 'untrack', '--', clean], repoRoot);
+    await execGit(['lfs', 'untrack', '--', clean], repoRoot);
     return this.lfsInfo();
   }
 
   /** Подтянуть содержимое LFS-файлов (`git lfs pull`) — как fetch, только для больших файлов. */
   async lfsPull(): Promise<GitLfsInfo> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['lfs', 'pull'], repoRoot, { timeout: NETWORK_TIMEOUT_MS });
+    await execGit(['lfs', 'pull'], repoRoot, { timeout: NETWORK_TIMEOUT_MS });
     return this.lfsInfo();
   }
 
   /** Подготовить репозиторий к LFS: `git lfs install --local` (ставит хуки). */
   async lfsInstall(): Promise<GitLfsInfo> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['lfs', 'install', '--local'], repoRoot);
+    await execGit(['lfs', 'install', '--local'], repoRoot);
     return this.lfsInfo();
   }
 
@@ -1989,7 +1967,7 @@ export class GitService {
   async worktrees(): Promise<GitWorktree[]> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return [];
-    const result = await this.exec(['worktree', 'list', '--porcelain'], repoRoot, { allowFailure: true });
+    const result = await execGit(['worktree', 'list', '--porcelain'], repoRoot, { allowFailure: true });
     // git отдаёт пути со слэшами ВСЕГДА, даже на Windows. Приводим к разделителям
     // платформы: иначе путь не совпадёт с тем, что дают fs и остальное приложение.
     return result.ok ? parseWorktrees(result.stdout).map((item) => ({ ...item, path: path.normalize(item.path) })) : [];
@@ -2007,7 +1985,7 @@ export class GitService {
     if (options.newBranch) args.push('-b', this.nameArg(options.newBranch));
     args.push(directory);
     if (options.branch) args.push(this.nameArg(options.branch));
-    await this.exec(args, repoRoot, { timeout: NETWORK_TIMEOUT_MS });
+    await execGit(args, repoRoot, { timeout: NETWORK_TIMEOUT_MS });
     return this.worktrees();
   }
 
@@ -2018,14 +1996,14 @@ export class GitService {
     const args = ['worktree', 'remove'];
     if (force) args.push('--force');
     args.push('--', target);
-    await this.exec(args, repoRoot);
+    await execGit(args, repoRoot);
     return this.worktrees();
   }
 
   /** Убрать записи о каталогах, которых уже нет на диске. */
   async worktreePrune(): Promise<GitWorktree[]> {
     const repoRoot = await this.requireRoot();
-    await this.exec(['worktree', 'prune'], repoRoot);
+    await execGit(['worktree', 'prune'], repoRoot);
     return this.worktrees();
   }
 
@@ -2098,7 +2076,7 @@ export class GitService {
   async reflog(limit = 50): Promise<GitReflogEntry[]> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return [];
-    const result = await this.exec(
+    const result = await execGit(
       ['reflog', '--date=short', '-n', String(Math.max(Math.trunc(limit), 1)), '--format=%h%x1f%gd%x1f%ad%x1f%gs'],
       repoRoot,
       { allowFailure: true },
@@ -2117,7 +2095,7 @@ export class GitService {
   async logGraph(limit = 100): Promise<string> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) return '';
-    const result = await this.exec(
+    const result = await execGit(
       ['log', '--graph', '--oneline', '--decorate', '--all', '-n', String(Math.max(Math.trunc(limit), 1))],
       repoRoot,
       { allowFailure: true },
@@ -2153,7 +2131,7 @@ export class GitService {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
 
-    const result = await this.exec(args, repoRoot, { allowFailure: true, timeout: NETWORK_TIMEOUT_MS });
+    const result = await execGit(args, repoRoot, { allowFailure: true, timeout: NETWORK_TIMEOUT_MS });
     // У push/fetch итог идёт в stderr, у pull — в stdout: берём то, что непусто.
     const text = (result.stderr.trim() || result.stdout.trim()).trim();
     const message = text || `git ${args[0]}: выполнено`;
@@ -2163,7 +2141,7 @@ export class GitService {
 
   /** Настроен ли upstream у текущей ветки: без него `push`/`pull` не знают пары. */
   private async hasUpstream(repoRoot: string): Promise<boolean> {
-    const result = await this.exec(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoRoot, {
+    const result = await execGit(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], repoRoot, {
       allowFailure: true,
     });
     return result.ok && result.stdout.trim() !== '';
@@ -2182,7 +2160,7 @@ export class GitService {
   private async repositoryRoot(explicit?: string): Promise<string | null> {
     const root = explicit ?? this.root();
     if (!root) return null;
-    const result = await this.exec(['rev-parse', '--show-toplevel'], root, { allowFailure: true });
+    const result = await execGit(['rev-parse', '--show-toplevel'], root, { allowFailure: true });
     if (!result.ok) return null;
     const value = result.stdout.trim();
     return value || null;
@@ -2269,7 +2247,7 @@ export class GitService {
 
   /** Содержимое из дерева git; если объекта нет (новый файл) — пустая строка. */
   private async show(spec: string, cwd: string): Promise<string> {
-    const result = await this.exec(['show', spec], cwd, { allowFailure: true });
+    const result = await execGit(['show', spec], cwd, { allowFailure: true });
     return result.ok ? result.stdout : '';
   }
 
@@ -2330,47 +2308,6 @@ export class GitService {
         if (code === 0) resolve();
         else reject(new RpcFailure(RpcErrorCode.Internal, `git ${args[0]} завершился с кодом ${code}`, rest.trim()));
       });
-    });
-  }
-
-  private exec(
-    args: string[],
-    cwd: string,
-    options: { allowFailure?: boolean; timeout?: number; env?: Record<string, string> } = {},
-  ): Promise<GitResult> {
-    return new Promise((resolve, reject) => {
-      execFile(
-        'git',
-        // --no-optional-locks: IDE не должна менять индекс, пока пользователь просто смотрит на файлы.
-        ['--no-optional-locks', '-c', 'core.quotepath=false', ...args],
-        {
-          cwd,
-          timeout: options.timeout ?? GIT_TIMEOUT_MS,
-          maxBuffer: MAX_BUFFER,
-          windowsHide: true,
-          env: {
-            ...process.env,
-            // Никаких диалогов и редакторов: всё, что требует ввода, в IDE решается иначе.
-            GIT_TERMINAL_PROMPT: '0',
-            GIT_EDITOR: 'true',
-            GIT_PAGER: 'cat',
-            // Пустой каталог шаблонов — причина и замер в `gitTemplateDir`.
-            ...(gitTemplateDir() ? { GIT_TEMPLATE_DIR: gitTemplateDir() } : {}),
-            // Отдельные вызовы (rebase) подменяют редакторы своими — см. `rebaseInteractive`.
-            ...options.env,
-          },
-        },
-        (error, stdout, stderr) => {
-          const failed = error !== null;
-          const result: GitResult = { ok: !failed, stdout, stderr };
-          if (!failed || options.allowFailure) {
-            resolve(result);
-            return;
-          }
-          const message = stderr.trim() || stdout.trim() || `git ${args[0]}: код ${error?.code ?? '?'}`;
-          reject(new RpcFailure(RpcErrorCode.Internal, `git: ${message}`, message));
-        },
-      );
     });
   }
 
