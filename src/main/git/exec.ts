@@ -32,11 +32,11 @@ export const MAX_DIFF_BYTES = 2 * 1024 * 1024;
  * а не условие работы.
  */
 export function gitTemplateDir(): string | undefined {
-try {
-  return path.join(app.getPath('userData'), 'git-templates');
-} catch {
-  return undefined;
-}
+  try {
+    return path.join(app.getPath('userData'), 'git-templates');
+  } catch {
+    return undefined;
+  }
 }
 
 /** Что вернул `execFile`: `ok` — код выхода ноль, `stderr` — то, что git сказал в ошибку. */
