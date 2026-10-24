@@ -331,7 +331,7 @@ interface ToolGroupView {
  * Чем открыть файл-результат (`present`). Клику в ленте мало одного `editors.reveal`:
  * среди открытых документа может и не быть — агент только что его создал.
  */
-type OpenFileHandler = (path: string) => Promise<void>;
+type OpenFileHandler = (path: string, position?: { line?: number; column?: number }) => Promise<void>;
 
 function createToolGroup(
   container: HTMLElement,
@@ -538,7 +538,7 @@ function createToolGroup(
             showToast('Открыть файл здесь нечем', 'error');
             return;
           }
-          void onOpenFile(item.path).catch(() => showToast('Не удалось открыть файл', 'error'));
+          void onOpenFile(item.path, item).catch(() => showToast('Не удалось открыть файл', 'error'));
         });
         open.disabled = onOpenFile === undefined;
         if (!onOpenFile) open.title = item.path;

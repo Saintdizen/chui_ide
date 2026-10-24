@@ -178,7 +178,13 @@ describe('мок интерфейса: согласованность с кон�
   it('в моке нет повторяющихся ключей', () => {
     const keys = mockKeys();
     const seen = new Set<string>();
-    const duplicates = keys.filter((method) => (seen.has(method) ? true : (seen.add(method), false)));
+    // Два прохода зараз: `filter` тут же пополняет `seen`, так что повтором
+    // считается только уже встреченный ключ — без запятой-оператора в теле.
+    const duplicates = keys.filter((method) => {
+      if (seen.has(method)) return true;
+      seen.add(method);
+      return false;
+    });
     expect(duplicates, `в моке повторяются: ${[...new Set(duplicates)].join(', ')}`).toEqual([]);
   });
 

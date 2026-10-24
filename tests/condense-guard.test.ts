@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { ApplyEditsHostResult } from '../src/shared/api';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
-import { condenseAppliedCalls, isCondenseMarker } from '../src/shared/context-fit';
+import { condenseAppliedCalls, condenseCallArguments, isCondenseMarker } from '../src/shared/context-fit';
 
 const MARKER = '[применено: 57 стр. — текст в файле]';
 // Собираем в рантайме: в исходнике такая строка выглядит как порча, и статический
@@ -115,10 +115,23 @@ describe('пометка сжатия в аргументе: отказ вмес
 
 describe('пометка узнаётся в старой и новой записи', () => {
   it('обе формы — пометка, обычный текст — нет', () => {
+    expect(isCondenseMarker('[свёрнуто: 12 стр. — текст в файле, не копировать]')).toBe(true);
+    expect(isCondenseMarker('[свёрнуто: 12 стр. — текст в файле]')).toBe(true);
+    // Старая запись: беседы, сжатые до переименования, ещё лежат в истории.
     expect(isCondenseMarker('[применено: 12 стр. — текст в файле]')).toBe(true);
     expect(isCondenseMarker('[применено: 12 стр. — текст в файле, не копировать]')).toBe(true);
     expect(isCondenseMarker('const a = 1;\n[применено: 12 стр.]')).toBe(false);
     expect(isCondenseMarker(42)).toBe(false);
+  });
+
+  it('сжатие пишет новое слово, и такой вызов не исполняется', async () => {
+    // Слово в пометке совпадало с отчётом об успешной правке (`применено
+    // правок — 1`), и пометку принимали за подтверждение, что правка легла.
+    const long = 'строка\n'.repeat(120);
+    const args = JSON.stringify({ edits: [{ path: 'a.css', oldText: long, newText: `${long}!` }] });
+    const condensed = condenseCallArguments(args, 400);
+    expect(condensed).toContain('[свёрнуто:');
+    expect(condensed).not.toContain('[применено:');
   });
 });
 

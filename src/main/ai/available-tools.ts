@@ -54,7 +54,7 @@ export function canRunTool(tool: AgentToolSpec, env: ToolAvailability): boolean 
   // подтвердить, а без сервиса терминалов не открыть сессию. Условие одно на
   // все действия, как у браузера: действие без своей возможности откажет
   // словами в обработчике, но в списке у модели инструмент есть.
-  if (tool.name === 'terminal') return env.terminals !== undefined || host?.confirmCommand !== undefined;
+  if (tool.name.startsWith('terminal')) return env.terminals !== undefined || host?.confirmCommand !== undefined;
   // Проверки: у действий разные возможности (пометки даёт окно, линтер — main),
   // поэтому условие одно на оба, как у браузера и терминала.
   if (tool.name === 'checks') return host?.getDiagnostics !== undefined || env.linter !== undefined;
@@ -79,7 +79,11 @@ export function canRunTool(tool: AgentToolSpec, env: ToolAvailability): boolean 
   // спрашивают подтверждение — значит, без подключённого окна их не предлагаем.
   if (tool.name === 'browser') {
     if (!env.browser || !env.browserEnabled) return false;
-    return host?.confirmBrowser !== undefined || env.browser.zoom !== undefined;
+    // Действия браузера не исполнить без окна редактора: `permitBrowser`
+    // спрашивает человека через `confirmBrowser`, а без моста молча отвечает
+    // отказом. Один признак на все действия — встроенный Chromium и режим масштаба
+    // (env.browser.zoom) его не заменяют: подтверждения у них нет.
+    return host?.confirmBrowser !== undefined;
   }
 
   // Всё прочее — только по явному признаку. Новый инструмент без условия в

@@ -34,7 +34,7 @@ describe('действия схемы доходят до обработчика
     // Пустой список прошёл бы все проверки молча — это и есть его слепое пятно.
     expect(WITH_ACTION).toContain('search');
     expect(WITH_ACTION).toContain('history');
-    expect(WITH_ACTION).toContain('terminal');
+    expect(WITH_ACTION).toContain('browser');
   });
 
   for (const name of WITH_ACTION) {

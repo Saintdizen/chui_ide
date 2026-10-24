@@ -92,10 +92,16 @@ export const TOOL_POLICIES: Readonly<Record<AgentToolName, ToolPolicy>> = {
   edit: {},
 
   /* ── команды, задания, терминалы ────────────────────────────────────── */
-  // Один инструмент на всё, что запускает процессы: команда, задание в фоне,
-  // живая сессия. Целиком он мир меняет, поэтому не `readOnly` и не в плане;
-  // чтение вывода и список — отдельные действия, и они тоже только читают.
-  terminal: { readOnlyActions: ['list', 'read', 'output'] },
+  // Семья терминала — пять имён, потому что действие видно из имени: схема
+  // `terminal(action: …)` весила 370 токенов на каждом шаге и требовала помнить
+  // пару «действие + id». Запуск и запись мир меняют; чтение вывода и список — нет.
+  terminal: {},
+  terminalOpen: {},
+  terminalWrite: {},
+  terminalStop: {},
+  terminalOutput: { readOnly: true },
+  // Список сессий и заданий ничего не меняет — ему в плане можно, как `read`.
+  terminalList: { readOnly: true, alwaysAvailable: true, plan: true },
 
   /* ── состояние беседы ───────────────────────────────────────────────── */
   // Одно имя на всё разговорное: заметки, вопрос, план, цель, утверждение
@@ -171,7 +177,9 @@ export function isReadOnlyCall(name: string, rawArguments: string): boolean {
 
 /** Чтение живого процесса и явное force нельзя подавлять как буквальный повтор. */
 export function isCacheableReadCall(name: string, rawArguments: string): boolean {
-  if (!isReadOnlyCall(name, rawArguments) || name === 'terminal') return false;
+  if (!isReadOnlyCall(name, rawArguments)) return false;
+  // `terminalOutput` опрашивает живой процесс: повтор вправе принести новый вывод.
+  if (name === 'terminalOutput') return false;
   if (name !== 'read') return true;
   const parsed = parseToolArguments(rawArguments);
   return parsed.ok && parsed.value.force !== true && parsed.value.force !== 'true';

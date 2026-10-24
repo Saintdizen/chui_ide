@@ -13,6 +13,15 @@
 
 export type AgentToolSide = 'main' | 'renderer';
 
+/**
+ * Как инструменты считают строки: везде с единицы.
+ *
+ * Одна формулировка на все схемы (и на все варианты написания, что присылает
+ * модель) — иначе модель путает, чей номер она видит. Номера приходят ровно
+ * в том же счёте, что печатает `read` в выводе и `lsp` в локациях (`файл:12:5`).
+ */
+export const LINE_NUMBERING = 'Lines and columns are 1-based, the same as read prints them.';
+
 export type AgentToolName =
   | 'list'
   | 'read'
@@ -26,6 +35,11 @@ export type AgentToolName =
   | 'mcp'
   | 'edit'
   | 'terminal'
+  | 'terminalOpen'
+  | 'terminalOutput'
+  | 'terminalWrite'
+  | 'terminalStop'
+  | 'terminalList'
   | 'web'
   | 'file'
   | 'mind'
@@ -51,12 +65,26 @@ export interface JsonSchemaProperty {
   /** Обязательные поля вложенного объекта. */
   required?: string[];
   enum?: string[];
+  /**
+   * Значение поля-условия в `allOf[].if` (JSON-Schema): `{ enum: [...] }` или `{ const: ... }`.
+   * Нужен только там; в обычных свойствах инструментов не встречается.
+   */
+  const?: string;
 }
 
 export interface JsonSchema {
   type: 'object';
   properties: Record<string, JsonSchemaProperty>;
   required?: string[];
+  /**
+   * Условные требования: при выполненном `if` обязательны поля из `then.required`.
+   * `if` — это `properties` с перечнем значений, при которых условие срабатывает
+   * (тип там не дублируется: значение — всегда `action`).
+   */
+  allOf?: {
+    if?: { properties?: Record<string, { enum?: string[]; const?: string }> };
+    then?: { required?: string[] };
+  }[];
 }
 
 /**
@@ -113,7 +141,7 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
         },
         startLine: {
           type: 'number',
-          description: 'First line, 1-based.',
+          description: `First line; ${LINE_NUMBERING}`,
         },
         endLine: {
           type: 'number',
@@ -215,8 +243,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           type: 'string',
           description: 'references: narrow to a file. definition: the usage. outline: that file.',
         },
-        line: { type: 'number', description: 'definition: usage line, 1-based.' },
-        column: { type: 'number', description: 'definition: column, 1-based.' },
+        line: { type: 'number', description: `definition: usage line. ${LINE_NUMBERING}` },
+        column: { type: 'number', description: `definition: column. ${LINE_NUMBERING}` },
         includeDeclaration: {
           type: 'boolean',
           description: 'references: include the declaration (default yes).',
@@ -355,28 +383,72 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
   {
     name: 'terminal',
     side: 'main',
-    description: 'A real pty the user sees. One command per call. Project tests are run_tests, not here.',
+    description: 'Run a command and get its output in one call. Project tests are run_tests, not here.',
     inputSchema: {
       type: 'object',
       properties: {
-        action: {
-          type: 'string',
-          // Сессия и команда — два разных дела в одном имени: `enum` называет
-          // действия, но не говорит, к какому из них относится `id`. Перечень
-          // действий не повторяем — он в `enum` рядом.
-          description: 'start/write/stop: sessions; run/output/cancel: jobs.',
-          enum: ['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel'],
-        },
-        id: { type: 'string', description: 'read/write/stop: session id. output/cancel: job id.' },
-        command: { type: 'string', description: 'start: typed once open. run: the command.' },
-        cwd: { type: 'string', description: 'start, run: folder inside the project.' },
-        data: { type: 'string', description: 'write: what to type; newline = Enter.' },
-        from: { type: 'number', description: 'read, output: offset.' },
-        timeout: { type: 'number', description: 'run: seconds (120; background 1800).' },
-        background: { type: 'boolean', description: 'run: do not wait, returns a job id.' },
+        command: { type: 'string', description: 'The command.' },
+        cwd: { type: 'string', description: 'Folder inside the project.' },
+        background: { type: 'boolean', description: 'Do not wait; returns a job id for terminalOutput.' },
+        timeout: { type: 'number', description: 'Seconds (120; background 1800).' },
       },
-      required: ['action'],
+      required: ['command'],
     },
+  },
+  {
+    name: 'terminalOpen',
+    side: 'main',
+    description:
+      'A real terminal the user sees; it lives on after the step. What you type goes in with terminalWrite, ' +
+      'what came back is read with terminalOutput — output never comes by itself.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Typed once open.' },
+        cwd: { type: 'string', description: 'Folder inside the project.' },
+      },
+    },
+  },
+  {
+    name: 'terminalOutput',
+    side: 'main',
+    description: 'What the terminal said — session or job.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Session or job id; empty = the current one.' },
+        from: { type: 'number', description: 'Offset: what you have already read.' },
+      },
+    },
+  },
+  {
+    name: 'terminalWrite',
+    side: 'main',
+    description: 'Type into a live session; newline = Enter.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Session id.' },
+        data: { type: 'string', description: 'What to type; newline = Enter.' },
+      },
+      required: ['id', 'data'],
+    },
+  },
+  {
+    name: 'terminalStop',
+    side: 'main',
+    description: 'Stop a running job (Ctrl-C) or kill a live session.',
+    inputSchema: {
+      type: 'object',
+      properties: { id: { type: 'string', description: 'Job or session id.' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'terminalList',
+    side: 'main',
+    description: 'Open terminals and jobs: their ids and state.',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'file',
@@ -522,8 +594,8 @@ export const AGENT_TOOLS: readonly AgentToolSpec[] = [
           description: 'open: a file in the editor at a line; present: result files as buttons.',
         },
         path: { type: 'string', description: 'Path.' },
-        line: { type: 'number', description: 'open: line, 1-based.' },
-        column: { type: 'number', description: 'open: column, 1-based.' },
+        line: { type: 'number', description: `open, present: line. ${LINE_NUMBERING}` },
+        column: { type: 'number', description: `open, present: column. ${LINE_NUMBERING}` },
         paths: {
           type: 'array',
           items: { type: 'string' },

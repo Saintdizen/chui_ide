@@ -143,6 +143,48 @@ describe('findFiles', () => {
     expect(await ws.findFiles()).toEqual(['a.ts', 'b.ts', 'c.ts']);
     expect(await ws.findFiles(undefined, 2)).toEqual(['a.ts', 'b.ts']);
   });
+
+  /**
+   * Обход ОБЯЗАН обрываться на `limit`, и проверяется именно это, а не форма
+   * ответа: сортировка делает ответ одинаковым при любом способе обхода, поэтому
+   * тест на одни лишь пути мутацию не ловит (проверено откатом).
+   *
+   * Считаем `isIgnored` по файлам и каталогам: обход зовёт его на каждой записи,
+   * так что без раннего выхода их будет пропорционально всему дереву.
+   *
+   * Заодно страхуем форму ответа: `limit` отдаёт начало того же
+   * отсортированного списка, а не случайную горстку.
+   */
+  it('на limit обрывает обход, а не собирает проект', async () => {
+    const dir = await makeDir();
+    for (let i = 0; i < 30; i += 1) await write(dir, `dir${i}/f.ts`, 'x');
+
+    const ws = service();
+    await ws.open(dir);
+    const full = await ws.findFiles();
+    expect(full.length).toBe(30);
+    expect(full).toEqual([...full].sort());
+
+    // Сколько записей успел просмотреть обход. Считаем до вызова: у самого сервиса
+    // другого счётчика нет, а время плавает.
+    const seen = { count: 0 };
+    const proto = Object.getPrototypeOf(ws) as { isIgnored: (full: string, dir: boolean) => boolean };
+    const original = proto.isIgnored;
+    proto.isIgnored = function patched(this: unknown, full: string, isDir: boolean): boolean {
+      seen.count += 1;
+      return original.call(this, full, isDir);
+    };
+    try {
+      const cut = await ws.findFiles(undefined, 5);
+      expect(cut.length).toBe(5);
+      expect(cut).toEqual(full.slice(0, 5));
+    } finally {
+      proto.isIgnored = original;
+    }
+
+    // 30 каталогов + 31 файл = 61 запись. С обрывом смотрим единицы.
+    expect(seen.count).toBeLessThan(20);
+  });
 });
 
 describe('replace', () => {

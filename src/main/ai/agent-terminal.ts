@@ -109,36 +109,36 @@ export function sandboxRefusesTerminal(ctx: ToolContext): ToolOutcome | null {
     summary: 'В песочнице терминальная сессия не поддерживается',
     detail:
       `Песочница включена (${ctx.sandbox.label}), а терминальная сессия — процесс на хосте. ` +
-      'Запускай команды через terminal (action run; долгие — с background: true): они идут в контейнер.',
+      'Запускай команды через terminal (долгие — с background: true): они идут в контейнер.',
   };
 }
 
-/** Действия терминала одним инструментом: разбор аргументов — в прежних функциях. */
-export async function terminalAction(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
-  const action = requireString(args, 'action').trim();
-  switch (action) {
-    case 'list':
-      return terminalList(ctx);
-    case 'start':
-      return await terminalStart(ctx, args);
-    case 'read':
-      return missingForAction(args, ['id']) ?? terminalRead(ctx, args);
-    case 'write':
-      return missingForAction(args, ['id', 'data']) ?? (await terminalWrite(ctx, args));
-    case 'stop':
-      return missingForAction(args, ['id']) ?? terminalStop(ctx, args);
-    case 'run':
+/**
+ * Действия терминала — каждое отдельным инструментом, без аргумента `action`.
+ *
+ * Слияние восьми действий в одно стоило модели на каждом шаге: схема весила 370 токенов
+ * и называла поля, к делу не относящиеся (`data` при `run`, `command` при `read`).
+ * Сессия (живой pty, в который человек смотрит) и команда (одноразовый прогон с выводом)
+ * теперь разведены по именам, как того и ждёт модель.
+ */
+export async function terminalAction(ctx: ToolContext, name: string, args: Record<string, unknown>) {
+  switch (name) {
+    case 'terminal':
       return missingForAction(args, ['command']) ?? (await terminalRun(ctx, args));
-    case 'output':
+    case 'terminalOpen':
+      return await terminalStart(ctx, args);
+    case 'terminalOutput':
       return terminalOutput(ctx, args);
-    case 'cancel':
-      return missingForAction(args, ['id']) ?? terminalCancel(ctx, args);
+    case 'terminalWrite':
+      return missingForAction(args, ['id', 'data']) ?? (await terminalWrite(ctx, args));
+    case 'terminalStop': {
+      const id = requireString(args, 'id').trim();
+      // Имя одно, а цели две: сессию убиваем, у фоновой команды снимаем Ctrl-C.
+      const session = ctx.terminals?.list().some((item) => item.id === id) ?? false;
+      return session ? terminalStop(ctx, args) : terminalCancel(ctx, args);
+    }
     default:
-      return {
-        ok: false,
-        summary: `Неизвестное действие терминала: ${action}`,
-        detail: 'Допустимые: list, start, read, write, stop, run, output, cancel.',
-      };
+      return terminalList(ctx);
   }
 }
 
@@ -149,7 +149,7 @@ export function terminalList(ctx: ToolContext): ToolOutcome {
     return {
       ok: true,
       summary: 'открытых терминалов нет',
-      detail: 'Список пуст. Открой сессию через terminal (action start).',
+      detail: 'Список пуст. Открой сессию через terminalOpen.',
     };
   }
   const lines = sessions.map((session) => `${session.id} · ${session.shell} · ${session.cwd} (pid ${session.pid})`);

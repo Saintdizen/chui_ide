@@ -686,7 +686,7 @@ module.exports = [
       const text = fileText(file?.relative ?? '');
       // Оригинал делаем отличимым: без последней строки, как было до правки.
       const lines = text.split('\n');
-      const original = lines.slice(0, Math.max(1, lines.length - 2)).join('\n') + '\n';
+      const original = `${lines.slice(0, Math.max(1, lines.length - 2)).join('\n')}\n`;
       // Один блок изменений — чтобы в проверке была видна кнопка индексирования.
       const hunks = [{ oldStart: 1, oldCount: 1, newStart: 1, newCount: 1 }];
       return { original, modified: text, hunks };

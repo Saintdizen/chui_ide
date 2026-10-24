@@ -3,8 +3,8 @@ import { runTool, type SandboxRunner, type TerminalAgent, type ToolContext } fro
 import type { WorkspaceService } from '../src/main/workspace/workspace';
 
 /**
- * Запуск команд ассистентом — три пути в одну дверь: `terminal` с `action: run`
- * (и он же с `background: true`), с `action: start` и с `action: write`. Проверяем
+ * Запуск команд ассистентом — три пути в одну дверь: `terminal` (он же с
+ * `background: true`), `terminalOpen` и `terminalWrite`. Проверяем
  * то, что у них общее и что раньше расходилось: где именно выполняется команда (проект, подпапка или
  * песочница) и каким словом отказывают — отказ обязан быть один, иначе модель
  * считает отказы разными и пробует снова.
@@ -57,7 +57,7 @@ describe('где выполняется команда', () => {
   it('по умолчанию — корень проекта', async () => {
     const box = sandbox();
     const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
-    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: 'npm test' }));
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ command: 'npm test' }));
 
     expect(outcome.ok).toBe(true);
     expect(box.calls).toEqual([{ command: 'npm test', cwd: ROOT }]);
@@ -68,11 +68,7 @@ describe('где выполняется команда', () => {
     // подпапка выражается `cd` внутри уже смонтированного проекта.
     const box = sandbox();
     const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
-    await runTool(
-      ctx,
-      'terminal',
-      JSON.stringify({ action: 'run', command: 'npm test', cwd: `${ROOT}/packages/core` }),
-    );
+    await runTool(ctx, 'terminal', JSON.stringify({ command: 'npm test', cwd: `${ROOT}/packages/core` }));
 
     expect(box.calls).toEqual([{ command: "cd 'packages/core' && npm test", cwd: ROOT }]);
   });
@@ -83,7 +79,7 @@ describe('где выполняется команда', () => {
     // должны показывать саму команду.
     const box = sandbox();
     const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
-    await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: `cd ${ROOT}/packages/core && npm test` }));
+    await runTool(ctx, 'terminal', JSON.stringify({ command: `cd ${ROOT}/packages/core && npm test` }));
 
     expect(box.calls).toEqual([{ command: "cd 'packages/core' && npm test", cwd: ROOT }]);
   });
@@ -91,7 +87,7 @@ describe('где выполняется команда', () => {
   it('cd вне проекта остаётся в команде', async () => {
     const box = sandbox();
     const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
-    await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: 'cd /tmp && npm test' }));
+    await runTool(ctx, 'terminal', JSON.stringify({ command: 'cd /tmp && npm test' }));
 
     expect(box.calls).toEqual([{ command: 'cd /tmp && npm test', cwd: ROOT }]);
   });
@@ -99,7 +95,7 @@ describe('где выполняется команда', () => {
   it('cwd за пределами проекта — отказ, команда не выполняется', async () => {
     const box = sandbox();
     const ctx = { workspace: workspace(), sandbox: box, confirmCommand: async () => true } as ToolContext;
-    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: 'ls', cwd: '/etc' }));
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ command: 'ls', cwd: '/etc' }));
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('/etc');
@@ -111,7 +107,7 @@ describe('где выполняется команда', () => {
     const outcome = await runTool(
       ctx,
       'terminal',
-      JSON.stringify({ action: 'run', command: 'npm test', cwd: `${ROOT}/a.ts`, background: true }),
+      JSON.stringify({ command: 'npm test', cwd: `${ROOT}/a.ts`, background: true }),
     );
 
     expect(outcome.ok).toBe(false);
@@ -149,7 +145,7 @@ describe('песочница', () => {
     const term = terminals();
     const box = sandbox();
     const ctx = { workspace: workspace(), terminals: term, sandbox: box } as ToolContext;
-    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'start', command: 'npm test' }));
+    const outcome = await runTool(ctx, 'terminalOpen', JSON.stringify({ command: 'npm test' }));
 
     expect(outcome.ok).toBe(false);
     expect(outcome.detail).toContain('контейнер обрезка');
@@ -160,7 +156,7 @@ describe('песочница', () => {
     const term = terminals();
     const box = sandbox();
     const ctx = { workspace: workspace(), terminals: term, sandbox: box } as ToolContext;
-    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'write', id: 't1', data: 'rm -rf /' }));
+    const outcome = await runTool(ctx, 'terminalWrite', JSON.stringify({ id: 't1', data: 'rm -rf /' }));
 
     expect(outcome.ok).toBe(false);
     expect(outcome.summary).toContain('песочниц');
@@ -175,9 +171,9 @@ describe('отказ — одним словом', () => {
     const term = terminals();
     const base = { workspace: workspace(), terminals: term, confirmCommand: deny } as ToolContext;
 
-    const viaRun = await runTool(base, 'terminal', JSON.stringify({ action: 'run', command: 'npm test' }));
-    const viaSession = await runTool(base, 'terminal', JSON.stringify({ action: 'start', command: 'npm test' }));
-    const viaTyping = await runTool(base, 'terminal', JSON.stringify({ action: 'write', id: 't1', data: 'npm test' }));
+    const viaRun = await runTool(base, 'terminal', JSON.stringify({ command: 'npm test' }));
+    const viaSession = await runTool(base, 'terminalOpen', JSON.stringify({ command: 'npm test' }));
+    const viaTyping = await runTool(base, 'terminalWrite', JSON.stringify({ id: 't1', data: 'npm test' }));
 
     expect(viaRun.summary).toBe(viaSession.summary);
     expect(viaSession.summary).toBe(viaTyping.summary);
@@ -189,11 +185,11 @@ describe('отказ — одним словом', () => {
   it('без моста подтверждений — один и тот же отказ', async () => {
     const base = { workspace: workspace() } as ToolContext;
     const withJobs = { workspace: workspace(), jobs: {} } as unknown as ToolContext;
-    const viaRun = await runTool(base, 'terminal', JSON.stringify({ action: 'run', command: 'npm test' }));
+    const viaRun = await runTool(base, 'terminal', JSON.stringify({ command: 'npm test' }));
     const viaBackground = await runTool(
       withJobs,
       'terminal',
-      JSON.stringify({ action: 'run', command: 'npm test', background: true }),
+      JSON.stringify({ command: 'npm test', background: true }),
     );
 
     expect(viaRun.ok).toBe(false);
@@ -215,7 +211,7 @@ describe('отказ — одним словом', () => {
       },
     } as unknown as ToolContext;
 
-    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run', command: 'npm test' }));
+    const outcome = await runTool(ctx, 'terminal', JSON.stringify({ command: 'npm test' }));
 
     expect(outcome.ok).toBe(true);
     expect(asked).toBe(0);
@@ -224,7 +220,7 @@ describe('отказ — одним словом', () => {
   it('в непесочной папке папка запуска берётся из cwd', async () => {
     const term = terminals();
     const ctx = { workspace: workspace(), terminals: term, confirmCommand: async () => true } as ToolContext;
-    await runTool(ctx, 'terminal', JSON.stringify({ action: 'start', cwd: `${ROOT}/packages/core` }));
+    await runTool(ctx, 'terminalOpen', JSON.stringify({ cwd: `${ROOT}/packages/core` }));
 
     expect(term.created).toEqual([`${ROOT}/packages/core`]);
   });

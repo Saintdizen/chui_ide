@@ -608,7 +608,7 @@ export function condenseCallArguments(args: string, minChars: number): string {
     const record = value as Record<string, unknown>;
     for (const [key, inner] of Object.entries(record)) {
       if (typeof inner === 'string' && CONDENSE_FIELDS.has(key) && inner.length >= minChars) {
-        record[key] = `[применено: ${inner.split('\n').length} стр. — текст в файле, не копировать]`;
+        record[key] = `[свёрнуто: ${inner.split('\n').length} стр. — текст в файле, не копировать]`;
         changed = true;
       } else {
         record[key] = walk(inner);
@@ -627,8 +627,14 @@ export function condenseCallArguments(args: string, minChars: number): string {
  * попадает. Но если попадёт — файл получит эту строку вместо текста, а
  * инструмент отчитается «создан». Молчаливая порча хуже отказа, поэтому
  * `runTool` узнаёт пометку и не исполняет такой вызов.
+ *
+ * Слово — «свёрнуто», не «применено»: отчёт об удачной правке у `edit` —
+ * `применено правок — 1` (`agent-edit.ts`), и одинаковое слово в двух разных
+ * смыслах уже читалось как «правка легла в файл» там, где в файл положили
+ * пометку. Старая форма осталась в регулярке: беседы, сжатые до переименования,
+ * в истории ещё несут её, и `isCondenseMarker` обязан их узнавать.
  */
-const CONDENSE_MARKER = /^\[применено: \d+ стр\. — текст в файле(, не копировать)?\]$/;
+const CONDENSE_MARKER = /^\[(?:применено|свёрнуто): \d+ стр\. — текст в файле(, не копировать)?\]$/;
 
 /** Аргумент — ровно пометка сжатия, а не текст, который модель написала сама. */
 export function isCondenseMarker(value: unknown): boolean {

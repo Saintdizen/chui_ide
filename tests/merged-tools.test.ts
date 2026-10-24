@@ -19,8 +19,9 @@ describe('слитые инструменты: схема', () => {
       return property.enum ?? [];
     };
     expect(actions('browser')).toEqual(['open', 'snapshot', 'click', 'type', 'evaluate', 'zoom', 'close']);
-    expect(actions('terminal')).toEqual(['list', 'start', 'read', 'write', 'stop', 'run', 'output', 'cancel']);
     expect(actions('lsp')).toEqual(['references', 'definition', 'outline', 'rename']);
+    // Терминала здесь нет: его восемь действий — восемь имён. Это сторожит
+    // соседний тест — чтобы слитое имя не вернулось тихо.
     // Старых имён в наборе больше нет: иначе схема и обработчик разъехались бы.
     const gone = ['browser_open', 'terminal_start', 'git_status', 'run_terminal', 'apply_patch', 'file_outline'];
     for (const old of gone) {
@@ -28,8 +29,16 @@ describe('слитые инструменты: схема', () => {
     }
   });
 
+  it('у `terminal` нет `action`: он разведён по именам', () => {
+    expect(spec('terminal').inputSchema.properties.action).toBeUndefined();
+    expect(spec('terminal').inputSchema.required).toEqual(['command']);
+    for (const name of ['terminalOpen', 'terminalOutput', 'terminalWrite', 'terminalStop', 'terminalList']) {
+      expect(spec(name).inputSchema.properties.action).toBeUndefined();
+    }
+  });
+
   it('обязателен только action: остальные поля зависят от действия', () => {
-    for (const name of ['browser', 'terminal', 'lsp']) {
+    for (const name of ['browser', 'lsp']) {
       expect(spec(name).inputSchema.required).toEqual(['action']);
     }
   });
@@ -38,25 +47,26 @@ describe('слитые инструменты: схема', () => {
 describe('слитые инструменты: разбор', () => {
   const ctx = { workspace: {} } as unknown as ToolContext;
 
-  it('незнакомое действие называет допустимые', async () => {
+  it('незнакомое имя называет доступные', async () => {
+    // Имена терминала теперь самостоятельные: слитое `terminal` с `action` больше
+    // не принимается, и модель должна узнать это из ответа, а не гадать.
     const outcome = await runTool(ctx, 'terminal', JSON.stringify({ action: 'взмахнуть' }));
     expect(outcome.ok).toBe(false);
-    expect(outcome.summary).toContain('взмахнуть');
-    expect(outcome.detail).toContain('list, start, read, write, stop');
+    expect(outcome.detail).toContain('command');
   });
 
-  it('terminal: команда и задание живут под общими действиями', async () => {
-    // `run` без команды и `cancel` без номера отказывают до обработчика — там
+  it('terminal: команда и задание — разные имена', async () => {
+    // Команда без `command` и остановка без `id` отказывают до обработчика — там
     // контекста нет, и «не задан аргумент» из глубины читалось бы как поломка.
-    const run = await runTool(ctx, 'terminal', JSON.stringify({ action: 'run' }));
+    const run = await runTool(ctx, 'terminal', JSON.stringify({}));
     expect(run.summary).toContain('command');
-    const cancel = await runTool(ctx, 'terminal', JSON.stringify({ action: 'cancel' }));
-    expect(cancel.summary).toContain('id');
-    // `output` без id — список заданий, а не ошибка: реестр заданий есть всегда.
+    const stop = await runTool(ctx, 'terminalStop', JSON.stringify({}));
+    expect(stop.summary).toContain('id');
+    // Вывод без id — список заданий, а не ошибка: реестр заданий есть всегда.
     const jobs = await runTool(
       { ...ctx, jobs: { list: () => [], get: () => undefined } } as ToolContext,
-      'terminal',
-      JSON.stringify({ action: 'output' }),
+      'terminalOutput',
+      JSON.stringify({}),
     );
     expect(jobs.ok).toBe(true);
     expect(jobs.summary).toContain('заданий');

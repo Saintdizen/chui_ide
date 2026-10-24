@@ -391,7 +391,7 @@ describe('condenseCallArguments', () => {
     };
     expect(parsed.edits[0]?.path).toBe('src/a.ts');
     expect(parsed.edits[0]?.expectedVersion).toBe(3);
-    expect(parsed.edits[0]?.edits[0]?.newText).toContain('применено');
+    expect(parsed.edits[0]?.edits[0]?.newText).toContain('свёрнуто');
     expect(condensed.length).toBeLessThan(args.length);
   });
 
@@ -440,7 +440,7 @@ describe('condenseAppliedCalls', () => {
     const condensed = condenseAppliedCalls(message, new Set(['done']), 200);
     const done = condensed.toolCalls?.[0]?.arguments ?? '';
     const later = condensed.toolCalls?.[1]?.arguments ?? '';
-    expect(done).toContain('применено');
+    expect(done).toContain('свёрнуто');
     expect(done).not.toContain('строка кода');
     // Второй вызов не применился — его аргументы остаются как были.
     expect(later).toBe(message.toolCalls?.[1]?.arguments);

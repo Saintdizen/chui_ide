@@ -125,6 +125,11 @@ export interface ChatDeps {
    * и не быть — агент его только что создал, — и показывать тогда нечего.
    */
   openFile?: (path: string) => Promise<void>;
+  /**
+   * Встать на место в открытом файле. Тот же приём, что у перехода по ссылке в
+   * документе: открытие — дело `openFile`, место — `editors.reveal`.
+   */
+  revealAt?: (path: string, position?: { line?: number; column?: number }) => void;
   commands: CommandRegistry;
   /** Рабочая папка: её корень — ключ, по которому main находит историю бесед. */
   workspace: WorkspaceModel;
@@ -298,7 +303,13 @@ export function createChatPanel(deps: ChatDeps): ChatView {
    */
   const revealFile = async (path: string, line = 1, column = 1): Promise<void> => {
     await deps.openFile?.(path);
-    deps.editors.reveal(path, line, column);
+    deps.revealAt?.(path, { line, column });
+  };
+
+  /** Кнопка файла-результата в ленте: та же пара, но место — только если агент его назвал. */
+  const openPresented = async (path: string, position?: { line?: number; column?: number }): Promise<void> => {
+    await deps.openFile?.(path);
+    deps.revealAt?.(path, position);
   };
 
   // Панель изменений и план агента — отдельные модули: они только рисуют по
@@ -658,6 +669,10 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       const restored = history.activeUid ? sessions.find((item) => item.uid === history.activeUid) : undefined;
       activeId = (restored ?? sessions[0]!).id;
       syncActiveView();
+      // Старт всегда открывает беседу с конца — там последний ответ. Один
+      // `scrollTop` тут не годится: лента только что вошла в документ, и картинки
+      // с карточками файлов ещё не получили высоту (см. `scrollToEndSoon`).
+      scrollToEndSoon(restored ?? sessions[0]!);
     },
     // Корень сменился после старта: список путей для `@` собираем заново, а
     // команды проекта — уже другие файлы.
@@ -1344,6 +1359,25 @@ export function createChatPanel(deps: ChatDeps): ChatView {
 
   /* ── рендер сообщений ──────────────────────────────────────────────────── */
 
+  /**
+   * Лента в конце — когда браузер уже знает её итоговую высоту.
+   *
+   * `scrollTop = scrollHeight` в тот же кадр, когда разметка только вставлена,
+   * работает только если всё содержимое уже сверстано. При восстановлении беседы
+   * это не так: картинки и карточки файлов получают высоту позже, и лента
+   * остаётся прокрученной на старое, меньшее значение — «при старте чат не в конце».
+   * Ждём двух кадров: первый отдаёт разметку планировщику, второй — уже
+   * с измеренной высотой.
+   */
+  function scrollToEndSoon(session: ChatSession = active()): void {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        autoScroll = true;
+        scrollToEnd(session, true);
+      });
+    });
+  }
+
   function scrollToEnd(session: ChatSession = active(), force = false): void {
     // Фоновая беседа может генерировать, но прокручивать чужую ленту нельзя:
     // полоса прокрутки у панели одна, и она принадлежит активной вкладке.
@@ -1918,9 +1952,7 @@ export function createChatPanel(deps: ChatDeps): ChatView {
       ),
     continueAnswer: () => void send('Продолжи ответ с того места, где остановился.'),
     // Файлы-результаты (present) открываются тем же путём, что клик по файлу в дереве.
-    openFile: async (path) => {
-      await revealFile(path);
-    },
+    openFile: (path, position) => openPresented(path, position),
     openRunLog: (session) => {
       runInspector.open(session.run ?? null, session.title ? `беседа: ${session.title}` : undefined);
     },

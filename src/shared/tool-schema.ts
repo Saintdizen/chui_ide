@@ -46,6 +46,25 @@ export function missingArguments(schema: JsonSchema, args: Record<string, unknow
       });
     }
   }
+  // Условная часть схемы (`if/then`): набор обязательных полей зависит от действия —
+  // у `terminal` `id` нужен для `read`, но не для `clear`. Без этого шага `switch`
+  // ниже отвечал формой не того действия, и модель угадывала заново.
+  for (const branch of schema.allOf ?? []) {
+    const condition = branch.if?.properties;
+    if (!condition) continue;
+    const matched = Object.entries(condition).every(([key, expected]) => {
+      const actual = args[key];
+      if (expected.enum) return typeof actual === 'string' && expected.enum.includes(actual);
+      if (expected.const !== undefined) return actual === expected.const;
+      // Условие без перечня — «поле задано»: промах по значению ловит `wrongArguments`.
+      return actual !== undefined && actual !== null;
+    });
+    if (!matched) continue;
+    for (const requiredField of branch.then?.required ?? []) {
+      const actual = args[requiredField];
+      if (actual === undefined || actual === null) missing.push(`${prefix}${requiredField}`);
+    }
+  }
   return missing;
 }
 

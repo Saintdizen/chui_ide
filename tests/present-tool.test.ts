@@ -82,6 +82,30 @@ describe('present', () => {
     expect(outcome.presented).toEqual([{ path: '/p/один.txt' }]);
   });
 
+  it('место из line/column достаётся первому файлу', async () => {
+    const outcome = await runTool(
+      context(exists),
+      'present',
+      JSON.stringify({ paths: ['/p/главное.md', '/p/ещё.md'], line: 12, column: 5 }),
+    );
+
+    // Якорь у present один: второй файл открывается целиком, без чужих строк.
+    expect(outcome.presented).toEqual([{ path: '/p/главное.md', line: 12, column: 5 }, { path: '/p/ещё.md' }]);
+  });
+
+  it('одна строка без column — тоже место', async () => {
+    const outcome = await runTool(context(exists), 'present', JSON.stringify({ paths: ['/p/a.txt'], line: 7 }));
+    expect(outcome.presented).toEqual([{ path: '/p/a.txt', line: 7 }]);
+  });
+
+  it('мусор вместо места — никакого места, но файл всё равно показан', async () => {
+    // Ноль, дробь и строка — не строки в файле: с ними кнопка встанет наугад.
+    for (const place of [{ line: 0 }, { line: 2.5 }, { line: '12' }, { column: 4 }]) {
+      const outcome = await runTool(context(exists), 'present', JSON.stringify({ paths: ['/p/a.txt'], ...place }));
+      expect(outcome.presented).toEqual([{ path: '/p/a.txt' }]);
+    }
+  });
+
   it('потолок не даёт превратить ответ в список проекта', async () => {
     const many = Array.from({ length: 12 }, (_, index) => `/p/f${index}.txt`);
     const outcome = await runTool(context(exists), 'present', JSON.stringify({ paths: many }));

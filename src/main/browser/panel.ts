@@ -115,7 +115,7 @@ function pushConsole(entry: Entry | undefined, args: readonly unknown[]): void {
   }
   if (!message) return;
   const name = typeof level === 'string' ? level : level === 3 ? 'error' : level === 2 ? 'warning' : 'log';
-  entry.console.push('[' + name + '] ' + message);
+  entry.console.push(`[${name}] ${message}`);
   if (entry.console.length > CONSOLE_LIMIT) entry.console.splice(0, entry.console.length - CONSOLE_LIMIT);
 }
 

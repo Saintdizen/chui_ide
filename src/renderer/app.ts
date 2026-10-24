@@ -1466,7 +1466,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     host,
     // Открытие файла — тем же путём, что у дерева и быстрого открытия: клик по
     // файлу в ленте чата открывает вкладку, а не только ставит курсор.
-    openFile: (path) => openPath(path),
+    // Строки — те же, что у `show open`: файл-результат `present` открывается на
+    // месте, если модель его назвала, а иначе — целиком (см. `OpenFileHandler`).
+    openFile: async (path: string, position?: { line?: number; column?: number }) => {
+      await openPath(path);
+      revealAt(path, position);
+    },
   });
   layout.rightBody.appendChild(chat.element);
   // Чат готов — браузер теперь может слать ему снимок страницы и её консоль.
@@ -1860,6 +1865,12 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
       }
     }
     return null;
+  };
+
+  /** Встать на место в открытом файле: без позиции вкладка просто открывается целиком. */
+  const revealAt = (path: string, position?: { line?: number; column?: number }): void => {
+    if (position?.line === undefined) return;
+    editors.reveal(path, position.line, position.column ?? 1);
   };
 
   const openDocumentLink = async (target: string, fromPath: string): Promise<void> => {

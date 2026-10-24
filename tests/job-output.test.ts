@@ -38,11 +38,7 @@ function fixture() {
       status = failed ? 'failed' : 'completed';
     },
     read: (from?: number) =>
-      runTool(
-        ctx,
-        'terminal',
-        JSON.stringify({ action: 'output', id: 'job-1', ...(from === undefined ? {} : { from }) }),
-      ),
+      runTool(ctx, 'terminalOutput', JSON.stringify({ id: 'job-1', ...(from === undefined ? {} : { from }) })),
     dir,
   };
 }

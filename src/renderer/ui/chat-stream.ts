@@ -84,8 +84,11 @@ export interface StreamHost {
   continueAnswer(): void;
   /** Пост-обработка конца потока: вкладки, инфо о сессии, сохранение. */
   afterStream(session: ChatSession): void;
-  /** Открыть файл-результат агента (show с action present) — как клик по файлу. */
-  openFile(path: string): Promise<void>;
+  /**
+   * Открыть файл-результат агента (show с action present) — как клик по файлу.
+   * Место необязательно: `present` его присылает, только если модель назвала строку.
+   */
+  openFile(path: string, position?: { line?: number; column?: number }): Promise<void>;
   /** Открыть окно «Прогон» с трассой последнего прогона этой беседы. */
   openRunLog(session: ChatSession): void;
   /** Текущий режим (вопрос / агент / план) — уходит провайдеру. */
@@ -170,7 +173,7 @@ export function createStreamRunner(host: StreamHost): StreamRunner {
       messageEl,
       activity.element,
       () => host.scrollToEnd(session),
-      (path) => host.openFile(path),
+      (path, position) => host.openFile(path, position),
     );
     /** Размышления текущего шага: строка живёт в той же ленте, что и вызовы. */
     let reasoningView: ReasoningRowView | null = null;

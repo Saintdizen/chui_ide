@@ -73,9 +73,9 @@ export const TOOL_GROUPS: readonly ToolGroupSpec[] = [
   {
     id: 'shell',
     label: 'Терминал',
-    // Команда, задание в фоне и живая сессия — действия одного инструмента:
-    // run, output, cancel, list, start, read, write, stop.
-    names: ['terminal'],
+    // Семья одна, но имена разные: команда, живая сессия, чтение вывода,
+    // ввод, остановка, список. Схемы — тонкие, а `action` из них убран.
+    names: ['terminal', 'terminalOpen', 'terminalOutput', 'terminalWrite', 'terminalStop', 'terminalList'],
   },
   {
     id: 'web',
@@ -195,7 +195,14 @@ export const ROSTER_TOOLS: readonly string[] = [
   // реальных токена; разовый промах префикса при промпте 82 тыс. стоит ~74 тыс.
   // токенов, то есть дороже строки в тридцать тысяч раз. Отсюда правило: в
   // постоянной части пусть будет на 200 токенов больше — лишь бы она не менялась.
+  // Терминал: шесть имён в ростере, зато ни одного `action` — схема
+  // самой частой команды (`terminal`) больше не тащит поля чужих действий.
   'terminal',
+  'terminalOpen',
+  'terminalOutput',
+  'terminalWrite',
+  'terminalStop',
+  'terminalList',
   'mcp',
   'list',
   'run_tests',
@@ -238,9 +245,9 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     // выполняется сразу. Схема при этом в набор не вернётся: `widen` касается того,
     // чего в этом списке нет.
     //
-    // `terminal` и `mcp` тоже едут строкой — с п.45 здесь нет ни одного
+    // `terminal` и `mcp` тоже едут строкой — здесь нет ни одного
     // инструмента, который докачивался бы схемой.
-    except: [...WIDENED_TOOLS, ...ROSTER_TOOLS],
+    except: ROSTER_TOOLS,
   },
   {
     id: 'full',
@@ -252,7 +259,7 @@ export const TOOL_PRESETS: readonly ToolPresetSpec[] = [
     // расширения набора (поэтому `widen` в этом наборе нет).
     hint: `Всё, что может эта сборка; редкое и простое — по имени (≈${fullSetTokens()} токенов схем в каждом запросе)`,
     groups: null,
-    except: [...WIDENED_TOOLS, ...ROSTER_TOOLS],
+    except: ROSTER_TOOLS,
   },
   {
     id: 'edit',
@@ -344,7 +351,8 @@ export function rosterNames(preset: ToolPresetId): readonly string[] {
     for (const name of group.names) {
       // `WIDENED_TOOLS` узких наборов тоже едут строкой: их `action` стоят дороже
       // собственного имени, а расширять набор там нечем (`widen` только у «Авто»).
-      if (ROSTER_TOOLS.includes(name) || WIDENED_TOOLS.includes(name)) names.add(name);
+      if (!ROSTER_TOOLS.includes(name) && !WIDENED_TOOLS.includes(name)) continue;
+      names.add(name);
     }
   }
   for (const name of spec.deny ?? []) names.delete(name);
@@ -360,11 +368,11 @@ export function toolPresetAllows(preset: ToolPresetId, name: string): boolean {
 /**
  * Необязательные поля, которые нужны в строке ростера, хотя схема их обязательными не считает.
  *
- * `terminal(action: …)` без `command` бесполезен: имя действия есть, а чем его
+ * `terminal` без `command` бесполезен: имя есть, а чем его
  * выполнять — нет. Такие поля печатаем с `?`, чтобы было видно: необязательны.
  */
 const ROSTER_EXTRA: Record<string, readonly string[]> = {
-  terminal: ['command', 'cwd', 'id'],
+  terminal: ['command', 'cwd'],
   mcp: ['server', 'uri'],
   list: ['path', 'glob', 'limit'],
   run_tests: ['target'],
@@ -425,10 +433,10 @@ export function toolPresetNote(preset: ToolPresetId): string {
   // упрётся в «нет такого инструмента» и пойдёт обходным путём там, где
   // достаточно назвать нужное.
   if (spec.widen) {
-    // `terminal`, `mcp` в ростер не названы нарочно: у них много
-    // `action` (у `terminal` — восемь), и перечень `action: a|b|c…` стоил 135
-    // токенов на каждом шаге прогона — больше, чем одна докачка схемы. Модели
-    // достаточно знать, что спрятанное зовётся по имени и форма видна из схемы.
+    // `terminal`, `mcp` в ростер не названы нарочно: у них много полей,
+    // и перечень полей в строке ростера стоил бы токенов на каждом шаге — больше,
+    // чем одна докачка схемы. Модели достаточно знать, что спрятанное зовётся
+    // по имени и форма видна из схемы.
     const roster = rosterLine(rosterLineNames(preset));
     return (
       `Набор инструментов: «${spec.label}» (${labels}). Чего нет в списке — зови по имени: ` +

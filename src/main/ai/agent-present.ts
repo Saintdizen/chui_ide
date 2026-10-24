@@ -17,6 +17,14 @@ import type { ToolContext, ToolOutcome } from './tool-context';
 /** Сколько файлов объявляем за раз: это «вот результат», а не список всего проекта. */
 export const MAX_PRESENTED_FILES = 8;
 
+/**
+ * Место из аргументов — только положительное целое. Ноль, дробь и строка —
+ * не место, а мусор: с ними кнопка встанет не туда, а модель ещё и не узнает.
+ */
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
 export async function presentFiles(ctx: ToolContext, args: Record<string, unknown>): Promise<ToolOutcome> {
   const raw = Array.isArray(args.paths) ? args.paths : typeof args.path === 'string' ? [args.path] : [];
   const paths = raw.filter((item): item is string => typeof item === 'string' && item.trim() !== '');
@@ -29,6 +37,9 @@ export async function presentFiles(ctx: ToolContext, args: Record<string, unknow
   }
 
   const note = (optionalString(args, 'note') ?? '').trim();
+  // Место — у первого файла: у `present` один результат-якорь, его и открываем на месте.
+  const line = positiveInteger(args.line);
+  const column = positiveInteger(args.column);
   const presented: ToolPresentedFile[] = [];
   const missing: string[] = [];
 
@@ -39,7 +50,14 @@ export async function presentFiles(ctx: ToolContext, args: Record<string, unknow
         missing.push(`${item} (это папка, а не файл)`);
         continue;
       }
-      presented.push({ path: stat.path, ...(note ? { note } : {}) });
+      const place = presented.length === 0 ? { line, column } : {};
+      presented.push({
+        path: stat.path,
+        ...(note ? { note } : {}),
+        // Пошли вместе: колонка без строки — это уже не место, а догадка.
+        ...(place.line === undefined ? {} : { line: place.line }),
+        ...(place.line === undefined || place.column === undefined ? {} : { column: place.column }),
+      });
     } catch {
       // Файла нет или путь вне проекта: говорим прямо, а не показываем кнопку-обманку.
       missing.push(item);

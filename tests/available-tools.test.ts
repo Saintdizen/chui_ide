@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canRunTool, canUseWebSearch, type ToolAvailability } from '../src/main/ai/available-tools';
+import { AGENT_TOOLS } from '../src/shared/tools';
 
 /**
  * Условия «предлагать ли инструмент» проверяются напрямую: до переезда в
@@ -33,10 +34,13 @@ describe('что предлагать модели', () => {
     expect(canRunTool(spec('terminal'), { ...empty, terminals: {} as never })).toBe(true);
   });
 
-  it('браузер сам по себе не включается: нужна настройка', () => {
+  it('браузер сам по себе не включается: нужна настройка и окно для подтверждения', () => {
     const browser = { zoom: () => {} };
-    expect(canRunTool(spec('browser'), { ...empty, browser, browserEnabled: false })).toBe(false);
-    expect(canRunTool(spec('browser'), { ...empty, browser, browserEnabled: true })).toBe(true);
+    const host = { confirmBrowser: async () => true } as never;
+    expect(canRunTool(spec('browser'), { ...empty, browser, browserEnabled: false, host })).toBe(false);
+    // Одно окно без настройки — тоже не повод предлагать: настройка выключена.
+    expect(canRunTool(spec('browser'), { ...empty, browser, browserEnabled: true })).toBe(false);
+    expect(canRunTool(spec('browser'), { ...empty, browser, browserEnabled: true, host })).toBe(true);
   });
 
   it('веб-поиск: выключенный поиск не даёт инструмента, даже если есть что искать', () => {
@@ -52,5 +56,43 @@ describe('что предлагать модели', () => {
 
   it('незнакомый инструмент не предлагается: отказ по умолчанию', () => {
     expect(canRunTool(spec('совсем-новый'), empty)).toBe(false);
+  });
+
+  /**
+   * Печать достижимости: каждое объявленное имя обязано включаться хоть при
+   * каком-то окружении. Новый инструмент без условия в `canRunTool` и без
+   * флага `alwaysAvailable` молча выпадает из пробы — здесь это падает, а не
+   * всплывает потом «почему модель его не видит».
+   */
+  it('у каждого объявленного инструмента есть окружение, в котором он предлагается', () => {
+    // Всё, что только можно: и мост к окну, и все сервисы, и обе настройки.
+    const host = {
+      applyPatches: async () => ({}),
+      applyEdits: async () => ({}),
+      confirmCommand: async () => true,
+      confirmBrowser: async () => true,
+      getDiagnostics: async () => [],
+      openFile: async () => {},
+    } as never;
+    const full: ToolAvailability = {
+      ...empty,
+      host,
+      terminals: {} as never,
+      tests: {} as never,
+      linter: {} as never,
+      symbols: {} as never,
+      browser: { zoom: () => {} },
+      browserEnabled: true,
+      webFetchEnabled: true,
+      webSearch: { enabled: true, provider: 'brave' } as ToolAvailability['webSearch'],
+      webSearchKey: 'k',
+    };
+
+    // `mcp` — отдельный случай: в статическом отборе его нет нарочно, схемы
+    // ресурсов добавляет подключение (см. `resourceTools`).
+    const reachable = AGENT_TOOLS.map((tool) => tool.name).filter(
+      (name) => canRunTool(spec(name), full) || name === 'mcp',
+    );
+    expect(reachable).toEqual(AGENT_TOOLS.map((tool) => tool.name));
   });
 });

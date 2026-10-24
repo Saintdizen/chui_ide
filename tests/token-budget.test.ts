@@ -216,10 +216,13 @@ describe('бюджет схем', () => {
       )} + ростер ${String(note).padStart(3)} = ${schemas + ready + note}`;
     });
     console.log(table.join('\n'));
-    // Промпт — текст, а не механика, и от набора не зависит: у него свой потолок.
-    // Схемы с ним сравнивать нельзя — у дешёвых наборов они уже меньше промпта.
+    const auto = presetTokens('auto');
     // Потолок — по «Авто»: он и есть плата за шаг, которую мы держим под присмотром.
-    expect(estimateTextTokens(agentPrompt('auto', { confirm: true }))).toBeLessThan(570);
+    // 585 токенов: до развода `terminal` в «Авто» было 611 схем — один `terminal`
+    // стоил 370 и тянул поля восьми действий; пять имён вместе — 570. Выигрыш не
+    // в сумме схем, а в вызове (нет `action`) и в шаге, который больше не обязан
+    // держать в голове правила чужого действия.
+    expect(auto).toBeLessThan(600);
     for (const preset of TOOL_PRESETS) {
       // Ростер — цена скрытого: строка с именами не может стоить как схемы, которые прячет.
       expect(estimateTextTokens(toolPresetNote(preset.id))).toBeLessThan(290);

@@ -59,17 +59,15 @@ export const TOOL_NO_ROLES: Readonly<Record<string, string>> = {
 /**
  * Перегруженные имена: одно имя — несколько разных дел.
  *
- * `terminal` и `mind` держат по два-три дела в одном `enum`: модель не видит
+ * `terminal` и `mind` держали по два-три дела в одном `enum`: модель не видит
  * границы между ними, если её не назвать. Здесь эта граница объявлена, а тест
  * сверяет её с `enum` схемы — новое действие не может появиться молча.
+ *
+ * Терминала в списке больше нет: его действия — уже имена
+ * (`terminal`, `terminalOpen`, `terminalOutput`, `terminalWrite`, `terminalStop`,
+ * `terminalList`), и границу проводить не в чем.
  */
 export const TOOL_ACTION_ROLES: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
-  terminal: {
-    // Разовая команда: `id` здесь — задача, а не сессия.
-    command: ['run', 'output', 'cancel'],
-    // Живая оболочка: `id` — сессия, `from` — смещение в её выводе.
-    session: ['list', 'start', 'read', 'write', 'stop'],
-  },
   mind: {
     // Память: то, что переживает беседу.
     memory: ['remember', 'forget', 'notes'],

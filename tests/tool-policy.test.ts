@@ -24,10 +24,11 @@ const names = AGENT_TOOLS.map((tool) => tool.name);
 
 describe('повторы живого вывода', () => {
   it('права чтения не превращают опрос процесса в кешированный результат', () => {
-    for (const action of ['list', 'read', 'output']) {
-      const args = JSON.stringify({ action, id: 'job-1' });
-      expect(isReadOnlyCall('terminal', args)).toBe(true);
-      expect(isCacheableReadCall('terminal', args)).toBe(false);
+    for (const name of ['terminalList', 'terminalOutput']) {
+      const args = JSON.stringify({ id: 'job-1' });
+      expect(isReadOnlyCall(name, args)).toBe(true);
+      // Только опрос живого процесса: список меняется сам, его можно кешировать.
+      expect(isCacheableReadCall(name, args)).toBe(name === 'terminalList');
     }
     expect(isCacheableReadCall('read', '{"path":"a.ts"}')).toBe(true);
     expect(isCacheableReadCall('read', '{"path":"a.ts","force":true}')).toBe(false);
@@ -80,27 +81,35 @@ describe('производные наборы', () => {
     }
   });
 
+  it('терминал, меняющий мир, — не в плане', () => {
+    for (const name of ['terminal', 'terminalOpen', 'terminalWrite', 'terminalStop', 'terminalOutput']) {
+      // Всё, что трогает живой процесс, в плане не предлагается: там можно только смотреть.
+      expect(PLAN_MODE_TOOLS.has(name)).toBe(false);
+    }
+    // А список сессий ничего не меняет — ему в плане можно, как `read`.
+    expect(PLAN_MODE_TOOLS.has('terminalList')).toBe(true);
+  });
+
   it('без моста окна не обещает работать', () => {
     // Эти инструменты живут в ленте чата и в документной модели: без окна их
     // не исполнить, и «всегда доступен» про них было бы неправдой.
-    for (const name of ['ask', 'exit_plan_mode', 'edit', 'open_file', 'terminal']) {
+    for (const name of ['ask', 'exit_plan_mode', 'edit', 'open_file', 'terminalOutput']) {
       expect(ALWAYS_AVAILABLE.has(name)).toBe(false);
     }
   });
 });
 
 describe('повтор чтения', () => {
-  it('у слитого терминала чтение — по действию, а не по имени', () => {
-    // Иначе слияние молча отключило бы защиту от зацикливания: `terminal` целиком
-    // мир меняет, а чтение вывода и список — нет.
-    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'read', id: 't1' }))).toBe(true);
-    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'output' }))).toBe(true);
-    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'list' }))).toBe(true);
+  it('у терминала чтение — отдельное имя, а не флаг вызова', () => {
+    // Раньше это решал `action`; после развода имён правило держится именем:
+    // иначе сторож на повторы молча отключился бы вместе со слиянием.
+    expect(isReadOnlyCall('terminalOutput', JSON.stringify({ id: 't1' }))).toBe(true);
+    expect(isReadOnlyCall('terminalList', '{}')).toBe(true);
     // Команда и ввод — новая работа, повтор бывает нужен.
-    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'run', command: 'npm test' }))).toBe(false);
-    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'write', id: 't1', data: 'ls\n' }))).toBe(false);
-    // Незнакомое действие и битые аргументы не считаются чтением: глушить нечего.
-    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'взмахнуть' }))).toBe(false);
+    expect(isReadOnlyCall('terminal', JSON.stringify({ command: 'npm test' }))).toBe(false);
+    expect(isReadOnlyCall('terminalWrite', JSON.stringify({ id: 't1', data: 'ls\n' }))).toBe(false);
+    // Старый вызов со слитым действием — уже не команда: он не выполнится.
+    expect(isReadOnlyCall('terminal', JSON.stringify({ action: 'read', id: 't1' }))).toBe(false);
     expect(isReadOnlyCall('terminal', 'не json')).toBe(false);
     // Обычные инструменты чтения работают как раньше.
     expect(isReadOnlyCall('read', JSON.stringify({ path: '/p/a.ts' }))).toBe(true);
@@ -139,6 +148,7 @@ describe('доступность (canRun)', () => {
     const uncovered = names.filter((name) => {
       if (ALWAYS_AVAILABLE.has(name)) return false;
       if (body.includes(`'${name}'`)) return false;
+      if (name.startsWith('terminal')) return false; // Семья терминала — префиксом
       const cut = name.indexOf('_');
       return cut <= 0 || !body.includes(name.slice(0, cut + 1));
     });

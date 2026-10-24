@@ -88,7 +88,7 @@ export class ProjectMemory {
   private async write(file: string, notes: readonly MemoryNote[], scope: MemoryScope): Promise<void> {
     await fs.mkdir(path.dirname(file), { recursive: true });
     // Через временный файл: падение посреди записи не оставит обрезанную память.
-    const temporary = file + '.tmp';
+    const temporary = `${file}.tmp`;
     const title = scope === 'global' ? 'Память (глобальная, для всех проектов)' : 'Память проекта';
     await fs.writeFile(temporary, serializeMemory(notes, title), 'utf8');
     await fs.rename(temporary, file);

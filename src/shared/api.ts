@@ -1941,6 +1941,12 @@ export interface ToolPresentedFile {
   path: string;
   /** Строка от агента: что это за файл. Не задана — показываем имя. */
   note?: string;
+  /**
+   * Место в файле — если агент его назвал (`line`/`column` у `present`). Без него
+   * кнопка открывает файл целиком: где смотреть, в таком ответе уже видно по `note`.
+   */
+  line?: number;
+  column?: number;
 }
 
 export interface ToolFileChange {

@@ -1,5 +1,5 @@
 import { agentPrompt } from '../src/shared/agent-prompt';
-import { AGENT_TOOLS } from '../src/shared/tools';
+import { AGENT_TOOLS, LINE_NUMBERING } from '../src/shared/tools';
 import { describe, expect, it } from 'vitest';
 import { describeShape, missingArguments, toolSpec, wrongArguments } from '../src/shared/tool-schema';
 
@@ -74,6 +74,20 @@ describe('missingArguments', () => {
   it('не-объект вместо элемента не роняет проверку', () => {
     const spec = toolSpec('edit')!;
     expect(missingArguments(spec.inputSchema, { edits: [{ path: '/a.ts', edits: ['строка'] }] })).toEqual([]);
+  });
+
+  it('у каждого терминального имени свои обязательные поля', () => {
+    // Повод: ответ «нет поля id» приходил формой не того действия — `allOf` описывал
+    // зависимость, но проверка его не читала. После развода имён поля — в самой схеме.
+    const run = toolSpec('terminal')!;
+    expect(missingArguments(run.inputSchema, {})).toEqual(['command']);
+    const write = toolSpec('terminalWrite')!;
+    expect(missingArguments(write.inputSchema, { id: 't1' })).toEqual(['data']);
+    const stop = toolSpec('terminalStop')!;
+    expect(missingArguments(stop.inputSchema, {})).toEqual(['id']);
+    // У чтения и списка обязательных полей нет: пустой список — тоже ответ.
+    expect(missingArguments(toolSpec('terminalOutput')!.inputSchema, {})).toEqual([]);
+    expect(missingArguments(toolSpec('terminalList')!.inputSchema, {})).toEqual([]);
   });
 
   it('подзадача без prompt названа путём внутри tasks', () => {
@@ -183,6 +197,44 @@ describe('описания аргументов', () => {
     // вызова от этого честнее: отказ говорит, какие поля необязательны.
     // Подсказка стоит токенов только в отказе: в задании её нет.
     expect(agentPrompt('auto', { confirm: false })).not.toContain('Форма:');
+  });
+
+  /**
+   * Как считаются строки — тоже постоянная часть запроса, и путаница тут стоила
+   * шага: `show.open.line` шёл в редактор, а `read` печатал свои номера, и модель
+   * верила, что счёт общий. Теперь у каждой схемы, где строки вообще есть, одна
+   * формулировка — `LINE_NUMBERING`; закрытый список ловит новое слово.
+   */
+  it('строки везде считаются с единицы и это сказано одинаково', () => {
+    const CANONICAL_LINE = new Set([
+      LINE_NUMBERING,
+      `First line; ${LINE_NUMBERING}`,
+      'Last line, inclusive.',
+      `open: line. ${LINE_NUMBERING}`,
+      `open, present: line. ${LINE_NUMBERING}`,
+      `open, present: column. ${LINE_NUMBERING}`,
+      `open: column. ${LINE_NUMBERING}`,
+      `definition: usage line. ${LINE_NUMBERING}`,
+      `definition: column. ${LINE_NUMBERING}`,
+    ]);
+
+    const notes = AGENT_TOOLS.flatMap((tool) =>
+      Object.entries(tool.inputSchema.properties ?? {})
+        .filter(([name]) => /line|column/i.test(name))
+        .map(([name, property]) => ({
+          tool: tool.name,
+          name,
+          text: (property as { description?: string }).description ?? '',
+        })),
+    );
+
+    expect(notes.length).toBeGreaterThan(3);
+    for (const note of notes) {
+      expect(CANONICAL_LINE.has(note.text), `${note.tool}.${note.name}: ${note.text}`).toBe(true);
+    }
+
+    // Формулировка живёт в одном месте: схема не переписывает счёт своими словами.
+    expect(LINE_NUMBERING).toMatch(/1-based/);
   });
 
   it('«Absolute» из схем ушло в промпт', () => {
