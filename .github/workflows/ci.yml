@@ -79,7 +79,16 @@ jobs:
       # ВРЕМЕННО (ветка measure/windows-test-time): пофайловое время на Windows.
       # Удалить вместе с веткой — это замер, а не проверка.
       - name: Замер времени по файлам
-        run: npx tsx scripts/test-time-census.ts --runs=3 --top=20
+        run: npx tsx scripts/test-time-census.ts --runs=3 --top=20 --out=time-windows.json
+
+      # Цифры забираем артефактом: логи шага в API отдаются без токена-владельца.
+      - name: Сохранить замер
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: time-windows
+          path: time-windows.json
+          if-no-files-found: warn
 
   # macOS тоже расходится с Linux в мелочах работы с путями и файлами: `os.tmpdir()`
   # возвращает `/var/folders/…` — симлинк на `/private/var/…`, а `git` и дочерние
