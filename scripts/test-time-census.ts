@@ -50,17 +50,31 @@ const out = arg('out');
 const root = process.cwd();
 const tmp = mkdtempSync(path.join(tmpdir(), 'test-time-'));
 
+/**
+ * Путь к vitest напрямую, без `npx`.
+ *
+ * Проверено на Windows-раннере 24.10: `spawnSync('npx', ...)` изнутри скрипта
+ * не возвращает ни кода, ни вывода — шаг просто обрывается (9с и отказ, при
+ * том что тот же `npx vitest run` обычной строкой `run:` проходит). Через
+ * `node_modules/.bin` всё работает, а лишний процесс в каждом прогоне нам и не
+ * нужен: замер — про время тестов, а не про скорость поиска бинарника.
+ */
+function vitestBin(): string {
+  const base = path.join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'vitest.cmd' : 'vitest');
+  return base;
+}
+
 function runOnce(index: number): Map<string, number> {
   const json = path.join(tmp, `run-${index}.json`);
-  const args = ['vitest', 'run', '--reporter=json', `--outputFile=${json}`];
+  const args = ['run', '--reporter=json', `--outputFile=${json}`];
   if (only) args.push(only);
 
   process.stderr.write(`прогон ${index + 1}/${runs}… `);
   const started = Date.now();
-  const result = spawnSync('npx', args, { cwd: root, stdio: 'ignore', shell: process.platform === 'win32' });
+  const result = spawnSync(vitestBin(), args, { cwd: root, stdio: 'ignore', shell: process.platform === 'win32' });
   const spent = Date.now() - started;
   // Падение тестов не мешает замеру: время у упавшего файла тоже есть.
-  const note = result.status === 0 ? '' : ` (код ${result.status})`;
+  const note = result.status === 0 ? '' : ` (код ${result.status}${result.error ? `, ${result.error.message}` : ''})`;
   process.stderr.write(`${(spent / 1000).toFixed(1)}с${note}\n`);
 
   const parsed = JSON.parse(readFileSync(json, 'utf8')) as { testResults?: RunFileResult[] };
