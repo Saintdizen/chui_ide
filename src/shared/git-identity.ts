@@ -71,6 +71,48 @@ export interface GitConfigValues {
   'credential.helper'?: string;
 }
 
+/** Ключи, из которых собирается личность. Остальные настройки репозитория не нужны. */
+const IDENTITY_KEYS = [
+  'user.name',
+  'user.email',
+  'user.signingkey',
+  'gpg.format',
+  'commit.gpgsign',
+  'tag.gpgsign',
+  'credential.helper',
+] as const;
+
+/**
+ * Шаблон для `git config --get-regexp`: только ключи личности — плоский конфиг
+ * репозитория бывает длинным, и тащить его весь в main незачем.
+ */
+export const IDENTITY_CONFIG_PATTERN = `^(${['user', 'gpg', 'commit', 'tag', 'credential'].join('|')})\\.`;
+
+/**
+ * Разобрать вывод `git config --get-regexp -z`.
+ *
+ * Записи разделены NUL, внутри записи ключ отделён от значения ПЕРВЫМ переводом
+ * строки, а в значении переводы строки остаются как есть (многострочный помощник
+ * учётных данных). Уровни идут сверху вниз: системный, глобальный, локальный, —
+ * и действующим считается ПОСЛЕДНЕЕ значение ключа, как у самого git. Ключи вне
+ * списка личности пропускаем.
+ *
+ * Многозначный ключ (`user.signingkey` может быть задан и локально, и глобально без
+ * `--replace-all`) git печатает несколько раз. Действует последнее.
+ */
+export function parseIdentityConfig(raw: string): GitConfigValues {
+  const values: Record<string, string> = {};
+  for (const entry of raw.split('\0')) {
+    if (entry === '') continue;
+    const cut = entry.indexOf('\n');
+    if (cut < 0) continue;
+    const key = entry.slice(0, cut).trim();
+    if (!(IDENTITY_KEYS as readonly string[]).includes(key)) continue;
+    values[key] = entry.slice(cut + 1).replace(/\r\n/g, '\n');
+  }
+  return values as GitConfigValues;
+}
+
 /** Собрать личность из прочитанных настроек. Логические значения git пишет `true`/`false`. */
 export function identityFromConfig(config: GitConfigValues, keyFound = false): GitIdentity {
   return {

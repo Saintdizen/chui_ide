@@ -40,10 +40,11 @@ import {
   type GitLfsInfo,
 } from '../../shared/git-lfs';
 import {
+  IDENTITY_CONFIG_PATTERN,
   identityFromConfig,
   identityPatch,
+  parseIdentityConfig,
   parseSshPublicKey,
-  type GitConfigValues,
   type GitIdentity,
   type GitSshKey,
 } from '../../shared/git-identity';
@@ -1695,23 +1696,18 @@ export class GitService {
   /* ── личность, подпись коммитов и ключи ────────────────────────────────── */
 
   /**
-   * Действующие настройки автора и подписи. Читаем через `git config --get`: он сам
-   * собирает значение из системного, глобального и локального конфигов — то же, чем
-   * пользуется сам git при коммите.
+   * Действующие настройки автора и подписи. Одним запуском `git config --get-regexp -z`:
+   * он сам собирает значения из системного, глобального и локального конфигов в том же
+   * порядке, чем пользуется git при коммите. Семь отдельных `--get` давали семь процессов
+   * на каждый вызов, а `identity()` зовётся и из `setIdentity()`, и из окна настроек.
    */
   async identity(): Promise<GitIdentity> {
     const repoRoot = await this.repositoryRoot();
     if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-    const values: GitConfigValues = {
-      'user.name': await this.configGet(repoRoot, 'user.name'),
-      'user.email': await this.configGet(repoRoot, 'user.email'),
-      'user.signingkey': await this.configGet(repoRoot, 'user.signingkey'),
-      'gpg.format': await this.configGet(repoRoot, 'gpg.format'),
-      'commit.gpgsign': await this.configGet(repoRoot, 'commit.gpgsign'),
-      'tag.gpgsign': await this.configGet(repoRoot, 'tag.gpgsign'),
-      'credential.helper': await this.configGet(repoRoot, 'credential.helper'),
-    };
-    const draft = identityFromConfig(values, false);
+    const result = await execGit(['config', '--get-regexp', '-z', IDENTITY_CONFIG_PATTERN], repoRoot, {
+      allowFailure: true,
+    });
+    const draft = identityFromConfig(parseIdentityConfig(result.ok ? result.stdout : ''), false);
     draft.keyFound = await this.signingKeyFound(draft);
     return draft;
   }
@@ -1765,12 +1761,6 @@ export class GitService {
     if (!result.ok) return '';
     // «256 SHA256:abcd… comment (ED25519)» — берём второй столбец.
     return result.stdout.trim().split(/\s+/)[1] ?? '';
-  }
-
-  /** Значение настройки git: пустая строка, если она не задана. */
-  private async configGet(repoRoot: string, key: string): Promise<string> {
-    const result = await execGit(['config', '--get', key], repoRoot, { allowFailure: true });
-    return result.ok ? result.stdout.trim() : '';
   }
 
   /** Есть ли ключ подписи: у ssh — файл на диске, у GPG — секретный ключ в связке. */
