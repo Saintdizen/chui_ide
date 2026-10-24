@@ -89,8 +89,12 @@ async function makeRepos(): Promise<{ work: string; bare: string; branch: string
   const bare = path.join(base, 'origin.git');
   await fs.mkdir(work);
 
-  await git(base, ['init', '-q', '--bare', bare]);
-  await git(work, ['init', '-q']);
+  // `--template=` — пустой каталог шаблонов: без него git пишет хук `pre-commit` и
+  // примеры из `/usr/share/git-core`, а они не нужны ни одному тесту (замер:
+  // 20 init с шаблоном — 62мс, без — 52мс). Сервис настроек не читает, так что
+  // пропажа папки `info` (в ней `exclude`) тестам не мешает.
+  await git(base, ['init', '-q', '--bare', '--template=', bare]);
+  await git(work, ['init', '-q', '--template=']);
   // Подпись коммитов — локально: у сборочной машины её может не быть в конфиге.
   // `core.autocrlf=false` — Windows по умолчанию держит `true` и отдаёт файлы из
   // рабочей папки с `\r\n` там, где в коммите лежит `\n` (проверки сравнивают
@@ -380,7 +384,7 @@ describe('GitService: удалённые и сеть', () => {
     const work = path.join(base, 'work');
     // Отдельный репозиторий, который подключим подмодулем.
     await fs.mkdir(inner);
-    await git(inner, ['init', '-q']);
+    await git(inner, ['init', '-q', '--template=']);
     await git(inner, ['config', 'user.email', 'inner@example.com']);
     await git(inner, ['config', 'user.name', 'Inner']);
     await fs.writeFile(path.join(inner, 'a.txt'), 'a\n');
@@ -388,7 +392,7 @@ describe('GitService: удалённые и сеть', () => {
     await git(inner, ['commit', '-q', '-m', 'inner']);
 
     await fs.mkdir(work);
-    await git(work, ['init', '-q']);
+    await git(work, ['init', '-q', '--template=']);
     await git(work, ['config', 'user.email', 'test@example.com']);
     await git(work, ['config', 'user.name', 'Test']);
     await fs.writeFile(path.join(work, 'm.txt'), 'm\n');
@@ -421,7 +425,7 @@ describe('GitService: удалённые и сеть', () => {
     roots.push(base);
     const work = path.join(base, 'work');
     await fs.mkdir(work);
-    await git(work, ['init', '-q']);
+    await git(work, ['init', '-q', '--template=']);
     await git(work, ['config', 'user.email', 'test@example.com']);
     await git(work, ['config', 'user.name', 'Test']);
     await fs.writeFile(path.join(work, 'a.txt'), 'a\n');
@@ -705,7 +709,7 @@ describe('GitService: удалённые и сеть', () => {
     if (!gitAvailable) return;
     const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-git-empty-')));
     roots.push(base);
-    await git(base, ['init', '-q']);
+    await git(base, ['init', '-q', '--template=']);
     await git(base, ['config', 'user.email', 'test@example.com']);
     await git(base, ['config', 'user.name', 'Test']);
     await expect(serviceFor(base).commit('', undefined, true)).rejects.toThrow();

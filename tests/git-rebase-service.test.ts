@@ -40,7 +40,7 @@ async function makeRepo(): Promise<{ work: string; base: string; commits: string
   const work = path.join(base, 'work');
   await fs.mkdir(work);
 
-  await git(work, ['init', '-q']);
+  await git(work, ['init', '-q', '--template=']);
   await git(work, ['config', 'user.email', 'test@example.com']);
   await git(work, ['config', 'user.name', 'Test']);
   await git(work, ['config', 'commit.gpgsign', 'false']);

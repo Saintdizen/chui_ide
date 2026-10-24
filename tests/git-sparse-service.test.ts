@@ -51,7 +51,7 @@ function serviceFor(root: string): GitService {
 async function makeRepo(): Promise<string> {
   const work = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-sparse-')));
   roots.push(work);
-  await git(work, ['init', '-q']);
+  await git(work, ['init', '-q', '--template=']);
   await git(work, ['config', 'user.email', 'test@example.com']);
   await git(work, ['config', 'user.name', 'Test']);
   await git(work, ['config', 'commit.gpgsign', 'false']);

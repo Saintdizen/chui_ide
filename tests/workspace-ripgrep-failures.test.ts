@@ -43,9 +43,9 @@ async function withFakeRg(body: string): Promise<void> {
   roots.push(dir);
   const file = path.join(dir, 'rg');
   // process.execPath — не «первый node в PATH», а тот бинарник, что сейчас работает.
-  // Номер версии — первым аргументом: иначе обёртка vitest не находит файл и
-  // запускает обычный Node с `--require …/suppress-warnings.cjs`, а тот съедает
-  // позиционный `process.argv[2]`. Голый `--` не спасает: флаг идёт ДО него.
+  // `--` первым аргументом — чтобы Node не съел флаги, которые допишет обёртка
+  // vitest: строка `#!node --` тоже верна (`--` разбирается Node после версии, а
+  // голая `--` без версии идёт позиционным аргументом и ломает поиск файла).
   await fs.writeFile(file, `#!${process.execPath} --\n${body}\n`, 'utf8');
   await fs.chmod(file, 0o755);
   const previous = process.env.PATH ?? '';
@@ -62,6 +62,30 @@ async function withFakeRg(body: string): Promise<void> {
  */
 function script(body: string): string {
   return `if (process.argv[2] === '--version') process.exit(0);\n${body}`;
+}
+
+/**
+ * Дождаться отметки от убитого процесса. `close` приходит по выходу процесса, но
+ * запись файла файловая система может отдать с задержкой (Windows — разделяем:
+ * там сигнал не ловится вовсе и отметки нет, — поэтому `skip`).
+ */
+async function expectFileToContain(
+  file: string,
+  text: string,
+  skip: boolean,
+  context: () => Promise<string> = async () => '',
+): Promise<void> {
+  if (skip) return;
+  const deadline = Date.now() + 2000;
+  let mark = '';
+  while (Date.now() < deadline) {
+    mark = await fs.readFile(file, 'utf8').catch(() => '');
+    if (mark.includes(text)) break;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  // Журнал заглушки — в текст провала: без него причина («не тот процесс убит»)
+  // не видна ни в CI, ни на машине, где провал повторился.
+  expect(`${mark}\n--- журнал заглушки ---\n${await context()}`).toContain(text);
 }
 
 describe('сбои rg', () => {
@@ -98,22 +122,33 @@ describe('сбои rg', () => {
     const isWindows = process.platform === 'win32';
     // Сам сигнал на Windows не ловится: там процесс просто завершается убийством.
     const diedLiteral = JSON.stringify(died);
+    const log = path.join(marker, 'rg.log');
+    const logLiteral = JSON.stringify(log);
     await withFakeRg(
       script(
-        `process.on('SIGTERM', () => { require('node:fs').writeFileSync(${diedLiteral}, 'да'); process.exit(143); });\nsetTimeout(() => {}, 5000);`,
+        // Журнал нужен потому, что провал этого теста (1 на ~4 полных прогона)
+        // ничего не говорил о причине: «отметки нет» одинаково означало и «сигнал
+        // не дошёл», и «дошёл, но убил не тот процесс». Теперь видно, кого ждали.
+        `require('node:fs').appendFileSync(${logLiteral}, 'pid ' + process.pid + ' argv ' + process.argv.slice(2).join(',') + '\\n');\n` +
+          `process.on('SIGTERM', () => { require('node:fs').appendFileSync(${logLiteral}, 'term ' + process.pid + '\\n'); require('node:fs').writeFileSync(${diedLiteral}, 'да'); process.exit(143); });\nsetTimeout(() => {}, 5000);`,
       ),
     );
 
     const controller = new AbortController();
     const pending = runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir(), controller.signal);
     setTimeout(() => controller.abort(), 150);
-    // Код смерти 143 — не гарантия: гонка закрытия перекрывает сохранение кода выхода.
-    // 40 запусков с `process.on('SIGTERM', () => process.exit(143))` дали 5 раз
-    // `143` и 35 раз `null` — так что принимать надо оба.
-    // Что доказать надо — что сигнал дошёл: процесс убит (он мог жить 5 секунд!)
-    // и смерть вышла по сигналу, а не ответом rg.
-    await expect(pending).rejects.toThrow(/^rg завершился с кодом (143|null): /);
-    // На Windows сигнал не ловится: процесс просто завершается убийством, отметки не будет.
-    if (!isWindows) await expect(fs.readFile(died, 'utf8')).resolves.toContain('да');
+    // Отказ называет наше решение, а не код убитого процесса: кода может не быть
+    // вовсе (сигнал пришёл раньше обработчика), и `143` не отличался от `null` ни
+    // для вызывающего, ни для человека. Ловим отказ в переменную, а не через
+    // `rejects.toThrow`: так провал читается, даже если обещание уже отклонено.
+    const failure = await pending.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(String(failure)).toMatch(/^Error: поиск прерван: /);
+    // Что доказать надо — что процесс был убит: он мог жить 5 секунд. Отметку ждём
+    // отдельно, её пишет уже сам умирающий процесс; журнал заглушки идёт в текст
+    // провала, чтобы причина была видна без повторного запуска.
+    await expectFileToContain(died, 'да', isWindows, () => fs.readFile(log, 'utf8').catch(() => ''));
   });
 });

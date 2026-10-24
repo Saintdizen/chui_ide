@@ -47,7 +47,7 @@ async function makeDir(): Promise<string> {
 
 async function makeRepo(): Promise<string> {
   const dir = await makeDir();
-  await git(dir, ['init', '-q', '-b', 'main']);
+  await git(dir, ['init', '-q', '-b', 'main', '--template=']);
   await git(dir, ['config', 'user.email', 'test@example.com']);
   await git(dir, ['config', 'user.name', 'Test']);
   await git(dir, ['config', 'commit.gpgsign', 'false']);

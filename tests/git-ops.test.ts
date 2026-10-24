@@ -45,7 +45,7 @@ async function makeDir(): Promise<string> {
 /** Репозиторий с одним коммитом. `commits: false` — свежий `git init` без HEAD. */
 async function makeRepo(commits = true): Promise<string> {
   const dir = await makeDir();
-  await git(dir, ['init', '-q']);
+  await git(dir, ['init', '-q', '--template=']);
   await git(dir, ['config', 'user.email', 'test@example.com']);
   await git(dir, ['config', 'user.name', 'Test']);
   await git(dir, ['config', 'commit.gpgsign', 'false']);
