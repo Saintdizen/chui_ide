@@ -91,16 +91,15 @@ async function makeRepos(): Promise<{ work: string; bare: string; branch: string
 
   await git(base, ['init', '-q', '--bare', bare]);
   await git(work, ['init', '-q']);
-  // Подпись коммитов задаём локально: у сборочной машины её может не быть в конфиге.
+  // Подпись коммитов — локально: у сборочной машины её может не быть в конфиге.
+  // `core.autocrlf=false` — Windows по умолчанию держит `true` и отдаёт файлы из
+  // рабочей папки с `\r\n` там, где в коммите лежит `\n` (проверки сравнивают
+  // содержимое посимвольно). Одной строки хватает: раньше она стояла дважды.
+  // Почему не через `-c` у `init`: синтаксис верный, но `git init` не записывает
+  // такие настройки в `.git/config` (проверено: автор теряется, `commit` падает).
   await git(work, ['config', 'user.email', 'test@example.com']);
   await git(work, ['config', 'user.name', 'Test']);
   await git(work, ['config', 'commit.gpgsign', 'false']);
-  // Windows по умолчанию держит autocrlf=true: без этой строки файлы из
-  // рабочей папки приходят с \r\n, и тест сравнивает их с чистым \n.
-  await git(work, ['config', 'core.autocrlf', 'false']);
-  // Содержимое сверяем посимвольно, а на Windows `core.autocrlf` по умолчанию
-  // переводит строки в CRLF при выдаче файла на диск — тогда `pull` давал бы
-  // `from peer\r\n` там, где в коммите лежит `from peer\n`.
   await git(work, ['config', 'core.autocrlf', 'false']);
   await fs.writeFile(path.join(work, 'a.txt'), 'one\n');
   await git(work, ['add', '-A']);
@@ -110,6 +109,49 @@ async function makeRepos(): Promise<{ work: string; bare: string; branch: string
   await git(work, ['push', '-q', '-u', 'origin', branch]);
 
   return { work, bare, branch };
+}
+
+/**
+ * Готовый репозиторий, который тестам нужно только ЧИТАТЬ.
+ *
+ * Создание с нуля стоит дорого, и почти целиком — не наши файлы, а служебное:
+ * `git init` (5 мс) пишет хук и примеры, первый `commit` вместе с `add` (ещё ~9 мс)
+ * кладёт сжатые словари подсказок, которыми пакетный менеджер набивает
+ * `/usr/share/git-core` в кеш. Клон этого же репозитория — около 10 мс, и он
+ * сразу имеет историю, ветку и remote. Поэтому основной репозиторий делается один
+ * раз лениво, а каждый тест получает СВОЮ копию — общего состояния у тестов нет.
+ *
+ * Кто меняет историю (коммиты, ветки, bisect, rebase) — тот продолжает звать `makeRepos()`:
+ * копия не должна оказаться в чужих руках.
+ */
+let snapshot: Promise<{ work: string; bare: string; branch: string }> | null = null;
+
+async function readOnlyRepo(): Promise<{ work: string; bare: string; branch: string }> {
+  let made: { work: string; bare: string; branch: string } | null = null;
+  try {
+    made = await snapshot;
+  } catch {
+    // Прошлая попытка не удалась (git не встал, каталог недоступен) — пробуем заново.
+  }
+  // Снимок ленивый — значит живёт дольше одного теста, а `roots` чистит всё после
+  // каждого теста: второй получил бы «репозитория не существует». Потому готовый
+  // снимок проверяем наличием `.git` и при нужде делаем заново.
+  if (
+    made === null ||
+    !(await fs.stat(path.join(made.work, '.git')).then(
+      () => true,
+      () => false,
+    ))
+  ) {
+    snapshot = makeRepos();
+    made = await snapshot;
+  }
+  const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-git-copy-')));
+  roots.push(dir);
+  const work = path.join(dir, 'work');
+  const copy = await git(dir, ['clone', '-q', '--no-hardlinks', made.work, work]);
+  if (copy.code !== 0) throw new Error(copy.stderr);
+  return { work, bare: made.bare, branch: made.branch };
 }
 
 /** Сервис над рабочей папкой: публикация статуса в тесте не нужна. */
@@ -146,7 +188,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('fetch() завершается успешно и не трогает рабочее дерево', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     await fs.writeFile(path.join(work, 'a.txt'), 'local edit\n');
 
     const result = await serviceFor(work).fetch();
@@ -299,7 +341,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('checkIgnore() отвечает только про игнорируемые пути', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     await fs.writeFile(path.join(work, '.gitignore'), 'dist/\n*.log\n');
     await fs.mkdir(path.join(work, 'dist'));
     await fs.writeFile(path.join(work, 'dist', 'bundle.js'), 'x\n');
@@ -426,7 +468,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('forgeInfo(): узнаёт площадку по адресу и честно говорит про клиента', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     // Ставим адрес GitHub: сеть для этого не нужна — только разбор адреса.
     await git(work, ['remote', 'set-url', 'origin', 'git@github.com:acme/web.git']);
 
@@ -468,7 +510,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('forgeInfo(): свой GitLab узнаётся и без клиента', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     await git(work, ['remote', 'set-url', 'origin', 'https://gitlab.example.com/team/sub/api.git']);
     const info = await serviceFor(work).forgeInfo();
     expect(info.repo).toMatchObject({ platform: 'gitlab', host: 'gitlab.example.com', owner: 'team/sub', repo: 'api' });
@@ -477,7 +519,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('forgeCheckout() без клиента объясняет причину', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     await git(work, ['remote', 'set-url', 'origin', 'git@github.com:acme/web.git']);
     const service = serviceFor(work);
     if (!stubSupported) {
@@ -499,7 +541,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('forgeIssues() без клиента объясняет причину', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     await git(work, ['remote', 'set-url', 'origin', 'git@github.com:acme/web.git']);
     const service = serviceFor(work);
     if (!stubSupported) {
@@ -548,7 +590,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('sshKeys(): отдаёт открытые ключи из ~/.ssh (список может быть пустым)', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     const keys = await serviceFor(work).sshKeys();
     expect(Array.isArray(keys)).toBe(true);
     for (const key of keys) {
@@ -591,7 +633,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('blame() называет автора строки и её коммит', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
 
     const lines = await serviceFor(work).blame(path.join(work, 'a.txt'));
 
@@ -604,7 +646,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('blame() неотслеживаемого файла — пустой список, а не сбой', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     await fs.writeFile(path.join(work, 'new.txt'), 'x\n');
 
     expect(await serviceFor(work).blame(path.join(work, 'new.txt'))).toEqual([]);
@@ -612,7 +654,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('headText() отдаёт версию файла в HEAD; новый файл — пустая строка', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     const service = serviceFor(work);
 
     expect(await service.headText(path.join(work, 'a.txt'))).toBe('one\n');
@@ -774,7 +816,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('ссылка на коммит не может начинаться с дефиса', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     await expect(serviceFor(work).cherryPick('-x')).rejects.toThrow();
   });
 
@@ -794,7 +836,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('ignore добавляет путь в .gitignore и не дублирует его', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     const service = serviceFor(work);
     await fs.writeFile(path.join(work, 'debug.log'), 'x\n');
 
@@ -811,7 +853,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('reflog отдаёт записи с ссылкой и описанием', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     const entries = await serviceFor(work).reflog(10);
     expect(entries.length).toBeGreaterThan(0);
     expect(entries[0]!.ref).toBe('HEAD@{0}');
@@ -820,7 +862,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('logGraph отдаёт граф веток текстом', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     const text = await serviceFor(work).logGraph(10);
     expect(text).toContain('*');
     expect(text).toContain('init');
@@ -932,7 +974,7 @@ describe('GitService: история и просмотр против комми
 
   it('diff() против коммита показывает правки, сделанные после него', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     const file = path.join(work, 'a.txt');
     const [first] = await serviceFor(work).log(50, file);
     await fs.writeFile(file, 'one\ntwo\n');
@@ -1114,7 +1156,7 @@ describe('GitService: блоки файла для действий из жёл�
 
   it('строка полоски из жёлоба попадает в свой блок', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     const file = path.join(work, 'a.txt');
     const service = serviceFor(work);
 
@@ -1166,7 +1208,7 @@ describe('GitService: блоки файла для действий из жёл�
 
   it('fileHunks у файла без правок отдаёт пустые наборы, а не ошибку', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     // Файл чист: между щелчком и запросом его могли сохранить или закоммитить.
     const hunks = await serviceFor(work).fileHunks(path.join(work, 'a.txt'));
     expect(hunks).toEqual({ unstaged: [], staged: [] });
@@ -1208,7 +1250,7 @@ describe('GitService: наблюдение за метаданными репо�
 
   it('без обработчика наблюдение не заводится', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     // Обработчика нет: следить незачем, и это не ошибка.
     const service = serviceFor(work);
     await service.status();
@@ -1217,7 +1259,7 @@ describe('GitService: наблюдение за метаданными репо�
 
   it('repositoryMetaDir: у обычного репозитория - каталог .git', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     expect(repositoryMetaDir(work)).toBe(path.join(work, '.git'));
   });
 
