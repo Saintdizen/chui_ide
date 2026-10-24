@@ -11,7 +11,23 @@ import path from 'node:path';
  * Вынесено из `agent-tools.ts` целиком: разбор живёт на регулярках и позициях
  * кавычек, и правка в нём — это правка одного места, а не поиск по 5 000 строк.
  */
-/** Сколько файлов и сколько символов отдаёт `read` за один вызов. */
+/**
+ * Кто читает — один файл или пачку. Разбор формы аргументов, без самих чтений.
+ *
+ * Вызывающий берёт этот ответ и зовёт `readFile` / `readFiles` / отказывает:
+ * так `read` с `glob` и `read` с `path` делят схему (234 токена на каждом шаге),
+ * а сам бюджет вывода и оглавление LSP остаются в `agent-tools.ts`.
+ */
+export function readDispatch(args: Record<string, unknown>): 'files' | 'one' | 'none' {
+  if (Array.isArray(args.paths)) return 'files';
+  return isAbsent(args.path) ? 'none' : 'one';
+}
+
+/** `path` нет или он пуст: читать нечего, и это отказ, а не чтение пустоты. */
+function isAbsent(value: unknown): boolean {
+  return typeof value !== 'string' || value.trim() === '';
+}
+
 /**
  * Команда, которая только читает: `cat`, `head -n N`, `sed -n 'A,Bp'`, `grep`.
  *
