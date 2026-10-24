@@ -24,9 +24,14 @@ afterEach(async () => {
 /** Запустить git и дождаться выхода. Ошибку возвращаем, а не бросаем: так виднее тест. */
 function git(cwd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    execFile('git', args, { cwd, windowsHide: true }, (error, stdout, stderr) => {
-      resolve({ code: error ? 1 : 0, stdout: stdout ?? '', stderr: stderr ?? '' });
-    });
+    execFile(
+      'git',
+      args,
+      { cwd, windowsHide: true, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: cwd, XDG_CONFIG_HOME: cwd } },
+      (error, stdout, stderr) => {
+        resolve({ code: error ? 1 : 0, stdout: stdout ?? '', stderr: stderr ?? '' });
+      },
+    );
   });
 }
 
