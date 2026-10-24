@@ -168,7 +168,7 @@ import { createNotificationsModal } from './ui/notifications-modal';
 import { createTextModal } from './ui/text-modal';
 import { createStatusBar } from './ui/statusbar';
 import { needsLspRefresh, statusPatch } from './core/status-state';
-import { createSettingsModal } from './ui/settings-modal';
+import type { SectionId, SettingsModalView } from './ui/settings-modal';
 import { createTabs, type PagesTabSource } from './ui/tabs';
 import { createTerminalPanel } from './ui/terminal';
 import { createDebugPanel } from './ui/debug-panel';
@@ -665,15 +665,42 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
   importChecker.attach();
 
   // Настройки — модальное окно поверх всего: и шапка, и панель AI открывают одно и то же.
-  const settingsModal = createSettingsModal({
-    rpc,
-    commands,
-    project: {
-      kind: () => projectScan?.kind.id ?? null,
-      patch: (value) => saveSettingsPatch(value),
+  // Модуль окна (87 КБ исходника, четвёртый по весу в чанке) грузим по первому открытию:
+  // до него доходит не каждый сеанс, а плата — только задержка перед показом.
+  //
+  // Фасад занимает его место сразу: `open`/`applySettings` до загрузки ничего не теряют —
+  // `applySettings` копит последнее состояние, `open` создаёт окно и подставляет накопленное.
+  // Закрывать до создания нечего, это `close()`.
+  let settingsView: SettingsModalView | null = null;
+  let settingsLoading: Promise<SettingsModalView> | null = null;
+  let pendingSettings: Settings | null = null;
+  const createSettingsView = async (): Promise<SettingsModalView> => {
+    const { createSettingsModal } = await import('./ui/settings-modal');
+    return createSettingsModal({
+      rpc,
+      commands,
+      project: {
+        kind: () => projectScan?.kind.id ?? null,
+        patch: (value) => saveSettingsPatch(value),
+      },
+    });
+  };
+  const settingsModal: SettingsModalView = {
+    // Пока окна нет, отдаём пустую заглушку: в body её кладут только при открытии.
+    element: document.createElement('div'),
+    open: async (section?: SectionId) => {
+      settingsLoading ??= createSettingsView();
+      settingsView = await settingsLoading;
+      if (!settingsView.element.isConnected) document.body.appendChild(settingsView.element);
+      if (pendingSettings !== null) settingsView.applySettings(pendingSettings);
+      await settingsView.open(section);
     },
-  });
-  document.body.appendChild(settingsModal.element);
+    close: () => settingsView?.close(),
+    applySettings: (next) => {
+      pendingSettings = next;
+      settingsView?.applySettings(next);
+    },
+  };
 
   // Окно Python-окружений: создание venv рядом с настройками, поверх всего.
   const venvModal = createVenvModal({
