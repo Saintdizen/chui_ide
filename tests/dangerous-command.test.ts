@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isDangerousCommand } from '../src/main/ai/agent-tools';
+import { isDangerousCommand } from '../src/main/ai/tool-rules';
 
 /**
  * Страховка полного доступа: список команд, которые при `confirmDangerous`

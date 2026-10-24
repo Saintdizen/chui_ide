@@ -2,13 +2,9 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  MAX_OUTPUT_CHARS,
-  STEP_OUTPUT_CHARS,
-  runTool,
-  stepOutputChars,
-  type ToolContext,
-} from '../src/main/ai/agent-tools';
+import { runTool } from '../src/main/ai/agent-tools';
+import { MAX_OUTPUT_CHARS, STEP_OUTPUT_CHARS, stepOutputChars } from '../src/main/ai/output-budget';
+import type { ToolContext } from '../src/main/ai/tool-context';
 import { WorkspaceService } from '../src/main/workspace/workspace';
 import { estimateTextTokens } from '../src/shared/context-fit';
 

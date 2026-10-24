@@ -44,10 +44,15 @@
 
 ## Структура (долгая правка, отдельной сессией)
 
-- [ ] **`src/main/ai/agent-tools.ts` — 4 992 строки, 162 функции, 19 инструментов**
-       в одном файле. Разнести по инструментам (`edit`, `run`/`terminal`,
-       `browser`/`web`, `task`, `mind`, `lsp`/`checks`) с общим модулем контекста.
-       По одному модулю за раз, под зелёными тестами.
+- [ ] **`src/main/ai/agent-tools.ts` — 2 471 строка (было 4 992).** Терминал,
+       `edit`, `run_tests`, распознавание команд, правила подтверждения, бюджет
+       вывода и контекст инструментов вынесены: `agent-terminal.ts`,
+       `agent-edit.ts`, `tool-command.ts`, `tool-rules.ts`, `output-budget.ts`,
+       `output-trim.ts`, `tool-context.ts`, `agent-lookup.ts`. Осталось в нём:
+       реестр `runTool` и сами инструменты `read`/`search`/`lsp`/`checks`/
+       `browser`/`web`/`mind`. Следующий шаг — `read`+`search` вместе (общий
+       обход файлов и покрытие диапазонов), затем `lsp`+`checks`. Дальше не резать
+       без повода: выигрыша в скорости нет, только читаемость.
 
 - [ ] **`src/main/git/git.ts` — 2 464 строки, 132 метода** в одном классе
        `GitService` (forge, bisect, worktree, подмодули, коммиты). Замер 24.10:

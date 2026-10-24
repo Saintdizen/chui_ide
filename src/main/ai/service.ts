@@ -133,21 +133,20 @@ import { scanProject } from '../project/scan';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
 import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
-import {
-  runTool,
-  STEP_OUTPUT_CHARS,
-  stepOutputChars,
-  failureText,
-  type BrowserTools,
-  type Linter,
-  type McpRunner,
-  type SymbolSearch,
-  type TerminalAgent,
-  type TestRunner,
-  type SessionSearchRunner,
-  type ToolContext,
-  type ToolOutcome,
-} from './agent-tools';
+import { runTool } from './agent-tools';
+import { STEP_OUTPUT_CHARS, stepOutputChars } from './output-budget';
+import { failureText } from './tool-rules';
+import type {
+  BrowserTools,
+  Linter,
+  McpRunner,
+  SessionSearchRunner,
+  SymbolSearch,
+  TerminalAgent,
+  TestRunner,
+  ToolContext,
+  ToolOutcome,
+} from './tool-context';
 import { AnthropicProvider } from './anthropic';
 import { searchWeb, webSearchProviderLabel } from './web-search';
 import { fetchPage } from './web-fetch';

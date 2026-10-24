@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { FileEdit, TextEdit } from '../../shared/edits';
 import type { PatchFile, PatchHunk } from '../../shared/patch';
-import type { ToolOutcome } from './agent-tools';
+import type { ToolOutcome } from './tool-context';
 
 /**
  * Разбор и сведение правок: всё, что происходит с аргументом `edit` до самого

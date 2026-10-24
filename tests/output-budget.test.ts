@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { fitOutput, fitOutputLines } from '../src/shared/output-budget';
 import { estimateTextTokens } from '../src/shared/context-fit';
-import { failureText, MAX_OUTPUT_TOKENS, runTool, type ToolContext } from '../src/main/ai/agent-tools';
+import { runTool } from '../src/main/ai/agent-tools';
+import type { ToolContext } from '../src/main/ai/tool-context';
+import { MAX_OUTPUT_TOKENS } from '../src/main/ai/output-budget';
+import { failureText } from '../src/main/ai/tool-rules';
 
 describe('ограничение цены результата', () => {
   it('учитывает состав текста, сохраняет хвост и не разрывает Unicode', () => {

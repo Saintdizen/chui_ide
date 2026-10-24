@@ -2,7 +2,7 @@ import { nativeImage, type NativeImage } from 'electron';
 import { formatBytes, imageMimeLabel } from '../../shared/images';
 import { imageRefusal, shrinkSteps, fitInto, READ_IMAGE_TARGET_BYTES, type ImageSize } from '../../shared/read-image';
 import type { WorkspaceService } from '../workspace/workspace';
-import type { ReadImageResult, ReadImageRunner } from './agent-tools';
+import type { ReadImageResult, ReadImageRunner } from './tool-context';
 
 /**
  * `read_image`: файл с диска → картинка для модели.

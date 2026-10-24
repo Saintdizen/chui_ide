@@ -2,7 +2,10 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { failureText, runTool, STEP_OUTPUT_CHARS, type ToolContext } from '../src/main/ai/agent-tools';
+import { runTool } from '../src/main/ai/agent-tools';
+import type { ToolContext } from '../src/main/ai/tool-context';
+import { STEP_OUTPUT_CHARS } from '../src/main/ai/output-budget';
+import { failureText } from '../src/main/ai/tool-rules';
 import { WorkspaceService } from '../src/main/workspace/workspace';
 
 /**

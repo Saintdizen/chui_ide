@@ -2,7 +2,7 @@ import type { AiWebSearchSettings } from '../../shared/api';
 import type { ChatHostBridge } from './service';
 import type { AgentToolSpec } from '../../shared/tools';
 import { ALWAYS_AVAILABLE } from '../../shared/tool-policy';
-import type { Linter, SymbolSearch, TerminalAgent, TestRunner } from './agent-tools';
+import type { Linter, SymbolSearch, TerminalAgent, TestRunner } from './tool-context';
 import { webSearchNeedsKey } from './web-search';
 
 /**

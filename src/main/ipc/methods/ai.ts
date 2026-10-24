@@ -5,7 +5,7 @@ import { SessionIndexStore } from '../../ai/session-index-store';
 import { PushTopic, RpcErrorCode, type ChatRequest } from '../../../shared/api';
 import { shouldReview, type ReviewVerdict } from '../../../shared/approval-review';
 import { sanitizePlanExitDecision } from '../../../shared/plan-exit';
-import { isDangerousCommand } from '../../ai/agent-tools';
+import { isDangerousCommand } from '../../ai/tool-rules';
 import { pushToRenderers } from '../push';
 import type { RpcServices } from '../context';
 import { RpcFailure, type RpcRouter } from '../router';
