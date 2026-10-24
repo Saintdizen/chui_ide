@@ -74,9 +74,10 @@ async function expectFileToContain(
   text: string,
   skip: boolean,
   context: () => Promise<string> = async () => '',
+  timeoutMs = 2000,
 ): Promise<void> {
   if (skip) return;
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + timeoutMs;
   let mark = '';
   while (Date.now() < deadline) {
     mark = await fs.readFile(file, 'utf8').catch(() => '');
@@ -124,19 +125,29 @@ describe('сбои rg', () => {
     const diedLiteral = JSON.stringify(died);
     const log = path.join(marker, 'rg.log');
     const logLiteral = JSON.stringify(log);
+    // Журнал нужен потому, что провал этого теста (1 на ~4 полных прогона)
+    // ничего не говорил о причине: «отметки нет» одинаково означало и «сигнал
+    // не дошёл», и «дошёл, но убил не тот процесс». Теперь видно, кого ждали.
+
+    // Отмену ждём от САМОЙ заглушки, а не по часам: 150 мс — это «ещё не успел
+    // подняться» на загруженной машине (полный прогон: 1 падение на N; локально
+    // журнал заглушки был ПУСТ — ни одной строки, значит node не успел дойти до
+    // первой записи). Тест доказывает «сигнал доходит до живого процесса», и для
+    // этого достаточно, чтобы процесс был жив — а он живёт 5 секунд.
+    const ready = path.join(marker, 'started.txt');
+    const readyLiteral = JSON.stringify(ready);
     await withFakeRg(
       script(
-        // Журнал нужен потому, что провал этого теста (1 на ~4 полных прогона)
-        // ничего не говорил о причине: «отметки нет» одинаково означало и «сигнал
-        // не дошёл», и «дошёл, но убил не тот процесс». Теперь видно, кого ждали.
         `require('node:fs').appendFileSync(${logLiteral}, 'pid ' + process.pid + ' argv ' + process.argv.slice(2).join(',') + '\\n');\n` +
+          `require('node:fs').writeFileSync(${readyLiteral}, 'да');\n` +
           `process.on('SIGTERM', () => { require('node:fs').appendFileSync(${logLiteral}, 'term ' + process.pid + '\\n'); require('node:fs').writeFileSync(${diedLiteral}, 'да'); process.exit(143); });\nsetTimeout(() => {}, 5000);`,
       ),
     );
-
     const controller = new AbortController();
     const pending = runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir(), controller.signal);
-    setTimeout(() => controller.abort(), 150);
+    // Поднимаемся не дольше 3 с, иначе это не загруженность, а поломка заглушки.
+    await expectFileToContain(ready, 'да', isWindows, async () => '', 3000);
+    controller.abort();
     // Отказ называет наше решение, а не код убитого процесса: кода может не быть
     // вовсе (сигнал пришёл раньше обработчика), и `143` не отличался от `null` ни
     // для вызывающего, ни для человека. Ловим отказ в переменную, а не через
@@ -146,6 +157,13 @@ describe('сбои rg', () => {
       (error: unknown) => error,
     );
     expect(String(failure)).toMatch(/^Error: поиск прерван: /);
+    // Сигнал получил ТОТ САМЫЙ процесс, а не другой запуск заглушки: pid из журнала
+    // поднятия должен встретиться в строке `term`. Это и есть исходная защита теста —
+    // без неё «убит» ничего не доказывало бы.
+    const journal = await fs.readFile(log, 'utf8').catch(() => '');
+    const pid = /^pid (\d+)/m.exec(journal)?.[1];
+    expect(pid).toBeDefined();
+    await expectFileToContain(log, `term ${pid}`, isWindows);
     // Что доказать надо — что процесс был убит: он мог жить 5 секунд. Отметку ждём
     // отдельно, её пишет уже сам умирающий процесс; журнал заглушки идёт в текст
     // провала, чтобы причина была видна без повторного запуска.

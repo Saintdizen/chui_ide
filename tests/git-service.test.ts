@@ -105,16 +105,26 @@ async function makeRepos(): Promise<{ work: string; bare: string; branch: string
   // пропажа папки `info` (в ней `exclude`) тестам не мешает.
   await git(base, ['init', '-q', '--bare', '--template=', bare]);
   await git(work, ['init', '-q', '--template=']);
+  // Четыре настройки дописываем в `.git/config` ОДНОЙ записью файла, а не четырьмя
+  // `git config`: на Windows каждый запуск процесса стоит ~150–300 мс, и это были
+  // 4 из 15 процессов на репозиторий, повторяемые 74 раза за прогон. `makeRepos`
+  // зовётся либо один раз (снимок), либо тестом, которому нужен свой bare, — файл
+  // пишется там же, где раньше садились команды.
+  //
+  // Почему не `-c key=val` у `init`/`commit`: проверено — `-c` действует только на
+  // свой процесс и в `.git/config` НЕ попадает (после `commit` с `-c user.name`
+  // в конфиге остаются одни `core.*`, автор теряется).
+  //
   // Подпись коммитов — локально: у сборочной машины её может не быть в конфиге.
   // `core.autocrlf=false` — Windows по умолчанию держит `true` и отдаёт файлы из
   // рабочей папки с `\r\n` там, где в коммите лежит `\n` (проверки сравнивают
-  // содержимое посимвольно). Одной строки хватает: раньше она стояла дважды.
-  // Почему не через `-c` у `init`: синтаксис верный, но `git init` не записывает
-  // такие настройки в `.git/config` (проверено: автор теряется, `commit` падает).
-  await git(work, ['config', 'user.email', 'test@example.com']);
-  await git(work, ['config', 'user.name', 'Test']);
-  await git(work, ['config', 'commit.gpgsign', 'false']);
-  await git(work, ['config', 'core.autocrlf', 'false']);
+  // содержимое посимвольно). Второй раздел `[core]` дописывается перед домолчанием
+  // git — так и делает сам git, дубли ключей в конфиге законны.
+  const configPath = path.join(work, '.git', 'config');
+  await fs.appendFile(
+    configPath,
+    '[user]\n\tname = Test\n\temail = test@example.com\n[commit]\n\tgpgsign = false\n[core]\n\tautocrlf = false\n',
+  );
   await fs.writeFile(path.join(work, 'a.txt'), 'one\n');
   await git(work, ['add', '-A']);
   await git(work, ['commit', '-q', '-m', 'init']);
@@ -600,6 +610,13 @@ describe('GitService: удалённые и сеть', () => {
     expect(local.stdout.trim()).toBe('true');
     const global = await git(work, ['config', '--global', '--get', 'user.name']);
     expect(global.stdout.trim()).not.toBe('Новый Автор');
+
+    // Пустое значение — снять настройку. Затем же сверяем, что снятие не оставляет
+    // в конфиге пустого ключа, который читал бы `identity()` как заданное значение.
+    const cleared = await service.setIdentity({ signingKey: '' });
+    expect(cleared.signingKey).toBe('');
+    const dropped = await git(work, ['config', '--local', '--get', 'user.signingkey']);
+    expect(dropped.code).not.toBe(0);
   });
 
   it('sshKeys(): отдаёт открытые ключи из ~/.ssh (список может быть пустым)', async () => {

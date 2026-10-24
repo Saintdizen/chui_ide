@@ -1719,14 +1719,9 @@ export class GitService {
   async setIdentity(values: Partial<GitIdentity>): Promise<GitIdentity> {
     const repoRoot = await this.requireRoot();
     const current = await this.identity();
-    for (const item of identityPatch(current, values)) {
-      if (item.value === '') {
-        // Пустое значение — снять настройку; её могло и не быть.
-        await execGit(['config', '--local', '--unset', item.key], repoRoot, { allowFailure: true });
-        continue;
-      }
-      await execGit(['config', '--local', item.key, item.value], repoRoot);
-    }
+    const patch = identityPatch(current, values);
+    if (patch.length === 0) return current;
+    await writeLocalConfig(repoRoot, patch);
     return this.identity();
   }
 
@@ -2382,5 +2377,34 @@ export function repositoryMetaDir(repoRoot: string): string | null {
     return statSync(dir).isDirectory() ? dir : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Записать пачку настроек в ЛОКАЛЬНЫЙ конфиг.
+ *
+ * `git config` принимает ровно один ключ за раз, но файл можно назвать самому:
+ * `-f <путь> --replace-all ключ значение`. Значения всё равно раскладывает по
+ * разделам сам git — дописывать `.git/config` своим форматом значит портить чужой
+ * файл с его комментариями и раскладкой.
+ *
+ * Снятие идёт отдельной подкомандой `--unset-all`, а не `--replace-all` с пустым
+ * значением: второе оставляет в файле ключ с пустым значением, то есть ЦЕЛЫЙ ключ,
+ * который потом не отличить от заданного (проверено тестом — он и поймал).
+ *
+ * Почему в цикле, а не одним вызовом: на меняющих подкомандах git перечитывает
+ * конфиг и отказывается брать пары ключ-значение списком (`wrong number of
+ * arguments, should be from 2 to 3`). `--local` не нужен: путь назван явно,
+ * глобальный конфиг в правке не участвует.
+ */
+async function writeLocalConfig(repoRoot: string, patch: Array<{ key: string; value: string }>): Promise<void> {
+  const configPath = path.join(repoRoot, '.git', 'config');
+  for (const item of patch) {
+    const args =
+      item.value === ''
+        ? ['config', '-f', configPath, '--unset-all', item.key]
+        : ['config', '-f', configPath, '--replace-all', item.key, item.value];
+    // Ключа могло и не быть — для нас это не ошибка, тон же, что у `--local --unset`.
+    await execGit(args, repoRoot, { allowFailure: true });
   }
 }
