@@ -99,7 +99,7 @@ describe('эхо команды в ответе', () => {
     // 34% всех символов в ответах terminal оказались эхом того, что модель уже
     // написала в вызове.
     const workspace = new WorkspaceService(() => undefined);
-    await workspace.open(process.cwd());
+    await workspace.open(dir);
     try {
       const ctx = {
         workspace,
@@ -118,7 +118,7 @@ describe('эхо команды в ответе', () => {
 
   it('длинная команда в ошибке говорит, что делать', async () => {
     const workspace = new WorkspaceService(() => undefined);
-    await workspace.open(process.cwd());
+    await workspace.open(dir);
     try {
       const ctx = {
         workspace,
@@ -160,7 +160,7 @@ describe('отказ инструмента', () => {
 describe('что остаётся в истории от команды', () => {
   async function run(command: string) {
     const workspace = new WorkspaceService(() => undefined);
-    await workspace.open(process.cwd());
+    await workspace.open(dir);
     try {
       const ctx = {
         workspace,

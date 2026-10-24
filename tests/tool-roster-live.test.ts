@@ -1,3 +1,6 @@
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runTool, type ToolContext } from '../src/main/ai/agent-tools';
 import { WorkspaceService } from '../src/main/workspace/workspace';
@@ -28,8 +31,12 @@ describe('скрытое по имени: привычка не должна д�
 
   it('вызов по имени выполняется и набор не растёт', async () => {
     const before = presetToolNames('auto')?.size ?? 0;
+    // Корень — временный каталог, а не сам проект: на проекте 885 МБ
+    // `node_modules` и `fs.watch(recursive)` за ним включается ~440 мс на каждый
+    // `open`, хотя этот тест смотрит только на ростер инструментов.
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-roster-'));
     const ws = new WorkspaceService(() => undefined);
-    await ws.open(process.cwd());
+    await ws.open(root);
     try {
       const ctx = { workspace: ws, signal: new AbortController().signal } as ToolContext;
       const r = await runTool(ctx, 'project_map', JSON.stringify({}));
@@ -39,6 +46,7 @@ describe('скрытое по имени: привычка не должна д�
       expect(presetToolNames('auto')?.size ?? 0).toBe(before);
     } finally {
       ws.dispose();
+      await fs.rm(root, { recursive: true, force: true });
     }
   }, 60_000);
 });

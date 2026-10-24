@@ -1,3 +1,5 @@
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -11,7 +13,7 @@ import { WorkspaceService } from '../src/main/workspace/workspace';
 import { estimateTextTokens } from '../src/shared/context-fit';
 
 /**
- * Бюджет ответов читающих инструментов — на настоящем проекте, с числами.
+ * Бюджет ответов читающих инструментов — на настоящих файлах проекта, с числами.
  *
  * Сторож держит не отдельный инструмент, а свойство: ответ одного вызова не
  * может перевалить за `MAX_OUTPUT_CHARS`. До правок это соблюдали только чтение
@@ -25,18 +27,27 @@ import { estimateTextTokens } from '../src/shared/context-fit';
  * «сколько нашлось — столько и отдадим».
  */
 
-const ROOT = process.cwd();
+const SOURCE_ROOT = process.cwd();
+let ROOT = '';
 let workspace: WorkspaceService;
 const rows: string[] = [];
 const sizes = new Map<string, number>();
 
 beforeAll(async () => {
+  // Корень — временное зеркало исходников, не сам проект: 885 МБ `node_modules`
+  // в корне заставляет `fs.watch(recursive)` перебирать их при каждом `open`
+  // (~440 мс). Цена ответов зависит от ФОРМЫ кода, а не от его веса — те же
+  // файлы под другим корнем дают те же числа. Слежение нужно только для
+  // `search`/`list`/`read`: они идут мимо него.
+  ROOT = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-budget-'));
+  await fs.cp(path.join(SOURCE_ROOT, 'src'), path.join(ROOT, 'src'), { recursive: true });
   workspace = new WorkspaceService(() => undefined);
   await workspace.open(ROOT);
 });
 
-afterAll(() => {
+afterAll(async () => {
   workspace.dispose();
+  await fs.rm(ROOT, { recursive: true, force: true });
   console.log(rows.join('\n'));
 });
 
