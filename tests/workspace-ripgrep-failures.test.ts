@@ -29,12 +29,24 @@ afterEach(async () => {
  * без дисплея идёт в оболочке через PATH — так и происходит в бою. На Windows
  * без оболочки — только `.exe`: ни `rg` без расширения, ни `rg.cmd` спавн не найдёт
  * (ENOENT даже с `PATHEXT`). Шебанг для этого не нужен: Node читает его сам.
+ *
+ * Шебанг `#!/usr/bin/env node` в прогоне тестов врёт: env находит `node` в PATH,
+ * а там под vitest лежит обёртка, которая ДОПИСЫВАЕТ к аргументам свои —
+ * `--require …/vitest/suppress-warnings.cjs`. Наш `rg` работает не по argv, а по
+ * `process.argv[2]`, поэтому такой флаг сжирал позиционный аргумент, скрипт
+ * просыпал SIGTERM, и тест на прерывание падал раз в несколько полных прогонов
+ * («ENOENT» — подпись уборки временного каталога). Поэтому Node зовётся полным
+ * путём, тем же, что у самого vitest.
  */
 async function withFakeRg(body: string): Promise<void> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'chui-rg-fail-'));
   roots.push(dir);
   const file = path.join(dir, 'rg');
-  await fs.writeFile(file, `#!/usr/bin/env node\n${body}\n`, 'utf8');
+  // process.execPath — не «первый node в PATH», а тот бинарник, что сейчас работает.
+  // Номер версии — первым аргументом: иначе обёртка vitest не находит файл и
+  // запускает обычный Node с `--require …/suppress-warnings.cjs`, а тот съедает
+  // позиционный `process.argv[2]`. Голый `--` не спасает: флаг идёт ДО него.
+  await fs.writeFile(file, `#!${process.execPath} --\n${body}\n`, 'utf8');
   await fs.chmod(file, 0o755);
   const previous = process.env.PATH ?? '';
   process.env.PATH = `${dir}${path.delimiter}${previous}`;
