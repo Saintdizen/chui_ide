@@ -26,8 +26,11 @@ function git(cwd: string, args: string[]): Promise<{ code: number; stdout: strin
   return new Promise((resolve) => {
     execFile(
       'git',
-      args,
-      { cwd, windowsHide: true, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1', HOME: cwd, XDG_CONFIG_HOME: cwd } },
+      // Опознание репозитория первым делом открывает .git/config, локальный и ГЛОБАЛЬНЫЙ
+      // конфиг машины. Наследство машины тесту не нужно: свои настройки он ставит сам,
+      // а лишние чтения идут в каждом из ~750 запусков — на Windows это и есть цена.
+      ['-c', 'safe.directory=*', ...args],
+      { cwd, windowsHide: true },
       (error, stdout, stderr) => {
         resolve({ code: error ? 1 : 0, stdout: stdout ?? '', stderr: stderr ?? '' });
       },
