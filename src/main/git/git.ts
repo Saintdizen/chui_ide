@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { promises as fs, readFileSync, statSync, watch, type FSWatcher } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { shell } from 'electron';
+import { app, shell } from 'electron';
 import {
   PushTopic,
   RpcErrorCode,
@@ -77,6 +77,27 @@ import { summarizeRoot, type GitRootFetch, type GitRootSummary } from '../../sha
 import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
+
+/**
+ * Пустой каталог шаблонов git. git кладёт в новый `.git` хук-образец и примеры
+ * ловушек, которые IDE не показывает и никто не исполняет: замер — 50 `init` с
+ * шаблоном 192мс, с пустым каталогом 126мс. Каталог один на машину, поэтому и
+ * живёт рядом с прочим состоянием приложения, а не в репозитории.
+ *
+ * Функция, а не константа: импорт модуля в юнит-тестах не должен трогать `app`
+ * (Electron там нет вовсе). Значение считается на вызове, а `mkdir` перед `init`
+ * подстраховывает первый запуск — git без каталога тоже работает, но пишет
+ * предупреждение в stderr, а его мы показываем как ошибку панели.
+ * Если `app` всё-таки недоступен, шаблоны просто не подставляем: это ускоритель,
+ * а не условие работы.
+ */
+export function gitTemplateDir(): string | undefined {
+  try {
+    return path.join(app.getPath('userData'), 'git-templates');
+  } catch {
+    return undefined;
+  }
+}
 
 const GIT_TIMEOUT_MS = 20_000;
 /** Клонирование зависит от сети: здесь ограничение по времени много больше. */
@@ -269,6 +290,8 @@ export class GitService {
 
   async init(): Promise<GitStatus> {
     const root = this.requireRoot();
+    const templates = gitTemplateDir();
+    if (templates) await fs.mkdir(templates, { recursive: true });
     await this.exec(['init'], root);
     return this.refresh();
   }
@@ -2331,6 +2354,8 @@ export class GitService {
             GIT_TERMINAL_PROMPT: '0',
             GIT_EDITOR: 'true',
             GIT_PAGER: 'cat',
+            // Пустой каталог шаблонов — причина и замер в `gitTemplateDir`.
+            ...(gitTemplateDir() ? { GIT_TEMPLATE_DIR: gitTemplateDir() } : {}),
             // Отдельные вызовы (rebase) подменяют редакторы своими — см. `rebaseInteractive`.
             ...options.env,
           },

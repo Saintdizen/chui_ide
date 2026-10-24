@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { statSync } from 'node:fs';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { PushTopic, type WorkspaceChangedPayload } from '../shared/api';
 import { folderFromCommandLine, type CommandLineFolder } from '../shared/cli';
@@ -9,7 +10,7 @@ import { AgentBrowser } from './browser/agent-browser';
 import { BrowserPanel } from './browser/panel';
 import { DebugService } from './debug/debug';
 import { installDiagnostics } from './diagnostics';
-import { GitService } from './git/git';
+import { GitService, gitTemplateDir } from './git/git';
 import { HostClient } from './ipc/host';
 import { pushToRenderers } from './ipc/push';
 import { openProjectFolder, registerIpc } from './ipc/register';
@@ -210,6 +211,10 @@ if (!app.requestSingleInstanceLock()) {
     );
     // Git ничего не хранит сам: корень берётся у рабочей папки. Статус обновляем
     // по потоку изменений рабочей папки (см. `refreshGitSoon`) и по своим git-операциям.
+    // Каталог шаблонов git может отсутствовать (первый запуск): git прощает
+    // несуществующий путь предупреждением в stderr, а оно попадает в ошибки панели.
+    const templates = gitTemplateDir();
+    if (templates) await mkdir(templates, { recursive: true }).catch(() => undefined);
     const git = new GitService(
       () => workspace.rootPath(),
       (topic, payload) => pushToRenderers(topic, payload),
