@@ -79,7 +79,7 @@ jobs:
       # ВРЕМЕННО (ветка measure/windows-test-time): пофайловое время на Windows.
       # Удалить вместе с веткой — это замер, а не проверка.
       - name: Замер времени по файлам
-        run: npx tsx scripts/test-time-census.ts --runs=3 --top=20
+        run: npx tsx scripts/test-time-census.ts --runs=2 --top=5
 
       # Цифры забираем артефактом: логи шага в API отдаются без токена-владельца.
       - name: Сохранить замер
