@@ -3,8 +3,23 @@ import { defineConfig } from 'vitest/config';
 /**
  * Юнит-тесты чистой логики: то, что не требует Electron и DOM.
  * Проверки интерфейса и процессов живут в `scripts/*-smoke.cjs`.
+ *
+ * Вторая строка была неправдой до 24.10: тесты доходили до electron транзитом
+ * (тест → `git/git.ts` → `git/exec.ts` → `app`), и прогон был зелён только
+ * потому, что пакет лежал на диске. Без него 52 файла из 459 не загружаются и
+ * 506 проверок из 5589 исчезают молча. Теперь electron подменён через alias.
  */
 export default defineConfig({
+  /**
+   * Electron — на подделку, а не в `node_modules`. Зачем alias, а не `vi.mock`
+   * в каждом файле: до electron доходят транзитом, и знать об этом пришлось бы
+   * 52 файлам. См. `tests/mocks/electron.ts`.
+   */
+  resolve: {
+    alias: {
+      electron: new URL('./tests/mocks/electron.ts', import.meta.url).pathname,
+    },
+  },
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
