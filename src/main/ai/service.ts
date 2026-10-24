@@ -1,6 +1,4 @@
 import { createAiQueries } from './queries';
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import {
   ChatStreamEvent,
   RpcErrorCode,
@@ -29,7 +27,6 @@ import { ageStaleResults, ageToolResults } from './age-results';
 import { clipWithRemainder } from './spill';
 import { readCalibration, saveCalibration } from './token-calibration';
 import { compressToolOutput } from '../../shared/output-compress';
-import { formatShortMap } from '../../shared/project-map';
 import {
   modelCapabilities,
   contextWindow,
@@ -68,8 +65,6 @@ import {
   trimMessagesToFit,
 } from '../../shared/context-fit';
 import { agentPrompt } from '../../shared/agent-prompt';
-import { formatMemory } from '../../shared/memory';
-import { formatInstructionFile } from '../../shared/instructions';
 import type { CommitPromptParts } from '../../shared/commit-message';
 import type { TestPromptParts } from '../../shared/test-generation';
 import type { ChatTitleParts } from '../../shared/chat-title';
@@ -79,7 +74,6 @@ import {
   coveredRequest,
   forgetChangedFiles,
   needsConfirm,
-  readStamp,
   rememberRead,
   restoreReads,
   snapshotReads,
@@ -125,11 +119,11 @@ import {
 import { pricingAt } from '../../shared/providers';
 import { repairToolPairs } from '../../shared/chat-sanitize';
 import { ProjectMemory } from './project-memory';
+import { WorkspaceContext } from './workspace-context';
 import type { TelemetryStore } from './telemetry';
 import { createJobRegistry, type JobRegistry } from './jobs';
 import type { SandboxService } from '../sandbox/sandbox';
 import { RpcFailure } from '../ipc/router';
-import { scanProject } from '../project/scan';
 import type { SettingsStore } from '../settings';
 import type { WorkspaceService } from '../workspace/workspace';
 import { selectMcpTools, type McpToolInfo } from '../../shared/mcp';
@@ -163,30 +157,6 @@ import {
   WIDENED_TOOLS,
   type ToolPresetId,
 } from '../../shared/tool-presets';
-
-/**
- * Файлы с правилами проекта — подмешиваются в системный промпт. Читаются все,
- * а не первый найденный: имена разные не потому, что это варианты одного файла,
- * а потому, что так их называют разные инструменты, и в проекте их заводит
- * каждый свой. `.ai_rules` — наше имя, оно читается первым: если человек завёл
- * его, его правила должны стоять выше чужих.
- *
- * Порядок в списке = порядок в промпте: сначала общие правила проекта, потом
- * уточнения инструментов.
- */
-const INSTRUCTION_FILES = ['.ai_rules', 'AGENTS.md', 'CHUI.md', 'CLAUDE.md'];
-/** Потолок на один файл: правила не должны вытеснять саму беседу из окна. */
-const MAX_INSTRUCTIONS_BYTES = 4000;
-/**
- * Потолок на все файлы вместе.
- *
- * Раньше было двадцать тысяч — больше, чем весь набор схем. Правила едут в каждый
- * запрос прогона, а длинный файл работает не лучше: агент ищет в нём нужное тем
- * же поиском, что в любом другом файле проекта. Голова и карта разделов (см.
- * `formatInstructionFile`) дают ориентир, а раздел достаётся `read_file` — один
- * раз, а не на каждом шаге.
- */
-const MAX_INSTRUCTIONS_TOTAL_BYTES = 6000;
 
 /**
  * Сколько раз пробуем спасти шаг, если провайдер ответил «запрос не влез».
@@ -406,19 +376,18 @@ export class AiService {
   }
 
   /**
-   * Карта проекта для промпта. Скан обходит дерево, поэтому держим результат до
-   * смены папки: в каждом запросе обходить проект заново — платить за одно и то
-   * же. Числа поэтому могут отстать от жизни (агент что-то создал) — за свежими
-   * он идёт в `project_map`, который сканирует на каждый вызов.
-   */
-  private mapCache: { root: string; text: string } | null = null;
-
-  /**
    * Память проекта: заметки агента, переживающие беседу. Она нужна и для промпта,
    * и для инструментов. Хранилище можно подменить (проверки пишут в temp-каталог,
    * а не в userData разработчика), поэтому приходит параметром.
    */
   private readonly memory: ProjectMemory;
+
+  /**
+   * Карта проекта, память и правила проекта для системного блока. Держим
+   * объектом, а не набором методов: внутри кэш карты, и он должен переживать
+   * шаги беседы.
+   */
+  private readonly contextBlocks: WorkspaceContext;
 
   constructor(
     private readonly settings: SettingsStore,
@@ -426,6 +395,7 @@ export class AiService {
     memory?: ProjectMemory,
   ) {
     this.memory = memory ?? new ProjectMemory();
+    this.contextBlocks = new WorkspaceContext(this.workspace, this.memory);
     // Поправки оценки токенов переживают перезапуск: без них первые шаги снова
     // промахиваются мимо окна, пока калибровка не наберёт замеры заново.
     this.calibration.load(readCalibration(this.settings.file()));
@@ -738,7 +708,7 @@ export class AiService {
 
     // Карта проекта нужна там, где агент работает с проектом; в «Вопросе»
     // инструментов нет, и обход дерева за наши деньги был бы лишним.
-    const context = await this.buildWorkspaceContext(useTools || planMode);
+    const context = await this.contextBlocks.build(useTools || planMode);
     if (context) messages.push({ role: 'system', content: context });
     // Контекст, который пользователь приложил сам (выделение, файл, ошибки),
     // едет отдельным сообщением: в самом вопросе он мешал бы его читать.
@@ -1738,14 +1708,14 @@ export class AiService {
         const readArgs = call.name === 'read' ? parseToolArguments(call.arguments) : undefined;
         const readPath = readArgs?.ok ? readArgs.value.path : undefined;
         if (typeof readPath === 'string' && needsConfirm(coveredReads, readPath)) {
-          confirmFile(coveredReads, readPath, await this.versionOf(readPath));
+          confirmFile(coveredReads, readPath, await this.contextBlocks.versionOf(readPath));
         }
         // Повтор чтения уже прочитанного диапазона: текст есть выше, не дублируем.
         // После непрозрачного вызова (`terminal`) куски помечены сомнительными: сверяем
         // версию файла с диском — не менялся — «уже прочитано» держится, менялся — забыт.
         let covered = repeated ? undefined : coveredRequest(call.name, call.arguments, coveredReads);
         if (covered && needsConfirm(coveredReads, covered.path)) {
-          const stamp = await this.versionOf(covered.path);
+          const stamp = await this.contextBlocks.versionOf(covered.path);
           if (!confirmFile(coveredReads, covered.path, stamp)) covered = undefined;
         }
         // Перекрытие — не повтор, но и не весь текст заново: просят `1–250`, а
@@ -2458,72 +2428,6 @@ export class AiService {
       baseUrl: betaBaseUrl(provider.baseUrl, provider.strictTools === true),
       apiKey,
     });
-  }
-
-  /**
-   * Карта проекта для промпта: устройство проекта по именам файлов. Пустая
-   * папка, ошибка обхода — карта не добавляется, но правила проекта всё равно
-   * читаются: без карты агент просто спросит её инструментом.
-   */
-  private async projectMapLine(root: string): Promise<string | null> {
-    if (this.mapCache?.root === root) return this.mapCache.text;
-    try {
-      const text = formatShortMap(await scanProject(root));
-      this.mapCache = { root, text };
-      return text;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Версия файла для сверки памяти чтений: `mtimeMs:size` или `undefined`, если
-   * сосчитать нельзя (нет файла, каталог). Зовётся только для покрытия, помеченного
-   * сомнительным, — то есть после `terminal`, а не на каждом чтении.
-   */
-  private async versionOf(target: string): Promise<string | undefined> {
-    try {
-      const stat = await this.workspace.stat(target);
-      return stat.kind === 'file' ? readStamp(stat) : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private async buildWorkspaceContext(withMap: boolean): Promise<string | null> {
-    const root = this.workspace.rootPath();
-    if (!root) return null;
-
-    const parts = [`Рабочая папка проекта: ${root}`];
-    if (withMap) {
-      const map = await this.projectMapLine(root);
-      if (map) parts.push(map);
-    }
-    // Память — рядом с картой: заметки агента переживают беседу и её сжатие, поэтому
-    // их видно в начале каждого ответа. Областей две: заметки проекта и общие — идут
-    // отдельными блоками, чтобы агент не принял глобальную заметку за проектную.
-    const memory = formatMemory(await this.memory.list(root, 'workspace'), 'workspace');
-    if (memory) parts.push(memory);
-    const globalMemory = formatMemory(await this.memory.list(root, 'global'), 'global');
-    if (globalMemory) parts.push(globalMemory);
-    let spent = 0;
-    for (const name of INSTRUCTION_FILES) {
-      if (spent >= MAX_INSTRUCTIONS_TOTAL_BYTES) break;
-      try {
-        const text = await fs.readFile(path.join(root, name), 'utf8');
-        if (!text.trim()) continue;
-
-        // Правила сверх общего потолка не теряем целиком: длинный файл едет
-        // головой и картой разделов — по ней видно, что дальше, и есть чем
-        // попросить продолжение (`read_file`/`search` по этому файлу).
-        const room = Math.min(MAX_INSTRUCTIONS_BYTES, MAX_INSTRUCTIONS_TOTAL_BYTES - spent);
-        parts.push(formatInstructionFile(name, text, room));
-        spent += Math.min(text.length, room);
-      } catch {
-        // файла нет — это нормально
-      }
-    }
-    return parts.join('\n\n');
   }
 }
 
