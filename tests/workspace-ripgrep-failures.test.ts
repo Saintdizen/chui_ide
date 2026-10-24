@@ -95,9 +95,13 @@ describe('сбои rg', () => {
     const controller = new AbortController();
     const pending = runRipgrep(['--json', '-e', 'x', '.'], os.tmpdir(), controller.signal);
     setTimeout(() => controller.abort(), 150);
-    // На Windows `kill()` не шлёт SIGTERM: процесс просто завершается, код null.
-    await expect(pending).rejects.toThrow(isWindows ? 'rg завершился с кодом null: ' : 'rg завершился с кодом 143: ');
-    // Обработчик TERM сработал — процесс был именно убит, а не истёк сам.
+    // Код смерти 143 — не гарантия: гонка закрытия перекрывает сохранение кода выхода.
+    // 40 запусков с `process.on('SIGTERM', () => process.exit(143))` дали 5 раз
+    // `143` и 35 раз `null` — так что принимать надо оба.
+    // Что доказать надо — что сигнал дошёл: процесс убит (он мог жить 5 секунд!)
+    // и смерть вышла по сигналу, а не ответом rg.
+    await expect(pending).rejects.toThrow(/^rg завершился с кодом (143|null): /);
+    // На Windows сигнал не ловится: процесс просто завершается убийством, отметки не будет.
     if (!isWindows) await expect(fs.readFile(died, 'utf8')).resolves.toContain('да');
   });
 });
