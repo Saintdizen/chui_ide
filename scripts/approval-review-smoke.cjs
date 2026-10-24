@@ -5,8 +5,7 @@
  * OpenAI-совместимый, а сервис разбирает его как обычно. Проверяем то, чего не
  * видно в юнит-тестах (там чистый разбор): провод запроса — какая модель взята,
  * что ушло в промпт, сколько сообщений; отказ в сторону вопроса на мусорном
- * ответе и на ошибке сервера; предел времени, после которого решение остаётся
- * за человеком.
+ * ответе и на ошибке сервера; молчание режет сигнал человека, а не свой предел.
  *
  *   npm run smoke:review
  */
@@ -17,7 +16,7 @@ const fs = require('node:fs');
 
 const { AiService } = require('../dist/main/ai/service.js');
 const { isDangerousCommand } = require('../dist/main/ai/agent-tools.js');
-const { shouldReview, REVIEW_TIMEOUT_MS } = require('../dist/shared/approval-review.js');
+const { shouldReview } = require('../dist/shared/approval-review.js');
 const { WorkspaceService } = require('../dist/main/workspace/workspace.js');
 
 let failures = 0;
@@ -155,14 +154,15 @@ async function main() {
 
   mode = 'hang';
   const started = Date.now();
-  const hung = await ai.reviewCommand('ls', '/tmp/project', new AbortController().signal);
+  // Предела времени у проверки больше нет: прогон и так ограничен сигналом
+  // человека, а жёсткий предел рвал нормальный медленный ответ. Своё ждёт
+  // терпеливо; здесь его будит человек через 12с — это и должно произойти.
+  const person = new AbortController();
+  setTimeout(() => person.abort(), 12_000);
+  const hung = await ai.reviewCommand('ls', '/tmp/project', person.signal);
   const waited = Date.now() - started;
   ok('молчащий сервер — не разрешение', hung === null, JSON.stringify(hung));
-  ok(
-    'молчание ограничено своим пределом',
-    waited < REVIEW_TIMEOUT_MS + 3000 && waited >= REVIEW_TIMEOUT_MS - 500,
-    `${waited} мс при пределе ${REVIEW_TIMEOUT_MS}`,
-  );
+  ok('молчание режет сигнал человека', waited < 14_000, `${waited} мс`);
   mode = 'text';
 
   /* ── 5. без провайдера проверять нечем ────────────────────────────────── */

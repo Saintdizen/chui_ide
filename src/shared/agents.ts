@@ -89,10 +89,6 @@ export const MAX_MESSAGE_CHARS = 2000;
 /** Сколько завершённых агентов помним: панель — не архив прогонов. */
 export const MAX_KEPT_AGENTS = 12;
 
-/** Сколько ждём по умолчанию и максимум (`action: "wait"`). */
-export const WAIT_DEFAULT_MS = 120_000;
-export const WAIT_MAX_MS = 300_000;
-
 /** Потолок текста списка для модели: строк на агента немного, но их может быть много. */
 export const MAX_LIST_CHARS = 6000;
 
