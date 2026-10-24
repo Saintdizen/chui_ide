@@ -83,7 +83,7 @@ import {
   execGit,
   gitTemplateDir,
   GIT_TIMEOUT_MS,
-  MAX_BUFFER,
+  runForge,
   MAX_DIFF_BYTES,
   NETWORK_TIMEOUT_MS,
 } from './exec';
@@ -1311,7 +1311,7 @@ export class GitService {
     }
 
     // Клиент есть? Спрашиваем версию: так проверка не зависит от того, куда он поставлен.
-    const version = await this.forgeRun(cli, ['--version'], repoRoot);
+    const version = await runForge(cli, ['--version'], repoRoot);
     if (!version.ok) {
       info.note = `Клиент ${cli} не найден в системе — поставьте его, чтобы видеть ${'запросы на слияние'}`;
       return info;
@@ -1320,12 +1320,12 @@ export class GitService {
 
     // Вход в аккаунт: без него клиент не покажет чужие приватные запросы, но публичные
     // иногда покажет. Если входа нет — так и скажем, а список оставим пустым.
-    const auth = await this.forgeRun(cli, ['auth', 'status'], repoRoot);
+    const auth = await runForge(cli, ['auth', 'status'], repoRoot);
     info.authenticated = auth.ok;
 
     const listing =
       cli === 'gh'
-        ? await this.forgeRun(
+        ? await runForge(
             'gh',
             [
               'pr',
@@ -1337,7 +1337,7 @@ export class GitService {
             ],
             repoRoot,
           )
-        : await this.forgeRun('glab', ['mr', 'list', '--output', 'json', '--per-page', '40'], repoRoot);
+        : await runForge('glab', ['mr', 'list', '--output', 'json', '--per-page', '40'], repoRoot);
 
     if (!listing.ok) {
       info.note = listing.stderr.trim() || listing.stdout.trim() || `Клиент ${cli} не смог получить список`;
@@ -1379,7 +1379,7 @@ export class GitService {
       args.push(...(info.cli === 'gh' ? ['--head', options.source] : ['--source-branch', options.source]));
     if (options.draft) args.push('--draft');
 
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1405,7 +1405,7 @@ export class GitService {
     const n = Math.floor(number);
     if (!Number.isFinite(n) || n <= 0) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Неверный номер запроса');
     const args = info.cli === 'gh' ? ['pr', 'checkout', String(n)] : ['mr', 'checkout', String(n)];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1441,7 +1441,7 @@ export class GitService {
       info.cli === 'gh'
         ? ['pr', 'view', String(n), '--json', 'comments']
         : ['api', `projects/:id/merge_requests/${n}/notes?per_page=100`];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1470,7 +1470,7 @@ export class GitService {
 
     const args =
       info.cli === 'gh' ? ['pr', 'comment', String(n), '--body', text] : ['mr', 'note', String(n), '-m', text];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1504,7 +1504,7 @@ export class GitService {
             'number,title,author,state,url,updatedAt,labels',
           ]
         : ['issue', 'list', '--output', 'json', '--per-page', '40'];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1527,7 +1527,7 @@ export class GitService {
       info.cli === 'gh'
         ? ['issue', 'create', '--title', title, ...(options.body ? ['--body', options.body] : ['--body', ''])]
         : ['issue', 'create', '--title', title, ...(options.body ? ['--description', options.body] : []), '--yes'];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1541,7 +1541,7 @@ export class GitService {
   async forgeIssueClose(number: number): Promise<ForgeIssue[]> {
     const { repoRoot, info } = await this.forgeReady();
     const n = requireRequestNumber(number);
-    const result = await this.forgeRun(info.cli, ['issue', 'close', String(n)], repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, ['issue', 'close', String(n)], repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1560,7 +1560,7 @@ export class GitService {
       info.cli === 'gh'
         ? ['issue', 'view', String(n), '--json', 'comments']
         : ['api', `projects/:id/issues/${n}/notes?per_page=100`];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1579,7 +1579,7 @@ export class GitService {
 
     const args =
       info.cli === 'gh' ? ['issue', 'comment', String(n), '--body', text] : ['issue', 'note', String(n), '-m', text];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1607,7 +1607,7 @@ export class GitService {
             'databaseId,displayTitle,status,conclusion,headBranch,event,createdAt,url',
           ]
         : ['api', 'projects/:id/pipelines?per_page=20'];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1625,7 +1625,7 @@ export class GitService {
     const { repoRoot, info } = await this.forgeReady();
     const n = requireRequestNumber(id);
     const args = info.cli === 'gh' ? ['run', 'rerun', String(n)] : ['ci', 'retry', String(n)];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1645,7 +1645,7 @@ export class GitService {
     if (!info.repo) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Площадка не определена');
     const path = `${info.repo.owner}/${info.repo.repo}`;
     const args = info.cli === 'gh' ? ['api', `repos/${path}/notifications?per_page=50`] : ['api', 'todos?per_page=100'];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1666,7 +1666,7 @@ export class GitService {
       info.cli === 'gh'
         ? ['api', '--method', 'PATCH', `notifications/threads/${thread}`]
         : ['api', '--method', 'POST', `todos/${thread}/mark_as_done`];
-    const result = await this.forgeRun(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
+    const result = await runForge(info.cli, args, repoRoot, NETWORK_TIMEOUT_MS);
     if (!result.ok) {
       throw new RpcFailure(
         RpcErrorCode.Internal,
@@ -1690,36 +1690,6 @@ export class GitService {
       throw new RpcFailure(RpcErrorCode.InvalidParams, `Клиент ${info.cli} не найден в системе`);
     }
     return { repoRoot, info: info as ForgeInfo & { cli: 'gh' | 'glab' } };
-  }
-
-  /**
-   * Запуск консольного клиента площадки (`gh`, `glab`). Сбой — это `ok: false`, а не
-   * исключение: «клиента нет» и «сеть не ответила» — обычные ответы, о которых окно
-   * сообщает словами.
-   */
-  private forgeRun(cli: string, args: string[], cwd: string, timeout = GIT_TIMEOUT_MS): Promise<GitResult> {
-    return new Promise((resolve) => {
-      execFile(
-        cli,
-        args,
-        {
-          cwd,
-          timeout,
-          maxBuffer: MAX_BUFFER,
-          windowsHide: true,
-          env: {
-            ...process.env,
-            // Никаких вопросов и браузера: всё, что требует ввода, не для этого окна.
-            GH_PROMPT_DISABLED: '1',
-            GIT_TERMINAL_PROMPT: '0',
-            NO_COLOR: '1',
-          },
-        },
-        (error, stdout, stderr) => {
-          resolve({ ok: error === null, stdout: stdout ?? '', stderr: stderr ?? '' });
-        },
-      );
-    });
   }
 
   /* ── личность, подпись коммитов и ключи ────────────────────────────────── */

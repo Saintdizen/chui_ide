@@ -86,3 +86,33 @@ export function execGit(
     );
   });
 }
+
+/**
+ * Запуск консольного клиента площадки (`gh`, `glab`). Сбой — это `ok: false`, а не
+ * исключение: «клиента нет» и «сеть не ответила» — обычные ответы, о которых окно
+ * сообщает словами.
+ */
+export function runForge(cli: string, args: string[], cwd: string, timeout = GIT_TIMEOUT_MS): Promise<GitResult> {
+  return new Promise((resolve) => {
+    execFile(
+      cli,
+      args,
+      {
+        cwd,
+        timeout,
+        maxBuffer: MAX_BUFFER,
+        windowsHide: true,
+        env: {
+          ...process.env,
+          // Никаких вопросов и браузера: всё, что требует ввода, не для этого окна.
+          GH_PROMPT_DISABLED: '1',
+          GIT_TERMINAL_PROMPT: '0',
+          NO_COLOR: '1',
+        },
+      },
+      (error, stdout, stderr) => {
+        resolve({ ok: error === null, stdout: stdout ?? '', stderr: stderr ?? '' });
+      },
+    );
+  });
+}
