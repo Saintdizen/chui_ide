@@ -29,7 +29,8 @@ import { parseTagList, type GitTag } from '../../shared/git-tags';
 import { formatRebaseTodo, validateRebaseTodo, type RebaseTodoItem } from '../../shared/git-rebase';
 import { pullModeArgs, type PullMode } from '../../shared/git-pull';
 import { mergeRefDiff, type GitRefDiff } from '../../shared/git-ref-diff';
-import { parseBisectState, type GitBisectState } from '../../shared/git-bisect';
+import { type GitBisectState } from '../../shared/git-bisect';
+import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules';
 import { parseWorktrees, type GitWorktree } from '../../shared/git-worktrees';
 import {
@@ -522,66 +523,33 @@ export class GitService {
 
   /* ── пошаговый поиск багованного коммита (bisect) ──────────────────────── */
 
-  /**
-   * Состояние поиска: идёт ли он, на каком коммите стоит рабочее дерево и сколько
-   * осталось. Идёт ли — узнаём по файлу `BISECT_START` в каталоге git, а остаток и
-   * итог — по тексту, который git пишет в файлы bisect.
-   */
+  /** Контекст для модуля `bisect`: три колбэка, состояние класса наружу не идёт. */
+  private bisectContext(): BisectContext {
+    return {
+      root: () => this.requireRoot(),
+      refresh: () => this.refresh(),
+      gitPath: (repoRoot, name) => this.gitPath(repoRoot, name),
+    };
+  }
+
+  /** Состояние поиска багованного коммита (bisect). */
   async bisectState(): Promise<GitBisectState> {
-    const repoRoot = await this.requireRoot();
-    return this.readBisectState(repoRoot, '');
+    return bisectState(this.bisectContext());
   }
 
   /** Начать поиск: `bad` — известный плохой коммит, `good` — известный хороший. */
   async bisectStart(options: { bad?: string; good?: string } = {}): Promise<GitBisectState> {
-    const repoRoot = await this.requireRoot();
-    const args = ['bisect', 'start'];
-    if (options.bad) args.push(this.commitArg(options.bad));
-    if (options.good) args.push(this.commitArg(options.good));
-    // Берём ОБА потока: git может сказать во stderr (предупреждение), а итог —
-    // в stdout. Выбор «stderr || stdout» терял бы сообщение с виновником.
-    const result = await execGit(args, repoRoot, { allowFailure: true });
-    return this.readBisectState(repoRoot, `${result.stdout}\n${result.stderr}`);
+    return bisectStart(this.bisectContext(), options);
   }
 
   /** Пометить текущий проверяемый коммит хорошим, плохим или пропустить его. */
   async bisectMark(mark: 'good' | 'bad' | 'skip'): Promise<GitBisectState> {
-    const repoRoot = await this.requireRoot();
-    const result = await execGit(['bisect', mark], repoRoot, { allowFailure: true });
-    return this.readBisectState(repoRoot, `${result.stdout}\n${result.stderr}`);
+    return bisectMark(this.bisectContext(), mark);
   }
 
   /** Закончить поиск: ветка возвращается туда, где была до него. */
   async bisectReset(): Promise<GitStatus> {
-    const repoRoot = await this.requireRoot();
-    await execGit(['bisect', 'reset'], repoRoot);
-    return this.refresh();
-  }
-
-  /**
-   * Собрать состояние поиска. Начало поиска определяем по файлу `BISECT_START`:
-   * его git создаёт на время bisect и убирает на `reset`. Текст хода берём из
-   * `BISECT_LOG` (журнал шагов) плюс свежий вывод команды.
-   */
-  private async readBisectState(repoRoot: string, output: string): Promise<GitBisectState> {
-    const startFile = await this.gitPath(repoRoot, 'BISECT_START');
-    const started = startFile ? (await fs.stat(startFile).catch(() => null))?.isFile() === true : false;
-
-    // Журнал идёт в том же формате, что печатает git: разбираем и его, и свежий вывод.
-    const logFile = await this.gitPath(repoRoot, 'BISECT_LOG');
-    const log = logFile ? await fs.readFile(logFile, 'utf8').catch(() => '') : '';
-    const text = `${log}\n${output}`;
-    const parsed = parseBisectState(text, started);
-
-    let current: { hash: string; summary: string } | null = null;
-    if (started) {
-      const head = await execGit(['log', '-1', '--format=%h%x00%s'], repoRoot, { allowFailure: true });
-      const [hash, summary] = head.stdout.trim().split('\u0000');
-      if (hash) current = { hash, summary: summary ?? '' };
-    }
-
-    const message = (output.trim() || (parsed.active ? 'Поиск идёт' : 'Поиск завершён')).trim();
-    return { ...parsed, current, message };
+    return bisectReset(this.bisectContext());
   }
 
   /** Имя ссылки или путь не могут начинаться с `-`: иначе git примет их за флаг. */
