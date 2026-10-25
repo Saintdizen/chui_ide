@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -15,9 +15,20 @@ import { GitService } from '../src/main/git/git';
  */
 
 const roots: string[] = [];
+/** Папка общего репозитория: из `roots` её убирает afterEach, удаляет afterAll. */
+let sharedBase: string | null = null;
 
 afterEach(async () => {
+  // Общий репозиторий живёт весь файл: его папка в `roots` есть, но удаляется
+  // только по afterAll — иначе вторая сцена получила бы удалённый путь.
+  const dirs = roots.splice(0).filter((dir) => dir !== sharedBase);
+  for (const dir of dirs) await fs.rm(dir, { recursive: true, force: true });
+});
+
+afterAll(async () => {
   for (const dir of roots.splice(0)) await fs.rm(dir, { recursive: true, force: true });
+  if (sharedBase) await fs.rm(sharedBase, { recursive: true, force: true });
+  sharedBase = null;
 });
 
 let gitAvailable = true;
@@ -57,18 +68,35 @@ async function withGhScript(body: string): Promise<{ restore: () => void; calls:
   };
 }
 
-async function makeRepo(): Promise<string> {
+/**
+ * Один готовый репозиторий на весь файл. Сценам нужен только адрес `origin` и один
+ * коммит, а создание стоит трёх запусков git; изоляции между сценами не требуется:
+ * ни одна не пишет в файлы и не меняет настройки (проверки читают `calls` заглушки).
+ * Освобождается в afterEach, как и прежде.
+ */
+let sharedRepo: Promise<string> | null = null;
+
+function makeRepo(): Promise<string> {
+  sharedRepo ??= seedRepo();
+  return sharedRepo;
+}
+
+async function seedRepo(): Promise<string> {
   const base = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'chui-forge-repo-')));
   roots.push(base);
+  sharedBase = base;
   const work = path.join(base, 'work');
   await fs.mkdir(work);
+  // `--template=` — пустой шаблон: без него init копирует хуки, и каждый репозиторий
+  // платит за них. Четыре настройки — ОДНОЙ дописью в `.git/config`: пять запусков
+  // `git config` на репозиторий дороже всего остального в этом файле.
   await git(work, ['init', '-q', '--template=']);
-  await git(work, ['config', 'user.email', 'test@example.com']);
-  await git(work, ['config', 'user.name', 'Test']);
-  await git(work, ['config', 'commit.gpgsign', 'false']);
-  // Windows по умолчанию держит autocrlf=true: без этой строки файлы из
-  // рабочей папки приходят с \r\n, и тест сравнивает их с чистым \n.
-  await git(work, ['config', 'core.autocrlf', 'false']);
+  await fs.appendFile(
+    path.join(work, '.git', 'config'),
+    // core.autocrlf=false: Windows по умолчанию держит autocrlf=true, и файлы из
+    // рабочей папки приходят с \r\n, а тест сравнивает их с чистым \n.
+    '[user]\n\temail = test@example.com\n\tname = Test\n[commit]\n\tgpgsign = false\n[core]\n\tautocrlf = false\n',
+  );
   await fs.writeFile(path.join(work, 'a.txt'), 'one\n');
   await git(work, ['add', '-A']);
   await git(work, ['commit', '-q', '-m', 'init']);
