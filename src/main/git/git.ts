@@ -31,6 +31,7 @@ import { pullModeArgs, type PullMode } from '../../shared/git-pull';
 import { mergeRefDiff, type GitRefDiff } from '../../shared/git-ref-diff';
 import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
+import { headText, type InspectContext, reset, revert } from './inspect';
 import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules';
 import { parseWorktrees, type GitWorktree } from '../../shared/git-worktrees';
 import {
@@ -521,9 +522,17 @@ export class GitService {
     return { original, modified, hunks: [] };
   }
 
+  /** Контекст для модуля `inspect`: три колбэка, состояние класса наружу не идёт. */
+  private inspectContext(): InspectContext {
+    return {
+      repositoryRoot: () => this.repositoryRoot(),
+      requireRoot: () => this.requireRoot(),
+      refresh: () => this.refresh(),
+    };
+  }
+
   /* ── пошаговый поиск багованного коммита (bisect) ──────────────────────── */
 
-  /** Контекст для модуля `bisect`: три колбэка, состояние класса наружу не идёт. */
   private bisectContext(): BisectContext {
     return {
       root: () => this.requireRoot(),
@@ -859,10 +868,7 @@ export class GitService {
    * изменений быть не должно); пустая строка — файл новый или без коммитов.
    */
   async headText(filePath: string): Promise<string | null> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) return null;
-    const relative = path.relative(repoRoot, path.resolve(filePath));
-    return this.show(`HEAD:${relative}`, repoRoot);
+    return headText(this.inspectContext(), filePath);
   }
 
   /* ── отложенные изменения (stash) ─────────────────────────────────────── */
@@ -944,17 +950,12 @@ export class GitService {
 
   /** Отменить один коммит новым коммитом с обратными правками. */
   async revert(commit: string): Promise<GitStatus> {
-    const repoRoot = await this.requireRoot();
-    // --no-edit: сообщение берём готовое, редактор не открываем.
-    await execGit(['revert', '--no-edit', this.commitArg(commit)], repoRoot);
-    return this.refresh();
+    return revert(this.inspectContext(), commit);
   }
 
   /** Передвинуть ветку на коммит: soft (только указатель), mixed (+ индекс), hard (+ дерево). */
   async reset(mode: 'soft' | 'mixed' | 'hard', commit: string): Promise<GitStatus> {
-    const repoRoot = await this.requireRoot();
-    await execGit(['reset', `--${mode}`, this.commitArg(commit)], repoRoot);
-    return this.refresh();
+    return reset(this.inspectContext(), mode, commit);
   }
 
   /* ── интерактивный rebase ──────────────────────────────────────────────── */
