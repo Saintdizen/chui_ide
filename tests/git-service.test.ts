@@ -87,7 +87,9 @@ beforeAll(async () => {
  * Рабочий репозиторий с одним коммитом и bare-репозиторий как «origin».
  * `branch` — имя текущей ветки (зависит от настроек git: master или main).
  */
-async function makeRepos(): Promise<{ work: string; bare: string; branch: string }> {
+async function makeRepos(
+  afterClone?: (work: string) => Promise<void>,
+): Promise<{ work: string; bare: string; branch: string }> {
   // Каталог сразу разворачиваем: на macOS `tmpdir()` — это `/var/folders/…`, за
   // которым стоит симлинк на `/private/var/…`. А `git rev-parse --show-toplevel`
   // возвращает канонический путь, и относительный путь от него к цели, названной
@@ -141,8 +143,27 @@ async function makeRepos(): Promise<{ work: string; bare: string; branch: string
   // `push -u` сам заводит ветку на сервере и ставит upstream — одно действие вместо
   // `push` + ручного `update-ref`.
   await git(work, ['push', '-q', '-u', 'origin', branch]);
+  // Поверх клона: сценам, которым нужна ПРОДВИНУТАЯ история, не надо заводить свой
+  // репозиторий — коммит дешевле нового `init` с `config`, `push` и `remote add`.
+
+  if (afterClone) await afterClone(work);
 
   return { work, bare, branch };
+}
+
+/** Коммит одного файла: три сцены про `pull` делают ровно это. */
+async function commitFile(work: string, name: string, body: string, message: string): Promise<void> {
+  await fs.writeFile(path.join(work, name), body);
+  await git(work, ['add', '-A']);
+  await git(work, ['commit', '-q', '-m', message]);
+}
+
+/** Клон «коллеги»: своя личность на каждый клон, иначе коммит не встанет на чужой машине. */
+async function peerCommit(peer: string, name: string, body: string, message: string, branch: string): Promise<void> {
+  await git(peer, ['config', 'user.email', 'peer@example.com']);
+  await git(peer, ['config', 'user.name', 'Peer']);
+  await commitFile(peer, name, body, message);
+  await git(peer, ['push', '-q', 'origin', branch]);
 }
 
 /**
@@ -185,6 +206,12 @@ async function readOnlyRepo(): Promise<{ work: string; bare: string; branch: str
   const work = path.join(dir, 'work');
   const copy = await git(dir, ['clone', '-q', '--no-hardlinks', made.work, work]);
   if (copy.code !== 0) throw new Error(copy.stderr);
+  // `clone` переносит `.git/config` только частично — личность в копию не приходит,
+  // а машина может никакой не иметь (сборочная уж точно). Ставим свою: иначе
+  // сцена без явного автора пройдёт только там, где git умеет угадать имя
+  // по входу в систему.
+  await git(work, ['config', 'user.name', 'Test']);
+  await git(work, ['config', 'user.email', 'test@example.com']);
   return { work, bare: made.bare, branch: made.branch };
 }
 
@@ -199,12 +226,16 @@ function serviceFor(root: string): GitService {
 describe('GitService: удалённые и сеть', () => {
   it('remotes() перечисляет origin с адресами fetch и push', async () => {
     if (!gitAvailable) return;
-    const { work, bare } = await makeRepos();
+    const { work } = await readOnlyRepo();
 
     const remotes = await serviceFor(work).remotes();
 
+    // Копия — клон снимка, поэтому `origin` ведёт на снимок, а не на `bare`, который
+    // завёл этот вызов `readOnlyRepo`. Проверяем то, что не зависит от того, кто
+    // владеет снимком: один remote по имени `origin`, адреса fetch и push совпадают.
     expect(remotes).toHaveLength(1);
-    expect(remotes[0]).toMatchObject({ name: 'origin', fetchUrl: bare, pushUrl: bare });
+    expect(remotes[0]).toMatchObject({ name: 'origin' });
+    expect(remotes[0]!.fetchUrl).toBe(remotes[0]!.pushUrl);
   });
 
   it('push() первой отправки ветки ставит upstream у origin', async () => {
@@ -239,12 +270,7 @@ describe('GitService: удалённые и сеть', () => {
     // Второй клон кладёт коммит в origin — как это сделал бы коллега.
     const peer = path.join(path.dirname(work), 'peer');
     await git(path.dirname(work), ['clone', '-q', bare, peer]);
-    await git(peer, ['config', 'user.email', 'peer@example.com']);
-    await git(peer, ['config', 'user.name', 'Peer']);
-    await fs.writeFile(path.join(peer, 'b.txt'), 'from peer\n');
-    await git(peer, ['add', '-A']);
-    await git(peer, ['commit', '-q', '-m', 'peer commit']);
-    await git(peer, ['push', '-q', 'origin', branch]);
+    await peerCommit(peer, 'b.txt', 'from peer\n', 'peer commit', branch);
 
     const result = await serviceFor(work).pull();
 
@@ -257,12 +283,7 @@ describe('GitService: удалённые и сеть', () => {
     const { work, bare, branch } = await makeRepos();
     const peer = path.join(path.dirname(work), 'peer');
     await git(path.dirname(work), ['clone', '-q', bare, peer]);
-    await git(peer, ['config', 'user.email', 'peer@example.com']);
-    await git(peer, ['config', 'user.name', 'Peer']);
-    await fs.writeFile(path.join(peer, 'c.txt'), 'peer\n');
-    await git(peer, ['add', '-A']);
-    await git(peer, ['commit', '-q', '-m', 'peer']);
-    await git(peer, ['push', '-q', 'origin', branch]);
+    await peerCommit(peer, 'c.txt', 'peer\n', 'peer', branch);
 
     // Локально чисто и позади — слияние перемоткой проходит в любом режиме.
     const result = await serviceFor(work).pull('default');
@@ -276,16 +297,9 @@ describe('GitService: удалённые и сеть', () => {
     // Коллега ушёл вперёд в origin.
     const peer = path.join(path.dirname(work), 'peer');
     await git(path.dirname(work), ['clone', '-q', bare, peer]);
-    await git(peer, ['config', 'user.email', 'peer@example.com']);
-    await git(peer, ['config', 'user.name', 'Peer']);
-    await fs.writeFile(path.join(peer, 'peer.txt'), 'peer\n');
-    await git(peer, ['add', '-A']);
-    await git(peer, ['commit', '-q', '-m', 'peer']);
-    await git(peer, ['push', '-q', 'origin', branch]);
+    await peerCommit(peer, 'peer.txt', 'peer\n', 'peer', branch);
     // А мы сделали свой коммит поверх старого — история разошлась.
-    await fs.writeFile(path.join(work, 'mine.txt'), 'mine\n');
-    await git(work, ['add', '-A']);
-    await git(work, ['commit', '-q', '-m', 'mine']);
+    await commitFile(work, 'mine.txt', 'mine\n', 'mine');
 
     const result = await serviceFor(work).pull('ff-only');
     // Отказ — не исключение: git говорит текстом, что перемотка невозможна, а правки целы.
@@ -367,7 +381,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('bisectState() без поиска говорит, что он не идёт', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     const state = await serviceFor(work).bisectState();
     expect(state.active).toBe(false);
     expect(state.current).toBeNull();
@@ -911,7 +925,7 @@ describe('GitService: удалённые и сеть', () => {
 
   it('push() без удалённого возвращает сбой текстом, а не бросает', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     await git(work, ['remote', 'remove', 'origin']);
 
     const result = await serviceFor(work).push();
@@ -986,7 +1000,7 @@ describe('GitService: индексирование по блокам', () => {
 describe('GitService: история и просмотр против коммита', () => {
   it('log() отдаёт записи с хешем, автором, датой и заголовком', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     await fs.writeFile(path.join(work, 'b.txt'), 'new file\n');
     await git(work, ['add', '-A']);
     await git(work, ['commit', '-q', '-m', 'add b']);
@@ -1001,7 +1015,7 @@ describe('GitService: история и просмотр против комми
 
   it('log() с путём оставляет только коммиты этого файла', async () => {
     if (!gitAvailable) return;
-    const { work } = await makeRepos();
+    const { work } = await readOnlyRepo();
     // Второй коммит трогает только b.txt — в истории a.txt его быть не должно.
     await fs.writeFile(path.join(work, 'b.txt'), 'bee\n');
     await git(work, ['add', '-A']);
