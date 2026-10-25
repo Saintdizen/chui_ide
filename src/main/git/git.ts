@@ -29,6 +29,8 @@ import { mergeRefDiff, type GitRefDiff } from '../../shared/git-ref-diff';
 import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, type InspectContext, reset, revert } from './inspect';
+import { nameArg as gitNameArg, refArg as gitRefArg } from './args';
+import { rawDiff as gitRawDiff } from './diff-text';
 import { RepositoryWatcher } from './repository-watcher';
 import { parseStatus, writeLocalConfig } from './status';
 import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules';
@@ -504,39 +506,13 @@ export class GitService {
     return bisectReset(this.bisectContext());
   }
 
-  /** Имя ссылки или путь не могут начинаться с `-`: иначе git примет их за флаг. */
   private refArg(value: string): string {
-    const text = value.trim();
-    if (!text) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задана ссылка для сравнения');
-    if (text.startsWith('-')) throw new RpcFailure(RpcErrorCode.InvalidParams, `Некорректная ссылка: ${text}`);
-    return text;
+    return gitRefArg(value);
   }
 
-  /**
-   * Сырой унифицированный diff файла от git. Контекст задаём сами, а не берём из
-   * настроек git: инструмент отдаёт текст модели, и у человека в `diff.context`
-   * может стоять 25 строк — тогда больше половины отведённого места уйдёт на
-   * неизменённый текст (на нашем репозитории такой конфиг раздувает diff в 2,5
-   * раза — 769 КБ против 298 КБ). `-U3` — обычная норма, её же ждёт модель, читая
-   * хунки, и те же границы блоков видит интерфейс. `--no-color` — цвет в ответе
-   * инструмента не нужен; `--no-ext-diff` — иначе `diff.external` подменил бы
-   * вывод чужой программой, а нам нужен именно унифицированный diff.
-   */
-  private async rawDiff(
-    relative: string,
-    repoRoot: string,
-    target: { staged: boolean; commit?: string },
-  ): Promise<string> {
-    // Пустая строка — «без ограничения по пути»: так просят весь diff. Маркер `--`
-    // обязателен, иначе git примет имя файла за ссылку.
-    const scope = relative ? ['--', relative] : [];
-    const args = target.commit
-      ? ['diff', target.commit, '-U3', '--no-color', '--no-ext-diff', ...scope]
-      : target.staged
-        ? ['diff', '--cached', '-U3', '--no-color', '--no-ext-diff', ...scope]
-        : ['diff', '-U3', '--no-color', '--no-ext-diff', ...scope];
-    const result = await execGit(args, repoRoot, { allowFailure: true });
-    return result.stdout;
+  /** Сырой diff файла (контекст, цвет, внешний diff — см. diff-text.ts). */
+  private rawDiff(relative: string, repoRoot: string, target: { staged: boolean; commit?: string }): Promise<string> {
+    return gitRawDiff(relative, repoRoot, target);
   }
 
   /**
@@ -1619,12 +1595,8 @@ export class GitService {
     return value;
   }
 
-  /** То же для имени тега. */
   private nameArg(name: string): string {
-    const value = name.trim();
-    if (!value) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задано имя тега');
-    if (value.startsWith('-')) throw new RpcFailure(RpcErrorCode.InvalidParams, `Некорректное имя тега: ${value}`);
-    return value;
+    return gitNameArg(name);
   }
 
   /* ── внутреннее ────────────────────────────────────────────────────────── */
