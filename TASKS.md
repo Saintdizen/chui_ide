@@ -11,10 +11,10 @@
 
 Вне класса уже всё, что проверяется отдельно (`workspace-context.ts`,
 `src/shared/read-coverage.ts`, `git/exec.ts`, `git/forge.ts`, `git/bisect.ts`,
-`git/inspect.ts`).
+`git/inspect.ts`, `git/status.ts`).
 Без повода не затевать: выигрыш здесь только в читаемости, скорость и поведение те же.
 
-- [ ] **`src/main/git/git.ts` — 2 011 строк.** Распил идёт по одному узлу за
+- [ ] **`src/main/git/git.ts` — 1 867 строк.** Распил идёт по одному узлу за
        сессию, методика та же, что на `agent-tools.ts`: grep частоты `this.X(` по
        блоку, брать узел с МАЛОЙ зависимостью от состояния класса. Вынесено так:
        `exec.ts` (запуск git и forge), `forge.ts` (413 строк — задачи, конвейеры,
@@ -22,7 +22,9 @@
        `remotes`, `refresh`), `bisect.ts` (90 строк; `BisectContext` из трёх:
        `root`, `refresh`, `gitPath`), `inspect.ts` (61 строка — `headText`,
        `revert`, `reset`; `InspectContext` из трёх: `repositoryRoot`, `requireRoot`,
-       `refresh`).
+       `refresh`), `status.ts` (140 строк — разбор porcelain=v2, `repositoryMetaDir`,
+       `writeLocalConfig`; ровно ноль обращений к состоянию класса, поэтому резалось
+       без контекста вовсе).
        **Узел кончился, и это замерено.** Оставшиеся блоги (watcher, index/status,
        ветки, worktree, подмодули, личность и ключи) имеют 25–36 вызовов
        `this.repositoryRoot`/`this.requireRoot` на блок — это не узел с малой
