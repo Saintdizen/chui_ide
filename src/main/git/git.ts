@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { promises as fs, watch, type FSWatcher } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { shell } from 'electron';
@@ -29,7 +29,8 @@ import { mergeRefDiff, type GitRefDiff } from '../../shared/git-ref-diff';
 import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, type InspectContext, reset, revert } from './inspect';
-import { parseStatus, repositoryMetaDir, writeLocalConfig } from './status';
+import { RepositoryWatcher } from './repository-watcher';
+import { parseStatus, writeLocalConfig } from './status';
 import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules';
 import { parseWorktrees, type GitWorktree } from '../../shared/git-worktrees';
 import {
@@ -79,12 +80,6 @@ import type { WorkspaceRoot } from '../../shared/workspace-roots';
 import { RpcFailure } from '../ipc/router';
 export { gitTemplateDir } from './exec';
 import { CLONE_TIMEOUT_MS, execGit, gitTemplateDir, GIT_TIMEOUT_MS, MAX_DIFF_BYTES, NETWORK_TIMEOUT_MS } from './exec';
-
-/**
- * Пересчёт статуса после чужой git-операции схлопываем: запись в `.git` идёт
- * пачкой (индекс, ссылка, журнал) - одного пересчёта на пачку хватает.
- */
-const REPOSITORY_WATCH_DEBOUNCE_MS = 300;
 
 /**
  * Редактор списка шагов для `git rebase -i`: кладёт наш готовый список на место
@@ -138,11 +133,7 @@ interface GitResult {
  */
 
 export class GitService {
-  /** Наблюдение за метаданными репозитория: показывает чужие коммиты в дереве. */
-  private watcher: FSWatcher | null = null;
-  /** Корень, за метаданными которого следим: чтобы не пересоздавать на каждый статус. */
-  private watchedRoot: string | null = null;
-  private watchTimer: NodeJS.Timeout | null = null;
+  private readonly watcher: RepositoryWatcher;
 
   constructor(
     private readonly root: () => string | null,
@@ -155,60 +146,14 @@ export class GitService {
      *
      * Без обработчика слежение не заводим: уведомлять некого.
      */
-    private readonly onRepositoryChange: (() => void) | null = null,
-  ) {}
-
-  /**
-   * Следить за метаданными репозитория активного корня.
-   *
-   * Зачем отдельно от общего наблюдения за рабочей папкой: коммит из терминала или
-   * чужого инструмента меняет `.git/HEAD` и `.git/index`, но не файлы дерева - правки
-   * в проводнике не появятся, а пометки git застынут. Общий наблюдатель за корнем
-   * такие события ловит не всегда (буфер inotify переполняется на пачках правок), а
-   * тут файлов мало и события редкие.
-   */
-  private syncWatcher(repoRoot: string | null): void {
-    if (!this.onRepositoryChange || repoRoot === this.watchedRoot) return;
-    this.closeWatcher();
-    this.watchedRoot = repoRoot;
-    if (!repoRoot) return;
-    const gitDir = repositoryMetaDir(repoRoot);
-    if (!gitDir) {
-      this.watchedRoot = null;
-      return;
-    }
-    try {
-      const watcher = watch(gitDir, { recursive: true }, () => this.scheduleRepositoryChange());
-      // Сбой наблюдения - не беда: пометки обновятся по следующему событию папки.
-      watcher.on('error', () => this.closeWatcher());
-      this.watcher = watcher;
-    } catch {
-      // не на всех платформах есть рекурсивное наблюдение - живём без него
-      this.watchedRoot = null;
-    }
-  }
-
-  private scheduleRepositoryChange(): void {
-    if (this.watchTimer) clearTimeout(this.watchTimer);
-    this.watchTimer = setTimeout(() => {
-      this.watchTimer = null;
-      this.onRepositoryChange?.();
-    }, REPOSITORY_WATCH_DEBOUNCE_MS);
-  }
-
-  private closeWatcher(): void {
-    this.watcher?.close();
-    this.watcher = null;
-    this.watchedRoot = null;
-    if (this.watchTimer) {
-      clearTimeout(this.watchTimer);
-      this.watchTimer = null;
-    }
+    onRepositoryChange: (() => void) | null = null,
+  ) {
+    this.watcher = new RepositoryWatcher(onRepositoryChange);
   }
 
   /** Остановить наблюдение за метаданными: вызывается при выходе приложения. */
   dispose(): void {
-    this.closeWatcher();
+    this.watcher.close();
   }
 
   /**
@@ -220,7 +165,7 @@ export class GitService {
     const repoRoot = await this.repositoryRoot(rootPath);
     // Наблюдение ставим по активному корню (его зовут без пути): чужой коммит в
     // другой папке области статус активной не меняет.
-    if (rootPath === undefined) this.syncWatcher(repoRoot);
+    if (rootPath === undefined) this.watcher.sync(repoRoot);
     if (!repoRoot) return { repository: null, files: [] };
 
     const result = await execGit(['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'], repoRoot);
