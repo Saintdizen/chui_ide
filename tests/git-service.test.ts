@@ -4,7 +4,8 @@ import { removeTemp } from './temp';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { GitService, repositoryMetaDir } from '../src/main/git/git';
+import { GitService } from '../src/main/git/git';
+import { repositoryMetaDir } from '../src/main/git/status';
 import { hunkAtLine } from '../src/shared/hunk-lines';
 import { lineChanges } from '../src/shared/git-line-changes';
 

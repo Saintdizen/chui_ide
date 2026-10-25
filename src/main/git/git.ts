@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process';
-import { promises as fs, readFileSync, statSync, watch, type FSWatcher } from 'node:fs';
+import { promises as fs, watch, type FSWatcher } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { shell } from 'electron';
@@ -7,18 +7,15 @@ import {
   PushTopic,
   RpcErrorCode,
   type GitBranch,
-  type GitChange,
   type GitCommit,
   type GitCommitDiff,
   type GitFileHunks,
   type GitCommitInfo,
   type GitConflictParts,
   type GitDiff,
-  type GitFileStatus,
   type GitNetworkResult,
   type GitRebaseResult,
   type GitRemote,
-  type GitRepository,
   type GitStatus,
 } from '../../shared/api';
 import { parseBlamePorcelain, type BlameLine } from '../../shared/git-blame';
@@ -32,6 +29,7 @@ import { mergeRefDiff, type GitRefDiff } from '../../shared/git-ref-diff';
 import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, type InspectContext, reset, revert } from './inspect';
+import { parseStatus, repositoryMetaDir, writeLocalConfig } from './status';
 import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules';
 import { parseWorktrees, type GitWorktree } from '../../shared/git-worktrees';
 import {
@@ -226,7 +224,7 @@ export class GitService {
     if (!repoRoot) return { repository: null, files: [] };
 
     const result = await execGit(['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'], repoRoot);
-    return this.parseStatus(result.stdout, repoRoot);
+    return parseStatus(result.stdout, repoRoot);
   }
 
   /**
@@ -1865,147 +1863,5 @@ export class GitService {
         else reject(new RpcFailure(RpcErrorCode.Internal, `git ${args[0]} завершился с кодом ${code}`, rest.trim()));
       });
     });
-  }
-
-  /* ── разбор `git status --porcelain=v2 -z` ─────────────────────────────── */
-
-  private parseStatus(stdout: string, repoRoot: string): GitStatus {
-    const repository: GitRepository = {
-      root: repoRoot,
-      branch: null,
-      detached: false,
-      head: null,
-      ahead: 0,
-      behind: 0,
-    };
-    const files: GitFileStatus[] = [];
-
-    const applyHeader = (line: string): void => {
-      const body = line.slice(1).trim();
-      const [key, ...rest] = body.split(' ');
-      const value = rest.join(' ');
-      if (key === 'branch.head') {
-        repository.detached = value === '(detached)';
-        repository.branch = value === '(detached)' || value === '' ? null : value;
-      } else if (key === 'branch.oid') {
-        repository.head = value === '(initial)' || value === '' ? null : value.slice(0, 7);
-      } else if (key === 'branch.ab') {
-        const [ahead, behind] = value.split(' ');
-        repository.ahead = Math.abs(Number(ahead ?? 0)) || 0;
-        repository.behind = Math.abs(Number(behind ?? 0)) || 0;
-      }
-    };
-
-    const tokens = stdout.split('\u0000');
-    for (let index = 0; index < tokens.length; index += 1) {
-      let token = tokens[index] ?? '';
-
-      // Шапка приходит строками, разделёнными LF, и может склеиться с первой записью.
-      while (token.startsWith('#')) {
-        const end = token.indexOf('\n');
-        if (end === -1) {
-          applyHeader(token);
-          token = '';
-          break;
-        }
-        applyHeader(token.slice(0, end));
-        token = token.slice(end + 1);
-      }
-
-      if (!token) continue;
-
-      if (token.startsWith('1 ')) {
-        const parts = token.split(' ');
-        files.push(this.makeFile(parts[1] ?? '', parts.slice(8).join(' '), repoRoot));
-      } else if (token.startsWith('2 ')) {
-        // У переименования два пути: новый в самой записи, старый — следующим токеном.
-        const parts = token.split(' ');
-        index += 1;
-        files.push(this.makeFile(parts[1] ?? '', parts.slice(9).join(' '), repoRoot));
-      } else if (token.startsWith('u ')) {
-        const parts = token.split(' ');
-        files.push(this.makeFile('UU', parts.slice(10).join(' '), repoRoot, 'conflicted'));
-      } else if (token.startsWith('? ')) {
-        const relative = token.slice(2);
-        files.push({
-          path: path.join(repoRoot, relative),
-          relative,
-          change: 'untracked',
-          staged: false,
-          unstaged: true,
-        });
-      }
-      // `!` — игнорируемые файлы: в интерфейсе они не нужны.
-    }
-
-    files.sort((a, b) => a.relative.localeCompare(b.relative));
-    return { repository, files };
-  }
-
-  /** `XY` из porcelain: X — индекс, Y — рабочее дерево. */
-  private makeFile(xy: string, relative: string, repoRoot: string, forced?: GitChange): GitFileStatus {
-    const index = xy[0] ?? '.';
-    const worktree = xy[1] ?? '.';
-    const staged = index !== '.' && index !== ' ' && index !== '?';
-    const unstaged = worktree !== '.' && worktree !== ' ';
-
-    let change: GitChange;
-    if (forced) change = forced;
-    else if (index === 'A') change = 'added';
-    else if (index === 'D' || worktree === 'D') change = 'deleted';
-    else if (index === 'R') change = 'renamed';
-    else change = 'modified';
-
-    return { path: path.join(repoRoot, relative), relative, change, staged, unstaged };
-  }
-}
-
-/**
- * Каталог метаданных репозитория: за ним следим, чтобы увидеть чужую git-операцию.
- *
- * У обычного репозитория это `<root>/.git`, но у рабочего дерева (worktree,
- * подмодуль) `.git` — ФАЙЛ со ссылкой `gitdir: <путь>`: тогда идём по ссылке.
- * Не репозиторий или битая ссылка — `null`: следить не за чем.
- */
-export function repositoryMetaDir(repoRoot: string): string | null {
-  const dotGit = path.join(repoRoot, '.git');
-  try {
-    if (statSync(dotGit).isDirectory()) return dotGit;
-    const match = /^gitdir:\s*(.+)$/m.exec(readFileSync(dotGit, 'utf8'));
-    const target = match?.[1]?.trim();
-    if (!target) return null;
-    const dir = path.resolve(repoRoot, target);
-    return statSync(dir).isDirectory() ? dir : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Записать пачку настроек в ЛОКАЛЬНЫЙ конфиг.
- *
- * `git config` принимает ровно один ключ за раз, но файл можно назвать самому:
- * `-f <путь> --replace-all ключ значение`. Значения всё равно раскладывает по
- * разделам сам git — дописывать `.git/config` своим форматом значит портить чужой
- * файл с его комментариями и раскладкой.
- *
- * Снятие идёт отдельной подкомандой `--unset-all`, а не `--replace-all` с пустым
- * значением: второе оставляет в файле ключ с пустым значением, то есть ЦЕЛЫЙ ключ,
- * который потом не отличить от заданного (проверено тестом — он и поймал).
- *
- * Почему в цикле, а не одним вызовом: на меняющих подкомандах git перечитывает
- * конфиг и отказывается брать пары ключ-значение списком (`wrong number of
- * arguments, should be from 2 to 3`). `--local` не нужен: путь назван явно,
- * глобальный конфиг в правке не участвует.
- */
-async function writeLocalConfig(repoRoot: string, patch: Array<{ key: string; value: string }>): Promise<void> {
-  const configPath = path.join(repoRoot, '.git', 'config');
-  for (const item of patch) {
-    const args =
-      item.value === ''
-        ? ['config', '-f', configPath, '--unset-all', item.key]
-        : ['config', '-f', configPath, '--replace-all', item.key, item.value];
-    // Ключа могло и не быть — для нас это не ошибка, тон же, что у `--local --unset`.
-    await execGit(args, repoRoot, { allowFailure: true });
   }
 }
