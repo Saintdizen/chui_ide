@@ -45,15 +45,16 @@
 
 ## Дальше по git.ts (записано 26.10, не сделано)
 
-- [ ] **Конфликты: `markResolved` вынесен (26.10) — остался `reset`.** Шов
-       проверен на одном узле: `conflict.ts` взял `status`+`refresh` и ничего
-       больше, `git.ts` 980 → 974, 63 теста `git-service` зелёные. `reset`
-       берётся тем же `ConflictContext` (тоже не трогает watcher). `merge` и
-       `rebase` в `git.ts` не нашлись вовсе (`grep -i merge` пуст) — прежде чем
-       их переносить, найти, где они живут на самом деле.
-- [ ] **`worktreeAdd`/`worktreeRemove`.** `WorktreeContext` (три метода) уже есть,
-       тянет `gitPath`. Мелочь на 20–40 строк, отдельного коммита не стоит —
-       приклеить к следующему крупному выносу.
+- [x] **Снято замером 26.10: «оставшиеся» пункты уже сделаны.** Два из них — `reset`
+       живёт в `inspect.ts` и идёт через `InspectContext`, `worktreeAdd/Remove/Prune`
+       — в `worktree.ts` через `WorktreesContext`. В `git.ts` от них остались
+       обёртки в одну строку. Проверять так, прежде чем выносить: `grep -rn
+       "export async function ИМЯ" src/main/git/` — тело может быть уже в своём
+       модуле, а в классе только стрелка.
+- [ ] **`git.ts` 980 → 919 (26.10), остаток — 92 обёртки и шов кеша.** Вынесены
+       `markResolved` (`conflict.ts`) и `checkIgnore` (`check-ignore.ts`). Следующий
+       узел искать замером `grep -oE "this\.[a-zA-Z]+" | uniq -c`: частые
+       `this.refresh`/`this.status` — это шов ядра (ниже), а не кандидат на вынос.
 - [ ] **Ядро: `status`/`refresh`/`publish`/watcher — НЕ вынос, а решение.**
        Тут кеш статуса и рассылка `GitChanged`; watcher зовёт `refresh`, а
        `refresh` зовёт `watcher.sync` — обратная связь. Рвать цикл можно только
