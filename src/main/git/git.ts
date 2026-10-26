@@ -49,13 +49,7 @@ import { RepositoryWatcher } from './repository-watcher';
 import { parseStatus, writeLocalConfig } from './status';
 import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules';
 import type { GitWorktree } from '../../shared/git-worktrees';
-import {
-  emptyLfsInfo,
-  normalizeLfsPattern,
-  parseLfsFiles,
-  parseLfsPatterns,
-  type GitLfsInfo,
-} from '../../shared/git-lfs';
+import type { GitLfsInfo } from '../../shared/git-lfs';
 import {
   IDENTITY_CONFIG_PATTERN,
   identityFromConfig,
@@ -93,6 +87,14 @@ import {
 import { summarizeRoot, type GitRootFetch, type GitRootSummary } from '../../shared/git-multiroot';
 import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
+import {
+  lfsInfo as gitLfsInfo,
+  lfsInstall as gitLfsInstall,
+  lfsPull as gitLfsPull,
+  lfsTrack as gitLfsTrack,
+  lfsUntrack as gitLfsUntrack,
+  type LfsContext,
+} from './lfs';
 import { addWorktree, listWorktrees, pruneWorktrees, removeWorktree, type WorktreeContext } from './worktree';
 import { RpcFailure } from '../ipc/router';
 export { gitTemplateDir } from './exec';
@@ -1368,67 +1370,30 @@ export class GitService {
 
   /* ── Git LFS (хранение больших файлов) ─────────────────────────────────── */
 
-  /**
-   * Что знает репозиторий про LFS: доступен ли `git lfs`, какие шаблоны заданы и
-   * какие файлы ведёт хранилище. Без git-lfs не ошибка: окно LFS честно скажет, что
-   * инструмент не найден, и предложит его поставить.
-   */
   async lfsInfo(): Promise<GitLfsInfo> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    // Шаблоны читаем с диска: они нужны и когда сам git-lfs не установлен.
-    const attributes = await fs.readFile(path.join(repoRoot, '.gitattributes'), 'utf8').catch(() => '');
-    const patterns = parseLfsPatterns(attributes);
-
-    const version = await execGit(['lfs', 'version'], repoRoot, { allowFailure: true });
-    if (!version.ok) return emptyLfsInfo(patterns);
-    // `git lfs version` печатает «git-lfs/3.4.0 (GitHub; …)» — берём первое слово.
-    const versionText = version.stdout.trim().split(/\s+/)[0] ?? '';
-
-    const listing = await execGit(['lfs', 'ls-files'], repoRoot, { allowFailure: true });
-    const files = listing.ok ? parseLfsFiles(listing.stdout) : [];
-    return {
-      available: true,
-      configured: patterns.length > 0 || files.length > 0,
-      files,
-      patterns,
-      version: versionText || null,
-    };
+    return gitLfsInfo(this.lfsCtx());
   }
 
-  /** Взять шаблон под LFS: `git lfs track` дописывает строку в `.gitattributes`. */
   async lfsTrack(pattern: string): Promise<GitLfsInfo> {
-    const repoRoot = await this.requireRoot();
-    const clean = normalizeLfsPattern(pattern);
-    if (clean === '' || /\s/.test(clean)) {
-      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Шаблон не должен быть пустым или содержать пробелы');
-    }
-    await execGit(['lfs', 'track', '--', clean], repoRoot);
-    return this.lfsInfo();
+    return gitLfsTrack(this.lfsCtx(), pattern);
   }
 
-  /** Перестать вести шаблон через LFS (`git lfs untrack`). Сами файлы не трогаются. */
   async lfsUntrack(pattern: string): Promise<GitLfsInfo> {
-    const repoRoot = await this.requireRoot();
-    const clean = normalizeLfsPattern(pattern);
-    if (clean === '') throw new RpcFailure(RpcErrorCode.InvalidParams, 'Пустой шаблон');
-    await execGit(['lfs', 'untrack', '--', clean], repoRoot);
-    return this.lfsInfo();
+    return gitLfsUntrack(this.lfsCtx(), pattern);
   }
 
-  /** Подтянуть содержимое LFS-файлов (`git lfs pull`) — как fetch, только для больших файлов. */
+  /** Как fetch, только для больших файлов. */
   async lfsPull(): Promise<GitLfsInfo> {
-    const repoRoot = await this.requireRoot();
-    await execGit(['lfs', 'pull'], repoRoot, { timeout: NETWORK_TIMEOUT_MS });
-    return this.lfsInfo();
+    return gitLfsPull(this.lfsCtx());
   }
 
   /** Подготовить репозиторий к LFS: `git lfs install --local` (ставит хуки). */
   async lfsInstall(): Promise<GitLfsInfo> {
-    const repoRoot = await this.requireRoot();
-    await execGit(['lfs', 'install', '--local'], repoRoot);
-    return this.lfsInfo();
+    return gitLfsInstall(this.lfsCtx());
+  }
+
+  private lfsCtx(): LfsContext {
+    return { repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit) };
   }
 
   /* ── дополнительные рабочие каталоги (worktree) ───────────────────────── */
