@@ -14,7 +14,7 @@
 `git/inspect.ts`, `git/status.ts`, `git/repository-watcher.ts`, `git/args.ts`, `git/diff-text.ts`, `git/apply.ts`, `git/locate.ts`, `git/file-text.ts`, `git/network.ts`, `git/stash.ts`, `git/worktree.ts`, `git/lfs.ts`, `git/sparse.ts`, `git/ssh-keys.ts`, `git/rebase.ts`, `git/submodules.ts`, `git/contexts.ts`, `git/git-context-source.ts`, `git/index-staging.ts`, `git/history.ts`, `git/branches.ts`, `git/net.ts`, `git/clone.ts`, `../tool.ts`).
 Без повода не затевать: выигрыш здесь только в читаемости, скорость и поведение те же.
 
-- [ ] **`src/main/git/git.ts` — 980 строк.** Распил идёт по одному узлу за
+- [ ] **`src/main/git/git.ts` — 862 строки.** Распил идёт по одному узлу за
        сессию, методика та же, что на `agent-tools.ts`: grep частоты `this.X(` по
        блоку, брать узел с МАЛОЙ зависимостью от состояния класса. Вынесено так:
        `exec.ts` (запуск git и forge), `forge.ts` (413 строк — задачи, конвейеры,
@@ -70,11 +70,12 @@ SparseContext, StashContext, SubmoduleContext, WorktreesContext + строка
        обёртки в одну строку. Проверять так, прежде чем выносить: `grep -rn
        "export async function ИМЯ" src/main/git/` — тело может быть уже в своём
        модуле, а в классе только стрелка.
-- [ ] **`git.ts` 980 → 919 (26.10), остаток — 92 обёртки по одной строке.**
+- [x] **`git.ts` 980 → 919 (26.10), остаток — 92 обёртки по одной строке.**
        Вынесены `markResolved` (`conflict.ts`) и `checkIgnore` (`check-ignore.ts`).
        Дальше резать нечего по одному методу: оставшееся — это либо `return
        x(this.yCtx())` (ничего не стоит, кроме строки), либо шов ядра, снятый
-       замером ниже.
+       замером ниже. **Хвост снят 26.10: 919 → 862** (13 выродившихся `*-Ctx()`,
+       70 обращений → `this.gitContext()`); подробности — абзацем выше.
 - [x] **Ядро: `status`/`refresh`/`publish`/watcher — снято замером 26.10.**
        Решать нечего: кеш не нужен. `git status --porcelain=v2 -z` на этом
        репозитории (792 файла, node_modules на месте) — **7.1–8.4 мс**, и это
