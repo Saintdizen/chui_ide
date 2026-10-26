@@ -383,23 +383,79 @@ const ROSTER_EXTRA: Record<string, readonly string[]> = {
   mind: ['text', 'question', 'steps'],
 };
 
-function rosterLine(names: readonly string[]): string {
-  if (names.length === 0) return '';
-  const items = names.map((name) => {
-    const tool = AGENT_TOOLS.find((item) => item.name === name);
-    const required = tool?.inputSchema.required ?? [];
-    // Допустимые значения обязательного поля — часть формы вызова: без них
-    // `browser(action)` не говорит, как называется действие.
-    const shown = required.map((key) => {
-      const values = tool?.inputSchema.properties?.[key]?.enum;
-      return values && values.length > 0 ? `${key}: ${values.join('|')}` : key;
-    });
-    for (const key of ROSTER_EXTRA[name] ?? []) {
-      if (!required.includes(key)) shown.push(`${key}?`);
-    }
-    return shown.length > 0 ? `${name}(${shown.join(', ')})` : `${name}()`;
+/**
+ * Семья терминала — одна запись `terminal(...)`, а не шесть имён подряд.
+ *
+ * Шесть строк стоили 84 токена на каждом шаге, при этом несли ровно одно
+ * знание: что у терминала есть команда, сессия, вывод, ввод, стоп и список.
+ * Раскладка `a|b|c` при этом уже принята в ростере — её читают и модели, и
+ * человек. Имя вызывается как есть: `terminalOpen`, а не `terminal.open` —
+ * разделитель только за то, чтобы не повторять слово «terminal» шесть раз.
+ */
+const ROSTER_FAMILIES: readonly { head: string; rest: readonly string[]; open?: readonly string[] }[] = [
+  { head: 'terminal', rest: ['Open', 'Output', 'Write', 'Stop', 'List'], open: ['cwd?'] },
+];
+
+/** Поля вызова инструмента для ростера: обязательные требуются, `ROSTER_EXTRA` — с `?`. */
+function rosterFields(name: string): string[] {
+  const tool = AGENT_TOOLS.find((item) => item.name === name);
+  const required = tool?.inputSchema.required ?? [];
+  // Допустимые значения обязательного поля — часть формы вызова: без них
+  // `browser(action)` не говорит, как называется действие.
+  const shown = required.map((key) => {
+    const values = tool?.inputSchema.properties?.[key]?.enum;
+    return values && values.length > 0 ? `${key}: ${values.join('|')}` : key;
   });
-  return ` Скрыто по цене, зовётся по имени: ${items.join(', ')}.`;
+  for (const key of ROSTER_EXTRA[name] ?? []) {
+    if (!required.includes(key)) shown.push(`${key}?`);
+  }
+  return shown;
+}
+
+function rosterItem(name: string): string {
+  const shown = rosterFields(name);
+  return shown.length > 0 ? `${name}(${shown.join(', ')})` : `${name}()`;
+}
+
+/**
+ * Инструменты ростера, свёрнутые в семьи: `terminal(Open|…, command, cwd?)`.
+ *
+ * Поля общей шапки (`ROSTER_EXTRA` главы) называют всю семью; поля самих
+ * членов семьи дописываются только те, что есть не у всех — `terminalWrite`
+ * требует `id` и `data`, `terminalStop` — `id`, и молчать о них значит
+ * получить вызов, который откажет на первом же шаге.
+ */
+function rosterItems(names: readonly string[]): string[] {
+  const items: string[] = [];
+  const absorbed = new Set<string>();
+  for (const name of names) {
+    if (absorbed.has(name)) continue;
+    const family = ROSTER_FAMILIES.find(
+      (item) => item.head === name && item.rest.every((tail) => names.includes(name + tail)),
+    );
+    if (!family) {
+      items.push(rosterItem(name));
+      continue;
+    }
+    for (const tail of family.rest) absorbed.add(name + tail);
+    // Шапка — глава плюс поля, общие для всех: они у семьи одинаковые.
+    const head = rosterFields(name);
+    for (const field of family.open ?? []) if (!head.includes(field)) head.push(field);
+    // Поля члена семьи, которых нет в шапке: только обязательные, иначе строка
+    // растёт без пользы (`from?` у `terminalOutput` — подсказка, а не форма).
+    const extra = new Set<string>();
+    for (const tail of family.rest) {
+      for (const field of rosterFields(name + tail)) if (!head.includes(field)) extra.add(field);
+    }
+    const open = [...head, ...extra].join(', ');
+    items.push(`${name}(${family.rest.join('|')}${open ? `, ${open}` : ''})`);
+  }
+  return items;
+}
+
+export function rosterLine(names: readonly string[]): string {
+  if (names.length === 0) return '';
+  return ` Скрыто по цене, зовётся по имени: ${rosterItems(names).join(', ')}.`;
 }
 
 /** Имена для строки ростера: всё, что скрыто от блока `tools`, без докачки схем. */

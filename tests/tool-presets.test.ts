@@ -7,6 +7,7 @@ import {
   TOOL_PRESETS,
   isRosterTool,
   presetToolNames,
+  rosterLine,
   rosterNames,
   sanitizeToolPreset,
   toolPresetAllows,
@@ -189,7 +190,15 @@ describe('наборы инструментов агента', () => {
       // Ростера мало: без формы вызова первый вызов уйдёт наугад, а схема
       // теперь не приедет вовсе (`WIDENED_TOOLS` пуст, п.45) — форма в строке
       // единственное, что увидит модель. Сверяем начало формы.
-      expect(note, `в ростере нет формы ${name}`).toContain(`${name}(`);
+      // Свёрнутые в семью (`terminal(Open|Output|…, command, cwd?)`) ищем по
+      // тексту самой записи: хвост `Output` в ней есть, отдельной `terminalOutput(`
+      // нет. Регулярка жадная: `\w+` иначе отдаёт хвосту лишь последнюю букву.
+      const family = /^(\w+)(Open|Output|Write|Stop|List)$/.exec(name);
+      const record = family ? new RegExp(`(?:^|[ ,:])${family[1]}\\(([^)]*)\\)`).exec(note) : null;
+      const inFamily =
+        family !== null && record !== null && record[1]!.split(/[|,]/).includes(name.slice(family[1].length));
+      const shown = note.includes(`${name}(`) ? `${name}(` : inFamily ? `${family![1]}(` : null;
+      expect(shown, `в ростере нет формы ${name}`).not.toBeNull();
       expect(toolPresetAllows('auto', name), `${name} не должен входить в схемы`).toBe(false);
       // Полный набор не задет: исключение — про цену, а не про возможность.
       expect(toolPresetAllows('full', name)).toBe(true);
@@ -198,6 +207,25 @@ describe('наборы инструментов агента', () => {
         `${name} нет в описании инструментов`,
       ).toBe(true);
     }
+  });
+
+  it('семья терминала едет одной записью, но говорит про обязательные id и data', () => {
+    // Шесть имён подряд стоили 84 токена на каждом шаге и несли одно знание:
+    // «у терминала есть сессия, вывод, ввод, стоп, список». Свёрнуто в
+    // `terminal(Open|Output|…, command, cwd?, id, data)`.
+    const note = toolPresetNote('auto');
+    expect(note).toContain('terminal(Open|Output|Write|Stop|List');
+    // `terminalWrite` без `id` и `data` откажет на первом же вызове, а схемы в
+    // наборе нет — эти поля обязаны быть в строке. `cwd?` — как был, с `?`.
+    expect(note).toContain('cwd?');
+    expect(note).toContain('id');
+    expect(note).toContain('data');
+    // Сворачиваем только то, что правда в ростере целиком: обрезанная семья
+    // обещала бы имена, которых в наборе нет (`terminalList` при выключенном
+    // терминале).
+    const onlyOutput = rosterLine(['terminalOutput']);
+    expect(onlyOutput).toContain('terminalOutput(');
+    expect(onlyOutput).not.toContain('terminal(');
   });
 
   it('инструмент ростера не расширяет набор после вызова', () => {
