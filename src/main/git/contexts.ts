@@ -57,6 +57,13 @@ export interface SnapshotContext {
  */
 export interface WorktreeContext extends SnapshotContext, StatusContext {}
 
+/**
+ * Чтение истории: «что было», а не «что поменять». Ничего не пишет и не
+ * рассылает `GitChanged`, поэтому в контексте только корень репозитория.
+ * `null` от `repositoryRoot` здесь — пустой ответ, а не сбой.
+ */
+export interface HistoryContext extends RepositoryContext {}
+
 /** Удалённые репозитории: `forge.ts` и `network.ts` решают по ним, что показать. */
 export interface RemoteContext {
   remotes(): Promise<GitRemote[]>;

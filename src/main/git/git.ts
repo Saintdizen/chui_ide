@@ -18,14 +18,14 @@ import {
   type GitRemote,
   type GitStatus,
 } from '../../shared/api';
-import { parseBlamePorcelain, type BlameLine } from '../../shared/git-blame';
+import type { BlameLine } from '../../shared/git-blame';
 import { hunkRanges } from '../../shared/git-hunks';
-import { parseReflog, type GitReflogEntry } from '../../shared/git-reflog';
+import type { GitReflogEntry } from '../../shared/git-reflog';
 import type { GitStashEntry } from '../../shared/git-stash';
 import { parseTagList, type GitTag } from '../../shared/git-tags';
 import type { RebaseTodoItem } from '../../shared/git-rebase';
 import { pullModeArgs, type PullMode } from '../../shared/git-pull';
-import { mergeRefDiff, type GitRefDiff } from '../../shared/git-ref-diff';
+import type { GitRefDiff } from '../../shared/git-ref-diff';
 import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, type InspectContext, reset, revert } from './inspect';
@@ -41,9 +41,9 @@ import {
   stashShow as gitStashShow,
   type StashContext,
 } from './stash';
-import { nameArg as gitNameArg, refArg as gitRefArg } from './args';
+import { nameArg as gitNameArg } from './args';
 import { rawDiff } from './diff-text';
-import { readFileText, showFile } from './file-text';
+import { readFileText } from './file-text';
 
 import { RepositoryWatcher } from './repository-watcher';
 import { parseStatus, writeLocalConfig } from './status';
@@ -106,7 +106,8 @@ import {
 } from './lfs';
 import { addWorktree, listWorktrees, pruneWorktrees, removeWorktree, type WorktreesContext } from './worktree';
 import { RpcFailure } from '../ipc/router';
-import type { WorktreeContext } from './contexts';
+import type { HistoryContext, WorktreeContext } from './contexts';
+import { blame, compareRefs, conflictParts, diffRefs, logGraph, logHistory, logText, reflog, show } from './history';
 import { locateFile } from './locate';
 export { gitTemplateDir } from './exec';
 import { CLONE_TIMEOUT_MS, execGit, gitTemplateDir, type GitResult, NETWORK_TIMEOUT_MS } from './exec';
@@ -244,11 +245,11 @@ export class GitService {
     let original: string;
     let modified: string;
     if (commit) {
-      original = await this.show(`${commit}:${relative}`, repoRoot);
+      original = await show(`${commit}:${relative}`, repoRoot);
       modified = await this.readText(absolute);
     } else {
-      original = staged ? await this.show(`HEAD:${relative}`, repoRoot) : await this.show(`:${relative}`, repoRoot);
-      modified = staged ? await this.show(`:${relative}`, repoRoot) : await this.readText(absolute);
+      original = staged ? await show(`HEAD:${relative}`, repoRoot) : await show(`:${relative}`, repoRoot);
+      modified = staged ? await show(`:${relative}`, repoRoot) : await this.readText(absolute);
     }
 
     // Границы блоков нужны интерфейсу: у каждого будет своя кнопка. Считаем из
@@ -276,44 +277,6 @@ export class GitService {
     if (!known) throw new RpcFailure(RpcErrorCode.NotFound, 'У файла нет изменений');
 
     return rawDiff(known.relative, repoRoot, { staged });
-  }
-
-  /**
-   * Сравнение двух ссылок (веток, коммитов, тегов): что между ними изменилось.
-   * Список файлов со статусом и счётчиком строк — его показывает экран «сравнить
-   * ветки», а сам файл открывается уже своим сравнением (`diffRefs`).
-   *
-   * Запускаем ДВЕ команды вместо одной: `--name-status` говорит, что случилось с
-   * файлом, `--numstat` — насколько. Обе с `-z`: тогда пути со спецсимволами
-   * (пробел, кириллица, перевод строки в имени) не ломают разбор.
-   */
-  async compareRefs(base: string, head: string): Promise<GitRefDiff> {
-    const repoRoot = await this.requireRoot();
-    const left = this.refArg(base);
-    const right = this.refArg(head);
-    const names = await execGit(['diff', '--name-status', '-z', left, right], repoRoot);
-    const stats = await execGit(['diff', '--numstat', '-z', left, right], repoRoot);
-    return { base: left, head: right, files: mergeRefDiff(names.stdout, stats.stdout) };
-  }
-
-  /**
-   * Сравнение ОДНОГО файла между двумя ссылками: слева содержимое из `base`,
-   * справа — из `head`. Блоки не считаем: части правки между ветками индексировать
-   * нечего — это просмотр, а не подготовка коммита.
-   */
-  async diffRefs(base: string, head: string, filePath: string): Promise<GitDiff> {
-    const repoRoot = await this.requireRoot();
-    const left = this.refArg(base);
-    const right = this.refArg(head);
-    // Путь приходит абсолютным (как у остальных сравнений) — git же в `ref:путь`
-    // хочет путь от корня репозитория. Уже относительный оставляем как есть.
-    const relative = path.isAbsolute(filePath) ? path.relative(repoRoot, path.resolve(filePath)) : filePath;
-    const target = this.refArg(relative.split(path.sep).join('/'));
-    const [original, modified] = await Promise.all([
-      this.show(`${left}:${target}`, repoRoot),
-      this.show(`${right}:${target}`, repoRoot),
-    ]);
-    return { original, modified, hunks: [] };
   }
 
   /** Контекст для модуля `inspect`: три колбэка, состояние класса наружу не идёт. */
@@ -390,111 +353,6 @@ export class GitService {
   /** Закончить поиск: ветка возвращается туда, где была до него. */
   async bisectReset(): Promise<GitStatus> {
     return bisectReset(this.bisectContext());
-  }
-
-  private refArg(value: string): string {
-    return gitRefArg(value);
-  }
-
-  /**
-   * История коммитов текстом: hash, дата, автор, заголовок. Read-only — нужна
-   * агенту, чтобы понять контекст, не вычитывая файл целиком. Поле `path`
-   * ограничивает историю одним файлом.
-   */
-  async logText(limit = 20, filePath?: string): Promise<string> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    const count = Math.min(Math.max(Math.round(limit) || 20, 1), 100);
-    const args = ['log', `-n${count}`, '--date=short', '--format=%h %ad %an: %s'];
-    if (filePath) args.push('--', path.relative(repoRoot, path.resolve(filePath)));
-
-    // allowFailure: в репозитории без коммитов `git log` завершается ошибкой,
-    // а это не сбой — просто истории ещё нет.
-    const result = await execGit(args, repoRoot, { allowFailure: true });
-    return result.ok ? result.stdout : '';
-  }
-
-  /**
-   * История коммитов в виде записей: хеш, автор, дата, заголовок. Нужна списку
-   * в интерфейсе — в отличие от `logText`, здесь поля разделены, а не собраны
-   * в одну строку. Файл (`path`) ограничивает историю теми коммитами, что его трогали.
-   */
-  async log(limit = 50, filePath?: string): Promise<GitCommit[]> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    const count = Math.min(Math.max(Math.round(limit) || 50, 1), 200);
-    // Поля разделяем байтом US (0x1f), который git вставляет по `%x1f`: автор или
-    // заголовок могут содержать пробелы и двоеточия, и печатный разделитель
-    // рано или поздно совпал бы с текстом.
-    // `%at` — время коммита секундами: по нему лента истории файла ставит коммиты и
-    // снимки редактора в один порядок (`shared/timeline.ts`). Дата без времени для
-    // этого груба: два коммита одного дня встали бы не по порядку.
-    const args = ['log', `-n${count}`, '--date=short', '--format=%h%x1f%at%x1f%ad%x1f%an%x1f%s'];
-    if (filePath) args.push('--', path.relative(repoRoot, path.resolve(filePath)));
-
-    // allowFailure: в репозитории без коммитов `git log` завершается ошибкой,
-    // а это не сбой — просто истории ещё нет.
-    const result = await execGit(args, repoRoot, { allowFailure: true });
-    if (!result.ok) return [];
-
-    const commits: GitCommit[] = [];
-    for (const line of result.stdout.split('\n')) {
-      if (!line) continue;
-      const [hash, seconds, date, author, ...rest] = line.split('\u001f');
-      if (!hash || !date || !author) continue;
-      const at = Number(seconds);
-      commits.push({
-        hash,
-        date,
-        author,
-        summary: rest.join('\u001f'),
-        ...(Number.isFinite(at) && at > 0 ? { at: at * 1000 } : {}),
-      });
-    }
-    return commits;
-  }
-
-  /**
-   * Кто и когда менял строки файла. `range` ограничивает вывод строками — на
-   * большом файле blame целиком никому не нужен. Пустой список — файл не
-   * отслеживается или blame не сложился: это ответ, а не сбой.
-   */
-  async blame(filePath: string, range?: { startLine?: number; endLine?: number }): Promise<BlameLine[]> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    // `-L` требует обе границы: если задана только одна, вторую берём из файла.
-    const relative = path.relative(repoRoot, path.resolve(filePath));
-    const args = ['blame', '--line-porcelain'];
-    const start = range?.startLine;
-    const end = range?.endLine;
-    if (start !== undefined || end !== undefined) {
-      args.push('-L', `${Math.max(start ?? 1, 1)},${Math.max(end ?? start ?? 1, 1)}`);
-    }
-    args.push('--', relative);
-
-    const result = await execGit(args, repoRoot, { allowFailure: true });
-    return result.ok ? parseBlamePorcelain(result.stdout) : [];
-  }
-
-  /**
-   * Три версии конфликтного файла из индекса: общий предок и обе стороны.
-   * Нет объекта в индексе (файл добавлен только одной стороной) — пустая строка:
-   * для интерфейса это «сравнивать не с чем», а не ошибка.
-   */
-  async conflictParts(filePath: string): Promise<GitConflictParts> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    const relative = path.relative(repoRoot, path.resolve(filePath));
-    const [base, ours, theirs] = await Promise.all([
-      this.show(`:1:${relative}`, repoRoot),
-      this.show(`:2:${relative}`, repoRoot),
-      this.show(`:3:${relative}`, repoRoot),
-    ]);
-    return { base, ours, theirs };
   }
 
   /**
@@ -1009,6 +867,44 @@ export class GitService {
     return listSshKeys();
   }
 
+  /* ── история и содержимое ─────────────────────────────────────────────── */
+
+  async logText(limit = 20, filePath?: string): Promise<string> {
+    return logText(this.historyCtx(), limit, filePath);
+  }
+
+  async log(limit = 50, filePath?: string): Promise<GitCommit[]> {
+    return logHistory(this.historyCtx(), limit, filePath);
+  }
+
+  async blame(filePath: string, range?: { startLine?: number; endLine?: number }): Promise<BlameLine[]> {
+    return blame(this.historyCtx(), filePath, range);
+  }
+
+  async conflictParts(filePath: string): Promise<GitConflictParts> {
+    return conflictParts(this.historyCtx(), filePath);
+  }
+
+  async compareRefs(base: string, head: string): Promise<GitRefDiff> {
+    return compareRefs(this.historyCtx(), base, head);
+  }
+
+  async diffRefs(base: string, head: string, filePath: string): Promise<GitDiff> {
+    return diffRefs(this.historyCtx(), base, head, filePath);
+  }
+
+  async reflog(limit = 50): Promise<GitReflogEntry[]> {
+    return reflog(this.historyCtx(), limit);
+  }
+
+  async logGraph(limit = 100): Promise<string> {
+    return logGraph(this.historyCtx(), limit);
+  }
+
+  private historyCtx(): HistoryContext {
+    return this.gitContext();
+  }
+
   /* ── индекс и рабочее дерево ──────────────────────────────────────────── */
 
   async stage(paths: string[]): Promise<GitStatus> {
@@ -1142,37 +1038,6 @@ export class GitService {
     });
   }
 
-  /** Журнал ссылок: свежие записи — первыми. */
-  async reflog(limit = 50): Promise<GitReflogEntry[]> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) return [];
-    const result = await execGit(
-      ['reflog', '--date=short', '-n', String(Math.max(Math.trunc(limit), 1)), '--format=%h%x1f%gd%x1f%ad%x1f%gs'],
-      repoRoot,
-      { allowFailure: true },
-    );
-    const entries = parseReflog(result.stdout);
-    // `--date=short` превращает селектор в `HEAD@{2026-10-12}`, а нам нужна ссылка
-    // на запись: берём номер по порядку вывода — он же и есть её индекс у git.
-    return entries.map((entry, index) => ({ ...entry, ref: `HEAD@{${index}}` }));
-  }
-
-  /**
-   * История в виде графа веток — текстом, как её рисует сам git. Свой разбор
-   * графа не делаем: `--graph` рисует ASCII-схему, а её проще показать как есть,
-   * чем воспроизводить колонки и связи своим кодом.
-   */
-  async logGraph(limit = 100): Promise<string> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) return '';
-    const result = await execGit(
-      ['log', '--graph', '--oneline', '--decorate', '--all', '-n', String(Math.max(Math.trunc(limit), 1))],
-      repoRoot,
-      { allowFailure: true },
-    );
-    return result.stdout;
-  }
-
   /** Имя коммита может начинаться с `-` — тогда git примет его за флаг, а не за ссылку. */
   private commitArg(commit: string): string {
     const value = commit.trim();
@@ -1219,10 +1084,6 @@ export class GitService {
     if (!result.ok) return null;
     const value = result.stdout.trim();
     return value || null;
-  }
-
-  private show(spec: string, cwd: string): Promise<string> {
-    return showFile(spec, cwd);
   }
 
   private readText(absolute: string): Promise<string> {
