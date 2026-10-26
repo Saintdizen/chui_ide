@@ -30,7 +30,7 @@ import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, type InspectContext, reset, revert } from './inspect';
 import { commitDiff, discard, discardHunk, fileHunks, stage, stageHunk, unstage, unstageHunk } from './index-staging';
-
+import { markResolved as gitMarkResolved } from './conflict';
 import { runNetwork } from './network';
 import {
   stashApply as gitStashApply,
@@ -111,7 +111,6 @@ import { fetch, pull, push, remotes } from './net';
 import { clone } from './clone';
 import { branches, checkout, deleteBranch, renameBranch } from './branches';
 import { blame, compareRefs, conflictParts, diffRefs, logGraph, logHistory, logText, reflog, show } from './history';
-import { locateFile } from './locate';
 export { gitTemplateDir } from './exec';
 import { execGit, gitTemplateDir, type GitResult, NETWORK_TIMEOUT_MS, resolveRepositoryRoot } from './exec';
 
@@ -355,14 +354,9 @@ export class GitService {
     return bisectReset(this.bisectContext());
   }
 
-  /**
-   * Отметить конфликт решённым: содержимое рабочего файла уходит в индекс.
-   * Отдельно от `stage`: `add -A` тронул бы и соседние пути, а тут нужен ровно этот.
-   */
+  /** Конфликт решён → `conflict.ts`: `add --` ровно этого пути и свежий статус. */
   async markResolved(filePath: string): Promise<GitStatus> {
-    const { repoRoot, relative } = await locateFile(() => this.status(), filePath);
-    await execGit(['add', '--', relative], repoRoot);
-    return this.refresh();
+    return gitMarkResolved({ status: () => this.status(), refresh: () => this.refresh() }, filePath);
   }
 
   /** Статус плюс рассылка события: любую правку в репозитории UI узнаёт отсюда. */

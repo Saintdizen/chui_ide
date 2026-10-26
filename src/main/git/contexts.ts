@@ -93,3 +93,12 @@ export interface NetContext extends RepositoryContext, RemoteContext, StatusCont
  * контексте и быть не может — только git.
  */
 export type CloneContext = Record<string, never>;
+
+/**
+ * Разрешение конфликтов: отметка файла решённым.
+ *
+ * Свежий статус нужен не для чтения, а как граница: `locateFile` пускает только
+ * файл, о котором git уже что-то говорит, и заодно даёт корень и путь от него.
+ * `refresh` — потому что `git add` меняет индекс, и UI узнаёт об этом из рассылки.
+ */
+export interface ConflictContext extends WorktreeContext {}
