@@ -22,7 +22,7 @@ import {
 import { parseBlamePorcelain, type BlameLine } from '../../shared/git-blame';
 import { hunkPatch, hunkRanges } from '../../shared/git-hunks';
 import { parseReflog, type GitReflogEntry } from '../../shared/git-reflog';
-import { parseStashList, type GitStashEntry } from '../../shared/git-stash';
+import type { GitStashEntry } from '../../shared/git-stash';
 import { parseTagList, type GitTag } from '../../shared/git-tags';
 import { formatRebaseTodo, validateRebaseTodo, type RebaseTodoItem } from '../../shared/git-rebase';
 import { pullModeArgs, type PullMode } from '../../shared/git-pull';
@@ -32,6 +32,15 @@ import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState }
 import { headText, type InspectContext, reset, revert } from './inspect';
 import { applyToIndex as gitApplyToIndex, applyToWorktree as gitApplyToWorktree } from './apply';
 import { type NetworkContext, runNetwork } from './network';
+import {
+  stashApply as gitStashApply,
+  stashDrop as gitStashDrop,
+  stashList as gitStashList,
+  stashPop as gitStashPop,
+  stashSave as gitStashSave,
+  stashShow as gitStashShow,
+  type StashContext,
+} from './stash';
 import { nameArg as gitNameArg, refArg as gitRefArg } from './args';
 import { rawDiff as gitRawDiff } from './diff-text';
 import { readFileText, showFile } from './file-text';
@@ -791,70 +800,36 @@ export class GitService {
 
   /* ── отложенные изменения (stash) ─────────────────────────────────────── */
 
-  /** Список записей stash: свежая — первой. */
   async stashList(): Promise<GitStashEntry[]> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) return [];
-    const result = await execGit(['stash', 'list', '--format=%gd%x1f%gs'], repoRoot, { allowFailure: true });
-    return parseStashList(result.stdout);
+    return gitStashList(this.stashCtx());
   }
 
-  /**
-   * Отложить текущие правки. `git stash push` без изменений ничего не делает
-   * и завершается успешно — это не сбой, а пустой результат.
-   */
+  /** `stash push` без изменений завершается успешно — это пустой результат, не сбой. */
   async stashSave(options: { message?: string; includeUntracked?: boolean } = {}): Promise<GitStatus> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    const args = ['stash', 'push'];
-    if (options.includeUntracked) args.push('--include-untracked');
-    const message = options.message?.trim();
-    if (message) args.push('-m', message);
-    await execGit(args, repoRoot);
-    return this.refresh();
+    return gitStashSave(this.stashCtx(), options);
   }
 
-  /** Применить запись, оставив её в списке. */
   async stashApply(index: number): Promise<GitStatus> {
-    return this.stashOp('apply', index);
+    return gitStashApply(this.stashCtx(), index);
   }
 
-  /** Применить запись и убрать из списка. */
   async stashPop(index: number): Promise<GitStatus> {
-    return this.stashOp('pop', index);
+    return gitStashPop(this.stashCtx(), index);
   }
 
-  /** Удалить запись, не трогая рабочее дерево. */
   async stashDrop(index: number): Promise<GitStatus> {
-    return this.stashOp('drop', index);
+    return gitStashDrop(this.stashCtx(), index);
   }
 
-  /** Полный патч записи — содержимое для просмотра. */
   async stashShow(index: number): Promise<string> {
-    const { repoRoot, ref } = await this.locateStash(index);
-    const result = await execGit(['stash', 'show', '-p', '--no-color', '--no-ext-diff', ref], repoRoot, {
-      allowFailure: true,
-    });
-    // Пусто — в записи нет правок отслеживаемых файлов (бывают только новые):
-    // скажем это словами, а не пустым экраном.
-    return result.stdout.trim() ? result.stdout : 'В этой записи нет правок отслеживаемых файлов.';
+    return gitStashShow(this.stashCtx(), index);
   }
 
-  private async stashOp(op: 'apply' | 'pop' | 'drop', index: number): Promise<GitStatus> {
-    const { repoRoot, ref } = await this.locateStash(index);
-    await execGit(['stash', op, ref], repoRoot);
-    return this.refresh();
-  }
-
-  /** Проверить номер записи и получить её ссылку. */
-  private async locateStash(index: number): Promise<{ repoRoot: string; ref: string }> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-    if (!Number.isInteger(index) || index < 0) {
-      throw new RpcFailure(RpcErrorCode.InvalidParams, 'Номер записи stash — целое число, начиная с нуля');
-    }
-    return { repoRoot, ref: `stash@{${index}}` };
+  private stashCtx(): StashContext {
+    return {
+      repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit),
+      refresh: () => this.refresh(),
+    };
   }
 
   /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
