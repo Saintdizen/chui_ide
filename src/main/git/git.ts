@@ -30,6 +30,7 @@ import { type GitBisectState } from '../../shared/git-bisect';
 import { type BisectContext, bisectMark, bisectReset, bisectStart, bisectState } from './bisect';
 import { headText, type InspectContext, reset, revert } from './inspect';
 import { applyToIndex as gitApplyToIndex, applyToWorktree as gitApplyToWorktree } from './apply';
+import { type NetworkContext, runNetwork } from './network';
 import { nameArg as gitNameArg, refArg as gitRefArg } from './args';
 import { rawDiff as gitRawDiff } from './diff-text';
 import { readFileText, showFile } from './file-text';
@@ -1609,16 +1610,16 @@ export class GitService {
    * отказ авторизации, конфликт слияния) — не исключение, а ответ: `ok: false` и
    * текст от git. Ожидание много больше обычного — здесь ждут сеть.
    */
-  private async network(args: string[]): Promise<GitNetworkResult> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
+  /** Сетевая команда: свой таймаут, «нечего пушить» — не исключение (см. network.ts). */
+  private network(args: string[]): Promise<GitNetworkResult> {
+    return runNetwork(this.networkCtx(), args);
+  }
 
-    const result = await execGit(args, repoRoot, { allowFailure: true, timeout: NETWORK_TIMEOUT_MS });
-    // У push/fetch итог идёт в stderr, у pull — в stdout: берём то, что непусто.
-    const text = (result.stderr.trim() || result.stdout.trim()).trim();
-    const message = text || `git ${args[0]}: выполнено`;
-    const status = await this.refresh();
-    return { ok: result.ok, message, status };
+  private networkCtx(): NetworkContext {
+    return {
+      repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit),
+      refresh: () => this.refresh(),
+    };
   }
 
   private requireRoot(): string {
