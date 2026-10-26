@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runTool } from '../src/main/ai/agent-tools';
+import { unknownTool } from '../src/main/ai/agent-show';
 import { MAX_OUTPUT_CHARS, STEP_OUTPUT_CHARS, stepOutputChars, toolOutputChars } from '../src/main/ai/output-budget';
 import { TOOL_OUTPUT_CHARS } from '../src/main/ai/output-budget';
 import { AGENT_TOOLS } from '../src/shared/tools';
@@ -227,5 +228,38 @@ describe('бюджет шага под окно модели', () => {
       expect(names).toContain(name);
       expect(toolOutputChars(name), `${name} потерял свой потолок`).toBeLessThan(MAX_OUTPUT_CHARS);
     }
+  });
+});
+
+/**
+ * Отказ «инструмента нет» обязан прицеливаться, а не вываливать всё.
+ *
+ * Имя из сохранённой беседы (`read_file`, `apply_patch`) модель копирует, и
+ * подсказка решает, будет шаг потрачен или два: голый список имён заставляет
+ * угадывать форму аргументов, а плоский список всех схем — дамп на 40 форм, в
+ * котором `read` теряется среди `terminal*` именно тогда, когда его и искали.
+ */
+describe('unknownTool: подсказка прицелена', () => {
+  it('похожее имя идёт первым и со своей формой', () => {
+    const out = unknownTool('read_file');
+    expect(out.ok).toBe(false);
+    expect(out.detail).toContain('read(');
+  });
+
+  it('схема похожего стоит раньше остальных', () => {
+    const out = unknownTool('read_file');
+    const detail = out.detail ?? '';
+    const atRead = detail.indexOf('\nПохожие:');
+    const atOthers = detail.indexOf('\nОстальные:');
+    // Похожая секция объявлена до остальных — иначе глаз (модели) до неё не дойдёт.
+    expect(atRead).toBeGreaterThan(-1);
+    if (atOthers > -1) expect(atRead).toBeLessThan(atOthers);
+    expect(detail.slice(atRead, atOthers > -1 ? atOthers : undefined)).toContain('read(');
+  });
+
+  it('непохожее имя не получает пустой подсказки', () => {
+    const out = unknownTool('zzz_nothing');
+    expect(out.detail).toBeTruthy();
+    expect(out.detail).not.toContain('Похожие:');
   });
 });
