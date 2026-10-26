@@ -30,6 +30,7 @@ import { badgeFor, badgeTitle } from '../../shared/icon-badges';
 import { isPinned, normalizePins, togglePin } from '../core/tree-pins';
 import { sortTree } from '../core/tree-sort';
 import { computeWindow } from '../core/tree-window';
+import { filterTreePaths } from '../core/tree-filter';
 import { movePlan } from '../core/tree-move';
 import {
   clickSelection,
@@ -219,6 +220,13 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     const target = event.target as HTMLElement | null;
     // Поле ввода живёт внутри дерева (создание, переименование) — там клавиши чужие.
     if (target?.closest('input, textarea, select') || target?.isContentEditable) return;
+    // Ctrl+F в дереве — фильтр по нему самому, а не поиск по всему проекту.
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      filterInput?.focus();
+      filterInput?.select();
+      return;
+    }
     // Показанная копия забирает свои клавиши первой: она видна, а фокус — в дереве.
     if (deps.peekKey?.(event)) {
       event.preventDefault();
@@ -1158,6 +1166,14 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   let treeEl: HTMLElement | null = null;
   let rowsHost: HTMLElement | null = null;
   let flatRows: FlatRow[] = [];
+  /**
+   * Запрос фильтра дерева. Пусто — показываем всё. Фильтр не трогает свёрнутость
+   * и раскрытие: он лишь решает, какие строки попадут в `flatRows`, поэтому
+   * очистка запроса возвращает дерево ровно в то состояние, в каком оно было.
+   */
+  let filterQuery = '';
+  /** Поле фильтра — нужно, чтобы Ctrl+F из дерева ставил в него фокус. */
+  let filterInput: HTMLInputElement | null = null;
   /** Высота строки в пикселях: меряется по отрисованной строке (зависит от плотности). */
   let rowStride = 0;
   /** Прокрутка: сохраняется между перерисовками — дерево пересобирается целиком. */
@@ -1187,6 +1203,44 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
   /** Наблюдатель один: в `paint` он переводится на новый узел дерева (см. `syncViewport`). */
   const treeResize = new ResizeObserver(syncViewport);
   window.addEventListener('resize', syncViewport);
+
+  /**
+   * Применить запрос фильтра к собранным строкам. Фильтру не нужны группы,
+   * пакеты и виртуальные узлы — только пути, поэтому отдаём ему проекцию
+   * «имя + путь + родитель», а оставшиеся пути возвращаем как есть.
+   *
+   * Родитель считается по пути, а не по глубине: строка вложенного файла
+   * должна поднять из списка свою папку, даже если та нарисована на другом
+   * уровне (пакеты монорепо, несколько корней).
+   */
+  const filtered = (rows: FlatRow[]): FlatRow[] => {
+    if (filterQuery.trim() === '') return rows;
+    const pathOf = (row: FlatRow): string | null => {
+      if (row.kind === 'entry') return row.kind === 'entry' ? row.entry.path : null;
+      if (row.kind === 'package') return row.dir;
+      return null;
+    };
+    const nameOfRow = (row: FlatRow): string | null => {
+      if (row.kind === 'entry') return row.entry.name;
+      if (row.kind === 'package') return row.name;
+      return null;
+    };
+    const projected: { name: string; path: string; parent: string }[] = [];
+    for (const row of rows) {
+      const path = pathOf(row);
+      const name = nameOfRow(row);
+      if (path === null || name === null) continue;
+      const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+      projected.push({ name, path, parent });
+    }
+    const keep = filterTreePaths(projected, filterQuery);
+    return rows.filter((row) => {
+      const path = pathOf(row);
+      // Строки без пути (группы, разделители) не фильтруются: они держат
+      // оформление списка и не несут содержимого.
+      return path === null ? true : keep.has(path);
+    });
+  };
 
   /**
    * Видимые строки дерева в порядке отображения: раскрытые папки, их дети и
@@ -1278,10 +1332,10 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
           if (expanded.has(dir)) pushDir(dir, 1);
         }
         pushDir(info.root, 0, absolute);
-        return rows;
+        return filtered(rows);
       }
       pushDir(info.root, 0);
-      return rows;
+      return filtered(rows);
     }
     for (const item of info.roots) {
       const active = item.root === info.root;
@@ -1289,7 +1343,7 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
       rows.push({ kind: 'root', root: item, active, collapsed });
       if (!collapsed) pushDir(item.root, 1);
     }
-    return rows;
+    return filtered(rows);
   };
 
   /** Собрать узел строки. `null` — строка себя не показывает (её рисует поле ввода). */
@@ -1582,6 +1636,43 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
         // Вместо слова «Проект» — имя папки: заголовок говорит, что открыто,
         // а полный путь лежит в подсказке, чтобы длинное имя не резало кнопки.
         h('span', { class: 'panel-title', title: `${info.name} · ${info.root}` }, info.name),
+        // Поле фильтра живёт в шапке, а не отдельной строкой: дерево начинается
+        // сразу под шапкой, и лишняя строка съедала бы высоту списка.
+        h('input', {
+          class: 'tree-filter',
+          type: 'search',
+          placeholder: 'Фильтр…',
+          title: 'Фильтр по дереву (Ctrl+F)',
+          value: filterQuery,
+          onInput: (event: Event) => {
+            const next = (event.target as HTMLInputElement).value;
+            if (next === filterQuery) return;
+            filterQuery = next;
+            // Перерисовываем только список: заголовок и закреплённые строки от
+            // запроса не зависят, а их пересборка на каждый символ заметна.
+            flatRows = buildFlat(info);
+            visibleNow = [];
+            for (const row of flatRows) {
+              if (row.kind === 'entry' && !row.deleted) visibleNow.push(row.entry.path);
+            }
+            host.replaceChildren();
+            renderWindow();
+          },
+          onKeydown: (event: Event) => {
+            if ((event as KeyboardEvent).key === 'Escape') {
+              event.stopPropagation();
+              filterQuery = '';
+              (event.target as HTMLInputElement).value = '';
+              flatRows = buildFlat(info);
+              visibleNow = [];
+              for (const row of flatRows) {
+                if (row.kind === 'entry' && !row.deleted) visibleNow.push(row.entry.path);
+              }
+              host.replaceChildren();
+              renderWindow();
+            }
+          },
+        }),
         h(
           'div',
           { class: 'panel-actions' },
@@ -1636,6 +1727,8 @@ export function createExplorer(deps: ExplorerDeps): ExplorerView {
     // табом оно не попадает). Фокус нужен, чтобы F2 и Del относились к дереву,
     // а не к редактору: глобальная привязка Delete удаляла бы файл при наборе.
     const tree = h('div', { class: 'tree', tabindex: '-1' });
+    // Ссылку на поле фильтра берём после сборки: `h` не умеет `ref`.
+    filterInput = element.querySelector<HTMLInputElement>('.tree-filter');
     treeEl = tree;
     const host = h('div', { class: 'tree-rows' });
     rowsHost = host;

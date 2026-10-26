@@ -1795,6 +1795,37 @@ textarea {
   color: var(--text_color_tertiary);
 }
 
+/* Фильтр по дереву. Живёт в шапке панели между заголовком и кнопками, поэтому
+   растягивается по остатку ширины, а не занимает свою строку: дерево начинается
+   сразу под шапкой. Высота меньше кнопок (18px против 22), чтобы шапка не
+   подрастала и нижняя граница дерева не съезжала при появлении поля. */
+.tree-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 18px;
+  margin: 0 4px;
+  padding: 0 6px;
+  border: 1px solid var(--border_color);
+  border-radius: var(--radius_xs);
+  background: var(--sunken_background);
+  color: var(--text_color);
+  font-size: var(--font_small_size);
+  font-family: inherit;
+}
+
+.tree-filter:focus {
+  outline: none;
+  border-color: var(--focus_ring_color);
+}
+
+.tree-filter::placeholder {
+  color: var(--text_color_tertiary);
+}
+
+/* Счётчик отфильтрованного не помещаем: строка шапки узкая, и подпись «3 из 40»
+   начала бы резать кнопки. Пустой список говорит сам за себя, а сколько строк
+   скрыто — видно по исчезнувшим папкам. */
+
 .tree-empty-note {
   padding: 2px 8px 6px 24px;
   color: var(--text_color_tertiary);
