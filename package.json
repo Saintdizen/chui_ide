@@ -1,6 +1,6 @@
 {
   "name": "chui-ide",
-  "version": "0.3.54",
+  "version": "0.3.55",
   "private": true,
   "license": "MIT",
   "author": {
@@ -52,6 +52,7 @@
     "probe:markdown": "npm run build && electron scripts/markdown-preview-probe.cjs",
     "probe:office": "npm run build && electron scripts/office-preview-probe.cjs",
     "probe:agents": "npm run build && electron scripts/agents-probe.cjs",
+    "probe:type-bench": "npm run build && electron scripts/type-bench-probe.cjs",
     "probe:colors": "electron scripts/color-probe.cjs",
     "probe:menu": "npm run build:main && electron scripts/menu-probe.cjs",
     "probe:schedule": "npm run build && electron scripts/schedule-probe.cjs",
