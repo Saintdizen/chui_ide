@@ -139,11 +139,7 @@ app.whenReady().then(async () => {
     // Ждём не фиксированное время, а кадр: два rAF подряд значат «отрисовано».
     // Фиксированный settle складывался бы в результат: при settle=40 минимум
     // выходил ровно 40.4 — мерили собственное ожидание, а не работу редактора.
-    await ask(
-      ide,
-      `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r('кадр'))))`,
-      5000,
-    );
+    await ask(ide, `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r('кадр'))))`, 5000);
     await wait(settle > 0 && process.env.SETTLE ? settle : 0);
     return ask(
       ide,
@@ -173,7 +169,9 @@ app.whenReady().then(async () => {
     }
   }
   report.push(`Ввод символа в середине (30), мс: ${JSON.stringify(stats(typeTimes))}`);
-  report.push(`  длинных задач(>50мс): ${typeLong.length}${typeLong.length ? `, худшая ${Math.max(...typeLong)} мс` : ''}`);
+  report.push(
+    `  длинных задач(>50мс): ${typeLong.length}${typeLong.length ? `, худшая ${Math.max(...typeLong)} мс` : ''}`,
+  );
 
   const lineTimes = [];
   for (let i = 0; i < 15; i += 1) {
