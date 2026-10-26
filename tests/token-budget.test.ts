@@ -11,6 +11,7 @@ import {
   rosterNames,
   WIDENED_TOOLS,
   presetToolNames,
+  rosterLine,
   toolPresetNote,
   type ToolPresetId,
 } from '../src/shared/tool-presets';
@@ -226,6 +227,29 @@ describe('бюджет схем', () => {
     for (const preset of TOOL_PRESETS) {
       // Ростер — цена скрытого: строка с именами не может стоить как схемы, которые прячет.
       expect(estimateTextTokens(toolPresetNote(preset.id))).toBeLessThan(290);
+    }
+  });
+
+  /**
+   * Строка ростера — единственное, что модель узнаёт о скрытых инструментах
+   * (схема не едет: `WIDENED_TOOLS` пуст намеренно, докачка ломает кеш префикса).
+   * Поэтому она обязана называть поля, без которых вызов не собрать:
+   * `terminal(Open|…, command, cwd?)` до 26.10 молчала про `background`/`timeout`,
+   * а `task` показывался как `task()` — при том что у него поле с промптом.
+   */
+  it('ростер называет поля, без которых скрытый инструмент не позвать', () => {
+    const line = rosterLine(rosterNames('auto'));
+    const shown = (name: string) => {
+      const start = line.indexOf(`${name}(`);
+      expect(start).toBeGreaterThanOrEqual(0);
+      return line.slice(start, line.indexOf(')', start) + 1);
+    };
+    for (const field of ['command', 'cwd?', 'background?', 'timeout?']) {
+      expect(shown('terminal')).toContain(field);
+    }
+    // У `task` нет обязательных полей — но пустые скобки не рассказывают ничего.
+    for (const field of ['description?', 'prompt?', 'tasks?']) {
+      expect(shown('task')).toContain(field);
     }
   });
 });

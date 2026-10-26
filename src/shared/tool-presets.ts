@@ -372,7 +372,11 @@ export function toolPresetAllows(preset: ToolPresetId, name: string): boolean {
  * выполнять — нет. Такие поля печатаем с `?`, чтобы было видно: необязательны.
  */
 const ROSTER_EXTRA: Record<string, readonly string[]> = {
-  terminal: ['command', 'cwd'],
+  terminal: ['command', 'cwd', 'background', 'timeout'],
+  // У `task` схема без единого обязательного поля, и строка ростера выходила
+  // `task()` — модель не знала даже, что у вызова есть тело промпта, и слала
+  // пустой. Поле зовётся `prompt`, хотя в описании инструмента речь о `task`.
+  task: ['description', 'prompt', 'tasks'],
   mcp: ['server', 'uri'],
   list: ['path', 'glob', 'limit'],
   run_tests: ['target'],
