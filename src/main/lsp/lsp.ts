@@ -1108,8 +1108,13 @@ export class LspService {
    * разбираем здесь, где легенда под рукой: renderer получает готовые участки.
    * Сервера нет, легенды нет или ответ пуст — пустой список: подсветка останется своя.
    */
-  async semanticTokens(path: string): Promise<SemanticToken[]> {
-    const runtime = this.runtimeForPath(path);
+  async semanticTokens(path: string, languageId?: string): Promise<SemanticToken[]> {
+    // Язык берём у вызывающего, а не только из `languageOfPath`: туда пишет
+    // `open`, а он у renderer'а уходит `void`-запросом (см. `LspClient.sendOpen`),
+    // и его приход не гарантирован раньше этого вызова. Без языка `runtimeForPath`
+    // не находил сервер и отдавал пусто — подсветка молча пропадала. Так же
+    // устроен `outline`: язык — аргумент, карта — запасной путь.
+    const runtime = languageId ? await this.runtimeForDocument(path, languageId) : this.runtimeForPath(path);
     if (!runtime) return [];
     await runtime.initialized.catch(() => undefined);
     const legend = semanticLegend(runtime.capabilities.semanticTokensProvider);

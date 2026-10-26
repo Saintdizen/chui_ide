@@ -318,7 +318,7 @@ export interface EditorHostOptions {
    * Семантическая подсветка файла от сервера (`semanticTokens/full`): точные роли поверх
    * своей грамматики (см. `shared/lsp-semantic-tokens.ts`). Не задано — только грамматика.
    */
-  semanticTokens?: (path: string) => Promise<readonly SemanticToken[]>;
+  semanticTokens?: (path: string, languageId: string) => Promise<readonly SemanticToken[]>;
   /**
    * Код-линзы файла от языкового сервера: путь и текст → подписи у строк (см.
    * `shared/lsp-code-lens.ts`). Не задано — линз нет вовсе.
@@ -424,7 +424,9 @@ export class EditorHost {
     | undefined;
   private selectionRequestId = 0;
   /** Семантическая подсветка — от приложения (языковой сервер): источник и номер запроса. */
-  private readonly semanticSource: ((path: string) => Promise<readonly SemanticToken[]>) | undefined;
+  private readonly semanticSource:
+    | ((path: string, languageId: string) => Promise<readonly SemanticToken[]>)
+    | undefined;
   private semanticRequestId = 0;
   private semanticTimer: number | null = null;
   /** Последний ответ по файлам: рисуем из него, клик ищет здесь же. */
@@ -2076,7 +2078,7 @@ export class EditorHost {
     const path = this.path;
     if (!source || !path) return;
     const id = (this.semanticRequestId += 1);
-    const tokens = await source(path).catch(() => []);
+    const tokens = await source(path, this.languageId).catch(() => []);
     // Пока спрашивали, файл сменился — ответ уже не к месту.
     if (id !== this.semanticRequestId || this.path !== path) return;
     this.view.setSemanticTokens(tokens);

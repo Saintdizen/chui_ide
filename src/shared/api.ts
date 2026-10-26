@@ -2641,7 +2641,7 @@ export interface ChuiMethods {
    * Семантическая подсветка файла: точные роли от сервера (см. `LspService.semanticTokens`).
    * Ответ уже разобран в main (там легенда сервера) — renderer получает готовые участки.
    */
-  'lsp.semanticTokens': { params: { path: string }; result: SemanticToken[] };
+  'lsp.semanticTokens': { params: { path: string; languageId?: string }; result: SemanticToken[] };
   /**
    * Отформатировать УЧАСТОК файла (`textDocument/rangeFormatting`): выделение или только
    * что вставленный кусок. Правки с позициями 1-based; пусто — сервер не умеет или менять

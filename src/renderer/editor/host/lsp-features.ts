@@ -427,9 +427,13 @@ export class LspFeatures {
    * Семантическая подсветка файла: точные роли от сервера поверх нашей грамматики
    * (см. `LspService.semanticTokens`). Ответ разобран в main — там легенда сервера, —
    * сюда приходят готовые участки. Пусто — сервер не умеет или файл ему неизвестен.
+   *
+   * `languageId` — не украшение: main ищет сервер по языку документа, а узнать его
+   * кроме как отсюда не может — `lsp.open` у renderer'а уходит `void`-запросом (см.
+   * `LspClient.sendOpen`), и без языка этот вызов мог обогнать его и получить пусто.
    */
-  async semanticTokens(path: string): Promise<SemanticToken[]> {
-    const result = await this.rpc.request('lsp.semanticTokens', { path }).catch(() => null);
+  async semanticTokens(path: string, languageId: string): Promise<SemanticToken[]> {
+    const result = await this.rpc.request('lsp.semanticTokens', { path, languageId }).catch(() => null);
     return Array.isArray(result) ? (result as SemanticToken[]) : [];
   }
 

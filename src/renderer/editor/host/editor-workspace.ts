@@ -146,7 +146,7 @@ export interface EditorWorkspaceOptions {
    */
   selectionRanges?: (path: string, position: { line: number; column: number }) => Promise<readonly SelectionSpan[]>;
   /** Семантическая подсветка от сервера: `LspFeatures.semanticTokens`. */
-  semanticTokens?: (path: string) => Promise<readonly SemanticToken[]>;
+  semanticTokens?: (path: string, languageId: string) => Promise<readonly SemanticToken[]>;
   /** Исполнить команду линзы: её выбирает сервер, а запускает приложение. */
   lensCommand?: (path: string, command: CodeLensCommand) => void;
   /** Подсказки-вставки файла: путь и текст → подсказки (см. `LspFeatures.inlayHints`). */

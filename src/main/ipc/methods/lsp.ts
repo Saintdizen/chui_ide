@@ -74,7 +74,9 @@ export function registerLspMethods(router: RpcRouter, deps: RpcServices): void {
   );
   // Семантическая подсветка: точные роли от сервера. Ответ разобран в main (там легенда),
   // renderer получает готовые участки и накладывает их поверх своей грамматики.
-  router.register('lsp.semanticTokens', (params) => deps.lsp?.semanticTokens(params.path) ?? []);
+  // Язык — от вызывающего: `open` уходит `void`-запросом, и его приход не гарантирован
+  // раньше этого вызова (см. `LspService.semanticTokens`).
+  router.register('lsp.semanticTokens', (params) => deps.lsp?.semanticTokens(params.path, params.languageId) ?? []);
   // Форматирование участка: сервер переписывает только выделение или вставленный кусок.
   router.register(
     'lsp.formatRange',

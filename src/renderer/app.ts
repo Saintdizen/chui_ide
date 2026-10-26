@@ -439,7 +439,7 @@ export async function startApplication(mount: HTMLElement): Promise<void> {
     // выражение, строка, блок) — по ней работают «выделить шире/уже».
     selectionRanges: (path, position) => lsp.selectionRanges(path, position),
     // Семантическая подсветка: точные роли от сервера поверх своей грамматики.
-    semanticTokens: (path) => lsp.semanticTokens(path),
+    semanticTokens: (path, languageId) => lsp.semanticTokens(path, languageId),
     // Знаки-триггеры сервера (`@` в CSS, `:` в JSON): попап открывается сразу по ним.
     completionTriggers: (path) => lsp.completionTriggers(path),
     // Дотягивание подсказки: описание символа подтягивается при выделении строки.
