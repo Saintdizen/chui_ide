@@ -11,10 +11,10 @@
 
 Вне класса уже всё, что проверяется отдельно (`workspace-context.ts`,
 `src/shared/read-coverage.ts`, `git/exec.ts`, `git/forge.ts`, `git/bisect.ts`,
-`git/inspect.ts`, `git/status.ts`, `git/repository-watcher.ts`, `git/args.ts`, `git/diff-text.ts`, `git/apply.ts`, `git/locate.ts`, `git/file-text.ts`, `git/network.ts`, `git/stash.ts`, `git/worktree.ts`, `git/lfs.ts`, `git/sparse.ts`, `git/ssh-keys.ts`, `git/rebase.ts`, `git/submodules.ts`, `git/contexts.ts`, `git/git-context-source.ts`, `../tool.ts`).
+`git/inspect.ts`, `git/status.ts`, `git/repository-watcher.ts`, `git/args.ts`, `git/diff-text.ts`, `git/apply.ts`, `git/locate.ts`, `git/file-text.ts`, `git/network.ts`, `git/stash.ts`, `git/worktree.ts`, `git/lfs.ts`, `git/sparse.ts`, `git/ssh-keys.ts`, `git/rebase.ts`, `git/submodules.ts`, `git/contexts.ts`, `git/git-context-source.ts`, `git/index-staging.ts`, `../tool.ts`).
 Без повода не затевать: выигрыш здесь только в читаемости, скорость и поведение те же.
 
-- [ ] **`src/main/git/git.ts` — 1 403 строки.** Распил идёт по одному узлу за
+- [ ] **`src/main/git/git.ts` — 1 280 строк.** Распил идёт по одному узлу за
        сессию, методика та же, что на `agent-tools.ts`: grep частоты `this.X(` по
        блоку, брать узел с МАЛОЙ зависимостью от состояния класса. Вынесено так:
        `exec.ts` (запуск git и forge), `forge.ts` (413 строк — задачи, конвейеры,
