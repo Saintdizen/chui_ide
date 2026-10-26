@@ -48,7 +48,7 @@ import { locateFile, locatePaths } from './locate';
 import { RepositoryWatcher } from './repository-watcher';
 import { parseStatus, writeLocalConfig } from './status';
 import { parseSubmodules, type GitSubmodule } from '../../shared/git-submodules';
-import { parseWorktrees, type GitWorktree } from '../../shared/git-worktrees';
+import type { GitWorktree } from '../../shared/git-worktrees';
 import {
   emptyLfsInfo,
   normalizeLfsPattern,
@@ -93,6 +93,7 @@ import {
 import { summarizeRoot, type GitRootFetch, type GitRootSummary } from '../../shared/git-multiroot';
 import { COMMIT_DIFF_MAX_CHARS, truncateDiff } from '../../shared/commit-message';
 import type { WorkspaceRoot } from '../../shared/workspace-roots';
+import { addWorktree, listWorktrees, pruneWorktrees, removeWorktree, type WorktreeContext } from './worktree';
 import { RpcFailure } from '../ipc/router';
 export { gitTemplateDir } from './exec';
 import { CLONE_TIMEOUT_MS, execGit, gitTemplateDir, type GitResult, NETWORK_TIMEOUT_MS } from './exec';
@@ -832,6 +833,27 @@ export class GitService {
     };
   }
 
+  async worktrees(): Promise<GitWorktree[]> {
+    return listWorktrees(this.worktreeCtx());
+  }
+
+  async worktreeAdd(target: string, options: { branch?: string; newBranch?: string } = {}): Promise<GitWorktree[]> {
+    return addWorktree(this.worktreeCtx(), target, options);
+  }
+
+  async worktreeRemove(target: string, force = false): Promise<GitWorktree[]> {
+    return removeWorktree(this.worktreeCtx(), target, force);
+  }
+
+  /** Убрать записи о каталогах, которых уже нет на диске. */
+  async worktreePrune(): Promise<GitWorktree[]> {
+    return pruneWorktrees(this.worktreeCtx());
+  }
+
+  private worktreeCtx(): WorktreeContext {
+    return { repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit) };
+  }
+
   /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
 
   /** Перенести один коммит в текущую ветку. */
@@ -1410,50 +1432,6 @@ export class GitService {
   }
 
   /* ── дополнительные рабочие каталоги (worktree) ───────────────────────── */
-
-  /** Список рабочих каталогов репозитория: главный и добавленные. */
-  async worktrees(): Promise<GitWorktree[]> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) return [];
-    const result = await execGit(['worktree', 'list', '--porcelain'], repoRoot, { allowFailure: true });
-    // git отдаёт пути со слэшами ВСЕГДА, даже на Windows. Приводим к разделителям
-    // платформы: иначе путь не совпадёт с тем, что дают fs и остальное приложение.
-    return result.ok ? parseWorktrees(result.stdout).map((item) => ({ ...item, path: path.normalize(item.path) })) : [];
-  }
-
-  /**
-   * Добавить рабочий каталог. С `branch` существующей веткой — выложим её; с
-   * `newBranch` — создадим ветку в новом каталоге. Без них — отделённый указатель.
-   */
-  async worktreeAdd(target: string, options: { branch?: string; newBranch?: string } = {}): Promise<GitWorktree[]> {
-    const repoRoot = await this.requireRoot();
-    const directory = target.trim();
-    if (!directory) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Не задан путь рабочего каталога');
-    const args = ['worktree', 'add'];
-    if (options.newBranch) args.push('-b', this.nameArg(options.newBranch));
-    args.push(directory);
-    if (options.branch) args.push(this.nameArg(options.branch));
-    await execGit(args, repoRoot, { timeout: NETWORK_TIMEOUT_MS });
-    return this.worktrees();
-  }
-
-  /** Удалить рабочий каталог. `force` — когда в нём есть незакоммиченные правки. */
-  async worktreeRemove(target: string, force = false): Promise<GitWorktree[]> {
-    const repoRoot = await this.requireRoot();
-    // Путь начинается с дефиса? Тогда за него примет git — подстрахуемся `--`.
-    const args = ['worktree', 'remove'];
-    if (force) args.push('--force');
-    args.push('--', target);
-    await execGit(args, repoRoot);
-    return this.worktrees();
-  }
-
-  /** Убрать записи о каталогах, которых уже нет на диске. */
-  async worktreePrune(): Promise<GitWorktree[]> {
-    const repoRoot = await this.requireRoot();
-    await execGit(['worktree', 'prune'], repoRoot);
-    return this.worktrees();
-  }
 
   /**
    * Какие из путей git считает игнорируемыми (`.gitignore`). Спрашиваем только про
