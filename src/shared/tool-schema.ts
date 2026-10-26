@@ -138,6 +138,44 @@ export function wrongArguments(schema: JsonSchema, args: Record<string, unknown>
   return wrong;
 }
 
+/**
+ * Отказ по пропущенным полям: только они, с путём и формой — без всей схемы.
+ *
+ * Раньше сюда уезжала схема целиком (`argumentsShape`): ошибка на одном
+ * аргументе приносила в контекст десятки полей, из которых почти все не про
+ * дело, и они оседали в истории до конца диалога. Здесь — точный набор:
+ * `path`, `edits[0].edits`, `run.command`.
+ *
+ * Путь ищется по шагам: точка разделяет поля, `[i]` — элемент массива. Не
+ * нашли (обязательное поле из `if/then`, элемент без `properties`) — показываем
+ * путь как есть, без типа: пустое лучше неверного.
+ */
+export function missingFieldsDetail(tool: string, schema: JsonSchema, missing: readonly string[]): string {
+  const fields = missing.map((path) => {
+    const found = propertyAtPath(schema, path);
+    if (!found) return path;
+    const kind = found.type ?? (found.items ? 'array' : found.properties ? 'object' : 'any');
+    const list = found.enum ? `=${found.enum.join('|')}` : '';
+    return `${path}: ${kind}${list}`;
+  });
+  return `Аргументы ${tool}: нужны ${fields.join(', ')}`;
+}
+
+/** Свойство схемы по пути `edits[0].edits` — или `undefined`, если путь не нашёлся. */
+function propertyAtPath(schema: JsonSchema, path: string): JsonSchemaProperty | undefined {
+  let node: JsonSchemaProperty = schema;
+  for (const step of path.split('.')) {
+    const name = step.replace(/\[\d+\]$/, '');
+    const property = node.properties?.[name];
+    if (!property) return undefined;
+    // `[i]` — спускаемся в элемент массива, иначе остаёмся на самом поле.
+    const next: JsonSchemaProperty | undefined = step.endsWith(']') ? property.items : property;
+    if (!next) return property;
+    node = next;
+  }
+  return node;
+}
+
 /** Схема инструмента по имени — или `undefined`, если имя чужое (MCP). */
 export function toolSpec(name: string): AgentToolSpec | undefined {
   return AGENT_TOOLS.find((tool) => tool.name === name);

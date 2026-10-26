@@ -13,7 +13,14 @@ import { parseSubagentTasks } from '../../shared/subagents';
 import { parseToolArguments } from '../../shared/tools';
 import { estimateTextTokens, isCondenseMarker } from '../../shared/context-fit';
 import { fitOutput } from '../../shared/output-budget';
-import { argumentsShape, describeShape, missingArguments, toolSpec, wrongArguments } from '../../shared/tool-schema';
+import {
+  argumentsShape,
+  describeShape,
+  missingArguments,
+  missingFieldsDetail,
+  toolSpec,
+  wrongArguments,
+} from '../../shared/tool-schema';
 import { canonicalCall } from '../../shared/tool-aliases';
 import { MAX_OUTPUT_CHARS, MAX_OUTPUT_TOKENS, MIN_OUTPUT_CHARS, toolOutputChars } from './output-budget';
 import { spill } from './output-trim';
@@ -141,13 +148,14 @@ export async function runTool(ctx: ToolContext, name: string, rawArguments: stri
     const missing = missingArguments(spec.inputSchema, parsed.value);
     if (missing.length > 0) {
       // Форма — в том же отказе: без неё потерянное поле ищут в неверном месте
-      // (плоский `edit` вместо обёртки `edits: [{path, edits}]`). Сама схема — тоже:
-      // инструменты из ростера (п.45) едут одной строкой, и их формы у модели нет
-      // вовсе — пересказывать её прозой значит потерять имена полей и типы.
+      // (плоский `edit` вместо обёртки `edits: [{path, edits}]`). Но только та её
+      // часть, что относится к пропущенным полям: раньше сюда уезжала СХЕМА
+      // ЦЕЛИКОМ (`argumentsShape`), и ошибка на один аргумент стоила сотен
+      // токенов в контексте, где половина полей была не про дело.
       return {
         ok: false,
         summary: `Не хватает аргумента: ${missing.join(', ')}. Форма: ${describeShape(spec.inputSchema)}`,
-        detail: `Аргументы ${name}: ${argumentsShape(spec.inputSchema)}`,
+        detail: missingFieldsDetail(name, spec.inputSchema, missing),
       };
     }
     // Значение мимо `enum` — тот же класс ошибки, что забытое поле: `switch` ниже
