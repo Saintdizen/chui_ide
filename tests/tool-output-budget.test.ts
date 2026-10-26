@@ -6,6 +6,7 @@ import { runTool } from '../src/main/ai/agent-tools';
 import { MAX_OUTPUT_CHARS, STEP_OUTPUT_CHARS, stepOutputChars, toolOutputChars } from '../src/main/ai/output-budget';
 import type { ToolContext } from '../src/main/ai/tool-context';
 import { WorkspaceService } from '../src/main/workspace/workspace';
+import type { WebFetchRunner } from '../src/main/ai/tool-context';
 import { estimateTextTokens } from '../src/shared/context-fit';
 
 /**
@@ -80,6 +81,46 @@ describe('бюджет ответов инструментов', () => {
       expect(size, `${name}: ${size} символов (потолок ${cap})`).toBeLessThanOrEqual(cap);
     }
   }, 180_000);
+
+  it('отказ режется общим пределом, а не потолком инструмента', async () => {
+    // Потолки `checks: 8_000` и `run_tests: 12_000` ставились под объём вывода,
+    // который читают с конца. Отказ читают с начала: `01_deploy.test.ts ✗` стоит
+    // первой строкой при двух тысячах упавших. Резать его инструментным потолком —
+    // значит отдать модели хвост вместо причины; общий предел (18 000) остаётся,
+    // чтобы отказ не съел весь шаг.
+    //
+    // Отказ настоящий и заведомо длинный: `web fetch` без подключения к сети
+    // доносит сообщение о сбое целиком, а адрес из двух тысяч символов делает это
+    // сообщение длиннее любого инструментного потолка. Бюджет шага не снимаем —
+    // проверяем именно потолок инструмента.
+    const host = `${'a'.repeat(2_000)}.invalid`;
+    const failed: WebFetchRunner = {
+      fetch: async (url) => {
+        throw new Error(`getaddrinfo ENOTFOUND ${url.replace('http://', '')}`);
+      },
+    };
+    const context = {
+      workspace,
+      signal: new AbortController().signal,
+      webFetch: failed,
+    } as ToolContext;
+    const outcome = await runTool(
+      context,
+      'web',
+      JSON.stringify({ action: 'fetch', url: `http://${'a'.repeat(9_000)}.invalid/` }),
+    );
+    const text = outcome.ok ? (outcome.detail ?? outcome.summary ?? '') : (outcome.summary ?? '');
+
+    rows.push(
+      `отказ web:fetch ${text.length} симв. (потолок web ${toolOutputChars('web')}, общий ${MAX_OUTPUT_CHARS})`,
+    );
+    expect(outcome.ok).toBe(false);
+    // Решающая строка: со старым кодом отказ режется до потолка `web` (8 000),
+    // с новым доходит до общего (18 000). Сравниваем с инструментным потолком,
+    // а не только с общим — иначе сторож проходил бы при любом коде.
+    expect(text.length).toBeGreaterThan(toolOutputChars('web'));
+    expect(text.length).toBeLessThanOrEqual(MAX_OUTPUT_CHARS);
+  }, 60_000);
 
   it('умолчания поиска не возвращаются к «сколько нашлось»', async () => {
     // Верхняя граница именно для умолчаний: предел выдачи и склейка блоков

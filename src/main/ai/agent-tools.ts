@@ -304,7 +304,16 @@ function clipOutcome(
   // `read` нужен пачкой файлов. Меняем ТОЛЬКО символы: токенный предел остаётся
   // прежним, иначе `fitOutput` начнёт резать по токенам раньше, чем по символам,
   // и у русского текста с номерами строк выйдет вдвое короче, чем просили.
-  const chars = Math.min(toolOutputChars(name), Math.max(MIN_OUTPUT_CHARS, before?.left ?? MAX_OUTPUT_CHARS));
+  //
+  // Отказу достаётся общий предел, а не инструментный. Потолки `run_tests: 12_000`,
+  // `checks: 8_000` ставились под объём вывода, который читают с конца; отказ — это
+  // текст, который надо прочитать ЦЕЛИКОМ и коротко, а его начало и есть самое
+  // важное: `01_deploy.test.ts ✗` стоит в первой строке вывода при 2 000 падений.
+  // К тому же обрезка отказу не помогает: услуга всё равно позовёт `failureText`
+  // ещё раз (см. ниже), то есть платится дважды, а обрезка ещё и съедала место
+  // у подсказки, где лежит копия.
+  const own = outcome.ok ? toolOutputChars(name) : MAX_OUTPUT_CHARS;
+  const chars = Math.min(own, Math.max(MIN_OUTPUT_CHARS, before?.left ?? MAX_OUTPUT_CHARS));
   const limit = {
     chars,
     tokens: Math.min(
