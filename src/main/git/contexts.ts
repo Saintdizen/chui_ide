@@ -64,6 +64,15 @@ export interface WorktreeContext extends SnapshotContext, StatusContext {}
  */
 export interface HistoryContext extends RepositoryContext {}
 
+/**
+ * Ветки: список, переключение, создание, переименование, удаление.
+ *
+ * `repositoryRoot` — для чтения (нет репозитория → пустой список), а не для
+ * записи: операции переключения и удаления меняют рабочее дерево целиком,
+ * поэтому после них нужен `refresh` с рассылкой, а не свежий статус.
+ */
+export interface BranchContext extends RepositoryContext, StatusContext {}
+
 /** Удалённые репозитории: `forge.ts` и `network.ts` решают по ним, что показать. */
 export interface RemoteContext {
   remotes(): Promise<GitRemote[]>;

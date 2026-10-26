@@ -106,7 +106,8 @@ import {
 } from './lfs';
 import { addWorktree, listWorktrees, pruneWorktrees, removeWorktree, type WorktreesContext } from './worktree';
 import { RpcFailure } from '../ipc/router';
-import type { HistoryContext, WorktreeContext } from './contexts';
+import type { BranchContext, HistoryContext, WorktreeContext } from './contexts';
+import { branches, checkout, deleteBranch, renameBranch } from './branches';
 import { blame, compareRefs, conflictParts, diffRefs, logGraph, logHistory, logText, reflog, show } from './history';
 import { locateFile } from './locate';
 export { gitTemplateDir } from './exec';
@@ -365,43 +366,6 @@ export class GitService {
     return this.refresh();
   }
 
-  async branches(): Promise<GitBranch[]> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) return [];
-
-    const [local, remote] = await Promise.all([
-      execGit(['branch', '--list', '--format=%(refname:short)%09%(HEAD)'], repoRoot),
-      execGit(['branch', '--remotes', '--format=%(refname:short)'], repoRoot),
-    ]);
-
-    const parsed: GitBranch[] = [];
-    for (const line of local.stdout.split('\n')) {
-      const [name, head] = line.split('\t');
-      if (name) parsed.push({ name, current: head?.trim() === '*', remote: false });
-    }
-    for (const line of remote.stdout.split('\n')) {
-      const name = line.trim();
-      if (!name || name.endsWith('/HEAD')) continue;
-      parsed.push({ name, current: false, remote: true });
-    }
-
-    return parsed.sort((a, b) => {
-      if (a.current !== b.current) return a.current ? -1 : 1;
-      if (a.remote !== b.remote) return a.remote ? 1 : -1;
-      return a.name.localeCompare(b.name);
-    });
-  }
-
-  async checkout(name: string, create = false): Promise<GitStatus> {
-    const repoRoot = await this.repositoryRoot();
-    if (!repoRoot) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Это не репозиторий git');
-
-    const branch = name.trim();
-    if (!branch) throw new RpcFailure(RpcErrorCode.InvalidParams, 'Пустое имя ветки');
-    await execGit(create ? ['checkout', '-b', branch] : ['checkout', branch], repoRoot);
-    return this.refresh();
-  }
-
   /**
    * Удалённые репозитории: имя и адреса. Из `git remote -v` собираем карту по
    * имени — одна строка на `(fetch)`, одна на `(push)`.
@@ -654,23 +618,6 @@ export class GitService {
   /* ── ветки, .gitignore и журнал ссылок ────────────────────────────────── */
 
   /**
-   * Удалить ветку. `force` — когда git отказывается: ветка не влита, а человек
-   * всё равно настаивает (это его выбор, но предупредить должно быть в UI).
-   */
-  async deleteBranch(name: string, force = false): Promise<GitStatus> {
-    const repoRoot = await this.requireRoot();
-    await execGit(['branch', force ? '-D' : '-d', this.nameArg(name)], repoRoot);
-    return this.refresh();
-  }
-
-  /** Переименовать ветку (у текущей — без указания старого имени). */
-  async renameBranch(from: string, to: string): Promise<GitStatus> {
-    const repoRoot = await this.requireRoot();
-    await execGit(['branch', '-m', this.nameArg(from), this.nameArg(to)], repoRoot);
-    return this.refresh();
-  }
-
-  /**
    * Добавить пути в `.gitignore` корня репозитория. Уже перечисленные не дублируем,
    * а сам файл создаём, если его ещё нет. Путь пишем от корня и со слэшами: так
    * его понимает gitignore на любой системе.
@@ -865,6 +812,28 @@ export class GitService {
 
   async sshKeys(): Promise<GitSshKey[]> {
     return listSshKeys();
+  }
+
+  /* ── ветки ────────────────────────────────────────────────────────────── */
+
+  async branches(): Promise<GitBranch[]> {
+    return branches(this.branchCtx());
+  }
+
+  async checkout(name: string, create = false): Promise<GitStatus> {
+    return checkout(this.branchCtx(), name, create);
+  }
+
+  async deleteBranch(name: string, force = false): Promise<GitStatus> {
+    return deleteBranch(this.branchCtx(), name, force);
+  }
+
+  async renameBranch(from: string, to: string): Promise<GitStatus> {
+    return renameBranch(this.branchCtx(), from, to);
+  }
+
+  private branchCtx(): BranchContext {
+    return this.gitContext();
   }
 
   /* ── история и содержимое ─────────────────────────────────────────────── */
