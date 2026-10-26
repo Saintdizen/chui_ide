@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { fitOutput, fitOutputLines } from '../src/shared/output-budget';
-import { estimateTextTokens } from '../src/shared/context-fit';
+import { CHARS_PER_TOKEN, CHARS_PER_TOKEN_WIDE, estimateTextTokens } from '../src/shared/context-fit';
 import { runTool } from '../src/main/ai/agent-tools';
 import type { ToolContext } from '../src/main/ai/tool-context';
 import { MAX_OUTPUT_TOKENS } from '../src/main/ai/output-budget';
@@ -48,8 +48,15 @@ describe('ограничение цены результата', () => {
     const result = failureText(outcome);
     expect(result).toMatch(/^Ошибка: /);
     expect(result).not.toContain('Ошибка: Ошибка:');
-    expect(estimateTextTokens(result)).toBeLessThanOrEqual(MAX_OUTPUT_TOKENS);
-    expect(ctx.stepBudget!.tokensLeft).toBe(6000 - estimateTextTokens(result));
+    // Бюджет шага задаётся в ЕДИНИЦАХ УЗКОЙ СТАВКИ — так его читает `outputRoom`.
+    // Считаем ответ той же ставкой: `estimateTextTokens` на кириллице даёт вдвое больше,
+    // и сверять с ним надо не сам потолок, а переведённый в широкую ставку.
+    const narrowTokens = (text: string) =>
+      Math.ceil((estimateTextTokens(text) * CHARS_PER_TOKEN_WIDE) / CHARS_PER_TOKEN);
+    const wideCap = Math.ceil((MAX_OUTPUT_TOKENS * CHARS_PER_TOKEN) / CHARS_PER_TOKEN_WIDE);
+    expect(narrowTokens(result)).toBeLessThanOrEqual(MAX_OUTPUT_TOKENS);
+    expect(estimateTextTokens(result)).toBeLessThanOrEqual(wideCap);
+    expect(ctx.stepBudget!.tokensLeft).toBe(6000 - narrowTokens(result));
   });
 
   it('общий сторож учитывает весь текст структурного ответа и общий бюджет токенов', async () => {
@@ -70,12 +77,14 @@ describe('ограничение цены результата', () => {
           })),
       },
     } as unknown as ToolContext;
+    const narrow = (text: string) => Math.ceil((estimateTextTokens(text) * CHARS_PER_TOKEN_WIDE) / CHARS_PER_TOKEN);
     const first = await runTool(ctx, 'lsp', JSON.stringify({ action: 'outline', path: '/project/a.ts' }));
     expect(first.ok).toBe(true);
-    expect(estimateTextTokens(first.detail!)).toBeLessThanOrEqual(MAX_OUTPUT_TOKENS);
-    expect(budget.tokensLeft).toBe(6000 - estimateTextTokens(first.detail!));
+    // Оба бюджета — в единицах узкой ставки, поэтому и считать надо так же (см. clipOutcome).
+    expect(narrow(first.detail!)).toBeLessThanOrEqual(MAX_OUTPUT_TOKENS);
+    expect(budget.tokensLeft).toBe(6000 - narrow(first.detail!));
     const second = await runTool(ctx, 'lsp', JSON.stringify({ action: 'outline', path: '/project/b.ts' }));
-    expect(estimateTextTokens(first.detail! + second.detail!)).toBeLessThanOrEqual(6000);
+    expect(narrow(first.detail! + second.detail!)).toBeLessThanOrEqual(6000);
     expect(second.detail).toContain('вывод обрезан');
     expect(budget.left).toBe(24_000 - first.detail!.length - second.detail!.length);
   });

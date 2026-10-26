@@ -151,8 +151,9 @@ describe('read головы: место строк в бюджетном отв�
     const shown = String(outcome.detail ?? '')
       .split('\n')
       .filter((line) => /^\d+ \| /.test(line)).length;
-    // Было 112: последние восемь строк головы режет `clipOutcome` по токенной оценке.
-    expect(shown).toBeGreaterThanOrEqual(112);
+    // Было 112: последние восемь строк головы резал `clipOutcome` по токенной оценке
+    // (узкая ставка 3,5 против широкой 2 в `fitOutput`). Теперь — сторож.
+    expect(shown).toBe(120);
     expect(outcome.summary).toContain('показаны первые 120');
   });
 });

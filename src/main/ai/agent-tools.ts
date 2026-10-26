@@ -11,7 +11,7 @@ import { confirmFile, coveredRequest, uncoverFiles } from '../../shared/read-cov
 import { isMcpToolName } from '../../shared/mcp';
 import { parseSubagentTasks } from '../../shared/subagents';
 import { parseToolArguments } from '../../shared/tools';
-import { estimateTextTokens, isCondenseMarker } from '../../shared/context-fit';
+import { CHARS_PER_TOKEN, CHARS_PER_TOKEN_WIDE, estimateTextTokens, isCondenseMarker } from '../../shared/context-fit';
 import { fitOutput } from '../../shared/output-budget';
 import {
   argumentsShape,
@@ -314,12 +314,15 @@ function clipOutcome(
   // у подсказки, где лежит копия.
   const own = outcome.ok ? toolOutputChars(name) : MAX_OUTPUT_CHARS;
   const chars = Math.min(own, Math.max(MIN_OUTPUT_CHARS, before?.left ?? MAX_OUTPUT_CHARS));
+  // MAX_OUTPUT_TOKENS записан в единицах УЗКОЙ ставки (5 200 ~ 18 000 / 3.5): ровно так
+  // его читает тот, кто решает «влезло ли» (outputRoom -> readPrefix). А fitOutput ниже
+  // считает по составу: кириллица идёт по CHARS_PER_TOKEN_WIDE (2). Две цены на один текст,
+  // и русский read проходил первую проверку, а здесь терял восемь строк головы вместе с
+  // адресом продолжения (замер 26.10: 112 из 120). Выравниваем единицы.
+  const wideCap = Math.ceil((MAX_OUTPUT_TOKENS * CHARS_PER_TOKEN) / CHARS_PER_TOKEN_WIDE);
   const limit = {
     chars,
-    tokens: Math.min(
-      MAX_OUTPUT_TOKENS,
-      Math.max(Math.ceil(MIN_OUTPUT_CHARS / 3.5), before?.tokensLeft ?? MAX_OUTPUT_TOKENS),
-    ),
+    tokens: Math.min(wideCap, Math.max(Math.ceil(MIN_OUTPUT_CHARS / 3.5), before?.tokensLeft ?? wideCap)),
   };
   // Хвост выводят все срезы, которые читают с конца: не только одноразовый
   // `terminal`, но и `terminalOutput` — за ним приходят именно за хвостом живой
@@ -345,7 +348,10 @@ function clipOutcome(
   if (ctx.stepBudget && before) {
     // Единожды учитываем весь результат, включая заголовки и ссылку на копию.
     ctx.stepBudget.left = exhausted ? 0 : Math.max(0, before.left - detail.length);
-    ctx.stepBudget.tokensLeft = exhausted ? 0 : Math.max(0, before.tokensLeft - estimateTextTokens(detail));
+    // Оба бюджета ведутся в единицах УЗКОЙ ставки (см. wideCap выше): то, что fitOutput
+    // оценил по составу, при списании переводим обратно — иначе кириллица спишется вдвое.
+    const spent = Math.ceil((estimateTextTokens(detail) * CHARS_PER_TOKEN_WIDE) / CHARS_PER_TOKEN);
+    ctx.stepBudget.tokensLeft = exhausted ? 0 : Math.max(0, before.tokensLeft - spent);
   }
   if (detail === source) return outcome;
   // При отказе service вызовет failureText ещё раз: не дублируем заголовок ошибки.
