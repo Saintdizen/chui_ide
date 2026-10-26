@@ -3,17 +3,10 @@ import { RpcErrorCode } from '../../shared/api';
 import { parseWorktrees, type GitWorktree } from '../../shared/git-worktrees';
 import { RpcFailure } from '../ipc/router';
 import { nameArg } from './args';
+import type { RepositoryContext } from './contexts';
 import { execGit, NETWORK_TIMEOUT_MS } from './exec';
 
-/**
- * Рабочие каталоги (`git worktree`): список, добавление, удаление, чистка.
- *
- * Нужен только корень репозитория. `add` идёт с сетевым таймаутом нарочно:
- * без `-b` git может подтянуть ветку из удалённого репозитория.
- */
-export interface WorktreeContext {
-  repositoryRoot(explicit?: string): Promise<string | null>;
-}
+export interface WorktreeContext extends RepositoryContext {}
 
 export async function listWorktrees(ctx: WorktreeContext): Promise<GitWorktree[]> {
   const repoRoot = await ctx.repositoryRoot();

@@ -1,18 +1,10 @@
 import { RpcErrorCode, type GitStatus } from '../../shared/api';
 import { parseStashList, type GitStashEntry } from '../../shared/git-stash';
 import { RpcFailure } from '../ipc/router';
+import type { RepositoryContext, StatusContext } from './contexts';
 import { execGit } from './exec';
 
-/**
- * Stash-записи: список, показ и три операции над номером.
- *
- * Нужны корень репозитория и пересчёт статуса — ничего больше. Правила целиком
- * здесь: номер — это индекс в `stash@{n}`, не ref; пустой `stash push` — не сбой.
- */
-export interface StashContext {
-  repositoryRoot(explicit?: string): Promise<string | null>;
-  refresh(): Promise<GitStatus>;
-}
+export interface StashContext extends RepositoryContext, StatusContext {}
 
 /** Список записей; вне репозитория — пустой, а не ошибка: панель просто пуста. */
 export async function stashList(ctx: StashContext): Promise<GitStashEntry[]> {

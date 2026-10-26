@@ -1,17 +1,9 @@
-import { RpcErrorCode, type GitNetworkResult, type GitStatus } from '../../shared/api';
+import { RpcErrorCode, type GitNetworkResult } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
+import type { RepositoryContext, StatusContext } from './contexts';
 import { execGit, NETWORK_TIMEOUT_MS } from './exec';
 
-/**
- * Сеть в гит-сервисе: fetch/pull/push — единственное место, где запрос может
- * висеть долго, и единственное, после которого состояние меняется у нас «сзади».
- *
- * Своя зависимость, а не класс: нужен корень репозитория и пересчёт статуса.
- */
-export interface NetworkContext {
-  repositoryRoot(explicit?: string): Promise<string | null>;
-  refresh(): Promise<GitStatus>;
-}
+export interface NetworkContext extends RepositoryContext, StatusContext {}
 
 /**
  * Выполнить сетевую команду и вернуть её словами вместе с новым статусом.

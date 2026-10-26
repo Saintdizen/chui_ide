@@ -1,20 +1,10 @@
 import path from 'node:path';
 import { RpcErrorCode, type GitStatus } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
+import type { RepositoryContext, StatusContext } from './contexts';
 import { execGit } from './exec';
 
-/**
- * Чтение и точечная правка отдельных коммитов. Всё, что нужно от `GitService`,
- * сведено к трём ответам; состоянием класса операции не пользуются.
- */
-export interface InspectContext {
-  /** Корень репозитория или `null`, если папка проектом не является. */
-  repositoryRoot(): Promise<string | null>;
-  /** Корень с ошибкой, если его нет: операции ниже без репозитория бессмысленны. */
-  requireRoot(): string;
-  /** Свежий статус — им же в интерфейс уходит уведомление об изменении. */
-  refresh(): Promise<GitStatus>;
-}
+export interface InspectContext extends RepositoryContext, StatusContext {}
 
 /**
  * Содержимое файла в HEAD. `null` — рабочая папка не репозиторий (тогда полосок
@@ -29,7 +19,7 @@ export async function headText(ctx: InspectContext, filePath: string): Promise<s
 
 /** Отменить один коммит новым коммитом с обратными правками. */
 export async function revert(ctx: InspectContext, commit: string): Promise<GitStatus> {
-  const repoRoot = ctx.requireRoot();
+  const repoRoot = ctx.root();
   // --no-edit: сообщение берём готовое, редактор не открываем.
   await execGit(['revert', '--no-edit', commitArg(commit)], repoRoot);
   return ctx.refresh();
@@ -37,7 +27,7 @@ export async function revert(ctx: InspectContext, commit: string): Promise<GitSt
 
 /** Передвинуть ветку на коммит: soft (только указатель), mixed (+ индекс), hard (+ дерево). */
 export async function reset(ctx: InspectContext, mode: 'soft' | 'mixed' | 'hard', commit: string): Promise<GitStatus> {
-  const repoRoot = ctx.requireRoot();
+  const repoRoot = ctx.root();
   await execGit(['reset', `--${mode}`, commitArg(commit)], repoRoot);
   return ctx.refresh();
 }

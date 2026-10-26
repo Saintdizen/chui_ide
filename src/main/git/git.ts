@@ -50,6 +50,7 @@ import { parseStatus, writeLocalConfig } from './status';
 import type { GitSubmodule } from '../../shared/git-submodules';
 import type { GitWorktree } from '../../shared/git-worktrees';
 import type { GitLfsInfo } from '../../shared/git-lfs';
+import type { Source } from './git-context-source';
 import { listSubmodules, type SubmoduleContext, updateSubmodules } from './submodules';
 import {
   rebase as gitRebase,
@@ -457,11 +458,26 @@ export class GitService {
   }
 
   /** Контекст для модуля `inspect`: три колбэка, состояние класса наружу не идёт. */
+  /** Контекст для модуля `inspect`: три колбэка, состояние класса наружу не идёт. */
   private inspectContext(): InspectContext {
+    return this.gitContext();
+  }
+
+  /**
+   * Один набор колбэков на все модули `./git/*`.
+   *
+   * Модули объявляют разные контексты (`lfs.ts` просит только корень, `forge.ts`
+   * ещё и удалённые), но дают их все отсюда: иначе каждый перенос метода
+   * добавлял бы в класс ещё одну сборку контекста, и вернулась бы та же свалка,
+   * только длиннее.
+   */
+  private gitContext(): Source {
     return {
-      repositoryRoot: () => this.repositoryRoot(),
-      requireRoot: () => this.requireRoot(),
+      root: () => this.requireRoot(),
+      repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit),
       refresh: () => this.refresh(),
+      gitPath: (repoRoot: string, name: string) => this.gitPath(repoRoot, name),
+      remotes: () => this.remotes(),
     };
   }
 
@@ -487,21 +503,13 @@ export class GitService {
   }
 
   private rebaseCtx(): RebaseContext {
-    return {
-      root: () => this.requireRoot(),
-      refresh: () => this.refresh(),
-      gitPath: (repoRoot, name) => this.gitPath(repoRoot, name),
-    };
+    return this.gitContext();
   }
 
   /* ── пошаговый поиск багованного коммита (bisect) ──────────────────────── */
 
   private bisectContext(): BisectContext {
-    return {
-      root: () => this.requireRoot(),
-      refresh: () => this.refresh(),
-      gitPath: (repoRoot, name) => this.gitPath(repoRoot, name),
-    };
+    return this.gitContext();
   }
 
   /** Состояние поиска багованного коммита (bisect). */
@@ -836,10 +844,7 @@ export class GitService {
   }
 
   private stashCtx(): StashContext {
-    return {
-      repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit),
-      refresh: () => this.refresh(),
-    };
+    return this.gitContext();
   }
 
   async worktrees(): Promise<GitWorktree[]> {
@@ -860,7 +865,7 @@ export class GitService {
   }
 
   private worktreeCtx(): WorktreeContext {
-    return { repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit) };
+    return this.gitContext();
   }
 
   /* ── отдельные коммиты и теги ─────────────────────────────────────────── */
@@ -990,10 +995,7 @@ export class GitService {
   }
 
   private submoduleCtx(): SubmoduleContext {
-    return {
-      repositoryRoot: () => this.repositoryRoot(),
-      refresh: () => this.refresh(),
-    };
+    return this.gitContext();
   }
 
   /* ── площадка хостинга: запросы на слияние (PR/MR) ─────────────────────── */
@@ -1010,12 +1012,7 @@ export class GitService {
    */
   /** Площадка: задачи, конвейеры, уведомления. Тело — в `git/forge.ts`. */
   private forgeCtx(): ForgeContext {
-    return {
-      root: () => this.requireRoot(),
-      repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit),
-      remotes: () => this.remotes(),
-      refresh: () => this.refresh(),
-    };
+    return this.gitContext();
   }
 
   async forgeInfo(remote?: string): Promise<ForgeInfo> {
@@ -1150,7 +1147,7 @@ export class GitService {
   }
 
   private sparseCtx(): SparseContext {
-    return { repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit) };
+    return this.gitContext();
   }
 
   async sshKeys(): Promise<GitSshKey[]> {
@@ -1182,7 +1179,7 @@ export class GitService {
   }
 
   private lfsCtx(): LfsContext {
-    return { repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit) };
+    return this.gitContext();
   }
 
   /* ── дополнительные рабочие каталоги (worktree) ───────────────────────── */
@@ -1309,10 +1306,7 @@ export class GitService {
   }
 
   private networkCtx(): NetworkContext {
-    return {
-      repositoryRoot: (explicit?: string) => this.repositoryRoot(explicit),
-      refresh: () => this.refresh(),
-    };
+    return this.gitContext();
   }
 
   private requireRoot(): string {

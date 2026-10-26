@@ -2,18 +2,10 @@ import { promises as fs } from 'node:fs';
 import { RpcErrorCode, type GitStatus } from '../../shared/api';
 import { parseBisectState, type GitBisectState } from '../../shared/git-bisect';
 import { RpcFailure } from '../ipc/router';
+import type { RepositoryContext, StatusContext, GitDirContext } from './contexts';
 import { execGit } from './exec';
 
-/**
- * Что нужно пошаговому поиску от `GitService`: три готовых ответа. Состоянием класса
- * он не пользуется — только этими колбэками, отсюда и вынесен.
- */
-export interface BisectContext {
-  /** Рабочая папка проекта; поиск идёт в ней, а не в корне репозитория. */
-  root(): string;
-  refresh(): Promise<GitStatus>;
-  gitPath(repoRoot: string, name: string): Promise<string | null>;
-}
+export interface BisectContext extends RepositoryContext, StatusContext, GitDirContext {}
 
 /** Имя коммита может начинаться с `-` — тогда git примет его за флаг, а не за ссылку. */
 function commitArg(commit: string): string {

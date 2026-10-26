@@ -4,19 +4,10 @@ import path from 'node:path';
 import { type GitRebaseResult, type GitStatus, RpcErrorCode } from '../../shared/api';
 import { formatRebaseTodo, type RebaseTodoItem, validateRebaseTodo } from '../../shared/git-rebase';
 import { RpcFailure } from '../ipc/router';
+import type { RepositoryContext, StatusContext, GitDirContext } from './contexts';
 import { execGit, type GitResult } from './exec';
 
-/**
- * Интерактивный rebase: подмена редакторов git своими скриптами.
- *
- * Нужны корень, пересчёт статуса и `gitPath`: файлы rebase git держит в `.git`,
- * а у связанных рабочих каталогов `.git` — файл, а не папка.
- */
-export interface RebaseContext {
-  root(): string;
-  refresh(): Promise<GitStatus>;
-  gitPath(repoRoot: string, name: string): Promise<string | null>;
-}
+export interface RebaseContext extends RepositoryContext, StatusContext, GitDirContext {}
 
 const SEQUENCE_EDITOR_SCRIPT = `
 const fs = require('node:fs');

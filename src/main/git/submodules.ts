@@ -1,20 +1,10 @@
 import { RpcErrorCode, type GitStatus } from '../../shared/api';
 import { type GitSubmodule, parseSubmodules } from '../../shared/git-submodules';
 import { RpcFailure } from '../ipc/router';
+import type { RepositoryContext, StatusContext } from './contexts';
 import { execGit, NETWORK_TIMEOUT_MS } from './exec';
 
-/**
- * Подмодули репозитория.
- *
- * `repositoryRoot` здесь не бросает: вне репозитория список подмодулей пустой.
- * `refresh` — это не «перечитать статус», а ещё и рассылка `GitChanged`:
- * после `submodule update` на диске меняется много файлов сразу, и UI узнаёт
- * об этом только из этого события.
- */
-export interface SubmoduleContext {
-  repositoryRoot(): Promise<string | null>;
-  refresh(): Promise<GitStatus>;
-}
+export interface SubmoduleContext extends RepositoryContext, StatusContext {}
 
 /** Какие папки — чужие репозитории и в каком они состоянии. */
 export async function listSubmodules(ctx: SubmoduleContext): Promise<GitSubmodule[]> {

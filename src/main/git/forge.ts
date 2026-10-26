@@ -1,3 +1,4 @@
+import type { RepositoryContext, StatusContext, RemoteContext } from './contexts';
 import type { ForgeComment, ForgeInfo, ForgeIssue, ForgeNotification, ForgePipeline } from '../../shared/git-platform';
 import {
   cliFor,
@@ -14,19 +15,10 @@ import {
   parseGlabTodos,
 } from '../../shared/git-platform';
 import { NETWORK_TIMEOUT_MS, runForge } from './exec';
-import { RpcErrorCode, type GitRemote, type GitStatus } from '../../shared/api';
+import { RpcErrorCode, type GitStatus } from '../../shared/api';
 import { RpcFailure } from '../ipc/router';
 
-/**
- * Что модулю нужно от `GitService`: три готовых ответа и один корень. Больше ничего —
- * отсюда он и вынесен без параметров-структур на 15 полей.
- */
-export interface ForgeContext {
-  root(): string;
-  repositoryRoot(explicit?: string): Promise<string | null>;
-  remotes(): Promise<GitRemote[]>;
-  refresh(): Promise<GitStatus>;
-}
+export interface ForgeContext extends RepositoryContext, StatusContext, RemoteContext {}
 
 export async function forgeInfo(ctx: ForgeContext, remote?: string): Promise<ForgeInfo> {
   const empty: ForgeInfo = {

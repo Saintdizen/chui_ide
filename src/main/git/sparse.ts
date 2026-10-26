@@ -7,17 +7,10 @@ import {
   parseSparseList,
 } from '../../shared/git-sparse';
 import { RpcFailure } from '../ipc/router';
+import type { RepositoryContext } from './contexts';
 import { execGit } from './exec';
 
-/**
- * Разреженный рабочий каталог (`git sparse-checkout`).
- *
- * Своего состояния не держим: репозиторий могли настроить и мимо IDE (в
- * терминале), поэтому каждый раз читаем конфиг и `sparse-checkout list`.
- */
-export interface SparseContext {
-  repositoryRoot(explicit?: string): Promise<string | null>;
-}
+export interface SparseContext extends RepositoryContext {}
 
 /**
  * Что выложено на диск: включён ли разреженный режим и какие каталоги выбраны.

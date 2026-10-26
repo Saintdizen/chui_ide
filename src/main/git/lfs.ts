@@ -9,18 +9,10 @@ import {
   parseLfsPatterns,
 } from '../../shared/git-lfs';
 import { RpcFailure } from '../ipc/router';
+import type { RepositoryContext } from './contexts';
 import { execGit, NETWORK_TIMEOUT_MS } from './exec';
 
-/**
- * Git LFS: состояние, отслеживание шаблонов, подтягивание больших файлов.
- *
- * Нужен только корень репозитория. Шаблоны читаются с диска, а не у git-lfs:
- * они нужны и когда сам git-lfs не установлен — иначе настройка репозитория
- * выглядела бы пустой, хотя `.gitattributes` полон.
- */
-export interface LfsContext {
-  repositoryRoot(explicit?: string): Promise<string | null>;
-}
+export interface LfsContext extends RepositoryContext {}
 
 export async function lfsInfo(ctx: LfsContext): Promise<GitLfsInfo> {
   const repoRoot = await requireRoot(ctx);
